@@ -27,6 +27,7 @@ import sqlite3
 
 import bcrypt
 
+# Database setup
 from src.db.migrations import migrate_auth_database
 
 _DB_PATH = os.path.abspath(
@@ -114,18 +115,22 @@ def verify_user(username: str, password: str) -> bool:
             (username,),
         ).fetchone()
 
-        if not row:
-            return False
+    if not row:
+        return False
 
-        stored_hash, is_active = row
-        if not is_active:
-            return False
+    stored_hash, is_active = row
+    if not is_active:
+        return False
+
+    try:
+        return bcrypt.checkpw(password.encode(), stored_hash.encode())
+    except ValueError:
+        return False
 
         try:
             return bcrypt.checkpw(password.encode(), stored_hash.encode())
         except ValueError:
             return False
-
 
 # Alias for compatibility
 authenticate_user = verify_user
