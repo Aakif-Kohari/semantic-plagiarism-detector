@@ -151,6 +151,19 @@ except ImportError:
 init_corpus_db()
 init_db()
 
+# Start lightweight REST API server for /healthz endpoint in background
+import threading
+
+import uvicorn
+from src.api.app import app as fastapi_app
+
+
+def _start_api_server():
+    uvicorn.run(fastapi_app, host="0.0.0.0", port=8000, log_level="warning")
+
+
+threading.Thread(target=_start_api_server, daemon=True).start()
+
 # Generate unique session ID for this Streamlit session
 if "session_id" not in st.session_state:
     import uuid
