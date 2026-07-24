@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -23,7 +24,9 @@ load_dotenv()
 
 import numpy as np
 import pandas as pd
+from app.components.faiss_results import faiss_results_dataframe
 import streamlit as st
+from sklearn.metrics.pairwise import cosine_similarity
 
 from src.security.metadata_stripper import strip_exif_metadata
 
@@ -65,9 +68,12 @@ from app.theme import (
     get_colors,
     get_theme_name,
     inject_css,
+    pipeline_progress_html,
     set_theme,
     version_check_widget_html,
 )
+from src.core.ai_detector import detect_documents_ai_probability
+from src.core.app_config import get_app_title
 from src.core.config import DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD, severity_key
 from src.core.document_parser import (
     DEFAULT_OCR_DPI,
@@ -75,10 +81,12 @@ from src.core.document_parser import (
     SUPPORTED_OCR_LANGUAGES,
     OCRDependencyError,
     extract_text,
+    prepare_text_for_embedding,
     remove_ignore_phrases,
 )
 from src.core.embedding_model import embed_chunks, embed_documents
 from src.core.faiss_index import (
+    build_index,
     build_index_from_matrix,
     load_index,
     load_or_rebuild_index,
@@ -90,8 +98,9 @@ from src.core.similarity import (
     find_most_similar_chunks,
     flag_plagiarism,
 )
+from src.core.text_chunking import chunk_documents
 from src.core.webhook import send_plagiarism_alert
-from src.i18n.translator import _SUPPORTED_LANGUAGES
+from src.i18n.translator import _SUPPORTED_LANGUAGES, get_text
 from src.visualization.network_graph import plot_similarity_network
 
 
@@ -106,6 +115,7 @@ class OCRFileBatchError(Exception):
 
 from src.core.export_engine import LMSExportEngine
 from src.core.telemetry import TelemetryService
+from src.db.database_backup import create_corpus_database_snapshot
 from src.db import (
     clear_all_data,
     delete_document,
@@ -126,6 +136,7 @@ from src.db.auth import (
     get_tour_completed,
     get_user_preferences,
     get_user_role,
+    init_db,
     is_user_active,
     record_failed_login,
     set_tour_completed,
@@ -142,6 +153,10 @@ from src.db.incidents import (  # noqa: E402
 from src.utils.diff_highlighter import highlight_overlap
 from src.utils.excel_export import export_similarity_matrix_to_excel
 from src.utils.pdf_report import highlight_pdf_matches  # noqa: E402
+from src.utils.processing_time import (
+    estimate_processing_seconds,
+    uploaded_files_total_bytes,
+)
 from src.utils.redis_cache import (
     cache_session_state,
     clear_session,
@@ -160,7 +175,6 @@ from src.visualization.analytics import (
 )
 from src.visualization.heatmap import plot_similarity_heatmap  # noqa: E402
 
-init_db()
 # Safe import for PDF Highlighting
 
 try:
@@ -229,8 +243,10 @@ except Exception:
 # collapsed so it doesn't cover the similarity matrix / heatmap. On wider
 # screens it behaves the same as "expanded". See issue #258.
 
+APP_TITLE = get_app_title()
+
 st.set_page_config(
-    page_title="Semantic Plagiarism Detector",
+    page_title=APP_TITLE,
     page_icon="🔍",
     layout="wide",
     initial_sidebar_state="auto",
@@ -783,7 +799,7 @@ with st.sidebar:
     selected_class = st.selectbox("Select Class/Section", unique_classes, index=0)
 
 # ── Main UI ───────────────────────────────────────────────────────────────────
-st.title("🔍 Semantic Plagiarism Detection System")
+st.title(f"🔍 {APP_TITLE}")
 
 uploaded_files = st.file_uploader(
     "📂 Upload Assignments",
@@ -981,7 +997,11 @@ if (
             st.rerun()
 
 # ── Main Header ──────────────────────────────────────────────────────────────
-st.title(get_text("title", lang=lang_code))
+configured_app_title = os.getenv("APP_TITLE", "").strip()
+if configured_app_title:
+    st.title(f"🔍 {APP_TITLE}")
+else:
+    st.title(get_text("title", lang=lang_code))
 st.markdown(get_text("subtitle", lang=lang_code))
 st.divider()
 
@@ -1235,6 +1255,21 @@ else:
         accept_multiple_files=True,
         key="file_uploader",
     )
+
+    if uploaded_files:
+        total_upload_bytes = uploaded_files_total_bytes(uploaded_files)
+        estimated_seconds = estimate_processing_seconds(
+            total_upload_bytes
+        )
+
+        st.markdown(
+            pipeline_progress_html(
+                ["Extract", "Chunk", "Embed", "Compare", "Report"],
+                active_index=-1,
+                estimated_seconds=estimated_seconds,
+            ),
+            unsafe_allow_html=True,
+        )
     # 2. GOOGLE DRIVE IMPORT SECTION
 
     if uploaded_files:
@@ -2080,13 +2115,63 @@ if not st.session_state.authenticated:
                         threshold=threshold,
                     )
                     if q_results:
-                        for rec, score in q_results:
-                            st.markdown(
-                                f"**{rec.doc_name}** (Chunk #{rec.chunk_index}) — Similarity: `{score:.1%}`"
-                            )
-                            st.caption(rec.chunk_text)
+                        results_df = faiss_results_dataframe(q_results)
+                        st.caption(
+                            "Click a column header to sort by similarity, "
+                            "target document, chunk, or rank."
+                        )
+                        st.dataframe(
+                            results_df,
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config={
+                                "Rank": st.column_config.NumberColumn(
+                                    "Rank",
+                                    help="Default relevance order.",
+                                    format="%d",
+                                    width="small",
+                                ),
+                                "Target Document": (
+                                    st.column_config.TextColumn(
+                                        "Target Document",
+                                        help=(
+                                            "Document containing the "
+                                            "matching chunk."
+                                        ),
+                                        width="medium",
+                                    )
+                                ),
+                                "Chunk": st.column_config.NumberColumn(
+                                    "Chunk",
+                                    help="One-based chunk number.",
+                                    format="%d",
+                                    width="small",
+                                ),
+                                "Similarity Score": (
+                                    st.column_config.NumberColumn(
+                                        "Similarity Score",
+                                        help=(
+                                            "Cosine similarity between "
+                                            "the query and chunk."
+                                        ),
+                                        format="%.1f%%",
+                                        width="medium",
+                                    )
+                                ),
+                                "Matching Text": (
+                                    st.column_config.TextColumn(
+                                        "Matching Text",
+                                        help="Text from the matched chunk.",
+                                        width="large",
+                                    )
+                                ),
+                            },
+                            key="faiss_search_results_table",
+                        )
                     else:
-                        st.info("No matching vector chunks found above threshold.")
+                        st.info(
+                            "No matching vector chunks found above threshold."
+                        )
                 except Exception as err:
                     st.error(f"FAISS search error: {err}")
             else:
@@ -2780,6 +2865,36 @@ if not st.session_state.authenticated:
                 st.success("✅ Settings reset to defaults!")
                 st.rerun()
 
+            st.markdown("---")
+            st.markdown("### 🗄️ Database Backup")
+            st.caption(
+                "Download a consistent snapshot of the corpus SQLite "
+                "database for debugging or offline backup."
+            )
+
+            try:
+                corpus_database_snapshot = (
+                    create_corpus_database_snapshot()
+                )
+            except (OSError, sqlite3.DatabaseError) as exc:
+                st.warning(
+                    "The corpus database is currently unavailable for "
+                    f"download: {exc}"
+                )
+            else:
+                st.download_button(
+                    label="⬇️ Download raw Database",
+                    data=corpus_database_snapshot,
+                    file_name="corpus.db",
+                    mime="application/vnd.sqlite3",
+                    key="download_raw_corpus_database",
+                    use_container_width=True,
+                    help=(
+                        "Downloads a transactionally consistent SQLite "
+                        "snapshot. Existing server data is not modified."
+                    ),
+                )
+
             st.markdown("")
             if st.button(
                 "🔍 Ping Redis", key="ping_redis_button", use_container_width=True
@@ -2796,7 +2911,7 @@ if not st.session_state.authenticated:
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.divider()
 
-st.caption("🎓 Semantic Plagiarism Detection System · Streamlit")
+st.caption(f"🎓 {APP_TITLE} · Streamlit")
 
 # ── Version / Update indicator ────────────────────────────────────────────────
 # Import here (deferred) to avoid slowing down the initial module load for
@@ -2813,7 +2928,7 @@ _latest_tag: str | None = st.session_state["_update_check_tag"]
 _footer_col1, _footer_col2 = st.columns([3, 1])
 with _footer_col1:
     st.caption(
-        f"🎓 Semantic Plagiarism Detection System · v{APP_VERSION} · Streamlit · [🐛 Report Bug / Feedback](https://github.com/Ganesh-403/semantic-plagiarism-detector/issues)"
+        f"🎓 {APP_TITLE} · v{APP_VERSION} · Streamlit · [🐛 Report Bug / Feedback](https://github.com/Ganesh-403/semantic-plagiarism-detector/issues)"
     )
 with _footer_col2:
     if _latest_tag:

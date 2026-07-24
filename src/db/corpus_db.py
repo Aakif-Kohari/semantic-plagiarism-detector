@@ -6,6 +6,7 @@ Enables incremental updates and index rebuilding without re-embedding.
 """
 
 import os
+from pathlib import Path
 import sqlite3
 from datetime import datetime
 
@@ -17,6 +18,11 @@ _DB_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "corpus.db")
 )
 
+
+
+def get_corpus_db_path() -> Path:
+    """Return the configured corpus SQLite database path."""
+    return Path(_DB_PATH)
 
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
