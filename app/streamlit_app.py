@@ -255,12 +255,10 @@ if "lang" not in st.session_state:
 with st.sidebar:
     st.title("⚙️ " + get_text("settings", lang=st.session_state.lang))
 
-    # 1. i18n Language Dropdown (#144)
     selected_lang_name = st.selectbox(
         "🌐 Language / Idioma",
         options=["English", "Español"],
         index=0 if st.session_state.lang == "en" else 1,
-        initial_sidebar_state="auto",
     )
 st.markdown(back_to_top_html(), unsafe_allow_html=True)
 inject_css()
@@ -571,6 +569,8 @@ def clear_all_dialog():
                 st.session_state.analysis_results = None
             if "analysis_file_signature" in st.session_state:
                 st.session_state.analysis_file_signature = None
+            if "processed_pipeline_signature" in st.session_state:
+                st.session_state.processed_pipeline_signature = None
 
             st.success("✅ All documents, chunks, and incidents have been cleared.")
             st.rerun()
@@ -2030,7 +2030,134 @@ if encrypted_files_detected:
                     st.error("Please enter a password.")
 
     # Run Pipeline if files uploaded
+    def compute_pipeline_signature(
+        file_bytes_dict: dict,
+        ocr_language: str,
+        ocr_dpi: int,
+        chunk_size: int,
+        chunk_overlap: int,
+        url_text: str,
+        url_filename: str,
+    ) -> str:
+        import hashlib
+        h = hashlib.sha256()
+        for name in sorted(file_bytes_dict.keys()):
+            data = file_bytes_dict[name]
+            h.update(name.encode("utf-8", errors="ignore"))
+            h.update(data)
+        h.update((ocr_language or "").encode("utf-8", errors="ignore"))
+        h.update(str(ocr_dpi).encode("utf-8"))
+        h.update(str(chunk_size).encode("utf-8"))
+        h.update(str(chunk_overlap).encode("utf-8"))
+        if url_text:
+            h.update(url_text.encode("utf-8", errors="ignore"))
+        if url_filename:
+            h.update(url_filename.encode("utf-8", errors="ignore"))
+        return h.hexdigest()
+
+    is_calculating = False
+    current_sig = None
+
     if (len(file_bytes_dict) > 0 and any(file_bytes_dict.values())) or url_text:
+        current_sig = compute_pipeline_signature(
+            file_bytes_dict=file_bytes_dict,
+            ocr_language=ocr_language,
+            ocr_dpi=ocr_dpi,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            url_text=url_text,
+            url_filename=url_filename,
+        )
+        if st.session_state.get("processed_pipeline_signature") != current_sig:
+            is_calculating = True
+
+    if is_calculating:
+        st.subheader(get_text("analysis_summary", lang=lang_code))
+
+        # 1. Summary Metrics Skeleton
+        col1, col2, col3, col4, col5 = st.columns(5)
+        with col1:
+            st.markdown(f"**{get_text('metric_docs', lang=lang_code)}**")
+            st.markdown('<div class="skeleton skeleton-metric"></div>', unsafe_allow_html=True)
+        with col2:
+            st.markdown(f"**{get_text('metric_pairs', lang=lang_code)}**")
+            st.markdown('<div class="skeleton skeleton-metric"></div>', unsafe_allow_html=True)
+        with col3:
+            st.markdown(f"**{get_text('metric_flagged', lang=lang_code)}**")
+            st.markdown('<div class="skeleton skeleton-metric"></div>', unsafe_allow_html=True)
+        with col4:
+            st.markdown(f"**{get_text('metric_faiss', lang=lang_code)}**")
+            st.markdown('<div class="skeleton skeleton-metric"></div>', unsafe_allow_html=True)
+        with col5:
+            st.markdown("**🎯 Threshold**")
+            st.markdown('<div class="skeleton skeleton-metric"></div>', unsafe_allow_html=True)
+        st.divider()
+
+        # 2. Tabs Skeleton
+        (
+            tab_warnings,
+            tab_faiss,
+            tab_matrix,
+            tab_heatmap,
+            tab_drill,
+            tab_analytics,
+            tab_users,
+        ) = st.tabs(
+            [
+                get_text("tab_warnings", lang=lang_code),
+                get_text("tab_faiss", lang=lang_code),
+                get_text("tab_matrix", lang=lang_code),
+                get_text("tab_heatmap", lang=lang_code),
+                get_text("tab_drill", lang=lang_code),
+                get_text("tab_analytics", lang=lang_code),
+                get_text("tab_users", lang=lang_code),
+            ]
+        )
+
+        with tab_warnings:
+            st.markdown("🏠 Home > Dashboard > **Warnings**")
+            st.subheader(get_text("tab_warnings", lang=lang_code))
+            st.markdown('<div class="skeleton skeleton-title"></div>', unsafe_allow_html=True)
+            st.markdown('<div class="skeleton skeleton-text"></div>', unsafe_allow_html=True)
+            st.markdown('<div class="skeleton skeleton-text"></div>', unsafe_allow_html=True)
+            st.markdown('<div class="skeleton skeleton-text-short"></div>', unsafe_allow_html=True)
+
+        with tab_faiss:
+            st.markdown("🏠 Home > Dashboard > **FAISS Chunk Search**")
+            st.subheader("⚡ FAISS Chunk Search")
+            st.markdown('<div class="skeleton skeleton-text-short" style="height: 40px; width: 100%;"></div>', unsafe_allow_html=True)
+            st.markdown('<div class="skeleton skeleton-text" style="height: 200px;"></div>', unsafe_allow_html=True)
+
+        with tab_matrix:
+            st.markdown("🏠 Home > Dashboard > **Similarity Matrix**")
+            st.subheader("📋 Similarity Matrix")
+            st.markdown('<div class="skeleton skeleton-table"></div>', unsafe_allow_html=True)
+
+        with tab_heatmap:
+            st.markdown("🏠 Home > Dashboard > **Heatmap & Network**")
+            st.subheader(get_text("tab_heatmap", lang=lang_code))
+            st.markdown('<div class="skeleton skeleton-chart">Calculating similarities and generating heatmap...</div>', unsafe_allow_html=True)
+            st.divider()
+            st.subheader("🕸️ Interactive Plagiarism Network")
+            st.markdown('<div class="skeleton skeleton-chart">Calculating similarities and generating network graph...</div>', unsafe_allow_html=True)
+
+        with tab_drill:
+            st.markdown("🏠 Home > Dashboard > **Pair Drill-Down**")
+            st.subheader("🔬 Pair Drill-Down")
+            st.markdown('<div class="skeleton skeleton-text-short"></div>', unsafe_allow_html=True)
+            st.markdown('<div class="skeleton skeleton-chart"></div>', unsafe_allow_html=True)
+
+        with tab_analytics:
+            st.markdown("🏠 Home > Dashboard > **Analytics Dashboard**")
+            st.subheader("📊 Plagiarism Analytics Dashboard")
+            st.markdown('<div class="skeleton skeleton-chart">Generating analytics trends...</div>', unsafe_allow_html=True)
+            st.markdown('<div class="skeleton skeleton-chart">Generating top plagiarism charts...</div>', unsafe_allow_html=True)
+
+        with tab_users:
+            st.markdown("🏠 Home > Dashboard > **User Management**")
+            st.subheader("👤 User Management")
+            st.markdown('<div class="skeleton skeleton-table"></div>', unsafe_allow_html=True)
+
         try:
             with st.spinner("🧠 Processing files and building embeddings…"):
                 start_time = time.time()
@@ -2044,17 +2171,8 @@ if encrypted_files_detected:
                     url_filename=url_filename,
                 )
                 elapsed_time = time.time() - start_time
-                (
-                    raw_texts,
-                    chunked_docs,
-                    embeddings,
-                    sim_df,
-                    chunk_sim_df,
-                    faiss_index,
-                    registry,
-                    ai_probabilities,
-                ) = analysis_results
                 st.session_state.analysis_results = analysis_results
+                st.session_state.processed_pipeline_signature = current_sig
                 st.toast(f"Successfully processed in {elapsed_time:.2f} seconds 🚀")
         except OCRFileBatchError as exc:
             from src.errors import OCR_DEPENDENCIES_MISSING
@@ -2063,6 +2181,25 @@ if encrypted_files_detected:
             if exc.failed_files:
                 st.warning(f"Failed files: {', '.join(exc.failed_files)}")
             st.stop()
+
+        st.rerun()
+
+    else:
+        if st.session_state.analysis_results is not None:
+            (
+                raw_texts,
+                chunked_docs,
+                embeddings,
+                sim_df,
+                chunk_sim_df,
+                f_idx_new,
+                f_reg_new,
+                ai_probabilities,
+            ) = st.session_state.analysis_results
+            if f_idx_new is not None:
+                faiss_index = f_idx_new
+            if f_reg_new:
+                registry = f_reg_new
 
     active_sim_df = chunk_sim_df if use_chunk_matrix else sim_df
     flags = flag_plagiarism(
