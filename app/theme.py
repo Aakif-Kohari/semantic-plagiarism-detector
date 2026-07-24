@@ -784,16 +784,14 @@ def sidebar_user_badge_html(username: str, role: str) -> str:
     )
 
 
-def pipeline_progress_html(steps: list[str], active_index: int = -1) -> str:
-    """Return a horizontal pipeline progress indicator.
-
-    Args:
-        steps: List of step labels (e.g. ["Extract", "Chunk", "Embed", ...]).
-        active_index: 0-based index of the currently running step.
-            Steps before *active_index* are marked done; steps after are
-            pending.  Pass -1 (default) to mark all steps as pending.
-    """
+def pipeline_progress_html(
+    steps: list[str],
+    active_index: int = -1,
+    estimated_seconds: int | None = None,
+) -> str:
+    """Return a horizontal pipeline progress indicator with optional ETA."""
     parts = []
+
     for i, step in enumerate(steps):
         if active_index < 0:
             cls = "pipeline-step"
@@ -804,12 +802,26 @@ def pipeline_progress_html(steps: list[str], active_index: int = -1) -> str:
         else:
             cls = "pipeline-step"
 
-        prefix = "✓ " if (active_index >= 0 and i < active_index) else ""
+        prefix = "✓ " if active_index >= 0 and i < active_index else ""
         parts.append(f'<span class="{cls}">{prefix}{step}</span>')
+
         if i < len(steps) - 1:
             parts.append('<span class="pipeline-arrow">→</span>')
 
-    return f'<div class="pipeline-steps">{"".join(parts)}</div>'
+    progress = f'<div class="pipeline-steps">{"".join(parts)}</div>'
+
+    if estimated_seconds is None:
+        return progress
+
+    from src.utils.processing_time import format_processing_duration
+
+    duration = format_processing_duration(estimated_seconds)
+    eta = (
+        '<div class="pipeline-eta">'
+        f"Estimated processing time: about {duration}"
+        "</div>"
+    )
+    return f"{progress}{eta}"
 
 
 def back_to_top_html() -> str:
