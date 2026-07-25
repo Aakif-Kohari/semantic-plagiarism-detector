@@ -148,3 +148,23 @@ def test_sqlite_file_lock_exception(mock_db):
     finally:
         conn.rollback()
         conn.close()
+
+
+def test_user_theme(mock_db):
+    """Test get and set theme for a user."""
+    user = f"theme_user_{uuid.uuid4().hex[:8]}"
+    add_user(user, "password123")
+    
+    from src.db.auth import get_user_theme, set_user_theme
+    
+    # Default should be light
+    assert get_user_theme(user) == "light"
+    
+    # Set to dark
+    set_user_theme(user, "dark")
+    assert get_user_theme(user) == "dark"
+    
+    # Invalid themes should fallback to light
+    set_user_theme(user, "purple")
+    assert get_user_theme(user) == "light"
+

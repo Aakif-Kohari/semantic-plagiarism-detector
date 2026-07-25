@@ -5,6 +5,7 @@ from unittest.mock import patch
 import responses
 
 from src.core.webhook import send_plagiarism_alert
+import src.core.webhook as webhook
 
 
 @patch.dict(os.environ, {}, clear=True)
