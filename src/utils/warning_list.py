@@ -628,12 +628,13 @@ def render_warning_controls(
             st.rerun()
 
     with page_col:
-        selected_page = st.selectbox(
+        selected_page = st.number_input(
             "Page",
-            list(range(1, current_page.total_pages + 1)),
-            index=current_page.page - 1,
-            key=f"warning_page_selector_{current_page.total_pages}",
-            format_func=lambda value: f"Page {value} of {current_page.total_pages}",
+            min_value=1,
+            max_value=current_page.total_pages,
+            value=current_page.page,
+            step=1,
+            key=f"warning_page_input_{current_page.total_pages}",
             label_visibility="collapsed",
         )
         if selected_page != current_page.page:
