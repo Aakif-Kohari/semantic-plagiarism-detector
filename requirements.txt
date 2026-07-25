@@ -55,6 +55,7 @@ psutil>=5.9.0                   # System memory monitoring
 # ── Web Scraping ───────────────────────────────────────────────────────────────
 beautifulsoup4>=4.15.0          # HTML parsing for URL content extraction
 requests>=2.31.0                # HTTP library for fetching web content
+responses>=0.25.0               # Deterministic HTTP mocks for outbound-request tests
 # ── REST API & LMS Integration ────────────────────────────────────────────────
 fastapi>=0.109.0                # REST API framework for LMS integrations
 uvicorn>=0.27.0                 # ASGI server implementation
