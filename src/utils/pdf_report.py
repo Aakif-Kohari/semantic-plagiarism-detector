@@ -13,7 +13,7 @@ from reportlab.lib import colors
 from reportlab.lib.colors import HexColor
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
@@ -186,26 +186,29 @@ def generate_plagiarism_report(
     )
 
     # Get custom styles
-    styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
         "CustomTitle",
-        parent=styles["Heading1"],
+        fontName="Helvetica-Bold",
         fontSize=18,
+        leading=22,
         textColor=brand_clr,
         spaceAfter=30,
         alignment=TA_CENTER,
+        keepWithNext=True,
     )
     heading_style = ParagraphStyle(
         "CustomHeading",
-        parent=styles["Heading2"],
+        fontName="Helvetica-Bold",
         fontSize=14,
+        leading=18,
         textColor=brand_clr,
         spaceAfter=12,
         spaceBefore=20,
+        keepWithNext=True,
     )
     normal_style = ParagraphStyle(
         "CustomNormal",
-        parent=styles["Normal"],
+        fontName="Helvetica",
         fontSize=10,
         leading=14,
         textColor=HexColor("#FFFFFF") if dark_mode else HexColor("#31333f"),
@@ -347,11 +350,13 @@ def generate_plagiarism_report(
                 f"<b>Pair #{rank}</b> — Similarity: <font color='{pair_color}'>{score:.1%}</font>",
                 ParagraphStyle(
                     "PairHeader",
-                    parent=styles["Heading3"],
+                    fontName="Helvetica-Bold",
                     fontSize=11,
+                    leading=14,
                     textColor=HexColor("#FFFFFF") if dark_mode else HexColor("#1f2937"),
                     spaceAfter=8,
                     spaceBefore=15,
+                    keepWithNext=True,
                 ),
             )
             story.append(pair_header)
