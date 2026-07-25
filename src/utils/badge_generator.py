@@ -349,5 +349,6 @@ def generate_badge_pdf(
 
     # Build PDF
     doc.build(story)
-    buffer.seek(0)
-    return buffer
+    from src.utils.pdf_report import compress_pdf_buffer
+
+    return compress_pdf_buffer(buffer)
