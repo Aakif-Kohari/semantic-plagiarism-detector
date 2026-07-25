@@ -2664,6 +2664,15 @@ if not st.session_state.authenticated:
         else:
             if flags:
                 sync_flagged_incidents(flags)
+                from src.utils.bulk_export import generate_bulk_reports_zip
+                zip_bytes = generate_bulk_reports_zip(flags)
+                st.download_button(
+                    label="⬇️ Download All Flagged Pairs (ZIP)",
+                    data=zip_bytes,
+                    file_name="flagged_pairs_reports.zip",
+                    mime="application/zip",
+                    use_container_width=True,
+                )
 
             st.subheader("📈 High Severity Plagiarism Trends (Last 30 Days)")
             trend_data = get_high_severity_trends(days=30)
