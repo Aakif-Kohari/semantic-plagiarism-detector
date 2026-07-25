@@ -67,7 +67,6 @@ def mock_rebuild_task(lock_file: str, shared_resource: list, thread_id: int):
     try:
         with faiss_write_lock(lock_path=lock_file, timeout=10):
             # Critical section
-            current_len = len(shared_resource)
             time.sleep(0.05) # Simulate IO
             shared_resource.append(thread_id)
             # If not thread-safe, multiple threads will append at the same index
