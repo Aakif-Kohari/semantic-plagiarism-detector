@@ -25,6 +25,7 @@ from .corpus_db import (
     get_chunk_registry,
     get_document_by_hash,
     get_document_chunks_count,
+    get_document_word_counts,
     get_documents_by_class,
     get_unique_class_sections,
     init_corpus_db,
@@ -58,6 +59,7 @@ __all__ = [
     "get_all_tags",
     "get_unique_class_sections",
     "get_documents_by_class",
+    "get_document_word_counts",
 ]
 
 

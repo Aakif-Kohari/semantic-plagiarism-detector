@@ -37,6 +37,17 @@ def test_empty_search_returns_everything():
     assert len(filter_warnings(WARNINGS, " ")) == 4
 
 
+def test_fuzzy_search_handles_minor_typos():
+    # "Alpaha" is a typo for "Alpha"
+    results = filter_warnings(WARNINGS, "Alpaha")
+    assert len(results) == 2
+
+    # "Ztaa" is a typo for "Zeta"
+    results_zeta = filter_warnings(WARNINGS, "Ztaa")
+    assert len(results_zeta) == 1
+    assert results_zeta[0]["doc_a"] == "Zeta.pdf"
+
+
 def test_multi_column_sorting():
     results = sort_warnings(
         WARNINGS,
@@ -104,3 +115,4 @@ def test_filtering_occurs_before_pagination():
     assert len(filtered) == 12
     assert len(page.items) == 2
     assert page.total_pages == 2
+    

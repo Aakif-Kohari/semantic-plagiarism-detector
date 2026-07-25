@@ -142,4 +142,38 @@ def test_severity_keys_and_ranks():
     assert severity_key(0.8) == "medium"
     assert severity_key(0.95) == "high"
     assert severity_rank("Low") < severity_rank("Medium")
+
     assert severity_rank("Medium") < severity_rank("High")
+
+    assert severity_rank("Medium") < severity_rank("High")
+@pytest.mark.parametrize(
+    "label",
+    [
+        "very high risk",
+        "highly suspicious",
+        "medium priority",
+        "low confidence",
+        "warning message",
+        "unrelated warning text",
+        "below average",
+    ],
+)
+def test_unrelated_strings_with_severity_words_are_rejected(label):
+    with pytest.raises(ValueError, match="Unknown severity label"):
+        normalize_severity_label(label)
+@pytest.mark.parametrize(
+    ("label", "expected"),
+    [
+        ("High", "High"),
+        ("🔴 High", "High"),
+        ("ðŸ”´ High", "High"),
+        ("Medium", "Medium"),
+        ("🟡 Medium", "Medium"),
+        ("warning", "Medium"),
+        ("Low", "Low"),
+        ("🟢 Low", "Low"),
+    ],
+)
+def test_legacy_labels_are_normalized(label, expected):
+    assert normalize_severity_label(label) == expected
+
