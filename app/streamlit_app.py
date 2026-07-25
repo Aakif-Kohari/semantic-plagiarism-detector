@@ -323,6 +323,62 @@ st.markdown(
 # ── SESSION TIMEOUT & ROUTE PROTECTION ────────────────────────────────────────
 TIMEOUT_LIMIT = 15 * 60  # 15 minutes in seconds
 
+import streamlit.components.v1 as components
+if st.session_state.get("authenticated", False):
+    components.html(
+        f"""
+        <script>
+            let timeoutLimit = {TIMEOUT_LIMIT} * 1000;
+            let warningTime = timeoutLimit - (2 * 60 * 1000); // 2 minutes before
+            let timer;
+            let warningShown = false;
+            
+            function resetTimer() {{
+                clearTimeout(timer);
+                const warning = window.parent.document.getElementById('session-warning-toast');
+                if (warning) {{
+                    warning.style.display = 'none';
+                }}
+                warningShown = false;
+                timer = setTimeout(showWarning, warningTime);
+            }}
+            
+            function showWarning() {{
+                if (warningShown) return;
+                warningShown = true;
+                let doc = window.parent.document;
+                let warning = doc.getElementById('session-warning-toast');
+                if (!warning) {{
+                    warning = doc.createElement('div');
+                    warning.id = 'session-warning-toast';
+                    warning.style.position = 'fixed';
+                    warning.style.top = '60px'; // below header
+                    warning.style.right = '20px';
+                    warning.style.backgroundColor = '#ffcc00';
+                    warning.style.color = 'black';
+                    warning.style.padding = '15px';
+                    warning.style.borderRadius = '5px';
+                    warning.style.zIndex = '9999';
+                    warning.style.boxShadow = '0 4px 6px rgba(0,0,0,0.1)';
+                    warning.innerHTML = '<strong>⚠️ Session Timeout Warning</strong><br>Your session will expire in 2 minutes due to inactivity. Please save your work or interact with the app to stay logged in.';
+                    doc.body.appendChild(warning);
+                }}
+                warning.style.display = 'block';
+            }}
+
+            let parentDoc = window.parent.document;
+            parentDoc.addEventListener('mousemove', resetTimer);
+            parentDoc.addEventListener('keydown', resetTimer);
+            parentDoc.addEventListener('scroll', resetTimer);
+            parentDoc.addEventListener('click', resetTimer);
+            
+            resetTimer();
+        </script>
+        """,
+        height=0,
+    )
+
+
 # 1. Handle Automatic Session Expiration (Inactivity Check)
 cached_last_interaction = get_session_state(SESSION_ID, "last_interaction")
 if cached_last_interaction is not None:
