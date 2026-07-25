@@ -135,8 +135,10 @@ from src.db.database_backup import create_corpus_database_snapshot
 from src.db import (
     clear_all_data,
     delete_document,
+    delete_tag,
     get_all_documents,
     get_all_embeddings,
+    get_all_tags,
     get_chunk_registry,
     get_unique_class_sections,
     init_corpus_db,
@@ -821,6 +823,22 @@ with st.sidebar:
                         del st.session_state._pending_delete
                         st.rerun()
                 st.markdown("</div>", unsafe_allow_html=True)
+
+        # ── Manage Tags ───────────────────────────────────────────────────────
+        with st.expander("🏷️ Manage Tags", expanded=False):
+            all_tags = get_all_tags()
+            if not all_tags:
+                st.caption("No tags found in the database.")
+            else:
+                for tag in all_tags:
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        st.markdown(f"`{tag}`")
+                    with col2:
+                        if st.button("Delete", key=f"del_tag_{tag}", type="secondary"):
+                            affected = delete_tag(tag)
+                            st.success(f"Deleted tag `{tag}` from {affected} document(s).")
+                            st.rerun()
 
         # ── Generate Mock Data (Issue #255) ───────────────────────────────────
         # Hidden developer utility: generates 5 fake essays via Faker so the
