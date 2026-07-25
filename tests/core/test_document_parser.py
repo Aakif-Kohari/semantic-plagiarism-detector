@@ -10,6 +10,7 @@ from src.core.document_parser import (
     extract_text_from_pdf,
     extract_text_from_txt,
     extract_texts,
+    clean_text,
     remove_ignore_phrases,
     strip_bibliography,
 )
@@ -298,3 +299,80 @@ class TestRemoveIgnorePhrases:
         ignore_phrases = "Q1: Some question\nQ2: Another question"
         result = remove_ignore_phrases(text, ignore_phrases)
         assert result == text
+
+
+# ---------------------------------------------------------------------------
+# clean_text tests
+# ---------------------------------------------------------------------------
+
+
+class TestCleanText:
+
+    def test_collapses_multiple_blank_lines(self):
+        text = "Line 1\n\n\n\nLine 2"
+        result = clean_text(text)
+        assert result == "Line 1\n\nLine 2"
+
+    def test_collapses_multiple_spaces_and_tabs(self):
+        text = "Hello     world\t\tPython"
+        result = clean_text(text)
+        assert result == "Hello world Python"
+
+    def test_replaces_unicode_spaces(self):
+        text = "Hello\u00a0World\u200b!"
+        result = clean_text(text)
+        assert result == "Hello World !"
+
+    def test_removes_spaces_before_newline(self):
+        text = "Hello   \nWorld"
+        result = clean_text(text)
+        assert result == "Hello\nWorld"
+
+    def test_removes_spaces_after_newline(self):
+        text = "Hello\n    World"
+        result = clean_text(text)
+        assert result == "Hello\nWorld"
+
+    def test_strips_leading_and_trailing_whitespace(self):
+        text = "   Hello World   \n"
+        result = clean_text(text)
+        assert result == "Hello World"
+
+    def test_handles_empty_string(self):
+        text = ""
+        result = clean_text(text)
+        assert result == ""
+
+    def test_preserves_normal_text(self):
+        text = "This is a normal sentence."
+        result = clean_text(text)
+        assert result == text
+
+    def test_combines_all_cleaning_steps(self):
+        text = "  Hello\t\t\n\n\n  World\u00a0 "
+        result = clean_text(text)
+        assert result == "Hello\n\nWorld"
+
+    def test_only_whitespace_returns_empty(self):
+        text = "   \n\t\n  "
+        result = clean_text(text)
+        assert result == ""
+
+
+def test_extract_empty_pdf_gracefully(caplog):
+    """Assert that passing an empty/blank PDF returns an empty string gracefully without crashing."""
+    from reportlab.pdfgen import canvas
+    import logging
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf)
+    c.showPage()
+    c.save()
+    empty_pdf_bytes = buf.getvalue()
+
+    with patch("src.core.document_parser._ocr_pdf_page", return_value=""):
+        with caplog.at_level(logging.WARNING):
+            result = extract_text_from_pdf(empty_pdf_bytes)
+
+    assert isinstance(result, str)
+    assert result.strip() == ""

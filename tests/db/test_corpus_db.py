@@ -13,19 +13,16 @@ from src.db.corpus_db import (
     get_document_chunks_count,
     get_documents_by_class,
     get_unique_class_sections,
-    init_corpus_db,
 )
 
 
 @pytest.fixture(autouse=True)
-def setup_test_db():
-    # Initialize database
-    init_corpus_db()
-    # Clear any leftover records
-    clear_all_data()
+def setup_test_db(mock_db):
+    """
+    Uses the global mock_db fixture from conftest.py for complete DB isolation
+    and automatic teardown per test.
+    """
     yield
-    # Cleanup after tests
-    clear_all_data()
 
 
 def test_add_document_metadata():

@@ -6,7 +6,7 @@ import sqlite3
 
 from .common import column_exists, run_migrations
 
-AUTH_SCHEMA_VERSION = 5
+AUTH_SCHEMA_VERSION = 6
 
 
 def migration_001_create_users(
@@ -70,12 +70,26 @@ def migration_004_add_role_index(
     )
 
 
+def migration_006_add_active_flag(
+    connection: sqlite3.Connection,
+) -> None:
+    """Add is_active field to temporarily suspend user accounts."""
+    if not column_exists(connection, "users", "is_active"):
+        connection.execute(
+            """
+            ALTER TABLE users
+            ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1
+            """
+        )
+
+
 AUTH_MIGRATIONS = {
     1: migration_001_create_users,
     2: migration_002_add_onboarding_state,
     3: migration_003_add_two_factor_fields,
     4: migration_004_add_role_index,
     5: migration_005_add_preferences,
+    6: migration_006_add_active_flag,
 }
 
 

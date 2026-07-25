@@ -48,6 +48,7 @@ def test_fresh_auth_database_reaches_latest_version(tmp_path):
         assert column_exists(connection, "users", "tour_completed")
         assert column_exists(connection, "users", "otp_secret")
         assert column_exists(connection, "users", "two_factor_enabled")
+        assert column_exists(connection, "users", "is_active")
         assert index_exists(connection, "idx_users_role")
 
 

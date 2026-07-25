@@ -19,15 +19,6 @@ from src.core.similarity import (
 )
 
 
-@pytest.fixture
-def dummy_embeddings():
-    # 3 docs, 384-dim embeddings
-    # Doc A and B are very similar, Doc C is completely different
-    emb_a = np.array([[1.0, 0.0, 0.0], [0.8, 0.6, 0.0]])  # 2 chunks (dummy dim)
-    emb_b = np.array([[0.9, 0.1, 0.0], [0.8, 0.5, 0.0]])  # 2 chunks
-    emb_c = np.array([[0.0, 0.0, 1.0]])  # 1 chunk
-
-    return {"doc_A": emb_a, "doc_B": emb_b, "doc_C": emb_c}
 
 
 def test_chunk_max_similarity(dummy_embeddings):

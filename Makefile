@@ -4,9 +4,21 @@
 run:
 	streamlit run app/streamlit_app.py
 
-# Run the test suite
+# Run the entire test suite via the automated runner
 test:
-	pytest
+	python scripts/run_tests.py --all
+
+# Run only fast, isolated unit tests
+test-unit:
+	python scripts/run_tests.py --unit
+
+# Run full integration tests against local mock DBs
+test-integration:
+	python scripts/run_tests.py --integration
+
+# Run tests with strict coverage enforcement
+test-cov:
+	python scripts/run_tests.py --all --enforce-coverage 85
 
 # Run code formatters and linters check
 lint:

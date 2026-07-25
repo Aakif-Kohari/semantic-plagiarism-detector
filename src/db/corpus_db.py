@@ -6,10 +6,13 @@ Enables incremental updates and index rebuilding without re-embedding.
 """
 
 import os
+from pathlib import Path
 import sqlite3
 from datetime import datetime
 
 import numpy as np
+
+from src.utils.filename import sanitize_filename
 
 from src.db.migrations import delete_all_if_table_exists, migrate_corpus_database
 
@@ -17,6 +20,11 @@ _DB_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "corpus.db")
 )
 
+
+
+def get_corpus_db_path() -> Path:
+    """Return the configured corpus SQLite database path."""
+    return Path(_DB_PATH)
 
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
@@ -39,7 +47,8 @@ def init_corpus_db() -> None:
                 assignment_title TEXT,
                 pdf_author       TEXT,
                 pdf_creation_date TEXT,
-                pdf_title        TEXT
+                pdf_title        TEXT,
+                tags             TEXT
             )
         """
         )
@@ -59,6 +68,8 @@ def init_corpus_db() -> None:
             conn.execute("ALTER TABLE documents ADD COLUMN pdf_creation_date TEXT")
         if "pdf_title" not in columns:
             conn.execute("ALTER TABLE documents ADD COLUMN pdf_title TEXT")
+        if "tags" not in columns:
+            conn.execute("ALTER TABLE documents ADD COLUMN tags TEXT")
 
         conn.execute(
             """
@@ -75,6 +86,13 @@ def init_corpus_db() -> None:
         conn.commit()
         migrate_corpus_database(conn)
 
+    # Restrict database file permissions to owner read/write only
+    # Prevents other local users on the server from reading the corpus data
+    try:
+        os.chmod(_DB_PATH, 0o600)
+    except OSError:
+        pass  # Best-effort; some platforms (e.g., Windows) may not support chmod
+
 
 def add_document(
     filename: str,
@@ -85,15 +103,21 @@ def add_document(
     pdf_author: str = None,
     pdf_creation_date: str = None,
     pdf_title: str = None,
+    tags: str = None,
 ) -> bool:
     """
-    Insert a new document metadata row.
+    Insert a new document metadata row using parameterized execution.
     Returns True if successfully inserted, False if it already exists.
+
+    The filename is sanitized again here so direct database callers cannot
+    persist HTML, JavaScript, traversal components, or control characters.
     """
+    filename = sanitize_filename(filename)
+
     try:
         with _connect() as conn:
             conn.execute(
-                "INSERT INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     filename,
                     file_hash,
@@ -104,6 +128,7 @@ def add_document(
                     pdf_author,
                     pdf_creation_date,
                     pdf_title,
+                    tags,
                 ),
             )
             conn.commit()
@@ -265,3 +290,65 @@ def get_embedding_count() -> int:
     with _connect() as conn:
         row = conn.execute("SELECT COUNT(1) FROM chunks").fetchone()
     return int(row[0]) if row else 0
+
+
+def add_documents_bulk(documents: list) -> int:
+    """
+    Insert a batch of new documents in a single transaction using executemany.
+    documents: list of dicts containing metadata (filename, file_hash, class_section, etc).
+    Returns the number of documents successfully inserted.
+    """
+    formatted_docs = []
+    now = datetime.now().isoformat()
+    for doc in documents:
+        formatted_docs.append((
+            doc.get("filename"),
+            doc.get("file_hash"),
+            now,
+            doc.get("class_section"),
+            doc.get("student_name"),
+            doc.get("assignment_title"),
+            doc.get("pdf_author"),
+            doc.get("pdf_creation_date"),
+            doc.get("pdf_title"),
+            doc.get("tags")
+        ))
+
+    success_count = 0
+    with _connect() as conn:
+        try:
+            conn.executemany(
+                "INSERT OR IGNORE INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                formatted_docs,
+            )
+            success_count = conn.execute("SELECT changes()").fetchone()[0]
+            conn.commit()
+        except sqlite3.Error as e:
+            conn.rollback()
+            raise e
+    return success_count
+
+
+def get_all_tags() -> list[str]:
+    """Fetches all unique document tags from the database."""
+    try:
+        with _connect() as conn:
+            cursor = conn.execute("SELECT tags FROM documents WHERE tags IS NOT NULL AND tags != ''")
+            all_tags_lists = [row[0] for row in cursor.fetchall()]
+            
+            # Use TagManager to extract unique
+            from src.core.tag_manager import TagManager
+            return TagManager.extract_unique_tags(all_tags_lists)
+    except Exception:
+        return []
+
+
+def get_document_tags(filename: str) -> str:
+    """Fetches the tags string for a specific document."""
+    try:
+        with _connect() as conn:
+            cursor = conn.execute("SELECT tags FROM documents WHERE filename = ?", (filename,))
+            row = cursor.fetchone()
+            return row[0] if row and row[0] else ""
+    except Exception:
+        return ""

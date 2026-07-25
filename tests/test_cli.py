@@ -2,22 +2,15 @@ import json
 import sys
 from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pytest
+
+from tests.conftest import MockDataFactory
 
 # Mock ML libraries to prevent pytest segmentation faults on Apple Silicon
 sys.modules["transformers"] = MagicMock()
 sys.modules["sentence_transformers"] = MagicMock()
 
 from cli import main, run_scan  # noqa: E402
-
-
-def mock_embed_chunks(chunks, batch_size=64):
-    if not chunks:
-        return np.array([])
-    # Return uniform embeddings so similarity is high (1.0)
-    val = 1.0 / (384**0.5)
-    return np.full((len(chunks), 384), val, dtype="float32")
 
 
 @pytest.fixture
@@ -43,7 +36,9 @@ def temp_assignments_dir(tmp_path):
     "src.core.embedding_model.get_embedding_model_info",
     return_value=("all-MiniLM-L6-v2", 384),
 )
-@patch("src.core.embedding_model.embed_chunks", side_effect=mock_embed_chunks)
+@patch(
+    "src.core.embedding_model.embed_chunks", side_effect=MockDataFactory.embed_chunks
+)
 def test_cli_scan_success(mock_embed, mock_model_info, temp_assignments_dir, capsys):
     """Test a successful CLI scan on a directory with valid documents."""
     exit_code = run_scan(str(temp_assignments_dir), threshold=0.8)

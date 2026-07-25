@@ -128,6 +128,7 @@ def sync_flagged_incidents(
         conn.row_factory = sqlite3.Row
 
         try:
+            bulk_records = []
             for flag in flags:
                 doc_a = str(flag.get("doc_a", "")).strip()
                 doc_b = str(flag.get("doc_b", "")).strip()
@@ -136,8 +137,19 @@ def sync_flagged_incidents(
                     continue
 
                 first, second = _normalise_pair(doc_a, doc_b)
+                
+                bulk_records.append((
+                    build_incident_id(first, second),
+                    first,
+                    second,
+                    _normalise_score(flag.get("similarity", 0.0)),
+                    _severity_rank(flag),
+                    timestamp,
+                    timestamp,
+                ))
 
-                conn.execute(
+            if bulk_records:
+                conn.executemany(
                     """
                     INSERT INTO plagiarism_incidents (
                         incident_id, document_a, document_b,
@@ -150,15 +162,7 @@ def sync_flagged_incidents(
                         severity_rank = excluded.severity_rank,
                         last_seen = excluded.last_seen
                     """,
-                    (
-                        build_incident_id(first, second),
-                        first,
-                        second,
-                        _normalise_score(flag.get("similarity", 0.0)),
-                        _severity_rank(flag),
-                        timestamp,
-                        timestamp,
-                    ),
+                    bulk_records
                 )
             conn.commit()
 
@@ -185,6 +189,25 @@ def get_all_incidents(
     init_incident_db(db_path)
     with closing(sqlite3.connect(str(db_path))) as conn:
         return _fetch_all_incidents(conn)
+
+
+def get_all_incidents_above_threshold_for_export(
+    threshold: float,
+    db_path: str | Path = DEFAULT_DB_PATH,
+) -> list[dict[str, Any]]:
+    init_incident_db(db_path)
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT document_a as doc_a, document_b as doc_b, similarity_score as similarity
+            FROM plagiarism_incidents
+            WHERE similarity_score >= ?
+            ORDER BY similarity_score DESC
+            """,
+            (threshold,)
+        ).fetchall()
+        return [dict(row) for row in rows]
 
 
 def update_review_status(

@@ -10,6 +10,7 @@ import os
 
 import requests
 from dotenv import load_dotenv
+from src.security.ssrf_protector import SSRFProtector, SSRFSecurityException
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -52,6 +53,9 @@ def send_plagiarism_alert(doc_a: str, doc_b: str, similarity: float) -> bool:
     payload = {"text": message, "content": message}
 
     try:
+        # Prevent Server-Side Request Forgery (Issue #301)
+        SSRFProtector.validate_webhook_url(webhook_url)
+        
         response = requests.post(webhook_url, json=payload, timeout=10)
         # Check if request returned an unsuccessful status code (4xx, 5xx)
         response.raise_for_status()
@@ -59,6 +63,9 @@ def send_plagiarism_alert(doc_a: str, doc_b: str, similarity: float) -> bool:
             f"Webhook alert successfully sent for pair: {doc_a} <-> {doc_b} ({sim_percent:.1f}%)"
         )
         return True
+    except SSRFSecurityException as e:
+        logger.error(f"SECURITY BLOCKED: Webhook {webhook_url} failed SSRF validation: {e}")
+        return False
     except requests.exceptions.RequestException as e:
         # Gracefully handle all network / request failures so indexing is not blocked
         logger.error(

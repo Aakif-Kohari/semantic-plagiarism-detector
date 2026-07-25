@@ -15,9 +15,10 @@ import docx
 import pdfplumber
 from langdetect import LangDetectException, detect
 
+from striprtf.striprtf import rtf_to_text
 logger = logging.getLogger(__name__)
-
 from src.core.translator import translate_text
+
 
 # OCR dependencies are imported lazily so TXT/DOCX and normal text PDFs still
 # work even when Tesseract is not installed on the machine.
@@ -121,6 +122,19 @@ def strip_bibliography(text: str) -> str:
     return text
 
 
+def clean_text(raw_text: str) -> str:
+    """Normalize whitespace and remove unwanted Unicode characters."""
+    text = raw_text
+    text = re.sub(r"\n\s*\n\s*\n", "\n\n", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"[\u00a0\u200b]", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n[ \t]+", "\n", text)
+
+    return text.strip()
+
+
 def remove_ignore_phrases(text: str, ignore_phrases: str) -> str:
     """Remove specified ignore phrases from text.
 
@@ -146,9 +160,7 @@ def remove_ignore_phrases(text: str, ignore_phrases: str) -> str:
         result = result.replace(phrase, "")
 
     # Clean up extra whitespace left after removal
-    result = re.sub(r"\n\s*\n\s*\n", "\n\n", result)  # Collapse multiple blank lines
-    result = re.sub(r"[ \t]+", " ", result)  # Collapse multiple spaces
-    result = result.strip()
+    result = clean_text(result)
 
     return result
 
@@ -189,7 +201,7 @@ class OCRDependencyError(RuntimeError):
 
 def _is_page_number(line: str) -> bool:
     """Return True for simple standalone page-number lines."""
-    cleaned = re.sub(r"[\u00a0\u200b]", " ", line).strip()
+    cleaned = clean_text(line)
     if not cleaned:
         return False
     return bool(
@@ -201,7 +213,7 @@ def _clean_page_text(page_text: str) -> List[str]:
     """Clean one page of extracted text."""
     lines: List[str] = []
     for raw_line in page_text.splitlines():
-        cleaned = re.sub(r"[\u00a0\u200b]", " ", raw_line).strip()
+        cleaned = clean_text(raw_line)
         if not cleaned or _is_page_number(cleaned):
             continue
         lines.append(cleaned)
@@ -246,10 +258,8 @@ def _normalize_whitespace(page_lines: List[List[str]]) -> str:
     """Join cleaned lines and collapse excessive whitespace."""
     cleaned_lines = [line for lines in page_lines for line in lines]
     text = "\n".join(cleaned_lines).strip()
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    text = re.sub(r"[ \t]+\n", "\n", text)
-    text = re.sub(r"\n[ \t]+", "\n", text)
-    return text.strip()
+    text = clean_text(text)
+    return text
 
 
 def _read_pdf_bytes(file: PDFInput) -> bytes:
@@ -665,6 +675,30 @@ def extract_text_from_txt(file: PDFInput) -> str:
     return text.strip()
 
 
+
+def extract_text_from_rtf(file: PDFInput) -> str:
+    """Extract plain text from an RTF file using striprtf."""
+    text = ""
+    try:
+        if isinstance(file, str):
+            with open(file, "r", encoding="utf-8", errors="ignore") as handle:
+                content = handle.read()
+        elif isinstance(file, bytes):
+            content = file.decode("utf-8", errors="ignore")
+        elif isinstance(file, io.BytesIO):
+            content = file.read().decode("utf-8", errors="ignore")
+        else:
+            data = file.read()
+            content = (
+                data.decode("utf-8", errors="ignore")
+                if isinstance(data, bytes)
+                else data
+            )
+        text = rtf_to_text(content)
+    except Exception as exc:
+        print(f"[document_parser] Error reading RTF: {exc}")
+    return text.strip()
+
 def extract_text_from_url(url: str) -> str:
     """Extract text content from a URL using web scraping.
 
@@ -727,12 +761,6 @@ def extract_text_from_url(url: str) -> str:
 
 
 # --- Markdown (.md) support -------------------------------------------------
-#
-# Markdown files are plain text, so we reuse the TXT reading logic to get the
-# raw source, then strip common Markdown syntax so only the readable content
-# reaches the semantic-analysis / embedding pipeline. Fenced code blocks are
-# kept (with the fence markers removed) since code can still be relevant
-# content for plagiarism comparison; only the surrounding syntax is removed.
 
 _MD_FENCE = re.compile(r"^\s*(```|~~~)")
 _MD_ATX_HEADER = re.compile(r"^\s{0,3}#{1,6}\s+")
@@ -786,7 +814,6 @@ def strip_markdown_syntax(raw_text: str) -> str:
             continue
 
         if _MD_SETEXT_HEADER.match(line) and output and output[-1].strip():
-            # Setext header underline (=== or ---) following a text line.
             continue
 
         line = _MD_ATX_HEADER.sub("", line)
@@ -798,7 +825,7 @@ def strip_markdown_syntax(raw_text: str) -> str:
         output.append(line)
 
     text = "\n".join(output)
-    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = clean_text(text)
     return text.strip()
 
 
@@ -833,11 +860,7 @@ def extract_text_from_epub(file: PDFInput) -> str:
 
 
 def extract_text_from_md(file: PDFInput) -> str:
-    """Extract plain text from a Markdown (.md) file.
-
-    Reads the raw Markdown source (reusing the TXT reader) and strips
-    Markdown syntax so downstream chunking/embedding sees clean prose.
-    """
+    """Extract plain text from a Markdown (.md) file."""
     raw_text = extract_text_from_txt(file)
     if not raw_text:
         return ""
@@ -865,6 +888,10 @@ def extract_text(
         raw = extract_text_from_docx(file)
     elif extension == "md":
         raw = extract_text_from_md(file)
+
+    elif extension == "rtf":
+        raw = extract_text_from_rtf(file)
+
     elif extension == "epub":
         raw = extract_text_from_epub(file)
     else:
@@ -906,8 +933,3 @@ def extract_texts(files: list) -> Dict[str, str]:
         results[name] = raw_texts.get(name, "")
 
     return results
-
-
-# Cross-lingual embedding preparation (Issue #46)
-# Re-exported here because parsing is the boundary where raw source text is
-# converted into embedding-ready text.

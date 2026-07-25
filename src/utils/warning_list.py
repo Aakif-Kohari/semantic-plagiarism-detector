@@ -183,7 +183,88 @@ def render_warning_controls(
     if "warning_page" not in st.session_state:
         st.session_state.warning_page = 1
 
+    from src.core.config import DEFAULT_THRESHOLDS
+    
     st.caption(f"Pairs with similarity ≥ **{threshold:.2f}**")
+    
+    active_filters = []
+    if abs(threshold - DEFAULT_THRESHOLDS.plagiarism) > 0.001:
+        active_filters.append({
+            "key": "clear_threshold",
+            "label": f"Threshold: >{threshold*100:.0f}% ⓧ",
+            "action": "threshold"
+        })
+        
+    if st.session_state.get("hide_low_severity", False):
+        active_filters.append({
+            "key": "clear_hide_low_severity",
+            "label": "Severity: Medium+ ⓧ",
+            "action": "hide_low_severity"
+        })
+        
+    warning_search = st.session_state.get("warning_search", "").strip()
+    if warning_search:
+        display_search = warning_search if len(warning_search) <= 15 else warning_search[:12] + "..."
+        active_filters.append({
+            "key": "clear_warning_search",
+            "label": f"Search: '{display_search}' ⓧ",
+            "action": "warning_search"
+        })
+        
+    selected_document_id = st.session_state.get("selected_document_id")
+    if selected_document_id:
+        display_doc = selected_document_id if len(selected_document_id) <= 15 else selected_document_id[:12] + "..."
+        active_filters.append({
+            "key": "clear_document_filter",
+            "label": f"Document: {display_doc} ⓧ",
+            "action": "selected_document_id"
+        })
+        
+    selected_class = st.session_state.get("class_filter_selectbox", "All Classes")
+    if selected_class and selected_class != "All Classes":
+        display_class = selected_class if len(selected_class) <= 15 else selected_class[:12] + "..."
+        active_filters.append({
+            "key": "clear_class_filter",
+            "label": f"Class: {display_class} ⓧ",
+            "action": "class_filter"
+        })
+
+    if active_filters:
+        st.markdown(
+            '''<style>
+            /* Make buttons look like small pills */
+            div[data-testid="column"] button {
+                border-radius: 16px !important;
+                padding: 2px 12px !important;
+                min-height: 28px !important;
+                height: 28px !important;
+                font-size: 13px !important;
+            }
+            </style>''',
+            unsafe_allow_html=True
+        )
+        cols = st.columns([len(f["label"]) for f in active_filters] + [20])
+        for idx, f in enumerate(active_filters):
+            with cols[idx]:
+                if st.button(f["label"], key=f["key"]):
+                    if f["action"] == "threshold":
+                        st.session_state.threshold = DEFAULT_THRESHOLDS.plagiarism
+                        st.session_state.threshold_slider = DEFAULT_THRESHOLDS.plagiarism
+                        if "last_seen_threshold_query" in st.session_state:
+                            del st.session_state["last_seen_threshold_query"]
+                        # In Streamlit >= 1.30, st.query_params is dict-like
+                        if "threshold" in st.query_params:
+                            del st.query_params["threshold"]
+                    elif f["action"] == "hide_low_severity":
+                        st.session_state.hide_low_severity = False
+                    elif f["action"] == "warning_search":
+                        st.session_state.warning_search = ""
+                    elif f["action"] == "selected_document_id":
+                        st.session_state.selected_document_id = None
+                    elif f["action"] == "class_filter":
+                        st.session_state.class_filter_selectbox = "All Classes"
+                    st.rerun()
+
     dismissed_pairs = get_false_positives()
     filtered_flags = [
         f
@@ -397,46 +478,52 @@ def render_warning_controls(
             disabled=export_df.empty,
         )
 
-    for flag in current_page.items:
-        tier = tier_from_severity_label(flag["severity"])
-        with st.container(border=True):
-            c1, c2, c3 = st.columns([3, 1, 1])
-            with c1:
-                if _has_exact_match(flag["doc_a"], flag["doc_b"]):
-                    exact_badge = " <span style='background-color: #E8F5E9; color: #2E7D32; border: 1px solid #2E7D32; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; margin-left: 8px; vertical-align: middle;'>Exact Match</span>"
+    # ── Warning list container (#369) ────────────────────────────────
+    # A stable `key` makes Streamlit attach a `st-key-warning_list_container`
+    # class to this container's wrapping div, which theme.py's CSS targets
+    # with a transition so re-filtered/re-sorted results animate smoothly
+    # instead of snapping instantly.
+    with st.container(key="warning_list_container"):
+        for flag in current_page.items:
+            tier = tier_from_severity_label(flag["severity"])
+            with st.container(border=True):
+                c1, c2, c3 = st.columns([3, 1, 1])
+                with c1:
+                    if _has_exact_match(flag["doc_a"], flag["doc_b"]):
+                        exact_badge = " <span style='background-color: #E8F5E9; color: #2E7D32; border: 1px solid #2E7D32; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; margin-left: 8px; vertical-align: middle;'>Exact Match</span>"
+                        st.markdown(
+                            f"**{flag['doc_a']}** ↔ **{flag['doc_b']}**{exact_badge}",
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown(f"**{flag['doc_a']}** ↔ **{flag['doc_b']}**")
+
+                    # Replaced the standard similarity text with your matched length display logic
+                    matched_words = flag.get("matched_length", 0)
+                    display_text = f"[{flag['similarity'] * 100:.1f}% Similarity | {matched_words} words matched]"
+                    st.progress(
+                        min(1.0, max(0.0, float(flag["similarity"]))),
+                        text=display_text,
+                    )
+
+                    # Display AI probabilities if available
+                    if ai_probabilities:
+                        ai_a = ai_probabilities.get(flag["doc_a"], {}).get("overall", 0.0)
+                        ai_b = ai_probabilities.get(flag["doc_b"], {}).get("overall", 0.0)
+                        if ai_a > 0 or ai_b > 0:
+                            st.caption(
+                                f"🤖 AI Prob: {flag['doc_a']}: {ai_a:.1%} | "
+                                f"{flag['doc_b']}: {ai_b:.1%}"
+                            )
+                with c2:
                     st.markdown(
-                        f"**{flag['doc_a']}** ↔ **{flag['doc_b']}**{exact_badge}",
+                        f"<div style='text-align:right;'>{badge_html(tier, flag['severity'])}</div>",
                         unsafe_allow_html=True,
                     )
-                else:
-                    st.markdown(f"**{flag['doc_a']}** ↔ **{flag['doc_b']}**")
-
-                # Replaced the standard similarity text with your matched length display logic
-                matched_words = flag.get("matched_length", 0)
-                display_text = f"[{flag['similarity'] * 100:.1f}% Similarity | {matched_words} words matched]"
-                st.progress(
-                    min(1.0, max(0.0, float(flag["similarity"]))),
-                    text=display_text,
-                )
-
-                # Display AI probabilities if available
-                if ai_probabilities:
-                    ai_a = ai_probabilities.get(flag["doc_a"], {}).get("overall", 0.0)
-                    ai_b = ai_probabilities.get(flag["doc_b"], {}).get("overall", 0.0)
-                    if ai_a > 0 or ai_b > 0:
-                        st.caption(
-                            f"🤖 AI Prob: {flag['doc_a']}: {ai_a:.1%} | "
-                            f"{flag['doc_b']}: {ai_b:.1%}"
-                        )
-            with c2:
-                st.markdown(
-                    f"<div style='text-align:right;'>{badge_html(tier, flag['severity'])}</div>",
-                    unsafe_allow_html=True,
-                )
-            with c3:
-                if st.button("Dismiss", key=f"dismiss_{flag['doc_a']}_{flag['doc_b']}"):
-                    add_false_positive(flag["doc_a"], flag["doc_b"])
-                    st.rerun()
+                with c3:
+                    if st.button("Dismiss", key=f"dismiss_{flag['doc_a']}_{flag['doc_b']}"):
+                        add_false_positive(flag["doc_a"], flag["doc_b"])
+                        st.rerun()
 
     if current_page.total_items == 0:
         return

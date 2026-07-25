@@ -4,6 +4,8 @@ src/i18n/translator.py
 Translation manager for dynamic UI internationalization (i18n).
 """
 
+# pylint: disable=streamlit-global-mutation
+
 import json
 import os
 from typing import Dict
