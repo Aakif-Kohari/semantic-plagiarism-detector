@@ -3,20 +3,39 @@ src/utils/excel_export.py
 -------------------------
 Utility for exporting similarity matrices into styled Excel (.xlsx) workbooks
 with conditional formatting matching the application's heatmap logic.
+Supports both in-memory generation and managed temporary disk-file creation with automatic exit cleanup.
 """
 
+import atexit
 import io
-
+import os
+import tempfile
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.formatting.rule import ColorScaleRule
 from openpyxl.styles import Alignment, Font, PatternFill
 
 
-def export_similarity_matrix_to_excel(
+def _create_managed_temp_file(suffix: str = ".xlsx", prefix: str = "temp_") -> str:
+    """Helper to create a temporary file that is automatically deleted on exit."""
+    fd, temp_path = tempfile.mkstemp(suffix=suffix, prefix=prefix)
+    os.close(fd)
+
+    def _cleanup():
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+
+    atexit.register(_cleanup)
+    return temp_path
+
+
+def build_similarity_workbook(
     df: pd.DataFrame, threshold: float = 0.59
-) -> bytes:
-    """Exports a similarity matrix DataFrame into an Excel file (.xlsx) with formatting."""
+) -> Workbook:
+    """Helper function that builds and styles the openpyxl Workbook."""
     wb = Workbook()
     ws = wb.active
     ws.title = "Similarity Matrix"
@@ -78,6 +97,30 @@ def export_similarity_matrix_to_excel(
         col_letter = col[0].column_letter
         ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
 
+    return wb
+
+
+def export_similarity_matrix_to_excel(
+    df: pd.DataFrame, threshold: float = 0.59
+) -> bytes:
+    """Exports a similarity matrix DataFrame into an in-memory Excel file (.xlsx) with formatting."""
+    wb = build_similarity_workbook(df, threshold=threshold)
     output = io.BytesIO()
     wb.save(output)
     return output.getvalue()
+
+
+def export_similarity_matrix_to_temp_file(
+    df: pd.DataFrame, threshold: float = 0.59
+) -> str:
+    """
+    Exports the similarity matrix to a temporary .xlsx file on disk.
+    The created file is automatically registered for cleanup on application exit via atexit.
+    
+    Returns:
+        str: Absolute path to the created temporary Excel file.
+    """
+    wb = build_similarity_workbook(df, threshold=threshold)
+    temp_path = _create_managed_temp_file(suffix=".xlsx", prefix="similarity_matrix_")
+    wb.save(temp_path)
+    return temp_path

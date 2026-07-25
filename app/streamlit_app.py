@@ -76,7 +76,7 @@ from src.visualization.heatmap import plot_similarity_heatmap
 try:
     from src.utils.excel_export import export_similarity_matrix_to_excel
 except ImportError:
-    from utils.excel_export import export_similarity_matrix_to_excel
+    from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore[import-untyped,reportMissingImports]
 
 # Initialize corpus database
 init_corpus_db()
@@ -101,7 +101,7 @@ _INDEX_PATH = os.path.abspath(
 )
 try:
     from streamlit_tour import Tour
-except ImportError:
+except Exception:
     Tour = None
 
 # Initialize auth database
@@ -217,7 +217,6 @@ with theme_col:
 
 
 # ── Sidebar (ROLE RESTRICTED Settings) ────────────────────────────────────────
-# ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### ⚙️ Settings")
 
@@ -435,7 +434,6 @@ else:
 
     if "analysis_results" not in st.session_state:
         st.session_state.analysis_results = None
-        # Try to load from Redis cache
 
         cached_results = get_analysis_results(f"{SESSION_ID}:current")
         if cached_results is not None:
@@ -456,10 +454,12 @@ else:
         faiss_index = load_index(_INDEX_PATH) if os.path.exists(_INDEX_PATH) else None
         registry = get_chunk_registry()
 
-        # Try to load from Redis cache
         cached_signature = get_session_state(SESSION_ID, "analysis_file_signature")
         if cached_signature is not None:
             st.session_state.analysis_file_signature = cached_signature
+
+    if "failed_documents" not in st.session_state:
+        st.session_state.failed_documents = {}
 
     # 1. LOCAL FILE UPLOADER
     uploaded_files = st.file_uploader(
@@ -531,6 +531,22 @@ else:
     if st.session_state.drive_files_dict:
         file_bytes_dict.update(st.session_state.drive_files_dict)
 
+    # ── Display Failed Documents & Retry OCR Button (#183) ───────────────────
+    if st.session_state.failed_documents:
+        failed_list = list(st.session_state.failed_documents.keys())
+        st.warning(
+            f"⚠️ **{len(failed_list)} document(s) failed text extraction/OCR:** "
+            f"`{', '.join(failed_list)}`. This can happen due to transient memory errors."
+        )
+        col_retry, _ = st.columns([1, 3])
+        with col_retry:
+            if st.button("🔄 Retry OCR", key="retry_ocr_button", type="secondary"):
+                # Re-add failed document bytes to active dict and clear failed state
+                for fname, fbytes in st.session_state.failed_documents.items():
+                    file_bytes_dict[fname] = fbytes
+                st.session_state.failed_documents = {}
+                st.rerun()
+
     # 4. PIPELINE STOP CHECK
     if len(file_bytes_dict) < 2:
         if st.session_state.analysis_results is None:
@@ -597,13 +613,22 @@ else:
         ocr_dpi: int,
     ):
         raw_texts = {}
+        failed_files = {}
+
         for name, data in file_bytes_dict.items():
-            raw_texts[name] = extract_text(
-                _io.BytesIO(data),
-                name,
-                ocr_language=ocr_language,
-                ocr_dpi=ocr_dpi,
-            )
+            try:
+                extracted = extract_text(
+                    _io.BytesIO(data),
+                    name,
+                    ocr_language=ocr_language,
+                    ocr_dpi=ocr_dpi,
+                )
+                if extracted and extracted.strip():
+                    raw_texts[name] = extracted
+                else:
+                    failed_files[name] = data
+            except Exception:
+                failed_files[name] = data
 
         chunked_docs = chunk_documents(raw_texts)
         translated_chunked_docs = {}
@@ -648,6 +673,7 @@ else:
             faiss_index,
             registry,
             ai_probabilities,
+            failed_files,
         )
 
     with st.spinner("🧠 Processing files and building embeddings…"):
@@ -662,7 +688,11 @@ else:
         faiss_index,
         registry,
         ai_probabilities,
+        pipeline_failed_files,
     ) = analysis_results
+
+    if pipeline_failed_files:
+        st.session_state.failed_documents.update(pipeline_failed_files)
 
     active_sim_df = chunk_sim_df if use_chunk_matrix else sim_df
     flags = flag_plagiarism(active_sim_df, threshold=threshold)
@@ -679,22 +709,6 @@ else:
             unsafe_allow_html=True,
         )
         st.stop()
-
-    # Process files pipeline
-    raw_texts = {}
-    for name, data in file_bytes_dict.items():
-        raw_texts[name] = extract_text(
-            _io.BytesIO(data), name, ocr_language=ocr_language, ocr_dpi=ocr_dpi
-        )
-
-    chunked_docs = chunk_documents(raw_texts)
-    embeddings = embed_documents(chunked_docs)
-    sim_df = document_similarity_matrix(embeddings)
-    faiss_index, registry = build_index(embeddings, chunked_docs)
-    ai_probabilities = detect_documents_ai_probability(chunked_docs)
-
-    active_sim_df = sim_df
-    flags = flag_plagiarism(active_sim_df, threshold=threshold)
 
     for flag in flags:
         try:
