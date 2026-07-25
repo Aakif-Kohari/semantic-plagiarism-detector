@@ -13,6 +13,15 @@ from app.theme import badge_html, tier_from_severity_label
 from src.core.config import normalize_severity_label, severity_from_score, severity_rank
 from src.db.incidents import _normalise_pair, add_false_positive, get_false_positives
 
+
+try:
+    from thefuzz import fuzz
+except ImportError:
+    try:
+        from fuzzywuzzy import fuzz  # type: ignore[import-untyped,reportMissingImports]
+    except ImportError:
+        fuzz = None
+
 SORT_FIELDS = {
     "Similarity": "similarity",
     "Document A": "doc_a",
@@ -59,18 +68,37 @@ def _normalise_warning(
 def filter_warnings(
     warnings: Iterable[Mapping[str, Any]],
     search_query: str = "",
+    fuzzy_threshold: int = 60,
 ) -> list[dict[str, Any]]:
+    """
+    Filters warnings by query using exact substring matching and 
+    fuzzy string matching (thefuzz/fuzzywuzzy) to handle minor typos.
+    """
     normalised = [_normalise_warning(item) for item in warnings]
     query = search_query.strip().casefold()
 
     if not query:
         return normalised
 
-    return [
-        item
-        for item in normalised
-        if query in item["doc_a"].casefold() or query in item["doc_b"].casefold()
-    ]
+    filtered = []
+    for item in normalised:
+        doc_a = item["doc_a"].casefold()
+        doc_b = item["doc_b"].casefold()
+
+        # 1. Check exact substring match
+        if query in doc_a or query in doc_b:
+            filtered.append(item)
+            continue
+
+        # 2. Check fuzzy match if fuzz library is available
+        if fuzz is not None:
+            score_a = max(fuzz.partial_ratio(query, doc_a), fuzz.token_set_ratio(query, doc_a))
+            score_b = max(fuzz.partial_ratio(query, doc_b), fuzz.token_set_ratio(query, doc_b))
+
+            if score_a >= fuzzy_threshold or score_b >= fuzzy_threshold:
+                filtered.append(item)
+
+    return filtered
 
 
 def sort_warnings(
@@ -281,7 +309,7 @@ def render_warning_controls(
     with search_col:
         search_query = st.text_input(
             "Search warnings",
-            placeholder="Search by either document name…",
+            placeholder="Search by student or document name (supports typos)…",
             key="warning_search",
             on_change=_reset_page,
         )
@@ -560,4 +588,9 @@ def render_warning_controls(
             key="warning_next_page",
         ):
             st.session_state.warning_page = current_page.page + 1
+
             st.rerun()
+            
+
+            st.rerun()
+
