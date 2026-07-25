@@ -99,6 +99,13 @@ def init_db() -> None:
     except sqlite3.Error as e:
         raise sqlite3.Error(f"Failed to initialize authentication database: {e}") from e
 
+    # Restrict database file permissions to owner read/write only
+    # Prevents other local users on the server from reading user credentials
+    try:
+        os.chmod(_DB_PATH, 0o600)
+    except OSError:
+        pass  # Best-effort; some platforms (e.g., Windows) may not support chmod
+
 
 def verify_user(username: str, password: str) -> bool:
     """Return True if username exists, password matches the stored hash, and account is active."""

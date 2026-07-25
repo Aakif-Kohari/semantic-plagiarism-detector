@@ -11,6 +11,8 @@ from datetime import datetime
 
 import numpy as np
 
+from src.utils.filename import sanitize_filename
+
 from src.db.migrations import delete_all_if_table_exists, migrate_corpus_database
 
 _DB_PATH = os.path.abspath(
@@ -78,6 +80,13 @@ def init_corpus_db() -> None:
         conn.commit()
         migrate_corpus_database(conn)
 
+    # Restrict database file permissions to owner read/write only
+    # Prevents other local users on the server from reading the corpus data
+    try:
+        os.chmod(_DB_PATH, 0o600)
+    except OSError:
+        pass  # Best-effort; some platforms (e.g., Windows) may not support chmod
+
 
 def add_document(
     filename: str,
@@ -93,7 +102,12 @@ def add_document(
     """
     Insert a new document metadata row using parameterized execution.
     Returns True if successfully inserted, False if it already exists.
+
+    The filename is sanitized again here so direct database callers cannot
+    persist HTML, JavaScript, traversal components, or control characters.
     """
+    filename = sanitize_filename(filename)
+
     try:
         with _connect() as conn:
             conn.execute(
