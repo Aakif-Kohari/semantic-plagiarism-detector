@@ -332,7 +332,7 @@ if st.session_state.get("authenticated", False):
             let warningTime = timeoutLimit - (2 * 60 * 1000); // 2 minutes before
             let timer;
             let warningShown = false;
-            
+
             function resetTimer() {{
                 clearTimeout(timer);
                 const warning = window.parent.document.getElementById('session-warning-toast');
@@ -342,7 +342,7 @@ if st.session_state.get("authenticated", False):
                 warningShown = false;
                 timer = setTimeout(showWarning, warningTime);
             }}
-            
+
             function showWarning() {{
                 if (warningShown) return;
                 warningShown = true;
@@ -371,7 +371,7 @@ if st.session_state.get("authenticated", False):
             parentDoc.addEventListener('keydown', resetTimer);
             parentDoc.addEventListener('scroll', resetTimer);
             parentDoc.addEventListener('click', resetTimer);
-            
+
             resetTimer();
         </script>
         """,
@@ -729,7 +729,7 @@ def save_preferences_callback():
             ),
         }
         update_user_preferences(st.session_state.username, prefs)
-        
+
         from src.db.auth import set_user_theme
         theme_val = st.session_state.get("theme_selector", "Light")
         set_user_theme(st.session_state.username, theme_val)
@@ -765,12 +765,12 @@ with st.sidebar:
         st.markdown("### 📁 Document Management")
         existing_docs = get_all_documents()
         session_uploaded_docs = st.session_state.get("session_uploaded_docs", set())
-        
+
         doc_filter = st.text_input("Filter documents by filename", key="doc_mgmt_filter")
-        
+
         if existing_docs:
             filtered_docs = [
-                d for d in existing_docs 
+                d for d in existing_docs
                 if not doc_filter or doc_filter.lower() in str(d["filename"]).lower()
             ]
             st.write(f"**{len(filtered_docs)}** documents matching")
@@ -2760,7 +2760,7 @@ if not st.session_state.authenticated:
             )
         else:
             if flags:
-                sync_flagged_incidents(flags)
+                sync_flagged_incidents(flags, threshold=threshold)
                 from src.utils.bulk_export import generate_bulk_reports_zip
                 zip_bytes = generate_bulk_reports_zip(flags)
                 st.download_button(

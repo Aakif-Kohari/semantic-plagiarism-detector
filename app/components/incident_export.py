@@ -54,6 +54,7 @@ def render_incident_export_panel(
             "Document A": i["document_a"],
             "Document B": i["document_b"],
             "Similarity": f"{i['similarity_score']:.1%}",
+            "Threshold at Flag": f"{i['threshold_at_time_of_flag']:.1%}",
             "Severity": i["severity_rank"],
             "Review Status": i["review_status"],
             "Date Flagged": i["date_flagged"],
