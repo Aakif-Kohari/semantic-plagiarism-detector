@@ -112,18 +112,24 @@ def severity_key(
 
 
 def normalize_severity_label(label: str) -> str:
-    """Normalize canonical and legacy emoji-prefixed labels."""
+    """Normalize supported canonical and legacy severity labels."""
     clean = str(label or "").strip().lower()
 
-    if "high" in clean:
-        return HIGH_SEVERITY
-    if "medium" in clean or "warn" in clean:
-        return MEDIUM_SEVERITY
-    if "low" in clean:
-        return LOW_SEVERITY
+    severity_aliases = {
+        "low": LOW_SEVERITY,
+        "medium": MEDIUM_SEVERITY,
+        "high": HIGH_SEVERITY,
+        "🟢 low": LOW_SEVERITY,
+        "🟡 medium": MEDIUM_SEVERITY,
+        "🔴 high": HIGH_SEVERITY,
+        "ðÿ”´ high": HIGH_SEVERITY,
+        "warning": MEDIUM_SEVERITY,
+    }
 
-    raise ValueError(f"Unknown severity label: {label!r}")
-
+    try:
+        return severity_aliases[clean]
+    except KeyError:
+        raise ValueError(f"Unknown severity label: {label!r}") from None
 
 def severity_rank(label: str) -> int:
     """Return a stable sort rank for a severity label."""
