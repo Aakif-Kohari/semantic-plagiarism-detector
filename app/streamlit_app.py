@@ -130,6 +130,7 @@ from src.db import (
     get_unique_class_sections,
     init_corpus_db,
 )
+from src.core.synchronization import verify_and_repair_index
 from src.db.auth import (
     authenticate_user,
     check_login_rate_limit,
@@ -228,6 +229,9 @@ _BRANDING_LOGO_PATH = os.path.abspath(
 _INDEX_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "corpus.index")
 )
+
+# Startup Synchronization Check (Issue #361)
+verify_and_repair_index(_INDEX_PATH)
 
 from streamlit_tour import Tour
 
