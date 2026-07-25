@@ -21,6 +21,7 @@ from .core import (
     save_index,
     search_similar_chunks,
     send_plagiarism_alert,
+    dispatch_plagiarism_alert,
     translate_text,
 )
 from .db import (
@@ -78,6 +79,7 @@ __all__ = [
     "plot_similarity_network",
     "translate_text",
     "send_plagiarism_alert",
+    "dispatch_plagiarism_alert",
     "build_index",
     "search_similar_chunks",
     "find_plagiarised_chunks",

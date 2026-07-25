@@ -113,7 +113,7 @@ from src.core.similarity import (
     find_most_similar_chunks,
     flag_plagiarism,
 )
-from src.core.webhook import send_plagiarism_alert
+from src.core.webhook import dispatch_plagiarism_alert
 from src.i18n.translator import _SUPPORTED_LANGUAGES, get_text
 from src.visualization.network_graph import plot_similarity_network
 
@@ -2431,7 +2431,7 @@ if not st.session_state.authenticated:
             alert_key = (flag["doc_a"], flag["doc_b"])
             if alert_key not in st.session_state.sent_alerts:
                 try:
-                    send_plagiarism_alert(
+                    dispatch_plagiarism_alert(
                         doc_a=flag["doc_a"],
                         doc_b=flag["doc_b"],
                         similarity=float(flag["similarity"]),
@@ -2799,7 +2799,7 @@ if not st.session_state.authenticated:
         alert_key = (flag["doc_a"], flag["doc_b"])
         if alert_key not in st.session_state.sent_alerts:
             try:
-                send_plagiarism_alert(
+                dispatch_plagiarism_alert(
                     doc_a=flag["doc_a"],
                     doc_b=flag["doc_b"],
                     similarity=float(flag["similarity"]),

@@ -23,7 +23,7 @@ from .similarity import (
 )
 from .text_chunking import chunk_document, chunk_documents
 from .translator import translate_text
-from .webhook import send_plagiarism_alert
+from .webhook import send_plagiarism_alert, dispatch_plagiarism_alert
 
 __all__ = [
     "extract_text_from_pdf",
@@ -49,4 +49,5 @@ __all__ = [
     "build_index_from_matrix",
     "translate_text",
     "send_plagiarism_alert",
+    "dispatch_plagiarism_alert",
 ]
