@@ -26,9 +26,21 @@ SNAPSHOT_INPUTS = {
     "overall_similarity": 0.873,
     "threshold": 0.60,
     "top_pairs": [
-        ("The mitochondria is the powerhouse of the cell and plays a crucial role in energy production.", "The mitochondria serves as the cell's primary energy generator through ATP synthesis.", 0.94),
-        ("Photosynthesis converts light energy into chemical energy stored in glucose molecules.", "Plants transform sunlight into chemical energy via the process of photosynthesis.", 0.91),
-        ("DNA replication occurs during the S phase of the cell cycle before mitosis begins.", "The cell replicates its DNA in the synthesis phase prior to mitotic division.", 0.88),
+        (
+            "The mitochondria is the powerhouse of the cell and plays a crucial role in energy production.",
+            "The mitochondria serves as the cell's primary energy generator through ATP synthesis.",
+            0.94,
+        ),
+        (
+            "Photosynthesis converts light energy into chemical energy stored in glucose molecules.",
+            "Plants transform sunlight into chemical energy via the process of photosynthesis.",
+            0.91,
+        ),
+        (
+            "DNA replication occurs during the S phase of the cell cycle before mitosis begins.",
+            "The cell replicates its DNA in the synthesis phase prior to mitotic division.",
+            0.88,
+        ),
     ],
 }
 
@@ -270,3 +282,38 @@ def test_snapshot_pdf_structure_valid():
     assert "mitochondria" in text
     assert "photosynthesis" in text
     assert "DNA replication" in text
+
+
+def test_generate_plagiarism_report_dark_mode():
+    pdf_buffer = generate_plagiarism_report(
+        doc_a="student_a.pdf",
+        doc_b="student_b.pdf",
+        overall_similarity=0.934,
+        threshold=0.59,
+        top_pairs=[
+            ("First matching paragraph.", "Second matching paragraph.", 0.96),
+        ],
+        dark_mode=True,
+    )
+    pdf_bytes = pdf_buffer.getvalue()
+    assert pdf_bytes.startswith(b"%PDF")
+    text = _read_text(pdf_bytes)
+    assert "student_a.pdf" in text
+
+
+def test_generate_plagiarism_report_auto_detect_dark_mode():
+    import streamlit as st
+
+    st.session_state.theme = "Dark"
+    pdf_buffer = generate_plagiarism_report(
+        doc_a="student_a.pdf",
+        doc_b="student_b.pdf",
+        overall_similarity=0.934,
+        threshold=0.59,
+        top_pairs=[
+            ("First matching paragraph.", "Second matching paragraph.", 0.96),
+        ],
+    )
+    pdf_bytes = pdf_buffer.getvalue()
+    assert pdf_bytes.startswith(b"%PDF")
+    st.session_state.theme = "Light"

@@ -13,6 +13,15 @@ from app.theme import badge_html, tier_from_severity_label
 from src.core.config import normalize_severity_label, severity_from_score, severity_rank
 from src.db.incidents import _normalise_pair, add_false_positive, get_false_positives
 
+
+try:
+    from thefuzz import fuzz
+except ImportError:
+    try:
+        from fuzzywuzzy import fuzz  # type: ignore[import-untyped,reportMissingImports]
+    except ImportError:
+        fuzz = None
+
 SORT_FIELDS = {
     "Similarity": "similarity",
     "Document A": "doc_a",
@@ -59,18 +68,45 @@ def _normalise_warning(
 def filter_warnings(
     warnings: Iterable[Mapping[str, Any]],
     search_query: str = "",
+    min_match_length: int = 0,
 ) -> list[dict[str, Any]]:
+    """
+    Filters warnings by query using exact substring matching and 
+    fuzzy string matching (thefuzz/fuzzywuzzy) to handle minor typos.
+    """
     normalised = [_normalise_warning(item) for item in warnings]
+
+    if min_match_length > 0:
+        normalised = [
+            item
+            for item in normalised
+            if item.get("matched_length", 0) >= min_match_length
+        ]
+
     query = search_query.strip().casefold()
 
     if not query:
         return normalised
 
-    return [
-        item
-        for item in normalised
-        if query in item["doc_a"].casefold() or query in item["doc_b"].casefold()
-    ]
+    filtered = []
+    for item in normalised:
+        doc_a = item["doc_a"].casefold()
+        doc_b = item["doc_b"].casefold()
+
+        # 1. Check exact substring match
+        if query in doc_a or query in doc_b:
+            filtered.append(item)
+            continue
+
+        # 2. Check fuzzy match if fuzz library is available
+        if fuzz is not None:
+            score_a = max(fuzz.partial_ratio(query, doc_a), fuzz.token_set_ratio(query, doc_a))
+            score_b = max(fuzz.partial_ratio(query, doc_b), fuzz.token_set_ratio(query, doc_b))
+
+            if score_a >= fuzzy_threshold or score_b >= fuzzy_threshold:
+                filtered.append(item)
+
+    return filtered
 
 
 def sort_warnings(
@@ -130,6 +166,7 @@ def prepare_warning_page(
     warnings: Iterable[Mapping[str, Any]],
     *,
     search_query: str = "",
+    min_match_length: int = 0,
     primary_field: str = "similarity",
     primary_descending: bool = True,
     secondary_field: str = "doc_a",
@@ -137,7 +174,9 @@ def prepare_warning_page(
     page: int = 1,
     page_size: int = 10,
 ) -> tuple[list[dict[str, Any]], WarningPage]:
-    filtered = filter_warnings(warnings, search_query)
+    filtered = filter_warnings(
+        warnings, search_query, min_match_length=min_match_length
+    )
     sorted_items = sort_warnings(
         filtered,
         primary_field=primary_field,
@@ -184,54 +223,82 @@ def render_warning_controls(
         st.session_state.warning_page = 1
 
     from src.core.config import DEFAULT_THRESHOLDS
-    
+
     st.caption(f"Pairs with similarity ≥ **{threshold:.2f}**")
-    
+
     active_filters = []
     if abs(threshold - DEFAULT_THRESHOLDS.plagiarism) > 0.001:
-        active_filters.append({
-            "key": "clear_threshold",
-            "label": f"Threshold: >{threshold*100:.0f}% ⓧ",
-            "action": "threshold"
-        })
-        
+        active_filters.append(
+            {
+                "key": "clear_threshold",
+                "label": f"Threshold: >{threshold*100:.0f}% ⓧ",
+                "action": "threshold",
+            }
+        )
+
     if st.session_state.get("hide_low_severity", False):
-        active_filters.append({
-            "key": "clear_hide_low_severity",
-            "label": "Severity: Medium+ ⓧ",
-            "action": "hide_low_severity"
-        })
-        
+        active_filters.append(
+            {
+                "key": "clear_hide_low_severity",
+                "label": "Severity: Medium+ ⓧ",
+                "action": "hide_low_severity",
+            }
+        )
+
     warning_search = st.session_state.get("warning_search", "").strip()
     if warning_search:
-        display_search = warning_search if len(warning_search) <= 15 else warning_search[:12] + "..."
-        active_filters.append({
-            "key": "clear_warning_search",
-            "label": f"Search: '{display_search}' ⓧ",
-            "action": "warning_search"
-        })
-        
+        display_search = (
+            warning_search if len(warning_search) <= 15 else warning_search[:12] + "..."
+        )
+        active_filters.append(
+            {
+                "key": "clear_warning_search",
+                "label": f"Search: '{display_search}' ⓧ",
+                "action": "warning_search",
+            }
+        )
+
     selected_document_id = st.session_state.get("selected_document_id")
     if selected_document_id:
-        display_doc = selected_document_id if len(selected_document_id) <= 15 else selected_document_id[:12] + "..."
-        active_filters.append({
-            "key": "clear_document_filter",
-            "label": f"Document: {display_doc} ⓧ",
-            "action": "selected_document_id"
-        })
-        
+        display_doc = (
+            selected_document_id
+            if len(selected_document_id) <= 15
+            else selected_document_id[:12] + "..."
+        )
+        active_filters.append(
+            {
+                "key": "clear_document_filter",
+                "label": f"Document: {display_doc} ⓧ",
+                "action": "selected_document_id",
+            }
+        )
+
     selected_class = st.session_state.get("class_filter_selectbox", "All Classes")
     if selected_class and selected_class != "All Classes":
-        display_class = selected_class if len(selected_class) <= 15 else selected_class[:12] + "..."
-        active_filters.append({
-            "key": "clear_class_filter",
-            "label": f"Class: {display_class} ⓧ",
-            "action": "class_filter"
-        })
+        display_class = (
+            selected_class if len(selected_class) <= 15 else selected_class[:12] + "..."
+        )
+        active_filters.append(
+            {
+                "key": "clear_class_filter",
+                "label": f"Class: {display_class} ⓧ",
+                "action": "class_filter",
+            }
+        )
+
+    min_match_len_val = st.session_state.get("warning_min_match_length", 0)
+    if min_match_len_val > 0:
+        active_filters.append(
+            {
+                "key": "clear_min_match_length",
+                "label": f"Min Words: {min_match_len_val}+ ⓧ",
+                "action": "min_match_length",
+            }
+        )
 
     if active_filters:
         st.markdown(
-            '''<style>
+            """<style>
             /* Make buttons look like small pills */
             div[data-testid="column"] button {
                 border-radius: 16px !important;
@@ -240,8 +307,8 @@ def render_warning_controls(
                 height: 28px !important;
                 font-size: 13px !important;
             }
-            </style>''',
-            unsafe_allow_html=True
+            </style>""",
+            unsafe_allow_html=True,
         )
         cols = st.columns([len(f["label"]) for f in active_filters] + [20])
         for idx, f in enumerate(active_filters):
@@ -249,7 +316,9 @@ def render_warning_controls(
                 if st.button(f["label"], key=f["key"]):
                     if f["action"] == "threshold":
                         st.session_state.threshold = DEFAULT_THRESHOLDS.plagiarism
-                        st.session_state.threshold_slider = DEFAULT_THRESHOLDS.plagiarism
+                        st.session_state.threshold_slider = (
+                            DEFAULT_THRESHOLDS.plagiarism
+                        )
                         if "last_seen_threshold_query" in st.session_state:
                             del st.session_state["last_seen_threshold_query"]
                         # In Streamlit >= 1.30, st.query_params is dict-like
@@ -263,6 +332,8 @@ def render_warning_controls(
                         st.session_state.selected_document_id = None
                     elif f["action"] == "class_filter":
                         st.session_state.class_filter_selectbox = "All Classes"
+                    elif f["action"] == "min_match_length":
+                        st.session_state.warning_min_match_length = 0
                     st.rerun()
 
     dismissed_pairs = get_false_positives()
@@ -281,7 +352,7 @@ def render_warning_controls(
     with search_col:
         search_query = st.text_input(
             "Search warnings",
-            placeholder="Search by either document name…",
+            placeholder="Search by student or document name (supports typos)…",
             key="warning_search",
             on_change=_reset_page,
         )
@@ -299,6 +370,16 @@ def render_warning_controls(
             key="warning_page_size",
             on_change=_reset_page,
         )
+
+    min_match_length = st.slider(
+        "Minimum Match Length (Words)",
+        min_value=0,
+        max_value=250,
+        value=0,
+        step=5,
+        key="warning_min_match_length",
+        on_change=_reset_page,
+    )
 
     p1, d1, p2, d2 = st.columns([2, 1, 2, 1])
 
@@ -344,6 +425,7 @@ def render_warning_controls(
     sorted_flags, current_page = prepare_warning_page(
         display_flags,
         search_query=search_query,
+        min_match_length=min_match_length,
         primary_field=SORT_FIELDS[primary_label],
         primary_descending=primary_direction == "Descending",
         secondary_field=SORT_FIELDS[secondary_label],
@@ -508,8 +590,12 @@ def render_warning_controls(
 
                     # Display AI probabilities if available
                     if ai_probabilities:
-                        ai_a = ai_probabilities.get(flag["doc_a"], {}).get("overall", 0.0)
-                        ai_b = ai_probabilities.get(flag["doc_b"], {}).get("overall", 0.0)
+                        ai_a = ai_probabilities.get(flag["doc_a"], {}).get(
+                            "overall", 0.0
+                        )
+                        ai_b = ai_probabilities.get(flag["doc_b"], {}).get(
+                            "overall", 0.0
+                        )
                         if ai_a > 0 or ai_b > 0:
                             st.caption(
                                 f"🤖 AI Prob: {flag['doc_a']}: {ai_a:.1%} | "
@@ -521,7 +607,9 @@ def render_warning_controls(
                         unsafe_allow_html=True,
                     )
                 with c3:
-                    if st.button("Dismiss", key=f"dismiss_{flag['doc_a']}_{flag['doc_b']}"):
+                    if st.button(
+                        "Dismiss", key=f"dismiss_{flag['doc_a']}_{flag['doc_b']}"
+                    ):
                         add_false_positive(flag["doc_a"], flag["doc_b"])
                         st.rerun()
 

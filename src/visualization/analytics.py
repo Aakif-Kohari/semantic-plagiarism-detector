@@ -146,7 +146,9 @@ def plot_most_plagiarized_documents(doc_data: list[dict[str, Any]]) -> go.Figure
     return fig
 
 
-def plot_similarity_distribution(sim_matrix: pd.DataFrame, title: str = "Distribution of Similarity Scores") -> go.Figure:
+def plot_similarity_distribution(
+    sim_matrix: pd.DataFrame, title: str = "Distribution of Similarity Scores"
+) -> go.Figure:
     """
     Create a histogram showing the distribution of all pairwise similarity scores.
 
@@ -198,6 +200,75 @@ def plot_similarity_distribution(sim_matrix: pd.DataFrame, title: str = "Distrib
         marker_line_color="#4a4dba",
         marker_line_width=1,
         hovertemplate="Score: %{x:.2f}<br>Pairs: %{y}<extra></extra>",
+    )
+
+    return fig
+
+
+def plot_document_sizes(word_counts: dict[str, int]) -> go.Figure:
+    """
+    Create a bar chart showing the word counts of all documents.
+
+    Args:
+        word_counts: Dictionary mapping document filenames to word counts
+
+    Returns:
+        Plotly Figure object
+    """
+    if not word_counts:
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No documents currently in the database",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
+            font=dict(size=16, color="gray"),
+        )
+        fig.update_layout(
+            title="Document Word Counts",
+            xaxis_title="Document Name",
+            yaxis_title="Word Count",
+            height=400,
+        )
+        return fig
+
+    # Create DataFrame
+    df = pd.DataFrame(
+        list(word_counts.items()), columns=["document_name", "word_count"]
+    )
+    df = df.sort_values(by="word_count", ascending=False)
+
+    df["display_name"] = df["document_name"].apply(
+        lambda x: x[:30] + "..." if len(x) > 30 else x
+    )
+
+    fig = px.bar(
+        df,
+        x="display_name",
+        y="word_count",
+        title="Document Word Counts",
+        labels={
+            "display_name": "Document Name",
+            "word_count": "Word Count",
+        },
+        orientation="v",
+    )
+
+    fig.update_layout(
+        xaxis_title="Document Name",
+        yaxis_title="Word Count",
+        height=400,
+        showlegend=False,
+    )
+
+    fig.update_traces(
+        marker_color="#1f77b4",
+        marker_line_color="#1a6294",
+        marker_line_width=1.5,
+        hovertemplate="<b>%{customdata}</b><br>Word Count: %{y}<extra></extra>",
+        customdata=df["document_name"].tolist(),
     )
 
     return fig

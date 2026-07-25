@@ -5,18 +5,20 @@ SQLite database manager to persist document metadata, chunk text, and embeddings
 Enables incremental updates and index rebuilding without re-embedding.
 """
 
+import logging
 import os
-from pathlib import Path
 import sqlite3
-from datetime import datetime
-from contextlib import contextmanager
 import threading
+from contextlib import contextmanager
+from datetime import datetime
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 
-from src.utils.filename import sanitize_filename
-
 from src.db.migrations import delete_all_if_table_exists, migrate_corpus_database
+from src.utils.filename import sanitize_filename
 
 _DB_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "corpus.db")
@@ -25,10 +27,10 @@ _DB_PATH = os.path.abspath(
 _connection_pool = threading.local()
 
 
-
 def get_corpus_db_path() -> Path:
     """Return the configured corpus SQLite database path."""
     return Path(_DB_PATH)
+
 
 def _pool() -> dict[str, sqlite3.Connection]:
     """Return the connection pool belonging to the current thread."""
@@ -297,6 +299,20 @@ def get_document_chunks_count(filename: str) -> int:
     return row[0] if row else 0
 
 
+def get_document_word_counts() -> dict[str, int]:
+    """Calculate and return the total word count for each document currently in the database based on its chunks."""
+    import re
+
+    with _connect() as conn:
+        rows = conn.execute("SELECT filename, chunk_text FROM chunks").fetchall()
+
+    word_counts = {}
+    for filename, chunk_text in rows:
+        words = len(re.findall(r"\b\w+\b", chunk_text or ""))
+        word_counts[filename] = word_counts.get(filename, 0) + words
+    return word_counts
+
+
 def clear_all_data() -> None:
     """Clear known corpus tables while tolerating partial schemas."""
     with _connect() as conn:
@@ -341,18 +357,20 @@ def add_documents_bulk(documents: list) -> int:
     formatted_docs = []
     now = datetime.now().isoformat()
     for doc in documents:
-        formatted_docs.append((
-            doc.get("filename"),
-            doc.get("file_hash"),
-            now,
-            doc.get("class_section"),
-            doc.get("student_name"),
-            doc.get("assignment_title"),
-            doc.get("pdf_author"),
-            doc.get("pdf_creation_date"),
-            doc.get("pdf_title"),
-            doc.get("tags")
-        ))
+        formatted_docs.append(
+            (
+                doc.get("filename"),
+                doc.get("file_hash"),
+                now,
+                doc.get("class_section"),
+                doc.get("student_name"),
+                doc.get("assignment_title"),
+                doc.get("pdf_author"),
+                doc.get("pdf_creation_date"),
+                doc.get("pdf_title"),
+                doc.get("tags"),
+            )
+        )
 
     success_count = 0
     with _connect() as conn:
@@ -373,11 +391,14 @@ def get_all_tags() -> list[str]:
     """Fetches all unique document tags from the database."""
     try:
         with _connect() as conn:
-            cursor = conn.execute("SELECT tags FROM documents WHERE tags IS NOT NULL AND tags != ''")
+            cursor = conn.execute(
+                "SELECT tags FROM documents WHERE tags IS NOT NULL AND tags != ''"
+            )
             all_tags_lists = [row[0] for row in cursor.fetchall()]
-            
+
             # Use TagManager to extract unique
             from src.core.tag_manager import TagManager
+
             return TagManager.extract_unique_tags(all_tags_lists)
     except Exception:
         return []
@@ -387,11 +408,28 @@ def get_document_tags(filename: str) -> str:
     """Fetches the tags string for a specific document."""
     try:
         with _connect() as conn:
-            cursor = conn.execute("SELECT tags FROM documents WHERE filename = ?", (filename,))
+            cursor = conn.execute(
+                "SELECT tags FROM documents WHERE filename = ?", (filename,)
+            )
             row = cursor.fetchone()
             return row[0] if row and row[0] else ""
     except Exception:
         return ""
+
+
+def update_document_tags(filename: str, tags: str) -> bool:
+    """Updates the tags for a specific document."""
+    try:
+        with _connect() as conn:
+            conn.execute(
+                "UPDATE documents SET tags = ? WHERE filename = ?",
+                (tags, filename)
+            )
+            conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to update tags for '{filename}': {e}")
+        return False
 
 
 def delete_tag(tag: str) -> int:
@@ -418,7 +456,9 @@ def delete_tag(tag: str) -> int:
                 individual_tags = [t.strip() for t in tags_str.split(",") if t.strip()]
                 if tag in individual_tags:
                     updated_tags = [t for t in individual_tags if t != tag]
-                    new_tags_str = ",".join(sorted(updated_tags)) if updated_tags else ""
+                    new_tags_str = (
+                        ",".join(sorted(updated_tags)) if updated_tags else ""
+                    )
                     conn.execute(
                         "UPDATE documents SET tags = ? WHERE filename = ?",
                         (new_tags_str, filename),
