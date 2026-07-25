@@ -4,8 +4,19 @@ import logging
 from datetime import datetime, timezone
 from src.core.faiss_index import load_index, save_index, build_index_from_matrix
 from src.db.corpus_db import get_embedding_count, get_all_embeddings
+import concurrent.futures
+from typing import Callable, Any
 
 logger = logging.getLogger(__name__)
+
+# Background thread pool for non-blocking UI tasks (e.g., webhook dispatching)
+background_tasks = concurrent.futures.ThreadPoolExecutor(
+    max_workers=4, thread_name_prefix="bg_task"
+)
+
+def run_background(func: Callable[..., Any], *args: Any, **kwargs: Any) -> concurrent.futures.Future:
+    """Submits a function to run in the background thread pool."""
+    return background_tasks.submit(func, *args, **kwargs)
 
 def verify_and_repair_index(index_path: str) -> None:
     """
