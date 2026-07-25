@@ -30,6 +30,15 @@ def faiss_results_dataframe(
     """Convert FAISS records into a sortable display DataFrame."""
     rows: list[dict[str, Any]] = []
 
+    RESULT_COLUMNS = [
+        "Rank",
+        "Target Document",
+        "Chunk",
+        "Similarity Score",
+        "Matching Text",
+        "Stats",
+    ]
+
     for record, raw_score in results:
         document = str(
             _record_value(record, "doc_name", "Unknown document")
@@ -38,12 +47,15 @@ def faiss_results_dataframe(
         chunk_text = str(_record_value(record, "chunk_text", ""))
         score = float(raw_score)
 
+        from src.utils.text_stats import format_text_stats
+        
         rows.append(
             {
                 "Target Document": document,
                 "Chunk": chunk_index + 1,
                 "Similarity Score": score,
                 "Matching Text": chunk_text,
+                "Stats": format_text_stats(chunk_text),
             }
         )
 

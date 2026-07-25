@@ -2611,11 +2611,12 @@ if not st.session_state.authenticated:
                         expanded=st.session_state.expand_all_drill or (rank == 1),
                     ):
                         highlighted_ca, highlighted_cb = highlight_overlap(ca, cb)
+                        from src.utils.text_stats import format_text_stats
                         st.markdown(
-                            f"**{doc_a}:** {highlighted_ca}", unsafe_allow_html=True
+                            f"**{doc_a} ({format_text_stats(ca)}):** {highlighted_ca}", unsafe_allow_html=True
                         )
                         st.markdown(
-                            f"**{doc_b}:** {highlighted_cb}", unsafe_allow_html=True
+                            f"**{doc_b} ({format_text_stats(cb)}):** {highlighted_cb}", unsafe_allow_html=True
                         )
 
             with drill_tab_viewer:
