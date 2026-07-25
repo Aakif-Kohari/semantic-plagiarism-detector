@@ -208,6 +208,7 @@ except Exception:
     from src.utils.json_export import export_similarity_matrix_to_json
 except ImportError:
 
+    from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore[import-untyped,reportMissingImports]
     from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore
     from utils.json_export import export_similarity_matrix_to_json
 
@@ -263,6 +264,11 @@ verify_and_repair_index(_INDEX_PATH)
 from streamlit_tour import Tour
 
 try:
+
+    from streamlit_tour import Tour
+except Exception:
+    Tour = None
+
     from src.utils.google_drive import import_from_google_drive  # type: ignore
 except Exception:
     import_from_google_drive = None
@@ -270,6 +276,7 @@ except Exception:
 # -----------------------------------------------------------------------------
 # Page Configuration & Session State
 # -----------------------------------------------------------------------------
+
 
 
 # Page Configuration
@@ -741,7 +748,6 @@ def save_preferences_callback():
         theme_val = st.session_state.get("theme_selector", "Light")
         set_user_theme(st.session_state.username, theme_val)
 
-
 with st.sidebar:
     st.markdown(f"👤 Logged in as **{st.session_state.get('username', '')}**")
 
@@ -1072,6 +1078,10 @@ if user_role != "admin":
 else:
     # ADMINISTRATOR ACCESS: Full Upload Pipeline & Evaluation Dashboards
 
+
+    if "analysis_results" not in st.session_state:
+        st.session_state.analysis_results = None
+
     # Load or initialize FAISS index
     if os.path.exists(_INDEX_PATH):
         faiss_index = load_index(_INDEX_PATH)
@@ -1136,6 +1146,7 @@ if (
             ),
         ]
 
+
         tour = Tour(steps=tour_steps)
         tour.start()
 
@@ -1171,6 +1182,8 @@ if user_role != "admin":
     )
 
     if st.button("🔍 Run Quick Verification", key="user_query") and query_text.strip():
+
+
 
         with st.spinner("Loading index and searching..."):
             try:
@@ -1392,12 +1405,17 @@ else:
 
     if "analysis_file_signature" not in st.session_state:
         st.session_state.analysis_file_signature = None
+
         cached_signature = get_session_state(SESSION_ID, "analysis_file_signature")
         if cached_signature is not None:
             st.session_state.analysis_file_signature = cached_signature
 
+
+    if "failed_documents" not in st.session_state:
+        st.session_state.failed_documents = {}
+
+
     # 1. LOCAL FILE UPLOADER (Dynamic Title Translation)
-    # 1. LOCAL FILE UPLOADER
     uploaded_files = st.file_uploader(
         get_text("upload_title", lang=lang_code),
         type=["pdf", "docx", "doc", "txt", "zip", "csv"],
@@ -1810,6 +1828,22 @@ if not st.session_state.authenticated:
                         st.error("Please enter a password.")
         st.stop()
 
+    # ── Display Failed Documents & Retry OCR Button (#183) ───────────────────
+    if st.session_state.failed_documents:
+        failed_list = list(st.session_state.failed_documents.keys())
+        st.warning(
+            f"⚠️ **{len(failed_list)} document(s) failed text extraction/OCR:** "
+            f"`{', '.join(failed_list)}`. This can happen due to transient memory errors."
+        )
+        col_retry, _ = st.columns([1, 3])
+        with col_retry:
+            if st.button("🔄 Retry OCR", key="retry_ocr_button", type="secondary"):
+                # Re-add failed document bytes to active dict and clear failed state
+                for fname, fbytes in st.session_state.failed_documents.items():
+                    file_bytes_dict[fname] = fbytes
+                st.session_state.failed_documents = {}
+                st.rerun()
+
     # 4. PIPELINE STOP CHECK
     if len(file_bytes_dict) < 2 and url_text is None:
         if st.session_state.analysis_results is None:
@@ -1926,6 +1960,24 @@ if not st.session_state.authenticated:
         url_filename: str = None,
     ):
         raw_texts = {}
+
+        failed_files = {}
+
+        for name, data in file_bytes_dict.items():
+            try:
+                extracted = extract_text(
+                    _io.BytesIO(data),
+                    name,
+                    ocr_language=ocr_language,
+                    ocr_dpi=ocr_dpi,
+                )
+                if extracted and extracted.strip():
+                    raw_texts[name] = extracted
+                else:
+                    failed_files[name] = data
+            except Exception:
+                failed_files[name] = data
+
         failed_files = []
         failure_details = []
 
@@ -2004,9 +2056,35 @@ if not st.session_state.authenticated:
             faiss_index,
             registry,
             ai_probabilities,
+            failed_files,
         )
 
+
+    with st.spinner("🧠 Processing files and building embeddings…"):
+        analysis_results = run_pipeline(file_bytes_dict, ocr_language, ocr_dpi)
+
+    (
+        raw_texts,
+        chunked_docs,
+        embeddings,
+        sim_df,
+        chunk_sim_df,
+        faiss_index,
+        registry,
+        ai_probabilities,
+        pipeline_failed_files,
+    ) = analysis_results
+
+    if pipeline_failed_files:
+        st.session_state.failed_documents.update(pipeline_failed_files)
+
+    active_sim_df = chunk_sim_df if use_chunk_matrix else sim_df
+    flags = flag_plagiarism(active_sim_df, threshold=threshold)
+
+    # ── Summary Metrics ───────────────────────────────────────────────────────────
+
     has_enough_files = (len(file_bytes_dict) + (1 if url_text else 0)) >= 2
+
 
     # Run Pipeline if files uploaded
     def compute_pipeline_signature(
@@ -2087,6 +2165,9 @@ if not st.session_state.authenticated:
                 unsafe_allow_html=True,
             )
         st.divider()
+
+
+    for flag in flags:
 
         # 2. Tabs Skeleton
         (
@@ -2194,6 +2275,7 @@ if not st.session_state.authenticated:
                 f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TABLE}"></div>',
                 unsafe_allow_html=True,
             )
+
 
         try:
             with st.spinner("🧠 Processing files and building embeddings…"):
