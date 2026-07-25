@@ -1,17 +1,18 @@
-import sqlite3
-import pytest
-import numpy as np
 import os
 import pathlib
+import sqlite3
 import sys
 
+import numpy as np
+
+from src.db.auth import _DB_PATH as AUTH_DB_PATH
 from src.db.corpus_db import _DB_PATH as CORPUS_DB_PATH
 from src.db.incidents import DEFAULT_DB_PATH as INCIDENTS_DB_PATH
-from src.db.auth import _DB_PATH as AUTH_DB_PATH
 
 # ---------------------------------------------------------------------------
 # Mock Database Fixture Tests
 # ---------------------------------------------------------------------------
+
 
 def test_mock_db_provides_isolated_schema(mock_db):
     """
@@ -22,44 +23,49 @@ def test_mock_db_provides_isolated_schema(mock_db):
     assert CORPUS_DB_PATH == mock_db
     assert INCIDENTS_DB_PATH == mock_db
     assert AUTH_DB_PATH == mock_db
-    
+
     # 2. Verify we can connect and write
     conn = sqlite3.connect(mock_db)
     cursor = conn.cursor()
-    
+
     # Check that documents table exists (from init_corpus_db)
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='documents'")
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='documents'"
+    )
     assert cursor.fetchone() is not None
-    
+
     # Check that incidents table exists (from init_incidents_db)
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='incidents'")
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='incidents'"
+    )
     assert cursor.fetchone() is not None
-    
+
     # Check that users table exists (from init_auth_db)
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
     assert cursor.fetchone() is not None
-    
+
     # 3. Verify emptiness
     cursor.execute("SELECT COUNT(*) FROM documents")
     assert cursor.fetchone()[0] == 0
-    
+
     cursor.execute("SELECT COUNT(*) FROM incidents")
     assert cursor.fetchone()[0] == 0
-    
+
     cursor.execute("SELECT COUNT(*) FROM users")
     assert cursor.fetchone()[0] == 0
-    
+
     # 4. Verify writability
     cursor.execute(
         "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
-        ("test_admin", "hash", "admin")
+        ("test_admin", "hash", "admin"),
     )
     conn.commit()
-    
+
     cursor.execute("SELECT username FROM users")
     assert cursor.fetchone()[0] == "test_admin"
-    
+
     conn.close()
+
 
 def test_mock_db_teardown_isolation(tmp_path):
     """
@@ -75,6 +81,7 @@ def test_mock_db_teardown_isolation(tmp_path):
 # ---------------------------------------------------------------------------
 # Other Conftest Fixture Tests (Issue #363 Extended Coverage)
 # ---------------------------------------------------------------------------
+
 
 def test_sqlite_database_path(sqlite_database_path):
     """
@@ -100,11 +107,11 @@ def test_clean_test_env(tmp_path):
     repo_root = pathlib.Path(__file__).parent.parent.resolve()
     dummy_index = repo_root / "corpus.index"
     dummy_db = repo_root / "corpus.db"
-    
+
     try:
         dummy_index.touch()
         dummy_db.touch()
-        
+
         # Test teardown function directly
         # In a real scenario, this is an autouse fixture. We can just test the logic manually.
         assert dummy_index.exists()
@@ -124,12 +131,12 @@ def test_dummy_embeddings(dummy_embeddings):
     assert "doc_A" in dummy_embeddings
     assert "doc_B" in dummy_embeddings
     assert "doc_C" in dummy_embeddings
-    
+
     emb_a = dummy_embeddings["doc_A"]
     assert isinstance(emb_a, np.ndarray)
     assert emb_a.shape == (2, 3)
     assert np.allclose(emb_a[0], [1.0, 0.0, 0.0])
-    
+
     emb_c = dummy_embeddings["doc_C"]
     assert emb_c.shape == (1, 3)
 
@@ -140,7 +147,7 @@ def test_mock_embed_chunks(mock_embed_chunks):
     """
     chunks = ["Hello world", "This is a test"]
     embeddings = mock_embed_chunks(chunks, batch_size=1)
-    
+
     assert isinstance(embeddings, np.ndarray)
     assert embeddings.shape == (2, 384)
     # Check that values are consistent and normalized
@@ -153,10 +160,11 @@ def test_mock_factory_singleton(mock_factory):
     """
     assert hasattr(mock_factory, "embed_chunks")
     assert callable(mock_factory.embed_chunks)
-    
+
     res = mock_factory.embed_chunks([])
     assert isinstance(res, np.ndarray)
     assert len(res) == 0
+
 
 def test_redis_db_environment_isolation():
     """
@@ -164,16 +172,23 @@ def test_redis_db_environment_isolation():
     """
     assert os.environ.get("REDIS_DB") == "1"
 
+
 def test_tesseract_availability_flag():
     """
     Ensure the tesseract flag is boolean and evaluated at startup.
     """
     import tests.conftest as cfg
+
     assert isinstance(cfg.TESSERACT_AVAILABLE, bool)
+
 
 def test_sentence_transformer_mock():
     """
     Ensure the heavy SentenceTransformer library is mocked during testing.
     """
     import sentence_transformers
-    assert isinstance(sentence_transformers.SentenceTransformer, type(sys.modules["unittest.mock"].MagicMock))
+
+    assert isinstance(
+        sentence_transformers.SentenceTransformer,
+        type(sys.modules["unittest.mock"].MagicMock),
+    )

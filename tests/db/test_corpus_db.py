@@ -13,7 +13,6 @@ from src.db.corpus_db import (
     get_document_chunks_count,
     get_documents_by_class,
     get_unique_class_sections,
-    init_corpus_db,
 )
 
 
@@ -24,6 +23,7 @@ def setup_test_db(mock_db):
     and automatic teardown per test.
     """
     yield
+
 
 def test_add_document_metadata():
     # Add first document

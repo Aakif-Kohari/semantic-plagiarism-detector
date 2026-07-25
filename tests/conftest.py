@@ -71,8 +71,9 @@ def clean_test_env():
         
     index_path = os.path.join(str(_REPO_ROOT), "corpus.index")
     db_path = os.path.join(str(_REPO_ROOT), "corpus.db")
+    users_db_path = os.path.join(str(_REPO_ROOT), "users.db")
     
-    for path in [index_path, db_path]:
+    for path in [index_path, db_path, users_db_path]:
         if os.path.exists(path):
             try:
                 os.remove(path)
@@ -84,7 +85,7 @@ def clean_test_env():
         clear_all_data()
     except ImportError:
         pass
-    for path in [index_path, db_path]:
+    for path in [index_path, db_path, users_db_path]:
         if os.path.exists(path):
             try:
                 os.remove(path)
@@ -146,10 +147,10 @@ def mock_db(tmp_path):
         try:
             from src.db.corpus_db import init_corpus_db
             from src.db.incidents import init_incidents_db
-            from src.db.auth import init_auth_db
+            from src.db.auth import init_db
             init_corpus_db()
             init_incidents_db()
-            init_auth_db()
+            init_db()
         except ImportError:
             pass
             

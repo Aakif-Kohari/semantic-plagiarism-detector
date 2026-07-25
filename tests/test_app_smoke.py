@@ -1,11 +1,10 @@
-
-from tests.conftest import MockDataFactory
 import io
 from unittest.mock import patch
 
-import numpy as np
 from reportlab.pdfgen import canvas
 from streamlit.testing.v1 import AppTest
+
+from tests.conftest import MockDataFactory
 
 
 def generate_pdf(text: str) -> bytes:
@@ -27,9 +26,10 @@ def generate_pdf(text: str) -> bytes:
     return buf.getvalue()
 
 
-
 @patch("src.core.webhook.send_plagiarism_alert")
-@patch("src.core.embedding_model.embed_chunks", side_effect=MockDataFactory.embed_chunks)
+@patch(
+    "src.core.embedding_model.embed_chunks", side_effect=MockDataFactory.embed_chunks
+)
 def test_app_smoke(mock_embed, mock_webhook):
     import os
 

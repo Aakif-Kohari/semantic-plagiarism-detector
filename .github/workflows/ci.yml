@@ -24,12 +24,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install pytest ruff
+          pip install pytest pytest-cov ruff
 
       - name: Run Ruff (Linter & Formatter Check)
         run: |
           ruff check .
 
-      - name: Run Pytest Test Suite
+      - name: Run Automated Test Runner (Coverage Enforcement)
         run: |
-          pytest
+          python scripts/run_tests.py --all --enforce-coverage 85

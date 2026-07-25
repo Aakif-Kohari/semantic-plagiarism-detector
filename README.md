@@ -752,4 +752,6 @@ Existing database files should not be deleted during an application upgrade.
 
 ## 📄 License
 
-MIT License. Free for academic and educational use.
+This project is licensed under the [MIT License](LICENSE).
+
+See the [`LICENSE`](LICENSE) file for the full license text.
