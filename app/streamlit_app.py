@@ -3205,6 +3205,17 @@ if not st.session_state.authenticated:
                     st.error("🚨 Disconnected")
                 st.rerun()
 
+            st.markdown("")
+            if st.button(
+                "🧹 Clear Telemetry Cache",
+                key="clear_telemetry_button",
+                use_container_width=True,
+                help="Flushes all cached telemetry metrics (user count, document count) from Redis.",
+            ):
+                TelemetryService.clear_telemetry_data()
+                st.success("✅ Telemetry cache cleared successfully!")
+                st.rerun()
+
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.divider()
 
