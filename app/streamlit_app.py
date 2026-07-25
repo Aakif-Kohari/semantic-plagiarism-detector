@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import sys
 from pathlib import Path
 from sklearn.metrics.pairwise import cosine_similarity
@@ -119,6 +120,7 @@ class OCRFileBatchError(Exception):
 
 from src.core.export_engine import LMSExportEngine
 from src.core.telemetry import TelemetryService
+from src.db.database_backup import create_corpus_database_snapshot
 from src.db import (
     clear_all_data,
     delete_document,
@@ -3035,6 +3037,36 @@ if not st.session_state.authenticated:
                 set_theme("Light")
                 st.success("✅ Settings reset to defaults!")
                 st.rerun()
+
+            st.markdown("---")
+            st.markdown("### 🗄️ Database Backup")
+            st.caption(
+                "Download a consistent snapshot of the corpus SQLite "
+                "database for debugging or offline backup."
+            )
+
+            try:
+                corpus_database_snapshot = (
+                    create_corpus_database_snapshot()
+                )
+            except (OSError, sqlite3.DatabaseError) as exc:
+                st.warning(
+                    "The corpus database is currently unavailable for "
+                    f"download: {exc}"
+                )
+            else:
+                st.download_button(
+                    label="⬇️ Download raw Database",
+                    data=corpus_database_snapshot,
+                    file_name="corpus.db",
+                    mime="application/vnd.sqlite3",
+                    key="download_raw_corpus_database",
+                    use_container_width=True,
+                    help=(
+                        "Downloads a transactionally consistent SQLite "
+                        "snapshot. Existing server data is not modified."
+                    ),
+                )
 
             st.markdown("")
             if st.button(
