@@ -1,6 +1,10 @@
 import os
 import sys
 from pathlib import Path
+from sklearn.metrics.pairwise import cosine_similarity
+from src.core.text_chunking import chunk_documents
+from src.core.embedding_model import embed_documents
+from src.core.ai_detector import detect_documents_ai_probability
 
 # Fix Streamlit import paths by pointing to project root
 FILE_PATH = Path(__file__).resolve()
@@ -11,6 +15,7 @@ if str(ROOT_DIR) not in sys.path:
 
 
 import base64
+import html
 
 # Standard / Third-party imports
 import time
@@ -28,6 +33,7 @@ import streamlit as st
 from sklearn.metrics.pairwise import cosine_similarity
 
 from src.security.metadata_stripper import strip_exif_metadata
+from src.utils.filename import sanitize_filename, unique_filename
 
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _ROOT not in sys.path:
@@ -77,13 +83,12 @@ from src.core.config import DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD, severity_k
 from src.core.document_parser import (
     DEFAULT_OCR_DPI,
     DEFAULT_OCR_LANGUAGE,
-    SUPPORTED_OCR_LANGUAGES,
     OCRDependencyError,
+    SUPPORTED_OCR_LANGUAGES,
     extract_text,
     prepare_text_for_embedding,
     remove_ignore_phrases,
 )
-from src.core.embedding_model import embed_chunks, embed_documents
 from src.core.faiss_index import (
     build_index,
     build_index_from_matrix,
@@ -260,6 +265,17 @@ if "pdf_passwords" not in st.session_state:
 if "lang" not in st.session_state:
     st.session_state.lang = "en"
 
+# -----------------------------------------------------------------------------
+# Sidebar Settings Configuration
+# -----------------------------------------------------------------------------
+with st.sidebar:
+    st.title("⚙️ " + get_text("settings", lang=st.session_state.lang))
+
+    selected_lang_name = st.selectbox(
+        "🌐 Language / Idioma",
+        options=["English", "Español"],
+        index=0 if st.session_state.lang == "en" else 1,
+    )
 st.markdown(back_to_top_html(), unsafe_allow_html=True)
 inject_css()
 
@@ -587,6 +603,8 @@ def clear_all_dialog():
                 st.session_state.analysis_results = None
             if "analysis_file_signature" in st.session_state:
                 st.session_state.analysis_file_signature = None
+            if "processed_pipeline_signature" in st.session_state:
+                st.session_state.processed_pipeline_signature = None
 
             st.success("✅ All documents, chunks, and incidents have been cleared.")
             st.rerun()
@@ -668,8 +686,13 @@ with st.sidebar:
                         if is_new
                         else ""
                     )
+                    safe_display_name = html.escape(
+                        str(doc["filename"]),
+                        quote=True,
+                    )
                     st.markdown(
-                        f"📄 {doc['filename']}{badge_html}", unsafe_allow_html=True
+                        f"📄 {safe_display_name}{badge_html}",
+                        unsafe_allow_html=True,
                     )
                 with col2:
                     if st.button("🗑️", key=f"del_{doc['filename']}"):
@@ -1390,9 +1413,6 @@ else:
             "Fetch", key="fetch_url_btn", use_container_width=True
         )
 
-    file_bytes_dict = {
-        uploaded_file.name: uploaded_file.getvalue() for uploaded_file in uploaded_files
-    }
     # 2. GOOGLE DRIVE IMPORT SECTION (#146)
 
     from src.utils.google_drive import bulk_download_drive_folder
@@ -1419,7 +1439,7 @@ else:
 
                     _parsed = _urlparse(url_input.strip())
                     st.session_state.url_text = _fetched_text
-                    st.session_state.url_filename = (
+                    st.session_state.url_filename = sanitize_filename(
                         f"webpage_{_parsed.netloc.replace('.', '_')}.txt"
                     )
                     st.session_state._last_fetched_url = url_input.strip()
@@ -1438,14 +1458,14 @@ else:
             f"🔗 URL document loaded: **{st.session_state.url_filename}** ({len(st.session_state.url_text)} characters)"
         )
 
-    file_bytes_dict = (
-        {
-            uploaded_file.name: uploaded_file.getvalue()
-            for uploaded_file in uploaded_files
-        }
-        if uploaded_files
-        else {}
-    )
+    file_bytes_dict = {}
+    if uploaded_files:
+        for uploaded_file in uploaded_files:
+            safe_name = unique_filename(
+                uploaded_file.name,
+                file_bytes_dict,
+            )
+            file_bytes_dict[safe_name] = uploaded_file.getvalue()
 
 
 # -----------------------------------------------------------------------------
@@ -1526,24 +1546,30 @@ if not st.session_state.authenticated:
     if uploaded_files:
         # Re-initialize to handle zip/csv extraction correctly instead of raw bytes
         file_bytes_dict = {}
-        for f in uploaded_files:
+        for uploaded_file in uploaded_files:
+            original_name = uploaded_file.name
+            safe_name = unique_filename(
+                original_name,
+                file_bytes_dict,
+            )
 
-            if f.size > MAX_FILE_SIZE_BYTES:
+            if uploaded_file.size > MAX_FILE_SIZE_BYTES:
                 st.error(
-                    f"⚠️ File **'{f.name}'** exceeds the maximum size limit of 10MB ({f.size / (1024 * 1024):.2f}MB). Please upload a smaller file."
+                    f"⚠️ File **'{safe_name}'** exceeds the maximum size "
+                    f"limit of 10MB "
+                    f"({uploaded_file.size / (1024 * 1024):.2f}MB). "
+                    "Please upload a smaller file."
                 )
-            else:
-                file_bytes_dict[f.name] = f.read()
-                f.seek(0)
+                continue
 
-            if f.name.lower().endswith(".zip"):
+            if original_name.lower().endswith(".zip"):
                 try:
                     from src.utils.zip_processor import process_zip_file
 
-                    zip_files = process_zip_file(f.read())
+                    zip_files = process_zip_file(uploaded_file.read())
                     if not zip_files:
                         st.error(
-                            f"⚠️ ZIP file '{f.name}' contains no supported documents (.pdf, .docx, .txt)."
+                            f"⚠️ ZIP file '{safe_name}' contains no supported documents (.pdf, .docx, .txt)."
                         )
                     else:
                         file_bytes_dict.update(
@@ -1553,14 +1579,14 @@ if not st.session_state.authenticated:
                             }
                         )
                 except ValueError as ve:
-                    st.error(f"⚠️ Failed to process ZIP archive '{f.name}': {str(ve)}")
+                    st.error(f"⚠️ Failed to process ZIP archive '{safe_name}': {str(ve)}")
                 except (OSError, RuntimeError, TypeError):
                     st.error(
-                        f"⚠️ Failed to process ZIP archive '{f.name}': Unknown error occurred."
+                        f"⚠️ Failed to process ZIP archive '{safe_name}': Unknown error occurred."
                     )
-            elif f.name.lower().endswith(".csv"):
-                if f.name in csv_configs:
-                    config = csv_configs[f.name]
+            elif original_name.lower().endswith(".csv"):
+                if original_name in csv_configs:
+                    config = csv_configs[original_name]
                     df = config["df"]
                     text_col = config["text_col"]
                     name_col = config["name_col"]
@@ -1572,18 +1598,22 @@ if not st.session_state.authenticated:
                             student_name = str(row[name_col]).strip()
                         else:
                             student_name = f"Row {idx + 1}"
-                        clean_student_name = student_name.replace("/", "_").replace(
-                            "\\", "_"
-                        )
-                        virtual_filename = (
-                            f"{clean_student_name} ({f.name} - Row {idx + 1}).txt"
+                        virtual_filename = unique_filename(
+                            (
+                                f"{student_name} "
+                                f"({safe_name} - Row {idx + 1}).txt"
+                            ),
+                            file_bytes_dict,
                         )
                         file_bytes_dict[virtual_filename] = strip_exif_metadata(
                             str(text_val).encode("utf-8"), virtual_filename
                         )
             else:
-                file_bytes_dict[f.name] = strip_exif_metadata(f.read(), f.name)
-            f.seek(0)
+                file_bytes_dict[safe_name] = strip_exif_metadata(
+                    uploaded_file.read(),
+                    safe_name,
+                )
+            uploaded_file.seek(0)
 
     # Allow analysis with existing index even without new uploads
     # Read URL result from session state (populated by the Fetch button above)
@@ -1591,13 +1621,19 @@ if not st.session_state.authenticated:
     url_filename = st.session_state.url_filename
 
     if st.session_state.drive_files_dict:
-        for g_name, g_bytes in st.session_state.drive_files_dict.items():
-            if len(g_bytes) > MAX_FILE_SIZE_BYTES:
+        for drive_name, drive_bytes in st.session_state.drive_files_dict.items():
+            safe_drive_name = unique_filename(
+                drive_name,
+                file_bytes_dict,
+            )
+            if len(drive_bytes) > MAX_FILE_SIZE_BYTES:
                 st.error(
-                    f"⚠️ Google Drive file **'{g_name}'** exceeds the maximum size limit of 10MB ({len(g_bytes) / (1024 * 1024):.2f}MB)."
+                    f"⚠️ Google Drive file **'{safe_drive_name}'** exceeds "
+                    f"the maximum size limit of 10MB "
+                    f"({len(drive_bytes) / (1024 * 1024):.2f}MB)."
                 )
             else:
-                file_bytes_dict[g_name] = g_bytes
+                file_bytes_dict[safe_drive_name] = drive_bytes
 
     # 3. PDF Decryption Check
     encrypted_files_detected = []
@@ -1848,7 +1884,134 @@ if not st.session_state.authenticated:
     has_enough_files = (len(file_bytes_dict) + (1 if url_text else 0)) >= 2
 
     # Run Pipeline if files uploaded
+    def compute_pipeline_signature(
+        file_bytes_dict: dict,
+        ocr_language: str,
+        ocr_dpi: int,
+        chunk_size: int,
+        chunk_overlap: int,
+        url_text: str,
+        url_filename: str,
+    ) -> str:
+        import hashlib
+        h = hashlib.sha256()
+        for name in sorted(file_bytes_dict.keys()):
+            data = file_bytes_dict[name]
+            h.update(name.encode("utf-8", errors="ignore"))
+            h.update(data)
+        h.update((ocr_language or "").encode("utf-8", errors="ignore"))
+        h.update(str(ocr_dpi).encode("utf-8"))
+        h.update(str(chunk_size).encode("utf-8"))
+        h.update(str(chunk_overlap).encode("utf-8"))
+        if url_text:
+            h.update(url_text.encode("utf-8", errors="ignore"))
+        if url_filename:
+            h.update(url_filename.encode("utf-8", errors="ignore"))
+        return h.hexdigest()
+
+    is_calculating = False
+    current_sig = None
+
     if (len(file_bytes_dict) > 0 and any(file_bytes_dict.values())) or url_text:
+        current_sig = compute_pipeline_signature(
+            file_bytes_dict=file_bytes_dict,
+            ocr_language=ocr_language,
+            ocr_dpi=ocr_dpi,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            url_text=url_text,
+            url_filename=url_filename,
+        )
+        if st.session_state.get("processed_pipeline_signature") != current_sig:
+            is_calculating = True
+
+    if is_calculating:
+        st.subheader(get_text("analysis_summary", lang=lang_code))
+
+        # 1. Summary Metrics Skeleton
+        col1, col2, col3, col4, col5 = st.columns(5)
+        with col1:
+            st.markdown(f"**{get_text('metric_docs', lang=lang_code)}**")
+            st.markdown('<div class="skeleton skeleton-metric"></div>', unsafe_allow_html=True)
+        with col2:
+            st.markdown(f"**{get_text('metric_pairs', lang=lang_code)}**")
+            st.markdown('<div class="skeleton skeleton-metric"></div>', unsafe_allow_html=True)
+        with col3:
+            st.markdown(f"**{get_text('metric_flagged', lang=lang_code)}**")
+            st.markdown('<div class="skeleton skeleton-metric"></div>', unsafe_allow_html=True)
+        with col4:
+            st.markdown(f"**{get_text('metric_faiss', lang=lang_code)}**")
+            st.markdown('<div class="skeleton skeleton-metric"></div>', unsafe_allow_html=True)
+        with col5:
+            st.markdown("**🎯 Threshold**")
+            st.markdown('<div class="skeleton skeleton-metric"></div>', unsafe_allow_html=True)
+        st.divider()
+
+        # 2. Tabs Skeleton
+        (
+            tab_warnings,
+            tab_faiss,
+            tab_matrix,
+            tab_heatmap,
+            tab_drill,
+            tab_analytics,
+            tab_users,
+        ) = st.tabs(
+            [
+                get_text("tab_warnings", lang=lang_code),
+                get_text("tab_faiss", lang=lang_code),
+                get_text("tab_matrix", lang=lang_code),
+                get_text("tab_heatmap", lang=lang_code),
+                get_text("tab_drill", lang=lang_code),
+                get_text("tab_analytics", lang=lang_code),
+                get_text("tab_users", lang=lang_code),
+            ]
+        )
+
+        with tab_warnings:
+            st.markdown("🏠 Home > Dashboard > **Warnings**")
+            st.subheader(get_text("tab_warnings", lang=lang_code))
+            st.markdown('<div class="skeleton skeleton-title"></div>', unsafe_allow_html=True)
+            st.markdown('<div class="skeleton skeleton-text"></div>', unsafe_allow_html=True)
+            st.markdown('<div class="skeleton skeleton-text"></div>', unsafe_allow_html=True)
+            st.markdown('<div class="skeleton skeleton-text-short"></div>', unsafe_allow_html=True)
+
+        with tab_faiss:
+            st.markdown("🏠 Home > Dashboard > **FAISS Chunk Search**")
+            st.subheader("⚡ FAISS Chunk Search")
+            st.markdown('<div class="skeleton skeleton-text-short" style="height: 40px; width: 100%;"></div>', unsafe_allow_html=True)
+            st.markdown('<div class="skeleton skeleton-text" style="height: 200px;"></div>', unsafe_allow_html=True)
+
+        with tab_matrix:
+            st.markdown("🏠 Home > Dashboard > **Similarity Matrix**")
+            st.subheader("📋 Similarity Matrix")
+            st.markdown('<div class="skeleton skeleton-table"></div>', unsafe_allow_html=True)
+
+        with tab_heatmap:
+            st.markdown("🏠 Home > Dashboard > **Heatmap & Network**")
+            st.subheader(get_text("tab_heatmap", lang=lang_code))
+            st.markdown('<div class="skeleton skeleton-chart">Calculating similarities and generating heatmap...</div>', unsafe_allow_html=True)
+            st.divider()
+            st.subheader("🕸️ Interactive Plagiarism Network")
+            st.markdown('<div class="skeleton skeleton-chart">Calculating similarities and generating network graph...</div>', unsafe_allow_html=True)
+
+        with tab_drill:
+            st.markdown("🏠 Home > Dashboard > **Pair Drill-Down**")
+            st.subheader("🔬 Pair Drill-Down")
+            st.markdown('<div class="skeleton skeleton-text-short"></div>', unsafe_allow_html=True)
+            st.markdown('<div class="skeleton skeleton-chart"></div>', unsafe_allow_html=True)
+
+        with tab_analytics:
+            st.markdown("🏠 Home > Dashboard > **Analytics Dashboard**")
+            st.subheader("📊 Plagiarism Analytics Dashboard")
+            st.markdown('<div class="skeleton skeleton-chart">Generating analytics trends...</div>', unsafe_allow_html=True)
+            st.markdown('<div class="skeleton skeleton-chart">Generating top plagiarism charts...</div>', unsafe_allow_html=True)
+
+        with tab_users:
+            st.markdown("🏠 Home > Dashboard > **User Management**")
+            st.subheader("👤 User Management")
+            st.markdown('<div class="skeleton skeleton-table"></div>', unsafe_allow_html=True)
+
         try:
             with st.spinner("🧠 Processing files and building embeddings…"):
                 start_time = time.time()
@@ -1862,17 +2025,8 @@ if not st.session_state.authenticated:
                     url_filename=url_filename,
                 )
                 elapsed_time = time.time() - start_time
-                (
-                    raw_texts,
-                    chunked_docs,
-                    embeddings,
-                    sim_df,
-                    chunk_sim_df,
-                    faiss_index,
-                    registry,
-                    ai_probabilities,
-                ) = analysis_results
                 st.session_state.analysis_results = analysis_results
+                st.session_state.processed_pipeline_signature = current_sig
                 st.toast(f"Successfully processed in {elapsed_time:.2f} seconds 🚀")
         except OCRFileBatchError as exc:
             from src.errors import OCR_DEPENDENCIES_MISSING
@@ -1881,6 +2035,25 @@ if not st.session_state.authenticated:
             if exc.failed_files:
                 st.warning(f"Failed files: {', '.join(exc.failed_files)}")
             st.stop()
+
+        st.rerun()
+
+    else:
+        if st.session_state.analysis_results is not None:
+            (
+                raw_texts,
+                chunked_docs,
+                embeddings,
+                sim_df,
+                chunk_sim_df,
+                f_idx_new,
+                f_reg_new,
+                ai_probabilities,
+            ) = st.session_state.analysis_results
+            if f_idx_new is not None:
+                faiss_index = f_idx_new
+            if f_reg_new:
+                registry = f_reg_new
 
     active_sim_df = chunk_sim_df if use_chunk_matrix else sim_df
     flags = flag_plagiarism(
