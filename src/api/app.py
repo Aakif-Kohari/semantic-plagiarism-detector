@@ -107,6 +107,33 @@ def health_check():
     }
 
 
+_HEALTHZ_DB_PATHS = (
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "corpus.db")),
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "users.db")),
+)
+
+
+@app.get("/healthz", tags=["Health"])
+def healthz():
+    """Lightweight /healthz endpoint for DevOps monitoring and load balancer probes.
+
+    Returns 200 OK with the combined SQLite database size so operators can
+    monitor storage growth without rendering the Streamlit UI.
+    """
+    total_bytes = 0
+    for path in _HEALTHZ_DB_PATHS:
+        try:
+            total_bytes += os.path.getsize(path) if os.path.exists(path) else 0
+        except OSError:
+            pass
+
+    return {
+        "status": "ok",
+        "db_size_bytes": total_bytes,
+        "db_size_mb": round(total_bytes / (1024 * 1024), 2),
+    }
+
+
 @app.post("/api/v1/scan", tags=["Plagiarism Detection"])
 async def scan_document(
     file: UploadFile = File(

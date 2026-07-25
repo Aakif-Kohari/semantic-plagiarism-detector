@@ -68,6 +68,17 @@ if missing_env_vars:
     )
 
 
+from app.css_constants import (
+    CLASS_CLEAR_ALL_CONTAINER,
+    CLASS_DOC_ROW,
+    CLASS_SKELETON,
+    CLASS_SKELETON_CHART,
+    CLASS_SKELETON_METRIC,
+    CLASS_SKELETON_TABLE,
+    CLASS_SKELETON_TEXT,
+    CLASS_SKELETON_TEXT_SHORT,
+    CLASS_SKELETON_TITLE,
+)
 from app.theme import (
     back_to_top_html,
     empty_state_html,
@@ -212,6 +223,19 @@ except ImportError:
 init_corpus_db()
 init_db()
 
+# Start lightweight REST API server for /healthz endpoint in background
+import threading
+
+import uvicorn
+from src.api.app import app as fastapi_app
+
+
+def _start_api_server():
+    uvicorn.run(fastapi_app, host="0.0.0.0", port=8000, log_level="warning")
+
+
+threading.Thread(target=_start_api_server, daemon=True).start()
+
 # Generate unique session ID for this Streamlit session
 if "session_id" not in st.session_state:
     import uuid
@@ -298,6 +322,62 @@ st.markdown(
 
 # ── SESSION TIMEOUT & ROUTE PROTECTION ────────────────────────────────────────
 TIMEOUT_LIMIT = 15 * 60  # 15 minutes in seconds
+
+import streamlit.components.v1 as components
+if st.session_state.get("authenticated", False):
+    components.html(
+        f"""
+        <script>
+            let timeoutLimit = {TIMEOUT_LIMIT} * 1000;
+            let warningTime = timeoutLimit - (2 * 60 * 1000); // 2 minutes before
+            let timer;
+            let warningShown = false;
+
+            function resetTimer() {{
+                clearTimeout(timer);
+                const warning = window.parent.document.getElementById('session-warning-toast');
+                if (warning) {{
+                    warning.style.display = 'none';
+                }}
+                warningShown = false;
+                timer = setTimeout(showWarning, warningTime);
+            }}
+
+            function showWarning() {{
+                if (warningShown) return;
+                warningShown = true;
+                let doc = window.parent.document;
+                let warning = doc.getElementById('session-warning-toast');
+                if (!warning) {{
+                    warning = doc.createElement('div');
+                    warning.id = 'session-warning-toast';
+                    warning.style.position = 'fixed';
+                    warning.style.top = '60px'; // below header
+                    warning.style.right = '20px';
+                    warning.style.backgroundColor = '#ffcc00';
+                    warning.style.color = 'black';
+                    warning.style.padding = '15px';
+                    warning.style.borderRadius = '5px';
+                    warning.style.zIndex = '9999';
+                    warning.style.boxShadow = '0 4px 6px rgba(0,0,0,0.1)';
+                    warning.innerHTML = '<strong>⚠️ Session Timeout Warning</strong><br>Your session will expire in 2 minutes due to inactivity. Please save your work or interact with the app to stay logged in.';
+                    doc.body.appendChild(warning);
+                }}
+                warning.style.display = 'block';
+            }}
+
+            let parentDoc = window.parent.document;
+            parentDoc.addEventListener('mousemove', resetTimer);
+            parentDoc.addEventListener('keydown', resetTimer);
+            parentDoc.addEventListener('scroll', resetTimer);
+            parentDoc.addEventListener('click', resetTimer);
+
+            resetTimer();
+        </script>
+        """,
+        height=0,
+    )
+
 
 # 1. Handle Automatic Session Expiration (Inactivity Check)
 cached_last_interaction = get_session_state(SESSION_ID, "last_interaction")
@@ -400,7 +480,8 @@ if not st.session_state.get("authenticated", False):
                         st.session_state.threshold = prefs.get(
                             "threshold", DEFAULT_THRESHOLDS.plagiarism
                         )
-                        st.session_state.theme = prefs.get("theme", "Light")
+                        from src.db.auth import get_user_theme
+                        st.session_state.theme = get_user_theme(username)
                         set_theme(st.session_state.theme)
 
                         # Clear pending state
@@ -433,7 +514,8 @@ if not st.session_state.get("authenticated", False):
             st.session_state.threshold = prefs.get(
                 "threshold", DEFAULT_THRESHOLDS.plagiarism
             )
-            st.session_state.theme = prefs.get("theme", "Light")
+            from src.db.auth import get_user_theme
+            st.session_state.theme = get_user_theme(username)
             set_theme(st.session_state.theme)
 
             if not username or not password:
@@ -645,9 +727,12 @@ def save_preferences_callback():
             "threshold": st.session_state.get(
                 "threshold_slider", DEFAULT_THRESHOLDS.plagiarism
             ),
-            "theme": st.session_state.get("theme_selector", "Light"),
         }
-    update_user_preferences(st.session_state.username, prefs)
+        update_user_preferences(st.session_state.username, prefs)
+
+        from src.db.auth import set_user_theme
+        theme_val = st.session_state.get("theme_selector", "Light")
+        set_user_theme(st.session_state.username, theme_val)
 
 
 with st.sidebar:
@@ -680,9 +765,16 @@ with st.sidebar:
         st.markdown("### 📁 Document Management")
         existing_docs = get_all_documents()
         session_uploaded_docs = st.session_state.get("session_uploaded_docs", set())
+
+        doc_filter = st.text_input("Filter documents by filename", key="doc_mgmt_filter")
+
         if existing_docs:
-            st.write(f"**{len(existing_docs)}** documents in database")
-            for doc in existing_docs:
+            filtered_docs = [
+                d for d in existing_docs
+                if not doc_filter or doc_filter.lower() in str(d["filename"]).lower()
+            ]
+            st.write(f"**{len(filtered_docs)}** documents matching")
+            for doc in filtered_docs:
                 st.markdown('<div class="doc-row">', unsafe_allow_html=True)
                 col1, col2 = st.columns([3, 1])
                 with col1:
@@ -802,7 +894,7 @@ with st.sidebar:
                 except (ValueError, RuntimeError, TypeError, OSError) as _mock_err:
                     st.error(f"❌ Mock data generation failed: {_mock_err}")
 
-        st.markdown('<div class="clear-all-container">', unsafe_allow_html=True)
+        st.markdown(f'<div class="{CLASS_CLEAR_ALL_CONTAINER}">', unsafe_allow_html=True)
         if st.button(
             "🗑️ Clear All Documents",
             key="clear_all_documents_button",
@@ -1938,19 +2030,19 @@ if not st.session_state.authenticated:
         col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
             st.markdown(f"**{get_text('metric_docs', lang=lang_code)}**")
-            st.markdown('<div class="skeleton skeleton-metric"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_METRIC}"></div>', unsafe_allow_html=True)
         with col2:
             st.markdown(f"**{get_text('metric_pairs', lang=lang_code)}**")
-            st.markdown('<div class="skeleton skeleton-metric"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_METRIC}"></div>', unsafe_allow_html=True)
         with col3:
             st.markdown(f"**{get_text('metric_flagged', lang=lang_code)}**")
-            st.markdown('<div class="skeleton skeleton-metric"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_METRIC}"></div>', unsafe_allow_html=True)
         with col4:
             st.markdown(f"**{get_text('metric_faiss', lang=lang_code)}**")
-            st.markdown('<div class="skeleton skeleton-metric"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_METRIC}"></div>', unsafe_allow_html=True)
         with col5:
             st.markdown("**🎯 Threshold**")
-            st.markdown('<div class="skeleton skeleton-metric"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_METRIC}"></div>', unsafe_allow_html=True)
         st.divider()
 
         # 2. Tabs Skeleton
@@ -1977,46 +2069,46 @@ if not st.session_state.authenticated:
         with tab_warnings:
             st.markdown("🏠 Home > Dashboard > **Warnings**")
             st.subheader(get_text("tab_warnings", lang=lang_code))
-            st.markdown('<div class="skeleton skeleton-title"></div>', unsafe_allow_html=True)
-            st.markdown('<div class="skeleton skeleton-text"></div>', unsafe_allow_html=True)
-            st.markdown('<div class="skeleton skeleton-text"></div>', unsafe_allow_html=True)
-            st.markdown('<div class="skeleton skeleton-text-short"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TITLE}"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT}"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT}"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT_SHORT}"></div>', unsafe_allow_html=True)
 
         with tab_faiss:
             st.markdown("🏠 Home > Dashboard > **FAISS Chunk Search**")
             st.subheader("⚡ FAISS Chunk Search")
-            st.markdown('<div class="skeleton skeleton-text-short" style="height: 40px; width: 100%;"></div>', unsafe_allow_html=True)
-            st.markdown('<div class="skeleton skeleton-text" style="height: 200px;"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT_SHORT}" style="height: 40px; width: 100%;"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT}" style="height: 200px;"></div>', unsafe_allow_html=True)
 
         with tab_matrix:
             st.markdown("🏠 Home > Dashboard > **Similarity Matrix**")
             st.subheader("📋 Similarity Matrix")
-            st.markdown('<div class="skeleton skeleton-table"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TABLE}"></div>', unsafe_allow_html=True)
 
         with tab_heatmap:
             st.markdown("🏠 Home > Dashboard > **Heatmap & Network**")
             st.subheader(get_text("tab_heatmap", lang=lang_code))
-            st.markdown('<div class="skeleton skeleton-chart">Calculating similarities and generating heatmap...</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_CHART}">Calculating similarities and generating heatmap...</div>', unsafe_allow_html=True)
             st.divider()
             st.subheader("🕸️ Interactive Plagiarism Network")
-            st.markdown('<div class="skeleton skeleton-chart">Calculating similarities and generating network graph...</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_CHART}">Calculating similarities and generating network graph...</div>', unsafe_allow_html=True)
 
         with tab_drill:
             st.markdown("🏠 Home > Dashboard > **Pair Drill-Down**")
             st.subheader("🔬 Pair Drill-Down")
-            st.markdown('<div class="skeleton skeleton-text-short"></div>', unsafe_allow_html=True)
-            st.markdown('<div class="skeleton skeleton-chart"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT_SHORT}"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_CHART}"></div>', unsafe_allow_html=True)
 
         with tab_analytics:
             st.markdown("🏠 Home > Dashboard > **Analytics Dashboard**")
             st.subheader("📊 Plagiarism Analytics Dashboard")
-            st.markdown('<div class="skeleton skeleton-chart">Generating analytics trends...</div>', unsafe_allow_html=True)
-            st.markdown('<div class="skeleton skeleton-chart">Generating top plagiarism charts...</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_CHART}">Generating analytics trends...</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_CHART}">Generating top plagiarism charts...</div>', unsafe_allow_html=True)
 
         with tab_users:
             st.markdown("🏠 Home > Dashboard > **User Management**")
             st.subheader("👤 User Management")
-            st.markdown('<div class="skeleton skeleton-table"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TABLE}"></div>', unsafe_allow_html=True)
 
         try:
             with st.spinner("🧠 Processing files and building embeddings…"):
@@ -2615,11 +2707,12 @@ if not st.session_state.authenticated:
                         expanded=st.session_state.expand_all_drill or (rank == 1),
                     ):
                         highlighted_ca, highlighted_cb = highlight_overlap(ca, cb)
+                        from src.utils.text_stats import format_text_stats
                         st.markdown(
-                            f"**{doc_a}:** {highlighted_ca}", unsafe_allow_html=True
+                            f"**{doc_a} ({format_text_stats(ca)}):** {highlighted_ca}", unsafe_allow_html=True
                         )
                         st.markdown(
-                            f"**{doc_b}:** {highlighted_cb}", unsafe_allow_html=True
+                            f"**{doc_b} ({format_text_stats(cb)}):** {highlighted_cb}", unsafe_allow_html=True
                         )
 
             with drill_tab_viewer:
@@ -2668,6 +2761,15 @@ if not st.session_state.authenticated:
         else:
             if flags:
                 sync_flagged_incidents(flags, threshold=threshold)
+                from src.utils.bulk_export import generate_bulk_reports_zip
+                zip_bytes = generate_bulk_reports_zip(flags)
+                st.download_button(
+                    label="⬇️ Download All Flagged Pairs (ZIP)",
+                    data=zip_bytes,
+                    file_name="flagged_pairs_reports.zip",
+                    mime="application/zip",
+                    use_container_width=True,
+                )
 
             st.subheader("📈 High Severity Plagiarism Trends (Last 30 Days)")
             trend_data = get_high_severity_trends(days=30)
