@@ -23,6 +23,7 @@ CSV_COLUMNS = [
     "Document A",
     "Document B",
     "Similarity Score",
+    "Threshold at Time of Flag",
     "Severity Rank",
     "Review Status",
     "Date Flagged",
@@ -106,7 +107,8 @@ def _fetch_all_incidents(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     rows = conn.execute(
         """
         SELECT incident_id, document_a, document_b, similarity_score,
-               severity_rank, review_status, date_flagged, last_seen
+               severity_rank, review_status, date_flagged, last_seen,
+               threshold_at_time_of_flag
         FROM plagiarism_incidents
         ORDER BY date_flagged DESC, incident_id ASC
         """
@@ -120,6 +122,7 @@ def sync_flagged_incidents(
     db_path: str | Path = DEFAULT_DB_PATH,
     *,
     now: str | None = None,
+    threshold: float | None = None,
 ) -> list[dict[str, Any]]:
     init_incident_db(db_path)
     timestamp = now or _utc_now_iso()
@@ -144,6 +147,7 @@ def sync_flagged_incidents(
                     second,
                     _normalise_score(flag.get("similarity", 0.0)),
                     _severity_rank(flag),
+                    _normalise_score(flag.get("threshold_at_time_of_flag", threshold or 0.0)),
                     timestamp,
                     timestamp,
                 ))
@@ -154,9 +158,10 @@ def sync_flagged_incidents(
                     INSERT INTO plagiarism_incidents (
                         incident_id, document_a, document_b,
                         similarity_score, severity_rank,
-                        review_status, date_flagged, last_seen
+                        review_status, date_flagged, last_seen,
+                        threshold_at_time_of_flag
                     )
-                    VALUES (?, ?, ?, ?, ?, 'Pending', ?, ?)
+                    VALUES (?, ?, ?, ?, ?, 'Pending', ?, ?, ?)
                     ON CONFLICT(incident_id) DO UPDATE SET
                         similarity_score = excluded.similarity_score,
                         severity_rank = excluded.severity_rank,
@@ -170,7 +175,8 @@ def sync_flagged_incidents(
                 """
                 SELECT incident_id, document_a, document_b,
                        similarity_score, severity_rank,
-                       review_status, date_flagged, last_seen
+                       review_status, date_flagged, last_seen,
+                       threshold_at_time_of_flag
                 FROM plagiarism_incidents
                 ORDER BY date_flagged DESC, incident_id ASC
                 """
@@ -200,7 +206,9 @@ def get_all_incidents_above_threshold_for_export(
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """
-            SELECT document_a as doc_a, document_b as doc_b, similarity_score as similarity
+            SELECT document_a as doc_a, document_b as doc_b,
+                   similarity_score as similarity,
+                   threshold_at_time_of_flag
             FROM plagiarism_incidents
             WHERE similarity_score >= ?
             ORDER BY similarity_score DESC
@@ -250,6 +258,7 @@ def incidents_to_csv(incidents: Iterable[Mapping[str, Any]]) -> bytes:
                 "Document A": incident.get("document_a", ""),
                 "Document B": incident.get("document_b", ""),
                 "Similarity Score": f"{_normalise_score(incident.get('similarity_score', 0.0)):.4f}",
+                "Threshold at Time of Flag": f"{_normalise_score(incident.get('threshold_at_time_of_flag', 0.0)):.4f}",
                 "Severity Rank": incident.get("severity_rank", ""),
                 "Review Status": incident.get("review_status", "Pending"),
                 "Date Flagged": incident.get("date_flagged", ""),

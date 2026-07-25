@@ -2667,7 +2667,7 @@ if not st.session_state.authenticated:
             )
         else:
             if flags:
-                sync_flagged_incidents(flags)
+                sync_flagged_incidents(flags, threshold=threshold)
 
             st.subheader("📈 High Severity Plagiarism Trends (Last 30 Days)")
             trend_data = get_high_severity_trends(days=30)

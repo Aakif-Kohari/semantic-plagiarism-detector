@@ -207,17 +207,9 @@ def chunk_similarity_matrix(
 def flag_plagiarism(
     similarity_df: pd.DataFrame,
     threshold: float = PLAGIARISM_THRESHOLD,
-
-) -> List[Dict]:
-
-    """
-    Identify document pairs whose similarity exceeds the threshold.
-
-
     chunked_docs: dict = None,
     embeddings: dict = None,
-):
-
+) -> List[Dict]:
     """Identify document pairs whose similarity reaches the threshold.
 
     Flagging uses the configurable plagiarism threshold. Severity uses the
@@ -227,12 +219,6 @@ def flag_plagiarism(
     flags = []
     doc_names = similarity_df.columns.tolist()
 
-
-    for i in range(n):
-        for j in range(i + 1, n):
-            score = similarity_df.iloc[i, j]
-            if score >= threshold:
-                severity = "🔴 High" if score >= 0.90 else "🟡 Medium"
 
     for i in range(len(doc_names)):
         for j in range(i + 1, len(doc_names)):
@@ -260,6 +246,7 @@ def flag_plagiarism(
                         "doc_a": doc_a,
                         "doc_b": doc_b,
                         "similarity": round(score, 4),
+                        "threshold_at_time_of_flag": float(threshold),
                         "matched_length": matched_length,
                         "severity": severity_from_score(
                             score,
