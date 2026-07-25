@@ -26,6 +26,8 @@ def _record_value(record: Any, name: str, default: Any = None) -> Any:
 
 def faiss_results_dataframe(
     results: Iterable[tuple[Any, float]],
+    min_similarity: float | None = None,
+    max_similarity: float | None = None,
 ) -> pd.DataFrame:
     """Convert FAISS records into a sortable display DataFrame."""
     rows: list[dict[str, Any]] = []
@@ -40,12 +42,17 @@ def faiss_results_dataframe(
     ]
 
     for record, raw_score in results:
+        score = float(raw_score)
+        if min_similarity is not None and score < min_similarity:
+            continue
+        if max_similarity is not None and score > max_similarity:
+            continue
+
         document = str(
             _record_value(record, "doc_name", "Unknown document")
         )
         chunk_index = int(_record_value(record, "chunk_index", 0))
         chunk_text = str(_record_value(record, "chunk_text", ""))
-        score = float(raw_score)
 
         from src.utils.text_stats import format_text_stats
         
