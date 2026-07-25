@@ -297,6 +297,8 @@ def plot_similarity_network(
             ),
             showlegend=False,
             hovermode="closest",
+            autosize=True,
+            width=None,
             margin=dict(
                 b=40,
                 l=40,
