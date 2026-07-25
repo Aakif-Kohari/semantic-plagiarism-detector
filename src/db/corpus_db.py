@@ -9,6 +9,8 @@ import os
 from pathlib import Path
 import sqlite3
 from datetime import datetime
+from contextlib import contextmanager
+import threading
 
 import numpy as np
 
@@ -20,16 +22,54 @@ _DB_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "corpus.db")
 )
 
+_connection_pool = threading.local()
+
 
 
 def get_corpus_db_path() -> Path:
     """Return the configured corpus SQLite database path."""
     return Path(_DB_PATH)
 
-def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+def _pool() -> dict[str, sqlite3.Connection]:
+    """Return the connection pool belonging to the current thread."""
+    pool = getattr(_connection_pool, "connections", None)
+    if pool is None:
+        pool = {}
+        _connection_pool.connections = pool
+    return pool
+
+
+@contextmanager
+def _connect():
+    """Borrow a reusable connection and manage the operation transaction.
+
+    Connections are kept per thread and database path so consecutive database
+    operations reuse the same SQLite handle.  The context manager commits on
+    success and rolls back on failure; :func:`close_connections` closes the
+    handles when the process or a test is finished with the database.
+    """
+    path = os.path.abspath(_DB_PATH)
+    pool = _pool()
+    conn = pool.get(path)
+    if conn is None:
+        conn = sqlite3.connect(path, check_same_thread=False)
+        conn.execute("PRAGMA foreign_keys = ON")
+        pool[path] = conn
+
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def close_connections() -> None:
+    """Close all pooled corpus connections for the current thread."""
+    pool = getattr(_connection_pool, "connections", {})
+    for conn in pool.values():
+        conn.close()
+    pool.clear()
 
 
 def init_corpus_db() -> None:
