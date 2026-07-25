@@ -292,6 +292,43 @@ def get_embedding_count() -> int:
     return int(row[0]) if row else 0
 
 
+def add_documents_bulk(documents: list) -> int:
+    """
+    Insert a batch of new documents in a single transaction using executemany.
+    documents: list of dicts containing metadata (filename, file_hash, class_section, etc).
+    Returns the number of documents successfully inserted.
+    """
+    formatted_docs = []
+    now = datetime.now().isoformat()
+    for doc in documents:
+        formatted_docs.append((
+            doc.get("filename"),
+            doc.get("file_hash"),
+            now,
+            doc.get("class_section"),
+            doc.get("student_name"),
+            doc.get("assignment_title"),
+            doc.get("pdf_author"),
+            doc.get("pdf_creation_date"),
+            doc.get("pdf_title"),
+            doc.get("tags")
+        ))
+
+    success_count = 0
+    with _connect() as conn:
+        try:
+            conn.executemany(
+                "INSERT OR IGNORE INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                formatted_docs,
+            )
+            success_count = conn.execute("SELECT changes()").fetchone()[0]
+            conn.commit()
+        except sqlite3.Error as e:
+            conn.rollback()
+            raise e
+    return success_count
+
+
 def get_all_tags() -> list[str]:
     """Fetches all unique document tags from the database."""
     try:
