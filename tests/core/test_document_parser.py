@@ -357,3 +357,22 @@ class TestCleanText:
         text = "   \n\t\n  "
         result = clean_text(text)
         assert result == ""
+
+
+def test_extract_empty_pdf_gracefully(caplog):
+    """Assert that passing an empty/blank PDF returns an empty string gracefully without crashing."""
+    from reportlab.pdfgen import canvas
+    import logging
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf)
+    c.showPage()
+    c.save()
+    empty_pdf_bytes = buf.getvalue()
+
+    with patch("src.core.document_parser._ocr_pdf_page", return_value=""):
+        with caplog.at_level(logging.WARNING):
+            result = extract_text_from_pdf(empty_pdf_bytes)
+
+    assert isinstance(result, str)
+    assert result.strip() == ""

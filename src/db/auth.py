@@ -1,6 +1,10 @@
 import json
 
 """
+
+src/db/auth.py
+--------------
+User authentication, registration, and credential management routines.
 auth.py
 -------
 SQLite-backed authentication with bcrypt password hashing.
@@ -23,6 +27,7 @@ import sqlite3
 
 import bcrypt
 
+# Database setup
 from src.db.migrations import migrate_auth_database
 
 _DB_PATH = os.path.abspath(
@@ -94,9 +99,17 @@ def init_db() -> None:
     except sqlite3.Error as e:
         raise sqlite3.Error(f"Failed to initialize authentication database: {e}") from e
 
+    # Restrict database file permissions to owner read/write only
+    # Prevents other local users on the server from reading user credentials
+    try:
+        os.chmod(_DB_PATH, 0o600)
+    except OSError:
+        pass  # Best-effort; some platforms (e.g., Windows) may not support chmod
+
 
 def verify_user(username: str, password: str) -> bool:
-    """Return True if username exists and password matches the stored hash."""
+    """Return True if username exists, password matches the stored hash, and account is active."""
+    init_db()  # Ensure DB is initialized
     try:
         username = _validate_username(username)
         password = _validate_password(password)
@@ -105,19 +118,26 @@ def verify_user(username: str, password: str) -> bool:
 
     with _connect() as conn:
         row = conn.execute(
-            "SELECT password FROM users WHERE username = ?",
+            "SELECT password, is_active FROM users WHERE username = ?",
             (username,),
         ).fetchone()
 
     if not row:
         return False
 
-    stored_hash = row[0]
+    stored_hash, is_active = row
+    if not is_active:
+        return False
+
     try:
         return bcrypt.checkpw(password.encode(), stored_hash.encode())
     except ValueError:
         return False
 
+        try:
+            return bcrypt.checkpw(password.encode(), stored_hash.encode())
+        except ValueError:
+            return False
 
 # Alias for compatibility
 authenticate_user = verify_user
@@ -167,9 +187,17 @@ def get_all_users() -> list:
     try:
         with _connect() as conn:
             rows = conn.execute(
-                "SELECT id, username, role FROM users ORDER BY id"
+                "SELECT id, username, role, is_active FROM users ORDER BY id"
             ).fetchall()
-            return [{"id": r[0], "username": r[1], "role": r[2]} for r in rows]
+            return [
+                {
+                    "id": r[0],
+                    "username": r[1],
+                    "role": r[2],
+                    "is_active": bool(r[3]),
+                }
+                for r in rows
+            ]
     except sqlite3.Error as e:
         raise sqlite3.Error(f"Failed to retrieve users: {e}") from e
 
@@ -359,3 +387,60 @@ def get_or_create_sso_user(email: str, default_role: str = "teacher") -> str:
         )
         conn.commit()
         return role
+
+
+def get_user_active_status(username: str) -> bool:
+    """Return whether a user account is active."""
+    try:
+        username = _validate_username(username)
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT is_active FROM users WHERE username = ?",
+                (username,),
+            ).fetchone()
+            return bool(row[0]) if row else False
+    except sqlite3.Error as e:
+        raise sqlite3.Error(f"Failed to retrieve user active status: {e}") from e
+
+
+def set_user_active_status(username: str, is_active: bool) -> None:
+    """Set whether a user account is active (suspended or active)."""
+    try:
+        username = _validate_username(username)
+        with _connect() as conn:
+            # We don't allow suspending the 'admin' account to prevent lockouts
+            if username == "admin" and not is_active:
+                raise ValueError("The admin account cannot be suspended.")
+
+            conn.execute(
+                "UPDATE users SET is_active = ? WHERE username = ?",
+                (1 if is_active else 0, username),
+            )
+            conn.commit()
+    except sqlite3.Error as e:
+        raise sqlite3.Error(f"Failed to update user active status: {e}") from e
+
+
+def is_user_active(username: str) -> bool:
+    """Return True if username exists and is_active is 1, or if username does not exist yet."""
+    try:
+        username = _validate_username(username)
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT is_active FROM users WHERE username = ?",
+                (username,),
+            ).fetchone()
+            return bool(row[0]) if row else True
+    except sqlite3.Error:
+        return True
+
+
+def get_user_count() -> int:
+    """
+    Returns the total number of registered users in the system.
+    This is highly optimized for fast telemetry lookups.
+    """
+    with _connect() as conn:
+        cursor = conn.execute("SELECT COUNT(*) FROM users")
+        row = cursor.fetchone()
+        return row[0] if row else 0

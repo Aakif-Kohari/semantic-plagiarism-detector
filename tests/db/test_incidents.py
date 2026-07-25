@@ -8,7 +8,6 @@ from src.db.incidents import (
     export_current_flags_csv,
     get_all_incidents,
     incidents_to_csv,
-    init_incident_db,
     sync_flagged_incidents,
     update_review_status,
 )

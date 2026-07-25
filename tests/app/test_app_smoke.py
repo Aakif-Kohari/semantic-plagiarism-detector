@@ -2,12 +2,11 @@ import io
 import os
 from unittest.mock import patch
 
-import numpy as np
 import pytest
-
-from tests.conftest import MockDataFactory
 from reportlab.pdfgen import canvas
 from streamlit.testing.v1 import AppTest
+
+from tests.conftest import MockDataFactory
 
 # Paths to stale artifacts that can pollute test runs
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -44,7 +43,6 @@ def generate_pdf(text: str) -> bytes:
     return buf.getvalue()
 
 
-
 @pytest.fixture(autouse=True)
 def clean_smoke_test_env():
     import os
@@ -74,7 +72,9 @@ def clean_smoke_test_env():
     "src.core.embedding_model.get_embedding_model_info",
     return_value=("all-MiniLM-L6-v2", 384),
 )
-@patch("src.core.embedding_model.embed_chunks", side_effect=MockDataFactory.embed_chunks)
+@patch(
+    "src.core.embedding_model.embed_chunks", side_effect=MockDataFactory.embed_chunks
+)
 def test_app_smoke(mock_embed, mock_model_info, mock_webhook):
     # Clean up stale artifacts from prior test runs
     _cleanup_stale_artifacts()

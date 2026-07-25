@@ -187,6 +187,25 @@ def get_all_incidents(
         return _fetch_all_incidents(conn)
 
 
+def get_all_incidents_above_threshold_for_export(
+    threshold: float,
+    db_path: str | Path = DEFAULT_DB_PATH,
+) -> list[dict[str, Any]]:
+    init_incident_db(db_path)
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT document_a as doc_a, document_b as doc_b, similarity_score as similarity
+            FROM plagiarism_incidents
+            WHERE similarity_score >= ?
+            ORDER BY similarity_score DESC
+            """,
+            (threshold,)
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
 def update_review_status(
     incident_id: str,
     review_status: str,

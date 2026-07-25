@@ -4,6 +4,8 @@ src/core/ai_detector.py
 AI content detection module using transformer models.
 """
 
+# pylint: disable=streamlit-global-mutation
+
 import logging
 import os
 from typing import Any, Dict, List

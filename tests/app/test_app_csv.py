@@ -2,11 +2,9 @@ import os
 import sys
 from unittest.mock import MagicMock, patch
 
-import numpy as np
-import pytest
+from streamlit.testing.v1 import AppTest
 
 from tests.conftest import MockDataFactory
-from streamlit.testing.v1 import AppTest
 
 # Mock googleapiclient modules to avoid ModuleNotFoundError in environments without them installed
 sys.modules["googleapiclient"] = MagicMock()
@@ -34,16 +32,15 @@ def _cleanup_stale_artifacts():
             pass
 
 
-
-
-
 @patch("src.core.ai_detector.detect_documents_ai_probability", return_value={})
 @patch("src.core.webhook.send_plagiarism_alert")
 @patch(
     "src.core.embedding_model.get_embedding_model_info",
     return_value=("all-MiniLM-L6-v2", 384),
 )
-@patch("src.core.embedding_model.embed_chunks", side_effect=MockDataFactory.embed_chunks)
+@patch(
+    "src.core.embedding_model.embed_chunks", side_effect=MockDataFactory.embed_chunks
+)
 def test_app_csv_upload_integration(mock_embed, mock_model_info, mock_webhook, mock_ai):
     _cleanup_stale_artifacts()
 

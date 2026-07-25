@@ -44,25 +44,41 @@ COLORS = THEMES["Light"]
 
 def initialize_theme() -> None:
     """Initialize the active theme for the current session."""
-    if "theme" not in st.session_state:
-        st.session_state.theme = "Light"
+    try:
+        if "theme" not in st.session_state:
+            st.session_state.theme = "Light"
+        if "theme_colors" not in st.session_state:
+            st.session_state.theme_colors = THEMES[st.session_state.theme]
+    except Exception:
+        pass
 
 
 def get_theme_name() -> str:
     """Return the active theme name."""
     initialize_theme()
-    return st.session_state.theme
+    try:
+        return st.session_state.theme
+    except Exception:
+        return "Light"
 
 
 def set_theme(theme_name: str) -> None:
     """Set the active theme."""
     if theme_name in THEMES:
-        st.session_state.theme = theme_name
+        try:
+            st.session_state.theme = theme_name
+            st.session_state.theme_colors = THEMES[theme_name]
+        except Exception:
+            pass
 
 
 def get_colors() -> dict:
     """Return the colors for the active theme."""
-    return THEMES[get_theme_name()]
+    initialize_theme()
+    try:
+        return st.session_state.theme_colors
+    except Exception:
+        return THEMES["Light"]
 
 
 def inject_css() -> None:
@@ -369,6 +385,15 @@ def inject_css() -> None:
             border-left: 4px solid var(--success) !important;
         }}
 
+        /* ── Warning list container animation (#369) ─────────────────
+           The threshold slider re-filters the warning list on every
+           change. This transition smooths out the resulting layout /
+           opacity shifts on the container instead of snapping instantly. */
+
+        .st-key-warning_list_container {{
+            transition: all 0.3s ease;
+        }}
+
         /* ── Similarity score pill ──────────────────────────────────── */
 
         .sim-pill {{
@@ -651,6 +676,73 @@ def inject_css() -> None:
                 max-width: 85vw !important;
             }}
         }}
+
+        /* ── Skeletons for Loading State ────────────────────────────── */
+
+        @keyframes skeletonPulse {{
+            0%, 100% {{
+                opacity: 0.6;
+            }}
+            50% {{
+                opacity: 0.3;
+            }}
+        }}
+
+        .skeleton {{
+            background-color: var(--neutral-soft);
+            border-radius: 6px;
+            animation: skeletonPulse 1.5s infinite ease-in-out;
+            border: 1px solid var(--border);
+        }}
+
+        .skeleton-metric {{
+            height: 70px;
+            width: 100%;
+            margin-bottom: 10px;
+        }}
+
+        .skeleton-title {{
+            height: 24px;
+            width: 40%;
+            margin-bottom: 15px;
+        }}
+
+        .skeleton-text {{
+            height: 16px;
+            width: 100%;
+            margin-bottom: 8px;
+        }}
+
+        .skeleton-text-short {{
+            height: 16px;
+            width: 60%;
+            margin-bottom: 8px;
+        }}
+
+        .skeleton-chart {{
+            height: 350px;
+            width: 100%;
+            margin-top: 15px;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--muted);
+            font-size: 0.9rem;
+        }}
+
+        .skeleton-table {{
+            height: 200px;
+            width: 100%;
+            margin-top: 15px;
+            margin-bottom: 15px;
+        }}
+
+        @media (prefers-reduced-motion: reduce) {{
+            .skeleton {{
+                animation: none !important;
+            }}
+        }}
     </style>
     """
 
@@ -759,16 +851,14 @@ def sidebar_user_badge_html(username: str, role: str) -> str:
     )
 
 
-def pipeline_progress_html(steps: list[str], active_index: int = -1) -> str:
-    """Return a horizontal pipeline progress indicator.
-
-    Args:
-        steps: List of step labels (e.g. ["Extract", "Chunk", "Embed", ...]).
-        active_index: 0-based index of the currently running step.
-            Steps before *active_index* are marked done; steps after are
-            pending.  Pass -1 (default) to mark all steps as pending.
-    """
+def pipeline_progress_html(
+    steps: list[str],
+    active_index: int = -1,
+    estimated_seconds: int | None = None,
+) -> str:
+    """Return a horizontal pipeline progress indicator with optional ETA."""
     parts = []
+
     for i, step in enumerate(steps):
         if active_index < 0:
             cls = "pipeline-step"
@@ -779,12 +869,26 @@ def pipeline_progress_html(steps: list[str], active_index: int = -1) -> str:
         else:
             cls = "pipeline-step"
 
-        prefix = "✓ " if (active_index >= 0 and i < active_index) else ""
+        prefix = "✓ " if active_index >= 0 and i < active_index else ""
         parts.append(f'<span class="{cls}">{prefix}{step}</span>')
+
         if i < len(steps) - 1:
             parts.append('<span class="pipeline-arrow">→</span>')
 
-    return f'<div class="pipeline-steps">{"".join(parts)}</div>'
+    progress = f'<div class="pipeline-steps">{"".join(parts)}</div>'
+
+    if estimated_seconds is None:
+        return progress
+
+    from src.utils.processing_time import format_processing_duration
+
+    duration = format_processing_duration(estimated_seconds)
+    eta = (
+        '<div class="pipeline-eta">'
+        f"Estimated processing time: about {duration}"
+        "</div>"
+    )
+    return f"{progress}{eta}"
 
 
 def back_to_top_html() -> str:
