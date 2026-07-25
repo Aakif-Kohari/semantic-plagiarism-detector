@@ -566,10 +566,46 @@ def render_warning_controls(
     # with a transition so re-filtered/re-sorted results animate smoothly
     # instead of snapping instantly.
     with st.container(key="warning_list_container"):
+        if "selected_warnings" not in st.session_state:
+            st.session_state.selected_warnings = set()
+
+        current_page_ids = {f"{flag['doc_a']}_{flag['doc_b']}" for flag in current_page.items}
+        all_selected = bool(current_page_ids) and current_page_ids.issubset(st.session_state.selected_warnings)
+
+        def toggle_select_all():
+            if all_selected:
+                st.session_state.selected_warnings.difference_update(current_page_ids)
+            else:
+                st.session_state.selected_warnings.update(current_page_ids)
+
+        if current_page_ids:
+            st.checkbox(
+                "Select All on Current Page",
+                value=all_selected,
+                on_change=toggle_select_all,
+                key=f"select_all_page_{current_page.page}",
+            )
+
         for flag in current_page.items:
             tier = tier_from_severity_label(flag["severity"])
+            flag_id = f"{flag['doc_a']}_{flag['doc_b']}"
+            
+            def toggle_item(item_id=flag_id):
+                if item_id in st.session_state.selected_warnings:
+                    st.session_state.selected_warnings.remove(item_id)
+                else:
+                    st.session_state.selected_warnings.add(item_id)
+
             with st.container(border=True):
-                c1, c2, c3 = st.columns([3, 1, 1])
+                c0, c1, c2, c3 = st.columns([0.3, 3, 1, 1])
+                with c0:
+                    st.checkbox(
+                        "Select",
+                        value=flag_id in st.session_state.selected_warnings,
+                        on_change=toggle_item,
+                        key=f"select_{flag_id}",
+                        label_visibility="collapsed"
+                    )
                 with c1:
                     if _has_exact_match(flag["doc_a"], flag["doc_b"]):
                         exact_badge = " <span style='background-color: #E8F5E9; color: #2E7D32; border: 1px solid #2E7D32; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; margin-left: 8px; vertical-align: middle;'>Exact Match</span>"
