@@ -78,6 +78,25 @@ class TelemetryService:
         return count
 
     @classmethod
+    def clear_telemetry_data(cls) -> None:
+        """Flush all cached telemetry metrics from Redis.
+
+        This clears the telemetry cache keys so the next read will
+        perform a fresh lookup from the database. Safe to call even
+        when Redis is unavailable.
+        """
+        from src.utils.redis_cache import get_cache
+
+        cache = get_cache()
+        for key in (cls.CACHE_KEY_USER_COUNT, cls.CACHE_KEY_DOC_COUNT):
+            try:
+                cache.delete(key)
+            except Exception as e:
+                logger.warning("Failed to clear telemetry cache key '%s': %s", key, e)
+
+        logger.info("Telemetry cache cleared successfully.")
+
+    @classmethod
     def force_refresh_metrics(cls) -> None:
         \"\"\"
         Forces a recalculation of all telemetry metrics and updates the cache.
