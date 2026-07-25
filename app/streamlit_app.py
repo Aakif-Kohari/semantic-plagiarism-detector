@@ -760,10 +760,17 @@ with st.sidebar:
         st.markdown("### 📁 Document Management")
         existing_docs = get_all_documents()
         session_uploaded_docs = st.session_state.get("session_uploaded_docs", set())
+        
+        doc_filter = st.text_input("Filter documents by filename", key="doc_mgmt_filter")
+        
         if existing_docs:
-            st.write(f"**{len(existing_docs)}** documents in database")
-            for doc in existing_docs:
-                st.markdown(f'<div class="{CLASS_DOC_ROW}">', unsafe_allow_html=True)
+            filtered_docs = [
+                d for d in existing_docs 
+                if not doc_filter or doc_filter.lower() in str(d["filename"]).lower()
+            ]
+            st.write(f"**{len(filtered_docs)}** documents matching")
+            for doc in filtered_docs:
+                st.markdown('<div class="doc-row">', unsafe_allow_html=True)
                 col1, col2 = st.columns([3, 1])
                 with col1:
                     is_new = doc["filename"] in session_uploaded_docs
