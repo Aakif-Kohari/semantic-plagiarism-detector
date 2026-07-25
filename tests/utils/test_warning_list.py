@@ -104,3 +104,43 @@ def test_filtering_occurs_before_pagination():
     assert len(filtered) == 12
     assert len(page.items) == 2
     assert page.total_pages == 2
+
+
+def test_filter_warnings_by_minimum_match_length():
+    warnings = [
+        {
+            "doc_a": "doc1.pdf",
+            "doc_b": "doc2.pdf",
+            "similarity": 0.8,
+            "severity": "Medium",
+            "matched_length": 5,
+        },
+        {
+            "doc_a": "doc1.pdf",
+            "doc_b": "doc3.pdf",
+            "similarity": 0.85,
+            "severity": "High",
+            "matched_length": 150,
+        },
+        {
+            "doc_a": "doc2.pdf",
+            "doc_b": "doc3.pdf",
+            "similarity": 0.75,
+            "severity": "Medium",
+            "matched_length": 50,
+        },
+    ]
+
+    # Filter with min_match_length = 50 -> should exclude the 5-word match
+    filtered = filter_warnings(warnings, min_match_length=50)
+    assert len(filtered) == 2
+    assert all(item["matched_length"] >= 50 for item in filtered)
+
+    # Filter with min_match_length = 200 -> should exclude all matches
+    filtered_none = filter_warnings(warnings, min_match_length=200)
+    assert len(filtered_none) == 0
+
+    # Filter routing in prepare_warning_page
+    sorted_items, page = prepare_warning_page(warnings, min_match_length=50)
+    assert len(sorted_items) == 2
+    assert page.total_items == 2
