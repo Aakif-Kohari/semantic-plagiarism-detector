@@ -491,6 +491,9 @@ if not st.session_state.get("authenticated", False):
                         st.session_state.threshold = prefs.get(
                             "threshold", DEFAULT_THRESHOLDS.plagiarism
                         )
+                        st.session_state.telemetry_opt_in = prefs.get(
+                            "telemetry_opt_in", True
+                        )
                         from src.db.auth import get_user_theme
 
                         st.session_state.theme = get_user_theme(username)
@@ -526,6 +529,7 @@ if not st.session_state.get("authenticated", False):
             st.session_state.threshold = prefs.get(
                 "threshold", DEFAULT_THRESHOLDS.plagiarism
             )
+            st.session_state.telemetry_opt_in = prefs.get("telemetry_opt_in", True)
             from src.db.auth import get_user_theme
 
             st.session_state.theme = get_user_theme(username)
@@ -740,6 +744,7 @@ def save_preferences_callback():
             "threshold": st.session_state.get(
                 "threshold_slider", DEFAULT_THRESHOLDS.plagiarism
             ),
+            "telemetry_opt_in": st.session_state.get("telemetry_opt_in_toggle", True),
         }
         update_user_preferences(st.session_state.username, prefs)
 
@@ -751,12 +756,13 @@ def save_preferences_callback():
 with st.sidebar:
     st.markdown(f"👤 Logged in as **{st.session_state.get('username', '')}**")
 
-    # Render cached telemetry user count badge
-    try:
-        active_users = TelemetryService.get_active_user_count()
-        st.caption(f"Total System Users: {active_users}")
-    except Exception:
-        pass
+    # Render cached telemetry user count badge (only if the user has opted in)
+    if st.session_state.get("telemetry_opt_in", True):
+        try:
+            active_users = TelemetryService.get_active_user_count()
+            st.caption(f"Total System Users: {active_users}")
+        except Exception:
+            pass
 
     if st.button("🚪 Log Out", use_container_width=True):
         import logging
@@ -3199,6 +3205,20 @@ if not st.session_state.authenticated:
         if selected_theme != current_theme:
             set_theme(selected_theme)
             st.rerun()
+
+        st.markdown("---")
+        st.markdown("### 🔒 Privacy")
+        st.toggle(
+            "📊 Share Anonymous Usage Data",
+            value=st.session_state.get("telemetry_opt_in", True),
+            help=(
+                "When enabled, anonymous usage metrics (such as total user and "
+                "document counts) help us improve the app. You can opt out at "
+                "any time — this only affects your own account."
+            ),
+            key="telemetry_opt_in_toggle",
+            on_change=save_preferences_callback,
+        )
 
         if user_role == "admin":
             st.markdown("---")
