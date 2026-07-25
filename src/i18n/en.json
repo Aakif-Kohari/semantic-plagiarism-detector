@@ -5,7 +5,7 @@
   "language": "Language",
   "theme": "Theme",
   "threshold": "Plagiarism Threshold",
-  "upload_title": "📂 Upload Assignments",
+  "upload_title": "📂 Upload Assignments (PDF, DOCX, TXT, ZIP)",
   "analysis_summary": "📊 Analysis Summary",
   "metric_docs": "📄 Documents",
   "metric_pairs": "🔗 Pairs",

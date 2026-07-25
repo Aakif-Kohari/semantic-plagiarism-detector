@@ -5,7 +5,7 @@
   "language": "Idioma",
   "theme": "Tema",
   "threshold": "Umbral de Plagio",
-  "upload_title": "📂 Cargar Tareas",
+  "upload_title": "📂 Cargar Tareas (PDF, DOCX, TXT, ZIP)",
   "analysis_summary": "📊 Resumen del Análisis",
   "metric_docs": "📄 Documentos",
   "metric_pairs": "🔗 Parejas",

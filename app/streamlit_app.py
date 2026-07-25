@@ -939,8 +939,8 @@ with st.sidebar:
 st.title(f"🔍 {APP_TITLE}")
 
 uploaded_files = st.file_uploader(
-    "📂 Upload Assignments",
-    type=["pdf", "docx", "txt"],
+    "📂 Upload Assignments (PDF, DOCX, TXT, ZIP)",
+    type=["pdf", "docx", "txt", "zip"],
     accept_multiple_files=True,
     key="file_uploader",
 )
