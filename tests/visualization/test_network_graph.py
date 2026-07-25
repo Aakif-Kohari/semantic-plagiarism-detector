@@ -5,9 +5,10 @@ Unit tests for plot_similarity_network edge cases.
 """
 
 from unittest.mock import patch
+
 import pandas as pd
 import plotly.graph_objects as go
-import pytest
+
 from src.visualization.network_graph import plot_similarity_network
 
 
@@ -83,3 +84,17 @@ def test_plot_similarity_network_mocked_plotly(mock_figure):
 
     # Verify that the Figure constructor was invoked properly
     assert mock_figure.called
+
+
+def test_plot_similarity_network_layout_autosize():
+    """Verify layout has autosize=True and width=None for dynamic scaling."""
+    data = {
+        "doc1": [1.0, 0.90],
+        "doc2": [0.90, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2"])
+
+    fig = plot_similarity_network(df, threshold=0.75)
+
+    assert fig.layout.autosize is True
+    assert fig.layout.width is None

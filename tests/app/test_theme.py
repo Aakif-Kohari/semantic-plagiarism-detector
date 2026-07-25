@@ -1,9 +1,9 @@
 from app.theme import (
-    severity_tier,
-    tier_from_severity_label,
-    tier_color,
-    badge_html,
     COLORS,
+    badge_html,
+    severity_tier,
+    tier_color,
+    tier_from_severity_label,
 )
 
 

@@ -33,9 +33,9 @@ def test_detect_ai_probability_batch_empty():
 def test_detect_document_ai_probability_empty():
     """Test that empty chunks return zero probabilities."""
     result = detect_document_ai_probability([])
-    assert result['overall'] == 0.0
-    assert result['max'] == 0.0
-    assert result['chunk_scores'] == []
+    assert result["overall"] == 0.0
+    assert result["max"] == 0.0
+    assert result["chunk_scores"] == []
 
 
 def test_detect_documents_ai_probability_empty():
@@ -50,21 +50,21 @@ def test_detect_documents_ai_probability_single_doc():
         "test_doc.txt": ["This is a test chunk of text.", "Another test chunk here."]
     }
     result = detect_documents_ai_probability(chunked_docs)
-    
+
     assert "test_doc.txt" in result
-    assert 'overall' in result["test_doc.txt"]
-    assert 'max' in result["test_doc.txt"]
-    assert 'chunk_scores' in result["test_doc.txt"]
-    assert len(result["test_doc.txt"]['chunk_scores']) == 2
-    assert 0.0 <= result["test_doc.txt"]['overall'] <= 1.0
-    assert 0.0 <= result["test_doc.txt"]['max'] <= 1.0
+    assert "overall" in result["test_doc.txt"]
+    assert "max" in result["test_doc.txt"]
+    assert "chunk_scores" in result["test_doc.txt"]
+    assert len(result["test_doc.txt"]["chunk_scores"]) == 2
+    assert 0.0 <= result["test_doc.txt"]["overall"] <= 1.0
+    assert 0.0 <= result["test_doc.txt"]["max"] <= 1.0
 
 
 def test_detect_ai_probability_batch_mixed():
     """Test batch detection with mixed empty and non-empty texts."""
     texts = ["Some text", "", None, "More text"]
     result = detect_ai_probability_batch(texts)
-    
+
     assert len(result) == 4
     assert result[1] == 0.0  # Empty string
     assert result[2] == 0.0  # None

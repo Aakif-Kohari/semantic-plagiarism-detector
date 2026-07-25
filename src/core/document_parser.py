@@ -3,16 +3,28 @@
 from __future__ import annotations
 
 import io
+import logging
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 from collections import Counter
 from pathlib import Path
 from typing import BinaryIO, Dict, List, Union
+from urllib.parse import urlparse
 
-from langdetect import LangDetectException, detect
-from src.core.translator import translate_text
+import defusedxml.lxml
+
+defusedxml.lxml.monkey_patch()
+
 import docx
 import pdfplumber
+from langdetect import LangDetectException, detect
+from striprtf.striprtf import rtf_to_text
+
+logger = logging.getLogger(__name__)
+from src.core.translator import translate_text
 
 # OCR dependencies are imported lazily so TXT/DOCX and normal text PDFs still
 # work even when Tesseract is not installed on the machine.
@@ -116,6 +128,49 @@ def strip_bibliography(text: str) -> str:
     return text
 
 
+def clean_text(raw_text: str) -> str:
+    """Normalize whitespace and remove unwanted Unicode characters."""
+    text = raw_text
+    text = re.sub(r"\n\s*\n\s*\n", "\n\n", text)
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"[\u00a0\u200b]", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n[ \t]+", "\n", text)
+
+    return text.strip()
+
+
+def remove_ignore_phrases(text: str, ignore_phrases: str) -> str:
+    """Remove specified ignore phrases from text.
+
+    Args:
+        text: The text to process
+        ignore_phrases: Multi-line string where each line is a phrase to remove
+
+    Returns:
+        Text with all ignore phrases removed
+    """
+    if not ignore_phrases or not ignore_phrases.strip():
+        return text
+
+    # Split ignore phrases by line and filter empty lines
+    phrases = [line.strip() for line in ignore_phrases.split("\n") if line.strip()]
+
+    if not phrases:
+        return text
+
+    result = text
+    for phrase in phrases:
+        # Remove exact matches of the phrase
+        result = result.replace(phrase, "")
+
+    # Clean up extra whitespace left after removal
+    result = clean_text(result)
+
+    return result
+
+
 def prepare_text_for_embedding(text: str) -> dict:
     """
     Preserve the original text and prepare English text for embeddings.
@@ -152,7 +207,7 @@ class OCRDependencyError(RuntimeError):
 
 def _is_page_number(line: str) -> bool:
     """Return True for simple standalone page-number lines."""
-    cleaned = re.sub(r"[\u00a0\u200b]", " ", line).strip()
+    cleaned = clean_text(line)
     if not cleaned:
         return False
     return bool(
@@ -164,7 +219,7 @@ def _clean_page_text(page_text: str) -> List[str]:
     """Clean one page of extracted text."""
     lines: List[str] = []
     for raw_line in page_text.splitlines():
-        cleaned = re.sub(r"[\u00a0\u200b]", " ", raw_line).strip()
+        cleaned = clean_text(raw_line)
         if not cleaned or _is_page_number(cleaned):
             continue
         lines.append(cleaned)
@@ -209,10 +264,8 @@ def _normalize_whitespace(page_lines: List[List[str]]) -> str:
     """Join cleaned lines and collapse excessive whitespace."""
     cleaned_lines = [line for lines in page_lines for line in lines]
     text = "\n".join(cleaned_lines).strip()
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    text = re.sub(r"[ \t]+\n", "\n", text)
-    text = re.sub(r"\n[ \t]+", "\n", text)
-    return text.strip()
+    text = clean_text(text)
+    return text
 
 
 def _read_pdf_bytes(file: PDFInput) -> bytes:
@@ -270,10 +323,9 @@ def _ocr_pdf_page(
         import pytesseract
         from PIL import Image
     except ImportError as exc:
-        raise OCRDependencyError(
-            "OCR dependencies are missing. Install pytesseract, PyMuPDF and "
-            "Pillow using: python -m pip install pytesseract pymupdf pillow"
-        ) from exc
+        from src.errors import OCR_DEPENDENCIES_MISSING
+
+        raise OCRDependencyError(OCR_DEPENDENCIES_MISSING) from exc
 
     _configure_tesseract(pytesseract)
 
@@ -296,10 +348,9 @@ def _ocr_pdf_page(
                 config="--oem 3 --psm 3",
             ).strip()
     except pytesseract.TesseractNotFoundError as exc:
-        raise OCRDependencyError(
-            "Tesseract OCR was not found. Install Tesseract and either add it "
-            "to PATH or set TESSERACT_CMD to tesseract.exe."
-        ) from exc
+        from src.errors import OCR_TESSERACT_NOT_FOUND
+
+        raise OCRDependencyError(OCR_TESSERACT_NOT_FOUND) from exc
 
 
 def _should_use_parallel() -> bool:
@@ -321,7 +372,7 @@ def _should_use_parallel() -> bool:
             and multiprocessing.parent_process() is not None
         ):
             return False
-    except Exception:
+    except (AttributeError, RuntimeError):
         pass
     return True
 
@@ -333,8 +384,9 @@ def _parse_pdf_page(
     ocr_language: str,
 ) -> List[str]:
     """Helper running in a subprocess to extract text from a single PDF page."""
-    import pdfplumber
     import io
+
+    import pdfplumber
 
     try:
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
@@ -353,8 +405,9 @@ def _parse_pdf_page(
             return _clean_page_text(selected_text)
     except OCRDependencyError:
         raise
+    # Requires generic catch because pdfplumber/pdfminer raise various deeply nested exceptions (e.g. PdfminerException, PDFPasswordIncorrect) for encrypted/malformed PDFs
     except Exception as exc:
-        print(f"[document_parser] Error parsing page {page_index}: {exc}")
+        logger.error(f"[document_parser] Error parsing page {page_index}: {exc}")
         return []
 
 
@@ -397,7 +450,15 @@ def extract_texts_parallel(
                 results[name] = _extract_single_file_helper(
                     data, name, ocr_language, ocr_dpi
                 )
-            except Exception as exc:
+            except (
+                ValueError,
+                TypeError,
+                OSError,
+                KeyError,
+                AttributeError,
+                UnicodeError,
+                RuntimeError,
+            ) as exc:
                 errors[name] = exc
         return results, errors
 
@@ -420,12 +481,22 @@ def extract_texts_parallel(
                 try:
                     text = future.result()
                     results[name] = text
-                except Exception as exc:
+                except (
+                    ValueError,
+                    TypeError,
+                    OSError,
+                    KeyError,
+                    AttributeError,
+                    UnicodeError,
+                    RuntimeError,
+                ) as exc:
                     errors[name] = exc
 
         return results, errors
-    except Exception as exc:
-        print(f"[document_parser] ProcessPoolExecutor failed ({exc}), falling back to sequential extraction...")
+    except (RuntimeError, OSError) as exc:
+        logger.warning(
+            f"[document_parser] ProcessPoolExecutor failed ({exc}), falling back to sequential extraction..."
+        )
         results.clear()
         errors.clear()
         for name, data in files_dict.items():
@@ -433,9 +504,43 @@ def extract_texts_parallel(
                 results[name] = _extract_single_file_helper(
                     data, name, ocr_language, ocr_dpi
                 )
-            except Exception as e:
+            except (
+                ValueError,
+                TypeError,
+                OSError,
+                KeyError,
+                AttributeError,
+                UnicodeError,
+                RuntimeError,
+            ) as e:
                 errors[name] = e
         return results, errors
+
+
+def extract_pdf_metadata(file: PDFInput) -> Dict[str, str]:
+    """Extract PDF metadata (Author, Creation Date, Title) using PyMuPDF.
+
+    Returns:
+        Dictionary with keys 'author', 'creation_date', 'title'.
+        Values are None if metadata is not available.
+    """
+    pdf_bytes = _read_pdf_bytes(file)
+    metadata = {"author": None, "creation_date": None, "title": None}
+
+    try:
+        import fitz  # PyMuPDF
+
+        with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+            doc_metadata = doc.metadata
+            metadata["author"] = doc_metadata.get("author")
+            metadata["creation_date"] = doc_metadata.get("creationDate")
+            metadata["title"] = doc_metadata.get("title")
+    except (ValueError, RuntimeError, OSError, TypeError) as exc:
+        print(f"[document_parser] Error extracting PDF metadata: {exc}")
+    except Exception as exc:
+        logger.error(f"[document_parser] Error extracting PDF metadata: {exc}")
+
+    return metadata
 
 
 def extract_text_from_pdf(
@@ -456,13 +561,33 @@ def extract_text_from_pdf(
     )
 
     pdf_bytes = _read_pdf_bytes(file)
+
+    # Validate actual file magic bytes to prevent renamed malicious files (Issue #252)
+    try:
+        import magic
+
+        mime_type = magic.from_buffer(pdf_bytes, mime=True)
+        if mime_type != "application/pdf":
+            logger.warning(
+                f"[document_parser] Security warning: Invalid MIME type '{mime_type}' for PDF."
+            )
+            return ""
+    except ImportError:
+        # Fallback manual magic byte check if python-magic is not installed
+        if not pdf_bytes.lstrip().startswith(b"%PDF-"):
+            logger.warning(
+                "[document_parser] Security warning: Invalid magic bytes for PDF."
+            )
+            return ""
+
     page_lines: List[List[str]] = []
 
     try:
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
             num_pages = len(pdf.pages)
+    # Requires generic catch because pdfplumber/pdfminer raise various deeply nested exceptions (e.g. PdfminerException, PDFPasswordIncorrect) for encrypted/malformed PDFs
     except Exception as exc:
-        print(f"[document_parser] Error reading PDF: {exc}")
+        logger.error(f"[document_parser] Error reading PDF: {exc}")
         return ""
 
     if num_pages == 0:
@@ -488,8 +613,10 @@ def extract_text_from_pdf(
                     page_lines[page_index] = future.result()
         except OCRDependencyError:
             raise
-        except Exception as exc:
-            print(f"[document_parser] ProcessPoolExecutor failed ({exc}), falling back to sequential page parsing...")
+        except (RuntimeError, OSError) as exc:
+            logger.warning(
+                f"[document_parser] ProcessPoolExecutor failed ({exc}), falling back to sequential page parsing..."
+            )
             page_lines = [
                 _parse_pdf_page(
                     pdf_bytes,
@@ -524,8 +651,10 @@ def extract_text_from_docx(file: PDFInput) -> str:
         doc_file = io.BytesIO(file) if isinstance(file, bytes) else file
         document = docx.Document(doc_file)
         text = "\n\n".join(paragraph.text for paragraph in document.paragraphs)
-    except Exception as exc:
+    except (ValueError, KeyError, OSError) as exc:
         print(f"[document_parser] Error reading DOCX: {exc}")
+    except Exception as exc:
+        logger.error(f"[document_parser] Error reading DOCX: {exc}")
     return text.strip()
 
 
@@ -545,18 +674,152 @@ def extract_text_from_txt(file: PDFInput) -> str:
                 if isinstance(data, bytes)
                 else data
             )
-    except Exception as exc:
+    except (OSError, UnicodeDecodeError, AttributeError, TypeError) as exc:
         print(f"[document_parser] Error reading TXT: {exc}")
+    except Exception as exc:
+        logger.error(f"[document_parser] Error reading TXT: {exc}")
     return text.strip()
 
 
+def extract_text_from_rtf(file: PDFInput) -> str:
+    """Extract plain text from an RTF file using striprtf."""
+    text = ""
+    try:
+        if isinstance(file, str):
+            with open(file, "r", encoding="utf-8", errors="ignore") as handle:
+                content = handle.read()
+        elif isinstance(file, bytes):
+            content = file.decode("utf-8", errors="ignore")
+        elif isinstance(file, io.BytesIO):
+            content = file.read().decode("utf-8", errors="ignore")
+        else:
+            data = file.read()
+            content = (
+                data.decode("utf-8", errors="ignore")
+                if isinstance(data, bytes)
+                else data
+            )
+        text = rtf_to_text(content)
+    except Exception as exc:
+        print(f"[document_parser] Error reading RTF: {exc}")
+    return text.strip()
+
+
+def extract_text_from_doc(file: PDFInput) -> str:
+    """Extract plain text from a legacy Word Document (.doc) using antiword."""
+    if not shutil.which("antiword"):
+        logger.warning(
+            "antiword binary not found. Please install antiword to parse .doc files."
+        )
+        raise RuntimeError(
+            "antiword binary is not installed on the system. Cannot parse .doc files."
+        )
+
+    # Write input to a temporary file
+    with tempfile.NamedTemporaryFile(suffix=".doc", delete=False) as temp_file:
+        if isinstance(file, bytes):
+            temp_file.write(file)
+        elif isinstance(file, str):
+            with open(file, "rb") as f:
+                temp_file.write(f.read())
+        else:
+            # File-like object
+            content = file.read()
+            if isinstance(content, str):
+                content = content.encode("utf-8")
+            temp_file.write(content)
+        temp_file_path = temp_file.name
+
+    try:
+        # Run antiword command: antiword <temp_file_path>
+        result = subprocess.run(
+            ["antiword", temp_file_path],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="ignore",
+            timeout=30,
+            check=True,
+        )
+        return result.stdout.strip()
+    except subprocess.CalledProcessError as exc:
+        logger.error(f"[document_parser] antiword failed: {exc.stderr}")
+        raise RuntimeError(
+            f"antiword failed to extract text from .doc file: {exc.stderr}"
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
+        logger.error(f"[document_parser] antiword timed out: {exc}")
+        raise RuntimeError("antiword execution timed out.") from exc
+    finally:
+        # Always clean up the temp file
+        try:
+            os.remove(temp_file_path)
+        except OSError:
+            pass
+
+
+def extract_text_from_url(url: str) -> str:
+    """Extract text content from a URL using web scraping.
+
+    Args:
+        url: The URL to fetch and extract text from
+
+    Returns:
+        Cleaned text content from the webpage
+
+    Raises:
+        ValueError: If the URL is invalid
+        Exception: If fetching or parsing fails
+    """
+    try:
+        import requests
+        from bs4 import BeautifulSoup
+    except ImportError as exc:
+        raise ImportError(
+            "Web scraping dependencies are missing. Install beautifulsoup4 and "
+            "requests using: python -m pip install beautifulsoup4 requests"
+        ) from exc
+
+    # Validate URL
+    parsed = urlparse(url)
+    if not all([parsed.scheme, parsed.netloc]) or parsed.scheme not in (
+        "http",
+        "https",
+    ):
+        raise ValueError(f"Invalid URL: {url}")
+
+    try:
+        # Fetch the webpage with a user agent to avoid being blocked
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
+
+        # Parse HTML content
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        # Remove script and style elements
+        for script in soup(["script", "style", "nav", "footer", "header", "aside"]):
+            script.decompose()
+
+        # Get text from main content areas
+        text = soup.get_text()
+
+        # Clean up whitespace
+        lines = (line.strip() for line in text.splitlines())
+        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+        text = "\n".join(chunk for chunk in chunks if chunk)
+
+        return strip_bibliography(text)
+
+    except requests.RequestException as exc:
+        raise Exception(f"Failed to fetch URL: {exc}") from exc
+    except (ValueError, TypeError, AttributeError, RuntimeError) as exc:
+        raise Exception(f"Failed to parse webpage content: {exc}") from exc
+
+
 # --- Markdown (.md) support -------------------------------------------------
-#
-# Markdown files are plain text, so we reuse the TXT reading logic to get the
-# raw source, then strip common Markdown syntax so only the readable content
-# reaches the semantic-analysis / embedding pipeline. Fenced code blocks are
-# kept (with the fence markers removed) since code can still be relevant
-# content for plagiarism comparison; only the surrounding syntax is removed.
 
 _MD_FENCE = re.compile(r"^\s*(```|~~~)")
 _MD_ATX_HEADER = re.compile(r"^\s{0,3}#{1,6}\s+")
@@ -610,7 +873,6 @@ def strip_markdown_syntax(raw_text: str) -> str:
             continue
 
         if _MD_SETEXT_HEADER.match(line) and output and output[-1].strip():
-            # Setext header underline (=== or ---) following a text line.
             continue
 
         line = _MD_ATX_HEADER.sub("", line)
@@ -622,16 +884,42 @@ def strip_markdown_syntax(raw_text: str) -> str:
         output.append(line)
 
     text = "\n".join(output)
-    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = clean_text(text)
     return text.strip()
 
 
-def extract_text_from_md(file: PDFInput) -> str:
-    """Extract plain text from a Markdown (.md) file.
+def extract_text_from_epub(file: PDFInput) -> str:
+    """Extract plain text from an EPUB file."""
+    try:
+        from bs4 import BeautifulSoup
+        from ebooklib import epub
 
-    Reads the raw Markdown source (reusing the TXT reader) and strips
-    Markdown syntax so downstream chunking/embedding sees clean prose.
-    """
+        epub_file = io.BytesIO(file) if isinstance(file, bytes) else file
+
+        book = epub.read_epub(epub_file)
+
+        text_parts = []
+
+        for item in book.get_items():
+            if item.get_type() == 9:
+                soup = BeautifulSoup(
+                    item.get_content(),
+                    "html.parser",
+                )
+
+                text_parts.append(soup.get_text(" ", strip=True))
+
+        return "\n\n".join(text_parts).strip()
+
+    except (ValueError, TypeError, OSError, KeyError) as exc:
+        print(f"[document_parser] Error reading EPUB: {exc}")
+    except Exception as exc:
+        logger.error(f"[document_parser] Error reading EPUB: {exc}")
+        return ""
+
+
+def extract_text_from_md(file: PDFInput) -> str:
+    """Extract plain text from a Markdown (.md) file."""
     raw_text = extract_text_from_txt(file)
     if not raw_text:
         return ""
@@ -657,8 +945,16 @@ def extract_text(
         raw = extract_text_from_pdf(file, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
     elif extension == "docx":
         raw = extract_text_from_docx(file)
+    elif extension == "doc":
+        raw = extract_text_from_doc(file)
     elif extension == "md":
         raw = extract_text_from_md(file)
+
+    elif extension == "rtf":
+        raw = extract_text_from_rtf(file)
+
+    elif extension == "epub":
+        raw = extract_text_from_epub(file)
     else:
         raw = extract_text_from_txt(file)
 
@@ -683,8 +979,10 @@ def extract_texts(files: list) -> Dict[str, str]:
 
         try:
             files_dict[name] = _read_pdf_bytes(file)
-        except Exception as exc:
+        except (OSError, TypeError, AttributeError) as exc:
             print(f"[document_parser] Error reading file data for {name}: {exc}")
+        except Exception as exc:
+            logger.error(f"[document_parser] Error reading file data for {name}: {exc}")
             files_dict[name] = b""
 
     raw_texts, errors = extract_texts_parallel(files_dict)
@@ -696,9 +994,3 @@ def extract_texts(files: list) -> Dict[str, str]:
         results[name] = raw_texts.get(name, "")
 
     return results
-
-
-# Cross-lingual embedding preparation (Issue #46)
-# Re-exported here because parsing is the boundary where raw source text is
-# converted into embedding-ready text.
-

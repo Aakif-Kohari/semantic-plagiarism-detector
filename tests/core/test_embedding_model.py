@@ -1,6 +1,8 @@
+from unittest.mock import MagicMock, patch
+
 import numpy as np
 import pytest
-from unittest.mock import patch, MagicMock
+
 import src.core.embedding_model as embedding_model
 from src.core.embedding_model import (
     embed_chunks,

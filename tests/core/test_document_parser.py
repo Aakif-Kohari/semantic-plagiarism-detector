@@ -1,14 +1,17 @@
 import io
 import shutil
-import pytest
-import docx
 from unittest.mock import MagicMock, patch
+
+import docx
+
 from src.core.document_parser import (
+    clean_text,
     extract_text,
-    extract_texts,
-    extract_text_from_pdf,
     extract_text_from_docx,
+    extract_text_from_pdf,
     extract_text_from_txt,
+    extract_texts,
+    remove_ignore_phrases,
     strip_bibliography,
 )
 
@@ -39,11 +42,11 @@ def _make_docx_bytes(text: str) -> bytes:
     return buf.getvalue()
 
 
-@pytest.mark.skipif(
-    not TESSERACT_AVAILABLE, reason="Tesseract OCR is not installed on this machine"
-)
-def test_extract_from_pdf_bytes():
-    pdf_bytes = _make_pdf_bytes("Hello PDF")
+@patch("src.core.document_parser._ocr_pdf_page", return_value="")
+def test_extract_from_pdf_bytes(mock_ocr):
+    pdf_bytes = _make_pdf_bytes(
+        "Hello PDF this is a document with enough words to satisfy native text check"
+    )
     # For blank page PDF, pdfplumber might return empty string, but it shouldn't error
     result = extract_text_from_pdf(pdf_bytes)
     assert isinstance(result, str)
@@ -72,7 +75,7 @@ def test_extract_from_pdf_filters_repeated_headers_page_numbers_and_whitespace()
     fake_pdf.__exit__ = MagicMock(return_value=False)
 
     with patch("src.core.document_parser.pdfplumber.open", return_value=fake_pdf):
-        result = extract_text_from_pdf(io.BytesIO(b"fake-pdf"))
+        result = extract_text_from_pdf(io.BytesIO(b"%PDF-fake-pdf"))
 
     # Repeated header across all pages must be stripped
     assert "Research Report" not in result
@@ -97,11 +100,11 @@ def test_extract_from_txt_bytes():
     assert result == "Hello TXT"
 
 
-@pytest.mark.skipif(
-    not TESSERACT_AVAILABLE, reason="Tesseract OCR is not installed on this machine"
-)
-def test_extract_text_routing():
-    pdf_bytes = _make_pdf_bytes("Hello PDF")
+@patch("src.core.document_parser._ocr_pdf_page", return_value="")
+def test_extract_text_routing(mock_ocr):
+    pdf_bytes = _make_pdf_bytes(
+        "Hello PDF this is a document with enough words to satisfy native text check"
+    )
     docx_bytes = _make_docx_bytes("Hello DOCX")
     txt_bytes = b"Hello TXT"
 
@@ -138,6 +141,7 @@ def test_extract_texts_mixed():
 # ---------------------------------------------------------------------------
 # strip_bibliography tests (Issue #116)
 # ---------------------------------------------------------------------------
+
 
 class TestStripBibliography:
 
@@ -215,3 +219,210 @@ class TestStripBibliography:
         result = extract_text(docx_bytes, "test.docx")
         assert "Bibliography" not in result
         assert "Body content" in result
+
+
+# ---------------------------------------------------------------------------
+# remove_ignore_phrases tests (Issue #161)
+# ---------------------------------------------------------------------------
+
+
+class TestRemoveIgnorePhrases:
+
+    def test_removes_single_phrase(self):
+        text = (
+            "Q1: Explain the theory of relativity. This is my answer about relativity."
+        )
+        ignore_phrases = "Q1: Explain the theory of relativity"
+        result = remove_ignore_phrases(text, ignore_phrases)
+        assert "Q1: Explain the theory of relativity" not in result
+        assert "This is my answer about relativity" in result
+
+    def test_removes_multiple_phrases(self):
+        text = "Q1: First question. My answer to first. Q2: Second question. My answer to second."
+        ignore_phrases = "Q1: First question\nQ2: Second question"
+        result = remove_ignore_phrases(text, ignore_phrases)
+        assert "Q1: First question" not in result
+        assert "Q2: Second question" not in result
+        assert "My answer to first" in result
+        assert "My answer to second" in result
+
+    def test_empty_ignore_phrases_returns_original(self):
+        text = "This is my original text."
+        ignore_phrases = ""
+        result = remove_ignore_phrases(text, ignore_phrases)
+        assert result == text
+
+    def test_whitespace_only_ignore_phrases_returns_original(self):
+        text = "This is my original text."
+        ignore_phrases = "   \n\n   "
+        result = remove_ignore_phrases(text, ignore_phrases)
+        assert result == text
+
+    def test_none_ignore_phrases_returns_original(self):
+        text = "This is my original text."
+        result = remove_ignore_phrases(text, "")
+        assert result == text
+
+    def test_cleans_extra_whitespace(self):
+        text = "Q1: Question text.\n\n\nMy answer here."
+        ignore_phrases = "Q1: Question text."
+        result = remove_ignore_phrases(text, ignore_phrases)
+        assert "Q1: Question text" not in result
+        assert "\n\n\n" not in result
+        assert "My answer here" in result
+
+    def test_handles_empty_lines_in_ignore_phrases(self):
+        text = "Q1: First question. Answer. Q2: Second question. Answer."
+        ignore_phrases = "Q1: First question\n\n\nQ2: Second question"
+        result = remove_ignore_phrases(text, ignore_phrases)
+        assert "Q1: First question" not in result
+        assert "Q2: Second question" not in result
+        assert "Answer" in result
+
+    def test_case_sensitive_removal(self):
+        text = "Q1: Explain the theory. q1: explain the theory."
+        ignore_phrases = "Q1: Explain the theory"
+        result = remove_ignore_phrases(text, ignore_phrases)
+        assert "Q1: Explain the theory" not in result
+        assert "q1: explain the theory" in result
+
+    def test_multiple_occurrences_removed(self):
+        text = "Instructions: Write in your own words. Paragraph 1. Instructions: Write in your own words. Paragraph 2."
+        ignore_phrases = "Instructions: Write in your own words"
+        result = remove_ignore_phrases(text, ignore_phrases)
+        assert "Instructions: Write in your own words" not in result
+        assert "Paragraph 1" in result
+        assert "Paragraph 2" in result
+
+    def test_no_match_returns_original(self):
+        text = "This is my original text with no matching phrases."
+        ignore_phrases = "Q1: Some question\nQ2: Another question"
+        result = remove_ignore_phrases(text, ignore_phrases)
+        assert result == text
+
+
+# ---------------------------------------------------------------------------
+# clean_text tests
+# ---------------------------------------------------------------------------
+
+
+class TestCleanText:
+
+    def test_collapses_multiple_blank_lines(self):
+        text = "Line 1\n\n\n\nLine 2"
+        result = clean_text(text)
+        assert result == "Line 1\n\nLine 2"
+
+    def test_collapses_multiple_spaces_and_tabs(self):
+        text = "Hello     world\t\tPython"
+        result = clean_text(text)
+        assert result == "Hello world Python"
+
+    def test_replaces_unicode_spaces(self):
+        text = "Hello\u00a0World\u200b!"
+        result = clean_text(text)
+        assert result == "Hello World !"
+
+    def test_removes_spaces_before_newline(self):
+        text = "Hello   \nWorld"
+        result = clean_text(text)
+        assert result == "Hello\nWorld"
+
+    def test_removes_spaces_after_newline(self):
+        text = "Hello\n    World"
+        result = clean_text(text)
+        assert result == "Hello\nWorld"
+
+    def test_strips_leading_and_trailing_whitespace(self):
+        text = "   Hello World   \n"
+        result = clean_text(text)
+        assert result == "Hello World"
+
+    def test_handles_empty_string(self):
+        text = ""
+        result = clean_text(text)
+        assert result == ""
+
+    def test_preserves_normal_text(self):
+        text = "This is a normal sentence."
+        result = clean_text(text)
+        assert result == text
+
+    def test_combines_all_cleaning_steps(self):
+        text = "  Hello\t\t\n\n\n  World\u00a0 "
+        result = clean_text(text)
+        assert result == "Hello\n\nWorld"
+
+    def test_only_whitespace_returns_empty(self):
+        text = "   \n\t\n  "
+        result = clean_text(text)
+        assert result == ""
+
+
+def test_extract_empty_pdf_gracefully(caplog):
+    """Assert that passing an empty/blank PDF returns an empty string gracefully without crashing."""
+    import logging
+
+    from reportlab.pdfgen import canvas
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf)
+    c.showPage()
+    c.save()
+    empty_pdf_bytes = buf.getvalue()
+
+    with patch("src.core.document_parser._ocr_pdf_page", return_value=""):
+        with caplog.at_level(logging.WARNING):
+            result = extract_text_from_pdf(empty_pdf_bytes)
+
+    assert isinstance(result, str)
+    assert result.strip() == ""
+
+
+def test_extract_text_from_doc_success():
+    """Test that extract_text_from_doc runs antiword successfully when present."""
+
+    from src.core.document_parser import extract_text_from_doc
+
+    mock_result = MagicMock()
+    mock_result.stdout = (
+        "This is a test legacy Word Document content extracted by antiword."
+    )
+    mock_result.returncode = 0
+
+    with patch("shutil.which", return_value="/usr/bin/antiword"):
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            result = extract_text_from_doc(b"fake doc bytes")
+            assert (
+                result
+                == "This is a test legacy Word Document content extracted by antiword."
+            )
+            mock_run.assert_called_once()
+            args, kwargs = mock_run.call_args
+            assert args[0][0] == "antiword"
+            assert args[0][1].endswith(".doc")
+
+
+def test_extract_text_from_doc_missing_antiword():
+    """Test that extract_text_from_doc raises RuntimeError if antiword is not installed."""
+    import pytest
+
+    from src.core.document_parser import extract_text_from_doc
+
+    with patch("shutil.which", return_value=None):
+        with pytest.raises(RuntimeError, match="antiword binary is not installed"):
+            extract_text_from_doc(b"fake doc bytes")
+
+
+def test_extract_text_routing_doc():
+    """Test that extract_text routes .doc files to extract_text_from_doc."""
+    from src.core.document_parser import extract_text
+
+    mock_result = MagicMock()
+    mock_result.stdout = "Legacy Word Doc Content"
+    mock_result.returncode = 0
+
+    with patch("shutil.which", return_value="/usr/bin/antiword"):
+        with patch("subprocess.run", return_value=mock_result):
+            result = extract_text(b"fake bytes", "test_file.doc")
+            assert result == "Legacy Word Doc Content"
