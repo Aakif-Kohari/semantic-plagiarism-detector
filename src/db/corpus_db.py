@@ -417,6 +417,21 @@ def get_document_tags(filename: str) -> str:
         return ""
 
 
+def update_document_tags(filename: str, tags: str) -> bool:
+    """Updates the tags for a specific document."""
+    try:
+        with _connect() as conn:
+            conn.execute(
+                "UPDATE documents SET tags = ? WHERE filename = ?",
+                (tags, filename)
+            )
+            conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to update tags for '{filename}': {e}")
+        return False
+
+
 def delete_tag(tag: str) -> int:
     """
     Removes a specific tag from ALL documents in the database.
