@@ -58,7 +58,8 @@ def validate_thresholds(
 
     if not plagiarism <= medium <= high:
         raise ValueError(
-            "Thresholds must satisfy " "0.0 <= plagiarism <= medium <= high <= 1.0."
+            "Thresholds must satisfy "
+            "0.0 <= plagiarism <= medium <= high <= 1.0."
         )
     return thresholds
 
@@ -92,10 +93,19 @@ def severity_from_score(
     score: Real,
     thresholds: SimilarityThresholds = DEFAULT_THRESHOLDS,
 ) -> str:
-    """Return the canonical Low, Medium, or High severity label."""
+    """
+    Return the canonical Low, Medium, or High severity label.
+
+    Scores below the plagiarism threshold are not considered plagiarism,
+    but retain Low severity so callers can continue using the canonical
+    three-level severity scale. Scores from the plagiarism threshold up
+    to the medium threshold represent flagged plagiarism with Low severity.
+    """
     validate_thresholds(thresholds)
     normalized = normalize_score(score)
 
+    if normalized < thresholds.plagiarism:
+        return LOW_SEVERITY
     if normalized >= thresholds.high:
         return HIGH_SEVERITY
     if normalized >= thresholds.medium:
@@ -130,6 +140,7 @@ def normalize_severity_label(label: str) -> str:
         return severity_aliases[clean]
     except KeyError:
         raise ValueError(f"Unknown severity label: {label!r}") from None
+
 
 def severity_rank(label: str) -> int:
     """Return a stable sort rank for a severity label."""
