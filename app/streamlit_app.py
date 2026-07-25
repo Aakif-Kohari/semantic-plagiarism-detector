@@ -28,6 +28,7 @@ load_dotenv()
 
 import numpy as np
 import pandas as pd
+from app.components.faiss_results import faiss_results_dataframe
 import streamlit as st
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -77,6 +78,7 @@ from app.theme import (
     version_check_widget_html,
 )
 from src.core.ai_detector import detect_documents_ai_probability
+from src.core.app_config import get_app_title
 from src.core.config import DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD, severity_key
 from src.core.document_parser import (
     DEFAULT_OCR_DPI,
@@ -244,8 +246,10 @@ except Exception:
 # collapsed so it doesn't cover the similarity matrix / heatmap. On wider
 # screens it behaves the same as "expanded". See issue #258.
 
+APP_TITLE = get_app_title()
+
 st.set_page_config(
-    page_title="Semantic Plagiarism Detector",
+    page_title=APP_TITLE,
     page_icon="🔍",
     layout="wide",
     initial_sidebar_state="auto",
@@ -816,7 +820,7 @@ with st.sidebar:
     selected_class = st.selectbox("Select Class/Section", unique_classes, index=0)
 
 # ── Main UI ───────────────────────────────────────────────────────────────────
-st.title("🔍 Semantic Plagiarism Detection System")
+st.title(f"🔍 {APP_TITLE}")
 
 uploaded_files = st.file_uploader(
     "📂 Upload Assignments",
@@ -1014,7 +1018,11 @@ if (
             st.rerun()
 
 # ── Main Header ──────────────────────────────────────────────────────────────
-st.title(get_text("title", lang=lang_code))
+configured_app_title = os.getenv("APP_TITLE", "").strip()
+if configured_app_title:
+    st.title(f"🔍 {APP_TITLE}")
+else:
+    st.title(get_text("title", lang=lang_code))
 st.markdown(get_text("subtitle", lang=lang_code))
 st.divider()
 
@@ -2278,13 +2286,63 @@ if not st.session_state.authenticated:
                         threshold=threshold,
                     )
                     if q_results:
-                        for rec, score in q_results:
-                            st.markdown(
-                                f"**{rec.doc_name}** (Chunk #{rec.chunk_index}) — Similarity: `{score:.1%}`"
-                            )
-                            st.caption(rec.chunk_text)
+                        results_df = faiss_results_dataframe(q_results)
+                        st.caption(
+                            "Click a column header to sort by similarity, "
+                            "target document, chunk, or rank."
+                        )
+                        st.dataframe(
+                            results_df,
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config={
+                                "Rank": st.column_config.NumberColumn(
+                                    "Rank",
+                                    help="Default relevance order.",
+                                    format="%d",
+                                    width="small",
+                                ),
+                                "Target Document": (
+                                    st.column_config.TextColumn(
+                                        "Target Document",
+                                        help=(
+                                            "Document containing the "
+                                            "matching chunk."
+                                        ),
+                                        width="medium",
+                                    )
+                                ),
+                                "Chunk": st.column_config.NumberColumn(
+                                    "Chunk",
+                                    help="One-based chunk number.",
+                                    format="%d",
+                                    width="small",
+                                ),
+                                "Similarity Score": (
+                                    st.column_config.NumberColumn(
+                                        "Similarity Score",
+                                        help=(
+                                            "Cosine similarity between "
+                                            "the query and chunk."
+                                        ),
+                                        format="%.1f%%",
+                                        width="medium",
+                                    )
+                                ),
+                                "Matching Text": (
+                                    st.column_config.TextColumn(
+                                        "Matching Text",
+                                        help="Text from the matched chunk.",
+                                        width="large",
+                                    )
+                                ),
+                            },
+                            key="faiss_search_results_table",
+                        )
                     else:
-                        st.info("No matching vector chunks found above threshold.")
+                        st.info(
+                            "No matching vector chunks found above threshold."
+                        )
                 except Exception as err:
                     st.error(f"FAISS search error: {err}")
             else:
@@ -2994,7 +3052,7 @@ if not st.session_state.authenticated:
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.divider()
 
-st.caption("🎓 Semantic Plagiarism Detection System · Streamlit")
+st.caption(f"🎓 {APP_TITLE} · Streamlit")
 
 # ── Version / Update indicator ────────────────────────────────────────────────
 # Import here (deferred) to avoid slowing down the initial module load for
@@ -3011,7 +3069,7 @@ _latest_tag: str | None = st.session_state["_update_check_tag"]
 _footer_col1, _footer_col2 = st.columns([3, 1])
 with _footer_col1:
     st.caption(
-        f"🎓 Semantic Plagiarism Detection System · v{APP_VERSION} · Streamlit · [🐛 Report Bug / Feedback](https://github.com/Ganesh-403/semantic-plagiarism-detector/issues)"
+        f"🎓 {APP_TITLE} · v{APP_VERSION} · Streamlit · [🐛 Report Bug / Feedback](https://github.com/Ganesh-403/semantic-plagiarism-detector/issues)"
     )
 with _footer_col2:
     if _latest_tag:
