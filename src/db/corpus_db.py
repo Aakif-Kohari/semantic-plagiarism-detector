@@ -392,3 +392,40 @@ def get_document_tags(filename: str) -> str:
             return row[0] if row and row[0] else ""
     except Exception:
         return ""
+
+
+def delete_tag(tag: str) -> int:
+    """
+    Removes a specific tag from ALL documents in the database.
+    Returns the number of documents that were modified.
+    """
+    if not tag or not isinstance(tag, str):
+        return 0
+    tag = tag.strip()
+    if not tag:
+        return 0
+
+    affected_count = 0
+    try:
+        with _connect() as conn:
+            cursor = conn.execute(
+                "SELECT filename, tags FROM documents WHERE tags IS NOT NULL AND tags != ''"
+            )
+            rows = cursor.fetchall()
+            for filename, tags_str in rows:
+                if not tags_str:
+                    continue
+                individual_tags = [t.strip() for t in tags_str.split(",") if t.strip()]
+                if tag in individual_tags:
+                    updated_tags = [t for t in individual_tags if t != tag]
+                    new_tags_str = ",".join(sorted(updated_tags)) if updated_tags else ""
+                    conn.execute(
+                        "UPDATE documents SET tags = ? WHERE filename = ?",
+                        (new_tags_str, filename),
+                    )
+                    affected_count += 1
+            conn.commit()
+    except Exception as e:
+        logger.error(f"Failed to delete tag '{tag}': {e}")
+        raise
+    return affected_count
