@@ -80,6 +80,13 @@ def init_corpus_db() -> None:
         conn.commit()
         migrate_corpus_database(conn)
 
+    # Restrict database file permissions to owner read/write only
+    # Prevents other local users on the server from reading the corpus data
+    try:
+        os.chmod(_DB_PATH, 0o600)
+    except OSError:
+        pass  # Best-effort; some platforms (e.g., Windows) may not support chmod
+
 
 def add_document(
     filename: str,
