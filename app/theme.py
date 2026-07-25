@@ -676,6 +676,73 @@ def inject_css() -> None:
                 max-width: 85vw !important;
             }}
         }}
+
+        /* ── Skeletons for Loading State ────────────────────────────── */
+
+        @keyframes skeletonPulse {{
+            0%, 100% {{
+                opacity: 0.6;
+            }}
+            50% {{
+                opacity: 0.3;
+            }}
+        }}
+
+        .skeleton {{
+            background-color: var(--neutral-soft);
+            border-radius: 6px;
+            animation: skeletonPulse 1.5s infinite ease-in-out;
+            border: 1px solid var(--border);
+        }}
+
+        .skeleton-metric {{
+            height: 70px;
+            width: 100%;
+            margin-bottom: 10px;
+        }}
+
+        .skeleton-title {{
+            height: 24px;
+            width: 40%;
+            margin-bottom: 15px;
+        }}
+
+        .skeleton-text {{
+            height: 16px;
+            width: 100%;
+            margin-bottom: 8px;
+        }}
+
+        .skeleton-text-short {{
+            height: 16px;
+            width: 60%;
+            margin-bottom: 8px;
+        }}
+
+        .skeleton-chart {{
+            height: 350px;
+            width: 100%;
+            margin-top: 15px;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--muted);
+            font-size: 0.9rem;
+        }}
+
+        .skeleton-table {{
+            height: 200px;
+            width: 100%;
+            margin-top: 15px;
+            margin-bottom: 15px;
+        }}
+
+        @media (prefers-reduced-motion: reduce) {{
+            .skeleton {{
+                animation: none !important;
+            }}
+        }}
     </style>
     """
 
