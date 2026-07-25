@@ -2,7 +2,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.core.lexical_similarity import lexical_similarity_matrix
+from src.core.lexical_similarity import (  # noqa: E402
+    STOPWORDS,
+    jaccard_similarity,
+    lexical_similarity_matrix,
+    remove_stopwords,
+    tokenize,
+)
 from src.core.similarity import (
     chunk_max_similarity,
     chunk_similarity_matrix,
@@ -13,15 +19,6 @@ from src.core.similarity import (
 )
 
 
-@pytest.fixture
-def dummy_embeddings():
-    # 3 docs, 384-dim embeddings
-    # Doc A and B are very similar, Doc C is completely different
-    emb_a = np.array([[1.0, 0.0, 0.0], [0.8, 0.6, 0.0]])  # 2 chunks (dummy dim)
-    emb_b = np.array([[0.9, 0.1, 0.0], [0.8, 0.5, 0.0]])  # 2 chunks
-    emb_c = np.array([[0.0, 0.0, 1.0]])  # 1 chunk
-
-    return {"doc_A": emb_a, "doc_B": emb_b, "doc_C": emb_c}
 
 
 def test_chunk_max_similarity(dummy_embeddings):
@@ -361,3 +358,99 @@ def test_hybrid_similarity_matrix_index_mismatch():
         match="Semantic and lexical matrices must have the same index and columns",
     ):
         hybrid_similarity_matrix(semantic_df, lexical_df)
+
+
+# ── Stop-word filtering (issue #222) ──────────────────────────────────────────
+# Common function words (the, and, is, …) must not inflate lexical similarity.
+# These tests exercise both the TF-IDF path and the standalone Jaccard helper.
+
+
+def test_remove_stopwords_strips_common_function_words():
+    """The high-frequency words named in the issue are filtered out."""
+    text = "the cat and the dog are playing in the garden"
+    filtered = remove_stopwords(text)
+    # "the", "and", "are", "in" are stop-words and must be gone;
+    # content words remain.
+    assert "the" not in filtered.split()
+    assert "and" not in filtered.split()
+    assert "are" not in filtered.split()
+    assert "in" not in filtered.split()
+    for content_word in ("cat", "dog", "playing", "garden"):
+        assert content_word in filtered.split()
+
+
+def test_remove_stopwords_handles_empty_and_all_stopwords():
+    assert remove_stopwords("") == ""
+    assert remove_stopwords("the and is a of") == ""
+
+
+def test_remove_stopwords_preserves_content_words_only():
+    assert remove_stopwords("Machine learning is awesome") == "machine learning awesome"
+
+
+def test_tokenize_returns_stopword_free_set():
+    tokens = tokenize("The quick brown fox jumps over the lazy dog")
+    assert isinstance(tokens, set)
+    assert "the" not in tokens
+    # Content words are kept; "over" may or may not be a stop-word
+    # depending on whether NLTK is available, so only assert on the
+    # unambiguous content tokens.
+    assert {"quick", "brown", "fox", "jumps", "lazy", "dog"} <= tokens
+
+
+def test_jaccard_similarity_identical_content():
+    text = "machine learning models predict outcomes"
+    assert jaccard_similarity(text, text) == 1.0
+
+
+def test_jaccard_similarity_unrelated_content_is_low():
+    """Two essays that share only stop-words must score ~0, not ~1."""
+    essay_a = "the history of ancient rome and its emperors"
+    essay_b = "the fundamentals of quantum mechanics and particles"
+    score = jaccard_similarity(essay_a, essay_b)
+    # After stop-word removal the only shared token is "of" if it slips
+    # through, but "of" is in the fallback list too — so overlap is ~0.
+    assert score <= 0.2, f"expected low similarity, got {score}"
+
+
+def test_jaccard_similarity_partial_overlap_is_between_zero_and_one():
+    a = "neural networks for image classification"
+    b = "neural networks for sequence prediction"
+    score = jaccard_similarity(a, b)
+    assert 0.0 < score < 1.0
+
+
+def test_jaccard_similarity_empty_inputs_return_zero():
+    assert jaccard_similarity("", "") == 0.0
+    assert jaccard_similarity("the and is", "the and is") == 0.0
+
+
+def test_lexical_similarity_matrix_filters_stopwords():
+    """Two documents that differ only in stop-words should be near-identical
+    after filtering (they carry the same content), while a document that
+    shares ONLY stop-words with another should have low similarity.
+
+    This is the core regression guard for issue #222.
+    """
+    # Same content words, different stop-words → should still be very similar
+    # because stop-words are now filtered out before TF-IDF.
+    docs = {
+        "doc1": "the cat sat on the mat",
+        "doc2": "a cat is on a mat",
+        "doc3": "dogs run in the park",
+    }
+    df = lexical_similarity_matrix(docs, use_cache=False)
+
+    # doc1 vs doc2: identical content words (cat, sat/on, mat) → high
+    assert df.loc["doc1", "doc2"] > 0.5
+
+    # doc1 vs doc3: no content-word overlap → low (this is the bug #222 fix)
+    assert df.loc["doc1", "doc3"] < 0.3
+
+
+def test_stopwords_set_is_nonempty_and_contains_core_words():
+    """The module-level STOPWORDS set must be populated and contain at least
+    the words explicitly called out in the issue description."""
+    assert len(STOPWORDS) > 0
+    for word in ("the", "and", "is"):
+        assert word in STOPWORDS
