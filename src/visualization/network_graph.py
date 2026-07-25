@@ -24,49 +24,66 @@ def plot_similarity_network(
 
     Args:
         similarity_df: Square N×N DataFrame of similarity scores.
-        threshold:     Edge threshold; pairs with similarity >= threshold are connected.
-        title:         Title of the graph.
+        threshold: Edge threshold; pairs with similarity >= threshold are connected.
+        title: Title of the graph.
+        theme_colors: Optional dictionary containing theme colors.
 
     Returns:
         Plotly Graph Objects Figure.
     """
+
     # Create networkx graph
     G = nx.Graph()
 
     # Add all documents as nodes
     doc_names = list(similarity_df.columns)
+
     for name in doc_names:
         G.add_node(name)
 
     # Add edges for pairs exceeding threshold
     n = len(doc_names)
     edge_similarities = {}
+
     for i in range(n):
         for j in range(i + 1, n):
             score = float(similarity_df.iloc[i, j])
+
             if score >= threshold:
                 G.add_edge(doc_names[i], doc_names[j])
+
                 edge_similarities[(doc_names[i], doc_names[j])] = score
 
-    # Compute layout coordinates (spring layout forces connected nodes closer)
+    # Compute layout coordinates
     # Seed layout for reproducibility
-    pos = nx.spring_layout(G, seed=42, k=1.0 / np.sqrt(max(1, len(G.nodes()))))
+    pos = nx.spring_layout(
+        G,
+        seed=42,
+        k=1.0 / np.sqrt(max(1, len(G.nodes()))),
+    )
 
-    # ── Draw Edges (using Plotly shapes for custom colors/widths) ─────────────────
+    # ── Draw Edges ─────────────────────────────────────────────────────────────
+
     shapes = []
-    # For hover info, we can also add a transparent trace under each edge
+
+    # For hover info, add a transparent trace over each edge
     edge_trace_x = []
     edge_trace_y = []
     edge_hover_texts = []
 
     for edge in G.edges():
         doc_a, doc_b = edge
+
         x0, y0 = pos[doc_a]
         x1, y1 = pos[doc_b]
 
         # Get similarity score
         score = edge_similarities.get(
-            (doc_a, doc_b), edge_similarities.get((doc_b, doc_a), threshold)
+            (doc_a, doc_b),
+            edge_similarities.get(
+                (doc_b, doc_a),
+                threshold,
+            ),
         )
 
         # Line width based on similarity
@@ -74,11 +91,11 @@ def plot_similarity_network(
 
         # Color based on severity
         if score >= 0.90:
-            color = theme_colors["danger"] if theme_colors else "#ff4b4b"  # High
+            color = theme_colors["danger"] if theme_colors else "#ff4b4b"
         elif score >= 0.75:
-            color = theme_colors["warning"] if theme_colors else "#ffa500"  # Medium
+            color = theme_colors["warning"] if theme_colors else "#ffa500"
         else:
-            color = theme_colors["success"] if theme_colors else "#21c55d"  # Low
+            color = theme_colors["success"] if theme_colors else "#21c55d"
 
         shapes.append(
             dict(
@@ -87,40 +104,54 @@ def plot_similarity_network(
                 y0=y0,
                 x1=x1,
                 y1=y1,
-                line=dict(color=color, width=line_width),
+                line=dict(
+                    color=color,
+                    width=line_width,
+                ),
                 layer="below",
             )
         )
 
-        # Add to hover trace (midpoint of the edge for tooltip)
+        # Add to hover trace
         edge_trace_x.extend([x0, x1, None])
+
         edge_trace_y.extend([y0, y1, None])
+
         edge_hover_texts.append(
-            f"<b>Match:</b> {doc_a} ↔ {doc_b}<br><b>Similarity:</b> {score:.1%}"
+            f"<b>Match:</b> {doc_a} ↔ {doc_b}<br>" f"<b>Similarity:</b> {score:.1%}"
         )
 
-    # Hidden scatter trace to enable hover text on edges (hovering on midpoints)
+    # ── Edge Hover Trace ──────────────────────────────────────────────────────
+
     edge_hover_x = []
     edge_hover_y = []
+
     for edge in G.edges():
         doc_a, doc_b = edge
+
         x0, y0 = pos[doc_a]
         x1, y1 = pos[doc_b]
+
         # Midpoint coordinate
         edge_hover_x.append((x0 + x1) / 2.0)
+
         edge_hover_y.append((y0 + y1) / 2.0)
 
     edge_hover_trace = go.Scatter(
         x=edge_hover_x,
         y=edge_hover_y,
         mode="markers",
-        marker=dict(size=8, color="rgba(0,0,0,0)"),  # Invisible markers
+        marker=dict(
+            size=8,
+            color="rgba(0,0,0,0)",
+        ),
         text=edge_hover_texts,
         hoverinfo="text",
         name="Connections",
     )
 
-    # ── Draw Nodes ────────────────────────────────────────────────────────────────
+    # ── Draw Nodes ─────────────────────────────────────────────────────────────
+
     node_x = []
     node_y = []
     node_text = []
@@ -128,46 +159,87 @@ def plot_similarity_network(
     node_color = []
     node_size = []
 
+    # Store the document ID for each Plotly node.
+    # The order matches node_x, node_y, and node_text.
+    node_document_ids = []
+
     for node in G.nodes():
         x, y = pos[node]
+
         node_x.append(x)
         node_y.append(y)
         node_text.append(node)
 
+        # The current graph uses document names as node identifiers.
+        # These values are passed through Plotly's customdata so that
+        # streamlit-plotly-events can identify the clicked document.
+        node_document_ids.append(node)
+
         deg = G.degree(node)
 
-        # Size based on degree (number of suspicious connections)
+        # Size based on degree
         node_size.append(20 + deg * 6)
 
         # Color based on degree
         if deg == 0:
             node_color.append(
-                theme_colors.get("success", "#2e7d32") if theme_colors else "#2e7d32"
+                theme_colors.get(
+                    "success",
+                    "#2e7d32",
+                )
+                if theme_colors
+                else "#2e7d32"
             )
+
         elif deg == 1:
             node_color.append(
-                theme_colors.get("warning", "#f9a825") if theme_colors else "#f9a825"
+                theme_colors.get(
+                    "warning",
+                    "#f9a825",
+                )
+                if theme_colors
+                else "#f9a825"
             )
+
         else:
             node_color.append(
-                theme_colors.get("danger", "#c62828") if theme_colors else "#c62828"
+                theme_colors.get(
+                    "danger",
+                    "#c62828",
+                )
+                if theme_colors
+                else "#c62828"
             )
 
         node_hover.append(
             f"<b>📄 Document:</b> {node}<br>"
-            f"<b>🚨 Flagged connections:</b> {deg} / {len(doc_names) - 1}"
+            f"<b>🚨 Flagged connections:</b> "
+            f"{deg} / {len(doc_names) - 1}"
         )
+
+    # ── Plotly Node Trace ──────────────────────────────────────────────────────
 
     node_trace = go.Scatter(
         x=node_x,
         y=node_y,
         mode="markers+text",
+        # Store document ID with every Plotly node.
+        # streamlit-plotly-events can retrieve this value
+        # when the user clicks a node.
+        customdata=node_document_ids,
         text=[name.split(".")[0] for name in node_text],
         textposition="top center",
         hoverinfo="text",
         hovertext=node_hover,
         textfont=dict(
-            color=theme_colors.get("ink", "#0F172A") if theme_colors else "#0F172A",
+            color=(
+                theme_colors.get(
+                    "ink",
+                    "#0F172A",
+                )
+                if theme_colors
+                else "#0F172A"
+            ),
             size=10,
             family="Arial Black",
         ),
@@ -178,7 +250,10 @@ def plot_similarity_network(
             line=dict(
                 width=2,
                 color=(
-                    theme_colors.get("background", "#ffffff")
+                    theme_colors.get(
+                        "background",
+                        "#ffffff",
+                    )
                     if theme_colors
                     else "#ffffff"
                 ),
@@ -187,23 +262,63 @@ def plot_similarity_network(
         name="Documents",
     )
 
-    # ── Figure Layout ─────────────────────────────────────────────────────────────
-    bg_color = theme_colors.get("background", "#FFFFFF") if theme_colors else "#FFFFFF"
-    ink_color = theme_colors.get("ink", "#0F172A") if theme_colors else "#0F172A"
+    # ── Figure Layout ──────────────────────────────────────────────────────────
+
+    bg_color = (
+        theme_colors.get(
+            "background",
+            "#FFFFFF",
+        )
+        if theme_colors
+        else "#FFFFFF"
+    )
+
+    ink_color = (
+        theme_colors.get(
+            "ink",
+            "#0F172A",
+        )
+        if theme_colors
+        else "#0F172A"
+    )
 
     fig = go.Figure(
-        data=[edge_hover_trace, node_trace],
+        data=[
+            edge_hover_trace,
+            node_trace,
+        ],
         layout=go.Layout(
-            title=dict(text=title, font=dict(size=16, family="Arial Black")),
+            title=dict(
+                text=title,
+                font=dict(
+                    size=16,
+                    family="Arial Black",
+                ),
+            ),
             showlegend=False,
             hovermode="closest",
-            margin=dict(b=40, l=40, r=40, t=50),
+            margin=dict(
+                b=40,
+                l=40,
+                r=40,
+                t=50,
+            ),
             shapes=shapes,
-            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+            xaxis=dict(
+                showgrid=False,
+                zeroline=False,
+                showticklabels=False,
+            ),
+            yaxis=dict(
+                showgrid=False,
+                zeroline=False,
+                showticklabels=False,
+            ),
             paper_bgcolor=bg_color,
             plot_bgcolor=bg_color,
-            font=dict(color=ink_color),
+            font=dict(
+                color=ink_color,
+            ),
         ),
     )
 
