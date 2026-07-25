@@ -5,12 +5,12 @@ from unittest.mock import MagicMock, patch
 import docx
 
 from src.core.document_parser import (
+    clean_text,
     extract_text,
     extract_text_from_docx,
     extract_text_from_pdf,
     extract_text_from_txt,
     extract_texts,
-    clean_text,
     remove_ignore_phrases,
     strip_bibliography,
 )
@@ -361,8 +361,9 @@ class TestCleanText:
 
 def test_extract_empty_pdf_gracefully(caplog):
     """Assert that passing an empty/blank PDF returns an empty string gracefully without crashing."""
-    from reportlab.pdfgen import canvas
     import logging
+
+    from reportlab.pdfgen import canvas
 
     buf = io.BytesIO()
     c = canvas.Canvas(buf)
@@ -375,4 +376,53 @@ def test_extract_empty_pdf_gracefully(caplog):
             result = extract_text_from_pdf(empty_pdf_bytes)
 
     assert isinstance(result, str)
-    assert result.strip() == ""
+    assert result.strip() == ""
+
+
+def test_extract_text_from_doc_success():
+    """Test that extract_text_from_doc runs antiword successfully when present."""
+
+    from src.core.document_parser import extract_text_from_doc
+
+    mock_result = MagicMock()
+    mock_result.stdout = (
+        "This is a test legacy Word Document content extracted by antiword."
+    )
+    mock_result.returncode = 0
+
+    with patch("shutil.which", return_value="/usr/bin/antiword"):
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            result = extract_text_from_doc(b"fake doc bytes")
+            assert (
+                result
+                == "This is a test legacy Word Document content extracted by antiword."
+            )
+            mock_run.assert_called_once()
+            args, kwargs = mock_run.call_args
+            assert args[0][0] == "antiword"
+            assert args[0][1].endswith(".doc")
+
+
+def test_extract_text_from_doc_missing_antiword():
+    """Test that extract_text_from_doc raises RuntimeError if antiword is not installed."""
+    import pytest
+
+    from src.core.document_parser import extract_text_from_doc
+
+    with patch("shutil.which", return_value=None):
+        with pytest.raises(RuntimeError, match="antiword binary is not installed"):
+            extract_text_from_doc(b"fake doc bytes")
+
+
+def test_extract_text_routing_doc():
+    """Test that extract_text routes .doc files to extract_text_from_doc."""
+    from src.core.document_parser import extract_text
+
+    mock_result = MagicMock()
+    mock_result.stdout = "Legacy Word Doc Content"
+    mock_result.returncode = 0
+
+    with patch("shutil.which", return_value="/usr/bin/antiword"):
+        with patch("subprocess.run", return_value=mock_result):
+            result = extract_text(b"fake bytes", "test_file.doc")
+            assert result == "Legacy Word Doc Content"

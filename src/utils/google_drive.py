@@ -10,14 +10,14 @@ import os
 import re
 from typing import Dict, List, Optional, Tuple
 
-from src.utils.filename import unique_filename
-
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
+from src.utils.filename import unique_filename
+
 # Supported extensions for the plagiarism detection pipeline
-SUPPORTED_EXTENSIONS = (".pdf", ".docx", ".txt")
+SUPPORTED_EXTENSIONS = (".pdf", ".docx", ".doc", ".txt")
 
 
 def extract_folder_id(url_or_id: str) -> Optional[str]:

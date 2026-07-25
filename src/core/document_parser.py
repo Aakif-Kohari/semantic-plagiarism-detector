@@ -6,22 +6,25 @@ import io
 import logging
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 from collections import Counter
 from pathlib import Path
 from typing import BinaryIO, Dict, List, Union
 from urllib.parse import urlparse
 
 import defusedxml.lxml
+
 defusedxml.lxml.monkey_patch()
 
 import docx
 import pdfplumber
 from langdetect import LangDetectException, detect
-
 from striprtf.striprtf import rtf_to_text
+
 logger = logging.getLogger(__name__)
 from src.core.translator import translate_text
-
 
 # OCR dependencies are imported lazily so TXT/DOCX and normal text PDFs still
 # work even when Tesseract is not installed on the machine.
@@ -678,7 +681,6 @@ def extract_text_from_txt(file: PDFInput) -> str:
     return text.strip()
 
 
-
 def extract_text_from_rtf(file: PDFInput) -> str:
     """Extract plain text from an RTF file using striprtf."""
     text = ""
@@ -701,6 +703,60 @@ def extract_text_from_rtf(file: PDFInput) -> str:
     except Exception as exc:
         print(f"[document_parser] Error reading RTF: {exc}")
     return text.strip()
+
+
+def extract_text_from_doc(file: PDFInput) -> str:
+    """Extract plain text from a legacy Word Document (.doc) using antiword."""
+    if not shutil.which("antiword"):
+        logger.warning(
+            "antiword binary not found. Please install antiword to parse .doc files."
+        )
+        raise RuntimeError(
+            "antiword binary is not installed on the system. Cannot parse .doc files."
+        )
+
+    # Write input to a temporary file
+    with tempfile.NamedTemporaryFile(suffix=".doc", delete=False) as temp_file:
+        if isinstance(file, bytes):
+            temp_file.write(file)
+        elif isinstance(file, str):
+            with open(file, "rb") as f:
+                temp_file.write(f.read())
+        else:
+            # File-like object
+            content = file.read()
+            if isinstance(content, str):
+                content = content.encode("utf-8")
+            temp_file.write(content)
+        temp_file_path = temp_file.name
+
+    try:
+        # Run antiword command: antiword <temp_file_path>
+        result = subprocess.run(
+            ["antiword", temp_file_path],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="ignore",
+            timeout=30,
+            check=True,
+        )
+        return result.stdout.strip()
+    except subprocess.CalledProcessError as exc:
+        logger.error(f"[document_parser] antiword failed: {exc.stderr}")
+        raise RuntimeError(
+            f"antiword failed to extract text from .doc file: {exc.stderr}"
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
+        logger.error(f"[document_parser] antiword timed out: {exc}")
+        raise RuntimeError("antiword execution timed out.") from exc
+    finally:
+        # Always clean up the temp file
+        try:
+            os.remove(temp_file_path)
+        except OSError:
+            pass
+
 
 def extract_text_from_url(url: str) -> str:
     """Extract text content from a URL using web scraping.
@@ -889,6 +945,8 @@ def extract_text(
         raw = extract_text_from_pdf(file, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
     elif extension == "docx":
         raw = extract_text_from_docx(file)
+    elif extension == "doc":
+        raw = extract_text_from_doc(file)
     elif extension == "md":
         raw = extract_text_from_md(file)
 
