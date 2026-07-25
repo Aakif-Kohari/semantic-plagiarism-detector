@@ -30,7 +30,21 @@ class SimilarityThresholds:
     high: float = 0.90
 
     def __post_init__(self) -> None:
-        validate_thresholds(self)
+        plagiarism = _validate_boundary("plagiarism", self.plagiarism)
+        medium = _validate_boundary("medium", self.medium)
+        high = _validate_boundary("high", self.high)
+
+        if not plagiarism <= medium <= high:
+            raise ValueError(
+                "Thresholds must satisfy "
+                "0.0 <= plagiarism <= medium <= high <= 1.0."
+            )
+
+        # Normalize all validated Real values to floats while preserving
+        # the public immutability of this frozen dataclass.
+        object.__setattr__(self, "plagiarism", plagiarism)
+        object.__setattr__(self, "medium", medium)
+        object.__setattr__(self, "high", high)
 
 
 def _validate_boundary(name: str, value: Real) -> float:
@@ -48,19 +62,16 @@ def _validate_boundary(name: str, value: Real) -> float:
 def validate_thresholds(
     thresholds: SimilarityThresholds,
 ) -> SimilarityThresholds:
-    """Validate threshold types, ranges, and ordering."""
+    """Validate threshold type and ordering."""
     if not isinstance(thresholds, SimilarityThresholds):
         raise TypeError("thresholds must be a SimilarityThresholds instance.")
 
-    plagiarism = _validate_boundary("plagiarism", thresholds.plagiarism)
-    medium = _validate_boundary("medium", thresholds.medium)
-    high = _validate_boundary("high", thresholds.high)
-
-    if not plagiarism <= medium <= high:
+    if not thresholds.plagiarism <= thresholds.medium <= thresholds.high:
         raise ValueError(
             "Thresholds must satisfy "
             "0.0 <= plagiarism <= medium <= high <= 1.0."
         )
+
     return thresholds
 
 

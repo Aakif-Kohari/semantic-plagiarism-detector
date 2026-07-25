@@ -1,11 +1,11 @@
 {
   "title": "🔍 Sistema de Detección de Plagio Semántico",
-  "subtitle": "Cargue archivos PDF, DOCX o TXT de estudiantes. Detecta similitudes semánticas mediante incrustaciones de transformadores y búsqueda FAISS.",
+  "subtitle": "Cargue archivos PDF, DOCX, DOC o TXT de estudiantes. Detecta similitudes semánticas mediante incrustaciones de transformadores y búsqueda FAISS.",
   "settings": "⚙️ Configuración",
   "language": "Idioma",
   "theme": "Tema",
   "threshold": "Umbral de Plagio",
-  "upload_title": "📂 Cargar Tareas (PDF, DOCX, TXT, ZIP)",
+  "upload_title": "📂 Cargar Tareas (PDF, DOCX, DOC, TXT, ZIP)",
   "analysis_summary": "📊 Resumen del Análisis",
   "metric_docs": "📄 Documentos",
   "metric_pairs": "🔗 Parejas",
@@ -19,5 +19,7 @@
   "tab_users": "👥 Gestión de Usuarios",
   "tab_settings": "⚙️ Configuración",
   "download_csv": "⬇️ Descargar CSV",
-  "download_excel": "📊 Exportar como Excel Estilizado (.xlsx)"
+  "download_excel": "📊 Exportar como Excel Estilizado (.xlsx)",
+  "document_word_counts": "📊 Recuentos de Palabras del Documento",
+  "no_documents_db": "No hay documentos actualmente en la base de datos."
 }
