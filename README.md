@@ -63,6 +63,8 @@ similarity, and **FAISS vector search**.
               └────────┘ └────────┘ └────────┘ └───────┘ └──────┘ └───────┘
 ```
 
+>For a detailed explanation of the system components and data flow, see the [Architecture Guide](docs/ARCHITECTURE.md).
+
 ### Module Responsibilities
 
 | Module | Responsibility |
@@ -139,6 +141,7 @@ source venv/bin/activate        # Windows: venv\Scripts\activate
 
 ```bash
 pip install -r requirements.txt
+pip install pytest-cov  # Required for coverage reporting
 ```
 
 > **Note:** The first run will download the `paraphrase-multilingual-MiniLM-L12-v2` model (~420 MB).
@@ -152,6 +155,79 @@ streamlit run app/streamlit_app.py
 
 The app opens at **http://localhost:8501**.
 
+### 5. Pre-populated Seed Data (Optional for Contributors)
+
+To quickly test dashboard UI/CSS changes or verify logic without manually registering accounts or uploading documents, you can load pre-populated seed data:
+
+```bash
+# Load seed databases (users.db, corpus.db) and FAISS index (corpus.index)
+make load-seed   # Or: python scripts/manage_seed.py load
+```
+
+After loading the seed data, launch the Streamlit dashboard and log in with the pre-configured contributor accounts:
+* **Admin**: `admin` / `admin123`
+* **Teacher**: `teacher` / `teacher123`
+
+
+### Docker Deployment (recommended for quick setup)
+
+One-command local deployment using Docker and Docker Compose. This builds a slim
+Python 3.11 image with all dependencies and spins up the Streamlit dashboard plus
+an optional Redis cache.
+
+**Prerequisites:**
+- Docker Engine 20.10+
+- Docker Compose v2+
+
+**Start the app:**
+
+```bash
+docker compose up --build
+```
+
+The dashboard is available at **http://localhost:8501**.
+
+**Optional services:**
+- **Redis** is included in `docker-compose.yml` for session caching and rate-limiting.
+  The app runs without Redis and falls back to local in-memory state, so you can
+  comment out the `redis` service if you only need the Streamlit UI.
+
+**Environment variables:**
+
+Customize behavior via a `.env` file in the project root or inline in
+`docker-compose.yml`. Key variables:
+
+| Variable | Default | Description |
+|---|---|---|
+| `REDIS_URL` | `redis://redis:6379/0` | Redis connection URL |
+| `APP_BASE_URL` | `http://localhost:8501` | Base URL used in notifications |
+| `SMTP_SERVER` | `smtp.gmail.com` | SMTP server for daily summary emails |
+| `SMTP_PORT` | `587` | SMTP port |
+| `SMTP_USERNAME` | | SMTP username |
+| `SMTP_PASSWORD` | | SMTP password |
+| `API_BEARER_TOKEN` | | Bearer token for REST API |
+
+See `.env.example` for the full list.
+
+**Rebuild after dependency changes:**
+
+```bash
+docker compose build --no-cache
+docker compose up
+```
+
+**Stop the app:**
+
+```bash
+docker compose down
+```
+
+To also remove the Redis data volume:
+
+```bash
+docker compose down -v
+```
+
 ### Default credentials
 
 | Username | Password | Role |
@@ -161,6 +237,185 @@ The app opens at **http://localhost:8501**.
 Additional users can be created from the **User Management** page (admin only).
 
 ---
+
+
+## 🛠️ Troubleshooting
+
+If you encounter issues while setting up or running the project locally, check the solutions below for some of the most common development errors.
+
+### 1. `ModuleNotFoundError` or dependency installation errors
+
+**Error:**
+
+```text
+ModuleNotFoundError: No module named '<package>'
+```
+
+**Possible causes:**
+- Project dependencies have not been installed.
+- The virtual environment is not activated.
+- The dependency installation was interrupted or failed.
+
+**Solution:**
+
+Make sure your virtual environment is activated and install the required dependencies:
+
+```bash
+python -m venv venv
+```
+
+Activate it:
+
+```bash
+# Windows
+venv\Scripts\activate
+
+# macOS / Linux
+source venv/bin/activate
+```
+
+Then install the dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+If the missing module is related to OCR support, install the additional OCR dependencies:
+
+```bash
+python -m pip install pytesseract pymupdf pillow
+```
+
+---
+
+### 2. Sentence Transformer model download or loading errors
+
+**Error:**
+
+The application may fail while loading `paraphrase-multilingual-MiniLM-L12-v2`, or the first startup may appear to hang while downloading the model.
+
+**Possible causes:**
+- The model has not been downloaded before.
+- The machine has limited or unstable internet connectivity.
+- There is not enough disk space for the model cache.
+
+**Solution:**
+
+Make sure you have an active internet connection during the first run. The application downloads the `paraphrase-multilingual-MiniLM-L12-v2` model (approximately 420 MB) and caches it locally.
+
+After the initial download, subsequent runs should use the cached model.
+
+If the model download fails, restart the application and try again. Also verify that sufficient disk space is available.
+
+---
+
+### 3. SQLite `database is locked`
+
+**Error:**
+
+```text
+sqlite3.OperationalError: database is locked
+```
+
+**Possible causes:**
+- Another instance of the application is using the same SQLite database.
+- A previous application process is still running.
+- Multiple processes are attempting to write to the database simultaneously.
+
+**Solution:**
+
+1. Stop all running instances of the Streamlit application.
+2. Check that no other process is accessing `users.db` or `corpus.db`.
+3. Restart the application:
+
+```bash
+streamlit run app/streamlit_app.py
+```
+
+Avoid running multiple application instances that write to the same SQLite database files at the same time.
+
+> **Note:** Do not delete `users.db` or `corpus.db` as a first step. The project uses versioned SQLite migrations to preserve existing data during application upgrades.
+
+---
+
+### 4. Tesseract OCR not found
+
+**Error:**
+
+Scanned or image-only PDFs may fail to process, or you may see an error indicating that Tesseract could not be found.
+
+**Possible causes:**
+- Tesseract OCR is not installed.
+- Tesseract is installed but is not available on the system `PATH`.
+- The `TESSERACT_CMD` environment variable is not configured.
+
+**Solution:**
+
+First, verify that Tesseract is installed:
+
+```powershell
+tesseract --version
+```
+
+On Windows, if Tesseract is installed but cannot be found, set the executable path:
+
+```powershell
+$env:TESSERACT_CMD="C:\Program Files\Tesseract-OCR\tesseract.exe"
+```
+
+Then restart the application.
+
+For OCR support, also make sure the required Python dependencies are installed:
+
+```bash
+python -m pip install pytesseract pymupdf pillow
+```
+
+---
+
+### 5. Memory allocation or out-of-memory errors
+
+**Error:**
+
+The application may become slow, crash, or report memory allocation errors when processing a large number of documents or building FAISS indexes.
+
+**Possible causes:**
+- A large number of documents or text chunks are being processed at once.
+- Embedding generation requires more RAM than is currently available.
+- FAISS is indexing a large collection of vectors.
+- The embedding batch size is too high for the available hardware.
+
+**Solution:**
+
+Try the following:
+
+- Close other applications to free system memory.
+- Process fewer documents at a time.
+- Reduce the embedding batch size in `src/core/embedding_model.py`.
+- If using a GPU, make sure sufficient GPU memory is available.
+- Restart the application to clear unused memory.
+
+For larger collections, the application automatically switches from `IndexFlatIP` to `IndexIVFFlat` when the number of vectors reaches 5,000 or more.
+
+If the problem persists, reduce the batch size and try processing the documents again.
+
+---
+
+### Still having issues?
+
+If the problem persists after trying the solutions above, check the project's documentation and existing GitHub issues before opening a new issue.
+
+When reporting a new problem, include:
+
+- A clear description of the error.
+- The complete error message or traceback.
+- Steps to reproduce the issue.
+- Your operating system and Python version.
+- The command you used to start the application.
+- Relevant logs or screenshots.
+
+---
+
 
 ## ⚓ Pre-commit Hooks
 
@@ -446,8 +701,57 @@ The TF-IDF baseline relies on exact word overlap — it fails when students para
 Sentence Transformers encode **meaning**, catching paraphrases that surface-level
 methods miss entirely.
 
+## Similarity threshold and severity configuration
+
+All plagiarism and severity boundaries are defined in
+`src/core/config.py`.
+
+| Rule | Default |
+|---|---:|
+| Pair is flagged as plagiarism | `>= 0.59` |
+| Medium severity | `>= 0.75` |
+| High severity | `>= 0.90` |
+
+The required ordering is:
+
+```text
+0.0 <= plagiarism <= medium <= high <= 1.0
+```
+
+The administrator slider controls which pairs are flagged. It does not redefine
+the Medium or High severity bands.
+
+Scores outside `[0.0, 1.0]` are clamped for consistent presentation. Invalid
+non-numeric, NaN, or infinite values are rejected.
+
+
+## Versioned SQLite schema migrations
+
+`users.db` and `corpus.db` are upgraded automatically using SQLite
+`PRAGMA user_version`.
+
+Migration definitions live in:
+
+```text
+src/db/migrations/auth.py
+src/db/migrations/corpus.py
+src/db/migrations/common.py
+```
+
+Each upgrade:
+
+1. reads the current schema version,
+2. applies every missing migration in order,
+3. runs inside a rollback-safe savepoint,
+4. updates `PRAGMA user_version` only after all migrations succeed,
+5. preserves existing users, documents, chunks, embeddings, and incidents.
+
+Existing database files should not be deleted during an application upgrade.
+
 ---
 
 ## 📄 License
 
-MIT License. Free for academic and educational use.
+This project is licensed under the [MIT License](LICENSE).
+
+See the [`LICENSE`](LICENSE) file for the full license text.

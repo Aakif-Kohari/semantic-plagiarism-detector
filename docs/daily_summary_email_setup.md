@@ -30,7 +30,7 @@ ADMIN_EMAIL=admin@example.com
 **Gmail:**
 - Server: `smtp.gmail.com`
 - Port: `587` (TLS)
-- Password: Use an [App Password](https://support.google.com/accounts/answer/185833)
+- Password: Use an [App Password](http://web.archive.org/web/20260713122540/https://support.google.com/accounts/answer/185833)
 
 **Outlook/Office 365:**
 - Server: `smtp.office365.com`
