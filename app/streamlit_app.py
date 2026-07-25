@@ -2780,7 +2780,16 @@ if not st.session_state.authenticated:
             if flags:
                 sync_flagged_incidents(flags, threshold=threshold)
                 from src.utils.bulk_export import generate_bulk_reports_zip
-                zip_bytes = generate_bulk_reports_zip(flags)
+
+                analysis_results = st.session_state.get("analysis_results")
+                chunked_docs = analysis_results[1] if analysis_results else None
+                embeddings = analysis_results[2] if analysis_results else None
+
+                zip_bytes = generate_bulk_reports_zip(
+                    flags,
+                    chunked_docs=chunked_docs,
+                    embeddings=embeddings,
+                )
                 st.download_button(
                     label="⬇️ Download All Flagged Pairs (ZIP)",
                     data=zip_bytes,
