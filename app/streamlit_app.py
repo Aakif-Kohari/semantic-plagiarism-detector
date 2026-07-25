@@ -3215,12 +3215,12 @@ st.caption(f"🎓 {APP_TITLE} · Streamlit")
 # users who never reach the footer.
 from src.utils.version_check import APP_VERSION, check_for_update_sync  # noqa: E402
 
-# Cache the result for the lifetime of the Streamlit session so we don't
-# hammer the GitHub API on every rerun (e.g. widget interaction).
-if "_update_check_tag" not in st.session_state:
-    st.session_state["_update_check_tag"] = check_for_update_sync(APP_VERSION)
+@st.cache_data(ttl=3600)
+def _cached_version_check() -> str | None:
+    """Check for updates once per hour, cached by Streamlit."""
+    return check_for_update_sync(APP_VERSION)
 
-_latest_tag: str | None = st.session_state["_update_check_tag"]
+_latest_tag: str | None = _cached_version_check()
 
 _footer_col1, _footer_col2 = st.columns([3, 1])
 with _footer_col1:
