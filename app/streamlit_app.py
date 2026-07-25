@@ -2,10 +2,12 @@ import os
 import sqlite3
 import sys
 from pathlib import Path
+
 from sklearn.metrics.pairwise import cosine_similarity
-from src.core.text_chunking import chunk_documents
-from src.core.embedding_model import embed_documents
+
 from src.core.ai_detector import detect_documents_ai_probability
+from src.core.embedding_model import embed_documents
+from src.core.text_chunking import chunk_documents
 
 # Fix Streamlit import paths by pointing to project root
 FILE_PATH = Path(__file__).resolve()
@@ -29,10 +31,9 @@ load_dotenv()
 
 import numpy as np
 import pandas as pd
-from app.components.faiss_results import faiss_results_dataframe
 import streamlit as st
-from sklearn.metrics.pairwise import cosine_similarity
 
+from app.components.faiss_results import faiss_results_dataframe
 from src.security.metadata_stripper import strip_exif_metadata
 from src.utils.filename import sanitize_filename, unique_filename
 
@@ -70,7 +71,6 @@ if missing_env_vars:
 
 from app.css_constants import (
     CLASS_CLEAR_ALL_CONTAINER,
-    CLASS_DOC_ROW,
     CLASS_SKELETON,
     CLASS_SKELETON_CHART,
     CLASS_SKELETON_METRIC,
@@ -89,14 +89,13 @@ from app.theme import (
     set_theme,
     version_check_widget_html,
 )
-from src.core.ai_detector import detect_documents_ai_probability
 from src.core.app_config import get_app_title
 from src.core.config import DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD, severity_key
 from src.core.document_parser import (
     DEFAULT_OCR_DPI,
     DEFAULT_OCR_LANGUAGE,
-    OCRDependencyError,
     SUPPORTED_OCR_LANGUAGES,
+    OCRDependencyError,
     extract_text,
     prepare_text_for_embedding,
     remove_ignore_phrases,
@@ -114,7 +113,6 @@ from src.core.similarity import (
     find_most_similar_chunks,
     flag_plagiarism,
 )
-from src.core.text_chunking import chunk_documents
 from src.core.webhook import send_plagiarism_alert
 from src.i18n.translator import _SUPPORTED_LANGUAGES, get_text
 from src.visualization.network_graph import plot_similarity_network
@@ -130,8 +128,8 @@ class OCRFileBatchError(Exception):
 
 
 from src.core.export_engine import LMSExportEngine
+from src.core.synchronization import verify_and_repair_index
 from src.core.telemetry import TelemetryService
-from src.db.database_backup import create_corpus_database_snapshot
 from src.db import (
     clear_all_data,
     delete_document,
@@ -140,10 +138,10 @@ from src.db import (
     get_all_embeddings,
     get_all_tags,
     get_chunk_registry,
+    get_document_word_counts,
     get_unique_class_sections,
     init_corpus_db,
 )
-from src.core.synchronization import verify_and_repair_index
 from src.db.auth import (
     authenticate_user,
     check_login_rate_limit,
@@ -163,6 +161,7 @@ from src.db.auth import (
     update_user_preferences,
     verify_user,
 )
+from src.db.database_backup import create_corpus_database_snapshot
 from src.db.incidents import (  # noqa: E402
     get_all_incidents_above_threshold_for_export,
     get_high_severity_trends,
@@ -188,6 +187,7 @@ from src.utils.redis_cache import (
 )
 from src.utils.warning_list import render_warning_controls
 from src.visualization.analytics import (
+    plot_document_sizes,
     plot_high_severity_trends,
     plot_most_plagiarized_documents,
     plot_similarity_distribution,
@@ -229,6 +229,7 @@ init_db()
 import threading
 
 import uvicorn
+
 from src.api.app import app as fastapi_app
 
 
@@ -326,6 +327,7 @@ st.markdown(
 TIMEOUT_LIMIT = 15 * 60  # 15 minutes in seconds
 
 import streamlit.components.v1 as components
+
 if st.session_state.get("authenticated", False):
     components.html(
         f"""
@@ -483,6 +485,7 @@ if not st.session_state.get("authenticated", False):
                             "threshold", DEFAULT_THRESHOLDS.plagiarism
                         )
                         from src.db.auth import get_user_theme
+
                         st.session_state.theme = get_user_theme(username)
                         set_theme(st.session_state.theme)
 
@@ -517,6 +520,7 @@ if not st.session_state.get("authenticated", False):
                 "threshold", DEFAULT_THRESHOLDS.plagiarism
             )
             from src.db.auth import get_user_theme
+
             st.session_state.theme = get_user_theme(username)
             set_theme(st.session_state.theme)
 
@@ -733,6 +737,7 @@ def save_preferences_callback():
         update_user_preferences(st.session_state.username, prefs)
 
         from src.db.auth import set_user_theme
+
         theme_val = st.session_state.get("theme_selector", "Light")
         set_user_theme(st.session_state.username, theme_val)
 
@@ -768,11 +773,14 @@ with st.sidebar:
         existing_docs = get_all_documents()
         session_uploaded_docs = st.session_state.get("session_uploaded_docs", set())
 
-        doc_filter = st.text_input("Filter documents by filename", key="doc_mgmt_filter")
+        doc_filter = st.text_input(
+            "Filter documents by filename", key="doc_mgmt_filter"
+        )
 
         if existing_docs:
             filtered_docs = [
-                d for d in existing_docs
+                d
+                for d in existing_docs
                 if not doc_filter or doc_filter.lower() in str(d["filename"]).lower()
             ]
             st.write(f"**{len(filtered_docs)}** documents matching")
@@ -837,7 +845,9 @@ with st.sidebar:
                     with col2:
                         if st.button("Delete", key=f"del_tag_{tag}", type="secondary"):
                             affected = delete_tag(tag)
-                            st.success(f"Deleted tag `{tag}` from {affected} document(s).")
+                            st.success(
+                                f"Deleted tag `{tag}` from {affected} document(s)."
+                            )
                             st.rerun()
 
         # ── Generate Mock Data (Issue #255) ───────────────────────────────────
@@ -912,7 +922,9 @@ with st.sidebar:
                 except (ValueError, RuntimeError, TypeError, OSError) as _mock_err:
                     st.error(f"❌ Mock data generation failed: {_mock_err}")
 
-        st.markdown(f'<div class="{CLASS_CLEAR_ALL_CONTAINER}">', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="{CLASS_CLEAR_ALL_CONTAINER}">', unsafe_allow_html=True
+        )
         if st.button(
             "🗑️ Clear All Documents",
             key="clear_all_documents_button",
@@ -1395,9 +1407,7 @@ else:
 
     if uploaded_files:
         total_upload_bytes = uploaded_files_total_bytes(uploaded_files)
-        estimated_seconds = estimate_processing_seconds(
-            total_upload_bytes
-        )
+        estimated_seconds = estimate_processing_seconds(total_upload_bytes)
 
         st.markdown(
             pipeline_progress_html(
@@ -1695,7 +1705,9 @@ if not st.session_state.authenticated:
                             }
                         )
                 except ValueError as ve:
-                    st.error(f"⚠️ Failed to process ZIP archive '{safe_name}': {str(ve)}")
+                    st.error(
+                        f"⚠️ Failed to process ZIP archive '{safe_name}': {str(ve)}"
+                    )
                 except (OSError, RuntimeError, TypeError):
                     st.error(
                         f"⚠️ Failed to process ZIP archive '{safe_name}': Unknown error occurred."
@@ -1715,10 +1727,7 @@ if not st.session_state.authenticated:
                         else:
                             student_name = f"Row {idx + 1}"
                         virtual_filename = unique_filename(
-                            (
-                                f"{student_name} "
-                                f"({safe_name} - Row {idx + 1}).txt"
-                            ),
+                            (f"{student_name} " f"({safe_name} - Row {idx + 1}).txt"),
                             file_bytes_dict,
                         )
                         file_bytes_dict[virtual_filename] = strip_exif_metadata(
@@ -2010,6 +2019,7 @@ if not st.session_state.authenticated:
         url_filename: str,
     ) -> str:
         import hashlib
+
         h = hashlib.sha256()
         for name in sorted(file_bytes_dict.keys()):
             data = file_bytes_dict[name]
@@ -2048,19 +2058,34 @@ if not st.session_state.authenticated:
         col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
             st.markdown(f"**{get_text('metric_docs', lang=lang_code)}**")
-            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_METRIC}"></div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_METRIC}"></div>',
+                unsafe_allow_html=True,
+            )
         with col2:
             st.markdown(f"**{get_text('metric_pairs', lang=lang_code)}**")
-            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_METRIC}"></div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_METRIC}"></div>',
+                unsafe_allow_html=True,
+            )
         with col3:
             st.markdown(f"**{get_text('metric_flagged', lang=lang_code)}**")
-            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_METRIC}"></div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_METRIC}"></div>',
+                unsafe_allow_html=True,
+            )
         with col4:
             st.markdown(f"**{get_text('metric_faiss', lang=lang_code)}**")
-            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_METRIC}"></div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_METRIC}"></div>',
+                unsafe_allow_html=True,
+            )
         with col5:
             st.markdown("**🎯 Threshold**")
-            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_METRIC}"></div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_METRIC}"></div>',
+                unsafe_allow_html=True,
+            )
         st.divider()
 
         # 2. Tabs Skeleton
@@ -2087,46 +2112,88 @@ if not st.session_state.authenticated:
         with tab_warnings:
             st.markdown("🏠 Home > Dashboard > **Warnings**")
             st.subheader(get_text("tab_warnings", lang=lang_code))
-            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TITLE}"></div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT}"></div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT}"></div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT_SHORT}"></div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TITLE}"></div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT}"></div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT}"></div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT_SHORT}"></div>',
+                unsafe_allow_html=True,
+            )
 
         with tab_faiss:
             st.markdown("🏠 Home > Dashboard > **FAISS Chunk Search**")
             st.subheader("⚡ FAISS Chunk Search")
-            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT_SHORT}" style="height: 40px; width: 100%;"></div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT}" style="height: 200px;"></div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT_SHORT}" style="height: 40px; width: 100%;"></div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT}" style="height: 200px;"></div>',
+                unsafe_allow_html=True,
+            )
 
         with tab_matrix:
             st.markdown("🏠 Home > Dashboard > **Similarity Matrix**")
             st.subheader("📋 Similarity Matrix")
-            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TABLE}"></div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TABLE}"></div>',
+                unsafe_allow_html=True,
+            )
 
         with tab_heatmap:
             st.markdown("🏠 Home > Dashboard > **Heatmap & Network**")
             st.subheader(get_text("tab_heatmap", lang=lang_code))
-            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_CHART}">Calculating similarities and generating heatmap...</div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_CHART}">Calculating similarities and generating heatmap...</div>',
+                unsafe_allow_html=True,
+            )
             st.divider()
             st.subheader("🕸️ Interactive Plagiarism Network")
-            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_CHART}">Calculating similarities and generating network graph...</div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_CHART}">Calculating similarities and generating network graph...</div>',
+                unsafe_allow_html=True,
+            )
 
         with tab_drill:
             st.markdown("🏠 Home > Dashboard > **Pair Drill-Down**")
             st.subheader("🔬 Pair Drill-Down")
-            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT_SHORT}"></div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_CHART}"></div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT_SHORT}"></div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_CHART}"></div>',
+                unsafe_allow_html=True,
+            )
 
         with tab_analytics:
             st.markdown("🏠 Home > Dashboard > **Analytics Dashboard**")
             st.subheader("📊 Plagiarism Analytics Dashboard")
-            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_CHART}">Generating analytics trends...</div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_CHART}">Generating top plagiarism charts...</div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_CHART}">Generating analytics trends...</div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_CHART}">Generating top plagiarism charts...</div>',
+                unsafe_allow_html=True,
+            )
 
         with tab_users:
             st.markdown("🏠 Home > Dashboard > **User Management**")
             st.subheader("👤 User Management")
-            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TABLE}"></div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TABLE}"></div>',
+                unsafe_allow_html=True,
+            )
 
         try:
             with st.spinner("🧠 Processing files and building embeddings…"):
@@ -2422,8 +2489,7 @@ if not st.session_state.authenticated:
                                     st.column_config.TextColumn(
                                         "Target Document",
                                         help=(
-                                            "Document containing the "
-                                            "matching chunk."
+                                            "Document containing the " "matching chunk."
                                         ),
                                         width="medium",
                                     )
@@ -2456,9 +2522,7 @@ if not st.session_state.authenticated:
                             key="faiss_search_results_table",
                         )
                     else:
-                        st.info(
-                            "No matching vector chunks found above threshold."
-                        )
+                        st.info("No matching vector chunks found above threshold.")
                 except Exception as err:
                     st.error(f"FAISS search error: {err}")
             else:
@@ -2726,11 +2790,14 @@ if not st.session_state.authenticated:
                     ):
                         highlighted_ca, highlighted_cb = highlight_overlap(ca, cb)
                         from src.utils.text_stats import format_text_stats
+
                         st.markdown(
-                            f"**{doc_a} ({format_text_stats(ca)}):** {highlighted_ca}", unsafe_allow_html=True
+                            f"**{doc_a} ({format_text_stats(ca)}):** {highlighted_ca}",
+                            unsafe_allow_html=True,
                         )
                         st.markdown(
-                            f"**{doc_b} ({format_text_stats(cb)}):** {highlighted_cb}", unsafe_allow_html=True
+                            f"**{doc_b} ({format_text_stats(cb)}):** {highlighted_cb}",
+                            unsafe_allow_html=True,
                         )
 
             with drill_tab_viewer:
@@ -2767,6 +2834,17 @@ if not st.session_state.authenticated:
     with tab_analytics:
         st.markdown("🏠 Home > Dashboard > **Analytics Dashboard**")
         st.subheader("📊 Plagiarism Analytics Dashboard")
+
+        # ── Document Word Counts Graph ──
+        st.subheader(get_text("document_word_counts", lang=lang_code))
+        word_counts = get_document_word_counts()
+        if word_counts:
+            word_counts_fig = plot_document_sizes(word_counts)
+            st.plotly_chart(word_counts_fig, use_container_width=True)
+        else:
+            st.info(get_text("no_documents_db", lang=lang_code))
+        st.divider()
+
         if not has_enough_files:
             st.markdown(
                 empty_state_html(
@@ -3179,9 +3257,7 @@ if not st.session_state.authenticated:
             )
 
             try:
-                corpus_database_snapshot = (
-                    create_corpus_database_snapshot()
-                )
+                corpus_database_snapshot = create_corpus_database_snapshot()
             except (OSError, sqlite3.DatabaseError) as exc:
                 st.warning(
                     "The corpus database is currently unavailable for "
@@ -3235,10 +3311,12 @@ st.caption(f"🎓 {APP_TITLE} · Streamlit")
 # users who never reach the footer.
 from src.utils.version_check import APP_VERSION, check_for_update_sync  # noqa: E402
 
+
 @st.cache_data(ttl=3600)
 def _cached_version_check() -> str | None:
     """Check for updates once per hour, cached by Streamlit."""
     return check_for_update_sync(APP_VERSION)
+
 
 _latest_tag: str | None = _cached_version_check()
 
