@@ -1,5 +1,21 @@
 import streamlit as st
 
+from app.css_constants import (
+    CLASS_AVATAR,
+    CLASS_BADGE,
+    CLASS_EMPTY_DESC,
+    CLASS_EMPTY_ICON,
+    CLASS_EMPTY_STATE,
+    CLASS_EMPTY_TITLE,
+    CLASS_PIPELINE_ACTIVE,
+    CLASS_PIPELINE_ARROW,
+    CLASS_PIPELINE_DONE,
+    CLASS_PIPELINE_ETA,
+    CLASS_PIPELINE_STEP,
+    CLASS_PIPELINE_STEPS,
+    CLASS_SIDEBAR_USER_BADGE,
+    CLASS_SIM_PILL,
+)
 from src.core.config import DEFAULT_THRESHOLDS, normalize_severity_label, severity_key
 
 THEMES = {
@@ -800,7 +816,7 @@ def badge_html(tier: str, label: str = None) -> str:
         default_label = "🟢 Low"
 
     display_label = label if label is not None else default_label
-    return f'<span class="badge" style="background-color: {bg_color}; color: {text_color}; border: 1px solid {text_color};">{display_label}</span>'
+    return f'<span class="{CLASS_BADGE}" style="background-color: {bg_color}; color: {text_color}; border: 1px solid {text_color};">{display_label}</span>'
 
 
 # ── UI helpers ────────────────────────────────────────────────────────────────
@@ -823,7 +839,7 @@ def format_similarity_html(
         bg = colors["success"]
 
     return (
-        f'<span class="sim-pill" style="background:{bg};">'
+        f'<span class="{CLASS_SIM_PILL}" style="background:{bg};">'
         f"Similarity: {score * 100:.1f}%</span>"
     )
 
@@ -831,10 +847,10 @@ def format_similarity_html(
 def empty_state_html(icon: str, title: str, description: str) -> str:
     """Return styled empty-state HTML block."""
     return (
-        f'<div class="empty-state">'
-        f'<div class="empty-icon">{icon}</div>'
-        f'<div class="empty-title">{title}</div>'
-        f'<div class="empty-desc">{description}</div>'
+        f'<div class="{CLASS_EMPTY_STATE}">'
+        f'<div class="{CLASS_EMPTY_ICON}">{icon}</div>'
+        f'<div class="{CLASS_EMPTY_TITLE}">{title}</div>'
+        f'<div class="{CLASS_EMPTY_DESC}">{description}</div>'
         f"</div>"
     )
 
@@ -843,8 +859,8 @@ def sidebar_user_badge_html(username: str, role: str) -> str:
     """Return the sidebar user badge with avatar circle."""
     initial = username[0].upper() if username else "?"
     return (
-        f'<div class="sidebar-user-badge">'
-        f'<div class="avatar">{initial}</div>'
+        f'<div class="{CLASS_SIDEBAR_USER_BADGE}">'
+        f'<div class="{CLASS_AVATAR}">{initial}</div>'
         f"<div><strong>{username}</strong><br>"
         f'<span style="font-size:0.7rem;color:var(--muted);">{role.upper()}</span></div>'
         f"</div>"
@@ -861,21 +877,21 @@ def pipeline_progress_html(
 
     for i, step in enumerate(steps):
         if active_index < 0:
-            cls = "pipeline-step"
+            cls = CLASS_PIPELINE_STEP
         elif i < active_index:
-            cls = "pipeline-step done"
+            cls = f"{CLASS_PIPELINE_STEP} {CLASS_PIPELINE_DONE}"
         elif i == active_index:
-            cls = "pipeline-step active"
+            cls = f"{CLASS_PIPELINE_STEP} {CLASS_PIPELINE_ACTIVE}"
         else:
-            cls = "pipeline-step"
+            cls = CLASS_PIPELINE_STEP
 
         prefix = "✓ " if active_index >= 0 and i < active_index else ""
         parts.append(f'<span class="{cls}">{prefix}{step}</span>')
 
         if i < len(steps) - 1:
-            parts.append('<span class="pipeline-arrow">→</span>')
+            parts.append(f'<span class="{CLASS_PIPELINE_ARROW}">→</span>')
 
-    progress = f'<div class="pipeline-steps">{"".join(parts)}</div>'
+    progress = f'<div class="{CLASS_PIPELINE_STEPS}">{"".join(parts)}</div>'
 
     if estimated_seconds is None:
         return progress
@@ -884,7 +900,7 @@ def pipeline_progress_html(
 
     duration = format_processing_duration(estimated_seconds)
     eta = (
-        '<div class="pipeline-eta">'
+        f'<div class="{CLASS_PIPELINE_ETA}">'
         f"Estimated processing time: about {duration}"
         "</div>"
     )

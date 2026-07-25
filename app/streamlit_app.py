@@ -68,6 +68,17 @@ if missing_env_vars:
     )
 
 
+from app.css_constants import (
+    CLASS_CLEAR_ALL_CONTAINER,
+    CLASS_DOC_ROW,
+    CLASS_SKELETON,
+    CLASS_SKELETON_CHART,
+    CLASS_SKELETON_METRIC,
+    CLASS_SKELETON_TABLE,
+    CLASS_SKELETON_TEXT,
+    CLASS_SKELETON_TEXT_SHORT,
+    CLASS_SKELETON_TITLE,
+)
 from app.theme import (
     back_to_top_html,
     empty_state_html,
@@ -683,7 +694,7 @@ with st.sidebar:
         if existing_docs:
             st.write(f"**{len(existing_docs)}** documents in database")
             for doc in existing_docs:
-                st.markdown('<div class="doc-row">', unsafe_allow_html=True)
+                st.markdown(f'<div class="{CLASS_DOC_ROW}">', unsafe_allow_html=True)
                 col1, col2 = st.columns([3, 1])
                 with col1:
                     is_new = doc["filename"] in session_uploaded_docs
@@ -802,7 +813,7 @@ with st.sidebar:
                 except (ValueError, RuntimeError, TypeError, OSError) as _mock_err:
                     st.error(f"❌ Mock data generation failed: {_mock_err}")
 
-        st.markdown('<div class="clear-all-container">', unsafe_allow_html=True)
+        st.markdown(f'<div class="{CLASS_CLEAR_ALL_CONTAINER}">', unsafe_allow_html=True)
         if st.button(
             "🗑️ Clear All Documents",
             key="clear_all_documents_button",
@@ -1938,19 +1949,19 @@ if not st.session_state.authenticated:
         col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
             st.markdown(f"**{get_text('metric_docs', lang=lang_code)}**")
-            st.markdown('<div class="skeleton skeleton-metric"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_METRIC}"></div>', unsafe_allow_html=True)
         with col2:
             st.markdown(f"**{get_text('metric_pairs', lang=lang_code)}**")
-            st.markdown('<div class="skeleton skeleton-metric"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_METRIC}"></div>', unsafe_allow_html=True)
         with col3:
             st.markdown(f"**{get_text('metric_flagged', lang=lang_code)}**")
-            st.markdown('<div class="skeleton skeleton-metric"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_METRIC}"></div>', unsafe_allow_html=True)
         with col4:
             st.markdown(f"**{get_text('metric_faiss', lang=lang_code)}**")
-            st.markdown('<div class="skeleton skeleton-metric"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_METRIC}"></div>', unsafe_allow_html=True)
         with col5:
             st.markdown("**🎯 Threshold**")
-            st.markdown('<div class="skeleton skeleton-metric"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_METRIC}"></div>', unsafe_allow_html=True)
         st.divider()
 
         # 2. Tabs Skeleton
@@ -1977,46 +1988,46 @@ if not st.session_state.authenticated:
         with tab_warnings:
             st.markdown("🏠 Home > Dashboard > **Warnings**")
             st.subheader(get_text("tab_warnings", lang=lang_code))
-            st.markdown('<div class="skeleton skeleton-title"></div>', unsafe_allow_html=True)
-            st.markdown('<div class="skeleton skeleton-text"></div>', unsafe_allow_html=True)
-            st.markdown('<div class="skeleton skeleton-text"></div>', unsafe_allow_html=True)
-            st.markdown('<div class="skeleton skeleton-text-short"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TITLE}"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT}"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT}"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT_SHORT}"></div>', unsafe_allow_html=True)
 
         with tab_faiss:
             st.markdown("🏠 Home > Dashboard > **FAISS Chunk Search**")
             st.subheader("⚡ FAISS Chunk Search")
-            st.markdown('<div class="skeleton skeleton-text-short" style="height: 40px; width: 100%;"></div>', unsafe_allow_html=True)
-            st.markdown('<div class="skeleton skeleton-text" style="height: 200px;"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT_SHORT}" style="height: 40px; width: 100%;"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT}" style="height: 200px;"></div>', unsafe_allow_html=True)
 
         with tab_matrix:
             st.markdown("🏠 Home > Dashboard > **Similarity Matrix**")
             st.subheader("📋 Similarity Matrix")
-            st.markdown('<div class="skeleton skeleton-table"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TABLE}"></div>', unsafe_allow_html=True)
 
         with tab_heatmap:
             st.markdown("🏠 Home > Dashboard > **Heatmap & Network**")
             st.subheader(get_text("tab_heatmap", lang=lang_code))
-            st.markdown('<div class="skeleton skeleton-chart">Calculating similarities and generating heatmap...</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_CHART}">Calculating similarities and generating heatmap...</div>', unsafe_allow_html=True)
             st.divider()
             st.subheader("🕸️ Interactive Plagiarism Network")
-            st.markdown('<div class="skeleton skeleton-chart">Calculating similarities and generating network graph...</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_CHART}">Calculating similarities and generating network graph...</div>', unsafe_allow_html=True)
 
         with tab_drill:
             st.markdown("🏠 Home > Dashboard > **Pair Drill-Down**")
             st.subheader("🔬 Pair Drill-Down")
-            st.markdown('<div class="skeleton skeleton-text-short"></div>', unsafe_allow_html=True)
-            st.markdown('<div class="skeleton skeleton-chart"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT_SHORT}"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_CHART}"></div>', unsafe_allow_html=True)
 
         with tab_analytics:
             st.markdown("🏠 Home > Dashboard > **Analytics Dashboard**")
             st.subheader("📊 Plagiarism Analytics Dashboard")
-            st.markdown('<div class="skeleton skeleton-chart">Generating analytics trends...</div>', unsafe_allow_html=True)
-            st.markdown('<div class="skeleton skeleton-chart">Generating top plagiarism charts...</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_CHART}">Generating analytics trends...</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_CHART}">Generating top plagiarism charts...</div>', unsafe_allow_html=True)
 
         with tab_users:
             st.markdown("🏠 Home > Dashboard > **User Management**")
             st.subheader("👤 User Management")
-            st.markdown('<div class="skeleton skeleton-table"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TABLE}"></div>', unsafe_allow_html=True)
 
         try:
             with st.spinner("🧠 Processing files and building embeddings…"):
