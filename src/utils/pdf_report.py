@@ -132,6 +132,7 @@ def generate_plagiarism_report(
     report_title: str = "Plagiarism Detection Report",
     logo_image: Optional[bytes] = None,
     brand_color: Optional[str] = None,
+    dark_mode: Optional[bool] = None,
 ) -> BytesIO:
     """
     Generates a professional PDF plagiarism report for a document pair.
@@ -145,11 +146,21 @@ def generate_plagiarism_report(
         report_title: Title for the PDF report
         logo_image: Optional raw bytes of a PNG/JPG logo for the PDF header
         brand_color: Optional hex color string (e.g. "#1e3a8a") for headings
+        dark_mode: Optional boolean to enable dark mode themed report
 
     Returns:
         BytesIO buffer containing the generated PDF
     """
-    brand_hex = brand_color or "#1e3a8a"
+    if dark_mode is None:
+        try:
+            import streamlit as st
+
+            dark_mode = st.session_state.get("theme", "Light") == "Dark"
+        except Exception:
+            dark_mode = False
+
+    default_brand = "#2dd4bf" if dark_mode else "#1e3a8a"
+    brand_hex = brand_color or default_brand
     brand_clr = HexColor(brand_hex)
 
     # Determine top margin to leave room for logo header
@@ -192,33 +203,46 @@ def generate_plagiarism_report(
         spaceAfter=12,
         spaceBefore=20,
     )
-    normal_style = styles["Normal"]
-    normal_style.fontSize = 10
-    normal_style.leading = 14
+    normal_style = ParagraphStyle(
+        "CustomNormal",
+        parent=styles["Normal"],
+        fontSize=10,
+        leading=14,
+        textColor=HexColor("#FFFFFF") if dark_mode else HexColor("#31333f"),
+    )
 
-    # ── Header / footer callback for logo ──────────────────────────────────
+    # ── Header / footer callback for logo ──
     def _draw_header(canvas_obj, _doc):
-        if not logo_image:
-            return
         canvas_obj.saveState()
-        try:
-            reader = ImageReader(BytesIO(logo_image))
-            iw, ih = reader.getSize()
-            logo_display_w = 1.5 * inch
-            logo_display_h = logo_display_w * ih / iw
-            x = _doc.leftMargin
-            y = _doc.pagesize[1] - 36 - logo_display_h
-            canvas_obj.drawImage(
-                reader,
-                x,
-                y,
-                width=logo_display_w,
-                height=logo_display_h,
-                preserveAspectRatio=True,
-                mask="auto",
+        if dark_mode:
+            canvas_obj.setFillColor(HexColor("#0F172A"))
+            canvas_obj.rect(
+                0,
+                0,
+                _doc.pagesize[0],
+                _doc.pagesize[1],
+                fill=True,
+                stroke=False,
             )
-        except Exception:
-            pass
+        if logo_image:
+            try:
+                reader = ImageReader(BytesIO(logo_image))
+                iw, ih = reader.getSize()
+                logo_display_w = 1.5 * inch
+                logo_display_h = logo_display_w * ih / iw
+                x = _doc.leftMargin
+                y = _doc.pagesize[1] - 36 - logo_display_h
+                canvas_obj.drawImage(
+                    reader,
+                    x,
+                    y,
+                    width=logo_display_w,
+                    height=logo_display_h,
+                    preserveAspectRatio=True,
+                    mask="auto",
+                )
+            except Exception:
+                pass
         canvas_obj.restoreState()
 
     # Build story (PDF content)
@@ -245,21 +269,32 @@ def generate_plagiarism_report(
     ]
 
     doc_table = Table(doc_data, colWidths=[2 * inch, 4 * inch], hAlign=TA_LEFT)
-    doc_table.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (0, -1), HexColor("#f3f4f6")),
-                ("TEXTCOLOR", (0, 0), (0, -1), HexColor("#374151")),
-                ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-                ("FONTSIZE", (0, 0), (-1, -1), 10),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-                ("TOPPADDING", (0, 0), (-1, -1), 8),
-                ("LEFTPADDING", (0, 0), (-1, -1), 12),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 12),
-                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-            ]
-        )
-    )
+    if dark_mode:
+        table_style_cmds = [
+            ("BACKGROUND", (0, 0), (0, -1), HexColor("#1E293B")),
+            ("TEXTCOLOR", (0, 0), (0, -1), HexColor("#FFFFFF")),
+            ("TEXTCOLOR", (1, 0), (1, -1), HexColor("#FFFFFF")),
+            ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+            ("FONTSIZE", (0, 0), (-1, -1), 10),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ("LEFTPADDING", (0, 0), (-1, -1), 12),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.lightgrey),
+        ]
+    else:
+        table_style_cmds = [
+            ("BACKGROUND", (0, 0), (0, -1), HexColor("#f3f4f6")),
+            ("TEXTCOLOR", (0, 0), (0, -1), HexColor("#374151")),
+            ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+            ("FONTSIZE", (0, 0), (-1, -1), 10),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ("LEFTPADDING", (0, 0), (-1, -1), 12),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ]
+    doc_table.setStyle(TableStyle(table_style_cmds))
     story.append(doc_table)
     story.append(Spacer(1, 0.3 * inch))
 
@@ -278,11 +313,12 @@ def generate_plagiarism_report(
         colWidths=[bar_width / 100 * 5 * inch, (100 - bar_width) / 100 * 5 * inch],
         hAlign=TA_LEFT,
     )
+    bar_bg_empty = HexColor("#374151") if dark_mode else HexColor("#e5e7eb")
     bar_table.setStyle(
         TableStyle(
             [
                 ("BACKGROUND", (0, 0), (0, -1), sim_color),
-                ("BACKGROUND", (1, 0), (1, -1), HexColor("#e5e7eb")),
+                ("BACKGROUND", (1, 0), (1, -1), bar_bg_empty),
                 ("HEIGHT", (0, 0), (-1, -1), 20),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ]
@@ -313,7 +349,7 @@ def generate_plagiarism_report(
                     "PairHeader",
                     parent=styles["Heading3"],
                     fontSize=11,
-                    textColor=HexColor("#1f2937"),
+                    textColor=HexColor("#FFFFFF") if dark_mode else HexColor("#1f2937"),
                     spaceAfter=8,
                     spaceBefore=15,
                 ),
@@ -332,22 +368,34 @@ def generate_plagiarism_report(
             pair_table = Table(
                 pair_data, colWidths=[2.5 * inch, 2.5 * inch], hAlign=TA_LEFT
             )
-            pair_table.setStyle(
-                TableStyle(
-                    [
-                        ("BACKGROUND", (0, 0), (-1, 0), HexColor("#f9fafb")),
-                        ("TEXTCOLOR", (0, 0), (-1, 0), HexColor("#111827")),
-                        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-                        ("FONTSIZE", (0, 0), (-1, -1), 9),
-                        ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
-                        ("TOPPADDING", (0, 0), (-1, -1), 10),
-                        ("LEFTPADDING", (0, 0), (-1, -1), 10),
-                        ("RIGHTPADDING", (0, 0), (-1, -1), 10),
-                        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                    ]
-                )
-            )
+            if dark_mode:
+                pair_table_cmds = [
+                    ("BACKGROUND", (0, 0), (-1, 0), HexColor("#1E293B")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), HexColor("#FFFFFF")),
+                    ("TEXTCOLOR", (0, 1), (-1, 1), HexColor("#FFFFFF")),
+                    ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+                    ("TOPPADDING", (0, 0), (-1, -1), 10),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.lightgrey),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ]
+            else:
+                pair_table_cmds = [
+                    ("BACKGROUND", (0, 0), (-1, 0), HexColor("#f9fafb")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), HexColor("#111827")),
+                    ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+                    ("TOPPADDING", (0, 0), (-1, -1), 10),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ]
+            pair_table.setStyle(TableStyle(pair_table_cmds))
             story.append(pair_table)
             story.append(Spacer(1, 0.15 * inch))
 
@@ -357,7 +405,8 @@ def generate_plagiarism_report(
     else:
         story.append(
             Paragraph(
-                "No suspicious paragraph pairs found above threshold.", normal_style
+                "No suspicious paragraph pairs found above threshold.",
+                normal_style,
             )
         )
 
