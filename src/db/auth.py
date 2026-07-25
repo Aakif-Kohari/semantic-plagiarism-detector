@@ -1,11 +1,12 @@
 """
 auth.py
 -------
-SQLite-backed authentication with bcrypt password hashing.
+SQLite-backed authentication with Argon2 password hashing (via argon2-cffi)
+and automatic transparent migration from legacy bcrypt hashes.
 
 Public API
 ----------
-init_db()                          → create tables + seed default admin
+init_db()                         → create tables + seed default admin
 verify_user(username, password)    → bool
 get_user_role(username)            → str | None
 add_user(username, password, role) → None
@@ -20,6 +21,8 @@ import os
 import sqlite3
 
 import bcrypt
+from argon2 import PasswordHasher
+from argon2.exceptions import VerificationError, VerifyMismatchError
 
 _DB_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "users.db")
@@ -27,17 +30,17 @@ _DB_PATH = os.path.abspath(
 
 VALID_ROLES = {"admin", "teacher"}
 
+# Initialize Argon2 password hasher
+_ph = PasswordHasher()
+
 
 def _connect() -> sqlite3.Connection:
     return sqlite3.connect(_DB_PATH, check_same_thread=False)
 
 
 def _hash_password(password: str) -> str:
-    """Return a bcrypt hash for the given password."""
-    return bcrypt.hashpw(
-        password.encode(),
-        bcrypt.gensalt(10),
-    ).decode()
+    """Return an Argon2 hash for the given password."""
+    return _ph.hash(password)
 
 
 def _validate_username(username: str) -> str:
@@ -101,13 +104,6 @@ def init_db() -> None:
         ).fetchone()
 
         if not exists:
-
-            hashed = bcrypt.hashpw(
-                b"admin123",
-                bcrypt.gensalt(10),
-            ).decode()
-
-
             hashed = _hash_password("admin123")
 
             conn.execute(
@@ -119,7 +115,11 @@ def init_db() -> None:
 
 
 def verify_user(username: str, password: str) -> bool:
-    """Return True if username exists and password matches the stored hash."""
+    """
+    Return True if username exists and password matches stored hash.
+    Supports both Argon2 and legacy bcrypt hashes, automatically migrating 
+    bcrypt hashes to Argon2 upon successful login.
+    """
     username = _validate_username(username)
     password = _validate_password(password)
 
@@ -132,7 +132,28 @@ def verify_user(username: str, password: str) -> bool:
     if not row:
         return False
 
-    return bcrypt.checkpw(password.encode(), row[0].encode())
+    stored_hash = row[0]
+
+    # Case 1: Stored hash is Argon2
+    if stored_hash.startswith("$argon2"):
+        try:
+            _ph.verify(stored_hash, password)
+            if _ph.check_needs_rehash(stored_hash):
+                update_password(username, password)
+            return True
+        except (VerifyMismatchError, VerificationError):
+            return False
+
+    # Case 2: Legacy Bcrypt hash -> Verify & migrate to Argon2
+    if stored_hash.startswith(("$2a$", "$2b$", "$2y$")):
+        try:
+            if bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8")):
+                update_password(username, password)
+                return True
+        except ValueError:
+            return False
+
+    return False
 
 
 def get_user_role(username: str) -> str | None:
@@ -149,17 +170,10 @@ def get_user_role(username: str) -> str | None:
 
 
 def add_user(username: str, password: str, role: str = "teacher") -> None:
-    """Insert a new user with a bcrypt-hashed password."""
-
+    """Insert a new user with an Argon2-hashed password."""
     username = _validate_username(username)
     password = _validate_password(password)
     role = _validate_role(role)
-
-    hashed = bcrypt.hashpw(
-        password.encode(),
-        bcrypt.gensalt(10),
-    ).decode()
-
 
     hashed = _hash_password(password)
 
@@ -201,16 +215,9 @@ def delete_user(username: str) -> None:
 
 
 def update_password(username: str, new_password: str) -> None:
-    """Update a user's password with a new bcrypt hash."""
-
+    """Update a user's password with a new Argon2 hash."""
     username = _validate_username(username)
     new_password = _validate_password(new_password)
-
-    hashed = bcrypt.hashpw(
-        new_password.encode(),
-        bcrypt.gensalt(10),
-    ).decode()
-
 
     hashed = _hash_password(new_password)
 
