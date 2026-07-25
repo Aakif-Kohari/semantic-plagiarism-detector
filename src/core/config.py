@@ -104,10 +104,19 @@ def severity_from_score(
     score: Real,
     thresholds: SimilarityThresholds = DEFAULT_THRESHOLDS,
 ) -> str:
-    """Return the canonical Low, Medium, or High severity label."""
+    """
+    Return the canonical Low, Medium, or High severity label.
+
+    Scores below the plagiarism threshold are not considered plagiarism,
+    but retain Low severity so callers can continue using the canonical
+    three-level severity scale. Scores from the plagiarism threshold up
+    to the medium threshold represent flagged plagiarism with Low severity.
+    """
     validate_thresholds(thresholds)
     normalized = normalize_score(score)
 
+    if normalized < thresholds.plagiarism:
+        return LOW_SEVERITY
     if normalized >= thresholds.high:
         return HIGH_SEVERITY
     if normalized >= thresholds.medium:

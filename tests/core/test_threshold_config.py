@@ -177,3 +177,23 @@ def test_unrelated_strings_with_severity_words_are_rejected(label):
 def test_legacy_labels_are_normalized(label, expected):
     assert normalize_severity_label(label) == expected
 
+def test_severity_respects_plagiarism_boundary():
+    thresholds = SimilarityThresholds(
+        plagiarism=0.59,
+        medium=0.75,
+        high=0.90,
+    )
+
+    # Below the plagiarism threshold: not flagged, but remains
+    # Low to preserve the existing three-level severity contract.
+    assert severity_from_score(0.58, thresholds) == "Low"
+    assert is_plagiarism(0.58, thresholds.plagiarism) is False
+
+    # At the plagiarism threshold: flagged with Low severity.
+    assert severity_from_score(0.59, thresholds) == "Low"
+    assert is_plagiarism(0.59, thresholds.plagiarism) is True
+
+    # Higher severity boundaries remain unchanged.
+    assert severity_from_score(0.75, thresholds) == "Medium"
+    assert severity_from_score(0.90, thresholds) == "High"
+
