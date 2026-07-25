@@ -364,6 +364,30 @@ def update_user_preferences(username: str, preferences: dict) -> None:
         conn.commit()
 
 
+def get_user_theme(username: str) -> str:
+    """Return the user's theme preference (default 'light')."""
+    username = username.lower()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT theme FROM users WHERE username = ?",
+            (username,),
+        ).fetchone()
+        return row[0] if row else "light"
+
+
+def set_user_theme(username: str, theme: str) -> None:
+    """Update the user's theme preference."""
+    username = username.lower()
+    if theme not in ("light", "dark"):
+        theme = "light"
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE users SET theme = ? WHERE username = ?",
+            (theme, username),
+        )
+        conn.commit()
+
+
 def get_or_create_sso_user(email: str, default_role: str = "teacher") -> str:
     """Finds a user by email (as username) or creates a new one for SSO."""
     username = _validate_username(email)

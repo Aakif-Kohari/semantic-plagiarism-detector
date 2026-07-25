@@ -6,7 +6,7 @@ import sqlite3
 
 from .common import column_exists, run_migrations
 
-AUTH_SCHEMA_VERSION = 6
+AUTH_SCHEMA_VERSION = 7
 
 
 def migration_001_create_users(
@@ -82,6 +82,18 @@ def migration_006_add_active_flag(
             """
         )
 
+def migration_007_add_theme_preference(
+    connection: sqlite3.Connection,
+) -> None:
+    """Add theme field for persistent UI preference."""
+    if not column_exists(connection, "users", "theme"):
+        connection.execute(
+            """
+            ALTER TABLE users
+            ADD COLUMN theme TEXT NOT NULL DEFAULT 'light'
+            """
+        )
+
 
 AUTH_MIGRATIONS = {
     1: migration_001_create_users,
@@ -90,6 +102,7 @@ AUTH_MIGRATIONS = {
     4: migration_004_add_role_index,
     5: migration_005_add_preferences,
     6: migration_006_add_active_flag,
+    7: migration_007_add_theme_preference,
 }
 
 

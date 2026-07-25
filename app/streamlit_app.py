@@ -396,7 +396,8 @@ if not st.session_state.get("authenticated", False):
                         st.session_state.threshold = prefs.get(
                             "threshold", DEFAULT_THRESHOLDS.plagiarism
                         )
-                        st.session_state.theme = prefs.get("theme", "Light")
+                        from src.db.auth import get_user_theme
+                        st.session_state.theme = get_user_theme(username)
                         set_theme(st.session_state.theme)
 
                         # Clear pending state
@@ -429,7 +430,8 @@ if not st.session_state.get("authenticated", False):
             st.session_state.threshold = prefs.get(
                 "threshold", DEFAULT_THRESHOLDS.plagiarism
             )
-            st.session_state.theme = prefs.get("theme", "Light")
+            from src.db.auth import get_user_theme
+            st.session_state.theme = get_user_theme(username)
             set_theme(st.session_state.theme)
 
             if not username or not password:
@@ -641,9 +643,12 @@ def save_preferences_callback():
             "threshold": st.session_state.get(
                 "threshold_slider", DEFAULT_THRESHOLDS.plagiarism
             ),
-            "theme": st.session_state.get("theme_selector", "Light"),
         }
-    update_user_preferences(st.session_state.username, prefs)
+        update_user_preferences(st.session_state.username, prefs)
+        
+        from src.db.auth import set_user_theme
+        theme_val = st.session_state.get("theme_selector", "Light")
+        set_user_theme(st.session_state.username, theme_val)
 
 
 with st.sidebar:
