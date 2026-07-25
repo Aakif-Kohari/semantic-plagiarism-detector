@@ -1,6 +1,10 @@
 import os
 import sys
 from pathlib import Path
+from sklearn.metrics.pairwise import cosine_similarity
+from src.core.text_chunking import chunk_documents
+from src.core.embedding_model import embed_documents
+from src.core.ai_detector import detect_documents_ai_probability
 
 # Fix Streamlit import paths by pointing to project root
 FILE_PATH = Path(__file__).resolve()
@@ -11,6 +15,7 @@ if str(ROOT_DIR) not in sys.path:
 
 
 import base64
+import html
 
 # Standard / Third-party imports
 import time
@@ -26,6 +31,7 @@ import pandas as pd
 import streamlit as st
 
 from src.security.metadata_stripper import strip_exif_metadata
+from src.utils.filename import sanitize_filename, unique_filename
 
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _ROOT not in sys.path:
@@ -72,13 +78,14 @@ from src.core.config import DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD, severity_k
 from src.core.document_parser import (
     DEFAULT_OCR_DPI,
     DEFAULT_OCR_LANGUAGE,
-    SUPPORTED_OCR_LANGUAGES,
     OCRDependencyError,
+    SUPPORTED_OCR_LANGUAGES,
     extract_text,
+    prepare_text_for_embedding,
     remove_ignore_phrases,
 )
-from src.core.embedding_model import embed_chunks, embed_documents
 from src.core.faiss_index import (
+    build_index,
     build_index_from_matrix,
     load_index,
     load_or_rebuild_index,
@@ -91,7 +98,7 @@ from src.core.similarity import (
     flag_plagiarism,
 )
 from src.core.webhook import send_plagiarism_alert
-from src.i18n.translator import _SUPPORTED_LANGUAGES
+from src.i18n.translator import _SUPPORTED_LANGUAGES, get_text
 from src.visualization.network_graph import plot_similarity_network
 
 
@@ -126,6 +133,7 @@ from src.db.auth import (
     get_tour_completed,
     get_user_preferences,
     get_user_role,
+    init_db,
     is_user_active,
     record_failed_login,
     set_tour_completed,
@@ -160,8 +168,6 @@ from src.visualization.analytics import (
 )
 from src.visualization.heatmap import plot_similarity_heatmap  # noqa: E402
 
-init_db()
-# Safe import for PDF Highlighting
 
 try:
 
@@ -667,8 +673,13 @@ with st.sidebar:
                         if is_new
                         else ""
                     )
+                    safe_display_name = html.escape(
+                        str(doc["filename"]),
+                        quote=True,
+                    )
                     st.markdown(
-                        f"📄 {doc['filename']}{badge_html}", unsafe_allow_html=True
+                        f"📄 {safe_display_name}{badge_html}",
+                        unsafe_allow_html=True,
                     )
                 with col2:
                     if st.button("🗑️", key=f"del_{doc['filename']}"):
@@ -1370,9 +1381,6 @@ else:
             "Fetch", key="fetch_url_btn", use_container_width=True
         )
 
-    file_bytes_dict = {
-        uploaded_file.name: uploaded_file.getvalue() for uploaded_file in uploaded_files
-    }
     # 2. GOOGLE DRIVE IMPORT SECTION (#146)
 
     from src.utils.google_drive import bulk_download_drive_folder
@@ -1399,7 +1407,7 @@ else:
 
                     _parsed = _urlparse(url_input.strip())
                     st.session_state.url_text = _fetched_text
-                    st.session_state.url_filename = (
+                    st.session_state.url_filename = sanitize_filename(
                         f"webpage_{_parsed.netloc.replace('.', '_')}.txt"
                     )
                     st.session_state._last_fetched_url = url_input.strip()
@@ -1418,14 +1426,14 @@ else:
             f"🔗 URL document loaded: **{st.session_state.url_filename}** ({len(st.session_state.url_text)} characters)"
         )
 
-    file_bytes_dict = (
-        {
-            uploaded_file.name: uploaded_file.getvalue()
-            for uploaded_file in uploaded_files
-        }
-        if uploaded_files
-        else {}
-    )
+    file_bytes_dict = {}
+    if uploaded_files:
+        for uploaded_file in uploaded_files:
+            safe_name = unique_filename(
+                uploaded_file.name,
+                file_bytes_dict,
+            )
+            file_bytes_dict[safe_name] = uploaded_file.getvalue()
 
 
 # -----------------------------------------------------------------------------
@@ -1506,24 +1514,30 @@ if not st.session_state.authenticated:
     if uploaded_files:
         # Re-initialize to handle zip/csv extraction correctly instead of raw bytes
         file_bytes_dict = {}
-        for f in uploaded_files:
+        for uploaded_file in uploaded_files:
+            original_name = uploaded_file.name
+            safe_name = unique_filename(
+                original_name,
+                file_bytes_dict,
+            )
 
-            if f.size > MAX_FILE_SIZE_BYTES:
+            if uploaded_file.size > MAX_FILE_SIZE_BYTES:
                 st.error(
-                    f"⚠️ File **'{f.name}'** exceeds the maximum size limit of 10MB ({f.size / (1024 * 1024):.2f}MB). Please upload a smaller file."
+                    f"⚠️ File **'{safe_name}'** exceeds the maximum size "
+                    f"limit of 10MB "
+                    f"({uploaded_file.size / (1024 * 1024):.2f}MB). "
+                    "Please upload a smaller file."
                 )
-            else:
-                file_bytes_dict[f.name] = f.read()
-                f.seek(0)
+                continue
 
-            if f.name.lower().endswith(".zip"):
+            if original_name.lower().endswith(".zip"):
                 try:
                     from src.utils.zip_processor import process_zip_file
 
-                    zip_files = process_zip_file(f.read())
+                    zip_files = process_zip_file(uploaded_file.read())
                     if not zip_files:
                         st.error(
-                            f"⚠️ ZIP file '{f.name}' contains no supported documents (.pdf, .docx, .txt)."
+                            f"⚠️ ZIP file '{safe_name}' contains no supported documents (.pdf, .docx, .txt)."
                         )
                     else:
                         file_bytes_dict.update(
@@ -1533,14 +1547,14 @@ if not st.session_state.authenticated:
                             }
                         )
                 except ValueError as ve:
-                    st.error(f"⚠️ Failed to process ZIP archive '{f.name}': {str(ve)}")
+                    st.error(f"⚠️ Failed to process ZIP archive '{safe_name}': {str(ve)}")
                 except (OSError, RuntimeError, TypeError):
                     st.error(
-                        f"⚠️ Failed to process ZIP archive '{f.name}': Unknown error occurred."
+                        f"⚠️ Failed to process ZIP archive '{safe_name}': Unknown error occurred."
                     )
-            elif f.name.lower().endswith(".csv"):
-                if f.name in csv_configs:
-                    config = csv_configs[f.name]
+            elif original_name.lower().endswith(".csv"):
+                if original_name in csv_configs:
+                    config = csv_configs[original_name]
                     df = config["df"]
                     text_col = config["text_col"]
                     name_col = config["name_col"]
@@ -1552,18 +1566,22 @@ if not st.session_state.authenticated:
                             student_name = str(row[name_col]).strip()
                         else:
                             student_name = f"Row {idx + 1}"
-                        clean_student_name = student_name.replace("/", "_").replace(
-                            "\\", "_"
-                        )
-                        virtual_filename = (
-                            f"{clean_student_name} ({f.name} - Row {idx + 1}).txt"
+                        virtual_filename = unique_filename(
+                            (
+                                f"{student_name} "
+                                f"({safe_name} - Row {idx + 1}).txt"
+                            ),
+                            file_bytes_dict,
                         )
                         file_bytes_dict[virtual_filename] = strip_exif_metadata(
                             str(text_val).encode("utf-8"), virtual_filename
                         )
             else:
-                file_bytes_dict[f.name] = strip_exif_metadata(f.read(), f.name)
-            f.seek(0)
+                file_bytes_dict[safe_name] = strip_exif_metadata(
+                    uploaded_file.read(),
+                    safe_name,
+                )
+            uploaded_file.seek(0)
 
     # Allow analysis with existing index even without new uploads
     # Read URL result from session state (populated by the Fetch button above)
@@ -1571,13 +1589,19 @@ if not st.session_state.authenticated:
     url_filename = st.session_state.url_filename
 
     if st.session_state.drive_files_dict:
-        for g_name, g_bytes in st.session_state.drive_files_dict.items():
-            if len(g_bytes) > MAX_FILE_SIZE_BYTES:
+        for drive_name, drive_bytes in st.session_state.drive_files_dict.items():
+            safe_drive_name = unique_filename(
+                drive_name,
+                file_bytes_dict,
+            )
+            if len(drive_bytes) > MAX_FILE_SIZE_BYTES:
                 st.error(
-                    f"⚠️ Google Drive file **'{g_name}'** exceeds the maximum size limit of 10MB ({len(g_bytes) / (1024 * 1024):.2f}MB)."
+                    f"⚠️ Google Drive file **'{safe_drive_name}'** exceeds "
+                    f"the maximum size limit of 10MB "
+                    f"({len(drive_bytes) / (1024 * 1024):.2f}MB)."
                 )
             else:
-                file_bytes_dict[g_name] = g_bytes
+                file_bytes_dict[safe_drive_name] = drive_bytes
 
     # 3. PDF Decryption Check
     encrypted_files_detected = []
