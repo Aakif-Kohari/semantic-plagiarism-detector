@@ -10,11 +10,12 @@ import os
 import sys
 from io import BytesIO
 
-from src.core.document_parser import extract_text, DEFAULT_OCR_LANGUAGE, DEFAULT_OCR_DPI
-from src.core.text_chunking import chunk_documents
 from src.core.cross_lingual import prepare_text_for_embedding
+from src.core.document_parser import DEFAULT_OCR_DPI, DEFAULT_OCR_LANGUAGE, extract_text
 from src.core.embedding_model import embed_documents
 from src.core.similarity import document_similarity_matrix, flag_plagiarism
+from src.core.text_chunking import chunk_documents
+from src.core.synchronization import verify_and_repair_index
 
 
 def run_scan(folder_path: str, threshold: float) -> int:
@@ -32,7 +33,7 @@ def run_scan(folder_path: str, threshold: float) -> int:
 
     supported_extensions = {".pdf", ".docx", ".txt"}
     files = []
-    
+
     try:
         for entry in os.scandir(folder_path):
             if entry.is_file():
@@ -63,8 +64,22 @@ def run_scan(folder_path: str, threshold: float) -> int:
             )
             if text.strip():
                 raw_texts[filename] = text
-            else:
-                sys.stderr.write(f"Warning: Extracted text from '{filename}' is empty.\n")
+            
+    elif args.command == 'sync-index':
+        print("Starting FAISS and Database synchronization verification...")
+        index_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "corpus.index"))
+        try:
+            verify_and_repair_index(index_path)
+            print("Synchronization complete.")
+            return 0
+        except Exception as e:
+            sys.stderr.write(f"Error during synchronization: {e}\n")
+            return 1
+
+    else:
+                sys.stderr.write(
+                    f"Warning: Extracted text from '{filename}' is empty.\n"
+                )
         except Exception as e:
             sys.stderr.write(f"Warning: Failed to parse '{filename}': {e}\n")
 
@@ -88,11 +103,13 @@ def run_scan(folder_path: str, threshold: float) -> int:
             flags = flag_plagiarism(sim_df, threshold=threshold)
 
             for flag in flags:
-                matches.append({
-                    "document_1": flag["doc_a"],
-                    "document_2": flag["doc_b"],
-                    "similarity_score": flag["similarity"]
-                })
+                matches.append(
+                    {
+                        "document_1": flag["doc_a"],
+                        "document_2": flag["doc_b"],
+                        "similarity_score": flag["similarity"],
+                    }
+                )
         except Exception as e:
             sys.stderr.write(f"Error during plagiarism detection pipeline: {e}\n")
             return 1
@@ -100,7 +117,7 @@ def run_scan(folder_path: str, threshold: float) -> int:
     report = {
         "documents_processed": num_processed,
         "threshold": threshold,
-        "matches": matches
+        "matches": matches,
     }
 
     print(json.dumps(report, indent=2))
@@ -122,6 +139,11 @@ def main() -> None:
         help="Similarity threshold for flagging (default: 0.59)",
     )
 
+    
+    parser_sync = subparsers.add_parser(
+        "sync-index", help="Verify and repair FAISS index sync with SQLite database."
+    )
+
     args = parser.parse_args()
 
     if args.command == "scan":
@@ -131,6 +153,18 @@ def main() -> None:
 
         exit_code = run_scan(args.folder, args.threshold)
         sys.exit(exit_code)
+    
+    elif args.command == 'sync-index':
+        print("Starting FAISS and Database synchronization verification...")
+        index_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "corpus.index"))
+        try:
+            verify_and_repair_index(index_path)
+            print("Synchronization complete.")
+            return 0
+        except Exception as e:
+            sys.stderr.write(f"Error during synchronization: {e}\n")
+            return 1
+
     else:
         sys.stderr.write(f"Error: Invalid command '{args.command}'.\n")
         sys.exit(1)
