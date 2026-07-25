@@ -68,6 +68,17 @@ if missing_env_vars:
     )
 
 
+from app.css_constants import (
+    CLASS_CLEAR_ALL_CONTAINER,
+    CLASS_DOC_ROW,
+    CLASS_SKELETON,
+    CLASS_SKELETON_CHART,
+    CLASS_SKELETON_METRIC,
+    CLASS_SKELETON_TABLE,
+    CLASS_SKELETON_TEXT,
+    CLASS_SKELETON_TEXT_SHORT,
+    CLASS_SKELETON_TITLE,
+)
 from app.theme import (
     back_to_top_html,
     empty_state_html,
@@ -130,6 +141,7 @@ from src.db import (
     get_unique_class_sections,
     init_corpus_db,
 )
+from src.core.synchronization import verify_and_repair_index
 from src.db.auth import (
     authenticate_user,
     check_login_rate_limit,
@@ -211,6 +223,19 @@ except ImportError:
 init_corpus_db()
 init_db()
 
+# Start lightweight REST API server for /healthz endpoint in background
+import threading
+
+import uvicorn
+from src.api.app import app as fastapi_app
+
+
+def _start_api_server():
+    uvicorn.run(fastapi_app, host="0.0.0.0", port=8000, log_level="warning")
+
+
+threading.Thread(target=_start_api_server, daemon=True).start()
+
 # Generate unique session ID for this Streamlit session
 if "session_id" not in st.session_state:
     import uuid
@@ -228,6 +253,9 @@ _BRANDING_LOGO_PATH = os.path.abspath(
 _INDEX_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "corpus.index")
 )
+
+# Startup Synchronization Check (Issue #361)
+verify_and_repair_index(_INDEX_PATH)
 
 from streamlit_tour import Tour
 
@@ -294,6 +322,62 @@ st.markdown(
 
 # ── SESSION TIMEOUT & ROUTE PROTECTION ────────────────────────────────────────
 TIMEOUT_LIMIT = 15 * 60  # 15 minutes in seconds
+
+import streamlit.components.v1 as components
+if st.session_state.get("authenticated", False):
+    components.html(
+        f"""
+        <script>
+            let timeoutLimit = {TIMEOUT_LIMIT} * 1000;
+            let warningTime = timeoutLimit - (2 * 60 * 1000); // 2 minutes before
+            let timer;
+            let warningShown = false;
+            
+            function resetTimer() {{
+                clearTimeout(timer);
+                const warning = window.parent.document.getElementById('session-warning-toast');
+                if (warning) {{
+                    warning.style.display = 'none';
+                }}
+                warningShown = false;
+                timer = setTimeout(showWarning, warningTime);
+            }}
+            
+            function showWarning() {{
+                if (warningShown) return;
+                warningShown = true;
+                let doc = window.parent.document;
+                let warning = doc.getElementById('session-warning-toast');
+                if (!warning) {{
+                    warning = doc.createElement('div');
+                    warning.id = 'session-warning-toast';
+                    warning.style.position = 'fixed';
+                    warning.style.top = '60px'; // below header
+                    warning.style.right = '20px';
+                    warning.style.backgroundColor = '#ffcc00';
+                    warning.style.color = 'black';
+                    warning.style.padding = '15px';
+                    warning.style.borderRadius = '5px';
+                    warning.style.zIndex = '9999';
+                    warning.style.boxShadow = '0 4px 6px rgba(0,0,0,0.1)';
+                    warning.innerHTML = '<strong>⚠️ Session Timeout Warning</strong><br>Your session will expire in 2 minutes due to inactivity. Please save your work or interact with the app to stay logged in.';
+                    doc.body.appendChild(warning);
+                }}
+                warning.style.display = 'block';
+            }}
+
+            let parentDoc = window.parent.document;
+            parentDoc.addEventListener('mousemove', resetTimer);
+            parentDoc.addEventListener('keydown', resetTimer);
+            parentDoc.addEventListener('scroll', resetTimer);
+            parentDoc.addEventListener('click', resetTimer);
+            
+            resetTimer();
+        </script>
+        """,
+        height=0,
+    )
+
 
 # 1. Handle Automatic Session Expiration (Inactivity Check)
 cached_last_interaction = get_session_state(SESSION_ID, "last_interaction")
@@ -805,7 +889,7 @@ with st.sidebar:
                 except (ValueError, RuntimeError, TypeError, OSError) as _mock_err:
                     st.error(f"❌ Mock data generation failed: {_mock_err}")
 
-        st.markdown('<div class="clear-all-container">', unsafe_allow_html=True)
+        st.markdown(f'<div class="{CLASS_CLEAR_ALL_CONTAINER}">', unsafe_allow_html=True)
         if st.button(
             "🗑️ Clear All Documents",
             key="clear_all_documents_button",
@@ -1941,19 +2025,19 @@ if not st.session_state.authenticated:
         col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
             st.markdown(f"**{get_text('metric_docs', lang=lang_code)}**")
-            st.markdown('<div class="skeleton skeleton-metric"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_METRIC}"></div>', unsafe_allow_html=True)
         with col2:
             st.markdown(f"**{get_text('metric_pairs', lang=lang_code)}**")
-            st.markdown('<div class="skeleton skeleton-metric"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_METRIC}"></div>', unsafe_allow_html=True)
         with col3:
             st.markdown(f"**{get_text('metric_flagged', lang=lang_code)}**")
-            st.markdown('<div class="skeleton skeleton-metric"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_METRIC}"></div>', unsafe_allow_html=True)
         with col4:
             st.markdown(f"**{get_text('metric_faiss', lang=lang_code)}**")
-            st.markdown('<div class="skeleton skeleton-metric"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_METRIC}"></div>', unsafe_allow_html=True)
         with col5:
             st.markdown("**🎯 Threshold**")
-            st.markdown('<div class="skeleton skeleton-metric"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_METRIC}"></div>', unsafe_allow_html=True)
         st.divider()
 
         # 2. Tabs Skeleton
@@ -1980,46 +2064,46 @@ if not st.session_state.authenticated:
         with tab_warnings:
             st.markdown("🏠 Home > Dashboard > **Warnings**")
             st.subheader(get_text("tab_warnings", lang=lang_code))
-            st.markdown('<div class="skeleton skeleton-title"></div>', unsafe_allow_html=True)
-            st.markdown('<div class="skeleton skeleton-text"></div>', unsafe_allow_html=True)
-            st.markdown('<div class="skeleton skeleton-text"></div>', unsafe_allow_html=True)
-            st.markdown('<div class="skeleton skeleton-text-short"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TITLE}"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT}"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT}"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT_SHORT}"></div>', unsafe_allow_html=True)
 
         with tab_faiss:
             st.markdown("🏠 Home > Dashboard > **FAISS Chunk Search**")
             st.subheader("⚡ FAISS Chunk Search")
-            st.markdown('<div class="skeleton skeleton-text-short" style="height: 40px; width: 100%;"></div>', unsafe_allow_html=True)
-            st.markdown('<div class="skeleton skeleton-text" style="height: 200px;"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT_SHORT}" style="height: 40px; width: 100%;"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT}" style="height: 200px;"></div>', unsafe_allow_html=True)
 
         with tab_matrix:
             st.markdown("🏠 Home > Dashboard > **Similarity Matrix**")
             st.subheader("📋 Similarity Matrix")
-            st.markdown('<div class="skeleton skeleton-table"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TABLE}"></div>', unsafe_allow_html=True)
 
         with tab_heatmap:
             st.markdown("🏠 Home > Dashboard > **Heatmap & Network**")
             st.subheader(get_text("tab_heatmap", lang=lang_code))
-            st.markdown('<div class="skeleton skeleton-chart">Calculating similarities and generating heatmap...</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_CHART}">Calculating similarities and generating heatmap...</div>', unsafe_allow_html=True)
             st.divider()
             st.subheader("🕸️ Interactive Plagiarism Network")
-            st.markdown('<div class="skeleton skeleton-chart">Calculating similarities and generating network graph...</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_CHART}">Calculating similarities and generating network graph...</div>', unsafe_allow_html=True)
 
         with tab_drill:
             st.markdown("🏠 Home > Dashboard > **Pair Drill-Down**")
             st.subheader("🔬 Pair Drill-Down")
-            st.markdown('<div class="skeleton skeleton-text-short"></div>', unsafe_allow_html=True)
-            st.markdown('<div class="skeleton skeleton-chart"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TEXT_SHORT}"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_CHART}"></div>', unsafe_allow_html=True)
 
         with tab_analytics:
             st.markdown("🏠 Home > Dashboard > **Analytics Dashboard**")
             st.subheader("📊 Plagiarism Analytics Dashboard")
-            st.markdown('<div class="skeleton skeleton-chart">Generating analytics trends...</div>', unsafe_allow_html=True)
-            st.markdown('<div class="skeleton skeleton-chart">Generating top plagiarism charts...</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_CHART}">Generating analytics trends...</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_CHART}">Generating top plagiarism charts...</div>', unsafe_allow_html=True)
 
         with tab_users:
             st.markdown("🏠 Home > Dashboard > **User Management**")
             st.subheader("👤 User Management")
-            st.markdown('<div class="skeleton skeleton-table"></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TABLE}"></div>', unsafe_allow_html=True)
 
         try:
             with st.spinner("🧠 Processing files and building embeddings…"):

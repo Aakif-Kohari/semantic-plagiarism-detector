@@ -7,6 +7,9 @@ when high-similarity plagiarism incidents (>= 90%) are detected.
 
 import logging
 import os
+import threading
+import time
+from collections import deque
 
 import requests
 from dotenv import load_dotenv
@@ -15,8 +18,29 @@ from src.security.ssrf_protector import SSRFProtector, SSRFSecurityException
 # Set up logging
 logger = logging.getLogger(__name__)
 
+_WEBHOOK_RATE_LIMIT = 5
+_WEBHOOK_RATE_WINDOW_SECONDS = 60.0
+_rate_limit_lock = threading.Lock()
+_webhook_dispatches: dict[str, deque[float]] = {}
+
 # Load environment variables from .env
 load_dotenv()
+
+
+def _allow_webhook_dispatch(webhook_url: str) -> bool:
+    """Return whether this webhook is below the per-minute dispatch limit."""
+    now = time.monotonic()
+    with _rate_limit_lock:
+        dispatches = _webhook_dispatches.setdefault(webhook_url, deque())
+        cutoff = now - _WEBHOOK_RATE_WINDOW_SECONDS
+        while dispatches and dispatches[0] <= cutoff:
+            dispatches.popleft()
+
+        if len(dispatches) >= _WEBHOOK_RATE_LIMIT:
+            return False
+
+        dispatches.append(now)
+        return True
 
 
 def send_plagiarism_alert(doc_a: str, doc_b: str, similarity: float) -> bool:
@@ -35,6 +59,14 @@ def send_plagiarism_alert(doc_a: str, doc_b: str, similarity: float) -> bool:
 
     if not webhook_url:
         logger.warning("PLAGIARISM_WEBHOOK_URL is not configured in the environment.")
+        return False
+
+    if not _allow_webhook_dispatch(webhook_url):
+        logger.warning(
+            "Webhook rate limit reached; suppressing plagiarism alert for %s <-> %s.",
+            doc_a,
+            doc_b,
+        )
         return False
 
     # Get base URL of the Streamlit dashboard for the review link
