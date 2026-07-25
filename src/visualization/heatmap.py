@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib.figure import Figure
+from matplotlib.ticker import PercentFormatter
 
 matplotlib.use("Agg")
 
@@ -71,6 +72,9 @@ def plot_similarity_heatmap(
         cbar_kws={"label": "Cosine Similarity", "shrink": 0.8, "pad": 0.02},
         annot_kws={"size": max(7, 14 - n), "weight": "bold"},
     )
+
+    colorbar = ax.collections[0].colorbar
+    colorbar.ax.yaxis.set_major_formatter(PercentFormatter(xmax=1.0, decimals=0))
 
     if theme_colors:
         fig.patch.set_facecolor(theme_colors.get("background", "#FFFFFF"))
