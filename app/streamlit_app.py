@@ -138,6 +138,7 @@ from src.db import (
     get_all_embeddings,
     get_all_tags,
     get_chunk_registry,
+    get_document_word_counts,
     get_unique_class_sections,
     init_corpus_db,
 )
@@ -186,6 +187,7 @@ from src.utils.redis_cache import (
 )
 from src.utils.warning_list import render_warning_controls
 from src.visualization.analytics import (
+    plot_document_sizes,
     plot_high_severity_trends,
     plot_most_plagiarized_documents,
     plot_similarity_distribution,
@@ -2832,6 +2834,17 @@ if not st.session_state.authenticated:
     with tab_analytics:
         st.markdown("🏠 Home > Dashboard > **Analytics Dashboard**")
         st.subheader("📊 Plagiarism Analytics Dashboard")
+
+        # ── Document Word Counts Graph ──
+        st.subheader(get_text("document_word_counts", lang=lang_code))
+        word_counts = get_document_word_counts()
+        if word_counts:
+            word_counts_fig = plot_document_sizes(word_counts)
+            st.plotly_chart(word_counts_fig, use_container_width=True)
+        else:
+            st.info(get_text("no_documents_db", lang=lang_code))
+        st.divider()
+
         if not has_enough_files:
             st.markdown(
                 empty_state_html(
