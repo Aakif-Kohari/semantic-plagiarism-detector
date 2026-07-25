@@ -478,8 +478,8 @@ def render_warning_controls(
         .replace("\n", "\\n")
     )
 
-    left, middle, right = st.columns([3, 2, 2])
-    with left:
+    info_col, copy_col, md_col, csv_col = st.columns([2, 2, 2, 2])
+    with info_col:
         if current_page.total_items:
             st.markdown(
                 f"Showing **{current_page.start_index}–{current_page.end_index}** "
@@ -487,7 +487,7 @@ def render_warning_controls(
             )
         else:
             st.info("No warnings match the current search.")
-    with middle:
+    with copy_col:
         html_code = f"""
         <style>
             body {{
@@ -550,9 +550,17 @@ def render_warning_controls(
         </script>
         """
         st.components.v1.html(html_code, height=45)
-    with right:
+    with md_col:
         st.download_button(
-            "⬇️ Download filtered report (CSV)",
+            "📝 Download Summary (MD)",
+            markdown_text.encode("utf-8"),
+            "plagiarism_report_summary.md",
+            "text/markdown",
+            use_container_width=True,
+        )
+    with csv_col:
+        st.download_button(
+            "⬇️ Download filtered (CSV)",
             export_df.to_csv(index=False).encode("utf-8"),
             "plagiarism_warnings_filtered.csv",
             "text/csv",
