@@ -7,6 +7,7 @@ if sys.platform == "win32":
 # ruff: noqa: E402
 
 import base64
+import datetime
 import io as _io
 import os
 import time
@@ -101,7 +102,7 @@ _INDEX_PATH = os.path.abspath(
 )
 try:
     from streamlit_tour import Tour
-except ImportError:
+except Exception:
     Tour = None
 
 # Initialize auth database
@@ -217,7 +218,6 @@ with theme_col:
 
 
 # ── Sidebar (ROLE RESTRICTED Settings) ────────────────────────────────────────
-# ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### ⚙️ Settings")
 
@@ -252,6 +252,17 @@ with st.sidebar:
             20,
             value=5,
             key="faiss_top_k_slider",
+        )
+
+        # ── Date Filter Range Selector (#181) ─────────────────────────────────
+        st.markdown("### 📅 Date Filter")
+        today = datetime.date.today()
+        seven_days_ago = today - datetime.timedelta(days=7)
+        date_range = st.date_input(
+            "Filter Documents by Upload Date",
+            value=(seven_days_ago, today),
+            key="document_date_filter",
+            help="Filter documents by file modification date before processing.",
         )
 
         # ── Customizable Chunk Size & Overlap Sliders (#153) ─────────────────
@@ -310,6 +321,7 @@ with st.sidebar:
         chunk_overlap = 50
         ocr_language = DEFAULT_OCR_LANGUAGE
         ocr_dpi = DEFAULT_OCR_DPI
+        date_range = None
 
     unique_classes = ["All Classes"] + get_unique_class_sections()
 
@@ -531,13 +543,27 @@ else:
     if st.session_state.drive_files_dict:
         file_bytes_dict.update(st.session_state.drive_files_dict)
 
+    # Apply Date Range Filtering (#181)
+    if date_range and isinstance(date_range, (tuple, list)) and len(date_range) == 2:
+        start_d, end_d = date_range[0], date_range[1]
+        filtered_bytes_dict = {}
+        for fname, bdata in file_bytes_dict.items():
+            mod_date = datetime.date.today()  # Fallback to current date
+            if os.path.exists(fname):
+                mtime = os.path.getmtime(fname)
+                mod_date = datetime.date.fromtimestamp(mtime)
+
+            if start_d <= mod_date <= end_d:
+                filtered_bytes_dict[fname] = bdata
+        file_bytes_dict = filtered_bytes_dict
+
     # 4. PIPELINE STOP CHECK
     if len(file_bytes_dict) < 2:
         if st.session_state.analysis_results is None:
             st.markdown(
                 empty_state_html(
                     "Waiting for Files",
-                    "Please upload or import from Drive at least 2 PDF, DOCX, or TXT assignments to begin.",
+                    "Please upload or import from Drive at least 2 PDF, DOCX, or TXT assignments within the selected date range to begin.",
                     "📂",
                 ),
                 unsafe_allow_html=True,
