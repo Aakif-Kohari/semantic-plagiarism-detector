@@ -1,11 +1,11 @@
 {
   "title": "🔍 Semantic Plagiarism Detection System",
-  "subtitle": "Upload student PDF, DOCX, or TXT files. Detects semantic similarity using transformer embeddings + FAISS vector search.",
+  "subtitle": "Upload student PDF, DOCX, DOC, or TXT files. Detects semantic similarity using transformer embeddings + FAISS vector search.",
   "settings": "⚙️ Settings",
   "language": "Language",
   "theme": "Theme",
   "threshold": "Plagiarism Threshold",
-  "upload_title": "📂 Upload Assignments (PDF, DOCX, TXT, ZIP)",
+  "upload_title": "📂 Upload Assignments (PDF, DOCX, DOC, TXT, ZIP)",
   "analysis_summary": "📊 Analysis Summary",
   "metric_docs": "📄 Documents",
   "metric_pairs": "🔗 Pairs",
