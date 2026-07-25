@@ -12,7 +12,6 @@ from typing import Any
 
 import pandas as pd
 
-
 RESULT_COLUMNS: list[str] = [
     "Rank",
     "Target Document",
@@ -63,15 +62,13 @@ def faiss_results_dataframe(
     ]
 
     for record, raw_score in results:
-        document: str = str(
-            _record_value(record, "doc_name", "Unknown document")
-        )
+        document: str = str(_record_value(record, "doc_name", "Unknown document"))
         chunk_index: int = int(_record_value(record, "chunk_index", 0))
         chunk_text: str = str(_record_value(record, "chunk_text", ""))
         score: float = float(raw_score)
 
         from src.utils.text_stats import format_text_stats
-        
+
         rows.append(
             {
                 "Target Document": document,
