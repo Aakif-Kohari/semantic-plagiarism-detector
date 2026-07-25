@@ -116,3 +116,61 @@ class TagManager:
         # Split document tags and check for exact inclusion
         doc_tags = [t.strip() for t in doc_tags_str.split(",") if t.strip()]
         return filter_tag in doc_tags
+
+    @classmethod
+    def apply_tag(cls, document_ids: List[str], tag: str) -> None:
+        """
+        Applies a specific tag to a list of documents.
+        Skips documents that already have the tag.
+        
+        Args:
+            document_ids (List[str]): The IDs (filenames) of documents.
+            tag (str): The tag to apply.
+        """
+        from src.db.corpus_db import get_document_tags, update_document_tags
+        
+        normalized_tag = cls.parse_tags(tag)
+        if not normalized_tag:
+            return
+            
+        for doc_id in document_ids:
+            current_tags_str = get_document_tags(doc_id)
+            if not current_tags_str:
+                new_tags_str = normalized_tag
+            else:
+                individual_tags = [t.strip() for t in current_tags_str.split(",") if t.strip()]
+                if normalized_tag in individual_tags:
+                    continue
+                individual_tags.append(normalized_tag)
+                new_tags_str = ",".join(sorted(set(individual_tags)))
+                
+            update_document_tags(doc_id, new_tags_str)
+
+    @classmethod
+    def remove_tag(cls, document_ids: List[str], tag: str) -> None:
+        """
+        Removes a specific tag from a list of documents.
+        Ignores documents that don't have the tag.
+        
+        Args:
+            document_ids (List[str]): The IDs (filenames) of documents.
+            tag (str): The tag to remove.
+        """
+        from src.db.corpus_db import get_document_tags, update_document_tags
+        
+        normalized_tag = cls.parse_tags(tag)
+        if not normalized_tag:
+            return
+            
+        for doc_id in document_ids:
+            current_tags_str = get_document_tags(doc_id)
+            if not current_tags_str:
+                continue
+                
+            individual_tags = [t.strip() for t in current_tags_str.split(",") if t.strip()]
+            if normalized_tag not in individual_tags:
+                continue
+                
+            updated_tags = [t for t in individual_tags if t != normalized_tag]
+            new_tags_str = ",".join(sorted(set(updated_tags))) if updated_tags else ""
+            update_document_tags(doc_id, new_tags_str)
