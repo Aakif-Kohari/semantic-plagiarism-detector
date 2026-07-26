@@ -2982,18 +2982,24 @@ if not st.session_state.authenticated:
                 chunked_docs = analysis_results[1] if analysis_results else None
                 embeddings = analysis_results[2] if analysis_results else None
 
-                zip_bytes = generate_bulk_reports_zip(
-                    flags,
-                    chunked_docs=chunked_docs,
-                    embeddings=embeddings,
-                )
-                st.download_button(
-                    label="⬇️ Download All Flagged Pairs (ZIP)",
-                    data=zip_bytes,
-                    file_name="flagged_pairs_reports.zip",
-                    mime="application/zip",
-                    use_container_width=True,
-                )
+                selected_warnings = st.session_state.get("selected_warnings", set())
+                export_flags = [f for f in flags if f"{f['doc_a']}_{f['doc_b']}" in selected_warnings]
+
+                if not export_flags:
+                    st.info("No warnings selected for export. Please select warnings in the Flagged Incidents tab.")
+                else:
+                    zip_bytes = generate_bulk_reports_zip(
+                        export_flags,
+                        chunked_docs=chunked_docs,
+                        embeddings=embeddings,
+                    )
+                    st.download_button(
+                        label=f"⬇️ Download {len(export_flags)} Selected Flagged Pairs (ZIP)",
+                        data=zip_bytes,
+                        file_name="flagged_pairs_reports.zip",
+                        mime="application/zip",
+                        use_container_width=True,
+                    )
 
             st.subheader("📈 High Severity Plagiarism Trends (Last 30 Days)")
             trend_data = get_high_severity_trends(days=30)
