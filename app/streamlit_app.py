@@ -2747,19 +2747,22 @@ if not st.session_state.authenticated:
             st.pyplot(heatmap_fig, use_container_width=True)
 
             buf = _io.BytesIO()
-            heatmap_fig.savefig(
-                buf,
-                format="png",
-                dpi=150,
-                bbox_inches="tight",
-            )
+            heatmap_fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
             buf.seek(0)
-
             st.download_button(
                 "⬇️ Download Heatmap PNG",
                 buf,
                 "heatmap.png",
                 "image/png",
+            )
+            svg_buf = _io.StringIO()
+            heatmap_fig.savefig(svg_buf, format="svg", bbox_inches="tight")
+            buf.seek(0)
+            st.download_button(
+                "⬇️ Export Heatmap SVG",
+                svg_buf.getvalue(),
+                "heatmap.svg",
+                "image/svg+xml",
             )
 
             st.divider()
