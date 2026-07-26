@@ -790,6 +790,21 @@ with st.sidebar:
         except Exception:
             pass
 
+    # Redis Connection Health Status Indicator
+    try:
+        from src.utils.redis_cache import get_cache
+        cache = get_cache()
+        connected, latency = cache.ping()
+        if not connected:
+            st.markdown("🔴 **Redis Cache**: Offline")
+        elif latency is not None and latency > 100.0:
+            st.markdown(f"🟡 **Redis Cache**: Degraded ({latency:.1f}ms)")
+        else:
+            latency_str = f" ({latency:.1f}ms)" if latency is not None else ""
+            st.markdown(f"🟢 **Redis Cache**: Healthy{latency_str}")
+    except Exception:
+        st.markdown("🔴 **Redis Cache**: Offline")
+
     if st.button("🚪 Log Out", use_container_width=True):
         import logging
         from datetime import datetime, timezone
