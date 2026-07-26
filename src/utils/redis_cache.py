@@ -75,11 +75,70 @@ class RedisCache:
     def __new__(cls) -> "RedisCache":
         if cls._instance is None:
             cls._instance = super().__new__(cls)
+            cls._instance._fallback_cache = {}
         return cls._instance
 
     def __init__(self):
+        if not hasattr(self, "_fallback_cache") or self._fallback_cache is None:
+            self._fallback_cache = {}
         if self._client is None:
             self._connect()
+
+    @property
+    def fallback_cache(self) -> dict:
+        """Lazily initialize fallback cache dictionary if not present."""
+        if not hasattr(self, "_fallback_cache") or self._fallback_cache is None:
+            self._fallback_cache = {}
+        return self._fallback_cache
+
+    def _fallback_set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
+        import time
+        expire_at = time.time() + ttl if ttl is not None else None
+        self.fallback_cache[key] = (value, expire_at)
+        return True
+
+    def _fallback_get(self, key: str) -> Optional[Any]:
+        import time
+        if key not in self.fallback_cache:
+            return None
+        value, expire_at = self.fallback_cache[key]
+        if expire_at is not None and time.time() > expire_at:
+            del self.fallback_cache[key]
+            return None
+        return value
+
+    def _fallback_delete(self, key: str) -> bool:
+        if key in self.fallback_cache:
+            del self.fallback_cache[key]
+            return True
+        return False
+
+    def _fallback_exists(self, key: str) -> bool:
+        return self._fallback_get(key) is not None
+
+    def _fallback_set_json(self, key: str, value: dict, ttl: Optional[int] = None) -> bool:
+        import json
+        serialized = json.dumps(value)
+        return self._fallback_set(key, json.loads(serialized), ttl)
+
+    def _fallback_get_json(self, key: str) -> Optional[dict]:
+        val = self._fallback_get(key)
+        if isinstance(val, dict):
+            return val
+        return None
+
+    def _fallback_clear_pattern(self, pattern: str) -> int:
+        import fnmatch
+        keys_to_delete = []
+        for key in list(self.fallback_cache.keys()):
+            if fnmatch.fnmatch(key, pattern):
+                keys_to_delete.append(key)
+        count = 0
+        for key in keys_to_delete:
+            if key in self.fallback_cache:
+                del self.fallback_cache[key]
+                count += 1
+        return count
 
     def _connect(self) -> None:
         """Establish Redis connection with fallback to in-memory if unavailable."""
@@ -148,115 +207,150 @@ class RedisCache:
             return False, None
 
     def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
-        """Store a value in Redis with optional TTL.
+        """Store a value in Redis with optional TTL. Falls back to in-memory on failure."""
+        if self.is_available():
+            try:
+                serialized = pickle.dumps(value)
+                if ttl:
+                    self._client.setex(key, ttl, serialized)
+                else:
+                    self._client.set(key, serialized)
+                return True
+            except (
+                RedisError,
+                RedisConnectionError,
+                RedisTimeoutError,
+                ConnectionRefusedError,
+                ConnectionResetError,
+                pickle.PickleError,
+            ) as e:
+                print(f"[RedisCache] Error setting key {key}: {e}. Falling back to in-memory.")
+                logger.error(f"[RedisCache] Error setting key {key}: {e}. Falling back to in-memory.")
 
-        When *ttl* is ``None``, the :attr:`DEFAULT_TTL` (24 hours) is
-        applied so that transient cache keys do not persist indefinitely.
-        Pass ``ttl=0`` to store without expiration (use sparingly).
-        """
-        if not self.is_available():
-            return False
-
-        try:
-            serialized = pickle.dumps(value)
-            if ttl is None:
-                self._client.setex(key, DEFAULT_TTL, serialized)
-            elif ttl:
-                self._client.setex(key, ttl, serialized)
-            else:
-                self._client.set(key, serialized)
-            return True
-        except (RedisError, pickle.PickleError, ConnectionRefusedError) as e:
-            print(f"[RedisCache] Error setting key {key}: {e}")
-            logger.error(f"[RedisCache] Error setting key {key}: {e}")
-            return False
+        return self._fallback_set(key, value, ttl)
 
     def get(self, key: str) -> Optional[Any]:
-        """Retrieve a value from Redis."""
-        if not self.is_available():
-            return None
+        """Retrieve a value from Redis. Falls back to in-memory on failure."""
+        if self.is_available():
+            try:
+                data = self._client.get(key)
+                if data is not None:
+                    return pickle.loads(data)
+            except (
+                RedisError,
+                RedisConnectionError,
+                RedisTimeoutError,
+                ConnectionRefusedError,
+                ConnectionResetError,
+                pickle.PickleError,
+            ) as e:
+                print(f"[RedisCache] Error getting key {key}: {e}. Falling back to in-memory.")
+                logger.error(f"[RedisCache] Error getting key {key}: {e}. Falling back to in-memory.")
 
-        try:
-            data = self._client.get(key)
-            if data is None:
-                return None
-            return pickle.loads(data)
-        except (RedisError, pickle.PickleError, ConnectionRefusedError) as e:
-            print(f"[RedisCache] Error getting key {key}: {e}")
-            logger.error(f"[RedisCache] Error getting key {key}: {e}")
-            return None
+        return self._fallback_get(key)
 
     def delete(self, key: str) -> bool:
-        """Delete a key from Redis."""
-        if not self.is_available():
-            return False
+        """Delete a key from Redis. Falls back to in-memory on failure."""
+        redis_deleted = False
+        if self.is_available():
+            try:
+                redis_deleted = bool(self._client.delete(key))
+            except (
+                RedisError,
+                RedisConnectionError,
+                RedisTimeoutError,
+                ConnectionRefusedError,
+                ConnectionResetError,
+            ) as e:
+                print(f"[RedisCache] Error deleting key {key}: {e}. Falling back to in-memory.")
+                logger.error(f"[RedisCache] Error deleting key {key}: {e}. Falling back to in-memory.")
 
-        try:
-            self._client.delete(key)
-            return True
-        except (RedisError, ConnectionRefusedError) as e:
-            print(f"[RedisCache] Error deleting key {key}: {e}")
-            logger.error(f"[RedisCache] Error deleting key {key}: {e}")
-            return False
+        fallback_deleted = self._fallback_delete(key)
+        return redis_deleted or fallback_deleted
 
     def set_json(self, key: str, value: dict, ttl: Optional[int] = None) -> bool:
-        """Store a JSON-serializable dict in Redis."""
-        if not self.is_available():
-            return False
+        """Store a JSON-serializable dict in Redis. Falls back to in-memory on failure."""
+        if self.is_available():
+            try:
+                serialized = json.dumps(value)
+                if ttl:
+                    self._client.setex(key, ttl, serialized)
+                else:
+                    self._client.set(key, serialized)
+                return True
+            except (
+                RedisError,
+                RedisConnectionError,
+                RedisTimeoutError,
+                ConnectionRefusedError,
+                ConnectionResetError,
+                json.JSONDecodeError,
+                TypeError,
+            ) as e:
+                print(f"[RedisCache] Error setting JSON key {key}: {e}. Falling back to in-memory.")
+                logger.error(f"[RedisCache] Error setting JSON key {key}: {e}. Falling back to in-memory.")
 
-        try:
-            serialized = json.dumps(value)
-            if ttl:
-                self._client.setex(key, ttl, serialized)
-            else:
-                self._client.set(key, serialized)
-            return True
-        except (RedisError, json.JSONDecodeError, ConnectionRefusedError) as e:
-            print(f"[RedisCache] Error setting JSON key {key}: {e}")
-            logger.error(f"[RedisCache] Error setting JSON key {key}: {e}")
-            return False
+        return self._fallback_set_json(key, value, ttl)
 
     def get_json(self, key: str) -> Optional[dict]:
-        """Retrieve a JSON value from Redis."""
-        if not self.is_available():
-            return None
+        """Retrieve a JSON value from Redis. Falls back to in-memory on failure."""
+        if self.is_available():
+            try:
+                data = self._client.get(key)
+                if data is not None:
+                    return json.loads(data)
+            except (
+                RedisError,
+                RedisConnectionError,
+                RedisTimeoutError,
+                ConnectionRefusedError,
+                ConnectionResetError,
+                json.JSONDecodeError,
+            ) as e:
+                print(f"[RedisCache] Error getting JSON key {key}: {e}. Falling back to in-memory.")
+                logger.error(f"[RedisCache] Error getting JSON key {key}: {e}. Falling back to in-memory.")
 
-        try:
-            data = self._client.get(key)
-            if data is None:
-                return None
-            return json.loads(data)
-        except (RedisError, json.JSONDecodeError, ConnectionRefusedError) as e:
-            print(f"[RedisCache] Error getting JSON key {key}: {e}")
-            logger.error(f"[RedisCache] Error getting JSON key {key}: {e}")
-            return None
+        return self._fallback_get_json(key)
 
     def exists(self, key: str) -> bool:
-        """Check if a key exists in Redis."""
-        if not self.is_available():
-            return False
+        """Check if a key exists in Redis. Falls back to in-memory on failure."""
+        if self.is_available():
+            try:
+                if bool(self._client.exists(key)):
+                    return True
+            except (
+                RedisError,
+                RedisConnectionError,
+                RedisTimeoutError,
+                ConnectionRefusedError,
+                ConnectionResetError,
+            ) as e:
+                print(f"[RedisCache] Error checking key {key}: {e}. Falling back to in-memory.")
+                logger.error(f"[RedisCache] Error checking key {key}: {e}. Falling back to in-memory.")
 
-        try:
-            return bool(self._client.exists(key))
-        except (RedisError, ConnectionRefusedError) as e:
-            print(f"[RedisCache] Error checking key {key}: {e}")
-            logger.error(f"[RedisCache] Error checking key {key}: {e}")
-            return False
+        return self._fallback_exists(key)
 
     def clear_pattern(self, pattern: str) -> int:
-        """Delete all keys matching a pattern."""
-        if not self.is_available():
-            return 0
+        """Delete all keys matching a pattern. Falls back to in-memory on failure."""
+        redis_count = 0
+        if self.is_available():
+            try:
+                keys = self._client.keys(pattern)
+                if keys:
+                    redis_count = self._client.delete(*keys)
+            except (
+                RedisError,
+                RedisConnectionError,
+                RedisTimeoutError,
+                ConnectionRefusedError,
+                ConnectionResetError,
+            ) as e:
+                print(f"[RedisCache] Error clearing pattern {pattern}: {e}. Falling back to in-memory.")
+                logger.error(f"[RedisCache] Error clearing pattern {pattern}: {e}. Falling back to in-memory.")
 
-        try:
-            keys = self._client.keys(pattern)
-            if keys:
-                return self._client.delete(*keys)
-            return 0
-        except (RedisError, ConnectionRefusedError) as e:
-            print(f"[RedisCache] Error clearing pattern {pattern}: {e}")
-            logger.error(f"[RedisCache] Error clearing pattern {pattern}: {e}")
-            return 0
+        fallback_count = self._fallback_clear_pattern(pattern)
+        return redis_count + fallback_count
+
 
 
     def close(self) -> None:
