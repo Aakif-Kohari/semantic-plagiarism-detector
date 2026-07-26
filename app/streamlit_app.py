@@ -3297,11 +3297,21 @@ if not st.session_state.authenticated:
                 if not export_flags:
                     st.info("No warnings selected for export. Please select warnings in the Flagged Incidents tab.")
                 else:
-                    zip_bytes = generate_bulk_reports_zip(
-                        export_flags,
-                        chunked_docs=chunked_docs,
-                        embeddings=embeddings,
-                    )
+                    progress_bar = st.progress(0.0)
+                    try:
+                        zip_bytes = generate_bulk_reports_zip(
+                            export_flags,
+                            chunked_docs=chunked_docs,
+                            embeddings=embeddings,
+                            progress_bar=progress_bar,
+                        )
+                    except Exception as e:
+                        progress_bar.empty()
+                        raise e
+                    else:
+                        time.sleep(0.5)
+                        progress_bar.empty()
+
                     st.download_button(
                         label=f"⬇️ Download {len(export_flags)} Selected Flagged Pairs (ZIP)",
                         data=zip_bytes,
