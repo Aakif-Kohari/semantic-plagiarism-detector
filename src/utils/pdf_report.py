@@ -19,8 +19,14 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.lib.utils import ImageReader
-from reportlab.platypus import (PageBreak, Paragraph, SimpleDocTemplate,
-                                Spacer, Table, TableStyle)
+from reportlab.platypus import (
+    PageBreak,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
+)
 
 try:
     import fitz  # PyMuPDF
