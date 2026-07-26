@@ -6,7 +6,7 @@ import sqlite3
 
 from .common import column_exists, run_migrations
 
-CORPUS_SCHEMA_VERSION = 6
+CORPUS_SCHEMA_VERSION = 7
 
 
 def migration_001_create_base_schema(
@@ -128,6 +128,16 @@ def migration_006_add_incident_threshold_snapshot(
         )
 
 
+def migration_007_add_document_language(
+    connection: sqlite3.Connection,
+) -> None:
+    """Store the primary detected language code of each document."""
+    if not column_exists(connection, "documents", "detected_language"):
+        connection.execute(
+            "ALTER TABLE documents ADD COLUMN detected_language TEXT"
+        )
+
+
 CORPUS_MIGRATIONS = {
     1: migration_001_create_base_schema,
     2: migration_002_add_document_metadata,
@@ -135,6 +145,7 @@ CORPUS_MIGRATIONS = {
     4: migration_004_add_plagiarism_incidents,
     5: migration_005_add_false_positives,
     6: migration_006_add_incident_threshold_snapshot,
+    7: migration_007_add_document_language,
 }
 
 

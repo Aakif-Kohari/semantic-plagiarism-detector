@@ -16,14 +16,16 @@ def test_add_documents_bulk_success():
             "file_hash": "hash_bulk_1",
             "class_section": "Class A",
             "student_name": "Alice",
-            "assignment_title": "HW1"
+            "assignment_title": "HW1",
+            "detected_language": "en"
         },
         {
             "filename": "bulk_doc_2.pdf",
             "file_hash": "hash_bulk_2",
             "class_section": "Class B",
             "student_name": "Bob",
-            "assignment_title": "HW2"
+            "assignment_title": "HW2",
+            "detected_language": "es"
         },
         {
             "filename": "bulk_doc_3.pdf",
@@ -43,6 +45,14 @@ def test_add_documents_bulk_success():
     assert "bulk_doc_1.pdf" in filenames
     assert "bulk_doc_2.pdf" in filenames
     assert "bulk_doc_3.pdf" in filenames
+
+    # Find docs and assert language
+    doc1 = next(d for d in all_docs if d["filename"] == "bulk_doc_1.pdf")
+    doc2 = next(d for d in all_docs if d["filename"] == "bulk_doc_2.pdf")
+    doc3 = next(d for d in all_docs if d["filename"] == "bulk_doc_3.pdf")
+    assert doc1["detected_language"] == "en"
+    assert doc2["detected_language"] == "es"
+    assert doc3["detected_language"] is None
 
 def test_add_documents_bulk_duplicate_ignore():
     # Test that inserting duplicate filenames/hashes does not fail but ignores them

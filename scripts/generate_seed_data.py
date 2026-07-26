@@ -84,6 +84,8 @@ def main():
     hash_bob = hashlib.sha256(text_bob.encode()).hexdigest()
     hash_charlie = hashlib.sha256(text_charlie.encode()).hexdigest()
 
+    from src.core.document_parser import detect_text_language
+
     print("Adding dummy documents...")
     add_document(
         filename="Introduction_to_AI.pdf",
@@ -91,6 +93,7 @@ def main():
         class_section="CS-101",
         student_name="Alice Smith",
         assignment_title="Final Essay",
+        detected_language=detect_text_language(text_alice),
     )
     add_document(
         filename="AI_Concepts_Homework.pdf",
@@ -98,6 +101,7 @@ def main():
         class_section="CS-101",
         student_name="Bob Jones",
         assignment_title="Final Essay",
+        detected_language=detect_text_language(text_bob),
     )
     add_document(
         filename="Introduction_to_Blockchain.pdf",
@@ -105,6 +109,7 @@ def main():
         class_section="CS-101",
         student_name="Charlie Brown",
         assignment_title="Final Essay",
+        detected_language=detect_text_language(text_charlie),
     )
 
     # Generate mock embeddings (384-dimensional) with exact similarities

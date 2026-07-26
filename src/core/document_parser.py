@@ -969,7 +969,12 @@ def extract_text(
     else:
         raw = extract_text_from_txt(file)
 
-    return strip_bibliography(raw)
+    raw = strip_bibliography(raw)
+    lang_code = detect_text_language(raw)
+    logger.info(
+        f"[document_parser] Detected language for document '{filename}': {lang_code}"
+    )
+    return raw
 
 
 def extract_texts_from_pdfs(files: list) -> Dict[str, str]:
