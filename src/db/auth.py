@@ -164,6 +164,39 @@ def get_user_role(username: str) -> str | None:
         raise sqlite3.Error(f"Failed to retrieve user role: {e}") from e
 
 
+def get_user_roles(user_ids: list[int]) -> dict[int, str]:
+    """Return a mapping of user_id → role for the given user IDs.
+
+    Performs a single ``WHERE id IN (?)`` query instead of N individual
+    queries, which is significantly faster when resolving roles for many
+    users (e.g. dashboard telemetry or batch admin views).
+
+    Parameters
+    ----------
+    user_ids:
+        List of user primary keys to look up.
+
+    Returns
+    -------
+    dict[int, str]
+        Mapping from user ID to role string.  IDs not found in the
+        database are omitted from the result.
+    """
+    if not user_ids:
+        return {}
+
+    try:
+        placeholders = ",".join("?" for _ in user_ids)
+        with _connect() as conn:
+            rows = conn.execute(
+                f"SELECT id, role FROM users WHERE id IN ({placeholders})",
+                user_ids,
+            ).fetchall()
+            return {row[0]: row[1] for row in rows}
+    except sqlite3.Error as e:
+        raise sqlite3.Error(f"Failed to batch query user roles: {e}") from e
+
+
 def add_user(username: str, password: str, role: str = "teacher") -> None:
     """Insert a user and preserve SQLite duplicate-user semantics."""
     try:
