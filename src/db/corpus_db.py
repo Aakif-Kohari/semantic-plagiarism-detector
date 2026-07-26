@@ -472,3 +472,15 @@ def delete_tag(tag: str) -> int:
         logger.error(f"Failed to delete tag '{tag}': {e}")
         raise
     return affected_count
+
+
+def check_database_integrity() -> list[str]:
+    """Execute PRAGMA integrity_check and return the result."""
+    try:
+        with _connect() as conn:
+            cursor = conn.execute("PRAGMA integrity_check;")
+            rows = cursor.fetchall()
+            return [row[0] for row in rows]
+    except Exception as e:
+        logger.error(f"Integrity check failed: {e}")
+        return [f"Error: {e}"]
