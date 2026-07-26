@@ -60,6 +60,7 @@ from .visualization import (
     render_network_plotly,
 )
 
+
 __all__ = [
     "extract_text_from_pdf",
     "extract_texts_from_pdfs",

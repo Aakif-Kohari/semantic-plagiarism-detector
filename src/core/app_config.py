@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 from typing import Final
 
-
 DEFAULT_APP_TITLE: Final[str] = (
     "Semantic Plagiarism Detection System"
 )

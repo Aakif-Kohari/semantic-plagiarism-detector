@@ -10,6 +10,7 @@ from .network_graph import (
     render_network_plotly,
 )
 
+
 __all__ = [
     "plot_similarity_heatmap",
     "plot_similarity_heatmap_plotly",
