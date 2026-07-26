@@ -3,20 +3,10 @@ import uuid
 
 import pytest
 
-from src.db.auth import (
-    add_user,
-    delete_user,
-    disable_2fa,
-    enable_2fa,
-    get_2fa_status,
-    get_user_active_status,
-    get_user_role,
-    init_db,
-    is_user_active,
-    set_user_active_status,
-    update_password,
-    verify_user,
-)
+from src.db.auth import (add_user, delete_user, disable_2fa, enable_2fa,
+                         get_2fa_status, get_user_active_status, get_user_role,
+                         init_db, is_user_active, set_user_active_status,
+                         update_password, verify_user)
 
 
 @pytest.fixture(autouse=True)
@@ -29,13 +19,13 @@ def setup_test_db(mock_db):
 # Calls the init_db function and then uses verify_user to check if default admin user created
 def test_init_db():
     init_db()
-    assert verify_user("admin", "admin123") is not False
+    assert verify_user("admin", "admin12345") is not False
 
 
 # Adds new user via uuid and uses get_user_role to check if user added
 def test_add_user():
     user = uuid.uuid4().hex
-    add_user(user, "ac_123")
+    add_user(user, "ac_1234567")
     check = get_user_role(user)
     assert check is not None
 
@@ -80,7 +70,7 @@ def test_delete_user():
 
 def test_2fa_flow():
     username = "test2fauser"
-    add_user(username, "pass123")
+    add_user(username, "pass1234567")
 
     enabled, secret = get_2fa_status(username)
     assert enabled is False
@@ -119,7 +109,7 @@ def test_suspend_account():
 
     # Try suspending default 'admin' user (must raise ValueError)
     try:
-        add_user("admin", "admin123", "admin")
+        add_user("admin", "admin12345", "admin")
     except ValueError:
         pass
     with pytest.raises(ValueError, match="The admin account cannot be suspended."):
@@ -156,7 +146,7 @@ def test_user_theme(mock_db):
     add_user(user, "password123")
     
     from src.db.auth import get_user_theme, set_user_theme
-    
+
     # Default should be light
     assert get_user_theme(user) == "light"
     
