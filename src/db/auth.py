@@ -10,8 +10,12 @@ auth.py
 -------
 
 SQLite-backed authentication with Argon2 password hashing (via argon2-cffi),
+
 automatic transparent migration from legacy bcrypt hashes, user login tracking,
 and strong password complexity policies.
+
+automatic transparent migration from legacy bcrypt hashes, and user login tracking.
+
 
 SQLite-backed authentication with Argon2 password hashing (via argon2-cffi)
 and automatic transparent migration from legacy bcrypt hashes.
@@ -75,6 +79,14 @@ def configure_db_path(db_path: str | os.PathLike) -> None:
     """Configure the SQLite database path used by the authentication module."""
     global _DB_PATH
     _DB_PATH = os.path.abspath(os.fspath(db_path))
+
+
+VALID_ROLES = {"admin", "teacher"}
+
+# Initialize Argon2 password hasher
+_ph = PasswordHasher()
+
+
 
 
 def _connect() -> sqlite3.Connection:
@@ -295,6 +307,7 @@ def verify_user(username: str, password: str) -> bool:
 authenticate_user = verify_user
 
 
+
 def get_user_role(username: str) -> str | None:
     """Return the role of a user, or None if not found."""
     try:
@@ -376,9 +389,11 @@ def add_user(username: str, password: str, role: str = "teacher") -> None:
             ("admin",),
         ).fetchone()
 
+
         hashed = _hash_password("Admin123!")
 
         if not exists:
+
 
 
         if not exists:
@@ -496,10 +511,14 @@ def verify_user(username: str, password: str) -> bool:
     """
     Return True if username exists and password matches stored hash.
 
+
     Automatically records last_login_at timestamp upon successful verification.
 
     Supports both Argon2 and legacy bcrypt hashes, automatically migrating 
     bcrypt hashes to Argon2 upon successful login.
+
+
+    Automatically records last_login_at timestamp upon successful verification.
 
     """
     username = _validate_username(username)
@@ -532,6 +551,7 @@ def get_2fa_status(username: str) -> tuple[bool, str | None]:
             _ph.verify(stored_hash, password)
             if _ph.check_needs_rehash(stored_hash):
 
+
                 # Internal system rehash bypasses policy check to preserve existing password
                 hashed = _hash_password(password)
                 with _connect() as conn_rehash:
@@ -544,6 +564,10 @@ def get_2fa_status(username: str) -> tuple[bool, str | None]:
 
                 update_password(username, password)
 
+
+                update_password(username, password)
+            _record_login_timestamp(username)
+
             return True
         except (VerifyMismatchError, VerificationError):
             return False
@@ -552,6 +576,7 @@ def get_2fa_status(username: str) -> tuple[bool, str | None]:
     if stored_hash.startswith(("$2a$", "$2b$", "$2y$")):
         try:
             if bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8")):
+
 
                 hashed = _hash_password(password)
                 with _connect() as conn_migrate:
@@ -563,6 +588,10 @@ def get_2fa_status(username: str) -> tuple[bool, str | None]:
                 _record_login_timestamp(username)
 
                 update_password(username, password)
+
+
+                update_password(username, password)
+                _record_login_timestamp(username)
 
                 return True
         except ValueError:
@@ -598,6 +627,7 @@ def check_login_rate_limit(username: str) -> tuple[bool, str | None]:
 
 
 
+
 def add_user(username: str, password: str, role: str = "teacher") -> None:
     """Insert a new user enforcing strong password complexity policy."""
 
@@ -607,6 +637,12 @@ def add_user(username: str, password: str, role: str = "teacher") -> None:
 
     username = _validate_username(username)
     password = _validate_password_complexity(password)
+
+def add_user(username: str, password: str, role: str = "teacher") -> None:
+    """Insert a new user with an Argon2-hashed password."""
+    username = _validate_username(username)
+    password = _validate_password(password)
+
     role = _validate_role(role)
 
     hashed = _hash_password(password)
@@ -664,6 +700,24 @@ def get_user_preferences(username: str) -> dict:
     """Return user preferences as a dictionary, or empty dict if none exist."""
     username = username.lower()
 
+
+def get_all_users() -> list:
+    """Return all users as a list of dicts including last_login_at."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, username, role, last_login_at FROM users ORDER BY id"
+        ).fetchall()
+
+    return [
+        {
+            "ID": row[0],
+            "Username": row[1],
+            "Role": row[2],
+            "Last Login At": row[3] or "Never",
+        }
+        for row in rows
+    ]
+
     with _connect() as conn:
         row = conn.execute(
             "SELECT preferences FROM users WHERE username = ?",
@@ -677,6 +731,7 @@ def get_user_preferences(username: str) -> dict:
         except json.JSONDecodeError:
             return {}
     return {}
+
 
 
 def update_user_preferences(username: str, preferences: dict) -> None:
@@ -705,6 +760,7 @@ def update_password(username: str, new_password: str) -> None:
 
     hashed = _hash_password(new_password)
 
+
     with _connect() as conn:
         cursor = conn.execute(
             "SELECT COUNT(1) FROM users WHERE username = ?",
@@ -725,6 +781,7 @@ def update_password(username: str, new_password: str) -> None:
         username=username,
         details="Password updated successfully.",
     )
+
 
 def get_user_theme(username: str) -> str:
     """Return the user's theme preference (default 'light')."""
