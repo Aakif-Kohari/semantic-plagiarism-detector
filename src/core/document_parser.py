@@ -326,8 +326,48 @@ def _configure_tesseract(pytesseract_module) -> None:
         pytesseract_module.pytesseract.tesseract_cmd = configured_path
 
 
-def _ocr_pdf_page(
+def _is_blank_scanned_page(
     pdf_bytes: bytes,
+    page_index: int,
+    *,
+    dpi: int = DEFAULT_OCR_DPI,
+    variance_threshold: float = 5.0,
+) -> bool:
+    """Return True if a rendered page looks blank (very low pixel variance)."""
+    try:
+        import fitz  # PyMuPDF
+        from PIL import Image
+    except ImportError:
+        return False
+
+    try:
+        with fitz.open(stream=pdf_bytes, filetype="pdf") as document:
+            page = document.load_page(page_index)
+            scale = dpi / 72
+            pixmap = page.get_pixmap(
+                matrix=fitz.Matrix(scale, scale),
+                alpha=False,
+            )
+            image = Image.frombytes(
+                "RGB",
+                (pixmap.width, pixmap.height),
+                pixmap.samples,
+            ).convert("L")
+
+        histogram = image.histogram()
+        pixel_count = image.width * image.height
+        if pixel_count == 0:
+            return True
+
+        mean = sum(i * count for i, count in enumerate(histogram)) / pixel_count
+        variance = (
+            sum(count * ((i - mean) ** 2) for i, count in enumerate(histogram))
+            / pixel_count
+        )
+        return variance < variance_threshold
+    except Exception as exc:
+        logger.error(f"[document_parser] Error checking blank page {page_index}: {exc}")
+        return False    pdf_bytes: bytes,
     page_index: int,
     *,
     dpi: int = DEFAULT_OCR_DPI,
@@ -418,9 +458,15 @@ def _parse_pdf_page(
 
     import pdfplumber
 
-    try:
+try:
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
             page = pdf.pages[page_index]
+
+
+            if not _has_meaningful_text(native_text):
+                if _is_blank_scanned_page(pdf_bytes, page_index, dpi=ocr_dpi):
+                    return []
+
 
             tables = page.find_tables()
 
@@ -447,6 +493,7 @@ def _parse_pdf_page(
             selected_text = combined_text
 
             if not _has_meaningful_text(selected_text):
+
                 selected_text = _ocr_pdf_page(
                     pdf_bytes,
                     page_index,
@@ -454,8 +501,7 @@ def _parse_pdf_page(
                     language=ocr_language,
                 )
 
-            return _clean_page_text(selected_text)
-    except OCRDependencyError:
+            return _clean_page_text(selected_text)    except OCRDependencyError:
         raise
     except Exception as exc:
         logger.error(f"[document_parser] Error parsing page {page_index}: {exc}")
