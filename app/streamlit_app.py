@@ -17,6 +17,13 @@ from src.core.embedding_model import embed_documents
 from src.core.text_chunking import chunk_documents
 
 import base64
+
+
+import datetime
+import io as _io
+import os
+
+
 import html
 # Standard / Third-party imports
 import time
@@ -102,7 +109,11 @@ from src.db import (
     init_corpus_db,
 )
 from src.db.auth import add_user, get_all_users, get_user_role, init_db, verify_user
+
 from src.utils.pdf_report import highlight_pdf_matches
+
+from src.utils.pdf_report import highlight_pdf_matches, truncate_filename
+
 from src.utils.redis_cache import (
     cache_session_state,
     clear_session,
@@ -202,9 +213,14 @@ except ImportError:
     from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore[import-untyped,reportMissingImports]
 
 
+
+    from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore[import-untyped,reportMissingImports]
+
+
     from utils.excel_export import \
         export_similarity_matrix_to_excel  # type: ignore
     from utils.json_export import export_similarity_matrix_to_json
+
 
 
 
@@ -740,6 +756,10 @@ with theme_col:
 
 
 
+
+
+# ── Sidebar (ROLE RESTRICTED Settings) ────────────────────────────────────────
+
 # ── Sidebar (ROLE RESTRICTED Settings & i18n) ─────────────────────────────────
 
 
@@ -907,6 +927,39 @@ with st.sidebar:
                             )
                             st.rerun()
 
+
+        # ── Date Filter Range Selector (#181) ─────────────────────────────────
+        st.markdown("### 📅 Date Filter")
+        today = datetime.date.today()
+        seven_days_ago = today - datetime.timedelta(days=7)
+        date_range = st.date_input(
+            "Filter Documents by Upload Date",
+            value=(seven_days_ago, today),
+            key="document_date_filter",
+            help="Filter documents by file modification date before processing.",
+        )
+
+        # ── Customizable Chunk Size & Overlap Sliders (#153) ─────────────────
+        st.markdown("### ✂️ Chunking Settings")
+        chunk_size = st.slider(
+            "Chunk Size (characters)",
+            200,
+            2000,
+            value=500,
+            step=50,
+            help="Target character length for text chunks during embedding.",
+            key="chunk_size_slider",
+        )
+        chunk_overlap = st.slider(
+            "Chunk Overlap (characters)",
+            0,
+            500,
+            value=50,
+            step=10,
+            help="Character overlap between consecutive chunks to preserve contextual boundary.",
+            key="chunk_overlap_slider",
+        )
+
         # ── Generate Mock Data (Issue #255) ───────────────────────────────────
         # Hidden developer utility: generates 5 fake essays via Faker so the
         # app is immediately usable after cloning without manual PDF uploads.
@@ -951,6 +1004,7 @@ with st.sidebar:
                                 "chunk_overlap_slider", 50
                             ),
                         )
+
 
                     added = result["essays"]
                     skipped = result["skipped"]
@@ -999,6 +1053,7 @@ with st.sidebar:
         chunk_overlap = 50
         ocr_language = DEFAULT_OCR_LANGUAGE
         ocr_dpi = DEFAULT_OCR_DPI
+        date_range = None
 
     st.markdown("---")
     unique_classes = ["All Classes"] + get_unique_class_sections()
@@ -1717,6 +1772,12 @@ if not st.session_state.authenticated:
     except ImportError:
         bulk_download_drive_folder = None
 
+
+                        if downloaded_dict:
+                            st.session_state.drive_files_dict.update(downloaded_dict)
+                            st.success(
+                                f"✅ Imported {len(downloaded_names)} files: {', '.join([truncate_filename(n, 25) for n in downloaded_names])}"
+
     if "drive_files_dict" not in st.session_state:
         st.session_state.drive_files_dict = {}
 
@@ -1746,7 +1807,7 @@ if not st.session_state.authenticated:
                                         drive_api_key.strip() if drive_api_key else None
                                     ),
                                 )
-                            )
+                        )
 
                             if downloaded_dict:
                                 scrubbed_drive = {
@@ -1930,6 +1991,21 @@ if not st.session_state.authenticated:
                         st.error("Please enter a password.")
         st.stop()
 
+
+    # Apply Date Range Filtering (#181)
+    if date_range and isinstance(date_range, (tuple, list)) and len(date_range) == 2:
+        start_d, end_d = date_range[0], date_range[1]
+        filtered_bytes_dict = {}
+        for fname, bdata in file_bytes_dict.items():
+            mod_date = datetime.date.today()  # Fallback to current date
+            if os.path.exists(fname):
+                mtime = os.path.getmtime(fname)
+                mod_date = datetime.date.fromtimestamp(mtime)
+
+            if start_d <= mod_date <= end_d:
+                filtered_bytes_dict[fname] = bdata
+        file_bytes_dict = filtered_bytes_dict
+
     # ── Display Failed Documents & Retry OCR Button (#183) ───────────────────
     if st.session_state.failed_documents:
         failed_list = list(st.session_state.failed_documents.keys())
@@ -1961,9 +2037,15 @@ if not st.session_state.authenticated:
         # Reconstruct the file bytes dictionary with the chosen order
         file_bytes_dict = {name: file_bytes_dict[name] for name in ordered_file_names}
 
+
     # ── Display Failed Documents & Retry OCR Button (#183) ───────────────────
     if st.session_state.failed_documents:
         failed_list = list(st.session_state.failed_documents.keys())
+
+    # ── Display Failed Documents & Retry OCR Button (#183 & #319) ─────────────
+    if st.session_state.failed_documents:
+        failed_list = [truncate_filename(fn, 25) for fn in st.session_state.failed_documents.keys()]
+
         st.warning(
             f"⚠️ **{len(failed_list)} document(s) failed text extraction/OCR:** "
             f"`{', '.join(failed_list)}`. This can happen due to transient memory errors."
@@ -1976,18 +2058,29 @@ if not st.session_state.authenticated:
                 st.session_state.failed_documents = {}
                 st.rerun()
 
+
     # 4. PIPELINE STOP CHECK
     if len(file_bytes_dict) < 2 and url_text is None:
         if st.session_state.analysis_results is None:
             st.markdown(
                 empty_state_html(
                     "Waiting for Files",
+
+
+                    "Please upload or import from Drive at least 2 PDF, DOCX, or TXT assignments (under 10MB each) to begin.",
+
+
                     "Please upload or import from Drive at least 2 PDF, DOCX, DOC, or TXT assignments (under 10MB each) to begin.",
+
                     "📂",
                 ),
                 unsafe_allow_html=True,
             )
             st.stop()
+
+
+    # ── Metadata Editor Section (#319 Truncated Expanders) ───────────────────
+
 
     st.markdown("### 📝 Set Document Metadata")
     col1, col2 = st.columns(2)
@@ -2004,6 +2097,13 @@ if not st.session_state.authenticated:
 
     metadata_dict = {}
     for filename in file_bytes_dict.keys():
+
+        base_name = os.path.splitext(filename)[0]
+        guessed_name = base_name.replace("_", " ").replace("-", " ").title()
+        truncated_disp_name = truncate_filename(filename, max_len=30)
+
+        with st.expander(f"📄 {truncated_disp_name}", expanded=False):
+
         # Check if this filename is a virtual CSV document
         is_csv_doc = False
         csv_filename_matched = None
@@ -2057,6 +2157,7 @@ if not st.session_state.authenticated:
 
     if url_filename:
         with st.expander(f"🔗 {url_filename}", expanded=True):
+
             student_name = st.text_input(
                 f"Student Name for {url_filename}",
                 value="Web Source",
@@ -2094,6 +2195,7 @@ if not st.session_state.authenticated:
         raw_texts = {}
 
 
+
         failed_files = {}
 
         for name, data in file_bytes_dict.items():
@@ -2110,6 +2212,7 @@ if not st.session_state.authenticated:
                     failed_files[name] = data
             except Exception:
                 failed_files[name] = data
+
 
 
         failed_files = []
@@ -2223,7 +2326,11 @@ if not st.session_state.authenticated:
 
 
 
+
     # Run Pipeline if files uploaded
+
+   # Run Pipeline if files uploaded
+
     def compute_pipeline_signature(
         file_bytes_dict: dict,
         ocr_language: str,
@@ -2302,7 +2409,6 @@ if not st.session_state.authenticated:
                 unsafe_allow_html=True,
             )
         st.divider()
-
 
 
     for flag in flags:
@@ -2706,6 +2812,15 @@ if not st.session_state.authenticated:
                 st.info(
                     "No matching vector chunks found above threshold."
                 )
+
+                if q_results:
+                    for rec, score in q_results:
+                        disp_doc_name = truncate_filename(rec.doc_name, 30)
+                        st.markdown(
+                            f"**{disp_doc_name}** (Chunk #{rec.chunk_index}) — Similarity: `{score:.1%}`"
+                        )
+                        st.caption(rec.chunk_text)
+
             else:
                 min_sim, max_sim = st.slider(
                     "Similarity Range:",
@@ -2776,12 +2891,13 @@ if not st.session_state.authenticated:
                         },
                         key="faiss_search_results_table",
                     )
+
                 else:
                     st.info(
                         "No matching vector chunks found within the selected similarity range."
                     )
 
-    # ══ TAB 3: MATRIX ═════════════════════════════════════════════════════════
+    # ══ TAB 3: MATRIX (#319 Truncated Row/Col Headers) ════════════════════════
     with tab_matrix:
         st.markdown("🏠 Home > Dashboard > **Similarity Matrix**")
         st.subheader("📋 Similarity Matrix")
@@ -2807,7 +2923,13 @@ if not st.session_state.authenticated:
                     return "background-color:#ffa500;color:white;font-weight:bold;"
                 return ""
 
-            styled_df = active_sim_df.style.format("{:.4f}").map(_highlight)
+            # Truncate row labels and column names to prevent UI table layout overflow
+            truncated_sim_df = active_sim_df.rename(
+                index=lambda x: truncate_filename(str(x), 28),
+                columns=lambda x: truncate_filename(str(x), 28),
+            )
+
+            styled_df = truncated_sim_df.style.format("{:.4f}").map(_highlight)
             st.dataframe(styled_df, use_container_width=True)
 
             # Export options row
@@ -2857,6 +2979,9 @@ if not st.session_state.authenticated:
             cmap=heatmap_cmap,  # Dynamic colormap support (#186)
         )
         st.pyplot(heatmap_fig, use_container_width=True)
+
+
+    # ══ TAB 5: PAIR DRILL-DOWN (#145 & #319 Included) ════════════════════════
 
         # ══ TAB 5: PAIR DRILL-DOWN ══════════════════════════════════════════════════
 
@@ -3004,9 +3129,29 @@ if not st.session_state.authenticated:
 
     # ══ TAB 5: PAIR DRILL-DOWN ════════════════════════════════════════════════
 
+
     with tab_drill:
         st.markdown("🏠 Home > Dashboard > **Pair Drill-Down**")
         st.subheader("🔬 Pair Drill-Down")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            doc_a = st.selectbox(
+                "Document A",
+                doc_names,
+                index=0,
+                format_func=lambda x: truncate_filename(x, 35),
+                key="da",
+            )
+        with c2:
+            remaining_docs = [d for d in doc_names if d != doc_a]
+            doc_b = st.selectbox(
+                "Document B",
+                remaining_docs,
+                index=0,
+                format_func=lambda x: truncate_filename(x, 35),
+                key="db",
+
         st.caption("Inspect chunk-level similarity between any two documents.")
 
         if "expand_all_drill" not in st.session_state:
@@ -3026,6 +3171,7 @@ if not st.session_state.authenticated:
                     "📂",
                 ),
                 unsafe_allow_html=True,
+
             )
         elif len(active_sim_df) < 2:
             from src.errors import UI_NEED_MIN_DOCUMENTS
@@ -3276,6 +3422,22 @@ if not st.session_state.authenticated:
                 "⚠️ Access Denied: User Management is restricted to administrators."
             )
 
+            for rank, (ca, cb, sim) in enumerate(top_pairs, 1):
+                with st.expander(f"#{rank} — Similarity: {sim:.1%}"):
+                    st.write(f"**{truncate_filename(doc_a, 30)}:** {ca}")
+                    st.write(f"**{truncate_filename(doc_b, 30)}:** {cb}")
+
+        # --- In-App PDF Preview with Highlighted Matches (#145) ---
+        with drill_tab_viewer:
+            st.subheader("📄 In-App PDF Preview with Highlighted Matches")
+            selected_view_doc = st.radio(
+                "Select Document to Preview:",
+                options=[doc_a, doc_b],
+                format_func=lambda x: truncate_filename(x, 35),
+                horizontal=True,
+                key="doc_viewer_select",
+
+
         st.write("---")
         st.subheader("🔐 Two-Factor Authentication (2FA)")
 
@@ -3285,6 +3447,7 @@ if not st.session_state.authenticated:
         if enabled:
             st.success(
                 "✔️ Two-Factor Authentication is currently **enabled** for your account."
+
             )
             with st.expander("Deactivate Two-Factor Authentication", expanded=False):
                 with st.form("disable_2fa_form"):
@@ -3762,6 +3925,7 @@ if not st.session_state.authenticated:
                         "snapshot. Existing server data is not modified."
                     ),
                 )
+
 
     # ══ TAB 6: USERS ══════════════════════════════════════════════════════════
     with tab_users:
