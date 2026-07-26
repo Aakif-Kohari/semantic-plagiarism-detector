@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import argparse
-import json
 import os
 import subprocess
 import sys
@@ -33,9 +32,9 @@ def run_tests(args):
     # 2. Coverage flags
     if args.enforce_coverage:
         cmd.extend([
-            f"--cov=src",
-            f"--cov=app",
-            f"--cov-report=term-missing",
+            "--cov=src",
+            "--cov=app",
+            "--cov-report=term-missing",
             f"--cov-fail-under={args.enforce_coverage}",
             f"--junitxml=test-reports/junit-{datetime.now().strftime('%Y%m%d%H%M%S')}.xml"
         ])

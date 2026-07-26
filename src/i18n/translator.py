@@ -8,7 +8,7 @@ and translation API integration with SQLite caching.
 
 import json
 import os
-from typing import Dict, Optional
+from typing import Dict
 
 from src.db.translation_cache import cache_translation, get_cached_translation
 

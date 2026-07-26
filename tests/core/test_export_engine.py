@@ -2,7 +2,6 @@ import csv
 import io
 import json
 
-import pytest
 
 from src.core.export_engine import LMSExportEngine
 

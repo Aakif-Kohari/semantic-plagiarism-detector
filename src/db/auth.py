@@ -383,7 +383,6 @@ def disable_2fa(username: str) -> None:
 
 def check_login_rate_limit(username: str) -> tuple[bool, str | None]:
     """Check if username is rate limited. Returns (is_allowed, error_message)."""
-    from src.utils.redis_cache import get_login_attempts, is_login_locked_out
 
 
 def add_user(username: str, password: str, role: str = "teacher") -> None:

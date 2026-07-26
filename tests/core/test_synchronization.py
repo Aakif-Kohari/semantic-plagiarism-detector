@@ -1,7 +1,6 @@
 import os
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from src.core.synchronization import (_backup_corrupted_index,
                                       verify_and_repair_index)

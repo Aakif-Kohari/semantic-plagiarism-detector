@@ -1,6 +1,5 @@
 import matplotlib.pyplot as plt
 import numpy as np
-import pytest
 
 
 def test_similarity_heatmap_visual():
