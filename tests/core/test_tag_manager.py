@@ -1,4 +1,3 @@
-import pytest
 
 from src.core.tag_manager import TagManager
 
