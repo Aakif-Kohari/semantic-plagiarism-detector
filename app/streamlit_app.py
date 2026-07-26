@@ -1852,6 +1852,21 @@ if not st.session_state.authenticated:
                 st.session_state.failed_documents = {}
                 st.rerun()
 
+    # ── Re-order Uploaded Files (Issue #608) ──────────────────────────────────
+    if file_bytes_dict:
+        st.markdown("### 🔄 Drag-and-Drop Batch Ordering")
+        st.caption("Drag-and-drop, remove, or select files to change the batch execution sequence.")
+        file_names_list = list(file_bytes_dict.keys())
+        ordered_file_names = st.multiselect(
+            "Select and order files for pipeline execution:",
+            options=file_names_list,
+            default=file_names_list,
+            key="pipeline_file_ordering_multiselect",
+            help="Files will be processed in the exact order selected here.",
+        )
+        # Reconstruct the file bytes dictionary with the chosen order
+        file_bytes_dict = {name: file_bytes_dict[name] for name in ordered_file_names}
+
     # 4. PIPELINE STOP CHECK
     if len(file_bytes_dict) < 2 and url_text is None:
         if st.session_state.analysis_results is None:
@@ -2107,7 +2122,7 @@ if not st.session_state.authenticated:
         import hashlib
 
         h = hashlib.sha256()
-        for name in sorted(file_bytes_dict.keys()):
+        for name in file_bytes_dict.keys():
             data = file_bytes_dict[name]
             h.update(name.encode("utf-8", errors="ignore"))
             h.update(data)
