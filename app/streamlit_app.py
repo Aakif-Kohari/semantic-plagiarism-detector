@@ -3754,6 +3754,75 @@ if not st.session_state.authenticated:
             on_change=save_preferences_callback,
         )
 
+        st.markdown("---")
+        st.markdown("### ℹ️ Diagnostics")
+        st.caption("Copy system diagnostic information for bug reporting.")
+        if st.button("📋 Copy System Info", key="copy_system_info_btn", use_container_width=True):
+            import platform
+            import streamlit.components.v1 as components
+            import json
+
+            # Gather system information
+            py_version = sys.version.split()[0]
+            os_info = f"{platform.system()} {platform.release()}"
+            st_version = st.__version__
+
+            db_status = "Unknown"
+            try:
+                from src.db.corpus_db import check_database_integrity
+                results = check_database_integrity()
+                if results and all(r.lower() == "ok" for r in results):
+                    db_status = "Connected (Healthy)"
+                else:
+                    db_status = f"Unhealthy ({', '.join(results)})"
+            except Exception as e:
+                db_status = f"Unavailable ({str(e)})"
+
+            # Format information as a Markdown block suitable for GitHub issue reports
+            sys_info_markdown = (
+                "### Diagnostic Information\n"
+                f"- **Python Version**: `{py_version}`\n"
+                f"- **Streamlit Version**: `{st_version}`\n"
+                f"- **OS**: `{os_info}`\n"
+                f"- **Database Status**: `{db_status}`"
+            )
+
+            # Copy to clipboard via components.html
+            components.html(
+                f"""
+                <script>
+                const text = {json.dumps(sys_info_markdown)};
+                const parentWindow = window.parent;
+                const clipboard = parentWindow.navigator.clipboard || navigator.clipboard;
+                if (clipboard) {{
+                    clipboard.writeText(text).then(() => {{
+                        console.log("Copied to clipboard successfully via Clipboard API");
+                    }}).catch((err) => {{
+                        fallbackCopy(text);
+                    }});
+                }} else {{
+                    fallbackCopy(text);
+                }}
+
+                function fallbackCopy(str) {{
+                    const el = document.createElement('textarea');
+                    el.value = str;
+                    el.setAttribute('readonly', '');
+                    el.style.position = 'absolute';
+                    el.style.left = '-9999px';
+                    document.body.appendChild(el);
+                    el.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(el);
+                    console.log("Copied to clipboard successfully via fallback");
+                }}
+                </script>
+                """,
+                height=0,
+                width=0,
+            )
+            st.toast("📋 System Info copied to clipboard!")
+
         if user_role == "admin":
             st.markdown("---")
             st.markdown("### ⚙️ Advanced Configuration")
