@@ -1,7 +1,17 @@
+"""Helpers for estimating and formatting document processing time."""
+
 from __future__ import annotations
 
+import math
 import time
+from collections.abc import Iterable
 from contextlib import contextmanager
+from numbers import Real
+from typing import Any
+
+BYTES_PER_MB = 1024 * 1024
+DEFAULT_SECONDS_PER_MB = 2.0
+
 
 class ProcessingTimer:
     def __init__(self):
@@ -18,17 +28,6 @@ class ProcessingTimer:
             end = time.perf_counter()
             self._active_timers -= 1
             self.durations.append(end - start)
-"""Helpers for estimating and formatting document processing time."""
-
-from __future__ import annotations
-
-import math
-from collections.abc import Iterable
-from numbers import Real
-from typing import Any
-
-BYTES_PER_MB = 1024 * 1024
-DEFAULT_SECONDS_PER_MB = 2.0
 
 
 def _validate_non_negative_number(name: str, value: Real) -> float:

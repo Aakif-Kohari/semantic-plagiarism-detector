@@ -40,6 +40,7 @@ FAISS_INDEX_TTL = 24 * 60 * 60  # 24 hours for FAISS index cache
 ANALYSIS_RESULTS_TTL = 2 * 60 * 60  # 2 hours for analysis results
 LOGIN_LOCKOUT_TTL = 15 * 60  # 15 minutes for login lockout
 UPLOAD_RATE_TTL = 60 * 60  # 1 hour for upload rate limiting
+DEFAULT_TTL = 24 * 60 * 60  # 24 hours fallback for keys without explicit TTL
 
 
 class RedisCache:
@@ -124,13 +125,20 @@ class RedisCache:
             return False, None
 
     def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
-        """Store a value in Redis with optional TTL."""
+        """Store a value in Redis with optional TTL.
+
+        When *ttl* is ``None``, the :attr:`DEFAULT_TTL` (24 hours) is
+        applied so that transient cache keys do not persist indefinitely.
+        Pass ``ttl=0`` to store without expiration (use sparingly).
+        """
         if not self.is_available():
             return False
 
         try:
             serialized = pickle.dumps(value)
-            if ttl:
+            if ttl is None:
+                self._client.setex(key, DEFAULT_TTL, serialized)
+            elif ttl:
                 self._client.setex(key, ttl, serialized)
             else:
                 self._client.set(key, serialized)
@@ -243,9 +251,40 @@ class RedisCache:
 _cache = RedisCache()
 
 
-def get_cache() -> RedisCache:
-    """Get the global Redis cache instance."""
+def get_cache(key: Optional[str] = None):
+    """Get the global Redis cache instance, or look up a key directly.
+
+    When called with no arguments, returns the :class:`RedisCache` singleton.
+    When called with a *key* string, performs a cache lookup and returns the
+    stored value (or ``None`` on miss).
+    """
+    if key is not None:
+        return _cache.get(key)
     return _cache
+
+
+def set_cache(key: str, value: Any, expire: Optional[int] = None) -> bool:
+    """Store *value* under *key* in the global Redis cache.
+
+    Args:
+        key:    Cache key.
+        value:  Value to store (will be serialised by the cache backend).
+        expire: Optional TTL in seconds. When ``None`` (default), the
+                cache backend applies its own 24-hour default TTL.
+
+    Returns:
+        ``True`` on success, ``False`` on failure.
+    """
+    return _cache.set(key, value, ttl=expire)
+
+
+def delete_cache(key: str) -> bool:
+    """Delete a key from Redis.
+
+    Safe to call even when the key does not exist or Redis is
+    unavailable — returns ``False`` in those cases.
+    """
+    return _cache.delete(key)
 
 
 def cache_session_state(session_id: str, key: str, value: Any) -> bool:
