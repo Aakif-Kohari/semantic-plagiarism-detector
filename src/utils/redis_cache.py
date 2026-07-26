@@ -5,10 +5,13 @@ Redis connection and caching utilities for session state and FAISS results.
 Supports scaling across multiple server nodes in Docker/Kubernetes environments.
 """
 
+import hashlib
 import json
 import os
 import pickle
+import re
 from typing import Any, Optional
+from urllib.parse import quote
 
 try:
     import redis
@@ -32,6 +35,26 @@ REDIS_URL = os.getenv("REDIS_URL", f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB
 SESSION_TTL = 15 * 60  # 15 minutes for session state
 FAISS_INDEX_TTL = 24 * 60 * 60  # 24 hours for FAISS index cache
 ANALYSIS_RESULTS_TTL = 2 * 60 * 60  # 2 hours for analysis results
+
+
+def sanitize_key_component(key_input: str) -> str:
+    """
+    Sanitizes string inputs used in Redis key generation to prevent
+    key injection, key splitting, and command pollution.
+    
+    Strips whitespace and uses URL encoding or SHA256 hashing for inputs
+    containing spaces, wildcards, or control characters.
+    """
+    if not isinstance(key_input, str):
+        key_input = str(key_input)
+
+    stripped = key_input.strip()
+
+    # If the input contains whitespace or illegal characters, hash or encode it safely
+    if re.search(r"[\s*?\[\]{}\\\n\r]", stripped) or len(stripped) > 128:
+        return hashlib.sha256(stripped.encode("utf-8")).hexdigest()
+
+    return quote(stripped, safe="-_.")
 
 
 class RedisCache:
@@ -198,41 +221,50 @@ def get_cache() -> RedisCache:
 
 def cache_session_state(session_id: str, key: str, value: Any) -> bool:
     """Cache session state data with TTL."""
-    cache_key = f"session:{session_id}:{key}"
+    clean_sid = sanitize_key_component(session_id)
+    clean_key = sanitize_key_component(key)
+    cache_key = f"session:{clean_sid}:{clean_key}"
     return _cache.set(cache_key, value, SESSION_TTL)
 
 
 def get_session_state(session_id: str, key: str) -> Optional[Any]:
     """Retrieve session state data from cache."""
-    cache_key = f"session:{session_id}:{key}"
+    clean_sid = sanitize_key_component(session_id)
+    clean_key = sanitize_key_component(key)
+    cache_key = f"session:{clean_sid}:{clean_key}"
     return _cache.get(cache_key)
 
 
 def clear_session(session_id: str) -> bool:
     """Clear all session data for a given session ID."""
-    pattern = f"session:{session_id}:*"
+    clean_sid = sanitize_key_component(session_id)
+    pattern = f"session:{clean_sid}:*"
     return _cache.clear_pattern(pattern) > 0
 
 
 def cache_faiss_index(index_key: str, index_data: bytes) -> bool:
     """Cache FAISS index binary data."""
-    cache_key = f"faiss:index:{index_key}"
+    clean_key = sanitize_key_component(index_key)
+    cache_key = f"faiss:index:{clean_key}"
     return _cache.set(cache_key, index_data, FAISS_INDEX_TTL)
 
 
 def get_faiss_index(index_key: str) -> Optional[bytes]:
     """Retrieve FAISS index binary data from cache."""
-    cache_key = f"faiss:index:{index_key}"
+    clean_key = sanitize_key_component(index_key)
+    cache_key = f"faiss:index:{clean_key}"
     return _cache.get(cache_key)
 
 
 def cache_analysis_results(analysis_key: str, results: dict) -> bool:
     """Cache analysis results (embeddings, similarity matrices, etc.)."""
-    cache_key = f"analysis:{analysis_key}"
+    clean_key = sanitize_key_component(analysis_key)
+    cache_key = f"analysis:{clean_key}"
     return _cache.set(cache_key, results, ANALYSIS_RESULTS_TTL)
 
 
 def get_analysis_results(analysis_key: str) -> Optional[dict]:
     """Retrieve analysis results from cache."""
-    cache_key = f"analysis:{analysis_key}"
+    clean_key = sanitize_key_component(analysis_key)
+    cache_key = f"analysis:{clean_key}"
     return _cache.get(cache_key)

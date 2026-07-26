@@ -76,8 +76,7 @@ from src.visualization.heatmap import plot_similarity_heatmap
 try:
     from src.utils.excel_export import export_similarity_matrix_to_excel
 except ImportError:
-    from utils.excel_export import export_similarity_matrix_to_excel
-
+    from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore[import-untyped,reportMissingImports]
 # Initialize corpus database
 init_corpus_db()
 
@@ -101,7 +100,7 @@ _INDEX_PATH = os.path.abspath(
 )
 try:
     from streamlit_tour import Tour
-except ImportError:
+except Exception:
     Tour = None
 
 # Initialize auth database
