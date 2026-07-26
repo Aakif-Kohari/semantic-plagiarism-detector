@@ -34,6 +34,16 @@ import numpy as np
 # the test suite does not flush the active development session cache.
 os.environ.setdefault("REDIS_DB", "1")
 
+# ── Headless Renderer Configuration (Issue #504) ──────────────────────────────
+# Force Matplotlib to use the non-GUI Agg backend on headless CI workers
+os.environ.setdefault("MPLBACKEND", "Agg")
+try:
+    import matplotlib
+
+    matplotlib.use("Agg")
+except ImportError:
+    pass
+
 import pytest
 
 # ── Repository Root Path Bootstrap ────────────────────────────────────────────
@@ -65,12 +75,14 @@ def clean_test_env():
     before and after every test, preventing state leakage across test cases.
     """
     try:
-        from src.db.corpus_db import clear_all_data, close_connections
+        from src.db.corpus_db import clear_all_data
         clear_all_data()
     except Exception:
-        close_connections()  # Flush the connection pool so mock_db starts clean
-    except ImportError:
-        pass
+        try:
+            from src.db.corpus_db import close_connections
+            close_connections()
+        except Exception:
+            pass
 
     index_path = os.path.join(str(_REPO_ROOT), "corpus.index")
     db_path = os.path.join(str(_REPO_ROOT), "corpus.db")
@@ -84,12 +96,14 @@ def clean_test_env():
                 pass
     yield
     try:
-        from src.db.corpus_db import clear_all_data, close_connections
+        from src.db.corpus_db import clear_all_data
         clear_all_data()
     except Exception:
-        close_connections()
-    except ImportError:
-        pass
+        try:
+            from src.db.corpus_db import close_connections
+            close_connections()
+        except Exception:
+            pass
     for path in [index_path, db_path, users_db_path]:
         if os.path.exists(path):
             try:

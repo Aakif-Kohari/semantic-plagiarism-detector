@@ -12,6 +12,8 @@ from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError, VerifyMismatchError
 
 from src.db.migrations import migrate_auth_database
+import logging
+
 
 logger = logging.getLogger(__name__)
 
@@ -279,6 +281,7 @@ def add_user(username: str, password: str, role: str = "teacher") -> None:
         raise sqlite3.Error(f"Failed to add user: {e}") from e
 
 
+
 def get_all_users() -> list:
     try:
         with _connect() as conn:
@@ -382,6 +385,8 @@ def get_2fa_status(username: str) -> tuple[bool, str | None]:
     if not row:
         return False, None
     return bool(row[0]), row[1]
+
+
 
 
 def enable_2fa(username: str, secret: str) -> None:

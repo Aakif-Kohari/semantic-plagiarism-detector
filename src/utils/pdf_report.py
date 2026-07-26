@@ -7,6 +7,7 @@ Provides side-by-side comparison of suspicious paragraph pairs with visual simil
 
 from __future__ import annotations
 
+
 import os
 
 from datetime import datetime

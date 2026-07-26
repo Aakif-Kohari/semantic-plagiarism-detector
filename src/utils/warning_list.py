@@ -71,6 +71,7 @@ def filter_warnings(
     warnings: Iterable[Mapping[str, Any]],
     search_query: str = "",
     min_match_length: int = 0,
+    fuzzy_threshold: int = 70,
 ) -> list[dict[str, Any]]:
     """
     Filters warnings by query using exact substring matching and 
