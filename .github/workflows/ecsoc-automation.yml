@@ -142,13 +142,104 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/github-script@v7
+      - name: Cleanup Excess Claims (> 5 open issues)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const maxAllowed = 5;
+            console.log("Checking for users with > 5 open claimed issues...");
+
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'ECSoC26',
+              state: 'open',
+              per_page: 100
+            });
+
+            const userClaimsMap = {};
+
+            for (const issue of issues.data) {
+              if (issue.pull_request) continue;
+
+              const comments = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                per_page: 100
+              });
+
+              const claimComment = comments.data.find(c => c.body && c.body.includes("thanks for your interest in contributing under *ECSoC'26*"));
+
+              let claimer = null;
+              if (claimComment) {
+                const match = claimComment.body.match(/Hi @([a-zA-Z0-9-]+)/);
+                if (match) claimer = match[1];
+              }
+              if (!claimer && issue.assignees && issue.assignees.length > 0) {
+                claimer = issue.assignees[0].login;
+              }
+
+              if (claimer) {
+                const key = claimer.toLowerCase();
+                if (!userClaimsMap[key]) {
+                  userClaimsMap[key] = { username: claimer, issues: [] };
+                }
+                userClaimsMap[key].issues.push(issue);
+              }
+            }
+
+            for (const key of Object.keys(userClaimsMap)) {
+              const userObj = userClaimsMap[key];
+              const claimedIssues = userObj.issues; // sorted chronologically by issue number
+
+              if (claimedIssues.length > maxAllowed) {
+                console.log(`User @${userObj.username} has ${claimedIssues.length} open issues. Keeping 5, freeing remaining ${claimedIssues.length - maxAllowed}...`);
+
+                const excess = claimedIssues.slice(maxAllowed);
+
+                for (const issue of excess) {
+                  if (issue.assignees.length > 0) {
+                    try {
+                      await github.rest.issues.removeAssignees({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        issue_number: issue.number,
+                        assignees: issue.assignees.map(a => a.login)
+                      });
+                    } catch (e) {
+                      console.log("Error removing assignees:", e.message);
+                    }
+                  }
+
+                  try {
+                    await github.rest.issues.removeLabel({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: issue.number,
+                      name: 'ECSoC26'
+                    });
+                  } catch (e) {
+                    console.log("Error removing label:", e.message);
+                  }
+
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issue.number,
+                    body: `⚠️ @${userObj.username} exceeded the maximum limit of ${maxAllowed} open claimed issues for **ECSoC'26**. This issue has been automatically unassigned and is now **open for anyone to claim**!`
+                  });
+                }
+              }
+            }
+
+      - name: Unassign Inactive Issues (> 4 Days)
+        uses: actions/github-script@v7
         with:
           script: |
             const fourDaysMs = 4 * 24 * 60 * 60 * 1000;
             const now = new Date();
 
-            // Fetch open issues labeled ECSoC26
             const issues = await github.rest.issues.listForRepo({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -177,7 +268,6 @@ jobs:
                   const match = claimComment.body.match(/Hi @([a-zA-Z0-9-]+)/);
                   const claimer = match ? match[1] : (issue.assignees[0] ? issue.assignees[0].login : null);
 
-                  // Remove assignees if assigned
                   if (issue.assignees.length > 0) {
                     try {
                       await github.rest.issues.removeAssignees({
@@ -191,7 +281,17 @@ jobs:
                     }
                   }
 
-                  // Post unassign notification comment
+                  try {
+                    await github.rest.issues.removeLabel({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: issue.number,
+                      name: 'ECSoC26'
+                    });
+                  } catch (e) {
+                    console.log("Error removing label:", e.message);
+                  }
+
                   await github.rest.issues.createComment({
                     owner: context.repo.owner,
                     repo: context.repo.repo,
