@@ -37,22 +37,24 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-  return sqlite3.connect(_DB_PATH, check_same_thread=False)
-DB_PATH = os.path.abspath(
+_DB_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "users.db")
 )
 
-
-]
-def configure_db_path(db_path: str | os.PathLike) -> None:
-    """Configure the SQLite database path used by the authentication module."""
-    global _DB_PATH
-    _DB_PATH = os.path.abspath(os.fspath(db_path))
-    ]
 VALID_ROLES = {"admin", "teacher"}
 
 # Initialize Argon2 password hasher
 _ph = PasswordHasher()
+
+
+def configure_db_path(db_path: str | os.PathLike) -> None:
+    """Configure the SQLite database path used by the authentication module."""
+    global _DB_PATH
+    _DB_PATH = os.path.abspath(os.fspath(db_path))
+
+
+def _connect() -> sqlite3.Connection:
+    return sqlite3.connect(_DB_PATH, check_same_thread=False)
 
 
 def log_security_event(
@@ -91,12 +93,6 @@ def log_security_event(
             username,
             exc,
         )
-
-
-def _connect() -> sqlite3.Connection:
-    return sqlite3.connect(_DB_PATH, check_same_thread=False)
-
-VALID_ROLES = {"admin", "teacher"}
 
 
 def _hash_password(password: str) -> str:
@@ -162,8 +158,11 @@ def init_db() -> None:
 
 
 def verify_user(username: str, password: str) -> bool:
-    """Return True if username exists, password matches the stored hash, and account is active."""
-    init_db()  # Ensure DB is initialized
+    """
+    Return True if username exists, account is active, and password matches.
+    Supports Argon2 hashes (current standard) and legacy bcrypt hashes,
+    automatically migrating bcrypt hashes to Argon2 upon successful login.
+    """
     try:
         username = _validate_username(username)
         password = _validate_password(password)
@@ -183,15 +182,27 @@ def verify_user(username: str, password: str) -> bool:
     if not is_active:
         return False
 
-    try:
-        return bcrypt.checkpw(password.encode(), stored_hash.encode())
-    except ValueError:
-        return False
-
+    # Case 1: Argon2 hash (current standard)
+    if stored_hash.startswith("$argon2"):
         try:
-            return bcrypt.checkpw(password.encode(), stored_hash.encode())
+            _ph.verify(stored_hash, password)
+            if _ph.check_needs_rehash(stored_hash):
+                update_password(username, password)
+            return True
+        except (VerifyMismatchError, VerificationError):
+            return False
+
+    # Case 2: Legacy bcrypt hash → verify and migrate to Argon2
+    if stored_hash.startswith(("$2a$", "$2b$", "$2y$")):
+        try:
+            if bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8")):
+                update_password(username, password)
+                return True
         except ValueError:
             return False
+
+    return False
+
 
 # Alias for compatibility
 authenticate_user = verify_user
@@ -268,10 +279,6 @@ def add_user(username: str, password: str, role: str = "teacher") -> None:
     finally:
         password = "REDACTED"
 
-
-
-        if not exists:
-            hashed = _hash_password("admin123")
 
 def get_all_users() -> list:
     """Return all users as a list of dicts (excludes password hashes)."""
@@ -370,16 +377,6 @@ def set_tour_completed(username: str, completed: bool = True) -> None:
         raise sqlite3.Error(f"Failed to update tour status: {e}") from e
 
 
-def verify_user(username: str, password: str) -> bool:
-    """
-    Return True if username exists and password matches stored hash.
-    Supports both Argon2 and legacy bcrypt hashes, automatically migrating 
-    bcrypt hashes to Argon2 upon successful login.
-    """
-    username = _validate_username(username)
-    password = _validate_password(password)
-
-
 def get_2fa_status(username: str) -> tuple[bool, str | None]:
     """Return (two_factor_enabled, otp_secret) for a user."""
     with _connect() as conn:
@@ -390,30 +387,6 @@ def get_2fa_status(username: str) -> tuple[bool, str | None]:
     if not row:
         return False, None
     return bool(row[0]), row[1]
-
-
-    stored_hash = row[0]
-
-    # Case 1: Stored hash is Argon2
-    if stored_hash.startswith("$argon2"):
-        try:
-            _ph.verify(stored_hash, password)
-            if _ph.check_needs_rehash(stored_hash):
-                update_password(username, password)
-            return True
-        except (VerifyMismatchError, VerificationError):
-            return False
-
-    # Case 2: Legacy Bcrypt hash -> Verify & migrate to Argon2
-    if stored_hash.startswith(("$2a$", "$2b$", "$2y$")):
-        try:
-            if bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8")):
-                update_password(username, password)
-                return True
-        except ValueError:
-            return False
-
-    return False
 
 def enable_2fa(username: str, secret: str) -> None:
     """Enable 2FA for a user and store their OTP secret."""
@@ -448,20 +421,6 @@ def check_login_rate_limit(username: str) -> tuple[bool, str | None]:
     return True, None
 
 
-def add_user(username: str, password: str, role: str = "teacher") -> None:
-    """Insert a new user with an Argon2-hashed password."""
-    username = _validate_username(username)
-    password = _validate_password(password)
-    role = _validate_role(role)
-
-    hashed = _hash_password(password)
-
-    with _connect() as conn:
-        conn.execute(
-            "INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
-            (username, hashed, role),
-        )
-        conn.commit()
 
 
 def record_failed_login(username: str) -> None:
