@@ -5,6 +5,7 @@ Generates professional PDF plagiarism reports using ReportLab.
 Provides side-by-side comparison of suspicious paragraph pairs with visual similarity indicators.
 """
 
+from __future__ import annotations
 from datetime import datetime
 from io import BytesIO
 from typing import List, Optional, Tuple
