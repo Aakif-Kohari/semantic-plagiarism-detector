@@ -70,7 +70,8 @@ from app.css_constants import (CLASS_CLEAR_ALL_CONTAINER, CLASS_SKELETON,
 from app.theme import (back_to_top_html, empty_state_html, get_colors,
                        get_theme_name, inject_css, pipeline_progress_html,
                        set_theme, version_check_widget_html)
-from src.core.app_config import get_app_title, get_welcome_messagefrom src.core.config import (DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD,
+from src.core.app_config import get_app_title, get_welcome_message
+from src.core.config import (DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD,
                              severity_key)
 from src.core.document_parser import (DEFAULT_OCR_DPI, DEFAULT_OCR_LANGUAGE,
                                       SUPPORTED_OCR_LANGUAGES,
@@ -99,7 +100,7 @@ class OCRFileBatchError(Exception):
 from src.core.export_engine import LMSExportEngine
 from src.core.synchronization import verify_and_repair_index
 from src.core.telemetry import TelemetryService
-from src.db import (clear_all_data, delete_document, delete_tag,
+from src.db import (clear_all_data, delete_tag,
                     get_all_documents, get_all_embeddings, get_all_tags,
                     get_chunk_registry, get_document_word_counts,
                     get_unique_class_sections, init_corpus_db,
