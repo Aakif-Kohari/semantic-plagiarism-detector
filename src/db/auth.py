@@ -1,3 +1,4 @@
+from __future__ import annotations
 import json
 
 """
@@ -7,11 +8,12 @@ src/db/auth.py
 User authentication, registration, and credential management routines.
 auth.py
 -------
-SQLite-backed authentication with bcrypt password hashing.
+SQLite-backed authentication with Argon2 password hashing (via argon2-cffi)
+and automatic transparent migration from legacy bcrypt hashes.
 
 Public API
 ----------
-init_db()                          → create tables + seed default admin
+init_db()                         → create tables + seed default admin
 verify_user(username, password)    → bool
 get_user_role(username)            → str | None
 add_user(username, password, role) → None
@@ -26,6 +28,8 @@ import os
 import sqlite3
 
 import bcrypt
+from argon2 import PasswordHasher
+from argon2.exceptions import VerificationError, VerifyMismatchError
 
 # Database setup
 from src.db.migrations import migrate_auth_database
@@ -36,10 +40,17 @@ DB_PATH = os.path.abspath(
 )
 
 
+]
 def configure_db_path(db_path: str | os.PathLike) -> None:
     """Configure the SQLite database path used by the authentication module."""
     global _DB_PATH
     _DB_PATH = os.path.abspath(os.fspath(db_path))
+    ]
+VALID_ROLES = {"admin", "teacher"}
+
+# Initialize Argon2 password hasher
+_ph = PasswordHasher()
+
 
 
 def _connect() -> sqlite3.Connection:
@@ -49,11 +60,8 @@ VALID_ROLES = {"admin", "teacher"}
 
 
 def _hash_password(password: str) -> str:
-    """Return a bcrypt hash for the given password."""
-    return bcrypt.hashpw(
-        password.encode(),
-        bcrypt.gensalt(10),
-    ).decode()
+    """Return an Argon2 hash for the given password."""
+    return _ph.hash(password)
 
 
 def _validate_username(username: str) -> str:
@@ -66,8 +74,8 @@ def _validate_username(username: str) -> str:
 def _validate_password(password: str) -> str:
     try:
         password = str(password)
-        if len(password.strip()) < 5:
-            raise ValueError("Password must be at least 5 characters long.")
+        if len(password.strip()) < 10:
+            raise ValueError("Password must be at least 10 characters long.")
         return password
     finally:
         password = "REDACTED"
@@ -93,7 +101,7 @@ def init_db() -> None:
             exists = bool(row and row[0])
 
             if not exists:
-                hashed = _hash_password("admin123")
+                hashed = _hash_password("admin12345")
                 conn.execute(
                     """
                     INSERT INTO users (username, password, role)
@@ -163,6 +171,39 @@ def get_user_role(username: str) -> str | None:
         raise sqlite3.Error(f"Failed to retrieve user role: {e}") from e
 
 
+def get_user_roles(user_ids: list[int]) -> dict[int, str]:
+    """Return a mapping of user_id → role for the given user IDs.
+
+    Performs a single ``WHERE id IN (?)`` query instead of N individual
+    queries, which is significantly faster when resolving roles for many
+    users (e.g. dashboard telemetry or batch admin views).
+
+    Parameters
+    ----------
+    user_ids:
+        List of user primary keys to look up.
+
+    Returns
+    -------
+    dict[int, str]
+        Mapping from user ID to role string.  IDs not found in the
+        database are omitted from the result.
+    """
+    if not user_ids:
+        return {}
+
+    try:
+        placeholders = ",".join("?" for _ in user_ids)
+        with _connect() as conn:
+            rows = conn.execute(
+                f"SELECT id, role FROM users WHERE id IN ({placeholders})",
+                user_ids,
+            ).fetchall()
+            return {row[0]: row[1] for row in rows}
+    except sqlite3.Error as e:
+        raise sqlite3.Error(f"Failed to batch query user roles: {e}") from e
+
+
 def add_user(username: str, password: str, role: str = "teacher") -> None:
     """Insert a user and preserve SQLite duplicate-user semantics."""
     try:
@@ -187,6 +228,10 @@ def add_user(username: str, password: str, role: str = "teacher") -> None:
     finally:
         password = "REDACTED"
 
+
+
+        if not exists:
+            hashed = _hash_password("admin123")
 
 def get_all_users() -> list:
     """Return all users as a list of dicts (excludes password hashes)."""
@@ -220,6 +265,7 @@ def delete_user(username: str) -> None:
             conn.commit()
     except sqlite3.Error as e:
         raise sqlite3.Error(f"Failed to delete user: {e}") from e
+
 
 
 def update_password(username: str, new_password: str) -> None:
@@ -277,6 +323,16 @@ def set_tour_completed(username: str, completed: bool = True) -> None:
         raise sqlite3.Error(f"Failed to update tour status: {e}") from e
 
 
+def verify_user(username: str, password: str) -> bool:
+    """
+    Return True if username exists and password matches stored hash.
+    Supports both Argon2 and legacy bcrypt hashes, automatically migrating 
+    bcrypt hashes to Argon2 upon successful login.
+    """
+    username = _validate_username(username)
+    password = _validate_password(password)
+
+
 def get_2fa_status(username: str) -> tuple[bool, str | None]:
     """Return (two_factor_enabled, otp_secret) for a user."""
     with _connect() as conn:
@@ -288,6 +344,29 @@ def get_2fa_status(username: str) -> tuple[bool, str | None]:
         return False, None
     return bool(row[0]), row[1]
 
+
+    stored_hash = row[0]
+
+    # Case 1: Stored hash is Argon2
+    if stored_hash.startswith("$argon2"):
+        try:
+            _ph.verify(stored_hash, password)
+            if _ph.check_needs_rehash(stored_hash):
+                update_password(username, password)
+            return True
+        except (VerifyMismatchError, VerificationError):
+            return False
+
+    # Case 2: Legacy Bcrypt hash -> Verify & migrate to Argon2
+    if stored_hash.startswith(("$2a$", "$2b$", "$2y$")):
+        try:
+            if bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8")):
+                update_password(username, password)
+                return True
+        except ValueError:
+            return False
+
+    return False
 
 def enable_2fa(username: str, secret: str) -> None:
     """Enable 2FA for a user and store their OTP secret."""
@@ -313,6 +392,15 @@ def check_login_rate_limit(username: str) -> tuple[bool, str | None]:
     """Check if username is rate limited. Returns (is_allowed, error_message)."""
     from src.utils.redis_cache import get_login_attempts, is_login_locked_out
 
+
+def add_user(username: str, password: str, role: str = "teacher") -> None:
+    """Insert a new user with an Argon2-hashed password."""
+    username = _validate_username(username)
+    password = _validate_password(password)
+    role = _validate_role(role)
+
+    hashed = _hash_password(password)
+
     identifier = username.lower()
     if is_login_locked_out(identifier):
         attempts = get_login_attempts(identifier)
@@ -331,9 +419,11 @@ def record_failed_login(username: str) -> None:
     increment_login_attempts(identifier)
 
 
+
 def clear_login_attempts(username: str) -> None:
     """Clear failed login attempts after successful login."""
-    from src.utils.redis_cache import clear_login_attempts as redis_clear_login_attempts
+    from src.utils.redis_cache import \
+        clear_login_attempts as redis_clear_login_attempts
 
     identifier = username.lower()
     redis_clear_login_attempts(identifier)
@@ -370,6 +460,14 @@ def update_user_preferences(username: str, preferences: dict) -> None:
         conn.commit()
 
 
+
+def update_password(username: str, new_password: str) -> None:
+    """Update a user's password with a new Argon2 hash."""
+    username = _validate_username(username)
+    new_password = _validate_password(new_password)
+
+    hashed = _hash_password(new_password)
+
 def get_user_theme(username: str) -> str:
     """Return the user's theme preference (default 'light')."""
     username = username.lower()
@@ -379,6 +477,7 @@ def get_user_theme(username: str) -> str:
             (username,),
         ).fetchone()
         return row[0] if row else "light"
+
 
 
 def set_user_theme(username: str, theme: str) -> None:

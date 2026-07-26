@@ -4,16 +4,12 @@ from unittest.mock import MagicMock, patch
 
 import docx
 
-from src.core.document_parser import (
-    extract_text,
-    extract_text_from_docx,
-    extract_text_from_pdf,
-    extract_text_from_txt,
-    extract_texts,
-    clean_text,
-    remove_ignore_phrases,
-    strip_bibliography,
-)
+from src.core.document_parser import (clean_text, extract_text,
+                                      extract_text_from_docx,
+                                      extract_text_from_pdf,
+                                      extract_text_from_txt, extract_texts,
+                                      remove_ignore_phrases,
+                                      strip_bibliography)
 
 # Skip OCR tests when Tesseract binary is not present on this machine
 TESSERACT_AVAILABLE = shutil.which("tesseract") is not None
@@ -361,8 +357,9 @@ class TestCleanText:
 
 def test_extract_empty_pdf_gracefully(caplog):
     """Assert that passing an empty/blank PDF returns an empty string gracefully without crashing."""
-    from reportlab.pdfgen import canvas
     import logging
+
+    from reportlab.pdfgen import canvas
 
     buf = io.BytesIO()
     c = canvas.Canvas(buf)
@@ -375,4 +372,111 @@ def test_extract_empty_pdf_gracefully(caplog):
             result = extract_text_from_pdf(empty_pdf_bytes)
 
     assert isinstance(result, str)
-    assert result.strip() == ""
+    assert result.strip() == ""
+
+
+def test_extract_text_from_doc_success():
+    """Test that extract_text_from_doc runs antiword successfully when present."""
+
+    from src.core.document_parser import extract_text_from_doc
+
+    mock_result = MagicMock()
+    mock_result.stdout = (
+        "This is a test legacy Word Document content extracted by antiword."
+    )
+    mock_result.returncode = 0
+
+    with patch("shutil.which", return_value="/usr/bin/antiword"):
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            result = extract_text_from_doc(b"fake doc bytes")
+            assert (
+                result
+                == "This is a test legacy Word Document content extracted by antiword."
+            )
+            mock_run.assert_called_once()
+            args, kwargs = mock_run.call_args
+            assert args[0][0] == "antiword"
+            assert args[0][1].endswith(".doc")
+
+
+def test_extract_text_from_doc_missing_antiword():
+    """Test that extract_text_from_doc raises RuntimeError if antiword is not installed."""
+    import pytest
+
+    from src.core.document_parser import extract_text_from_doc
+
+    with patch("shutil.which", return_value=None):
+        with pytest.raises(RuntimeError, match="antiword binary is not installed"):
+            extract_text_from_doc(b"fake doc bytes")
+
+
+def test_extract_text_routing_doc():
+    """Test that extract_text routes .doc files to extract_text_from_doc."""
+    from src.core.document_parser import extract_text
+
+    mock_result = MagicMock()
+    mock_result.stdout = "Legacy Word Doc Content"
+    mock_result.returncode = 0
+
+    with patch("shutil.which", return_value="/usr/bin/antiword"):
+        with patch("subprocess.run", return_value=mock_result):
+            result = extract_text(b"fake bytes", "test_file.doc")
+            assert result == "Legacy Word Doc Content"
+
+
+# ---------------------------------------------------------------------------
+# Batch Processing Rate Limiting Tests (Issue #494)
+# ---------------------------------------------------------------------------
+
+
+def test_check_batch_rate_limit_helper():
+    """Test check_batch_rate_limit helper raises error when count exceeds 50."""
+    import pytest
+    from src.core.document_parser import MAX_BATCH_SIZE, check_batch_rate_limit
+    from src.errors import PARSER_BATCH_LIMIT_EXCEEDED
+
+    assert MAX_BATCH_SIZE == 50
+
+    # Under limit -> should pass without raising
+    check_batch_rate_limit(50)
+
+    # Exceeds limit -> raises ValueError
+    with pytest.raises(
+        ValueError, match=PARSER_BATCH_LIMIT_EXCEEDED.format(limit=50)
+    ):
+        check_batch_rate_limit(51)
+
+
+def test_extract_texts_exceeds_max_batch_size():
+    """Test extract_texts raises ValueError when input files exceed 50 documents."""
+    import pytest
+    from src.core.document_parser import extract_texts
+    from src.errors import PARSER_BATCH_LIMIT_EXCEEDED
+
+    files = [MagicMock() for _ in range(51)]
+    with pytest.raises(
+        ValueError, match=PARSER_BATCH_LIMIT_EXCEEDED.format(limit=50)
+    ):
+        extract_texts(files)
+
+
+def test_extract_texts_within_batch_size_limit():
+    """Test extract_texts succeeds when input files count is <= 50 documents."""
+    from src.core.document_parser import extract_texts
+
+    mock_files = []
+    for i in range(5):
+        f = MagicMock()
+        f.name = f"doc_{i}.txt"
+        f.read.return_value = b"sample text"
+        mock_files.append(f)
+
+    with patch(
+        "src.core.document_parser.extract_text",
+        side_effect=lambda data, name, **kwargs: f"Parsed {name}",
+    ):
+        results = extract_texts(mock_files)
+
+    assert len(results) == 5
+    assert results["doc_0.txt"] == "Parsed doc_0.txt"
+

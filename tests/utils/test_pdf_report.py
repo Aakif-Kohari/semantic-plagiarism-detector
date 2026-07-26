@@ -9,11 +9,8 @@ from unittest.mock import patch
 
 from PyPDF2 import PdfReader
 
-from src.utils.pdf_report import (
-    generate_plagiarism_report,
-    get_similarity_color,
-    wrap_text,
-)
+from src.utils.pdf_report import (generate_plagiarism_report,
+                                  get_similarity_color, wrap_text)
 
 FIXTURE_DIR = os.path.join(os.path.dirname(__file__), "..", "fixtures")
 GOLDEN_PATH = os.path.join(FIXTURE_DIR, "pdf_report_golden.hash")
@@ -26,9 +23,21 @@ SNAPSHOT_INPUTS = {
     "overall_similarity": 0.873,
     "threshold": 0.60,
     "top_pairs": [
-        ("The mitochondria is the powerhouse of the cell and plays a crucial role in energy production.", "The mitochondria serves as the cell's primary energy generator through ATP synthesis.", 0.94),
-        ("Photosynthesis converts light energy into chemical energy stored in glucose molecules.", "Plants transform sunlight into chemical energy via the process of photosynthesis.", 0.91),
-        ("DNA replication occurs during the S phase of the cell cycle before mitosis begins.", "The cell replicates its DNA in the synthesis phase prior to mitotic division.", 0.88),
+        (
+            "The mitochondria is the powerhouse of the cell and plays a crucial role in energy production.",
+            "The mitochondria serves as the cell's primary energy generator through ATP synthesis.",
+            0.94,
+        ),
+        (
+            "Photosynthesis converts light energy into chemical energy stored in glucose molecules.",
+            "Plants transform sunlight into chemical energy via the process of photosynthesis.",
+            0.91,
+        ),
+        (
+            "DNA replication occurs during the S phase of the cell cycle before mitosis begins.",
+            "The cell replicates its DNA in the synthesis phase prior to mitotic division.",
+            0.88,
+        ),
     ],
 }
 
@@ -270,3 +279,70 @@ def test_snapshot_pdf_structure_valid():
     assert "mitochondria" in text
     assert "photosynthesis" in text
     assert "DNA replication" in text
+
+
+def test_generate_plagiarism_report_dark_mode():
+    pdf_buffer = generate_plagiarism_report(
+        doc_a="student_a.pdf",
+        doc_b="student_b.pdf",
+        overall_similarity=0.934,
+        threshold=0.59,
+        top_pairs=[
+            ("First matching paragraph.", "Second matching paragraph.", 0.96),
+        ],
+        dark_mode=True,
+    )
+    pdf_bytes = pdf_buffer.getvalue()
+    assert pdf_bytes.startswith(b"%PDF")
+    text = _read_text(pdf_bytes)
+    assert "student_a.pdf" in text
+
+
+def test_generate_plagiarism_report_auto_detect_dark_mode():
+    import streamlit as st
+
+    st.session_state.theme = "Dark"
+    pdf_buffer = generate_plagiarism_report(
+        doc_a="student_a.pdf",
+        doc_b="student_b.pdf",
+        overall_similarity=0.934,
+        threshold=0.59,
+        top_pairs=[
+            ("First matching paragraph.", "Second matching paragraph.", 0.96),
+        ],
+    )
+    pdf_bytes = pdf_buffer.getvalue()
+    assert pdf_bytes.startswith(b"%PDF")
+    st.session_state.theme = "Light"
+
+
+def test_pdf_generation_memory_leak():
+    """Verify that generating multiple PDFs sequentially does not leak memory."""
+    import gc
+    import psutil
+
+    # 1. Warm-up run to initialize any lazy-loaded libraries (fonts, caches)
+    _ = generate_plagiarism_report(**SNAPSHOT_INPUTS)
+    
+    # 2. Force garbage collection and take baseline
+    gc.collect()
+    process = psutil.Process(os.getpid())
+    baseline_rss = process.memory_info().rss
+    
+    # 3. Generate 100 PDF reports sequentially
+    iterations = 100
+    for _ in range(iterations):
+        buffer = generate_plagiarism_report(**SNAPSHOT_INPUTS)
+        buffer.close()
+        del buffer
+        
+    # 4. Force garbage collection again
+    gc.collect()
+    
+    # 5. Measure final RSS
+    final_rss = process.memory_info().rss
+    growth_mb = (final_rss - baseline_rss) / (1024 * 1024)
+    
+    # 6. Assert memory growth is bounded
+    # Allow 25 MB growth for normal Python allocator and caching behaviour
+    assert growth_mb < 25.0, f"Memory leak detected: growth {growth_mb:.2f} MB exceeds threshold of 25.0 MB"

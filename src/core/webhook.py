@@ -13,6 +13,7 @@ from collections import deque
 
 import requests
 from dotenv import load_dotenv
+
 from src.security.ssrf_protector import SSRFProtector, SSRFSecurityException
 
 # Set up logging
@@ -104,3 +105,18 @@ def send_plagiarism_alert(doc_a: str, doc_b: str, similarity: float) -> bool:
             f"Failed to send webhook notification for pair: {doc_a} <-> {doc_b}. Error: {e}"
         )
         return False
+
+def dispatch_plagiarism_alert(doc_a: str, doc_b: str, similarity: float) -> None:
+    """
+    Asynchronously dispatches a plagiarism alert via the background thread pool.
+    This prevents the UI from blocking during network requests.
+    """
+    from src.core.synchronization import run_background
+    
+    def _dispatch():
+        try:
+            send_plagiarism_alert(doc_a, doc_b, similarity)
+        except Exception:
+            logger.exception("Webhook dispatch failed")
+            
+    run_background(_dispatch)
