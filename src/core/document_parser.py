@@ -617,6 +617,32 @@ def extract_texts_parallel(
         return results, errors
 
 
+def count_pdf_images(pdf_bytes: bytes) -> int:
+    """Count embedded images in a PDF by inspecting page image lists.
+
+    Uses PyMuPDF (fitz) to retrieve the total number of image streams
+    across all pages. Returns 0 when PyMuPDF is unavailable or the PDF
+    cannot be read.
+
+    Parameters
+    ----------
+    pdf_bytes:
+        Raw PDF file bytes.
+
+    Returns
+    -------
+    int
+        Total number of image objects embedded in the PDF.
+    """
+    try:
+        import fitz  # PyMuPDF
+
+        with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+            return sum(len(page.get_images()) for page in doc)
+    except Exception:
+        return 0
+
+
 def extract_pdf_metadata(file: PDFInput) -> Dict[str, str]:
     """Extract PDF metadata (Author, Creation Date, Title) using PyMuPDF.
 
@@ -639,6 +665,15 @@ def extract_pdf_metadata(file: PDFInput) -> Dict[str, str]:
         print(f"[document_parser] Error extracting PDF metadata: {exc}")
     except Exception as exc:
         logger.error(f"[document_parser] Error extracting PDF metadata: {exc}")
+
+    image_count = count_pdf_images(pdf_bytes)
+    if image_count:
+        logger.info(
+            "[document_parser] PDF contains %d embedded image(s): %s",
+            image_count,
+            metadata.get("title") or "unknown",
+        )
+    metadata["image_count"] = image_count
 
     return metadata
 
