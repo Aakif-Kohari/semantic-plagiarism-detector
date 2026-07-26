@@ -3,8 +3,6 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from sklearn.metrics.pairwise import cosine_similarity
-
 from src.core.ai_detector import detect_documents_ai_probability
 from src.core.embedding_model import embed_documents
 from src.core.text_chunking import chunk_documents
@@ -16,6 +14,10 @@ ROOT_DIR = FILE_PATH.parent.parent  # Points to semantic-plagiarism-detector/
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from sklearn.metrics.pairwise import cosine_similarity
+from src.core.text_chunking import chunk_documents
+from src.core.embedding_model import embed_documents
+from src.core.ai_detector import detect_documents_ai_probability
 
 import base64
 import html
@@ -2556,65 +2558,94 @@ if not st.session_state.authenticated:
                         top_k=faiss_top_k if "faiss_top_k" in locals() else 5,
                         threshold=threshold,
                     )
-                    if q_results:
-                        results_df = faiss_results_dataframe(q_results)
-                        st.caption(
-                            "Click a column header to sort by similarity, "
-                            "target document, chunk, or rank."
-                        )
-                        st.dataframe(
-                            results_df,
-                            use_container_width=True,
-                            hide_index=True,
-                            column_config={
-                                "Rank": st.column_config.NumberColumn(
-                                    "Rank",
-                                    help="Default relevance order.",
-                                    format="%d",
-                                    width="small",
-                                ),
-                                "Target Document": (
-                                    st.column_config.TextColumn(
-                                        "Target Document",
-                                        help=(
-                                            "Document containing the " "matching chunk."
-                                        ),
-                                        width="medium",
-                                    )
-                                ),
-                                "Chunk": st.column_config.NumberColumn(
-                                    "Chunk",
-                                    help="One-based chunk number.",
-                                    format="%d",
-                                    width="small",
-                                ),
-                                "Similarity Score": (
-                                    st.column_config.NumberColumn(
-                                        "Similarity Score",
-                                        help=(
-                                            "Cosine similarity between "
-                                            "the query and chunk."
-                                        ),
-                                        format="%.1f%%",
-                                        width="medium",
-                                    )
-                                ),
-                                "Matching Text": (
-                                    st.column_config.TextColumn(
-                                        "Matching Text",
-                                        help="Text from the matched chunk.",
-                                        width="large",
-                                    )
-                                ),
-                            },
-                            key="faiss_search_results_table",
-                        )
-                    else:
-                        st.info("No matching vector chunks found above threshold.")
+                    st.session_state.q_results = q_results
                 except Exception as err:
                     st.error(f"FAISS search error: {err}")
+                    st.session_state.q_results = None
             else:
                 st.warning("Please enter a valid query string.")
+                st.session_state.q_results = None
+
+        if st.session_state.get("q_results") is not None:
+            q_results = st.session_state.q_results
+            if not q_results:
+                st.info(
+                    "No matching vector chunks found above threshold."
+                )
+            else:
+                min_sim, max_sim = st.slider(
+                    "Similarity Range:",
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=(0.0, 1.0),
+                    step=0.01,
+                    format="%.2f",
+                    key="faiss_similarity_range",
+                )
+
+                results_df = faiss_results_dataframe(
+                    q_results,
+                    min_similarity=min_sim,
+                    max_similarity=max_sim,
+                )
+                
+                if not results_df.empty:
+                    st.caption(
+                        "Click a column header to sort by similarity, "
+                        "target document, chunk, or rank."
+                    )
+                    st.dataframe(
+                        results_df,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config={
+                            "Rank": st.column_config.NumberColumn(
+                                "Rank",
+                                help="Default relevance order.",
+                                format="%d",
+                                width="small",
+                            ),
+                            "Target Document": (
+                                st.column_config.TextColumn(
+                                    "Target Document",
+                                    help=(
+                                        "Document containing the "
+                                        "matching chunk."
+                                    ),
+                                    width="medium",
+                                )
+                            ),
+                            "Chunk": st.column_config.NumberColumn(
+                                "Chunk",
+                                help="One-based chunk number.",
+                                format="%d",
+                                width="small",
+                            ),
+                            "Similarity Score": (
+                                st.column_config.NumberColumn(
+                                    "Similarity Score",
+                                    help=(
+                                        "Cosine similarity between "
+                                        "the query and chunk."
+                                    ),
+                                    format="%.1f%%",
+                                    width="medium",
+                                )
+                            ),
+                            "Matching Text": (
+                                st.column_config.TextColumn(
+                                    "Matching Text",
+                                    help="Text from the matched chunk.",
+                                    width="large",
+                                )
+                            ),
+                        },
+                        key="faiss_search_results_table",
+                    )
+                else:
+                    st.info(
+                        "No matching vector chunks found within the selected similarity range."
+                    )
 
     # ══ TAB 3: MATRIX ═════════════════════════════════════════════════════════
     with tab_matrix:
