@@ -2789,6 +2789,32 @@ if not st.session_state.authenticated:
             else:
                 st.plotly_chart(network_fig, use_container_width=True)
 
+            try:
+                svg_bytes = network_fig.to_image(format="svg")
+                col_svg, col_pdf = st.columns(2)
+                with col_svg:
+                    st.download_button(
+                        label="⬇️ Download as SVG",
+                        data=svg_bytes,
+                        file_name="plagiarism_network.svg",
+                        mime="image/svg+xml",
+                        use_container_width=True,
+                    )
+                with col_pdf:
+                    try:
+                        pdf_bytes = network_fig.to_image(format="pdf")
+                        st.download_button(
+                            label="⬇️ Download as PDF",
+                            data=pdf_bytes,
+                            file_name="plagiarism_network.pdf",
+                            mime="application/pdf",
+                            use_container_width=True,
+                        )
+                    except Exception:
+                        st.caption("📄 PDF export requires `kaleido` package.")
+            except Exception:
+                pass
+
             selected_document_id = st.session_state.get("selected_document_id")
 
             if selected_document_id:
