@@ -36,3 +36,24 @@ def test_blank_app_title_falls_back_to_default(monkeypatch):
     monkeypatch.setenv("APP_TITLE", "   ")
 
     assert get_app_title() == DEFAULT_APP_TITLE
+
+
+def test_get_lock_timeout_default(mocker):
+    mocker.patch('os.getenv', return_value='30')
+    from src.core.app_config import get_lock_timeout
+    assert get_lock_timeout() == 30
+
+def test_get_lock_timeout_custom(mocker):
+    mocker.patch('os.getenv', return_value='60')
+    from src.core.app_config import get_lock_timeout
+    assert get_lock_timeout() == 60
+
+def test_get_lock_timeout_invalid(mocker):
+    mocker.patch('os.getenv', return_value='invalid')
+    from src.core.app_config import get_lock_timeout
+    assert get_lock_timeout() == 30
+
+def test_get_lock_timeout_minimum(mocker):
+    mocker.patch('os.getenv', return_value='0')
+    from src.core.app_config import get_lock_timeout
+    assert get_lock_timeout() == 1
