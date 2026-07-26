@@ -1,0 +1,85 @@
+name: ECSoC Automation
+
+on:
+  issue_comment:
+    types: [created]
+
+  pull_request:
+    types: [opened]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  issue-claim:
+    if: github.event_name == 'issue_comment'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+
+            // Ignore PR comments
+            if (issue.pull_request) return;
+
+            // Already assigned? Do nothing.
+            if (issue.assignees.length > 0) {
+              console.log("Issue already assigned.");
+              return;
+            }
+
+            const claimer = context.payload.comment.user.login;
+
+            // Assign first commenter
+            await github.rest.issues.addAssignees({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              assignees: [claimer]
+            });
+
+            // Add ECSoC26 label
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              labels: ["ECSoC26"]
+            });
+
+            // Optional confirmation comment
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              body: `🎉 @${claimer} has successfully claimed this issue for **ECSoC26**. Happy coding!`
+            });
+
+  pr-automation:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const author = pr.user.login;
+
+            // Assign PR author
+            await github.rest.issues.addAssignees({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              assignees: [author]
+            });
+
+            // Add label
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              labels: ["ECSoC26"]
+            });

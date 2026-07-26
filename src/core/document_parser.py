@@ -14,11 +14,8 @@ from pathlib import Path
 from typing import BinaryIO, Dict, List, Union
 from urllib.parse import urlparse
 
-import defusedxml.lxml
-
-defusedxml.lxml.monkey_patch()
-
 import docx
+
 import pdfplumber
 from langdetect import LangDetectException, detect
 from striprtf.striprtf import rtf_to_text
@@ -926,6 +923,35 @@ def extract_text_from_md(file: PDFInput) -> str:
     return strip_markdown_syntax(raw_text)
 
 
+def extract_text_from_image(
+    file: PDFInput, *, ocr_language: str = DEFAULT_OCR_LANGUAGE
+) -> str:
+    """Extract text from an image (PNG, JPG) using Tesseract OCR."""
+    try:
+        import pytesseract
+        from PIL import Image
+    except ImportError as exc:
+        from src.errors import OCR_DEPENDENCIES_MISSING
+        raise OCRDependencyError(OCR_DEPENDENCIES_MISSING) from exc
+
+    _configure_tesseract(pytesseract)
+
+    file_bytes = _read_pdf_bytes(file)
+    try:
+        image = Image.open(io.BytesIO(file_bytes))
+        return pytesseract.image_to_string(
+            image,
+            lang=ocr_language,
+            config="--oem 3 --psm 3",
+        ).strip()
+    except pytesseract.TesseractNotFoundError as exc:
+        from src.errors import OCR_TESSERACT_NOT_FOUND
+        raise OCRDependencyError(OCR_TESSERACT_NOT_FOUND) from exc
+    except Exception as exc:
+        logger.error(f"[document_parser] Error reading image: {exc}")
+        return ""
+
+
 def extract_text(
     file: PDFInput,
     filename: str,
@@ -955,6 +981,8 @@ def extract_text(
 
     elif extension == "epub":
         raw = extract_text_from_epub(file)
+    elif extension in ("png", "jpg", "jpeg"):
+        raw = extract_text_from_image(file, ocr_language=ocr_language)
     else:
         raw = extract_text_from_txt(file)
 
