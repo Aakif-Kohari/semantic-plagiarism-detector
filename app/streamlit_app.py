@@ -61,8 +61,8 @@ from src.db import (
     get_unique_class_sections,
     init_corpus_db,
 )
-from src.db.auth import get_all_users, get_user_role, init_db, verify_user
-from src.utils.pdf_report import highlight_pdf_matches
+from src.db.auth import add_user, get_all_users, get_user_role, init_db, verify_user
+from src.utils.pdf_report import highlight_pdf_matches, truncate_filename
 from src.utils.redis_cache import (
     cache_session_state,
     clear_session,
@@ -76,7 +76,7 @@ from src.visualization.heatmap import plot_similarity_heatmap
 try:
     from src.utils.excel_export import export_similarity_matrix_to_excel
 except ImportError:
-    from utils.excel_export import export_similarity_matrix_to_excel
+    from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore[import-untyped,reportMissingImports]
 
 # Initialize corpus database
 init_corpus_db()
@@ -101,7 +101,7 @@ _INDEX_PATH = os.path.abspath(
 )
 try:
     from streamlit_tour import Tour
-except ImportError:
+except Exception:
     Tour = None
 
 # Initialize auth database
@@ -160,7 +160,7 @@ if last_interaction and st.session_state.get("authenticated", False):
 if not st.session_state.get("authenticated", False):
     with st.form("login_form"):
         username = st.text_input("Username", value="admin")
-        password = st.text_input("Password", type="password", value="admin")
+        password = st.text_input("Password", type="password", value="Admin123!")
         login_submitted = st.form_submit_button("Log In", use_container_width=True)
 
         if login_submitted:
@@ -188,7 +188,7 @@ if not st.session_state.get("authenticated", False):
 
                 st.error("Invalid username or password.")
     st.stop()
-    st.error("Invalid username or password. Try admin / admin123")
+    st.error("Invalid username or password. Try admin / Admin123!")
     st.markdown("</div>", unsafe_allow_html=True)
     st.stop()
 
@@ -217,7 +217,6 @@ with theme_col:
 
 
 # ── Sidebar (ROLE RESTRICTED Settings) ────────────────────────────────────────
-# ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### ⚙️ Settings")
 
@@ -435,7 +434,6 @@ else:
 
     if "analysis_results" not in st.session_state:
         st.session_state.analysis_results = None
-        # Try to load from Redis cache
 
         cached_results = get_analysis_results(f"{SESSION_ID}:current")
         if cached_results is not None:
@@ -456,10 +454,12 @@ else:
         faiss_index = load_index(_INDEX_PATH) if os.path.exists(_INDEX_PATH) else None
         registry = get_chunk_registry()
 
-        # Try to load from Redis cache
         cached_signature = get_session_state(SESSION_ID, "analysis_file_signature")
         if cached_signature is not None:
             st.session_state.analysis_file_signature = cached_signature
+
+    if "failed_documents" not in st.session_state:
+        st.session_state.failed_documents = {}
 
     # 1. LOCAL FILE UPLOADER
     uploaded_files = st.file_uploader(
@@ -510,7 +510,7 @@ else:
                         if downloaded_dict:
                             st.session_state.drive_files_dict.update(downloaded_dict)
                             st.success(
-                                f"✅ Imported {len(downloaded_names)} files: {', '.join(downloaded_names)}"
+                                f"✅ Imported {len(downloaded_names)} files: {', '.join([truncate_filename(n, 25) for n in downloaded_names])}"
                             )
                             st.rerun()
                         else:
@@ -531,6 +531,21 @@ else:
     if st.session_state.drive_files_dict:
         file_bytes_dict.update(st.session_state.drive_files_dict)
 
+    # ── Display Failed Documents & Retry OCR Button (#183 & #319) ─────────────
+    if st.session_state.failed_documents:
+        failed_list = [truncate_filename(fn, 25) for fn in st.session_state.failed_documents.keys()]
+        st.warning(
+            f"⚠️ **{len(failed_list)} document(s) failed text extraction/OCR:** "
+            f"`{', '.join(failed_list)}`. This can happen due to transient memory errors."
+        )
+        col_retry, _ = st.columns([1, 3])
+        with col_retry:
+            if st.button("🔄 Retry OCR", key="retry_ocr_button", type="secondary"):
+                for fname, fbytes in st.session_state.failed_documents.items():
+                    file_bytes_dict[fname] = fbytes
+                st.session_state.failed_documents = {}
+                st.rerun()
+
     # 4. PIPELINE STOP CHECK
     if len(file_bytes_dict) < 2:
         if st.session_state.analysis_results is None:
@@ -544,7 +559,7 @@ else:
             )
             st.stop()
 
-    # ── Metadata Editor Section ──────────────────────────────────────────────────
+    # ── Metadata Editor Section (#319 Truncated Expanders) ───────────────────
     st.markdown("### 📝 Set Document Metadata")
 
     col1, col2 = st.columns(2)
@@ -565,8 +580,9 @@ else:
     for filename in file_bytes_dict.keys():
         base_name = os.path.splitext(filename)[0]
         guessed_name = base_name.replace("_", " ").replace("-", " ").title()
+        truncated_disp_name = truncate_filename(filename, max_len=30)
 
-        with st.expander(f"📄 {filename}", expanded=False):
+        with st.expander(f"📄 {truncated_disp_name}", expanded=False):
             student_name = st.text_input(
                 f"Student Name for {filename}",
                 value=guessed_name,
@@ -597,13 +613,22 @@ else:
         ocr_dpi: int,
     ):
         raw_texts = {}
+        failed_files = {}
+
         for name, data in file_bytes_dict.items():
-            raw_texts[name] = extract_text(
-                _io.BytesIO(data),
-                name,
-                ocr_language=ocr_language,
-                ocr_dpi=ocr_dpi,
-            )
+            try:
+                extracted = extract_text(
+                    _io.BytesIO(data),
+                    name,
+                    ocr_language=ocr_language,
+                    ocr_dpi=ocr_dpi,
+                )
+                if extracted and extracted.strip():
+                    raw_texts[name] = extracted
+                else:
+                    failed_files[name] = data
+            except Exception:
+                failed_files[name] = data
 
         chunked_docs = chunk_documents(raw_texts)
         translated_chunked_docs = {}
@@ -648,6 +673,7 @@ else:
             faiss_index,
             registry,
             ai_probabilities,
+            failed_files,
         )
 
     with st.spinner("🧠 Processing files and building embeddings…"):
@@ -662,7 +688,11 @@ else:
         faiss_index,
         registry,
         ai_probabilities,
+        pipeline_failed_files,
     ) = analysis_results
+
+    if pipeline_failed_files:
+        st.session_state.failed_documents.update(pipeline_failed_files)
 
     active_sim_df = chunk_sim_df if use_chunk_matrix else sim_df
     flags = flag_plagiarism(active_sim_df, threshold=threshold)
@@ -679,22 +709,6 @@ else:
             unsafe_allow_html=True,
         )
         st.stop()
-
-    # Process files pipeline
-    raw_texts = {}
-    for name, data in file_bytes_dict.items():
-        raw_texts[name] = extract_text(
-            _io.BytesIO(data), name, ocr_language=ocr_language, ocr_dpi=ocr_dpi
-        )
-
-    chunked_docs = chunk_documents(raw_texts)
-    embeddings = embed_documents(chunked_docs)
-    sim_df = document_similarity_matrix(embeddings)
-    faiss_index, registry = build_index(embeddings, chunked_docs)
-    ai_probabilities = detect_documents_ai_probability(chunked_docs)
-
-    active_sim_df = sim_df
-    flags = flag_plagiarism(active_sim_df, threshold=threshold)
 
     for flag in flags:
         try:
@@ -766,14 +780,15 @@ else:
                 )
                 if q_results:
                     for rec, score in q_results:
+                        disp_doc_name = truncate_filename(rec.doc_name, 30)
                         st.markdown(
-                            f"**{rec.doc_name}** (Chunk #{rec.chunk_index}) — Similarity: `{score:.1%}`"
+                            f"**{disp_doc_name}** (Chunk #{rec.chunk_index}) — Similarity: `{score:.1%}`"
                         )
                         st.caption(rec.chunk_text)
                 else:
                     st.info("No matching vector chunks found above threshold.")
 
-    # ══ TAB 3: MATRIX ═════════════════════════════════════════════════════════
+    # ══ TAB 3: MATRIX (#319 Truncated Row/Col Headers) ════════════════════════
     with tab_matrix:
         st.subheader("📋 Similarity Matrix")
 
@@ -796,7 +811,13 @@ else:
                     return "background-color:#ffa500;color:white;font-weight:bold;"
                 return ""
 
-            styled_df = active_sim_df.style.format("{:.4f}").map(_highlight)
+            # Truncate row labels and column names to prevent UI table layout overflow
+            truncated_sim_df = active_sim_df.rename(
+                index=lambda x: truncate_filename(str(x), 28),
+                columns=lambda x: truncate_filename(str(x), 28),
+            )
+
+            styled_df = truncated_sim_df.style.format("{:.4f}").map(_highlight)
             st.dataframe(styled_df, use_container_width=True)
 
             # Export options row
@@ -834,15 +855,26 @@ else:
         )
         st.pyplot(heatmap_fig, use_container_width=True)
 
-    # ══ TAB 5: PAIR DRILL-DOWN (#145 Feature Included) ════════════════════════
+    # ══ TAB 5: PAIR DRILL-DOWN (#145 & #319 Included) ════════════════════════
     with tab_drill:
         st.subheader("🔬 Pair Drill-Down")
         c1, c2 = st.columns(2)
         with c1:
-            doc_a = st.selectbox("Document A", doc_names, index=0, key="da")
+            doc_a = st.selectbox(
+                "Document A",
+                doc_names,
+                index=0,
+                format_func=lambda x: truncate_filename(x, 35),
+                key="da",
+            )
         with c2:
+            remaining_docs = [d for d in doc_names if d != doc_a]
             doc_b = st.selectbox(
-                "Document B", [d for d in doc_names if d != doc_a], index=0, key="db"
+                "Document B",
+                remaining_docs,
+                index=0,
+                format_func=lambda x: truncate_filename(x, 35),
+                key="db",
             )
 
         score = float(active_sim_df.loc[doc_a, doc_b])
@@ -868,8 +900,8 @@ else:
             )
             for rank, (ca, cb, sim) in enumerate(top_pairs, 1):
                 with st.expander(f"#{rank} — Similarity: {sim:.1%}"):
-                    st.write(f"**{doc_a}:** {ca}")
-                    st.write(f"**{doc_b}:** {cb}")
+                    st.write(f"**{truncate_filename(doc_a, 30)}:** {ca}")
+                    st.write(f"**{truncate_filename(doc_b, 30)}:** {cb}")
 
         # --- In-App PDF Preview with Highlighted Matches (#145) ---
         with drill_tab_viewer:
@@ -877,6 +909,7 @@ else:
             selected_view_doc = st.radio(
                 "Select Document to Preview:",
                 options=[doc_a, doc_b],
+                format_func=lambda x: truncate_filename(x, 35),
                 horizontal=True,
                 key="doc_viewer_select",
             )
@@ -915,6 +948,34 @@ else:
     # ══ TAB 6: USERS ══════════════════════════════════════════════════════════
     with tab_users:
         st.subheader("👥 User Management")
+        
+        # User Creation Form with Password Complexity Enforcement (#225)
+        with st.expander("➕ Create New User", expanded=False):
+            with st.form("create_user_form"):
+                new_username = st.text_input("New Username", placeholder="e.g. jdoe")
+                new_password = st.text_input(
+                    "New Password",
+                    type="password",
+                    placeholder="Must meet complexity requirements...",
+                    help="🔒 Password Policy: At least 8 characters long, containing 1 uppercase letter, 1 number, and 1 special character.",
+                )
+                new_role = st.selectbox("Role", ["teacher", "admin"], index=0)
+                submit_create_user = st.form_submit_button(
+                    "Create Account", use_container_width=True
+                )
+
+                if submit_create_user:
+                    try:
+                        add_user(
+                            username=new_username,
+                            password=new_password,
+                            role=new_role,
+                        )
+                        st.success(f"✅ User `{new_username.strip().lower()}` created successfully!")
+                        st.rerun()
+                    except ValueError as err:
+                        st.error(f"❌ {str(err)}")
+
         users = get_all_users()
         if users:
             st.dataframe(pd.DataFrame(users), use_container_width=True)

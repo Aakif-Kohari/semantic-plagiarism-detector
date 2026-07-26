@@ -5,10 +5,12 @@ Generates professional PDF plagiarism reports using ReportLab.
 Provides side-by-side comparison of suspicious paragraph pairs with visual similarity indicators.
 """
 
+import os
 from datetime import datetime
 from io import BytesIO
 from typing import List, Optional, Tuple
 
+import fitz  # PyMuPDF
 from reportlab.lib import colors
 from reportlab.lib.colors import HexColor
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
@@ -24,6 +26,26 @@ from reportlab.platypus import (
     Table,
     TableStyle,
 )
+
+
+def truncate_filename(filename: str, max_len: int = 30) -> str:
+    """
+    Truncates a filename to max_len characters with an ellipsis if needed,
+    preserving its file extension.
+    Example: 'final_essay_v2_final_really_final_draft_john_smith.pdf' -> 'final_essay_v2_f...h.pdf'
+    """
+    if len(filename) <= max_len:
+        return filename
+
+    name, ext = os.path.splitext(filename)
+    needed_len = max_len - len(ext) - 3
+
+    if needed_len <= 2:
+        return filename[: max_len - 3] + "..."
+
+    half = needed_len // 2
+    truncated_name = f"{name[:half]}...{name[-(needed_len - half):]}"
+    return f"{truncated_name}{ext}"
 
 
 def get_similarity_color(score: float) -> HexColor:
@@ -61,26 +83,9 @@ def generate_plagiarism_report(
     logo_image: Optional[bytes] = None,
     brand_color: Optional[str] = None,
 ) -> BytesIO:
-    """
-    Generates a professional PDF plagiarism report for a document pair.
-
-    Args:
-        doc_a: Name of the first document
-        doc_b: Name of the second document
-        overall_similarity: Overall similarity score between documents (0-1)
-        threshold: Plagiarism threshold used for detection
-        top_pairs: List of (chunk_a, chunk_b, similarity) tuples for top matches
-        report_title: Title for the PDF report
-        logo_image: Optional raw bytes of a PNG/JPG logo for the PDF header
-        brand_color: Optional hex color string (e.g. "#1e3a8a") for headings
-
-    Returns:
-        BytesIO buffer containing the generated PDF
-    """
     brand_hex = brand_color or "#1e3a8a"
     brand_clr = HexColor(brand_hex)
 
-    # Determine top margin to leave room for logo header
     logo_height = 0
     if logo_image:
         try:
@@ -102,7 +107,6 @@ def generate_plagiarism_report(
         bottomMargin=18,
     )
 
-    # Get custom styles
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
         "CustomTitle",
@@ -124,7 +128,6 @@ def generate_plagiarism_report(
     normal_style.fontSize = 10
     normal_style.leading = 14
 
-    # ── Header / footer callback for logo ──────────────────────────────────
     def _draw_header(canvas_obj, _doc):
         if not logo_image:
             return
@@ -149,25 +152,20 @@ def generate_plagiarism_report(
             pass
         canvas_obj.restoreState()
 
-    # Build story (PDF content)
     story = []
 
-    # Title
     story.append(Paragraph(report_title, title_style))
     story.append(Spacer(1, 0.2 * inch))
 
-    # Report metadata
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     story.append(Paragraph(f"<b>Generated:</b> {timestamp}", normal_style))
     story.append(Spacer(1, 0.1 * inch))
 
-    # Document comparison header
     story.append(Paragraph("Document Comparison", heading_style))
 
-    # Document details table
     doc_data = [
-        ["Document A", doc_a],
-        ["Document B", doc_b],
+        ["Document A", truncate_filename(doc_a, 40)],
+        ["Document B", truncate_filename(doc_b, 40)],
         ["Overall Similarity", f"{overall_similarity:.1%}"],
         ["Detection Threshold", f"{threshold:.1%}"],
     ]
@@ -191,11 +189,9 @@ def generate_plagiarism_report(
     story.append(doc_table)
     story.append(Spacer(1, 0.3 * inch))
 
-    # Visual similarity bar
     sim_color = get_similarity_color(overall_similarity)
     story.append(Paragraph("Similarity Score Visualization", heading_style))
 
-    # Create similarity bar as a table
     bar_width = overall_similarity * 100
     bar_data = [
         ["", ""],
@@ -220,7 +216,6 @@ def generate_plagiarism_report(
     story.append(Paragraph(f"{overall_similarity:.1%}", normal_style))
     story.append(Spacer(1, 0.3 * inch))
 
-    # Top suspicious paragraph pairs
     if top_pairs:
         story.append(Paragraph("Top Suspicious Paragraph Pairs", heading_style))
         story.append(
@@ -231,9 +226,7 @@ def generate_plagiarism_report(
         )
         story.append(Spacer(1, 0.1 * inch))
 
-        # Create side-by-side comparison table for each pair
         for rank, (chunk_a, chunk_b, score) in enumerate(top_pairs, 1):
-            # Pair header with similarity score
             pair_color = get_similarity_color(score)
             pair_header = Paragraph(
                 f"<b>Pair #{rank}</b> — Similarity: <font color='{pair_color}'>{score:.1%}</font>",
@@ -248,12 +241,11 @@ def generate_plagiarism_report(
             )
             story.append(pair_header)
 
-            # Side-by-side comparison
             wrapped_a = wrap_text(chunk_a, max_chars=500)
             wrapped_b = wrap_text(chunk_b, max_chars=500)
 
             pair_data = [
-                [f"<b>From {doc_a}:</b>", f"<b>From {doc_b}:</b>"],
+                [f"<b>From {truncate_filename(doc_a, 25)}:</b>", f"<b>From {truncate_filename(doc_b, 25)}:</b>"],
                 [wrapped_a, wrapped_b],
             ]
 
@@ -279,7 +271,6 @@ def generate_plagiarism_report(
             story.append(pair_table)
             story.append(Spacer(1, 0.15 * inch))
 
-            # Add page break if we're in the middle of a long report
             if rank == 3 and len(top_pairs) > 3:
                 story.append(PageBreak())
     else:
@@ -289,7 +280,6 @@ def generate_plagiarism_report(
             )
         )
 
-    # Footer note
     story.append(PageBreak())
     story.append(Paragraph("Report Notes", heading_style))
     story.append(
@@ -309,24 +299,16 @@ def generate_plagiarism_report(
         )
     )
 
-    # Build PDF
     doc.build(story, onFirstPage=_draw_header, onLaterPages=_draw_header)
     buffer.seek(0)
     return buffer
 
 
-import fitz  # PyMuPDF
-
-
 def highlight_pdf_matches(
     pdf_source: str | bytes,
     matching_chunks: List[str],
-    highlight_color: Tuple[float, float, float] = (1.0, 0.85, 0.0),  # Yellow
+    highlight_color: Tuple[float, float, float] = (1.0, 0.85, 0.0),
 ) -> bytes:
-    """Opens a PDF, searches for matching text chunks, applies yellow highlights
-
-    on exact bounding box coordinates, and returns the modified PDF bytes.
-    """
     if isinstance(pdf_source, bytes):
         doc = fitz.open(stream=pdf_source, filetype="pdf")
     else:
@@ -335,11 +317,9 @@ def highlight_pdf_matches(
     for page in doc:
         for chunk in matching_chunks:
             chunk_clean = str(chunk).strip()
-            # Avoid highlighting tiny single words/chars to prevent false positives
             if len(chunk_clean) < 3:
                 continue
 
-            # Search page for matching text coordinates
             quad_matches = page.search_for(chunk_clean)
             for rect in quad_matches:
                 annot = page.add_highlight_annot(rect)
