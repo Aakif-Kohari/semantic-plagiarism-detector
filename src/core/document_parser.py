@@ -13,6 +13,10 @@ from collections import Counter
 from pathlib import Path
 from typing import BinaryIO, Dict, List, Optional, Union
 
+try:
+    defusedxml.lxml.monkey_patch()
+except AttributeError:
+    pass
 from urllib.parse import urlparse
 
 import docx
