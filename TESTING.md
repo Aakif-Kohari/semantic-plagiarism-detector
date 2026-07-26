@@ -43,6 +43,31 @@ make test-unit    # Runs only unit tests
 make test-cov     # Runs tests with coverage enforcement
 ```
 
+## Generating Mock Data
+To quickly populate the dashboard with realistic dummy essays, use the built-in mock data generator available from the Streamlit application.
+
+### Prerequisites
+The mock data generator requires the `faker` package. If it is not already installed, run:
+
+```bash
+pip install faker
+```
+
+### Steps
+1. Launch the Streamlit application.
+2. Log in as an administrator.
+3. Open the **🧪 Developer Tools** section in the sidebar.
+4. (Optional) Enter a custom **Mock Class/Section** and **Mock Assignment Title**.
+5. Click **⚗️ Generate Mock Data**.
+
+The generator will:
+
+- Create five realistic student essays using the Faker library.
+- Store the generated essays in `corpus.db`.
+- Skip essays that already exist in the database.
+- Rebuild the FAISS index (`corpus.index`).
+- Automatically refresh the application so the demo essays are immediately available in the dashboard.
+
 ## Adding New Tests
 1. **File Location:** Place new tests in `tests/` mirroring the `src/` directory structure.
 2. **Naming Convention:** Prefix test files with `test_` and functions with `test_`.

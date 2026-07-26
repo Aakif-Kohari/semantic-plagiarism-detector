@@ -1,20 +1,12 @@
 import numpy as np
 import pytest
 
-from src.db.corpus_db import (
-    add_chunks,
-    add_document,
-    clear_all_data,
-    delete_document,
-    get_all_documents,
-    get_all_embeddings,
-    get_chunk_registry,
-    get_document_by_hash,
-    get_document_chunks_count,
-    get_documents_by_class,
-    get_unique_class_sections,
-    init_corpus_db,
-)
+from src.db.corpus_db import (add_chunks, add_document, clear_all_data,
+                              delete_document, get_all_documents,
+                              get_all_embeddings, get_chunk_registry,
+                              get_document_by_hash, get_document_chunks_count,
+                              get_documents_by_class,
+                              get_unique_class_sections)
 
 
 @pytest.fixture(autouse=True)
@@ -24,6 +16,7 @@ def setup_test_db(mock_db):
     and automatic teardown per test.
     """
     yield
+
 
 def test_add_document_metadata():
     # Add first document
@@ -199,3 +192,35 @@ def test_clear_all_data_clears_incidents():
     # Verify everything is cleared
     assert len(get_all_documents()) == 0
     assert len(get_all_incidents()) == 0
+
+
+def test_get_document_word_counts():
+    import numpy as np
+
+    from src.db.corpus_db import (add_chunks, add_document, clear_all_data,
+                                  get_document_word_counts)
+
+    clear_all_data()
+
+    # 1. Add mock documents
+    add_document("doc1.txt", "hash_doc1")
+    add_document("doc2.txt", "hash_doc2")
+
+    # 2. Add chunks with text
+    chunks = [
+        (1, "doc1.txt", 0, "This is the first chunk.", np.zeros(384)),
+        (2, "doc1.txt", 1, "And this is the second chunk of doc1.", np.zeros(384)),
+        (3, "doc2.txt", 0, "Doc2 has only one single chunk.", np.zeros(384)),
+    ]
+    add_chunks(chunks)
+
+    # 3. Retrieve word counts
+    word_counts = get_document_word_counts()
+
+    # "This is the first chunk." -> 5 words
+    # "And this is the second chunk of doc1." -> 8 words
+    # doc1 total = 13 words
+    assert word_counts["doc1.txt"] == 13
+
+    # "Doc2 has only one single chunk." -> 6 words
+    assert word_counts["doc2.txt"] == 6

@@ -11,9 +11,11 @@ import sys
 from io import BytesIO
 
 from src.core.cross_lingual import prepare_text_for_embedding
-from src.core.document_parser import DEFAULT_OCR_DPI, DEFAULT_OCR_LANGUAGE, extract_text
+from src.core.document_parser import (DEFAULT_OCR_DPI, DEFAULT_OCR_LANGUAGE,
+                                      extract_text)
 from src.core.embedding_model import embed_documents
 from src.core.similarity import document_similarity_matrix, flag_plagiarism
+from src.core.synchronization import verify_and_repair_index
 from src.core.text_chunking import chunk_documents
 
 
@@ -30,7 +32,7 @@ def run_scan(folder_path: str, threshold: float) -> int:
         sys.stderr.write(f"Error: Path '{folder_path}' is not a directory.\n")
         return 1
 
-    supported_extensions = {".pdf", ".docx", ".txt"}
+    supported_extensions = {".pdf", ".docx", ".doc", ".txt"}
     files = []
 
     try:
@@ -126,6 +128,10 @@ def main() -> None:
         help="Similarity threshold for flagging (default: 0.59)",
     )
 
+    subparsers.add_parser(
+        "sync-index", help="Verify and repair FAISS index sync with SQLite database."
+    )
+
     args = parser.parse_args()
 
     if args.command == "scan":
@@ -135,6 +141,20 @@ def main() -> None:
 
         exit_code = run_scan(args.folder, args.threshold)
         sys.exit(exit_code)
+
+    elif args.command == "sync-index":
+        print("Starting FAISS and Database synchronization verification...")
+        index_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "corpus.index")
+        )
+        try:
+            verify_and_repair_index(index_path)
+            print("Synchronization complete.")
+            return 0
+        except Exception as e:
+            sys.stderr.write(f"Error during synchronization: {e}\n")
+            return 1
+
     else:
         sys.stderr.write(f"Error: Invalid command '{args.command}'.\n")
         sys.exit(1)

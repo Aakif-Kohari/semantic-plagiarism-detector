@@ -3,6 +3,8 @@ import os
 import zipfile
 from typing import Dict
 
+from src.utils.filename import unique_filename
+
 # Safety limits for ZIP bomb protection
 MAX_TOTAL_DECOMPRESSED_SIZE = 200 * 1024 * 1024  # 200 MB
 MAX_SINGLE_FILE_SIZE = 100 * 1024 * 1024  # 100 MB
@@ -10,7 +12,7 @@ MAX_SINGLE_FILE_SIZE = 100 * 1024 * 1024  # 100 MB
 
 def process_zip_file(zip_bytes: bytes) -> Dict[str, bytes]:
     """
-    Extracts supported documents (PDF, DOCX, TXT) from a ZIP archive entirely in memory.
+    Extracts supported documents (PDF, DOCX, DOC, TXT) from a ZIP archive entirely in memory.
 
     Handles:
     - Invalid or corrupted ZIP files (raises ValueError).
@@ -38,13 +40,19 @@ def process_zip_file(zip_bytes: bytes) -> Dict[str, bytes]:
             total_size = 0
             for zip_info in zf.infolist():
                 if zip_info.file_size > MAX_SINGLE_FILE_SIZE:
+                    size_limit_mb = MAX_SINGLE_FILE_SIZE // (1024 * 1024)
+
                     raise ValueError(
-                        f"Entry '{zip_info.filename}' exceeds single file decompression safety limit of {MAX_SINGLE_FILE_SIZE // (1024 * 1024)}MB."
+                        f"Entry '{zip_info.filename}' exceeds the single-file "
+                        f"decompression safety limit of {size_limit_mb}MB."
                     )
                 total_size += zip_info.file_size
                 if total_size > MAX_TOTAL_DECOMPRESSED_SIZE:
+                    total_limit_mb = MAX_TOTAL_DECOMPRESSED_SIZE // (1024 * 1024)
+
                     raise ValueError(
-                        f"ZIP archive total decompressed size exceeds safety limit of {MAX_TOTAL_DECOMPRESSED_SIZE // (1024 * 1024)}MB."
+                        "ZIP archive total decompressed size exceeds the safety "
+                        f"limit of {total_limit_mb}MB."
                     )
 
             # 2. Extract and sanitize entries
@@ -74,7 +82,7 @@ def process_zip_file(zip_bytes: bytes) -> Dict[str, bytes]:
                 # Filter by supported document extensions
                 _, ext = os.path.splitext(filename)
                 ext = ext.lower()
-                if ext not in [".pdf", ".docx", ".txt"]:
+                if ext not in [".pdf", ".docx", ".doc", ".txt"]:
                     continue
 
                 # Read entry bytes
@@ -89,17 +97,11 @@ def process_zip_file(zip_bytes: bytes) -> Dict[str, bytes]:
                 if not file_data:
                     continue
 
-                # Flatten nested folder structures to construct safe unique filenames (replacing '/' with '_')
-                sanitized_name = filename.replace("/", "_")
-
-                # Resolve duplicate filename collisions by appending unique suffixes
-                base, extension = os.path.splitext(sanitized_name)
-                counter = 1
-                unique_name = sanitized_name
-                while unique_name in extracted_files:
-                    unique_name = f"{base}_{counter}{extension}"
-                    counter += 1
-
+                # Keep only the entry basename and sanitize it as untrusted input.
+                unique_name = unique_filename(
+                    filename,
+                    extracted_files,
+                )
                 extracted_files[unique_name] = file_data
 
     except zipfile.BadZipFile as e:

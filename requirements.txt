@@ -13,6 +13,7 @@ pymupdf>=1.24.0                  # PyMuPDF for rendering & highlighting PDF matc
 pypdf>=5.0.0                     # Extract text from PDF files
 pdfplumber>=0.11.0               # Robust PDF text extraction
 python-docx>=1.1.0               # Extract text from Word documents
+defusedxml>=0.7.1                # Protect against XML External Entity (XXE) attacks
 PyPDF2>=3.0.0                    # Legacy PDF manipulation support
 reportlab>=5.0.0                 # PDF document generation
 pytesseract>=0.3.13              # OCR text extraction from scanned images
@@ -55,6 +56,7 @@ psutil>=5.9.0                   # System memory monitoring
 # ── Web Scraping ───────────────────────────────────────────────────────────────
 beautifulsoup4>=4.15.0          # HTML parsing for URL content extraction
 requests>=2.31.0                # HTTP library for fetching web content
+responses>=0.25.0               # Deterministic HTTP mocks for outbound-request tests
 # ── REST API & LMS Integration ────────────────────────────────────────────────
 fastapi>=0.109.0                # REST API framework for LMS integrations
 uvicorn>=0.27.0                 # ASGI server implementation
