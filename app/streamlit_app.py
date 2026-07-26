@@ -1414,7 +1414,7 @@ else:
         get_text("upload_title", lang=lang_code),
         type=["pdf", "docx", "doc", "txt", "zip", "csv", "png", "jpg", "jpeg"],
         accept_multiple_files=True,
-        key="file_uploader",
+        key="file_uploader_admin",
     )
 
     if uploaded_files:

@@ -4,7 +4,6 @@ from unittest.mock import patch
 
 import responses
 
-import src.core.webhook as webhook
 from src.core.webhook import send_plagiarism_alert
 
 
