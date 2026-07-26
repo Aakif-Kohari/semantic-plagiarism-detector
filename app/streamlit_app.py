@@ -963,8 +963,8 @@ with st.sidebar:
 st.title(f"🔍 {APP_TITLE}")
 
 uploaded_files = st.file_uploader(
-    "📂 Upload Assignments (PDF, DOCX, DOC, TXT, ZIP)",
-    type=["pdf", "docx", "doc", "txt", "zip"],
+    "📂 Upload Assignments (PDF, DOCX, DOC, TXT, ZIP, PNG, JPG)",
+    type=["pdf", "docx", "doc", "txt", "zip", "png", "jpg", "jpeg"],
     accept_multiple_files=True,
     key="file_uploader",
 )
@@ -1424,7 +1424,7 @@ else:
     # 1. LOCAL FILE UPLOADER (Dynamic Title Translation)
     uploaded_files = st.file_uploader(
         get_text("upload_title", lang=lang_code),
-        type=["pdf", "docx", "doc", "txt", "zip", "csv"],
+        type=["pdf", "docx", "doc", "txt", "zip", "csv", "png", "jpg", "jpeg"],
         accept_multiple_files=True,
         key="file_uploader",
     )
