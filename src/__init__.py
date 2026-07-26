@@ -21,6 +21,7 @@ from .core import (
     save_index,
     search_similar_chunks,
     send_plagiarism_alert,
+    dispatch_plagiarism_alert,
     translate_text,
 )
 from .db import (
@@ -30,6 +31,9 @@ from .db import (
     clear_all_data,
     delete_document,
     delete_user,
+    disable_2fa,
+    enable_2fa,
+    get_2fa_status,
     get_all_documents,
     get_all_embeddings,
     get_all_users,
@@ -38,18 +42,24 @@ from .db import (
     get_document_chunks_count,
     get_documents_by_class,
     get_unique_class_sections,
+    get_user_active_status,
     get_user_role,
     init_corpus_db,
     init_db,
+    is_user_active,
+    set_user_active_status,
     update_password,
     verify_user,
 )
 from .visualization import (
+    build_network_data,
     plot_chunk_similarity_comparison,
     plot_similarity_heatmap,
     plot_similarity_heatmap_plotly,
     plot_similarity_network,
+    render_network_plotly,
 )
+
 
 __all__ = [
     "extract_text_from_pdf",
@@ -69,9 +79,13 @@ __all__ = [
     "plot_similarity_heatmap",
     "plot_similarity_heatmap_plotly",
     "plot_chunk_similarity_comparison",
+    "build_network_data",
+    "render_network_plotly",
     "plot_similarity_network",
+
     "translate_text",
     "send_plagiarism_alert",
+    "dispatch_plagiarism_alert",
     "build_index",
     "search_similar_chunks",
     "find_plagiarised_chunks",
@@ -86,6 +100,12 @@ __all__ = [
     "add_user",
     "delete_user",
     "update_password",
+    "get_2fa_status",
+    "enable_2fa",
+    "disable_2fa",
+    "get_user_active_status",
+    "set_user_active_status",
+    "is_user_active",
     "init_corpus_db",
     "add_document",
     "get_document_by_hash",
