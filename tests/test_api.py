@@ -118,3 +118,86 @@ def test_scan_empty_file_upload():
     )
     assert response.status_code == 400
     assert "Uploaded file is empty" in response.json()["detail"]
+
+
+def test_clear_all_documents_no_auth_header():
+    """Verify that requests to POST /api/v1/clear without Authorization header return 401/403."""
+    response = client.post("/api/v1/clear?username=admin")
+    assert response.status_code in (401, 403)
+
+
+def test_clear_all_documents_invalid_token():
+    """Verify that requests to POST /api/v1/clear with invalid Bearer token return 401."""
+    response = client.post(
+        "/api/v1/clear?username=admin",
+        headers={"Authorization": "Bearer wrong-token-value"},
+    )
+    assert response.status_code == 401
+
+
+@patch("src.api.app.get_user_role")
+def test_clear_all_documents_non_admin_forbidden(mock_get_role):
+    """Verify that a non-administrator receives 403 Forbidden on POST /api/v1/clear."""
+    mock_get_role.return_value = "teacher"
+
+    expected_token = get_expected_bearer_token()
+    response = client.post(
+        "/api/v1/clear?username=teacher_user",
+        headers={"Authorization": f"Bearer {expected_token}"},
+    )
+
+    assert response.status_code == 403
+    assert "Forbidden" in response.json()["detail"]
+
+
+@patch("src.api.app.get_user_role")
+@patch("src.api.app.clear_all_data")
+@patch("os.path.exists")
+@patch("os.remove")
+def test_clear_all_documents_admin_success(
+    mock_remove, mock_exists, mock_clear_db, mock_get_role
+):
+    """Verify that an administrator can successfully clear all documents."""
+    mock_get_role.return_value = "admin"
+    mock_exists.return_value = True
+
+    expected_token = get_expected_bearer_token()
+    response = client.post(
+        "/api/v1/clear?username=admin",
+        headers={"Authorization": f"Bearer {expected_token}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+    assert "cleared" in data["message"]
+
+    mock_clear_db.assert_called_once()
+    mock_exists.assert_called_once()
+    mock_remove.assert_called_once()
+
+
+@patch("src.api.app.get_user_role")
+@patch("src.api.app.clear_all_data")
+@patch("os.path.exists")
+@patch("os.remove")
+def test_clear_all_documents_already_empty(
+    mock_remove, mock_exists, mock_clear_db, mock_get_role
+):
+    """Verify that clearing an already empty database behaves safely (index doesn't exist)."""
+    mock_get_role.return_value = "admin"
+    mock_exists.return_value = False
+
+    expected_token = get_expected_bearer_token()
+    response = client.post(
+        "/api/v1/clear?username=admin",
+        headers={"Authorization": f"Bearer {expected_token}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+
+    mock_clear_db.assert_called_once()
+    mock_exists.assert_called_once()
+    mock_remove.assert_not_called()

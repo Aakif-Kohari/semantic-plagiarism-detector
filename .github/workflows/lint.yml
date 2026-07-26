@@ -15,6 +15,10 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install ruff
+          pip install ruff pylint
       - name: Run Ruff
         run: ruff check .
+      - name: Run Pylint for Streamlit anti-patterns
+        env:
+          PYTHONPATH: .
+        run: pylint --load-plugins=pylint_plugins.streamlit_lint --disable=all --enable=streamlit-global-mutation app/ src/
