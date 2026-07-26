@@ -712,12 +712,12 @@ def clear_all_dialog():
                     logger.error(f"Error removing FAISS index: {e}")
 
             try:
-                from src.utils.redis_cache import get_cache
+                from src.utils.redis_cache import CacheKeyPrefix, get_cache
 
                 cache = get_cache()
                 if cache.is_available():
-                    cache.delete("faiss:index:corpus_index")
-                    cache.clear_pattern("analysis:*")
+                    cache.delete(CacheKeyPrefix.LEGACY_FAISS_INDEX.value)
+                    cache.clear_pattern(CacheKeyPrefix.LEGACY_ANALYSIS_PATTERN.value)
             except (ImportError, RuntimeError, ConnectionError) as e:
                 print(f"Error invalidating cache: {e}")
             except Exception as e:
@@ -881,11 +881,11 @@ with st.sidebar:
                     ):
                         soft_delete_document(pending)
                         try:
-                            from src.utils.redis_cache import get_cache
+                            from src.utils.redis_cache import CacheKeyPrefix, get_cache
                             cache = get_cache()
                             if cache.is_available():
-                                cache.delete("faiss:index:corpus_index")
-                                cache.clear_pattern("analysis:*")
+                                cache.delete(CacheKeyPrefix.LEGACY_FAISS_INDEX.value)
+                                cache.clear_pattern(CacheKeyPrefix.LEGACY_ANALYSIS_PATTERN.value)
                         except Exception as e:
                             logger.error(f"Error invalidating cache: {e}")
 
@@ -3568,11 +3568,11 @@ if not st.session_state.authenticated:
                     if st.button("Yes, empty trash", key="confirm_empty_trash_btn", type="primary", use_container_width=True):
                         empty_trash()
                         try:
-                            from src.utils.redis_cache import get_cache
+                            from src.utils.redis_cache import CacheKeyPrefix, get_cache
                             cache = get_cache()
                             if cache.is_available():
-                                cache.delete("faiss:index:corpus_index")
-                                cache.clear_pattern("analysis:*")
+                                cache.delete(CacheKeyPrefix.LEGACY_FAISS_INDEX.value)
+                                cache.clear_pattern(CacheKeyPrefix.LEGACY_ANALYSIS_PATTERN.value)
                         except Exception as e:
                             logger.error(f"Error invalidating cache: {e}")
 
@@ -3657,11 +3657,11 @@ if not st.session_state.authenticated:
                     if st.button("Yes, restore", key="confirm_restore_btn", type="primary", use_container_width=True):
                         restore_document(pending_restore)
                         try:
-                            from src.utils.redis_cache import get_cache
+                            from src.utils.redis_cache import CacheKeyPrefix, get_cache
                             cache = get_cache()
                             if cache.is_available():
-                                cache.delete("faiss:index:corpus_index")
-                                cache.clear_pattern("analysis:*")
+                                cache.delete(CacheKeyPrefix.LEGACY_FAISS_INDEX.value)
+                                cache.clear_pattern(CacheKeyPrefix.LEGACY_ANALYSIS_PATTERN.value)
                         except Exception as e:
                             logger.error(f"Error invalidating cache: {e}")
 
@@ -3694,11 +3694,11 @@ if not st.session_state.authenticated:
                     if st.button("Yes, delete permanently", key="confirm_perm_delete_btn", type="primary", use_container_width=True):
                         permanently_delete_document(pending_perm_delete)
                         try:
-                            from src.utils.redis_cache import get_cache
+                            from src.utils.redis_cache import CacheKeyPrefix, get_cache
                             cache = get_cache()
                             if cache.is_available():
-                                cache.delete("faiss:index:corpus_index")
-                                cache.clear_pattern("analysis:*")
+                                cache.delete(CacheKeyPrefix.LEGACY_FAISS_INDEX.value)
+                                cache.clear_pattern(CacheKeyPrefix.LEGACY_ANALYSIS_PATTERN.value)
                         except Exception as e:
                             logger.error(f"Error invalidating cache: {e}")
 
