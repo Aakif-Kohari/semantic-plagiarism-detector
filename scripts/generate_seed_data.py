@@ -54,6 +54,7 @@ def main():
     print("Initializing databases...")
     # Initialize Auth DB (Creates users.db and seeds admin/admin123)
     init_auth_db()
+
     # Add a teacher user
     add_user("teacher", "teacher123", "teacher")
     print("Auth DB initialized and seeded.")
@@ -130,6 +131,45 @@ def main():
     noise_c /= np.linalg.norm(noise_c)
     vc = 0.15 * va + np.sqrt(1 - 0.15**2) * noise_c
     vc /= np.linalg.norm(vc)
+
+    # Validate generated cosine similarities before persisting embeddings.
+    # Since the vectors are normalized, their dot product equals cosine similarity.
+    alice_bob_similarity = float(np.dot(va, vb))
+    alice_charlie_similarity = float(np.dot(va, vc))
+
+    expected_alice_bob_similarity = 0.95
+    expected_alice_charlie_similarity = 0.15
+    similarity_tolerance = 1e-6
+
+    if not np.isclose(
+        alice_bob_similarity,
+        expected_alice_bob_similarity,
+        atol=similarity_tolerance,
+        rtol=0.0,
+    ):
+        raise ValueError(
+            "Mock embedding validation failed for Alice/Bob: "
+            f"expected {expected_alice_bob_similarity}, "
+            f"got {alice_bob_similarity:.6f}"
+        )
+
+    if not np.isclose(
+        alice_charlie_similarity,
+        expected_alice_charlie_similarity,
+        atol=similarity_tolerance,
+        rtol=0.0,
+    ):
+        raise ValueError(
+            "Mock embedding validation failed for Alice/Charlie: "
+            f"expected {expected_alice_charlie_similarity}, "
+            f"got {alice_charlie_similarity:.6f}"
+        )
+
+    print(
+        "Validated mock similarities: "
+        f"Alice/Bob={alice_bob_similarity:.6f}, "
+        f"Alice/Charlie={alice_charlie_similarity:.6f}"
+    )
 
     # Format chunks: (vector_id, filename, chunk_index, chunk_text, embedding)
     chunks = [
