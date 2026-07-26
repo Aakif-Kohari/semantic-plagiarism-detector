@@ -3349,6 +3349,19 @@ if not st.session_state.authenticated:
                     del st.query_params["threshold"]
                 set_theme("Light")
                 st.success("✅ Settings reset to defaults!")
+            
+            st.markdown("")
+            if st.button(
+                "🛡️ Check Database Integrity",
+                key="check_db_integrity_button",
+                use_container_width=True,
+            ):
+                from src.db.corpus_db import check_database_integrity
+                results = check_database_integrity()
+                if results and all(r.lower() == "ok" for r in results):
+                    st.toast("✅ Database integrity check passed (healthy).")
+                else:
+                    st.error(f"🚨 Database integrity check failed: {results}")
                 st.rerun()
 
             st.markdown("---")
