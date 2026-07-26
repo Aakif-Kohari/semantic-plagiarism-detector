@@ -105,11 +105,11 @@ class RedisCache:
         except Exception:
             return False
 
-    def ping(self) -> tuple[bool, float | None]:
+    def ping(self) -> tuple[bool, Optional[float]]:
         """Ping Redis and measure round-trip latency.
 
         Returns:
-            Tuple of (connected: bool, latency_ms: float | None).
+            Tuple of (connected: bool, latency_ms: Optional[float]).
             latency_ms is None if the connection is unavailable.
         """
         if self._client is None:
