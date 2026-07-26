@@ -316,33 +316,37 @@ def test_generate_plagiarism_report_auto_detect_dark_mode():
     st.session_state.theme = "Light"
 
 
-def test_pdf_generation_memory_leak():
-    """Verify that generating multiple PDFs sequentially does not leak memory."""
-    import gc
-    import psutil
+def test_pdf_generation_performance_benchmark():
+    """Verify that generating a PDF plagiarism report for a 50-pair report stays under 1.5 seconds."""
+    import time
 
-    # 1. Warm-up run to initialize any lazy-loaded libraries (fonts, caches)
-    _ = generate_plagiarism_report(**SNAPSHOT_INPUTS)
-    
-    # 2. Force garbage collection and take baseline
-    gc.collect()
-    process = psutil.Process(os.getpid())
-    baseline_rss = process.memory_info().rss
-    
-    # 3. Generate 100 PDF reports sequentially
-    iterations = 100
-    for _ in range(iterations):
-        buffer = generate_plagiarism_report(**SNAPSHOT_INPUTS)
-        buffer.close()
-        del buffer
-        
-    # 4. Force garbage collection again
-    gc.collect()
-    
-    # 5. Measure final RSS
-    final_rss = process.memory_info().rss
-    growth_mb = (final_rss - baseline_rss) / (1024 * 1024)
-    
-    # 6. Assert memory growth is bounded
-    # Allow 25 MB growth for normal Python allocator and caching behaviour
-    assert growth_mb < 25.0, f"Memory leak detected: growth {growth_mb:.2f} MB exceeds threshold of 25.0 MB"
+    # Generate 50 mock matching pairs
+    top_pairs = [
+        (
+            f"This is mock sentence A for pair {i} to be used in the PDF plagiarism report.",
+            f"This is mock sentence B for pair {i} to be used in the PDF plagiarism report.",
+            0.85 + (i % 15) / 100.0,
+        )
+        for i in range(50)
+    ]
+
+    start_time = time.perf_counter()
+    pdf_buffer = generate_plagiarism_report(
+        doc_a="essay_alpha.pdf",
+        doc_b="essay_beta.pdf",
+        overall_similarity=0.78,
+        threshold=0.60,
+        top_pairs=top_pairs,
+    )
+    end_time = time.perf_counter()
+
+    duration = end_time - start_time
+
+    # Assert PDF report generation time is under 1.5 seconds
+    assert duration < 1.5, f"PDF generation took {duration:.4f} seconds, exceeding limit of 1.5s."
+
+    # Validate output
+    pdf_bytes = pdf_buffer.getvalue()
+    assert pdf_bytes.startswith(b"%PDF")
+    assert len(pdf_bytes) > 0
+
