@@ -1,0 +1,303 @@
+name: ECSoC Automation
+
+on:
+  issue_comment:
+    types: [created]
+
+  pull_request_target:
+    types: [opened]
+
+  schedule:
+    - cron: '0 0 * * *'
+
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  issue-claim:
+    if: github.event_name == 'issue_comment'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+
+            // Ignore PR comments
+            if (issue.pull_request) return;
+
+            // Already assigned? Do nothing.
+            if (issue.assignees.length > 0) {
+              console.log("Issue already assigned.");
+              return;
+            }
+
+            const claimer = context.payload.comment.user.login;
+
+            // Check max 5 open claimed issues limit for user
+            try {
+              const assignedIssues = await github.rest.issues.listForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                assignee: claimer,
+                state: 'open'
+              });
+
+              const searchRes = await github.rest.search.issuesAndPullRequests({
+                q: `type:issue state:open repo:${context.repo.owner}/${context.repo.repo} "@${claimer}" "ECSoC'26"`
+              });
+
+              const openIssueNumbers = new Set([
+                ...(assignedIssues.data || []).map(i => i.number),
+                ...(searchRes.data.items || []).map(i => i.number)
+              ]);
+              openIssueNumbers.delete(issue.number);
+
+              if (openIssueNumbers.size >= 5) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  body: `⚠️ @${claimer}, you currently have **${openIssueNumbers.size} open issue(s)** claimed for **ECSoC'26**. The maximum allowed limit is 5. Please complete your existing open issues before claiming another one!`
+                });
+                return;
+              }
+            } catch (err) {
+              console.log("Error checking user open issue limit:", err.message);
+            }
+
+            // Assign first commenter (if user is a collaborator)
+            try {
+              await github.rest.issues.addAssignees({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                assignees: [claimer]
+              });
+            } catch (err) {
+              console.log(`Could not assign ${claimer} (user might not be a collaborator):`, err.message);
+            }
+
+            // Add ECSoC26 label
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              labels: ["ECSoC26"]
+            });
+
+            // Optional confirmation comment
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              body: `🎉 Hi @${claimer}, thanks for your interest in contributing under *ECSoC'26*! I've assigned this issue to you. Please follow the contribution guidelines, work on a separate branch, and link your PR using Fixes #<issue_number>. Wishing you the best—looking forward to reviewing your contribution! Happy coding!`
+            });
+
+  pr-automation:
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const author = pr.user.login;
+
+            // Assign PR author (if user is a collaborator)
+            try {
+              await github.rest.issues.addAssignees({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                assignees: [author]
+              });
+            } catch (err) {
+              console.log(`Could not assign ${author} (user might not be a collaborator):`, err.message);
+            }
+
+            // Add label
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              labels: ["ECSoC26"]
+            });
+
+            // Welcome comment for PR
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              body: `🎉 Thanks @${author} for opening this Pull Request for **ECSoC26**! A maintainer will review it soon.`
+            });
+
+  auto-unassign-stale:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Cleanup Excess Claims (> 5 open issues)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const maxAllowed = 5;
+            console.log("Checking for users with > 5 open claimed issues...");
+
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'ECSoC26',
+              state: 'open',
+              per_page: 100
+            });
+
+            const userClaimsMap = {};
+
+            for (const issue of issues.data) {
+              if (issue.pull_request) continue;
+
+              const comments = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                per_page: 100
+              });
+
+              const claimComment = comments.data.find(c => c.body && c.body.includes("thanks for your interest in contributing under *ECSoC'26*"));
+
+              let claimer = null;
+              if (claimComment) {
+                const match = claimComment.body.match(/Hi @([a-zA-Z0-9-]+)/);
+                if (match) claimer = match[1];
+              }
+              if (!claimer && issue.assignees && issue.assignees.length > 0) {
+                claimer = issue.assignees[0].login;
+              }
+
+              if (claimer) {
+                const key = claimer.toLowerCase();
+                if (!userClaimsMap[key]) {
+                  userClaimsMap[key] = { username: claimer, issues: [] };
+                }
+                userClaimsMap[key].issues.push(issue);
+              }
+            }
+
+            for (const key of Object.keys(userClaimsMap)) {
+              const userObj = userClaimsMap[key];
+              const claimedIssues = userObj.issues; // sorted chronologically by issue number
+
+              if (claimedIssues.length > maxAllowed) {
+                console.log(`User @${userObj.username} has ${claimedIssues.length} open issues. Keeping 5, freeing remaining ${claimedIssues.length - maxAllowed}...`);
+
+                const excess = claimedIssues.slice(maxAllowed);
+
+                for (const issue of excess) {
+                  if (issue.assignees.length > 0) {
+                    try {
+                      await github.rest.issues.removeAssignees({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        issue_number: issue.number,
+                        assignees: issue.assignees.map(a => a.login)
+                      });
+                    } catch (e) {
+                      console.log("Error removing assignees:", e.message);
+                    }
+                  }
+
+                  try {
+                    await github.rest.issues.removeLabel({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: issue.number,
+                      name: 'ECSoC26'
+                    });
+                  } catch (e) {
+                    console.log("Error removing label:", e.message);
+                  }
+
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issue.number,
+                    body: `⚠️ @${userObj.username} exceeded the maximum limit of ${maxAllowed} open claimed issues for **ECSoC'26**. This issue has been automatically unassigned and is now **open for anyone to claim**!`
+                  });
+                }
+              }
+            }
+
+      - name: Unassign Inactive Issues (> 4 Days)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fourDaysMs = 4 * 24 * 60 * 60 * 1000;
+            const now = new Date();
+
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'ECSoC26',
+              state: 'open',
+              per_page: 100
+            });
+
+            for (const issue of issues.data) {
+              if (issue.pull_request) continue;
+
+              const comments = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                per_page: 100
+              });
+
+              const claimComment = comments.data.find(c => c.body && c.body.includes("thanks for your interest in contributing under *ECSoC'26*"));
+
+              if (claimComment) {
+                const claimDate = new Date(claimComment.created_at);
+                const ageMs = now - claimDate;
+
+                if (ageMs >= fourDaysMs) {
+                  const match = claimComment.body.match(/Hi @([a-zA-Z0-9-]+)/);
+                  const claimer = match ? match[1] : (issue.assignees[0] ? issue.assignees[0].login : null);
+
+                  if (issue.assignees.length > 0) {
+                    try {
+                      await github.rest.issues.removeAssignees({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        issue_number: issue.number,
+                        assignees: issue.assignees.map(a => a.login)
+                      });
+                    } catch (e) {
+                      console.log("Error removing assignees:", e.message);
+                    }
+                  }
+
+                  try {
+                    await github.rest.issues.removeLabel({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: issue.number,
+                      name: 'ECSoC26'
+                    });
+                  } catch (e) {
+                    console.log("Error removing label:", e.message);
+                  }
+
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issue.number,
+                    body: `⏰ ${claimer ? '@' + claimer : 'The contributor'} has held this issue for more than 4 days without submitting a PR. It has been automatically unassigned and is now **open for anyone to claim**!`
+                  });
+                }
+              }
+            }

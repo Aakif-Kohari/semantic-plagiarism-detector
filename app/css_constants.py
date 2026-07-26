@@ -18,8 +18,7 @@ CLASS_PIPELINE_ETA = "pipeline-eta"
 
 CLASS_DOC_ROW = "doc-row"
 
-CLASS_CLEAR_ALL_CONTAINER = "clear-all-container"
-
+CLASS_WELCOME_BANNER = "welcome-banner"
 CLASS_SKELETON = "skeleton"
 CLASS_SKELETON_METRIC = "skeleton-metric"
 CLASS_SKELETON_TITLE = "skeleton-title"
