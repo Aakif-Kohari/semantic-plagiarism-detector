@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib.figure import Figure
+from matplotlib.ticker import PercentFormatter
 
 matplotlib.use("Agg")
 
@@ -51,6 +52,13 @@ def plot_similarity_heatmap(
     """
     n = len(similarity_df)
 
+    # Guard for empty DataFrame (0 documents)
+    if n == 0:
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        ax.set_title(title)
+        return fig
+
     if figsize is None:
         cell_size = max(1.2, 6 / n)
         figsize = (max(6, n * cell_size + 2), max(5, n * cell_size + 1.5))
@@ -71,6 +79,9 @@ def plot_similarity_heatmap(
         cbar_kws={"label": "Cosine Similarity", "shrink": 0.8, "pad": 0.02},
         annot_kws={"size": max(7, 14 - n), "weight": "bold"},
     )
+
+    colorbar = ax.collections[0].colorbar
+    colorbar.ax.yaxis.set_major_formatter(PercentFormatter(xmax=1.0, decimals=0))
 
     if theme_colors:
         fig.patch.set_facecolor(theme_colors.get("background", "#FFFFFF"))
@@ -160,6 +171,13 @@ def plot_similarity_heatmap_plotly(
 
     Returns a plotly.graph_objects.Figure for st.plotly_chart().
     """
+    # Guard for empty DataFrame (0 documents)
+    if similarity_df.empty or len(similarity_df) == 0:
+        import plotly.graph_objects as go
+        fig = go.Figure()
+        fig.update_layout(title=title)
+        return fig
+
     import plotly.graph_objects as go
 
     names = list(similarity_df.columns)

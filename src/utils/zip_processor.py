@@ -12,7 +12,7 @@ MAX_SINGLE_FILE_SIZE = 100 * 1024 * 1024  # 100 MB
 
 def process_zip_file(zip_bytes: bytes) -> Dict[str, bytes]:
     """
-    Extracts supported documents (PDF, DOCX, TXT) from a ZIP archive entirely in memory.
+    Extracts supported documents (PDF, DOCX, DOC, TXT) from a ZIP archive entirely in memory.
 
     Handles:
     - Invalid or corrupted ZIP files (raises ValueError).
@@ -82,7 +82,7 @@ def process_zip_file(zip_bytes: bytes) -> Dict[str, bytes]:
                 # Filter by supported document extensions
                 _, ext = os.path.splitext(filename)
                 ext = ext.lower()
-                if ext not in [".pdf", ".docx", ".txt"]:
+                if ext not in [".pdf", ".docx", ".doc", ".txt"]:
                     continue
 
                 # Read entry bytes
