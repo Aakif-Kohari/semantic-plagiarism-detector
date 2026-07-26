@@ -48,12 +48,18 @@ def main():
             try:
                 os.remove(path)
                 print(f"Removed old seed {f}")
-            except Exception as err:
-                print(f"Warning: Could not remove old seed {f} ({err})")
+            except PermissionError as err:
+                print(
+                    f"Warning: Permission denied while removing seed file {f} "
+                    f"({err}). The file may be locked or in use by another process."
+                )
+            except OSError as err:
+                print(f"Warning: OS error while removing seed file {f} ({err})")
 
     print("Initializing databases...")
     # Initialize Auth DB (Creates users.db and seeds admin/admin123)
     init_auth_db()
+
     # Add a teacher user
     add_user("teacher", "teacher123", "teacher")
     print("Auth DB initialized and seeded.")
