@@ -13,7 +13,7 @@ def test_telemetry_cache_hit():
     Test that TelemetryService.get_active_user_count correctly returns a cached value 
     without querying the DB.
     """
-    with patch('src.core.telemetry.get_cache') as mock_get_cache, \\
+    with patch('src.core.telemetry.get_cache') as mock_get_cache, \
          patch('src.core.telemetry.get_user_count') as mock_get_user_count:
         
         mock_get_cache.return_value = "42"
@@ -28,8 +28,8 @@ def test_telemetry_cache_miss():
     """
     Test that on cache miss, the service queries the DB and populates the cache.
     """
-    with patch('src.core.telemetry.get_cache') as mock_get_cache, \\
-         patch('src.core.telemetry.get_user_count') as mock_get_user_count, \\
+    with patch('src.core.telemetry.get_cache') as mock_get_cache, \
+         patch('src.core.telemetry.get_user_count') as mock_get_user_count, \
          patch('src.core.telemetry.set_cache') as mock_set_cache:
         
         mock_get_cache.return_value = None
@@ -50,7 +50,7 @@ def test_telemetry_db_failure():
     """
     Test that if the database lookup fails entirely, the service handles it gracefully.
     """
-    with patch('src.core.telemetry.get_cache') as mock_get_cache, \\
+    with patch('src.core.telemetry.get_cache') as mock_get_cache, \
          patch('src.core.telemetry.get_user_count') as mock_get_user_count:
         
         mock_get_cache.return_value = None
@@ -68,7 +68,7 @@ def test_telemetry_doc_count_cache_hit():
     """
     Test that TelemetryService.get_document_count hits the cache.
     """
-    with patch('src.core.telemetry.get_cache') as mock_get_cache, \\
+    with patch('src.core.telemetry.get_cache') as mock_get_cache, \
          patch('src.core.telemetry.get_all_documents') as mock_get_all_documents:
         
         mock_get_cache.return_value = "99"
@@ -83,8 +83,8 @@ def test_telemetry_doc_count_cache_miss():
     """
     Test that on cache miss, get_document_count queries DB and populates cache.
     """
-    with patch('src.core.telemetry.get_cache') as mock_get_cache, \\
-         patch('src.core.telemetry.get_all_documents') as mock_get_all_documents, \\
+    with patch('src.core.telemetry.get_cache') as mock_get_cache, \
+         patch('src.core.telemetry.get_all_documents') as mock_get_all_documents, \
          patch('src.core.telemetry.set_cache') as mock_set_cache:
         
         mock_get_cache.return_value = None
@@ -105,7 +105,7 @@ def test_telemetry_doc_db_failure():
     """
     Test that if document DB query fails, service falls back safely.
     """
-    with patch('src.core.telemetry.get_cache') as mock_get_cache, \\
+    with patch('src.core.telemetry.get_cache') as mock_get_cache, \
          patch('src.core.telemetry.get_all_documents') as mock_get_all_documents:
         
         mock_get_cache.return_value = None
@@ -123,8 +123,8 @@ def test_telemetry_force_refresh():
     """
     Test that force_refresh bypasses the get_cache check and immediately updates cache.
     """
-    with patch('src.core.telemetry.get_user_count') as mock_get_user_count, \\
-         patch('src.core.telemetry.get_all_documents') as mock_get_all_documents, \\
+    with patch('src.core.telemetry.get_user_count') as mock_get_user_count, \
+         patch('src.core.telemetry.get_all_documents') as mock_get_all_documents, \
          patch('src.core.telemetry.set_cache') as mock_set_cache:
         
         mock_get_user_count.return_value = 100
