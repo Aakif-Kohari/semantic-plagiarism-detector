@@ -1,22 +1,14 @@
 import streamlit as st
 
-from app.css_constants import (
-    CLASS_AVATAR,
-    CLASS_BADGE,
-    CLASS_EMPTY_DESC,
-    CLASS_EMPTY_ICON,
-    CLASS_EMPTY_STATE,
-    CLASS_EMPTY_TITLE,
-    CLASS_PIPELINE_ACTIVE,
-    CLASS_PIPELINE_ARROW,
-    CLASS_PIPELINE_DONE,
-    CLASS_PIPELINE_ETA,
-    CLASS_PIPELINE_STEP,
-    CLASS_PIPELINE_STEPS,
-    CLASS_SIDEBAR_USER_BADGE,
-    CLASS_SIM_PILL,
-)
-from src.core.config import DEFAULT_THRESHOLDS, normalize_severity_label, severity_key
+from app.css_constants import (CLASS_AVATAR, CLASS_BADGE, CLASS_EMPTY_DESC,
+                               CLASS_EMPTY_ICON, CLASS_EMPTY_STATE,
+                               CLASS_EMPTY_TITLE, CLASS_PIPELINE_ACTIVE,
+                               CLASS_PIPELINE_ARROW, CLASS_PIPELINE_DONE,
+                               CLASS_PIPELINE_ETA, CLASS_PIPELINE_STEP,
+                               CLASS_PIPELINE_STEPS, CLASS_SIDEBAR_USER_BADGE,
+                               CLASS_SIM_PILL)
+from src.core.config import (DEFAULT_THRESHOLDS, normalize_severity_label,
+                             severity_key)
 
 THEMES = {
     "Light": {
@@ -489,6 +481,16 @@ def inject_css() -> None:
             color: white !important;
             border-color: #ff3333 !important;
         }}
+
+        .{CLASS_WELCOME_BANNER} {{
+    background-color: {colors["surface"]};
+    border: 1px solid {colors["border"]};
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    color: {colors["ink"]};
+    font-size: 0.95rem;
+}}
 
         [data-testid="stExpander"],
         [data-testid="stForm"] {{

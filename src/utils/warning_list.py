@@ -10,15 +10,17 @@ import pandas as pd
 import streamlit as st
 
 from app.theme import badge_html, tier_from_severity_label
-from src.core.config import normalize_severity_label, severity_from_score, severity_rank
-from src.db.incidents import _normalise_pair, add_false_positive, get_false_positives
-
+from src.core.config import (normalize_severity_label, severity_from_score,
+                             severity_rank)
+from src.db.incidents import (_normalise_pair, add_false_positive,
+                              get_false_positives)
 
 try:
     from thefuzz import fuzz
 except ImportError:
     try:
-        from fuzzywuzzy import fuzz  # type: ignore[import-untyped,reportMissingImports]
+        from fuzzywuzzy import \
+            fuzz  # type: ignore[import-untyped,reportMissingImports]
     except ImportError:
         fuzz = None
 

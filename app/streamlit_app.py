@@ -3,25 +3,21 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from src.core.ai_detector import detect_documents_ai_probability
-from src.core.embedding_model import embed_documents
-from src.core.text_chunking import chunk_documents
-
 # Fix Streamlit import paths by pointing to project root
 FILE_PATH = Path(__file__).resolve()
-ROOT_DIR = FILE_PATH.parent.parent  # Points to semantic-plagiarism-detector/
+ROOT_DIR = FILE_PATH.parent.parent
 
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from sklearn.metrics.pairwise import cosine_similarity
-from src.core.text_chunking import chunk_documents
-from src.core.embedding_model import embed_documents
+
 from src.core.ai_detector import detect_documents_ai_probability
+from src.core.embedding_model import embed_documents
+from src.core.text_chunking import chunk_documents
 
 import base64
 import html
-
 # Standard / Third-party imports
 import time
 
@@ -38,10 +34,6 @@ import streamlit as st
 from app.components.faiss_results import faiss_results_dataframe
 from src.security.metadata_stripper import strip_exif_metadata
 from src.utils.filename import sanitize_filename, unique_filename
-
-_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
 
 from typing import Any
 
@@ -71,50 +63,26 @@ if missing_env_vars:
     )
 
 
-from app.css_constants import (
-    CLASS_CLEAR_ALL_CONTAINER,
-    CLASS_SKELETON,
-    CLASS_SKELETON_CHART,
-    CLASS_SKELETON_METRIC,
-    CLASS_SKELETON_TABLE,
-    CLASS_SKELETON_TEXT,
-    CLASS_SKELETON_TEXT_SHORT,
-    CLASS_SKELETON_TITLE,
-)
-from app.theme import (
-    back_to_top_html,
-    empty_state_html,
-    get_colors,
-    get_theme_name,
-    inject_css,
-    pipeline_progress_html,
-    set_theme,
-    version_check_widget_html,
-)
-from src.core.app_config import get_app_title
-from src.core.config import DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD, severity_key
-from src.core.document_parser import (
-    DEFAULT_OCR_DPI,
-    DEFAULT_OCR_LANGUAGE,
-    SUPPORTED_OCR_LANGUAGES,
-    OCRDependencyError,
-    extract_text,
-    prepare_text_for_embedding,
-    remove_ignore_phrases,
-)
-from src.core.faiss_index import (
-    build_index,
-    build_index_from_matrix,
-    load_index,
-    load_or_rebuild_index,
-    save_index,
-    search_similar_chunks,
-)
-from src.core.similarity import (
-    document_similarity_matrix,
-    find_most_similar_chunks,
-    flag_plagiarism,
-)
+from app.css_constants import (CLASS_CLEAR_ALL_CONTAINER, CLASS_SKELETON,
+                               CLASS_WELCOME_BANNER,                               CLASS_SKELETON_CHART, CLASS_SKELETON_METRIC,
+                               CLASS_SKELETON_TABLE, CLASS_SKELETON_TEXT,
+                               CLASS_SKELETON_TEXT_SHORT, CLASS_SKELETON_TITLE)
+from app.theme import (back_to_top_html, empty_state_html, get_colors,
+                       get_theme_name, inject_css, pipeline_progress_html,
+                       set_theme, version_check_widget_html)
+from src.core.app_config import get_app_title, get_welcome_message
+from src.core.config import (DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD,
+                             severity_key)
+from src.core.document_parser import (DEFAULT_OCR_DPI, DEFAULT_OCR_LANGUAGE,
+                                      SUPPORTED_OCR_LANGUAGES,
+                                      OCRDependencyError, extract_text,
+                                      prepare_text_for_embedding,
+                                      remove_ignore_phrases)
+from src.core.faiss_index import (build_index, build_index_from_matrix,
+                                  load_index, load_or_rebuild_index,
+                                  save_index, search_similar_chunks)
+from src.core.similarity import (document_similarity_matrix,
+                                 find_most_similar_chunks, flag_plagiarism)
 from src.core.webhook import dispatch_plagiarism_alert
 from src.i18n.translator import _SUPPORTED_LANGUAGES, get_text
 from src.visualization.network_graph import plot_similarity_network
@@ -132,68 +100,39 @@ class OCRFileBatchError(Exception):
 from src.core.export_engine import LMSExportEngine
 from src.core.synchronization import verify_and_repair_index
 from src.core.telemetry import TelemetryService
-from src.db import (
-    clear_all_data,
-    delete_document,
-    delete_tag,
-    get_all_documents,
-    get_all_embeddings,
-    get_all_tags,
-    get_chunk_registry,
-    get_document_word_counts,
-    get_unique_class_sections,
-    init_corpus_db,
-)
-from src.db.auth import (
-    authenticate_user,
-    check_login_rate_limit,
-    clear_login_attempts,
-    disable_2fa,
-    enable_2fa,
-    get_2fa_status,
-    get_all_users,
-    get_tour_completed,
-    get_user_preferences,
-    get_user_role,
-    init_db,
-    is_user_active,
-    record_failed_login,
-    set_tour_completed,
-    set_user_active_status,
-    update_user_preferences,
-    verify_user,
-)
+from src.db import (clear_all_data, delete_tag,
+                    get_all_documents, get_all_embeddings, get_all_tags,
+                    get_chunk_registry, get_document_word_counts,
+                    get_unique_class_sections, init_corpus_db,
+                    get_deleted_documents, soft_delete_document,
+                    restore_document, permanently_delete_document,
+                    empty_trash)
+from src.db.auth import (authenticate_user, check_login_rate_limit,
+                         clear_login_attempts, disable_2fa, enable_2fa,
+                         get_2fa_status, get_all_users, get_tour_completed,
+                         get_user_preferences, get_user_role, init_db,
+                         is_user_active, record_failed_login,
+                         set_tour_completed, set_user_active_status,
+                         update_user_preferences, verify_user)
 from src.db.database_backup import create_corpus_database_snapshot
 from src.db.incidents import (  # noqa: E402
-    get_all_incidents_above_threshold_for_export,
-    get_high_severity_trends,
-    get_most_plagiarized_documents,
-    sync_flagged_incidents,
-)
+    get_all_incidents_above_threshold_for_export, get_high_severity_trends,
+    get_most_plagiarized_documents, sync_flagged_incidents)
 from src.utils.diff_highlighter import highlight_overlap
 from src.utils.excel_export import export_similarity_matrix_to_excel
 from src.utils.pdf_report import highlight_pdf_matches  # noqa: E402
-from src.utils.processing_time import (
-    estimate_processing_seconds,
-    uploaded_files_total_bytes,
-)
-from src.utils.redis_cache import (
-    cache_session_state,
-    clear_session,
-    get_analysis_results,
-    get_faiss_index,
-    get_session_state,
-    get_upload_count,
-    increment_upload_count,
-    is_upload_rate_limited,
-)
+from src.utils.processing_time import (estimate_processing_seconds,
+                                       uploaded_files_total_bytes)
+from src.utils.redis_cache import (cache_session_state, clear_session,
+                                   get_analysis_results, get_faiss_index,
+                                   get_session_state, get_upload_count,
+                                   increment_upload_count,
+                                   is_upload_rate_limited)
 from src.utils.warning_list import render_warning_controls
-from src.visualization.analytics import (
-    plot_document_sizes,
-    plot_high_severity_trends,
-    plot_most_plagiarized_documents,
-    plot_similarity_distribution,
-)
+from src.visualization.analytics import (plot_document_sizes,
+                                         plot_high_severity_trends,
+                                         plot_most_plagiarized_documents,
+                                         plot_similarity_distribution)
 from src.visualization.heatmap import plot_similarity_heatmap  # noqa: E402
 
 # Safe import for PDF Highlighting
@@ -210,8 +149,8 @@ except Exception:
     from src.utils.json_export import export_similarity_matrix_to_json
 except ImportError:
 
-    from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore[import-untyped,reportMissingImports]
-    from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore
+    from utils.excel_export import \
+        export_similarity_matrix_to_excel  # type: ignore
     from utils.json_export import export_similarity_matrix_to_json
 
 
@@ -798,7 +737,19 @@ with st.sidebar:
                 if not doc_filter or doc_filter.lower() in str(d["filename"]).lower()
             ]
             st.write(f"**{len(filtered_docs)}** documents matching")
-            for doc in filtered_docs:
+
+            items_per_page = 20
+            total_pages = max(1, (len(filtered_docs) - 1) // items_per_page + 1)
+
+            current_page = st.session_state.get("sidebar_doc_page", 1)
+            if current_page > total_pages:
+                current_page = total_pages
+                st.session_state.sidebar_doc_page = current_page
+
+            start_idx = (current_page - 1) * items_per_page
+            end_idx = start_idx + items_per_page
+
+            for doc in filtered_docs[start_idx:end_idx]:
                 st.markdown('<div class="doc-row">', unsafe_allow_html=True)
                 col1, col2 = st.columns([3, 1])
                 with col1:
@@ -821,6 +772,19 @@ with st.sidebar:
                         st.session_state._pending_delete = doc["filename"]
                         st.rerun()
 
+            if total_pages > 1:
+                p_col1, p_col2, p_col3 = st.columns([1, 2, 1])
+                with p_col1:
+                    if st.button("Prev", disabled=(current_page == 1), key="prev_doc_page"):
+                        st.session_state.sidebar_doc_page = current_page - 1
+                        st.rerun()
+                with p_col2:
+                    st.markdown(f"<div style='text-align: center; margin-top: 5px;'><small>Page {current_page}/{total_pages}</small></div>", unsafe_allow_html=True)
+                with p_col3:
+                    if st.button("Next", disabled=(current_page == total_pages), key="next_doc_page"):
+                        st.session_state.sidebar_doc_page = current_page + 1
+                        st.rerun()
+
             pending = st.session_state.get("_pending_delete")
             if pending:
                 st.markdown("---")
@@ -830,7 +794,21 @@ with st.sidebar:
                     if st.button(
                         "Yes, delete", type="primary", key="confirm_delete_doc"
                     ):
-                        delete_document(pending)
+                        soft_delete_document(pending)
+                        try:
+                            from src.utils.redis_cache import get_cache
+                            cache = get_cache()
+                            if cache.is_available():
+                                cache.delete("faiss:index:corpus_index")
+                                cache.clear_pattern("analysis:*")
+                        except Exception as e:
+                            logger.error(f"Error invalidating cache: {e}")
+
+                        if "analysis_results" in st.session_state:
+                            st.session_state.analysis_results = None
+                        if "processed_pipeline_signature" in st.session_state:
+                            st.session_state.processed_pipeline_signature = None
+
                         embeddings_matrix = get_all_embeddings()
                         if embeddings_matrix.size > 0:
                             new_index = build_index_from_matrix(embeddings_matrix)
@@ -892,7 +870,8 @@ with st.sidebar:
                 "stores them in corpus.db, and rebuilds the FAISS index.",
             ):
                 try:
-                    from src.utils.mock_data import generate_mock_data as _gen_mock
+                    from src.utils.mock_data import \
+                        generate_mock_data as _gen_mock
 
                     with st.spinner(
                         "⚗️ Generating mock essays and building FAISS index…"
@@ -964,9 +943,16 @@ with st.sidebar:
 # ── Main UI ───────────────────────────────────────────────────────────────────
 st.title(f"🔍 {APP_TITLE}")
 
-uploaded_files = st.file_uploader(
-    "📂 Upload Assignments (PDF, DOCX, DOC, TXT, ZIP)",
-    type=["pdf", "docx", "doc", "txt", "zip"],
+welcome_message = get_welcome_message()
+if welcome_message:
+    safe_welcome_message = html.escape(welcome_message)
+    st.markdown(
+        f'<div class="{CLASS_WELCOME_BANNER}">{safe_welcome_message}</div>',
+        unsafe_allow_html=True,
+    )
+
+uploaded_files = st.file_uploader(    "📂 Upload Assignments (PDF, DOCX, DOC, TXT, ZIP, PNG, JPG)",
+    type=["pdf", "docx", "doc", "txt", "zip", "png", "jpg", "jpeg"],
     accept_multiple_files=True,
     key="file_uploader",
 )
@@ -1426,7 +1412,7 @@ else:
     # 1. LOCAL FILE UPLOADER (Dynamic Title Translation)
     uploaded_files = st.file_uploader(
         get_text("upload_title", lang=lang_code),
-        type=["pdf", "docx", "doc", "txt", "zip", "csv"],
+        type=["pdf", "docx", "doc", "txt", "zip", "csv", "png", "jpg", "jpeg"],
         accept_multiple_files=True,
         key="file_uploader",
     )
@@ -2186,6 +2172,7 @@ if not st.session_state.authenticated:
             tab_drill,
             tab_analytics,
             tab_users,
+            tab_trash,
         ) = st.tabs(
             [
                 get_text("tab_warnings", lang=lang_code),
@@ -2195,6 +2182,7 @@ if not st.session_state.authenticated:
                 get_text("tab_drill", lang=lang_code),
                 get_text("tab_analytics", lang=lang_code),
                 get_text("tab_users", lang=lang_code),
+                get_text("tab_trash", lang=lang_code),
             ]
         )
 
@@ -2468,6 +2456,7 @@ if not st.session_state.authenticated:
         tab_drill,
         tab_analytics,
         tab_users,
+        tab_trash,
         tab_settings,
     ) = st.tabs(
         [
@@ -2478,6 +2467,7 @@ if not st.session_state.authenticated:
             get_text("tab_drill", lang=lang_code),
             get_text("tab_analytics", lang=lang_code),
             get_text("tab_users", lang=lang_code),
+            get_text("tab_trash", lang=lang_code),
             get_text("tab_settings", lang=lang_code),
         ],
         key="main_tabs",
@@ -2545,10 +2535,10 @@ if not st.session_state.authenticated:
         if st.button("🔍 Run FAISS Search", key="run_faiss_search_btn"):
             if faiss_query.strip() and faiss_index is not None:
                 try:
-                    from src.core.embeddings import generate_embeddings  # type: ignore
-                    from src.core.faiss_indexer import (
-                        search_similar_chunks,  # type: ignore
-                    )
+                    from src.core.embeddings import \
+                        generate_embeddings  # type: ignore
+                    from src.core.faiss_indexer import \
+                        search_similar_chunks  # type: ignore
 
                     q_vec = generate_embeddings([faiss_query.strip()])[0]
                     q_results = search_similar_chunks(
@@ -2588,7 +2578,7 @@ if not st.session_state.authenticated:
                     min_similarity=min_sim,
                     max_similarity=max_sim,
                 )
-                
+
                 if not results_df.empty:
                     st.caption(
                         "Click a column header to sort by similarity, "
@@ -2747,19 +2737,22 @@ if not st.session_state.authenticated:
             st.pyplot(heatmap_fig, use_container_width=True)
 
             buf = _io.BytesIO()
-            heatmap_fig.savefig(
-                buf,
-                format="png",
-                dpi=150,
-                bbox_inches="tight",
-            )
+            heatmap_fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
             buf.seek(0)
-
             st.download_button(
                 "⬇️ Download Heatmap PNG",
                 buf,
                 "heatmap.png",
                 "image/png",
+            )
+            svg_buf = _io.StringIO()
+            heatmap_fig.savefig(svg_buf, format="svg", bbox_inches="tight")
+            buf.seek(0)
+            st.download_button(
+                "⬇️ Export Heatmap SVG",
+                svg_buf.getvalue(),
+                "heatmap.svg",
+                "image/svg+xml",
             )
 
             st.divider()
@@ -2795,6 +2788,32 @@ if not st.session_state.authenticated:
                         st.session_state.selected_document_id = clicked_document_id
             else:
                 st.plotly_chart(network_fig, use_container_width=True)
+
+            try:
+                svg_bytes = network_fig.to_image(format="svg")
+                col_svg, col_pdf = st.columns(2)
+                with col_svg:
+                    st.download_button(
+                        label="⬇️ Download as SVG",
+                        data=svg_bytes,
+                        file_name="plagiarism_network.svg",
+                        mime="image/svg+xml",
+                        use_container_width=True,
+                    )
+                with col_pdf:
+                    try:
+                        pdf_bytes = network_fig.to_image(format="pdf")
+                        st.download_button(
+                            label="⬇️ Download as PDF",
+                            data=pdf_bytes,
+                            file_name="plagiarism_network.pdf",
+                            mime="application/pdf",
+                            use_container_width=True,
+                        )
+                    except Exception:
+                        st.caption("📄 PDF export requires `kaleido` package.")
+            except Exception:
+                pass
 
             selected_document_id = st.session_state.get("selected_document_id")
 
@@ -3218,7 +3237,178 @@ if not st.session_state.authenticated:
                                 del st.session_state.temp_2fa_secret
                             st.rerun()
 
-    # ══ TAB 8: Settings ══════════════════════════════════════════════════════════
+    # ══ TAB 8: Trash ═════════════════════════════════════════════════════════════
+    with tab_trash:
+        st.markdown("🏠 Home > Dashboard > **Trash**")
+        st.subheader(get_text("tab_trash", lang=lang_code))
+
+        # 1. Fetch soft-deleted documents
+        deleted_docs = get_deleted_documents()
+
+        if not deleted_docs:
+            st.info(get_text("trash_empty_msg", lang=lang_code))
+        else:
+            # 2. Empty Trash action and confirmation
+            col_empty, _ = st.columns([1, 3])
+            with col_empty:
+                if st.button("🗑️ Empty Trash", key="empty_trash_btn", type="primary", use_container_width=True):
+                    st.session_state.show_confirm_empty_trash = True
+
+            if st.session_state.get("show_confirm_empty_trash"):
+                st.warning("⚠️ Are you sure you want to permanently delete all soft-deleted documents? This action cannot be undone.")
+                c_confirm, c_cancel = st.columns(2)
+                with c_confirm:
+                    if st.button("Yes, empty trash", key="confirm_empty_trash_btn", type="primary", use_container_width=True):
+                        empty_trash()
+                        try:
+                            from src.utils.redis_cache import get_cache
+                            cache = get_cache()
+                            if cache.is_available():
+                                cache.delete("faiss:index:corpus_index")
+                                cache.clear_pattern("analysis:*")
+                        except Exception as e:
+                            logger.error(f"Error invalidating cache: {e}")
+
+                        if "analysis_results" in st.session_state:
+                            st.session_state.analysis_results = None
+                        if "processed_pipeline_signature" in st.session_state:
+                            st.session_state.processed_pipeline_signature = None
+
+                        st.session_state.show_confirm_empty_trash = False
+                        st.success("Trash emptied successfully.")
+                        st.rerun()
+                with c_cancel:
+                    if st.button("Cancel", key="cancel_empty_trash_btn", use_container_width=True):
+                        st.session_state.show_confirm_empty_trash = False
+                        st.rerun()
+
+            st.markdown("---")
+
+            # 3. Filter and pagination
+            trash_filter = st.text_input("Filter trash documents by filename", key="trash_mgmt_filter")
+            filtered_trash = [
+                d for d in deleted_docs
+                if not trash_filter or trash_filter.lower() in str(d["filename"]).lower()
+            ]
+
+            st.write(f"**{len(filtered_trash)}** documents matching in trash")
+
+            trash_items_per_page = 10
+            trash_total_pages = max(1, (len(filtered_trash) + trash_items_per_page - 1) // trash_items_per_page)
+
+            if "trash_doc_page" not in st.session_state:
+                st.session_state.trash_doc_page = 1
+
+            # Reset page if it exceeds total pages
+            if st.session_state.trash_doc_page > trash_total_pages:
+                st.session_state.trash_doc_page = 1
+
+            current_trash_page = st.session_state.trash_doc_page
+            start_idx = (current_trash_page - 1) * trash_items_per_page
+            end_idx = min(start_idx + trash_items_per_page, len(filtered_trash))
+            page_items = filtered_trash[start_idx:end_idx]
+
+            # 4. List items
+            for doc in page_items:
+                col_info, col_actions = st.columns([5, 2])
+                with col_info:
+                    st.markdown(f"📄 **{doc['filename']}**")
+                    st.caption(f"Deleted at: {doc['deleted_at']} | Uploaded: {doc['upload_date']}")
+                with col_actions:
+                    btn_col1, btn_col2 = st.columns(2)
+                    with btn_col1:
+                        if st.button("🔄", key=f"restore_btn_{doc['filename']}", help="Restore document"):
+                            st.session_state._pending_restore = doc["filename"]
+                            st.rerun()
+                    with btn_col2:
+                        if st.button("❌", key=f"perm_del_btn_{doc['filename']}", help="Permanently delete"):
+                            st.session_state._pending_perm_delete = doc["filename"]
+                            st.rerun()
+
+            # 5. Pagination controls
+            if trash_total_pages > 1:
+                st.markdown("<br>", unsafe_allow_html=True)
+                p_col1, p_col2, p_col3 = st.columns([1, 2, 1])
+                with p_col1:
+                    if st.button("Prev", disabled=(current_trash_page == 1), key="prev_trash_page_btn"):
+                        st.session_state.trash_doc_page = current_trash_page - 1
+                        st.rerun()
+                with p_col2:
+                    st.markdown(f"<div style='text-align: center; margin-top: 5px;'><small>Page {current_trash_page}/{trash_total_pages}</small></div>", unsafe_allow_html=True)
+                with p_col3:
+                    if st.button("Next", disabled=(current_trash_page == trash_total_pages), key="next_trash_page_btn"):
+                        st.session_state.trash_doc_page = current_trash_page + 1
+                        st.rerun()
+
+            # 6. Action confirmations
+            pending_restore = st.session_state.get("_pending_restore")
+            if pending_restore:
+                st.markdown("---")
+                st.warning(f"Are you sure you want to restore **{pending_restore}** to the active corpus?")
+                col_c, col_a = st.columns(2)
+                with col_c:
+                    if st.button("Yes, restore", key="confirm_restore_btn", type="primary", use_container_width=True):
+                        restore_document(pending_restore)
+                        try:
+                            from src.utils.redis_cache import get_cache
+                            cache = get_cache()
+                            if cache.is_available():
+                                cache.delete("faiss:index:corpus_index")
+                                cache.clear_pattern("analysis:*")
+                        except Exception as e:
+                            logger.error(f"Error invalidating cache: {e}")
+
+                        if "analysis_results" in st.session_state:
+                            st.session_state.analysis_results = None
+                        if "processed_pipeline_signature" in st.session_state:
+                            st.session_state.processed_pipeline_signature = None
+
+                        embeddings_matrix = get_all_embeddings()
+                        if embeddings_matrix.size > 0:
+                            new_index = build_index_from_matrix(embeddings_matrix)
+                            save_index(new_index, _INDEX_PATH)
+                        else:
+                            if os.path.exists(_INDEX_PATH):
+                                os.remove(_INDEX_PATH)
+                        del st.session_state._pending_restore
+                        st.success(f"Successfully restored {pending_restore}.")
+                        st.rerun()
+                with col_a:
+                    if st.button("Cancel", key="cancel_restore_btn", use_container_width=True):
+                        del st.session_state._pending_restore
+                        st.rerun()
+
+            pending_perm_delete = st.session_state.get("_pending_perm_delete")
+            if pending_perm_delete:
+                st.markdown("---")
+                st.warning(f"⚠️ Are you sure you want to PERMANENTLY delete **{pending_perm_delete}**? Chunks and embeddings will be lost forever.")
+                col_c, col_a = st.columns(2)
+                with col_c:
+                    if st.button("Yes, delete permanently", key="confirm_perm_delete_btn", type="primary", use_container_width=True):
+                        permanently_delete_document(pending_perm_delete)
+                        try:
+                            from src.utils.redis_cache import get_cache
+                            cache = get_cache()
+                            if cache.is_available():
+                                cache.delete("faiss:index:corpus_index")
+                                cache.clear_pattern("analysis:*")
+                        except Exception as e:
+                            logger.error(f"Error invalidating cache: {e}")
+
+                        if "analysis_results" in st.session_state:
+                            st.session_state.analysis_results = None
+                        if "processed_pipeline_signature" in st.session_state:
+                            st.session_state.processed_pipeline_signature = None
+
+                        del st.session_state._pending_perm_delete
+                        st.success(f"Permanently deleted {pending_perm_delete}.")
+                        st.rerun()
+                with col_a:
+                    if st.button("Cancel", key="cancel_perm_del_btn", use_container_width=True):
+                        del st.session_state._pending_perm_delete
+                        st.rerun()
+
+    # ══ TAB 9: Settings ══════════════════════════════════════════════════════════
     with tab_settings:
         st.markdown("🏠 Home > Dashboard > **Settings**")
         st.subheader(get_text("settings", lang=lang_code))
@@ -3386,6 +3576,19 @@ if not st.session_state.authenticated:
                     del st.query_params["threshold"]
                 set_theme("Light")
                 st.success("✅ Settings reset to defaults!")
+
+            st.markdown("")
+            if st.button(
+                "🛡️ Check Database Integrity",
+                key="check_db_integrity_button",
+                use_container_width=True,
+            ):
+                from src.db.corpus_db import check_database_integrity
+                results = check_database_integrity()
+                if results and all(r.lower() == "ok" for r in results):
+                    st.toast("✅ Database integrity check passed (healthy).")
+                else:
+                    st.error(f"🚨 Database integrity check failed: {results}")
                 st.rerun()
 
             st.markdown("---")
@@ -3448,7 +3651,8 @@ st.caption(f"🎓 {APP_TITLE} · Streamlit")
 # ── Version / Update indicator ────────────────────────────────────────────────
 # Import here (deferred) to avoid slowing down the initial module load for
 # users who never reach the footer.
-from src.utils.version_check import APP_VERSION, check_for_update_sync  # noqa: E402
+from src.utils.version_check import (APP_VERSION,  # noqa: E402
+                                     check_for_update_sync)
 
 
 @st.cache_data(ttl=3600)
