@@ -67,8 +67,8 @@ def _validate_username(username: str) -> str:
 def _validate_password(password: str) -> str:
     try:
         password = str(password)
-        if len(password.strip()) < 5:
-            raise ValueError("Password must be at least 5 characters long.")
+        if len(password.strip()) < 10:
+            raise ValueError("Password must be at least 10 characters long.")
         return password
     finally:
         password = "REDACTED"
@@ -94,7 +94,7 @@ def init_db() -> None:
             exists = bool(row and row[0])
 
             if not exists:
-                hashed = _hash_password("admin123")
+                hashed = _hash_password("admin12345")
                 conn.execute(
                     """
                     INSERT INTO users (username, password, role)
