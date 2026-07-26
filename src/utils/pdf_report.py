@@ -5,6 +5,8 @@ Generates professional PDF plagiarism reports using ReportLab.
 Provides side-by-side comparison of suspicious paragraph pairs with visual similarity indicators.
 """
 
+from __future__ import annotations
+
 from datetime import datetime
 from io import BytesIO
 from typing import List, Optional, Tuple
@@ -16,6 +18,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.lib.utils import ImageReader
+from reportlab.pdfgen import canvas
 from reportlab.platypus import (
     PageBreak,
     Paragraph,
@@ -121,6 +124,44 @@ def compress_pdf_buffer(pdf_buffer: BytesIO) -> BytesIO:
         except Exception:
             pass
         return pdf_buffer
+
+
+class NumberedCanvas(canvas.Canvas):
+    """
+    Canvas that renders dynamic page numbers in the format:
+    'Page X of Y'
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._saved_page_states = []
+
+    def showPage(self):
+        self._saved_page_states.append(dict(self.__dict__))
+        self._startPage()
+
+    def save(self):
+        # Save the final page before calculating total pages
+        self._saved_page_states.append(dict(self.__dict__))
+
+        total_pages = len(self._saved_page_states)
+
+        for state in self._saved_page_states:
+            self.__dict__.update(state)
+            self.draw_page_number(total_pages)
+            super().showPage()
+
+        super().save()
+
+    def draw_page_number(self, total_pages):
+        self.setFont("Helvetica", 9)
+        self.setFillColor(colors.grey)
+
+        self.drawRightString(
+            A4[0] - 72,
+            15,
+            f"Page {self._pageNumber} of {total_pages}",
+        )
 
 
 def generate_plagiarism_report(
@@ -367,14 +408,21 @@ def generate_plagiarism_report(
 
             # Compare and highlight differences
             from src.utils.diff_highlighter import highlight_overlap
+
             hl_a, hl_b = highlight_overlap(truncated_a, truncated_b)
 
             backcolor_hex = "#FEF08A" if not dark_mode else "#854D0E"
             textcolor_hex = "#1E293B" if not dark_mode else "#FFFFFF"
             mark_start = "<mark style='background-color: rgba(250, 204, 21, 0.3); color: inherit; padding: 1px 3px; border-radius: 3px;'>"
 
-            hl_a = hl_a.replace(mark_start, f"<font backcolor='{backcolor_hex}' color='{textcolor_hex}'>").replace("</mark>", "</font>")
-            hl_b = hl_b.replace(mark_start, f"<font backcolor='{backcolor_hex}' color='{textcolor_hex}'>").replace("</mark>", "</font>")
+            hl_a = hl_a.replace(
+                mark_start,
+                f"<font backcolor='{backcolor_hex}' color='{textcolor_hex}'>",
+            ).replace("</mark>", "</font>")
+            hl_b = hl_b.replace(
+                mark_start,
+                f"<font backcolor='{backcolor_hex}' color='{textcolor_hex}'>",
+            ).replace("</mark>", "</font>")
 
             for char in ["*", "_", "~", "`", "#", "[", "]", "(", ")"]:
                 hl_a = hl_a.replace(f"\\{char}", char)
@@ -472,7 +520,12 @@ def generate_plagiarism_report(
     )
 
     # Build PDF
-    doc.build(story, onFirstPage=_draw_header, onLaterPages=_draw_header)
+    doc.build(
+        story,
+        onFirstPage=_draw_header,
+        onLaterPages=_draw_header,
+        canvasmaker=NumberedCanvas,
+    )
     return compress_pdf_buffer(buffer)
 
 

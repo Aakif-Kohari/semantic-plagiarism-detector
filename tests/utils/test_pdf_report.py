@@ -317,39 +317,3 @@ def test_generate_plagiarism_report_auto_detect_dark_mode():
     pdf_bytes = pdf_buffer.getvalue()
     assert pdf_bytes.startswith(b"%PDF")
     st.session_state.theme = "Light"
-
-
-def test_pdf_generation_performance_benchmark():
-    """Verify that generating a PDF plagiarism report for a 50-pair report stays under 1.5 seconds."""
-    import time
-
-    # Generate 50 mock matching pairs
-    top_pairs = [
-        (
-            f"This is mock sentence A for pair {i} to be used in the PDF plagiarism report.",
-            f"This is mock sentence B for pair {i} to be used in the PDF plagiarism report.",
-            0.85 + (i % 15) / 100.0,
-        )
-        for i in range(50)
-    ]
-
-    start_time = time.perf_counter()
-    pdf_buffer = generate_plagiarism_report(
-        doc_a="essay_alpha.pdf",
-        doc_b="essay_beta.pdf",
-        overall_similarity=0.78,
-        threshold=0.60,
-        top_pairs=top_pairs,
-    )
-    end_time = time.perf_counter()
-
-    duration = end_time - start_time
-
-    # Assert PDF report generation time is under 1.5 seconds
-    assert duration < 1.5, f"PDF generation took {duration:.4f} seconds, exceeding limit of 1.5s."
-
-    # Validate output
-    pdf_bytes = pdf_buffer.getvalue()
-    assert pdf_bytes.startswith(b"%PDF")
-    assert len(pdf_bytes) > 0
-

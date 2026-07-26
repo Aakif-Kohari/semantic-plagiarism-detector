@@ -20,3 +20,11 @@ def get_app_title() -> str:
     """
     configured_title = os.getenv("APP_TITLE", "").strip()
     return configured_title or DEFAULT_APP_TITLE
+
+def get_lock_timeout() -> int:
+    """Return the configured lock timeout in seconds (default 30)."""
+    try:
+        timeout = int(os.getenv("LOCK_TIMEOUT_SECONDS", "30"))
+        return max(1, timeout)
+    except ValueError:
+        return 30
