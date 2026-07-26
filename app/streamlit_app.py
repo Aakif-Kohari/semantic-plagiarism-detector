@@ -2423,6 +2423,7 @@ if not st.session_state.authenticated:
             tab_analytics,
             tab_users,
             tab_trash,
+            tab_health,
         ) = st.tabs(
             [
                 get_text("tab_warnings", lang=lang_code),
@@ -2433,6 +2434,7 @@ if not st.session_state.authenticated:
                 get_text("tab_analytics", lang=lang_code),
                 get_text("tab_users", lang=lang_code),
                 get_text("tab_trash", lang=lang_code),
+                get_text("tab_health", lang=lang_code),
             ]
         )
 
@@ -2519,6 +2521,14 @@ if not st.session_state.authenticated:
             st.subheader("👤 User Management")
             st.markdown(
                 f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TABLE}"></div>',
+                unsafe_allow_html=True,
+            )
+
+        with tab_health:
+            st.markdown("🏠 Home > Dashboard > **System Health**")
+            st.subheader(get_text("tab_health", lang=lang_code))
+            st.markdown(
+                f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_METRIC}"></div>',
                 unsafe_allow_html=True,
             )
 
@@ -2707,6 +2717,7 @@ if not st.session_state.authenticated:
         tab_analytics,
         tab_users,
         tab_trash,
+        tab_health,
         tab_settings,
     ) = st.tabs(
         [
@@ -2718,6 +2729,7 @@ if not st.session_state.authenticated:
             get_text("tab_analytics", lang=lang_code),
             get_text("tab_users", lang=lang_code),
             get_text("tab_trash", lang=lang_code),
+            get_text("tab_health", lang=lang_code),
             get_text("tab_settings", lang=lang_code),
         ],
         key="main_tabs",
@@ -3715,8 +3727,136 @@ if not st.session_state.authenticated:
                         del st.session_state._pending_perm_delete
                         st.rerun()
 
-    # ══ TAB 9: Settings ══════════════════════════════════════════════════════════
+
+    # ══ TAB 9: System Health ═════════════════════════════════════════════════
+    with tab_health:
+        st.markdown("🏠 Home > Dashboard > **System Health**")
+        st.subheader(get_text("tab_health", lang=lang_code))
+        st.caption(
+            "Live snapshot of server-side resource usage. "
+            "Metrics are collected at page load time — refresh to update."
+        )
+
+        st.markdown("---")
+        st.markdown("#### 🖥️ CPU & Memory")
+
+        _cpu_percent = psutil.cpu_percent(interval=None)
+        _mem = psutil.virtual_memory()
+        _mem_used_gb = _mem.used / (1024 ** 3)
+        _mem_total_gb = _mem.total / (1024 ** 3)
+
+        _cpu_col, _mem_used_col, _mem_pct_col = st.columns(3)
+        _cpu_col.metric(
+            label="🔲 CPU Usage",
+            value=f"{_cpu_percent:.1f}%",
+            help="Current CPU utilisation across all cores (sampled at page load).",
+        )
+        _mem_used_col.metric(
+            label="💾 Memory Used",
+            value=f"{_mem_used_gb:.2f} GB",
+            help=f"Used {_mem_used_gb:.2f} GB of {_mem_total_gb:.2f} GB total.",
+        )
+        _mem_pct_col.metric(
+            label="📊 Memory Usage",
+            value=f"{_mem.percent:.1f}%",
+            delta=(
+                "⚠️ High" if _mem.percent >= 85 else None
+            ),
+            delta_color="inverse",
+            help="Percentage of total system RAM currently in use.",
+        )
+
+        if _mem.percent >= 85:
+            st.warning(
+                "⚠️ High memory usage detected (≥ 85%). "
+                "Large FAISS indexes may cause instability."
+            )
+
+        st.markdown("---")
+        st.markdown("#### 🔴 Redis Status")
+
+        from src.utils.redis_cache import get_cache as _get_cache
+
+        _cache = _get_cache()
+        _redis_connected, _redis_latency = _cache.ping()
+
+        _redis_col, _redis_latency_col = st.columns(2)
+        if _redis_connected:
+            _redis_col.metric(
+                label="🟢 Redis",
+                value="Connected",
+                help="Redis is reachable and responding to PING.",
+            )
+            _redis_latency_col.metric(
+                label="⏱️ Round-Trip Latency",
+                value=f"{_redis_latency} ms",
+                help="Time taken for a Redis PING round-trip.",
+            )
+        else:
+            _redis_col.metric(
+                label="🔴 Redis",
+                value="Disconnected",
+                help="Redis is unavailable. Caching features are disabled.",
+            )
+            _redis_latency_col.metric(
+                label="⏱️ Round-Trip Latency",
+                value="N/A",
+            )
+            st.error(
+                "🚨 Redis is unavailable. "
+                "Session caching, FAISS index caching, and rate-limiting are disabled. "
+                "Check your REDIS_URL environment variable."
+            )
+
+        st.markdown("---")
+        st.markdown("#### 🗄️ Database")
+
+        from src.db.corpus_db import get_corpus_db_path as _get_corpus_db_path
+
+        _db_path = _get_corpus_db_path()
+        _db_col1, _db_col2, _db_col3 = st.columns(3)
+        _db_col1.metric(
+            label="📄 File",
+            value=_db_path.name,
+            help=f"Full path: {_db_path}",
+        )
+        if _db_path.exists():
+            _db_bytes = _db_path.stat().st_size
+            if _db_bytes >= 1024 * 1024:
+                _db_size_label = f"{_db_bytes / 1_048_576:.2f} MB"
+            elif _db_bytes >= 1024:
+                _db_size_label = f"{_db_bytes / 1024:.1f} KB"
+            else:
+                _db_size_label = f"{_db_bytes} B"
+            _db_col2.metric(
+                label="💾 Size",
+                value=_db_size_label,
+                help="Size of the live corpus SQLite file on disk.",
+            )
+            import datetime as _dt
+            _db_mtime = _dt.datetime.fromtimestamp(_db_path.stat().st_mtime)
+            _db_col3.metric(
+                label="🕒 Last Modified",
+                value=_db_mtime.strftime("%Y-%m-%d %H:%M"),
+                help="Filesystem modification time of the corpus database.",
+            )
+        else:
+            _db_col2.metric(label="💾 Size", value="N/A")
+            _db_col3.metric(label="🕒 Last Modified", value="N/A")
+            st.warning("⚠️ Corpus database file not found on disk.")
+
+        st.markdown("")
+        if st.button(
+            "🔄 Refresh Metrics",
+            key="health_refresh_button",
+            use_container_width=True,
+            help="Re-collect all system metrics.",
+        ):
+            st.rerun()
+
+    # ══ TAB 10: Settings ══════════════════════════════════════════════════════
     with tab_settings:
+
         st.markdown("🏠 Home > Dashboard > **Settings**")
         st.subheader(get_text("settings", lang=lang_code))
 
