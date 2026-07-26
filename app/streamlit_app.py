@@ -257,7 +257,11 @@ with st.sidebar:
         options=["English", "Español"],
         index=0 if st.session_state.lang == "en" else 1,
     )
-st.markdown(back_to_top_html(), unsafe_allow_html=True)
+# The back-to-top button is only useful on views long enough to scroll
+# past its trigger threshold — skip it on short screens like login.
+SHOW_BACK_TO_TOP = st.session_state.get("authenticated", False)
+if SHOW_BACK_TO_TOP:
+    st.markdown(back_to_top_html(scroll_threshold=250), unsafe_allow_html=True)
 inject_css()
 
 st.markdown(
