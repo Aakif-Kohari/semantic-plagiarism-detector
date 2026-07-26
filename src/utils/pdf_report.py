@@ -5,11 +5,14 @@ Generates professional PDF plagiarism reports using ReportLab.
 Provides side-by-side comparison of suspicious paragraph pairs with visual similarity indicators.
 """
 
+from __future__ import annotations
 from datetime import datetime
 from io import BytesIO
 from typing import List, Optional, Tuple
 
+from reportlab.pdfgen import canvas
 from reportlab.lib import colors
+from src.core.app_config import get_pdf_footer_text
 from reportlab.lib.colors import HexColor
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import A4
@@ -123,6 +126,44 @@ def compress_pdf_buffer(pdf_buffer: BytesIO) -> BytesIO:
         return pdf_buffer
 
 
+class NumberedCanvas(canvas.Canvas):
+    """
+    Canvas that renders dynamic page numbers in the format:
+    'Page X of Y'
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._saved_page_states = []
+
+    def showPage(self):
+        self._saved_page_states.append(dict(self.__dict__))
+        self._startPage()
+
+    def save(self):
+        # Save the final page before calculating total pages
+        self._saved_page_states.append(dict(self.__dict__))
+
+        total_pages = len(self._saved_page_states)
+
+        for state in self._saved_page_states:
+            self.__dict__.update(state)
+            self.draw_page_number(total_pages)
+            super().showPage()
+
+        super().save()
+
+    def draw_page_number(self, total_pages):
+        self.setFont("Helvetica", 9)
+        self.setFillColor(colors.grey)
+
+        self.drawRightString(
+            A4[0] - 72,
+            15,
+            f"Page {self._pageNumber} of {total_pages}",
+        )
+
+
 def generate_plagiarism_report(
     doc_a: str,
     doc_b: str,
@@ -182,7 +223,7 @@ def generate_plagiarism_report(
         rightMargin=72,
         leftMargin=72,
         topMargin=72 + logo_height,
-        bottomMargin=18,
+        bottomMargin=40,
     )
 
     # Get custom styles
@@ -213,6 +254,8 @@ def generate_plagiarism_report(
         leading=14,
         textColor=HexColor("#FFFFFF") if dark_mode else HexColor("#31333f"),
     )
+
+    footer_text = get_pdf_footer_text()
 
     # ── Header / footer callback for logo ──
     def _draw_header(canvas_obj, _doc):
@@ -247,6 +290,16 @@ def generate_plagiarism_report(
             except Exception:
                 pass
         canvas_obj.restoreState()
+
+        if footer_text:
+            canvas_obj.saveState()
+            canvas_obj.setFont("Helvetica", 9)
+            if dark_mode:
+                canvas_obj.setFillColor(HexColor("#9CA3AF"))
+            else:
+                canvas_obj.setFillColor(HexColor("#6B7280"))
+            canvas_obj.drawCentredString(_doc.pagesize[0] / 2.0, 20, footer_text)
+            canvas_obj.restoreState()
 
     # Build story (PDF content)
     story = []
@@ -436,7 +489,12 @@ def generate_plagiarism_report(
     )
 
     # Build PDF
-    doc.build(story, onFirstPage=_draw_header, onLaterPages=_draw_header)
+    doc.build(
+        story,
+        onFirstPage=_draw_header,
+        onLaterPages=_draw_header,
+        canvasmaker=NumberedCanvas,
+    )
     return compress_pdf_buffer(buffer)
 
 
