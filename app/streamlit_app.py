@@ -1682,6 +1682,8 @@ if not st.session_state.authenticated:
     MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 10MB limit
     file_bytes_dict = {}
     if uploaded_files:
+        from src.security.mime_validator import validate_mime_type
+
         # Re-initialize to handle zip/csv extraction correctly instead of raw bytes
         file_bytes_dict = {}
         for uploaded_file in uploaded_files:
@@ -1700,22 +1702,32 @@ if not st.session_state.authenticated:
                 )
                 continue
 
+            file_data = uploaded_file.read()
+            uploaded_file.seek(0)
+            if not validate_mime_type(file_data, safe_name):
+                st.error(
+                    f"🚨 **Security Alert:** File **'{safe_name}'** has been rejected. "
+                    "The file content does not match its expected file type (invalid magic byte signature)."
+                )
+                continue
+
             if original_name.lower().endswith(".zip"):
                 try:
                     from src.utils.zip_processor import process_zip_file
 
-                    zip_files = process_zip_file(uploaded_file.read())
+                    zip_files = process_zip_file(file_data)
                     if not zip_files:
                         st.error(
                             f"⚠️ ZIP file '{safe_name}' contains no supported documents (.pdf, .docx, .txt)."
                         )
                     else:
-                        file_bytes_dict.update(
-                            {
-                                name: strip_exif_metadata(data, name)
-                                for name, data in zip_files.items()
-                            }
-                        )
+                        for name, data in zip_files.items():
+                            if not validate_mime_type(data, name):
+                                st.error(
+                                    f"🚨 **Security Alert:** Extracted file **'{name}'** from ZIP archive was rejected due to mismatching magic byte signature."
+                                )
+                            else:
+                                file_bytes_dict[name] = strip_exif_metadata(data, name)
                 except ValueError as ve:
                     st.error(
                         f"⚠️ Failed to process ZIP archive '{safe_name}': {str(ve)}"
@@ -1747,7 +1759,7 @@ if not st.session_state.authenticated:
                         )
             else:
                 file_bytes_dict[safe_name] = strip_exif_metadata(
-                    uploaded_file.read(),
+                    file_data,
                     safe_name,
                 )
             uploaded_file.seek(0)
@@ -1758,6 +1770,8 @@ if not st.session_state.authenticated:
     url_filename = st.session_state.url_filename
 
     if st.session_state.drive_files_dict:
+        from src.security.mime_validator import validate_mime_type
+
         for drive_name, drive_bytes in st.session_state.drive_files_dict.items():
             safe_drive_name = unique_filename(
                 drive_name,
@@ -1768,6 +1782,11 @@ if not st.session_state.authenticated:
                     f"⚠️ Google Drive file **'{safe_drive_name}'** exceeds "
                     f"the maximum size limit of 10MB "
                     f"({len(drive_bytes) / (1024 * 1024):.2f}MB)."
+                )
+            elif not validate_mime_type(drive_bytes, safe_drive_name):
+                st.error(
+                    f"🚨 **Security Alert:** Google Drive file **'{safe_drive_name}'** has been rejected. "
+                    "The file content does not match its expected file type (invalid magic byte signature)."
                 )
             else:
                 file_bytes_dict[safe_drive_name] = drive_bytes
