@@ -393,24 +393,51 @@ def _should_use_parallel() -> bool:
     return True
 
 
-def _parse_pdf_page(
-    pdf_bytes: bytes,
-    page_index: int,
-    ocr_dpi: int,
-    ocr_language: str,
-) -> List[str]:
-    """Helper running in a subprocess to extract text from a single PDF page."""
+def _format_table_as_text(table: List[List[Optional[str]]]) -> str:
+    """Format a pdfplumber-extracted table into clean, readable text.
+
+    Each row's cells are joined with ' | ' so the structure stays
+    readable instead of being merged into one chaotic string.
+    """
+    lines: List[str] = []
+    for row in table:
+        cells = [str(cell).strip() if cell is not None else "" for cell in row]
+        if any(cells):
+            lines.append(" | ".join(cells))
+    return "\n".join(lines)    """Helper running in a subprocess to extract text from a single PDF page."""
     import io
 
     import pdfplumber
 
-    try:
+try:
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
             page = pdf.pages[page_index]
-            native_text = (page.extract_text() or "").strip()
-            selected_text = native_text
 
-            if not _has_meaningful_text(native_text):
+            tables = page.find_tables()
+
+            # Pull normal text, but exclude the regions covered by tables
+            # so table cells don't also show up mashed together in the
+            # regular text (which is what caused the chaotic strings).
+            text_page = page
+            for table in tables:
+                text_page = text_page.outside_bbox(table.bbox)
+            native_text = (text_page.extract_text() or "").strip()
+
+            table_texts = []
+            for table in tables:
+                extracted_rows = table.extract()
+                if extracted_rows:
+                    formatted = _format_table_as_text(extracted_rows)
+                    if formatted:
+                        table_texts.append(formatted)
+
+            combined_text = native_text
+            if table_texts:
+                combined_text = "\n\n".join([combined_text, *table_texts]).strip()
+
+            selected_text = combined_text
+
+            if not _has_meaningful_text(selected_text):
                 selected_text = _ocr_pdf_page(
                     pdf_bytes,
                     page_index,
@@ -418,8 +445,7 @@ def _parse_pdf_page(
                     language=ocr_language,
                 )
 
-            return _clean_page_text(selected_text)
-    except OCRDependencyError:
+            return _clean_page_text(selected_text)    except OCRDependencyError:
         raise
     # Requires generic catch because pdfplumber/pdfminer raise various deeply nested exceptions (e.g. PdfminerException, PDFPasswordIncorrect) for encrypted/malformed PDFs
     except Exception as exc:
