@@ -596,7 +596,7 @@ if not st.session_state.get("authenticated", False):
     st.markdown("</div>", unsafe_allow_html=True)
     st.stop()
 
-                    st.error(f"🚨 {AUTH_INVALID_CREDENTIALS}")
+    st.error(f"🚨 {AUTH_INVALID_CREDENTIALS}")
 
 
     # ── SSO Sign-In Options ──────────────────────────────────────────────────
@@ -1773,10 +1773,9 @@ if not st.session_state.authenticated:
         bulk_download_drive_folder = None
 
 
-                        if downloaded_dict:
-                            st.session_state.drive_files_dict.update(downloaded_dict)
-                            st.success(
-                                f"✅ Imported {len(downloaded_names)} files: {', '.join([truncate_filename(n, 25) for n in downloaded_names])}"
+        if downloaded_dict:
+            st.session_state.drive_files_dict.update(downloaded_dict)
+            st.success( f"✅ Imported {len(downloaded_names)} files: {', '.join([truncate_filename(n, 25) for n in downloaded_names])}")
 
     if "drive_files_dict" not in st.session_state:
         st.session_state.drive_files_dict = {}
@@ -2105,7 +2104,7 @@ if not st.session_state.authenticated:
         with st.expander(f"📄 {truncated_disp_name}", expanded=False):
 
         # Check if this filename is a virtual CSV document
-        is_csv_doc = False
+            is_csv_doc = False
         csv_filename_matched = None
         for csv_name in csv_configs.keys():
             if f"({csv_name} - Row " in filename:
@@ -3150,7 +3149,7 @@ if not st.session_state.authenticated:
                 remaining_docs,
                 index=0,
                 format_func=lambda x: truncate_filename(x, 35),
-                key="db",
+                key="db")
 
         st.caption("Inspect chunk-level similarity between any two documents.")
 
@@ -3435,7 +3434,7 @@ if not st.session_state.authenticated:
                 options=[doc_a, doc_b],
                 format_func=lambda x: truncate_filename(x, 35),
                 horizontal=True,
-                key="doc_viewer_select",
+                key="doc_viewer_select")
 
 
         st.write("---")

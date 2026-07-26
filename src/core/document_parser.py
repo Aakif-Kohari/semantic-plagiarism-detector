@@ -1,7 +1,8 @@
 """Document text extraction with OCR fallback for scanned PDF pages."""
 
 from __future__ import annotations
-
+import defusedxml
+from defusedxml import lxml
 import io
 import logging
 import os
