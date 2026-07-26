@@ -64,14 +64,13 @@ if missing_env_vars:
 
 
 from app.css_constants import (CLASS_CLEAR_ALL_CONTAINER, CLASS_SKELETON,
-                               CLASS_SKELETON_CHART, CLASS_SKELETON_METRIC,
+                               CLASS_WELCOME_BANNER,                               CLASS_SKELETON_CHART, CLASS_SKELETON_METRIC,
                                CLASS_SKELETON_TABLE, CLASS_SKELETON_TEXT,
                                CLASS_SKELETON_TEXT_SHORT, CLASS_SKELETON_TITLE)
 from app.theme import (back_to_top_html, empty_state_html, get_colors,
                        get_theme_name, inject_css, pipeline_progress_html,
                        set_theme, version_check_widget_html)
-from src.core.app_config import get_app_title
-from src.core.config import (DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD,
+from src.core.app_config import get_app_title, get_welcome_messagefrom src.core.config import (DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD,
                              severity_key)
 from src.core.document_parser import (DEFAULT_OCR_DPI, DEFAULT_OCR_LANGUAGE,
                                       SUPPORTED_OCR_LANGUAGES,
@@ -943,8 +942,15 @@ with st.sidebar:
 # ── Main UI ───────────────────────────────────────────────────────────────────
 st.title(f"🔍 {APP_TITLE}")
 
-uploaded_files = st.file_uploader(
-    "📂 Upload Assignments (PDF, DOCX, DOC, TXT, ZIP, PNG, JPG)",
+welcome_message = get_welcome_message()
+if welcome_message:
+    safe_welcome_message = html.escape(welcome_message)
+    st.markdown(
+        f'<div class="{CLASS_WELCOME_BANNER}">{safe_welcome_message}</div>',
+        unsafe_allow_html=True,
+    )
+
+uploaded_files = st.file_uploader(    "📂 Upload Assignments (PDF, DOCX, DOC, TXT, ZIP, PNG, JPG)",
     type=["pdf", "docx", "doc", "txt", "zip", "png", "jpg", "jpeg"],
     accept_multiple_files=True,
     key="file_uploader",

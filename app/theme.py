@@ -482,6 +482,16 @@ def inject_css() -> None:
             border-color: #ff3333 !important;
         }}
 
+        .{CLASS_WELCOME_BANNER} {{
+    background-color: {colors["surface"]};
+    border: 1px solid {colors["border"]};
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    color: {colors["ink"]};
+    font-size: 0.95rem;
+}}
+
         [data-testid="stExpander"],
         [data-testid="stForm"] {{
             background-color: var(--card) !important;
