@@ -1,9 +1,7 @@
-from .analytics import plot_high_severity_trends, plot_most_plagiarized_documents
-from .heatmap import (
-    plot_chunk_similarity_comparison,
-    plot_similarity_heatmap,
-    plot_similarity_heatmap_plotly,
-)
+from .analytics import (plot_high_severity_trends,
+                        plot_most_plagiarized_documents)
+from .heatmap import (plot_chunk_similarity_comparison,
+                      plot_similarity_heatmap, plot_similarity_heatmap_plotly)
 from .network_graph import plot_similarity_network
 
 __all__ = [

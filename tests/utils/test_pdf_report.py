@@ -9,11 +9,8 @@ from unittest.mock import patch
 
 from PyPDF2 import PdfReader
 
-from src.utils.pdf_report import (
-    generate_plagiarism_report,
-    get_similarity_color,
-    wrap_text,
-)
+from src.utils.pdf_report import (generate_plagiarism_report,
+                                  get_similarity_color, wrap_text)
 
 FIXTURE_DIR = os.path.join(os.path.dirname(__file__), "..", "fixtures")
 GOLDEN_PATH = os.path.join(FIXTURE_DIR, "pdf_report_golden.hash")

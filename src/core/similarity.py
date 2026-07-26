@@ -10,16 +10,13 @@ cosine similarity reduces to the dot product, making this very fast.
 """
 
 from typing import Dict, List, Optional, Tuple, Union
+
 import numpy as np
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 
-from src.core.config import (
-    DEFAULT_THRESHOLDS,
-    PLAGIARISM_THRESHOLD,
-    is_plagiarism,
-    severity_from_score,
-)
+from src.core.config import (DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD,
+                             is_plagiarism, severity_from_score)
 
 # ── Validation helpers ─────────────────────────────────────────────────────────
 
