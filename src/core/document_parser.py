@@ -404,12 +404,21 @@ def _format_table_as_text(table: List[List[Optional[str]]]) -> str:
         cells = [str(cell).strip() if cell is not None else "" for cell in row]
         if any(cells):
             lines.append(" | ".join(cells))
-    return "\n".join(lines)    """Helper running in a subprocess to extract text from a single PDF page."""
+    return "\n".join(lines)
+
+
+def _parse_pdf_page(
+    pdf_bytes: bytes,
+    page_index: int,
+    ocr_dpi: int,
+    ocr_language: str,
+) -> List[str]:
+    """Helper running in a subprocess to extract text from a single PDF page."""
     import io
 
     import pdfplumber
 
-try:
+    try:
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
             page = pdf.pages[page_index]
 
@@ -445,9 +454,9 @@ try:
                     language=ocr_language,
                 )
 
-            return _clean_page_text(selected_text)    except OCRDependencyError:
+            return _clean_page_text(selected_text)
+    except OCRDependencyError:
         raise
-    # Requires generic catch because pdfplumber/pdfminer raise various deeply nested exceptions (e.g. PdfminerException, PDFPasswordIncorrect) for encrypted/malformed PDFs
     except Exception as exc:
         logger.error(f"[document_parser] Error parsing page {page_index}: {exc}")
         return []
@@ -630,7 +639,6 @@ def extract_text_from_pdf(
     try:
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
             num_pages = len(pdf.pages)
-    # Requires generic catch because pdfplumber/pdfminer raise various deeply nested exceptions (e.g. PdfminerException, PDFPasswordIncorrect) for encrypted/malformed PDFs
     except Exception as exc:
         logger.error(f"[document_parser] Error reading PDF: {exc}")
         return ""
@@ -1072,4 +1080,3 @@ def extract_texts(files: list, session_id: Optional[str] = None) -> Dict[str, st
         results[name] = raw_texts.get(name, "")
 
     return results
-
