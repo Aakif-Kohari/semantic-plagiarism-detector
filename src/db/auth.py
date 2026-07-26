@@ -30,14 +30,20 @@ import bcrypt
 # Database setup
 from src.db.migrations import migrate_auth_database
 
-_DB_PATH = os.path.abspath(
+  return sqlite3.connect(_DB_PATH, check_same_thread=False)
+DB_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "users.db")
 )
 
 
+def configure_db_path(db_path: str | os.PathLike) -> None:
+    """Configure the SQLite database path used by the authentication module."""
+    global _DB_PATH
+    _DB_PATH = os.path.abspath(os.fspath(db_path))
+
+
 def _connect() -> sqlite3.Connection:
     return sqlite3.connect(_DB_PATH, check_same_thread=False)
-
 
 VALID_ROLES = {"admin", "teacher"}
 
