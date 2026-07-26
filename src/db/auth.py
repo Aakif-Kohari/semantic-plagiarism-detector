@@ -33,6 +33,9 @@ from argon2.exceptions import VerificationError, VerifyMismatchError
 
 # Database setup
 from src.db.migrations import migrate_auth_database
+import logging
+
+logger = logging.getLogger(__name__)
 
 _DB_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "users.db")
@@ -43,6 +46,44 @@ VALID_ROLES = {"admin", "teacher"}
 
 # Initialize Argon2 password hasher
 _ph = PasswordHasher()
+
+
+def log_security_event(
+    event_type: str,
+    username: str,
+    details: str | None = None,
+) -> None:
+    """Record a security-relevant event in the security_audit_log table.
+
+    Parameters
+    ----------
+    event_type:
+        A short identifier for the event, e.g. ``'password_change'``.
+    username:
+        The account that was affected by the event.
+    details:
+        Optional free-text context (must NOT contain passwords or secrets).
+    """
+    import datetime
+
+    timestamp = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        with _connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO security_audit_log (event_type, username, timestamp, details)
+                VALUES (?, ?, ?, ?)
+                """,
+                (event_type, username, timestamp, details),
+            )
+            conn.commit()
+    except Exception as exc:  # pragma: no cover – best-effort logging
+        logger.warning(
+            "Failed to write security audit log entry [%s, %s]: %s",
+            event_type,
+            username,
+            exc,
+        )
 
 
 def _connect() -> sqlite3.Connection:
@@ -249,6 +290,13 @@ def update_password(username: str, new_password: str) -> None:
                 (hashed, username),
             )
             conn.commit()
+
+        # Record the password change in the security audit log
+        log_security_event(
+            event_type="password_change",
+            username=username,
+            details="Password updated successfully.",
+        )
     except sqlite3.Error as e:
         raise sqlite3.Error(f"Failed to update password: {e}") from e
     finally:
@@ -352,6 +400,15 @@ def check_login_rate_limit(username: str) -> tuple[bool, str | None]:
     """Check if username is rate limited. Returns (is_allowed, error_message)."""
     from src.utils.redis_cache import get_login_attempts, is_login_locked_out
 
+    identifier = username.lower()
+    if is_login_locked_out(identifier):
+        attempts = get_login_attempts(identifier)
+        return (
+            False,
+            f"Account locked due to too many failed attempts. Please try again in 15 minutes. ({attempts}/5 attempts)",
+        )
+    return True, None
+
 
 def add_user(username: str, password: str, role: str = "teacher") -> None:
     """Insert a new user with an Argon2-hashed password."""
@@ -361,14 +418,12 @@ def add_user(username: str, password: str, role: str = "teacher") -> None:
 
     hashed = _hash_password(password)
 
-    identifier = username.lower()
-    if is_login_locked_out(identifier):
-        attempts = get_login_attempts(identifier)
-        return (
-            False,
-            f"Account locked due to too many failed attempts. Please try again in 15 minutes. ({attempts}/5 attempts)",
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
+            (username, hashed, role),
         )
-    return True, None
+        conn.commit()
 
 
 def record_failed_login(username: str) -> None:
@@ -427,6 +482,27 @@ def update_password(username: str, new_password: str) -> None:
     new_password = _validate_password(new_password)
 
     hashed = _hash_password(new_password)
+
+    with _connect() as conn:
+        cursor = conn.execute(
+            "SELECT COUNT(1) FROM users WHERE username = ?",
+            (username,),
+        )
+        if cursor.fetchone()[0] == 0:
+            raise ValueError("User not found.")
+
+        conn.execute(
+            "UPDATE users SET password = ? WHERE username = ?",
+            (hashed, username),
+        )
+        conn.commit()
+
+    # Record the password change in the security audit log
+    log_security_event(
+        event_type="password_change",
+        username=username,
+        details="Password updated successfully.",
+    )
 
 def get_user_theme(username: str) -> str:
     """Return the user's theme preference (default 'light')."""
