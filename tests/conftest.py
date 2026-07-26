@@ -66,7 +66,7 @@ def clean_test_env():
     try:
         from src.db.corpus_db import clear_all_data
         clear_all_data()
-    except ImportError:
+    except Exception:
         pass
         
     index_path = os.path.join(str(_REPO_ROOT), "corpus.index")
@@ -83,7 +83,7 @@ def clean_test_env():
     try:
         from src.db.corpus_db import clear_all_data
         clear_all_data()
-    except ImportError:
+    except Exception:
         pass
     for path in [index_path, db_path, users_db_path]:
         if os.path.exists(path):

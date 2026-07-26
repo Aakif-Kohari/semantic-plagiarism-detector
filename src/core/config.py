@@ -21,7 +21,7 @@ SEVERITY_RANK: Final[Mapping[str, int]] = {
 }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class SimilarityThresholds:
     """Validated plagiarism and severity boundaries."""
 
