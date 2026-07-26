@@ -34,20 +34,27 @@ from argon2.exceptions import VerificationError, VerifyMismatchError
 # Database setup
 from src.db.migrations import migrate_auth_database
 
-_DB_PATH = os.path.abspath(
+  return sqlite3.connect(_DB_PATH, check_same_thread=False)
+DB_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "users.db")
 )
 
 
+]
+def configure_db_path(db_path: str | os.PathLike) -> None:
+    """Configure the SQLite database path used by the authentication module."""
+    global _DB_PATH
+    _DB_PATH = os.path.abspath(os.fspath(db_path))
+    ]
 VALID_ROLES = {"admin", "teacher"}
 
 # Initialize Argon2 password hasher
 _ph = PasswordHasher()
 
 
+
 def _connect() -> sqlite3.Connection:
     return sqlite3.connect(_DB_PATH, check_same_thread=False)
-
 
 VALID_ROLES = {"admin", "teacher"}
 
@@ -67,8 +74,8 @@ def _validate_username(username: str) -> str:
 def _validate_password(password: str) -> str:
     try:
         password = str(password)
-        if len(password.strip()) < 5:
-            raise ValueError("Password must be at least 5 characters long.")
+        if len(password.strip()) < 10:
+            raise ValueError("Password must be at least 10 characters long.")
         return password
     finally:
         password = "REDACTED"
@@ -94,7 +101,7 @@ def init_db() -> None:
             exists = bool(row and row[0])
 
             if not exists:
-                hashed = _hash_password("admin123")
+                hashed = _hash_password("admin12345")
                 conn.execute(
                     """
                     INSERT INTO users (username, password, role)
@@ -162,6 +169,39 @@ def get_user_role(username: str) -> str | None:
             return row[0] if row else None
     except sqlite3.Error as e:
         raise sqlite3.Error(f"Failed to retrieve user role: {e}") from e
+
+
+def get_user_roles(user_ids: list[int]) -> dict[int, str]:
+    """Return a mapping of user_id → role for the given user IDs.
+
+    Performs a single ``WHERE id IN (?)`` query instead of N individual
+    queries, which is significantly faster when resolving roles for many
+    users (e.g. dashboard telemetry or batch admin views).
+
+    Parameters
+    ----------
+    user_ids:
+        List of user primary keys to look up.
+
+    Returns
+    -------
+    dict[int, str]
+        Mapping from user ID to role string.  IDs not found in the
+        database are omitted from the result.
+    """
+    if not user_ids:
+        return {}
+
+    try:
+        placeholders = ",".join("?" for _ in user_ids)
+        with _connect() as conn:
+            rows = conn.execute(
+                f"SELECT id, role FROM users WHERE id IN ({placeholders})",
+                user_ids,
+            ).fetchall()
+            return {row[0]: row[1] for row in rows}
+    except sqlite3.Error as e:
+        raise sqlite3.Error(f"Failed to batch query user roles: {e}") from e
 
 
 def add_user(username: str, password: str, role: str = "teacher") -> None:
@@ -350,7 +390,6 @@ def disable_2fa(username: str) -> None:
 
 def check_login_rate_limit(username: str) -> tuple[bool, str | None]:
     """Check if username is rate limited. Returns (is_allowed, error_message)."""
-    from src.utils.redis_cache import get_login_attempts, is_login_locked_out
 
 
 def add_user(username: str, password: str, role: str = "teacher") -> None:
@@ -382,7 +421,8 @@ def record_failed_login(username: str) -> None:
 
 def clear_login_attempts(username: str) -> None:
     """Clear failed login attempts after successful login."""
-    from src.utils.redis_cache import clear_login_attempts as redis_clear_login_attempts
+    from src.utils.redis_cache import \
+        clear_login_attempts as redis_clear_login_attempts
 
     identifier = username.lower()
     redis_clear_login_attempts(identifier)
