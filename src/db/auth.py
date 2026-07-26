@@ -67,8 +67,8 @@ def _validate_username(username: str) -> str:
 def _validate_password(password: str) -> str:
     try:
         password = str(password)
-        if len(password.strip()) < 5:
-            raise ValueError("Password must be at least 5 characters long.")
+        if len(password.strip()) < 10:
+            raise ValueError("Password must be at least 10 characters long.")
         return password
     finally:
         password = "REDACTED"
@@ -94,7 +94,7 @@ def init_db() -> None:
             exists = bool(row and row[0])
 
             if not exists:
-                hashed = _hash_password("admin123")
+                hashed = _hash_password("admin12345")
                 conn.execute(
                     """
                     INSERT INTO users (username, password, role)
@@ -162,6 +162,39 @@ def get_user_role(username: str) -> str | None:
             return row[0] if row else None
     except sqlite3.Error as e:
         raise sqlite3.Error(f"Failed to retrieve user role: {e}") from e
+
+
+def get_user_roles(user_ids: list[int]) -> dict[int, str]:
+    """Return a mapping of user_id → role for the given user IDs.
+
+    Performs a single ``WHERE id IN (?)`` query instead of N individual
+    queries, which is significantly faster when resolving roles for many
+    users (e.g. dashboard telemetry or batch admin views).
+
+    Parameters
+    ----------
+    user_ids:
+        List of user primary keys to look up.
+
+    Returns
+    -------
+    dict[int, str]
+        Mapping from user ID to role string.  IDs not found in the
+        database are omitted from the result.
+    """
+    if not user_ids:
+        return {}
+
+    try:
+        placeholders = ",".join("?" for _ in user_ids)
+        with _connect() as conn:
+            rows = conn.execute(
+                f"SELECT id, role FROM users WHERE id IN ({placeholders})",
+                user_ids,
+            ).fetchall()
+            return {row[0]: row[1] for row in rows}
+    except sqlite3.Error as e:
+        raise sqlite3.Error(f"Failed to batch query user roles: {e}") from e
 
 
 def add_user(username: str, password: str, role: str = "teacher") -> None:
