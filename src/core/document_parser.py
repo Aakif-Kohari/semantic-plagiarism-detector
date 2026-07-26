@@ -939,6 +939,17 @@ def extract_text(
         dpi=ocr_dpi,
     )
 
+    # Validate file type magic bytes first to prevent malicious file uploads
+    file_bytes = _read_pdf_bytes(file)
+    from src.security.mime_validator import validate_mime_type
+    if not validate_mime_type(file_bytes, filename):
+        logger.warning(
+            f"[document_parser] Security warning: Rejected file '{filename}' "
+            f"because its MIME type / magic bytes do not match its file extension."
+        )
+        return ""
+    file = file_bytes
+
     extension = filename.rsplit(".", 1)[-1].lower()
 
     if extension == "pdf":
