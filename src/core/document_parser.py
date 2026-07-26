@@ -367,7 +367,11 @@ def _is_blank_scanned_page(
         return variance < variance_threshold
     except Exception as exc:
         logger.error(f"[document_parser] Error checking blank page {page_index}: {exc}")
-        return False    pdf_bytes: bytes,
+        return False
+
+
+def _ocr_pdf_page(
+    pdf_bytes: bytes,
     page_index: int,
     *,
     dpi: int = DEFAULT_OCR_DPI,
@@ -458,15 +462,9 @@ def _parse_pdf_page(
 
     import pdfplumber
 
-try:
+    try:
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
             page = pdf.pages[page_index]
-
-
-            if not _has_meaningful_text(native_text):
-                if _is_blank_scanned_page(pdf_bytes, page_index, dpi=ocr_dpi):
-                    return []
-
 
             tables = page.find_tables()
 
@@ -477,6 +475,10 @@ try:
             for table in tables:
                 text_page = text_page.outside_bbox(table.bbox)
             native_text = (text_page.extract_text() or "").strip()
+
+            if not _has_meaningful_text(native_text):
+                if _is_blank_scanned_page(pdf_bytes, page_index, dpi=ocr_dpi):
+                    return []
 
             table_texts = []
             for table in tables:
@@ -493,7 +495,6 @@ try:
             selected_text = combined_text
 
             if not _has_meaningful_text(selected_text):
-
                 selected_text = _ocr_pdf_page(
                     pdf_bytes,
                     page_index,
@@ -501,7 +502,8 @@ try:
                     language=ocr_language,
                 )
 
-            return _clean_page_text(selected_text)    except OCRDependencyError:
+            return _clean_page_text(selected_text)
+    except OCRDependencyError:
         raise
     except Exception as exc:
         logger.error(f"[document_parser] Error parsing page {page_index}: {exc}")
