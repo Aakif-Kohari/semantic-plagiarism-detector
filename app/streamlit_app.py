@@ -2191,14 +2191,33 @@ if not st.session_state.authenticated:
         existing_registry=None,
         url_text: str = None,
         url_filename: str = None,
+        _status_placeholder=None,
     ):
         raw_texts = {}
 
 
 
-        failed_files = {}
+        file_statuses = {name: "Pending" for name in file_bytes_dict.keys()}
+        
+        def update_status():
+            if _status_placeholder is not None:
+                df = pd.DataFrame(
+                    [{"File": n, "Status": s} for n, s in file_statuses.items()]
+                )
+                _status_placeholder.table(df)
+        
+        update_status()
 
+        failed_files = {}
         for name, data in file_bytes_dict.items():
+            if not data:
+                file_statuses[name] = "Completed ✅"
+                update_status()
+                continue
+                
+            file_statuses[name] = "Processing ⏳"
+            update_status()
+            
             try:
                 extracted = extract_text(
                     _io.BytesIO(data),
@@ -2208,33 +2227,18 @@ if not st.session_state.authenticated:
                 )
                 if extracted and extracted.strip():
                     raw_texts[name] = extracted
+                    file_statuses[name] = "Completed ✅"
                 else:
                     failed_files[name] = data
+                    file_statuses[name] = "Failed ❌"
             except Exception:
                 failed_files[name] = data
-
-
-
-        failed_files = []
-        failure_details = []
-
-        for name, data in file_bytes_dict.items():
-            if not data:
-                continue  # Skip dummy data used for existing index bypass
-            try:
-                raw_texts[name] = extract_text(
-                    _io.BytesIO(data), name, ocr_language=ocr_language, ocr_dpi=ocr_dpi
-                )
-            except OCRDependencyError as exc:
-                failed_files.append(name)
-                failure_details.append(f"{name}: {exc}")
-
+                file_statuses[name] = "Failed ❌"
+            
+            update_status()
 
         if url_text and url_filename:
             raw_texts[url_filename] = url_text
-
-        if failed_files:
-            raise OCRFileBatchError(failed_files, failure_details)
 
         if "ignore_phrases" in globals() and ignore_phrases and ignore_phrases.strip():
             raw_texts = {
@@ -2298,8 +2302,14 @@ if not st.session_state.authenticated:
         )
 
 
+    status_placeholder = st.empty()
     with st.spinner("🧠 Processing files and building embeddings…"):
-        analysis_results = run_pipeline(file_bytes_dict, ocr_language, ocr_dpi)
+        analysis_results = run_pipeline(
+            file_bytes_dict, 
+            ocr_language, 
+            ocr_dpi, 
+            _status_placeholder=status_placeholder
+        )
 
     (
         raw_texts,
