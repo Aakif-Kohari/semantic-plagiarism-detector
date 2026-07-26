@@ -67,6 +67,7 @@ def clean_test_env():
     try:
         from src.db.corpus_db import clear_all_data, close_connections
         clear_all_data()
+    except Exception:
         close_connections()  # Flush the connection pool so mock_db starts clean
     except ImportError:
         pass
@@ -85,6 +86,7 @@ def clean_test_env():
     try:
         from src.db.corpus_db import clear_all_data, close_connections
         clear_all_data()
+    except Exception:
         close_connections()
     except ImportError:
         pass
@@ -170,4 +172,4 @@ def mock_db(tmp_path):
         except ImportError:
             pass
 
-        yield str(corpus_db_file)
+        yield str(auth_db_file)

@@ -30,6 +30,16 @@ _DB_PATH = os.path.abspath(
 _connection_pool = threading.local()
 
 
+
+def configure_db_path(db_path: str | os.PathLike) -> None:
+    """Configure the SQLite database path used by the corpus module."""
+    global _DB_PATH
+    close_connections()
+    _DB_PATH = os.path.abspath(os.fspath(db_path))
+
+
+
+
 def get_corpus_db_path() -> Path:
     """Return the configured corpus SQLite database path."""
     return Path(_DB_PATH)

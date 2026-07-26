@@ -5,11 +5,13 @@ Redis connection and caching utilities for session state and FAISS results.
 Supports scaling across multiple server nodes in Docker/Kubernetes environments.
 """
 
+import hashlib
 import json
 import os
 import pickle
 from enum import Enum
 from typing import Any, Optional
+from urllib.parse import quote
 
 try:
     import redis
@@ -177,11 +179,11 @@ class RedisCache:
         except Exception:
             return False
 
-    def ping(self) -> tuple[bool, float | None]:
+    def ping(self) -> tuple[bool, Optional[float]]:
         """Ping Redis and measure round-trip latency.
 
         Returns:
-            Tuple of (connected: bool, latency_ms: float | None).
+            Tuple of (connected: bool, latency_ms: Optional[float]).
             latency_ms is None if the connection is unavailable.
         """
         if self._client is None:
@@ -358,17 +360,29 @@ class RedisCache:
 _cache = RedisCache()
 
 
-def get_cache() -> RedisCache:
-    """Get the global Redis cache instance."""
+def get_cache(key: Optional[str] = None):
+    """Get the global Redis cache instance, or look up a key directly.
+
+    When called with no arguments, returns the :class:`RedisCache` singleton.
+    When called with a *key* string, performs a cache lookup and returns the
+    stored value (or ``None`` on miss).
+    """
+    if key is not None:
+        return _cache.get(key)
     return _cache
 
 
-def set_cache(key: str, value: Any, expire: int = DEFAULT_TTL) -> bool:
-    """Store a value with the given *expire* TTL (default 24h).
+def set_cache(key: str, value: Any, expire: Optional[int] = None) -> bool:
+    """Store *value* under *key* in the global Redis cache.
 
-    This is the primary public API for storing transient data in Redis.
-    Callers that do not need a custom expiry can rely on the 24-hour
-    default to avoid indefinite key persistence.
+    Args:
+        key:    Cache key.
+        value:  Value to store (will be serialised by the cache backend).
+        expire: Optional TTL in seconds. When ``None`` (default), the
+                cache backend applies its own 24-hour default TTL.
+
+    Returns:
+        ``True`` on success, ``False`` on failure.
     """
     return _cache.set(key, value, ttl=expire)
 

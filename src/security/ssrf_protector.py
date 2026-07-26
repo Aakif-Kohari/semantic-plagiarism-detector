@@ -3,7 +3,7 @@ import logging
 import socket
 import time
 import urllib.parse
-from typing import Dict, Optional
+from typing import Dict
 
 logger = logging.getLogger(__name__)
 
