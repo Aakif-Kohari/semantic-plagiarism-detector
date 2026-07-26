@@ -96,7 +96,7 @@ class TestRedisCache:
         value = True
 
         cache_session_state(session_id, key, value)
-        expected_key = f"session:{session_id}:{key}"
+        expected_key = f"spd:v1:session:{session_id}:{key}"
         mock_redis_client.setex.assert_called_once()
 
         mock_redis_client.get.return_value = b"\x80"
@@ -107,14 +107,14 @@ class TestRedisCache:
         """Test clearing session data."""
         session_id = "test_session"
         mock_redis_client.keys.return_value = [
-            b"session:test_session:key1",
-            b"session:test_session:key2",
+            b"spd:v1:session:test_session:key1",
+            b"spd:v1:session:test_session:key2",
         ]
         mock_redis_client.delete.return_value = 2
 
         result = clear_session(session_id)
         assert result is True
-        mock_redis_client.keys.assert_called_once_with(f"session:{session_id}:*")
+        mock_redis_client.keys.assert_called_once_with(f"spd:v1:session:{session_id}:*")
 
     def test_faiss_index_caching(self, cache_with_mock, mock_redis_client):
         """Test FAISS index caching."""
@@ -136,7 +136,7 @@ class TestRedisCache:
         results = {"embeddings": np.array([[1, 2, 3]]), "similarity": 0.85}
 
         cache_analysis_results(analysis_key, results)
-        expected_key = f"analysis:{analysis_key}"
+        expected_key = f"spd:v1:analysis:{analysis_key}"
         mock_redis_client.setex.assert_called_once()
 
         mock_redis_client.get.return_value = b"\x80"

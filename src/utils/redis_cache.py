@@ -9,7 +9,7 @@ import hashlib
 import json
 import os
 import pickle
-import re
+from enum import Enum
 from typing import Any, Optional
 from urllib.parse import quote
 
@@ -46,24 +46,16 @@ UPLOAD_RATE_TTL = 60 * 60  # 1 hour for upload rate limiting
 DEFAULT_TTL = 24 * 60 * 60  # 24 hours fallback for keys without explicit TTL
 
 
-def sanitize_key_component(key_input: str) -> str:
-    """
-    Sanitizes string inputs used in Redis key generation to prevent
-    key injection, key splitting, and command pollution.
-    
-    Strips whitespace and uses URL encoding or SHA256 hashing for inputs
-    containing spaces, wildcards, or control characters.
-    """
-    if not isinstance(key_input, str):
-        key_input = str(key_input)
+class CacheNamespace(str, Enum):
+    SESSION = "spd:v1:session"
+    FAISS = "spd:v1:faiss"
+    ANALYSIS = "spd:v1:analysis"
+    LOGIN_ATTEMPTS = "spd:v1:login_attempts"
+    UPLOADS = "spd:v1:uploads"
 
-    stripped = key_input.strip()
-
-    # If the input contains whitespace or illegal characters, hash or encode it safely
-    if re.search(r"[\s*?\[\]{}\\\n\r]", stripped) or len(stripped) > 128:
-        return hashlib.sha256(stripped.encode("utf-8")).hexdigest()
-
-    return quote(stripped, safe="-_.")
+    def build_key(self, *parts: str) -> str:
+        """Construct a standardized cache key with namespace prefix."""
+        return ":".join([self.value] + list(parts))
 
 
 class RedisCache:
@@ -406,58 +398,49 @@ def delete_cache(key: str) -> bool:
 
 def cache_session_state(session_id: str, key: str, value: Any) -> bool:
     """Cache session state data with TTL."""
-    clean_sid = sanitize_key_component(session_id)
-    clean_key = sanitize_key_component(key)
-    cache_key = f"session:{clean_sid}:{clean_key}"
+    cache_key = CacheNamespace.SESSION.build_key(session_id, key)
     return _cache.set(cache_key, value, SESSION_TTL)
 
 
 def get_session_state(session_id: str, key: str) -> Optional[Any]:
     """Retrieve session state data from cache."""
-    clean_sid = sanitize_key_component(session_id)
-    clean_key = sanitize_key_component(key)
-    cache_key = f"session:{clean_sid}:{clean_key}"
+    cache_key = CacheNamespace.SESSION.build_key(session_id, key)
     return _cache.get(cache_key)
 
 
 def clear_session(session_id: str) -> bool:
     """Clear all session data for a given session ID."""
-    clean_sid = sanitize_key_component(session_id)
-    pattern = f"session:{clean_sid}:*"
+    pattern = CacheNamespace.SESSION.build_key(session_id, "*")
     return _cache.clear_pattern(pattern) > 0
 
 
 def cache_faiss_index(index_key: str, index_data: bytes) -> bool:
     """Cache FAISS index binary data."""
-    clean_key = sanitize_key_component(index_key)
-    cache_key = f"faiss:index:{clean_key}"
+    cache_key = CacheNamespace.FAISS.build_key("index", index_key)
     return _cache.set(cache_key, index_data, FAISS_INDEX_TTL)
 
 
 def get_faiss_index(index_key: str) -> Optional[bytes]:
     """Retrieve FAISS index binary data from cache."""
-    clean_key = sanitize_key_component(index_key)
-    cache_key = f"faiss:index:{clean_key}"
+    cache_key = CacheNamespace.FAISS.build_key("index", index_key)
     return _cache.get(cache_key)
 
 
 def cache_analysis_results(analysis_key: str, results: dict) -> bool:
     """Cache analysis results (embeddings, similarity matrices, etc.)."""
-    clean_key = sanitize_key_component(analysis_key)
-    cache_key = f"analysis:{clean_key}"
+    cache_key = CacheNamespace.ANALYSIS.build_key(analysis_key)
     return _cache.set(cache_key, results, ANALYSIS_RESULTS_TTL)
 
 
 def get_analysis_results(analysis_key: str) -> Optional[dict]:
     """Retrieve analysis results from cache."""
-    clean_key = sanitize_key_component(analysis_key)
-    cache_key = f"analysis:{clean_key}"
+    cache_key = CacheNamespace.ANALYSIS.build_key(analysis_key)
     return _cache.get(cache_key)
 
 
 def increment_login_attempts(identifier: str) -> int:
     """Increment failed login attempt counter for a username/IP."""
-    cache_key = f"login_attempts:{identifier}"
+    cache_key = CacheNamespace.LOGIN_ATTEMPTS.build_key(identifier)
     current = _cache.get(cache_key)
     if current is None:
         current = 0
@@ -468,7 +451,7 @@ def increment_login_attempts(identifier: str) -> int:
 
 def get_login_attempts(identifier: str) -> int:
     """Get current failed login attempt count for a username/IP."""
-    cache_key = f"login_attempts:{identifier}"
+    cache_key = CacheNamespace.LOGIN_ATTEMPTS.build_key(identifier)
     current = _cache.get(cache_key)
     return current if current is not None else 0
 
@@ -480,13 +463,13 @@ def is_login_locked_out(identifier: str) -> bool:
 
 def clear_login_attempts(identifier: str) -> bool:
     """Clear failed login attempt counter after successful login."""
-    cache_key = f"login_attempts:{identifier}"
+    cache_key = CacheNamespace.LOGIN_ATTEMPTS.build_key(identifier)
     return _cache.delete(cache_key)
 
 
 def increment_upload_count(username: str) -> int:
     """Increment upload counter for a user per hour."""
-    cache_key = f"uploads:{username}"
+    cache_key = CacheNamespace.UPLOADS.build_key(username)
     current = _cache.get(cache_key)
     if current is None:
         current = 0
@@ -497,7 +480,7 @@ def increment_upload_count(username: str) -> int:
 
 def get_upload_count(username: str) -> int:
     """Get current upload count for a user in the current hour window."""
-    cache_key = f"uploads:{username}"
+    cache_key = CacheNamespace.UPLOADS.build_key(username)
     current = _cache.get(cache_key)
     return current if current is not None else 0
 

@@ -14,11 +14,6 @@ from datetime import datetime
 from io import BytesIO
 from typing import List, Optional, Tuple
 
-
-import fitz  # PyMuPDF
-
-from reportlab.pdfgen import canvas
-
 from reportlab.lib import colors
 from src.core.app_config import get_pdf_footer_text
 from reportlab.lib.colors import HexColor
@@ -27,6 +22,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.lib.utils import ImageReader
+from reportlab.pdfgen import canvas
 from reportlab.platypus import (
     PageBreak,
     Paragraph,
@@ -452,14 +448,21 @@ def generate_plagiarism_report(
 
             # Compare and highlight differences
             from src.utils.diff_highlighter import highlight_overlap
+
             hl_a, hl_b = highlight_overlap(truncated_a, truncated_b)
 
             backcolor_hex = "#FEF08A" if not dark_mode else "#854D0E"
             textcolor_hex = "#1E293B" if not dark_mode else "#FFFFFF"
             mark_start = "<mark style='background-color: rgba(250, 204, 21, 0.3); color: inherit; padding: 1px 3px; border-radius: 3px;'>"
 
-            hl_a = hl_a.replace(mark_start, f"<font backcolor='{backcolor_hex}' color='{textcolor_hex}'>").replace("</mark>", "</font>")
-            hl_b = hl_b.replace(mark_start, f"<font backcolor='{backcolor_hex}' color='{textcolor_hex}'>").replace("</mark>", "</font>")
+            hl_a = hl_a.replace(
+                mark_start,
+                f"<font backcolor='{backcolor_hex}' color='{textcolor_hex}'>",
+            ).replace("</mark>", "</font>")
+            hl_b = hl_b.replace(
+                mark_start,
+                f"<font backcolor='{backcolor_hex}' color='{textcolor_hex}'>",
+            ).replace("</mark>", "</font>")
 
             for char in ["*", "_", "~", "`", "#", "[", "]", "(", ")"]:
                 hl_a = hl_a.replace(f"\\{char}", char)
