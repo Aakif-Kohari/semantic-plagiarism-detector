@@ -10,7 +10,12 @@ auth.py
 -------
 
 SQLite-backed authentication with Argon2 password hashing (via argon2-cffi),
+
+automatic transparent migration from legacy bcrypt hashes, user login tracking,
+and strong password complexity policies.
+
 automatic transparent migration from legacy bcrypt hashes, and user login tracking.
+
 
 SQLite-backed authentication with Argon2 password hashing (via argon2-cffi)
 and automatic transparent migration from legacy bcrypt hashes.
@@ -31,6 +36,7 @@ set_tour_completed(username, completed) → None
 
 import datetime
 import os
+import re
 import sqlite3
 
 import bcrypt
@@ -41,16 +47,32 @@ from argon2.exceptions import VerificationError, VerifyMismatchError
 from src.db.migrations import migrate_auth_database
 import logging
 
+
+
+  return sqlite3.connect(_DB_PATH, check_same_thread=False)
+DB_PATH = os.path.abspath(
+
 logger = logging.getLogger(__name__)
 
 _DB_PATH = os.path.abspath(
+
     os.path.join(os.path.dirname(__file__), "..", "..", "users.db")
 )
 
 VALID_ROLES = {"admin", "teacher"}
 
+
+# Regex requiring at least 8 characters, one uppercase letter, one number, and one special character
+PASSWORD_COMPLEXITY_REGEX = re.compile(
+    r"^(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\])[A-Za-z\d@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\]{8,}$"
+)
+
 # Initialize Argon2 password hasher
 _ph = PasswordHasher()
+
+# Initialize Argon2 password hasher
+_ph = PasswordHasher()
+
 
 
 def configure_db_path(db_path: str | os.PathLike) -> None:
@@ -122,6 +144,36 @@ def _validate_username(username: str) -> str:
 
 
 def _validate_password(password: str) -> str:
+
+    """Basic validation for authentication checks."""
+    password = str(password)
+
+    if not password:
+        raise ValueError("Password cannot be empty.")
+
+    return password
+
+
+def _validate_password_complexity(password: str) -> str:
+    """Enforce strong password policy for user creation and password updates."""
+    password = str(password)
+
+    if len(password) < 8:
+        raise ValueError("Password must be at least 8 characters long.")
+
+    if not re.search(r"[A-Z]", password):
+        raise ValueError("Password must contain at least one uppercase letter.")
+
+    if not re.search(r"\d", password):
+        raise ValueError("Password must contain at least one number.")
+
+    if not re.search(r"[@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\]", password):
+        raise ValueError(
+            "Password must contain at least one special character (e.g. @$!%*?&)."
+        )
+
+    return password
+
     try:
         password = str(password)
         if len(password.strip()) < 10:
@@ -129,6 +181,7 @@ def _validate_password(password: str) -> str:
         return password
     finally:
         password = "REDACTED"
+
 
 
 def _validate_role(role: str) -> str:
@@ -236,8 +289,10 @@ def verify_user(username: str, password: str) -> bool:
         except (VerifyMismatchError, VerificationError):
             return False
 
+
     # Case 2: Legacy bcrypt hash → verify and migrate to Argon2
     if stored_hash.startswith(("$2a$", "$2b$", "$2y$")):
+
         try:
             if bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8")):
                 update_password(username, password)
@@ -334,6 +389,13 @@ def add_user(username: str, password: str, role: str = "teacher") -> None:
             ("admin",),
         ).fetchone()
 
+
+        hashed = _hash_password("Admin123!")
+
+        if not exists:
+
+
+
         if not exists:
             hashed = _hash_password("admin123")
 
@@ -389,10 +451,19 @@ def update_password(username: str, new_password: str) -> None:
                 raise ValueError("User not found.")
 
             hashed = _hash_password(new_password)
+
             conn.execute(
                 "UPDATE users SET password = ? WHERE username = ?",
                 (hashed, username),
             )
+
+        else:
+            # Update legacy seed password for admin if account already exists
+            conn.execute(
+                "UPDATE users SET password = ? WHERE username = ? AND role = 'admin'",
+                (hashed, "admin"),
+            )
+
             conn.commit()
 
         # Record the password change in the security audit log
@@ -405,6 +476,7 @@ def update_password(username: str, new_password: str) -> None:
         raise sqlite3.Error(f"Failed to update password: {e}") from e
     finally:
         new_password = "REDACTED"
+
 
 
 def get_tour_completed(username: str) -> bool:
@@ -438,7 +510,16 @@ def set_tour_completed(username: str, completed: bool = True) -> None:
 def verify_user(username: str, password: str) -> bool:
     """
     Return True if username exists and password matches stored hash.
+
+
     Automatically records last_login_at timestamp upon successful verification.
+
+    Supports both Argon2 and legacy bcrypt hashes, automatically migrating 
+    bcrypt hashes to Argon2 upon successful login.
+
+
+    Automatically records last_login_at timestamp upon successful verification.
+
     """
     username = _validate_username(username)
     password = _validate_password(password)
@@ -453,8 +534,12 @@ def get_2fa_status(username: str) -> tuple[bool, str | None]:
             (username.lower(),),
         ).fetchone()
     if not row:
+
+        return False
+
         return False, None
     return bool(row[0]), row[1]
+
 
 
 
@@ -465,8 +550,24 @@ def get_2fa_status(username: str) -> tuple[bool, str | None]:
         try:
             _ph.verify(stored_hash, password)
             if _ph.check_needs_rehash(stored_hash):
+
+
+                # Internal system rehash bypasses policy check to preserve existing password
+                hashed = _hash_password(password)
+                with _connect() as conn_rehash:
+                    conn_rehash.execute(
+                        "UPDATE users SET password = ? WHERE username = ?",
+                        (hashed, username),
+                    )
+                    conn_rehash.commit()
+            _record_login_timestamp(username)
+
+                update_password(username, password)
+
+
                 update_password(username, password)
             _record_login_timestamp(username)
+
             return True
         except (VerifyMismatchError, VerificationError):
             return False
@@ -475,8 +576,23 @@ def get_2fa_status(username: str) -> tuple[bool, str | None]:
     if stored_hash.startswith(("$2a$", "$2b$", "$2y$")):
         try:
             if bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8")):
+
+
+                hashed = _hash_password(password)
+                with _connect() as conn_migrate:
+                    conn_migrate.execute(
+                        "UPDATE users SET password = ? WHERE username = ?",
+                        (hashed, username),
+                    )
+                    conn_migrate.commit()
+                _record_login_timestamp(username)
+
+                update_password(username, password)
+
+
                 update_password(username, password)
                 _record_login_timestamp(username)
+
                 return True
         except ValueError:
             return False
@@ -495,6 +611,7 @@ def enable_2fa(username: str, secret: str) -> None:
         conn.commit()
 
 
+
 def disable_2fa(username: str) -> None:
     """Disable 2FA for a user and clear their OTP secret."""
     with _connect() as conn:
@@ -509,13 +626,27 @@ def check_login_rate_limit(username: str) -> tuple[bool, str | None]:
     """Check if username is rate limited. Returns (is_allowed, error_message)."""
 
 
+
+
+def add_user(username: str, password: str, role: str = "teacher") -> None:
+    """Insert a new user enforcing strong password complexity policy."""
+
+
+def add_user(username: str, password: str, role: str = "teacher") -> None:
+    """Insert a new user with an Argon2-hashed password."""
+
+    username = _validate_username(username)
+    password = _validate_password_complexity(password)
+
 def add_user(username: str, password: str, role: str = "teacher") -> None:
     """Insert a new user with an Argon2-hashed password."""
     username = _validate_username(username)
     password = _validate_password(password)
+
     role = _validate_role(role)
 
     hashed = _hash_password(password)
+
 
     identifier = username.lower()
     if is_login_locked_out(identifier):
@@ -527,6 +658,24 @@ def add_user(username: str, password: str, role: str = "teacher") -> None:
     return True, None
 
 
+
+
+def get_all_users() -> list:
+    """Return all users as a list of dicts including last_login_at."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, username, role, last_login_at FROM users ORDER BY id"
+        ).fetchall()
+
+    return [
+        {
+            "ID": row[0],
+            "Username": row[1],
+            "Role": row[2],
+            "Last Login At": row[3] or "Never",
+        }
+        for row in rows
+    ]
 
 
 def record_failed_login(username: str) -> None:
@@ -575,6 +724,7 @@ def get_all_users() -> list:
             (username,),
         ).fetchone()
 
+
     if row and row[0]:
         try:
             return json.loads(row[0])
@@ -597,6 +747,11 @@ def update_user_preferences(username: str, preferences: dict) -> None:
         conn.commit()
 
 
+
+def update_password(username: str, new_password: str) -> None:
+    """Update a user's password enforcing strong password complexity policy."""
+    username = _validate_username(username)
+    new_password = _validate_password_complexity(new_password)
 
 def update_password(username: str, new_password: str) -> None:
     """Update a user's password with a new Argon2 hash."""
@@ -637,6 +792,7 @@ def get_user_theme(username: str) -> str:
             (username,),
         ).fetchone()
         return row[0] if row else "light"
+
 
 
 

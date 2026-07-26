@@ -109,7 +109,11 @@ from src.db import (
     init_corpus_db,
 )
 from src.db.auth import add_user, get_all_users, get_user_role, init_db, verify_user
+
+from src.utils.pdf_report import highlight_pdf_matches
+
 from src.utils.pdf_report import highlight_pdf_matches, truncate_filename
+
 from src.utils.redis_cache import (
     cache_session_state,
     clear_session,
@@ -207,6 +211,7 @@ except Exception:
 except ImportError:
 
     from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore[import-untyped,reportMissingImports]
+
 
 
     from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore[import-untyped,reportMissingImports]
@@ -752,7 +757,9 @@ with theme_col:
 
 
 
+
 # ── Sidebar (ROLE RESTRICTED Settings) ────────────────────────────────────────
+
 # ── Sidebar (ROLE RESTRICTED Settings & i18n) ─────────────────────────────────
 
 
@@ -2030,9 +2037,15 @@ if not st.session_state.authenticated:
         # Reconstruct the file bytes dictionary with the chosen order
         file_bytes_dict = {name: file_bytes_dict[name] for name in ordered_file_names}
 
+
+    # ── Display Failed Documents & Retry OCR Button (#183) ───────────────────
+    if st.session_state.failed_documents:
+        failed_list = list(st.session_state.failed_documents.keys())
+
     # ── Display Failed Documents & Retry OCR Button (#183 & #319) ─────────────
     if st.session_state.failed_documents:
         failed_list = [truncate_filename(fn, 25) for fn in st.session_state.failed_documents.keys()]
+
         st.warning(
             f"⚠️ **{len(failed_list)} document(s) failed text extraction/OCR:** "
             f"`{', '.join(failed_list)}`. This can happen due to transient memory errors."
@@ -2183,7 +2196,6 @@ if not st.session_state.authenticated:
 
 
 
-
         failed_files = {}
 
         for name, data in file_bytes_dict.items():
@@ -2313,7 +2325,12 @@ if not st.session_state.authenticated:
 
 
 
+
+
+    # Run Pipeline if files uploaded
+
    # Run Pipeline if files uploaded
+
     def compute_pipeline_signature(
         file_bytes_dict: dict,
         ocr_language: str,
@@ -2392,6 +2409,7 @@ if not st.session_state.authenticated:
                 unsafe_allow_html=True,
             )
         st.divider()
+
 
     for flag in flags:
 
