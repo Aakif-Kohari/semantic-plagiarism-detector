@@ -14,11 +14,17 @@ try:
     import redis
 except ImportError:
     redis = None
+import logging
+
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
 RedisError = getattr(redis, "RedisError", Exception)
+RedisConnectionError = getattr(redis, "ConnectionError", ConnectionError)
+RedisTimeoutError = getattr(redis, "TimeoutError", TimeoutError)
 
 
 # Redis connection configuration
@@ -32,6 +38,9 @@ REDIS_URL = os.getenv("REDIS_URL", f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB
 SESSION_TTL = 15 * 60  # 15 minutes for session state
 FAISS_INDEX_TTL = 24 * 60 * 60  # 24 hours for FAISS index cache
 ANALYSIS_RESULTS_TTL = 2 * 60 * 60  # 2 hours for analysis results
+LOGIN_LOCKOUT_TTL = 15 * 60  # 15 minutes for login lockout
+UPLOAD_RATE_TTL = 60 * 60  # 1 hour for upload rate limiting
+DEFAULT_TTL = 24 * 60 * 60  # 24 hours fallback for keys without explicit TTL
 
 
 class RedisCache:
@@ -75,8 +84,15 @@ class RedisCache:
             # Test connection
             self._client.ping()
             print(f"[RedisCache] Connected to Redis at {REDIS_HOST}:{REDIS_PORT}")
-        except (AttributeError, redis.ConnectionError, redis.TimeoutError) as e:
+        except (
+            RedisConnectionError,
+            RedisTimeoutError,
+            ConnectionRefusedError,
+        ) as e:
             print(f"[RedisCache] Redis connection failed: {e}. Running without cache.")
+            logger.warning(
+                f"[RedisCache] Redis connection failed: {e}. Running without cache."
+            )
             self._client = None
 
     def is_available(self) -> bool:
@@ -89,20 +105,47 @@ class RedisCache:
         except Exception:
             return False
 
+    def ping(self) -> tuple[bool, float | None]:
+        """Ping Redis and measure round-trip latency.
+
+        Returns:
+            Tuple of (connected: bool, latency_ms: float | None).
+            latency_ms is None if the connection is unavailable.
+        """
+        if self._client is None:
+            return False, None
+        try:
+            import time
+
+            start = time.monotonic()
+            self._client.ping()
+            elapsed = (time.monotonic() - start) * 1000
+            return True, round(elapsed, 1)
+        except Exception:
+            return False, None
+
     def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
-        """Store a value in Redis with optional TTL."""
+        """Store a value in Redis with optional TTL.
+
+        When *ttl* is ``None``, the :attr:`DEFAULT_TTL` (24 hours) is
+        applied so that transient cache keys do not persist indefinitely.
+        Pass ``ttl=0`` to store without expiration (use sparingly).
+        """
         if not self.is_available():
             return False
 
         try:
             serialized = pickle.dumps(value)
-            if ttl:
+            if ttl is None:
+                self._client.setex(key, DEFAULT_TTL, serialized)
+            elif ttl:
                 self._client.setex(key, ttl, serialized)
             else:
                 self._client.set(key, serialized)
             return True
-        except (RedisError, pickle.PickleError) as e:
+        except (RedisError, pickle.PickleError, ConnectionRefusedError) as e:
             print(f"[RedisCache] Error setting key {key}: {e}")
+            logger.error(f"[RedisCache] Error setting key {key}: {e}")
             return False
 
     def get(self, key: str) -> Optional[Any]:
@@ -115,8 +158,9 @@ class RedisCache:
             if data is None:
                 return None
             return pickle.loads(data)
-        except (RedisError, pickle.PickleError) as e:
+        except (RedisError, pickle.PickleError, ConnectionRefusedError) as e:
             print(f"[RedisCache] Error getting key {key}: {e}")
+            logger.error(f"[RedisCache] Error getting key {key}: {e}")
             return None
 
     def delete(self, key: str) -> bool:
@@ -127,8 +171,9 @@ class RedisCache:
         try:
             self._client.delete(key)
             return True
-        except RedisError as e:
+        except (RedisError, ConnectionRefusedError) as e:
             print(f"[RedisCache] Error deleting key {key}: {e}")
+            logger.error(f"[RedisCache] Error deleting key {key}: {e}")
             return False
 
     def set_json(self, key: str, value: dict, ttl: Optional[int] = None) -> bool:
@@ -143,8 +188,9 @@ class RedisCache:
             else:
                 self._client.set(key, serialized)
             return True
-        except (RedisError, json.JSONDecodeError) as e:
+        except (RedisError, json.JSONDecodeError, ConnectionRefusedError) as e:
             print(f"[RedisCache] Error setting JSON key {key}: {e}")
+            logger.error(f"[RedisCache] Error setting JSON key {key}: {e}")
             return False
 
     def get_json(self, key: str) -> Optional[dict]:
@@ -157,8 +203,9 @@ class RedisCache:
             if data is None:
                 return None
             return json.loads(data)
-        except (RedisError, json.JSONDecodeError) as e:
+        except (RedisError, json.JSONDecodeError, ConnectionRefusedError) as e:
             print(f"[RedisCache] Error getting JSON key {key}: {e}")
+            logger.error(f"[RedisCache] Error getting JSON key {key}: {e}")
             return None
 
     def exists(self, key: str) -> bool:
@@ -168,8 +215,9 @@ class RedisCache:
 
         try:
             return bool(self._client.exists(key))
-        except RedisError as e:
+        except (RedisError, ConnectionRefusedError) as e:
             print(f"[RedisCache] Error checking key {key}: {e}")
+            logger.error(f"[RedisCache] Error checking key {key}: {e}")
             return False
 
     def clear_pattern(self, pattern: str) -> int:
@@ -182,18 +230,61 @@ class RedisCache:
             if keys:
                 return self._client.delete(*keys)
             return 0
-        except RedisError as e:
+        except (RedisError, ConnectionRefusedError) as e:
             print(f"[RedisCache] Error clearing pattern {pattern}: {e}")
+            logger.error(f"[RedisCache] Error clearing pattern {pattern}: {e}")
             return 0
+
+
+    def close(self) -> None:
+        """Explicitly close the Redis connection."""
+        if self._client is not None:
+            try:
+                self._client.close()
+                self._client = None
+            except Exception as e:
+                print(f"[RedisCache] Error closing Redis connection: {e}")
+                logger.error(f"[RedisCache] Error closing Redis connection: {e}")
 
 
 # Global cache instance
 _cache = RedisCache()
 
 
-def get_cache() -> RedisCache:
-    """Get the global Redis cache instance."""
+def get_cache(key: Optional[str] = None):
+    """Get the global Redis cache instance, or look up a key directly.
+
+    When called with no arguments, returns the :class:`RedisCache` singleton.
+    When called with a *key* string, performs a cache lookup and returns the
+    stored value (or ``None`` on miss).
+    """
+    if key is not None:
+        return _cache.get(key)
     return _cache
+
+
+def set_cache(key: str, value: Any, expire: Optional[int] = None) -> bool:
+    """Store *value* under *key* in the global Redis cache.
+
+    Args:
+        key:    Cache key.
+        value:  Value to store (will be serialised by the cache backend).
+        expire: Optional TTL in seconds. When ``None`` (default), the
+                cache backend applies its own 24-hour default TTL.
+
+    Returns:
+        ``True`` on success, ``False`` on failure.
+    """
+    return _cache.set(key, value, ttl=expire)
+
+
+def delete_cache(key: str) -> bool:
+    """Delete a key from Redis.
+
+    Safe to call even when the key does not exist or Redis is
+    unavailable — returns ``False`` in those cases.
+    """
+    return _cache.delete(key)
 
 
 def cache_session_state(session_id: str, key: str, value: Any) -> bool:
@@ -236,3 +327,65 @@ def get_analysis_results(analysis_key: str) -> Optional[dict]:
     """Retrieve analysis results from cache."""
     cache_key = f"analysis:{analysis_key}"
     return _cache.get(cache_key)
+
+
+def increment_login_attempts(identifier: str) -> int:
+    """Increment failed login attempt counter for a username/IP."""
+    cache_key = f"login_attempts:{identifier}"
+    current = _cache.get(cache_key)
+    if current is None:
+        current = 0
+    current += 1
+    _cache.set(cache_key, current, LOGIN_LOCKOUT_TTL)
+    return current
+
+
+def get_login_attempts(identifier: str) -> int:
+    """Get current failed login attempt count for a username/IP."""
+    cache_key = f"login_attempts:{identifier}"
+    current = _cache.get(cache_key)
+    return current if current is not None else 0
+
+
+def is_login_locked_out(identifier: str) -> bool:
+    """Check if a username/IP is locked out due to too many failed attempts."""
+    return get_login_attempts(identifier) >= 5
+
+
+def clear_login_attempts(identifier: str) -> bool:
+    """Clear failed login attempt counter after successful login."""
+    cache_key = f"login_attempts:{identifier}"
+    return _cache.delete(cache_key)
+
+
+def increment_upload_count(username: str) -> int:
+    """Increment upload counter for a user per hour."""
+    cache_key = f"uploads:{username}"
+    current = _cache.get(cache_key)
+    if current is None:
+        current = 0
+    current += 1
+    _cache.set(cache_key, current, UPLOAD_RATE_TTL)
+    return current
+
+
+def get_upload_count(username: str) -> int:
+    """Get current upload count for a user in the current hour window."""
+    cache_key = f"uploads:{username}"
+    current = _cache.get(cache_key)
+    return current if current is not None else 0
+
+
+def is_upload_rate_limited(username: str) -> bool:
+    """Check if a user has exceeded the upload rate limit (100 uploads/hour)."""
+    return get_upload_count(username) >= 100
+
+
+import atexit
+
+def _cleanup_redis() -> None:
+    """Close the global Redis connection when the process terminates."""
+    if _cache:
+        _cache.close()
+
+atexit.register(_cleanup_redis)

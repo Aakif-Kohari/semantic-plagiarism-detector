@@ -5,17 +5,26 @@ Generates professional PDF plagiarism reports using ReportLab.
 Provides side-by-side comparison of suspicious paragraph pairs with visual similarity indicators.
 """
 
+
 import os
+
+from __future__ import annotations
+
 from datetime import datetime
 from io import BytesIO
 from typing import List, Optional, Tuple
 
+
 import fitz  # PyMuPDF
+
+from reportlab.pdfgen import canvas
+
 from reportlab.lib import colors
+from src.core.app_config import get_pdf_footer_text
 from reportlab.lib.colors import HexColor
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
@@ -26,6 +35,13 @@ from reportlab.platypus import (
     Table,
     TableStyle,
 )
+
+try:
+    import fitz  # PyMuPDF
+
+    _HAS_FITZ = True
+except Exception:
+    _HAS_FITZ = False
 
 
 def truncate_filename(filename: str, max_len: int = 30) -> str:
@@ -73,6 +89,109 @@ def wrap_text(text: str, max_chars: int = 400) -> str:
     return text[: max_chars - 3] + "..."
 
 
+def compress_pdf_buffer(pdf_buffer: BytesIO) -> BytesIO:
+    """
+    Compresses a ReportLab generated PDF in-memory buffer using PyMuPDF (fitz)
+    or PyPDF2/pypdf as a fallback.
+    """
+    try:
+        # Save original position
+        original_pos = pdf_buffer.tell()
+        pdf_buffer.seek(0)
+        pdf_bytes = pdf_buffer.getvalue()
+
+        # 1. Try PyMuPDF (fitz) which is very powerful for garbage collection and stream compression
+        if _HAS_FITZ:
+            try:
+                doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                # garbage=4 performs maximum cleanup including duplicate merging
+                compressed_bytes = doc.tobytes(garbage=4, deflate=True)
+                doc.close()
+                return BytesIO(compressed_bytes)
+            except Exception:
+                pass
+
+        # Fallback to pypdf if PyMuPDF fails or is unavailable
+        try:
+            from pypdf import PdfReader, PdfWriter
+
+            reader = PdfReader(BytesIO(pdf_bytes))
+            writer = PdfWriter()
+            for page in reader.pages:
+                writer.add_page(page)
+            for page in writer.pages:
+                page.compress_content_streams()
+            out_buf = BytesIO()
+            writer.write(out_buf)
+            out_buf.seek(0)
+            return out_buf
+        except ImportError:
+            try:
+                from PyPDF2 import PdfReader, PdfWriter
+
+                reader = PdfReader(BytesIO(pdf_bytes))
+                writer = PdfWriter()
+                for page in reader.pages:
+                    writer.add_page(page)
+                for page in writer.pages:
+                    page.compress_content_streams()
+                out_buf = BytesIO()
+                writer.write(out_buf)
+                out_buf.seek(0)
+                return out_buf
+            except ImportError:
+                pass
+
+        # If all compression attempts fail, return the original buffer
+        pdf_buffer.seek(original_pos)
+        return pdf_buffer
+    except Exception:
+        # Absolute safety fallback
+        try:
+            pdf_buffer.seek(0)
+        except Exception:
+            pass
+        return pdf_buffer
+
+
+class NumberedCanvas(canvas.Canvas):
+    """
+    Canvas that renders dynamic page numbers in the format:
+    'Page X of Y'
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._saved_page_states = []
+
+    def showPage(self):
+        self._saved_page_states.append(dict(self.__dict__))
+        self._startPage()
+
+    def save(self):
+        # Save the final page before calculating total pages
+        self._saved_page_states.append(dict(self.__dict__))
+
+        total_pages = len(self._saved_page_states)
+
+        for state in self._saved_page_states:
+            self.__dict__.update(state)
+            self.draw_page_number(total_pages)
+            super().showPage()
+
+        super().save()
+
+    def draw_page_number(self, total_pages):
+        self.setFont("Helvetica", 9)
+        self.setFillColor(colors.grey)
+
+        self.drawRightString(
+            A4[0] - 72,
+            15,
+            f"Page {self._pageNumber} of {total_pages}",
+        )
+
+
 def generate_plagiarism_report(
     doc_a: str,
     doc_b: str,
@@ -82,8 +201,39 @@ def generate_plagiarism_report(
     report_title: str = "Plagiarism Detection Report",
     logo_image: Optional[bytes] = None,
     brand_color: Optional[str] = None,
+    dark_mode: Optional[bool] = None,
 ) -> BytesIO:
+
     brand_hex = brand_color or "#1e3a8a"
+
+    """
+    Generates a professional PDF plagiarism report for a document pair.
+
+    Args:
+        doc_a: Name of the first document
+        doc_b: Name of the second document
+        overall_similarity: Overall similarity score between documents (0-1)
+        threshold: Plagiarism threshold used for detection
+        top_pairs: List of (chunk_a, chunk_b, similarity) tuples for top matches
+        report_title: Title for the PDF report
+        logo_image: Optional raw bytes of a PNG/JPG logo for the PDF header
+        brand_color: Optional hex color string (e.g. "#1e3a8a") for headings
+        dark_mode: Optional boolean to enable dark mode themed report
+
+    Returns:
+        BytesIO buffer containing the generated PDF
+    """
+    if dark_mode is None:
+        try:
+            import streamlit as st
+
+            dark_mode = st.session_state.get("theme", "Light") == "Dark"
+        except Exception:
+            dark_mode = False
+
+    default_brand = "#2dd4bf" if dark_mode else "#1e3a8a"
+    brand_hex = brand_color or default_brand
+
     brand_clr = HexColor(brand_hex)
 
     logo_height = 0
@@ -104,53 +254,94 @@ def generate_plagiarism_report(
         rightMargin=72,
         leftMargin=72,
         topMargin=72 + logo_height,
-        bottomMargin=18,
+        bottomMargin=40,
     )
 
+
     styles = getSampleStyleSheet()
+
+    # Get custom styles
+
     title_style = ParagraphStyle(
         "CustomTitle",
-        parent=styles["Heading1"],
+        fontName="Helvetica-Bold",
         fontSize=18,
+        leading=22,
         textColor=brand_clr,
         spaceAfter=30,
         alignment=TA_CENTER,
+        keepWithNext=True,
     )
     heading_style = ParagraphStyle(
         "CustomHeading",
-        parent=styles["Heading2"],
+        fontName="Helvetica-Bold",
         fontSize=14,
+        leading=18,
         textColor=brand_clr,
         spaceAfter=12,
         spaceBefore=20,
+        keepWithNext=True,
     )
-    normal_style = styles["Normal"]
-    normal_style.fontSize = 10
-    normal_style.leading = 14
+    normal_style = ParagraphStyle(
+        "CustomNormal",
+        fontName="Helvetica",
+        fontSize=10,
+        leading=14,
+        textColor=HexColor("#FFFFFF") if dark_mode else HexColor("#31333f"),
+    )
+
+
+
+    footer_text = get_pdf_footer_text()
+
+    # ── Header / footer callback for logo ──
 
     def _draw_header(canvas_obj, _doc):
-        if not logo_image:
-            return
         canvas_obj.saveState()
-        try:
-            reader = ImageReader(BytesIO(logo_image))
-            iw, ih = reader.getSize()
-            logo_display_w = 1.5 * inch
-            logo_display_h = logo_display_w * ih / iw
-            x = _doc.leftMargin
-            y = _doc.pagesize[1] - 36 - logo_display_h
-            canvas_obj.drawImage(
-                reader,
-                x,
-                y,
-                width=logo_display_w,
-                height=logo_display_h,
-                preserveAspectRatio=True,
-                mask="auto",
+        if dark_mode:
+            canvas_obj.setFillColor(HexColor("#0F172A"))
+            canvas_obj.rect(
+                0,
+                0,
+                _doc.pagesize[0],
+                _doc.pagesize[1],
+                fill=True,
+                stroke=False,
             )
-        except Exception:
-            pass
+        if logo_image:
+            try:
+                reader = ImageReader(BytesIO(logo_image))
+                iw, ih = reader.getSize()
+                logo_display_w = 1.5 * inch
+                logo_display_h = logo_display_w * ih / iw
+                x = _doc.leftMargin
+                y = _doc.pagesize[1] - 36 - logo_display_h
+                canvas_obj.drawImage(
+                    reader,
+                    x,
+                    y,
+                    width=logo_display_w,
+                    height=logo_display_h,
+                    preserveAspectRatio=True,
+                    mask="auto",
+                )
+            except Exception:
+                pass
         canvas_obj.restoreState()
+
+
+
+        if footer_text:
+            canvas_obj.saveState()
+            canvas_obj.setFont("Helvetica", 9)
+            if dark_mode:
+                canvas_obj.setFillColor(HexColor("#9CA3AF"))
+            else:
+                canvas_obj.setFillColor(HexColor("#6B7280"))
+            canvas_obj.drawCentredString(_doc.pagesize[0] / 2.0, 20, footer_text)
+            canvas_obj.restoreState()
+
+    # Build story (PDF content)
 
     story = []
 
@@ -171,21 +362,32 @@ def generate_plagiarism_report(
     ]
 
     doc_table = Table(doc_data, colWidths=[2 * inch, 4 * inch], hAlign=TA_LEFT)
-    doc_table.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (0, -1), HexColor("#f3f4f6")),
-                ("TEXTCOLOR", (0, 0), (0, -1), HexColor("#374151")),
-                ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-                ("FONTSIZE", (0, 0), (-1, -1), 10),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
-                ("TOPPADDING", (0, 0), (-1, -1), 8),
-                ("LEFTPADDING", (0, 0), (-1, -1), 12),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 12),
-                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-            ]
-        )
-    )
+    if dark_mode:
+        table_style_cmds = [
+            ("BACKGROUND", (0, 0), (0, -1), HexColor("#1E293B")),
+            ("TEXTCOLOR", (0, 0), (0, -1), HexColor("#FFFFFF")),
+            ("TEXTCOLOR", (1, 0), (1, -1), HexColor("#FFFFFF")),
+            ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+            ("FONTSIZE", (0, 0), (-1, -1), 10),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ("LEFTPADDING", (0, 0), (-1, -1), 12),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.lightgrey),
+        ]
+    else:
+        table_style_cmds = [
+            ("BACKGROUND", (0, 0), (0, -1), HexColor("#f3f4f6")),
+            ("TEXTCOLOR", (0, 0), (0, -1), HexColor("#374151")),
+            ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+            ("FONTSIZE", (0, 0), (-1, -1), 10),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ("LEFTPADDING", (0, 0), (-1, -1), 12),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ]
+    doc_table.setStyle(TableStyle(table_style_cmds))
     story.append(doc_table)
     story.append(Spacer(1, 0.3 * inch))
 
@@ -202,11 +404,12 @@ def generate_plagiarism_report(
         colWidths=[bar_width / 100 * 5 * inch, (100 - bar_width) / 100 * 5 * inch],
         hAlign=TA_LEFT,
     )
+    bar_bg_empty = HexColor("#374151") if dark_mode else HexColor("#e5e7eb")
     bar_table.setStyle(
         TableStyle(
             [
                 ("BACKGROUND", (0, 0), (0, -1), sim_color),
-                ("BACKGROUND", (1, 0), (1, -1), HexColor("#e5e7eb")),
+                ("BACKGROUND", (1, 0), (1, -1), bar_bg_empty),
                 ("HEIGHT", (0, 0), (-1, -1), 20),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ]
@@ -232,11 +435,13 @@ def generate_plagiarism_report(
                 f"<b>Pair #{rank}</b> — Similarity: <font color='{pair_color}'>{score:.1%}</font>",
                 ParagraphStyle(
                     "PairHeader",
-                    parent=styles["Heading3"],
+                    fontName="Helvetica-Bold",
                     fontSize=11,
-                    textColor=HexColor("#1f2937"),
+                    leading=14,
+                    textColor=HexColor("#FFFFFF") if dark_mode else HexColor("#1f2937"),
                     spaceAfter=8,
                     spaceBefore=15,
+                    keepWithNext=True,
                 ),
             )
             story.append(pair_header)
@@ -252,22 +457,34 @@ def generate_plagiarism_report(
             pair_table = Table(
                 pair_data, colWidths=[2.5 * inch, 2.5 * inch], hAlign=TA_LEFT
             )
-            pair_table.setStyle(
-                TableStyle(
-                    [
-                        ("BACKGROUND", (0, 0), (-1, 0), HexColor("#f9fafb")),
-                        ("TEXTCOLOR", (0, 0), (-1, 0), HexColor("#111827")),
-                        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-                        ("FONTSIZE", (0, 0), (-1, -1), 9),
-                        ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
-                        ("TOPPADDING", (0, 0), (-1, -1), 10),
-                        ("LEFTPADDING", (0, 0), (-1, -1), 10),
-                        ("RIGHTPADDING", (0, 0), (-1, -1), 10),
-                        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                    ]
-                )
-            )
+            if dark_mode:
+                pair_table_cmds = [
+                    ("BACKGROUND", (0, 0), (-1, 0), HexColor("#1E293B")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), HexColor("#FFFFFF")),
+                    ("TEXTCOLOR", (0, 1), (-1, 1), HexColor("#FFFFFF")),
+                    ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+                    ("TOPPADDING", (0, 0), (-1, -1), 10),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.lightgrey),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ]
+            else:
+                pair_table_cmds = [
+                    ("BACKGROUND", (0, 0), (-1, 0), HexColor("#f9fafb")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), HexColor("#111827")),
+                    ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 9),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+                    ("TOPPADDING", (0, 0), (-1, -1), 10),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ]
+            pair_table.setStyle(TableStyle(pair_table_cmds))
             story.append(pair_table)
             story.append(Spacer(1, 0.15 * inch))
 
@@ -276,7 +493,8 @@ def generate_plagiarism_report(
     else:
         story.append(
             Paragraph(
-                "No suspicious paragraph pairs found above threshold.", normal_style
+                "No suspicious paragraph pairs found above threshold.",
+                normal_style,
             )
         )
 
@@ -299,9 +517,20 @@ def generate_plagiarism_report(
         )
     )
 
+
     doc.build(story, onFirstPage=_draw_header, onLaterPages=_draw_header)
     buffer.seek(0)
     return buffer
+
+    # Build PDF
+    doc.build(
+        story,
+        onFirstPage=_draw_header,
+        onLaterPages=_draw_header,
+        canvasmaker=NumberedCanvas,
+    )
+    return compress_pdf_buffer(buffer)
+
 
 
 def highlight_pdf_matches(
@@ -309,6 +538,29 @@ def highlight_pdf_matches(
     matching_chunks: List[str],
     highlight_color: Tuple[float, float, float] = (1.0, 0.85, 0.0),
 ) -> bytes:
+
+
+    """
+    Opens an original PDF, searches for matching plagiarized text chunks,
+    applies yellow highlight annotations on exact coordinate boxes,
+    and returns the modified PDF as bytes.
+
+    Args:
+        pdf_source: Path to the PDF file (str) or raw bytes (bytes)
+        matching_chunks: List of text chunk strings to search and highlight
+        highlight_color: RGB tuple normalized between 0.0 and 1.0
+
+    Returns:
+        bytes: Binary PDF data with highlighted matches
+    """
+    if not _HAS_FITZ:
+        print("[pdf_report] Warning: PyMuPDF is unavailable, skipping PDF highlights.")
+        if isinstance(pdf_source, bytes):
+            return pdf_source
+        with open(pdf_source, "rb") as f:
+            return f.read()
+
+
     if isinstance(pdf_source, bytes):
         doc = fitz.open(stream=pdf_source, filetype="pdf")
     else:
@@ -316,9 +568,18 @@ def highlight_pdf_matches(
 
     for page in doc:
         for chunk in matching_chunks:
+
             chunk_clean = str(chunk).strip()
             if len(chunk_clean) < 3:
                 continue
+
+
+            chunk_clean = chunk.strip()
+            # Skip very short or empty chunks to prevent accidental full-page highlights
+            if len(chunk_clean) < 3:
+                continue
+
+            # Search for coordinate rectangles of the text on the page
 
             quad_matches = page.search_for(chunk_clean)
             for rect in quad_matches:
@@ -326,6 +587,10 @@ def highlight_pdf_matches(
                 annot.set_colors(stroke=highlight_color)
                 annot.update()
 
-    output_bytes = doc.tobytes()
+    # Save highlighted PDF to byte stream
+    output_buffer = doc.tobytes()
     doc.close()
+
     return output_bytes
+
+    return output_buffer
