@@ -14,10 +14,6 @@ from pathlib import Path
 from typing import BinaryIO, Dict, List, Union
 from urllib.parse import urlparse
 
-import defusedxml.lxml
-
-defusedxml.lxml.monkey_patch()
-
 import docx
 import pdfplumber
 from langdetect import LangDetectException, detect
