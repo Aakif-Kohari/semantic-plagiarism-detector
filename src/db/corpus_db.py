@@ -92,7 +92,8 @@ def init_corpus_db() -> None:
                 pdf_author       TEXT,
                 pdf_creation_date TEXT,
                 pdf_title        TEXT,
-                tags             TEXT
+                tags             TEXT,
+                detected_language TEXT
             )
         """
         )
@@ -114,6 +115,8 @@ def init_corpus_db() -> None:
             conn.execute("ALTER TABLE documents ADD COLUMN pdf_title TEXT")
         if "tags" not in columns:
             conn.execute("ALTER TABLE documents ADD COLUMN tags TEXT")
+        if "detected_language" not in columns:
+            conn.execute("ALTER TABLE documents ADD COLUMN detected_language TEXT")
 
         conn.execute(
             """
@@ -148,6 +151,7 @@ def add_document(
     pdf_creation_date: str = None,
     pdf_title: str = None,
     tags: str = None,
+    detected_language: str = None,
 ) -> bool:
     """
     Insert a new document metadata row using parameterized execution.
@@ -161,7 +165,7 @@ def add_document(
     try:
         with _connect() as conn:
             conn.execute(
-                "INSERT INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, tags, detected_language) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     filename,
                     file_hash,
@@ -173,6 +177,7 @@ def add_document(
                     pdf_creation_date,
                     pdf_title,
                     tags,
+                    detected_language,
                 ),
             )
             conn.commit()
@@ -194,7 +199,7 @@ def get_all_documents() -> list:
     """Return all indexed documents sorted by upload date descending."""
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title FROM documents ORDER BY upload_date DESC"
+            "SELECT filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, detected_language FROM documents ORDER BY upload_date DESC"
         ).fetchall()
     return [
         {
@@ -207,6 +212,7 @@ def get_all_documents() -> list:
             "pdf_author": r[6],
             "pdf_creation_date": r[7],
             "pdf_title": r[8],
+            "detected_language": r[9],
         }
         for r in rows
     ]
@@ -359,6 +365,10 @@ def add_documents_bulk(documents: list) -> int:
     formatted_docs = []
     now = datetime.now().isoformat()
     for doc in documents:
+        if not doc.get("file_hash"):
+            raise sqlite3.IntegrityError("NOT NULL constraint failed: documents.file_hash")
+        if not doc.get("filename"):
+            raise sqlite3.IntegrityError("NOT NULL constraint failed: documents.filename")
         formatted_docs.append(
             (
                 doc.get("filename"),
@@ -371,17 +381,19 @@ def add_documents_bulk(documents: list) -> int:
                 doc.get("pdf_creation_date"),
                 doc.get("pdf_title"),
                 doc.get("tags"),
+                doc.get("detected_language"),
             )
         )
 
     success_count = 0
     with _connect() as conn:
         try:
+            total_before = conn.total_changes
             conn.executemany(
-                "INSERT OR IGNORE INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT OR IGNORE INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, tags, detected_language) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 formatted_docs,
             )
-            success_count = conn.execute("SELECT changes()").fetchone()[0]
+            success_count = conn.total_changes - total_before
             conn.commit()
         except sqlite3.Error as e:
             conn.rollback()
