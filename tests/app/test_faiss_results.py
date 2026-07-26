@@ -2,10 +2,8 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from app.components.faiss_results import (
-    RESULT_COLUMNS,
-    faiss_results_dataframe,
-)
+from app.components.faiss_results import (RESULT_COLUMNS,
+                                          faiss_results_dataframe)
 
 
 @dataclass

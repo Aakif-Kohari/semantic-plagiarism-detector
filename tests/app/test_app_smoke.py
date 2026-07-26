@@ -3,15 +3,14 @@ import os
 import sys
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
 from reportlab.pdfgen import canvas
 from streamlit.testing.v1 import AppTest
 
-
 # Mock streamlit_tour globally during test import to avoid StreamlitAPIException
 sys.modules["streamlit_tour"] = MagicMock()
 from tests.conftest import MockDataFactory
-
 
 # Paths to stale artifacts that can pollute test runs
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -47,14 +46,11 @@ def generate_pdf(text: str) -> bytes:
     return buf.getvalue()
 
 
-
 def mock_embed_chunks(chunks, batch_size=64):
     if not chunks:
         return np.array([])
     val = 1.0 / (384**0.5)
     return np.full((len(chunks), 384), val, dtype="float32")
-
-
 
 
 @pytest.fixture(autouse=True)
@@ -87,13 +83,10 @@ def clean_smoke_test_env():
     "src.core.embedding_model.get_embedding_model_info",
     return_value=("all-MiniLM-L6-v2", 384),
 )
-
-@patch("src.core.embedding_model.embed_chunks", side_effect=mock_embed_chunks)
-def test_app_smoke(mock_embed, mock_model_info, mock_webhook, mock_ai_detector):
 @patch(
     "src.core.embedding_model.embed_chunks", side_effect=MockDataFactory.embed_chunks
 )
-def test_app_smoke(mock_embed, mock_model_info, mock_webhook):
+def test_app_smoke(mock_embed, mock_model_info, mock_webhook, mock_ai_detector):
     # Clean up stale artifacts from prior test runs
 
     _cleanup_stale_artifacts()
@@ -166,4 +159,3 @@ def test_app_smoke(mock_embed, mock_model_info, mock_webhook):
 
     finally:
         _cleanup_stale_artifacts()
-        

@@ -1,9 +1,11 @@
 import os
 import time
-import pytest
-import threading
 from concurrent.futures import ThreadPoolExecutor
-from src.core.concurrency import FAISSLock, faiss_write_lock, ConcurrencyTimeoutError
+
+import pytest
+
+from src.core.concurrency import (ConcurrencyTimeoutError, FAISSLock,
+                                  faiss_write_lock)
 
 # ---------------------------------------------------------------------------
 # Test Locking Mechanics
