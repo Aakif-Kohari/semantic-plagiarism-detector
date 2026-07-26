@@ -741,7 +741,19 @@ with st.sidebar:
                 if not doc_filter or doc_filter.lower() in str(d["filename"]).lower()
             ]
             st.write(f"**{len(filtered_docs)}** documents matching")
-            for doc in filtered_docs:
+            
+            items_per_page = 20
+            total_pages = max(1, (len(filtered_docs) - 1) // items_per_page + 1)
+            
+            current_page = st.session_state.get("sidebar_doc_page", 1)
+            if current_page > total_pages:
+                current_page = total_pages
+                st.session_state.sidebar_doc_page = current_page
+                
+            start_idx = (current_page - 1) * items_per_page
+            end_idx = start_idx + items_per_page
+            
+            for doc in filtered_docs[start_idx:end_idx]:
                 st.markdown('<div class="doc-row">', unsafe_allow_html=True)
                 col1, col2 = st.columns([3, 1])
                 with col1:
@@ -762,6 +774,19 @@ with st.sidebar:
                 with col2:
                     if st.button("🗑️", key=f"del_{doc['filename']}"):
                         st.session_state._pending_delete = doc["filename"]
+                        st.rerun()
+
+            if total_pages > 1:
+                p_col1, p_col2, p_col3 = st.columns([1, 2, 1])
+                with p_col1:
+                    if st.button("Prev", disabled=(current_page == 1), key="prev_doc_page"):
+                        st.session_state.sidebar_doc_page = current_page - 1
+                        st.rerun()
+                with p_col2:
+                    st.markdown(f"<div style='text-align: center; margin-top: 5px;'><small>Page {current_page}/{total_pages}</small></div>", unsafe_allow_html=True)
+                with p_col3:
+                    if st.button("Next", disabled=(current_page == total_pages), key="next_doc_page"):
+                        st.session_state.sidebar_doc_page = current_page + 1
                         st.rerun()
 
             pending = st.session_state.get("_pending_delete")
@@ -2691,19 +2716,22 @@ if not st.session_state.authenticated:
             st.pyplot(heatmap_fig, use_container_width=True)
 
             buf = _io.BytesIO()
-            heatmap_fig.savefig(
-                buf,
-                format="png",
-                dpi=150,
-                bbox_inches="tight",
-            )
+            heatmap_fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
             buf.seek(0)
-
             st.download_button(
                 "⬇️ Download Heatmap PNG",
                 buf,
                 "heatmap.png",
                 "image/png",
+            )
+            svg_buf = _io.StringIO()
+            heatmap_fig.savefig(svg_buf, format="svg", bbox_inches="tight")
+            buf.seek(0)
+            st.download_button(
+                "⬇️ Export Heatmap SVG",
+                svg_buf.getvalue(),
+                "heatmap.svg",
+                "image/svg+xml",
             )
 
             st.divider()
@@ -3330,6 +3358,19 @@ if not st.session_state.authenticated:
                     del st.query_params["threshold"]
                 set_theme("Light")
                 st.success("✅ Settings reset to defaults!")
+            
+            st.markdown("")
+            if st.button(
+                "🛡️ Check Database Integrity",
+                key="check_db_integrity_button",
+                use_container_width=True,
+            ):
+                from src.db.corpus_db import check_database_integrity
+                results = check_database_integrity()
+                if results and all(r.lower() == "ok" for r in results):
+                    st.toast("✅ Database integrity check passed (healthy).")
+                else:
+                    st.error(f"🚨 Database integrity check failed: {results}")
                 st.rerun()
 
             st.markdown("---")

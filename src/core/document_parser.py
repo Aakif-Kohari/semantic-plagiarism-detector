@@ -14,14 +14,8 @@ from pathlib import Path
 from typing import BinaryIO, Dict, List, Union
 from urllib.parse import urlparse
 
-import defusedxml.lxml
-
-if hasattr(defusedxml.lxml, "monkey_patch"):
-    defusedxml.lxml.monkey_patch()
-
-
-
 import docx
+
 import pdfplumber
 from langdetect import LangDetectException, detect
 from striprtf.striprtf import rtf_to_text
