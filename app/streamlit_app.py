@@ -3,26 +3,21 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from src.core.ai_detector import detect_documents_ai_probability
-from src.core.embedding_model import embed_documents
-from src.core.text_chunking import chunk_documents
-
 # Fix Streamlit import paths by pointing to project root
 FILE_PATH = Path(__file__).resolve()
-ROOT_DIR = FILE_PATH.parent.parent  # Points to semantic-plagiarism-detector/
+ROOT_DIR = FILE_PATH.parent.parent
 
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from sklearn.metrics.pairwise import cosine_similarity
-from src.core.text_chunking import chunk_documents
-from src.core.embedding_model import embed_documents
+
 from src.core.ai_detector import detect_documents_ai_probability
+from src.core.embedding_model import embed_documents
+from src.core.text_chunking import chunk_documents
 
 import base64
 import html
-
-# Standard / Third-party imports
 import time
 
 import _io
@@ -38,10 +33,6 @@ import streamlit as st
 from app.components.faiss_results import faiss_results_dataframe
 from src.security.metadata_stripper import strip_exif_metadata
 from src.utils.filename import sanitize_filename, unique_filename
-
-_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
 
 from typing import Any
 
