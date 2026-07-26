@@ -446,12 +446,49 @@ def generate_plagiarism_report(
             )
             story.append(pair_header)
 
-            wrapped_a = wrap_text(chunk_a, max_chars=500)
-            wrapped_b = wrap_text(chunk_b, max_chars=500)
+            # Side-by-side comparison
+            truncated_a = wrap_text(chunk_a, max_chars=500)
+            truncated_b = wrap_text(chunk_b, max_chars=500)
+
+            # Compare and highlight differences
+            from src.utils.diff_highlighter import highlight_overlap
+            hl_a, hl_b = highlight_overlap(truncated_a, truncated_b)
+
+            backcolor_hex = "#FEF08A" if not dark_mode else "#854D0E"
+            textcolor_hex = "#1E293B" if not dark_mode else "#FFFFFF"
+            mark_start = "<mark style='background-color: rgba(250, 204, 21, 0.3); color: inherit; padding: 1px 3px; border-radius: 3px;'>"
+
+            hl_a = hl_a.replace(mark_start, f"<font backcolor='{backcolor_hex}' color='{textcolor_hex}'>").replace("</mark>", "</font>")
+            hl_b = hl_b.replace(mark_start, f"<font backcolor='{backcolor_hex}' color='{textcolor_hex}'>").replace("</mark>", "</font>")
+
+            for char in ["*", "_", "~", "`", "#", "[", "]", "(", ")"]:
+                hl_a = hl_a.replace(f"\\{char}", char)
+                hl_b = hl_b.replace(f"\\{char}", char)
+
+            cell_header_style = ParagraphStyle(
+                f"ComparisonCellHeader_{rank}",
+                fontName="Helvetica-Bold",
+                fontSize=9,
+                leading=12,
+                textColor=HexColor("#FFFFFF") if dark_mode else HexColor("#111827"),
+            )
+            cell_body_style = ParagraphStyle(
+                f"ComparisonCellBody_{rank}",
+                fontName="Helvetica",
+                fontSize=9,
+                leading=12,
+                textColor=HexColor("#FFFFFF") if dark_mode else HexColor("#31333f"),
+            )
 
             pair_data = [
-                [f"<b>From {truncate_filename(doc_a, 25)}:</b>", f"<b>From {truncate_filename(doc_b, 25)}:</b>"],
-                [wrapped_a, wrapped_b],
+                [
+                    Paragraph(f"<b>From {doc_a}:</b>", cell_header_style),
+                    Paragraph(f"<b>From {doc_b}:</b>", cell_header_style),
+                ],
+                [
+                    Paragraph(hl_a, cell_body_style),
+                    Paragraph(hl_b, cell_body_style),
+                ],
             ]
 
             pair_table = Table(
