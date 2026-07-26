@@ -6,7 +6,7 @@ import sqlite3
 
 from .common import column_exists, run_migrations
 
-AUTH_SCHEMA_VERSION = 7
+AUTH_SCHEMA_VERSION = 8
 
 
 def migration_001_create_users(
@@ -95,6 +95,35 @@ def migration_007_add_theme_preference(
         )
 
 
+def migration_008_create_security_audit_log(
+    connection: sqlite3.Connection,
+) -> None:
+    """Create the security_audit_log table for recording security events."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS security_audit_log (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type TEXT    NOT NULL,
+            username   TEXT    NOT NULL,
+            timestamp  TEXT    NOT NULL,
+            details    TEXT    DEFAULT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_audit_log_username
+        ON security_audit_log(username)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_audit_log_event_type
+        ON security_audit_log(event_type)
+        """
+    )
+
+
 AUTH_MIGRATIONS = {
     1: migration_001_create_users,
     2: migration_002_add_onboarding_state,
@@ -103,6 +132,7 @@ AUTH_MIGRATIONS = {
     5: migration_005_add_preferences,
     6: migration_006_add_active_flag,
     7: migration_007_add_theme_preference,
+    8: migration_008_create_security_audit_log,
 }
 
 
@@ -115,3 +145,4 @@ def migrate_auth_database(
         migrations=AUTH_MIGRATIONS,
         target_version=AUTH_SCHEMA_VERSION,
     )
+
