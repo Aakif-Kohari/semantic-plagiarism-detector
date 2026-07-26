@@ -17,6 +17,13 @@ from src.core.embedding_model import embed_documents
 from src.core.text_chunking import chunk_documents
 
 import base64
+
+
+import datetime
+import io as _io
+import os
+
+
 import html
 # Standard / Third-party imports
 import time
@@ -61,6 +68,59 @@ if missing_env_vars:
         "Please configure them in your .env file.",
         ", ".join(missing_env_vars),
     )
+
+
+from app.theme import (
+    empty_state_html,
+    get_colors,
+    get_theme_name,
+    inject_css,
+    set_theme,
+)
+from src.core.ai_detector import detect_documents_ai_probability
+from src.core.document_parser import (
+    DEFAULT_OCR_DPI,
+    DEFAULT_OCR_LANGUAGE,
+    SUPPORTED_OCR_LANGUAGES,
+    extract_text,
+    prepare_text_for_embedding,
+)
+from src.core.embedding_model import embed_documents
+from src.core.faiss_index import (
+    build_index,
+    build_index_from_matrix,
+    load_index,
+    load_or_rebuild_index,
+    search_similar_chunks,
+)
+from src.core.similarity import (
+    PLAGIARISM_THRESHOLD,
+    document_similarity_matrix,
+    find_most_similar_chunks,
+    flag_plagiarism,
+)
+from src.core.text_chunking import chunk_documents
+from src.core.webhook import send_plagiarism_alert
+from src.db import (
+    get_all_embeddings,
+    get_chunk_registry,
+    get_documents_by_class,
+    get_unique_class_sections,
+    init_corpus_db,
+)
+from src.db.auth import add_user, get_all_users, get_user_role, init_db, verify_user
+
+from src.utils.pdf_report import highlight_pdf_matches
+
+from src.utils.pdf_report import highlight_pdf_matches, truncate_filename
+
+from src.utils.redis_cache import (
+    cache_session_state,
+    clear_session,
+    get_analysis_results,
+    get_faiss_index,
+    get_session_state,
+)
 
 
 from app.css_constants import (CLASS_CLEAR_ALL_CONTAINER, CLASS_SKELETON,
@@ -128,6 +188,7 @@ from src.utils.redis_cache import (cache_session_state, clear_session,
                                    get_session_state, get_upload_count,
                                    increment_upload_count,
                                    is_upload_rate_limited)
+
 from src.utils.warning_list import render_warning_controls
 from src.visualization.analytics import (plot_document_sizes,
                                          plot_high_severity_trends,
@@ -149,9 +210,18 @@ except Exception:
     from src.utils.json_export import export_similarity_matrix_to_json
 except ImportError:
 
+    from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore[import-untyped,reportMissingImports]
+
+
+
+    from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore[import-untyped,reportMissingImports]
+
+
     from utils.excel_export import \
         export_similarity_matrix_to_excel  # type: ignore
     from utils.json_export import export_similarity_matrix_to_json
+
+
 
 
 # Initialize corpus database
@@ -461,7 +531,7 @@ if not st.session_state.get("authenticated", False):
 
     with st.form("login_form"):
         username = st.text_input("Username", value="admin")
-        password = st.text_input("Password", type="password", value="admin")
+        password = st.text_input("Password", type="password", value="Admin123!")
         login_submitted = st.form_submit_button("Log In", use_container_width=True)
 
         if login_submitted:
@@ -519,7 +589,15 @@ if not st.session_state.get("authenticated", False):
                     record_failed_login(username)
                     from src.errors import AUTH_INVALID_CREDENTIALS
 
+
+                st.error("Invalid username or password.")
+    st.stop()
+    st.error("Invalid username or password. Try admin / Admin123!")
+    st.markdown("</div>", unsafe_allow_html=True)
+    st.stop()
+
                     st.error(f"🚨 {AUTH_INVALID_CREDENTIALS}")
+
 
     # ── SSO Sign-In Options ──────────────────────────────────────────────────
     st.markdown("---")
@@ -676,6 +754,12 @@ with theme_col:
         st.rerun()
 
 
+
+
+
+
+# ── Sidebar (ROLE RESTRICTED Settings) ────────────────────────────────────────
+
 # ── Sidebar (ROLE RESTRICTED Settings & i18n) ─────────────────────────────────
 
 
@@ -693,6 +777,7 @@ def save_preferences_callback():
 
         theme_val = st.session_state.get("theme_selector", "Light")
         set_user_theme(st.session_state.username, theme_val)
+
 
 with st.sidebar:
     st.markdown(f"👤 Logged in as **{st.session_state.get('username', '')}**")
@@ -842,6 +927,39 @@ with st.sidebar:
                             )
                             st.rerun()
 
+
+        # ── Date Filter Range Selector (#181) ─────────────────────────────────
+        st.markdown("### 📅 Date Filter")
+        today = datetime.date.today()
+        seven_days_ago = today - datetime.timedelta(days=7)
+        date_range = st.date_input(
+            "Filter Documents by Upload Date",
+            value=(seven_days_ago, today),
+            key="document_date_filter",
+            help="Filter documents by file modification date before processing.",
+        )
+
+        # ── Customizable Chunk Size & Overlap Sliders (#153) ─────────────────
+        st.markdown("### ✂️ Chunking Settings")
+        chunk_size = st.slider(
+            "Chunk Size (characters)",
+            200,
+            2000,
+            value=500,
+            step=50,
+            help="Target character length for text chunks during embedding.",
+            key="chunk_size_slider",
+        )
+        chunk_overlap = st.slider(
+            "Chunk Overlap (characters)",
+            0,
+            500,
+            value=50,
+            step=10,
+            help="Character overlap between consecutive chunks to preserve contextual boundary.",
+            key="chunk_overlap_slider",
+        )
+
         # ── Generate Mock Data (Issue #255) ───────────────────────────────────
         # Hidden developer utility: generates 5 fake essays via Faker so the
         # app is immediately usable after cloning without manual PDF uploads.
@@ -886,6 +1004,7 @@ with st.sidebar:
                                 "chunk_overlap_slider", 50
                             ),
                         )
+
 
                     added = result["essays"]
                     skipped = result["skipped"]
@@ -934,6 +1053,7 @@ with st.sidebar:
         chunk_overlap = 50
         ocr_language = DEFAULT_OCR_LANGUAGE
         ocr_dpi = DEFAULT_OCR_DPI
+        date_range = None
 
     st.markdown("---")
     unique_classes = ["All Classes"] + get_unique_class_sections()
@@ -1076,6 +1196,20 @@ else:
     if "analysis_results" not in st.session_state:
         st.session_state.analysis_results = None
 
+
+        cached_results = get_analysis_results(f"{SESSION_ID}:current")
+        if cached_results is not None:
+            st.session_state.analysis_results = cached_results
+
+    if "analysis_file_signature" not in st.session_state:
+        st.session_state.analysis_file_signature = None
+
+        cached_signature = get_session_state(SESSION_ID, "analysis_file_signature")
+        if cached_signature is not None:
+            st.session_state.analysis_file_signature = cached_signature
+
+
+
     # Load or initialize FAISS index
     if os.path.exists(_INDEX_PATH):
         faiss_index = load_index(_INDEX_PATH)
@@ -1215,6 +1349,8 @@ if user_role != "admin":
                         st.success(
                             f"✅ Found **{len(results)}** potentially similar passages."
                         )
+
+
 
                         doc_id_map = {}
                         anon_counter = 1
@@ -1400,6 +1536,7 @@ else:
     if "analysis_file_signature" not in st.session_state:
         st.session_state.analysis_file_signature = None
 
+
         cached_signature = get_session_state(SESSION_ID, "analysis_file_signature")
         if cached_signature is not None:
             st.session_state.analysis_file_signature = cached_signature
@@ -1408,13 +1545,20 @@ else:
     if "failed_documents" not in st.session_state:
         st.session_state.failed_documents = {}
 
+    # 1. LOCAL FILE UPLOADER
+
+
+    if "failed_documents" not in st.session_state:
+        st.session_state.failed_documents = {}
+
 
     # 1. LOCAL FILE UPLOADER (Dynamic Title Translation)
+
     uploaded_files = st.file_uploader(
         get_text("upload_title", lang=lang_code),
         type=["pdf", "docx", "doc", "txt", "zip", "csv", "png", "jpg", "jpeg"],
         accept_multiple_files=True,
-        key="file_uploader",
+        key="file_uploader_admin",
     )
 
     if uploaded_files:
@@ -1628,6 +1772,12 @@ if not st.session_state.authenticated:
     except ImportError:
         bulk_download_drive_folder = None
 
+
+                        if downloaded_dict:
+                            st.session_state.drive_files_dict.update(downloaded_dict)
+                            st.success(
+                                f"✅ Imported {len(downloaded_names)} files: {', '.join([truncate_filename(n, 25) for n in downloaded_names])}"
+
     if "drive_files_dict" not in st.session_state:
         st.session_state.drive_files_dict = {}
 
@@ -1657,7 +1807,7 @@ if not st.session_state.authenticated:
                                         drive_api_key.strip() if drive_api_key else None
                                     ),
                                 )
-                            )
+                        )
 
                             if downloaded_dict:
                                 scrubbed_drive = {
@@ -1682,6 +1832,8 @@ if not st.session_state.authenticated:
     MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 10MB limit
     file_bytes_dict = {}
     if uploaded_files:
+        from src.security.mime_validator import validate_mime_type
+
         # Re-initialize to handle zip/csv extraction correctly instead of raw bytes
         file_bytes_dict = {}
         for uploaded_file in uploaded_files:
@@ -1700,22 +1852,32 @@ if not st.session_state.authenticated:
                 )
                 continue
 
+            file_data = uploaded_file.read()
+            uploaded_file.seek(0)
+            if not validate_mime_type(file_data, safe_name):
+                st.error(
+                    f"🚨 **Security Alert:** File **'{safe_name}'** has been rejected. "
+                    "The file content does not match its expected file type (invalid magic byte signature)."
+                )
+                continue
+
             if original_name.lower().endswith(".zip"):
                 try:
                     from src.utils.zip_processor import process_zip_file
 
-                    zip_files = process_zip_file(uploaded_file.read())
+                    zip_files = process_zip_file(file_data)
                     if not zip_files:
                         st.error(
                             f"⚠️ ZIP file '{safe_name}' contains no supported documents (.pdf, .docx, .txt)."
                         )
                     else:
-                        file_bytes_dict.update(
-                            {
-                                name: strip_exif_metadata(data, name)
-                                for name, data in zip_files.items()
-                            }
-                        )
+                        for name, data in zip_files.items():
+                            if not validate_mime_type(data, name):
+                                st.error(
+                                    f"🚨 **Security Alert:** Extracted file **'{name}'** from ZIP archive was rejected due to mismatching magic byte signature."
+                                )
+                            else:
+                                file_bytes_dict[name] = strip_exif_metadata(data, name)
                 except ValueError as ve:
                     st.error(
                         f"⚠️ Failed to process ZIP archive '{safe_name}': {str(ve)}"
@@ -1747,7 +1909,7 @@ if not st.session_state.authenticated:
                         )
             else:
                 file_bytes_dict[safe_name] = strip_exif_metadata(
-                    uploaded_file.read(),
+                    file_data,
                     safe_name,
                 )
             uploaded_file.seek(0)
@@ -1758,6 +1920,8 @@ if not st.session_state.authenticated:
     url_filename = st.session_state.url_filename
 
     if st.session_state.drive_files_dict:
+        from src.security.mime_validator import validate_mime_type
+
         for drive_name, drive_bytes in st.session_state.drive_files_dict.items():
             safe_drive_name = unique_filename(
                 drive_name,
@@ -1768,6 +1932,11 @@ if not st.session_state.authenticated:
                     f"⚠️ Google Drive file **'{safe_drive_name}'** exceeds "
                     f"the maximum size limit of 10MB "
                     f"({len(drive_bytes) / (1024 * 1024):.2f}MB)."
+                )
+            elif not validate_mime_type(drive_bytes, safe_drive_name):
+                st.error(
+                    f"🚨 **Security Alert:** Google Drive file **'{safe_drive_name}'** has been rejected. "
+                    "The file content does not match its expected file type (invalid magic byte signature)."
                 )
             else:
                 file_bytes_dict[safe_drive_name] = drive_bytes
@@ -1822,6 +1991,21 @@ if not st.session_state.authenticated:
                         st.error("Please enter a password.")
         st.stop()
 
+
+    # Apply Date Range Filtering (#181)
+    if date_range and isinstance(date_range, (tuple, list)) and len(date_range) == 2:
+        start_d, end_d = date_range[0], date_range[1]
+        filtered_bytes_dict = {}
+        for fname, bdata in file_bytes_dict.items():
+            mod_date = datetime.date.today()  # Fallback to current date
+            if os.path.exists(fname):
+                mtime = os.path.getmtime(fname)
+                mod_date = datetime.date.fromtimestamp(mtime)
+
+            if start_d <= mod_date <= end_d:
+                filtered_bytes_dict[fname] = bdata
+        file_bytes_dict = filtered_bytes_dict
+
     # ── Display Failed Documents & Retry OCR Button (#183) ───────────────────
     if st.session_state.failed_documents:
         failed_list = list(st.session_state.failed_documents.keys())
@@ -1838,18 +2022,65 @@ if not st.session_state.authenticated:
                 st.session_state.failed_documents = {}
                 st.rerun()
 
+    # ── Re-order Uploaded Files (Issue #608) ──────────────────────────────────
+    if file_bytes_dict:
+        st.markdown("### 🔄 Drag-and-Drop Batch Ordering")
+        st.caption("Drag-and-drop, remove, or select files to change the batch execution sequence.")
+        file_names_list = list(file_bytes_dict.keys())
+        ordered_file_names = st.multiselect(
+            "Select and order files for pipeline execution:",
+            options=file_names_list,
+            default=file_names_list,
+            key="pipeline_file_ordering_multiselect",
+            help="Files will be processed in the exact order selected here.",
+        )
+        # Reconstruct the file bytes dictionary with the chosen order
+        file_bytes_dict = {name: file_bytes_dict[name] for name in ordered_file_names}
+
+
+    # ── Display Failed Documents & Retry OCR Button (#183) ───────────────────
+    if st.session_state.failed_documents:
+        failed_list = list(st.session_state.failed_documents.keys())
+
+    # ── Display Failed Documents & Retry OCR Button (#183 & #319) ─────────────
+    if st.session_state.failed_documents:
+        failed_list = [truncate_filename(fn, 25) for fn in st.session_state.failed_documents.keys()]
+
+        st.warning(
+            f"⚠️ **{len(failed_list)} document(s) failed text extraction/OCR:** "
+            f"`{', '.join(failed_list)}`. This can happen due to transient memory errors."
+        )
+        col_retry, _ = st.columns([1, 3])
+        with col_retry:
+            if st.button("🔄 Retry OCR", key="retry_ocr_button", type="secondary"):
+                for fname, fbytes in st.session_state.failed_documents.items():
+                    file_bytes_dict[fname] = fbytes
+                st.session_state.failed_documents = {}
+                st.rerun()
+
+
     # 4. PIPELINE STOP CHECK
     if len(file_bytes_dict) < 2 and url_text is None:
         if st.session_state.analysis_results is None:
             st.markdown(
                 empty_state_html(
                     "Waiting for Files",
+
+
+                    "Please upload or import from Drive at least 2 PDF, DOCX, or TXT assignments (under 10MB each) to begin.",
+
+
                     "Please upload or import from Drive at least 2 PDF, DOCX, DOC, or TXT assignments (under 10MB each) to begin.",
+
                     "📂",
                 ),
                 unsafe_allow_html=True,
             )
             st.stop()
+
+
+    # ── Metadata Editor Section (#319 Truncated Expanders) ───────────────────
+
 
     st.markdown("### 📝 Set Document Metadata")
     col1, col2 = st.columns(2)
@@ -1866,6 +2097,13 @@ if not st.session_state.authenticated:
 
     metadata_dict = {}
     for filename in file_bytes_dict.keys():
+
+        base_name = os.path.splitext(filename)[0]
+        guessed_name = base_name.replace("_", " ").replace("-", " ").title()
+        truncated_disp_name = truncate_filename(filename, max_len=30)
+
+        with st.expander(f"📄 {truncated_disp_name}", expanded=False):
+
         # Check if this filename is a virtual CSV document
         is_csv_doc = False
         csv_filename_matched = None
@@ -1919,6 +2157,7 @@ if not st.session_state.authenticated:
 
     if url_filename:
         with st.expander(f"🔗 {url_filename}", expanded=True):
+
             student_name = st.text_input(
                 f"Student Name for {url_filename}",
                 value="Web Source",
@@ -1955,6 +2194,8 @@ if not st.session_state.authenticated:
     ):
         raw_texts = {}
 
+
+
         failed_files = {}
 
         for name, data in file_bytes_dict.items():
@@ -1972,6 +2213,8 @@ if not st.session_state.authenticated:
             except Exception:
                 failed_files[name] = data
 
+
+
         failed_files = []
         failure_details = []
 
@@ -1985,6 +2228,7 @@ if not st.session_state.authenticated:
             except OCRDependencyError as exc:
                 failed_files.append(name)
                 failure_details.append(f"{name}: {exc}")
+
 
         if url_text and url_filename:
             raw_texts[url_filename] = url_text
@@ -2080,7 +2324,13 @@ if not st.session_state.authenticated:
     has_enough_files = (len(file_bytes_dict) + (1 if url_text else 0)) >= 2
 
 
+
+
+
     # Run Pipeline if files uploaded
+
+   # Run Pipeline if files uploaded
+
     def compute_pipeline_signature(
         file_bytes_dict: dict,
         ocr_language: str,
@@ -2093,7 +2343,7 @@ if not st.session_state.authenticated:
         import hashlib
 
         h = hashlib.sha256()
-        for name in sorted(file_bytes_dict.keys()):
+        for name in file_bytes_dict.keys():
             data = file_bytes_dict[name]
             h.update(name.encode("utf-8", errors="ignore"))
             h.update(data)
@@ -2562,6 +2812,15 @@ if not st.session_state.authenticated:
                 st.info(
                     "No matching vector chunks found above threshold."
                 )
+
+                if q_results:
+                    for rec, score in q_results:
+                        disp_doc_name = truncate_filename(rec.doc_name, 30)
+                        st.markdown(
+                            f"**{disp_doc_name}** (Chunk #{rec.chunk_index}) — Similarity: `{score:.1%}`"
+                        )
+                        st.caption(rec.chunk_text)
+
             else:
                 min_sim, max_sim = st.slider(
                     "Similarity Range:",
@@ -2632,12 +2891,13 @@ if not st.session_state.authenticated:
                         },
                         key="faiss_search_results_table",
                     )
+
                 else:
                     st.info(
                         "No matching vector chunks found within the selected similarity range."
                     )
 
-    # ══ TAB 3: MATRIX ═════════════════════════════════════════════════════════
+    # ══ TAB 3: MATRIX (#319 Truncated Row/Col Headers) ════════════════════════
     with tab_matrix:
         st.markdown("🏠 Home > Dashboard > **Similarity Matrix**")
         st.subheader("📋 Similarity Matrix")
@@ -2663,7 +2923,13 @@ if not st.session_state.authenticated:
                     return "background-color:#ffa500;color:white;font-weight:bold;"
                 return ""
 
-            styled_df = active_sim_df.style.format("{:.4f}").map(_highlight)
+            # Truncate row labels and column names to prevent UI table layout overflow
+            truncated_sim_df = active_sim_df.rename(
+                index=lambda x: truncate_filename(str(x), 28),
+                columns=lambda x: truncate_filename(str(x), 28),
+            )
+
+            styled_df = truncated_sim_df.style.format("{:.4f}").map(_highlight)
             st.dataframe(styled_df, use_container_width=True)
 
             # Export options row
@@ -2713,6 +2979,9 @@ if not st.session_state.authenticated:
             cmap=heatmap_cmap,  # Dynamic colormap support (#186)
         )
         st.pyplot(heatmap_fig, use_container_width=True)
+
+
+    # ══ TAB 5: PAIR DRILL-DOWN (#145 & #319 Included) ════════════════════════
 
         # ══ TAB 5: PAIR DRILL-DOWN ══════════════════════════════════════════════════
 
@@ -2860,9 +3129,29 @@ if not st.session_state.authenticated:
 
     # ══ TAB 5: PAIR DRILL-DOWN ════════════════════════════════════════════════
 
+
     with tab_drill:
         st.markdown("🏠 Home > Dashboard > **Pair Drill-Down**")
         st.subheader("🔬 Pair Drill-Down")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            doc_a = st.selectbox(
+                "Document A",
+                doc_names,
+                index=0,
+                format_func=lambda x: truncate_filename(x, 35),
+                key="da",
+            )
+        with c2:
+            remaining_docs = [d for d in doc_names if d != doc_a]
+            doc_b = st.selectbox(
+                "Document B",
+                remaining_docs,
+                index=0,
+                format_func=lambda x: truncate_filename(x, 35),
+                key="db",
+
         st.caption("Inspect chunk-level similarity between any two documents.")
 
         if "expand_all_drill" not in st.session_state:
@@ -2882,6 +3171,7 @@ if not st.session_state.authenticated:
                     "📂",
                 ),
                 unsafe_allow_html=True,
+
             )
         elif len(active_sim_df) < 2:
             from src.errors import UI_NEED_MIN_DOCUMENTS
@@ -3132,6 +3422,22 @@ if not st.session_state.authenticated:
                 "⚠️ Access Denied: User Management is restricted to administrators."
             )
 
+            for rank, (ca, cb, sim) in enumerate(top_pairs, 1):
+                with st.expander(f"#{rank} — Similarity: {sim:.1%}"):
+                    st.write(f"**{truncate_filename(doc_a, 30)}:** {ca}")
+                    st.write(f"**{truncate_filename(doc_b, 30)}:** {cb}")
+
+        # --- In-App PDF Preview with Highlighted Matches (#145) ---
+        with drill_tab_viewer:
+            st.subheader("📄 In-App PDF Preview with Highlighted Matches")
+            selected_view_doc = st.radio(
+                "Select Document to Preview:",
+                options=[doc_a, doc_b],
+                format_func=lambda x: truncate_filename(x, 35),
+                horizontal=True,
+                key="doc_viewer_select",
+
+
         st.write("---")
         st.subheader("🔐 Two-Factor Authentication (2FA)")
 
@@ -3141,6 +3447,7 @@ if not st.session_state.authenticated:
         if enabled:
             st.success(
                 "✔️ Two-Factor Authentication is currently **enabled** for your account."
+
             )
             with st.expander("Deactivate Two-Factor Authentication", expanded=False):
                 with st.form("disable_2fa_form"):
@@ -3619,6 +3926,42 @@ if not st.session_state.authenticated:
                     ),
                 )
 
+
+    # ══ TAB 6: USERS ══════════════════════════════════════════════════════════
+    with tab_users:
+        st.subheader("👥 User Management")
+        
+        # User Creation Form with Password Complexity Enforcement (#225)
+        with st.expander("➕ Create New User", expanded=False):
+            with st.form("create_user_form"):
+                new_username = st.text_input("New Username", placeholder="e.g. jdoe")
+                new_password = st.text_input(
+                    "New Password",
+                    type="password",
+                    placeholder="Must meet complexity requirements...",
+                    help="🔒 Password Policy: At least 8 characters long, containing 1 uppercase letter, 1 number, and 1 special character.",
+                )
+                new_role = st.selectbox("Role", ["teacher", "admin"], index=0)
+                submit_create_user = st.form_submit_button(
+                    "Create Account", use_container_width=True
+                )
+
+                if submit_create_user:
+                    try:
+                        add_user(
+                            username=new_username,
+                            password=new_password,
+                            role=new_role,
+                        )
+                        st.success(f"✅ User `{new_username.strip().lower()}` created successfully!")
+                        st.rerun()
+                    except ValueError as err:
+                        st.error(f"❌ {str(err)}")
+
+        users = get_all_users()
+        if users:
+            st.dataframe(pd.DataFrame(users), use_container_width=True)
+
             st.markdown("")
             if st.button(
                 "🔍 Ping Redis", key="ping_redis_button", use_container_width=True
@@ -3642,6 +3985,7 @@ if not st.session_state.authenticated:
                 TelemetryService.clear_telemetry_data()
                 st.success("✅ Telemetry cache cleared successfully!")
                 st.rerun()
+
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.divider()
