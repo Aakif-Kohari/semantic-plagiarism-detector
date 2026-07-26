@@ -15,6 +15,7 @@ from typing import BinaryIO, Dict, List, Union
 from urllib.parse import urlparse
 
 import docx
+
 import pdfplumber
 from langdetect import LangDetectException, detect
 from striprtf.striprtf import rtf_to_text
