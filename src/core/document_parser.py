@@ -16,7 +16,10 @@ from urllib.parse import urlparse
 
 import defusedxml.lxml
 
-defusedxml.lxml.monkey_patch()
+if hasattr(defusedxml.lxml, "monkey_patch"):
+    defusedxml.lxml.monkey_patch()
+
+
 
 import docx
 import pdfplumber
