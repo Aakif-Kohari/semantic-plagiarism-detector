@@ -3,7 +3,8 @@ import json
 import logging
 import zipfile
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
+import numpy as np
 
 from src.core.similarity import find_most_similar_chunks
 from src.utils.pdf_report import generate_plagiarism_report
@@ -20,7 +21,6 @@ def generate_bulk_reports_zip(
     flags: List[Dict],
     chunked_docs: Optional[Dict[str, List[str]]] = None,
     embeddings: Optional[Dict[str, "np.ndarray"]] = None,
-    progress_bar: Optional[Any] = None,
 ) -> bytes:
     """Generate a ZIP file containing PDF reports for all flagged pairs.
 
@@ -38,8 +38,6 @@ def generate_bulk_reports_zip(
         Optional mapping of document name → list of text chunks.
     embeddings:
         Optional mapping of document name → NumPy embedding array.
-    progress_bar:
-        Optional Streamlit progress bar component.
 
     Returns
     -------
@@ -47,10 +45,6 @@ def generate_bulk_reports_zip(
         In-memory ZIP file contents.
     """
     memory_file = io.BytesIO()
-    total_files = len(flags)
-
-    if progress_bar is not None and total_files > 0:
-        progress_bar.progress(0.0, text="Generating ZIP reports...")
 
     with zipfile.ZipFile(memory_file, "w", zipfile.ZIP_DEFLATED) as zf:
         for idx, flag in enumerate(flags):
@@ -106,11 +100,5 @@ def generate_bulk_reports_zip(
                     f"report_{safe_a}_{safe_b}.json",
                     json.dumps(fallback, indent=2),
                 )
-
-            if progress_bar is not None and total_files > 0:
-                progress_bar.progress((idx + 1) / total_files, text=f"Processing report {idx + 1} of {total_files}...")
-
-    if progress_bar is not None and total_files > 0:
-        progress_bar.progress(1.0, text="ZIP archive ready!")
 
     return memory_file.getvalue()

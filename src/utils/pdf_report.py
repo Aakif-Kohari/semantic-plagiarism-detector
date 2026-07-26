@@ -254,8 +254,6 @@ def generate_plagiarism_report(
     )
 
 
-    styles = getSampleStyleSheet()
-
     # Get custom styles
 
     title_style = ParagraphStyle(
@@ -642,7 +640,5 @@ def highlight_pdf_matches(
     # Save highlighted PDF to byte stream
     output_buffer = doc.tobytes()
     doc.close()
-
-    return output_bytes
 
     return output_buffer
