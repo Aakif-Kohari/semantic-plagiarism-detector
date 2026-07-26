@@ -224,8 +224,19 @@ except Exception:
 # collapsed so it doesn't cover the similarity matrix / heatmap. On wider
 # screens it behaves the same as "expanded". See issue #258.
 
-APP_TITLE = get_app_title()
+MAX_RECENT_SEARCHES = 5
 
+
+def _add_recent_search(query: str) -> None:
+    """Store a search query in session state, most-recent-first, capped at 5."""
+    query = query.strip()
+    if not query:
+        return
+
+    recent = st.session_state.get("recent_searches", [])
+    recent = [q for q in recent if q != query]
+    recent.insert(0, query)
+    st.session_state["recent_searches"] = recent[:MAX_RECENT_SEARCHES]
 st.set_page_config(
     page_title=APP_TITLE,
     page_icon="🔍",
@@ -945,14 +956,26 @@ if user_role != "admin":
         "🔒 Note: Direct assignment uploads and detailed breakdown panels are restricted to Administrator access. Your queries are anonymized for privacy."
     )
 
+recent_searches = st.session_state.get("recent_searches", [])
+    if recent_searches:
+        selected_recent = st.selectbox(
+            "🕒 Recent Searches",
+            options=[""] + recent_searches,
+            format_func=lambda q: "Select a recent search..." if q == "" else q,
+            key="recent_search_select_user",
+        )
+        if selected_recent:
+            st.session_state["user_query_text"] = selected_recent
+
     query_text = st.text_area(
         "Paste a text snippet to check against index:",
         height=150,
         placeholder="Paste a paragraph here to check for plagiarism...",
+        key="user_query_text",
     )
 
     if st.button("🔍 Run Quick Verification", key="user_query") and query_text.strip():
-        # Load existing index and registry from database
+        _add_recent_search(query_text)        # Load existing index and registry from database
         from src.core.faiss_index import build_index_from_matrix
         from src.db.corpus_db import get_all_embeddings, get_chunk_registry
 
@@ -1145,14 +1168,26 @@ if user_role != "admin":
     st.info(
         "🔒 Note: Direct assignment uploads are restricted to Administrator access."
     )
+recent_searches = st.session_state.get("recent_searches", [])
+    if recent_searches:
+        selected_recent = st.selectbox(
+            "🕒 Recent Searches",
+            options=[""] + recent_searches,
+            format_func=lambda q: "Select a recent search..." if q == "" else q,
+            key="recent_search_select_admin",
+        )
+        if selected_recent:
+            st.session_state["admin_query_text"] = selected_recent
+
     query_text = st.text_area(
-        "Search Query Text:",
-        placeholder="Paste document content here to search for matching plagiarism...",
-        height=200,
+        "Paste a text snippet to check against index:",
+        height=150,
+        placeholder="Paste a paragraph here to check for plagiarism...",
+        key="admin_query_text",
     )
 
     if st.button("🔍 Run Quick Verification", key="user_query") and query_text.strip():
-
+        _add_recent_search(query_text)
 
 
         with st.spinner("Loading index and searching..."):
