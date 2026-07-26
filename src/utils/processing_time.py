@@ -3,13 +3,31 @@
 from __future__ import annotations
 
 import math
+import time
 from collections.abc import Iterable
+from contextlib import contextmanager
 from numbers import Real
 from typing import Any
 
-
 BYTES_PER_MB = 1024 * 1024
 DEFAULT_SECONDS_PER_MB = 2.0
+
+
+class ProcessingTimer:
+    def __init__(self):
+        self.durations = []
+        self._active_timers = 0
+
+    @contextmanager
+    def time_block(self):
+        start = time.perf_counter()
+        self._active_timers += 1
+        try:
+            yield self
+        finally:
+            end = time.perf_counter()
+            self._active_timers -= 1
+            self.durations.append(end - start)
 
 
 def _validate_non_negative_number(name: str, value: Real) -> float:

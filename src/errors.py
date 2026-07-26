@@ -29,7 +29,7 @@ ZIP_ENCRYPTED = "Password-protected or encrypted ZIP files are not supported."
 ZIP_ENTRY_CORRUPTED = "Corrupted or protected entry: {filename}"
 ZIP_INVALID = "Invalid or corrupted ZIP archive."
 ZIP_NO_SUPPORTED_DOCS = (
-    "⚠️ ZIP file '{filename}' contains no supported documents (.pdf, .docx, .txt)."
+    "⚠️ ZIP file '{filename}' contains no supported documents (.pdf, .docx, .doc, .txt)."
 )
 ZIP_FAILED_TO_PROCESS = "⚠️ Failed to process ZIP archive '{filename}': {error}"
 
@@ -48,6 +48,8 @@ OCR_LANGUAGE_UNSUPPORTED = (
 OCR_DEPENDENCIES_MISSING = "OCR dependencies are missing. Install pytesseract, PyMuPDF and Pillow using: python -m pip install pytesseract pymupdf pillow"
 OCR_TESSERACT_NOT_FOUND = "Tesseract OCR was not found. Install Tesseract and either add it to PATH or set TESSERACT_CMD to tesseract.exe."
 BADGE_PIL_REQUIRED = "PIL/Pillow is required for PNG badge generation"
+PARSER_BATCH_LIMIT_EXCEEDED = "Batch parsing limit exceeded. Maximum allowed files per batch is {limit} documents."
+
 
 # Similarity & FAISS Errors
 SIM_BATCH_SIZE_INVALID = "batch_size must be an integer"
@@ -83,9 +85,9 @@ UI_INDEX_LOAD_FAILED = "Error loading index: {error}"
 UI_PDF_PREVIEW_FAILED = "Unable to render PDF preview: {error}"
 UI_PDF_PREVIEW_RESTRICTED = "PDF Preview is only available for uploaded `.pdf` files."
 UI_UPLOAD_MIN_FILES = "Upload at least 2 files to begin analysis."
-UI_UPLOAD_MIN_DOCS = "Please upload or import from Drive at least 2 PDF, DOCX, or TXT assignments to begin."
+UI_UPLOAD_MIN_DOCS = "Please upload or import from Drive at least 2 PDF, DOCX, DOC, or TXT assignments to begin."
 UI_UPLOAD_MIN_DOCS_ANALYSIS = (
-    "Please upload at least 2 PDF, DOCX, or TXT assignments to begin analysis."
+    "Please upload at least 2 PDF, DOCX, DOC, or TXT assignments to begin analysis."
 )
 UI_COMPUTE_SIMILARITY_MIN_DOCS = (
     "Ensure at least 2 documents are uploaded to compute similarities."
