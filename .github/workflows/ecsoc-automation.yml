@@ -33,13 +33,17 @@ jobs:
 
             const claimer = context.payload.comment.user.login;
 
-            // Assign first commenter
-            await github.rest.issues.addAssignees({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: issue.number,
-              assignees: [claimer]
-            });
+            // Assign first commenter (if user is a collaborator)
+            try {
+              await github.rest.issues.addAssignees({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                assignees: [claimer]
+              });
+            } catch (err) {
+              console.log(`Could not assign ${claimer} (user might not be a collaborator):`, err.message);
+            }
 
             // Add ECSoC26 label
             await github.rest.issues.addLabels({
@@ -68,13 +72,17 @@ jobs:
             const pr = context.payload.pull_request;
             const author = pr.user.login;
 
-            // Assign PR author
-            await github.rest.issues.addAssignees({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: pr.number,
-              assignees: [author]
-            });
+            // Assign PR author (if user is a collaborator)
+            try {
+              await github.rest.issues.addAssignees({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                assignees: [author]
+              });
+            } catch (err) {
+              console.log(`Could not assign ${author} (user might not be a collaborator):`, err.message);
+            }
 
             // Add label
             await github.rest.issues.addLabels({
