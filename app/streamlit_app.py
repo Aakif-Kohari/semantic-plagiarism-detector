@@ -21,7 +21,6 @@ from src.core.ai_detector import detect_documents_ai_probability
 
 import base64
 import html
-
 # Standard / Third-party imports
 import time
 
@@ -71,50 +70,26 @@ if missing_env_vars:
     )
 
 
-from app.css_constants import (
-    CLASS_CLEAR_ALL_CONTAINER,
-    CLASS_SKELETON,
-    CLASS_SKELETON_CHART,
-    CLASS_SKELETON_METRIC,
-    CLASS_SKELETON_TABLE,
-    CLASS_SKELETON_TEXT,
-    CLASS_SKELETON_TEXT_SHORT,
-    CLASS_SKELETON_TITLE,
-)
-from app.theme import (
-    back_to_top_html,
-    empty_state_html,
-    get_colors,
-    get_theme_name,
-    inject_css,
-    pipeline_progress_html,
-    set_theme,
-    version_check_widget_html,
-)
+from app.css_constants import (CLASS_CLEAR_ALL_CONTAINER, CLASS_SKELETON,
+                               CLASS_SKELETON_CHART, CLASS_SKELETON_METRIC,
+                               CLASS_SKELETON_TABLE, CLASS_SKELETON_TEXT,
+                               CLASS_SKELETON_TEXT_SHORT, CLASS_SKELETON_TITLE)
+from app.theme import (back_to_top_html, empty_state_html, get_colors,
+                       get_theme_name, inject_css, pipeline_progress_html,
+                       set_theme, version_check_widget_html)
 from src.core.app_config import get_app_title
-from src.core.config import DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD, severity_key
-from src.core.document_parser import (
-    DEFAULT_OCR_DPI,
-    DEFAULT_OCR_LANGUAGE,
-    SUPPORTED_OCR_LANGUAGES,
-    OCRDependencyError,
-    extract_text,
-    prepare_text_for_embedding,
-    remove_ignore_phrases,
-)
-from src.core.faiss_index import (
-    build_index,
-    build_index_from_matrix,
-    load_index,
-    load_or_rebuild_index,
-    save_index,
-    search_similar_chunks,
-)
-from src.core.similarity import (
-    document_similarity_matrix,
-    find_most_similar_chunks,
-    flag_plagiarism,
-)
+from src.core.config import (DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD,
+                             severity_key)
+from src.core.document_parser import (DEFAULT_OCR_DPI, DEFAULT_OCR_LANGUAGE,
+                                      SUPPORTED_OCR_LANGUAGES,
+                                      OCRDependencyError, extract_text,
+                                      prepare_text_for_embedding,
+                                      remove_ignore_phrases)
+from src.core.faiss_index import (build_index, build_index_from_matrix,
+                                  load_index, load_or_rebuild_index,
+                                  save_index, search_similar_chunks)
+from src.core.similarity import (document_similarity_matrix,
+                                 find_most_similar_chunks, flag_plagiarism)
 from src.core.webhook import dispatch_plagiarism_alert
 from src.i18n.translator import _SUPPORTED_LANGUAGES, get_text
 from src.visualization.network_graph import plot_similarity_network
@@ -132,68 +107,36 @@ class OCRFileBatchError(Exception):
 from src.core.export_engine import LMSExportEngine
 from src.core.synchronization import verify_and_repair_index
 from src.core.telemetry import TelemetryService
-from src.db import (
-    clear_all_data,
-    delete_document,
-    delete_tag,
-    get_all_documents,
-    get_all_embeddings,
-    get_all_tags,
-    get_chunk_registry,
-    get_document_word_counts,
-    get_unique_class_sections,
-    init_corpus_db,
-)
-from src.db.auth import (
-    authenticate_user,
-    check_login_rate_limit,
-    clear_login_attempts,
-    disable_2fa,
-    enable_2fa,
-    get_2fa_status,
-    get_all_users,
-    get_tour_completed,
-    get_user_preferences,
-    get_user_role,
-    init_db,
-    is_user_active,
-    record_failed_login,
-    set_tour_completed,
-    set_user_active_status,
-    update_user_preferences,
-    verify_user,
-)
+from src.db import (clear_all_data, delete_document, delete_tag,
+                    get_all_documents, get_all_embeddings, get_all_tags,
+                    get_chunk_registry, get_document_word_counts,
+                    get_unique_class_sections, init_corpus_db)
+from src.db.auth import (authenticate_user, check_login_rate_limit,
+                         clear_login_attempts, disable_2fa, enable_2fa,
+                         get_2fa_status, get_all_users, get_tour_completed,
+                         get_user_preferences, get_user_role, init_db,
+                         is_user_active, record_failed_login,
+                         set_tour_completed, set_user_active_status,
+                         update_user_preferences, verify_user)
 from src.db.database_backup import create_corpus_database_snapshot
 from src.db.incidents import (  # noqa: E402
-    get_all_incidents_above_threshold_for_export,
-    get_high_severity_trends,
-    get_most_plagiarized_documents,
-    sync_flagged_incidents,
-)
+    get_all_incidents_above_threshold_for_export, get_high_severity_trends,
+    get_most_plagiarized_documents, sync_flagged_incidents)
 from src.utils.diff_highlighter import highlight_overlap
 from src.utils.excel_export import export_similarity_matrix_to_excel
 from src.utils.pdf_report import highlight_pdf_matches  # noqa: E402
-from src.utils.processing_time import (
-    estimate_processing_seconds,
-    uploaded_files_total_bytes,
-)
-from src.utils.redis_cache import (
-    cache_session_state,
-    clear_session,
-    get_analysis_results,
-    get_faiss_index,
-    get_session_state,
-    get_upload_count,
-    increment_upload_count,
-    is_upload_rate_limited,
-)
+from src.utils.processing_time import (estimate_processing_seconds,
+                                       uploaded_files_total_bytes)
+from src.utils.redis_cache import (cache_session_state, clear_session,
+                                   get_analysis_results, get_faiss_index,
+                                   get_session_state, get_upload_count,
+                                   increment_upload_count,
+                                   is_upload_rate_limited)
 from src.utils.warning_list import render_warning_controls
-from src.visualization.analytics import (
-    plot_document_sizes,
-    plot_high_severity_trends,
-    plot_most_plagiarized_documents,
-    plot_similarity_distribution,
-)
+from src.visualization.analytics import (plot_document_sizes,
+                                         plot_high_severity_trends,
+                                         plot_most_plagiarized_documents,
+                                         plot_similarity_distribution)
 from src.visualization.heatmap import plot_similarity_heatmap  # noqa: E402
 
 # Safe import for PDF Highlighting
@@ -210,8 +153,8 @@ except Exception:
     from src.utils.json_export import export_similarity_matrix_to_json
 except ImportError:
 
-    from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore[import-untyped,reportMissingImports]
-    from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore
+    from utils.excel_export import \
+        export_similarity_matrix_to_excel  # type: ignore
     from utils.json_export import export_similarity_matrix_to_json
 
 
@@ -798,7 +741,19 @@ with st.sidebar:
                 if not doc_filter or doc_filter.lower() in str(d["filename"]).lower()
             ]
             st.write(f"**{len(filtered_docs)}** documents matching")
-            for doc in filtered_docs:
+            
+            items_per_page = 20
+            total_pages = max(1, (len(filtered_docs) - 1) // items_per_page + 1)
+            
+            current_page = st.session_state.get("sidebar_doc_page", 1)
+            if current_page > total_pages:
+                current_page = total_pages
+                st.session_state.sidebar_doc_page = current_page
+                
+            start_idx = (current_page - 1) * items_per_page
+            end_idx = start_idx + items_per_page
+            
+            for doc in filtered_docs[start_idx:end_idx]:
                 st.markdown('<div class="doc-row">', unsafe_allow_html=True)
                 col1, col2 = st.columns([3, 1])
                 with col1:
@@ -819,6 +774,19 @@ with st.sidebar:
                 with col2:
                     if st.button("🗑️", key=f"del_{doc['filename']}"):
                         st.session_state._pending_delete = doc["filename"]
+                        st.rerun()
+
+            if total_pages > 1:
+                p_col1, p_col2, p_col3 = st.columns([1, 2, 1])
+                with p_col1:
+                    if st.button("Prev", disabled=(current_page == 1), key="prev_doc_page"):
+                        st.session_state.sidebar_doc_page = current_page - 1
+                        st.rerun()
+                with p_col2:
+                    st.markdown(f"<div style='text-align: center; margin-top: 5px;'><small>Page {current_page}/{total_pages}</small></div>", unsafe_allow_html=True)
+                with p_col3:
+                    if st.button("Next", disabled=(current_page == total_pages), key="next_doc_page"):
+                        st.session_state.sidebar_doc_page = current_page + 1
                         st.rerun()
 
             pending = st.session_state.get("_pending_delete")
@@ -892,7 +860,8 @@ with st.sidebar:
                 "stores them in corpus.db, and rebuilds the FAISS index.",
             ):
                 try:
-                    from src.utils.mock_data import generate_mock_data as _gen_mock
+                    from src.utils.mock_data import \
+                        generate_mock_data as _gen_mock
 
                     with st.spinner(
                         "⚗️ Generating mock essays and building FAISS index…"
@@ -965,8 +934,8 @@ with st.sidebar:
 st.title(f"🔍 {APP_TITLE}")
 
 uploaded_files = st.file_uploader(
-    "📂 Upload Assignments (PDF, DOCX, DOC, TXT, ZIP)",
-    type=["pdf", "docx", "doc", "txt", "zip"],
+    "📂 Upload Assignments (PDF, DOCX, DOC, TXT, ZIP, PNG, JPG)",
+    type=["pdf", "docx", "doc", "txt", "zip", "png", "jpg", "jpeg"],
     accept_multiple_files=True,
     key="file_uploader",
 )
@@ -1426,7 +1395,7 @@ else:
     # 1. LOCAL FILE UPLOADER (Dynamic Title Translation)
     uploaded_files = st.file_uploader(
         get_text("upload_title", lang=lang_code),
-        type=["pdf", "docx", "doc", "txt", "zip", "csv"],
+        type=["pdf", "docx", "doc", "txt", "zip", "csv", "png", "jpg", "jpeg"],
         accept_multiple_files=True,
         key="file_uploader",
     )
@@ -2545,10 +2514,10 @@ if not st.session_state.authenticated:
         if st.button("🔍 Run FAISS Search", key="run_faiss_search_btn"):
             if faiss_query.strip() and faiss_index is not None:
                 try:
-                    from src.core.embeddings import generate_embeddings  # type: ignore
-                    from src.core.faiss_indexer import (
-                        search_similar_chunks,  # type: ignore
-                    )
+                    from src.core.embeddings import \
+                        generate_embeddings  # type: ignore
+                    from src.core.faiss_indexer import \
+                        search_similar_chunks  # type: ignore
 
                     q_vec = generate_embeddings([faiss_query.strip()])[0]
                     q_results = search_similar_chunks(
@@ -2747,19 +2716,22 @@ if not st.session_state.authenticated:
             st.pyplot(heatmap_fig, use_container_width=True)
 
             buf = _io.BytesIO()
-            heatmap_fig.savefig(
-                buf,
-                format="png",
-                dpi=150,
-                bbox_inches="tight",
-            )
+            heatmap_fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
             buf.seek(0)
-
             st.download_button(
                 "⬇️ Download Heatmap PNG",
                 buf,
                 "heatmap.png",
                 "image/png",
+            )
+            svg_buf = _io.StringIO()
+            heatmap_fig.savefig(svg_buf, format="svg", bbox_inches="tight")
+            buf.seek(0)
+            st.download_button(
+                "⬇️ Export Heatmap SVG",
+                svg_buf.getvalue(),
+                "heatmap.svg",
+                "image/svg+xml",
             )
 
             st.divider()
@@ -3386,6 +3358,19 @@ if not st.session_state.authenticated:
                     del st.query_params["threshold"]
                 set_theme("Light")
                 st.success("✅ Settings reset to defaults!")
+            
+            st.markdown("")
+            if st.button(
+                "🛡️ Check Database Integrity",
+                key="check_db_integrity_button",
+                use_container_width=True,
+            ):
+                from src.db.corpus_db import check_database_integrity
+                results = check_database_integrity()
+                if results and all(r.lower() == "ok" for r in results):
+                    st.toast("✅ Database integrity check passed (healthy).")
+                else:
+                    st.error(f"🚨 Database integrity check failed: {results}")
                 st.rerun()
 
             st.markdown("---")
@@ -3448,7 +3433,8 @@ st.caption(f"🎓 {APP_TITLE} · Streamlit")
 # ── Version / Update indicator ────────────────────────────────────────────────
 # Import here (deferred) to avoid slowing down the initial module load for
 # users who never reach the footer.
-from src.utils.version_check import APP_VERSION, check_for_update_sync  # noqa: E402
+from src.utils.version_check import (APP_VERSION,  # noqa: E402
+                                     check_for_update_sync)
 
 
 @st.cache_data(ttl=3600)
