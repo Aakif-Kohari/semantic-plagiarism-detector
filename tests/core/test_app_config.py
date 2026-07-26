@@ -1,7 +1,4 @@
-from src.core.app_config import (
-    DEFAULT_APP_TITLE,
-    get_app_title,
-)
+from src.core.app_config import DEFAULT_APP_TITLE, get_app_title
 
 
 def test_app_title_uses_default_when_variable_is_missing(

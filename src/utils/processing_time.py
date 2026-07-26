@@ -7,7 +7,6 @@ from collections.abc import Iterable
 from numbers import Real
 from typing import Any
 
-
 BYTES_PER_MB = 1024 * 1024
 DEFAULT_SECONDS_PER_MB = 2.0
 

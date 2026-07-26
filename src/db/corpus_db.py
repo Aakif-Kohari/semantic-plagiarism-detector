@@ -17,7 +17,8 @@ logger = logging.getLogger(__name__)
 
 import numpy as np
 
-from src.db.migrations import delete_all_if_table_exists, migrate_corpus_database
+from src.db.migrations import (delete_all_if_table_exists,
+                               migrate_corpus_database)
 from src.utils.filename import sanitize_filename
 
 _DB_PATH = os.path.abspath(

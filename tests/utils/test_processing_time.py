@@ -1,12 +1,10 @@
 import pytest
 
-from src.utils.processing_time import (
-    BYTES_PER_MB,
-    estimate_processing_seconds,
-    format_processing_duration,
-    processing_eta_text,
-    uploaded_files_total_bytes,
-)
+from src.utils.processing_time import (BYTES_PER_MB,
+                                       estimate_processing_seconds,
+                                       format_processing_duration,
+                                       processing_eta_text,
+                                       uploaded_files_total_bytes)
 
 
 class UploadedWithSize:
