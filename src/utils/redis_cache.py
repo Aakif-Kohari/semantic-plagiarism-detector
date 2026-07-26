@@ -40,6 +40,7 @@ FAISS_INDEX_TTL = 24 * 60 * 60  # 24 hours for FAISS index cache
 ANALYSIS_RESULTS_TTL = 2 * 60 * 60  # 2 hours for analysis results
 LOGIN_LOCKOUT_TTL = 15 * 60  # 15 minutes for login lockout
 UPLOAD_RATE_TTL = 60 * 60  # 1 hour for upload rate limiting
+DEFAULT_TTL = 24 * 60 * 60  # 24 hours fallback for keys without explicit TTL
 
 
 class RedisCache:
@@ -329,6 +330,17 @@ class RedisCache:
 
 
 
+    def close(self) -> None:
+        """Explicitly close the Redis connection."""
+        if self._client is not None:
+            try:
+                self._client.close()
+                self._client = None
+            except Exception as e:
+                print(f"[RedisCache] Error closing Redis connection: {e}")
+                logger.error(f"[RedisCache] Error closing Redis connection: {e}")
+
+
 # Global cache instance
 _cache = RedisCache()
 
@@ -336,6 +348,25 @@ _cache = RedisCache()
 def get_cache() -> RedisCache:
     """Get the global Redis cache instance."""
     return _cache
+
+
+def set_cache(key: str, value: Any, expire: int = DEFAULT_TTL) -> bool:
+    """Store a value with the given *expire* TTL (default 24h).
+
+    This is the primary public API for storing transient data in Redis.
+    Callers that do not need a custom expiry can rely on the 24-hour
+    default to avoid indefinite key persistence.
+    """
+    return _cache.set(key, value, ttl=expire)
+
+
+def delete_cache(key: str) -> bool:
+    """Delete a key from Redis.
+
+    Safe to call even when the key does not exist or Redis is
+    unavailable — returns ``False`` in those cases.
+    """
+    return _cache.delete(key)
 
 
 def cache_session_state(session_id: str, key: str, value: Any) -> bool:
@@ -430,3 +461,13 @@ def get_upload_count(username: str) -> int:
 def is_upload_rate_limited(username: str) -> bool:
     """Check if a user has exceeded the upload rate limit (100 uploads/hour)."""
     return get_upload_count(username) >= 100
+
+
+import atexit
+
+def _cleanup_redis() -> None:
+    """Close the global Redis connection when the process terminates."""
+    if _cache:
+        _cache.close()
+
+atexit.register(_cleanup_redis)
