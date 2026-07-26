@@ -168,15 +168,6 @@ def _validate_password_complexity(password: str) -> str:
 
     return password
 
-    try:
-        password = str(password)
-        if len(password.strip()) < 10:
-            raise ValueError("Password must be at least 10 characters long.")
-        return password
-    finally:
-        password = "REDACTED"
-
-
 
 def _validate_role(role: str) -> str:
     role = str(role).strip().lower()
@@ -209,7 +200,7 @@ def init_db() -> None:
             exists = bool(row and row[0])
 
             if not exists:
-                hashed = _hash_password("admin12345")
+                hashed = _hash_password("Admin123!")
                 conn.execute(
                     """
                     INSERT INTO users (username, password, role)
@@ -468,48 +459,6 @@ def set_tour_completed(username: str, completed: bool = True) -> None:
         raise sqlite3.Error(f"Failed to update tour status: {e}") from e
 
 
-def verify_user(username: str, password: str) -> bool:
-    """Return True if username exists and password matches stored hash."""
-    try:
-        username = _validate_username(username)
-        password = _validate_password(password)
-        with _connect() as conn:
-            row = conn.execute(
-                "SELECT password_hash FROM users WHERE username = ?",
-                (username,),
-            ).fetchone()
-        if not row:
-            return False
-
-        stored_hash = row[0]
-        if stored_hash.startswith("$argon2"):
-            try:
-                _ph.verify(stored_hash, password)
-                _record_login_timestamp(username)
-                return True
-            except (VerifyMismatchError, VerificationError):
-                return False
-
-        if stored_hash.startswith(("$2a$", "$2b$", "$2y$")):
-            try:
-                if bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8")):
-                    hashed = _hash_password(password)
-                    with _connect() as conn_migrate:
-                        conn_migrate.execute(
-                            "UPDATE users SET password_hash = ? WHERE username = ?",
-                            (hashed, username),
-                        )
-                        conn_migrate.commit()
-                    _record_login_timestamp(username)
-                    return True
-            except ValueError:
-                return False
-
-        return False
-    except Exception:
-        return False
-
-
 
 def get_2fa_status(username: str) -> tuple[bool, str | None]:
     """Return (two_factor_enabled, otp_secret) for a user."""
@@ -587,3 +536,92 @@ def is_user_active(username: str) -> bool:
             return bool(row[0]) if row else True
     except sqlite3.Error:
         return True
+
+
+def check_login_rate_limit(username: str) -> tuple[bool, str | None]:
+    """Check if username is rate limited. Returns (is_allowed, error_message)."""
+    from src.utils.redis_cache import get_login_attempts, is_login_locked_out
+    identifier = username.lower()
+    if is_login_locked_out(identifier):
+        attempts = get_login_attempts(identifier)
+        return (
+            False,
+            f"Account locked due to too many failed attempts. Please try again in 15 minutes. ({attempts}/5 attempts)",
+        )
+    return True, None
+
+
+def record_failed_login(username: str) -> None:
+    """Record a failed login attempt for rate limiting."""
+    from src.utils.redis_cache import increment_login_attempts
+    identifier = username.lower()
+    increment_login_attempts(identifier)
+
+
+def clear_login_attempts(username: str) -> None:
+    """Clear failed login attempts after successful login."""
+    from src.utils.redis_cache import clear_login_attempts as redis_clear_login_attempts
+    identifier = username.lower()
+    redis_clear_login_attempts(identifier)
+
+
+def get_user_count() -> int:
+    """Returns the total number of registered users in the system."""
+    with _connect() as conn:
+        cursor = conn.execute("SELECT COUNT(*) FROM users")
+        row = cursor.fetchone()
+        return row[0] if row else 0
+
+
+def get_user_preferences(username: str) -> dict:
+    """Return user preferences as a dictionary, or empty dict if none exist."""
+    import json
+    username = username.lower()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT preferences FROM users WHERE username = ?",
+            (username,),
+        ).fetchone()
+    if row and row[0]:
+        try:
+            return json.loads(row[0])
+        except Exception:
+            return {}
+    return {}
+
+
+def update_user_preferences(username: str, preferences: dict) -> None:
+    """Serialize and update user preferences in the database."""
+    import json
+    username = username.lower()
+    prefs_str = json.dumps(preferences)
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE users SET preferences = ? WHERE username = ?",
+            (prefs_str, username),
+        )
+        conn.commit()
+
+
+def get_user_theme(username: str) -> str:
+    """Return the user's theme preference (default 'light')."""
+    username = username.lower()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT theme FROM users WHERE username = ?",
+            (username,),
+        ).fetchone()
+        return row[0] if (row and row[0]) else "light"
+
+
+def set_user_theme(username: str, theme: str) -> None:
+    """Update the user's theme preference."""
+    username = username.lower()
+    if theme not in ("light", "dark"):
+        theme = "light"
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE users SET theme = ? WHERE username = ?",
+            (theme, username),
+        )
+        conn.commit()
