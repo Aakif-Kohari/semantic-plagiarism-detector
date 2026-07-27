@@ -1396,10 +1396,36 @@ if (
             help='Enter a public URL to a PDF, DOCX, DOC, TXT file, or webpage. Click "Fetch" to load it.',
         )
     with _btn_col:
-        st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
+        st.markdown("""
+<style>
+div[data-testid="stButton"] > button {
+    background: linear-gradient(135deg, #2563eb, #3b82f6);
+    color: white;
+    border: none;
+    border-radius: 10px;
+    height: 46px;
+    font-weight: 600;
+    font-size: 15px;
+    transition: all .25s ease;
+    box-shadow: 0 6px 18px rgba(37,99,235,.25);
+}
+
+div[data-testid="stButton"] > button:hover {
+    background: linear-gradient(135deg,#1d4ed8,#2563eb);
+    transform: translateY(-2px);
+    box-shadow: 0 10px 24px rgba(37,99,235,.35);
+}
+
+div[data-testid="stButton"] > button:active {
+    transform: scale(.98);
+}
+</style>
+""", unsafe_allow_html=True)
         fetch_url_btn = st.button(
-            "Fetch", key="fetch_url_btn", use_container_width=True
-        )
+    "Fetch",
+    key="fetch_url_btn",
+    use_container_width=True,
+)
 
     # 2. GOOGLE DRIVE IMPORT SECTION (#146)
 
