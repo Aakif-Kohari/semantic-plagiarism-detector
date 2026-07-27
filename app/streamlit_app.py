@@ -75,10 +75,10 @@ from app.theme import (
     inject_css,
     set_theme,
 )
+from src.core.app_config import SUPPORTED_OCR_LANGUAGES
 from src.core.document_parser import (
     DEFAULT_OCR_DPI,
     DEFAULT_OCR_LANGUAGE,
-    SUPPORTED_OCR_LANGUAGES,
     extract_text,
     prepare_text_for_embedding,
 )
