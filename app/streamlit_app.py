@@ -2997,12 +2997,12 @@ if not st.session_state.authenticated:
                 "their similarity is greater than or equal to the selected threshold."
             )
 
-            network_fig = plot_similarity_network(
+network_fig = plot_similarity_network(
                 similarity_df=active_sim_df,
                 threshold=threshold,
                 title="Interactive Document Plagiarism Network",
+                selected_node=st.session_state.get("selected_document_id"),
             )
-
             if plotly_events is not None:
                 selected_points = plotly_events(
                     network_fig,
