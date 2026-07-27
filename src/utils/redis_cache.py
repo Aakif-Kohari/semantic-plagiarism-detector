@@ -76,11 +76,17 @@ class RedisCache:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._fallback_cache = {}
+            cls._instance._hits = 0
+            cls._instance._misses = 0
         return cls._instance
 
     def __init__(self):
         if not hasattr(self, "_fallback_cache") or self._fallback_cache is None:
             self._fallback_cache = {}
+        if not hasattr(self, "_hits"):
+            self._hits = 0
+        if not hasattr(self, "_misses"):
+            self._misses = 0
         if self._client is None:
             self._connect()
 
@@ -206,6 +212,27 @@ class RedisCache:
         except Exception:
             return False, None
 
+    def get_stats(self) -> dict[str, Any]:
+        """Get cache statistics including hit ratio and total items count."""
+        total_requests = self._hits + self._misses
+        hit_ratio = (self._hits / total_requests) if total_requests > 0 else 0.0
+
+        total_items = 0
+        if self._client is not None and self.is_available():
+            try:
+                total_items = self._client.dbsize()
+            except Exception:
+                total_items = len(self.fallback_cache)
+        else:
+            total_items = len(self.fallback_cache)
+
+        return {
+            "hits": self._hits,
+            "misses": self._misses,
+            "hit_ratio": hit_ratio,
+            "total_items": total_items,
+        }
+
     def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
         """Store a value in Redis with optional TTL. Falls back to in-memory on failure."""
         if self._client is None:
@@ -233,12 +260,11 @@ class RedisCache:
 
     def get(self, key: str) -> Optional[Any]:
         """Retrieve a value from Redis. Falls back to in-memory on failure."""
-        if self._client is None:
-            return None
-        if self.is_available():
+        if self._client is not None and self.is_available():
             try:
                 data = self._client.get(key)
                 if data is not None:
+                    self._hits += 1
                     return pickle.loads(data)
             except (
                 RedisError,
@@ -251,7 +277,13 @@ class RedisCache:
                 print(f"[RedisCache] Error getting key {key}: {e}. Falling back to in-memory.")
                 logger.error(f"[RedisCache] Error getting key {key}: {e}. Falling back to in-memory.")
 
-        return self._fallback_get(key)
+        val = self._fallback_get(key)
+        if val is not None:
+            self._hits += 1
+            return val
+
+        self._misses += 1
+        return None
 
     def delete(self, key: str) -> bool:
         """Delete a key from Redis. Falls back to in-memory on failure."""
@@ -300,10 +332,11 @@ class RedisCache:
 
     def get_json(self, key: str) -> Optional[dict]:
         """Retrieve a JSON value from Redis. Falls back to in-memory on failure."""
-        if self.is_available():
+        if self._client is not None and self.is_available():
             try:
                 data = self._client.get(key)
                 if data is not None:
+                    self._hits += 1
                     return json.loads(data)
             except (
                 RedisError,
@@ -316,7 +349,13 @@ class RedisCache:
                 print(f"[RedisCache] Error getting JSON key {key}: {e}. Falling back to in-memory.")
                 logger.error(f"[RedisCache] Error getting JSON key {key}: {e}. Falling back to in-memory.")
 
-        return self._fallback_get_json(key)
+        val = self._fallback_get_json(key)
+        if val is not None:
+            self._hits += 1
+            return val
+
+        self._misses += 1
+        return None
 
     def exists(self, key: str) -> bool:
         """Check if a key exists in Redis. Falls back to in-memory on failure."""
