@@ -3955,39 +3955,84 @@ if not st.session_state.authenticated:
                 st.rerun()
 
 
-# ── Footer ────────────────────────────────────────────────────────────────────
-st.divider()
+st.markdown("---")
 
-st.caption(f"🎓 {APP_TITLE} · Streamlit")
+st.markdown(
+    f"""
+<div style="
+    margin-top:20px;
+    padding:18px 24px;
+    border:1px solid #e5e7eb;
+    border-radius:16px;
+    background:#ffffff;
+    box-shadow:0 2px 8px rgba(0,0,0,0.05);
+">
 
-# ── Version / Update indicator ────────────────────────────────────────────────
-# Import here (deferred) to avoid slowing down the initial module load for
-# users who never reach the footer.
-from src.utils.version_check import (APP_VERSION,  # noqa: E402
-                                     check_for_update_sync)
+<div style="
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    flex-wrap:wrap;
+    gap:16px;
+">
 
+<!-- Left -->
 
-@st.cache_data(ttl=3600)
-def _cached_version_check() -> str | None:
-    """Check for updates once per hour, cached by Streamlit."""
-    return check_for_update_sync(APP_VERSION)
+<div>
 
+<div style="
+    font-size:22px;
+    font-weight:700;
+    color:#111827;
+">
+🎓 Semantic Plagiarism Detection System
+</div>
 
-_latest_tag: str | None = _cached_version_check()
+<div style="
+    margin-top:6px;
+    color:#6b7280;
+    font-size:15px;
+">
+Version <b> v1.0.0</b> • Streamlit
+</div>
 
-_footer_col1, _footer_col2 = st.columns([3, 1])
-with _footer_col1:
-    st.caption(
-        f"🎓 {APP_TITLE} · v{APP_VERSION} · Streamlit · [🐛 Report Bug / Feedback](https://github.com/Ganesh-403/semantic-plagiarism-detector/issues)"
-    )
-with _footer_col2:
-    if _latest_tag:
-        st.markdown(
-            version_check_widget_html(
-                local_version=APP_VERSION,
-                latest_tag=_latest_tag,
-            ),
-            unsafe_allow_html=True,
-        )
-    else:
-        st.caption("✅ Up to date")
+</div>
+
+<!-- Right -->
+
+<div style="text-align:right;">
+
+<div style="
+    color:#22c55e;
+    font-weight:600;
+    font-size:17px;
+">
+✅ Up to date
+</div>
+
+<div style="margin-top:8px;">
+
+<a
+href="https://github.com/Ganesh-403/semantic-plagiarism-detector/issues"
+target="_blank"
+style="
+color:#0f766e;
+font-weight:600;
+text-decoration:none;
+font-size:15px;
+">
+
+🐞 Report Bug / Feedback
+
+</a>
+
+</div>
+
+</div>
+
+</div>
+
+</div>
+""",
+    unsafe_allow_html=True,
+)
