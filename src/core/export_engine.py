@@ -2,7 +2,7 @@ import csv
 import io
 import json
 import logging
-from typing import Dict, List, Optional
+from typing import List, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +18,113 @@ class LMSExportEngine:
         """Internal helper to classify severity based on numeric score."""
         return "CRITICAL" if sim_score > 0.90 else "HIGH" if sim_score > 0.80 else "MODERATE"
     
+    @staticmethod
+    def _safe_document_name(value: object) -> str:
+        """Return a readable document name for exports."""
+        name = str(value or "").strip()
+        return name or "Unknown"
+
+    @staticmethod
+    def _format_similarity_percent(sim_score: float) -> str:
+        """Return a human-readable similarity percentage."""
+        return f"{sim_score * 100:.1f}%"
+
+    @staticmethod
+    def generate_incident_txt(
+        incidents: List[Dict[str, any]],
+    ) -> Optional[str]:
+        """Generate a readable plain-text summary of flagged incidents.
+
+        Args:
+            incidents: Incident dictionaries containing ``doc_a``, ``doc_b``,
+                and ``similarity``. Optional fields such as ``matched_length``
+                and ``matched_text`` are included when present.
+
+        Returns:
+            A UTF-8-compatible plain-text report, or ``None`` when there are
+            no incidents to export.
+        """
+        if not incidents:
+            logger.warning(
+                "Attempted to export an empty incident list to TXT."
+            )
+            return None
+
+        try:
+            lines = [
+                "SEMANTIC PLAGIARISM INCIDENT REPORT",
+                "=" * 38,
+                f"Total flagged pairs: {len(incidents)}",
+                "",
+            ]
+
+            for index, row in enumerate(incidents, start=1):
+                sim_score = float(row.get("similarity", 0))
+                severity = LMSExportEngine._calculate_severity(sim_score)
+                doc_a = LMSExportEngine._safe_document_name(
+                    row.get("doc_a")
+                )
+                doc_b = LMSExportEngine._safe_document_name(
+                    row.get("doc_b")
+                )
+
+                lines.extend(
+                    [
+                        f"Incident #{index}",
+                        "-" * 24,
+                        f"Document A: {doc_a}",
+                        f"Document B: {doc_b}",
+                        (
+                            "Similarity: "
+                            f"{LMSExportEngine._format_similarity_percent(sim_score)} "
+                            f"({sim_score:.4f})"
+                        ),
+                        f"Severity: {severity}",
+                    ]
+                )
+
+                matched_length = row.get("matched_length")
+                if matched_length not in (None, ""):
+                    lines.append(
+                        f"Matched length: {matched_length} words"
+                    )
+
+                matched_text = str(
+                    row.get("matched_text")
+                    or row.get("matching_text")
+                    or ""
+                ).strip()
+                if matched_text:
+                    lines.extend(
+                        [
+                            "Matching text:",
+                            matched_text,
+                        ]
+                    )
+
+                lines.append("")
+
+            lines.extend(
+                [
+                    "=" * 38,
+                    "End of report",
+                    "",
+                ]
+            )
+
+            txt_data = "\n".join(lines)
+            logger.info(
+                "Successfully generated TXT export for %s incidents.",
+                len(incidents),
+            )
+            return txt_data
+        except (TypeError, ValueError) as exc:
+            logger.error(
+                "Failed to format incident data as TXT: %s",
+                exc,
+            )
+            return None
+
     @staticmethod
     def generate_incident_csv(incidents: List[Dict[str, any]]) -> Optional[str]:
         """
