@@ -35,12 +35,13 @@ _IVF_THRESHOLD = 5_000  # Switch from flat to IVF when vectors exceed this
 class ChunkRecord:
     """Stores metadata for a single chunk stored in the FAISS index."""
 
-    __slots__ = ("doc_name", "chunk_index", "chunk_text")
+    __slots__ = ("doc_name", "chunk_index", "chunk_text", "metadata")
 
-    def __init__(self, doc_name: str, chunk_index: int, chunk_text: str):
+    def __init__(self, doc_name: str, chunk_index: int, chunk_text: str, metadata: Optional[dict] = None):
         self.doc_name = doc_name
         self.chunk_index = chunk_index
         self.chunk_text = chunk_text
+        self.metadata = metadata or getattr(chunk_text, "metadata", {})
 
     def __repr__(self):
         preview = self.chunk_text[:60].replace("\n", " ")

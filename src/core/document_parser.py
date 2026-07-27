@@ -33,6 +33,14 @@ from src.core.translator import translate_text
 # work even when Tesseract is not installed on the machine.
 PDFInput = Union[str, bytes, io.BytesIO, BinaryIO]
 
+
+class ParsedDocxText(str):
+    def __new__(cls, value, word_headings=None):
+        obj = super().__new__(cls, value)
+        obj.word_headings = word_headings or []
+        return obj
+
+
 MIN_NATIVE_WORDS_PER_PAGE = 8
 DEFAULT_OCR_DPI = 250
 MIN_OCR_DPI = 150
@@ -142,8 +150,13 @@ def strip_bibliography(text: str) -> str:
     """
     match = _BIBLIOGRAPHY_HEADERS.search(text)
     if match:
-        return text[: match.start()].rstrip()
+        sliced_text = text[: match.start()].rstrip()
+        if hasattr(text, "word_headings"):
+            words_in_sliced = len(sliced_text.split())
+            return ParsedDocxText(sliced_text, word_headings=text.word_headings[:words_in_sliced])
+        return sliced_text
     return text
+
 
 
 def clean_text(raw_text: str) -> str:
@@ -802,16 +815,33 @@ def extract_text_from_pdf(
 
 def extract_text_from_docx(file: PDFInput) -> str:
     """Extract text from a DOCX file."""
-    text = ""
     try:
         doc_file = io.BytesIO(file) if isinstance(file, bytes) else file
         document = docx.Document(doc_file)
-        text = "\n\n".join(paragraph.text for paragraph in document.paragraphs)
+
+        current_heading = None
+        word_headings = []
+        paragraphs_text = []
+
+        for paragraph in document.paragraphs:
+            p_text = paragraph.text
+            paragraphs_text.append(p_text)
+
+            style_name = paragraph.style.name if paragraph.style else ""
+            if style_name in ("Heading 1", "Heading 2"):
+                current_heading = p_text.strip()
+
+            p_words = p_text.split()
+            word_headings.extend([current_heading] * len(p_words))
+
+        full_text = "\n\n".join(paragraphs_text)
+        return ParsedDocxText(full_text.strip(), word_headings=word_headings)
     except (ValueError, KeyError, OSError) as exc:
         print(f"[document_parser] Error reading DOCX: {exc}")
     except Exception as exc:
         logger.error(f"[document_parser] Error reading DOCX: {exc}")
-    return text.strip()
+    return ""
+
 
 
 def extract_text_from_txt(file: PDFInput) -> str:
