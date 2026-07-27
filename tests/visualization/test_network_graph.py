@@ -172,3 +172,27 @@ def test_plot_similarity_network_layout_autosize():
 
     assert fig.layout.autosize is True
     assert fig.layout.width is None
+
+
+def test_build_network_data_detailed_hover_tooltips():
+    """Verify build_network_data includes word count, upload date, and top match in hover text."""
+    data = {
+        "doc1": [1.0, 0.85],
+        "doc2": [0.85, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2"])
+    doc_metadata = {
+        "doc1": {"word_count": 450, "upload_date": "2026-03-15"},
+        "doc2": {"word_count": 520, "upload_date": "2026-03-16"},
+    }
+
+    net_data = build_network_data(df, threshold=0.75, doc_metadata=doc_metadata)
+    hover_texts = net_data["node_trace"].hovertext
+
+    assert len(hover_texts) == 2
+    doc1_hover = hover_texts[0]
+    assert "450" in doc1_hover
+    assert "2026-03-15" in doc1_hover
+    assert "doc2" in doc1_hover
+    assert "85.0%" in doc1_hover
+

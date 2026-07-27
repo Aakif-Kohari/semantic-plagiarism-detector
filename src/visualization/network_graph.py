@@ -17,6 +17,7 @@ def build_network_data(
     similarity_df: pd.DataFrame,
     threshold: float = 0.59,
     theme_colors: Optional[dict] = None,
+    doc_metadata: Optional[dict] = None,
 ) -> dict:
     """
     Processes similarity matrix data, constructs NetworkX graph layout, and formats node and edge traces.
@@ -25,6 +26,7 @@ def build_network_data(
         similarity_df: Square N×N DataFrame of similarity scores.
         threshold: Edge threshold; pairs with similarity >= threshold are connected.
         theme_colors: Optional dictionary containing theme colors.
+        doc_metadata: Optional dictionary mapping document names to metadata (word_count, upload_date, etc.).
 
     Returns:
         Dictionary containing shapes, edge_hover_trace, node_trace, graph, and pos coordinates.
@@ -221,10 +223,26 @@ def build_network_data(
                 else "#c62828"
             )
 
+        # Calculate top match from similarity matrix
+        top_match_str = "N/A"
+        if node in similarity_df.index and node in similarity_df.columns:
+            sim_series = similarity_df.loc[node].drop(labels=[node], errors="ignore")
+            if not sim_series.empty:
+                max_score = float(sim_series.max())
+                if max_score > 0:
+                    top_doc = sim_series.idxmax()
+                    top_match_str = f"{top_doc} ({max_score:.1%})"
+
+        meta = doc_metadata.get(node, {}) if doc_metadata and node in doc_metadata else {}
+        word_count = meta.get("word_count", "N/A")
+        upload_date = meta.get("upload_date", meta.get("created_at", "N/A"))
+
         node_hover.append(
             f"<b>📄 Document:</b> {node}<br>"
-            f"<b>🚨 Flagged connections:</b> "
-            f"{deg} / {len(doc_names) - 1}"
+            f"<b>🚨 Flagged connections:</b> {deg} / {max(1, len(doc_names) - 1)}<br>"
+            f"<b>📝 Word Count:</b> {word_count}<br>"
+            f"<b>📅 Upload Date:</b> {upload_date}<br>"
+            f"<b>🔗 Top Match:</b> {top_match_str}"
         )
 
     # ── Plotly Node Trace ──────────────────────────────────────────────────────
@@ -372,6 +390,7 @@ def plot_similarity_network(
     threshold: float = 0.59,
     title: str = "Document Plagiarism Network",
     theme_colors: Optional[dict] = None,
+    doc_metadata: Optional[dict] = None,
 ) -> go.Figure:
     """
     Builds a networkx graph from the similarity matrix and returns an interactive Plotly figure.
@@ -381,6 +400,7 @@ def plot_similarity_network(
         threshold: Edge threshold; pairs with similarity >= threshold are connected.
         title: Title of the graph.
         theme_colors: Optional dictionary containing theme colors.
+        doc_metadata: Optional dictionary mapping document names to metadata.
 
     Returns:
         Plotly Graph Objects Figure.
@@ -389,6 +409,7 @@ def plot_similarity_network(
         similarity_df=similarity_df,
         threshold=threshold,
         theme_colors=theme_colors,
+        doc_metadata=doc_metadata,
     )
     return render_network_plotly(
         network_data=network_data,
