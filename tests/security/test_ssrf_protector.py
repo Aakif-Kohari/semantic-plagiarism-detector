@@ -39,8 +39,10 @@ def test_validate_webhook_url_loopback(mock_getaddrinfo):
 @pytest.mark.parametrize(
     "blocked_ip",
     [
+        "10.0.0.1",      # 10.0.0.0/8 (DoD requirement)
         "10.0.0.5",      # 10.0.0.0/8
         "172.16.5.10",   # 172.16.0.0/12
+        "192.168.1.1",   # 192.168.0.0/16 (DoD requirement)
         "192.168.1.25",  # 192.168.0.0/16
     ],
 )
