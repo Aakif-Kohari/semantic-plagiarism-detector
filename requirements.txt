@@ -7,25 +7,21 @@ torch>=2.0.0                     # PyTorch backend for sentence-transformers
 transformers>=4.30.0             # HuggingFace transformers for AI detection
 langdetect>=1.0.9                # Language detection for cross-lingual NLP
 nltk>=3.8.0                      # Stop-word filtering for lexical fallback (#222)
-thefuzz>=0.22.1                  # Fuzzy string matching for warnings
 
 # ── PDF & Document Parsing ────────────────────────────────────────────────────
 pymupdf>=1.24.0                  # PyMuPDF for rendering & highlighting PDF matches
 pypdf>=5.0.0                     # Extract text from PDF files
 pdfplumber>=0.11.0               # Robust PDF text extraction
 python-docx>=1.1.0               # Extract text from Word documents
-defusedxml>=0.7.1                # Protect against XML External Entity (XXE) attacks
 PyPDF2>=3.0.0                    # Legacy PDF manipulation support
 reportlab>=5.0.0                 # PDF document generation
 pytesseract>=0.3.13              # OCR text extraction from scanned images
 Pillow>=10.0.0                   # Image processing library
 python-magic>=0.4.27             # File magic bytes verification
-striprtf>=0.0.32                 # Extract text from RTF documents
-EbookLib>=0.18                   # Extract text from EPUB documents
+
 # ── Web UI ────────────────────────────────────────────────────────────────────
 streamlit>=1.60.0                # Dashboard framework
 bcrypt>=4.0.0                    # Password hashing for auth
-argon2-cffi>=23.1.0              # Argon2 password hashing support
 pyotp>=2.9.0                     # TOTP generator/verifier for 2FA
 qrcode>=7.4.2                    # Local QR code generator for 2FA setup
 python-dotenv>=1.0.0             # Load credentials from .env
@@ -43,19 +39,13 @@ openpyxl>=3.1.5                  # Engine for exporting DataFrames to Excel
 # ── Visualisation ─────────────────────────────────────────────────────────────
 matplotlib>=3.8.0
 seaborn>=0.13.0
-networkx>=3.0                    # Graph visualisations for document relationships
 
 # ── Code Quality ──────────────────────────────────────────────────────────────
 ruff>=0.15.22
 pylint>=3.0.0
-typing-extensions>=4.8.0         # Type hint compatibility extensions
 
 # ── Development & Testing ─────────────────────────────────────────────────────
 faker>=20.0.0                   # Fake data generation for mock essay utility (#255)
-packaging>=23.0                  # Version parsing and comparison
-pytest-mock>=3.11.0             # Mocker fixture for unit tests (pytest-mock)
-thefuzz>=0.22.1                 # Fuzzy string matching for search (#warninglist)
-python-Levenshtein>=0.21.0      # C speedups for thefuzz
 
 # ── Caching & Session Management ───────────────────────────────────────────────
 
@@ -65,7 +55,7 @@ psutil>=5.9.0                   # System memory monitoring
 # ── Web Scraping ───────────────────────────────────────────────────────────────
 beautifulsoup4>=4.15.0          # HTML parsing for URL content extraction
 requests>=2.31.0                # HTTP library for fetching web content
-responses>=0.25.0               # Deterministic HTTP mocks for outbound-request tests
+tenacity>=8.2.3               # Retry transient webhook failures (#435)
 # ── REST API & LMS Integration ────────────────────────────────────────────────
 fastapi>=0.109.0                # REST API framework for LMS integrations
 uvicorn>=0.27.0                 # ASGI server implementation
