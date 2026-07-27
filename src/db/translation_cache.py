@@ -39,6 +39,12 @@ def _init_db():
             )
             """
         )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_translation_cache_created_at
+            ON translation_cache(created_at)
+            """
+        )
         conn.commit()
 
 
