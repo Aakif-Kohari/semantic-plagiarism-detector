@@ -7,6 +7,7 @@ Provides side-by-side comparison of suspicious paragraph pairs with visual simil
 
 from __future__ import annotations
 
+
 import os
 
 from datetime import datetime
@@ -252,8 +253,6 @@ def generate_plagiarism_report(
         bottomMargin=40,
     )
 
-
-    styles = getSampleStyleSheet()
 
     # Get custom styles
 
@@ -641,7 +640,5 @@ def highlight_pdf_matches(
     # Save highlighted PDF to byte stream
     output_buffer = doc.tobytes()
     doc.close()
-
-    return output_bytes
 
     return output_buffer

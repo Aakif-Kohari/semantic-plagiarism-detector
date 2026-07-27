@@ -47,7 +47,7 @@ DEFAULT_TTL = 24 * 60 * 60  # 24 hours fallback for keys without explicit TTL
 class CacheKeyPrefix(str, Enum):
     SESSION = "spd:v1:session"
     FAISS = "spd:v1:faiss"
-    ANALYSIS = "spd:v1:analysis"
+    ANALYSIS = "analysis"
     LOGIN_ATTEMPTS = "spd:v1:login_attempts"
     UPLOADS = "spd:v1:uploads"
 
@@ -207,6 +207,8 @@ class RedisCache:
 
     def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
         """Store a value in Redis with optional TTL. Falls back to in-memory on failure."""
+        if self._client is None:
+            return False
         if self.is_available():
             try:
                 serialized = pickle.dumps(value)
@@ -230,6 +232,8 @@ class RedisCache:
 
     def get(self, key: str) -> Optional[Any]:
         """Retrieve a value from Redis. Falls back to in-memory on failure."""
+        if self._client is None:
+            return None
         if self.is_available():
             try:
                 data = self._client.get(key)
@@ -250,6 +254,8 @@ class RedisCache:
 
     def delete(self, key: str) -> bool:
         """Delete a key from Redis. Falls back to in-memory on failure."""
+        if self._client is None:
+            return False
         redis_deleted = False
         if self.is_available():
             try:
@@ -313,6 +319,8 @@ class RedisCache:
 
     def exists(self, key: str) -> bool:
         """Check if a key exists in Redis. Falls back to in-memory on failure."""
+        if self._client is None:
+            return False
         if self.is_available():
             try:
                 if bool(self._client.exists(key)):

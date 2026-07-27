@@ -15,7 +15,7 @@ except ImportError:
                                CLASS_PIPELINE_ARROW, CLASS_PIPELINE_DONE,
                                CLASS_PIPELINE_ETA, CLASS_PIPELINE_STEP,
                                CLASS_PIPELINE_STEPS, CLASS_SIDEBAR_USER_BADGE,
-                               CLASS_SIM_PILL)
+                               CLASS_SIM_PILL, CLASS_WELCOME_BANNER)
 from src.core.config import (DEFAULT_THRESHOLDS, normalize_severity_label,
                              severity_key)
 
