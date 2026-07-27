@@ -3044,19 +3044,19 @@ if not st.session_state.authenticated:
                 "their similarity is greater than or equal to the selected threshold."
             )
 
-            active_doc_tags = {}
-            try:
-                from src.db.corpus_db import get_document_tags
-                for doc_col in active_sim_df.columns:
-                    t_val = get_document_tags(doc_col)
-                    if t_val:
-                        active_doc_tags[doc_col] = t_val
-            except Exception:
-                active_doc_tags = None
+            max_degree = max(0, len(active_sim_df) - 1)
+            min_degree = st.slider(
+                "Minimum Connected Documents",
+                min_value=0,
+                max_value=max_degree,
+                value=0,
+                key="min_connected_docs_slider",
+            )
 
             network_fig = plot_similarity_network(
                 similarity_df=active_sim_df,
                 threshold=threshold,
+                min_degree=min_degree,
                 title="Interactive Document Plagiarism Network",
                 selected_node=st.session_state.get("selected_document_id"),
                 document_tags=active_doc_tags if active_doc_tags else None,
