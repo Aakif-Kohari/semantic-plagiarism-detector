@@ -108,25 +108,7 @@ def init_corpus_db() -> None:
         """
         )
 
-        # Schema migration fallback logic: add missing columns if documents table already existed
-        cursor = conn.execute("PRAGMA table_info(documents)")
-        columns = [row[1] for row in cursor.fetchall()]
-        if "class_section" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN class_section TEXT")
-        if "student_name" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN student_name TEXT")
-        if "assignment_title" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN assignment_title TEXT")
-        if "pdf_author" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN pdf_author TEXT")
-        if "pdf_creation_date" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN pdf_creation_date TEXT")
-        if "pdf_title" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN pdf_title TEXT")
-        if "is_deleted" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0")
-        if "deleted_at" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN deleted_at TEXT")
+
 
         conn.execute(
             """

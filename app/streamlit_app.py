@@ -11,17 +11,8 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from sklearn.metrics.pairwise import cosine_similarity
-
-from src.core.ai_detector import detect_documents_ai_probability
-from src.core.embedding_model import embed_documents
-from src.core.text_chunking import chunk_documents
-
 import base64
-
-
-import datetime
-import io as _io
-import os
+import html
 
 
 import html
@@ -68,59 +59,6 @@ if missing_env_vars:
         "Please configure them in your .env file.",
         ", ".join(missing_env_vars),
     )
-
-
-from app.theme import (
-    empty_state_html,
-    get_colors,
-    get_theme_name,
-    inject_css,
-    set_theme,
-)
-from src.core.ai_detector import detect_documents_ai_probability
-from src.core.document_parser import (
-    DEFAULT_OCR_DPI,
-    DEFAULT_OCR_LANGUAGE,
-    SUPPORTED_OCR_LANGUAGES,
-    extract_text,
-    prepare_text_for_embedding,
-)
-from src.core.embedding_model import embed_documents
-from src.core.faiss_index import (
-    build_index,
-    build_index_from_matrix,
-    load_index,
-    load_or_rebuild_index,
-    search_similar_chunks,
-)
-from src.core.similarity import (
-    PLAGIARISM_THRESHOLD,
-    document_similarity_matrix,
-    find_most_similar_chunks,
-    flag_plagiarism,
-)
-from src.core.text_chunking import chunk_documents
-from src.core.webhook import send_plagiarism_alert
-from src.db import (
-    get_all_embeddings,
-    get_chunk_registry,
-    get_documents_by_class,
-    get_unique_class_sections,
-    init_corpus_db,
-)
-from src.db.auth import add_user, get_all_users, get_user_role, init_db, verify_user
-
-from src.utils.pdf_report import highlight_pdf_matches
-
-from src.utils.pdf_report import highlight_pdf_matches, truncate_filename
-
-from src.utils.redis_cache import (
-    cache_session_state,
-    clear_session,
-    get_analysis_results,
-    get_faiss_index,
-    get_session_state,
-)
 
 
 from app.css_constants import (CLASS_CLEAR_ALL_CONTAINER, CLASS_SKELETON,
