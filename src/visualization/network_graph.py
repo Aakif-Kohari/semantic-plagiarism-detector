@@ -13,6 +13,64 @@ import pandas as pd
 import plotly.graph_objects as go
 
 
+DEFAULT_TAG_COLORS = [
+    "#3B82F6",  # Blue
+    "#10B981",  # Emerald / Green
+    "#F59E0B",  # Amber / Yellow
+    "#EF4444",  # Red
+    "#8B5CF6",  # Purple
+    "#EC4899",  # Pink
+    "#06B6D4",  # Cyan
+    "#F97316",  # Orange
+    "#6366F1",  # Indigo
+    "#14B8A6",  # Teal
+]
+
+
+def _parse_document_tags(tags_val: object) -> list[str]:
+    """Extracts a list of normalized tag strings from string, list, set or tuple input."""
+    if not tags_val:
+        return []
+    if isinstance(tags_val, str):
+        raw_list = [t.strip() for t in tags_val.replace(" ", ",").split(",") if t.strip()]
+    elif isinstance(tags_val, (list, set, tuple)):
+        raw_list = [str(t).strip() for t in tags_val if str(t).strip()]
+    else:
+        return []
+
+    normalized = []
+    for tag in raw_list:
+        clean = tag.lower()
+        if not clean.startswith("#"):
+            clean = "#" + clean
+        if clean not in normalized:
+            normalized.append(clean)
+    return normalized
+
+
+def _extract_primary_tag(tags_val: object) -> Optional[str]:
+    """
+    Extracts the primary/class tag from a document's tags.
+    Prefers tags matching '#class...' (case-insensitive), otherwise returns the first tag.
+    """
+    tags = _parse_document_tags(tags_val)
+    if not tags:
+        return None
+    for tag in tags:
+        if tag.lower().startswith("#class"):
+            return tag
+    return tags[0]
+
+
+def _build_tag_color_map(tags_list: list[str]) -> dict[str, str]:
+    """Maps a sorted list of unique tag names to discrete colors from the palette."""
+    unique_tags = sorted(list(set(tags_list)))
+    color_map = {}
+    for i, tag in enumerate(unique_tags):
+        color_map[tag] = DEFAULT_TAG_COLORS[i % len(DEFAULT_TAG_COLORS)]
+    return color_map
+
+
 def build_network_data(
     similarity_df: pd.DataFrame,
     threshold: float = 0.59,
@@ -26,10 +84,15 @@ def build_network_data(
         similarity_df: Square N×N DataFrame of similarity scores.
         threshold: Edge threshold; pairs with similarity >= threshold are connected.
         theme_colors: Optional dictionary containing theme colors.
+        document_tags: Optional dictionary mapping document names to tag strings or lists of tags.
 
     Returns:
-        Dictionary containing shapes, edge_hover_trace, node_trace, graph, and pos coordinates.
+        Dictionary containing shapes, edge_hover_trace, node_trace, graph, pos coordinates,
+        tag_color_map, and document_tags.
     """
+    if document_tags is None and "doc_tags" in kwargs:
+        document_tags = kwargs.pop("doc_tags")
+
     # Create networkx graph
     G = nx.Graph()
 
@@ -61,6 +124,34 @@ def build_network_data(
         seed=42,
         k=1.0 / np.sqrt(max(1, len(G.nodes()))),
     )
+
+    # If document_tags is None, attempt to fetch from DB if available
+    if document_tags is None:
+        try:
+            from src.db.corpus_db import get_document_tags
+
+            fetched_tags = {}
+            for name in doc_names:
+                t = get_document_tags(name)
+                if t:
+                    fetched_tags[name] = t
+            if fetched_tags:
+                document_tags = fetched_tags
+        except Exception:
+            pass
+
+    # Extract primary tags for each document node and build color map
+    node_primary_tags = {}
+    all_tags = []
+    if document_tags and isinstance(document_tags, dict):
+        for node in doc_names:
+            raw_tags = document_tags.get(node)
+            primary_tag = _extract_primary_tag(raw_tags)
+            if primary_tag:
+                node_primary_tags[node] = primary_tag
+                all_tags.append(primary_tag)
+
+    tag_color_map = _build_tag_color_map(all_tags) if all_tags else {}
 
     # ── Draw Edges ─────────────────────────────────────────────────────────────
 
@@ -109,6 +200,7 @@ def build_network_data(
                 else "#21c55d"
             )
 
+
         # Highlight edges touching the clicked node; dim the rest.
         is_incident_edge = selected_node in (doc_a, doc_b)
         if selected_node and not is_incident_edge:
@@ -116,7 +208,8 @@ def build_network_data(
         elif is_incident_edge:
             line_width = max(line_width, 4.0)
 
-        shapes.append(            dict(
+        shapes.append(
+            dict(
                 type="line",
                 x0=x0,
                 y0=y0,
@@ -198,8 +291,11 @@ def build_network_data(
         # Size based on degree
         node_size.append(20 + deg * 6)
 
-        # Color based on degree
-        if deg == 0:
+        # Node color based on class tag if available, else degree
+        primary_tag = node_primary_tags.get(node)
+        if primary_tag and primary_tag in tag_color_map:
+            node_color.append(tag_color_map[primary_tag])
+        elif deg == 0:
             node_color.append(
                 theme_colors.get(
                     "success",
@@ -208,7 +304,6 @@ def build_network_data(
                 if theme_colors
                 else "#2e7d32"
             )
-
         elif deg == 1:
             node_color.append(
                 theme_colors.get(
@@ -218,7 +313,6 @@ def build_network_data(
                 if theme_colors
                 else "#f9a825"
             )
-
         else:
             node_color.append(
                 theme_colors.get(
@@ -229,7 +323,7 @@ def build_network_data(
                 else "#c62828"
             )
 
-# Highlight the clicked node and its direct neighbors; dim the rest.
+        # Highlight the clicked node and its direct neighbors; dim the rest.
         if selected_node:
             if node == selected_node:
                 node_size[-1] = node_size[-1] + 10
@@ -238,11 +332,11 @@ def build_network_data(
             else:
                 node_color[-1] = "rgba(180,180,180,0.35)"
 
-        node_hover.append(
-            f"<b>📄 Document:</b> {node}<br>"
-            f"<b>🚨 Flagged connections:</b> "
-            f"{deg} / {len(doc_names) - 1}"
-        )
+        hover_parts = [f"<b>📄 Document:</b> {node}"]
+        if primary_tag:
+            hover_parts.append(f"<b>🏷️ Tag:</b> {primary_tag}")
+        hover_parts.append(f"<b>🚨 Flagged connections:</b> {deg} / {len(doc_names) - 1}")
+        node_hover.append("<br>".join(hover_parts))
     # ── Plotly Node Trace ──────────────────────────────────────────────────────
 
     node_trace = go.Scatter(
@@ -294,6 +388,8 @@ def build_network_data(
         "node_trace": node_trace,
         "graph": G,
         "pos": pos,
+        "tag_color_map": tag_color_map,
+        "document_tags": document_tags,
     }
 
 
@@ -398,6 +494,7 @@ def plot_similarity_network(
         threshold: Edge threshold; pairs with similarity >= threshold are connected.
         title: Title of the graph.
         theme_colors: Optional dictionary containing theme colors.
+        document_tags: Optional dictionary mapping document names to tag strings or lists of tags.
 
     Returns:
         Plotly Graph Objects Figure.
@@ -413,4 +510,5 @@ def plot_similarity_network(
         title=title,
         theme_colors=theme_colors,
     )
+
 

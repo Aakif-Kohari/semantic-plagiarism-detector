@@ -342,7 +342,11 @@ st.markdown(
 
 
 # ── SESSION TIMEOUT & ROUTE PROTECTION ────────────────────────────────────────
-TIMEOUT_LIMIT = 15 * 60  # 15 minutes in seconds
+TIMEOUT_LIMIT = (
+    30 * 60
+    if st.session_state.get("role") == "admin"
+    else 15 * 60
+)
 
 import streamlit.components.v1 as components
 
@@ -3040,12 +3044,24 @@ if not st.session_state.authenticated:
                 "their similarity is greater than or equal to the selected threshold."
             )
 
-network_fig = plot_similarity_network(
+            active_doc_tags = {}
+            try:
+                from src.db.corpus_db import get_document_tags
+                for doc_col in active_sim_df.columns:
+                    t_val = get_document_tags(doc_col)
+                    if t_val:
+                        active_doc_tags[doc_col] = t_val
+            except Exception:
+                active_doc_tags = None
+
+            network_fig = plot_similarity_network(
                 similarity_df=active_sim_df,
                 threshold=threshold,
                 title="Interactive Document Plagiarism Network",
                 selected_node=st.session_state.get("selected_document_id"),
+                document_tags=active_doc_tags if active_doc_tags else None,
             )
+
             if plotly_events is not None:
                 selected_points = plotly_events(
                     network_fig,

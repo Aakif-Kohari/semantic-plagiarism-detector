@@ -1020,6 +1020,7 @@ scrollContainer.addEventListener('scroll', function () {{
     """
 
 
+
 def version_check_widget_html(
     local_version: str,
     latest_tag: str,
