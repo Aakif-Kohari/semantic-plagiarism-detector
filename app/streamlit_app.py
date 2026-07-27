@@ -3772,6 +3772,27 @@ network_fig = plot_similarity_network(
                     st.error(f"🚨 Database integrity check failed: {results}")
                 st.rerun()
 
+            st.markdown("")
+            if st.button(
+                "⚡ Optimize Database Storage",
+                key="optimize_db_button",
+                use_container_width=True,
+            ):
+                from src.db.corpus_db import optimize_database
+                res = optimize_database()
+                if res.get("error"):
+                    st.error(f"🚨 Database optimization failed: {res['error']}")
+                else:
+                    size_before = res["size_before"]
+                    size_after = res["size_after"]
+                    reclaimed = res["reclaimed_bytes"]
+                    st.success(
+                        f"✅ Database optimization completed successfully!\n\n"
+                        f"- **Database size before**: {size_before:,} bytes\n"
+                        f"- **Database size after**: {size_after:,} bytes\n"
+                        f"- **Space reclaimed**: {reclaimed:,} bytes"
+                    )
+
             st.markdown("---")
             st.markdown("### 🗄️ Database Backup")
             st.caption(
