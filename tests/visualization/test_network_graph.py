@@ -4,8 +4,10 @@ tests/visualization/test_network_graph.py
 Unit tests for plot_similarity_network edge cases.
 """
 
+import time
 from unittest.mock import patch
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
@@ -172,3 +174,26 @@ def test_plot_similarity_network_layout_autosize():
 
     assert fig.layout.autosize is True
     assert fig.layout.width is None
+
+
+def test_plot_similarity_network_benchmark_200_nodes():
+    """Verify rendering a 200-node graph completes in under 2.0 seconds."""
+    np.random.seed(42)
+    n = 200
+    doc_names = [f"doc_{i}" for i in range(n)]
+
+    matrix = np.random.uniform(0.1, 0.95, size=(n, n))
+    matrix = (matrix + matrix.T) / 2.0
+    np.fill_diagonal(matrix, 1.0)
+
+    df = pd.DataFrame(matrix, index=doc_names, columns=doc_names)
+
+    start_time = time.perf_counter()
+    fig = plot_similarity_network(df, threshold=0.80)
+    elapsed_time = time.perf_counter() - start_time
+
+    assert isinstance(fig, go.Figure)
+    assert (
+        elapsed_time < 2.0
+    ), f"Graph rendering took {elapsed_time:.3f}s, exceeding 2.0s benchmark."
+
