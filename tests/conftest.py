@@ -172,4 +172,4 @@ def mock_db(tmp_path):
         except ImportError:
             pass
 
-        yield str(auth_db_file)
+        yield str(corpus_db_file)

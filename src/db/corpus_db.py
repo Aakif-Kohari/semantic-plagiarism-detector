@@ -473,11 +473,12 @@ def add_documents_bulk(documents: list) -> int:
 
     success_count = 0
     with _connect() as conn:
-        conn.executemany(
+        cursor = conn.cursor()
+        cursor.executemany(
             "INSERT OR IGNORE INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             formatted_docs,
         )
-        success_count = conn.execute("SELECT changes()").fetchone()[0]
+        success_count = cursor.rowcount
     return success_count
 
 

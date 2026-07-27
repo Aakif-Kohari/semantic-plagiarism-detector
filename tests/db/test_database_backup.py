@@ -5,9 +5,10 @@ import pytest
 
 from src.db.database_backup import SQLITE_HEADER, create_sqlite_snapshot
 
+from contextlib import closing
 
 def create_test_database(path):
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection:
         connection.execute(
             """
             CREATE TABLE documents (
@@ -34,7 +35,7 @@ def test_snapshot_is_valid_and_preserves_data(tmp_path):
     restored = tmp_path / "restored.db"
     restored.write_bytes(snapshot)
 
-    with sqlite3.connect(restored) as connection:
+    with closing(sqlite3.connect(restored)) as connection:
         rows = connection.execute(
             "SELECT filename FROM documents ORDER BY id"
         ).fetchall()

@@ -143,7 +143,7 @@ def init_db() -> None:
             exists = bool(row and row[0])
 
             if not exists:
-                hashed = _hash_password("admin12345")
+                hashed = _hash_password("Admin123!")
                 conn.execute(
                     """
                     INSERT INTO users (username, password, role)
