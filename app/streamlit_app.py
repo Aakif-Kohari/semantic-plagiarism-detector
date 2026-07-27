@@ -4030,6 +4030,28 @@ if not st.session_state.authenticated:
                 "database for debugging or offline backup."
             )
 
+            # ── Backup file metadata ──────────────────────────────────────────
+            from datetime import datetime as _datetime
+
+            from src.db.corpus_db import get_corpus_db_path
+
+            _db_path = get_corpus_db_path()
+            if _db_path.exists():
+                _db_size_bytes = _db_path.stat().st_size
+                _db_mtime = _datetime.fromtimestamp(_db_path.stat().st_mtime)
+                _meta_col1, _meta_col2, _meta_col3 = st.columns(3)
+                _meta_col1.metric("📄 File", _db_path.name)
+                if _db_size_bytes >= 1024 * 1024:
+                    _size_label = f"{_db_size_bytes / 1_048_576:.2f} MB"
+                elif _db_size_bytes >= 1024:
+                    _size_label = f"{_db_size_bytes / 1024:.1f} KB"
+                else:
+                    _size_label = f"{_db_size_bytes} B"
+                _meta_col2.metric("💾 Size", _size_label)
+                _meta_col3.metric(
+                    "🕒 Modified", _db_mtime.strftime("%Y-%m-%d %H:%M")
+                )
+
             try:
                 corpus_database_snapshot = create_corpus_database_snapshot()
             except (OSError, sqlite3.DatabaseError) as exc:
@@ -4039,9 +4061,9 @@ if not st.session_state.authenticated:
                 )
             else:
                 st.download_button(
-                    label="⬇️ Download raw Database",
+                    label="⬇️ Download Corpus Database",
                     data=corpus_database_snapshot,
-                    file_name="corpus.db",
+                    file_name=_db_path.name if _db_path.exists() else "corpus.db",
                     mime="application/vnd.sqlite3",
                     key="download_raw_corpus_database",
                     use_container_width=True,
@@ -4051,6 +4073,13 @@ if not st.session_state.authenticated:
                     ),
                 )
 
+            # ── Copy Path ─────────────────────────────────────────────────────
+            with st.expander("📋 Copy Filesystem Path", expanded=False):
+                st.caption(
+                    "Full path to the live corpus database file on the server. "
+                    "Select the text below to copy it."
+                )
+                st.code(str(_db_path), language=None)
 
     # ══ TAB 6: USERS ══════════════════════════════════════════════════════════
     with tab_users:
