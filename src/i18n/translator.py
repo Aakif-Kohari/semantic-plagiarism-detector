@@ -50,6 +50,13 @@ TRANSLATIONS = {
 _I18N_DIR = os.path.dirname(os.path.abspath(__file__))
 _SUPPORTED_LANGUAGES = {"en": "English", "es": "Español"}
 
+FLAG_MAP = {"en": "🇺🇸", "es": "🇪🇸"}
+
+LANGUAGE_DISPLAY = {
+    code: f"{FLAG_MAP[code]} {name}" for code, name in _SUPPORTED_LANGUAGES.items()
+}
+DISPLAY_TO_CODE = {display: code for code, display in LANGUAGE_DISPLAY.items()}
+
 _translations: Dict[str, Dict[str, str]] = {}
 
 

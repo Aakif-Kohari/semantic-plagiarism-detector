@@ -128,10 +128,14 @@ from src.core.config import (DEFAULT_THRESHOLDS,
 from src.core.document_parser import (OCRDependencyError, remove_ignore_phrases)
 from src.core.faiss_index import (save_index)
 from src.core.webhook import dispatch_plagiarism_alert
-from src.i18n.translator import _SUPPORTED_LANGUAGES, get_text
+from src.i18n.translator import (_SUPPORTED_LANGUAGES, DISPLAY_TO_CODE, LANGUAGE_DISPLAY, get_text,)
 from src.visualization.network_graph import plot_similarity_network
 
-
+from src.core.ai_detector import detect_documents_ai_probability
+from src.core.embedding_model import embed_documents
+from src.core.text_chunking import chunk_documents
+from src.db.auth import add_user
+from src.utils.pdf_report import truncate_filename
 class OCRFileBatchError(Exception):
     """Exception raised when OCR extraction fails on one or more files in a batch."""
 
@@ -298,11 +302,12 @@ if "lang" not in st.session_state:
 with st.sidebar:
     st.title("⚙️ " + get_text("settings", lang=st.session_state.lang))
 
-    selected_lang_name = st.selectbox(
+    selected_lang_display = st.selectbox(
         "🌐 Language / Idioma",
-        options=["English", "Español"],
+        options=list(LANGUAGE_DISPLAY.values()),
         index=0 if st.session_state.lang == "en" else 1,
     )
+    selected_lang_name = DISPLAY_TO_CODE.get(selected_lang_display, "en")
 st.markdown(back_to_top_html(), unsafe_allow_html=True)
 inject_css()
 
@@ -624,8 +629,8 @@ elif "threshold_slider" not in st.session_state:
 
 
 # Resolve fallback configuration variables (ensuring all roles have access to these settings)
-selected_lang_name = st.session_state.get("lang_selector", "English")
-lang_code = "es" if selected_lang_name == "Español" else "en"
+selected_lang_display = st.session_state.get("lang_selector", LANGUAGE_DISPLAY["en"])
+lang_code = DISPLAY_TO_CODE.get(selected_lang_display, "en")
 
 threshold = st.session_state.get("threshold_slider", DEFAULT_THRESHOLDS.plagiarism)
 faiss_top_k = st.session_state.get("faiss_top_k_slider", 5)
@@ -2937,7 +2942,7 @@ if not st.session_state.authenticated:
             title="Document Semantic Similarity",
             threshold=threshold,
             theme_colors=get_colors(),
-            cmap=heatmap_cmap,  # Dynamic colormap support (#186)
+            colormap_name=heatmap_cmap,  # Dynamic colormap support (#186)
         )
         st.pyplot(heatmap_fig, use_container_width=True)
 
@@ -3205,8 +3210,8 @@ if not st.session_state.authenticated:
                     with st.spinner("Generating highlighted PDF preview..."):
                         try:
                             highlighted_pdf_bytes = highlight_pdf_matches(
-                                pdf_source=doc_source,
-                                matching_chunks=matching_chunks_to_highlight,
+                                pdf_bytes=doc_source,
+                                matching_phrases=matching_chunks_to_highlight,
                             )
                             base64_pdf = base64.b64encode(highlighted_pdf_bytes).decode(
                                 "utf-8"
@@ -3464,7 +3469,7 @@ if not st.session_state.authenticated:
                     qr.make(fit=True)
                     img = qr.make_image(fill_color="black", back_color="white")
                     buf = BytesIO()
-                    img.save(buf, format="PNG")
+                    img.save(buf)
                     qr_bytes = buf.getvalue()
 
                     col1, col2 = st.columns([1, 2])
@@ -3682,13 +3687,14 @@ if not st.session_state.authenticated:
         st.markdown("🏠 Home > Dashboard > **Settings**")
         st.subheader(get_text("settings", lang=lang_code))
 
-        selected_lang_name = st.selectbox(
+        selected_lang_display = st.selectbox(
             "🌐 Language / Idioma",
-            options=list(_SUPPORTED_LANGUAGES.values()),
+            options=list(LANGUAGE_DISPLAY.values()),
             index=0,
             key="lang_selector",
         )
-        lang_code = "es" if selected_lang_name == "Español" else "en"
+        lang_code = DISPLAY_TO_CODE.get(selected_lang_display, "en")
+
 
         selected_theme = st.radio(
             get_text("theme", lang=lang_code),

@@ -22,7 +22,8 @@ Exports:
 """
 
 from contextlib import contextmanager
-from typing import Generator, Optional
+from typing import Generator, Optional, List, Dict
+import logging
 
 import matplotlib
 import matplotlib.patches as mpatches
