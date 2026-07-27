@@ -1153,6 +1153,22 @@ with st.sidebar:
             clear_all_dialog()
         st.markdown("</div>", unsafe_allow_html=True)
 
+        # ── Cache Statistics Debug Badge (Issue #549) ──────────────────────────
+        st.markdown("---")
+        st.markdown("### ⚡ Redis Cache Stats")
+        from src.utils.redis_cache import get_cache
+        stats = get_cache().get_stats()
+        st.markdown(
+            f"""
+            <div style="background-color: rgba(45, 212, 191, 0.1); border: 1px solid rgba(45, 212, 191, 0.3); border-radius: 8px; padding: 10px; font-family: monospace; font-size: 0.85rem; color: inherit;">
+                <strong>Hits / Misses:</strong> {stats['hits']} / {stats['misses']}<br/>
+                <strong>Hit Ratio:</strong> {stats['hit_ratio']:.1%}<br/>
+                <strong>Cached Items:</strong> {stats['total_items']}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
     else:
         threshold = PLAGIARISM_THRESHOLD
         use_chunk_matrix = False
