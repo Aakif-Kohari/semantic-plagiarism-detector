@@ -63,7 +63,7 @@ Theme colors (background/ink/etc.) are applied conditionally with `if theme_colo
 Coloring logic here is threshold-based rather than a single palette lookup:
 
 - **Edges** are colored by similarity severity (lines ~92–98): `>= 0.90` uses `theme_colors["danger"]`, `>= 0.75` uses `theme_colors["warning"]`, otherwise `theme_colors["success"]` — each with a hardcoded hex fallback if `theme_colors` is `None`.
-- **Nodes** are colored by degree (number of flagged connections): degree `0` → success, degree `1` → warning, degree `2+` → danger (lines ~184–212).
+- **Nodes** are colored by document class tags (e.g. `#class_A`, `#class_B`) when tag metadata is provided via `document_tags` (or fetched from database). Each unique class tag is mapped to a discrete color from a high-contrast palette. If no document tags exist, node colors fall back to connection degree (degree `0` → success, degree `1` → warning, degree `2+` → danger).
 
 If you want to change these severity cutoffs, they are separate from `PLAGIARISM_THRESHOLD` in `src/core/similarity.py` — the `0.90`/`0.75` values are local to this function.
 
@@ -89,8 +89,65 @@ So today, dashboard charts do not follow the Light/Dark theme the way the heatma
 4. Call it from `app/streamlit_app.py`, passing `theme_colors=get_colors()` if applicable.
 5. Add a test under `tests/` (see `tests/test_heatmap.py` and `tests/visualization/test_network_graph.py` for existing patterns) and, if it's a Matplotlib figure, consider a baseline image test like `tests/baseline/test_similarity_heatmap_visual.png`.
 
-## Known Gaps (useful context for future work)
+## Chart Customization Examples
 
+### Choosing a heatmap colormap
+
+`plot_similarity_heatmap`, `plot_similarity_heatmap_plotly`, and `plot_chunk_similarity_comparison` all accept a `colormap_name` argument. Pick any of `UI_COLORMAP_OPTIONS` (`"Viridis"`, `"Plasma"`, `"Coolwarm"`, `"YlOrRd"`):
+
+```python
+from src.visualization.heatmap import plot_similarity_heatmap
+
+fig = plot_similarity_heatmap(
+    similarity_df,
+    colormap_name="Plasma",  # try "Viridis", "Coolwarm", or "YlOrRd" too
+)
+```
+
+### Overriding theme colors for a single chart
+
+Every visualization function accepts a `theme_colors` dict. You don't have to use `get_colors()` from `app/theme.py` — pass a custom dict to preview a one-off palette:
+
+```python
+custom_theme = {
+    "background": "#1A1A2E",
+    "surface": "#16213E",
+    "ink": "#EAEAEA",
+    "danger": "#FF6B6B",
+    "warning": "#FFD93D",
+    "success": "#6BCB77",
+}
+
+fig = plot_similarity_heatmap(similarity_df, theme_colors=custom_theme)
+```
+
+### Adding a permanent app-wide theme
+
+To make a new palette selectable app-wide (not just for one chart), add it to `THEMES` in `app/theme.py`, following the same token names used by `"Light"` and `"Dark"`:
+
+```python
+THEMES["HighContrast"] = {
+    "background": "#000000",
+    "surface": "#111111",
+    "card": "#000000",
+    "ink": "#FFFFFF",
+    "muted": "#AAAAAA",
+    "accent": "#00FFC2",
+    "border": "#333333",
+    "input": "#000000",
+    "danger": "#FF0033",
+    "danger_soft": "#330000",
+    "warning": "#FFEE00",
+    "warning_soft": "#332B00",
+    "success": "#00FF66",
+    "success_soft": "#003311",
+    "neutral_soft": "#1A1A1A",
+}
+```
+
+Once added, `set_theme("HighContrast")` makes it available through `get_colors()`, and every chart that accepts `theme_colors=get_colors()` will pick it up automatically.
+
+## Known Gaps (useful context for future work)
 - **`heatmap.py` colormap is not overridable per-call.** `app/streamlit_app.py` calls `plot_similarity_heatmap(..., cmap=heatmap_cmap, ...)` in one place (search for `# Dynamic colormap support`), but `plot_similarity_heatmap`'s signature has no `cmap` parameter — it only has `theme_colors`, not a colormap override. As written, that call site would raise a `TypeError` if it executes, since `cmap` isn't a valid keyword argument for the function. Adding a `cmap: str = _CMAP` parameter to `plot_similarity_heatmap` (and using it in place of the hardcoded `_CMAP` inside the function) would resolve this.
 - **`plot_similarity_distribution` and `plot_document_sizes` are not exported** from `src/visualization/__init__.py`. They're defined in `analytics.py` but must currently be imported as `from src.visualization.analytics import plot_similarity_distribution` rather than `from src.visualization import plot_similarity_distribution`.
 - **`analytics.py` charts don't take `theme_colors`.** Their colors are hardcoded hex strings, so they won't shift with the Light/Dark toggle the way `heatmap.py` and `network_graph.py` do.
