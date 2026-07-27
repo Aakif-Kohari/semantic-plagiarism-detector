@@ -63,7 +63,7 @@ Theme colors (background/ink/etc.) are applied conditionally with `if theme_colo
 Coloring logic here is threshold-based rather than a single palette lookup:
 
 - **Edges** are colored by similarity severity (lines ~92–98): `>= 0.90` uses `theme_colors["danger"]`, `>= 0.75` uses `theme_colors["warning"]`, otherwise `theme_colors["success"]` — each with a hardcoded hex fallback if `theme_colors` is `None`.
-- **Nodes** are colored by degree (number of flagged connections): degree `0` → success, degree `1` → warning, degree `2+` → danger (lines ~184–212).
+- **Nodes** are colored by document class tags (e.g. `#class_A`, `#class_B`) when tag metadata is provided via `document_tags` (or fetched from database). Each unique class tag is mapped to a discrete color from a high-contrast palette. If no document tags exist, node colors fall back to connection degree (degree `0` → success, degree `1` → warning, degree `2+` → danger).
 
 If you want to change these severity cutoffs, they are separate from `PLAGIARISM_THRESHOLD` in `src/core/similarity.py` — the `0.90`/`0.75` values are local to this function.
 
