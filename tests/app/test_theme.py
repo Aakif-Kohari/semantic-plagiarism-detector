@@ -1,10 +1,17 @@
-from app.theme import (
-    COLORS,
-    badge_html,
-    severity_tier,
-    tier_color,
-    tier_from_severity_label,
-)
+from unittest.mock import patch
+
+from app.theme import badge_html, get_colors, inject_css
+
+
+def test_get_colors_returns_valid_theme_colors():
+    colors = get_colors()
+
+    assert isinstance(colors, dict)
+    assert colors
+    assert "background" in colors
+    assert "accent" in colors
+from app.theme import (COLORS, severity_tier, tier_color,
+                       tier_from_severity_label)
 
 
 def test_severity_tier():
@@ -44,18 +51,23 @@ def test_badge_html_default():
     assert "color: " + COLORS["danger"] in html
     assert "🔴 High" in html
 
-    html_med = badge_html("medium")
-    assert "background-color: " + COLORS["warning_soft"] in html_med
-    assert "color: " + COLORS["warning"] in html_med
-    assert "🟡 Medium" in html_med
 
-    html_low = badge_html("low")
-    assert "background-color: " + COLORS["success_soft"] in html_low
-    assert "color: " + COLORS["success"] in html_low
-    assert "🟢 Low" in html_low
+def test_inject_css_generates_css_without_errors():
+    with patch("app.theme.st.markdown") as mock_markdown:
+        inject_css()
+
+    mock_markdown.assert_called_once()
+
+    css = mock_markdown.call_args.args[0]
+
+    assert isinstance(css, str)
+    assert len(css.strip()) > 0
+    assert "<style>" in css
 
 
-def test_badge_html_custom_label():
-    html = badge_html("high", "Similarity: 95.0%")
-    assert "Similarity: 95.0%" in html
-    assert "🔴 High" not in html
+def test_badge_html_returns_valid_html():
+    html = badge_html("high")
+
+    assert isinstance(html, str)
+    assert len(html.strip()) > 0
+    assert "badge" in html

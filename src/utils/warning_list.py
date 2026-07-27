@@ -10,15 +10,17 @@ import pandas as pd
 import streamlit as st
 
 from app.theme import badge_html, tier_from_severity_label
-from src.core.config import normalize_severity_label, severity_from_score, severity_rank
-from src.db.incidents import _normalise_pair, add_false_positive, get_false_positives
-
+from src.core.config import (normalize_severity_label, severity_from_score,
+                             severity_rank)
+from src.db.incidents import (_normalise_pair, add_false_positive,
+                              get_false_positives)
 
 try:
     from thefuzz import fuzz
 except ImportError:
     try:
-        from fuzzywuzzy import fuzz  # type: ignore[import-untyped,reportMissingImports]
+        from fuzzywuzzy import \
+            fuzz  # type: ignore[import-untyped,reportMissingImports]
     except ImportError:
         fuzz = None
 
@@ -69,6 +71,7 @@ def filter_warnings(
     warnings: Iterable[Mapping[str, Any]],
     search_query: str = "",
     min_match_length: int = 0,
+    fuzzy_threshold: int = 70,
 ) -> list[dict[str, Any]]:
     """
     Filters warnings by query using exact substring matching and 
@@ -143,7 +146,7 @@ def paginate_warnings(
     page: int = 1,
     page_size: int = 10,
 ) -> WarningPage:
-    safe_page_size = max(1, int(page_size))
+    safe_page_size = min(100, max(1, int(page_size)))
     total_items = len(warnings)
     total_pages = max(1, math.ceil(total_items / safe_page_size))
     safe_page = min(max(1, int(page)), total_pages)
@@ -221,6 +224,27 @@ def render_warning_controls(
 ) -> None:
     if "warning_page" not in st.session_state:
         st.session_state.warning_page = 1
+
+    # Clamp custom page_size from query parameters to prevent memory spikes
+    if "page_size" in st.query_params:
+        try:
+            qp_size = int(st.query_params["page_size"])
+            st.session_state.warning_page_size = min(100, max(1, qp_size))
+        except (ValueError, TypeError):
+            pass
+    elif "warning_page_size" in st.query_params:
+        try:
+            qp_size = int(st.query_params["warning_page_size"])
+            st.session_state.warning_page_size = min(100, max(1, qp_size))
+        except (ValueError, TypeError):
+            pass
+
+    # Ensure warning_page_size in session state is always clamped to 100
+    if "warning_page_size" in st.session_state:
+        try:
+            st.session_state.warning_page_size = min(100, max(1, int(st.session_state.warning_page_size)))
+        except (ValueError, TypeError):
+            st.session_state.warning_page_size = 10
 
     from src.core.config import DEFAULT_THRESHOLDS
 
@@ -364,12 +388,19 @@ def render_warning_controls(
         )
 
     with size_col:
+        # Dynamic options list to avoid Streamlit ControlFlowException
+        options = [10, 25, 50]
+        current_size = st.session_state.get("warning_page_size", 10)
+        if current_size not in options:
+            options = sorted(options + [current_size])
+
         page_size = st.selectbox(
             "Warnings per page",
-            [10, 25, 50],
+            options,
             key="warning_page_size",
             on_change=_reset_page,
         )
+        page_size = min(100, max(1, int(page_size)))
 
     min_match_length = st.slider(
         "Minimum Match Length (Words)",

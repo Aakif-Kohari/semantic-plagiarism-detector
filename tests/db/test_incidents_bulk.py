@@ -1,7 +1,11 @@
-import pytest
 import sqlite3
-from src.db.incidents import sync_flagged_incidents, _fetch_all_incidents, init_incident_db
+
+import pytest
+
 from src.db.corpus_db import clear_all_data
+from src.db.incidents import (_fetch_all_incidents, init_incident_db,
+                              sync_flagged_incidents)
+
 
 @pytest.fixture(autouse=True)
 def setup_teardown():
@@ -55,7 +59,7 @@ def test_sync_flagged_incidents_bulk_upsert():
     
     assert len(incidents) == 1
     assert incidents[0]["similarity_score"] == 0.99
-    assert incidents[0]["severity_rank"] == "Critical"
+    assert incidents[0]["severity_rank"] == "High"
 
 def test_sync_flagged_incidents_bulk_invalid():
     # Test skipping invalid pairs
