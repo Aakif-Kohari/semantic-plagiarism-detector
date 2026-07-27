@@ -34,6 +34,7 @@ REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 REDIS_DB = int(os.getenv("REDIS_DB", "0"))
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", None)
 REDIS_URL = os.getenv("REDIS_URL", f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}")
+REDIS_TIMEOUT_SECONDS = float(os.getenv("REDIS_TIMEOUT_SECONDS", "2.0"))
 
 # TTL settings (in seconds)
 SESSION_TTL = 15 * 60  # 15 minutes for session state
@@ -151,7 +152,7 @@ class RedisCache:
                     REDIS_URL,
                     password=REDIS_PASSWORD,
                     decode_responses=False,
-                    socket_connect_timeout=5,
+                    socket_connect_timeout=REDIS_TIMEOUT_SECONDS,
                 )
             else:
                 self._client = redis.Redis(
@@ -160,7 +161,7 @@ class RedisCache:
                     db=REDIS_DB,
                     password=REDIS_PASSWORD,
                     decode_responses=False,
-                    socket_connect_timeout=5,
+                    socket_connect_timeout=REDIS_TIMEOUT_SECONDS,
                 )
             # Test connection
             self._client.ping()
