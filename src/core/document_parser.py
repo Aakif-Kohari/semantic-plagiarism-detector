@@ -59,11 +59,8 @@ def check_batch_rate_limit(file_count: int, session_id: Optional[str] = None) ->
 # Tesseract language packs intentionally exposed by the administrator UI.
 
 # More values may be added later without changing the extraction API.
-SUPPORTED_OCR_LANGUAGES = {
-    "eng": "English",
-    "spa": "Spanish",
-    "fra": "French",
-}
+from src.core.app_config import SUPPORTED_OCR_LANGUAGES
+
 
 
 def validate_ocr_dpi(value: int) -> int:
