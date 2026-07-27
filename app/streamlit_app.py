@@ -342,7 +342,11 @@ st.markdown(
 
 
 # ── SESSION TIMEOUT & ROUTE PROTECTION ────────────────────────────────────────
-TIMEOUT_LIMIT = 15 * 60  # 15 minutes in seconds
+TIMEOUT_LIMIT = (
+    30 * 60
+    if st.session_state.get("role") == "admin"
+    else 15 * 60
+)
 
 import streamlit.components.v1 as components
 
