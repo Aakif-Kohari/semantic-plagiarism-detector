@@ -23,5 +23,6 @@
   "document_word_counts": "📊 Document Word Counts",
   "no_documents_db": "No documents currently in the database.",
   "tab_trash": "🗑️ Trash",
-  "trash_empty_msg": "Your trash is empty."
+  "trash_empty_msg": "Your trash is empty.",
+  "tab_health": "🖥️ System Health"
 }
