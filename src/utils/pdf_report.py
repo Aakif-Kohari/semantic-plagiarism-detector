@@ -323,6 +323,18 @@ def generate_plagiarism_report(
                 )
             except Exception:
                 pass
+
+        footer_text = get_pdf_footer_text()
+        if footer_text:
+            canvas_obj.setFont("Helvetica", 9)
+            if dark_mode:
+                canvas_obj.setFillColor(HexColor("#94a3b8"))
+            else:
+                canvas_obj.setFillColor(HexColor("#6b7280"))
+            canvas_obj.drawCentredString(
+                _doc.pagesize[0] / 2.0, 0.5 * inch, footer_text
+            )
+
         canvas_obj.restoreState()
 
 
