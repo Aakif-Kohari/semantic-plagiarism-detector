@@ -1,12 +1,21 @@
 import streamlit as st
 
-from app.css_constants import (CLASS_AVATAR, CLASS_BADGE, CLASS_EMPTY_DESC,
+try:
+    from app.css_constants import (CLASS_AVATAR, CLASS_BADGE, CLASS_EMPTY_DESC,
+                                   CLASS_EMPTY_ICON, CLASS_EMPTY_STATE,
+                                   CLASS_EMPTY_TITLE, CLASS_PIPELINE_ACTIVE,
+                                   CLASS_PIPELINE_ARROW, CLASS_PIPELINE_DONE,
+                                   CLASS_PIPELINE_ETA, CLASS_PIPELINE_STEP,
+                                   CLASS_PIPELINE_STEPS, CLASS_SIDEBAR_USER_BADGE,
+                                   CLASS_SIM_PILL, CLASS_WELCOME_BANNER)
+except ImportError:
+    from css_constants import (CLASS_AVATAR, CLASS_BADGE, CLASS_EMPTY_DESC,
                                CLASS_EMPTY_ICON, CLASS_EMPTY_STATE,
                                CLASS_EMPTY_TITLE, CLASS_PIPELINE_ACTIVE,
                                CLASS_PIPELINE_ARROW, CLASS_PIPELINE_DONE,
                                CLASS_PIPELINE_ETA, CLASS_PIPELINE_STEP,
                                CLASS_PIPELINE_STEPS, CLASS_SIDEBAR_USER_BADGE,
-                               CLASS_SIM_PILL)
+                               CLASS_SIM_PILL, CLASS_WELCOME_BANNER)
 from src.core.config import (DEFAULT_THRESHOLDS, normalize_severity_label,
                              severity_key)
 
@@ -49,9 +58,37 @@ THEMES = {
 # Backward-compatible default palette used by existing tests and callers.
 COLORS = THEMES["Light"]
 
+# ── Colormap Mappings & Constants ──────────────────────────────────────────────
+# Moved here from src/visualization/heatmap.py (Issue #633) so all
+# color/theme-related generation logic lives in one place.
 
-def initialize_theme() -> None:
-    """Initialize the active theme for the current session."""
+# Standard colormap options required by UI/UX specifications.
+UI_COLORMAP_OPTIONS: list[str] = ["Viridis", "Plasma", "Coolwarm", "YlOrRd"]
+
+# Map UI display names to exact Matplotlib/Seaborn string identifiers.
+MATPLOTLIB_CMAP_MAPPING: dict[str, str] = {
+    "Viridis": "viridis",
+    "Plasma": "plasma",
+    "Coolwarm": "coolwarm",
+    "YlOrRd": "YlOrRd",
+    # Legacy fallback mapping
+    "Legacy Red/Green": "RdYlGn_r",
+}
+
+# Map UI display names to exact Plotly string identifiers.
+PLOTLY_CMAP_MAPPING: dict[str, str] = {
+    "Viridis": "Viridis",
+    "Plasma": "Plasma",
+    "Coolwarm": "RdBu_r",  # Coolwarm equivalent in standard plotly
+    "YlOrRd": "YlOrRd",
+    # Legacy fallback mapping
+    "Legacy Red/Green": "RdYlGn_r",
+}
+
+DEFAULT_UI_COLORMAP: str = "Viridis"
+
+
+def initialize_theme() -> None:    """Initialize the active theme for the current session."""
     try:
         if "theme" not in st.session_state:
             st.session_state.theme = "Light"
@@ -481,6 +518,16 @@ def inject_css() -> None:
             color: white !important;
             border-color: #ff3333 !important;
         }}
+
+        .{CLASS_WELCOME_BANNER} {{
+    background-color: {colors["surface"]};
+    border: 1px solid {colors["border"]};
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    color: {colors["ink"]};
+    font-size: 0.95rem;
+}}
 
         [data-testid="stExpander"],
         [data-testid="stForm"] {{

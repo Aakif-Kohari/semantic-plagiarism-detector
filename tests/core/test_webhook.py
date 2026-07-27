@@ -4,7 +4,6 @@ from unittest.mock import patch
 
 import responses
 
-import src.core.webhook as webhook
 from src.core.webhook import send_plagiarism_alert
 
 
@@ -21,7 +20,8 @@ def test_send_plagiarism_alert_no_url():
     },
 )
 @responses.activate
-def test_send_plagiarism_alert_success():
+@patch("src.security.ssrf_protector.SSRFProtector.validate_webhook_url", return_value=True)
+def test_send_plagiarism_alert_success(mock_ssrf):
     responses.add(
         responses.POST,
         "https://mock-webhook.url",
@@ -47,7 +47,8 @@ def test_send_plagiarism_alert_success():
 
 @patch.dict(os.environ, {"PLAGIARISM_WEBHOOK_URL": "https://mock-webhook.url"})
 @responses.activate
-def test_send_plagiarism_alert_network_failure():
+@patch("src.security.ssrf_protector.SSRFProtector.validate_webhook_url", return_value=True)
+def test_send_plagiarism_alert_network_failure(mock_ssrf):
     responses.add(
         responses.POST,
         "https://mock-webhook.url",

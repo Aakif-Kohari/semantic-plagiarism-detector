@@ -71,6 +71,7 @@ def filter_warnings(
     warnings: Iterable[Mapping[str, Any]],
     search_query: str = "",
     min_match_length: int = 0,
+    fuzzy_threshold: int = 70,
 ) -> list[dict[str, Any]]:
     """
     Filters warnings by query using exact substring matching and 
@@ -145,7 +146,7 @@ def paginate_warnings(
     page: int = 1,
     page_size: int = 10,
 ) -> WarningPage:
-    safe_page_size = max(1, int(page_size))
+    safe_page_size = min(100, max(1, int(page_size)))
     total_items = len(warnings)
     total_pages = max(1, math.ceil(total_items / safe_page_size))
     safe_page = min(max(1, int(page)), total_pages)
@@ -223,6 +224,27 @@ def render_warning_controls(
 ) -> None:
     if "warning_page" not in st.session_state:
         st.session_state.warning_page = 1
+
+    # Clamp custom page_size from query parameters to prevent memory spikes
+    if "page_size" in st.query_params:
+        try:
+            qp_size = int(st.query_params["page_size"])
+            st.session_state.warning_page_size = min(100, max(1, qp_size))
+        except (ValueError, TypeError):
+            pass
+    elif "warning_page_size" in st.query_params:
+        try:
+            qp_size = int(st.query_params["warning_page_size"])
+            st.session_state.warning_page_size = min(100, max(1, qp_size))
+        except (ValueError, TypeError):
+            pass
+
+    # Ensure warning_page_size in session state is always clamped to 100
+    if "warning_page_size" in st.session_state:
+        try:
+            st.session_state.warning_page_size = min(100, max(1, int(st.session_state.warning_page_size)))
+        except (ValueError, TypeError):
+            st.session_state.warning_page_size = 10
 
     from src.core.config import DEFAULT_THRESHOLDS
 
@@ -366,12 +388,19 @@ def render_warning_controls(
         )
 
     with size_col:
+        # Dynamic options list to avoid Streamlit ControlFlowException
+        options = [10, 25, 50]
+        current_size = st.session_state.get("warning_page_size", 10)
+        if current_size not in options:
+            options = sorted(options + [current_size])
+
         page_size = st.selectbox(
             "Warnings per page",
-            [10, 25, 50],
+            options,
             key="warning_page_size",
             on_change=_reset_page,
         )
+        page_size = min(100, max(1, int(page_size)))
 
     min_match_length = st.slider(
         "Minimum Match Length (Words)",
@@ -383,11 +412,17 @@ def render_warning_controls(
         on_change=_reset_page,
     )
 
+    p_dir = st.session_state.get("warning_primary_direction", "Descending ▼")
+    s_dir = st.session_state.get("warning_secondary_direction", "Ascending ▲")
+
+    p_arrow = "▼" if "Descending" in p_dir else "▲"
+    s_arrow = "▲" if "Ascending" in s_dir else "▼"
+
     p1, d1, p2, d2 = st.columns([2, 1, 2, 1])
 
     with p1:
         primary_label = st.selectbox(
-            "Primary sort",
+            f"Primary sort {p_arrow}",
             list(SORT_FIELDS),
             key="warning_primary_sort",
             on_change=_reset_page,
@@ -396,14 +431,14 @@ def render_warning_controls(
     with d1:
         primary_direction = st.selectbox(
             "Direction",
-            ["Descending", "Ascending"],
+            ["Descending ▼", "Ascending ▲"],
             key="warning_primary_direction",
             on_change=_reset_page,
         )
 
     with p2:
         secondary_label = st.selectbox(
-            "Then sort by",
+            f"Then sort by {s_arrow}",
             list(SORT_FIELDS),
             index=1,
             key="warning_secondary_sort",
@@ -413,7 +448,7 @@ def render_warning_controls(
     with d2:
         secondary_direction = st.selectbox(
             "Then direction",
-            ["Ascending", "Descending"],
+            ["Ascending ▲", "Descending ▼"],
             key="warning_secondary_direction",
             on_change=_reset_page,
         )
@@ -429,9 +464,9 @@ def render_warning_controls(
         search_query=search_query,
         min_match_length=min_match_length,
         primary_field=SORT_FIELDS[primary_label],
-        primary_descending=primary_direction == "Descending",
+        primary_descending="Descending" in primary_direction,
         secondary_field=SORT_FIELDS[secondary_label],
-        secondary_descending=secondary_direction == "Descending",
+        secondary_descending="Descending" in secondary_direction,
         page=st.session_state.warning_page,
         page_size=page_size,
     )

@@ -3,7 +3,7 @@ import logging
 import socket
 import time
 import urllib.parse
-from typing import Dict, Optional
+from typing import Dict
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +21,11 @@ class SSRFProtector:
     # slow-DNS denial of service attacks. (Format: {hostname: (ip_str, timestamp)})
     _dns_cache: Dict[str, tuple[str, float]] = {}
     DNS_CACHE_TTL_SECONDS = 300 # 5 minutes
+    BLOCKED_PRIVATE_IPV4_SUBNETS = (
+        ipaddress.ip_network("10.0.0.0/8"),
+        ipaddress.ip_network("172.16.0.0/12"),
+        ipaddress.ip_network("192.168.0.0/16"),
+    )
 
     @classmethod
     def _resolve_hostname(cls, hostname: str) -> str:
@@ -87,7 +92,15 @@ class SSRFProtector:
         except ValueError as e:
             raise SSRFSecurityException(f"Resolved invalid IP address format: {e}")
             
-        # 3. Block Private, Loopback, and Unspecified IP ranges
+        # 3. Block explicit RFC1918 private IPv4 subnets using CIDR checks
+        if isinstance(ip, ipaddress.IPv4Address):
+            for subnet in cls.BLOCKED_PRIVATE_IPV4_SUBNETS:
+                if ip in subnet:
+                    raise SSRFSecurityException(
+                        f"Blocked private IPv4 subnet IP: {ip_str} ({subnet})"
+                    )
+
+        # 4. Block private IPv6 addresses and special-purpose ranges
         if ip.is_loopback:
             raise SSRFSecurityException(f"Blocked loopback IP: {ip_str}")
             

@@ -16,7 +16,9 @@ flowchart TD
 
     B --> C[📄 File Upload]
     
-    C --> D[📑 Document Parser]
+    C --> S[🛡️ SSRF Protection]
+
+    S --> D[📑 Document Parser]
     
     D --> E[📝 Text Extraction]
     
@@ -45,6 +47,10 @@ flowchart TD
     L --> O[🔍 Pair Drill-Down]
     
     L --> P[📋 Plagiarism Warnings]
+
+    L --> Q[📊 Analytics Dashboard]
+
+    B --> R[📡 Telemetry Service]
 
     J --> B
     I --> B
@@ -212,6 +218,40 @@ Default thresholds:
 
 ---
 
+## 8. SSRF Protection
+
+**Location:** `src/security/ssrf_protector.py`
+
+The SSRF protection layer validates external URLs before they are processed by the application.
+
+It performs security checks including:
+
+- URL validation
+- Hostname validation
+- Blocking loopback and private IP addresses
+- Rejecting invalid or unsafe destinations
+- Raising security exceptions when validation fails
+
+This helps protect the application from Server-Side Request Forgery (SSRF) attacks.
+
+---
+
+## 9. Analytics Dashboard
+
+**Location:** `src/visualization/analytics.py`
+
+The analytics module provides visual summaries of plagiarism detection results through charts and dashboard visualizations, helping users understand document similarity patterns and application statistics.
+
+---
+
+## 10. Telemetry Service
+
+**Location:** `src/core/telemetry.py`
+
+The telemetry service collects and caches runtime metrics used throughout the application. It provides application statistics and monitoring data that support reporting and operational visibility.
+
+---
+
 ## 📊 Result Visualisation
 
 After similarity analysis, results are presented through the Streamlit dashboard.
@@ -223,6 +263,7 @@ flowchart LR
     A --> D[🔥 Interactive Heatmap]
     A --> E[🔍 Pair Drill-Down]
     A --> F[🕸️ Plagiarism Network Graph]
+    A --> G[📈 Analytics Dashboard]
 ```
 
 ### Plagiarism Warnings
@@ -286,6 +327,9 @@ Administrators have access to user management functionality, while teachers can 
 | Corpus Database | `src/db/corpus_db.py` | Store document and corpus data |
 | Heatmap | `src/visualization/heatmap.py` | Similarity visualisation |
 | Network Graph | `src/visualization/network_graph.py` | Plagiarism relationship visualisation |
+| SSRF Protection | `src/security/ssrf_protector.py` | Protect external URL processing against SSRF attacks |
+| Analytics Dashboard | `src/visualization/analytics.py` | Generate dashboard analytics and visualizations |
+| Telemetry Service | `src/core/telemetry.py` | Collect and cache runtime application metrics |
 
 ---
 

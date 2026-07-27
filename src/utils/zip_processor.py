@@ -43,7 +43,7 @@ def process_zip_file(zip_bytes: bytes) -> Dict[str, bytes]:
                     size_limit_mb = MAX_SINGLE_FILE_SIZE // (1024 * 1024)
 
                     raise ValueError(
-                        f"Entry '{zip_info.filename}' exceeds the single-file "
+                        f"Entry '{zip_info.filename}' exceeds single file "
                         f"decompression safety limit of {size_limit_mb}MB."
                     )
                 total_size += zip_info.file_size
@@ -51,8 +51,8 @@ def process_zip_file(zip_bytes: bytes) -> Dict[str, bytes]:
                     total_limit_mb = MAX_TOTAL_DECOMPRESSED_SIZE // (1024 * 1024)
 
                     raise ValueError(
-                        "ZIP archive total decompressed size exceeds the safety "
-                        f"limit of {total_limit_mb}MB."
+                        "ZIP archive total decompressed size exceeds safety limit "
+                        f"of {total_limit_mb}MB."
                     )
 
             # 2. Extract and sanitize entries
@@ -97,9 +97,14 @@ def process_zip_file(zip_bytes: bytes) -> Dict[str, bytes]:
                 if not file_data:
                     continue
 
+                # Flatten nested path by joining path components with underscores
+                # e.g. "folder1/assignment.pdf" -> "folder1_assignment.pdf"
+                parts_path = filename.split("/")
+                flat_name = "_".join(p for p in parts_path if p)
+
                 # Keep only the entry basename and sanitize it as untrusted input.
                 unique_name = unique_filename(
-                    filename,
+                    flat_name,
                     extracted_files,
                 )
                 extracted_files[unique_name] = file_data
