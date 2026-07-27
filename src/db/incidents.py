@@ -13,7 +13,7 @@ from src.core.config import (normalize_score, normalize_severity_label,
                              severity_from_score)
 from src.db.migrations import migrate_corpus_database
 
-DEFAULT_DB_PATH = Path(__file__).resolve().parents[2] / "corpus.db"
+DEFAULT_DB_PATH = Path(__file__).resolve().parents[2] / "data" / "corpus.db"
 VALID_REVIEW_STATUSES = {"Pending", "Resolved"}
 CSV_COLUMNS = [
     "Incident ID",

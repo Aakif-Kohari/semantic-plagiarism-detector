@@ -15,7 +15,7 @@ from src.db.migrations import migrate_auth_database
 logger = logging.getLogger(__name__)
 
 _DB_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "users.db")
+    os.path.join(os.path.dirname(__file__), "..", "..", "data", "users.db")
 )
 
 VALID_ROLES = {"admin", "teacher"}

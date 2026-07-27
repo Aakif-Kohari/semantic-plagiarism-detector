@@ -198,7 +198,7 @@ if "session_id" not in st.session_state:
 SESSION_ID = st.session_state.session_id
 
 _BRANDING_CONFIG_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "branding_config.json")
+    os.path.join(os.path.dirname(__file__), "..", "config", "branding_config.json")
 )
 _BRANDING_LOGO_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "branding_logo.png")

@@ -167,6 +167,7 @@ corpus.db
 *.db
 *.sqlite
 *.sqlite3
+data/
 
 # ── Streamlit secrets (sensitive credentials) ─────────────────────────────────
 .streamlit/secrets.toml

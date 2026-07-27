@@ -24,7 +24,7 @@ from src.db.migrations import (delete_all_if_table_exists,
 from src.utils.filename import sanitize_filename
 
 _DB_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "corpus.db")
+    os.path.join(os.path.dirname(__file__), "..", "..", "data", "corpus.db")
 )
 
 _connection_pool = threading.local()
