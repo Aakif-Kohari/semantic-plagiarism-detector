@@ -2710,6 +2710,28 @@ if not st.session_state.authenticated:
         total_pairs = n_docs * (n_docs - 1) // 2 if n_docs > 1 else 0
         n_flagged = len(flags)
 
+        max_sim = max([float(f["similarity"]) for f in flags]) if flags else 0.0
+        overall_severity = severity_key(max_sim)
+        
+        severity_color_map = {
+            "low": "var(--success)",
+            "medium": "var(--warning)",
+            "high": "var(--danger)",
+        }
+        metric_color = severity_color_map.get(overall_severity, "var(--success)")
+
+        st.markdown(
+            f"""
+            <style>
+            div[data-testid="stMetric"] {{
+                border-color: {metric_color} !important;
+                border-top: 4px solid {metric_color} !important;
+            }}
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
+
         col1, col2, col3, col4, col5 = st.columns(5)
         col1.metric(get_text("metric_docs", lang=lang_code), n_docs)
         col2.metric(get_text("metric_pairs", lang=lang_code), total_pairs)
