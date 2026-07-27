@@ -5,6 +5,7 @@ import time
 import urllib.parse
 from typing import Dict
 
+from src import errors
 logger = logging.getLogger(__name__)
 
 class SSRFSecurityException(Exception):
@@ -45,8 +46,7 @@ class SSRFProtector:
             # socket.getaddrinfo is used to support both IPv4 and IPv6 resolution safely
             addr_info = socket.getaddrinfo(hostname, None)
             if not addr_info:
-                raise SSRFSecurityException(f"No addresses found for hostname '{hostname}'")
-            
+raise SSRFSecurityException(errors.SSRF_DNS_NO_ADDRESSES.format(hostname=hostname))            
             # Extract the first resolved IP
             ip_str = addr_info[0][4][0]
             
@@ -55,8 +55,7 @@ class SSRFProtector:
             return ip_str
             
         except socket.gaierror as e:
-            raise SSRFSecurityException(f"DNS resolution failed for hostname '{hostname}': {e}")
-
+raise SSRFSecurityException(errors.SSRF_DNS_RESOLUTION_FAILED.format(hostname=hostname, error=e))
     @classmethod
     def validate_webhook_url(cls, url: str) -> bool:
         """
@@ -73,49 +72,39 @@ class SSRFProtector:
             SSRFSecurityException: If the URL is malicious.
         """
         if not url:
-            raise SSRFSecurityException("Webhook URL cannot be empty.")
-            
+raise SSRFSecurityException(errors.SSRF_WEBHOOK_URL_EMPTY)            
         # 1. Scheme Validation
         parsed = urllib.parse.urlparse(url)
         if parsed.scheme != "https":
-            raise SSRFSecurityException(f"Insecure scheme '{parsed.scheme}'. Webhooks must use 'https'.")
-            
+raise SSRFSecurityException(errors.SSRF_INSECURE_SCHEME.format(scheme=parsed.scheme))            
         hostname = parsed.hostname
         if not hostname:
-            raise SSRFSecurityException("Invalid URL: missing hostname.")
-            
+raise SSRFSecurityException(errors.SSRF_MISSING_HOSTNAME)            
         # 2. DNS Resolution
         ip_str = cls._resolve_hostname(hostname)
             
         try:
             ip = ipaddress.ip_address(ip_str)
         except ValueError as e:
-            raise SSRFSecurityException(f"Resolved invalid IP address format: {e}")
-            
+raise SSRFSecurityException(errors.SSRF_INVALID_IP_FORMAT.format(error=e))            
         # 3. Block explicit RFC1918 private IPv4 subnets using CIDR checks
         if isinstance(ip, ipaddress.IPv4Address):
             for subnet in cls.BLOCKED_PRIVATE_IPV4_SUBNETS:
                 if ip in subnet:
-                    raise SSRFSecurityException(
-                        f"Blocked private IPv4 subnet IP: {ip_str} ({subnet})"
+raise SSRFSecurityException(
+                        errors.SSRF_BLOCKED_PRIVATE_SUBNET.format(ip=ip_str, subnet=subnet)
                     )
-
         # 4. Block private IPv6 addresses and special-purpose ranges
         if ip.is_loopback:
-            raise SSRFSecurityException(f"Blocked loopback IP: {ip_str}")
-            
+raise SSRFSecurityException(errors.SSRF_BLOCKED_LOOPBACK.format(ip=ip_str))            
         if ip.is_private:
-            raise SSRFSecurityException(f"Blocked private network IP: {ip_str}")
-            
+raise SSRFSecurityException(errors.SSRF_BLOCKED_PRIVATE_NETWORK.format(ip=ip_str))            
         if ip.is_link_local:
-            raise SSRFSecurityException(f"Blocked link-local IP: {ip_str}")
-            
+raise SSRFSecurityException(errors.SSRF_BLOCKED_LINK_LOCAL.format(ip=ip_str))            
         if ip.is_multicast:
-            raise SSRFSecurityException(f"Blocked multicast IP: {ip_str}")
-            
+raise SSRFSecurityException(errors.SSRF_BLOCKED_MULTICAST.format(ip=ip_str))            
         if ip.is_unspecified:
-            raise SSRFSecurityException(f"Blocked unspecified IP: {ip_str}")
-            
+raise SSRFSecurityException(errors.SSRF_BLOCKED_UNSPECIFIED.format(ip=ip_str))            
         # If it passed all checks, it's considered safe (public routable IP)
         logger.debug(f"SSRF Check passed for {url} -> {ip_str}")
         return True
