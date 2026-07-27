@@ -88,7 +88,8 @@ PLOTLY_CMAP_MAPPING: dict[str, str] = {
 DEFAULT_UI_COLORMAP: str = "Viridis"
 
 
-def initialize_theme() -> None:    """Initialize the active theme for the current session."""
+def initialize_theme() -> None:
+    """Initialize the active theme for the current session."""
     try:
         if "theme" not in st.session_state:
             st.session_state.theme = "Light"
@@ -968,18 +969,19 @@ def back_to_top_html(scroll_threshold: int = 250) -> str:
     re-queries the button on each event so that Streamlit reruns (which
     recreate the DOM) do not break the feature.
     """
-return f"""
-    <button id="back-to-top-btn"            type="button"
+    return f"""
+    <button id="back-to-top-btn" type="button"
             aria-label="Back to top"
-title="Back to top">
+            title="Back to top">
         ⬆️ Top
     </button>
-    <div id="back-to-top-status" class="sr-only" role="status" aria-live="polite"></div>    <script>
-    (function () {
+    <div id="back-to-top-status" class="sr-only" role="status" aria-live="polite"></div>
+    <script>
+    (function () {{
         if (window.__backToTopInitialized) return;
         window.__backToTopInitialized = true;
 
-var SCROLL_THRESHOLD = {scroll_threshold};
+        var SCROLL_THRESHOLD = {scroll_threshold};
         /* Streamlit >= 1.28 scrolls inside the parent of
            [data-testid="block-container"], not the window. */
         var scrollContainer =
@@ -990,15 +992,15 @@ var SCROLL_THRESHOLD = {scroll_threshold};
 
         /* Event delegation — works even after Streamlit recreates the
            button element on a rerun. */
-        scrollContainer.addEventListener('click', function (e) {
-            if (e.target.closest('#back-to-top-btn')) {
-                scrollContainer.scrollTo({ top: 0, behavior: 'smooth' });
-            }
-        });
+        scrollContainer.addEventListener('click', function (e) {{
+            if (e.target.closest('#back-to-top-btn')) {{
+                scrollContainer.scrollTo({{ top: 0, behavior: 'smooth' }});
+            }}
+        }});
 
         /* Re-query the button every scroll tick so the .visible class
            is always applied to the live element, not a detached one. */
-scrollContainer.addEventListener('scroll', function () {
+scrollContainer.addEventListener('scroll', function () {{
             var btn = document.getElementById('back-to-top-btn');
             var status = document.getElementById('back-to-top-status');
             if (!btn) return;
@@ -1008,12 +1010,12 @@ scrollContainer.addEventListener('scroll', function () {
             var shouldShow = scrollTop > SCROLL_THRESHOLD;
             var wasVisible = btn.classList.contains('visible');
             btn.classList.toggle('visible', shouldShow);
-            if (status && shouldShow && !wasVisible) {
+            if (status && shouldShow && !wasVisible) {{
                 status.textContent = 'Back to top button available';
-            } else if (status && !shouldShow && wasVisible) {
+            }} else if (status && !shouldShow && wasVisible) {{
                 status.textContent = '';
-            }
-        }, { passive: true });    })();
+            }}
+        }}, {{ passive: true }});    }})();
     </script>
     """
 
