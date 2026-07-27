@@ -655,8 +655,17 @@ def inject_css() -> None:
 
         /* ── Back to Top Button ─────────────────────────────────────── */
 
-        #back-to-top-btn {{
-            position: fixed;
+.sr-only {{
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }}            position: fixed;
             bottom: max(2rem, env(safe-area-inset-bottom, 2rem));
             right: max(2rem, env(safe-area-inset-right, 2rem));
             z-index: 9999;
@@ -946,9 +955,8 @@ def pipeline_progress_html(
     return f"{progress}{eta}"
 
 
-def back_to_top_html() -> str:
+def back_to_top_html(scroll_threshold: int = 250) -> str:
     """Return HTML and JavaScript for a floating back-to-top button.
-
     The button is hidden by default and fades in once the user scrolls past
     the configured threshold.  Clicking it smoothly scrolls the page to the top.
 
@@ -960,20 +968,18 @@ def back_to_top_html() -> str:
     re-queries the button on each event so that Streamlit reruns (which
     recreate the DOM) do not break the feature.
     """
-    return """
-    <button id="back-to-top-btn"
-            type="button"
+return f"""
+    <button id="back-to-top-btn"            type="button"
             aria-label="Back to top"
-            title="Back to top">
+title="Back to top">
         ⬆️ Top
     </button>
-    <script>
+    <div id="back-to-top-status" class="sr-only" role="status" aria-live="polite"></div>    <script>
     (function () {
         if (window.__backToTopInitialized) return;
         window.__backToTopInitialized = true;
 
-        var SCROLL_THRESHOLD = 250;
-
+var SCROLL_THRESHOLD = {scroll_threshold};
         /* Streamlit >= 1.28 scrolls inside the parent of
            [data-testid="block-container"], not the window. */
         var scrollContainer =
@@ -992,15 +998,22 @@ def back_to_top_html() -> str:
 
         /* Re-query the button every scroll tick so the .visible class
            is always applied to the live element, not a detached one. */
-        scrollContainer.addEventListener('scroll', function () {
+scrollContainer.addEventListener('scroll', function () {
             var btn = document.getElementById('back-to-top-btn');
+            var status = document.getElementById('back-to-top-status');
             if (!btn) return;
             var scrollTop = scrollContainer === window
                 ? window.scrollY
                 : scrollContainer.scrollTop;
-            btn.classList.toggle('visible', scrollTop > SCROLL_THRESHOLD);
-        }, { passive: true });
-    })();
+            var shouldShow = scrollTop > SCROLL_THRESHOLD;
+            var wasVisible = btn.classList.contains('visible');
+            btn.classList.toggle('visible', shouldShow);
+            if (status && shouldShow && !wasVisible) {
+                status.textContent = 'Back to top button available';
+            } else if (status && !shouldShow && wasVisible) {
+                status.textContent = '';
+            }
+        }, { passive: true });    })();
     </script>
     """
 
