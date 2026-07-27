@@ -14,8 +14,9 @@ from pathlib import Path
 from typing import BinaryIO, Dict, List, Optional, Union
 
 try:
+    import defusedxml.lxml
     defusedxml.lxml.monkey_patch()
-except AttributeError:
+except (AttributeError, ImportError):
     pass
 from urllib.parse import urlparse
 

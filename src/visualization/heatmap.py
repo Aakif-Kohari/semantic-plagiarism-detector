@@ -7,7 +7,8 @@ Generates similarity heatmaps.
 - plot_chunk_similarity_comparison → Matplotlib chunk-level heatmap
 """
 
-from typing import Optional
+from contextlib import contextmanager
+from typing import Generator, Optional
 
 import matplotlib
 import matplotlib.patches as mpatches
@@ -25,6 +26,16 @@ from src.core.similarity import PLAGIARISM_THRESHOLD
 # ── Colour palette ─────────────────────────────────────────────────────────────
 # RdYlGn_r: Red (high similarity / risk) → Yellow → Green (low similarity)
 _CMAP = "RdYlGn_r"
+
+
+@contextmanager
+def matplotlib_figure(*args, **kwargs) -> Generator[tuple, None, None]:
+    """Context manager that yields (fig, ax) and guarantees plt.close(fig)."""
+    fig, ax = plt.subplots(*args, **kwargs)
+    try:
+        yield fig, ax
+    finally:
+        plt.close(fig)
 
 
 def plot_similarity_heatmap(
@@ -54,110 +65,108 @@ def plot_similarity_heatmap(
 
     # Guard for empty DataFrame (0 documents)
     if n == 0:
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-        ax.set_title(title)
-        return fig
+        with matplotlib_figure() as (fig, ax):
+            ax.set_title(title)
+            return fig
 
     if figsize is None:
         cell_size = max(1.2, 6 / n)
         figsize = (max(6, n * cell_size + 2), max(5, n * cell_size + 1.5))
 
-    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
-
-    sns.heatmap(
-        similarity_df,
-        ax=ax,
-        annot=annotate,
-        fmt=".2f" if annotate else "",
-        cmap=_CMAP,
-        vmin=0.0,
-        vmax=1.0,
-        linewidths=0.6,
-        linecolor="#cccccc",
-        square=True,
-        cbar_kws={"label": "Cosine Similarity", "shrink": 0.8, "pad": 0.02},
-        annot_kws={"size": max(7, 14 - n), "weight": "bold"},
-    )
-
-    colorbar = ax.collections[0].colorbar
-    colorbar.ax.yaxis.set_major_formatter(PercentFormatter(xmax=1.0, decimals=0))
-
-    if theme_colors:
-        fig.patch.set_facecolor(theme_colors.get("background", "#FFFFFF"))
-        ax.set_facecolor(theme_colors.get("surface", "#F8FAFC"))
-        ax.tick_params(colors=theme_colors.get("ink", "#0F172A"))
-        ax.xaxis.label.set_color(theme_colors.get("ink", "#0F172A"))
-        ax.yaxis.label.set_color(theme_colors.get("ink", "#0F172A"))
-        title_color = theme_colors.get("ink", "#0F172A")
-    else:
-        title_color = "black"
-
-    data = similarity_df.values
-
-    # Diagonal border (self-similarity)
-    for i in range(n):
-        ax.add_patch(
-            mpatches.FancyBboxPatch(
-                (i, i),
-                1,
-                1,
-                boxstyle="square,pad=0",
-                linewidth=2,
-                edgecolor="#555555",
-                facecolor="none",
-                zorder=3,
-            )
+    with matplotlib_figure(figsize=figsize, dpi=dpi) as (fig, ax):
+        sns.heatmap(
+            similarity_df,
+            ax=ax,
+            annot=annotate,
+            fmt=".2f" if annotate else "",
+            cmap=_CMAP,
+            vmin=0.0,
+            vmax=1.0,
+            linewidths=0.6,
+            linecolor="#cccccc",
+            square=True,
+            cbar_kws={"label": "Cosine Similarity", "shrink": 0.8, "pad": 0.02},
+            annot_kws={"size": max(7, 14 - n), "weight": "bold"},
         )
 
-    # Red border on flagged pairs
-    for i in range(n):
-        for j in range(n):
-            if i != j and data[i, j] >= threshold:
-                ax.add_patch(
-                    mpatches.FancyBboxPatch(
-                        (j, i),
-                        1,
-                        1,
-                        boxstyle="square,pad=0",
-                        linewidth=2.5,
-                        edgecolor="#d62728",
-                        facecolor="none",
-                        zorder=4,
-                    )
+        colorbar = ax.collections[0].colorbar
+        colorbar.ax.yaxis.set_major_formatter(PercentFormatter(xmax=1.0, decimals=0))
+
+        if theme_colors:
+            fig.patch.set_facecolor(theme_colors.get("background", "#FFFFFF"))
+            ax.set_facecolor(theme_colors.get("surface", "#F8FAFC"))
+            ax.tick_params(colors=theme_colors.get("ink", "#0F172A"))
+            ax.xaxis.label.set_color(theme_colors.get("ink", "#0F172A"))
+            ax.yaxis.label.set_color(theme_colors.get("ink", "#0F172A"))
+            title_color = theme_colors.get("ink", "#0F172A")
+        else:
+            title_color = "black"
+
+        data = similarity_df.values
+
+        # Diagonal border (self-similarity)
+        for i in range(n):
+            ax.add_patch(
+                mpatches.FancyBboxPatch(
+                    (i, i),
+                    1,
+                    1,
+                    boxstyle="square,pad=0",
+                    linewidth=2,
+                    edgecolor="#555555",
+                    facecolor="none",
+                    zorder=3,
                 )
+            )
 
-    ax.set_title(title, fontsize=15, fontweight="bold", pad=16, color=title_color)
-    ax.set_xlabel("Documents", fontsize=11, labelpad=10)
-    ax.set_ylabel("Documents", fontsize=11, labelpad=10)
-    ax.set_xticklabels(
-        ax.get_xticklabels(), rotation=30, ha="right", fontsize=max(8, 11 - n // 3)
-    )
-    ax.set_yticklabels(ax.get_yticklabels(), rotation=0, fontsize=max(8, 11 - n // 3))
+        # Red border on flagged pairs
+        for i in range(n):
+            for j in range(n):
+                if i != j and data[i, j] >= threshold:
+                    ax.add_patch(
+                        mpatches.FancyBboxPatch(
+                            (j, i),
+                            1,
+                            1,
+                            boxstyle="square,pad=0",
+                            linewidth=2.5,
+                            edgecolor="#d62728",
+                            facecolor="none",
+                            zorder=4,
+                        )
+                    )
 
-    red_patch = mpatches.Patch(
-        edgecolor="#d62728",
-        facecolor="none",
-        linewidth=2,
-        label=f"Potential Plagiarism (≥ {threshold:.0%})",
-    )
-    ax.legend(
-        handles=[red_patch],
-        loc="upper left",
-        bbox_to_anchor=(0.0, -0.18),
-        frameon=True,
-        fontsize=9,
-    )
-    if theme_colors:
-        legend = ax.get_legend()
-        if legend:
-            for text in legend.get_texts():
-                text.set_color(theme_colors.get("ink", "#0F172A"))
-            legend.get_frame().set_facecolor(theme_colors.get("background", "#FFFFFF"))
-            legend.get_frame().set_edgecolor(theme_colors.get("border", "#E2E8F0"))
+        ax.set_title(title, fontsize=15, fontweight="bold", pad=16, color=title_color)
+        ax.set_xlabel("Documents", fontsize=11, labelpad=10)
+        ax.set_ylabel("Documents", fontsize=11, labelpad=10)
+        ax.set_xticklabels(
+            ax.get_xticklabels(), rotation=30, ha="right", fontsize=max(8, 11 - n // 3)
+        )
+        ax.set_yticklabels(ax.get_yticklabels(), rotation=0, fontsize=max(8, 11 - n // 3))
 
-    fig.tight_layout()
-    return fig
+        red_patch = mpatches.Patch(
+            edgecolor="#d62728",
+            facecolor="none",
+            linewidth=2,
+            label=f"Potential Plagiarism (≥ {threshold:.0%})",
+        )
+        ax.legend(
+            handles=[red_patch],
+            loc="upper left",
+            bbox_to_anchor=(0.0, -0.18),
+            frameon=True,
+            fontsize=9,
+        )
+        if theme_colors:
+            legend = ax.get_legend()
+            if legend:
+                for text in legend.get_texts():
+                    text.set_color(theme_colors.get("ink", "#0F172A"))
+                legend.get_frame().set_facecolor(theme_colors.get("background", "#FFFFFF"))
+                legend.get_frame().set_edgecolor(theme_colors.get("border", "#E2E8F0"))
+
+        fig.tight_layout()
+        return fig
 
 
 def plot_similarity_heatmap_plotly(
@@ -283,42 +292,41 @@ def plot_chunk_similarity_comparison(
     row_labels = [f"A{i + 1}: {short_label(c)}" for i, c in enumerate(chunks_a)]
     col_labels = [f"B{j + 1}: {short_label(c)}" for j, c in enumerate(chunks_b)]
 
-    fig, ax = plt.subplots(figsize=(max(8, nb * 1.5), max(6, na * 0.8)), dpi=150)
+    with matplotlib_figure(figsize=(max(8, nb * 1.5), max(6, na * 0.8)), dpi=150) as (fig, ax):
+        sns.heatmap(
+            sim_matrix,
+            ax=ax,
+            annot=True,
+            fmt=".2f",
+            cmap=_CMAP,
+            vmin=0.0,
+            vmax=1.0,
+            linewidths=0.5,
+            linecolor="#cccccc",
+            xticklabels=col_labels,
+            yticklabels=row_labels,
+            annot_kws={"size": 8},
+            cbar_kws={"label": "Cosine Similarity", "shrink": 0.7},
+        )
 
-    sns.heatmap(
-        sim_matrix,
-        ax=ax,
-        annot=True,
-        fmt=".2f",
-        cmap=_CMAP,
-        vmin=0.0,
-        vmax=1.0,
-        linewidths=0.5,
-        linecolor="#cccccc",
-        xticklabels=col_labels,
-        yticklabels=row_labels,
-        annot_kws={"size": 8},
-        cbar_kws={"label": "Cosine Similarity", "shrink": 0.7},
-    )
+        ax.set_title(
+            f"Chunk-Level Similarity: {doc_a_name}  vs  {doc_b_name}",
+            fontsize=13,
+            fontweight="bold",
+            pad=14,
+        )
+        ax.set_xlabel(f"Chunks from {doc_b_name}", fontsize=10)
+        ax.set_ylabel(f"Chunks from {doc_a_name}", fontsize=10)
+        ax.set_xticklabels(ax.get_xticklabels(), rotation=30, ha="right", fontsize=7)
+        ax.set_yticklabels(ax.get_yticklabels(), rotation=0, fontsize=7)
 
-    ax.set_title(
-        f"Chunk-Level Similarity: {doc_a_name}  vs  {doc_b_name}",
-        fontsize=13,
-        fontweight="bold",
-        pad=14,
-    )
-    ax.set_xlabel(f"Chunks from {doc_b_name}", fontsize=10)
-    ax.set_ylabel(f"Chunks from {doc_a_name}", fontsize=10)
-    ax.set_xticklabels(ax.get_xticklabels(), rotation=30, ha="right", fontsize=7)
-    ax.set_yticklabels(ax.get_yticklabels(), rotation=0, fontsize=7)
+        if theme_colors:
+            fig.patch.set_facecolor(theme_colors.get("background", "#FFFFFF"))
+            ax.set_facecolor(theme_colors.get("surface", "#F8FAFC"))
+            ax.tick_params(colors=theme_colors.get("ink", "#0F172A"))
+            ax.xaxis.label.set_color(theme_colors.get("ink", "#0F172A"))
+            ax.yaxis.label.set_color(theme_colors.get("ink", "#0F172A"))
+            ax.title.set_color(theme_colors.get("ink", "#0F172A"))
 
-    if theme_colors:
-        fig.patch.set_facecolor(theme_colors.get("background", "#FFFFFF"))
-        ax.set_facecolor(theme_colors.get("surface", "#F8FAFC"))
-        ax.tick_params(colors=theme_colors.get("ink", "#0F172A"))
-        ax.xaxis.label.set_color(theme_colors.get("ink", "#0F172A"))
-        ax.yaxis.label.set_color(theme_colors.get("ink", "#0F172A"))
-        ax.title.set_color(theme_colors.get("ink", "#0F172A"))
-
-    fig.tight_layout()
-    return fig
+        fig.tight_layout()
+        return fig
