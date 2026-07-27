@@ -5,22 +5,20 @@ import os
 from typing import Dict
 
 import numpy as np
-from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
+from fastapi import (Depends, FastAPI, File, HTTPException, Query, UploadFile,
+                     status)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
 from sklearn.metrics.pairwise import cosine_similarity
 
 from src.core.document_parser import extract_text
 from src.core.embedding_model import embed_chunks, get_document_embedding
-from src.core.similarity import (
-    PLAGIARISM_THRESHOLD,
-    chunk_max_similarity,
-    find_most_similar_chunks,
-)
+from src.core.similarity import (PLAGIARISM_THRESHOLD, chunk_max_similarity,
+                                 find_most_similar_chunks)
 from src.core.text_chunking import chunk_document
 from src.db.auth import get_user_role
 from src.db.corpus_db import _connect, clear_all_data, init_corpus_db
-from src.utils.redis_cache import get_cache
+from src.utils.redis_cache import CacheKeyPrefix, get_cache
 
 # ── API Initialization ────────────────────────────────────────────────────────
 
@@ -104,6 +102,33 @@ def health_check():
         "status": "healthy",
         "service": "Semantic Plagiarism Detector API",
         "version": "1.0.0",
+    }
+
+
+_HEALTHZ_DB_PATHS = (
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "corpus.db")),
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "users.db")),
+)
+
+
+@app.get("/healthz", tags=["Health"])
+def healthz():
+    """Lightweight /healthz endpoint for DevOps monitoring and load balancer probes.
+
+    Returns 200 OK with the combined SQLite database size so operators can
+    monitor storage growth without rendering the Streamlit UI.
+    """
+    total_bytes = 0
+    for path in _HEALTHZ_DB_PATHS:
+        try:
+            total_bytes += os.path.getsize(path) if os.path.exists(path) else 0
+        except OSError:
+            pass
+
+    return {
+        "status": "ok",
+        "db_size_bytes": total_bytes,
+        "db_size_mb": round(total_bytes / (1024 * 1024), 2),
     }
 
 
@@ -294,8 +319,8 @@ async def clear_all_documents(
         try:
             cache = get_cache()
             if cache.is_available():
-                cache.delete("faiss:index:corpus_index")
-                cache.clear_pattern("analysis:*")
+                cache.delete(CacheKeyPrefix.LEGACY_FAISS_INDEX.value)
+                cache.clear_pattern(CacheKeyPrefix.LEGACY_ANALYSIS_PATTERN.value)
         except Exception as e:
             logger.error(f"Failed to clear Redis cache: {e}")
 

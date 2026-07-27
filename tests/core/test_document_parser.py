@@ -4,16 +4,12 @@ from unittest.mock import MagicMock, patch
 
 import docx
 
-from src.core.document_parser import (
-    extract_text,
-    extract_text_from_docx,
-    extract_text_from_pdf,
-    extract_text_from_txt,
-    extract_texts,
-    clean_text,
-    remove_ignore_phrases,
-    strip_bibliography,
-)
+from src.core.document_parser import (clean_text, extract_text,
+                                      extract_text_from_docx,
+                                      extract_text_from_pdf,
+                                      extract_text_from_txt, extract_texts,
+                                      remove_ignore_phrases,
+                                      strip_bibliography)
 
 # Skip OCR tests when Tesseract binary is not present on this machine
 TESSERACT_AVAILABLE = shutil.which("tesseract") is not None
@@ -111,8 +107,8 @@ def test_extract_text_routing(mock_ocr):
     assert isinstance(extract_text(pdf_bytes, "test.pdf"), str)
     assert extract_text(docx_bytes, "test.docx") == "Hello DOCX"
     assert extract_text(txt_bytes, "test.txt") == "Hello TXT"
-    # Fallback case
-    assert extract_text(txt_bytes, "test.unknown") == "Hello TXT"
+    # Fallback case (now rejected by security check)
+    assert extract_text(txt_bytes, "test.unknown") == ""
 
 
 def test_extract_texts_mixed():
@@ -361,8 +357,9 @@ class TestCleanText:
 
 def test_extract_empty_pdf_gracefully(caplog):
     """Assert that passing an empty/blank PDF returns an empty string gracefully without crashing."""
-    from reportlab.pdfgen import canvas
     import logging
+
+    from reportlab.pdfgen import canvas
 
     buf = io.BytesIO()
     c = canvas.Canvas(buf)
@@ -375,4 +372,79 @@ def test_extract_empty_pdf_gracefully(caplog):
             result = extract_text_from_pdf(empty_pdf_bytes)
 
     assert isinstance(result, str)
-    assert result.strip() == ""
+    assert result.strip() == ""
+
+
+def test_extract_text_from_doc_success():
+    """Test that extract_text_from_doc runs antiword successfully when present."""
+
+    from src.core.document_parser import extract_text_from_doc
+
+    mock_result = MagicMock()
+    mock_result.stdout = (
+        "This is a test legacy Word Document content extracted by antiword."
+    )
+    mock_result.returncode = 0
+
+    with patch("shutil.which", return_value="/usr/bin/antiword"):
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            result = extract_text_from_doc(b"fake doc bytes")
+            assert (
+                result
+                == "This is a test legacy Word Document content extracted by antiword."
+            )
+            mock_run.assert_called_once()
+            args, kwargs = mock_run.call_args
+            assert args[0][0] == "antiword"
+            assert args[0][1].endswith(".doc")
+
+
+def test_extract_text_from_doc_missing_antiword():
+    """Test that extract_text_from_doc raises RuntimeError if antiword is not installed."""
+    import pytest
+
+    from src.core.document_parser import extract_text_from_doc
+
+    with patch("shutil.which", return_value=None):
+        with pytest.raises(RuntimeError, match="antiword binary is not installed"):
+            extract_text_from_doc(b"fake doc bytes")
+
+
+def test_extract_text_routing_doc():
+    """Test that extract_text routes .doc files to extract_text_from_doc."""
+    from src.core.document_parser import extract_text
+
+    mock_result = MagicMock()
+    mock_result.stdout = "Legacy Word Doc Content"
+    mock_result.returncode = 0
+
+    with patch("shutil.which", return_value="/usr/bin/antiword"):
+        with patch("subprocess.run", return_value=mock_result):
+            result = extract_text(b"\xd0\xcf\x11\xe0fake bytes", "test_file.doc")
+            assert result == "Legacy Word Doc Content"
+
+
+def test_large_pdf_parsing_performance_benchmark():
+    """Benchmark test asserting parsing of a 200-page text PDF completes under 3 seconds."""
+    import time
+    from reportlab.pdfgen import canvas
+    
+    # 1. Create a 200-page synthetic PDF in-memory using reportlab
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf)
+    for i in range(200):
+        # Add enough words per page to bypass OCR (min 8 words)
+        c.drawString(100, 750, f"Page {i}: This is a synthetic page of text to parse quickly.")
+        c.showPage()
+    c.save()
+    pdf_bytes = buf.getvalue()
+    
+    # 2. Time the parsing of the 200-page PDF
+    start_time = time.perf_counter()
+    parsed_text = extract_text_from_pdf(pdf_bytes)
+    duration = time.perf_counter() - start_time
+    
+    # 3. Assert duration and basic content checks
+    assert len(parsed_text) > 0
+    assert "Page 199" in parsed_text
+    assert duration < 3.0, f"Parsing 200-page PDF took too long: {duration:.2f} seconds (limit: 3.0s)"

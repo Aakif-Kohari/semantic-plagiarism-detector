@@ -4,17 +4,10 @@ import sqlite3
 
 import pytest
 
-from src.db.migrations import (
-    AUTH_SCHEMA_VERSION,
-    CORPUS_SCHEMA_VERSION,
-    column_exists,
-    get_user_version,
-    index_exists,
-    migrate_auth_database,
-    migrate_corpus_database,
-    run_migrations,
-    table_exists,
-)
+from src.db.migrations import (AUTH_SCHEMA_VERSION, CORPUS_SCHEMA_VERSION,
+                               column_exists, get_user_version, index_exists,
+                               migrate_auth_database, migrate_corpus_database,
+                               run_migrations, table_exists)
 
 
 def connect(path) -> sqlite3.Connection:
@@ -32,6 +25,7 @@ def test_fresh_corpus_database_reaches_latest_version(tmp_path):
         assert table_exists(connection, "documents")
         assert table_exists(connection, "chunks")
         assert table_exists(connection, "plagiarism_incidents")
+        assert column_exists(connection, "documents", "detected_language")
         assert index_exists(connection, "idx_documents_upload_date")
         assert index_exists(connection, "idx_documents_class_section")
         assert index_exists(connection, "idx_chunks_filename")
@@ -48,6 +42,7 @@ def test_fresh_auth_database_reaches_latest_version(tmp_path):
         assert column_exists(connection, "users", "tour_completed")
         assert column_exists(connection, "users", "otp_secret")
         assert column_exists(connection, "users", "two_factor_enabled")
+        assert column_exists(connection, "users", "is_active")
         assert index_exists(connection, "idx_users_role")
 
 

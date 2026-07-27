@@ -4,13 +4,42 @@ analytics.py
 Plotly visualizations for plagiarism analytics dashboard.
 """
 
-from typing import Any
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
+
+FigureT = TypeVar("FigureT")
+
+
+
+
+def build_visualization_lazily(
+    enabled: bool,
+    factory: Callable[[], FigureT],
+) -> FigureT | None:
+    """Build a visualization only after the user explicitly enables it.
+
+    Streamlit evaluates the bodies of all tabs during a script rerun. Merely
+    placing a chart inside a tab therefore does not defer expensive figure
+    construction. This helper keeps the figure factory uncalled until the UI
+    control for that visualization is enabled.
+
+    Args:
+        enabled: Whether the user requested the visualization.
+        factory: Zero-argument callable that creates the figure.
+
+    Returns:
+        The created figure when enabled, otherwise ``None``.
+    """
+    if not enabled:
+        return None
+
+    return factory()
 
 def plot_high_severity_trends(trend_data: list[dict[str, Any]]) -> go.Figure:
     """

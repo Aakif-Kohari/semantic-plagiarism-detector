@@ -4,6 +4,8 @@ src/core/ai_detector.py
 AI content detection module using transformer models.
 """
 
+# pylint: disable=streamlit-global-mutation
+
 import logging
 import os
 from typing import Any, Dict, List
@@ -33,7 +35,8 @@ def _get_model_and_tokenizer():
         logger.info(f"[ai_detector] Loading model: {model_name} …")
 
         try:
-            from transformers import AutoModelForSequenceClassification, AutoTokenizer
+            from transformers import (AutoModelForSequenceClassification,
+                                      AutoTokenizer)
 
             _tokenizer = AutoTokenizer.from_pretrained(model_name)
             _model = AutoModelForSequenceClassification.from_pretrained(model_name)

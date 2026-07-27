@@ -6,7 +6,7 @@ import sqlite3
 
 from .common import column_exists, run_migrations
 
-CORPUS_SCHEMA_VERSION = 5
+CORPUS_SCHEMA_VERSION = 7
 
 
 def migration_001_create_base_schema(
@@ -117,12 +117,35 @@ def migration_005_add_false_positives(cursor):
     )
 
 
+def migration_006_add_incident_threshold_snapshot(
+    connection: sqlite3.Connection,
+) -> None:
+    """Store the threshold that caused each incident to be flagged."""
+    if not column_exists(connection, "plagiarism_incidents", "threshold_at_time_of_flag"):
+        connection.execute(
+            "ALTER TABLE plagiarism_incidents "
+            "ADD COLUMN threshold_at_time_of_flag REAL NOT NULL DEFAULT 0.0"
+        )
+
+
+def migration_007_add_document_language(
+    connection: sqlite3.Connection,
+) -> None:
+    """Store the primary detected language code of each document."""
+    if not column_exists(connection, "documents", "detected_language"):
+        connection.execute(
+            "ALTER TABLE documents ADD COLUMN detected_language TEXT"
+        )
+
+
 CORPUS_MIGRATIONS = {
     1: migration_001_create_base_schema,
     2: migration_002_add_document_metadata,
     3: migration_003_add_required_indexes,
     4: migration_004_add_plagiarism_incidents,
     5: migration_005_add_false_positives,
+    6: migration_006_add_incident_threshold_snapshot,
+    7: migration_007_add_document_language,
 }
 
 

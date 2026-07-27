@@ -1,14 +1,11 @@
 import os
 
-import pytest
 from streamlit.testing.v1 import AppTest
 
 # Paths to index and DB
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 _INDEX_PATH = os.path.join(_REPO_ROOT, "corpus.index")
 _DB_PATH = os.path.join(_REPO_ROOT, "corpus.db")
-
-
 
 
 def test_clear_all_button_visibility():

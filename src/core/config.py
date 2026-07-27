@@ -10,18 +10,20 @@ from typing import Final, Mapping
 LOW_SEVERITY: Final[str] = "Low"
 MEDIUM_SEVERITY: Final[str] = "Medium"
 HIGH_SEVERITY: Final[str] = "High"
+CRITICAL_SEVERITY: Final[str] = "Critical"
 
 SEVERITY_ORDER: Final[tuple[str, ...]] = (
     LOW_SEVERITY,
     MEDIUM_SEVERITY,
     HIGH_SEVERITY,
+    CRITICAL_SEVERITY,
 )
 SEVERITY_RANK: Final[Mapping[str, int]] = {
     label: rank for rank, label in enumerate(SEVERITY_ORDER)
 }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class SimilarityThresholds:
     """Validated plagiarism and severity boundaries."""
 
@@ -30,7 +32,21 @@ class SimilarityThresholds:
     high: float = 0.90
 
     def __post_init__(self) -> None:
-        validate_thresholds(self)
+        plagiarism = _validate_boundary("plagiarism", self.plagiarism)
+        medium = _validate_boundary("medium", self.medium)
+        high = _validate_boundary("high", self.high)
+
+        if not plagiarism <= medium <= high:
+            raise ValueError(
+                "Thresholds must satisfy "
+                "0.0 <= plagiarism <= medium <= high <= 1.0."
+            )
+
+        # Normalize all validated Real values to floats while preserving
+        # the public immutability of this frozen dataclass.
+        object.__setattr__(self, "plagiarism", plagiarism)
+        object.__setattr__(self, "medium", medium)
+        object.__setattr__(self, "high", high)
 
 
 def _validate_boundary(name: str, value: Real) -> float:
@@ -48,18 +64,16 @@ def _validate_boundary(name: str, value: Real) -> float:
 def validate_thresholds(
     thresholds: SimilarityThresholds,
 ) -> SimilarityThresholds:
-    """Validate threshold types, ranges, and ordering."""
+    """Validate threshold type and ordering."""
     if not isinstance(thresholds, SimilarityThresholds):
         raise TypeError("thresholds must be a SimilarityThresholds instance.")
 
-    plagiarism = _validate_boundary("plagiarism", thresholds.plagiarism)
-    medium = _validate_boundary("medium", thresholds.medium)
-    high = _validate_boundary("high", thresholds.high)
-
-    if not plagiarism <= medium <= high:
+    if not thresholds.plagiarism <= thresholds.medium <= thresholds.high:
         raise ValueError(
-            "Thresholds must satisfy " "0.0 <= plagiarism <= medium <= high <= 1.0."
+            "Thresholds must satisfy "
+            "0.0 <= plagiarism <= medium <= high <= 1.0."
         )
+
     return thresholds
 
 
@@ -92,10 +106,19 @@ def severity_from_score(
     score: Real,
     thresholds: SimilarityThresholds = DEFAULT_THRESHOLDS,
 ) -> str:
-    """Return the canonical Low, Medium, or High severity label."""
+    """
+    Return the canonical Low, Medium, or High severity label.
+
+    Scores below the plagiarism threshold are not considered plagiarism,
+    but retain Low severity so callers can continue using the canonical
+    three-level severity scale. Scores from the plagiarism threshold up
+    to the medium threshold represent flagged plagiarism with Low severity.
+    """
     validate_thresholds(thresholds)
     normalized = normalize_score(score)
 
+    if normalized < thresholds.plagiarism:
+        return LOW_SEVERITY
     if normalized >= thresholds.high:
         return HIGH_SEVERITY
     if normalized >= thresholds.medium:
@@ -112,17 +135,25 @@ def severity_key(
 
 
 def normalize_severity_label(label: str) -> str:
-    """Normalize canonical and legacy emoji-prefixed labels."""
+    """Normalize supported canonical and legacy severity labels."""
     clean = str(label or "").strip().lower()
 
-    if "high" in clean:
-        return HIGH_SEVERITY
-    if "medium" in clean or "warn" in clean:
-        return MEDIUM_SEVERITY
-    if "low" in clean:
-        return LOW_SEVERITY
+    severity_aliases = {
+        "low": LOW_SEVERITY,
+        "medium": MEDIUM_SEVERITY,
+        "high": HIGH_SEVERITY,
+        "critical": CRITICAL_SEVERITY,
+        "🟢 low": LOW_SEVERITY,
+        "🟡 medium": MEDIUM_SEVERITY,
+        "🔴 high": HIGH_SEVERITY,
+        "ðÿ”´ high": HIGH_SEVERITY,
+        "warning": MEDIUM_SEVERITY,
+    }
 
-    raise ValueError(f"Unknown severity label: {label!r}")
+    try:
+        return severity_aliases[clean]
+    except KeyError:
+        raise ValueError(f"Unknown severity label: {label!r}") from None
 
 
 def severity_rank(label: str) -> int:

@@ -3,6 +3,12 @@ import os
 import zipfile
 from typing import Dict
 
+from src.utils.filename import (
+    InvalidFileExtensionError,
+    unique_filename,
+    validate_document_extension,
+)
+
 # Safety limits for ZIP bomb protection
 MAX_TOTAL_DECOMPRESSED_SIZE = 200 * 1024 * 1024  # 200 MB
 MAX_SINGLE_FILE_SIZE = 100 * 1024 * 1024  # 100 MB
@@ -89,17 +95,27 @@ def process_zip_file(zip_bytes: bytes) -> Dict[str, bytes]:
                 if not file_data:
                     continue
 
-                # Flatten nested folder structures to construct safe unique filenames (replacing '/' with '_')
-                sanitized_name = filename.replace("/", "_")
+                try:
+                    validate_document_extension(
+                        filename,
+                        allowed_extensions={
+                            ".csv",
+                            ".docx",
+                            ".pdf",
+                            ".rtf",
+                            ".txt",
+                        },
+                    )
+                except InvalidFileExtensionError:
+                    # Unsafe or unsupported archive members are ignored.
+                    continue
 
-                # Resolve duplicate filename collisions by appending unique suffixes
-                base, extension = os.path.splitext(sanitized_name)
-                counter = 1
-                unique_name = sanitized_name
-                while unique_name in extracted_files:
-                    unique_name = f"{base}_{counter}{extension}"
-                    counter += 1
-
+                # Keep only the entry basename and sanitize it as untrusted
+                # input after strict final-extension validation.
+                unique_name = unique_filename(
+                    filename,
+                    extracted_files,
+                )
                 extracted_files[unique_name] = file_data
 
     except zipfile.BadZipFile as e:

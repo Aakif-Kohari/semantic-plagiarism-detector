@@ -125,3 +125,16 @@ SSRF_BLOCKED_PRIVATE = "Blocked private network IP: {ip}"
 SSRF_BLOCKED_LINK_LOCAL = "Blocked link-local IP: {ip}"
 SSRF_BLOCKED_MULTICAST = "Blocked multicast IP: {ip}"
 SSRF_BLOCKED_UNSPECIFIED = "Blocked unspecified IP: {ip}"
+class ExportFailedError(RuntimeError):
+    """Raised when an export cannot be generated or written safely."""
+
+
+EXPORT_WRITE_FAILED = (
+    "Unable to write the {format_name} export to '{destination}'. "
+    "Check the destination permissions and available disk space, then try again."
+)
+
+EXPORT_GENERATION_IO_FAILED = (
+    "Unable to generate the {format_name} export because an I/O operation failed. "
+    "Please try again."
+)

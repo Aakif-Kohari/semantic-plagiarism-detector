@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 embedding_model.py
 ------------------
@@ -9,6 +11,8 @@ Model: paraphrase-multilingual-MiniLM-L12-v2
   - Strong performance on semantic similarity tasks
   - MIT licensed; safe for academic use
 """
+
+# pylint: disable=streamlit-global-mutation
 
 import logging
 import os

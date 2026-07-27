@@ -140,13 +140,8 @@ def generate_mock_data(
     from src.core.embedding_model import embed_documents
     from src.core.faiss_index import build_index, save_index
     from src.core.text_chunking import chunk_documents
-    from src.db.corpus_db import (
-        add_chunks,
-        add_document,
-        get_all_embeddings,
-        get_chunk_registry,
-        init_corpus_db,
-    )
+    from src.db.corpus_db import (add_chunks, add_document, get_all_embeddings,
+                                  get_chunk_registry, init_corpus_db)
 
     # Ensure the DB schema is initialised
     init_corpus_db()
@@ -161,12 +156,16 @@ def generate_mock_data(
     for filename, student_name, text in essays:
         file_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
 
+        from src.core.document_parser import detect_text_language
+        detected_lang = detect_text_language(text)
+
         inserted = add_document(
             filename=filename,
             file_hash=file_hash,
             class_section=class_section,
             student_name=student_name,
             assignment_title=assignment_title,
+            detected_language=detected_lang,
         )
 
         if not inserted:
