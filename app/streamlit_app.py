@@ -161,6 +161,7 @@ from src.utils.redis_cache import (
 )
 from src.utils.warning_list import render_warning_controls
 from src.visualization.analytics import (
+    build_visualization_lazily,
     plot_high_severity_trends,
     plot_most_plagiarized_documents,
     plot_similarity_distribution,
@@ -2230,20 +2231,6 @@ if not st.session_state.authenticated:
 
     # ══ TAB 4: HEATMAP & NETWORK ══════════════════════════════════════════════
     with tab_heatmap:
-
-        st.subheader("🗺️ Similarity Heatmap")
-
-        heatmap_fig = plot_similarity_heatmap(
-            active_sim_df,
-            title="Document Semantic Similarity",
-            threshold=threshold,
-            theme_colors=get_colors(),
-            cmap=heatmap_cmap,  # Dynamic colormap support (#186)
-        )
-        st.pyplot(heatmap_fig, use_container_width=True)
-
-        # ══ TAB 5: PAIR DRILL-DOWN ══════════════════════════════════════════════════
-
         st.markdown("🏠 Home > Dashboard > **Heatmap & Network**")
         st.subheader(get_text("tab_heatmap", lang=lang_code))
         if not has_enough_files or active_sim_df is None:
@@ -2256,37 +2243,40 @@ if not st.session_state.authenticated:
                 unsafe_allow_html=True,
             )
         else:
-            heatmap_fig = plot_similarity_heatmap(
-                active_sim_df,
-                title="Document Semantic Similarity",
-                threshold=threshold,
-                theme_colors=get_colors(),
-            )
-            st.pyplot(heatmap_fig, use_container_width=True)
+            with st.expander(
+                "🗺️ Similarity Heatmap",
+                expanded=False,
+            ):
+                load_heatmap = st.toggle(
+                    "Load heatmap",
+                    key="load_similarity_heatmap",
+                    help=(
+                        "Generate the heatmap only when needed. "
+                        "This can improve responsiveness for large analyses."
+                    ),
+                )
 
-            buf = _io.BytesIO()
-            heatmap_fig.savefig(
-                buf,
-                format="png",
-                dpi=150,
-                bbox_inches="tight",
-            )
-            buf.seek(0)
+                heatmap_fig = build_visualization_lazily(
+                    load_heatmap,
+                    lambda: plot_similarity_heatmap(
+                        active_sim_df,
+                        title="Document Semantic Similarity",
+                        threshold=threshold,
+                        theme_colors=get_colors(),
+                        cmap=heatmap_cmap,
+                    ),
+                )
 
-            st.download_button(
-                "⬇️ Download Heatmap PNG",
-                buf,
-                "heatmap.png",
-                "image/png",
-            )
-
-            st.divider()
-            st.subheader("🕸️ Interactive Plagiarism Network")
-            st.caption(
-                "Documents are shown as nodes. Connections appear when "
-                "their similarity is greater than or equal to the selected threshold."
-            )
-
+                if heatmap_fig is None:
+                    st.info(
+                        "Enable “Load heatmap” to generate this "
+                        "visualization."
+                    )
+                else:
+                    st.pyplot(
+                        heatmap_fig,
+                        use_container_width=True,
+                    )
             max_degree = max(0, len(active_sim_df) - 1)
             min_degree = st.slider(
                 "Minimum Connected Documents",
@@ -2303,28 +2293,85 @@ if not st.session_state.authenticated:
                 title="Interactive Document Plagiarism Network",
             )
 
-            if plotly_events is not None:
-                selected_points = plotly_events(
-                    network_fig,
-                    click_event=True,
-                    hover_event=False,
-                    select_event=False,
-                    key="plagiarism_network",
+                    buf = _io.BytesIO()
+                    heatmap_fig.savefig(
+                        buf,
+                        format="png",
+                        dpi=150,
+                        bbox_inches="tight",
+                    )
+                    buf.seek(0)
+
+                    st.download_button(
+                        "⬇️ Download Heatmap PNG",
+                        buf,
+                        "heatmap.png",
+                        "image/png",
+                        key="download_lazy_heatmap_png",
+                    )
+
+            with st.expander(
+                "🕸️ Interactive Plagiarism Network",
+                expanded=False,
+            ):
+                st.caption(
+                    "Documents are shown as nodes. Connections appear when "
+                    "their similarity is greater than or equal to the "
+                    "selected threshold."
+                )
+                load_network = st.toggle(
+                    "Load network graph",
+                    key="load_plagiarism_network",
+                    help=(
+                        "Generate the interactive network only when needed."
+                    ),
                 )
 
-                if selected_points:
-                    clicked_point = selected_points[0]
+                network_fig = build_visualization_lazily(
+                    load_network,
+                    lambda: plot_similarity_network(
+                        similarity_df=active_sim_df,
+                        threshold=threshold,
+                        title=(
+                            "Interactive Document Plagiarism Network"
+                        ),
+                    ),
+                )
 
-                    point_index = clicked_point.get("pointIndex")
+                if network_fig is None:
+                    st.info(
+                        "Enable “Load network graph” to generate this "
+                        "visualization."
+                    )
+                elif plotly_events is not None:
+                    selected_points = plotly_events(
+                        network_fig,
+                        click_event=True,
+                        hover_event=False,
+                        select_event=False,
+                        key="plagiarism_network",
+                    )
 
-                    if point_index is not None and 0 <= point_index < len(doc_names):
-                        clicked_document_id = doc_names[point_index]
+                    if selected_points:
+                        clicked_point = selected_points[0]
+                        point_index = clicked_point.get("pointIndex")
 
-                        st.session_state.selected_document_id = clicked_document_id
-            else:
-                st.plotly_chart(network_fig, use_container_width=True)
+                        if (
+                            point_index is not None
+                            and 0 <= point_index < len(doc_names)
+                        ):
+                            st.session_state.selected_document_id = (
+                                doc_names[point_index]
+                            )
+                else:
+                    st.plotly_chart(
+                        network_fig,
+                        use_container_width=True,
+                    )
 
-            selected_document_id = st.session_state.get("selected_document_id")
+            selected_document_id = st.session_state.get(
+                "selected_document_id"
+            )
 
             if selected_document_id:
                 filtered_flags = [
@@ -2490,48 +2537,124 @@ if not st.session_state.authenticated:
             if flags:
                 sync_flagged_incidents(flags)
 
-            st.subheader("📈 High Severity Plagiarism Trends (Last 30 Days)")
             trend_data = get_high_severity_trends(days=30)
-            trend_fig = plot_high_severity_trends(trend_data)
-            st.plotly_chart(trend_fig, use_container_width=True)
-
-            st.divider()
-            st.subheader("🔝 Most Frequently Plagiarized Documents")
             doc_data = get_most_plagiarized_documents(limit=10)
-            doc_fig = plot_most_plagiarized_documents(doc_data)
-            st.plotly_chart(doc_fig, use_container_width=True)
+
+            with st.expander(
+                "📈 High Severity Plagiarism Trends (Last 30 Days)",
+                expanded=False,
+            ):
+                load_trends = st.toggle(
+                    "Load trend chart",
+                    key="load_high_severity_trends",
+                )
+                trend_fig = build_visualization_lazily(
+                    load_trends,
+                    lambda: plot_high_severity_trends(trend_data),
+                )
+
+                if trend_fig is None:
+                    st.info(
+                        "Enable “Load trend chart” to generate this "
+                        "visualization."
+                    )
+                else:
+                    st.plotly_chart(
+                        trend_fig,
+                        use_container_width=True,
+                    )
+
+            with st.expander(
+                "🔝 Most Frequently Plagiarized Documents",
+                expanded=False,
+            ):
+                load_documents_chart = st.toggle(
+                    "Load document chart",
+                    key="load_most_plagiarized_documents",
+                )
+                doc_fig = build_visualization_lazily(
+                    load_documents_chart,
+                    lambda: plot_most_plagiarized_documents(doc_data),
+                )
+
+                if doc_fig is None:
+                    st.info(
+                        "Enable “Load document chart” to generate this "
+                        "visualization."
+                    )
+                else:
+                    st.plotly_chart(
+                        doc_fig,
+                        use_container_width=True,
+                    )
+
+            with st.expander(
+                "📊 Similarity Score Distribution",
+                expanded=False,
+            ):
+                analysis_results = st.session_state.get(
+                    "analysis_results"
+                )
+
+                if analysis_results is None:
+                    st.info(
+                        "Run a plagiarism analysis to see the "
+                        "similarity score distribution."
+                    )
+                else:
+                    load_distribution = st.toggle(
+                        "Load distribution chart",
+                        key="load_similarity_distribution",
+                    )
+                    sim_matrix = (
+                        analysis_results[4]
+                        if use_chunk_matrix
+                        else analysis_results[3]
+                    )
+                    dist_fig = build_visualization_lazily(
+                        load_distribution,
+                        lambda: plot_similarity_distribution(
+                            sim_matrix
+                        ),
+                    )
+
+                    if dist_fig is None:
+                        st.info(
+                            "Enable “Load distribution chart” to "
+                            "generate this visualization."
+                        )
+                    else:
+                        st.plotly_chart(
+                            dist_fig,
+                            use_container_width=True,
+                        )
 
             st.divider()
 
-            st.subheader("📊 Similarity Score Distribution")
-            analysis_results = st.session_state.get("analysis_results")
-            if analysis_results is not None:
-                sim_matrix = (
-                    analysis_results[4] if use_chunk_matrix else analysis_results[3]
-                )
-                dist_fig = plot_similarity_distribution(sim_matrix)
-                st.plotly_chart(dist_fig, use_container_width=True)
-            else:
-                st.info(
-                    "Run a plagiarism analysis to see the similarity score distribution."
-                )
-
-            st.divider()
-
-            # Summary statistics
+            # Summary statistics remain lightweight and always visible.
             st.subheader("📋 Analytics Summary")
             if trend_data:
-                total_high_severity = sum(item["count"] for item in trend_data)
+                total_high_severity = sum(
+                    item["count"] for item in trend_data
+                )
                 st.metric(
-                    "Total High Severity Incidents (30 days)", total_high_severity
+                    "Total High Severity Incidents (30 days)",
+                    total_high_severity,
                 )
             else:
-                st.info("No high severity incidents recorded in the last 30 days.")
+                st.info(
+                    "No high severity incidents recorded in the last "
+                    "30 days."
+                )
 
             if doc_data:
+                most_plagiarized = doc_data[0]
                 st.metric(
                     "Most Plagiarized Document",
-                    f"{doc_data[0]['document_name']} ({doc_data[0]['incident_count']} incidents)",
+                    (
+                        f"{most_plagiarized['document_name']} "
+                        f"({most_plagiarized['incident_count']} incidents)"
+                    ),
                 )
             else:
                 st.info("No plagiarism incidents recorded.")
