@@ -9,6 +9,14 @@ DEFAULT_APP_TITLE: Final[str] = "Semantic Plagiarism Detection System"
 DEFAULT_PDF_FOOTER_TEXT: Final[str] = ""
 
 
+SUPPORTED_OCR_LANGUAGES = {
+    "eng": "English",
+    "spa": "Spanish",
+    "fra": "French",
+}
+
+
+
 def get_app_title() -> str:
     """Return the configured application title.
 
@@ -45,3 +53,14 @@ def get_lock_timeout() -> int:
         return max(1, timeout)
     except ValueError:
         return 30
+
+
+DEFAULT_PDF_FOOTER_TEXT: Final[str] = ""
+
+
+def get_pdf_footer_text() -> str:
+    """Return the configured PDF footer text.
+
+    If not set, returns an empty string.
+    """
+    return os.getenv("PDF_FOOTER_TEXT", DEFAULT_PDF_FOOTER_TEXT).strip()

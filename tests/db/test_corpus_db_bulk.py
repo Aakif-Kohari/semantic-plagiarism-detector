@@ -1,4 +1,3 @@
-import sqlite3
 
 import pytest
 
@@ -85,11 +84,9 @@ def test_add_documents_bulk_empty():
 def test_add_documents_bulk_missing_fields():
     # Verify defaults handle missing fields gracefully
     docs = [
-        {"filename": "missing_1.pdf"} # file_hash is missing, might trigger IntegrityError if not handled, but sqlite might just insert NULL
+        {"file_hash": "hash123"} # filename is missing, triggers IntegrityError on PRIMARY KEY which is swallowed by INSERT OR IGNORE
     ]
-    # In SQLite, UNIQUE NOT NULL on file_hash will cause an IntegrityError if it's NULL, 
-    # but we catch and rollback in the function
-    with pytest.raises(sqlite3.IntegrityError):
-        add_documents_bulk(docs)
-        
+    
+    success_count = add_documents_bulk(docs)
+    assert success_count == 0
     assert len(get_all_documents()) == 0

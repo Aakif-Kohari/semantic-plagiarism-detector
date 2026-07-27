@@ -155,6 +155,19 @@ streamlit run app/streamlit_app.py
 
 The app opens at **http://localhost:8501**.
 
+## Supported File Formats
+
+| File Type | Extension(s) | Max Size | Feature Support |
+|-----------|--------------|----------|-----------------|
+| PDF | `.pdf` | 10 MB | Text extraction with OCR support for scanned PDFs |
+| Microsoft Word | `.docx`, `.doc` | 10 MB | Text extraction |
+| Plain Text | `.txt` | 10 MB | Text extraction |
+| Rich Text | `.rtf` | 10 MB | Text extraction |
+| Markdown | `.md` | 10 MB | Text extraction |
+| EPUB | `.epub` | 10 MB | Text extraction |
+| ZIP Archive | `.zip` | 10 MB | Batch upload of supported files |
+| Images | `.png`, `.jpg`, `.jpeg` | 10 MB | OCR-based text extraction |
+
 ### 5. Pre-populated Seed Data (Optional for Contributors)
 
 To quickly test dashboard UI/CSS changes or verify logic without manually registering accounts or uploading documents, you can load pre-populated seed data:
@@ -510,6 +523,20 @@ service.
 | Chunk max words | `200` | Longer paragraphs are sub-split at sentence boundaries |
 | Embedding model | `paraphrase-multilingual-MiniLM-L12-v2` | Change in `src/core/embedding_model.py` or set `SEMANTIC_PLAGIARISM_MODEL` |
 | Batch size | `64` | Tune for GPU/CPU in `src/core/embedding_model.py` |
+
+### Webhook Security (SSRF)
+
+When `PLAGIARISM_WEBHOOK_URL` is configured, the URL is validated before dispatch.
+Webhook requests are only allowed over HTTPS and are blocked if DNS resolution maps
+to internal or special-purpose addresses.
+
+The validator explicitly blocks these private IPv4 CIDR ranges:
+
+- `10.0.0.0/8`
+- `172.16.0.0/12`
+- `192.168.0.0/16`
+
+Validation is implemented in `src/security/ssrf_protector.py`.
 
 ---
 
