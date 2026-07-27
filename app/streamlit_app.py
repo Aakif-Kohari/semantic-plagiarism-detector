@@ -708,7 +708,134 @@ def clear_all_dialog():
             st.success("✅ All documents, chunks, and incidents have been cleared.")
             st.rerun()
 
+st.markdown("""
+<style>
 
+.navbar{
+    position:sticky;
+    top:0;
+    z-index:999;
+    background:white;
+    padding:16px 28px;
+    border-radius:16px;
+    border:1px solid #E5E7EB;
+    box-shadow:0 8px 30px rgba(0,0,0,.06);
+    margin-bottom:30px;
+}
+
+.nav-container{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+}
+
+.logo{
+    display:flex;
+    align-items:center;
+    gap:14px;
+}
+
+.logo-icon{
+    width:48px;
+    height:48px;
+    border-radius:14px;
+    background:linear-gradient(135deg,#2563eb,#06b6d4);
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    color:white;
+    font-size:24px;
+    box-shadow:0 8px 18px rgba(37,99,235,.30);
+}
+
+.logo-text{
+    font-size:28px;
+    font-weight:800;
+    color:#111827;
+}
+
+.logo-sub{
+    font-size:13px;
+    color:#6B7280;
+}
+
+.menu{
+    display:flex;
+    align-items:center;
+    gap:28px;
+}
+
+.menu a{
+    text-decoration:none;
+    color:#6B7280;
+    font-weight:600;
+    transition:.25s;
+}
+
+.menu a:hover{
+    color:#2563EB;
+}
+
+.github{
+    background:#111827;
+    color:white !important;
+    padding:10px 18px;
+    border-radius:10px;
+}
+
+.github:hover{
+    background:#2563EB;
+}
+
+</style>
+
+<div class="navbar">
+
+<div class="nav-container">
+
+<div class="logo">
+
+<div class="logo-icon">
+🔍
+</div>
+
+<div>
+
+<div class="logo-text">
+Semantic Plagiarism Detection
+</div>
+
+<div class="logo-sub">
+AI Powered Similarity Detection
+</div>
+
+</div>
+
+</div>
+
+<div class="menu">
+
+<a href="#upload">Upload</a>
+
+<a href="#results">Results</a>
+
+<a href="#history">History</a>
+
+<a href="#about">About</a>
+
+<a class="github"
+href="https://github.com/Ganesh-403/semantic-plagiarism-detector"
+target="_blank">
+⭐ GitHub
+</a>
+
+</div>
+
+</div>
+
+</div>
+
+""", unsafe_allow_html=True)
 # ── Top-right Theme Toggle ───────────────────────────────────────────────────
 current_theme = get_theme_name()
 _, theme_col = st.columns([0.94, 0.06])
