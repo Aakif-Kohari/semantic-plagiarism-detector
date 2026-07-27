@@ -28,7 +28,10 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from app.components.faiss_results import faiss_results_dataframe
+try:
+    from app.components.faiss_results import faiss_results_dataframe
+except ImportError:
+    from components.faiss_results import faiss_results_dataframe
 from src.security.metadata_stripper import strip_exif_metadata
 from src.utils.filename import sanitize_filename, unique_filename
 
@@ -60,12 +63,25 @@ if missing_env_vars:
     )
 
 
-from app.css_constants import (CLASS_CLEAR_ALL_CONTAINER, CLASS_SKELETON,
+try:
+    from app.css_constants import (CLASS_CLEAR_ALL_CONTAINER, CLASS_SKELETON,
+                                   CLASS_SKELETON_CHART, CLASS_SKELETON_METRIC,
+                                   CLASS_SKELETON_TABLE, CLASS_SKELETON_TEXT,
+                                   CLASS_SKELETON_TEXT_SHORT, CLASS_SKELETON_TITLE,
+                                   CLASS_WELCOME_BANNER)
+except ImportError:
+    from css_constants import (CLASS_CLEAR_ALL_CONTAINER, CLASS_SKELETON,
                                CLASS_SKELETON_CHART, CLASS_SKELETON_METRIC,
                                CLASS_SKELETON_TABLE, CLASS_SKELETON_TEXT,
                                CLASS_SKELETON_TEXT_SHORT, CLASS_SKELETON_TITLE,
                                CLASS_WELCOME_BANNER)
-from app.theme import (back_to_top_html, empty_state_html, get_colors,
+
+try:
+    from app.theme import (back_to_top_html, empty_state_html, get_colors,
+                           get_theme_name, inject_css, pipeline_progress_html,
+                           set_theme, version_check_widget_html)
+except ImportError:
+    from theme import (back_to_top_html, empty_state_html, get_colors,
                        get_theme_name, inject_css, pipeline_progress_html,
                        set_theme, version_check_widget_html)
 from src.core.app_config import get_app_title, get_welcome_message
