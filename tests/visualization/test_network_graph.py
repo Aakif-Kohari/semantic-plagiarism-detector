@@ -172,3 +172,22 @@ def test_plot_similarity_network_layout_autosize():
 
     assert fig.layout.autosize is True
     assert fig.layout.width is None
+
+
+def test_build_network_data_highlighted_doc():
+    """Verify highlighted_doc node color and marker size are updated to bright yellow."""
+    data = {
+        "doc1": [1.0, 0.85],
+        "doc2": [0.85, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2"])
+
+    net_data = build_network_data(df, threshold=0.75, highlighted_doc="doc1")
+    node_colors = net_data["node_trace"].marker.color
+    node_sizes = net_data["node_trace"].marker.size
+
+    # doc1 is highlighted -> color #FFFF00 and larger size
+    assert node_colors[0] == "#FFFF00"
+    assert node_colors[1] != "#FFFF00"
+    assert node_sizes[0] > node_sizes[1]
+

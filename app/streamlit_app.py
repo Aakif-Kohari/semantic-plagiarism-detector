@@ -2997,9 +2997,23 @@ if not st.session_state.authenticated:
                 "their similarity is greater than or equal to the selected threshold."
             )
 
+            doc_select_options = ["None"] + list(active_sim_df.columns)
+            selected_highlight_doc = st.selectbox(
+                "Highlight Document Node",
+                options=doc_select_options,
+                index=0,
+                key="highlight_doc_node_selector",
+            )
+            highlighted_doc = (
+                selected_highlight_doc
+                if selected_highlight_doc != "None"
+                else None
+            )
+
             network_fig = plot_similarity_network(
                 similarity_df=active_sim_df,
                 threshold=threshold,
+                highlighted_doc=highlighted_doc,
                 title="Interactive Document Plagiarism Network",
             )
 
