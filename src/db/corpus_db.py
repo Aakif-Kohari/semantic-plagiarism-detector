@@ -93,46 +93,26 @@ def init_corpus_db() -> None:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS documents (
-                id               INTEGER PRIMARY KEY AUTOINCREMENT,
-                filename         TEXT    UNIQUE NOT NULL,
-                file_hash        TEXT    UNIQUE NOT NULL,
-                upload_date      TEXT    NOT NULL,
-                class_section    TEXT,
-                student_name     TEXT,
-                assignment_title TEXT,
-                pdf_author       TEXT,
-                pdf_creation_date TEXT,
-                pdf_title        TEXT,
-                tags             TEXT
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename    TEXT UNIQUE NOT NULL,
+                file_hash   TEXT UNIQUE NOT NULL,
+                upload_date TEXT NOT NULL
             )
-        """
+            """
         )
-
-
-
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS chunks (
-                vector_id    INTEGER PRIMARY KEY,
-                filename     TEXT    NOT NULL,
-                chunk_index  INTEGER NOT NULL,
-                chunk_text   TEXT    NOT NULL,
-                embedding    BLOB    NOT NULL,
-                FOREIGN KEY (filename) REFERENCES documents(filename) ON DELETE CASCADE
+                vector_id   INTEGER PRIMARY KEY,
+                filename    TEXT NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                chunk_text  TEXT NOT NULL,
+                embedding   BLOB NOT NULL,
+                FOREIGN KEY (filename)
+                    REFERENCES documents(filename)
+                    ON DELETE CASCADE
             )
-        """
-        )
-        conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS deleted_chunks (
-                vector_id    INTEGER,
-                filename     TEXT    NOT NULL,
-                chunk_index  INTEGER NOT NULL,
-                chunk_text   TEXT    NOT NULL,
-                embedding    BLOB    NOT NULL,
-                FOREIGN KEY (filename) REFERENCES documents(filename) ON DELETE CASCADE
-            )
-        """
         )
         migrate_corpus_database(conn)
 
