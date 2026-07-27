@@ -24,7 +24,7 @@ from src.db.migrations import (delete_all_if_table_exists,
 from src.utils.filename import sanitize_filename
 
 _DB_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "corpus.db")
+    os.path.join(os.path.dirname(__file__), "..", "..", "data", "corpus.db")
 )
 
 _connection_pool = threading.local()
@@ -93,64 +93,26 @@ def init_corpus_db() -> None:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS documents (
-                id               INTEGER PRIMARY KEY AUTOINCREMENT,
-                filename         TEXT    UNIQUE NOT NULL,
-                file_hash        TEXT    UNIQUE NOT NULL,
-                upload_date      TEXT    NOT NULL,
-                class_section    TEXT,
-                student_name     TEXT,
-                assignment_title TEXT,
-                pdf_author       TEXT,
-                pdf_creation_date TEXT,
-                pdf_title        TEXT,
-                tags             TEXT
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename    TEXT UNIQUE NOT NULL,
+                file_hash   TEXT UNIQUE NOT NULL,
+                upload_date TEXT NOT NULL
             )
-        """
+            """
         )
-
-        # Schema migration fallback logic: add missing columns if documents table already existed
-        cursor = conn.execute("PRAGMA table_info(documents)")
-        columns = [row[1] for row in cursor.fetchall()]
-        if "class_section" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN class_section TEXT")
-        if "student_name" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN student_name TEXT")
-        if "assignment_title" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN assignment_title TEXT")
-        if "pdf_author" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN pdf_author TEXT")
-        if "pdf_creation_date" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN pdf_creation_date TEXT")
-        if "pdf_title" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN pdf_title TEXT")
-        if "is_deleted" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0")
-        if "deleted_at" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN deleted_at TEXT")
-
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS chunks (
-                vector_id    INTEGER PRIMARY KEY,
-                filename     TEXT    NOT NULL,
-                chunk_index  INTEGER NOT NULL,
-                chunk_text   TEXT    NOT NULL,
-                embedding    BLOB    NOT NULL,
-                FOREIGN KEY (filename) REFERENCES documents(filename) ON DELETE CASCADE
+                vector_id   INTEGER PRIMARY KEY,
+                filename    TEXT NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                chunk_text  TEXT NOT NULL,
+                embedding   BLOB NOT NULL,
+                FOREIGN KEY (filename)
+                    REFERENCES documents(filename)
+                    ON DELETE CASCADE
             )
-        """
-        )
-        conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS deleted_chunks (
-                vector_id    INTEGER,
-                filename     TEXT    NOT NULL,
-                chunk_index  INTEGER NOT NULL,
-                chunk_text   TEXT    NOT NULL,
-                embedding    BLOB    NOT NULL,
-                FOREIGN KEY (filename) REFERENCES documents(filename) ON DELETE CASCADE
-            )
-        """
         )
         migrate_corpus_database(conn)
 
@@ -511,11 +473,12 @@ def add_documents_bulk(documents: list) -> int:
 
     success_count = 0
     with _connect() as conn:
-        conn.executemany(
+        cursor = conn.cursor()
+        cursor.executemany(
             "INSERT OR IGNORE INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             formatted_docs,
         )
-        success_count = conn.execute("SELECT changes()").fetchone()[0]
+        success_count = cursor.rowcount
     return success_count
 
 

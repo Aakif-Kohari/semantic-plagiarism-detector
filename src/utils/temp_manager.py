@@ -24,15 +24,8 @@ def create_managed_temp_file(suffix: str = "", delete: bool = True):
             except OSError:
                 pass
 
--------------------------
-Utility for tracking and automatically cleaning up temporary files and directories
-on application exit using Python's atexit module and tempfile utilities.
-"""
-
 import atexit
-import os
 import shutil
-import tempfile
 from typing import List, Optional
 
 # Global list of registered temporary paths to clean up

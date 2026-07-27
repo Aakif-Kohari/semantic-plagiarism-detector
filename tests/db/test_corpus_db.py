@@ -164,7 +164,7 @@ def test_class_queries():
     assert len(class_b_docs) == 1
 
 
-def test_clear_all_data_clears_incidents():
+def test_clear_all_data_clears_incidents(mock_db):
     from src.db.incidents import get_all_incidents, sync_flagged_incidents
 
     # 1. Add mock documents
@@ -180,10 +180,10 @@ def test_clear_all_data_clears_incidents():
             "severity": "High",
         }
     ]
-    sync_flagged_incidents(flags)
+    sync_flagged_incidents(flags, mock_db)
 
     # Verify they exist
-    incidents = get_all_incidents()
+    incidents = get_all_incidents(mock_db)
     assert len(incidents) == 1
 
     # 3. Clear all data
@@ -191,7 +191,7 @@ def test_clear_all_data_clears_incidents():
 
     # Verify everything is cleared
     assert len(get_all_documents()) == 0
-    assert len(get_all_incidents()) == 0
+    assert len(get_all_incidents(mock_db)) == 0
 
 
 def test_get_document_word_counts():
