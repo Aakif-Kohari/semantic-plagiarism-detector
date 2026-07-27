@@ -65,6 +65,26 @@ def test_inject_css_generates_css_without_errors():
     assert "<style>" in css
 
 
+from app.theme import (COLORS, badge_html, get_colors, inject_css,
+                       sanitize_hex_color, sanitize_theme_colors,
+                       severity_tier, tier_color, tier_from_severity_label)
+
+
+def test_sanitize_hex_color_valid_and_invalid():
+    """Verify regex validation for hex colors."""
+    # Valid hex colors (3 and 6 digits)
+    assert sanitize_hex_color("#FFF") == "#FFF"
+    assert sanitize_hex_color("#123456") == "#123456"
+    assert sanitize_hex_color("#aBcDeF") == "#aBcDeF"
+
+    # Invalid hex colors / injection attempts
+    assert sanitize_hex_color("red", fallback="#000000") == "#000000"
+    assert sanitize_hex_color("#12345", fallback="#000000") == "#000000"
+    assert sanitize_hex_color("#1234567", fallback="#000000") == "#000000"
+    assert sanitize_hex_color("url('http://evil')", fallback="#000000") == "#000000"
+    assert sanitize_hex_color("; background: red;", fallback="#000000") == "#000000"
+
+
 def test_badge_html_returns_valid_html():
     html = badge_html("high")
 
