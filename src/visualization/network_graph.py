@@ -74,6 +74,7 @@ def _build_tag_color_map(tags_list: list[str]) -> dict[str, str]:
 def build_network_data(
     similarity_df: pd.DataFrame,
     threshold: float = 0.59,
+    min_degree: int = 0,
     theme_colors: Optional[dict] = None,
     selected_node: Optional[str] = None,
 ) -> dict:
@@ -83,6 +84,7 @@ def build_network_data(
     Args:
         similarity_df: Square N×N DataFrame of similarity scores.
         threshold: Edge threshold; pairs with similarity >= threshold are connected.
+        min_degree: Minimum degree threshold; nodes with degree < min_degree are filtered out.
         theme_colors: Optional dictionary containing theme colors.
         document_tags: Optional dictionary mapping document names to tag strings or lists of tags.
 
@@ -452,6 +454,7 @@ def render_network_plotly(
 def plot_similarity_network(
     similarity_df: pd.DataFrame,
     threshold: float = 0.59,
+    min_degree: int = 0,
     title: str = "Document Plagiarism Network",
     theme_colors: Optional[dict] = None,
     selected_node: Optional[str] = None,
@@ -462,6 +465,7 @@ def plot_similarity_network(
     Args:
         similarity_df: Square N×N DataFrame of similarity scores.
         threshold: Edge threshold; pairs with similarity >= threshold are connected.
+        min_degree: Minimum degree threshold; nodes with degree < min_degree are filtered out.
         title: Title of the graph.
         theme_colors: Optional dictionary containing theme colors.
         document_tags: Optional dictionary mapping document names to tag strings or lists of tags.
@@ -472,6 +476,7 @@ def plot_similarity_network(
     network_data = build_network_data(
         similarity_df=similarity_df,
         threshold=threshold,
+        min_degree=min_degree,
         theme_colors=theme_colors,
         selected_node=selected_node,
     )
