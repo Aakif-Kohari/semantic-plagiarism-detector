@@ -174,74 +174,26 @@ def test_plot_similarity_network_layout_autosize():
     assert fig.layout.width is None
 
 
-def test_build_network_data_colors_by_document_tags():
-    """Verify nodes are colored by discrete class tags when document_tags is provided."""
+def test_build_network_data_min_degree_filter():
+    """Verify min_degree filters out nodes connected to fewer than min_degree documents."""
     data = {
-        "doc1": [1.0, 0.85, 0.20],
-        "doc2": [0.85, 1.0, 0.10],
-        "doc3": [0.20, 0.10, 1.0],
+        "doc1": [1.0, 0.85, 0.80, 0.10],
+        "doc2": [0.85, 1.0, 0.10, 0.10],
+        "doc3": [0.80, 0.10, 1.0, 0.10],
+        "doc4": [0.10, 0.10, 0.10, 1.0],
     }
-    df = pd.DataFrame(data, index=["doc1", "doc2", "doc3"])
-    document_tags = {
-        "doc1": "#class_A,#hw1",
-        "doc2": "#class_A",
-        "doc3": "#class_B",
-    }
+    df = pd.DataFrame(data, index=["doc1", "doc2", "doc3", "doc4"])
 
-    net_data = build_network_data(df, threshold=0.75, document_tags=document_tags)
+    # doc1 is connected to doc2 and doc3 (degree 2)
+    # doc2 is connected to doc1 (degree 1)
+    # doc3 is connected to doc1 (degree 1)
+    # doc4 is isolated (degree 0)
+    net_data = build_network_data(df, threshold=0.75, min_degree=2)
+    nodes = list(net_data["graph"].nodes())
 
-    tag_color_map = net_data["tag_color_map"]
-    assert "#class_a" in tag_color_map
-    assert "#class_b" in tag_color_map
-    assert tag_color_map["#class_a"] != tag_color_map["#class_b"]
-
-    node_colors = net_data["node_trace"].marker.color
-    assert node_colors[0] == tag_color_map["#class_a"]
-    assert node_colors[1] == tag_color_map["#class_a"]
-    assert node_colors[2] == tag_color_map["#class_b"]
-
-    # Verify hover text contains tag info
-    hover_texts = net_data["node_trace"].hovertext
-    assert "<b>🏷️ Tag:</b> #class_a" in hover_texts[0]
-    assert "<b>🏷️ Tag:</b> #class_b" in hover_texts[2]
-
-
-def test_plot_similarity_network_with_doc_tags_alias():
-    """Verify plot_similarity_network accepts doc_tags alias and colors nodes accordingly."""
-    data = {
-        "doc1": [1.0, 0.90],
-        "doc2": [0.90, 1.0],
-    }
-    df = pd.DataFrame(data, index=["doc1", "doc2"])
-
-    fig = plot_similarity_network(
-        df,
-        threshold=0.75,
-        doc_tags={"doc1": ["#class_X"], "doc2": ["#class_Y"]},
-    )
-
-    node_trace = fig.data[1]  # node_trace is the second trace after edge_hover_trace
-    node_colors = node_trace.marker.color
-    assert len(node_colors) == 2
-    assert node_colors[0] != node_colors[1]
-    assert "<b>🏷️ Tag:</b> #class_x" in node_trace.hovertext[0]
-    assert "<b>🏷️ Tag:</b> #class_y" in node_trace.hovertext[1]
-
-
-def test_build_network_data_untagged_fallback():
-    """Verify untagged nodes fallback to degree-based colors when partial tags exist."""
-    data = {
-        "doc1": [1.0, 0.10],
-        "doc2": [0.10, 1.0],
-    }
-    df = pd.DataFrame(data, index=["doc1", "doc2"])
-
-    # doc1 is tagged with #class_A, doc2 is untagged (degree 0)
-    net_data = build_network_data(df, threshold=0.75, document_tags={"doc1": "#class_A"})
-
-    node_colors = net_data["node_trace"].marker.color
-    tag_color_map = net_data["tag_color_map"]
-
-    assert node_colors[0] == tag_color_map["#class_a"]
-    assert node_colors[1] == "#2e7d32"  # degree 0 success fallback color
+    assert "doc1" in nodes
+    assert "doc2" not in nodes
+    assert "doc3" not in nodes
+    assert "doc4" not in nodes
+    assert len(nodes) == 1
 

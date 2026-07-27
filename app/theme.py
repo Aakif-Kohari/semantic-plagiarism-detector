@@ -1,4 +1,43 @@
+import re
 import streamlit as st
+
+HEX_COLOR_PATTERN = re.compile(r"^#(?:[0-9a-fA-F]{3}){1,2}$")
+
+
+def sanitize_hex_color(color_val: str, fallback: str = "#000000") -> str:
+    """
+    Validates and sanitizes a hex color string against ^#(?:[0-9a-fA-F]{3}){1,2}$.
+    Returns fallback if invalid.
+    """
+    if isinstance(color_val, str) and HEX_COLOR_PATTERN.match(color_val.strip()):
+        return color_val.strip()
+    return fallback
+
+
+def sanitize_theme_colors(colors: dict) -> dict:
+    """Sanitize all color values in a theme dictionary."""
+    sanitized = {}
+    fallback_map = {
+        "background": "#FFFFFF",
+        "surface": "#F8FAFC",
+        "card": "#FFFFFF",
+        "ink": "#0F172A",
+        "muted": "#64748B",
+        "accent": "#0D9488",
+        "border": "#E2E8F0",
+        "input": "#FFFFFF",
+        "neutral_soft": "#F1F5F9",
+        "danger": "#FF4B4B",
+        "danger_soft": "#FEE2E2",
+        "warning": "#FFA500",
+        "warning_soft": "#FEF3C7",
+        "success": "#21C55D",
+        "success_soft": "#DCFCE7",
+    }
+    for k, v in colors.items():
+        fallback = fallback_map.get(k, "#000000")
+        sanitized[k] = sanitize_hex_color(str(v), fallback=fallback)
+    return sanitized
 
 try:
     from app.css_constants import (CLASS_AVATAR, CLASS_BADGE, CLASS_EMPTY_DESC,
@@ -129,7 +168,7 @@ def get_colors() -> dict:
 
 def inject_css() -> None:
     """Inject CSS for the currently selected Light or Dark theme."""
-    colors = get_colors()
+    colors = sanitize_theme_colors(get_colors())
 
     css = f"""
     <style>
