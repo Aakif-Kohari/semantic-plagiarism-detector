@@ -64,6 +64,7 @@ def _connect():
     handles when the process or a test is finished with the database.
     """
     path = os.path.abspath(_DB_PATH)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     pool = _pool()
     conn = pool.get(path)
     if conn is None:

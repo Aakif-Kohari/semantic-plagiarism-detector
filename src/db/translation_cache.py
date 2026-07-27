@@ -6,14 +6,16 @@ Maps SHA-256 hash of (foreign_text, source_lang, target_lang) -> cached_text.
 """
 
 import hashlib
+import os
 import sqlite3
 from typing import Optional
 
-DB_PATH = "corpus.db"
+DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "corpus.db")
 
 
 def _init_db():
     """Initializes the translation cache table if it does not exist."""
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute(

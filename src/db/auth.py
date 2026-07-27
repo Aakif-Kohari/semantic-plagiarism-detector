@@ -34,7 +34,9 @@ def configure_db_path(db_path: str | os.PathLike) -> None:
 
 
 def _connect() -> sqlite3.Connection:
-    return sqlite3.connect(_DB_PATH, check_same_thread=False)
+    path = os.path.abspath(_DB_PATH)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    return sqlite3.connect(path, check_same_thread=False)
 
 
 def log_security_event(

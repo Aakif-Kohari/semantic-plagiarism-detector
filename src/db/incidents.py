@@ -60,11 +60,17 @@ def build_incident_id(doc_a: str, doc_b: str) -> str:
     return f"INC-{digest[:12].upper()}"
 
 
+def _get_connection(db_path: str | Path) -> sqlite3.Connection:
+    abs_path = os.path.abspath(str(db_path))
+    os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+    return sqlite3.connect(abs_path)
+
+
 def init_incident_db(
     db_path: str | Path = DEFAULT_DB_PATH,
 ) -> None:
     """Create or upgrade the shared corpus/incident database."""
-    with closing(sqlite3.connect(str(db_path))) as conn:
+    with closing(_get_connection(db_path)) as conn:
         try:
             conn.execute("PRAGMA foreign_keys = ON")
             migrate_corpus_database(conn)
