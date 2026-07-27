@@ -2291,8 +2291,6 @@ if not st.session_state.authenticated:
                 threshold=threshold,
                 min_degree=min_degree,
                 title="Interactive Document Plagiarism Network",
-                selected_node=st.session_state.get("selected_document_id"),
-                document_tags=active_doc_tags if active_doc_tags else None,
             )
 
                     buf = _io.BytesIO()
