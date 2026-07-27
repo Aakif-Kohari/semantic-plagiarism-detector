@@ -128,33 +128,14 @@ def migration_006_add_incident_threshold_snapshot(
         )
 
 
-
-def migration_007_add_soft_delete(
+def migration_007_add_document_language(
     connection: sqlite3.Connection,
 ) -> None:
-    """Add is_deleted and deleted_at columns to documents, and create deleted_chunks table."""
-    if not column_exists(connection, "documents", "is_deleted"):
+    """Store the primary detected language code of each document."""
+    if not column_exists(connection, "documents", "detected_language"):
         connection.execute(
-            "ALTER TABLE documents ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0"
+            "ALTER TABLE documents ADD COLUMN detected_language TEXT"
         )
-    if not column_exists(connection, "documents", "deleted_at"):
-        connection.execute(
-            "ALTER TABLE documents ADD COLUMN deleted_at TEXT"
-        )
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS deleted_chunks (
-            vector_id   INTEGER,
-            filename    TEXT NOT NULL,
-            chunk_index INTEGER NOT NULL,
-            chunk_text  TEXT NOT NULL,
-            embedding   BLOB NOT NULL,
-            FOREIGN KEY (filename)
-                REFERENCES documents(filename)
-                ON DELETE CASCADE
-        )
-        """
-    )
 
 
 CORPUS_MIGRATIONS = {
@@ -164,7 +145,7 @@ CORPUS_MIGRATIONS = {
     4: migration_004_add_plagiarism_incidents,
     5: migration_005_add_false_positives,
     6: migration_006_add_incident_threshold_snapshot,
-    7: migration_007_add_soft_delete,
+    7: migration_007_add_document_language,
 }
 
 

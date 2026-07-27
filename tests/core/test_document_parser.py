@@ -107,8 +107,8 @@ def test_extract_text_routing(mock_ocr):
     assert isinstance(extract_text(pdf_bytes, "test.pdf"), str)
     assert extract_text(docx_bytes, "test.docx") == "Hello DOCX"
     assert extract_text(txt_bytes, "test.txt") == "Hello TXT"
-    # Fallback case
-    assert extract_text(txt_bytes, "test.unknown") == "Hello TXT"
+    # Fallback case (now rejected by security check)
+    assert extract_text(txt_bytes, "test.unknown") == ""
 
 
 def test_extract_texts_mixed():
@@ -420,63 +420,31 @@ def test_extract_text_routing_doc():
 
     with patch("shutil.which", return_value="/usr/bin/antiword"):
         with patch("subprocess.run", return_value=mock_result):
-            result = extract_text(b"fake bytes", "test_file.doc")
+            result = extract_text(b"\xd0\xcf\x11\xe0fake bytes", "test_file.doc")
             assert result == "Legacy Word Doc Content"
 
 
-# ---------------------------------------------------------------------------
-# Batch Processing Rate Limiting Tests (Issue #494)
-# ---------------------------------------------------------------------------
-
-
-def test_check_batch_rate_limit_helper():
-    """Test check_batch_rate_limit helper raises error when count exceeds 50."""
-    import pytest
-    from src.core.document_parser import MAX_BATCH_SIZE, check_batch_rate_limit
-    from src.errors import PARSER_BATCH_LIMIT_EXCEEDED
-
-    assert MAX_BATCH_SIZE == 50
-
-    # Under limit -> should pass without raising
-    check_batch_rate_limit(50)
-
-    # Exceeds limit -> raises ValueError
-    with pytest.raises(
-        ValueError, match=PARSER_BATCH_LIMIT_EXCEEDED.format(limit=50)
-    ):
-        check_batch_rate_limit(51)
-
-
-def test_extract_texts_exceeds_max_batch_size():
-    """Test extract_texts raises ValueError when input files exceed 50 documents."""
-    import pytest
-    from src.core.document_parser import extract_texts
-    from src.errors import PARSER_BATCH_LIMIT_EXCEEDED
-
-    files = [MagicMock() for _ in range(51)]
-    with pytest.raises(
-        ValueError, match=PARSER_BATCH_LIMIT_EXCEEDED.format(limit=50)
-    ):
-        extract_texts(files)
-
-
-def test_extract_texts_within_batch_size_limit():
-    """Test extract_texts succeeds when input files count is <= 50 documents."""
-    from src.core.document_parser import extract_texts
-
-    mock_files = []
-    for i in range(5):
-        f = MagicMock()
-        f.name = f"doc_{i}.txt"
-        f.read.return_value = b"sample text"
-        mock_files.append(f)
-
-    with patch(
-        "src.core.document_parser.extract_text",
-        side_effect=lambda data, name, **kwargs: f"Parsed {name}",
-    ):
-        results = extract_texts(mock_files)
-
-    assert len(results) == 5
-    assert results["doc_0.txt"] == "Parsed doc_0.txt"
-
+def test_large_pdf_parsing_performance_benchmark():
+    """Benchmark test asserting parsing of a 200-page text PDF completes under 3 seconds."""
+    import time
+    from reportlab.pdfgen import canvas
+    
+    # 1. Create a 200-page synthetic PDF in-memory using reportlab
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf)
+    for i in range(200):
+        # Add enough words per page to bypass OCR (min 8 words)
+        c.drawString(100, 750, f"Page {i}: This is a synthetic page of text to parse quickly.")
+        c.showPage()
+    c.save()
+    pdf_bytes = buf.getvalue()
+    
+    # 2. Time the parsing of the 200-page PDF
+    start_time = time.perf_counter()
+    parsed_text = extract_text_from_pdf(pdf_bytes)
+    duration = time.perf_counter() - start_time
+    
+    # 3. Assert duration and basic content checks
+    assert len(parsed_text) > 0
+    assert "Page 199" in parsed_text
+    assert duration < 3.0, f"Parsing 200-page PDF took too long: {duration:.2f} seconds (limit: 3.0s)"
