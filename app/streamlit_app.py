@@ -17,6 +17,13 @@ from src.core.embedding_model import embed_documents
 from src.core.text_chunking import chunk_documents
 
 import base64
+
+
+import datetime
+import io as _io
+import os
+
+
 import html
 # Standard / Third-party imports
 import time
@@ -63,6 +70,59 @@ if missing_env_vars:
     )
 
 
+from app.theme import (
+    empty_state_html,
+    get_colors,
+    get_theme_name,
+    inject_css,
+    set_theme,
+)
+from src.core.ai_detector import detect_documents_ai_probability
+from src.core.document_parser import (
+    DEFAULT_OCR_DPI,
+    DEFAULT_OCR_LANGUAGE,
+    SUPPORTED_OCR_LANGUAGES,
+    extract_text,
+    prepare_text_for_embedding,
+)
+from src.core.embedding_model import embed_documents
+from src.core.faiss_index import (
+    build_index,
+    build_index_from_matrix,
+    load_index,
+    load_or_rebuild_index,
+    search_similar_chunks,
+)
+from src.core.similarity import (
+    PLAGIARISM_THRESHOLD,
+    document_similarity_matrix,
+    find_most_similar_chunks,
+    flag_plagiarism,
+)
+from src.core.text_chunking import chunk_documents
+from src.core.webhook import send_plagiarism_alert
+from src.db import (
+    get_all_embeddings,
+    get_chunk_registry,
+    get_documents_by_class,
+    get_unique_class_sections,
+    init_corpus_db,
+)
+from src.db.auth import add_user, get_all_users, get_user_role, init_db, verify_user
+
+from src.utils.pdf_report import highlight_pdf_matches
+
+from src.utils.pdf_report import highlight_pdf_matches, truncate_filename
+
+from src.utils.redis_cache import (
+    cache_session_state,
+    clear_session,
+    get_analysis_results,
+    get_faiss_index,
+    get_session_state,
+)
+
+
 from app.css_constants import (CLASS_CLEAR_ALL_CONTAINER, CLASS_SKELETON,
                                CLASS_WELCOME_BANNER,                               CLASS_SKELETON_CHART, CLASS_SKELETON_METRIC,
                                CLASS_SKELETON_TABLE, CLASS_SKELETON_TEXT,
@@ -70,7 +130,8 @@ from app.css_constants import (CLASS_CLEAR_ALL_CONTAINER, CLASS_SKELETON,
 from app.theme import (back_to_top_html, empty_state_html, get_colors,
                        get_theme_name, inject_css, pipeline_progress_html,
                        set_theme, version_check_widget_html)
-from src.core.app_config import get_app_title, get_welcome_messagefrom src.core.config import (DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD,
+from src.core.app_config import get_app_title, get_welcome_message
+from src.core.config import (DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD,
                              severity_key)
 from src.core.document_parser import (DEFAULT_OCR_DPI, DEFAULT_OCR_LANGUAGE,
                                       SUPPORTED_OCR_LANGUAGES,
@@ -99,7 +160,7 @@ class OCRFileBatchError(Exception):
 from src.core.export_engine import LMSExportEngine
 from src.core.synchronization import verify_and_repair_index
 from src.core.telemetry import TelemetryService
-from src.db import (clear_all_data, delete_document, delete_tag,
+from src.db import (clear_all_data, delete_tag,
                     get_all_documents, get_all_embeddings, get_all_tags,
                     get_chunk_registry, get_document_word_counts,
                     get_unique_class_sections, init_corpus_db,
@@ -127,6 +188,7 @@ from src.utils.redis_cache import (cache_session_state, clear_session,
                                    get_session_state, get_upload_count,
                                    increment_upload_count,
                                    is_upload_rate_limited)
+
 from src.utils.warning_list import render_warning_controls
 from src.visualization.analytics import (plot_document_sizes,
                                          plot_high_severity_trends,
@@ -148,9 +210,18 @@ except Exception:
     from src.utils.json_export import export_similarity_matrix_to_json
 except ImportError:
 
+    from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore[import-untyped,reportMissingImports]
+
+
+
+    from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore[import-untyped,reportMissingImports]
+
+
     from utils.excel_export import \
         export_similarity_matrix_to_excel  # type: ignore
     from utils.json_export import export_similarity_matrix_to_json
+
+
 
 
 # Initialize corpus database
@@ -460,7 +531,7 @@ if not st.session_state.get("authenticated", False):
 
     with st.form("login_form"):
         username = st.text_input("Username", value="admin")
-        password = st.text_input("Password", type="password", value="admin")
+        password = st.text_input("Password", type="password", value="Admin123!")
         login_submitted = st.form_submit_button("Log In", use_container_width=True)
 
         if login_submitted:
@@ -518,7 +589,15 @@ if not st.session_state.get("authenticated", False):
                     record_failed_login(username)
                     from src.errors import AUTH_INVALID_CREDENTIALS
 
-                    st.error(f"🚨 {AUTH_INVALID_CREDENTIALS}")
+
+                st.error("Invalid username or password.")
+    st.stop()
+    st.error("Invalid username or password. Try admin / Admin123!")
+    st.markdown("</div>", unsafe_allow_html=True)
+    st.stop()
+
+    st.error(f"🚨 {AUTH_INVALID_CREDENTIALS}")
+
 
     # ── SSO Sign-In Options ──────────────────────────────────────────────────
     st.markdown("---")
@@ -633,12 +712,12 @@ def clear_all_dialog():
                     logger.error(f"Error removing FAISS index: {e}")
 
             try:
-                from src.utils.redis_cache import get_cache
+                from src.utils.redis_cache import CacheKeyPrefix, get_cache
 
                 cache = get_cache()
                 if cache.is_available():
-                    cache.delete("faiss:index:corpus_index")
-                    cache.clear_pattern("analysis:*")
+                    cache.delete(CacheKeyPrefix.LEGACY_FAISS_INDEX.value)
+                    cache.clear_pattern(CacheKeyPrefix.LEGACY_ANALYSIS_PATTERN.value)
             except (ImportError, RuntimeError, ConnectionError) as e:
                 print(f"Error invalidating cache: {e}")
             except Exception as e:
@@ -675,6 +754,12 @@ with theme_col:
         st.rerun()
 
 
+
+
+
+
+# ── Sidebar (ROLE RESTRICTED Settings) ────────────────────────────────────────
+
 # ── Sidebar (ROLE RESTRICTED Settings & i18n) ─────────────────────────────────
 
 
@@ -693,6 +778,7 @@ def save_preferences_callback():
         theme_val = st.session_state.get("theme_selector", "Light")
         set_user_theme(st.session_state.username, theme_val)
 
+
 with st.sidebar:
     st.markdown(f"👤 Logged in as **{st.session_state.get('username', '')}**")
 
@@ -703,6 +789,21 @@ with st.sidebar:
             st.caption(f"Total System Users: {active_users}")
         except Exception:
             pass
+
+    # Redis Connection Health Status Indicator
+    try:
+        from src.utils.redis_cache import get_cache
+        cache = get_cache()
+        connected, latency = cache.ping()
+        if not connected:
+            st.markdown("🔴 **Redis Cache**: Offline")
+        elif latency is not None and latency > 100.0:
+            st.markdown(f"🟡 **Redis Cache**: Degraded ({latency:.1f}ms)")
+        else:
+            latency_str = f" ({latency:.1f}ms)" if latency is not None else ""
+            st.markdown(f"🟢 **Redis Cache**: Healthy{latency_str}")
+    except Exception:
+        st.markdown("🔴 **Redis Cache**: Offline")
 
     if st.button("🚪 Log Out", use_container_width=True):
         import logging
@@ -795,11 +896,11 @@ with st.sidebar:
                     ):
                         soft_delete_document(pending)
                         try:
-                            from src.utils.redis_cache import get_cache
+                            from src.utils.redis_cache import CacheKeyPrefix, get_cache
                             cache = get_cache()
                             if cache.is_available():
-                                cache.delete("faiss:index:corpus_index")
-                                cache.clear_pattern("analysis:*")
+                                cache.delete(CacheKeyPrefix.LEGACY_FAISS_INDEX.value)
+                                cache.clear_pattern(CacheKeyPrefix.LEGACY_ANALYSIS_PATTERN.value)
                         except Exception as e:
                             logger.error(f"Error invalidating cache: {e}")
 
@@ -840,6 +941,39 @@ with st.sidebar:
                                 f"Deleted tag `{tag}` from {affected} document(s)."
                             )
                             st.rerun()
+
+
+        # ── Date Filter Range Selector (#181) ─────────────────────────────────
+        st.markdown("### 📅 Date Filter")
+        today = datetime.date.today()
+        seven_days_ago = today - datetime.timedelta(days=7)
+        date_range = st.date_input(
+            "Filter Documents by Upload Date",
+            value=(seven_days_ago, today),
+            key="document_date_filter",
+            help="Filter documents by file modification date before processing.",
+        )
+
+        # ── Customizable Chunk Size & Overlap Sliders (#153) ─────────────────
+        st.markdown("### ✂️ Chunking Settings")
+        chunk_size = st.slider(
+            "Chunk Size (characters)",
+            200,
+            2000,
+            value=500,
+            step=50,
+            help="Target character length for text chunks during embedding.",
+            key="chunk_size_slider",
+        )
+        chunk_overlap = st.slider(
+            "Chunk Overlap (characters)",
+            0,
+            500,
+            value=50,
+            step=10,
+            help="Character overlap between consecutive chunks to preserve contextual boundary.",
+            key="chunk_overlap_slider",
+        )
 
         # ── Generate Mock Data (Issue #255) ───────────────────────────────────
         # Hidden developer utility: generates 5 fake essays via Faker so the
@@ -885,6 +1019,7 @@ with st.sidebar:
                                 "chunk_overlap_slider", 50
                             ),
                         )
+
 
                     added = result["essays"]
                     skipped = result["skipped"]
@@ -933,6 +1068,7 @@ with st.sidebar:
         chunk_overlap = 50
         ocr_language = DEFAULT_OCR_LANGUAGE
         ocr_dpi = DEFAULT_OCR_DPI
+        date_range = None
 
     st.markdown("---")
     unique_classes = ["All Classes"] + get_unique_class_sections()
@@ -1075,6 +1211,20 @@ else:
     if "analysis_results" not in st.session_state:
         st.session_state.analysis_results = None
 
+
+        cached_results = get_analysis_results(f"{SESSION_ID}:current")
+        if cached_results is not None:
+            st.session_state.analysis_results = cached_results
+
+    if "analysis_file_signature" not in st.session_state:
+        st.session_state.analysis_file_signature = None
+
+        cached_signature = get_session_state(SESSION_ID, "analysis_file_signature")
+        if cached_signature is not None:
+            st.session_state.analysis_file_signature = cached_signature
+
+
+
     # Load or initialize FAISS index
     if os.path.exists(_INDEX_PATH):
         faiss_index = load_index(_INDEX_PATH)
@@ -1214,6 +1364,8 @@ if user_role != "admin":
                         st.success(
                             f"✅ Found **{len(results)}** potentially similar passages."
                         )
+
+
 
                         doc_id_map = {}
                         anon_counter = 1
@@ -1399,6 +1551,7 @@ else:
     if "analysis_file_signature" not in st.session_state:
         st.session_state.analysis_file_signature = None
 
+
         cached_signature = get_session_state(SESSION_ID, "analysis_file_signature")
         if cached_signature is not None:
             st.session_state.analysis_file_signature = cached_signature
@@ -1407,13 +1560,20 @@ else:
     if "failed_documents" not in st.session_state:
         st.session_state.failed_documents = {}
 
+    # 1. LOCAL FILE UPLOADER
+
+
+    if "failed_documents" not in st.session_state:
+        st.session_state.failed_documents = {}
+
 
     # 1. LOCAL FILE UPLOADER (Dynamic Title Translation)
+
     uploaded_files = st.file_uploader(
         get_text("upload_title", lang=lang_code),
         type=["pdf", "docx", "doc", "txt", "zip", "csv", "png", "jpg", "jpeg"],
         accept_multiple_files=True,
-        key="file_uploader",
+        key="file_uploader_admin",
     )
 
     if uploaded_files:
@@ -1627,6 +1787,11 @@ if not st.session_state.authenticated:
     except ImportError:
         bulk_download_drive_folder = None
 
+
+        if downloaded_dict:
+            st.session_state.drive_files_dict.update(downloaded_dict)
+            st.success( f"✅ Imported {len(downloaded_names)} files: {', '.join([truncate_filename(n, 25) for n in downloaded_names])}")
+
     if "drive_files_dict" not in st.session_state:
         st.session_state.drive_files_dict = {}
 
@@ -1656,7 +1821,7 @@ if not st.session_state.authenticated:
                                         drive_api_key.strip() if drive_api_key else None
                                     ),
                                 )
-                            )
+                        )
 
                             if downloaded_dict:
                                 scrubbed_drive = {
@@ -1681,6 +1846,8 @@ if not st.session_state.authenticated:
     MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 10MB limit
     file_bytes_dict = {}
     if uploaded_files:
+        from src.security.mime_validator import validate_mime_type
+
         # Re-initialize to handle zip/csv extraction correctly instead of raw bytes
         file_bytes_dict = {}
         for uploaded_file in uploaded_files:
@@ -1699,22 +1866,32 @@ if not st.session_state.authenticated:
                 )
                 continue
 
+            file_data = uploaded_file.read()
+            uploaded_file.seek(0)
+            if not validate_mime_type(file_data, safe_name):
+                st.error(
+                    f"🚨 **Security Alert:** File **'{safe_name}'** has been rejected. "
+                    "The file content does not match its expected file type (invalid magic byte signature)."
+                )
+                continue
+
             if original_name.lower().endswith(".zip"):
                 try:
                     from src.utils.zip_processor import process_zip_file
 
-                    zip_files = process_zip_file(uploaded_file.read())
+                    zip_files = process_zip_file(file_data)
                     if not zip_files:
                         st.error(
                             f"⚠️ ZIP file '{safe_name}' contains no supported documents (.pdf, .docx, .txt)."
                         )
                     else:
-                        file_bytes_dict.update(
-                            {
-                                name: strip_exif_metadata(data, name)
-                                for name, data in zip_files.items()
-                            }
-                        )
+                        for name, data in zip_files.items():
+                            if not validate_mime_type(data, name):
+                                st.error(
+                                    f"🚨 **Security Alert:** Extracted file **'{name}'** from ZIP archive was rejected due to mismatching magic byte signature."
+                                )
+                            else:
+                                file_bytes_dict[name] = strip_exif_metadata(data, name)
                 except ValueError as ve:
                     st.error(
                         f"⚠️ Failed to process ZIP archive '{safe_name}': {str(ve)}"
@@ -1746,7 +1923,7 @@ if not st.session_state.authenticated:
                         )
             else:
                 file_bytes_dict[safe_name] = strip_exif_metadata(
-                    uploaded_file.read(),
+                    file_data,
                     safe_name,
                 )
             uploaded_file.seek(0)
@@ -1757,6 +1934,8 @@ if not st.session_state.authenticated:
     url_filename = st.session_state.url_filename
 
     if st.session_state.drive_files_dict:
+        from src.security.mime_validator import validate_mime_type
+
         for drive_name, drive_bytes in st.session_state.drive_files_dict.items():
             safe_drive_name = unique_filename(
                 drive_name,
@@ -1767,6 +1946,11 @@ if not st.session_state.authenticated:
                     f"⚠️ Google Drive file **'{safe_drive_name}'** exceeds "
                     f"the maximum size limit of 10MB "
                     f"({len(drive_bytes) / (1024 * 1024):.2f}MB)."
+                )
+            elif not validate_mime_type(drive_bytes, safe_drive_name):
+                st.error(
+                    f"🚨 **Security Alert:** Google Drive file **'{safe_drive_name}'** has been rejected. "
+                    "The file content does not match its expected file type (invalid magic byte signature)."
                 )
             else:
                 file_bytes_dict[safe_drive_name] = drive_bytes
@@ -1821,6 +2005,21 @@ if not st.session_state.authenticated:
                         st.error("Please enter a password.")
         st.stop()
 
+
+    # Apply Date Range Filtering (#181)
+    if date_range and isinstance(date_range, (tuple, list)) and len(date_range) == 2:
+        start_d, end_d = date_range[0], date_range[1]
+        filtered_bytes_dict = {}
+        for fname, bdata in file_bytes_dict.items():
+            mod_date = datetime.date.today()  # Fallback to current date
+            if os.path.exists(fname):
+                mtime = os.path.getmtime(fname)
+                mod_date = datetime.date.fromtimestamp(mtime)
+
+            if start_d <= mod_date <= end_d:
+                filtered_bytes_dict[fname] = bdata
+        file_bytes_dict = filtered_bytes_dict
+
     # ── Display Failed Documents & Retry OCR Button (#183) ───────────────────
     if st.session_state.failed_documents:
         failed_list = list(st.session_state.failed_documents.keys())
@@ -1837,18 +2036,65 @@ if not st.session_state.authenticated:
                 st.session_state.failed_documents = {}
                 st.rerun()
 
+    # ── Re-order Uploaded Files (Issue #608) ──────────────────────────────────
+    if file_bytes_dict:
+        st.markdown("### 🔄 Drag-and-Drop Batch Ordering")
+        st.caption("Drag-and-drop, remove, or select files to change the batch execution sequence.")
+        file_names_list = list(file_bytes_dict.keys())
+        ordered_file_names = st.multiselect(
+            "Select and order files for pipeline execution:",
+            options=file_names_list,
+            default=file_names_list,
+            key="pipeline_file_ordering_multiselect",
+            help="Files will be processed in the exact order selected here.",
+        )
+        # Reconstruct the file bytes dictionary with the chosen order
+        file_bytes_dict = {name: file_bytes_dict[name] for name in ordered_file_names}
+
+
+    # ── Display Failed Documents & Retry OCR Button (#183) ───────────────────
+    if st.session_state.failed_documents:
+        failed_list = list(st.session_state.failed_documents.keys())
+
+    # ── Display Failed Documents & Retry OCR Button (#183 & #319) ─────────────
+    if st.session_state.failed_documents:
+        failed_list = [truncate_filename(fn, 25) for fn in st.session_state.failed_documents.keys()]
+
+        st.warning(
+            f"⚠️ **{len(failed_list)} document(s) failed text extraction/OCR:** "
+            f"`{', '.join(failed_list)}`. This can happen due to transient memory errors."
+        )
+        col_retry, _ = st.columns([1, 3])
+        with col_retry:
+            if st.button("🔄 Retry OCR", key="retry_ocr_button", type="secondary"):
+                for fname, fbytes in st.session_state.failed_documents.items():
+                    file_bytes_dict[fname] = fbytes
+                st.session_state.failed_documents = {}
+                st.rerun()
+
+
     # 4. PIPELINE STOP CHECK
     if len(file_bytes_dict) < 2 and url_text is None:
         if st.session_state.analysis_results is None:
             st.markdown(
                 empty_state_html(
                     "Waiting for Files",
+
+
+                    "Please upload or import from Drive at least 2 PDF, DOCX, or TXT assignments (under 10MB each) to begin.",
+
+
                     "Please upload or import from Drive at least 2 PDF, DOCX, DOC, or TXT assignments (under 10MB each) to begin.",
+
                     "📂",
                 ),
                 unsafe_allow_html=True,
             )
             st.stop()
+
+
+    # ── Metadata Editor Section (#319 Truncated Expanders) ───────────────────
+
 
     st.markdown("### 📝 Set Document Metadata")
     col1, col2 = st.columns(2)
@@ -1865,8 +2111,15 @@ if not st.session_state.authenticated:
 
     metadata_dict = {}
     for filename in file_bytes_dict.keys():
+
+        base_name = os.path.splitext(filename)[0]
+        guessed_name = base_name.replace("_", " ").replace("-", " ").title()
+        truncated_disp_name = truncate_filename(filename, max_len=30)
+
+        with st.expander(f"📄 {truncated_disp_name}", expanded=False):
+
         # Check if this filename is a virtual CSV document
-        is_csv_doc = False
+            is_csv_doc = False
         csv_filename_matched = None
         for csv_name in csv_configs.keys():
             if f"({csv_name} - Row " in filename:
@@ -1918,6 +2171,7 @@ if not st.session_state.authenticated:
 
     if url_filename:
         with st.expander(f"🔗 {url_filename}", expanded=True):
+
             student_name = st.text_input(
                 f"Student Name for {url_filename}",
                 value="Web Source",
@@ -1951,12 +2205,33 @@ if not st.session_state.authenticated:
         existing_registry=None,
         url_text: str = None,
         url_filename: str = None,
+        _status_placeholder=None,
     ):
         raw_texts = {}
 
-        failed_files = {}
 
+
+        file_statuses = {name: "Pending" for name in file_bytes_dict.keys()}
+        
+        def update_status():
+            if _status_placeholder is not None:
+                df = pd.DataFrame(
+                    [{"File": n, "Status": s} for n, s in file_statuses.items()]
+                )
+                _status_placeholder.table(df)
+        
+        update_status()
+
+        failed_files = {}
         for name, data in file_bytes_dict.items():
+            if not data:
+                file_statuses[name] = "Completed ✅"
+                update_status()
+                continue
+                
+            file_statuses[name] = "Processing ⏳"
+            update_status()
+            
             try:
                 extracted = extract_text(
                     _io.BytesIO(data),
@@ -1966,30 +2241,18 @@ if not st.session_state.authenticated:
                 )
                 if extracted and extracted.strip():
                     raw_texts[name] = extracted
+                    file_statuses[name] = "Completed ✅"
                 else:
                     failed_files[name] = data
+                    file_statuses[name] = "Failed ❌"
             except Exception:
                 failed_files[name] = data
-
-        failed_files = []
-        failure_details = []
-
-        for name, data in file_bytes_dict.items():
-            if not data:
-                continue  # Skip dummy data used for existing index bypass
-            try:
-                raw_texts[name] = extract_text(
-                    _io.BytesIO(data), name, ocr_language=ocr_language, ocr_dpi=ocr_dpi
-                )
-            except OCRDependencyError as exc:
-                failed_files.append(name)
-                failure_details.append(f"{name}: {exc}")
+                file_statuses[name] = "Failed ❌"
+            
+            update_status()
 
         if url_text and url_filename:
             raw_texts[url_filename] = url_text
-
-        if failed_files:
-            raise OCRFileBatchError(failed_files, failure_details)
 
         if "ignore_phrases" in globals() and ignore_phrases and ignore_phrases.strip():
             raw_texts = {
@@ -2053,8 +2316,14 @@ if not st.session_state.authenticated:
         )
 
 
+    status_placeholder = st.empty()
     with st.spinner("🧠 Processing files and building embeddings…"):
-        analysis_results = run_pipeline(file_bytes_dict, ocr_language, ocr_dpi)
+        analysis_results = run_pipeline(
+            file_bytes_dict, 
+            ocr_language, 
+            ocr_dpi, 
+            _status_placeholder=status_placeholder
+        )
 
     (
         raw_texts,
@@ -2079,7 +2348,13 @@ if not st.session_state.authenticated:
     has_enough_files = (len(file_bytes_dict) + (1 if url_text else 0)) >= 2
 
 
+
+
+
     # Run Pipeline if files uploaded
+
+   # Run Pipeline if files uploaded
+
     def compute_pipeline_signature(
         file_bytes_dict: dict,
         ocr_language: str,
@@ -2092,7 +2367,7 @@ if not st.session_state.authenticated:
         import hashlib
 
         h = hashlib.sha256()
-        for name in sorted(file_bytes_dict.keys()):
+        for name in file_bytes_dict.keys():
             data = file_bytes_dict[name]
             h.update(name.encode("utf-8", errors="ignore"))
             h.update(data)
@@ -2172,6 +2447,7 @@ if not st.session_state.authenticated:
             tab_analytics,
             tab_users,
             tab_trash,
+            tab_health,
         ) = st.tabs(
             [
                 get_text("tab_warnings", lang=lang_code),
@@ -2182,6 +2458,7 @@ if not st.session_state.authenticated:
                 get_text("tab_analytics", lang=lang_code),
                 get_text("tab_users", lang=lang_code),
                 get_text("tab_trash", lang=lang_code),
+                get_text("tab_health", lang=lang_code),
             ]
         )
 
@@ -2268,6 +2545,14 @@ if not st.session_state.authenticated:
             st.subheader("👤 User Management")
             st.markdown(
                 f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TABLE}"></div>',
+                unsafe_allow_html=True,
+            )
+
+        with tab_health:
+            st.markdown("🏠 Home > Dashboard > **System Health**")
+            st.subheader(get_text("tab_health", lang=lang_code))
+            st.markdown(
+                f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_METRIC}"></div>',
                 unsafe_allow_html=True,
             )
 
@@ -2435,6 +2720,28 @@ if not st.session_state.authenticated:
         total_pairs = n_docs * (n_docs - 1) // 2 if n_docs > 1 else 0
         n_flagged = len(flags)
 
+        max_sim = max([float(f["similarity"]) for f in flags]) if flags else 0.0
+        overall_severity = severity_key(max_sim)
+        
+        severity_color_map = {
+            "low": "var(--success)",
+            "medium": "var(--warning)",
+            "high": "var(--danger)",
+        }
+        metric_color = severity_color_map.get(overall_severity, "var(--success)")
+
+        st.markdown(
+            f"""
+            <style>
+            div[data-testid="stMetric"] {{
+                border-color: {metric_color} !important;
+                border-top: 4px solid {metric_color} !important;
+            }}
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
+
         col1, col2, col3, col4, col5 = st.columns(5)
         col1.metric(get_text("metric_docs", lang=lang_code), n_docs)
         col2.metric(get_text("metric_pairs", lang=lang_code), total_pairs)
@@ -2456,6 +2763,7 @@ if not st.session_state.authenticated:
         tab_analytics,
         tab_users,
         tab_trash,
+        tab_health,
         tab_settings,
     ) = st.tabs(
         [
@@ -2467,6 +2775,7 @@ if not st.session_state.authenticated:
             get_text("tab_analytics", lang=lang_code),
             get_text("tab_users", lang=lang_code),
             get_text("tab_trash", lang=lang_code),
+            get_text("tab_health", lang=lang_code),
             get_text("tab_settings", lang=lang_code),
         ],
         key="main_tabs",
@@ -2561,6 +2870,15 @@ if not st.session_state.authenticated:
                 st.info(
                     "No matching vector chunks found above threshold."
                 )
+
+                if q_results:
+                    for rec, score in q_results:
+                        disp_doc_name = truncate_filename(rec.doc_name, 30)
+                        st.markdown(
+                            f"**{disp_doc_name}** (Chunk #{rec.chunk_index}) — Similarity: `{score:.1%}`"
+                        )
+                        st.caption(rec.chunk_text)
+
             else:
                 min_sim, max_sim = st.slider(
                     "Similarity Range:",
@@ -2631,12 +2949,13 @@ if not st.session_state.authenticated:
                         },
                         key="faiss_search_results_table",
                     )
+
                 else:
                     st.info(
                         "No matching vector chunks found within the selected similarity range."
                     )
 
-    # ══ TAB 3: MATRIX ═════════════════════════════════════════════════════════
+    # ══ TAB 3: MATRIX (#319 Truncated Row/Col Headers) ════════════════════════
     with tab_matrix:
         st.markdown("🏠 Home > Dashboard > **Similarity Matrix**")
         st.subheader("📋 Similarity Matrix")
@@ -2662,7 +2981,13 @@ if not st.session_state.authenticated:
                     return "background-color:#ffa500;color:white;font-weight:bold;"
                 return ""
 
-            styled_df = active_sim_df.style.format("{:.4f}").map(_highlight)
+            # Truncate row labels and column names to prevent UI table layout overflow
+            truncated_sim_df = active_sim_df.rename(
+                index=lambda x: truncate_filename(str(x), 28),
+                columns=lambda x: truncate_filename(str(x), 28),
+            )
+
+            styled_df = truncated_sim_df.style.format("{:.4f}").map(_highlight)
             st.dataframe(styled_df, use_container_width=True)
 
             # Export options row
@@ -2712,6 +3037,9 @@ if not st.session_state.authenticated:
             cmap=heatmap_cmap,  # Dynamic colormap support (#186)
         )
         st.pyplot(heatmap_fig, use_container_width=True)
+
+
+    # ══ TAB 5: PAIR DRILL-DOWN (#145 & #319 Included) ════════════════════════
 
         # ══ TAB 5: PAIR DRILL-DOWN ══════════════════════════════════════════════════
 
@@ -2788,6 +3116,32 @@ if not st.session_state.authenticated:
             else:
                 st.plotly_chart(network_fig, use_container_width=True)
 
+            try:
+                svg_bytes = network_fig.to_image(format="svg")
+                col_svg, col_pdf = st.columns(2)
+                with col_svg:
+                    st.download_button(
+                        label="⬇️ Download as SVG",
+                        data=svg_bytes,
+                        file_name="plagiarism_network.svg",
+                        mime="image/svg+xml",
+                        use_container_width=True,
+                    )
+                with col_pdf:
+                    try:
+                        pdf_bytes = network_fig.to_image(format="pdf")
+                        st.download_button(
+                            label="⬇️ Download as PDF",
+                            data=pdf_bytes,
+                            file_name="plagiarism_network.pdf",
+                            mime="application/pdf",
+                            use_container_width=True,
+                        )
+                    except Exception:
+                        st.caption("📄 PDF export requires `kaleido` package.")
+            except Exception:
+                pass
+
             selected_document_id = st.session_state.get("selected_document_id")
 
             if selected_document_id:
@@ -2833,9 +3187,29 @@ if not st.session_state.authenticated:
 
     # ══ TAB 5: PAIR DRILL-DOWN ════════════════════════════════════════════════
 
+
     with tab_drill:
         st.markdown("🏠 Home > Dashboard > **Pair Drill-Down**")
         st.subheader("🔬 Pair Drill-Down")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            doc_a = st.selectbox(
+                "Document A",
+                doc_names,
+                index=0,
+                format_func=lambda x: truncate_filename(x, 35),
+                key="da",
+            )
+        with c2:
+            remaining_docs = [d for d in doc_names if d != doc_a]
+            doc_b = st.selectbox(
+                "Document B",
+                remaining_docs,
+                index=0,
+                format_func=lambda x: truncate_filename(x, 35),
+                key="db")
+
         st.caption("Inspect chunk-level similarity between any two documents.")
 
         if "expand_all_drill" not in st.session_state:
@@ -2855,6 +3229,7 @@ if not st.session_state.authenticated:
                     "📂",
                 ),
                 unsafe_allow_html=True,
+
             )
         elif len(active_sim_df) < 2:
             from src.errors import UI_NEED_MIN_DOCUMENTS
@@ -2980,11 +3355,21 @@ if not st.session_state.authenticated:
                 if not export_flags:
                     st.info("No warnings selected for export. Please select warnings in the Flagged Incidents tab.")
                 else:
-                    zip_bytes = generate_bulk_reports_zip(
-                        export_flags,
-                        chunked_docs=chunked_docs,
-                        embeddings=embeddings,
-                    )
+                    progress_bar = st.progress(0.0)
+                    try:
+                        zip_bytes = generate_bulk_reports_zip(
+                            export_flags,
+                            chunked_docs=chunked_docs,
+                            embeddings=embeddings,
+                            progress_bar=progress_bar,
+                        )
+                    except Exception as e:
+                        progress_bar.empty()
+                        raise e
+                    else:
+                        time.sleep(0.5)
+                        progress_bar.empty()
+
                     st.download_button(
                         label=f"⬇️ Download {len(export_flags)} Selected Flagged Pairs (ZIP)",
                         data=zip_bytes,
@@ -3105,6 +3490,22 @@ if not st.session_state.authenticated:
                 "⚠️ Access Denied: User Management is restricted to administrators."
             )
 
+            for rank, (ca, cb, sim) in enumerate(top_pairs, 1):
+                with st.expander(f"#{rank} — Similarity: {sim:.1%}"):
+                    st.write(f"**{truncate_filename(doc_a, 30)}:** {ca}")
+                    st.write(f"**{truncate_filename(doc_b, 30)}:** {cb}")
+
+        # --- In-App PDF Preview with Highlighted Matches (#145) ---
+        with drill_tab_viewer:
+            st.subheader("📄 In-App PDF Preview with Highlighted Matches")
+            selected_view_doc = st.radio(
+                "Select Document to Preview:",
+                options=[doc_a, doc_b],
+                format_func=lambda x: truncate_filename(x, 35),
+                horizontal=True,
+                key="doc_viewer_select")
+
+
         st.write("---")
         st.subheader("🔐 Two-Factor Authentication (2FA)")
 
@@ -3114,6 +3515,7 @@ if not st.session_state.authenticated:
         if enabled:
             st.success(
                 "✔️ Two-Factor Authentication is currently **enabled** for your account."
+
             )
             with st.expander("Deactivate Two-Factor Authentication", expanded=False):
                 with st.form("disable_2fa_form"):
@@ -3234,11 +3636,11 @@ if not st.session_state.authenticated:
                     if st.button("Yes, empty trash", key="confirm_empty_trash_btn", type="primary", use_container_width=True):
                         empty_trash()
                         try:
-                            from src.utils.redis_cache import get_cache
+                            from src.utils.redis_cache import CacheKeyPrefix, get_cache
                             cache = get_cache()
                             if cache.is_available():
-                                cache.delete("faiss:index:corpus_index")
-                                cache.clear_pattern("analysis:*")
+                                cache.delete(CacheKeyPrefix.LEGACY_FAISS_INDEX.value)
+                                cache.clear_pattern(CacheKeyPrefix.LEGACY_ANALYSIS_PATTERN.value)
                         except Exception as e:
                             logger.error(f"Error invalidating cache: {e}")
 
@@ -3323,11 +3725,11 @@ if not st.session_state.authenticated:
                     if st.button("Yes, restore", key="confirm_restore_btn", type="primary", use_container_width=True):
                         restore_document(pending_restore)
                         try:
-                            from src.utils.redis_cache import get_cache
+                            from src.utils.redis_cache import CacheKeyPrefix, get_cache
                             cache = get_cache()
                             if cache.is_available():
-                                cache.delete("faiss:index:corpus_index")
-                                cache.clear_pattern("analysis:*")
+                                cache.delete(CacheKeyPrefix.LEGACY_FAISS_INDEX.value)
+                                cache.clear_pattern(CacheKeyPrefix.LEGACY_ANALYSIS_PATTERN.value)
                         except Exception as e:
                             logger.error(f"Error invalidating cache: {e}")
 
@@ -3360,11 +3762,11 @@ if not st.session_state.authenticated:
                     if st.button("Yes, delete permanently", key="confirm_perm_delete_btn", type="primary", use_container_width=True):
                         permanently_delete_document(pending_perm_delete)
                         try:
-                            from src.utils.redis_cache import get_cache
+                            from src.utils.redis_cache import CacheKeyPrefix, get_cache
                             cache = get_cache()
                             if cache.is_available():
-                                cache.delete("faiss:index:corpus_index")
-                                cache.clear_pattern("analysis:*")
+                                cache.delete(CacheKeyPrefix.LEGACY_FAISS_INDEX.value)
+                                cache.clear_pattern(CacheKeyPrefix.LEGACY_ANALYSIS_PATTERN.value)
                         except Exception as e:
                             logger.error(f"Error invalidating cache: {e}")
 
@@ -3381,8 +3783,136 @@ if not st.session_state.authenticated:
                         del st.session_state._pending_perm_delete
                         st.rerun()
 
-    # ══ TAB 9: Settings ══════════════════════════════════════════════════════════
+
+    # ══ TAB 9: System Health ═════════════════════════════════════════════════
+    with tab_health:
+        st.markdown("🏠 Home > Dashboard > **System Health**")
+        st.subheader(get_text("tab_health", lang=lang_code))
+        st.caption(
+            "Live snapshot of server-side resource usage. "
+            "Metrics are collected at page load time — refresh to update."
+        )
+
+        st.markdown("---")
+        st.markdown("#### 🖥️ CPU & Memory")
+
+        _cpu_percent = psutil.cpu_percent(interval=None)
+        _mem = psutil.virtual_memory()
+        _mem_used_gb = _mem.used / (1024 ** 3)
+        _mem_total_gb = _mem.total / (1024 ** 3)
+
+        _cpu_col, _mem_used_col, _mem_pct_col = st.columns(3)
+        _cpu_col.metric(
+            label="🔲 CPU Usage",
+            value=f"{_cpu_percent:.1f}%",
+            help="Current CPU utilisation across all cores (sampled at page load).",
+        )
+        _mem_used_col.metric(
+            label="💾 Memory Used",
+            value=f"{_mem_used_gb:.2f} GB",
+            help=f"Used {_mem_used_gb:.2f} GB of {_mem_total_gb:.2f} GB total.",
+        )
+        _mem_pct_col.metric(
+            label="📊 Memory Usage",
+            value=f"{_mem.percent:.1f}%",
+            delta=(
+                "⚠️ High" if _mem.percent >= 85 else None
+            ),
+            delta_color="inverse",
+            help="Percentage of total system RAM currently in use.",
+        )
+
+        if _mem.percent >= 85:
+            st.warning(
+                "⚠️ High memory usage detected (≥ 85%). "
+                "Large FAISS indexes may cause instability."
+            )
+
+        st.markdown("---")
+        st.markdown("#### 🔴 Redis Status")
+
+        from src.utils.redis_cache import get_cache as _get_cache
+
+        _cache = _get_cache()
+        _redis_connected, _redis_latency = _cache.ping()
+
+        _redis_col, _redis_latency_col = st.columns(2)
+        if _redis_connected:
+            _redis_col.metric(
+                label="🟢 Redis",
+                value="Connected",
+                help="Redis is reachable and responding to PING.",
+            )
+            _redis_latency_col.metric(
+                label="⏱️ Round-Trip Latency",
+                value=f"{_redis_latency} ms",
+                help="Time taken for a Redis PING round-trip.",
+            )
+        else:
+            _redis_col.metric(
+                label="🔴 Redis",
+                value="Disconnected",
+                help="Redis is unavailable. Caching features are disabled.",
+            )
+            _redis_latency_col.metric(
+                label="⏱️ Round-Trip Latency",
+                value="N/A",
+            )
+            st.error(
+                "🚨 Redis is unavailable. "
+                "Session caching, FAISS index caching, and rate-limiting are disabled. "
+                "Check your REDIS_URL environment variable."
+            )
+
+        st.markdown("---")
+        st.markdown("#### 🗄️ Database")
+
+        from src.db.corpus_db import get_corpus_db_path as _get_corpus_db_path
+
+        _db_path = _get_corpus_db_path()
+        _db_col1, _db_col2, _db_col3 = st.columns(3)
+        _db_col1.metric(
+            label="📄 File",
+            value=_db_path.name,
+            help=f"Full path: {_db_path}",
+        )
+        if _db_path.exists():
+            _db_bytes = _db_path.stat().st_size
+            if _db_bytes >= 1024 * 1024:
+                _db_size_label = f"{_db_bytes / 1_048_576:.2f} MB"
+            elif _db_bytes >= 1024:
+                _db_size_label = f"{_db_bytes / 1024:.1f} KB"
+            else:
+                _db_size_label = f"{_db_bytes} B"
+            _db_col2.metric(
+                label="💾 Size",
+                value=_db_size_label,
+                help="Size of the live corpus SQLite file on disk.",
+            )
+            import datetime as _dt
+            _db_mtime = _dt.datetime.fromtimestamp(_db_path.stat().st_mtime)
+            _db_col3.metric(
+                label="🕒 Last Modified",
+                value=_db_mtime.strftime("%Y-%m-%d %H:%M"),
+                help="Filesystem modification time of the corpus database.",
+            )
+        else:
+            _db_col2.metric(label="💾 Size", value="N/A")
+            _db_col3.metric(label="🕒 Last Modified", value="N/A")
+            st.warning("⚠️ Corpus database file not found on disk.")
+
+        st.markdown("")
+        if st.button(
+            "🔄 Refresh Metrics",
+            key="health_refresh_button",
+            use_container_width=True,
+            help="Re-collect all system metrics.",
+        ):
+            st.rerun()
+
+    # ══ TAB 10: Settings ══════════════════════════════════════════════════════
     with tab_settings:
+
         st.markdown("🏠 Home > Dashboard > **Settings**")
         st.subheader(get_text("settings", lang=lang_code))
 
@@ -3419,6 +3949,75 @@ if not st.session_state.authenticated:
             key="telemetry_opt_in_toggle",
             on_change=save_preferences_callback,
         )
+
+        st.markdown("---")
+        st.markdown("### ℹ️ Diagnostics")
+        st.caption("Copy system diagnostic information for bug reporting.")
+        if st.button("📋 Copy System Info", key="copy_system_info_btn", use_container_width=True):
+            import platform
+            import streamlit.components.v1 as components
+            import json
+
+            # Gather system information
+            py_version = sys.version.split()[0]
+            os_info = f"{platform.system()} {platform.release()}"
+            st_version = st.__version__
+
+            db_status = "Unknown"
+            try:
+                from src.db.corpus_db import check_database_integrity
+                results = check_database_integrity()
+                if results and all(r.lower() == "ok" for r in results):
+                    db_status = "Connected (Healthy)"
+                else:
+                    db_status = f"Unhealthy ({', '.join(results)})"
+            except Exception as e:
+                db_status = f"Unavailable ({str(e)})"
+
+            # Format information as a Markdown block suitable for GitHub issue reports
+            sys_info_markdown = (
+                "### Diagnostic Information\n"
+                f"- **Python Version**: `{py_version}`\n"
+                f"- **Streamlit Version**: `{st_version}`\n"
+                f"- **OS**: `{os_info}`\n"
+                f"- **Database Status**: `{db_status}`"
+            )
+
+            # Copy to clipboard via components.html
+            components.html(
+                f"""
+                <script>
+                const text = {json.dumps(sys_info_markdown)};
+                const parentWindow = window.parent;
+                const clipboard = parentWindow.navigator.clipboard || navigator.clipboard;
+                if (clipboard) {{
+                    clipboard.writeText(text).then(() => {{
+                        console.log("Copied to clipboard successfully via Clipboard API");
+                    }}).catch((err) => {{
+                        fallbackCopy(text);
+                    }});
+                }} else {{
+                    fallbackCopy(text);
+                }}
+
+                function fallbackCopy(str) {{
+                    const el = document.createElement('textarea');
+                    el.value = str;
+                    el.setAttribute('readonly', '');
+                    el.style.position = 'absolute';
+                    el.style.left = '-9999px';
+                    document.body.appendChild(el);
+                    el.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(el);
+                    console.log("Copied to clipboard successfully via fallback");
+                }}
+                </script>
+                """,
+                height=0,
+                width=0,
+            )
+            st.toast("📋 System Info copied to clipboard!")
 
         if user_role == "admin":
             st.markdown("---")
@@ -3571,6 +4170,28 @@ if not st.session_state.authenticated:
                 "database for debugging or offline backup."
             )
 
+            # ── Backup file metadata ──────────────────────────────────────────
+            from datetime import datetime as _datetime
+
+            from src.db.corpus_db import get_corpus_db_path
+
+            _db_path = get_corpus_db_path()
+            if _db_path.exists():
+                _db_size_bytes = _db_path.stat().st_size
+                _db_mtime = _datetime.fromtimestamp(_db_path.stat().st_mtime)
+                _meta_col1, _meta_col2, _meta_col3 = st.columns(3)
+                _meta_col1.metric("📄 File", _db_path.name)
+                if _db_size_bytes >= 1024 * 1024:
+                    _size_label = f"{_db_size_bytes / 1_048_576:.2f} MB"
+                elif _db_size_bytes >= 1024:
+                    _size_label = f"{_db_size_bytes / 1024:.1f} KB"
+                else:
+                    _size_label = f"{_db_size_bytes} B"
+                _meta_col2.metric("💾 Size", _size_label)
+                _meta_col3.metric(
+                    "🕒 Modified", _db_mtime.strftime("%Y-%m-%d %H:%M")
+                )
+
             try:
                 corpus_database_snapshot = create_corpus_database_snapshot()
             except (OSError, sqlite3.DatabaseError) as exc:
@@ -3580,9 +4201,9 @@ if not st.session_state.authenticated:
                 )
             else:
                 st.download_button(
-                    label="⬇️ Download raw Database",
+                    label="⬇️ Download Corpus Database",
                     data=corpus_database_snapshot,
-                    file_name="corpus.db",
+                    file_name=_db_path.name if _db_path.exists() else "corpus.db",
                     mime="application/vnd.sqlite3",
                     key="download_raw_corpus_database",
                     use_container_width=True,
@@ -3591,6 +4212,49 @@ if not st.session_state.authenticated:
                         "snapshot. Existing server data is not modified."
                     ),
                 )
+
+            # ── Copy Path ─────────────────────────────────────────────────────
+            with st.expander("📋 Copy Filesystem Path", expanded=False):
+                st.caption(
+                    "Full path to the live corpus database file on the server. "
+                    "Select the text below to copy it."
+                )
+                st.code(str(_db_path), language=None)
+
+    # ══ TAB 6: USERS ══════════════════════════════════════════════════════════
+    with tab_users:
+        st.subheader("👥 User Management")
+        
+        # User Creation Form with Password Complexity Enforcement (#225)
+        with st.expander("➕ Create New User", expanded=False):
+            with st.form("create_user_form"):
+                new_username = st.text_input("New Username", placeholder="e.g. jdoe")
+                new_password = st.text_input(
+                    "New Password",
+                    type="password",
+                    placeholder="Must meet complexity requirements...",
+                    help="🔒 Password Policy: At least 8 characters long, containing 1 uppercase letter, 1 number, and 1 special character.",
+                )
+                new_role = st.selectbox("Role", ["teacher", "admin"], index=0)
+                submit_create_user = st.form_submit_button(
+                    "Create Account", use_container_width=True
+                )
+
+                if submit_create_user:
+                    try:
+                        add_user(
+                            username=new_username,
+                            password=new_password,
+                            role=new_role,
+                        )
+                        st.success(f"✅ User `{new_username.strip().lower()}` created successfully!")
+                        st.rerun()
+                    except ValueError as err:
+                        st.error(f"❌ {str(err)}")
+
+        users = get_all_users()
+        if users:
+            st.dataframe(pd.DataFrame(users), use_container_width=True)
 
             st.markdown("")
             if st.button(
@@ -3615,6 +4279,7 @@ if not st.session_state.authenticated:
                 TelemetryService.clear_telemetry_data()
                 st.success("✅ Telemetry cache cleared successfully!")
                 st.rerun()
+
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.divider()

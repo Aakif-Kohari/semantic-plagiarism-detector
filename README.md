@@ -155,6 +155,19 @@ streamlit run app/streamlit_app.py
 
 The app opens at **http://localhost:8501**.
 
+## Supported File Formats
+
+| File Type | Extension(s) | Max Size | Feature Support |
+|-----------|--------------|----------|-----------------|
+| PDF | `.pdf` | 10 MB | Text extraction with OCR support for scanned PDFs |
+| Microsoft Word | `.docx`, `.doc` | 10 MB | Text extraction |
+| Plain Text | `.txt` | 10 MB | Text extraction |
+| Rich Text | `.rtf` | 10 MB | Text extraction |
+| Markdown | `.md` | 10 MB | Text extraction |
+| EPUB | `.epub` | 10 MB | Text extraction |
+| ZIP Archive | `.zip` | 10 MB | Batch upload of supported files |
+| Images | `.png`, `.jpg`, `.jpeg` | 10 MB | OCR-based text extraction |
+
 ### 5. Pre-populated Seed Data (Optional for Contributors)
 
 To quickly test dashboard UI/CSS changes or verify logic without manually registering accounts or uploading documents, you can load pre-populated seed data:

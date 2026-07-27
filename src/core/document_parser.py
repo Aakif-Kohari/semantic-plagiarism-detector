@@ -1,7 +1,8 @@
 """Document text extraction with OCR fallback for scanned PDF pages."""
 
 from __future__ import annotations
-
+import defusedxml
+from defusedxml import lxml
 import io
 import logging
 import os
@@ -13,6 +14,10 @@ from collections import Counter
 from pathlib import Path
 from typing import BinaryIO, Dict, List, Optional, Union
 
+try:
+    defusedxml.lxml.monkey_patch()
+except AttributeError:
+    pass
 from urllib.parse import urlparse
 
 import docx
@@ -147,6 +152,20 @@ def strip_bibliography(text: str) -> str:
 def clean_text(raw_text: str) -> str:
     """Normalize whitespace and remove unwanted Unicode characters."""
     text = raw_text
+
+    text = text.translate(
+        str.maketrans(
+            {
+                "“": '"',
+                "”": '"',
+                "‘": "'",
+                "’": "'",
+                "—": "-",
+                "–": "-",
+            }
+        )
+    )
+
     text = re.sub(r"\n\s*\n\s*\n", "\n\n", text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"[\u00a0\u200b]", " ", text)
@@ -367,7 +386,11 @@ def _is_blank_scanned_page(
         return variance < variance_threshold
     except Exception as exc:
         logger.error(f"[document_parser] Error checking blank page {page_index}: {exc}")
-        return False    pdf_bytes: bytes,
+        return False
+
+
+def _ocr_pdf_page(
+    pdf_bytes: bytes,
     page_index: int,
     *,
     dpi: int = DEFAULT_OCR_DPI,
@@ -458,15 +481,9 @@ def _parse_pdf_page(
 
     import pdfplumber
 
-try:
+    try:
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
             page = pdf.pages[page_index]
-
-
-            if not _has_meaningful_text(native_text):
-                if _is_blank_scanned_page(pdf_bytes, page_index, dpi=ocr_dpi):
-                    return []
-
 
             tables = page.find_tables()
 
@@ -477,6 +494,10 @@ try:
             for table in tables:
                 text_page = text_page.outside_bbox(table.bbox)
             native_text = (text_page.extract_text() or "").strip()
+
+            if not _has_meaningful_text(native_text):
+                if _is_blank_scanned_page(pdf_bytes, page_index, dpi=ocr_dpi):
+                    return []
 
             table_texts = []
             for table in tables:
@@ -493,7 +514,6 @@ try:
             selected_text = combined_text
 
             if not _has_meaningful_text(selected_text):
-
                 selected_text = _ocr_pdf_page(
                     pdf_bytes,
                     page_index,
@@ -501,7 +521,8 @@ try:
                     language=ocr_language,
                 )
 
-            return _clean_page_text(selected_text)    except OCRDependencyError:
+            return _clean_page_text(selected_text)
+    except OCRDependencyError:
         raise
     except Exception as exc:
         logger.error(f"[document_parser] Error parsing page {page_index}: {exc}")
@@ -617,6 +638,32 @@ def extract_texts_parallel(
         return results, errors
 
 
+def count_pdf_images(pdf_bytes: bytes) -> int:
+    """Count embedded images in a PDF by inspecting page image lists.
+
+    Uses PyMuPDF (fitz) to retrieve the total number of image streams
+    across all pages. Returns 0 when PyMuPDF is unavailable or the PDF
+    cannot be read.
+
+    Parameters
+    ----------
+    pdf_bytes:
+        Raw PDF file bytes.
+
+    Returns
+    -------
+    int
+        Total number of image objects embedded in the PDF.
+    """
+    try:
+        import fitz  # PyMuPDF
+
+        with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+            return sum(len(page.get_images()) for page in doc)
+    except Exception:
+        return 0
+
+
 def extract_pdf_metadata(file: PDFInput) -> Dict[str, str]:
     """Extract PDF metadata (Author, Creation Date, Title) using PyMuPDF.
 
@@ -639,6 +686,15 @@ def extract_pdf_metadata(file: PDFInput) -> Dict[str, str]:
         print(f"[document_parser] Error extracting PDF metadata: {exc}")
     except Exception as exc:
         logger.error(f"[document_parser] Error extracting PDF metadata: {exc}")
+
+    image_count = count_pdf_images(pdf_bytes)
+    if image_count:
+        logger.info(
+            "[document_parser] PDF contains %d embedded image(s): %s",
+            image_count,
+            metadata.get("title") or "unknown",
+        )
+    metadata["image_count"] = image_count
 
     return metadata
 
@@ -1066,6 +1122,17 @@ def extract_text(
         language=ocr_language,
         dpi=ocr_dpi,
     )
+
+    # Validate file type magic bytes first to prevent malicious file uploads
+    file_bytes = _read_pdf_bytes(file)
+    from src.security.mime_validator import validate_mime_type
+    if not validate_mime_type(file_bytes, filename):
+        logger.warning(
+            f"[document_parser] Security warning: Rejected file '{filename}' "
+            f"because its MIME type / magic bytes do not match its file extension."
+        )
+        return ""
+    file = file_bytes
 
     extension = filename.rsplit(".", 1)[-1].lower()
 

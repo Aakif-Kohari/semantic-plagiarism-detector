@@ -30,6 +30,16 @@ _DB_PATH = os.path.abspath(
 _connection_pool = threading.local()
 
 
+
+def configure_db_path(db_path: str | os.PathLike) -> None:
+    """Configure the SQLite database path used by the corpus module."""
+    global _DB_PATH
+    close_connections()
+    _DB_PATH = os.path.abspath(os.fspath(db_path))
+
+
+
+
 def get_corpus_db_path() -> Path:
     """Return the configured corpus SQLite database path."""
     return Path(_DB_PATH)
@@ -142,7 +152,6 @@ def init_corpus_db() -> None:
             )
         """
         )
-        conn.commit()
         migrate_corpus_database(conn)
 
     # Restrict database file permissions to owner read/write only
@@ -190,7 +199,6 @@ def add_document(
                     tags,
                 ),
             )
-            conn.commit()
         return True
     except sqlite3.IntegrityError:
         return False
@@ -265,7 +273,6 @@ def add_chunks(chunks_to_add: list) -> None:
             "INSERT OR REPLACE INTO chunks (vector_id, filename, chunk_index, chunk_text, embedding) VALUES (?, ?, ?, ?, ?)",
             formatted_chunks,
         )
-        conn.commit()
 
 
 def get_chunk_registry() -> list:
@@ -304,7 +311,6 @@ def delete_document(filename: str) -> None:
         conn.execute("DELETE FROM false_positives WHERE document_a = ? OR document_b = ?", (filename, filename))
         # Delete document (triggers cascading delete on chunks and deleted_chunks)
         conn.execute("DELETE FROM documents WHERE filename = ?", (filename,))
-        conn.commit()
 
     # Re-index all remaining chunks so vector_ids are sequential [0, 1, ..., N-1]
     _compact_vector_ids()
@@ -330,7 +336,6 @@ def soft_delete_document(filename: str) -> None:
             (filename,),
         )
         conn.execute("DELETE FROM chunks WHERE filename = ?", (filename,))
-        conn.commit()
     _compact_vector_ids()
 
 
@@ -381,7 +386,6 @@ def restore_document(filename: str) -> None:
                 (next_id + i, row[0], row[1], row[2], row[3]),
             )
         conn.execute("DELETE FROM deleted_chunks WHERE filename = ?", (filename,))
-        conn.commit()
     _compact_vector_ids()
 
 
@@ -401,7 +405,6 @@ def empty_trash() -> None:
             conn.execute("DELETE FROM plagiarism_incidents WHERE document_a = ? OR document_b = ?", (filename, filename))
             conn.execute("DELETE FROM false_positives WHERE document_a = ? OR document_b = ?", (filename, filename))
         conn.execute("DELETE FROM documents WHERE is_deleted = 1")
-        conn.commit()
 
 
 def _compact_vector_ids() -> None:
@@ -422,7 +425,6 @@ def _compact_vector_ids() -> None:
                 "INSERT INTO chunks (vector_id, filename, chunk_index, chunk_text, embedding) VALUES (?, ?, ?, ?, ?)",
                 formatted,
             )
-        conn.commit()
 
 
 def get_document_chunks_count(filename: str) -> int:
@@ -456,7 +458,6 @@ def clear_all_data() -> None:
         delete_all_if_table_exists(conn, "deleted_chunks")
         delete_all_if_table_exists(conn, "documents")
         delete_all_if_table_exists(conn, "plagiarism_incidents")
-        conn.commit()
 
 
 def get_unique_class_sections() -> list:
@@ -510,16 +511,11 @@ def add_documents_bulk(documents: list) -> int:
 
     success_count = 0
     with _connect() as conn:
-        try:
-            conn.executemany(
-                "INSERT OR IGNORE INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                formatted_docs,
-            )
-            success_count = conn.execute("SELECT changes()").fetchone()[0]
-            conn.commit()
-        except sqlite3.Error as e:
-            conn.rollback()
-            raise e
+        conn.executemany(
+            "INSERT OR IGNORE INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            formatted_docs,
+        )
+        success_count = conn.execute("SELECT changes()").fetchone()[0]
     return success_count
 
 
@@ -561,7 +557,6 @@ def update_document_tags(filename: str, tags: str) -> bool:
                 "UPDATE documents SET tags = ? WHERE filename = ?",
                 (tags, filename)
             )
-            conn.commit()
         return True
     except Exception as e:
         logger.error(f"Failed to update tags for '{filename}': {e}")
@@ -600,7 +595,6 @@ def delete_tag(tag: str) -> int:
                         (new_tags_str, filename),
                     )
                     affected_count += 1
-            conn.commit()
     except Exception as e:
         logger.error(f"Failed to delete tag '{tag}': {e}")
         raise
