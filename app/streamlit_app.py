@@ -75,10 +75,10 @@ from app.theme import (
     inject_css,
     set_theme,
 )
+from src.core.app_config import SUPPORTED_OCR_LANGUAGES
 from src.core.document_parser import (
     DEFAULT_OCR_DPI,
     DEFAULT_OCR_LANGUAGE,
-    SUPPORTED_OCR_LANGUAGES,
     extract_text,
     prepare_text_for_embedding,
 )
@@ -277,8 +277,19 @@ except Exception:
 # collapsed so it doesn't cover the similarity matrix / heatmap. On wider
 # screens it behaves the same as "expanded". See issue #258.
 
-APP_TITLE = get_app_title()
+MAX_RECENT_SEARCHES = 5
 
+
+def _add_recent_search(query: str) -> None:
+    """Store a search query in session state, most-recent-first, capped at 5."""
+    query = query.strip()
+    if not query:
+        return
+
+    recent = st.session_state.get("recent_searches", [])
+    recent = [q for q in recent if q != query]
+    recent.insert(0, query)
+    st.session_state["recent_searches"] = recent[:MAX_RECENT_SEARCHES]
 st.set_page_config(
     page_title=APP_TITLE,
     page_icon="🔍",
@@ -307,8 +318,16 @@ with st.sidebar:
         options=list(LANGUAGE_DISPLAY.values()),
         index=0 if st.session_state.lang == "en" else 1,
     )
+
+# The back-to-top button is only useful on views long enough to scroll
+# past its trigger threshold — skip it on short screens like login.
+SHOW_BACK_TO_TOP = st.session_state.get("authenticated", False)
+if SHOW_BACK_TO_TOP:
+    st.markdown(back_to_top_html(scroll_threshold=250), unsafe_allow_html=True)
+
     selected_lang_name = DISPLAY_TO_CODE.get(selected_lang_display, "en")
 st.markdown(back_to_top_html(), unsafe_allow_html=True)
+
 inject_css()
 
 st.markdown(
@@ -323,7 +342,11 @@ st.markdown(
 
 
 # ── SESSION TIMEOUT & ROUTE PROTECTION ────────────────────────────────────────
-TIMEOUT_LIMIT = 15 * 60  # 15 minutes in seconds
+TIMEOUT_LIMIT = (
+    30 * 60
+    if st.session_state.get("role") == "admin"
+    else 15 * 60
+)
 
 import streamlit.components.v1 as components
 
@@ -708,7 +731,134 @@ def clear_all_dialog():
             st.success("✅ All documents, chunks, and incidents have been cleared.")
             st.rerun()
 
+st.markdown("""
+<style>
 
+.navbar{
+    position:sticky;
+    top:0;
+    z-index:999;
+    background:white;
+    padding:16px 28px;
+    border-radius:16px;
+    border:1px solid #E5E7EB;
+    box-shadow:0 8px 30px rgba(0,0,0,.06);
+    margin-bottom:30px;
+}
+
+.nav-container{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+}
+
+.logo{
+    display:flex;
+    align-items:center;
+    gap:14px;
+}
+
+.logo-icon{
+    width:48px;
+    height:48px;
+    border-radius:14px;
+    background:linear-gradient(135deg,#2563eb,#06b6d4);
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    color:white;
+    font-size:24px;
+    box-shadow:0 8px 18px rgba(37,99,235,.30);
+}
+
+.logo-text{
+    font-size:28px;
+    font-weight:800;
+    color:#111827;
+}
+
+.logo-sub{
+    font-size:13px;
+    color:#6B7280;
+}
+
+.menu{
+    display:flex;
+    align-items:center;
+    gap:28px;
+}
+
+.menu a{
+    text-decoration:none;
+    color:#6B7280;
+    font-weight:600;
+    transition:.25s;
+}
+
+.menu a:hover{
+    color:#2563EB;
+}
+
+.github{
+    background:#111827;
+    color:white !important;
+    padding:10px 18px;
+    border-radius:10px;
+}
+
+.github:hover{
+    background:#2563EB;
+}
+
+</style>
+
+<div class="navbar">
+
+<div class="nav-container">
+
+<div class="logo">
+
+<div class="logo-icon">
+🔍
+</div>
+
+<div>
+
+<div class="logo-text">
+Semantic Plagiarism Detection
+</div>
+
+<div class="logo-sub">
+AI Powered Similarity Detection
+</div>
+
+</div>
+
+</div>
+
+<div class="menu">
+
+<a href="#upload">Upload</a>
+
+<a href="#results">Results</a>
+
+<a href="#history">History</a>
+
+<a href="#about">About</a>
+
+<a class="github"
+href="https://github.com/Ganesh-403/semantic-plagiarism-detector"
+target="_blank">
+⭐ GitHub
+</a>
+
+</div>
+
+</div>
+
+</div>
+
+""", unsafe_allow_html=True)
 # ── Top-right Theme Toggle ───────────────────────────────────────────────────
 current_theme = get_theme_name()
 _, theme_col = st.columns([0.94, 0.06])
@@ -819,12 +969,18 @@ with st.sidebar:
                         if is_new
                         else ""
                     )
+                    lang_code = doc.get("detected_language")
+                    lang_badge = (
+                        f' <span style="background-color:#6f42c1;color:white;font-size:0.7rem;padding:2px 6px;border-radius:4px;font-weight:bold;">{lang_code.upper()}</span>'
+                        if lang_code
+                        else ""
+                    )
                     safe_display_name = html.escape(
                         str(doc["filename"]),
                         quote=True,
                     )
                     st.markdown(
-                        f"📄 {safe_display_name}{badge_html}",
+                        f"📄 {safe_display_name}{lang_badge}{badge_html}",
                         unsafe_allow_html=True,
                     )
                 with col2:
@@ -1020,6 +1176,22 @@ with st.sidebar:
             clear_all_dialog()
         st.markdown("</div>", unsafe_allow_html=True)
 
+        # ── Cache Statistics Debug Badge (Issue #549) ──────────────────────────
+        st.markdown("---")
+        st.markdown("### ⚡ Redis Cache Stats")
+        from src.utils.redis_cache import get_cache
+        stats = get_cache().get_stats()
+        st.markdown(
+            f"""
+            <div style="background-color: rgba(45, 212, 191, 0.1); border: 1px solid rgba(45, 212, 191, 0.3); border-radius: 8px; padding: 10px; font-family: monospace; font-size: 0.85rem; color: inherit;">
+                <strong>Hits / Misses:</strong> {stats['hits']} / {stats['misses']}<br/>
+                <strong>Hit Ratio:</strong> {stats['hit_ratio']:.1%}<br/>
+                <strong>Cached Items:</strong> {stats['total_items']}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
     else:
         threshold = PLAGIARISM_THRESHOLD
         use_chunk_matrix = False
@@ -1064,14 +1236,26 @@ if user_role != "admin":
         "🔒 Note: Direct assignment uploads and detailed breakdown panels are restricted to Administrator access. Your queries are anonymized for privacy."
     )
 
+recent_searches = st.session_state.get("recent_searches", [])
+    if recent_searches:
+        selected_recent = st.selectbox(
+            "🕒 Recent Searches",
+            options=[""] + recent_searches,
+            format_func=lambda q: "Select a recent search..." if q == "" else q,
+            key="recent_search_select_user",
+        )
+        if selected_recent:
+            st.session_state["user_query_text"] = selected_recent
+
     query_text = st.text_area(
         "Paste a text snippet to check against index:",
         height=150,
         placeholder="Paste a paragraph here to check for plagiarism...",
+        key="user_query_text",
     )
 
     if st.button("🔍 Run Quick Verification", key="user_query") and query_text.strip():
-        # Load existing index and registry from database
+        _add_recent_search(query_text)        # Load existing index and registry from database
         from src.core.faiss_index import build_index_from_matrix
         from src.db.corpus_db import get_all_embeddings, get_chunk_registry
 
@@ -1260,6 +1444,7 @@ if (
             st.rerun()
 
 # ── Main Header ──────────────────────────────────────────────────────────────
+
 configured_app_title = os.getenv("APP_TITLE", "").strip()
 if configured_app_title:
     st.title(f"🔍 {APP_TITLE}")
@@ -1278,14 +1463,26 @@ if user_role != "admin":
     st.info(
         "🔒 Note: Direct assignment uploads are restricted to Administrator access."
     )
+recent_searches = st.session_state.get("recent_searches", [])
+    if recent_searches:
+        selected_recent = st.selectbox(
+            "🕒 Recent Searches",
+            options=[""] + recent_searches,
+            format_func=lambda q: "Select a recent search..." if q == "" else q,
+            key="recent_search_select_admin",
+        )
+        if selected_recent:
+            st.session_state["admin_query_text"] = selected_recent
+
     query_text = st.text_area(
-        "Search Query Text:",
-        placeholder="Paste document content here to search for matching plagiarism...",
-        height=200,
+        "Paste a text snippet to check against index:",
+        height=150,
+        placeholder="Paste a paragraph here to check for plagiarism...",
+        key="admin_query_text",
     )
 
     if st.button("🔍 Run Quick Verification", key="user_query") and query_text.strip():
-
+        _add_recent_search(query_text)
 
 
         with st.spinner("Loading index and searching..."):
@@ -1325,8 +1522,6 @@ if user_role != "admin":
                             f"✅ Found **{len(results)}** potentially similar passages."
                         )
 
-
-
                         doc_id_map = {}
                         anon_counter = 1
 
@@ -1355,66 +1550,8 @@ if user_role != "admin":
                                     )
                                     st.warning(record.chunk_text)
 
-                                st.markdown(
-                                    f"<div style='text-align:right;'>"
-                                    f"<span style='background:{color};color:white;padding:3px 12px;"
-                                    f"border-radius:10px;font-size:0.85rem;font-weight:700;'>"
-                                    f"Similarity: {score*100:.1f}%</span></div>",
-                                    unsafe_allow_html=True,
-                                )
 
-                        st.caption(
-                            "🔒 Document names are anonymized to protect student privacy."
-                        )
-            except (RuntimeError, ValueError, OSError, TypeError) as e:
-                st.error(f"🚨 Error loading index: {str(e)}")
-else:
-    # ADMIN FULL ACCESS VIEW
-    faiss_index = None
-    registry = []
 
-    cached_index_data = get_faiss_index("corpus_index")
-    if cached_index_data is not None:
-        try:
-            import faiss
-
-            index_buffer = _io.BytesIO(cached_index_data)
-            faiss_index = faiss.deserialize_index(faiss.read_index(index_buffer))
-            registry = get_chunk_registry()
-            st.info(
-                f"📂 Loaded FAISS index from Redis cache with {faiss_index.ntotal} vectors"
-            )
-        except (RuntimeError, ValueError, OSError) as e:
-            print(f"[Redis] Error loading cached index: {e}, falling back to disk")
-        except Exception as e:
-            logger.warning(
-                f"[Redis] Error loading cached index: {e}, falling back to disk"
-            )
-
-    if faiss_index is None:
-        try:
-            memory = psutil.virtual_memory()
-            if memory.percent >= 85:
-                st.warning(
-                    "⚠️ High memory usage detected (>85%). Large FAISS indexes may cause system instability or out-of-memory crashes."
-                )
-            faiss_index, registry, index_recovered = load_or_rebuild_index(_INDEX_PATH)
-            if index_recovered:
-                if faiss_index.ntotal:
-                    st.warning(
-                        f"FAISS index rebuilt from {faiss_index.ntotal} stored vectors."
-                    )
-                else:
-                    st.info(
-                        "No stored embeddings found. An empty FAISS index was initialized."
-                    )
-            else:
-                st.info(
-                    f"Loaded existing FAISS index with {faiss_index.ntotal} vectors."
-                )
-        except (RuntimeError, ValueError, OSError):
-            faiss_index = None
-            registry = []
 
     def load_analysis_results_from_db():
         import numpy as np
@@ -1529,123 +1666,7 @@ else:
 
     # 1. LOCAL FILE UPLOADER (Dynamic Title Translation)
 
-    uploaded_files = st.file_uploader(
-        get_text("upload_title", lang=lang_code),
-        type=["pdf", "docx", "doc", "txt", "zip", "csv", "png", "jpg", "jpeg"],
-        accept_multiple_files=True,
-        key="file_uploader_admin",
-    )
-
-    if uploaded_files:
-        total_upload_bytes = uploaded_files_total_bytes(uploaded_files)
-        estimated_seconds = estimate_processing_seconds(total_upload_bytes)
-
-        st.markdown(
-            pipeline_progress_html(
-                ["Extract", "Chunk", "Embed", "Compare", "Report"],
-                active_index=-1,
-                estimated_seconds=estimated_seconds,
-            ),
-            unsafe_allow_html=True,
-        )
-    # 2. GOOGLE DRIVE IMPORT SECTION
-
-    if uploaded_files:
-        username = st.session_state.get("username", "anonymous")
-        if is_upload_rate_limited(username):
-            current_count = get_upload_count(username)
-            st.error(f"🚨 Upload rate limit exceeded. Current: {current_count}/100.")
-            uploaded_files = None
-        else:
-            for _ in uploaded_files:
-                increment_upload_count(username)
-
-    # CSV Column Configuration Section
-    csv_configs = {}
-    csv_files = (
-        [f for f in uploaded_files if f.name.lower().endswith(".csv")]
-        if uploaded_files
-        else []
-    )
-    if csv_files:
-        st.markdown("### 📊 CSV Ingestion Settings")
-        for f in csv_files:
-            try:
-                csv_bytes = f.getvalue()
-                df = pd.read_csv(_io.BytesIO(csv_bytes))
-                columns = list(df.columns)
-                if not columns:
-                    st.error(f"⚠️ CSV file '{f.name}' has no columns.")
-                    continue
-                # Auto-detect default text column
-                default_text_idx = 0
-                for i, col in enumerate(columns):
-                    if any(
-                        term in col.lower()
-                        for term in [
-                            "response",
-                            "answer",
-                            "text",
-                            "essay",
-                            "content",
-                            "document",
-                            "submission",
-                        ]
-                    ):
-                        default_text_idx = i
-                        break
-                # Auto-detect default name/id column
-                default_name_idx = None
-                for i, col in enumerate(columns):
-                    if (
-                        any(
-                            term in col.lower()
-                            for term in [
-                                "name",
-                                "student",
-                                "email",
-                                "id",
-                                "user",
-                                "username",
-                                "timestamp",
-                            ]
-                        )
-                        and i != default_text_idx
-                    ):
-                        default_name_idx = i
-                        break
-                st.markdown(f"**Column Mapping for `{f.name}`**")
-                col_text, col_name = st.columns(2)
-                with col_text:
-                    text_col = st.selectbox(
-                        f"Text Column ({f.name})",
-                        options=columns,
-                        index=default_text_idx,
-                        key=f"csv_text_col_{f.name}",
-                        help="Select the column containing the essay/text responses to analyze.",
-                    )
-                with col_name:
-                    name_options = ["None (Use Row Number)"] + columns
-                    default_name_idx_adjusted = (
-                        (default_name_idx + 1) if default_name_idx is not None else 0
-                    )
-                    name_col = st.selectbox(
-                        f"Student Name/ID Column ({f.name})",
-                        options=name_options,
-                        index=default_name_idx_adjusted,
-                        key=f"csv_name_col_{f.name}",
-                        help="Select the column containing student names or IDs (optional).",
-                    )
-                csv_configs[f.name] = {
-                    "df": df,
-                    "text_col": text_col,
-                    "name_col": (
-                        None if name_col == "None (Use Row Number)" else name_col
-                    ),
-                }
-            except (ValueError, OSError, TypeError, KeyError) as e:
-                st.error(f"❌ Failed to parse CSV file '{f.name}': {str(e)}")
-
+    
     st.markdown("### 🔗 Or Upload via Public URL")
 
     # Initialise URL-related session state keys so they persist across reruns
@@ -1665,10 +1686,36 @@ else:
             help='Enter a public URL to a PDF, DOCX, DOC, TXT file, or webpage. Click "Fetch" to load it.',
         )
     with _btn_col:
-        st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
+        st.markdown("""
+<style>
+div[data-testid="stButton"] > button {
+    background: linear-gradient(135deg, #2563eb, #3b82f6);
+    color: white;
+    border: none;
+    border-radius: 10px;
+    height: 46px;
+    font-weight: 600;
+    font-size: 15px;
+    transition: all .25s ease;
+    box-shadow: 0 6px 18px rgba(37,99,235,.25);
+}
+
+div[data-testid="stButton"] > button:hover {
+    background: linear-gradient(135deg,#1d4ed8,#2563eb);
+    transform: translateY(-2px);
+    box-shadow: 0 10px 24px rgba(37,99,235,.35);
+}
+
+div[data-testid="stButton"] > button:active {
+    transform: scale(.98);
+}
+</style>
+""", unsafe_allow_html=True)
         fetch_url_btn = st.button(
-            "Fetch", key="fetch_url_btn", use_container_width=True
-        )
+    "Fetch",
+    key="fetch_url_btn",
+    use_container_width=True,
+)
 
     # 2. GOOGLE DRIVE IMPORT SECTION (#146)
 
@@ -3015,6 +3062,8 @@ if not st.session_state.authenticated:
                 threshold=threshold,
                 highlighted_doc=highlighted_doc,
                 title="Interactive Document Plagiarism Network",
+                selected_node=st.session_state.get("selected_document_id"),
+                document_tags=active_doc_tags if active_doc_tags else None,
             )
 
             if plotly_events is not None:
@@ -3880,6 +3929,27 @@ if not st.session_state.authenticated:
                     st.error(f"🚨 Database integrity check failed: {results}")
                 st.rerun()
 
+            st.markdown("")
+            if st.button(
+                "⚡ Optimize Database Storage",
+                key="optimize_db_button",
+                use_container_width=True,
+            ):
+                from src.db.corpus_db import optimize_database
+                res = optimize_database()
+                if res.get("error"):
+                    st.error(f"🚨 Database optimization failed: {res['error']}")
+                else:
+                    size_before = res["size_before"]
+                    size_after = res["size_after"]
+                    reclaimed = res["reclaimed_bytes"]
+                    st.success(
+                        f"✅ Database optimization completed successfully!\n\n"
+                        f"- **Database size before**: {size_before:,} bytes\n"
+                        f"- **Database size after**: {size_after:,} bytes\n"
+                        f"- **Space reclaimed**: {reclaimed:,} bytes"
+                    )
+
             st.markdown("---")
             st.markdown("### 🗄️ Database Backup")
             st.caption(
@@ -3969,39 +4039,84 @@ if not st.session_state.authenticated:
                 st.rerun()
 
 
-# ── Footer ────────────────────────────────────────────────────────────────────
-st.divider()
+st.markdown("---")
 
-st.caption(f"🎓 {APP_TITLE} · Streamlit")
+st.markdown(
+    f"""
+<div style="
+    margin-top:20px;
+    padding:18px 24px;
+    border:1px solid #e5e7eb;
+    border-radius:16px;
+    background:#ffffff;
+    box-shadow:0 2px 8px rgba(0,0,0,0.05);
+">
 
-# ── Version / Update indicator ────────────────────────────────────────────────
-# Import here (deferred) to avoid slowing down the initial module load for
-# users who never reach the footer.
-from src.utils.version_check import (APP_VERSION,  # noqa: E402
-                                     check_for_update_sync)
+<div style="
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    flex-wrap:wrap;
+    gap:16px;
+">
 
+<!-- Left -->
 
-@st.cache_data(ttl=3600)
-def _cached_version_check() -> str | None:
-    """Check for updates once per hour, cached by Streamlit."""
-    return check_for_update_sync(APP_VERSION)
+<div>
 
+<div style="
+    font-size:22px;
+    font-weight:700;
+    color:#111827;
+">
+🎓 Semantic Plagiarism Detection System
+</div>
 
-_latest_tag: str | None = _cached_version_check()
+<div style="
+    margin-top:6px;
+    color:#6b7280;
+    font-size:15px;
+">
+Version <b> v1.0.0</b> • Streamlit
+</div>
 
-_footer_col1, _footer_col2 = st.columns([3, 1])
-with _footer_col1:
-    st.caption(
-        f"🎓 {APP_TITLE} · v{APP_VERSION} · Streamlit · [🐛 Report Bug / Feedback](https://github.com/Ganesh-403/semantic-plagiarism-detector/issues)"
-    )
-with _footer_col2:
-    if _latest_tag:
-        st.markdown(
-            version_check_widget_html(
-                local_version=APP_VERSION,
-                latest_tag=_latest_tag,
-            ),
-            unsafe_allow_html=True,
-        )
-    else:
-        st.caption("✅ Up to date")
+</div>
+
+<!-- Right -->
+
+<div style="text-align:right;">
+
+<div style="
+    color:#22c55e;
+    font-weight:600;
+    font-size:17px;
+">
+✅ Up to date
+</div>
+
+<div style="margin-top:8px;">
+
+<a
+href="https://github.com/Ganesh-403/semantic-plagiarism-detector/issues"
+target="_blank"
+style="
+color:#0f766e;
+font-weight:600;
+text-decoration:none;
+font-size:15px;
+">
+
+🐞 Report Bug / Feedback
+
+</a>
+
+</div>
+
+</div>
+
+</div>
+
+</div>
+""",
+    unsafe_allow_html=True,
+)

@@ -330,3 +330,36 @@ class TestRedisCache:
         cache1 = get_cache()
         cache2 = get_cache()
         assert cache1 is cache2
+
+    def test_cache_stats_tracking(self, cache_with_mock, mock_redis_client):
+        """Test tracking of hits, misses, hit ratio, and total items in cache stats."""
+        # Reset hits/misses to start fresh
+        cache_with_mock._hits = 0
+        cache_with_mock._misses = 0
+        cache_with_mock._fallback_cache.clear()
+
+        # Set mock expectations
+        mock_redis_client.dbsize.return_value = 5
+        mock_redis_client.get.return_value = None
+
+        # 1. Access non-existing key (should be a miss)
+        val = cache_with_mock.get("missing_key")
+        assert val is None
+        stats = cache_with_mock.get_stats()
+        assert stats["hits"] == 0
+        assert stats["misses"] == 1
+        assert stats["hit_ratio"] == 0.0
+        assert stats["total_items"] == 5
+
+        # 2. Write key & read back (should be a hit)
+        cache_with_mock.set("existing_key", "hello")
+        import pickle
+        mock_redis_client.get.return_value = pickle.dumps("hello")
+
+        val2 = cache_with_mock.get("existing_key")
+        assert val2 == "hello"
+        stats2 = cache_with_mock.get_stats()
+        assert stats2["hits"] == 1
+        assert stats2["misses"] == 1
+        assert stats2["hit_ratio"] == 0.5
+
