@@ -1,222 +1,146 @@
 # CI/CD Guide
 
-This document describes the GitHub Actions workflows used in this repository, the events that trigger them, the permissions and secrets they rely on, and the standard deployment steps for running the application.
+This repository uses GitHub Actions for continuous integration, issue and pull request automation, and draft release generation. This document summarizes the current workflows, the events that trigger them, the permissions they need, and the deployment/runtime settings that must be provided outside GitHub Actions.
 
----
+## Workflows
 
-## 1. Workflows
-
-### 1.1 CI Pipeline
+### 1. CI Pipeline
 
 File: [.github/workflows/ci.yml](../.github/workflows/ci.yml)
 
-Purpose:
-- Runs the main validation pipeline for the application.
-- Installs dependencies, runs Ruff, and executes the test suite with coverage enforcement.
+**Purpose**
 
-Trigger:
-- `push` to `main`
-- `pull_request` targeting `main`
+Runs code quality checks, static analysis, dependency vulnerability scanning, and the test suite.
 
-Job summary:
-- `test-and-lint`
-  - Runs on `ubuntu-latest`
-  - Uses Python `3.11`
-  - Installs project dependencies from `requirements.txt`
-  - Installs `pytest`, `pytest-cov`, and `ruff`
-  - Runs `ruff check .`
-  - Runs `python scripts/run_tests.py --all --enforce-coverage 85`
+**Triggers**
 
-Notes:
-- This workflow is the primary gate for merge quality on `main`.
-- Coverage is enforced at `85%`.
+- `push` to `main` and `develop`
+- `pull_request` targeting `main` and `develop`
 
----
+**Behavior**
 
-### 1.2 Lint
+- Cancels in-progress runs for the same ref when a newer run starts.
+- Uses Python 3.10 for linting, type checking, and dependency scanning.
+- Runs `ruff` for linting.
+- Runs `mypy` against `src/`.
+- Runs `pip-audit` against `requirements.txt` and uploads a JSON report when the job fails.
+- Runs the test suite on Python 3.9, 3.10, and 3.11 with coverage enabled.
+- Uploads coverage artifacts from each matrix job.
 
-File: [.github/workflows/lint.yml](../.github/workflows/lint.yml)
+**Notes**
 
-Purpose:
-- Runs a dedicated linting workflow on pull requests.
-- Checks both Ruff and the custom Pylint rule set for Streamlit anti-patterns.
+- The test job currently declares a dependency on `security-scan` in addition to `lint-and-type-check`.
+- If that job is not defined in the workflow file, the workflow definition should be corrected before relying on it in CI.
 
-Trigger:
-- `pull_request` targeting `main` or `master`
+**Secrets / permissions**
 
-Job summary:
-- `ruff`
-  - Runs on `ubuntu-latest`
-  - Uses Python `3.10`
-  - Installs `ruff` and `pylint`
-  - Runs `ruff check .`
-  - Runs `pylint --load-plugins=pylint_plugins.streamlit_lint --disable=all --enable=streamlit-global-mutation app/ src/`
+- No repository secret is referenced directly in this workflow.
+- The workflow relies on the standard `GITHUB_TOKEN` that GitHub provides to Actions.
 
-Notes:
-- This workflow is separate from the main CI pipeline so lint regressions are visible early on pull requests.
+### 2. Release Draft Generator
 
----
+File: [.github/workflows/release.yml](../.github/workflows/release.yml)
 
-### 1.3 ECSoC Automation
+**Purpose**
+
+Creates a draft GitHub Release automatically when a semantic version tag is pushed.
+
+**Triggers**
+
+- `push` of tags matching `v<major>.<minor>.<patch>`
+- `push` of prerelease tags such as `v1.2.3-beta`
+
+**Behavior**
+
+- Checks out the full repository history so previous tags are available.
+- Extracts the pushed tag name and uses it as the release name.
+- Generates `CHANGELOG.md` from commit history since the previous tag.
+- Creates a draft release with `softprops/action-gh-release`.
+- Marks prerelease tags as prereleases.
+
+**Secrets / permissions**
+
+- Requires `contents: write` so the workflow can create a release.
+- Uses the built-in `GITHUB_TOKEN`; no custom secret is listed in the workflow.
+
+### 3. ECSoC Automation
 
 File: [.github/workflows/ecsoc-automation.yml](../.github/workflows/ecsoc-automation.yml)
 
-Purpose:
-- Automates issue and pull request triage for the ECSoC'26 contribution flow.
-- Assigns contributors, adds labels, posts welcome comments, and cleans up stale claims.
+**Purpose**
 
-Triggers:
+Automates issue claiming, pull request onboarding, and stale-claim cleanup for the ECSoC contribution flow.
+
+**Triggers**
+
 - `issue_comment` with `created`
 - `pull_request_target` with `opened`
 - `schedule` at `0 0 * * *` UTC
 - `workflow_dispatch`
 
-Permissions:
-- `issues: write`
-- `pull-requests: write`
+**Behavior**
 
-Job summary:
-- `issue-claim`
-  - Runs on issue comments.
-  - Ignores PR comments.
-  - Assigns the commenter to the issue when possible.
-  - Adds the `ECSoC26` label.
-  - Enforces a maximum of 5 open claimed issues per contributor.
+- On issue comments, ignores pull request comments, bot comments, the issue author, the repository owner, and already assigned issues.
+- Adds the `ECSoC26` label and assigns the commenter when a claim is accepted.
+- Enforces a maximum of five open claimed issues per user.
+- On pull request open events, assigns the author, adds the `ECSoC26` label, and posts a welcome comment.
+- On scheduled or manual runs, unassigns users who exceed the open-issue limit and clears stale claims older than four days when there is no recent activity and no linked PR.
 
-- `pr-automation`
-  - Runs when a pull request is opened via `pull_request_target`.
-  - Attempts to assign the PR author.
-  - Adds the `ECSoC26` label.
-  - Posts a welcome comment.
+**Secrets / permissions**
 
-- `auto-unassign-stale`
-  - Runs on schedule and on manual dispatch.
-  - Removes excess claims above 5 open issues.
-  - Removes inactive claims older than 4 days.
-  - Removes the `ECSoC26` label when an issue is released back to the pool.
+- Requests `issues: write` and `pull-requests: write`.
+- Uses the standard GitHub Actions token; no extra repository secrets are referenced.
 
-Security note:
-- `pull_request_target` is used intentionally for repository-level triage actions.
-- The workflow does not check out or execute contributor code.
+## Deployment and Runtime Setup
 
----
+The repository does not define a separate production deployment workflow. The documented deployment path is container-based local deployment with Docker Compose, plus direct local execution for development.
 
-## 2. Secrets and Permissions
+### Docker Compose deployment
 
-### Required secrets
-
-The current workflows do not require any repository secrets.
-
-### Built-in GitHub token usage
-
-All automation uses the default `GITHUB_TOKEN` provided by GitHub Actions through `actions/github-script`.
-
-### Permission requirements
-
-The ECSoC automation workflow needs write access to:
-- Issues
-- Pull requests
-
-If repository or organization settings restrict workflow permissions, make sure the default workflow token can write to issues and pull requests.
-
-### Optional secrets for application deployment
-
-These are not required for the workflows above, but may be needed if you run the application with external integrations:
-- `PLAGIARISM_WEBHOOK_URL`
-- `APP_BASE_URL`
-- `SMTP_SERVER`
-- `SMTP_PORT`
-- `SMTP_USERNAME`
-- `SMTP_PASSWORD`
-- `REDIS_URL`
-- `API_BEARER_TOKEN`
-
----
-
-## 3. Local Prerequisites for CI Parity
-
-To match the CI environment locally, install:
-- Python `3.11` for the main CI path
-- Python `3.10` if you want to mirror the lint job exactly
-- `pytest`
-- `pytest-cov`
-- `ruff`
-- `pylint`
-
-Recommended local checks:
-
-```bash
-ruff check .
-python scripts/run_tests.py --all --enforce-coverage 85
-```
-
----
-
-## 4. Deployment Steps
-
-This repository does not currently include an automated production deployment workflow in GitHub Actions. Deployment is performed using the application runtime defined in the repo.
-
-### 4.1 Docker deployment
-
-Use Docker Compose for a reproducible local or server deployment:
+1. Ensure Docker Engine 20.10+ and Docker Compose v2+ are installed.
+2. Create a `.env` file in the repository root if you need to override defaults from [.env.example](../.env.example).
+3. Start the application with:
 
 ```bash
 docker compose up --build
 ```
 
-This starts the Streamlit application and any optional services defined in [docker-compose.yml](../docker-compose.yml).
+4. Open the dashboard at `http://localhost:8501`.
+5. Stop the stack with `docker compose down`.
+6. Remove the Redis volume as well with `docker compose down -v` if needed.
 
-To rebuild after dependency changes:
+### Direct local run
 
-```bash
-docker compose build --no-cache
-docker compose up
-```
-
-To stop the stack:
-
-```bash
-docker compose down
-```
-
-### 4.2 Direct Streamlit deployment
-
-For a simple local run:
+1. Create and activate a Python virtual environment.
+2. Install dependencies with `pip install -r requirements.txt`.
+3. Launch the app with:
 
 ```bash
-pip install -r requirements.txt
 streamlit run app/streamlit_app.py
 ```
 
-### 4.3 API deployment
+### Runtime configuration
 
-If you expose the FastAPI service separately, start it with:
+The following settings are configured through environment variables rather than GitHub Actions secrets:
 
-```bash
-uvicorn src.api.app:app --reload --port 8000
-```
+| Variable | Purpose |
+|---|---|
+| `APP_TITLE` | Optional application branding |
+| `PLAGIARISM_WEBHOOK_URL` | Slack or Discord notifications for plagiarism events |
+| `APP_BASE_URL` | Base URL used in notification links |
+| `REDIS_URL` | Redis connection string |
+| `REDIS_HOST`, `REDIS_PORT`, `REDIS_DB`, `REDIS_PASSWORD` | Fallback Redis settings |
+| `SMTP_SERVER`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD` | Daily summary email delivery |
+| `FROM_EMAIL` | Sender address for daily summary emails |
+| `ADMIN_EMAIL` | Fallback admin email address |
+| `API_BEARER_TOKEN` | Bearer token for REST API access from LMS integrations |
+| `LOCK_TIMEOUT_SECONDS` | Timeout for synchronization locks |
 
-### 4.4 Environment configuration
+See [.env.example](../.env.example) for default values and comments.
 
-Set any required runtime values before deployment. Common variables include:
-- `PLAGIARISM_WEBHOOK_URL`
-- `APP_BASE_URL`
-- `SMTP_SERVER`
-- `SMTP_PORT`
-- `SMTP_USERNAME`
-- `SMTP_PASSWORD`
-- `REDIS_URL`
-- `API_BEARER_TOKEN`
+## Setup Checklist
 
-Use a `.env` file for local development or configure variables in your deployment platform.
-
----
-
-## 5. Maintenance Checklist
-
-Before merging CI/CD-related changes:
-- Confirm the workflow trigger branches are still correct.
-- Confirm Python versions match the intended support matrix.
-- Confirm any new secrets are documented.
-- Confirm the workflow token permissions are sufficient.
-- Run `ruff check .` and the relevant tests locally.
+- Confirm the three workflow files exist under [.github/workflows](../.github/workflows).
+- Keep `requirements.txt` aligned with the tools used in CI: `ruff`, `mypy`, `pytest`, `pytest-cov`, and `pip-audit`.
+- Ensure the semantic version tag format used for releases is `vX.Y.Z` or a prerelease variant such as `vX.Y.Z-beta`.
+- Provide the runtime environment variables needed for webhooks, Redis, email, and LMS API access before deployment.

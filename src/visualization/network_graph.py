@@ -74,6 +74,7 @@ def _build_tag_color_map(tags_list: list[str]) -> dict[str, str]:
 def build_network_data(
     similarity_df: pd.DataFrame,
     threshold: float = 0.59,
+    min_degree: int = 0,
     theme_colors: Optional[dict] = None,
     highlighted_doc: Optional[str] = None,
 ) -> dict:
@@ -83,6 +84,7 @@ def build_network_data(
     Args:
         similarity_df: Square N×N DataFrame of similarity scores.
         threshold: Edge threshold; pairs with similarity >= threshold are connected.
+        min_degree: Minimum degree threshold; nodes with degree < min_degree are filtered out.
         theme_colors: Optional dictionary containing theme colors.
         highlighted_doc: Optional document name to search/highlight with larger size and bright yellow color.
 
@@ -114,11 +116,15 @@ def build_network_data(
                 G.add_edge(doc_names[i], doc_names[j])
                 edge_similarities[(doc_names[i], doc_names[j])] = score
 
-    # Nodes directly connected to the clicked node — used below to
-    # highlight them and dim everything else.
-    neighbor_nodes = set(G.neighbors(selected_node)) if selected_node in G else set()
+    # Filter out nodes below the minimum degree threshold
+    if min_degree > 0:
+        low_degree_nodes = [
+            node for node, deg in dict(G.degree()).items() if deg < min_degree
+        ]
+        G.remove_nodes_from(low_degree_nodes)
 
-    # Compute layout coordinates    # Seed layout for reproducibility
+    # Compute layout coordinates
+    # Seed layout for reproducibility
     pos = nx.spring_layout(
         G,
         seed=42,
@@ -484,6 +490,7 @@ def render_network_plotly(
 def plot_similarity_network(
     similarity_df: pd.DataFrame,
     threshold: float = 0.59,
+    min_degree: int = 0,
     title: str = "Document Plagiarism Network",
     theme_colors: Optional[dict] = None,
     highlighted_doc: Optional[str] = None,
@@ -494,6 +501,7 @@ def plot_similarity_network(
     Args:
         similarity_df: Square N×N DataFrame of similarity scores.
         threshold: Edge threshold; pairs with similarity >= threshold are connected.
+        min_degree: Minimum degree threshold; nodes with degree < min_degree are filtered out.
         title: Title of the graph.
         theme_colors: Optional dictionary containing theme colors.
         highlighted_doc: Optional document name to search/highlight with larger size and bright yellow color.
@@ -504,6 +512,7 @@ def plot_similarity_network(
     network_data = build_network_data(
         similarity_df=similarity_df,
         threshold=threshold,
+        min_degree=min_degree,
         theme_colors=theme_colors,
         highlighted_doc=highlighted_doc,
     )
