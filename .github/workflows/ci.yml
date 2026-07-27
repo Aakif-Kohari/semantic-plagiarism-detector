@@ -1,7 +1,7 @@
 # Continuous Integration Workflow
-# 
+#
 # This workflow runs on every push and pull request to the main branch.
-# It ensures code quality, executes tests, and checks for known security 
+# It ensures code quality, executes tests, and checks for known security
 # vulnerabilities in third-party dependencies.
 
 name: CI Pipeline
@@ -12,6 +12,7 @@ on:
   pull_request:
     branches: [ "main", "develop" ]
 
+# Cancel in-progress runs for the same ref (branch or tag) when a new run is triggered.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -42,7 +43,9 @@ jobs:
 
       - name: Run Flake8 Linting
         run: |
+          # stop the build if there are Python syntax errors or undefined names
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          # exit-zero treats all errors as warnings
           flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
 
       - name: Run Mypy Type Checking
@@ -63,8 +66,10 @@ jobs:
         with:
           python-version: '3.10'
           cache: 'pip'
+          # Issue #695 Implementation: Enabling pip cache
           cache-dependency-path: '**/requirements*.txt'
 
+      # Issue #688 Implementation: Pip Audit Step
       - name: Install pip-audit
         run: |
           python -m pip install --upgrade pip
@@ -72,7 +77,20 @@ jobs:
 
       - name: Run pip-audit for CVEs
         run: |
+          echo "Scanning requirements.txt for known vulnerabilities..."
+          # Fail the build if vulnerabilities are found in the dependency tree
           pip-audit -r requirements.txt --desc on
+
+      - name: Upload Security Report
+        if: failure()
+        run: |
+          pip-audit -r requirements.txt -f json > security-report.json || true
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: pip-audit-report
+          path: security-report.json
 
   test:
     name: Execute Test Suite
@@ -82,7 +100,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ['3.9', '3.10', '3.11']
-        
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -92,6 +110,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
+          # Issue #695 Implementation: Enabling pip cache
           cache-dependency-path: '**/requirements*.txt'
 
       - name: Install dependencies
@@ -100,7 +119,13 @@ jobs:
           pip install pytest pytest-cov pytest-xdist
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Run Test Runner
+      - name: Run Test Runner (Parallel)
         run: |
           chmod +x scripts/run_tests.py
           python scripts/run_tests.py --parallel --coverage
+
+      - name: Upload Coverage to Action Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-${{ matrix.python-version }}
+          path: htmlcov/
