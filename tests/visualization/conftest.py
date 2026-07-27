@@ -1,4 +1,5 @@
 import sys
+import importlib
 from unittest.mock import MagicMock
 
 # Stub out broken/heavy modules so heatmap tests can collect without errors
@@ -16,4 +17,8 @@ for mod in [
     "defusedxml",
     "defusedxml.lxml",
 ]:
-    sys.modules.setdefault(mod, MagicMock())
+    if mod not in sys.modules:
+        try:
+            importlib.import_module(mod)
+        except Exception:
+            sys.modules[mod] = MagicMock()

@@ -970,7 +970,9 @@ def back_to_top_html(scroll_threshold: int = 250) -> str:
     recreate the DOM) do not break the feature.
     """
     return f"""
-    <button id="back-to-top-btn" type="button" aria-label="Back to top" title="Back to top">
+    <button id="back-to-top-btn" type="button"
+            aria-label="Back to top"
+            title="Back to top">
         ⬆️ Top
     </button>
     <div id="back-to-top-status" class="sr-only" role="status" aria-live="polite"></div>
@@ -980,19 +982,25 @@ def back_to_top_html(scroll_threshold: int = 250) -> str:
         window.__backToTopInitialized = true;
 
         var SCROLL_THRESHOLD = {scroll_threshold};
+        /* Streamlit >= 1.28 scrolls inside the parent of
+           [data-testid="block-container"], not the window. */
         var scrollContainer =
             document.querySelector('[data-testid="block-container"]')
                 ?.parentElement
             || document.querySelector('section.main > div')
             || window;
 
+        /* Event delegation — works even after Streamlit recreates the
+           button element on a rerun. */
         scrollContainer.addEventListener('click', function (e) {{
             if (e.target.closest('#back-to-top-btn')) {{
                 scrollContainer.scrollTo({{ top: 0, behavior: 'smooth' }});
             }}
         }});
 
-        scrollContainer.addEventListener('scroll', function () {{
+        /* Re-query the button every scroll tick so the .visible class
+           is always applied to the live element, not a detached one. */
+scrollContainer.addEventListener('scroll', function () {{
             var btn = document.getElementById('back-to-top-btn');
             var status = document.getElementById('back-to-top-status');
             if (!btn) return;
@@ -1007,8 +1015,7 @@ def back_to_top_html(scroll_threshold: int = 250) -> str:
             }} else if (status && !shouldShow && wasVisible) {{
                 status.textContent = '';
             }}
-        }}, {{ passive: true }});
-    }})();
+        }}, {{ passive: true }});    }})();
     </script>
     """
 

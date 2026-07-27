@@ -76,8 +76,6 @@ def build_network_data(
     threshold: float = 0.59,
     theme_colors: Optional[dict] = None,
     selected_node: Optional[str] = None,
-    document_tags: Optional[dict] = None,
-    **kwargs,
 ) -> dict:
     """
     Processes similarity matrix data, constructs NetworkX graph layout, and formats node and edge traces.
@@ -115,7 +113,6 @@ def build_network_data(
             if score >= threshold:
                 G.add_edge(doc_names[i], doc_names[j])
                 edge_similarities[(doc_names[i], doc_names[j])] = score
-
 
     # Nodes directly connected to the clicked node — used below to
     # highlight them and dim everything else.
@@ -488,8 +485,6 @@ def plot_similarity_network(
     title: str = "Document Plagiarism Network",
     theme_colors: Optional[dict] = None,
     selected_node: Optional[str] = None,
-    document_tags: Optional[dict] = None,
-    **kwargs,
 ) -> go.Figure:
     """
     Builds a networkx graph from the similarity matrix and returns an interactive Plotly figure.
@@ -504,16 +499,11 @@ def plot_similarity_network(
     Returns:
         Plotly Graph Objects Figure.
     """
-    if document_tags is None and "doc_tags" in kwargs:
-        document_tags = kwargs.pop("doc_tags")
-
     network_data = build_network_data(
         similarity_df=similarity_df,
         threshold=threshold,
         theme_colors=theme_colors,
         selected_node=selected_node,
-        document_tags=document_tags,
-        **kwargs,
     )
     return render_network_plotly(
         network_data=network_data,

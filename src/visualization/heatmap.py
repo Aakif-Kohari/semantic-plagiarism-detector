@@ -205,7 +205,7 @@ def plot_similarity_heatmap(
             ax=ax,
             annot=annotate,
             fmt=".2f" if annotate else "",
-            cmap=_CMAP,
+            cmap=cmap,
             vmin=0.0,
             vmax=1.0,
             linewidths=0.6,
