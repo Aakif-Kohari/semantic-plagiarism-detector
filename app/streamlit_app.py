@@ -61,9 +61,10 @@ if missing_env_vars:
 
 
 from app.css_constants import (CLASS_CLEAR_ALL_CONTAINER, CLASS_SKELETON,
-                               CLASS_WELCOME_BANNER,                               CLASS_SKELETON_CHART, CLASS_SKELETON_METRIC,
+                               CLASS_SKELETON_CHART, CLASS_SKELETON_METRIC,
                                CLASS_SKELETON_TABLE, CLASS_SKELETON_TEXT,
-                               CLASS_SKELETON_TEXT_SHORT, CLASS_SKELETON_TITLE)
+                               CLASS_SKELETON_TEXT_SHORT, CLASS_SKELETON_TITLE,
+                               CLASS_WELCOME_BANNER)
 from app.theme import (back_to_top_html, empty_state_html, get_colors,
                        get_theme_name, inject_css, pipeline_progress_html,
                        set_theme, version_check_widget_html)
