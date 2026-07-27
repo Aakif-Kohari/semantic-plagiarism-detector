@@ -19,7 +19,7 @@ reportlab>=5.0.0                 # PDF document generation
 pytesseract>=0.3.13              # OCR text extraction from scanned images
 Pillow>=10.0.0                   # Image processing library
 python-magic>=0.4.27             # File magic bytes verification
-
+striprtf>=0.0.32                 # Extract text from RTF documents
 # ── Web UI ────────────────────────────────────────────────────────────────────
 streamlit>=1.60.0                # Dashboard framework
 bcrypt>=4.0.0                    # Password hashing for auth
