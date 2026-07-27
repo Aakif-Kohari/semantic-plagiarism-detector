@@ -1,7 +1,8 @@
 """Document text extraction with OCR fallback for scanned PDF pages."""
 
 from __future__ import annotations
-
+import defusedxml
+from defusedxml import lxml
 import io
 import logging
 import os
@@ -13,6 +14,10 @@ from collections import Counter
 from pathlib import Path
 from typing import BinaryIO, Dict, List, Optional, Union
 
+try:
+    defusedxml.lxml.monkey_patch()
+except AttributeError:
+    pass
 from urllib.parse import urlparse
 
 import docx
@@ -147,6 +152,20 @@ def strip_bibliography(text: str) -> str:
 def clean_text(raw_text: str) -> str:
     """Normalize whitespace and remove unwanted Unicode characters."""
     text = raw_text
+
+    text = text.translate(
+        str.maketrans(
+            {
+                "“": '"',
+                "”": '"',
+                "‘": "'",
+                "’": "'",
+                "—": "-",
+                "–": "-",
+            }
+        )
+    )
+
     text = re.sub(r"\n\s*\n\s*\n", "\n\n", text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"[\u00a0\u200b]", " ", text)
