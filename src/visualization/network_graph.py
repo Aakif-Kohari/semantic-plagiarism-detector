@@ -17,8 +17,8 @@ def build_network_data(
     similarity_df: pd.DataFrame,
     threshold: float = 0.59,
     theme_colors: Optional[dict] = None,
-) -> dict:
-    """
+    selected_node: Optional[str] = None,
+) -> dict:    """
     Processes similarity matrix data, constructs NetworkX graph layout, and formats node and edge traces.
 
     Args:
@@ -49,10 +49,13 @@ def build_network_data(
             if score >= threshold:
                 G.add_edge(doc_names[i], doc_names[j])
 
-                edge_similarities[(doc_names[i], doc_names[j])] = score
+edge_similarities[(doc_names[i], doc_names[j])] = score
 
-    # Compute layout coordinates
-    # Seed layout for reproducibility
+    # Nodes directly connected to the clicked node — used below to
+    # highlight them and dim everything else.
+    neighbor_nodes = set(G.neighbors(selected_node)) if selected_node in G else set()
+
+    # Compute layout coordinates    # Seed layout for reproducibility
     pos = nx.spring_layout(
         G,
         seed=42,
@@ -99,16 +102,21 @@ def build_network_data(
                 if theme_colors
                 else "#ffa500"
             )
-        else:
+else:
             color = (
                 theme_colors.get("success", "#21c55d")
                 if theme_colors
                 else "#21c55d"
             )
 
+        # Highlight edges touching the clicked node; dim the rest.
+        is_incident_edge = selected_node in (doc_a, doc_b)
+        if selected_node and not is_incident_edge:
+            color = "rgba(150,150,150,0.25)"
+        elif is_incident_edge:
+            line_width = max(line_width, 4.0)
 
-        shapes.append(
-            dict(
+        shapes.append(            dict(
                 type="line",
                 x0=x0,
                 y0=y0,
@@ -221,12 +229,20 @@ def build_network_data(
                 else "#c62828"
             )
 
+# Highlight the clicked node and its direct neighbors; dim the rest.
+        if selected_node:
+            if node == selected_node:
+                node_size[-1] = node_size[-1] + 10
+            elif node in neighbor_nodes:
+                node_size[-1] = node_size[-1] + 4
+            else:
+                node_color[-1] = "rgba(180,180,180,0.35)"
+
         node_hover.append(
             f"<b>📄 Document:</b> {node}<br>"
             f"<b>🚨 Flagged connections:</b> "
             f"{deg} / {len(doc_names) - 1}"
         )
-
     # ── Plotly Node Trace ──────────────────────────────────────────────────────
 
     node_trace = go.Scatter(
@@ -372,8 +388,8 @@ def plot_similarity_network(
     threshold: float = 0.59,
     title: str = "Document Plagiarism Network",
     theme_colors: Optional[dict] = None,
-) -> go.Figure:
-    """
+    selected_node: Optional[str] = None,
+) -> go.Figure:    """
     Builds a networkx graph from the similarity matrix and returns an interactive Plotly figure.
 
     Args:
@@ -385,12 +401,12 @@ def plot_similarity_network(
     Returns:
         Plotly Graph Objects Figure.
     """
-    network_data = build_network_data(
+network_data = build_network_data(
         similarity_df=similarity_df,
         threshold=threshold,
         theme_colors=theme_colors,
-    )
-    return render_network_plotly(
+        selected_node=selected_node,
+    )    return render_network_plotly(
         network_data=network_data,
         title=title,
         theme_colors=theme_colors,

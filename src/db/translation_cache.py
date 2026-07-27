@@ -42,8 +42,6 @@ def _init_db():
         conn.commit()
 
 
-# Initialize table on import
-_init_db()
 
 
 def _hash_text(
@@ -58,6 +56,7 @@ def get_cached_translation(
     text: str, source_lang: str = "auto", target_lang: str = "en"
 ) -> Optional[str]:
     """Retrieves cached translation if available."""
+    _init_db()
     if not text or not text.strip():
         return None
 
@@ -79,6 +78,7 @@ def cache_translation(
     target_lang: str = "en",
 ) -> None:
     """Stores a new translation in the SQLite cache."""
+    _init_db()
     if not foreign_text or not translated_text:
         return
 

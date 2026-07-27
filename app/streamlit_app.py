@@ -11,14 +11,22 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from sklearn.metrics.pairwise import cosine_similarity
+
+from src.core.ai_detector import detect_documents_ai_probability
+from src.core.embedding_model import embed_documents
+from src.core.text_chunking import chunk_documents
+
 import base64
+
+
+import datetime
+import io as _io
+
+
 import html
-
-
 # Standard / Third-party imports
 import time
 
-import _io
 import psutil
 from dotenv import load_dotenv
 
@@ -28,10 +36,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-try:
-    from app.components.faiss_results import faiss_results_dataframe
-except ImportError:
-    from components.faiss_results import faiss_results_dataframe
+from app.components.faiss_results import faiss_results_dataframe
 from src.security.metadata_stripper import strip_exif_metadata
 from src.utils.filename import sanitize_filename, unique_filename
 
@@ -63,45 +68,74 @@ if missing_env_vars:
     )
 
 
-try:
-    from app.css_constants import (CLASS_CLEAR_ALL_CONTAINER, CLASS_SKELETON,
-                                   CLASS_SKELETON_CHART, CLASS_SKELETON_METRIC,
-                                   CLASS_SKELETON_TABLE, CLASS_SKELETON_TEXT,
-                                   CLASS_SKELETON_TEXT_SHORT, CLASS_SKELETON_TITLE,
-                                   CLASS_WELCOME_BANNER)
-except ImportError:
-    from css_constants import (CLASS_CLEAR_ALL_CONTAINER, CLASS_SKELETON,
-                               CLASS_SKELETON_CHART, CLASS_SKELETON_METRIC,
-                               CLASS_SKELETON_TABLE, CLASS_SKELETON_TEXT,
-                               CLASS_SKELETON_TEXT_SHORT, CLASS_SKELETON_TITLE,
-                               CLASS_WELCOME_BANNER)
+from app.theme import (
+    empty_state_html,
+    get_colors,
+    get_theme_name,
+    inject_css,
+    set_theme,
+)
+from src.core.app_config import SUPPORTED_OCR_LANGUAGES
+from src.core.document_parser import (
+    DEFAULT_OCR_DPI,
+    DEFAULT_OCR_LANGUAGE,
+    extract_text,
+    prepare_text_for_embedding,
+)
+from src.core.faiss_index import (
+    build_index,
+    build_index_from_matrix,
+    load_index,
+    load_or_rebuild_index,
+    search_similar_chunks,
+)
+from src.core.similarity import (
+    PLAGIARISM_THRESHOLD,
+    document_similarity_matrix,
+    find_most_similar_chunks,
+    flag_plagiarism,
+)
+from src.db import (
+    get_all_embeddings,
+    get_chunk_registry,
+    get_unique_class_sections,
+    init_corpus_db,
+)
+from src.db.auth import add_user, get_all_users, get_user_role, init_db, verify_user
 
-try:
-    from app.theme import (back_to_top_html, empty_state_html, get_colors,
-                           get_theme_name, inject_css, pipeline_progress_html,
-                           set_theme, version_check_widget_html)
-except ImportError:
-    from theme import (back_to_top_html, empty_state_html, get_colors,
-                       get_theme_name, inject_css, pipeline_progress_html,
-                       set_theme, version_check_widget_html)
+from src.utils.pdf_report import highlight_pdf_matches
+
+from src.utils.pdf_report import truncate_filename
+
+from src.utils.redis_cache import (
+    cache_session_state,
+    clear_session,
+    get_analysis_results,
+    get_faiss_index,
+    get_session_state,
+)
+
+
+from app.css_constants import (CLASS_CLEAR_ALL_CONTAINER, CLASS_SKELETON,
+                               CLASS_WELCOME_BANNER,                               CLASS_SKELETON_CHART, CLASS_SKELETON_METRIC,
+                               CLASS_SKELETON_TABLE, CLASS_SKELETON_TEXT,
+                               CLASS_SKELETON_TEXT_SHORT, CLASS_SKELETON_TITLE)
+from app.theme import (back_to_top_html, pipeline_progress_html,
+                       version_check_widget_html)
 from src.core.app_config import get_app_title, get_welcome_message
-from src.core.config import (DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD,
+from src.core.config import (DEFAULT_THRESHOLDS,
                              severity_key)
-from src.core.document_parser import (DEFAULT_OCR_DPI, DEFAULT_OCR_LANGUAGE,
-                                      SUPPORTED_OCR_LANGUAGES,
-                                      extract_text,
-                                      prepare_text_for_embedding,
-                                      remove_ignore_phrases)
-from src.core.faiss_index import (build_index, build_index_from_matrix,
-                                  load_index, load_or_rebuild_index,
-                                  save_index, search_similar_chunks)
-from src.core.similarity import (document_similarity_matrix,
-                                 find_most_similar_chunks, flag_plagiarism)
+from src.core.document_parser import (OCRDependencyError, remove_ignore_phrases)
+from src.core.faiss_index import (save_index)
 from src.core.webhook import dispatch_plagiarism_alert
-from src.i18n.translator import _SUPPORTED_LANGUAGES, get_text
+from src.i18n.translator import (_SUPPORTED_LANGUAGES, DISPLAY_TO_CODE, LANGUAGE_DISPLAY, get_text,)
 from src.visualization.network_graph import plot_similarity_network
 
-
+from src.core.ai_detector import detect_documents_ai_probability
+from src.core.embedding_model import embed_documents
+from src.core.text_chunking import chunk_documents
+from src.db.auth import add_user
+from src.utils.pdf_report import truncate_filename
 class OCRFileBatchError(Exception):
     """Exception raised when OCR extraction fails on one or more files in a batch."""
 
@@ -115,31 +149,26 @@ from src.core.export_engine import LMSExportEngine
 from src.core.synchronization import verify_and_repair_index
 from src.core.telemetry import TelemetryService
 from src.db import (clear_all_data, delete_tag,
-                    get_all_documents, get_all_embeddings, get_all_tags,
-                    get_chunk_registry, get_document_word_counts,
-                    get_unique_class_sections, init_corpus_db,
+                    get_all_documents, get_all_tags,
+                    get_document_word_counts,
                     get_deleted_documents, soft_delete_document,
                     restore_document, permanently_delete_document,
                     empty_trash)
 from src.db.auth import (authenticate_user, check_login_rate_limit,
                          clear_login_attempts, disable_2fa, enable_2fa,
-                         get_2fa_status, get_all_users, get_tour_completed,
-                         get_user_preferences, get_user_role, init_db,
-                         is_user_active, record_failed_login,
+                         get_2fa_status, get_tour_completed,
+                         get_user_preferences, is_user_active, record_failed_login,
                          set_tour_completed, set_user_active_status,
-                         update_user_preferences, verify_user)
+                         update_user_preferences)
 from src.db.database_backup import create_corpus_database_snapshot
 from src.db.incidents import (  # noqa: E402
     get_all_incidents_above_threshold_for_export, get_high_severity_trends,
     get_most_plagiarized_documents, sync_flagged_incidents)
 from src.utils.diff_highlighter import highlight_overlap
 from src.utils.excel_export import export_similarity_matrix_to_excel
-from src.utils.pdf_report import highlight_pdf_matches  # noqa: E402
 from src.utils.processing_time import (estimate_processing_seconds,
                                        uploaded_files_total_bytes)
-from src.utils.redis_cache import (cache_session_state, clear_session,
-                                   get_analysis_results, get_faiss_index,
-                                   get_session_state, get_upload_count,
+from src.utils.redis_cache import (get_upload_count,
                                    increment_upload_count,
                                    is_upload_rate_limited)
 
@@ -211,7 +240,7 @@ if "session_id" not in st.session_state:
 SESSION_ID = st.session_state.session_id
 
 _BRANDING_CONFIG_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "config", "branding_config.json")
+    os.path.join(os.path.dirname(__file__), "..", "branding_config.json")
 )
 _BRANDING_LOGO_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "branding_logo.png")
@@ -248,8 +277,19 @@ except Exception:
 # collapsed so it doesn't cover the similarity matrix / heatmap. On wider
 # screens it behaves the same as "expanded". See issue #258.
 
-APP_TITLE = get_app_title()
+MAX_RECENT_SEARCHES = 5
 
+
+def _add_recent_search(query: str) -> None:
+    """Store a search query in session state, most-recent-first, capped at 5."""
+    query = query.strip()
+    if not query:
+        return
+
+    recent = st.session_state.get("recent_searches", [])
+    recent = [q for q in recent if q != query]
+    recent.insert(0, query)
+    st.session_state["recent_searches"] = recent[:MAX_RECENT_SEARCHES]
 st.set_page_config(
     page_title=APP_TITLE,
     page_icon="🔍",
@@ -273,12 +313,21 @@ if "lang" not in st.session_state:
 with st.sidebar:
     st.title("⚙️ " + get_text("settings", lang=st.session_state.lang))
 
-    selected_lang_name = st.selectbox(
+    selected_lang_display = st.selectbox(
         "🌐 Language / Idioma",
-        options=["English", "Español"],
+        options=list(LANGUAGE_DISPLAY.values()),
         index=0 if st.session_state.lang == "en" else 1,
     )
+
+# The back-to-top button is only useful on views long enough to scroll
+# past its trigger threshold — skip it on short screens like login.
+SHOW_BACK_TO_TOP = st.session_state.get("authenticated", False)
+if SHOW_BACK_TO_TOP:
+    st.markdown(back_to_top_html(scroll_threshold=250), unsafe_allow_html=True)
+
+    selected_lang_name = DISPLAY_TO_CODE.get(selected_lang_display, "en")
 st.markdown(back_to_top_html(), unsafe_allow_html=True)
+
 inject_css()
 
 st.markdown(
@@ -540,14 +589,8 @@ if not st.session_state.get("authenticated", False):
                     record_failed_login(username)
                     from src.errors import AUTH_INVALID_CREDENTIALS
 
-
-                st.error("Invalid username or password.")
-    st.stop()
-    st.error("Invalid username or password. Try admin / Admin123!")
+                    st.error(f"🚨 {AUTH_INVALID_CREDENTIALS}")
     st.markdown("</div>", unsafe_allow_html=True)
-    st.stop()
-
-    st.error(f"🚨 {AUTH_INVALID_CREDENTIALS}")
 
 
     # ── SSO Sign-In Options ──────────────────────────────────────────────────
@@ -605,8 +648,8 @@ elif "threshold_slider" not in st.session_state:
 
 
 # Resolve fallback configuration variables (ensuring all roles have access to these settings)
-selected_lang_name = st.session_state.get("lang_selector", "English")
-lang_code = "es" if selected_lang_name == "Español" else "en"
+selected_lang_display = st.session_state.get("lang_selector", LANGUAGE_DISPLAY["en"])
+lang_code = DISPLAY_TO_CODE.get(selected_lang_display, "en")
 
 threshold = st.session_state.get("threshold_slider", DEFAULT_THRESHOLDS.plagiarism)
 faiss_top_k = st.session_state.get("faiss_top_k_slider", 5)
@@ -663,12 +706,12 @@ def clear_all_dialog():
                     logger.error(f"Error removing FAISS index: {e}")
 
             try:
-                from src.utils.redis_cache import CacheKeyPrefix, get_cache
+                from src.utils.redis_cache import get_cache
 
                 cache = get_cache()
                 if cache.is_available():
-                    cache.delete(CacheKeyPrefix.LEGACY_FAISS_INDEX.value)
-                    cache.clear_pattern(CacheKeyPrefix.LEGACY_ANALYSIS_PATTERN.value)
+                    cache.delete("faiss:index:corpus_index")
+                    cache.clear_pattern("analysis:*")
             except (ImportError, RuntimeError, ConnectionError) as e:
                 print(f"Error invalidating cache: {e}")
             except Exception as e:
@@ -684,7 +727,134 @@ def clear_all_dialog():
             st.success("✅ All documents, chunks, and incidents have been cleared.")
             st.rerun()
 
+st.markdown("""
+<style>
 
+.navbar{
+    position:sticky;
+    top:0;
+    z-index:999;
+    background:white;
+    padding:16px 28px;
+    border-radius:16px;
+    border:1px solid #E5E7EB;
+    box-shadow:0 8px 30px rgba(0,0,0,.06);
+    margin-bottom:30px;
+}
+
+.nav-container{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+}
+
+.logo{
+    display:flex;
+    align-items:center;
+    gap:14px;
+}
+
+.logo-icon{
+    width:48px;
+    height:48px;
+    border-radius:14px;
+    background:linear-gradient(135deg,#2563eb,#06b6d4);
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    color:white;
+    font-size:24px;
+    box-shadow:0 8px 18px rgba(37,99,235,.30);
+}
+
+.logo-text{
+    font-size:28px;
+    font-weight:800;
+    color:#111827;
+}
+
+.logo-sub{
+    font-size:13px;
+    color:#6B7280;
+}
+
+.menu{
+    display:flex;
+    align-items:center;
+    gap:28px;
+}
+
+.menu a{
+    text-decoration:none;
+    color:#6B7280;
+    font-weight:600;
+    transition:.25s;
+}
+
+.menu a:hover{
+    color:#2563EB;
+}
+
+.github{
+    background:#111827;
+    color:white !important;
+    padding:10px 18px;
+    border-radius:10px;
+}
+
+.github:hover{
+    background:#2563EB;
+}
+
+</style>
+
+<div class="navbar">
+
+<div class="nav-container">
+
+<div class="logo">
+
+<div class="logo-icon">
+🔍
+</div>
+
+<div>
+
+<div class="logo-text">
+Semantic Plagiarism Detection
+</div>
+
+<div class="logo-sub">
+AI Powered Similarity Detection
+</div>
+
+</div>
+
+</div>
+
+<div class="menu">
+
+<a href="#upload">Upload</a>
+
+<a href="#results">Results</a>
+
+<a href="#history">History</a>
+
+<a href="#about">About</a>
+
+<a class="github"
+href="https://github.com/Ganesh-403/semantic-plagiarism-detector"
+target="_blank">
+⭐ GitHub
+</a>
+
+</div>
+
+</div>
+
+</div>
+
+""", unsafe_allow_html=True)
 # ── Top-right Theme Toggle ───────────────────────────────────────────────────
 current_theme = get_theme_name()
 _, theme_col = st.columns([0.94, 0.06])
@@ -741,21 +911,6 @@ with st.sidebar:
         except Exception:
             pass
 
-    # Redis Connection Health Status Indicator
-    try:
-        from src.utils.redis_cache import get_cache
-        cache = get_cache()
-        connected, latency = cache.ping()
-        if not connected:
-            st.markdown("🔴 **Redis Cache**: Offline")
-        elif latency is not None and latency > 100.0:
-            st.markdown(f"🟡 **Redis Cache**: Degraded ({latency:.1f}ms)")
-        else:
-            latency_str = f" ({latency:.1f}ms)" if latency is not None else ""
-            st.markdown(f"🟢 **Redis Cache**: Healthy{latency_str}")
-    except Exception:
-        st.markdown("🔴 **Redis Cache**: Offline")
-
     if st.button("🚪 Log Out", use_container_width=True):
         import logging
         from datetime import datetime, timezone
@@ -810,12 +965,18 @@ with st.sidebar:
                         if is_new
                         else ""
                     )
+                    lang_code = doc.get("detected_language")
+                    lang_badge = (
+                        f' <span style="background-color:#6f42c1;color:white;font-size:0.7rem;padding:2px 6px;border-radius:4px;font-weight:bold;">{lang_code.upper()}</span>'
+                        if lang_code
+                        else ""
+                    )
                     safe_display_name = html.escape(
                         str(doc["filename"]),
                         quote=True,
                     )
                     st.markdown(
-                        f"📄 {safe_display_name}{badge_html}",
+                        f"📄 {safe_display_name}{lang_badge}{badge_html}",
                         unsafe_allow_html=True,
                     )
                 with col2:
@@ -847,11 +1008,11 @@ with st.sidebar:
                     ):
                         soft_delete_document(pending)
                         try:
-                            from src.utils.redis_cache import CacheKeyPrefix, get_cache
+                            from src.utils.redis_cache import get_cache
                             cache = get_cache()
                             if cache.is_available():
-                                cache.delete(CacheKeyPrefix.LEGACY_FAISS_INDEX.value)
-                                cache.clear_pattern(CacheKeyPrefix.LEGACY_ANALYSIS_PATTERN.value)
+                                cache.delete("faiss:index:corpus_index")
+                                cache.clear_pattern("analysis:*")
                         except Exception as e:
                             logger.error(f"Error invalidating cache: {e}")
 
@@ -1011,6 +1172,22 @@ with st.sidebar:
             clear_all_dialog()
         st.markdown("</div>", unsafe_allow_html=True)
 
+        # ── Cache Statistics Debug Badge (Issue #549) ──────────────────────────
+        st.markdown("---")
+        st.markdown("### ⚡ Redis Cache Stats")
+        from src.utils.redis_cache import get_cache
+        stats = get_cache().get_stats()
+        st.markdown(
+            f"""
+            <div style="background-color: rgba(45, 212, 191, 0.1); border: 1px solid rgba(45, 212, 191, 0.3); border-radius: 8px; padding: 10px; font-family: monospace; font-size: 0.85rem; color: inherit;">
+                <strong>Hits / Misses:</strong> {stats['hits']} / {stats['misses']}<br/>
+                <strong>Hit Ratio:</strong> {stats['hit_ratio']:.1%}<br/>
+                <strong>Cached Items:</strong> {stats['total_items']}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
     else:
         threshold = PLAGIARISM_THRESHOLD
         use_chunk_matrix = False
@@ -1055,14 +1232,26 @@ if user_role != "admin":
         "🔒 Note: Direct assignment uploads and detailed breakdown panels are restricted to Administrator access. Your queries are anonymized for privacy."
     )
 
+recent_searches = st.session_state.get("recent_searches", [])
+    if recent_searches:
+        selected_recent = st.selectbox(
+            "🕒 Recent Searches",
+            options=[""] + recent_searches,
+            format_func=lambda q: "Select a recent search..." if q == "" else q,
+            key="recent_search_select_user",
+        )
+        if selected_recent:
+            st.session_state["user_query_text"] = selected_recent
+
     query_text = st.text_area(
         "Paste a text snippet to check against index:",
         height=150,
         placeholder="Paste a paragraph here to check for plagiarism...",
+        key="user_query_text",
     )
 
     if st.button("🔍 Run Quick Verification", key="user_query") and query_text.strip():
-        # Load existing index and registry from database
+        _add_recent_search(query_text)        # Load existing index and registry from database
         from src.core.faiss_index import build_index_from_matrix
         from src.db.corpus_db import get_all_embeddings, get_chunk_registry
 
@@ -1251,6 +1440,7 @@ if (
             st.rerun()
 
 # ── Main Header ──────────────────────────────────────────────────────────────
+
 configured_app_title = os.getenv("APP_TITLE", "").strip()
 if configured_app_title:
     st.title(f"🔍 {APP_TITLE}")
@@ -1269,14 +1459,26 @@ if user_role != "admin":
     st.info(
         "🔒 Note: Direct assignment uploads are restricted to Administrator access."
     )
+recent_searches = st.session_state.get("recent_searches", [])
+    if recent_searches:
+        selected_recent = st.selectbox(
+            "🕒 Recent Searches",
+            options=[""] + recent_searches,
+            format_func=lambda q: "Select a recent search..." if q == "" else q,
+            key="recent_search_select_admin",
+        )
+        if selected_recent:
+            st.session_state["admin_query_text"] = selected_recent
+
     query_text = st.text_area(
-        "Search Query Text:",
-        placeholder="Paste document content here to search for matching plagiarism...",
-        height=200,
+        "Paste a text snippet to check against index:",
+        height=150,
+        placeholder="Paste a paragraph here to check for plagiarism...",
+        key="admin_query_text",
     )
 
     if st.button("🔍 Run Quick Verification", key="user_query") and query_text.strip():
-
+        _add_recent_search(query_text)
 
 
         with st.spinner("Loading index and searching..."):
@@ -1316,8 +1518,6 @@ if user_role != "admin":
                             f"✅ Found **{len(results)}** potentially similar passages."
                         )
 
-
-
                         doc_id_map = {}
                         anon_counter = 1
 
@@ -1346,66 +1546,8 @@ if user_role != "admin":
                                     )
                                     st.warning(record.chunk_text)
 
-                                st.markdown(
-                                    f"<div style='text-align:right;'>"
-                                    f"<span style='background:{color};color:white;padding:3px 12px;"
-                                    f"border-radius:10px;font-size:0.85rem;font-weight:700;'>"
-                                    f"Similarity: {score*100:.1f}%</span></div>",
-                                    unsafe_allow_html=True,
-                                )
 
-                        st.caption(
-                            "🔒 Document names are anonymized to protect student privacy."
-                        )
-            except (RuntimeError, ValueError, OSError, TypeError) as e:
-                st.error(f"🚨 Error loading index: {str(e)}")
-else:
-    # ADMIN FULL ACCESS VIEW
-    faiss_index = None
-    registry = []
 
-    cached_index_data = get_faiss_index("corpus_index")
-    if cached_index_data is not None:
-        try:
-            import faiss
-
-            index_buffer = _io.BytesIO(cached_index_data)
-            faiss_index = faiss.deserialize_index(faiss.read_index(index_buffer))
-            registry = get_chunk_registry()
-            st.info(
-                f"📂 Loaded FAISS index from Redis cache with {faiss_index.ntotal} vectors"
-            )
-        except (RuntimeError, ValueError, OSError) as e:
-            print(f"[Redis] Error loading cached index: {e}, falling back to disk")
-        except Exception as e:
-            logger.warning(
-                f"[Redis] Error loading cached index: {e}, falling back to disk"
-            )
-
-    if faiss_index is None:
-        try:
-            memory = psutil.virtual_memory()
-            if memory.percent >= 85:
-                st.warning(
-                    "⚠️ High memory usage detected (>85%). Large FAISS indexes may cause system instability or out-of-memory crashes."
-                )
-            faiss_index, registry, index_recovered = load_or_rebuild_index(_INDEX_PATH)
-            if index_recovered:
-                if faiss_index.ntotal:
-                    st.warning(
-                        f"FAISS index rebuilt from {faiss_index.ntotal} stored vectors."
-                    )
-                else:
-                    st.info(
-                        "No stored embeddings found. An empty FAISS index was initialized."
-                    )
-            else:
-                st.info(
-                    f"Loaded existing FAISS index with {faiss_index.ntotal} vectors."
-                )
-        except (RuntimeError, ValueError, OSError):
-            faiss_index = None
-            registry = []
 
     def load_analysis_results_from_db():
         import numpy as np
@@ -1520,123 +1662,7 @@ else:
 
     # 1. LOCAL FILE UPLOADER (Dynamic Title Translation)
 
-    uploaded_files = st.file_uploader(
-        get_text("upload_title", lang=lang_code),
-        type=["pdf", "docx", "doc", "txt", "zip", "csv", "png", "jpg", "jpeg"],
-        accept_multiple_files=True,
-        key="file_uploader_admin",
-    )
-
-    if uploaded_files:
-        total_upload_bytes = uploaded_files_total_bytes(uploaded_files)
-        estimated_seconds = estimate_processing_seconds(total_upload_bytes)
-
-        st.markdown(
-            pipeline_progress_html(
-                ["Extract", "Chunk", "Embed", "Compare", "Report"],
-                active_index=-1,
-                estimated_seconds=estimated_seconds,
-            ),
-            unsafe_allow_html=True,
-        )
-    # 2. GOOGLE DRIVE IMPORT SECTION
-
-    if uploaded_files:
-        username = st.session_state.get("username", "anonymous")
-        if is_upload_rate_limited(username):
-            current_count = get_upload_count(username)
-            st.error(f"🚨 Upload rate limit exceeded. Current: {current_count}/100.")
-            uploaded_files = None
-        else:
-            for _ in uploaded_files:
-                increment_upload_count(username)
-
-    # CSV Column Configuration Section
-    csv_configs = {}
-    csv_files = (
-        [f for f in uploaded_files if f.name.lower().endswith(".csv")]
-        if uploaded_files
-        else []
-    )
-    if csv_files:
-        st.markdown("### 📊 CSV Ingestion Settings")
-        for f in csv_files:
-            try:
-                csv_bytes = f.getvalue()
-                df = pd.read_csv(_io.BytesIO(csv_bytes))
-                columns = list(df.columns)
-                if not columns:
-                    st.error(f"⚠️ CSV file '{f.name}' has no columns.")
-                    continue
-                # Auto-detect default text column
-                default_text_idx = 0
-                for i, col in enumerate(columns):
-                    if any(
-                        term in col.lower()
-                        for term in [
-                            "response",
-                            "answer",
-                            "text",
-                            "essay",
-                            "content",
-                            "document",
-                            "submission",
-                        ]
-                    ):
-                        default_text_idx = i
-                        break
-                # Auto-detect default name/id column
-                default_name_idx = None
-                for i, col in enumerate(columns):
-                    if (
-                        any(
-                            term in col.lower()
-                            for term in [
-                                "name",
-                                "student",
-                                "email",
-                                "id",
-                                "user",
-                                "username",
-                                "timestamp",
-                            ]
-                        )
-                        and i != default_text_idx
-                    ):
-                        default_name_idx = i
-                        break
-                st.markdown(f"**Column Mapping for `{f.name}`**")
-                col_text, col_name = st.columns(2)
-                with col_text:
-                    text_col = st.selectbox(
-                        f"Text Column ({f.name})",
-                        options=columns,
-                        index=default_text_idx,
-                        key=f"csv_text_col_{f.name}",
-                        help="Select the column containing the essay/text responses to analyze.",
-                    )
-                with col_name:
-                    name_options = ["None (Use Row Number)"] + columns
-                    default_name_idx_adjusted = (
-                        (default_name_idx + 1) if default_name_idx is not None else 0
-                    )
-                    name_col = st.selectbox(
-                        f"Student Name/ID Column ({f.name})",
-                        options=name_options,
-                        index=default_name_idx_adjusted,
-                        key=f"csv_name_col_{f.name}",
-                        help="Select the column containing student names or IDs (optional).",
-                    )
-                csv_configs[f.name] = {
-                    "df": df,
-                    "text_col": text_col,
-                    "name_col": (
-                        None if name_col == "None (Use Row Number)" else name_col
-                    ),
-                }
-            except (ValueError, OSError, TypeError, KeyError) as e:
-                st.error(f"❌ Failed to parse CSV file '{f.name}': {str(e)}")
-
+    
     st.markdown("### 🔗 Or Upload via Public URL")
 
     # Initialise URL-related session state keys so they persist across reruns
@@ -1656,10 +1682,36 @@ else:
             help='Enter a public URL to a PDF, DOCX, DOC, TXT file, or webpage. Click "Fetch" to load it.',
         )
     with _btn_col:
-        st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
+        st.markdown("""
+<style>
+div[data-testid="stButton"] > button {
+    background: linear-gradient(135deg, #2563eb, #3b82f6);
+    color: white;
+    border: none;
+    border-radius: 10px;
+    height: 46px;
+    font-weight: 600;
+    font-size: 15px;
+    transition: all .25s ease;
+    box-shadow: 0 6px 18px rgba(37,99,235,.25);
+}
+
+div[data-testid="stButton"] > button:hover {
+    background: linear-gradient(135deg,#1d4ed8,#2563eb);
+    transform: translateY(-2px);
+    box-shadow: 0 10px 24px rgba(37,99,235,.35);
+}
+
+div[data-testid="stButton"] > button:active {
+    transform: scale(.98);
+}
+</style>
+""", unsafe_allow_html=True)
         fetch_url_btn = st.button(
-            "Fetch", key="fetch_url_btn", use_container_width=True
-        )
+    "Fetch",
+    key="fetch_url_btn",
+    use_container_width=True,
+)
 
     # 2. GOOGLE DRIVE IMPORT SECTION (#146)
 
@@ -1737,11 +1789,6 @@ if not st.session_state.authenticated:
         from src.utils.google_drive import bulk_download_drive_folder
     except ImportError:
         bulk_download_drive_folder = None
-
-
-        if downloaded_dict:
-            st.session_state.drive_files_dict.update(downloaded_dict)
-            st.success( f"✅ Imported {len(downloaded_names)} files: {', '.join([truncate_filename(n, 25) for n in downloaded_names])}")
 
     if "drive_files_dict" not in st.session_state:
         st.session_state.drive_files_dict = {}
@@ -2066,11 +2113,8 @@ if not st.session_state.authenticated:
         base_name = os.path.splitext(filename)[0]
         guessed_name = base_name.replace("_", " ").replace("-", " ").title()
         truncated_disp_name = truncate_filename(filename, max_len=30)
-
-        with st.expander(f"📄 {truncated_disp_name}", expanded=False):
-
         # Check if this filename is a virtual CSV document
-            is_csv_doc = False
+        is_csv_doc = False
         csv_filename_matched = None
         for csv_name in csv_configs.keys():
             if f"({csv_name} - Row " in filename:
@@ -2156,33 +2200,14 @@ if not st.session_state.authenticated:
         existing_registry=None,
         url_text: str = None,
         url_filename: str = None,
-        _status_placeholder=None,
     ):
         raw_texts = {}
 
 
 
-        file_statuses = {name: "Pending" for name in file_bytes_dict.keys()}
-        
-        def update_status():
-            if _status_placeholder is not None:
-                df = pd.DataFrame(
-                    [{"File": n, "Status": s} for n, s in file_statuses.items()]
-                )
-                _status_placeholder.table(df)
-        
-        update_status()
-
         failed_files = {}
+
         for name, data in file_bytes_dict.items():
-            if not data:
-                file_statuses[name] = "Completed ✅"
-                update_status()
-                continue
-                
-            file_statuses[name] = "Processing ⏳"
-            update_status()
-            
             try:
                 extracted = extract_text(
                     _io.BytesIO(data),
@@ -2192,18 +2217,33 @@ if not st.session_state.authenticated:
                 )
                 if extracted and extracted.strip():
                     raw_texts[name] = extracted
-                    file_statuses[name] = "Completed ✅"
                 else:
                     failed_files[name] = data
-                    file_statuses[name] = "Failed ❌"
             except Exception:
                 failed_files[name] = data
-                file_statuses[name] = "Failed ❌"
-            
-            update_status()
+
+
+
+        failed_files = []
+        failure_details = []
+
+        for name, data in file_bytes_dict.items():
+            if not data:
+                continue  # Skip dummy data used for existing index bypass
+            try:
+                raw_texts[name] = extract_text(
+                    _io.BytesIO(data), name, ocr_language=ocr_language, ocr_dpi=ocr_dpi
+                )
+            except OCRDependencyError as exc:
+                failed_files.append(name)
+                failure_details.append(f"{name}: {exc}")
+
 
         if url_text and url_filename:
             raw_texts[url_filename] = url_text
+
+        if failed_files:
+            raise OCRFileBatchError(failed_files, failure_details)
 
         if "ignore_phrases" in globals() and ignore_phrases and ignore_phrases.strip():
             raw_texts = {
@@ -2267,14 +2307,8 @@ if not st.session_state.authenticated:
         )
 
 
-    status_placeholder = st.empty()
     with st.spinner("🧠 Processing files and building embeddings…"):
-        analysis_results = run_pipeline(
-            file_bytes_dict, 
-            ocr_language, 
-            ocr_dpi, 
-            _status_placeholder=status_placeholder
-        )
+        analysis_results = run_pipeline(file_bytes_dict, ocr_language, ocr_dpi)
 
     (
         raw_texts,
@@ -2398,7 +2432,6 @@ if not st.session_state.authenticated:
             tab_analytics,
             tab_users,
             tab_trash,
-            tab_health,
         ) = st.tabs(
             [
                 get_text("tab_warnings", lang=lang_code),
@@ -2409,7 +2442,6 @@ if not st.session_state.authenticated:
                 get_text("tab_analytics", lang=lang_code),
                 get_text("tab_users", lang=lang_code),
                 get_text("tab_trash", lang=lang_code),
-                get_text("tab_health", lang=lang_code),
             ]
         )
 
@@ -2496,14 +2528,6 @@ if not st.session_state.authenticated:
             st.subheader("👤 User Management")
             st.markdown(
                 f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_TABLE}"></div>',
-                unsafe_allow_html=True,
-            )
-
-        with tab_health:
-            st.markdown("🏠 Home > Dashboard > **System Health**")
-            st.subheader(get_text("tab_health", lang=lang_code))
-            st.markdown(
-                f'<div class="{CLASS_SKELETON} {CLASS_SKELETON_METRIC}"></div>',
                 unsafe_allow_html=True,
             )
 
@@ -2671,28 +2695,6 @@ if not st.session_state.authenticated:
         total_pairs = n_docs * (n_docs - 1) // 2 if n_docs > 1 else 0
         n_flagged = len(flags)
 
-        max_sim = max([float(f["similarity"]) for f in flags]) if flags else 0.0
-        overall_severity = severity_key(max_sim)
-        
-        severity_color_map = {
-            "low": "var(--success)",
-            "medium": "var(--warning)",
-            "high": "var(--danger)",
-        }
-        metric_color = severity_color_map.get(overall_severity, "var(--success)")
-
-        st.markdown(
-            f"""
-            <style>
-            div[data-testid="stMetric"] {{
-                border-color: {metric_color} !important;
-                border-top: 4px solid {metric_color} !important;
-            }}
-            </style>
-            """,
-            unsafe_allow_html=True
-        )
-
         col1, col2, col3, col4, col5 = st.columns(5)
         col1.metric(get_text("metric_docs", lang=lang_code), n_docs)
         col2.metric(get_text("metric_pairs", lang=lang_code), total_pairs)
@@ -2714,7 +2716,6 @@ if not st.session_state.authenticated:
         tab_analytics,
         tab_users,
         tab_trash,
-        tab_health,
         tab_settings,
     ) = st.tabs(
         [
@@ -2726,7 +2727,6 @@ if not st.session_state.authenticated:
             get_text("tab_analytics", lang=lang_code),
             get_text("tab_users", lang=lang_code),
             get_text("tab_trash", lang=lang_code),
-            get_text("tab_health", lang=lang_code),
             get_text("tab_settings", lang=lang_code),
         ],
         key="main_tabs",
@@ -2985,7 +2985,7 @@ if not st.session_state.authenticated:
             title="Document Semantic Similarity",
             threshold=threshold,
             theme_colors=get_colors(),
-            cmap=heatmap_cmap,  # Dynamic colormap support (#186)
+            colormap_name=heatmap_cmap,  # Dynamic colormap support (#186)
         )
         st.pyplot(heatmap_fig, use_container_width=True)
 
@@ -3040,12 +3040,12 @@ if not st.session_state.authenticated:
                 "their similarity is greater than or equal to the selected threshold."
             )
 
-            network_fig = plot_similarity_network(
+network_fig = plot_similarity_network(
                 similarity_df=active_sim_df,
                 threshold=threshold,
                 title="Interactive Document Plagiarism Network",
+                selected_node=st.session_state.get("selected_document_id"),
             )
-
             if plotly_events is not None:
                 selected_points = plotly_events(
                     network_fig,
@@ -3159,7 +3159,8 @@ if not st.session_state.authenticated:
                 remaining_docs,
                 index=0,
                 format_func=lambda x: truncate_filename(x, 35),
-                key="db")
+                key="db",
+            )
 
         st.caption("Inspect chunk-level similarity between any two documents.")
 
@@ -3180,7 +3181,6 @@ if not st.session_state.authenticated:
                     "📂",
                 ),
                 unsafe_allow_html=True,
-
             )
         elif len(active_sim_df) < 2:
             from src.errors import UI_NEED_MIN_DOCUMENTS
@@ -3253,8 +3253,8 @@ if not st.session_state.authenticated:
                     with st.spinner("Generating highlighted PDF preview..."):
                         try:
                             highlighted_pdf_bytes = highlight_pdf_matches(
-                                pdf_source=doc_source,
-                                matching_chunks=matching_chunks_to_highlight,
+                                pdf_bytes=doc_source,
+                                matching_phrases=matching_chunks_to_highlight,
                             )
                             base64_pdf = base64.b64encode(highlighted_pdf_bytes).decode(
                                 "utf-8"
@@ -3306,21 +3306,11 @@ if not st.session_state.authenticated:
                 if not export_flags:
                     st.info("No warnings selected for export. Please select warnings in the Flagged Incidents tab.")
                 else:
-                    progress_bar = st.progress(0.0)
-                    try:
-                        zip_bytes = generate_bulk_reports_zip(
-                            export_flags,
-                            chunked_docs=chunked_docs,
-                            embeddings=embeddings,
-                            progress_bar=progress_bar,
-                        )
-                    except Exception as e:
-                        progress_bar.empty()
-                        raise e
-                    else:
-                        time.sleep(0.5)
-                        progress_bar.empty()
-
+                    zip_bytes = generate_bulk_reports_zip(
+                        export_flags,
+                        chunked_docs=chunked_docs,
+                        embeddings=embeddings,
+                    )
                     st.download_button(
                         label=f"⬇️ Download {len(export_flags)} Selected Flagged Pairs (ZIP)",
                         data=zip_bytes,
@@ -3454,7 +3444,8 @@ if not st.session_state.authenticated:
                 options=[doc_a, doc_b],
                 format_func=lambda x: truncate_filename(x, 35),
                 horizontal=True,
-                key="doc_viewer_select")
+                key="doc_viewer_select",
+            )
 
 
         st.write("---")
@@ -3521,7 +3512,7 @@ if not st.session_state.authenticated:
                     qr.make(fit=True)
                     img = qr.make_image(fill_color="black", back_color="white")
                     buf = BytesIO()
-                    img.save(buf, format="PNG")
+                    img.save(buf)
                     qr_bytes = buf.getvalue()
 
                     col1, col2 = st.columns([1, 2])
@@ -3587,11 +3578,11 @@ if not st.session_state.authenticated:
                     if st.button("Yes, empty trash", key="confirm_empty_trash_btn", type="primary", use_container_width=True):
                         empty_trash()
                         try:
-                            from src.utils.redis_cache import CacheKeyPrefix, get_cache
+                            from src.utils.redis_cache import get_cache
                             cache = get_cache()
                             if cache.is_available():
-                                cache.delete(CacheKeyPrefix.LEGACY_FAISS_INDEX.value)
-                                cache.clear_pattern(CacheKeyPrefix.LEGACY_ANALYSIS_PATTERN.value)
+                                cache.delete("faiss:index:corpus_index")
+                                cache.clear_pattern("analysis:*")
                         except Exception as e:
                             logger.error(f"Error invalidating cache: {e}")
 
@@ -3676,11 +3667,11 @@ if not st.session_state.authenticated:
                     if st.button("Yes, restore", key="confirm_restore_btn", type="primary", use_container_width=True):
                         restore_document(pending_restore)
                         try:
-                            from src.utils.redis_cache import CacheKeyPrefix, get_cache
+                            from src.utils.redis_cache import get_cache
                             cache = get_cache()
                             if cache.is_available():
-                                cache.delete(CacheKeyPrefix.LEGACY_FAISS_INDEX.value)
-                                cache.clear_pattern(CacheKeyPrefix.LEGACY_ANALYSIS_PATTERN.value)
+                                cache.delete("faiss:index:corpus_index")
+                                cache.clear_pattern("analysis:*")
                         except Exception as e:
                             logger.error(f"Error invalidating cache: {e}")
 
@@ -3713,11 +3704,11 @@ if not st.session_state.authenticated:
                     if st.button("Yes, delete permanently", key="confirm_perm_delete_btn", type="primary", use_container_width=True):
                         permanently_delete_document(pending_perm_delete)
                         try:
-                            from src.utils.redis_cache import CacheKeyPrefix, get_cache
+                            from src.utils.redis_cache import get_cache
                             cache = get_cache()
                             if cache.is_available():
-                                cache.delete(CacheKeyPrefix.LEGACY_FAISS_INDEX.value)
-                                cache.clear_pattern(CacheKeyPrefix.LEGACY_ANALYSIS_PATTERN.value)
+                                cache.delete("faiss:index:corpus_index")
+                                cache.clear_pattern("analysis:*")
                         except Exception as e:
                             logger.error(f"Error invalidating cache: {e}")
 
@@ -3734,146 +3725,19 @@ if not st.session_state.authenticated:
                         del st.session_state._pending_perm_delete
                         st.rerun()
 
-
-    # ══ TAB 9: System Health ═════════════════════════════════════════════════
-    with tab_health:
-        st.markdown("🏠 Home > Dashboard > **System Health**")
-        st.subheader(get_text("tab_health", lang=lang_code))
-        st.caption(
-            "Live snapshot of server-side resource usage. "
-            "Metrics are collected at page load time — refresh to update."
-        )
-
-        st.markdown("---")
-        st.markdown("#### 🖥️ CPU & Memory")
-
-        _cpu_percent = psutil.cpu_percent(interval=None)
-        _mem = psutil.virtual_memory()
-        _mem_used_gb = _mem.used / (1024 ** 3)
-        _mem_total_gb = _mem.total / (1024 ** 3)
-
-        _cpu_col, _mem_used_col, _mem_pct_col = st.columns(3)
-        _cpu_col.metric(
-            label="🔲 CPU Usage",
-            value=f"{_cpu_percent:.1f}%",
-            help="Current CPU utilisation across all cores (sampled at page load).",
-        )
-        _mem_used_col.metric(
-            label="💾 Memory Used",
-            value=f"{_mem_used_gb:.2f} GB",
-            help=f"Used {_mem_used_gb:.2f} GB of {_mem_total_gb:.2f} GB total.",
-        )
-        _mem_pct_col.metric(
-            label="📊 Memory Usage",
-            value=f"{_mem.percent:.1f}%",
-            delta=(
-                "⚠️ High" if _mem.percent >= 85 else None
-            ),
-            delta_color="inverse",
-            help="Percentage of total system RAM currently in use.",
-        )
-
-        if _mem.percent >= 85:
-            st.warning(
-                "⚠️ High memory usage detected (≥ 85%). "
-                "Large FAISS indexes may cause instability."
-            )
-
-        st.markdown("---")
-        st.markdown("#### 🔴 Redis Status")
-
-        from src.utils.redis_cache import get_cache as _get_cache
-
-        _cache = _get_cache()
-        _redis_connected, _redis_latency = _cache.ping()
-
-        _redis_col, _redis_latency_col = st.columns(2)
-        if _redis_connected:
-            _redis_col.metric(
-                label="🟢 Redis",
-                value="Connected",
-                help="Redis is reachable and responding to PING.",
-            )
-            _redis_latency_col.metric(
-                label="⏱️ Round-Trip Latency",
-                value=f"{_redis_latency} ms",
-                help="Time taken for a Redis PING round-trip.",
-            )
-        else:
-            _redis_col.metric(
-                label="🔴 Redis",
-                value="Disconnected",
-                help="Redis is unavailable. Caching features are disabled.",
-            )
-            _redis_latency_col.metric(
-                label="⏱️ Round-Trip Latency",
-                value="N/A",
-            )
-            st.error(
-                "🚨 Redis is unavailable. "
-                "Session caching, FAISS index caching, and rate-limiting are disabled. "
-                "Check your REDIS_URL environment variable."
-            )
-
-        st.markdown("---")
-        st.markdown("#### 🗄️ Database")
-
-        from src.db.corpus_db import get_corpus_db_path as _get_corpus_db_path
-
-        _db_path = _get_corpus_db_path()
-        _db_col1, _db_col2, _db_col3 = st.columns(3)
-        _db_col1.metric(
-            label="📄 File",
-            value=_db_path.name,
-            help=f"Full path: {_db_path}",
-        )
-        if _db_path.exists():
-            _db_bytes = _db_path.stat().st_size
-            if _db_bytes >= 1024 * 1024:
-                _db_size_label = f"{_db_bytes / 1_048_576:.2f} MB"
-            elif _db_bytes >= 1024:
-                _db_size_label = f"{_db_bytes / 1024:.1f} KB"
-            else:
-                _db_size_label = f"{_db_bytes} B"
-            _db_col2.metric(
-                label="💾 Size",
-                value=_db_size_label,
-                help="Size of the live corpus SQLite file on disk.",
-            )
-            import datetime as _dt
-            _db_mtime = _dt.datetime.fromtimestamp(_db_path.stat().st_mtime)
-            _db_col3.metric(
-                label="🕒 Last Modified",
-                value=_db_mtime.strftime("%Y-%m-%d %H:%M"),
-                help="Filesystem modification time of the corpus database.",
-            )
-        else:
-            _db_col2.metric(label="💾 Size", value="N/A")
-            _db_col3.metric(label="🕒 Last Modified", value="N/A")
-            st.warning("⚠️ Corpus database file not found on disk.")
-
-        st.markdown("")
-        if st.button(
-            "🔄 Refresh Metrics",
-            key="health_refresh_button",
-            use_container_width=True,
-            help="Re-collect all system metrics.",
-        ):
-            st.rerun()
-
-    # ══ TAB 10: Settings ══════════════════════════════════════════════════════
+    # ══ TAB 9: Settings ══════════════════════════════════════════════════════════
     with tab_settings:
-
         st.markdown("🏠 Home > Dashboard > **Settings**")
         st.subheader(get_text("settings", lang=lang_code))
 
-        selected_lang_name = st.selectbox(
+        selected_lang_display = st.selectbox(
             "🌐 Language / Idioma",
-            options=list(_SUPPORTED_LANGUAGES.values()),
+            options=list(LANGUAGE_DISPLAY.values()),
             index=0,
             key="lang_selector",
         )
-        lang_code = "es" if selected_lang_name == "Español" else "en"
+        lang_code = DISPLAY_TO_CODE.get(selected_lang_display, "en")
+
 
         selected_theme = st.radio(
             get_text("theme", lang=lang_code),
@@ -3900,75 +3764,6 @@ if not st.session_state.authenticated:
             key="telemetry_opt_in_toggle",
             on_change=save_preferences_callback,
         )
-
-        st.markdown("---")
-        st.markdown("### ℹ️ Diagnostics")
-        st.caption("Copy system diagnostic information for bug reporting.")
-        if st.button("📋 Copy System Info", key="copy_system_info_btn", use_container_width=True):
-            import platform
-            import streamlit.components.v1 as components
-            import json
-
-            # Gather system information
-            py_version = sys.version.split()[0]
-            os_info = f"{platform.system()} {platform.release()}"
-            st_version = st.__version__
-
-            db_status = "Unknown"
-            try:
-                from src.db.corpus_db import check_database_integrity
-                results = check_database_integrity()
-                if results and all(r.lower() == "ok" for r in results):
-                    db_status = "Connected (Healthy)"
-                else:
-                    db_status = f"Unhealthy ({', '.join(results)})"
-            except Exception as e:
-                db_status = f"Unavailable ({str(e)})"
-
-            # Format information as a Markdown block suitable for GitHub issue reports
-            sys_info_markdown = (
-                "### Diagnostic Information\n"
-                f"- **Python Version**: `{py_version}`\n"
-                f"- **Streamlit Version**: `{st_version}`\n"
-                f"- **OS**: `{os_info}`\n"
-                f"- **Database Status**: `{db_status}`"
-            )
-
-            # Copy to clipboard via components.html
-            components.html(
-                f"""
-                <script>
-                const text = {json.dumps(sys_info_markdown)};
-                const parentWindow = window.parent;
-                const clipboard = parentWindow.navigator.clipboard || navigator.clipboard;
-                if (clipboard) {{
-                    clipboard.writeText(text).then(() => {{
-                        console.log("Copied to clipboard successfully via Clipboard API");
-                    }}).catch((err) => {{
-                        fallbackCopy(text);
-                    }});
-                }} else {{
-                    fallbackCopy(text);
-                }}
-
-                function fallbackCopy(str) {{
-                    const el = document.createElement('textarea');
-                    el.value = str;
-                    el.setAttribute('readonly', '');
-                    el.style.position = 'absolute';
-                    el.style.left = '-9999px';
-                    document.body.appendChild(el);
-                    el.select();
-                    document.execCommand('copy');
-                    document.body.removeChild(el);
-                    console.log("Copied to clipboard successfully via fallback");
-                }}
-                </script>
-                """,
-                height=0,
-                width=0,
-            )
-            st.toast("📋 System Info copied to clipboard!")
 
         if user_role == "admin":
             st.markdown("---")
@@ -4114,34 +3909,33 @@ if not st.session_state.authenticated:
                     st.error(f"🚨 Database integrity check failed: {results}")
                 st.rerun()
 
+            st.markdown("")
+            if st.button(
+                "⚡ Optimize Database Storage",
+                key="optimize_db_button",
+                use_container_width=True,
+            ):
+                from src.db.corpus_db import optimize_database
+                res = optimize_database()
+                if res.get("error"):
+                    st.error(f"🚨 Database optimization failed: {res['error']}")
+                else:
+                    size_before = res["size_before"]
+                    size_after = res["size_after"]
+                    reclaimed = res["reclaimed_bytes"]
+                    st.success(
+                        f"✅ Database optimization completed successfully!\n\n"
+                        f"- **Database size before**: {size_before:,} bytes\n"
+                        f"- **Database size after**: {size_after:,} bytes\n"
+                        f"- **Space reclaimed**: {reclaimed:,} bytes"
+                    )
+
             st.markdown("---")
             st.markdown("### 🗄️ Database Backup")
             st.caption(
                 "Download a consistent snapshot of the corpus SQLite "
                 "database for debugging or offline backup."
             )
-
-            # ── Backup file metadata ──────────────────────────────────────────
-            from datetime import datetime as _datetime
-
-            from src.db.corpus_db import get_corpus_db_path
-
-            _db_path = get_corpus_db_path()
-            if _db_path.exists():
-                _db_size_bytes = _db_path.stat().st_size
-                _db_mtime = _datetime.fromtimestamp(_db_path.stat().st_mtime)
-                _meta_col1, _meta_col2, _meta_col3 = st.columns(3)
-                _meta_col1.metric("📄 File", _db_path.name)
-                if _db_size_bytes >= 1024 * 1024:
-                    _size_label = f"{_db_size_bytes / 1_048_576:.2f} MB"
-                elif _db_size_bytes >= 1024:
-                    _size_label = f"{_db_size_bytes / 1024:.1f} KB"
-                else:
-                    _size_label = f"{_db_size_bytes} B"
-                _meta_col2.metric("💾 Size", _size_label)
-                _meta_col3.metric(
-                    "🕒 Modified", _db_mtime.strftime("%Y-%m-%d %H:%M")
-                )
 
             try:
                 corpus_database_snapshot = create_corpus_database_snapshot()
@@ -4152,9 +3946,9 @@ if not st.session_state.authenticated:
                 )
             else:
                 st.download_button(
-                    label="⬇️ Download Corpus Database",
+                    label="⬇️ Download raw Database",
                     data=corpus_database_snapshot,
-                    file_name=_db_path.name if _db_path.exists() else "corpus.db",
+                    file_name="corpus.db",
                     mime="application/vnd.sqlite3",
                     key="download_raw_corpus_database",
                     use_container_width=True,
@@ -4164,13 +3958,6 @@ if not st.session_state.authenticated:
                     ),
                 )
 
-            # ── Copy Path ─────────────────────────────────────────────────────
-            with st.expander("📋 Copy Filesystem Path", expanded=False):
-                st.caption(
-                    "Full path to the live corpus database file on the server. "
-                    "Select the text below to copy it."
-                )
-                st.code(str(_db_path), language=None)
 
     # ══ TAB 6: USERS ══════════════════════════════════════════════════════════
     with tab_users:
@@ -4232,39 +4019,84 @@ if not st.session_state.authenticated:
                 st.rerun()
 
 
-# ── Footer ────────────────────────────────────────────────────────────────────
-st.divider()
+st.markdown("---")
 
-st.caption(f"🎓 {APP_TITLE} · Streamlit")
+st.markdown(
+    f"""
+<div style="
+    margin-top:20px;
+    padding:18px 24px;
+    border:1px solid #e5e7eb;
+    border-radius:16px;
+    background:#ffffff;
+    box-shadow:0 2px 8px rgba(0,0,0,0.05);
+">
 
-# ── Version / Update indicator ────────────────────────────────────────────────
-# Import here (deferred) to avoid slowing down the initial module load for
-# users who never reach the footer.
-from src.utils.version_check import (APP_VERSION,  # noqa: E402
-                                     check_for_update_sync)
+<div style="
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    flex-wrap:wrap;
+    gap:16px;
+">
 
+<!-- Left -->
 
-@st.cache_data(ttl=3600)
-def _cached_version_check() -> str | None:
-    """Check for updates once per hour, cached by Streamlit."""
-    return check_for_update_sync(APP_VERSION)
+<div>
 
+<div style="
+    font-size:22px;
+    font-weight:700;
+    color:#111827;
+">
+🎓 Semantic Plagiarism Detection System
+</div>
 
-_latest_tag: str | None = _cached_version_check()
+<div style="
+    margin-top:6px;
+    color:#6b7280;
+    font-size:15px;
+">
+Version <b> v1.0.0</b> • Streamlit
+</div>
 
-_footer_col1, _footer_col2 = st.columns([3, 1])
-with _footer_col1:
-    st.caption(
-        f"🎓 {APP_TITLE} · v{APP_VERSION} · Streamlit · [🐛 Report Bug / Feedback](https://github.com/Ganesh-403/semantic-plagiarism-detector/issues)"
-    )
-with _footer_col2:
-    if _latest_tag:
-        st.markdown(
-            version_check_widget_html(
-                local_version=APP_VERSION,
-                latest_tag=_latest_tag,
-            ),
-            unsafe_allow_html=True,
-        )
-    else:
-        st.caption("✅ Up to date")
+</div>
+
+<!-- Right -->
+
+<div style="text-align:right;">
+
+<div style="
+    color:#22c55e;
+    font-weight:600;
+    font-size:17px;
+">
+✅ Up to date
+</div>
+
+<div style="margin-top:8px;">
+
+<a
+href="https://github.com/Ganesh-403/semantic-plagiarism-detector/issues"
+target="_blank"
+style="
+color:#0f766e;
+font-weight:600;
+text-decoration:none;
+font-size:15px;
+">
+
+🐞 Report Bug / Feedback
+
+</a>
+
+</div>
+
+</div>
+
+</div>
+
+</div>
+""",
+    unsafe_allow_html=True,
+)

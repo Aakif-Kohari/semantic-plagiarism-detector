@@ -71,6 +71,7 @@ def filter_warnings(
     warnings: Iterable[Mapping[str, Any]],
     search_query: str = "",
     min_match_length: int = 0,
+    fuzzy_threshold: int = 70,
 ) -> list[dict[str, Any]]:
     """
     Filters warnings by query using exact substring matching and 
@@ -411,11 +412,17 @@ def render_warning_controls(
         on_change=_reset_page,
     )
 
+    p_dir = st.session_state.get("warning_primary_direction", "Descending ▼")
+    s_dir = st.session_state.get("warning_secondary_direction", "Ascending ▲")
+
+    p_arrow = "▼" if "Descending" in p_dir else "▲"
+    s_arrow = "▲" if "Ascending" in s_dir else "▼"
+
     p1, d1, p2, d2 = st.columns([2, 1, 2, 1])
 
     with p1:
         primary_label = st.selectbox(
-            "Primary sort",
+            f"Primary sort {p_arrow}",
             list(SORT_FIELDS),
             key="warning_primary_sort",
             on_change=_reset_page,
@@ -424,14 +431,14 @@ def render_warning_controls(
     with d1:
         primary_direction = st.selectbox(
             "Direction",
-            ["Descending", "Ascending"],
+            ["Descending ▼", "Ascending ▲"],
             key="warning_primary_direction",
             on_change=_reset_page,
         )
 
     with p2:
         secondary_label = st.selectbox(
-            "Then sort by",
+            f"Then sort by {s_arrow}",
             list(SORT_FIELDS),
             index=1,
             key="warning_secondary_sort",
@@ -441,7 +448,7 @@ def render_warning_controls(
     with d2:
         secondary_direction = st.selectbox(
             "Then direction",
-            ["Ascending", "Descending"],
+            ["Ascending ▲", "Descending ▼"],
             key="warning_secondary_direction",
             on_change=_reset_page,
         )
@@ -457,9 +464,9 @@ def render_warning_controls(
         search_query=search_query,
         min_match_length=min_match_length,
         primary_field=SORT_FIELDS[primary_label],
-        primary_descending=primary_direction == "Descending",
+        primary_descending="Descending" in primary_direction,
         secondary_field=SORT_FIELDS[secondary_label],
-        secondary_descending=secondary_direction == "Descending",
+        secondary_descending="Descending" in secondary_direction,
         page=st.session_state.warning_page,
         page_size=page_size,
     )

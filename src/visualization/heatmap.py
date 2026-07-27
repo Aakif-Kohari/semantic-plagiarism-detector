@@ -21,8 +21,8 @@ Exports:
     - render_heatmap_ui: Streamlit component rendering the heatmap with interactive controls
 """
 
-import logging
-from typing import Optional, List, Dict
+from contextlib import contextmanager
+from typing import Generator, Optionalimport logging
 
 import matplotlib
 import matplotlib.patches as mpatches
@@ -49,32 +49,21 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 # ── Colormap Mappings & Constants ──────────────────────────────────────────────
+# Colormap options/mappings now live in app/theme.py (Issue #633).
 
-# Standard colormap options required by UI/UX specifications.
-UI_COLORMAP_OPTIONS: List[str] = ["Viridis", "Plasma", "Coolwarm", "YlOrRd"]
-
-# Map UI display names to exact Matplotlib/Seaborn string identifiers.
-MATPLOTLIB_CMAP_MAPPING: Dict[str, str] = {
-    "Viridis": "viridis",
-    "Plasma": "plasma",
-    "Coolwarm": "coolwarm",
-    "YlOrRd": "YlOrRd",
-    # Legacy fallback mapping
-    "Legacy Red/Green": "RdYlGn_r"
-}
-
-# Map UI display names to exact Plotly string identifiers.
-PLOTLY_CMAP_MAPPING: Dict[str, str] = {
-    "Viridis": "Viridis",
-    "Plasma": "Plasma",
-    "Coolwarm": "RdBu_r",  # Coolwarm equivalent in standard plotly
-    "YlOrRd": "YlOrRd",
-    # Legacy fallback mapping
-    "Legacy Red/Green": "RdYlGn_r"
-}
-
-DEFAULT_UI_COLORMAP: str = "Viridis"
-
+try:
+    from app.theme import (
+        UI_COLORMAP_OPTIONS,
+        MATPLOTLIB_CMAP_MAPPING,
+        PLOTLY_CMAP_MAPPING,
+        DEFAULT_UI_COLORMAP,
+    )
+except ImportError:
+    # Fallback for standalone testing or isolated environments
+    UI_COLORMAP_OPTIONS = ["Viridis", "Plasma", "Coolwarm", "YlOrRd"]
+    MATPLOTLIB_CMAP_MAPPING = {"Viridis": "viridis"}
+    PLOTLY_CMAP_MAPPING = {"Viridis": "Viridis"}
+    DEFAULT_UI_COLORMAP = "Viridis"
 
 # ── Data Validation Helpers ────────────────────────────────────────────────────
 
@@ -144,6 +133,16 @@ def _get_theme_color(theme_colors: Optional[dict], key: str, fallback: str) -> s
 
 # ── Static Visualization (Matplotlib/Seaborn) ──────────────────────────────────
 
+@contextmanager
+def matplotlib_figure(*args, **kwargs) -> Generator[tuple, None, None]:
+    """Context manager that yields (fig, ax) and guarantees plt.close(fig)."""
+    fig, ax = plt.subplots(*args, **kwargs)
+    try:
+        yield fig, ax
+    finally:
+        plt.close(fig)
+
+
 def plot_similarity_heatmap(
     similarity_df: pd.DataFrame,
     title: str = "Semantic Similarity Matrix",
@@ -188,11 +187,9 @@ def plot_similarity_heatmap(
 
     # 1. Guard clause for empty datasets
     if n == 0:
-        fig = plt.figure(figsize=(6, 4))
-        ax = fig.add_subplot(111)
-        ax.set_title(title)
-        ax.text(0.5, 0.5, "No data available", ha='center', va='center')
-        return fig
+        with matplotlib_figure() as (fig, ax):
+            ax.set_title(title)
+            return fig
 
     # 2. Dynamic aspect ratio and figure sizing based on document count
     if figsize is None:
@@ -201,117 +198,100 @@ def plot_similarity_heatmap(
         height = max(5.0, n * cell_size + 1.5)
         figsize = (width, height)
 
-    # 3. Figure and Axis initialization
-    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
-
-    # 4. Render the base heatmap using Seaborn
-    sns.heatmap(
-        clean_df,
-        ax=ax,
-        annot=annotate,
-        fmt=".2f" if annotate else "",
-        cmap=cmap,
-        vmin=0.0,
-        vmax=1.0,
-        linewidths=0.6,
-        linecolor=_get_theme_color(theme_colors, "border", "#cccccc"),
-        square=True,
-        cbar_kws={"label": "Cosine Similarity", "shrink": 0.8, "pad": 0.02},
-        annot_kws={"size": max(7, 14 - n), "weight": "bold"},
-    )
-
-    # 5. Format the colorbar to display percentages for easier user comprehension
-    if len(ax.collections) > 0:
-        colorbar = ax.collections[0].colorbar
-        colorbar.ax.yaxis.set_major_formatter(PercentFormatter(xmax=1.0, decimals=0))
-        
-        # Adjust colorbar text color based on theme
-        if theme_colors:
-            colorbar.ax.yaxis.label.set_color(_get_theme_color(theme_colors, "ink", "#0F172A"))
-            colorbar.ax.tick_params(colors=_get_theme_color(theme_colors, "ink", "#0F172A"))
-
-    # 6. Apply dynamic styling based on the provided theme dictionary
-    bg_color = _get_theme_color(theme_colors, "background", "#FFFFFF")
-    surface_color = _get_theme_color(theme_colors, "surface", "#F8FAFC")
-    ink_color = _get_theme_color(theme_colors, "ink", "#0F172A")
-    
-    fig.patch.set_facecolor(bg_color)
-    ax.set_facecolor(surface_color)
-    ax.tick_params(colors=ink_color)
-    ax.xaxis.label.set_color(ink_color)
-    ax.yaxis.label.set_color(ink_color)
-    title_color = ink_color
-
-    # Extract the underlying numpy array for matrix operations
-    data = clean_df.values
-
-    # 7. Apply a distinct dark border to the diagonal (self-similarity cells)
-    for i in range(n):
-        ax.add_patch(
-            mpatches.FancyBboxPatch(
-                (i, i), 1, 1,
-                boxstyle="square,pad=0",
-                linewidth=2,
-                edgecolor=_get_theme_color(theme_colors, "muted", "#555555"),
-                facecolor="none",
-                zorder=3,
-            )
+    with matplotlib_figure(figsize=figsize, dpi=dpi) as (fig, ax):
+        sns.heatmap(
+            similarity_df,
+            ax=ax,
+            annot=annotate,
+            fmt=".2f" if annotate else "",
+            cmap=_CMAP,
+            vmin=0.0,
+            vmax=1.0,
+            linewidths=0.6,
+            linecolor="#cccccc",
+            square=True,
+            cbar_kws={"label": "Cosine Similarity", "shrink": 0.8, "pad": 0.02},
+            annot_kws={"size": max(7, 14 - n), "weight": "bold"},
         )
 
-    # 8. Highlight flagged pairs exceeding the plagiarism threshold
-    # We iterate over the matrix, looking for cross-document pairs (i != j)
-    # that surpass the configured safety threshold.
-    for i in range(n):
-        for j in range(n):
-            if i != j and data[i, j] >= threshold:
-                ax.add_patch(
-                    mpatches.FancyBboxPatch(
-                        (j, i), 1, 1,
-                        boxstyle="square,pad=0",
-                        linewidth=2.5,
-                        edgecolor="#d62728", # High-alert Red
-                        facecolor="none",
-                        zorder=4,
-                    )
+        colorbar = ax.collections[0].colorbar
+        colorbar.ax.yaxis.set_major_formatter(PercentFormatter(xmax=1.0, decimals=0))
+
+        if theme_colors:
+            fig.patch.set_facecolor(theme_colors.get("background", "#FFFFFF"))
+            ax.set_facecolor(theme_colors.get("surface", "#F8FAFC"))
+            ax.tick_params(colors=theme_colors.get("ink", "#0F172A"))
+            ax.xaxis.label.set_color(theme_colors.get("ink", "#0F172A"))
+            ax.yaxis.label.set_color(theme_colors.get("ink", "#0F172A"))
+            title_color = theme_colors.get("ink", "#0F172A")
+        else:
+            title_color = "black"
+
+        data = similarity_df.values
+
+        # Diagonal border (self-similarity)
+        for i in range(n):
+            ax.add_patch(
+                mpatches.FancyBboxPatch(
+                    (i, i),
+                    1,
+                    1,
+                    boxstyle="square,pad=0",
+                    linewidth=2,
+                    edgecolor="#555555",
+                    facecolor="none",
+                    zorder=3,
                 )
+            )
 
-    # 9. Configure title and axis labels
-    ax.set_title(title, fontsize=15, fontweight="bold", pad=16, color=title_color)
-    ax.set_xlabel("Documents", fontsize=11, labelpad=10)
-    ax.set_ylabel("Documents", fontsize=11, labelpad=10)
-    
-    # Rotate x-axis labels to prevent overlap in large matrices
-    ax.set_xticklabels(
-        ax.get_xticklabels(), rotation=30, ha="right", fontsize=max(8, 11 - n // 3)
-    )
-    ax.set_yticklabels(ax.get_yticklabels(), rotation=0, fontsize=max(8, 11 - n // 3))
+        # Red border on flagged pairs
+        for i in range(n):
+            for j in range(n):
+                if i != j and data[i, j] >= threshold:
+                    ax.add_patch(
+                        mpatches.FancyBboxPatch(
+                            (j, i),
+                            1,
+                            1,
+                            boxstyle="square,pad=0",
+                            linewidth=2.5,
+                            edgecolor="#d62728",
+                            facecolor="none",
+                            zorder=4,
+                        )
+                    )
 
-    # 10. Construct a custom legend explaining the red threshold boxes
-    red_patch = mpatches.Patch(
-        edgecolor="#d62728",
-        facecolor="none",
-        linewidth=2,
-        label=f"Potential Plagiarism (≥ {threshold:.0%})",
-    )
-    
-    legend = ax.legend(
-        handles=[red_patch],
-        loc="upper left",
-        bbox_to_anchor=(0.0, -0.18),
-        frameon=True,
-        fontsize=9,
-    )
-    
-    # Theme the legend box
-    if theme_colors and legend:
-        for text in legend.get_texts():
-            text.set_color(ink_color)
-        legend.get_frame().set_facecolor(bg_color)
-        legend.get_frame().set_edgecolor(_get_theme_color(theme_colors, "border", "#E2E8F0"))
+        ax.set_title(title, fontsize=15, fontweight="bold", pad=16, color=title_color)
+        ax.set_xlabel("Documents", fontsize=11, labelpad=10)
+        ax.set_ylabel("Documents", fontsize=11, labelpad=10)
+        ax.set_xticklabels(
+            ax.get_xticklabels(), rotation=30, ha="right", fontsize=max(8, 11 - n // 3)
+        )
+        ax.set_yticklabels(ax.get_yticklabels(), rotation=0, fontsize=max(8, 11 - n // 3))
 
-    # Ensure everything fits within the canvas boundaries without clipping
-    fig.tight_layout()
-    return fig
+        red_patch = mpatches.Patch(
+            edgecolor="#d62728",
+            facecolor="none",
+            linewidth=2,
+            label=f"Potential Plagiarism (≥ {threshold:.0%})",
+        )
+        ax.legend(
+            handles=[red_patch],
+            loc="upper left",
+            bbox_to_anchor=(0.0, -0.18),
+            frameon=True,
+            fontsize=9,
+        )
+        if theme_colors:
+            legend = ax.get_legend()
+            if legend:
+                for text in legend.get_texts():
+                    text.set_color(theme_colors.get("ink", "#0F172A"))
+                legend.get_frame().set_facecolor(theme_colors.get("background", "#FFFFFF"))
+                legend.get_frame().set_edgecolor(theme_colors.get("border", "#E2E8F0"))
+
+        fig.tight_layout()
+        return fig
 
 
 # ── Interactive Visualization (Plotly) ─────────────────────────────────────────
@@ -512,182 +492,41 @@ def plot_chunk_similarity_comparison(
     row_labels = [f"A{i + 1}: {short_label(c)}" for i, c in enumerate(chunks_a)]
     col_labels = [f"B{j + 1}: {short_label(c)}" for j, c in enumerate(chunks_b)]
 
-    # Dynamic sizing based on chunk count to prevent cramped labels
-    fig_width = max(8.0, nb * 1.5)
-    fig_height = max(6.0, na * 0.8)
-    fig, ax = plt.subplots(figsize=(fig_width, fig_height), dpi=150)
-
-    # Plot the matrix using Seaborn
-    sns.heatmap(
-        sim_matrix,
-        ax=ax,
-        annot=True,
-        fmt=".2f",
-        cmap=cmap,
-        vmin=0.0,
-        vmax=1.0,
-        linewidths=0.5,
-        linecolor=_get_theme_color(theme_colors, "border", "#cccccc"),
-        xticklabels=col_labels,
-        yticklabels=row_labels,
-        annot_kws={"size": 8},
-        cbar_kws={"label": "Cosine Similarity", "shrink": 0.7},
-    )
-
-    # Format Axes and Titles
-    ink_color = _get_theme_color(theme_colors, "ink", "#0F172A")
-    ax.set_title(
-        f"Chunk-Level Similarity: {doc_a_name}  vs  {doc_b_name}",
-        fontsize=13,
-        fontweight="bold",
-        pad=14,
-        color=ink_color
-    )
-    ax.set_xlabel(f"Chunks from {doc_b_name}", fontsize=10, color=ink_color)
-    ax.set_ylabel(f"Chunks from {doc_a_name}", fontsize=10, color=ink_color)
-    
-    # Rotate labels to accommodate long text snippets
-    ax.set_xticklabels(ax.get_xticklabels(), rotation=30, ha="right", fontsize=7)
-    ax.set_yticklabels(ax.get_yticklabels(), rotation=0, fontsize=7)
-
-    # Apply Theme Adjustments
-    if theme_colors:
-        fig.patch.set_facecolor(theme_colors.get("background", "#FFFFFF"))
-        ax.set_facecolor(theme_colors.get("surface", "#F8FAFC"))
-        ax.tick_params(colors=ink_color)
-
-    fig.tight_layout()
-    return fig
-
-
-# ── Streamlit UI Integration (Issue #697) ──────────────────────────────────────
-
-def render_heatmap_ui(
-    similarity_df: pd.DataFrame, 
-    threshold: float = PLAGIARISM_THRESHOLD,
-    theme_colors: Optional[dict] = None
-) -> None:
-    """
-    Renders the complete Heatmap UI inside a Streamlit application context.
-    
-    This function fulfills Issue #697 by providing a comprehensive, interactive 
-    interface that encompasses both the colormap dropdown selection and the 
-    subsequent rendering of the Plotly/Matplotlib visualizers.
-
-    Args:
-        similarity_df (pd.DataFrame): The matrix of similarity scores.
-        threshold (float): Current threshold for plagiarism alerts.
-        theme_colors (Optional[dict]): Theme configuration for styling.
-    """
-    st.markdown("### 📊 Semantic Similarity Overview")
-    st.markdown(
-        "Analyze the pairwise semantic similarities between the uploaded corpus. "
-        "Select a colormap that best fits your visual preference and accessibility needs."
-    )
-
-    # 1. UI Control Row
-    col1, col2 = st.columns([1, 2])
-    
-    with col1:
-        # Core Implementation of #697: The Colormap Selectbox
-        selected_colormap = st.selectbox(
-            label="Visual Colormap",
-            options=UI_COLORMAP_OPTIONS,
-            index=UI_COLORMAP_OPTIONS.index(DEFAULT_UI_COLORMAP),
-            help="Change the color scale applied to the matrix. 'Viridis' is recommended for colorblind accessibility."
+    with matplotlib_figure(figsize=(max(8, nb * 1.5), max(6, na * 0.8)), dpi=150) as (fig, ax):
+        sns.heatmap(
+            sim_matrix,
+            ax=ax,
+            annot=True,
+            fmt=".2f",
+            cmap=_CMAP,
+            vmin=0.0,
+            vmax=1.0,
+            linewidths=0.5,
+            linecolor="#cccccc",
+            xticklabels=col_labels,
+            yticklabels=row_labels,
+            annot_kws={"size": 8},
+            cbar_kws={"label": "Cosine Similarity", "shrink": 0.7},
         )
 
-    with col2:
-        # Providing context metrics next to the dropdown
-        flagged_count = int(np.sum((similarity_df.values >= threshold)) - len(similarity_df)) // 2
-        st.metric(
-            label="Flagged Document Pairs", 
-            value=flagged_count if flagged_count >= 0 else 0,
-            delta="Requires Review" if flagged_count > 0 else "Clean",
-            delta_color="inverse"
+        ax.set_title(
+            f"Chunk-Level Similarity: {doc_a_name}  vs  {doc_b_name}",
+            fontsize=13,
+            fontweight="bold",
+            pad=14,
         )
+        ax.set_xlabel(f"Chunks from {doc_b_name}", fontsize=10)
+        ax.set_ylabel(f"Chunks from {doc_a_name}", fontsize=10)
+        ax.set_xticklabels(ax.get_xticklabels(), rotation=30, ha="right", fontsize=7)
+        ax.set_yticklabels(ax.get_yticklabels(), rotation=0, fontsize=7)
 
-    st.divider()
+        if theme_colors:
+            fig.patch.set_facecolor(theme_colors.get("background", "#FFFFFF"))
+            ax.set_facecolor(theme_colors.get("surface", "#F8FAFC"))
+            ax.tick_params(colors=theme_colors.get("ink", "#0F172A"))
+            ax.xaxis.label.set_color(theme_colors.get("ink", "#0F172A"))
+            ax.yaxis.label.set_color(theme_colors.get("ink", "#0F172A"))
+            ax.title.set_color(theme_colors.get("ink", "#0F172A"))
 
-    # 2. Rendering Tabs for different visualization modalities
-    # Users might want the interactive exploration or the static image for reporting.
-    tab_interactive, tab_static, tab_data = st.tabs(["Interactive Chart", "Static Report Format", "Raw Data Matrix"])
-
-    with tab_interactive:
-        with st.spinner("Generating interactive Plotly visualization..."):
-            plotly_fig = plot_similarity_heatmap_plotly(
-                similarity_df=similarity_df,
-                title="Interactive Document Analysis",
-                threshold=threshold,
-                theme_colors=theme_colors,
-                colormap_name=selected_colormap
-            )
-            # Render using standard Streamlit theme integration natively
-            st.plotly_chart(plotly_fig, use_container_width=True, theme="streamlit")
-
-    with tab_static:
-        with st.spinner("Generating high-resolution publication matrix..."):
-            matplot_fig = plot_similarity_heatmap(
-                similarity_df=similarity_df,
-                title="Similarity Matrix (Print Ready)",
-                threshold=threshold,
-                theme_colors=theme_colors,
-                colormap_name=selected_colormap
-            )
-            st.pyplot(matplot_fig, use_container_width=False)
-            
-            st.caption("Right-click the image above or use the toolbar to save a high-resolution PNG for your reports.")
-
-    with tab_data:
-        # Rendering the raw dataframe with a background gradient matching the user's colormap selection.
-        # This ties the UX cohesively across both charts and raw tabular data.
-        st.markdown("**Raw Matrix View**")
-        styled_df = similarity_df.style.background_gradient(
-            cmap=MATPLOTLIB_CMAP_MAPPING.get(selected_colormap, "viridis"),
-            axis=None, 
-            vmin=0.0, 
-            vmax=1.0
-        ).format("{:.2%}")
-        
-        st.dataframe(styled_df, use_container_width=True)
-
-
-# ── Standalone Testing/Demo Execution ──────────────────────────────────────────
-
-if __name__ == "__main__":
-    # Provides an isolated environment to test the UI components
-    # Run via: streamlit run src/visualization/heatmap.py
-    
-    st.set_page_config(page_title="Heatmap Component Test", layout="wide")
-    
-    st.title("Component Test: UI Colormap Integrations")
-    st.info("This is an isolated test environment for the `heatmap.py` module.")
-    
-    # Generate mock similarity data simulating 8 documents
-    np.random.seed(42)
-    n_docs = 8
-    
-    # Create a random symmetric matrix bounded 0-1
-    rand_matrix = np.random.rand(n_docs, n_docs)
-    sym_matrix = (rand_matrix + rand_matrix.T) / 2
-    np.fill_diagonal(sym_matrix, 1.0)
-    
-    # Introduce some artificial "plagiarism" spikes
-    sym_matrix[0, 3] = 0.85
-    sym_matrix[3, 0] = 0.85
-    sym_matrix[4, 7] = 0.92
-    sym_matrix[7, 4] = 0.92
-    
-    labels = [f"File_00{i}.txt" for i in range(1, n_docs + 1)]
-    mock_df = pd.DataFrame(sym_matrix, index=labels, columns=labels)
-    
-    # Mock theme config mimicking the main app context
-    mock_theme = {
-        "background": "#FFFFFF",
-        "surface": "#F8FAFC",
-        "ink": "#1E293B",
-        "border": "#E2E8F0"
-    }
-    
-    # Render the newly built UI wrapper
-    render_heatmap_ui(similarity_df=mock_df, threshold=0.80, theme_colors=mock_theme)
+        fig.tight_layout()
+        return fig

@@ -97,3 +97,32 @@ def test_cache_write_and_read_fallback_on_failure(mock_redis_refused):
         delete_result = cache.delete("some_key")
         assert delete_result is True
         assert cache.exists("some_key") is False
+
+
+def test_redis_configurable_timeout():
+    """Verify that REDIS_TIMEOUT_SECONDS is read and passed to Redis constructor."""
+    import os
+    import importlib
+    from unittest.mock import patch
+    import src.utils.redis_cache
+
+    with patch.dict(os.environ, {"REDIS_TIMEOUT_SECONDS": "4.5"}), \
+         patch("redis.from_url") as mock_from_url:
+
+        # Reload the module to pick up the new environment variable value
+        importlib.reload(src.utils.redis_cache)
+
+        assert src.utils.redis_cache.REDIS_TIMEOUT_SECONDS == 4.5
+
+        # Instantiate cache and verify mock connection parameters
+        cache = src.utils.redis_cache.RedisCache.__new__(src.utils.redis_cache.RedisCache)
+        cache._client = None
+        cache._connect()
+
+        mock_from_url.assert_called_once()
+        kwargs = mock_from_url.call_args[1]
+        assert kwargs.get("socket_connect_timeout") == 4.5
+
+    # Reload the module once more with environment cleared to restore defaults
+    importlib.reload(src.utils.redis_cache)
+
