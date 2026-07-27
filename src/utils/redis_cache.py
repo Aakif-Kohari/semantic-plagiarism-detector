@@ -5,13 +5,11 @@ Redis connection and caching utilities for session state and FAISS results.
 Supports scaling across multiple server nodes in Docker/Kubernetes environments.
 """
 
-import hashlib
 import json
 import os
 import pickle
 from enum import Enum
 from typing import Any, Optional
-from urllib.parse import quote
 
 try:
     import redis

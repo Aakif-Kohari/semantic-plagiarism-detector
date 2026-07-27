@@ -10,7 +10,7 @@ def test_get_colors_returns_valid_theme_colors():
     assert colors
     assert "background" in colors
     assert "accent" in colors
-from app.theme import (COLORS, badge_html, severity_tier, tier_color,
+from app.theme import (COLORS, severity_tier, tier_color,
                        tier_from_severity_label)
 
 

@@ -15,7 +15,6 @@ import base64
 import html
 
 
-import html
 # Standard / Third-party imports
 import time
 
@@ -73,7 +72,7 @@ from src.core.config import (DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD,
                              severity_key)
 from src.core.document_parser import (DEFAULT_OCR_DPI, DEFAULT_OCR_LANGUAGE,
                                       SUPPORTED_OCR_LANGUAGES,
-                                      OCRDependencyError, extract_text,
+                                      extract_text,
                                       prepare_text_for_embedding,
                                       remove_ignore_phrases)
 from src.core.faiss_index import (build_index, build_index_from_matrix,
@@ -152,11 +151,8 @@ except ImportError:
 
 
 
-    from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore[import-untyped,reportMissingImports]
 
 
-    from utils.excel_export import \
-        export_similarity_matrix_to_excel  # type: ignore
     from utils.json_export import export_similarity_matrix_to_json
 
 

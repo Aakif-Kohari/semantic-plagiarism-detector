@@ -22,7 +22,7 @@ Exports:
 """
 
 import logging
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict
 
 import matplotlib
 import matplotlib.patches as mpatches

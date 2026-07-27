@@ -25,9 +25,7 @@ def create_managed_temp_file(suffix: str = "", delete: bool = True):
                 pass
 
 import atexit
-import os
 import shutil
-import tempfile
 from typing import List, Optional
 
 # Global list of registered temporary paths to clean up
