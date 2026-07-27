@@ -236,6 +236,22 @@ except Exception:
 # collapsed so it doesn't cover the similarity matrix / heatmap. On wider
 # screens it behaves the same as "expanded". See issue #258.
 
+APP_TITLE = os.getenv("APP_TITLE", "Semantic Plagiarism Detector").strip() or "Semantic Plagiarism Detector"
+MAX_RECENT_SEARCHES = 5
+
+
+
+def _add_recent_search(query: str) -> None:
+    """Store a search query in session state, most-recent-first, capped at 5."""
+    query = query.strip()
+    if not query:
+        return
+
+    recent = st.session_state.get("recent_searches", [])
+    recent = [q for q in recent if q != query]
+    recent.insert(0, query)
+    st.session_state["recent_searches"] = recent[:MAX_RECENT_SEARCHES]
+
 st.set_page_config(
     page_title="Semantic Plagiarism Detector",
     page_icon="🔍",
@@ -816,6 +832,18 @@ if user_role != "admin":
         "🔒 Note: Direct assignment uploads and detailed breakdown panels are restricted to Administrator access. Your queries are anonymized for privacy."
     )
 
+    recent_searches = st.session_state.get("recent_searches", [])
+    if recent_searches:
+        selected_recent = st.selectbox(
+            "🕒 Recent Searches",
+            options=[""] + recent_searches,
+            format_func=lambda q: "Select a recent search..." if q == "" else q,
+            key="recent_search_select_user",
+        )
+        if selected_recent:
+            st.session_state["user_query_text"] = selected_recent
+
+
     query_text = st.text_area(
         "Paste a text snippet to check against index:",
         height=150,
@@ -1007,6 +1035,18 @@ if user_role != "admin":
     st.info(
         "🔒 Note: Direct assignment uploads are restricted to Administrator access."
     )
+    recent_searches = st.session_state.get("recent_searches", [])
+    if recent_searches:
+        selected_recent = st.selectbox(
+            "🕒 Recent Searches",
+            options=[""] + recent_searches,
+            format_func=lambda q: "Select a recent search..." if q == "" else q,
+            key="recent_search_select_admin",
+        )
+        if selected_recent:
+            st.session_state["admin_query_text"] = selected_recent
+
+
     query_text = st.text_area(
         "Search Query Text:",
         placeholder="Paste document content here to search for matching plagiarism...",
@@ -1079,7 +1119,6 @@ if user_role != "admin":
                                         f"**Matching passage in {anon_doc_name}:**"
                                     )
                                     st.warning(record.chunk_text)
-
                                 st.markdown(
                                     f"<div style='text-align:right;'>"
                                     f"<span style='background:{color};color:white;padding:3px 12px;"
@@ -1140,6 +1179,7 @@ else:
         except (RuntimeError, ValueError, OSError):
             faiss_index = None
             registry = []
+
 
     def load_analysis_results_from_db():
         import numpy as np

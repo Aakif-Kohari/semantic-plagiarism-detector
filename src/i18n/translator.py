@@ -13,6 +13,9 @@ from typing import Dict
 
 _I18N_DIR = os.path.dirname(os.path.abspath(__file__))
 _SUPPORTED_LANGUAGES = {"en": "English", "es": "Español"}
+LANGUAGE_DISPLAY = _SUPPORTED_LANGUAGES
+DISPLAY_TO_CODE = {v: k for k, v in _SUPPORTED_LANGUAGES.items()}
+
 
 _translations: Dict[str, Dict[str, str]] = {}
 

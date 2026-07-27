@@ -23,9 +23,15 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-RedisError = getattr(redis, "RedisError", Exception)
-RedisConnectionError = getattr(redis, "ConnectionError", ConnectionError)
-RedisTimeoutError = getattr(redis, "TimeoutError", TimeoutError)
+_RedisErr = getattr(redis, "RedisError", Exception)
+RedisError = _RedisErr if isinstance(_RedisErr, type) and issubclass(_RedisErr, BaseException) else Exception
+
+_ConnErr = getattr(redis, "ConnectionError", ConnectionError)
+RedisConnectionError = _ConnErr if isinstance(_ConnErr, type) and issubclass(_ConnErr, BaseException) else ConnectionError
+
+_TimeoutErr = getattr(redis, "TimeoutError", TimeoutError)
+RedisTimeoutError = _TimeoutErr if isinstance(_TimeoutErr, type) and issubclass(_TimeoutErr, BaseException) else TimeoutError
+
 
 
 # Redis connection configuration
@@ -383,8 +389,11 @@ class RedisCache:
         if self.is_available():
             try:
                 keys = self._client.keys(pattern)
+                if keys and not isinstance(keys, (list, set, tuple)):
+                    keys = None
                 if keys:
-                    redis_count = self._client.delete(*keys)
+                    res = self._client.delete(*keys)
+                    redis_count = int(res) if isinstance(res, (int, float)) else 0
             except (
                 RedisError,
                 RedisConnectionError,
@@ -396,7 +405,8 @@ class RedisCache:
                 logger.error(f"[RedisCache] Error clearing pattern {pattern}: {e}. Falling back to in-memory.")
 
         fallback_count = self._fallback_clear_pattern(pattern)
-        return redis_count + fallback_count
+        return (int(redis_count) if isinstance(redis_count, (int, float)) else 0) + fallback_count
+
 
 
 
