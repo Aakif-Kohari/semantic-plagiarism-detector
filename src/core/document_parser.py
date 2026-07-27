@@ -152,6 +152,20 @@ def strip_bibliography(text: str) -> str:
 def clean_text(raw_text: str) -> str:
     """Normalize whitespace and remove unwanted Unicode characters."""
     text = raw_text
+
+    text = text.translate(
+        str.maketrans(
+            {
+                "“": '"',
+                "”": '"',
+                "‘": "'",
+                "’": "'",
+                "—": "-",
+                "–": "-",
+            }
+        )
+    )
+
     text = re.sub(r"\n\s*\n\s*\n", "\n\n", text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"[\u00a0\u200b]", " ", text)
