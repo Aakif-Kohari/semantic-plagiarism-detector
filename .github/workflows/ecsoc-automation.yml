@@ -26,22 +26,70 @@ jobs:
         with:
           script: |
             const issue = context.payload.issue;
+            const comment = context.payload.comment;
 
-            // Ignore PR comments
+            // 1. Ignore PR comments
             if (issue.pull_request) return;
 
-            // Already assigned? Do nothing.
-            if (issue.assignees.length > 0) {
-              console.log("Issue already assigned.");
+            // 2. Only detect comments for OPEN issues
+            if (issue.state !== 'open') {
+              console.log("Issue is not open. Ignoring comment.");
               return;
             }
 
-            const claimer = context.payload.comment.user.login;
+            const claimer = comment.user.login;
+            const commenterType = comment.user.type;
+            const repoOwner = context.repo.owner;
+            const issueAuthor = issue.user ? issue.user.login : null;
 
             // Helper to check if a comment is from a bot
             const isBotComment = (c) => c.user && (c.user.type === 'Bot' || (c.user.login && c.user.login.endsWith('[bot]')));
 
-            // Check max 5 open claimed issues limit for user
+            // 3. Ignore bot comments, issue author comments, and repo owner comments
+            if (commenterType === 'Bot' || claimer.endsWith('[bot]')) {
+              console.log("Ignoring bot comment.");
+              return;
+            }
+
+            if (issueAuthor && claimer.toLowerCase() === issueAuthor.toLowerCase()) {
+              console.log(`Ignoring comment by issue author (@${claimer}).`);
+              return;
+            }
+
+            if (claimer.toLowerCase() === repoOwner.toLowerCase()) {
+              console.log(`Ignoring comment by repo owner (@${claimer}).`);
+              return;
+            }
+
+            // 4. Ignore any comments once issue is assigned (natively via assignees OR via existing bot claim)
+            if (issue.assignees && issue.assignees.length > 0) {
+              console.log("Issue already assigned natively. Ignoring comment.");
+              return;
+            }
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              per_page: 100
+            });
+
+            const botComments = comments.filter(c => 
+              isBotComment(c) && c.body && (
+                c.body.includes("thanks for your interest in contributing under *ECSoC'26*") ||
+                c.body.includes("open for anyone to claim")
+              )
+            );
+
+            if (botComments.length > 0) {
+              const lastBotComment = botComments[botComments.length - 1];
+              if (!lastBotComment.body.includes("open for anyone to claim")) {
+                console.log("Issue is already claimed via bot comment. Ignoring comment.");
+                return;
+              }
+            }
+
+            // 5. Check max 5 open claimed issues limit for user
             try {
               const issues = await github.paginate(github.rest.issues.listForRepo, {
                 owner: context.repo.owner,
@@ -55,22 +103,22 @@ jobs:
               for (const iss of issues) {
                 if (iss.pull_request || iss.number === issue.number) continue;
 
-                const comments = await github.paginate(github.rest.issues.listComments, {
+                const issComments = await github.paginate(github.rest.issues.listComments, {
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number: iss.number,
                   per_page: 100
                 });
 
-                const botComments = comments.filter(c => 
+                const issBotComments = issComments.filter(c => 
                   isBotComment(c) && c.body && (
                     c.body.includes("thanks for your interest in contributing under *ECSoC'26*") ||
                     c.body.includes("open for anyone to claim")
                   )
                 );
 
-                if (botComments.length > 0) {
-                  const lastBotComment = botComments[botComments.length - 1];
+                if (issBotComments.length > 0) {
+                  const lastBotComment = issBotComments[issBotComments.length - 1];
                   if (!lastBotComment.body.includes("open for anyone to claim")) {
                     const match = lastBotComment.body.match(/Hi @([a-zA-Z0-9-]+)/);
                     if (match && match[1].toLowerCase() === claimer.toLowerCase()) {
@@ -115,7 +163,7 @@ jobs:
               labels: ["ECSoC26"]
             });
 
-            // Optional confirmation comment
+            // Confirmation comment
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
