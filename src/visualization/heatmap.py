@@ -22,7 +22,7 @@ Exports:
 """
 
 from contextlib import contextmanager
-from typing import Generator, Optional, List, Dict
+from typing import Generator, Optional
 import logging
 
 import matplotlib
@@ -50,32 +50,21 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 # ── Colormap Mappings & Constants ──────────────────────────────────────────────
+# Colormap options/mappings now live in app/theme.py (Issue #633).
 
-# Standard colormap options required by UI/UX specifications.
-UI_COLORMAP_OPTIONS: List[str] = ["Viridis", "Plasma", "Coolwarm", "YlOrRd"]
-
-# Map UI display names to exact Matplotlib/Seaborn string identifiers.
-MATPLOTLIB_CMAP_MAPPING: Dict[str, str] = {
-    "Viridis": "viridis",
-    "Plasma": "plasma",
-    "Coolwarm": "coolwarm",
-    "YlOrRd": "YlOrRd",
-    # Legacy fallback mapping
-    "Legacy Red/Green": "RdYlGn_r"
-}
-
-# Map UI display names to exact Plotly string identifiers.
-PLOTLY_CMAP_MAPPING: Dict[str, str] = {
-    "Viridis": "Viridis",
-    "Plasma": "Plasma",
-    "Coolwarm": "RdBu_r",  # Coolwarm equivalent in standard plotly
-    "YlOrRd": "YlOrRd",
-    # Legacy fallback mapping
-    "Legacy Red/Green": "RdYlGn_r"
-}
-
-DEFAULT_UI_COLORMAP: str = "Viridis"
-
+try:
+    from app.theme import (
+        UI_COLORMAP_OPTIONS,
+        MATPLOTLIB_CMAP_MAPPING,
+        PLOTLY_CMAP_MAPPING,
+        DEFAULT_UI_COLORMAP,
+    )
+except ImportError:
+    # Fallback for standalone testing or isolated environments
+    UI_COLORMAP_OPTIONS = ["Viridis", "Plasma", "Coolwarm", "YlOrRd"]
+    MATPLOTLIB_CMAP_MAPPING = {"Viridis": "viridis"}
+    PLOTLY_CMAP_MAPPING = {"Viridis": "Viridis"}
+    DEFAULT_UI_COLORMAP = "Viridis"
 
 # ── Data Validation Helpers ────────────────────────────────────────────────────
 
@@ -216,7 +205,7 @@ def plot_similarity_heatmap(
             ax=ax,
             annot=annotate,
             fmt=".2f" if annotate else "",
-            cmap=_CMAP,
+            cmap=cmap,
             vmin=0.0,
             vmax=1.0,
             linewidths=0.6,

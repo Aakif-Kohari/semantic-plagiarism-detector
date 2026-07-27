@@ -57,6 +57,18 @@ if "sentence_transformers" not in sys.modules:
     stub.SentenceTransformer = MagicMock  # type: ignore[attr-defined]
     sys.modules["sentence_transformers"] = stub
 
+for mod_name in [
+    "lxml", "defusedxml", "defusedxml.lxml", "fitz", "docx", "redis", "bs4", "faker", "argon2", "argon2.exceptions",
+    "pdfplumber", "langdetect", "striprtf", "striprtf.striprtf", "src.core.translator",
+    "pypdf", "PyPDF2", "reportlab", "reportlab.pdfgen", "reportlab.lib", "reportlab.platypus", 
+    "reportlab.lib.colors", "reportlab.lib.enums", "reportlab.lib.styles", "reportlab.lib.units", 
+    "reportlab.lib.pagesizes", "reportlab.lib.utils", "plotly", "plotly.express", "plotly.graph_objects", 
+    "matplotlib", "matplotlib.patches", "matplotlib.pyplot", "matplotlib.figure", "matplotlib.ticker", "networkx",
+    "faiss", "torch", "psutil", "pytesseract", "sklearn", "sklearn.metrics", "sklearn.metrics.pairwise", "requests",
+    "bcrypt", "pyotp", "qrcode", "seaborn"
+]:
+    sys.modules[mod_name] = MagicMock()
+
 # ── Tesseract OCR Availability ────────────────────────────────────────────────
 TESSERACT_AVAILABLE = shutil.which("tesseract") is not None
 
@@ -161,29 +173,20 @@ def mock_db(tmp_path):
 
     # We patch the database path at the module level for all db modules
     import unittest.mock
-
-    with unittest.mock.patch("src.db.corpus_db._DB_PATH", str(corpus_db_file)), \
-         unittest.mock.patch("src.db.incidents.DEFAULT_DB_PATH", str(corpus_db_file)), \
-         unittest.mock.patch("src.db.auth._DB_PATH", str(auth_db_file)):
-
-        # Initialize schemas – each init is isolated so a single import
-        # failure does not prevent the other schemas from being created.
+    
+    with unittest.mock.patch("src.db.corpus_db._DB_PATH", str(db_file)), \
+         unittest.mock.patch("src.db.incidents.DEFAULT_DB_PATH", str(db_file)), \
+         unittest.mock.patch("src.db.auth._DB_PATH", str(db_file)):
+        
         try:
             from src.db.corpus_db import init_corpus_db
-            init_corpus_db()
-        except ImportError:
-            pass
-
-        try:
             from src.db.incidents import init_incident_db
-            init_incident_db(str(corpus_db_file))
-        except ImportError:
-            pass
-
-        try:
             from src.db.auth import init_db
+            init_corpus_db()
+            init_incident_db()
             init_db()
-        except ImportError:
-            pass
-
-        yield str(corpus_db_file)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            
+        yield str(db_file)

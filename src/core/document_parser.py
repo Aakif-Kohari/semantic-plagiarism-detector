@@ -33,6 +33,14 @@ from src.core.translator import translate_text
 # work even when Tesseract is not installed on the machine.
 PDFInput = Union[str, bytes, io.BytesIO, BinaryIO]
 
+
+class ParsedDocxText(str):
+    def __new__(cls, value, word_headings=None):
+        obj = super().__new__(cls, value)
+        obj.word_headings = word_headings or []
+        return obj
+
+
 MIN_NATIVE_WORDS_PER_PAGE = 8
 DEFAULT_OCR_DPI = 250
 MIN_OCR_DPI = 150
@@ -59,11 +67,8 @@ def check_batch_rate_limit(file_count: int, session_id: Optional[str] = None) ->
 # Tesseract language packs intentionally exposed by the administrator UI.
 
 # More values may be added later without changing the extraction API.
-SUPPORTED_OCR_LANGUAGES = {
-    "eng": "English",
-    "spa": "Spanish",
-    "fra": "French",
-}
+from src.core.app_config import SUPPORTED_OCR_LANGUAGES
+
 
 
 def validate_ocr_dpi(value: int) -> int:
@@ -145,8 +150,13 @@ def strip_bibliography(text: str) -> str:
     """
     match = _BIBLIOGRAPHY_HEADERS.search(text)
     if match:
-        return text[: match.start()].rstrip()
+        sliced_text = text[: match.start()].rstrip()
+        if hasattr(text, "word_headings"):
+            words_in_sliced = len(sliced_text.split())
+            return ParsedDocxText(sliced_text, word_headings=text.word_headings[:words_in_sliced])
+        return sliced_text
     return text
+
 
 
 def clean_text(raw_text: str) -> str:
@@ -736,63 +746,67 @@ def extract_text_from_pdf(
             )
             return ""
 
-    page_lines: List[List[str]] = []
-
     try:
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
             num_pages = len(pdf.pages)
+            if num_pages == 0:
+                return ""
+
+            if _should_use_parallel() and num_pages > 1:
+                from concurrent.futures import ProcessPoolExecutor
+
+                page_lines = [[] for _ in range(num_pages)]
+                try:
+                    with ProcessPoolExecutor() as executor:
+                        futures = [
+                            executor.submit(
+                                _parse_pdf_page,
+                                pdf_bytes,
+                                page_index,
+                                ocr_dpi,
+                                ocr_language,
+                            )
+                            for page_index in range(num_pages)
+                        ]
+                        for page_index, future in enumerate(futures):
+                            page_lines[page_index] = future.result()
+                except OCRDependencyError:
+                    raise
+                except (RuntimeError, OSError) as exc:
+                    logger.warning(
+                        f"[document_parser] ProcessPoolExecutor failed ({exc}), falling back to sequential page parsing..."
+                    )
+                    page_lines = []
+                    for page_index in range(num_pages):
+                        page = pdf.pages[page_index]
+                        native_text = (page.extract_text() or "").strip()
+                        selected_text = native_text
+                        if not _has_meaningful_text(native_text):
+                            selected_text = _ocr_pdf_page(
+                                pdf_bytes,
+                                page_index,
+                                dpi=ocr_dpi,
+                                language=ocr_language,
+                            )
+                        page_lines.append(_clean_page_text(selected_text))
+            else:
+                page_lines = []
+                for page_index in range(num_pages):
+                    page = pdf.pages[page_index]
+                    native_text = (page.extract_text() or "").strip()
+                    selected_text = native_text
+                    if not _has_meaningful_text(native_text):
+                        selected_text = _ocr_pdf_page(
+                            pdf_bytes,
+                            page_index,
+                            dpi=ocr_dpi,
+                            language=ocr_language,
+                        )
+                    page_lines.append(_clean_page_text(selected_text))
+    except OCRDependencyError:
+        raise
     except Exception as exc:
         logger.error(f"[document_parser] Error reading PDF: {exc}")
-        return ""
-
-    if num_pages == 0:
-        return ""
-
-    if _should_use_parallel() and num_pages > 1:
-        from concurrent.futures import ProcessPoolExecutor
-
-        page_lines = [[] for _ in range(num_pages)]
-        try:
-            with ProcessPoolExecutor() as executor:
-                futures = [
-                    executor.submit(
-                        _parse_pdf_page,
-                        pdf_bytes,
-                        page_index,
-                        ocr_dpi,
-                        ocr_language,
-                    )
-                    for page_index in range(num_pages)
-                ]
-                for page_index, future in enumerate(futures):
-                    page_lines[page_index] = future.result()
-        except OCRDependencyError:
-            raise
-        except (RuntimeError, OSError) as exc:
-            logger.warning(
-                f"[document_parser] ProcessPoolExecutor failed ({exc}), falling back to sequential page parsing..."
-            )
-            page_lines = [
-                _parse_pdf_page(
-                    pdf_bytes,
-                    page_index,
-                    ocr_dpi,
-                    ocr_language,
-                )
-                for page_index in range(num_pages)
-            ]
-    else:
-        page_lines = [
-            _parse_pdf_page(
-                pdf_bytes,
-                page_index,
-                ocr_dpi,
-                ocr_language,
-            )
-            for page_index in range(num_pages)
-        ]
-
-    if not page_lines:
         return ""
 
     cleaned_pages = _remove_repeated_boundary_lines(page_lines)
@@ -801,16 +815,33 @@ def extract_text_from_pdf(
 
 def extract_text_from_docx(file: PDFInput) -> str:
     """Extract text from a DOCX file."""
-    text = ""
     try:
         doc_file = io.BytesIO(file) if isinstance(file, bytes) else file
         document = docx.Document(doc_file)
-        text = "\n\n".join(paragraph.text for paragraph in document.paragraphs)
+
+        current_heading = None
+        word_headings = []
+        paragraphs_text = []
+
+        for paragraph in document.paragraphs:
+            p_text = paragraph.text
+            paragraphs_text.append(p_text)
+
+            style_name = paragraph.style.name if paragraph.style else ""
+            if style_name in ("Heading 1", "Heading 2"):
+                current_heading = p_text.strip()
+
+            p_words = p_text.split()
+            word_headings.extend([current_heading] * len(p_words))
+
+        full_text = "\n\n".join(paragraphs_text)
+        return ParsedDocxText(full_text.strip(), word_headings=word_headings)
     except (ValueError, KeyError, OSError) as exc:
         print(f"[document_parser] Error reading DOCX: {exc}")
     except Exception as exc:
         logger.error(f"[document_parser] Error reading DOCX: {exc}")
-    return text.strip()
+    return ""
+
 
 
 def extract_text_from_txt(file: PDFInput) -> str:
@@ -1155,7 +1186,12 @@ def extract_text(
     else:
         raw = extract_text_from_txt(file)
 
-    return strip_bibliography(raw)
+    raw = strip_bibliography(raw)
+    lang_code = detect_text_language(raw)
+    logger.info(
+        f"[document_parser] Detected language for document '{filename}': {lang_code}"
+    )
+    return raw
 
 
 def extract_texts_from_pdfs(files: list, session_id: Optional[str] = None) -> Dict[str, str]:
