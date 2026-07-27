@@ -2053,28 +2053,57 @@ if not st.session_state.authenticated:
         st.markdown("🏠 Home > Dashboard > **Warnings**")
         st.subheader(get_text("tab_warnings", lang=lang_code))
 
-        # LMS CSV Export (Issue #305)
+        # LMS incident exports
         st.markdown("---")
-        export_col1, export_col2 = st.columns([0.8, 0.2])
-        with export_col1:
-            st.caption("Generate a CSV of flagged incidents for LMS grading.")
-        with export_col2:
-            raw_incidents = get_all_incidents_above_threshold_for_export(
-                threshold=threshold
-            )
-            csv_data = LMSExportEngine.generate_incident_csv(raw_incidents)
+        st.caption(
+            "Export flagged plagiarism incidents for LMS review or "
+            "human-readable offline analysis."
+        )
+
+        raw_incidents = get_all_incidents_above_threshold_for_export(
+            threshold=threshold
+        )
+        csv_data = LMSExportEngine.generate_incident_csv(raw_incidents)
+        txt_data = LMSExportEngine.generate_incident_txt(raw_incidents)
+
+        export_csv_col, export_txt_col = st.columns(2)
+
+        with export_csv_col:
             if csv_data:
                 st.download_button(
-                    label="📥 Export Incident Log",
+                    label="📥 Export CSV",
                     data=csv_data,
                     file_name="plagiarism_incident_log.csv",
                     mime="text/csv",
+                    key="export_incidents_csv",
                     use_container_width=True,
                 )
             else:
                 st.button(
-                    "📥 Export Incident Log", disabled=True, use_container_width=True
+                    "📥 Export CSV",
+                    disabled=True,
+                    key="export_incidents_csv_disabled",
+                    use_container_width=True,
                 )
+
+        with export_txt_col:
+            if txt_data:
+                st.download_button(
+                    label="📝 Export TXT",
+                    data=txt_data,
+                    file_name="plagiarism_incident_summary.txt",
+                    mime="text/plain; charset=utf-8",
+                    key="export_incidents_txt",
+                    use_container_width=True,
+                )
+            else:
+                st.button(
+                    "📝 Export TXT",
+                    disabled=True,
+                    key="export_incidents_txt_disabled",
+                    use_container_width=True,
+                )
+
         st.markdown("---")
 
         if selected_document_id:
