@@ -172,3 +172,28 @@ def test_plot_similarity_network_layout_autosize():
 
     assert fig.layout.autosize is True
     assert fig.layout.width is None
+
+
+def test_build_network_data_min_degree_filter():
+    """Verify min_degree filters out nodes connected to fewer than min_degree documents."""
+    data = {
+        "doc1": [1.0, 0.85, 0.80, 0.10],
+        "doc2": [0.85, 1.0, 0.10, 0.10],
+        "doc3": [0.80, 0.10, 1.0, 0.10],
+        "doc4": [0.10, 0.10, 0.10, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2", "doc3", "doc4"])
+
+    # doc1 is connected to doc2 and doc3 (degree 2)
+    # doc2 is connected to doc1 (degree 1)
+    # doc3 is connected to doc1 (degree 1)
+    # doc4 is isolated (degree 0)
+    net_data = build_network_data(df, threshold=0.75, min_degree=2)
+    nodes = list(net_data["graph"].nodes())
+
+    assert "doc1" in nodes
+    assert "doc2" not in nodes
+    assert "doc3" not in nodes
+    assert "doc4" not in nodes
+    assert len(nodes) == 1
+

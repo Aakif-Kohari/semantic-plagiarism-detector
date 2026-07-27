@@ -16,6 +16,7 @@ import plotly.graph_objects as go
 def build_network_data(
     similarity_df: pd.DataFrame,
     threshold: float = 0.59,
+    min_degree: int = 0,
     theme_colors: Optional[dict] = None,
 ) -> dict:
     """
@@ -24,6 +25,7 @@ def build_network_data(
     Args:
         similarity_df: Square N×N DataFrame of similarity scores.
         threshold: Edge threshold; pairs with similarity >= threshold are connected.
+        min_degree: Minimum degree threshold; nodes with degree < min_degree are filtered out.
         theme_colors: Optional dictionary containing theme colors.
 
     Returns:
@@ -50,6 +52,13 @@ def build_network_data(
                 G.add_edge(doc_names[i], doc_names[j])
 
                 edge_similarities[(doc_names[i], doc_names[j])] = score
+
+    # Filter out nodes below the minimum degree threshold
+    if min_degree > 0:
+        low_degree_nodes = [
+            node for node, deg in dict(G.degree()).items() if deg < min_degree
+        ]
+        G.remove_nodes_from(low_degree_nodes)
 
     # Compute layout coordinates
     # Seed layout for reproducibility
@@ -370,6 +379,7 @@ def render_network_plotly(
 def plot_similarity_network(
     similarity_df: pd.DataFrame,
     threshold: float = 0.59,
+    min_degree: int = 0,
     title: str = "Document Plagiarism Network",
     theme_colors: Optional[dict] = None,
 ) -> go.Figure:
@@ -379,6 +389,7 @@ def plot_similarity_network(
     Args:
         similarity_df: Square N×N DataFrame of similarity scores.
         threshold: Edge threshold; pairs with similarity >= threshold are connected.
+        min_degree: Minimum degree threshold; nodes with degree < min_degree are filtered out.
         title: Title of the graph.
         theme_colors: Optional dictionary containing theme colors.
 
@@ -388,6 +399,7 @@ def plot_similarity_network(
     network_data = build_network_data(
         similarity_df=similarity_df,
         threshold=threshold,
+        min_degree=min_degree,
         theme_colors=theme_colors,
     )
     return render_network_plotly(
