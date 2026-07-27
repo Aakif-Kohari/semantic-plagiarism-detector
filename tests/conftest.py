@@ -57,7 +57,6 @@ if "sentence_transformers" not in sys.modules:
     stub.SentenceTransformer = MagicMock  # type: ignore[attr-defined]
     sys.modules["sentence_transformers"] = stub
 
-import importlib
 for mod_name in [
     "lxml", "defusedxml", "defusedxml.lxml", "fitz", "docx", "redis", "bs4", "faker", "argon2", "argon2.exceptions",
     "pdfplumber", "langdetect", "striprtf", "striprtf.striprtf", "src.core.translator",
@@ -66,51 +65,9 @@ for mod_name in [
     "reportlab.lib.pagesizes", "reportlab.lib.utils", "plotly", "plotly.express", "plotly.graph_objects", 
     "matplotlib", "matplotlib.patches", "matplotlib.pyplot", "matplotlib.figure", "matplotlib.ticker", "networkx",
     "faiss", "torch", "psutil", "pytesseract", "sklearn", "sklearn.metrics", "sklearn.metrics.pairwise", "requests",
-    "bcrypt", "pyotp", "qrcode", "seaborn", "streamlit"
+    "bcrypt", "pyotp", "qrcode", "seaborn"
 ]:
-    if mod_name not in sys.modules:
-        if mod_name in ("lxml", "defusedxml.lxml"):
-            sys.modules[mod_name] = MagicMock()
-            if mod_name == "lxml":
-                sys.modules["lxml.etree"] = sys.modules["lxml"].etree
-            if mod_name == "defusedxml.lxml":
-                try:
-                    import defusedxml
-                    defusedxml.lxml = sys.modules[mod_name]
-                except ImportError:
-                    pass
-            continue
-        try:
-            importlib.import_module(mod_name)
-        except ImportError:
-            if mod_name == "docx":
-                class DummyStyle:
-                    name = "Normal"
-                class DummyDocxParagraph:
-                    def __init__(self, text):
-                        self.text = text
-                        self.style = DummyStyle()
-                class DummyDocxDocument:
-                    def __init__(self, file=None):
-                        self.paragraphs = []
-                        if file is not None:
-                            try:
-                                content = file.read() if hasattr(file, "read") else file
-                                if content.startswith(b"PK\x03\x04"):
-                                    self.paragraphs.append(DummyDocxParagraph(content[4:].decode("utf-8")))
-                            except Exception:
-                                pass
-                    def add_paragraph(self, text):
-                        self.paragraphs.append(DummyDocxParagraph(text))
-                    def save(self, file):
-                        file.write(b"PK\x03\x04" + "\n\n".join(p.text for p in self.paragraphs).encode("utf-8"))
-                
-                class DummyDocxModule:
-                    Document = DummyDocxDocument
-                
-                sys.modules[mod_name] = DummyDocxModule()
-            else:
-                sys.modules[mod_name] = MagicMock()
+    sys.modules[mod_name] = MagicMock()
 
 # ── Tesseract OCR Availability ────────────────────────────────────────────────
 TESSERACT_AVAILABLE = shutil.which("tesseract") is not None
