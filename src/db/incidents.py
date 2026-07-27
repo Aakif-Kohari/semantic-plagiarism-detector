@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import os
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timezone
