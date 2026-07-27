@@ -8,6 +8,7 @@ Maps SHA-256 hash of (foreign_text, source_lang, target_lang) -> cached_text.
 import hashlib
 import os
 import sqlite3
+import tempfile
 from typing import Optional
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "corpus.db")
@@ -15,8 +16,16 @@ DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.a
 
 def _init_db():
     """Initializes the translation cache table if it does not exist."""
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    with sqlite3.connect(DB_PATH) as conn:
+    path = DB_PATH
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        conn = sqlite3.connect(path)
+    except (sqlite3.OperationalError, OSError, PermissionError):
+        path = os.path.join(tempfile.gettempdir(), "semantic_plagiarism_detector", "data", "corpus.db")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        conn = sqlite3.connect(path)
+
+    with conn:
         cursor = conn.cursor()
         cursor.execute(
             """

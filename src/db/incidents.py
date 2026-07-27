@@ -5,6 +5,7 @@ import hashlib
 import io
 import os
 import sqlite3
+import tempfile
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
@@ -63,8 +64,13 @@ def build_incident_id(doc_a: str, doc_b: str) -> str:
 
 def _get_connection(db_path: str | Path) -> sqlite3.Connection:
     abs_path = os.path.abspath(str(db_path))
-    os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-    return sqlite3.connect(abs_path)
+    try:
+        os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+        return sqlite3.connect(abs_path)
+    except (sqlite3.OperationalError, OSError, PermissionError):
+        fallback_path = os.path.join(tempfile.gettempdir(), "semantic_plagiarism_detector", "data", os.path.basename(abs_path))
+        os.makedirs(os.path.dirname(fallback_path), exist_ok=True)
+        return sqlite3.connect(fallback_path)
 
 
 def init_incident_db(

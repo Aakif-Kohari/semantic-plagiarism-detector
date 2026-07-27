@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import sqlite3
+import tempfile
 import datetime
 
 import bcrypt
@@ -35,8 +36,13 @@ def configure_db_path(db_path: str | os.PathLike) -> None:
 
 def _connect() -> sqlite3.Connection:
     path = os.path.abspath(_DB_PATH)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    return sqlite3.connect(path, check_same_thread=False)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        return sqlite3.connect(path, check_same_thread=False)
+    except (sqlite3.OperationalError, OSError, PermissionError):
+        path = os.path.join(tempfile.gettempdir(), "semantic_plagiarism_detector", "data", "users.db")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        return sqlite3.connect(path, check_same_thread=False)
 
 
 def log_security_event(
