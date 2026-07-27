@@ -736,63 +736,67 @@ def extract_text_from_pdf(
             )
             return ""
 
-    page_lines: List[List[str]] = []
-
     try:
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
             num_pages = len(pdf.pages)
+            if num_pages == 0:
+                return ""
+
+            if _should_use_parallel() and num_pages > 1:
+                from concurrent.futures import ProcessPoolExecutor
+
+                page_lines = [[] for _ in range(num_pages)]
+                try:
+                    with ProcessPoolExecutor() as executor:
+                        futures = [
+                            executor.submit(
+                                _parse_pdf_page,
+                                pdf_bytes,
+                                page_index,
+                                ocr_dpi,
+                                ocr_language,
+                            )
+                            for page_index in range(num_pages)
+                        ]
+                        for page_index, future in enumerate(futures):
+                            page_lines[page_index] = future.result()
+                except OCRDependencyError:
+                    raise
+                except (RuntimeError, OSError) as exc:
+                    logger.warning(
+                        f"[document_parser] ProcessPoolExecutor failed ({exc}), falling back to sequential page parsing..."
+                    )
+                    page_lines = []
+                    for page_index in range(num_pages):
+                        page = pdf.pages[page_index]
+                        native_text = (page.extract_text() or "").strip()
+                        selected_text = native_text
+                        if not _has_meaningful_text(native_text):
+                            selected_text = _ocr_pdf_page(
+                                pdf_bytes,
+                                page_index,
+                                dpi=ocr_dpi,
+                                language=ocr_language,
+                            )
+                        page_lines.append(_clean_page_text(selected_text))
+            else:
+                page_lines = []
+                for page_index in range(num_pages):
+                    page = pdf.pages[page_index]
+                    native_text = (page.extract_text() or "").strip()
+                    selected_text = native_text
+                    if not _has_meaningful_text(native_text):
+                        selected_text = _ocr_pdf_page(
+                            pdf_bytes,
+                            page_index,
+                            dpi=ocr_dpi,
+                            language=ocr_language,
+                        )
+                    page_lines.append(_clean_page_text(selected_text))
+    except OCRDependencyError:
+        raise
     except Exception as exc:
         logger.error(f"[document_parser] Error reading PDF: {exc}")
-        return ""
-
-    if num_pages == 0:
-        return ""
-
-    if _should_use_parallel() and num_pages > 1:
-        from concurrent.futures import ProcessPoolExecutor
-
-        page_lines = [[] for _ in range(num_pages)]
-        try:
-            with ProcessPoolExecutor() as executor:
-                futures = [
-                    executor.submit(
-                        _parse_pdf_page,
-                        pdf_bytes,
-                        page_index,
-                        ocr_dpi,
-                        ocr_language,
-                    )
-                    for page_index in range(num_pages)
-                ]
-                for page_index, future in enumerate(futures):
-                    page_lines[page_index] = future.result()
-        except OCRDependencyError:
-            raise
-        except (RuntimeError, OSError) as exc:
-            logger.warning(
-                f"[document_parser] ProcessPoolExecutor failed ({exc}), falling back to sequential page parsing..."
-            )
-            page_lines = [
-                _parse_pdf_page(
-                    pdf_bytes,
-                    page_index,
-                    ocr_dpi,
-                    ocr_language,
-                )
-                for page_index in range(num_pages)
-            ]
-    else:
-        page_lines = [
-            _parse_pdf_page(
-                pdf_bytes,
-                page_index,
-                ocr_dpi,
-                ocr_language,
-            )
-            for page_index in range(num_pages)
-        ]
-
-    if not page_lines:
         return ""
 
     cleaned_pages = _remove_repeated_boundary_lines(page_lines)
@@ -1155,7 +1159,12 @@ def extract_text(
     else:
         raw = extract_text_from_txt(file)
 
-    return strip_bibliography(raw)
+    raw = strip_bibliography(raw)
+    lang_code = detect_text_language(raw)
+    logger.info(
+        f"[document_parser] Detected language for document '{filename}': {lang_code}"
+    )
+    return raw
 
 
 def extract_texts_from_pdfs(files: list, session_id: Optional[str] = None) -> Dict[str, str]:

@@ -105,13 +105,42 @@ def init_corpus_db() -> None:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS documents (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                filename    TEXT UNIQUE NOT NULL,
-                file_hash   TEXT UNIQUE NOT NULL,
-                upload_date TEXT NOT NULL
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename         TEXT    UNIQUE NOT NULL,
+                file_hash        TEXT    UNIQUE NOT NULL,
+                upload_date      TEXT    NOT NULL,
+                class_section    TEXT,
+                student_name     TEXT,
+                assignment_title TEXT,
+                pdf_author       TEXT,
+                pdf_creation_date TEXT,
+                pdf_title        TEXT,
+                tags             TEXT,
+                detected_language TEXT
             )
             """
         )
+
+        # Schema migration fallback logic: add missing columns if documents table already existed
+        cursor = conn.execute("PRAGMA table_info(documents)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "class_section" not in columns:
+            conn.execute("ALTER TABLE documents ADD COLUMN class_section TEXT")
+        if "student_name" not in columns:
+            conn.execute("ALTER TABLE documents ADD COLUMN student_name TEXT")
+        if "assignment_title" not in columns:
+            conn.execute("ALTER TABLE documents ADD COLUMN assignment_title TEXT")
+        if "pdf_author" not in columns:
+            conn.execute("ALTER TABLE documents ADD COLUMN pdf_author TEXT")
+        if "pdf_creation_date" not in columns:
+            conn.execute("ALTER TABLE documents ADD COLUMN pdf_creation_date TEXT")
+        if "pdf_title" not in columns:
+            conn.execute("ALTER TABLE documents ADD COLUMN pdf_title TEXT")
+        if "tags" not in columns:
+            conn.execute("ALTER TABLE documents ADD COLUMN tags TEXT")
+        if "detected_language" not in columns:
+            conn.execute("ALTER TABLE documents ADD COLUMN detected_language TEXT")
+
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS chunks (
@@ -146,6 +175,7 @@ def add_document(
     pdf_creation_date: str = None,
     pdf_title: str = None,
     tags: str = None,
+    detected_language: str = None,
 ) -> bool:
     """
     Insert a new document metadata row using parameterized execution.
@@ -159,7 +189,7 @@ def add_document(
     try:
         with _connect() as conn:
             conn.execute(
-                "INSERT INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, tags, detected_language) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     filename,
                     file_hash,
@@ -171,6 +201,7 @@ def add_document(
                     pdf_creation_date,
                     pdf_title,
                     tags,
+                    detected_language,
                 ),
             )
         return True
@@ -190,44 +221,24 @@ def get_document_by_hash(file_hash: str) -> str | None:
 def get_all_documents(include_deleted: bool = False) -> list:
     """Return all indexed documents sorted by upload date descending."""
     with _connect() as conn:
-        if include_deleted:
-            rows = conn.execute(
-                "SELECT filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, is_deleted, deleted_at FROM documents ORDER BY upload_date DESC"
-            ).fetchall()
-            return [
-                {
-                    "filename": r[0],
-                    "file_hash": r[1],
-                    "upload_date": r[2],
-                    "class_section": r[3],
-                    "student_name": r[4],
-                    "assignment_title": r[5],
-                    "pdf_author": r[6],
-                    "pdf_creation_date": r[7],
-                    "pdf_title": r[8],
-                    "is_deleted": r[9],
-                    "deleted_at": r[10],
-                }
-                for r in rows
-            ]
-        else:
-            rows = conn.execute(
-                "SELECT filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title FROM documents WHERE is_deleted = 0 ORDER BY upload_date DESC"
-            ).fetchall()
-            return [
-                {
-                    "filename": r[0],
-                    "file_hash": r[1],
-                    "upload_date": r[2],
-                    "class_section": r[3],
-                    "student_name": r[4],
-                    "assignment_title": r[5],
-                    "pdf_author": r[6],
-                    "pdf_creation_date": r[7],
-                    "pdf_title": r[8],
-                }
-                for r in rows
-            ]
+        rows = conn.execute(
+            "SELECT filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, detected_language FROM documents ORDER BY upload_date DESC"
+        ).fetchall()
+    return [
+        {
+            "filename": r[0],
+            "file_hash": r[1],
+            "upload_date": r[2],
+            "class_section": r[3],
+            "student_name": r[4],
+            "assignment_title": r[5],
+            "pdf_author": r[6],
+            "pdf_creation_date": r[7],
+            "pdf_title": r[8],
+            "detected_language": r[9],
+        }
+        for r in rows
+    ]
 
 
 def add_chunks(chunks_to_add: list) -> None:
@@ -468,6 +479,10 @@ def add_documents_bulk(documents: list) -> int:
     formatted_docs = []
     now = datetime.now().isoformat()
     for doc in documents:
+        if not doc.get("file_hash"):
+            raise sqlite3.IntegrityError("NOT NULL constraint failed: documents.file_hash")
+        if not doc.get("filename"):
+            raise sqlite3.IntegrityError("NOT NULL constraint failed: documents.filename")
         formatted_docs.append(
             (
                 doc.get("filename"),
@@ -480,17 +495,23 @@ def add_documents_bulk(documents: list) -> int:
                 doc.get("pdf_creation_date"),
                 doc.get("pdf_title"),
                 doc.get("tags"),
+                doc.get("detected_language"),
             )
         )
 
     success_count = 0
     with _connect() as conn:
-        cursor = conn.cursor()
-        cursor.executemany(
-            "INSERT OR IGNORE INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            formatted_docs,
-        )
-        success_count = cursor.rowcount
+        try:
+            total_before = conn.total_changes
+            conn.executemany(
+                "INSERT OR IGNORE INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, tags, detected_language) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                formatted_docs,
+            )
+            success_count = conn.total_changes - total_before
+            conn.commit()
+        except sqlite3.Error as e:
+            conn.rollback()
+            raise e
     return success_count
 
 

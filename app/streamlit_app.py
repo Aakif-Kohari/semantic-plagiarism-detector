@@ -946,12 +946,18 @@ with st.sidebar:
                         if is_new
                         else ""
                     )
+                    lang_code = doc.get("detected_language")
+                    lang_badge = (
+                        f' <span style="background-color:#6f42c1;color:white;font-size:0.7rem;padding:2px 6px;border-radius:4px;font-weight:bold;">{lang_code.upper()}</span>'
+                        if lang_code
+                        else ""
+                    )
                     safe_display_name = html.escape(
                         str(doc["filename"]),
                         quote=True,
                     )
                     st.markdown(
-                        f"📄 {safe_display_name}{badge_html}",
+                        f"📄 {safe_display_name}{lang_badge}{badge_html}",
                         unsafe_allow_html=True,
                     )
                 with col2:
