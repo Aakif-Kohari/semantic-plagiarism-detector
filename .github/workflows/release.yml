@@ -44,13 +44,7 @@ jobs:
           echo "Processing release for tag: $TAG_NAME"
           echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
 
-      - name: Build Source Distribution
-        id: build_sdist
-        run: |
-          # Ensures that the system is properly packaged for a release
-          python -m pip install --upgrade pip build
-          python -m build --sdist --wheel
-          echo "Package built successfully."
+
 
       - name: Generate Changelog
         id: changelog
@@ -74,9 +68,6 @@ jobs:
           body_path: CHANGELOG.md
           draft: true
           prerelease: ${{ contains(github.ref, '-') }}
-          files: |
-            dist/*.whl
-            dist/*.tar.gz
         env:
           # GitHub token is provided automatically by Actions
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

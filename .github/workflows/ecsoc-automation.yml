@@ -249,16 +249,6 @@ jobs:
                     }
                   }
 
-                  try {
-                    await github.rest.issues.removeLabel({
-                      owner: context.repo.owner,
-                      repo: context.repo.repo,
-                      issue_number: issue.number,
-                      name: 'ECSoC26'
-                    });
-                  } catch (e) {
-                    console.log("Error removing label:", e.message);
-                  }
 
                   await github.rest.issues.createComment({
                     owner: context.repo.owner,
@@ -325,16 +315,6 @@ jobs:
                       }
                     }
 
-                    try {
-                      await github.rest.issues.removeLabel({
-                        owner: context.repo.owner,
-                        repo: context.repo.repo,
-                        issue_number: issue.number,
-                        name: 'ECSoC26'
-                      });
-                    } catch (e) {
-                      console.log("Error removing label:", e.message);
-                    }
 
                     await github.rest.issues.createComment({
                       owner: context.repo.owner,
