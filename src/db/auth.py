@@ -47,32 +47,29 @@ from argon2.exceptions import VerificationError, VerifyMismatchError
 from src.db.migrations import migrate_auth_database
 import logging
 
-
-
-  return sqlite3.connect(_DB_PATH, check_same_thread=False)
-DB_PATH = os.path.abspath(
-
 logger = logging.getLogger(__name__)
 
 _DB_PATH = os.path.abspath(
-
     os.path.join(os.path.dirname(__file__), "..", "..", "users.db")
 )
 
 VALID_ROLES = {"admin", "teacher"}
 
-
-# Regex requiring at least 8 characters, one uppercase letter, one number, and one special character
 PASSWORD_COMPLEXITY_REGEX = re.compile(
     r"^(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\])[A-Za-z\d@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\]{8,}$"
 )
 
-# Initialize Argon2 password hasher
 _ph = PasswordHasher()
 
-# Initialize Argon2 password hasher
-_ph = PasswordHasher()
+def get_connection():
+    return sqlite3.connect(_DB_PATH, check_same_thread=False)
 
+def configure_db_path(db_path: str | os.PathLike) -> None:
+    global _DB_PATH
+    _DB_PATH = os.path.abspath(os.fspath(db_path))
+
+def _connect() -> sqlite3.Connection:
+    return sqlite3.connect(_DB_PATH, check_same_thread=False)
 
 
 def configure_db_path(db_path: str | os.PathLike) -> None:
@@ -80,11 +77,6 @@ def configure_db_path(db_path: str | os.PathLike) -> None:
     global _DB_PATH
     _DB_PATH = os.path.abspath(os.fspath(db_path))
 
-
-VALID_ROLES = {"admin", "teacher"}
-
-# Initialize Argon2 password hasher
-_ph = PasswordHasher()
 
 
 
@@ -392,8 +384,6 @@ def add_user(username: str, password: str, role: str = "teacher") -> None:
 
         hashed = _hash_password("Admin123!")
 
-        if not exists:
-
 
 
         if not exists:
@@ -457,12 +447,7 @@ def update_password(username: str, new_password: str) -> None:
                 (hashed, username),
             )
 
-        else:
-            # Update legacy seed password for admin if account already exists
-            conn.execute(
-                "UPDATE users SET password = ? WHERE username = ? AND role = 'admin'",
-                (hashed, "admin"),
-            )
+            
 
             conn.commit()
 
@@ -562,10 +547,10 @@ def get_2fa_status(username: str) -> tuple[bool, str | None]:
                     conn_rehash.commit()
             _record_login_timestamp(username)
 
-                update_password(username, password)
+            update_password(username, password)
 
 
-                update_password(username, password)
+            update_password(username, password)
             _record_login_timestamp(username)
 
             return True
