@@ -2482,7 +2482,7 @@ if not st.session_state.authenticated:
                         f"#{rank} — {doc_a} ↔ {doc_b} — {sim:.1%}{badge}",
                         expanded=st.session_state.expand_all_drill or (rank == 1),
                     ):
-                        highlighted_ca, highlighted_cb = highlight_overlap(ca, cb)
+                        highlighted_ca, highlighted_cb = highlight_overlap(ca, cb, theme_colors=get_colors())
                         st.markdown(
                             f"**{doc_a}:** {highlighted_ca}", unsafe_allow_html=True
                         )
