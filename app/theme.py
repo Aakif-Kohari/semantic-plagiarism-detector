@@ -58,9 +58,37 @@ THEMES = {
 # Backward-compatible default palette used by existing tests and callers.
 COLORS = THEMES["Light"]
 
+# ── Colormap Mappings & Constants ──────────────────────────────────────────────
+# Moved here from src/visualization/heatmap.py (Issue #633) so all
+# color/theme-related generation logic lives in one place.
 
-def initialize_theme() -> None:
-    """Initialize the active theme for the current session."""
+# Standard colormap options required by UI/UX specifications.
+UI_COLORMAP_OPTIONS: list[str] = ["Viridis", "Plasma", "Coolwarm", "YlOrRd"]
+
+# Map UI display names to exact Matplotlib/Seaborn string identifiers.
+MATPLOTLIB_CMAP_MAPPING: dict[str, str] = {
+    "Viridis": "viridis",
+    "Plasma": "plasma",
+    "Coolwarm": "coolwarm",
+    "YlOrRd": "YlOrRd",
+    # Legacy fallback mapping
+    "Legacy Red/Green": "RdYlGn_r",
+}
+
+# Map UI display names to exact Plotly string identifiers.
+PLOTLY_CMAP_MAPPING: dict[str, str] = {
+    "Viridis": "Viridis",
+    "Plasma": "Plasma",
+    "Coolwarm": "RdBu_r",  # Coolwarm equivalent in standard plotly
+    "YlOrRd": "YlOrRd",
+    # Legacy fallback mapping
+    "Legacy Red/Green": "RdYlGn_r",
+}
+
+DEFAULT_UI_COLORMAP: str = "Viridis"
+
+
+def initialize_theme() -> None:    """Initialize the active theme for the current session."""
     try:
         if "theme" not in st.session_state:
             st.session_state.theme = "Light"
