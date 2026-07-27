@@ -10,6 +10,7 @@ Enables incremental updates and index rebuilding without re-embedding.
 import logging
 import os
 import sqlite3
+import tempfile
 import threading
 from contextlib import contextmanager
 from datetime import datetime
@@ -24,7 +25,7 @@ from src.db.migrations import (delete_all_if_table_exists,
 from src.utils.filename import sanitize_filename
 
 _DB_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "corpus.db")
+    os.path.join(os.path.dirname(__file__), "..", "..", "data", "corpus.db")
 )
 
 _connection_pool = threading.local()
@@ -64,10 +65,21 @@ def _connect():
     handles when the process or a test is finished with the database.
     """
     path = os.path.abspath(_DB_PATH)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+    except (OSError, PermissionError):
+        path = os.path.join(tempfile.gettempdir(), "semantic_plagiarism_detector", "data", "corpus.db")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+
     pool = _pool()
     conn = pool.get(path)
     if conn is None:
-        conn = sqlite3.connect(path, check_same_thread=False)
+        try:
+            conn = sqlite3.connect(path, check_same_thread=False)
+        except sqlite3.OperationalError:
+            path = os.path.join(tempfile.gettempdir(), "semantic_plagiarism_detector", "data", "corpus.db")
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            conn = sqlite3.connect(path, check_same_thread=False)
         conn.execute("PRAGMA foreign_keys = ON")
         pool[path] = conn
 
@@ -106,7 +118,7 @@ def init_corpus_db() -> None:
                 tags             TEXT,
                 detected_language TEXT
             )
-        """
+            """
         )
 
         # Schema migration fallback logic: add missing columns if documents table already existed
@@ -132,26 +144,16 @@ def init_corpus_db() -> None:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS chunks (
-                vector_id    INTEGER PRIMARY KEY,
-                filename     TEXT    NOT NULL,
-                chunk_index  INTEGER NOT NULL,
-                chunk_text   TEXT    NOT NULL,
-                embedding    BLOB    NOT NULL,
-                FOREIGN KEY (filename) REFERENCES documents(filename) ON DELETE CASCADE
+                vector_id   INTEGER PRIMARY KEY,
+                filename    TEXT NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                chunk_text  TEXT NOT NULL,
+                embedding   BLOB NOT NULL,
+                FOREIGN KEY (filename)
+                    REFERENCES documents(filename)
+                    ON DELETE CASCADE
             )
-        """
-        )
-        conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS deleted_chunks (
-                vector_id    INTEGER,
-                filename     TEXT    NOT NULL,
-                chunk_index  INTEGER NOT NULL,
-                chunk_text   TEXT    NOT NULL,
-                embedding    BLOB    NOT NULL,
-                FOREIGN KEY (filename) REFERENCES documents(filename) ON DELETE CASCADE
-            )
-        """
         )
         migrate_corpus_database(conn)
 

@@ -8,11 +8,9 @@ from datetime import datetime
 
 def check_dependencies():
     """Ensure pytest and coverage are installed."""
-    try:
-        import coverage
-        import pytest
-    except ImportError as e:
-        print(f"Error: Missing dependency. {e}")
+    import importlib.util
+    if not (importlib.util.find_spec("coverage") and importlib.util.find_spec("pytest")):
+        print("Error: Missing dependency.")
         print("Please install requirements: pip install -r requirements.txt")
         sys.exit(1)
 
