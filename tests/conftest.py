@@ -57,17 +57,28 @@ if "sentence_transformers" not in sys.modules:
     stub.SentenceTransformer = MagicMock  # type: ignore[attr-defined]
     sys.modules["sentence_transformers"] = stub
 
+if "torch" not in sys.modules:
+    torch_stub = types.ModuleType("torch")
+    class Tensor:
+        pass
+    torch_stub.Tensor = Tensor  # type: ignore
+    sys.modules["torch"] = torch_stub
+
+
 for mod_name in [
     "lxml", "defusedxml", "defusedxml.lxml", "fitz", "docx", "redis", "bs4", "faker", "argon2", "argon2.exceptions",
     "pdfplumber", "langdetect", "striprtf", "striprtf.striprtf", "src.core.translator",
+    "src.core.webhook",
     "pypdf", "PyPDF2", "reportlab", "reportlab.pdfgen", "reportlab.lib", "reportlab.platypus", 
     "reportlab.lib.colors", "reportlab.lib.enums", "reportlab.lib.styles", "reportlab.lib.units", 
-    "reportlab.lib.pagesizes", "reportlab.lib.utils", "plotly", "plotly.express", "plotly.graph_objects", 
-    "matplotlib", "matplotlib.patches", "matplotlib.pyplot", "matplotlib.figure", "matplotlib.ticker", "networkx",
+    "reportlab.lib.pagesizes", "reportlab.lib.utils", 
+    "matplotlib", "matplotlib.patches", "matplotlib.pyplot", "matplotlib.figure", "matplotlib.ticker",
     "faiss", "torch", "psutil", "pytesseract", "sklearn", "sklearn.metrics", "sklearn.metrics.pairwise", "requests",
-    "bcrypt", "pyotp", "qrcode", "seaborn"
 ]:
-    sys.modules[mod_name] = MagicMock()
+    if mod_name not in sys.modules:
+        sys.modules[mod_name] = MagicMock()
+
+
 
 # ── Tesseract OCR Availability ────────────────────────────────────────────────
 TESSERACT_AVAILABLE = shutil.which("tesseract") is not None
@@ -174,9 +185,9 @@ def mock_db(tmp_path):
     # We patch the database path at the module level for all db modules
     import unittest.mock
     
-    with unittest.mock.patch("src.db.corpus_db._DB_PATH", str(db_file)), \
-         unittest.mock.patch("src.db.incidents.DEFAULT_DB_PATH", str(db_file)), \
-         unittest.mock.patch("src.db.auth._DB_PATH", str(db_file)):
+    with unittest.mock.patch("src.db.corpus_db._DB_PATH", str(corpus_db_file)), \
+         unittest.mock.patch("src.db.incidents.DEFAULT_DB_PATH", str(corpus_db_file)), \
+         unittest.mock.patch("src.db.auth._DB_PATH", str(auth_db_file)):
         
         try:
             from src.db.corpus_db import init_corpus_db
@@ -185,8 +196,8 @@ def mock_db(tmp_path):
             init_corpus_db()
             init_incident_db()
             init_db()
-        except Exception as e:
+        except Exception:
             import traceback
             traceback.print_exc()
             
-        yield str(db_file)
+        yield str(corpus_db_file)

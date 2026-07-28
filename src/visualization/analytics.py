@@ -230,3 +230,57 @@ def plot_similarity_distribution(sim_matrix: pd.DataFrame, title: str = "Distrib
     )
 
     return fig
+
+
+def plot_document_sizes(word_counts: dict[str, int]) -> go.Figure:
+    """Create a bar chart visualizing document word counts.
+
+    Args:
+        word_counts: Dictionary mapping document names to word counts.
+
+    Returns:
+        Plotly Figure object.
+    """
+    if not word_counts:
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No documents currently in the database",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
+            font=dict(size=16, color="gray"),
+        )
+        fig.update_layout(title="Document Word Counts", height=400)
+        return fig
+
+    doc_names = list(word_counts.keys())
+    counts = list(word_counts.values())
+
+    display_names = [
+        name[:30] + "..." if len(name) > 30 else name for name in doc_names
+    ]
+
+    fig = px.bar(
+        x=display_names,
+        y=counts,
+        title="Document Word Counts",
+        labels={"x": "Document Name", "y": "Word Count"},
+    )
+
+    fig.update_layout(
+        xaxis_title="Document Name",
+        yaxis_title="Word Count",
+        height=400,
+        showlegend=False,
+    )
+
+    fig.update_traces(
+        marker_color="#00cc96",
+        customdata=doc_names,
+        hovertemplate="<b>%{customdata}</b><br>Words: %{y}<extra></extra>",
+    )
+
+    return fig
+

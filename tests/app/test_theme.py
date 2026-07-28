@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from app.theme import badge_html, get_colors, inject_css
+from app.theme import badge_html, get_colors, inject_css, sanitize_hex_color
 
 
 def test_get_colors_returns_valid_theme_colors():
@@ -65,9 +65,6 @@ def test_inject_css_generates_css_without_errors():
     assert "<style>" in css
 
 
-from app.theme import (COLORS, badge_html, get_colors, inject_css,
-                       sanitize_hex_color, sanitize_theme_colors,
-                       severity_tier, tier_color, tier_from_severity_label)
 
 
 def test_sanitize_hex_color_valid_and_invalid():

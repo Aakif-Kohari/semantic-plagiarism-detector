@@ -4,13 +4,18 @@ tests/visualization/test_network_graph.py
 Unit tests for plot_similarity_network edge cases.
 """
 
+import time
 from unittest.mock import patch
 
+import networkx as nx
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
 from src.visualization.network_graph import (
     build_network_data,
+    export_graph_to_gexf,
+    export_network_to_gexf_bytes,
     plot_similarity_network,
     render_network_plotly,
 )
@@ -174,26 +179,147 @@ def test_plot_similarity_network_layout_autosize():
     assert fig.layout.width is None
 
 
-def test_build_network_data_min_degree_filter():
-    """Verify min_degree filters out nodes connected to fewer than min_degree documents."""
+def test_plot_similarity_network_benchmark_200_nodes():
+    """Verify rendering a 200-node graph completes in under 2.0 seconds."""
+    np.random.seed(42)
+    n = 200
+    doc_names = [f"doc_{i}" for i in range(n)]
+
+    matrix = np.random.uniform(0.1, 0.95, size=(n, n))
+    matrix = (matrix + matrix.T) / 2.0
+    np.fill_diagonal(matrix, 1.0)
+
+    df = pd.DataFrame(matrix, index=doc_names, columns=doc_names)
+
+    start_time = time.perf_counter()
+    fig = plot_similarity_network(df, threshold=0.80)
+    elapsed_time = time.perf_counter() - start_time
+
+    assert isinstance(fig, go.Figure)
+    assert (
+        elapsed_time < 2.0
+    ), f"Graph rendering took {elapsed_time:.3f}s, exceeding 2.0s benchmark."
+
+
+def test_export_graph_to_gexf_produces_valid_xml():
+    """Verify export_graph_to_gexf returns well-formed GEXF XML for a simple graph."""
+    G = nx.Graph()
+    G.add_node("doc1")
+    G.add_node("doc2")
+    G.add_edge("doc1", "doc2", similarity=0.85)
+
+    gexf_str = export_graph_to_gexf(G)
+
+    assert "<gexf" in gexf_str
+    assert "</gexf>" in gexf_str
+    assert "doc1" in gexf_str
+    assert "doc2" in gexf_str
+    assert 'similarity="0.85"' in gexf_str or "0.85" in gexf_str
+    assert gexf_str.endswith(">")
+
+
+def test_export_graph_to_gexf_empty_graph():
+    """Verify export_graph_to_gexf handles an empty graph."""
+    G = nx.Graph()
+    gexf_str = export_graph_to_gexf(G)
+    assert "<gexf" in gexf_str
+    assert "</gexf>" in gexf_str
+
+
+def test_export_graph_to_gexf_single_node():
+    """Verify export_graph_to_gexf handles a graph with a single node and no edges."""
+    G = nx.Graph()
+    G.add_node("only_doc")
+    gexf_str = export_graph_to_gexf(G)
+    assert "<gexf" in gexf_str
+    assert "only_doc" in gexf_str
+
+
+def test_export_graph_to_gexf_multiple_edges():
+    """Verify export_graph_to_gexf captures all edges with similarity attributes."""
+    G = nx.Graph()
+    G.add_node("doc1")
+    G.add_node("doc2")
+    G.add_node("doc3")
+    G.add_edge("doc1", "doc2", similarity=0.85)
+    G.add_edge("doc2", "doc3", similarity=0.92)
+
+    gexf_str = export_graph_to_gexf(G)
+
+    # Two edges should appear in the output (count closing edge tags)
+    edge_count = gexf_str.count("</edge>")
+    assert edge_count == 2, f"Expected 2 edges, found {edge_count}"
+
+
+def test_export_network_to_gexf_bytes_returns_bytes():
+    """Verify export_network_to_gexf_bytes returns non-empty bytes."""
     data = {
-        "doc1": [1.0, 0.85, 0.80, 0.10],
-        "doc2": [0.85, 1.0, 0.10, 0.10],
-        "doc3": [0.80, 0.10, 1.0, 0.10],
-        "doc4": [0.10, 0.10, 0.10, 1.0],
+        "doc1": [1.0, 0.85, 0.20],
+        "doc2": [0.85, 1.0, 0.10],
+        "doc3": [0.20, 0.10, 1.0],
     }
-    df = pd.DataFrame(data, index=["doc1", "doc2", "doc3", "doc4"])
+    df = pd.DataFrame(data, index=["doc1", "doc2", "doc3"])
 
-    # doc1 is connected to doc2 and doc3 (degree 2)
-    # doc2 is connected to doc1 (degree 1)
-    # doc3 is connected to doc1 (degree 1)
-    # doc4 is isolated (degree 0)
-    net_data = build_network_data(df, threshold=0.75, min_degree=2)
-    nodes = list(net_data["graph"].nodes())
+    result = export_network_to_gexf_bytes(df, threshold=0.75)
 
-    assert "doc1" in nodes
-    assert "doc2" not in nodes
-    assert "doc3" not in nodes
-    assert "doc4" not in nodes
-    assert len(nodes) == 1
+    assert isinstance(result, bytes)
+    assert len(result) > 0
+
+
+def test_export_network_to_gexf_bytes_contains_nodes_and_edges():
+    """Verify GEXF output contains expected nodes and edge attributes from similarity matrix."""
+    data = {
+        "doc1": [1.0, 0.95],
+        "doc2": [0.95, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2"])
+
+    result = export_network_to_gexf_bytes(df, threshold=0.75)
+    decoded = result.decode("utf-8")
+
+    assert "doc1" in decoded
+    assert "doc2" in decoded
+    assert "<edge" in decoded
+    assert "0.95" in decoded
+
+
+def test_export_network_to_gexf_bytes_no_edges():
+    """Verify GEXF output for a matrix with no pairs exceeding threshold."""
+    data = {
+        "doc1": [1.0, 0.10],
+        "doc2": [0.10, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2"])
+
+    result = export_network_to_gexf_bytes(df, threshold=0.75)
+    decoded = result.decode("utf-8")
+
+    assert "doc1" in decoded
+    assert "doc2" in decoded
+    assert "<edge " not in decoded and "</edge>" not in decoded
+
+
+def test_export_network_to_gexf_bytes_empty_dataframe():
+    """Verify GEXF export handles an empty DataFrame gracefully."""
+    df = pd.DataFrame()
+    result = export_network_to_gexf_bytes(df, threshold=0.75)
+    assert isinstance(result, bytes)
+
+
+def test_export_network_to_gexf_bytes_min_degree_filter():
+    """Verify min_degree filtering is reflected in GEXF output."""
+    data = {
+        "doc1": [1.0, 0.85, 0.80],
+        "doc2": [0.85, 1.0, 0.10],
+        "doc3": [0.80, 0.10, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2", "doc3"])
+
+    # doc1 has degree 2, doc2 and doc3 have degree 1
+    result = export_network_to_gexf_bytes(df, threshold=0.75, min_degree=2)
+    decoded = result.decode("utf-8")
+
+    assert "doc1" in decoded
+    assert "doc2" not in decoded
+    assert "doc3" not in decoded
 
