@@ -69,3 +69,7 @@ isort>=5.13.0                   # Import sorting library
 # ── Google Integration ─────────────────────────────────────────────────────────
 google-api-python-client>=2.198.0
 google-auth>=2.56.2
+
+# ── Background Task Queue ─────────────────────────────────────────────────────
+rq>=1.16.0                      # Redis-backed background job queue for async upload processing
+hiredis>=2.3.0                  # C-extension Redis parser for faster RQ job dequeue
