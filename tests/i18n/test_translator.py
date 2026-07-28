@@ -103,3 +103,27 @@ def test_get_text_invalid_lang_falls_back_to_english():
     """An unsupported language code should fall back to English."""
     result = get_text("title", lang="xx")
     assert "Semantic Plagiarism" in result
+
+
+def test_get_text_with_format_html_escapes_values():
+    template = "Status: {label}"
+    modified = dict(_translations, en={**_translations["en"], "_test_xss": template})
+    with patch.dict("src.i18n.translator._translations", modified, clear=False):
+        result = get_text("_test_xss", lang="en", label='<script>alert("xss")</script>')
+    assert "Status: " in result
+    assert "&lt;script&gt;" in result
+    assert "<script>" not in result
+    assert "&quot;" in result or "&#x27;" in result
+
+
+def test_get_text_with_format_no_kwargs_leaves_placeholder_unchanged():
+    template = "Hello {name}"
+    modified = dict(_translations, en={**_translations["en"], "_test_ph": template})
+    with patch.dict("src.i18n.translator._translations", modified, clear=False):
+        result = get_text("_test_ph", lang="en")
+    assert result == "Hello {name}"
+
+
+def test_get_text_with_format_no_placeholder_ignores_unused_kwargs():
+    result = get_text("title", lang="en", unused="<br>")
+    assert result == "🔍 Semantic Plagiarism Detection System"
