@@ -573,6 +573,8 @@ def render_warning_controls(
         else:
             st.info(get_text("warn_no_match", lang=lang_code))
     with middle:
+        copy_label = "📋 Copy Summary"
+        copied_label = "✅ Copied!"
         html_code = f"""
         <style>
             body {{

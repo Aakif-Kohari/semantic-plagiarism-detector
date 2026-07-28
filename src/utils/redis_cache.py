@@ -8,18 +8,15 @@ Now includes highly optimized payload compression using zlib for massive similar
 """
 
 import atexit
-import hashlib
 import json
 import logging
-import math
 import os
 import pickle
 import threading
 import time
 import zlib
 from enum import Enum
-from typing import Any, Dict, Optional, Tuple, Union
-from urllib.parse import quote
+from typing import Any, Optional
 
 try:
     import redis

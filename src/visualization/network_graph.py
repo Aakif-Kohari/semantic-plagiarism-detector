@@ -78,6 +78,7 @@ def build_network_data(
     theme_colors: Optional[dict] = None,
     selected_node: Optional[str] = None,
     document_tags: Optional[dict] = None,
+    doc_metadata: Optional[dict] = None,
 ) -> dict:
     """
     Processes similarity matrix data, constructs NetworkX graph layout, and formats node and edge traces.
@@ -245,8 +246,6 @@ def build_network_data(
     # Store the document ID for each Plotly node.
     # The order matches node_x, node_y, and node_text.
     node_document_ids = []
-
-    neighbor_nodes = set(G.neighbors(selected_node)) if selected_node and selected_node in G else set()
 
     for node in G.nodes():
         x, y = pos[node]
