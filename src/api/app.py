@@ -1,23 +1,24 @@
 """src/api/app.py - FastAPI REST API for LMS integration."""
 
+import logging
 import os
 from typing import Dict
 
-from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
+import numpy as np
+from fastapi import (Depends, FastAPI, File, HTTPException, Query, UploadFile,
+                     status)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
-import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 
 from src.core.document_parser import extract_text
 from src.core.embedding_model import embed_chunks, get_document_embedding
-from src.core.similarity import (
-    PLAGIARISM_THRESHOLD,
-    chunk_max_similarity,
-    find_most_similar_chunks,
-)
+from src.core.similarity import (PLAGIARISM_THRESHOLD, chunk_max_similarity,
+                                 find_most_similar_chunks)
 from src.core.text_chunking import chunk_document
-from src.db.corpus_db import _connect, init_corpus_db
+from src.db.auth import get_user_role
+from src.db.corpus_db import _connect, clear_all_data, init_corpus_db
+from src.utils.redis_cache import CacheKeyPrefix, get_cache
 
 # ── API Initialization ────────────────────────────────────────────────────────
 
@@ -62,6 +63,7 @@ def verify_bearer_token(
 
 # ── Database Helpers ───────────────────────────────────────────────────────────
 
+
 def get_corpus_documents_with_embeddings() -> Dict[str, Dict]:
     """Load all stored corpus documents, text chunks, and chunk embeddings from SQLite."""
     init_corpus_db()
@@ -92,6 +94,7 @@ def get_corpus_documents_with_embeddings() -> Dict[str, Dict]:
 
 # ── API Endpoints ──────────────────────────────────────────────────────────────
 
+
 @app.get("/health", tags=["Health"])
 def health_check():
     """Healthcheck endpoint for readiness and liveness probes."""
@@ -102,9 +105,38 @@ def health_check():
     }
 
 
+_HEALTHZ_DB_PATHS = (
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "corpus.db")),
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "users.db")),
+)
+
+
+@app.get("/healthz", tags=["Health"])
+def healthz():
+    """Lightweight /healthz endpoint for DevOps monitoring and load balancer probes.
+
+    Returns 200 OK with the combined SQLite database size so operators can
+    monitor storage growth without rendering the Streamlit UI.
+    """
+    total_bytes = 0
+    for path in _HEALTHZ_DB_PATHS:
+        try:
+            total_bytes += os.path.getsize(path) if os.path.exists(path) else 0
+        except OSError:
+            pass
+
+    return {
+        "status": "ok",
+        "db_size_bytes": total_bytes,
+        "db_size_mb": round(total_bytes / (1024 * 1024), 2),
+    }
+
+
 @app.post("/api/v1/scan", tags=["Plagiarism Detection"])
 async def scan_document(
-    file: UploadFile = File(..., description="Document file to scan (.pdf, .docx, .txt)"),
+    file: UploadFile = File(
+        ..., description="Document file to scan (.pdf, .docx, .txt)"
+    ),
     threshold: float = Query(
         default=PLAGIARISM_THRESHOLD,
         ge=0.0,
@@ -243,3 +275,63 @@ async def scan_document(
         "matched_documents_count": len(matched_documents),
         "matched_documents": matched_documents,
     }
+
+
+# ── System Administration ──────────────────────────────────────────────────────
+
+logger = logging.getLogger(__name__)
+INDEX_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "corpus.index")
+)
+
+
+@app.post("/api/v1/clear", tags=["System Administration"])
+async def clear_all_documents(
+    username: str = Query(
+        ..., description="Username of the administrator executing the operation"
+    ),
+    _token: str = Depends(verify_bearer_token),
+):
+    """
+    Remove all documents, text chunks, and plagiarism incidents from the SQLite database,
+    delete the FAISS index file, and clear the Redis cache. Restricted to administrators.
+    """
+    # 1. Verify administrator permissions
+    role = get_user_role(username)
+    if role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: Only administrators are authorized to clear all documents.",
+        )
+
+    try:
+        # 2. Clear SQLite database (documents, chunks, incidents)
+        clear_all_data()
+
+        # 3. Clear/reset the FAISS index file on disk
+        if os.path.exists(INDEX_PATH):
+            try:
+                os.remove(INDEX_PATH)
+            except OSError as e:
+                logger.error(f"Failed to remove FAISS index file: {e}")
+
+        # 4. Invalidate Redis cache
+        try:
+            cache = get_cache()
+            if cache.is_available():
+                cache.delete(CacheKeyPrefix.LEGACY_FAISS_INDEX.value)
+                cache.clear_pattern(CacheKeyPrefix.LEGACY_ANALYSIS_PATTERN.value)
+        except Exception as e:
+            logger.error(f"Failed to clear Redis cache: {e}")
+
+        return {
+            "status": "success",
+            "message": "All documents, chunks, and plagiarism incidents have been cleared, and the FAISS index reset successfully.",
+        }
+
+    except Exception as e:
+        logger.error(f"Error during bulk clearing: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An error occurred while clearing the corpus: {str(e)}",
+        )

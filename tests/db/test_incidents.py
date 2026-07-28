@@ -1,23 +1,17 @@
 import csv
 import io
+
 import pytest
 
-from src.db.incidents import (
-    init_incident_db,
-    build_incident_id,
-    sync_flagged_incidents,
-    get_all_incidents,
-    update_review_status,
-    incidents_to_csv,
-    export_current_flags_csv,
-)
+from src.db.incidents import (build_incident_id, export_current_flags_csv,
+                              get_all_incidents, incidents_to_csv,
+                              sync_flagged_incidents, update_review_status)
 
 
-@pytest.fixture
-def test_db(tmp_path):
-    db_path = tmp_path / "incidents.db"
-    init_incident_db(db_path)
-    return db_path
+@pytest.fixture(autouse=True)
+def test_db(mock_db):
+    # Backward compatibility for tests expecting test_db fixture returning the path
+    return mock_db
 
 
 def test_build_incident_id_is_deterministic():
