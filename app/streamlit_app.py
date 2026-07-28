@@ -131,6 +131,10 @@ from src.db import (
     get_unique_class_sections,
     init_corpus_db,
 )
+
+from src.db.auth import get_all_users, get_user_role, init_db, verify_user
+from src.utils.pdf_report import highlight_pdf_matches, truncate_filename
+
 from src.db.auth import (
     authenticate_user,
     check_login_rate_limit,
@@ -159,6 +163,7 @@ from src.db.incidents import (  # noqa: E402
 from src.utils.diff_highlighter import highlight_overlap
 from src.utils.excel_export import export_similarity_matrix_to_excel
 from src.utils.pdf_report import highlight_pdf_matches  # noqa: E402
+
 from src.utils.redis_cache import (
     cache_session_state,
     clear_session,
@@ -193,8 +198,11 @@ except Exception:
     from src.utils.json_export import export_similarity_matrix_to_json
 except ImportError:
 
+    from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore[import-untyped,reportMissingImports]
+
     from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore
     from utils.json_export import export_similarity_matrix_to_json
+
 
 
 # Initialize corpus database
@@ -231,6 +239,11 @@ _INDEX_PATH = os.path.abspath(
 from streamlit_tour import Tour
 
 try:
+
+    from streamlit_tour import Tour
+except Exception:
+    Tour = None
+
     from src.utils.google_drive import import_from_google_drive  # type: ignore
 except Exception:
     import_from_google_drive = None
@@ -238,6 +251,7 @@ except Exception:
 # -----------------------------------------------------------------------------
 # Page Configuration & Session State
 # -----------------------------------------------------------------------------
+
 
 
 # Page Configuration
@@ -1032,6 +1046,11 @@ else:
             registry = []
 
 
+    if "analysis_results" not in st.session_state:
+        st.session_state.analysis_results = None
+
+
+
     def load_analysis_results_from_db():
         import numpy as np
         import pandas as pd
@@ -1128,6 +1147,22 @@ else:
 
     if "analysis_file_signature" not in st.session_state:
         st.session_state.analysis_file_signature = None
+
+
+        cached_signature = get_session_state(SESSION_ID, "analysis_file_signature")
+        if cached_signature is not None:
+            st.session_state.analysis_file_signature = cached_signature
+
+            faiss_index = (
+                load_index(_INDEX_PATH) if os.path.exists(_INDEX_PATH) else None
+            )
+            registry = get_chunk_registry()
+    else:
+        faiss_index = load_index(_INDEX_PATH) if os.path.exists(_INDEX_PATH) else None
+        registry = get_chunk_registry()
+
+
+
         cached_signature = get_session_state(SESSION_ID, "analysis_file_signature")
         if cached_signature is not None:
             st.session_state.analysis_file_signature = cached_signature
@@ -1566,6 +1601,9 @@ if not st.session_state.authenticated:
             )
             st.stop()
 
+
+    # ── Metadata Editor Section (#578 Character Count Statistics Included) ───────
+
     st.markdown("### 📝 Set Document Metadata")
     col1, col2 = st.columns(2)
     with col1:
@@ -1580,6 +1618,30 @@ if not st.session_state.authenticated:
         batch_tags = st.text_input("Tags (comma separated)", placeholder="#hw1, #draft")
 
     metadata_dict = {}
+
+    for filename, raw_bytes in file_bytes_dict.items():
+        base_name = os.path.splitext(filename)[0]
+        guessed_name = base_name.replace("_", " ").replace("-", " ").title()
+
+        # Calculate character and word count statistics
+        char_count = len(raw_bytes)
+        try:
+            text_str = raw_bytes.decode("utf-8", errors="ignore")
+            word_count = len(text_str.split())
+            char_count = len(text_str)
+        except Exception:
+            word_count = len(raw_bytes.split())
+
+        expander_label = (
+            f"📄 {filename}  "
+            f"(`{char_count:,}` chars | `{word_count:,}` words)"
+        )
+
+        with st.expander(expander_label, expanded=False):
+            st.caption(
+                f"📊 **Document Statistics:** {char_count:,} characters · {word_count:,} words"
+            )
+
     for filename in file_bytes_dict.keys():
         # Check if this filename is a virtual CSV document
         is_csv_doc = False
@@ -1634,6 +1696,7 @@ if not st.session_state.authenticated:
 
     if url_filename:
         with st.expander(f"🔗 {url_filename}", expanded=True):
+
             student_name = st.text_input(
                 f"Student Name for {url_filename}",
                 value="Web Source",
@@ -1653,7 +1716,12 @@ if not st.session_state.authenticated:
                 "student_name": student_name.strip(),
                 "class_section": class_section.strip(),
                 "assignment_title": assignment_title.strip(),
+
+                "char_count": char_count,
+                "word_count": word_count,
+
                 "tags": batch_tags.strip(),
+
             }
 
     @st.cache_data(show_spinner=False)
