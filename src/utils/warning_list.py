@@ -10,9 +10,9 @@ import pandas as pd
 import streamlit as st
 
 from app.theme import badge_html, tier_from_severity_label
-from src.i18n.translator import get_text
 from src.core.config import normalize_severity_label, severity_from_score, severity_rank
 from src.db.incidents import _normalise_pair, add_false_positive, get_false_positives
+from src.i18n.translator import get_text
 
 try:
     from thefuzz import fuzz
@@ -22,6 +22,7 @@ except ImportError:
     except ImportError:
         fuzz = None
 FUZZY_THRESHOLD = 75
+MAX_SEARCH_QUERY_LENGTH = 200
 
 _SORT_KEYS = {
     "warn_sort_similarity": "similarity",
@@ -70,13 +71,20 @@ def _normalise_warning(
     }
 
 
+def _truncate_search_query(search_query: str) -> str:
+    """Limit search input length to avoid expensive matching on oversized strings."""
+    if not isinstance(search_query, str):
+        return ""
+    return search_query[:MAX_SEARCH_QUERY_LENGTH].strip()
+
+
 def filter_warnings(
     warnings: Iterable[Mapping[str, Any]],
     search_query: str = "",
     min_match_length: int = 0,
 ) -> list[dict[str, Any]]:
     """
-    Filters warnings by query using exact substring matching and 
+    Filters warnings by query using exact substring matching and
     fuzzy string matching (thefuzz/fuzzywuzzy) to handle minor typos.
     """
     normalised = [_normalise_warning(item) for item in warnings]
@@ -88,7 +96,7 @@ def filter_warnings(
             if item.get("matched_length", 0) >= min_match_length
         ]
 
-    query = search_query.strip().casefold()
+    query = _truncate_search_query(search_query).casefold()
 
     if not query:
         return normalised
@@ -105,8 +113,12 @@ def filter_warnings(
 
         # 2. Check fuzzy match if fuzz library is available
         if fuzz is not None:
-            score_a = max(fuzz.partial_ratio(query, doc_a), fuzz.token_set_ratio(query, doc_a))
-            score_b = max(fuzz.partial_ratio(query, doc_b), fuzz.token_set_ratio(query, doc_b))
+            score_a = max(
+                fuzz.partial_ratio(query, doc_a), fuzz.token_set_ratio(query, doc_a)
+            )
+            score_b = max(
+                fuzz.partial_ratio(query, doc_b), fuzz.token_set_ratio(query, doc_b)
+            )
 
             if score_a >= FUZZY_THRESHOLD or score_b >= FUZZY_THRESHOLD:
                 filtered.append(item)
@@ -217,6 +229,7 @@ def _has_exact_match(doc_a: str, doc_b: str) -> bool:
 
     return not norm_a.isdisjoint(norm_b)
 
+
 def render_compact_warning_row(flag: Mapping[str, Any]) -> None:
     """
     Render warning in compact single-line format.
@@ -244,9 +257,7 @@ def render_compact_warning_row(flag: Mapping[str, Any]) -> None:
         )
 
     with col2:
-        st.markdown(
-            f"**{similarity:.1f}%**"
-        )
+        st.markdown(f"**{similarity:.1f}%**")
 
     with col3:
         st.markdown(
@@ -263,6 +274,7 @@ def render_compact_warning_row(flag: Mapping[str, Any]) -> None:
             add_false_positive(doc_a, doc_b)
             st.rerun()
 
+
 def render_warning_controls(
     flags: Sequence[Mapping[str, Any]],
     *,
@@ -277,14 +289,20 @@ def render_warning_controls(
 
     from src.core.config import DEFAULT_THRESHOLDS
 
-    st.caption(get_text("warn_pairs_caption", lang=lang_code).format(threshold=f"{threshold:.2f}"))
+    st.caption(
+        get_text("warn_pairs_caption", lang=lang_code).format(
+            threshold=f"{threshold:.2f}"
+        )
+    )
 
     active_filters = []
     if abs(threshold - DEFAULT_THRESHOLDS.plagiarism) > 0.001:
         active_filters.append(
             {
                 "key": "clear_threshold",
-                "label": get_text("warn_filter_threshold", lang=lang_code).format(pct=f"{threshold*100:.0f}"),
+                "label": get_text("warn_filter_threshold", lang=lang_code).format(
+                    pct=f"{threshold*100:.0f}"
+                ),
                 "action": "threshold",
             }
         )
@@ -307,7 +325,7 @@ def render_warning_controls(
             }
         )
 
-    warning_search = st.session_state.get("warning_search", "").strip()
+    warning_search = _truncate_search_query(st.session_state.get("warning_search", ""))
     if warning_search:
         display_search = (
             warning_search if len(warning_search) <= 15 else warning_search[:12] + "..."
@@ -315,7 +333,9 @@ def render_warning_controls(
         active_filters.append(
             {
                 "key": "clear_warning_search",
-                "label": get_text("warn_filter_search", lang=lang_code).format(query=display_search),
+                "label": get_text("warn_filter_search", lang=lang_code).format(
+                    query=display_search
+                ),
                 "action": "warning_search",
             }
         )
@@ -330,7 +350,9 @@ def render_warning_controls(
         active_filters.append(
             {
                 "key": "clear_document_filter",
-                "label": get_text("warn_filter_document", lang=lang_code).format(doc=display_doc),
+                "label": get_text("warn_filter_document", lang=lang_code).format(
+                    doc=display_doc
+                ),
                 "action": "selected_document_id",
             }
         )
@@ -343,7 +365,9 @@ def render_warning_controls(
         active_filters.append(
             {
                 "key": "clear_class_filter",
-                "label": get_text("warn_filter_class", lang=lang_code).format(class_name=display_class),
+                "label": get_text("warn_filter_class", lang=lang_code).format(
+                    class_name=display_class
+                ),
                 "action": "class_filter",
             }
         )
@@ -353,7 +377,9 @@ def render_warning_controls(
         active_filters.append(
             {
                 "key": "clear_min_match_length",
-                "label": get_text("warn_filter_min_words", lang=lang_code).format(count=min_match_len_val),
+                "label": get_text("warn_filter_min_words", lang=lang_code).format(
+                    count=min_match_len_val
+                ),
                 "action": "min_match_length",
             }
         )
@@ -420,6 +446,7 @@ def render_warning_controls(
             key="warning_search",
             on_change=_reset_page,
         )
+        search_query = _truncate_search_query(search_query)
 
     with toggle_col:
         hide_low_severity = st.checkbox(
@@ -473,7 +500,10 @@ def render_warning_controls(
     with d1:
         primary_direction = st.selectbox(
             get_text("warn_direction", lang=lang_code),
-            [get_text("warn_descending", lang=lang_code), get_text("warn_ascending", lang=lang_code)],
+            [
+                get_text("warn_descending", lang=lang_code),
+                get_text("warn_ascending", lang=lang_code),
+            ],
             key="warning_primary_direction",
             on_change=_reset_page,
         )
@@ -490,7 +520,10 @@ def render_warning_controls(
     with d2:
         secondary_direction = st.selectbox(
             get_text("warn_direction", lang=lang_code),
-            [get_text("warn_ascending", lang=lang_code), get_text("warn_descending", lang=lang_code)],
+            [
+                get_text("warn_ascending", lang=lang_code),
+                get_text("warn_descending", lang=lang_code),
+            ],
             key="warning_secondary_direction",
             on_change=_reset_page,
         )
@@ -544,7 +577,9 @@ def render_warning_controls(
             matched_words = flag.get("matched_length", 0)
             sim_label = get_text("warn_summary_similarity_label", lang=lang_code)
             sev_label = get_text("warn_summary_severity_label", lang=lang_code)
-            words_text = get_text("warn_summary_words_matched", lang=lang_code).format(count=matched_words)
+            words_text = get_text("warn_summary_words_matched", lang=lang_code).format(
+                count=matched_words
+            )
             markdown_lines.append(
                 f"{idx}. **{flag['doc_a']}** ↔ **{flag['doc_b']}** — "
                 f"{sim_label} `{flag['similarity'] * 100:.1f}%` ({words_text}) | "
@@ -654,71 +689,73 @@ def render_warning_controls(
     # instead of snapping instantly.
     with st.container(key="warning_list_container"):
 
-      for flag in current_page.items:
+        for flag in current_page.items:
 
-        if compact_view:
-            render_compact_warning_row(flag)
-            st.markdown(
-                 "<hr style='margin:4px 0;border:0;border-top:1px solid #eee;'>",
-                 unsafe_allow_html=True,
-            )
+            if compact_view:
+                render_compact_warning_row(flag)
+                st.markdown(
+                    "<hr style='margin:4px 0;border:0;border-top:1px solid #eee;'>",
+                    unsafe_allow_html=True,
+                )
 
-        else:
-            tier = tier_from_severity_label(flag["severity"])
+            else:
+                tier = tier_from_severity_label(flag["severity"])
 
-            with st.container(border=True):
-                c1, c2, c3 = st.columns([3, 1, 1])
-                with c1:
-                    exact_match_label = get_text("warn_exact_match", lang=lang_code)
-                    if _has_exact_match(flag["doc_a"], flag["doc_b"]):
-                        exact_badge = f" <span style='background-color: #E8F5E9; color: #2E7D32; border: 1px solid #2E7D32; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; margin-left: 8px; vertical-align: middle;'>{exact_match_label}</span>"
+                with st.container(border=True):
+                    c1, c2, c3 = st.columns([3, 1, 1])
+                    with c1:
+                        exact_match_label = get_text("warn_exact_match", lang=lang_code)
+                        if _has_exact_match(flag["doc_a"], flag["doc_b"]):
+                            exact_badge = f" <span style='background-color: #E8F5E9; color: #2E7D32; border: 1px solid #2E7D32; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; margin-left: 8px; vertical-align: middle;'>{exact_match_label}</span>"
+                            st.markdown(
+                                f"**{flag['doc_a']}** ↔ **{flag['doc_b']}**{exact_badge}",
+                                unsafe_allow_html=True,
+                            )
+                        else:
+                            st.markdown(f"**{flag['doc_a']}** ↔ **{flag['doc_b']}**")
+
+                        # Replaced the standard similarity text with your matched length display logic
+                        matched_words = flag.get("matched_length", 0)
+                        display_text = get_text(
+                            "warn_similarity_progress", lang=lang_code
+                        ).format(
+                            pct=f"{flag['similarity'] * 100:.1f}",
+                            words=matched_words,
+                        )
+                        st.progress(
+                            min(1.0, max(0.0, float(flag["similarity"]))),
+                            text=display_text,
+                        )
+
+                        # Display AI probabilities if available
+                        if ai_probabilities:
+                            ai_a = ai_probabilities.get(flag["doc_a"], {}).get(
+                                "overall", 0.0
+                            )
+                            ai_b = ai_probabilities.get(flag["doc_b"], {}).get(
+                                "overall", 0.0
+                            )
+                            if ai_a > 0 or ai_b > 0:
+                                st.caption(
+                                    get_text("warn_ai_prob", lang=lang_code).format(
+                                        doc_a=flag["doc_a"],
+                                        ai_a=ai_a,
+                                        doc_b=flag["doc_b"],
+                                        ai_b=ai_b,
+                                    )
+                                )
+                    with c2:
                         st.markdown(
-                            f"**{flag['doc_a']}** ↔ **{flag['doc_b']}**{exact_badge}",
+                            f"<div style='text-align:right;'>{badge_html(tier, flag['severity'])}</div>",
                             unsafe_allow_html=True,
                         )
-                    else:
-                        st.markdown(f"**{flag['doc_a']}** ↔ **{flag['doc_b']}**")
-
-                    # Replaced the standard similarity text with your matched length display logic
-                    matched_words = flag.get("matched_length", 0)
-                    display_text = get_text("warn_similarity_progress", lang=lang_code).format(
-                        pct=f"{flag['similarity'] * 100:.1f}",
-                        words=matched_words,
-                    )
-                    st.progress(
-                        min(1.0, max(0.0, float(flag["similarity"]))),
-                        text=display_text,
-                    )
-
-                    # Display AI probabilities if available
-                    if ai_probabilities:
-                        ai_a = ai_probabilities.get(flag["doc_a"], {}).get(
-                            "overall", 0.0
-                        )
-                        ai_b = ai_probabilities.get(flag["doc_b"], {}).get(
-                            "overall", 0.0
-                        )
-                        if ai_a > 0 or ai_b > 0:
-                            st.caption(
-                                get_text("warn_ai_prob", lang=lang_code).format(
-                                    doc_a=flag["doc_a"],
-                                    ai_a=ai_a,
-                                    doc_b=flag["doc_b"],
-                                    ai_b=ai_b,
-                                )
-                            )
-                with c2:
-                    st.markdown(
-                        f"<div style='text-align:right;'>{badge_html(tier, flag['severity'])}</div>",
-                        unsafe_allow_html=True,
-                    )
-                with c3:
-                    if st.button(
-                        get_text("warn_dismiss", lang=lang_code),
-                        key=f"dismiss_{flag['doc_a']}_{flag['doc_b']}",
-                    ):
-                        add_false_positive(flag["doc_a"], flag["doc_b"])
-                        st.rerun()
+                    with c3:
+                        if st.button(
+                            get_text("warn_dismiss", lang=lang_code),
+                            key=f"dismiss_{flag['doc_a']}_{flag['doc_b']}",
+                        ):
+                            add_false_positive(flag["doc_a"], flag["doc_b"])
+                            st.rerun()
 
     if current_page.total_items == 0:
         return
