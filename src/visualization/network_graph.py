@@ -76,7 +76,7 @@ def build_network_data(
     threshold: float = 0.59,
     min_degree: int = 0,
     theme_colors: Optional[dict] = None,
-    selected_node: Optional[str] = None,
+    doc_metadata: Optional[dict] = None,
 ) -> dict:
     """
     Processes similarity matrix data, constructs NetworkX graph layout, and formats node and edge traces.
@@ -86,7 +86,7 @@ def build_network_data(
         threshold: Edge threshold; pairs with similarity >= threshold are connected.
         min_degree: Minimum degree threshold; nodes with degree < min_degree are filtered out.
         theme_colors: Optional dictionary containing theme colors.
-        document_tags: Optional dictionary mapping document names to tag strings or lists of tags.
+        doc_metadata: Optional dictionary mapping document names to metadata (word_count, upload_date, etc.).
 
     Returns:
         Dictionary containing shapes, edge_hover_trace, node_trace, graph, pos coordinates,
@@ -329,20 +329,28 @@ def build_network_data(
                 else "#c62828"
             )
 
-        # Highlight the clicked node and its direct neighbors; dim the rest.
-        if selected_node:
-            if node == selected_node:
-                node_size[-1] = node_size[-1] + 10
-            elif node in neighbor_nodes:
-                node_size[-1] = node_size[-1] + 4
-            else:
-                node_color[-1] = "rgba(180,180,180,0.35)"
+        # Calculate top match from similarity matrix
+        top_match_str = "N/A"
+        if node in similarity_df.index and node in similarity_df.columns:
+            sim_series = similarity_df.loc[node].drop(labels=[node], errors="ignore")
+            if not sim_series.empty:
+                max_score = float(sim_series.max())
+                if max_score > 0:
+                    top_doc = sim_series.idxmax()
+                    top_match_str = f"{top_doc} ({max_score:.1%})"
 
-        hover_parts = [f"<b>📄 Document:</b> {node}"]
-        if primary_tag:
-            hover_parts.append(f"<b>🏷️ Tag:</b> {primary_tag}")
-        hover_parts.append(f"<b>🚨 Flagged connections:</b> {deg} / {len(doc_names) - 1}")
-        node_hover.append("<br>".join(hover_parts))
+        meta = doc_metadata.get(node, {}) if doc_metadata and node in doc_metadata else {}
+        word_count = meta.get("word_count", "N/A")
+        upload_date = meta.get("upload_date", meta.get("created_at", "N/A"))
+
+        node_hover.append(
+            f"<b>📄 Document:</b> {node}<br>"
+            f"<b>🚨 Flagged connections:</b> {deg} / {max(1, len(doc_names) - 1)}<br>"
+            f"<b>📝 Word Count:</b> {word_count}<br>"
+            f"<b>📅 Upload Date:</b> {upload_date}<br>"
+            f"<b>🔗 Top Match:</b> {top_match_str}"
+        )
+
     # ── Plotly Node Trace ──────────────────────────────────────────────────────
 
     node_trace = go.Scatter(
@@ -491,7 +499,7 @@ def plot_similarity_network(
     min_degree: int = 0,
     title: str = "Document Plagiarism Network",
     theme_colors: Optional[dict] = None,
-    selected_node: Optional[str] = None,
+    doc_metadata: Optional[dict] = None,
 ) -> go.Figure:
     """
     Builds a networkx graph from the similarity matrix and returns an interactive Plotly figure.
@@ -502,7 +510,7 @@ def plot_similarity_network(
         min_degree: Minimum degree threshold; nodes with degree < min_degree are filtered out.
         title: Title of the graph.
         theme_colors: Optional dictionary containing theme colors.
-        document_tags: Optional dictionary mapping document names to tag strings or lists of tags.
+        doc_metadata: Optional dictionary mapping document names to metadata.
 
     Returns:
         Plotly Graph Objects Figure.
@@ -512,7 +520,7 @@ def plot_similarity_network(
         threshold=threshold,
         min_degree=min_degree,
         theme_colors=theme_colors,
-        selected_node=selected_node,
+        doc_metadata=doc_metadata,
     )
     return render_network_plotly(
         network_data=network_data,
