@@ -623,8 +623,8 @@ with theme_col:
         from streamlit.runtime.scriptrunner import get_script_run_ctx
 
         _ctx = get_script_run_ctx()
-        if _ctx and _ctx.current_form_id:
-            _ctx.current_form_id = ""
+        if _ctx and getattr(_ctx, "current_form_id", None):
+            setattr(_ctx, "current_form_id", "")
     except Exception:
         pass
     if st.button(theme_icon, key="theme_toggle"):
@@ -993,8 +993,7 @@ else:
         try:
             import faiss
 
-            index_buffer = _io.BytesIO(cached_index_data)
-            faiss_index = faiss.deserialize_index(faiss.read_index(index_buffer))
+            faiss_index = faiss.deserialize_index(np.frombuffer(cached_index_data, dtype=np.uint8))
             registry = get_chunk_registry()
             st.info(
                 f"📂 Loaded FAISS index from Redis cache with {faiss_index.ntotal} vectors"
@@ -1065,13 +1064,14 @@ else:
                 emb = np.frombuffer(emb_blob, dtype=np.float32)
                 embeddings[fname].append(emb)
 
-            # Convert lists to numpy arrays
-            for fname in embeddings:
-                embeddings[fname] = np.vstack(embeddings[fname])
+            doc_embeddings: dict[str, Any] = {}
+            for fname, emb_list in embeddings.items():
+                if emb_list:
+                    doc_embeddings[fname] = np.vstack(emb_list)
 
-            sim_df = document_similarity_matrix(embeddings)
+            sim_df = document_similarity_matrix(doc_embeddings)
 
-            names = list(embeddings.keys())
+            names = list(doc_embeddings.keys())
             n = len(names)
             chunk_mat = np.zeros((n, n))
             for i, na in enumerate(names):
@@ -1079,10 +1079,11 @@ else:
                     if i == j:
                         chunk_mat[i, j] = 1.0
                     elif j > i:
-                        ea, eb = embeddings[na], embeddings[nb]
+                        ea, eb = doc_embeddings[na], doc_embeddings[nb]
+                        ea_arr, eb_arr = np.asarray(ea), np.asarray(eb)
                         score = (
-                            float(np.max(cosine_similarity(ea, eb)))
-                            if ea.size and eb.size
+                            float(np.max(cosine_similarity(ea_arr, eb_arr)))
+                            if ea_arr.size and eb_arr.size
                             else 0.0
                         )
                         chunk_mat[i, j] = score
@@ -1626,9 +1627,9 @@ if not st.session_state.authenticated:
                 )
 
                 metadata_dict[filename] = {
-                    "student_name": student_name.strip(),
-                    "class_section": class_section.strip(),
-                    "assignment_title": assignment_title.strip(),
+                    "student_name": (student_name or "").strip(),
+                    "class_section": (class_section or "").strip(),
+                    "assignment_title": (assignment_title or "").strip(),
                 }
 
     if url_filename:
@@ -1664,8 +1665,8 @@ if not st.session_state.authenticated:
         chunk_overlap: int = 50,
         existing_index=None,
         existing_registry=None,
-        url_text: str = None,
-        url_filename: str = None,
+        url_text: str | None = None,
+        url_filename: str | None = None,
     ):
         raw_texts = {}
         failed_files = []
@@ -1718,9 +1719,10 @@ if not st.session_state.authenticated:
                     chunk_mat[i, j] = 1.0
                 elif j > i:
                     ea, eb = embeddings[na], embeddings[nb]
+                    ea_arr, eb_arr = np.asarray(ea), np.asarray(eb)
                     score = (
-                        float(np.max(cosine_similarity(ea, eb)))
-                        if ea.size and eb.size
+                        float(np.max(cosine_similarity(ea_arr, eb_arr)))
+                        if ea_arr.size and eb_arr.size
                         else 0.0
                     )
                     chunk_mat[i, j] = score
@@ -2697,7 +2699,7 @@ if not st.session_state.authenticated:
                     qr.make(fit=True)
                     img = qr.make_image(fill_color="black", back_color="white")
                     buf = BytesIO()
-                    img.save(buf, format="PNG")
+                    img.save(buf)
                     qr_bytes = buf.getvalue()
 
                     col1, col2 = st.columns([1, 2])
