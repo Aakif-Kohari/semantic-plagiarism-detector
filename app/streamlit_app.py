@@ -509,7 +509,8 @@ elif "threshold_slider" not in st.session_state:
 
 # Resolve fallback configuration variables (ensuring all roles have access to these settings)
 selected_lang_name = st.session_state.get("lang_selector", "English")
-lang_code = "es" if selected_lang_name == "Español" else "en"
+_lang_reverse = {v: k for k, v in _SUPPORTED_LANGUAGES.items()}
+lang_code = _lang_reverse.get(selected_lang_name, "en")
 
 threshold = st.session_state.get("threshold_slider", DEFAULT_THRESHOLDS.plagiarism)
 faiss_top_k = st.session_state.get("faiss_top_k_slider", 5)
@@ -2841,7 +2842,7 @@ if not st.session_state.authenticated:
             index=0,
             key="lang_selector",
         )
-        lang_code = "es" if selected_lang_name == "Español" else "en"
+        lang_code = _lang_reverse.get(selected_lang_name, "en")
 
         selected_theme = st.radio(
             get_text("theme", lang=lang_code),
