@@ -1,9 +1,7 @@
 import io
 import docx
-import pytest
 from src.core.document_parser import extract_text_from_docx
 from src.core.text_chunking import chunk_text
-from src.core.faiss_index import ChunkRecord
 
 def test_docx_headings_extraction_and_chunking():
     # Create an in-memory DOCX file

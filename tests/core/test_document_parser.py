@@ -1,5 +1,24 @@
 import io
 import shutil
+
+import zipfile
+from unittest.mock import MagicMock, patch
+
+import docx
+import pytest
+
+from src.core.document_parser import (
+    CorruptedArchiveError,
+    extract_text,
+    extract_text_from_docx,
+    extract_text_from_pdf,
+    extract_text_from_txt,
+    extract_text_from_zip,
+    extract_texts,
+    strip_bibliography,
+)
+
+import time
 from unittest.mock import MagicMock, patch
 
 import docx
@@ -10,6 +29,7 @@ from src.core.document_parser import (clean_text, extract_text,
                                       extract_text_from_txt, extract_texts,
                                       remove_ignore_phrases,
                                       strip_bibliography)
+
 
 # Skip OCR tests when Tesseract binary is not present on this machine
 TESSERACT_AVAILABLE = shutil.which("tesseract") is not None
@@ -38,11 +58,46 @@ def _make_docx_bytes(text: str) -> bytes:
     return buf.getvalue()
 
 
+
+def _make_valid_zip_bytes(files: dict) -> bytes:
+    """Create a valid in-memory ZIP archive containing given file names and contents."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for filename, content in files.items():
+            zf.writestr(filename, content)
+
+
+def _make_large_docx_bytes(num_pages: int = 100) -> bytes:
+    """Create a multi-page in-memory DOCX containing realistic paragraphs."""
+    doc = docx.Document()
+    sample_paragraph = (
+        "Semantic Plagiarism Detection System performance benchmark paragraph. "
+        "This paragraph simulates student submission content across multiple pages "
+        "to ensure high-throughput processing and memory efficiency during analysis."
+    )
+    for i in range(num_pages):
+        doc.add_heading(f"Chapter {i + 1}: Section Overview", level=2)
+        doc.add_paragraph(f"Page {i + 1} content. {sample_paragraph}")
+        doc.add_page_break()
+
+    buf = io.BytesIO()
+    doc.save(buf)
+
+    return buf.getvalue()
+
+
+@pytest.mark.skipif(
+    not TESSERACT_AVAILABLE, reason="Tesseract OCR is not installed on this machine"
+)
+def test_extract_from_pdf_bytes():
+    pdf_bytes = _make_pdf_bytes("Hello PDF")
+
 @patch("src.core.document_parser._ocr_pdf_page", return_value="")
 def test_extract_from_pdf_bytes(mock_ocr):
     pdf_bytes = _make_pdf_bytes(
         "Hello PDF this is a document with enough words to satisfy native text check"
     )
+
     # For blank page PDF, pdfplumber might return empty string, but it shouldn't error
     result = extract_text_from_pdf(pdf_bytes)
     assert isinstance(result, str)
@@ -90,17 +145,63 @@ def test_extract_from_docx_bytes():
     assert result == "Hello DOCX"
 
 
+def test_docx_large_document_extraction_benchmark():
+    """Benchmark test asserting 100-page DOCX extraction completes under 2.0 seconds (#579)."""
+    large_docx_bytes = _make_large_docx_bytes(num_pages=100)
+
+    start_time = time.perf_counter()
+    extracted_text = extract_text_from_docx(large_docx_bytes)
+    elapsed_time = time.perf_counter() - start_time
+
+    assert len(extracted_text) > 0
+    assert "Chapter 100: Section Overview" in extracted_text
+    assert elapsed_time < 2.0, f"DOCX extraction took {elapsed_time:.3f}s (expected < 2.0s)"
+
+
 def test_extract_from_txt_bytes():
     txt_bytes = b"Hello TXT"
     result = extract_text_from_txt(txt_bytes)
     assert result == "Hello TXT"
 
 
+
+# ---------------------------------------------------------------------------
+# Corrupted Zip Submission Tests (#580)
+# ---------------------------------------------------------------------------
+
+
+class TestCorruptedZipHandling:
+
+    def test_extract_text_from_valid_zip(self):
+        zip_bytes = _make_valid_zip_bytes({"essay1.txt": "First student essay text.", "essay2.txt": "Second student submission."})
+        result = extract_text_from_zip(zip_bytes)
+        assert "First student essay text." in result
+        assert "Second student submission." in result
+
+    def test_corrupted_zip_header_raises_user_friendly_error(self):
+        corrupted_bytes = b"PK\x03\x04corrupted_zip_header_data_not_valid_archive"
+        with pytest.raises(CorruptedArchiveError) as exc_info:
+            extract_text_from_zip(corrupted_bytes)
+        assert "corrupted" in str(exc_info.value).lower()
+
+    def test_routing_corrupted_zip_via_extract_text(self):
+        corrupted_bytes = b"INVALID_ZIP_STREAM"
+        with pytest.raises(CorruptedArchiveError):
+            extract_text(corrupted_bytes, "submission_batch.zip")
+
+
+@pytest.mark.skipif(
+    not TESSERACT_AVAILABLE, reason="Tesseract OCR is not installed on this machine"
+)
+def test_extract_text_routing():
+    pdf_bytes = _make_pdf_bytes("Hello PDF")
+
 @patch("src.core.document_parser._ocr_pdf_page", return_value="")
 def test_extract_text_routing(mock_ocr):
     pdf_bytes = _make_pdf_bytes(
         "Hello PDF this is a document with enough words to satisfy native text check"
     )
+
     docx_bytes = _make_docx_bytes("Hello DOCX")
     txt_bytes = b"Hello TXT"
 
@@ -215,6 +316,9 @@ class TestStripBibliography:
         result = extract_text(docx_bytes, "test.docx")
         assert "Bibliography" not in result
         assert "Body content" in result
+
+        
+
 
 
 # ---------------------------------------------------------------------------
@@ -448,3 +552,34 @@ def test_large_pdf_parsing_performance_benchmark():
     assert len(parsed_text) > 0
     assert "Page 199" in parsed_text
     assert duration < 3.0, f"Parsing 200-page PDF took too long: {duration:.2f} seconds (limit: 3.0s)"
+
+
+def test_extract_text_from_txt_utf16_fallback():
+    """Test that extract_text_from_txt successfully decodes a UTF-16 encoded buffer."""
+    original_text = "Hello in UTF-16 coding fallback test!"
+    utf16_bytes = original_text.encode("utf-16")
+    result = extract_text_from_txt(utf16_bytes)
+    assert result == original_text
+
+
+def test_extract_text_from_txt_latin1_fallback():
+    """Test that extract_text_from_txt successfully decodes a Latin-1 (ISO-8859-1) encoded buffer."""
+    original_text = "Café, naïve, and résumé contents in Latin-1!"
+    latin1_bytes = original_text.encode("latin-1")
+    result = extract_text_from_txt(latin1_bytes)
+    assert result == original_text
+
+
+def test_extract_text_routing_txt_latin1(tmp_path):
+    """Test that extract_text successfully routes and decodes a Latin-1 file."""
+    original_text = "Café and naïve text."
+    latin1_bytes = original_text.encode("latin-1")
+    
+    # Write the bytes to a temp file
+    file_path = tmp_path / "latin1_test.txt"
+    file_path.write_bytes(latin1_bytes)
+    
+    # Verify routing and decoding
+    result = extract_text(str(file_path), "latin1_test.txt")
+    assert result == original_text
+

@@ -150,7 +150,7 @@ def test_app_smoke(mock_embed, mock_model_info, mock_webhook, mock_ai_detector):
             "danger",
             "Danger",
         )
-        badge_found = any(
+        assert any(
             any(kw in md.value for kw in high_severity_keywords) for md in at.markdown
         )
         if mock_webhook.called:

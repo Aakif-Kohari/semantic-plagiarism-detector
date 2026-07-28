@@ -750,6 +750,16 @@ Existing database files should not be deleted during an application upgrade.
 
 ---
 
+## Documentation
+
+- [Architecture Overview](docs/ARCHITECTURE.md)
+
+- [Bulk Export Formats & Data Fields](docs/EXPORTS.md)
+
+- [UI Customization and Theme Guide](docs/THEMING.md)
+
+---
+
 ## 📄 License
 
 MIT License. Free for academic and educational use.

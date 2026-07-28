@@ -40,4 +40,5 @@ __all__ = [
     "translate_text",
     "send_plagiarism_alert",
     "dispatch_plagiarism_alert",
+    "sanitize_zero_width_characters",
 ]
