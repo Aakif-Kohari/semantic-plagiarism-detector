@@ -331,20 +331,28 @@ def build_network_data(
                     else "#c62828"
                 )
 
-        # Highlight the clicked node and its direct neighbors; dim the rest.
-        if selected_node:
-            if node == selected_node:
-                node_size[-1] = node_size[-1] + 10
-            elif node in neighbor_nodes:
-                node_size[-1] = node_size[-1] + 4
-            else:
-                node_color[-1] = "rgba(180,180,180,0.35)"
+        # Calculate top match from similarity matrix
+        top_match_str = "N/A"
+        if node in similarity_df.index and node in similarity_df.columns:
+            sim_series = similarity_df.loc[node].drop(labels=[node], errors="ignore")
+            if not sim_series.empty:
+                max_score = float(sim_series.max())
+                if max_score > 0:
+                    top_doc = sim_series.idxmax()
+                    top_match_str = f"{top_doc} ({max_score:.1%})"
 
-        hover_parts = [f"<b>📄 Document:</b> {node}"]
-        if primary_tag:
-            hover_parts.append(f"<b>🏷️ Tag:</b> {primary_tag}")
-        hover_parts.append(f"<b>🚨 Flagged connections:</b> {deg} / {len(doc_names) - 1}")
-        node_hover.append("<br>".join(hover_parts))
+        meta = doc_metadata.get(node, {}) if doc_metadata and node in doc_metadata else {}
+        word_count = meta.get("word_count", "N/A")
+        upload_date = meta.get("upload_date", meta.get("created_at", "N/A"))
+
+        node_hover.append(
+            f"<b>📄 Document:</b> {node}<br>"
+            f"<b>🚨 Flagged connections:</b> {deg} / {max(1, len(doc_names) - 1)}<br>"
+            f"<b>📝 Word Count:</b> {word_count}<br>"
+            f"<b>📅 Upload Date:</b> {upload_date}<br>"
+            f"<b>🔗 Top Match:</b> {top_match_str}"
+        )
+
     # ── Plotly Node Trace ──────────────────────────────────────────────────────
 
     node_trace = go.Scatter(
