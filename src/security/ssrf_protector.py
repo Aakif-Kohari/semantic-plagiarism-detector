@@ -68,21 +68,17 @@ class SSRFProtector:
             addr_info = socket.getaddrinfo(hostname, None)
             if not addr_info:
 
-raise SSRFSecurityException(errors.SSRF_DNS_NO_ADDRESSES.format(hostname=hostname))            
+                raise SSRFSecurityException(errors.SSRF_DNS_NO_ADDRESSES.format(hostname=hostname))            
 
-                raise SSRFSecurityException(SSRF_NO_ADDRESSES.format(hostname=hostname))
-
-
-            # Extract the first resolved IP
-            ip_str = addr_info[0][4][0]
-
-            # Store in cache
-            cls._dns_cache[hostname] = (ip_str, current_time)
-            return ip_str
+                            # Extract the first resolved IP
+                ip_str = addr_info[0][4]
+                # Store in cache
+                cls._dns_cache[hostname] = (ip_str, current_time)
+                return ip_str
 
         except socket.gaierror as e:
 
-raise SSRFSecurityException(errors.SSRF_DNS_RESOLUTION_FAILED.format(hostname=hostname, error=e))
+            raise SSRFSecurityException(errors.SSRF_DNS_RESOLUTION_FAILED.format(hostname=hostname, error=e))
 
             raise SSRFSecurityException(
                 SSRF_DNS_RESOLUTION_FAILED.format(hostname=hostname, error=e)
@@ -106,14 +102,14 @@ raise SSRFSecurityException(errors.SSRF_DNS_RESOLUTION_FAILED.format(hostname=ho
         """
         if not url:
 
-raise SSRFSecurityException(errors.SSRF_WEBHOOK_URL_EMPTY)            
-        # 1. Scheme Validation
-        parsed = urllib.parse.urlparse(url)
-        if parsed.scheme != "https":
-raise SSRFSecurityException(errors.SSRF_INSECURE_SCHEME.format(scheme=parsed.scheme))            
-        hostname = parsed.hostname
-        if not hostname:
-raise SSRFSecurityException(errors.SSRF_MISSING_HOSTNAME)            
+            raise SSRFSecurityException(errors.SSRF_WEBHOOK_URL_EMPTY)            
+                    # 1. Scheme Validation
+            parsed = urllib.parse.urlparse(url)
+            if parsed.scheme != "https":
+                raise SSRFSecurityException(errors.SSRF_INSECURE_SCHEME.format(scheme=parsed.scheme))            
+                hostname = parsed.hostname
+            if not hostname:
+                raise SSRFSecurityException(errors.SSRF_MISSING_HOSTNAME)            
 
             raise SSRFSecurityException(SSRF_EMPTY_URL)
 
@@ -136,7 +132,7 @@ raise SSRFSecurityException(errors.SSRF_MISSING_HOSTNAME)
             ip = ipaddress.ip_address(ip_str)
         except ValueError as e:
 
-raise SSRFSecurityException(errors.SSRF_INVALID_IP_FORMAT.format(error=e))            
+            raise SSRFSecurityException(errors.SSRF_INVALID_IP_FORMAT.format(error=e))            
 
             raise SSRFSecurityException(SSRF_INVALID_IP.format(error=e))
             
@@ -145,21 +141,21 @@ raise SSRFSecurityException(errors.SSRF_INVALID_IP_FORMAT.format(error=e))
         if isinstance(ip, ipaddress.IPv4Address):
             for subnet in cls.BLOCKED_PRIVATE_IPV4_SUBNETS:
                 if ip in subnet:
-raise SSRFSecurityException(
+                    raise SSRFSecurityException(
                         errors.SSRF_BLOCKED_PRIVATE_SUBNET.format(ip=ip_str, subnet=subnet)
                     )
         # 4. Block private IPv6 addresses and special-purpose ranges
         if ip.is_loopback:
 
-raise SSRFSecurityException(errors.SSRF_BLOCKED_LOOPBACK.format(ip=ip_str))            
-        if ip.is_private:
-raise SSRFSecurityException(errors.SSRF_BLOCKED_PRIVATE_NETWORK.format(ip=ip_str))            
-        if ip.is_link_local:
-raise SSRFSecurityException(errors.SSRF_BLOCKED_LINK_LOCAL.format(ip=ip_str))            
-        if ip.is_multicast:
-raise SSRFSecurityException(errors.SSRF_BLOCKED_MULTICAST.format(ip=ip_str))            
-        if ip.is_unspecified:
-raise SSRFSecurityException(errors.SSRF_BLOCKED_UNSPECIFIED.format(ip=ip_str))            
+            raise SSRFSecurityException(errors.SSRF_BLOCKED_LOOPBACK.format(ip=ip_str))            
+            if ip.is_private:
+                raise SSRFSecurityException(errors.SSRF_BLOCKED_PRIVATE_NETWORK.format(ip=ip_str))            
+            if ip.is_link_local:
+                raise SSRFSecurityException(errors.SSRF_BLOCKED_LINK_LOCAL.format(ip=ip_str))            
+            if ip.is_multicast:
+                raise SSRFSecurityException(errors.SSRF_BLOCKED_MULTICAST.format(ip=ip_str))            
+            if ip.is_unspecified:
+                raise SSRFSecurityException(errors.SSRF_BLOCKED_UNSPECIFIED.format(ip=ip_str))            
 
             raise SSRFSecurityException(SSRF_BLOCKED_LOOPBACK.format(ip=ip_str))
 

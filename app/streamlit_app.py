@@ -2366,7 +2366,7 @@ if not st.session_state.authenticated:
                 title="Interactive Document Plagiarism Network",
             )
 
-                st.download_button(
+            st.download_button(
                     "⬇️ Download Heatmap PNG",
                     buf,
                     "heatmap.png",
