@@ -1,4 +1,62 @@
+import re
 import streamlit as st
+
+HEX_COLOR_PATTERN = re.compile(r"^#(?:[0-9a-fA-F]{3}){1,2}$")
+
+
+def sanitize_hex_color(color_val: str, fallback: str = "#000000") -> str:
+    """
+    Validates and sanitizes a hex color string against ^#(?:[0-9a-fA-F]{3}){1,2}$.
+    Returns fallback if invalid.
+    """
+    if isinstance(color_val, str) and HEX_COLOR_PATTERN.match(color_val.strip()):
+        return color_val.strip()
+    return fallback
+
+
+def sanitize_theme_colors(colors: dict) -> dict:
+    """Sanitize all color values in a theme dictionary."""
+    sanitized = {}
+    fallback_map = {
+        "background": "#FFFFFF",
+        "surface": "#F8FAFC",
+        "card": "#FFFFFF",
+        "ink": "#0F172A",
+        "muted": "#64748B",
+        "accent": "#0D9488",
+        "border": "#E2E8F0",
+        "input": "#FFFFFF",
+        "neutral_soft": "#F1F5F9",
+        "danger": "#FF4B4B",
+        "danger_soft": "#FEE2E2",
+        "warning": "#FFA500",
+        "warning_soft": "#FEF3C7",
+        "success": "#21C55D",
+        "success_soft": "#DCFCE7",
+    }
+    for k, v in colors.items():
+        fallback = fallback_map.get(k, "#000000")
+        sanitized[k] = sanitize_hex_color(str(v), fallback=fallback)
+    return sanitized
+
+try:
+    from app.css_constants import (CLASS_AVATAR, CLASS_BADGE, CLASS_EMPTY_DESC,
+                                   CLASS_EMPTY_ICON, CLASS_EMPTY_STATE,
+                                   CLASS_EMPTY_TITLE, CLASS_PIPELINE_ACTIVE,
+                                   CLASS_PIPELINE_ARROW, CLASS_PIPELINE_DONE,
+                                   CLASS_PIPELINE_ETA, CLASS_PIPELINE_STEP,
+                                   CLASS_PIPELINE_STEPS, CLASS_SIDEBAR_USER_BADGE,
+                                   CLASS_SIM_PILL, CLASS_WELCOME_BANNER)
+except ImportError:
+    from css_constants import (CLASS_AVATAR, CLASS_BADGE, CLASS_EMPTY_DESC,
+                               CLASS_EMPTY_ICON, CLASS_EMPTY_STATE,
+                               CLASS_EMPTY_TITLE, CLASS_PIPELINE_ACTIVE,
+                               CLASS_PIPELINE_ARROW, CLASS_PIPELINE_DONE,
+                               CLASS_PIPELINE_ETA, CLASS_PIPELINE_STEP,
+                               CLASS_PIPELINE_STEPS, CLASS_SIDEBAR_USER_BADGE,
+                               CLASS_SIM_PILL, CLASS_WELCOME_BANNER)
+from src.core.config import (DEFAULT_THRESHOLDS, normalize_severity_label,
+                             severity_key)
 
 THEMES = {
     "Light": {
@@ -39,33 +97,85 @@ THEMES = {
 # Backward-compatible default palette used by existing tests and callers.
 COLORS = THEMES["Light"]
 
+# ── Colormap Mappings & Constants ──────────────────────────────────────────────
+# Moved here from src/visualization/heatmap.py (Issue #633) so all
+# color/theme-related generation logic lives in one place.
+
+# Standard colormap options required by UI/UX specifications.
+UI_COLORMAP_OPTIONS: list[str] = ["Viridis", "Plasma", "Coolwarm", "YlOrRd"]
+
+# Map UI display names to exact Matplotlib/Seaborn string identifiers.
+MATPLOTLIB_CMAP_MAPPING: dict[str, str] = {
+    "Viridis": "viridis",
+    "Plasma": "plasma",
+    "Coolwarm": "coolwarm",
+    "YlOrRd": "YlOrRd",
+    # Legacy fallback mapping
+    "Legacy Red/Green": "RdYlGn_r",
+}
+
+# Map UI display names to exact Plotly string identifiers.
+PLOTLY_CMAP_MAPPING: dict[str, str] = {
+    "Viridis": "Viridis",
+    "Plasma": "Plasma",
+    "Coolwarm": "RdBu_r",  # Coolwarm equivalent in standard plotly
+    "YlOrRd": "YlOrRd",
+    # Legacy fallback mapping
+    "Legacy Red/Green": "RdYlGn_r",
+}
+
+DEFAULT_UI_COLORMAP: str = "Viridis"
+
 
 def initialize_theme() -> None:
     """Initialize the active theme for the current session."""
-    if "theme" not in st.session_state:
-        st.session_state.theme = "Light"
+    try:
+        if "theme" not in st.session_state:
+            query_theme = st.query_params.get("theme")
+            if query_theme and query_theme.lower() == "dark":
+                st.session_state.theme = "Dark"
+            elif query_theme and query_theme.lower() == "light":
+                st.session_state.theme = "Light"
+            else:
+                st.session_state.theme = "Light"
+        if "theme_colors" not in st.session_state:
+            st.session_state.theme_colors = THEMES[st.session_state.theme]
+    except Exception:
+        pass
 
 
 def get_theme_name() -> str:
     """Return the active theme name."""
     initialize_theme()
-    return st.session_state.theme
+    try:
+        return st.session_state.theme
+    except Exception:
+        return "Light"
 
 
 def set_theme(theme_name: str) -> None:
     """Set the active theme."""
     if theme_name in THEMES:
-        st.session_state.theme = theme_name
+        try:
+            st.session_state.theme = theme_name
+            st.session_state.theme_colors = THEMES[theme_name]
+            st.query_params["theme"] = theme_name.lower()
+        except Exception:
+            pass
 
 
 def get_colors() -> dict:
     """Return the colors for the active theme."""
-    return THEMES[get_theme_name()]
+    initialize_theme()
+    try:
+        return st.session_state.theme_colors
+    except Exception:
+        return THEMES["Light"]
 
 
 def inject_css() -> None:
     """Inject CSS for the currently selected Light or Dark theme."""
-    colors = get_colors()
+    colors = sanitize_theme_colors(get_colors())
 
     css = f"""
     <style>
@@ -217,6 +327,21 @@ def inject_css() -> None:
             flex-shrink: 0;
         }}
 
+        /* ── Document row (sidebar) ─────────────────────────────────── */
+
+        .doc-row {{
+            border-radius: 8px;
+            padding: 4px 8px;
+            margin-bottom: 2px;
+            transition: background-color 0.18s ease, box-shadow 0.18s ease;
+            cursor: default;
+        }}
+
+        .doc-row:hover {{
+            background-color: var(--neutral-soft);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+        }}
+
         /* ── Metric cards ───────────────────────────────────────────── */
 
         div[data-testid="stMetric"] {{
@@ -352,6 +477,15 @@ def inject_css() -> None:
             border-left: 4px solid var(--success) !important;
         }}
 
+        /* ── Warning list container animation (#369) ─────────────────
+           The threshold slider re-filters the warning list on every
+           change. This transition smooths out the resulting layout /
+           opacity shifts on the container instead of snapping instantly. */
+
+        .st-key-warning_list_container {{
+            transition: all 0.3s ease;
+        }}
+
         /* ── Similarity score pill ──────────────────────────────────── */
 
         .sim-pill {{
@@ -418,6 +552,29 @@ def inject_css() -> None:
         .stFormSubmitButton button {{
             border-color: var(--border) !important;
         }}
+
+        .clear-all-container button {{
+            background-color: var(--danger) !important;
+            color: white !important;
+            border-color: var(--danger) !important;
+            font-weight: 600 !important;
+        }}
+
+        .clear-all-container button:hover {{
+            background-color: #ff3333 !important;
+            color: white !important;
+            border-color: #ff3333 !important;
+        }}
+
+        .{CLASS_WELCOME_BANNER} {{
+    background-color: {colors["surface"]};
+    border: 1px solid {colors["border"]};
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    color: {colors["ink"]};
+    font-size: 0.95rem;
+}}
 
         [data-testid="stExpander"],
         [data-testid="stForm"] {{
@@ -543,6 +700,69 @@ def inject_css() -> None:
             50% {{ opacity: 0.7; }}
         }}
 
+        /* ── Back to Top Button ─────────────────────────────────────── */
+
+.sr-only {{
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }}            position: fixed;
+            bottom: max(2rem, env(safe-area-inset-bottom, 2rem));
+            right: max(2rem, env(safe-area-inset-right, 2rem));
+            z-index: 9999;
+            background-color: var(--accent);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 14px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(12px);
+            transition: opacity 0.3s ease, visibility 0.3s ease,
+                        transform 0.3s ease, box-shadow 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }}
+
+        #back-to-top-btn.visible {{
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0);
+        }}
+
+        #back-to-top-btn:hover {{
+            filter: brightness(0.85);
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
+            transform: translateY(-2px);
+        }}
+
+        #back-to-top-btn:focus-visible {{
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }}
+
+        @media (prefers-reduced-motion: reduce) {{
+            #back-to-top-btn {{
+                transition: opacity 0.15s ease, visibility 0.15s ease;
+            }}
+
+            #back-to-top-btn.visible,
+            #back-to-top-btn:hover {{
+                transform: none;
+            }}
+        }}
+
         /* ── Responsive: mobile / tablet ────────────────────────────── */
 
         @media (max-width: 768px) {{
@@ -558,9 +778,97 @@ def inject_css() -> None:
             div[data-testid="stMetricValue"] > div {{
                 font-size: 1.3rem !important;
             }}
+
+            /* Issue #258: when the sidebar is opened on a phone/small
+               tablet, keep it from covering the whole screen so the
+               similarity matrix / heatmap stay legible behind it. */
+            [data-testid="stSidebar"] {{
+                min-width: 85vw !important;
+                max-width: 85vw !important;
+            }}
+        }}
+
+        /* ── Skeletons for Loading State ────────────────────────────── */
+
+        @keyframes skeletonPulse {{
+            0%, 100% {{
+                opacity: 0.6;
+            }}
+            50% {{
+                opacity: 0.3;
+            }}
+        }}
+
+        .skeleton {{
+            background-color: var(--neutral-soft);
+            border-radius: 6px;
+            animation: skeletonPulse 1.5s infinite ease-in-out;
+            border: 1px solid var(--border);
+        }}
+
+        .skeleton-metric {{
+            height: 70px;
+            width: 100%;
+            margin-bottom: 10px;
+        }}
+
+        .skeleton-title {{
+            height: 24px;
+            width: 40%;
+            margin-bottom: 15px;
+        }}
+
+        .skeleton-text {{
+            height: 16px;
+            width: 100%;
+            margin-bottom: 8px;
+        }}
+
+        .skeleton-text-short {{
+            height: 16px;
+            width: 60%;
+            margin-bottom: 8px;
+        }}
+
+        .skeleton-chart {{
+            height: 350px;
+            width: 100%;
+            margin-top: 15px;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--muted);
+            font-size: 0.9rem;
+        }}
+
+        .skeleton-table {{
+            height: 200px;
+            width: 100%;
+            margin-top: 15px;
+            margin-bottom: 15px;
+        }}
+
+        @media (prefers-reduced-motion: reduce) {{
+            .skeleton {{
+                animation: none !important;
+            }}
         }}
     </style>
     """
+
+    if st.session_state.get("privacy_mode", False):
+        css = css.replace("</style>", """
+        /* Privacy Mode: Blur student name labels */
+        [class*="st-key-student_"] {
+            filter: blur(4px) !important;
+            transition: filter 0.3s ease;
+        }
+        [class*="st-key-student_"]:hover {
+            filter: none !important;
+        }
+    </style>
+        """)
 
     st.markdown(css, unsafe_allow_html=True)
 
@@ -568,14 +876,11 @@ def inject_css() -> None:
 # ── Severity helpers ──────────────────────────────────────────────────────────
 
 
-def severity_tier(score: float, threshold: float) -> str:
-    """
-    Categorizes the score into a severity tier matching the backend.
-
-    High: >= 0.90
-    Medium: >= threshold
-    Low: < threshold
-    """
+def severity_tier(
+    score: float,
+    threshold: float = DEFAULT_THRESHOLDS.plagiarism,
+) -> str:
+    """Return the severity tier based on score and threshold."""
     if score >= 0.90:
         return "high"
     elif score >= threshold:
@@ -585,13 +890,10 @@ def severity_tier(score: float, threshold: float) -> str:
 
 
 def tier_from_severity_label(label: str) -> str:
-    """Maps existing label string to tier key."""
-    clean = label.lower()
-    if "high" in clean:
-        return "high"
-    elif "medium" in clean or "warn" in clean:
-        return "medium"
-    else:
+    """Map canonical or legacy severity labels to a lowercase tier."""
+    try:
+        return normalize_severity_label(label).lower()
+    except ValueError:
         return "low"
 
 
@@ -622,23 +924,30 @@ def badge_html(tier: str, label: str = None) -> str:
         default_label = "🟢 Low"
 
     display_label = label if label is not None else default_label
-    return f'<span class="badge" style="background-color: {bg_color}; color: {text_color}; border: 1px solid {text_color};">{display_label}</span>'
+    return f'<span class="{CLASS_BADGE}" style="background-color: {bg_color}; color: {text_color}; border: 1px solid {text_color};">{display_label}</span>'
 
 
 # ── UI helpers ────────────────────────────────────────────────────────────────
 
 
-def format_similarity_html(score: float, threshold: float = 0.59) -> str:
-    """Return a themed similarity pill for use with st.markdown(unsafe_allow_html=True)."""
+def format_similarity_html(
+    score: float,
+    threshold: float = DEFAULT_THRESHOLDS.plagiarism,
+) -> str:
+    """Return a themed similarity pill using central severity boundaries."""
+    del threshold
     colors = get_colors()
-    if score >= 0.90:
+    tier = severity_key(score)
+
+    if tier == "high":
         bg = colors["danger"]
-    elif score >= threshold:
+    elif tier == "medium":
         bg = colors["warning"]
     else:
         bg = colors["success"]
+
     return (
-        f'<span class="sim-pill" style="background:{bg};">'
+        f'<span class="{CLASS_SIM_PILL}" style="background:{bg};">'
         f"Similarity: {score * 100:.1f}%</span>"
     )
 
@@ -646,10 +955,10 @@ def format_similarity_html(score: float, threshold: float = 0.59) -> str:
 def empty_state_html(icon: str, title: str, description: str) -> str:
     """Return styled empty-state HTML block."""
     return (
-        f'<div class="empty-state">'
-        f'<div class="empty-icon">{icon}</div>'
-        f'<div class="empty-title">{title}</div>'
-        f'<div class="empty-desc">{description}</div>'
+        f'<div class="{CLASS_EMPTY_STATE}">'
+        f'<div class="{CLASS_EMPTY_ICON}">{icon}</div>'
+        f'<div class="{CLASS_EMPTY_TITLE}">{title}</div>'
+        f'<div class="{CLASS_EMPTY_DESC}">{description}</div>'
         f"</div>"
     )
 
@@ -658,37 +967,120 @@ def sidebar_user_badge_html(username: str, role: str) -> str:
     """Return the sidebar user badge with avatar circle."""
     initial = username[0].upper() if username else "?"
     return (
-        f'<div class="sidebar-user-badge">'
-        f'<div class="avatar">{initial}</div>'
-        f'<div><strong>{username}</strong><br>'
+        f'<div class="{CLASS_SIDEBAR_USER_BADGE}">'
+        f'<div class="{CLASS_AVATAR}">{initial}</div>'
+        f"<div><strong>{username}</strong><br>"
         f'<span style="font-size:0.7rem;color:var(--muted);">{role.upper()}</span></div>'
         f"</div>"
     )
 
 
-def pipeline_progress_html(steps: list[str], active_index: int = -1) -> str:
-    """Return a horizontal pipeline progress indicator.
-
-    Args:
-        steps: List of step labels (e.g. ["Extract", "Chunk", "Embed", ...]).
-        active_index: 0-based index of the currently running step.
-            Steps before *active_index* are marked done; steps after are
-            pending.  Pass -1 (default) to mark all steps as pending.
-    """
+def pipeline_progress_html(
+    steps: list[str],
+    active_index: int = -1,
+    estimated_seconds: int | None = None,
+) -> str:
+    """Return a horizontal pipeline progress indicator with optional ETA."""
     parts = []
+
     for i, step in enumerate(steps):
         if active_index < 0:
-            cls = "pipeline-step"
+            cls = CLASS_PIPELINE_STEP
         elif i < active_index:
-            cls = "pipeline-step done"
+            cls = f"{CLASS_PIPELINE_STEP} {CLASS_PIPELINE_DONE}"
         elif i == active_index:
-            cls = "pipeline-step active"
+            cls = f"{CLASS_PIPELINE_STEP} {CLASS_PIPELINE_ACTIVE}"
         else:
-            cls = "pipeline-step"
+            cls = CLASS_PIPELINE_STEP
 
-        prefix = "✓ " if (active_index >= 0 and i < active_index) else ""
+        prefix = "✓ " if active_index >= 0 and i < active_index else ""
         parts.append(f'<span class="{cls}">{prefix}{step}</span>')
-        if i < len(steps) - 1:
-            parts.append('<span class="pipeline-arrow">→</span>')
 
-    return f'<div class="pipeline-steps">{"".join(parts)}</div>'
+        if i < len(steps) - 1:
+            parts.append(f'<span class="{CLASS_PIPELINE_ARROW}">→</span>')
+
+    progress = f'<div class="{CLASS_PIPELINE_STEPS}">{"".join(parts)}</div>'
+
+    if estimated_seconds is None:
+        return progress
+
+    from src.utils.processing_time import format_processing_duration
+
+    duration = format_processing_duration(estimated_seconds)
+    eta = (
+        f'<div class="{CLASS_PIPELINE_ETA}">'
+        f"Estimated processing time: about {duration}"
+        "</div>"
+    )
+    return f"{progress}{eta}"
+
+
+def back_to_top_html(scroll_threshold: int = 250) -> str:
+    """Return HTML for a floating back-to-top button.
+    Uses anchor navigation to smoothly scroll to the top of the page without
+    leaking raw script strings in Streamlit 1.60+.
+    """
+    return """
+    <a id="back-to-top-btn" class="visible" href="#top" aria-label="Back to top" title="Back to top">
+        ⬆️ Top
+    </a>
+    """
+
+
+
+def version_check_widget_html(
+    local_version: str,
+    latest_tag: str,
+    repo_url: str = "https://github.com/Ganesh-403/semantic-plagiarism-detector/releases/latest",
+) -> str:
+    """Return an HTML snippet that renders an update-available notification banner.
+
+    The banner is intentionally lightweight — pure HTML/CSS with no external
+    dependencies — so it renders reliably inside ``st.markdown(...,
+    unsafe_allow_html=True)``.
+
+    Parameters
+    ----------
+    local_version:
+        The version string of the currently running application.
+    latest_tag:
+        The newer tag string returned by the GitHub API (e.g. ``"v1.2.0"``).
+    repo_url:
+        Link target for the "View release" call-to-action.
+
+    Returns
+    -------
+    str
+        A self-contained HTML string ready for ``st.markdown``.
+    """
+    colors = get_colors()
+    warning_color = colors["warning"]
+    warning_soft = colors["warning_soft"]
+    ink = colors["ink"]
+
+    return f"""
+<div id="spd-update-banner" style="
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    margin-top: 8px;
+    background: {warning_soft};
+    border: 1px solid {warning_color};
+    border-radius: 8px;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.85rem;
+    color: {ink};
+">
+    <span style="font-size: 1.1rem;">🔔</span>
+    <span>
+        <strong>Update available:</strong>
+        v{local_version} &rarr; <strong>{latest_tag}</strong>.
+        &nbsp;
+        <a href="{repo_url}" target="_blank" rel="noopener noreferrer"
+           style="color: {warning_color}; font-weight: 600; text-decoration: underline;">
+            View release &rarr;
+        </a>
+    </span>
+</div>
+"""

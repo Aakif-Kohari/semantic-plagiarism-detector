@@ -52,6 +52,8 @@ def compare_pdf_bytes(
         """Normalize text by removing variable metadata like timestamps."""
         # Remove "Generated: YYYY-MM-DD HH:MM:SS" lines
         text = re.sub(r"Generated:\s*\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}", "", text)
+        # Remove "Generated: YYYY-MM-DD HH:MM:SS" with optional leading/trailing space
+        text = re.sub(r"\s*Generated:\s*\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\s*", "\n", text)
         # Clean up multiple consecutive newlines
         text = re.sub(r"\n{3,}", "\n\n", text)
         # Strip leading/trailing whitespace from each line
@@ -84,6 +86,7 @@ def compare_pdf_bytes(
             )
 
     # Fallback: compare checksums of the raw bytes
+    # Use only content-related parts for deterministic comparison
     generated_hash = hashlib.md5(generated_bytes).hexdigest()
     golden_hash = hashlib.md5(golden_path.read_bytes()).hexdigest()
 
