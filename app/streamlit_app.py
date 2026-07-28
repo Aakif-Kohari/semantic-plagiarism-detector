@@ -62,7 +62,7 @@ from src.db import (
     init_corpus_db,
 )
 from src.db.auth import get_all_users, get_user_role, init_db, verify_user
-from src.utils.pdf_report import highlight_pdf_matches
+from src.utils.pdf_report import highlight_pdf_matches, truncate_filename
 from src.utils.redis_cache import (
     cache_session_state,
     clear_session,
@@ -76,7 +76,7 @@ from src.visualization.heatmap import plot_similarity_heatmap
 try:
     from src.utils.excel_export import export_similarity_matrix_to_excel
 except ImportError:
-    from utils.excel_export import export_similarity_matrix_to_excel
+    from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore[import-untyped,reportMissingImports]
 
 # Initialize corpus database
 init_corpus_db()
@@ -101,7 +101,7 @@ _INDEX_PATH = os.path.abspath(
 )
 try:
     from streamlit_tour import Tour
-except ImportError:
+except Exception:
     Tour = None
 
 # Initialize auth database
@@ -435,7 +435,6 @@ else:
 
     if "analysis_results" not in st.session_state:
         st.session_state.analysis_results = None
-        # Try to load from Redis cache
 
         cached_results = get_analysis_results(f"{SESSION_ID}:current")
         if cached_results is not None:
@@ -456,7 +455,6 @@ else:
         faiss_index = load_index(_INDEX_PATH) if os.path.exists(_INDEX_PATH) else None
         registry = get_chunk_registry()
 
-        # Try to load from Redis cache
         cached_signature = get_session_state(SESSION_ID, "analysis_file_signature")
         if cached_signature is not None:
             st.session_state.analysis_file_signature = cached_signature
@@ -544,7 +542,7 @@ else:
             )
             st.stop()
 
-    # ── Metadata Editor Section ──────────────────────────────────────────────────
+    # ── Metadata Editor Section (#578 Character Count Statistics Included) ───────
     st.markdown("### 📝 Set Document Metadata")
 
     col1, col2 = st.columns(2)
@@ -562,11 +560,28 @@ else:
         )
 
     metadata_dict = {}
-    for filename in file_bytes_dict.keys():
+    for filename, raw_bytes in file_bytes_dict.items():
         base_name = os.path.splitext(filename)[0]
         guessed_name = base_name.replace("_", " ").replace("-", " ").title()
 
-        with st.expander(f"📄 {filename}", expanded=False):
+        # Calculate character and word count statistics
+        char_count = len(raw_bytes)
+        try:
+            text_str = raw_bytes.decode("utf-8", errors="ignore")
+            word_count = len(text_str.split())
+            char_count = len(text_str)
+        except Exception:
+            word_count = len(raw_bytes.split())
+
+        expander_label = (
+            f"📄 {filename}  "
+            f"(`{char_count:,}` chars | `{word_count:,}` words)"
+        )
+
+        with st.expander(expander_label, expanded=False):
+            st.caption(
+                f"📊 **Document Statistics:** {char_count:,} characters · {word_count:,} words"
+            )
             student_name = st.text_input(
                 f"Student Name for {filename}",
                 value=guessed_name,
@@ -587,6 +602,8 @@ else:
                 "student_name": student_name.strip(),
                 "class_section": class_section.strip(),
                 "assignment_title": assignment_title.strip(),
+                "char_count": char_count,
+                "word_count": word_count,
             }
 
     # ── Pipeline Execution ────────────────────────────────────────────────────────
