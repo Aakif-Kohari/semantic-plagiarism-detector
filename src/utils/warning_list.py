@@ -10,19 +10,18 @@ import pandas as pd
 import streamlit as st
 
 from app.theme import badge_html, tier_from_severity_label
-from src.core.config import (normalize_severity_label, severity_from_score,
-                             severity_rank)
-from src.db.incidents import (_normalise_pair, add_false_positive,
-                              get_false_positives)
+from src.core.config import normalize_severity_label, severity_from_score, severity_rank
+from src.db.incidents import _normalise_pair, add_false_positive, get_false_positives
+
 
 try:
     from thefuzz import fuzz
 except ImportError:
     try:
-        from fuzzywuzzy import \
-            fuzz  # type: ignore[import-untyped,reportMissingImports]
+        from fuzzywuzzy import fuzz  # type: ignore[import-untyped,reportMissingImports]
     except ImportError:
         fuzz = None
+FUZZY_THRESHOLD = 80
 
 SORT_FIELDS = {
     "Similarity": "similarity",
@@ -71,7 +70,6 @@ def filter_warnings(
     warnings: Iterable[Mapping[str, Any]],
     search_query: str = "",
     min_match_length: int = 0,
-    fuzzy_threshold: int = 70,
 ) -> list[dict[str, Any]]:
     """
     Filters warnings by query using exact substring matching and 
@@ -106,7 +104,7 @@ def filter_warnings(
             score_a = max(fuzz.partial_ratio(query, doc_a), fuzz.token_set_ratio(query, doc_a))
             score_b = max(fuzz.partial_ratio(query, doc_b), fuzz.token_set_ratio(query, doc_b))
 
-            if score_a >= fuzzy_threshold or score_b >= fuzzy_threshold:
+            if score_a >= FUZZY_THRESHOLD or score_b >= FUZZY_THRESHOLD:
                 filtered.append(item)
 
     return filtered
@@ -146,7 +144,7 @@ def paginate_warnings(
     page: int = 1,
     page_size: int = 10,
 ) -> WarningPage:
-    safe_page_size = min(100, max(1, int(page_size)))
+    safe_page_size = max(1, int(page_size))
     total_items = len(warnings)
     total_pages = max(1, math.ceil(total_items / safe_page_size))
     safe_page = min(max(1, int(page)), total_pages)
@@ -215,6 +213,51 @@ def _has_exact_match(doc_a: str, doc_b: str) -> bool:
 
     return not norm_a.isdisjoint(norm_b)
 
+def render_compact_warning_row(flag: Mapping[str, Any]) -> None:
+    """
+    Render warning in compact single-line format.
+    """
+
+    doc_a = flag["doc_a"]
+    doc_b = flag["doc_b"]
+
+    tier = tier_from_severity_label(flag["severity"])
+    similarity = flag["similarity"] * 100
+
+    col1, col2, col3, col4 = st.columns([5, 1, 1, 0.5])
+
+    with col1:
+        exact_badge = ""
+
+        if _has_exact_match(doc_a, doc_b):
+            exact_badge = (
+                " <span style='color:#2E7D32;font-weight:bold;'>✓ Exact</span>"
+            )
+
+        st.markdown(
+            f"📄 **{doc_a}** ↔ **{doc_b}**{exact_badge}",
+            unsafe_allow_html=True,
+        )
+
+    with col2:
+        st.markdown(
+            f"**{similarity:.1f}%**"
+        )
+
+    with col3:
+        st.markdown(
+            badge_html(tier, flag["severity"]),
+            unsafe_allow_html=True,
+        )
+
+    with col4:
+        if st.button(
+            "❌",
+            key=f"compact_dismiss_{doc_a}_{doc_b}",
+            help="Dismiss warning",
+        ):
+            add_false_positive(doc_a, doc_b)
+            st.rerun()
 
 def render_warning_controls(
     flags: Sequence[Mapping[str, Any]],
@@ -224,27 +267,8 @@ def render_warning_controls(
 ) -> None:
     if "warning_page" not in st.session_state:
         st.session_state.warning_page = 1
-
-    # Clamp custom page_size from query parameters to prevent memory spikes
-    if "page_size" in st.query_params:
-        try:
-            qp_size = int(st.query_params["page_size"])
-            st.session_state.warning_page_size = min(100, max(1, qp_size))
-        except (ValueError, TypeError):
-            pass
-    elif "warning_page_size" in st.query_params:
-        try:
-            qp_size = int(st.query_params["warning_page_size"])
-            st.session_state.warning_page_size = min(100, max(1, qp_size))
-        except (ValueError, TypeError):
-            pass
-
-    # Ensure warning_page_size in session state is always clamped to 100
-    if "warning_page_size" in st.session_state:
-        try:
-            st.session_state.warning_page_size = min(100, max(1, int(st.session_state.warning_page_size)))
-        except (ValueError, TypeError):
-            st.session_state.warning_page_size = 10
+    if "compact_view" not in st.session_state:
+        st.session_state.compact_view = False
 
     from src.core.config import DEFAULT_THRESHOLDS
 
@@ -260,12 +284,12 @@ def render_warning_controls(
             }
         )
 
-    if st.session_state.get("hide_low_severity", False):
+    if st.session_state.get("compact_view", False):
         active_filters.append(
             {
-                "key": "clear_hide_low_severity",
-                "label": "Severity: Medium+ ⓧ",
-                "action": "hide_low_severity",
+                "key": "clear_compact_view",
+                "label": "Compact View ⓧ",
+                "action": "compact_view",
             }
         )
 
@@ -358,6 +382,8 @@ def render_warning_controls(
                         st.session_state.class_filter_selectbox = "All Classes"
                     elif f["action"] == "min_match_length":
                         st.session_state.warning_min_match_length = 0
+                    elif f["action"] == "compact_view":
+                        st.session_state.compact_view = False
                     st.rerun()
 
     dismissed_pairs = get_false_positives()
@@ -371,7 +397,7 @@ def render_warning_controls(
         st.success("✅ No suspicious pairs found above the current threshold.")
         return
 
-    search_col, toggle_col, size_col = st.columns([3, 2, 1])
+    search_col, toggle_col, compact_col, size_col = st.columns([3, 2, 2, 1])
 
     with search_col:
         search_query = st.text_input(
@@ -386,21 +412,20 @@ def render_warning_controls(
             "Hide Low Severity",
             key="hide_low_severity",
         )
-
+    with compact_col:
+        compact_view = st.checkbox(
+            "Compact View",
+            key="compact_view",
+            help="Show warnings as compact single-line rows",
+            on_change=_reset_page,
+        )
     with size_col:
-        # Dynamic options list to avoid Streamlit ControlFlowException
-        options = [10, 25, 50]
-        current_size = st.session_state.get("warning_page_size", 10)
-        if current_size not in options:
-            options = sorted(options + [current_size])
-
         page_size = st.selectbox(
             "Warnings per page",
-            options,
+            [10, 25, 50],
             key="warning_page_size",
             on_change=_reset_page,
         )
-        page_size = min(100, max(1, int(page_size)))
 
     min_match_length = st.slider(
         "Minimum Match Length (Words)",
@@ -412,17 +437,11 @@ def render_warning_controls(
         on_change=_reset_page,
     )
 
-    p_dir = st.session_state.get("warning_primary_direction", "Descending ▼")
-    s_dir = st.session_state.get("warning_secondary_direction", "Ascending ▲")
-
-    p_arrow = "▼" if "Descending" in p_dir else "▲"
-    s_arrow = "▲" if "Ascending" in s_dir else "▼"
-
     p1, d1, p2, d2 = st.columns([2, 1, 2, 1])
 
     with p1:
         primary_label = st.selectbox(
-            f"Primary sort {p_arrow}",
+            "Primary sort",
             list(SORT_FIELDS),
             key="warning_primary_sort",
             on_change=_reset_page,
@@ -431,14 +450,14 @@ def render_warning_controls(
     with d1:
         primary_direction = st.selectbox(
             "Direction",
-            ["Descending ▼", "Ascending ▲"],
+            ["Descending", "Ascending"],
             key="warning_primary_direction",
             on_change=_reset_page,
         )
 
     with p2:
         secondary_label = st.selectbox(
-            f"Then sort by {s_arrow}",
+            "Then sort by",
             list(SORT_FIELDS),
             index=1,
             key="warning_secondary_sort",
@@ -448,7 +467,7 @@ def render_warning_controls(
     with d2:
         secondary_direction = st.selectbox(
             "Then direction",
-            ["Ascending ▲", "Descending ▼"],
+            ["Ascending", "Descending"],
             key="warning_secondary_direction",
             on_change=_reset_page,
         )
@@ -464,9 +483,9 @@ def render_warning_controls(
         search_query=search_query,
         min_match_length=min_match_length,
         primary_field=SORT_FIELDS[primary_label],
-        primary_descending="Descending" in primary_direction,
+        primary_descending=primary_direction == "Descending",
         secondary_field=SORT_FIELDS[secondary_label],
-        secondary_descending="Descending" in secondary_direction,
+        secondary_descending=secondary_direction == "Descending",
         page=st.session_state.warning_page,
         page_size=page_size,
     )
@@ -515,8 +534,8 @@ def render_warning_controls(
         .replace("\n", "\\n")
     )
 
-    info_col, copy_col, md_col, csv_col = st.columns([2, 2, 2, 2])
-    with info_col:
+    left, middle, right = st.columns([3, 2, 2])
+    with left:
         if current_page.total_items:
             st.markdown(
                 f"Showing **{current_page.start_index}–{current_page.end_index}** "
@@ -524,7 +543,7 @@ def render_warning_controls(
             )
         else:
             st.info("No warnings match the current search.")
-    with copy_col:
+    with middle:
         html_code = f"""
         <style>
             body {{
@@ -587,17 +606,9 @@ def render_warning_controls(
         </script>
         """
         st.components.v1.html(html_code, height=45)
-    with md_col:
+    with right:
         st.download_button(
-            "📝 Download Summary (MD)",
-            markdown_text.encode("utf-8"),
-            "plagiarism_report_summary.md",
-            "text/markdown",
-            use_container_width=True,
-        )
-    with csv_col:
-        st.download_button(
-            "⬇️ Download filtered (CSV)",
+            "⬇️ Download filtered report (CSV)",
             export_df.to_csv(index=False).encode("utf-8"),
             "plagiarism_warnings_filtered.csv",
             "text/csv",
@@ -611,46 +622,21 @@ def render_warning_controls(
     # with a transition so re-filtered/re-sorted results animate smoothly
     # instead of snapping instantly.
     with st.container(key="warning_list_container"):
-        if "selected_warnings" not in st.session_state:
-            st.session_state.selected_warnings = set()
 
-        current_page_ids = {f"{flag['doc_a']}_{flag['doc_b']}" for flag in current_page.items}
-        all_selected = bool(current_page_ids) and current_page_ids.issubset(st.session_state.selected_warnings)
+      for flag in current_page.items:
 
-        def toggle_select_all():
-            if all_selected:
-                st.session_state.selected_warnings.difference_update(current_page_ids)
-            else:
-                st.session_state.selected_warnings.update(current_page_ids)
-
-        if current_page_ids:
-            st.checkbox(
-                "Select All on Current Page",
-                value=all_selected,
-                on_change=toggle_select_all,
-                key=f"select_all_page_{current_page.page}",
+        if compact_view:
+            render_compact_warning_row(flag)
+            st.markdown(
+                 "<hr style='margin:4px 0;border:0;border-top:1px solid #eee;'>",
+                 unsafe_allow_html=True,
             )
 
-        for flag in current_page.items:
+        else:
             tier = tier_from_severity_label(flag["severity"])
-            flag_id = f"{flag['doc_a']}_{flag['doc_b']}"
-            
-            def toggle_item(item_id=flag_id):
-                if item_id in st.session_state.selected_warnings:
-                    st.session_state.selected_warnings.remove(item_id)
-                else:
-                    st.session_state.selected_warnings.add(item_id)
 
             with st.container(border=True):
-                c0, c1, c2, c3 = st.columns([0.3, 3, 1, 1])
-                with c0:
-                    st.checkbox(
-                        "Select",
-                        value=flag_id in st.session_state.selected_warnings,
-                        on_change=toggle_item,
-                        key=f"select_{flag_id}",
-                        label_visibility="collapsed"
-                    )
+                c1, c2, c3 = st.columns([3, 1, 1])
                 with c1:
                     if _has_exact_match(flag["doc_a"], flag["doc_b"]):
                         exact_badge = " <span style='background-color: #E8F5E9; color: #2E7D32; border: 1px solid #2E7D32; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; margin-left: 8px; vertical-align: middle;'>Exact Match</span>"
@@ -709,13 +695,12 @@ def render_warning_controls(
             st.rerun()
 
     with page_col:
-        selected_page = st.number_input(
+        selected_page = st.selectbox(
             "Page",
-            min_value=1,
-            max_value=current_page.total_pages,
-            value=current_page.page,
-            step=1,
-            key=f"warning_page_input_{current_page.total_pages}",
+            list(range(1, current_page.total_pages + 1)),
+            index=current_page.page - 1,
+            key=f"warning_page_selector_{current_page.total_pages}",
+            format_func=lambda value: f"Page {value} of {current_page.total_pages}",
             label_visibility="collapsed",
         )
         if selected_page != current_page.page:

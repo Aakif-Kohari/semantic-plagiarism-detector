@@ -44,17 +44,18 @@ Two entry points draw the main similarity matrix:
 - `plot_similarity_heatmap(...)` — Matplotlib/Seaborn, used for the high-res PNG download.
 - `plot_similarity_heatmap_plotly(...)` — Plotly, used for the interactive on-screen version.
 
-Both currently use a **module-level constant** for the colormap:
+Both functions accept a `colormap_name` parameter. The selected UI value is
+mapped to the appropriate Matplotlib or Plotly colormap using the mappings
+defined in `app/theme.py`. Supported options include those listed in
+`UI_COLORMAP_OPTIONS`, such as `"Viridis"`, `"Plasma"`, `"Coolwarm"`, and
+`"YlOrRd"`.
 
-```python
-_CMAP = "RdYlGn_r"
-```
 
-This is used directly inside `sns.heatmap(..., cmap=_CMAP)` and `go.Heatmap(..., colorscale="RdYlGn_r")`. Neither function currently accepts a `cmap` argument — the colormap is fixed at the module level, not passed in per-call.
+Internally, `colormap_name` is translated through `MATPLOTLIB_CMAP_MAPPING` or `PLOTLY_CMAP_MAPPING`, allowing the same UI selection to work consistently across both static and interactive heatmaps.
 
 Theme colors (background/ink/etc.) are applied conditionally with `if theme_colors:` blocks that style the figure background, axis text color, and legend — see lines 75–83 and 140–146 in `plot_similarity_heatmap`.
 
-`plot_chunk_similarity_comparison(...)` (the two-document chunk-level heatmap) reuses the same `_CMAP` constant and a similar `if theme_colors:` block.
+`plot_chunk_similarity_comparison(...)` also accepts colormap_name and maps it through MATPLOTLIB_CMAP_MAPPING, allowing the chunk-level heatmap to use the same user-selectable colormaps as the main similarity heatmaps.
 
 ### `network_graph.py`
 
@@ -100,9 +101,38 @@ from src.visualization.heatmap import plot_similarity_heatmap
 
 fig = plot_similarity_heatmap(
     similarity_df,
-    colormap_name="Plasma",  # try "Viridis", "Coolwarm", or "YlOrRd" too
+    colormap_name="Plasma",
+    annotate=True,
 )
 ```
+
+### Showing or hiding cell annotations
+
+The Matplotlib heatmap supports numeric cell annotations through the `annotate`
+parameter. By default, annotations are enabled.
+
+Show similarity values inside each cell:
+
+```python
+from src.visualization.heatmap import plot_similarity_heatmap
+
+fig = plot_similarity_heatmap(
+    similarity_df,
+    annotate=True,
+)
+```
+
+Hide the numeric values for a cleaner visualization of larger matrices:
+
+```python
+fig = plot_similarity_heatmap(
+    similarity_df,
+    annotate=False,
+)
+```
+
+When annotations are enabled, values are displayed with two decimal places and
+automatically scaled to remain readable as the matrix size increases.
 
 ### Overriding theme colors for a single chart
 
@@ -148,6 +178,6 @@ THEMES["HighContrast"] = {
 Once added, `set_theme("HighContrast")` makes it available through `get_colors()`, and every chart that accepts `theme_colors=get_colors()` will pick it up automatically.
 
 ## Known Gaps (useful context for future work)
-- **`heatmap.py` colormap is not overridable per-call.** `app/streamlit_app.py` calls `plot_similarity_heatmap(..., cmap=heatmap_cmap, ...)` in one place (search for `# Dynamic colormap support`), but `plot_similarity_heatmap`'s signature has no `cmap` parameter — it only has `theme_colors`, not a colormap override. As written, that call site would raise a `TypeError` if it executes, since `cmap` isn't a valid keyword argument for the function. Adding a `cmap: str = _CMAP` parameter to `plot_similarity_heatmap` (and using it in place of the hardcoded `_CMAP` inside the function) would resolve this.
+- `plot_similarity_heatmap(...)`, `plot_similarity_heatmap_plotly(...)`, and `plot_chunk_similarity_comparison(...)` now support a `colormap_name` parameter. If additional heatmap visualizations are added in the future, they should follow the same `colormap_name` + mapping approach so the UI exposes a consistent set of colormap options.
 - **`plot_similarity_distribution` and `plot_document_sizes` are not exported** from `src/visualization/__init__.py`. They're defined in `analytics.py` but must currently be imported as `from src.visualization.analytics import plot_similarity_distribution` rather than `from src.visualization import plot_similarity_distribution`.
 - **`analytics.py` charts don't take `theme_colors`.** Their colors are hardcoded hex strings, so they won't shift with the Light/Dark toggle the way `heatmap.py` and `network_graph.py` do.
