@@ -850,6 +850,19 @@ def inject_css() -> None:
     </style>
     """
 
+    if st.session_state.get("privacy_mode", False):
+        css = css.replace("</style>", """
+        /* Privacy Mode: Blur student name labels */
+        [class*="st-key-student_"] {
+            filter: blur(4px) !important;
+            transition: filter 0.3s ease;
+        }
+        [class*="st-key-student_"]:hover {
+            filter: none !important;
+        }
+    </style>
+        """)
+
     st.markdown(css, unsafe_allow_html=True)
 
 

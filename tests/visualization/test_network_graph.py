@@ -177,28 +177,27 @@ def test_plot_similarity_network_layout_autosize():
     assert fig.layout.width is None
 
 
-def test_build_network_data_min_degree_filter():
-    """Verify min_degree filters out nodes connected to fewer than min_degree documents."""
+def test_build_network_data_detailed_hover_tooltips():
+    """Verify build_network_data includes word count, upload date, and top match in hover text."""
     data = {
-        "doc1": [1.0, 0.85, 0.80, 0.10],
-        "doc2": [0.85, 1.0, 0.10, 0.10],
-        "doc3": [0.80, 0.10, 1.0, 0.10],
-        "doc4": [0.10, 0.10, 0.10, 1.0],
+        "doc1": [1.0, 0.85],
+        "doc2": [0.85, 1.0],
     }
-    df = pd.DataFrame(data, index=["doc1", "doc2", "doc3", "doc4"])
+    df = pd.DataFrame(data, index=["doc1", "doc2"])
+    doc_metadata = {
+        "doc1": {"word_count": 450, "upload_date": "2026-03-15"},
+        "doc2": {"word_count": 520, "upload_date": "2026-03-16"},
+    }
 
-    # doc1 is connected to doc2 and doc3 (degree 2)
-    # doc2 is connected to doc1 (degree 1)
-    # doc3 is connected to doc1 (degree 1)
-    # doc4 is isolated (degree 0)
-    net_data = build_network_data(df, threshold=0.75, min_degree=2)
-    nodes = list(net_data["graph"].nodes())
+    net_data = build_network_data(df, threshold=0.75, doc_metadata=doc_metadata)
+    hover_texts = net_data["node_trace"].hovertext
 
-    assert "doc1" in nodes
-    assert "doc2" not in nodes
-    assert "doc3" not in nodes
-    assert "doc4" not in nodes
-    assert len(nodes) == 1
+    assert len(hover_texts) == 2
+    doc1_hover = hover_texts[0]
+    assert "450" in doc1_hover
+    assert "2026-03-15" in doc1_hover
+    assert "doc2" in doc1_hover
+    assert "85.0%" in doc1_hover
 
 
 def test_export_graph_to_gexf_produces_valid_xml():

@@ -60,6 +60,7 @@ if "sentence_transformers" not in sys.modules:
 for mod_name in [
     "lxml", "defusedxml", "defusedxml.lxml", "fitz", "docx", "redis", "bs4", "faker", "argon2", "argon2.exceptions",
     "pdfplumber", "langdetect", "striprtf", "striprtf.striprtf", "src.core.translator",
+    "src.core.webhook",
     "pypdf", "PyPDF2", "reportlab", "reportlab.pdfgen", "reportlab.lib", "reportlab.platypus", 
     "reportlab.lib.colors", "reportlab.lib.enums", "reportlab.lib.styles", "reportlab.lib.units", 
     "reportlab.lib.pagesizes", "reportlab.lib.utils", 
