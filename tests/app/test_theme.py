@@ -88,3 +88,34 @@ def test_badge_html_returns_valid_html():
     assert isinstance(html, str)
     assert len(html.strip()) > 0
     assert "badge" in html
+
+
+import streamlit as st
+from unittest.mock import patch
+from app.theme import initialize_theme, set_theme
+
+def test_initialize_theme_loads_dark_from_query_params():
+    st.session_state.clear()
+    with patch("app.theme.st.query_params", {"theme": "dark"}):
+        initialize_theme()
+    assert st.session_state.theme == "Dark"
+
+def test_initialize_theme_loads_light_from_query_params():
+    st.session_state.clear()
+    with patch("app.theme.st.query_params", {"theme": "light"}):
+        initialize_theme()
+    assert st.session_state.theme == "Light"
+
+def test_initialize_theme_invalid_query_params_fallback():
+    st.session_state.clear()
+    with patch("app.theme.st.query_params", {"theme": "invalid_value"}):
+        initialize_theme()
+    assert st.session_state.theme == "Light"
+
+def test_set_theme_updates_query_params():
+    mock_query_params = {}
+    st.session_state.clear()
+    with patch("app.theme.st.query_params", mock_query_params):
+        set_theme("Dark")
+    assert mock_query_params["theme"] == "dark"
+    assert st.session_state.theme == "Dark"

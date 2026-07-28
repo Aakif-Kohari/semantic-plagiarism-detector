@@ -138,3 +138,17 @@ def test_user_theme(mock_db):
     # Set to dark
     set_user_theme(user, "dark")
     assert get_user_theme(user) == "dark"
+
+
+def test_get_all_users():
+    """Test that get_all_users returns User Pydantic model DTOs."""
+    from src.db.schemas import User
+    from src.db.auth import get_all_users
+    users = get_all_users()
+    assert len(users) >= 1
+    assert all(isinstance(u, User) for u in users)
+    admin_user = next(u for u in users if u["username"] == "admin")
+    assert admin_user["role"] == "admin"
+    assert admin_user.role == "admin"
+    assert admin_user.get("is_active") is True
+

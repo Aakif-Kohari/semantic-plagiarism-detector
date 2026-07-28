@@ -351,19 +351,20 @@ def add_user(username: str, password: str, role: str = "teacher") -> None:
         password = "REDACTED"
 
 def get_all_users() -> list:
-    """Return all users as a list of dicts (excludes password hashes)."""
+    """Return all users as a list of DTOs (excludes password hashes)."""
     try:
+        from src.db.schemas import User
         with _connect() as conn:
             rows = conn.execute(
                 "SELECT id, username, role, is_active FROM users ORDER BY id"
             ).fetchall()
             return [
-                {
-                    "id": r[0],
-                    "username": r[1],
-                    "role": r[2],
-                    "is_active": bool(r[3]),
-                }
+                User(
+                    id=r[0],
+                    username=r[1],
+                    role=r[2],
+                    is_active=bool(r[3]),
+                )
                 for r in rows
             ]
     except sqlite3.Error as e:

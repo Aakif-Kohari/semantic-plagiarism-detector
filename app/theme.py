@@ -131,7 +131,13 @@ def initialize_theme() -> None:
     """Initialize the active theme for the current session."""
     try:
         if "theme" not in st.session_state:
-            st.session_state.theme = "Light"
+            query_theme = st.query_params.get("theme")
+            if query_theme and query_theme.lower() == "dark":
+                st.session_state.theme = "Dark"
+            elif query_theme and query_theme.lower() == "light":
+                st.session_state.theme = "Light"
+            else:
+                st.session_state.theme = "Light"
         if "theme_colors" not in st.session_state:
             st.session_state.theme_colors = THEMES[st.session_state.theme]
     except Exception:
@@ -153,6 +159,7 @@ def set_theme(theme_name: str) -> None:
         try:
             st.session_state.theme = theme_name
             st.session_state.theme_colors = THEMES[theme_name]
+            st.query_params["theme"] = theme_name.lower()
         except Exception:
             pass
 

@@ -66,6 +66,43 @@ def test_build_network_data_with_theme_colors():
     assert net_data["node_trace"].textfont.color == "#ffffff"
 
 
+def test_build_network_data_hover_text():
+    """Verify hover text explicitly shows Document Title."""
+    data = {
+        "doc1": [1.0, 0.85],
+        "doc2": [0.85, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2"])
+    net_data = build_network_data(df, threshold=0.75)
+
+    hover_texts = net_data["node_trace"].hovertext
+    assert "<b>📄 Document Title:</b> doc1<br>" in hover_texts[0]
+
+
+def test_build_network_data_node_color_severity():
+    """Verify node colors are mapped by plagiarism severity (max similarity)."""
+    data = {
+        "doc_danger": [1.0, 0.95, 0.1],   # max_score=0.95 -> danger
+        "doc_warning": [0.95, 1.0, 0.8],  # max_score=0.95 -> danger
+        "doc_success": [0.1, 0.8, 1.0],   # max_score=0.8 -> warning
+    }
+    df = pd.DataFrame(data, index=["doc_danger", "doc_warning", "doc_success"])
+    custom_theme = {
+        "danger": "#ff0000",
+        "warning": "#ffff00",
+        "success": "#00ff00",
+    }
+    net_data = build_network_data(df, threshold=0.5, theme_colors=custom_theme)
+
+    # doc_danger has max_score=0.95 -> #ff0000
+    assert net_data["node_trace"].marker.color[0] == "#ff0000"
+    # doc_warning has max_score=0.95 -> #ff0000
+    assert net_data["node_trace"].marker.color[1] == "#ff0000"
+    # doc_success has max_score=0.8 -> #ffff00
+    assert net_data["node_trace"].marker.color[2] == "#ffff00"
+
+
+
 def test_render_network_plotly_construction():
     """Verify render_network_plotly constructs a valid Plotly Figure from network data."""
     data = {

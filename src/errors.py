@@ -65,8 +65,21 @@ INCIDENT_SYNC_FAILED = "Failed to synchronize incidents: {error}"
 INCIDENT_INVALID_REVIEW_STATUS = "review_status must be one of {valid_statuses}"
 INCIDENT_UPDATE_STATUS_FAILED = "Failed to update review status: {error}"
 
-# API Errors
-API_UNAUTHORIZED = "Invalid or missing authentication token."
+# SSRF / Webhook Security Errors
+SSRF_WEBHOOK_URL_EMPTY = "Webhook URL cannot be empty."
+SSRF_INSECURE_SCHEME = "Insecure scheme '{scheme}'. Webhooks must use 'https'."
+SSRF_MISSING_HOSTNAME = "Invalid URL: missing hostname."
+SSRF_INVALID_IP_FORMAT = "Resolved invalid IP address format: {error}"
+SSRF_BLOCKED_PRIVATE_SUBNET = "Blocked private IPv4 subnet IP: {ip} ({subnet})"
+SSRF_BLOCKED_LOOPBACK = "Blocked loopback IP: {ip}"
+SSRF_BLOCKED_PRIVATE_NETWORK = "Blocked private network IP: {ip}"
+SSRF_BLOCKED_LINK_LOCAL = "Blocked link-local IP: {ip}"
+SSRF_BLOCKED_MULTICAST = "Blocked multicast IP: {ip}"
+SSRF_BLOCKED_UNSPECIFIED = "Blocked unspecified IP: {ip}"
+SSRF_DNS_NO_ADDRESSES = "No addresses found for hostname '{hostname}'"
+SSRF_DNS_RESOLUTION_FAILED = "DNS resolution failed for hostname '{hostname}': {error}"
+
+# API ErrorsAPI_UNAUTHORIZED = "Invalid or missing authentication token."
 API_FILENAME_MISSING = "Filename must be provided."
 API_FILE_EMPTY = "Uploaded file is empty."
 API_TEXT_EXTRACTION_FAILED = "Failed to extract readable text from the uploaded file."
