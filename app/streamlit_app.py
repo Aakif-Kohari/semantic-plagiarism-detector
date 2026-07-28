@@ -2856,6 +2856,16 @@ if not st.session_state.authenticated:
             set_theme(selected_theme)
             st.rerun()
 
+        privacy_mode = st.toggle(
+            "Privacy Mode (Blur student names)",
+            value=st.session_state.get("privacy_mode", False),
+            key="privacy_mode_toggle",
+            help="Apply CSS filter: blur(4px) to student name labels for safe screenshots.",
+        )
+        if privacy_mode != st.session_state.get("privacy_mode", False):
+            st.session_state.privacy_mode = privacy_mode
+            st.rerun()
+
         if user_role == "admin":
             st.markdown("---")
             st.markdown("### ⚙️ Advanced Configuration")
