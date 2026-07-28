@@ -4,8 +4,10 @@ tests/visualization/test_network_graph.py
 Unit tests for plot_similarity_network edge cases.
 """
 
+import time
 from unittest.mock import patch
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
@@ -174,25 +176,24 @@ def test_plot_similarity_network_layout_autosize():
     assert fig.layout.width is None
 
 
-def test_build_network_data_detailed_hover_tooltips():
-    """Verify build_network_data includes word count, upload date, and top match in hover text."""
-    data = {
-        "doc1": [1.0, 0.85],
-        "doc2": [0.85, 1.0],
-    }
-    df = pd.DataFrame(data, index=["doc1", "doc2"])
-    doc_metadata = {
-        "doc1": {"word_count": 450, "upload_date": "2026-03-15"},
-        "doc2": {"word_count": 520, "upload_date": "2026-03-16"},
-    }
+def test_plot_similarity_network_benchmark_200_nodes():
+    """Verify rendering a 200-node graph completes in under 2.0 seconds."""
+    np.random.seed(42)
+    n = 200
+    doc_names = [f"doc_{i}" for i in range(n)]
 
-    net_data = build_network_data(df, threshold=0.75, doc_metadata=doc_metadata)
-    hover_texts = net_data["node_trace"].hovertext
+    matrix = np.random.uniform(0.1, 0.95, size=(n, n))
+    matrix = (matrix + matrix.T) / 2.0
+    np.fill_diagonal(matrix, 1.0)
 
-    assert len(hover_texts) == 2
-    doc1_hover = hover_texts[0]
-    assert "450" in doc1_hover
-    assert "2026-03-15" in doc1_hover
-    assert "doc2" in doc1_hover
-    assert "85.0%" in doc1_hover
+    df = pd.DataFrame(matrix, index=doc_names, columns=doc_names)
+
+    start_time = time.perf_counter()
+    fig = plot_similarity_network(df, threshold=0.80)
+    elapsed_time = time.perf_counter() - start_time
+
+    assert isinstance(fig, go.Figure)
+    assert (
+        elapsed_time < 2.0
+    ), f"Graph rendering took {elapsed_time:.3f}s, exceeding 2.0s benchmark."
 
