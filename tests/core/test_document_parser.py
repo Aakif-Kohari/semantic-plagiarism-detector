@@ -1,15 +1,18 @@
 import io
 import shutil
+import zipfile
 from unittest.mock import MagicMock, patch
 
 import docx
 import pytest
 
 from src.core.document_parser import (
+    CorruptedArchiveError,
     extract_text,
     extract_text_from_docx,
     extract_text_from_pdf,
     extract_text_from_txt,
+    extract_text_from_zip,
     extract_texts,
     strip_bibliography,
 )
@@ -38,6 +41,15 @@ def _make_docx_bytes(text: str) -> bytes:
     doc.add_paragraph(text)
     buf = io.BytesIO()
     doc.save(buf)
+    return buf.getvalue()
+
+
+def _make_valid_zip_bytes(files: dict) -> bytes:
+    """Create a valid in-memory ZIP archive containing given file names and contents."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for filename, content in files.items():
+            zf.writestr(filename, content)
     return buf.getvalue()
 
 
@@ -97,6 +109,31 @@ def test_extract_from_txt_bytes():
     txt_bytes = b"Hello TXT"
     result = extract_text_from_txt(txt_bytes)
     assert result == "Hello TXT"
+
+
+# ---------------------------------------------------------------------------
+# Corrupted Zip Submission Tests (#580)
+# ---------------------------------------------------------------------------
+
+
+class TestCorruptedZipHandling:
+
+    def test_extract_text_from_valid_zip(self):
+        zip_bytes = _make_valid_zip_bytes({"essay1.txt": "First student essay text.", "essay2.txt": "Second student submission."})
+        result = extract_text_from_zip(zip_bytes)
+        assert "First student essay text." in result
+        assert "Second student submission." in result
+
+    def test_corrupted_zip_header_raises_user_friendly_error(self):
+        corrupted_bytes = b"PK\x03\x04corrupted_zip_header_data_not_valid_archive"
+        with pytest.raises(CorruptedArchiveError) as exc_info:
+            extract_text_from_zip(corrupted_bytes)
+        assert "corrupted" in str(exc_info.value).lower()
+
+    def test_routing_corrupted_zip_via_extract_text(self):
+        corrupted_bytes = b"INVALID_ZIP_STREAM"
+        with pytest.raises(CorruptedArchiveError):
+            extract_text(corrupted_bytes, "submission_batch.zip")
 
 
 @pytest.mark.skipif(
@@ -218,3 +255,4 @@ class TestStripBibliography:
         result = extract_text(docx_bytes, "test.docx")
         assert "Bibliography" not in result
         assert "Body content" in result
+        

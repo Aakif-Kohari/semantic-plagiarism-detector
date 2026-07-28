@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import os
 import re
+import zipfile
 from collections import Counter
 from pathlib import Path
 from typing import BinaryIO, Dict, List, Union
@@ -32,6 +33,10 @@ SUPPORTED_OCR_LANGUAGES = {
     "spa": "Spanish",
     "fra": "French",
 }
+
+
+class CorruptedArchiveError(ValueError):
+    """Raised when an uploaded zip file or inner archived document is corrupted."""
 
 
 def validate_ocr_dpi(value: int) -> int:
@@ -448,12 +453,7 @@ def extract_text_from_pdf(
     ocr_language: str = DEFAULT_OCR_LANGUAGE,
     ocr_dpi: int = DEFAULT_OCR_DPI,
 ) -> str:
-    """Extract PDF text and OCR only pages with insufficient native text.
-
-    Text-based PDFs continue to use pdfplumber. Fully scanned and mixed PDFs
-    are handled page by page, allowing OCR results to enter the unchanged
-    chunking, embedding and FAISS pipeline.
-    """
+    """Extract PDF text and OCR only pages with insufficient native text."""
     ocr_language, ocr_dpi = normalize_ocr_settings(
         language=ocr_language,
         dpi=ocr_dpi,
@@ -556,13 +556,55 @@ def extract_text_from_txt(file: PDFInput) -> str:
     return text.strip()
 
 
+def extract_text_from_zip(
+    file: PDFInput,
+    *,
+    ocr_language: str = DEFAULT_OCR_LANGUAGE,
+    ocr_dpi: int = DEFAULT_OCR_DPI,
+) -> str:
+    """Extract and aggregate text from all valid documents inside a ZIP archive.
+
+    Catches zipfile.BadZipFile and reports corrupted zip files or damaged inner entries.
+    """
+    raw_data = _read_pdf_bytes(file)
+    zip_stream = io.BytesIO(raw_data)
+
+    if not zipfile.is_zipfile(zip_stream):
+        raise CorruptedArchiveError("Uploaded ZIP file is corrupted or not a valid ZIP archive.")
+
+    zip_stream.seek(0)
+    extracted_texts: List[str] = []
+    corrupted_files: List[str] = []
+
+    try:
+        with zipfile.ZipFile(zip_stream, "r") as archive:
+            for member_name in archive.namelist():
+                # Skip directories and macOS metadata files
+                if member_name.endswith("/") or member_name.startswith("__MACOSX"):
+                    continue
+
+                try:
+                    file_bytes = archive.read(member_name)
+                    parsed = extract_text(file_bytes, member_name, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
+                    if parsed:
+                        extracted_texts.append(parsed)
+                except Exception as exc:
+                    corrupted_files.append(f"{member_name} ({exc})")
+
+            if corrupted_files:
+                bad_list = ", ".join(corrupted_files)
+                print(f"[document_parser] Warning: Corrupted inner files in zip: {bad_list}")
+
+            if not extracted_texts and corrupted_files:
+                raise CorruptedArchiveError(f"ZIP archive contains corrupted files: {', '.join(corrupted_files)}")
+
+    except zipfile.BadZipFile as exc:
+        raise CorruptedArchiveError(f"Uploaded ZIP submission is corrupted: {exc}") from exc
+
+    return "\n\n".join(extracted_texts).strip()
+
+
 # --- Markdown (.md) support -------------------------------------------------
-#
-# Markdown files are plain text, so we reuse the TXT reading logic to get the
-# raw source, then strip common Markdown syntax so only the readable content
-# reaches the semantic-analysis / embedding pipeline. Fenced code blocks are
-# kept (with the fence markers removed) since code can still be relevant
-# content for plagiarism comparison; only the surrounding syntax is removed.
 
 _MD_FENCE = re.compile(r"^\s*(```|~~~)")
 _MD_ATX_HEADER = re.compile(r"^\s{0,3}#{1,6}\s+")
@@ -593,12 +635,7 @@ def _strip_inline_markdown(line: str) -> str:
 
 
 def strip_markdown_syntax(raw_text: str) -> str:
-    """Convert raw Markdown source into plain readable text.
-
-    Fenced code block contents are preserved as-is (fence markers removed);
-    headers, lists, blockquotes, horizontal rules, links, images, and
-    emphasis markers are stripped down to their underlying text.
-    """
+    """Convert raw Markdown source into plain readable text."""
     lines = raw_text.splitlines()
     output: List[str] = []
     in_code_block = False
@@ -616,7 +653,6 @@ def strip_markdown_syntax(raw_text: str) -> str:
             continue
 
         if _MD_SETEXT_HEADER.match(line) and output and output[-1].strip():
-            # Setext header underline (=== or ---) following a text line.
             continue
 
         line = _MD_ATX_HEADER.sub("", line)
@@ -633,11 +669,7 @@ def strip_markdown_syntax(raw_text: str) -> str:
 
 
 def extract_text_from_md(file: PDFInput) -> str:
-    """Extract plain text from a Markdown (.md) file.
-
-    Reads the raw Markdown source (reusing the TXT reader) and strips
-    Markdown syntax so downstream chunking/embedding sees clean prose.
-    """
+    """Extract plain text from a Markdown (.md) file."""
     raw_text = extract_text_from_txt(file)
     if not raw_text:
         return ""
@@ -665,6 +697,8 @@ def extract_text(
         raw = extract_text_from_docx(file)
     elif extension == "md":
         raw = extract_text_from_md(file)
+    elif extension in ("zip", "7z", "tar", "gz"):
+        raw = extract_text_from_zip(file, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
     else:
         raw = extract_text_from_txt(file)
 
@@ -702,8 +736,3 @@ def extract_texts(files: list) -> Dict[str, str]:
         results[name] = raw_texts.get(name, "")
 
     return results
-
-
-# Cross-lingual embedding preparation (Issue #46)
-# Re-exported here because parsing is the boundary where raw source text is
-# converted into embedding-ready text.
