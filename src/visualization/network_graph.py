@@ -76,7 +76,8 @@ def build_network_data(
     threshold: float = 0.59,
     min_degree: int = 0,
     theme_colors: Optional[dict] = None,
-    doc_metadata: Optional[dict] = None,
+    selected_node: Optional[str] = None,
+    document_tags: Optional[dict] = None,
 ) -> dict:
     """
     Processes similarity matrix data, constructs NetworkX graph layout, and formats node and edge traces.
@@ -86,14 +87,13 @@ def build_network_data(
         threshold: Edge threshold; pairs with similarity >= threshold are connected.
         min_degree: Minimum degree threshold; nodes with degree < min_degree are filtered out.
         theme_colors: Optional dictionary containing theme colors.
-        doc_metadata: Optional dictionary mapping document names to metadata (word_count, upload_date, etc.).
+        selected_node: Optional document name to highlight in the network.
+        document_tags: Optional dictionary mapping document names to tag strings or lists of tags.
 
     Returns:
         Dictionary containing shapes, edge_hover_trace, node_trace, graph, pos coordinates,
         tag_color_map, and document_tags.
     """
-    if document_tags is None and "doc_tags" in kwargs:
-        document_tags = kwargs.pop("doc_tags")
 
     # Create networkx graph
     G = nx.Graph()
@@ -245,6 +245,8 @@ def build_network_data(
     # Store the document ID for each Plotly node.
     # The order matches node_x, node_y, and node_text.
     node_document_ids = []
+
+    neighbor_nodes = set(G.neighbors(selected_node)) if selected_node and selected_node in G else set()
 
     for node in G.nodes():
         x, y = pos[node]
@@ -493,5 +495,62 @@ def plot_similarity_network(
         title=title,
         theme_colors=theme_colors,
     )
+
+
+def export_graph_to_gexf(graph: nx.Graph) -> str:
+    """
+    Serialize a NetworkX graph to GEXF XML format string.
+
+    GEXF (Graph Exchange XML Format) is the standard format supported by
+    Gephi, Sigma.js, and other graph visualization tools.
+
+    Args:
+        graph: NetworkX Graph object.
+
+    Returns:
+        GEXF XML string.
+    """
+    return "".join(nx.generate_gexf(graph))
+
+
+def export_network_to_gexf_bytes(
+    similarity_df: pd.DataFrame,
+    threshold: float = 0.59,
+    min_degree: int = 0,
+) -> bytes:
+    """
+    Build a network from the similarity matrix and export as GEXF bytes.
+
+    GEXF (Graph Exchange XML Format) is supported by Gephi, Sigma.js,
+    and other graph visualization tools. Similarity scores are attached
+    as edge attributes for visualization in Gephi.
+
+    Args:
+        similarity_df: Square N×N DataFrame of similarity scores.
+        threshold: Edge threshold; pairs with similarity >= threshold
+            are connected.
+        min_degree: Minimum degree threshold; nodes with degree below
+            this value are excluded.
+
+    Returns:
+        GEXF XML as UTF-8 encoded bytes, ready for download.
+    """
+    network_data = build_network_data(
+        similarity_df=similarity_df,
+        threshold=threshold,
+        min_degree=min_degree,
+    )
+    G = network_data["graph"]
+
+    doc_names = list(similarity_df.columns)
+    name_to_idx = {name: i for i, name in enumerate(doc_names)}
+
+    for u, v in G.edges():
+        i = name_to_idx[u]
+        j = name_to_idx[v]
+        G[u][v]["similarity"] = float(similarity_df.iloc[i, j])
+
+    gexf_str = export_graph_to_gexf(G)
+    return gexf_str.encode("utf-8")
 
 
