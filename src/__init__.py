@@ -117,4 +117,5 @@ __all__ = [
     "get_document_chunks_count",
     "get_unique_class_sections",
     "get_documents_by_class",
+    "sanitize_zero_width_characters",
 ]

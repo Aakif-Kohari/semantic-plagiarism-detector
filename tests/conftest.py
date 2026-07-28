@@ -59,7 +59,8 @@ if "sentence_transformers" not in sys.modules:
 
 if "torch" not in sys.modules:
     torch_stub = types.ModuleType("torch")
-    class Tensor: pass
+    class Tensor:
+        pass
     torch_stub.Tensor = Tensor  # type: ignore
     sys.modules["torch"] = torch_stub
 
@@ -184,9 +185,9 @@ def mock_db(tmp_path):
     # We patch the database path at the module level for all db modules
     import unittest.mock
     
-    with unittest.mock.patch("src.db.corpus_db._DB_PATH", str(db_file)), \
-         unittest.mock.patch("src.db.incidents.DEFAULT_DB_PATH", str(db_file)), \
-         unittest.mock.patch("src.db.auth._DB_PATH", str(db_file)):
+    with unittest.mock.patch("src.db.corpus_db._DB_PATH", str(corpus_db_file)), \
+         unittest.mock.patch("src.db.incidents.DEFAULT_DB_PATH", str(corpus_db_file)), \
+         unittest.mock.patch("src.db.auth._DB_PATH", str(auth_db_file)):
         
         try:
             from src.db.corpus_db import init_corpus_db
@@ -195,8 +196,8 @@ def mock_db(tmp_path):
             init_corpus_db()
             init_incident_db()
             init_db()
-        except Exception as e:
+        except Exception:
             import traceback
             traceback.print_exc()
             
-        yield str(db_file)
+        yield str(corpus_db_file)
