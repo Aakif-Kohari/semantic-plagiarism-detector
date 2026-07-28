@@ -24,6 +24,7 @@ class CacheKeyPrefix(str, Enum):
     UPLOAD_COUNT = "upload_count:"
     SIMILARITY_RESULT = "similarity:"
     DOCUMENT_CACHE = "doc:"
+    LEGACY_UPLOADS_PREFIX = "upload_count:"
 
 try:
     import redis
