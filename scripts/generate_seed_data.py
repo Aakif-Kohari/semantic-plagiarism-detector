@@ -10,13 +10,11 @@ Now includes robust CLI argument parsing for configurable dataset generation.
 import argparse
 import hashlib
 import logging
-import math
 import os
 import random
 import sys
-import time
 from dataclasses import dataclass
-from typing import List, Dict, Tuple, Optional, Any
+from typing import Tuple
 
 # Ensure repository root is in sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
