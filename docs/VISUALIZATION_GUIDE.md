@@ -60,6 +60,10 @@ Theme colors (background/ink/etc.) are applied conditionally with `if theme_colo
 
 `plot_similarity_network(...)` builds a graph with NetworkX (`nx.spring_layout` for node positions) and renders it with Plotly `go.Figure`.
 
+`export_graph_to_gexf(graph)` serializes a NetworkX graph to GEXF XML format string for external tools like Gephi and Sigma.js.
+
+`export_network_to_gexf_bytes(similarity_df, threshold, min_degree)` is a convenience function that builds the network from a similarity matrix and returns GEXF bytes ready for download. It attaches similarity scores as edge attributes so Gephi can color/weight edges by plagiarism severity.
+
 Coloring logic here is threshold-based rather than a single palette lookup:
 
 - **Edges** are colored by similarity severity (lines ~92–98): `>= 0.90` uses `theme_colors["danger"]`, `>= 0.75` uses `theme_colors["warning"]`, otherwise `theme_colors["success"]` — each with a hardcoded hex fallback if `theme_colors` is `None`.
@@ -88,6 +92,22 @@ So today, dashboard charts do not follow the Light/Dark theme the way the heatma
 3. Export it from `src/visualization/__init__.py` (add it to both the `from .module import ...` line and the `__all__` list) so it can be imported as `from src.visualization import your_function`.
 4. Call it from `app/streamlit_app.py`, passing `theme_colors=get_colors()` if applicable.
 5. Add a test under `tests/` (see `tests/test_heatmap.py` and `tests/visualization/test_network_graph.py` for existing patterns) and, if it's a Matplotlib figure, consider a baseline image test like `tests/baseline/test_similarity_heatmap_visual.png`.
+
+## Exporting Graph Data
+
+The network graph module supports **GEXF export** for use in external graph analysis tools like Gephi and Sigma.js:
+
+```python
+from src.visualization.network_graph import export_network_to_gexf_bytes
+
+gexf_data = export_network_to_gexf_bytes(
+    similarity_df=similarity_df,
+    threshold=0.59,
+    min_degree=0,
+)
+```
+
+The returned bytes can be passed directly to `st.download_button` in a Streamlit app. Each edge in the GEXF output includes a `similarity` attribute with the original cosine similarity score, enabling weighted graph analysis in Gephi.
 
 ## Chart Customization Examples
 

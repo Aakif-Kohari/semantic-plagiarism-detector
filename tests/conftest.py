@@ -62,8 +62,8 @@ for mod_name in [
     "pdfplumber", "langdetect", "striprtf", "striprtf.striprtf", "src.core.translator",
     "pypdf", "PyPDF2", "reportlab", "reportlab.pdfgen", "reportlab.lib", "reportlab.platypus", 
     "reportlab.lib.colors", "reportlab.lib.enums", "reportlab.lib.styles", "reportlab.lib.units", 
-    "reportlab.lib.pagesizes", "reportlab.lib.utils", "plotly", "plotly.express", "plotly.graph_objects", 
-    "matplotlib", "matplotlib.patches", "matplotlib.pyplot", "matplotlib.figure", "matplotlib.ticker", "networkx",
+    "reportlab.lib.pagesizes", "reportlab.lib.utils", 
+    "matplotlib", "matplotlib.patches", "matplotlib.pyplot", "matplotlib.figure", "matplotlib.ticker",
     "faiss", "torch", "psutil", "pytesseract", "sklearn", "sklearn.metrics", "sklearn.metrics.pairwise", "requests",
     "bcrypt", "pyotp", "qrcode", "seaborn"
 ]:
