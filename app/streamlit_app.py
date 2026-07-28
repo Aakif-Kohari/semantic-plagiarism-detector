@@ -1967,7 +1967,8 @@ if not st.session_state.authenticated:
                 st.rerun()
 
             render_warning_controls(
-                filtered_flags, threshold=threshold, ai_probabilities=ai_probabilities
+                filtered_flags, threshold=threshold, ai_probabilities=ai_probabilities,
+                lang_code=lang_code,
             )
 
     # ══ TAB 2: FAISS ══════════════════════════════════════════════════════════

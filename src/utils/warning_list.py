@@ -10,9 +10,9 @@ import pandas as pd
 import streamlit as st
 
 from app.theme import badge_html, tier_from_severity_label
+from src.i18n.translator import get_text
 from src.core.config import normalize_severity_label, severity_from_score, severity_rank
 from src.db.incidents import _normalise_pair, add_false_positive, get_false_positives
-
 
 try:
     from thefuzz import fuzz
@@ -23,12 +23,16 @@ except ImportError:
         fuzz = None
 FUZZY_THRESHOLD = 80
 
-SORT_FIELDS = {
-    "Similarity": "similarity",
-    "Document A": "doc_a",
-    "Document B": "doc_b",
-    "Severity": "severity_rank",
+_SORT_KEYS = {
+    "warn_sort_similarity": "similarity",
+    "warn_sort_doc_a": "doc_a",
+    "warn_sort_doc_b": "doc_b",
+    "warn_sort_severity": "severity_rank",
 }
+
+
+def _sort_display_names(lang_code: str) -> dict[str, str]:
+    return {get_text(k, lang=lang_code): v for k, v in _SORT_KEYS.items()}
 
 
 @dataclass(frozen=True)
@@ -264,6 +268,7 @@ def render_warning_controls(
     *,
     threshold: float,
     ai_probabilities: dict[str, dict[str, Any]] | None = None,
+    lang_code: str = "en",
 ) -> None:
     if "warning_page" not in st.session_state:
         st.session_state.warning_page = 1
@@ -272,14 +277,14 @@ def render_warning_controls(
 
     from src.core.config import DEFAULT_THRESHOLDS
 
-    st.caption(f"Pairs with similarity ≥ **{threshold:.2f}**")
+    st.caption(get_text("warn_pairs_caption", lang=lang_code).format(threshold=f"{threshold:.2f}"))
 
     active_filters = []
     if abs(threshold - DEFAULT_THRESHOLDS.plagiarism) > 0.001:
         active_filters.append(
             {
                 "key": "clear_threshold",
-                "label": f"Threshold: >{threshold*100:.0f}% ⓧ",
+                "label": get_text("warn_filter_threshold", lang=lang_code).format(pct=f"{threshold*100:.0f}"),
                 "action": "threshold",
             }
         )
@@ -288,8 +293,17 @@ def render_warning_controls(
         active_filters.append(
             {
                 "key": "clear_compact_view",
-                "label": "Compact View ⓧ",
+                "label": "Compact View \u24e7",
                 "action": "compact_view",
+            }
+        )
+
+    if st.session_state.get("hide_low_severity", False):
+        active_filters.append(
+            {
+                "key": "clear_hide_low_severity",
+                "label": get_text("warn_filter_severity", lang=lang_code),
+                "action": "hide_low_severity",
             }
         )
 
@@ -301,7 +315,7 @@ def render_warning_controls(
         active_filters.append(
             {
                 "key": "clear_warning_search",
-                "label": f"Search: '{display_search}' ⓧ",
+                "label": get_text("warn_filter_search", lang=lang_code).format(query=display_search),
                 "action": "warning_search",
             }
         )
@@ -316,7 +330,7 @@ def render_warning_controls(
         active_filters.append(
             {
                 "key": "clear_document_filter",
-                "label": f"Document: {display_doc} ⓧ",
+                "label": get_text("warn_filter_document", lang=lang_code).format(doc=display_doc),
                 "action": "selected_document_id",
             }
         )
@@ -329,7 +343,7 @@ def render_warning_controls(
         active_filters.append(
             {
                 "key": "clear_class_filter",
-                "label": f"Class: {display_class} ⓧ",
+                "label": get_text("warn_filter_class", lang=lang_code).format(class_name=display_class),
                 "action": "class_filter",
             }
         )
@@ -339,7 +353,7 @@ def render_warning_controls(
         active_filters.append(
             {
                 "key": "clear_min_match_length",
-                "label": f"Min Words: {min_match_len_val}+ ⓧ",
+                "label": get_text("warn_filter_min_words", lang=lang_code).format(count=min_match_len_val),
                 "action": "min_match_length",
             }
         )
@@ -394,22 +408,22 @@ def render_warning_controls(
     ]
 
     if not filtered_flags:
-        st.success("✅ No suspicious pairs found above the current threshold.")
+        st.success(get_text("warn_no_suspicious", lang=lang_code))
         return
 
     search_col, toggle_col, compact_col, size_col = st.columns([3, 2, 2, 1])
 
     with search_col:
         search_query = st.text_input(
-            "Search warnings",
-            placeholder="Search by student or document name (supports typos)…",
+            get_text("warn_search_label", lang=lang_code),
+            placeholder=get_text("warn_search_placeholder", lang=lang_code),
             key="warning_search",
             on_change=_reset_page,
         )
 
     with toggle_col:
         hide_low_severity = st.checkbox(
-            "Hide Low Severity",
+            get_text("warn_hide_low_severity", lang=lang_code),
             key="hide_low_severity",
         )
     with compact_col:
@@ -421,14 +435,14 @@ def render_warning_controls(
         )
     with size_col:
         page_size = st.selectbox(
-            "Warnings per page",
+            get_text("warn_per_page", lang=lang_code),
             [10, 25, 50],
             key="warning_page_size",
             on_change=_reset_page,
         )
 
     min_match_length = st.slider(
-        "Minimum Match Length (Words)",
+        get_text("warn_min_match_length", lang=lang_code),
         min_value=0,
         max_value=250,
         value=0,
@@ -437,28 +451,37 @@ def render_warning_controls(
         on_change=_reset_page,
     )
 
+    sort_fields = _sort_display_names(lang_code)
+    _desc_text = get_text("warn_descending", lang=lang_code)
+    _asc_text = get_text("warn_ascending", lang=lang_code)
+    p_dir = st.session_state.get("warning_primary_direction", _desc_text)
+    s_dir = st.session_state.get("warning_secondary_direction", _asc_text)
+
+    p_arrow = "\u25bc" if p_dir == _desc_text else "\u25b2"
+    s_arrow = "\u25b2" if s_dir == _asc_text else "\u25bc"
+
     p1, d1, p2, d2 = st.columns([2, 1, 2, 1])
 
     with p1:
         primary_label = st.selectbox(
-            "Primary sort",
-            list(SORT_FIELDS),
+            f"{get_text('warn_primary_sort', lang=lang_code)} {p_arrow}",
+            list(sort_fields),
             key="warning_primary_sort",
             on_change=_reset_page,
         )
 
     with d1:
         primary_direction = st.selectbox(
-            "Direction",
-            ["Descending", "Ascending"],
+            get_text("warn_direction", lang=lang_code),
+            [get_text("warn_descending", lang=lang_code), get_text("warn_ascending", lang=lang_code)],
             key="warning_primary_direction",
             on_change=_reset_page,
         )
 
     with p2:
         secondary_label = st.selectbox(
-            "Then sort by",
-            list(SORT_FIELDS),
+            f"{get_text('warn_secondary_sort', lang=lang_code)} {s_arrow}",
+            list(sort_fields),
             index=1,
             key="warning_secondary_sort",
             on_change=_reset_page,
@@ -466,8 +489,8 @@ def render_warning_controls(
 
     with d2:
         secondary_direction = st.selectbox(
-            "Then direction",
-            ["Ascending", "Descending"],
+            get_text("warn_direction", lang=lang_code),
+            [get_text("warn_ascending", lang=lang_code), get_text("warn_descending", lang=lang_code)],
             key="warning_secondary_direction",
             on_change=_reset_page,
         )
@@ -482,10 +505,10 @@ def render_warning_controls(
         display_flags,
         search_query=search_query,
         min_match_length=min_match_length,
-        primary_field=SORT_FIELDS[primary_label],
-        primary_descending=primary_direction == "Descending",
-        secondary_field=SORT_FIELDS[secondary_label],
-        secondary_descending=secondary_direction == "Descending",
+        primary_field=sort_fields[primary_label],
+        primary_descending=primary_direction == _desc_text,
+        secondary_field=sort_fields[secondary_label],
+        secondary_descending=secondary_direction == _desc_text,
         page=st.session_state.warning_page,
         page_size=page_size,
     )
@@ -495,10 +518,10 @@ def render_warning_controls(
     export_df = pd.DataFrame(
         [
             {
-                "Document A": item["doc_a"],
-                "Document B": item["doc_b"],
-                "Similarity": item["similarity"],
-                "Severity": item["severity"],
+                get_text("warn_col_doc_a", lang=lang_code): item["doc_a"],
+                get_text("warn_col_doc_b", lang=lang_code): item["doc_b"],
+                get_text("warn_col_similarity", lang=lang_code): item["similarity"],
+                get_text("warn_col_severity", lang=lang_code): item["severity"],
             }
             for item in sorted_flags
         ]
@@ -511,18 +534,21 @@ def render_warning_controls(
         if _normalise_warning(flag)["severity"] in ("High", "Medium")
     ]
     if not summary_flags:
-        markdown_text = "# 🔍 Plagiarism Report Summary\n\nNo High or Medium severity warnings found."
+        markdown_text = get_text("warn_no_summary", lang=lang_code)
     else:
         markdown_lines = [
-            "# 🔍 Plagiarism Report Summary\n",
-            "The following document pairs have been flagged for high or medium similarity:\n",
+            get_text("warn_summary_title", lang=lang_code) + "\n",
+            get_text("warn_summary_desc", lang=lang_code) + "\n",
         ]
         for idx, flag in enumerate(summary_flags, 1):
             matched_words = flag.get("matched_length", 0)
+            sim_label = get_text("warn_summary_similarity_label", lang=lang_code)
+            sev_label = get_text("warn_summary_severity_label", lang=lang_code)
+            words_text = get_text("warn_summary_words_matched", lang=lang_code).format(count=matched_words)
             markdown_lines.append(
                 f"{idx}. **{flag['doc_a']}** ↔ **{flag['doc_b']}** — "
-                f"**Similarity:** `{flag['similarity'] * 100:.1f}%` ({matched_words} words matched) | "
-                f"**Severity:** `{flag['severity']}`"
+                f"{sim_label} `{flag['similarity'] * 100:.1f}%` ({words_text}) | "
+                f"{sev_label} `{flag['severity']}`"
             )
         markdown_text = "\n".join(markdown_lines)
 
@@ -538,11 +564,14 @@ def render_warning_controls(
     with left:
         if current_page.total_items:
             st.markdown(
-                f"Showing **{current_page.start_index}–{current_page.end_index}** "
-                f"of **{current_page.total_items}** matching warnings"
+                get_text("warn_showing", lang=lang_code).format(
+                    start=current_page.start_index,
+                    end=current_page.end_index,
+                    total=current_page.total_items,
+                )
             )
         else:
-            st.info("No warnings match the current search.")
+            st.info(get_text("warn_no_match", lang=lang_code))
     with middle:
         html_code = f"""
         <style>
@@ -572,7 +601,7 @@ def render_warning_controls(
             box-sizing: border-box;
             transition: background-color 0.2s, color 0.2s, border-color 0.2s;
         " onmouseover="this.style.borderColor='#ff4b4b'; this.style.color='#ff4b4b'" onmouseout="this.style.borderColor='#d6d6d8'; this.style.color='#31333f'">
-            📋 Copy Report Summary
+            {copy_label}
         </button>
         <script>
             document.getElementById("copy-btn").addEventListener("click", function() {{
@@ -589,11 +618,11 @@ def render_warning_controls(
                     const successful = document.execCommand('copy');
                     if (successful) {{
                         const btn = document.getElementById("copy-btn");
-                        btn.innerHTML = "✅ Copied!";
+                        btn.innerHTML = "{copied_label}";
                         btn.style.borderColor = "#28a745";
                         btn.style.color = "#28a745";
                         setTimeout(function() {{
-                            btn.innerHTML = "📋 Copy Report Summary";
+                            btn.innerHTML = "{copy_label}";
                             btn.style.borderColor = "#d6d6d8";
                             btn.style.color = "#31333f";
                         }}, 2000);
@@ -608,7 +637,7 @@ def render_warning_controls(
         st.components.v1.html(html_code, height=45)
     with right:
         st.download_button(
-            "⬇️ Download filtered report (CSV)",
+            get_text("warn_download_csv", lang=lang_code),
             export_df.to_csv(index=False).encode("utf-8"),
             "plagiarism_warnings_filtered.csv",
             "text/csv",
@@ -638,8 +667,9 @@ def render_warning_controls(
             with st.container(border=True):
                 c1, c2, c3 = st.columns([3, 1, 1])
                 with c1:
+                    exact_match_label = get_text("warn_exact_match", lang=lang_code)
                     if _has_exact_match(flag["doc_a"], flag["doc_b"]):
-                        exact_badge = " <span style='background-color: #E8F5E9; color: #2E7D32; border: 1px solid #2E7D32; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; margin-left: 8px; vertical-align: middle;'>Exact Match</span>"
+                        exact_badge = f" <span style='background-color: #E8F5E9; color: #2E7D32; border: 1px solid #2E7D32; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; margin-left: 8px; vertical-align: middle;'>{exact_match_label}</span>"
                         st.markdown(
                             f"**{flag['doc_a']}** ↔ **{flag['doc_b']}**{exact_badge}",
                             unsafe_allow_html=True,
@@ -649,7 +679,10 @@ def render_warning_controls(
 
                     # Replaced the standard similarity text with your matched length display logic
                     matched_words = flag.get("matched_length", 0)
-                    display_text = f"[{flag['similarity'] * 100:.1f}% Similarity | {matched_words} words matched]"
+                    display_text = get_text("warn_similarity_progress", lang=lang_code).format(
+                        pct=f"{flag['similarity'] * 100:.1f}",
+                        words=matched_words,
+                    )
                     st.progress(
                         min(1.0, max(0.0, float(flag["similarity"]))),
                         text=display_text,
@@ -665,8 +698,12 @@ def render_warning_controls(
                         )
                         if ai_a > 0 or ai_b > 0:
                             st.caption(
-                                f"🤖 AI Prob: {flag['doc_a']}: {ai_a:.1%} | "
-                                f"{flag['doc_b']}: {ai_b:.1%}"
+                                get_text("warn_ai_prob", lang=lang_code).format(
+                                    doc_a=flag["doc_a"],
+                                    ai_a=ai_a,
+                                    doc_b=flag["doc_b"],
+                                    ai_b=ai_b,
+                                )
                             )
                 with c2:
                     st.markdown(
@@ -675,7 +712,8 @@ def render_warning_controls(
                     )
                 with c3:
                     if st.button(
-                        "Dismiss", key=f"dismiss_{flag['doc_a']}_{flag['doc_b']}"
+                        get_text("warn_dismiss", lang=lang_code),
+                        key=f"dismiss_{flag['doc_a']}_{flag['doc_b']}",
                     ):
                         add_false_positive(flag["doc_a"], flag["doc_b"])
                         st.rerun()
@@ -686,7 +724,7 @@ def render_warning_controls(
 
     with prev_col:
         if st.button(
-            "← Previous",
+            get_text("warn_prev", lang=lang_code),
             use_container_width=True,
             disabled=current_page.page <= 1,
             key="warning_previous_page",
@@ -696,7 +734,7 @@ def render_warning_controls(
 
     with page_col:
         selected_page = st.selectbox(
-            "Page",
+            get_text("warn_page", lang=lang_code),
             list(range(1, current_page.total_pages + 1)),
             index=current_page.page - 1,
             key=f"warning_page_selector_{current_page.total_pages}",
@@ -709,7 +747,7 @@ def render_warning_controls(
 
     with next_col:
         if st.button(
-            "Next →",
+            get_text("warn_next", lang=lang_code),
             use_container_width=True,
             disabled=current_page.page >= current_page.total_pages,
             key="warning_next_page",
