@@ -1,5 +1,23 @@
 import io
 import shutil
+
+import zipfile
+from unittest.mock import MagicMock, patch
+
+import docx
+import pytest
+
+from src.core.document_parser import (
+    CorruptedArchiveError,
+    extract_text,
+    extract_text_from_docx,
+    extract_text_from_pdf,
+    extract_text_from_txt,
+    extract_text_from_zip,
+    extract_texts,
+    strip_bibliography,
+)
+
 import time
 from unittest.mock import MagicMock, patch
 
@@ -11,6 +29,7 @@ from src.core.document_parser import (clean_text, extract_text,
                                       extract_text_from_txt, extract_texts,
                                       remove_ignore_phrases,
                                       strip_bibliography)
+
 
 # Skip OCR tests when Tesseract binary is not present on this machine
 TESSERACT_AVAILABLE = shutil.which("tesseract") is not None
@@ -40,6 +59,14 @@ def _make_docx_bytes(text: str) -> bytes:
 
 
 
+def _make_valid_zip_bytes(files: dict) -> bytes:
+    """Create a valid in-memory ZIP archive containing given file names and contents."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for filename, content in files.items():
+            zf.writestr(filename, content)
+
+
 def _make_large_docx_bytes(num_pages: int = 100) -> bytes:
     """Create a multi-page in-memory DOCX containing realistic paragraphs."""
     doc = docx.Document()
@@ -55,6 +82,7 @@ def _make_large_docx_bytes(num_pages: int = 100) -> bytes:
 
     buf = io.BytesIO()
     doc.save(buf)
+
     return buf.getvalue()
 
 
@@ -136,11 +164,44 @@ def test_extract_from_txt_bytes():
     assert result == "Hello TXT"
 
 
+
+# ---------------------------------------------------------------------------
+# Corrupted Zip Submission Tests (#580)
+# ---------------------------------------------------------------------------
+
+
+class TestCorruptedZipHandling:
+
+    def test_extract_text_from_valid_zip(self):
+        zip_bytes = _make_valid_zip_bytes({"essay1.txt": "First student essay text.", "essay2.txt": "Second student submission."})
+        result = extract_text_from_zip(zip_bytes)
+        assert "First student essay text." in result
+        assert "Second student submission." in result
+
+    def test_corrupted_zip_header_raises_user_friendly_error(self):
+        corrupted_bytes = b"PK\x03\x04corrupted_zip_header_data_not_valid_archive"
+        with pytest.raises(CorruptedArchiveError) as exc_info:
+            extract_text_from_zip(corrupted_bytes)
+        assert "corrupted" in str(exc_info.value).lower()
+
+    def test_routing_corrupted_zip_via_extract_text(self):
+        corrupted_bytes = b"INVALID_ZIP_STREAM"
+        with pytest.raises(CorruptedArchiveError):
+            extract_text(corrupted_bytes, "submission_batch.zip")
+
+
+@pytest.mark.skipif(
+    not TESSERACT_AVAILABLE, reason="Tesseract OCR is not installed on this machine"
+)
+def test_extract_text_routing():
+    pdf_bytes = _make_pdf_bytes("Hello PDF")
+
 @patch("src.core.document_parser._ocr_pdf_page", return_value="")
 def test_extract_text_routing(mock_ocr):
     pdf_bytes = _make_pdf_bytes(
         "Hello PDF this is a document with enough words to satisfy native text check"
     )
+
     docx_bytes = _make_docx_bytes("Hello DOCX")
     txt_bytes = b"Hello TXT"
 
@@ -255,6 +316,9 @@ class TestStripBibliography:
         result = extract_text(docx_bytes, "test.docx")
         assert "Bibliography" not in result
         assert "Body content" in result
+
+        
+
 
 
 # ---------------------------------------------------------------------------
@@ -518,3 +582,4 @@ def test_extract_text_routing_txt_latin1(tmp_path):
     # Verify routing and decoding
     result = extract_text(str(file_path), "latin1_test.txt")
     assert result == original_text
+

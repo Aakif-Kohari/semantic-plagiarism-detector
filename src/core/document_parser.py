@@ -6,6 +6,9 @@ import io
 import logging
 import os
 import re
+
+import zipfile
+
 import shutil
 import subprocess
 import tempfile
@@ -95,6 +98,10 @@ def check_batch_rate_limit(file_count: int, session_id: Optional[str] = None) ->
 # More values may be added later without changing the extraction API.
 from src.core.app_config import SUPPORTED_OCR_LANGUAGES
 
+
+
+class CorruptedArchiveError(ValueError):
+    """Raised when an uploaded zip file or inner archived document is corrupted."""
 
 
 def validate_ocr_dpi(value: int) -> int:
@@ -741,12 +748,7 @@ def extract_text_from_pdf(
     ocr_language: str = DEFAULT_OCR_LANGUAGE,
     ocr_dpi: int = DEFAULT_OCR_DPI,
 ) -> str:
-    """Extract PDF text and OCR only pages with insufficient native text.
-
-    Text-based PDFs continue to use pdfplumber. Fully scanned and mixed PDFs
-    are handled page by page, allowing OCR results to enter the unchanged
-    chunking, embedding and FAISS pipeline.
-    """
+    """Extract PDF text and OCR only pages with insufficient native text."""
     ocr_language, ocr_dpi = normalize_ocr_settings(
         language=ocr_language,
         dpi=ocr_dpi,
@@ -934,6 +936,54 @@ def extract_text_from_rtf(file: PDFInput) -> str:
     return text.strip()
 
 
+
+def extract_text_from_zip(
+    file: PDFInput,
+    *,
+    ocr_language: str = DEFAULT_OCR_LANGUAGE,
+    ocr_dpi: int = DEFAULT_OCR_DPI,
+) -> str:
+    """Extract and aggregate text from all valid documents inside a ZIP archive.
+
+    Catches zipfile.BadZipFile and reports corrupted zip files or damaged inner entries.
+    """
+    raw_data = _read_pdf_bytes(file)
+    zip_stream = io.BytesIO(raw_data)
+
+    if not zipfile.is_zipfile(zip_stream):
+        raise CorruptedArchiveError("Uploaded ZIP file is corrupted or not a valid ZIP archive.")
+
+    zip_stream.seek(0)
+    extracted_texts: List[str] = []
+    corrupted_files: List[str] = []
+
+    try:
+        with zipfile.ZipFile(zip_stream, "r") as archive:
+            for member_name in archive.namelist():
+                # Skip directories and macOS metadata files
+                if member_name.endswith("/") or member_name.startswith("__MACOSX"):
+                    continue
+
+                try:
+                    file_bytes = archive.read(member_name)
+                    parsed = extract_text(file_bytes, member_name, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
+                    if parsed:
+                        extracted_texts.append(parsed)
+                except Exception as exc:
+                    corrupted_files.append(f"{member_name} ({exc})")
+
+            if corrupted_files:
+                bad_list = ", ".join(corrupted_files)
+                print(f"[document_parser] Warning: Corrupted inner files in zip: {bad_list}")
+
+            if not extracted_texts and corrupted_files:
+                raise CorruptedArchiveError(f"ZIP archive contains corrupted files: {', '.join(corrupted_files)}")
+
+    except zipfile.BadZipFile as exc:
+        raise CorruptedArchiveError(f"Uploaded ZIP submission is corrupted: {exc}") from exc
+
+    return "\n\n".join(extracted_texts).strip()
+
 def extract_text_from_doc(file: PDFInput) -> str:
     """Extract plain text from a legacy Word Document (.doc) using antiword."""
     if not shutil.which("antiword"):
@@ -1079,12 +1129,7 @@ def _strip_inline_markdown(line: str) -> str:
 
 
 def strip_markdown_syntax(raw_text: str) -> str:
-    """Convert raw Markdown source into plain readable text.
-
-    Fenced code block contents are preserved as-is (fence markers removed);
-    headers, lists, blockquotes, horizontal rules, links, images, and
-    emphasis markers are stripped down to their underlying text.
-    """
+    """Convert raw Markdown source into plain readable text."""
     lines = raw_text.splitlines()
     output: List[str] = []
     in_code_block = False
@@ -1117,6 +1162,7 @@ def strip_markdown_syntax(raw_text: str) -> str:
     return text.strip()
 
 
+
 def extract_text_from_epub(file: PDFInput) -> str:
     """Extract plain text from an EPUB file."""
     try:
@@ -1145,6 +1191,7 @@ def extract_text_from_epub(file: PDFInput) -> str:
     except Exception as exc:
         logger.error(f"[document_parser] Error reading EPUB: {exc}")
         return ""
+
 
 
 def extract_text_from_md(file: PDFInput) -> str:
@@ -1219,6 +1266,10 @@ def extract_text(
     elif extension == "md":
         raw = extract_text_from_md(file)
 
+    elif extension in ("zip", "7z", "tar", "gz"):
+        raw = extract_text_from_zip(file, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
+
+
     elif extension == "rtf":
         raw = extract_text_from_rtf(file)
 
@@ -1226,6 +1277,7 @@ def extract_text(
         raw = extract_text_from_epub(file)
     elif extension in ("png", "jpg", "jpeg"):
         raw = extract_text_from_image(file, ocr_language=ocr_language)
+
     else:
         raw = extract_text_from_txt(file)
 
