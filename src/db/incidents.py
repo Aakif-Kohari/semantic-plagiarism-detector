@@ -168,9 +168,9 @@ def sync_flagged_incidents(
                     second,
                     _normalise_score(flag.get("similarity", 0.0)),
                     _severity_rank(flag),
+                    timestamp,
+                    timestamp,
                     _normalise_score(flag.get("threshold_at_time_of_flag", threshold or 0.0)),
-                    timestamp,
-                    timestamp,
                 ))
 
             if bulk_records:
