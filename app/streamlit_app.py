@@ -77,6 +77,9 @@ from app.theme import (
     version_check_widget_html,
 )
 from src.core.config import DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD, severity_key
+from sklearn.metrics.pairwise import cosine_similarity
+from src.core.ai_detector import detect_documents_ai_probability
+from src.core.cross_lingual import prepare_text_for_embedding
 from src.core.document_parser import (
     DEFAULT_OCR_DPI,
     DEFAULT_OCR_LANGUAGE,
@@ -93,14 +96,19 @@ from src.core.faiss_index import (
     save_index,
     search_similar_chunks,
 )
+from src.core.faiss_indexer import build_index
 from src.core.similarity import (
     document_similarity_matrix,
     find_most_similar_chunks,
     flag_plagiarism,
 )
+from src.core.text_chunking import chunk_documents
 from src.core.webhook import send_plagiarism_alert
 from src.i18n.translator import _SUPPORTED_LANGUAGES, get_text
-from src.visualization.network_graph import plot_similarity_network
+from src.visualization.network_graph import (
+    export_network_to_gexf_bytes,
+    plot_similarity_network,
+)
 
 
 class OCRFileBatchError(Exception):
@@ -238,6 +246,22 @@ except Exception:
 # "md" breakpoint (768px) — phones and small tablets — the sidebar starts
 # collapsed so it doesn't cover the similarity matrix / heatmap. On wider
 # screens it behaves the same as "expanded". See issue #258.
+
+APP_TITLE = os.getenv("APP_TITLE", "Semantic Plagiarism Detector").strip() or "Semantic Plagiarism Detector"
+MAX_RECENT_SEARCHES = 5
+
+
+
+def _add_recent_search(query: str) -> None:
+    """Store a search query in session state, most-recent-first, capped at 5."""
+    query = query.strip()
+    if not query:
+        return
+
+    recent = st.session_state.get("recent_searches", [])
+    recent = [q for q in recent if q != query]
+    recent.insert(0, query)
+    st.session_state["recent_searches"] = recent[:MAX_RECENT_SEARCHES]
 
 st.set_page_config(
     page_title="Semantic Plagiarism Detector",
@@ -599,8 +623,8 @@ with theme_col:
         from streamlit.runtime.scriptrunner import get_script_run_ctx
 
         _ctx = get_script_run_ctx()
-        if _ctx and _ctx.current_form_id:
-            _ctx.current_form_id = ""
+        if _ctx and getattr(_ctx, "current_form_id", None):
+            setattr(_ctx, "current_form_id", "")
     except Exception:
         pass
     if st.button(theme_icon, key="theme_toggle"):
@@ -861,6 +885,18 @@ if user_role != "admin":
     st.info(
         "🔒 Note: Direct assignment uploads are restricted to Administrator access."
     )
+    recent_searches = st.session_state.get("recent_searches", [])
+    if recent_searches:
+        selected_recent = st.selectbox(
+            "🕒 Recent Searches",
+            options=[""] + recent_searches,
+            format_func=lambda q: "Select a recent search..." if q == "" else q,
+            key="recent_search_select_admin",
+        )
+        if selected_recent:
+            st.session_state["admin_query_text"] = selected_recent
+
+
     query_text = st.text_area(
         "Search Query Text:",
         placeholder="Paste document content here to search for matching plagiarism...",
@@ -878,7 +914,8 @@ if user_role != "admin":
                     st.warning("No documents are currently indexed.")
                 else:
                     memory = psutil.virtual_memory()
-                    if memory.percent >= 85:
+                    mem_pct = getattr(memory, "percent", 0)
+                    if isinstance(mem_pct, (int, float)) and mem_pct >= 85:
                         st.warning(
                             "⚠️ High memory usage detected (>85%). Large FAISS indexes may cause system instability or out-of-memory crashes."
                         )
@@ -933,7 +970,6 @@ if user_role != "admin":
                                         f"**Matching passage in {anon_doc_name}:**"
                                     )
                                     st.warning(record.chunk_text)
-
                                 st.markdown(
                                     f"<div style='text-align:right;'>"
                                     f"<span style='background:{color};color:white;padding:3px 12px;"
@@ -957,8 +993,7 @@ else:
         try:
             import faiss
 
-            index_buffer = _io.BytesIO(cached_index_data)
-            faiss_index = faiss.deserialize_index(faiss.read_index(index_buffer))
+            faiss_index = faiss.deserialize_index(np.frombuffer(cached_index_data, dtype=np.uint8))
             registry = get_chunk_registry()
             st.info(
                 f"📂 Loaded FAISS index from Redis cache with {faiss_index.ntotal} vectors"
@@ -973,7 +1008,8 @@ else:
     if faiss_index is None:
         try:
             memory = psutil.virtual_memory()
-            if memory.percent >= 85:
+            mem_pct = getattr(memory, "percent", 0)
+            if isinstance(mem_pct, (int, float)) and mem_pct >= 85:
                 st.warning(
                     "⚠️ High memory usage detected (>85%). Large FAISS indexes may cause system instability or out-of-memory crashes."
                 )
@@ -994,6 +1030,7 @@ else:
         except (RuntimeError, ValueError, OSError):
             faiss_index = None
             registry = []
+
 
     def load_analysis_results_from_db():
         import numpy as np
@@ -1027,13 +1064,14 @@ else:
                 emb = np.frombuffer(emb_blob, dtype=np.float32)
                 embeddings[fname].append(emb)
 
-            # Convert lists to numpy arrays
-            for fname in embeddings:
-                embeddings[fname] = np.vstack(embeddings[fname])
+            doc_embeddings: dict[str, Any] = {}
+            for fname, emb_list in embeddings.items():
+                if emb_list:
+                    doc_embeddings[fname] = np.vstack(emb_list)
 
-            sim_df = document_similarity_matrix(embeddings)
+            sim_df = document_similarity_matrix(doc_embeddings)
 
-            names = list(embeddings.keys())
+            names = list(doc_embeddings.keys())
             n = len(names)
             chunk_mat = np.zeros((n, n))
             for i, na in enumerate(names):
@@ -1041,10 +1079,11 @@ else:
                     if i == j:
                         chunk_mat[i, j] = 1.0
                     elif j > i:
-                        ea, eb = embeddings[na], embeddings[nb]
+                        ea, eb = doc_embeddings[na], doc_embeddings[nb]
+                        ea_arr, eb_arr = np.asarray(ea), np.asarray(eb)
                         score = (
-                            float(np.max(cosine_similarity(ea, eb)))
-                            if ea.size and eb.size
+                            float(np.max(cosine_similarity(ea_arr, eb_arr)))
+                            if ea_arr.size and eb_arr.size
                             else 0.0
                         )
                         chunk_mat[i, j] = score
@@ -1588,9 +1627,9 @@ if not st.session_state.authenticated:
                 )
 
                 metadata_dict[filename] = {
-                    "student_name": student_name.strip(),
-                    "class_section": class_section.strip(),
-                    "assignment_title": assignment_title.strip(),
+                    "student_name": (student_name or "").strip(),
+                    "class_section": (class_section or "").strip(),
+                    "assignment_title": (assignment_title or "").strip(),
                 }
 
     if url_filename:
@@ -1626,8 +1665,8 @@ if not st.session_state.authenticated:
         chunk_overlap: int = 50,
         existing_index=None,
         existing_registry=None,
-        url_text: str = None,
-        url_filename: str = None,
+        url_text: str | None = None,
+        url_filename: str | None = None,
     ):
         raw_texts = {}
         failed_files = []
@@ -1680,9 +1719,10 @@ if not st.session_state.authenticated:
                     chunk_mat[i, j] = 1.0
                 elif j > i:
                     ea, eb = embeddings[na], embeddings[nb]
+                    ea_arr, eb_arr = np.asarray(ea), np.asarray(eb)
                     score = (
-                        float(np.max(cosine_similarity(ea, eb)))
-                        if ea.size and eb.size
+                        float(np.max(cosine_similarity(ea_arr, eb_arr)))
+                        if ea_arr.size and eb_arr.size
                         else 0.0
                     )
                     chunk_mat[i, j] = score
@@ -1691,7 +1731,8 @@ if not st.session_state.authenticated:
         chunk_sim_df = pd.DataFrame(chunk_mat, index=names, columns=names)
 
         memory = psutil.virtual_memory()
-        if memory.percent >= 85:
+        mem_pct = getattr(memory, "percent", 0)
+        if isinstance(mem_pct, (int, float)) and mem_pct >= 85:
             st.warning(
                 "⚠️ High memory usage detected (>85%). Large FAISS indexes may cause system instability or out-of-memory crashes."
             )
@@ -1967,7 +2008,8 @@ if not st.session_state.authenticated:
                 st.rerun()
 
             render_warning_controls(
-                filtered_flags, threshold=threshold, ai_probabilities=ai_probabilities
+                filtered_flags, threshold=threshold, ai_probabilities=ai_probabilities,
+                lang_code=lang_code,
             )
 
     # ══ TAB 2: FAISS ══════════════════════════════════════════════════════════
@@ -2217,6 +2259,23 @@ if not st.session_state.authenticated:
                 else:
                     st.plotly_chart(
                         network_fig,
+                        use_container_width=True,
+                    )
+
+                if network_fig is not None:
+                    gexf_data = export_network_to_gexf_bytes(
+                        similarity_df=active_sim_df,
+                        threshold=threshold,
+                        min_degree=st.session_state.get(
+                            "min_connected_docs_slider", 0
+                        ),
+                    )
+                    st.download_button(
+                        "⬇️ Download Network (GEXF)",
+                        gexf_data,
+                        "plagiarism_network.gexf",
+                        "application/xml",
+                        key="download_network_gexf",
                         use_container_width=True,
                     )
 
@@ -2639,7 +2698,7 @@ if not st.session_state.authenticated:
                     qr.make(fit=True)
                     img = qr.make_image(fill_color="black", back_color="white")
                     buf = BytesIO()
-                    img.save(buf, format="PNG")
+                    img.save(buf)
                     qr_bytes = buf.getvalue()
 
                     col1, col2 = st.columns([1, 2])

@@ -24,7 +24,11 @@ import docx
 
 import pdfplumber
 from langdetect import LangDetectException, detect
-from striprtf.striprtf import rtf_to_text
+try:
+    from striprtf.striprtf import rtf_to_text
+except ImportError:
+    def rtf_to_text(rtf_text: str) -> str:
+        return rtf_text
 
 logger = logging.getLogger(__name__)
 from src.core.translator import translate_text

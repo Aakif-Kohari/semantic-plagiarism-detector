@@ -18,6 +18,11 @@ reportlab>=5.0.0                 # PDF document generation
 pytesseract>=0.3.13              # OCR text extraction from scanned images
 Pillow>=10.0.0                   # Image processing library
 python-magic>=0.4.27             # File magic bytes verification
+striprtf>=0.0.20                  # Strip RTF formatting
+EbookLib>=0.18                   # EPUB e-book parsing
+thefuzz>=0.22.1                  # Fuzzy string matching
+networkx>=3.0                    # Plagiarism network graphs
+argon2-cffi>=23.1.0              # Password hashing
 
 # ── Web UI ────────────────────────────────────────────────────────────────────
 streamlit>=1.60.0                # Dashboard framework

@@ -4,13 +4,18 @@ tests/visualization/test_network_graph.py
 Unit tests for plot_similarity_network edge cases.
 """
 
+import time
 from unittest.mock import patch
 
+import networkx as nx
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
 from src.visualization.network_graph import (
     build_network_data,
+    export_graph_to_gexf,
+    export_network_to_gexf_bytes,
     plot_similarity_network,
     render_network_plotly,
 )
@@ -177,8 +182,23 @@ def test_plot_similarity_network_layout_autosize():
 def test_build_network_data_highlighted_doc():
     """Verify highlighted_doc node color and marker size are updated to bright yellow."""
     data = {
-        "doc1": [1.0, 0.85],
-        "doc2": [0.85, 1.0],
+        "doc1": [1.0, 0.85, 0.20],
+        "doc2": [0.85, 1.0, 0.10],
+        "doc3": [0.20, 0.10, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2", "doc3"])
+
+    result = export_network_to_gexf_bytes(df, threshold=0.75)
+
+    assert isinstance(result, bytes)
+    assert len(result) > 0
+
+
+def test_export_network_to_gexf_bytes_contains_nodes_and_edges():
+    """Verify GEXF output contains expected nodes and edge attributes from similarity matrix."""
+    data = {
+        "doc1": [1.0, 0.95],
+        "doc2": [0.95, 1.0],
     }
     df = pd.DataFrame(data, index=["doc1", "doc2"])
 

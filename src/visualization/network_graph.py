@@ -92,8 +92,6 @@ def build_network_data(
         Dictionary containing shapes, edge_hover_trace, node_trace, graph, pos coordinates,
         tag_color_map, and document_tags.
     """
-    if document_tags is None and "doc_tags" in kwargs:
-        document_tags = kwargs.pop("doc_tags")
 
     # Create networkx graph
     G = nx.Graph()
@@ -116,19 +114,15 @@ def build_network_data(
                 G.add_edge(doc_names[i], doc_names[j])
                 edge_similarities[(doc_names[i], doc_names[j])] = score
 
-    # Filter out nodes below the minimum degree threshold
-    if min_degree > 0:
-        low_degree_nodes = [
-            node for node, deg in dict(G.degree()).items() if deg < min_degree
-        ]
-        G.remove_nodes_from(low_degree_nodes)
-
     # Compute layout coordinates
-    # Seed layout for reproducibility
+    # Dynamic iteration depth for responsive performance on large node counts
+    num_nodes = len(G.nodes())
+    layout_iterations = 10 if num_nodes >= 100 else 25
     pos = nx.spring_layout(
         G,
         seed=42,
-        k=1.0 / np.sqrt(max(1, len(G.nodes()))),
+        k=1.0 / np.sqrt(max(1, num_nodes)),
+        iterations=layout_iterations,
     )
 
     # If document_tags is None, attempt to fetch from DB if available
@@ -162,15 +156,11 @@ def build_network_data(
     # ── Draw Edges ─────────────────────────────────────────────────────────────
 
     shapes = []
-
-    # For hover info, add a transparent trace over each edge
-    edge_trace_x = []
-    edge_trace_y = []
+    edge_hover_x = []
+    edge_hover_y = []
     edge_hover_texts = []
 
-    for edge in G.edges():
-        doc_a, doc_b = edge
-
+    for doc_a, doc_b in G.edges():
         x0, y0 = pos[doc_a]
         x1, y1 = pos[doc_b]
 
@@ -229,30 +219,12 @@ def build_network_data(
             )
         )
 
-        # Add to hover trace
-        edge_trace_x.extend([x0, x1, None])
-
-        edge_trace_y.extend([y0, y1, None])
-
+        # Midpoint coordinate for hover info
+        edge_hover_x.append((x0 + x1) / 2.0)
+        edge_hover_y.append((y0 + y1) / 2.0)
         edge_hover_texts.append(
             f"<b>Match:</b> {doc_a} ↔ {doc_b}<br>" f"<b>Similarity:</b> {score:.1%}"
         )
-
-    # ── Edge Hover Trace ──────────────────────────────────────────────────────
-
-    edge_hover_x = []
-    edge_hover_y = []
-
-    for edge in G.edges():
-        doc_a, doc_b = edge
-
-        x0, y0 = pos[doc_a]
-        x1, y1 = pos[doc_b]
-
-        # Midpoint coordinate
-        edge_hover_x.append((x0 + x1) / 2.0)
-
-        edge_hover_y.append((y0 + y1) / 2.0)
 
     edge_hover_trace = go.Scatter(
         x=edge_hover_x,
@@ -529,5 +501,62 @@ def plot_similarity_network(
         title=title,
         theme_colors=theme_colors,
     )
+
+
+def export_graph_to_gexf(graph: nx.Graph) -> str:
+    """
+    Serialize a NetworkX graph to GEXF XML format string.
+
+    GEXF (Graph Exchange XML Format) is the standard format supported by
+    Gephi, Sigma.js, and other graph visualization tools.
+
+    Args:
+        graph: NetworkX Graph object.
+
+    Returns:
+        GEXF XML string.
+    """
+    return "".join(nx.generate_gexf(graph))
+
+
+def export_network_to_gexf_bytes(
+    similarity_df: pd.DataFrame,
+    threshold: float = 0.59,
+    min_degree: int = 0,
+) -> bytes:
+    """
+    Build a network from the similarity matrix and export as GEXF bytes.
+
+    GEXF (Graph Exchange XML Format) is supported by Gephi, Sigma.js,
+    and other graph visualization tools. Similarity scores are attached
+    as edge attributes for visualization in Gephi.
+
+    Args:
+        similarity_df: Square N×N DataFrame of similarity scores.
+        threshold: Edge threshold; pairs with similarity >= threshold
+            are connected.
+        min_degree: Minimum degree threshold; nodes with degree below
+            this value are excluded.
+
+    Returns:
+        GEXF XML as UTF-8 encoded bytes, ready for download.
+    """
+    network_data = build_network_data(
+        similarity_df=similarity_df,
+        threshold=threshold,
+        min_degree=min_degree,
+    )
+    G = network_data["graph"]
+
+    doc_names = list(similarity_df.columns)
+    name_to_idx = {name: i for i, name in enumerate(doc_names)}
+
+    for u, v in G.edges():
+        i = name_to_idx[u]
+        j = name_to_idx[v]
+        G[u][v]["similarity"] = float(similarity_df.iloc[i, j])
+
+    gexf_str = export_graph_to_gexf(G)
+    return gexf_str.encode("utf-8")
 
 

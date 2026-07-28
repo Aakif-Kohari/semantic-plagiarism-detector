@@ -111,12 +111,8 @@ class SSRFProtector:
 
         try:
             ip = ipaddress.ip_address(ip_str)
-            except ValueError as e:
-            raise SSRFSecurityException(SSRF_INVALID_IP.format(error=e))
-
-        # 3. Block Private, Loopback, and Unspecified IP ranges
         except ValueError as e:
-            raise SSRFSecurityException(f"Resolved invalid IP address format: {e}")
+            raise SSRFSecurityException(SSRF_INVALID_IP.format(error=e))
             
         # 3. Block explicit RFC1918 private IPv4 subnets using CIDR checks
         if isinstance(ip, ipaddress.IPv4Address):

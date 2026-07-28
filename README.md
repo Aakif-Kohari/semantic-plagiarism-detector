@@ -750,6 +750,12 @@ Existing database files should not be deleted during an application upgrade.
 
 ---
 
+## Documentation
+
+- [Architecture Overview](docs/ARCHITECTURE.md)
+
+---
+
 ## 📄 License
 
 MIT License. Free for academic and educational use.

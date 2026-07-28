@@ -197,7 +197,7 @@ def plot_similarity_heatmap(
 
     with matplotlib_figure(figsize=figsize, dpi=dpi) as (fig, ax):
         sns.heatmap(
-            similarity_df,
+            clean_df,
             ax=ax,
             annot=annotate,
             fmt=".2f" if annotate else "",
@@ -224,7 +224,7 @@ def plot_similarity_heatmap(
         else:
             title_color = "black"
 
-        data = similarity_df.values
+        data = clean_df.values
 
         for i in range(n):
             ax.add_patch(
@@ -315,8 +315,9 @@ def plot_similarity_heatmap_plotly(
         
     try:
         clean_df = validate_similarity_matrix(similarity_df)
-    except ValueError:
-        clean_df = similarity_df
+    except ValueError as error:
+        logger.error(error)
+        return go.Figure()
 
     names = [TitleSanitizer.sanitize(str(col)) for col in clean_df.columns]
     z_matrix = clean_df.values.tolist()
@@ -396,23 +397,60 @@ def plot_similarity_heatmap_plotly(
     ink_color = _get_theme_color(theme_colors, "ink", "#0F172A")
 
     fig.update_layout(
-        title=dict(text=safe_title, font=dict(size=18, family="Arial, sans-serif", color=ink_color)),
+        title=dict(
+            text=safe_title,
+            font=dict(
+                size=18,
+                family="Arial, sans-serif",
+                color=ink_color
+            )
+        ),
         height=max(500, n * cell_px + 150),
         autosize=True,
-        xaxis=dict(side="bottom", tickangle=-30, title="Document ID", color=ink_color),
-        yaxis=dict(autorange="reversed", title="Document ID", color=ink_color),
+
+        xaxis=dict(
+            side="bottom",
+            tickangle=-30,
+            title="Document ID",
+            color=ink_color,
+            fixedrange=False
+        ),
+
+        yaxis=dict(
+            autorange="reversed",
+            title="Document ID",
+            color=ink_color,
+            fixedrange=False
+        ),
+
         annotations=annotations,
         shapes=shapes,
-        margin=dict(l=140, r=60, t=70, b=140),
+
+        margin=dict(
+            l=140,
+            r=60,
+            t=70,
+            b=140
+        ),
+
         paper_bgcolor=bg_color,
         plot_bgcolor=bg_color,
-        font=dict(color=ink_color),
+
+        font=dict(
+            color=ink_color
+        ),
+
         hoverlabel=dict(
-            bgcolor=_get_theme_color(theme_colors, "surface", "white"),
+            bgcolor=_get_theme_color(
+                theme_colors,
+                "surface",
+                "white"
+            ),
             font_size=14,
             font_family="Arial"
         )
     )
+
 
     return fig
 
@@ -455,7 +493,7 @@ def plot_chunk_similarity_comparison(
             ax=ax,
             annot=True,
             fmt=".2f",
-            cmap=cmap,  # Fixed variable typo from original code
+            cmap=cmap,
             vmin=0.0,
             vmax=1.0,
             linewidths=0.5,
@@ -487,3 +525,124 @@ def plot_chunk_similarity_comparison(
 
         fig.tight_layout()
         return fig
+def render_heatmap_ui(
+    similarity_df,
+    threshold=PLAGIARISM_THRESHOLD,
+    theme_colors=None,
+):
+    """
+    Streamlit UI wrapper for similarity heatmap controls.
+
+    Provides:
+    - Fit Matrix view
+    - High Similarity Focus view
+    - Reset View
+    - Dynamic colormap selection
+    """
+
+    if similarity_df.empty:
+        st.warning("No similarity data available.")
+        return
+
+    clean_df = validate_similarity_matrix(similarity_df)
+
+    if clean_df.empty:
+        st.warning("Validated similarity matrix is empty.")
+        return
+
+    # Heatmap view controls
+    zoom_mode = st.radio(
+        "Heatmap View",
+        [
+            "Fit Matrix",
+            "High Similarity Focus",
+            "Reset View",
+        ],
+        horizontal=True,
+        key="heatmap_zoom_mode",
+    )
+
+    # Colormap selector
+    default_index = (
+        UI_COLORMAP_OPTIONS.index(DEFAULT_UI_COLORMAP)
+        if DEFAULT_UI_COLORMAP in UI_COLORMAP_OPTIONS
+        else 0
+    )
+
+    colormap_name = st.selectbox(
+        "Color Map",
+        UI_COLORMAP_OPTIONS,
+        index=default_index,
+        key="heatmap_colormap",
+    )
+
+    n = len(clean_df)
+
+    # Create plot with selected colormap
+    fig = plot_similarity_heatmap_plotly(
+        clean_df,
+        threshold=threshold,
+        theme_colors=theme_colors,
+        colormap_name=colormap_name,
+    )
+
+    # Apply zoom modes
+    if zoom_mode == "Fit Matrix":
+
+        fig.update_xaxes(
+            range=[-0.5, n - 0.5]
+        )
+
+        fig.update_yaxes(
+            range=[n - 0.5, -0.5]
+        )
+
+    elif zoom_mode == "High Similarity Focus":
+
+        matrix = clean_df.values
+
+        coords = np.where(
+            matrix >= threshold
+        )
+
+        if len(coords[0]) > 0:
+
+            min_x = max(min(coords[1]) - 1, -0.5)
+            max_x = min(max(coords[1]) + 1, n - 0.5)
+
+            min_y = max(min(coords[0]) - 1, -0.5)
+            max_y = min(max(coords[0]) + 1, n - 0.5)
+
+            fig.update_xaxes(
+                range=[
+                    min_x,
+                    max_x,
+                ]
+            )
+
+            fig.update_yaxes(
+                range=[
+                    max_y,
+                    min_y,
+                ]
+            )
+
+        else:
+            st.info(
+                "No document pairs found above the similarity threshold."
+            )
+
+    elif zoom_mode == "Reset View":
+
+        fig.update_xaxes(
+            autorange=True
+        )
+
+        fig.update_yaxes(
+            autorange=True
+        )
+
+    st.plotly_chart(
+        fig,
+        use_container_width=True
+    )
