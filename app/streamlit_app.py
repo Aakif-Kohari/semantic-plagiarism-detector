@@ -2156,6 +2156,17 @@ if not st.session_state.authenticated:
                     help="Render similarity text labels inside heatmap cells.",
                 )
 
+                mask_threshold = st.slider(
+                    "Minimum Similarity to Display",
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=0.0,
+                    step=0.05,
+                    format="%.2f",
+                    key="heatmap_mask_threshold",
+                    help="Hide cell colors for similarity values below this threshold.",
+                )
+
                 heatmap_fig = build_visualization_lazily(
                     load_heatmap,
                     lambda: plot_similarity_heatmap(
@@ -2165,6 +2176,7 @@ if not st.session_state.authenticated:
                         theme_colors=get_colors(),
                         colormap_name=heatmap_cmap,
                         annotate=show_cell_percentages,
+                        mask_threshold=mask_threshold,
                     ),
                 )
 
