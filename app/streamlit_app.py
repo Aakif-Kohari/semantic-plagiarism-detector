@@ -12,6 +12,7 @@ if str(ROOT_DIR) not in sys.path:
 
 import base64
 import html
+import json
 
 # Standard / Third-party imports
 import time
@@ -98,7 +99,7 @@ from src.core.similarity import (
     flag_plagiarism,
 )
 from src.core.webhook import send_plagiarism_alert
-from src.i18n.translator import _SUPPORTED_LANGUAGES
+from src.i18n.translator import _SUPPORTED_LANGUAGES, get_text
 from src.visualization.network_graph import plot_similarity_network
 
 
@@ -133,6 +134,7 @@ from src.db.auth import (
     get_tour_completed,
     get_user_preferences,
     get_user_role,
+    init_db,
     is_user_active,
     record_failed_login,
     set_tour_completed,
@@ -161,6 +163,7 @@ from src.utils.redis_cache import (
 )
 from src.utils.warning_list import render_warning_controls
 from src.visualization.analytics import (
+    build_visualization_lazily,
     plot_high_severity_trends,
     plot_most_plagiarized_documents,
     plot_similarity_distribution,
@@ -524,7 +527,8 @@ elif "threshold_slider" not in st.session_state:
 
 # Resolve fallback configuration variables (ensuring all roles have access to these settings)
 selected_lang_name = st.session_state.get("lang_selector", "English")
-lang_code = "es" if selected_lang_name == "Español" else "en"
+_lang_reverse = {v: k for k, v in _SUPPORTED_LANGUAGES.items()}
+lang_code = _lang_reverse.get(selected_lang_name, "en")
 
 threshold = st.session_state.get("threshold_slider", DEFAULT_THRESHOLDS.plagiarism)
 faiss_top_k = st.session_state.get("faiss_top_k_slider", 5)
@@ -810,168 +814,6 @@ with st.sidebar:
 
     selected_class = st.selectbox("Select Class/Section", unique_classes, index=0)
 
-# ── Main UI ───────────────────────────────────────────────────────────────────
-st.title("🔍 Semantic Plagiarism Detection System")
-
-uploaded_files = st.file_uploader(
-    "📂 Upload Assignments",
-    type=["pdf", "docx", "txt"],
-    accept_multiple_files=True,
-    key="file_uploader",
-)
-# ── MAIN APPLICATION SECTIONS (ROLE CHECKED) ──────────────────────────────────
-
-if user_role != "admin":
-    # STANDARD USER VIEW: Student Query / Search Panel Only (No admin PDF uploading)
-    st.subheader("🔎 Secure Student Search Portal")
-    st.caption(
-        "Paste a text snippet below to check its similarity against existing indexed assignments."
-    )
-
-    st.info(
-        "🔒 Note: Direct assignment uploads and detailed breakdown panels are restricted to Administrator access. Your queries are anonymized for privacy."
-    )
-
-    recent_searches = st.session_state.get("recent_searches", [])
-    if recent_searches:
-        selected_recent = st.selectbox(
-            "🕒 Recent Searches",
-            options=[""] + recent_searches,
-            format_func=lambda q: "Select a recent search..." if q == "" else q,
-            key="recent_search_select_user",
-        )
-        if selected_recent:
-            st.session_state["user_query_text"] = selected_recent
-
-
-    query_text = st.text_area(
-        "Paste a text snippet to check against index:",
-        height=150,
-        placeholder="Paste a paragraph here to check for plagiarism...",
-    )
-
-    if st.button("🔍 Run Quick Verification", key="user_query") and query_text.strip():
-        # Load existing index and registry from database
-        from src.core.faiss_index import build_index_from_matrix
-        from src.db.corpus_db import get_all_embeddings, get_chunk_registry
-
-        with st.spinner("Loading index and searching..."):
-            try:
-                registry = get_chunk_registry()
-                embeddings_matrix = get_all_embeddings()
-
-                if embeddings_matrix.shape[0] == 0:
-                    from src.errors import UI_NO_DOCUMENTS_INDEXED
-
-                    st.warning(UI_NO_DOCUMENTS_INDEXED)
-                else:
-                    # Build index from stored embeddings
-                    faiss_index = build_index_from_matrix(
-                        embeddings_matrix, index_type="auto"
-                    )
-
-                    # Embed the query
-                    from src.core.embedding_model import embed_chunks
-
-                    query_vec = embed_chunks([query_text.strip()])[0]
-
-                    # Search with threshold
-                    faiss_threshold = threshold
-                    results = search_similar_chunks(
-                        query_vec,
-                        faiss_index,
-                        registry,
-                        top_k=faiss_top_k,
-                        threshold=faiss_threshold,
-                    )
-
-                    if not results:
-                        st.success(
-                            "✅ No significant matches found in the assignment database."
-                        )
-                    else:
-                        st.success(
-                            f"Found **{len(results)}** potentially similar passages."
-                        )
-
-                        # Anonymize document names
-                        doc_id_map = {}
-                        anon_counter = 1
-
-                        for record, score in results:
-                            if record.doc_name not in doc_id_map:
-                                doc_id_map[record.doc_name] = (
-                                    f"Document-{anon_counter:03d}"
-                                )
-                                anon_counter += 1
-
-                        # Display anonymized results
-                        for rank, (record, score) in enumerate(results, 1):
-                            anon_doc_name = doc_id_map[record.doc_name]
-                            color = "#ff4b4b" if score >= 0.90 else "#ffa500"
-
-                            with st.expander(
-                                f"#{rank} · {anon_doc_name} (chunk #{record.chunk_index+1}) "
-                                f"— {score:.1%}",
-                                expanded=(rank == 1),
-                            ):
-                                cq, cm = st.columns(2)
-                                with cq:
-                                    st.markdown("**Your query:**")
-                                    st.info(query_text.strip())
-                                with cm:
-                                    st.markdown(
-                                        f"**Matching passage in {anon_doc_name}:**"
-                                    )
-                                    st.warning(record.chunk_text)
-
-                                st.markdown(
-                                    f"<div style='text-align:right;'>"
-                                    f"<span style='background:{color};color:white;padding:3px 12px;"
-                                    f"border-radius:10px;font-size:0.85rem;font-weight:700;'>"
-                                    f"Similarity: {score*100:.1f}%</span></div>",
-                                    unsafe_allow_html=True,
-                                )
-
-                        st.caption(
-                            "🔒 Document names are anonymized to protect student privacy."
-                        )
-
-            except Exception as e:
-                from src.errors import UI_INDEX_LOAD_FAILED
-
-                st.error(UI_INDEX_LOAD_FAILED.format(error=str(e)))
-                st.info(
-                    "Please ensure documents have been indexed by an administrator."
-                )
-else:
-    # ADMINISTRATOR ACCESS: Full Upload Pipeline & Evaluation Dashboards
-
-    # Load or initialize FAISS index
-    if os.path.exists(_INDEX_PATH):
-        faiss_index = load_index(_INDEX_PATH)
-        registry = get_chunk_registry()
-        if faiss_index is not None and faiss_index.ntotal != len(registry):
-            all_embs = get_all_embeddings()
-            if len(all_embs) > 0 and len(all_embs) == len(registry):
-                faiss_index = build_index_from_matrix(all_embs)
-                save_index(faiss_index, _INDEX_PATH)
-            elif len(all_embs) == 0:
-                faiss_index = None
-                registry = []
-        if faiss_index is not None:
-            st.info(f"📂 Loaded existing FAISS index with {faiss_index.ntotal} vectors")
-    else:
-        threshold = DEFAULT_THRESHOLDS.plagiarism
-        use_chunk_matrix = False
-        faiss_top_k = 5
-        chunk_size = 500
-        chunk_overlap = 50
-        ocr_language = DEFAULT_OCR_LANGUAGE
-        ocr_dpi = DEFAULT_OCR_DPI
-        ignore_phrases = ""
-        st.info("ℹ️ Settings configuration is restricted to Administrators.")
-
 # ── Onboarding Tour for First-Time Admin Users ───────────────────────────────────
 if (
     Tour is not None
@@ -1064,7 +906,8 @@ if user_role != "admin":
                     st.warning("No documents are currently indexed.")
                 else:
                     memory = psutil.virtual_memory()
-                    if memory.percent >= 85:
+                    mem_pct = getattr(memory, "percent", 0)
+                    if isinstance(mem_pct, (int, float)) and mem_pct >= 85:
                         st.warning(
                             "⚠️ High memory usage detected (>85%). Large FAISS indexes may cause system instability or out-of-memory crashes."
                         )
@@ -1158,7 +1001,8 @@ else:
     if faiss_index is None:
         try:
             memory = psutil.virtual_memory()
-            if memory.percent >= 85:
+            mem_pct = getattr(memory, "percent", 0)
+            if isinstance(mem_pct, (int, float)) and mem_pct >= 85:
                 st.warning(
                     "⚠️ High memory usage detected (>85%). Large FAISS indexes may cause system instability or out-of-memory crashes."
                 )
@@ -1877,7 +1721,8 @@ if not st.session_state.authenticated:
         chunk_sim_df = pd.DataFrame(chunk_mat, index=names, columns=names)
 
         memory = psutil.virtual_memory()
-        if memory.percent >= 85:
+        mem_pct = getattr(memory, "percent", 0)
+        if isinstance(mem_pct, (int, float)) and mem_pct >= 85:
             st.warning(
                 "⚠️ High memory usage detected (>85%). Large FAISS indexes may cause system instability or out-of-memory crashes."
             )
@@ -2270,20 +2115,6 @@ if not st.session_state.authenticated:
 
     # ══ TAB 4: HEATMAP & NETWORK ══════════════════════════════════════════════
     with tab_heatmap:
-
-        st.subheader("🗺️ Similarity Heatmap")
-
-        heatmap_fig = plot_similarity_heatmap(
-            active_sim_df,
-            title="Document Semantic Similarity",
-            threshold=threshold,
-            theme_colors=get_colors(),
-            cmap=heatmap_cmap,  # Dynamic colormap support (#186)
-        )
-        st.pyplot(heatmap_fig, use_container_width=True)
-
-        # ══ TAB 5: PAIR DRILL-DOWN ══════════════════════════════════════════════════
-
         st.markdown("🏠 Home > Dashboard > **Heatmap & Network**")
         st.subheader(get_text("tab_heatmap", lang=lang_code))
         if not has_enough_files or active_sim_df is None:
@@ -2296,75 +2127,134 @@ if not st.session_state.authenticated:
                 unsafe_allow_html=True,
             )
         else:
-            heatmap_fig = plot_similarity_heatmap(
-                active_sim_df,
-                title="Document Semantic Similarity",
-                threshold=threshold,
-                theme_colors=get_colors(),
-            )
-            st.pyplot(heatmap_fig, use_container_width=True)
-
-            buf = _io.BytesIO()
-            heatmap_fig.savefig(
-                buf,
-                format="png",
-                dpi=150,
-                bbox_inches="tight",
-            )
-            buf.seek(0)
-
-            st.download_button(
-                "⬇️ Download Heatmap PNG",
-                buf,
-                "heatmap.png",
-                "image/png",
-            )
-
-            st.divider()
-            st.subheader("🕸️ Interactive Plagiarism Network")
-            st.caption(
-                "Documents are shown as nodes. Connections appear when "
-                "their similarity is greater than or equal to the selected threshold."
-            )
-
-            max_degree = max(0, len(active_sim_df) - 1)
-            min_degree = st.slider(
-                "Minimum Connected Documents",
-                min_value=0,
-                max_value=max_degree,
-                value=0,
-                key="min_connected_docs_slider",
-            )
-
-            network_fig = plot_similarity_network(
-                similarity_df=active_sim_df,
-                threshold=threshold,
-                min_degree=min_degree,
-                title="Interactive Document Plagiarism Network",
-            )
-
-            if plotly_events is not None:
-                selected_points = plotly_events(
-                    network_fig,
-                    click_event=True,
-                    hover_event=False,
-                    select_event=False,
-                    key="plagiarism_network",
+            with st.expander(
+                "🗺️ Similarity Heatmap",
+                expanded=False,
+            ):
+                load_heatmap = st.toggle(
+                    "Load heatmap",
+                    key="load_similarity_heatmap",
+                    help=(
+                        "Generate the heatmap only when needed. "
+                        "This can improve responsiveness for large analyses."
+                    ),
                 )
 
-                if selected_points:
-                    clicked_point = selected_points[0]
+                heatmap_fig = build_visualization_lazily(
+                    load_heatmap,
+                    lambda: plot_similarity_heatmap(
+                        active_sim_df,
+                        title="Document Semantic Similarity",
+                        threshold=threshold,
+                        theme_colors=get_colors(),
+                        cmap=heatmap_cmap,
+                    ),
+                )
 
-                    point_index = clicked_point.get("pointIndex")
+                if heatmap_fig is None:
+                    st.info(
+                        "Enable “Load heatmap” to generate this "
+                        "visualization."
+                    )
+                else:
+                    st.pyplot(
+                        heatmap_fig,
+                        use_container_width=True,
+                    )
 
-                    if point_index is not None and 0 <= point_index < len(doc_names):
-                        clicked_document_id = doc_names[point_index]
+            if heatmap_fig is not None:
+                buf = _io.BytesIO()
+                heatmap_fig.savefig(
+                    buf,
+                    format="png",
+                    dpi=150,
+                    bbox_inches="tight",
+                )
+                buf.seek(0)
 
-                        st.session_state.selected_document_id = clicked_document_id
-            else:
-                st.plotly_chart(network_fig, use_container_width=True)
+                st.download_button(
+                    "⬇️ Download Heatmap PNG",
+                    buf,
+                    "heatmap.png",
+                    "image/png",
+                    key="download_lazy_heatmap_png",
+                )
 
-            selected_document_id = st.session_state.get("selected_document_id")
+            with st.expander(
+                "🕸️ Interactive Plagiarism Network",
+                expanded=False,
+            ):
+                st.caption(
+                    "Documents are shown as nodes. Connections appear when "
+                    "their similarity is greater than or equal to the "
+                    "selected threshold."
+                )
+                load_network = st.toggle(
+                    "Load network graph",
+                    key="load_plagiarism_network",
+                    help=(
+                        "Generate the interactive network only when needed."
+                    ),
+                )
+
+                max_degree = max(0, len(active_sim_df) - 1)
+                min_degree = st.slider(
+                    "Minimum Connected Documents",
+                    min_value=0,
+                    max_value=max_degree,
+                    value=0,
+                    key="min_connected_docs_slider",
+                )
+
+                network_fig = build_visualization_lazily(
+                    load_network,
+                    lambda: plot_similarity_network(
+                        similarity_df=active_sim_df,
+                        threshold=threshold,
+                        min_degree=min_degree,
+                        title=(
+                            "Interactive Document Plagiarism Network"
+                        ),
+                        selected_node=st.session_state.get(
+                            "selected_document_id"
+                        ),
+                    ),
+                )
+
+                if network_fig is None:
+                    st.info(
+                        "Enable “Load network graph” to generate this "
+                        "visualization."
+                    )
+                elif plotly_events is not None:
+                    selected_points = plotly_events(
+                        network_fig,
+                        click_event=True,
+                        hover_event=False,
+                        select_event=False,
+                        key="plagiarism_network",
+                    )
+
+                    if selected_points:
+                        clicked_point = selected_points[0]
+                        point_index = clicked_point.get("pointIndex")
+
+                        if (
+                            point_index is not None
+                            and 0 <= point_index < len(doc_names)
+                        ):
+                            st.session_state.selected_document_id = (
+                                doc_names[point_index]
+                            )
+                else:
+                    st.plotly_chart(
+                        network_fig,
+                        use_container_width=True,
+                    )
+
+            selected_document_id = st.session_state.get(
+                "selected_document_id"
+            )
 
             if selected_document_id:
                 filtered_flags = [
@@ -2475,7 +2365,7 @@ if not st.session_state.authenticated:
                         f"#{rank} — {doc_a} ↔ {doc_b} — {sim:.1%}{badge}",
                         expanded=st.session_state.expand_all_drill or (rank == 1),
                     ):
-                        highlighted_ca, highlighted_cb = highlight_overlap(ca, cb)
+                        highlighted_ca, highlighted_cb = highlight_overlap(ca, cb, theme_colors=get_colors())
                         st.markdown(
                             f"**{doc_a}:** {highlighted_ca}", unsafe_allow_html=True
                         )
@@ -2530,48 +2420,124 @@ if not st.session_state.authenticated:
             if flags:
                 sync_flagged_incidents(flags)
 
-            st.subheader("📈 High Severity Plagiarism Trends (Last 30 Days)")
             trend_data = get_high_severity_trends(days=30)
-            trend_fig = plot_high_severity_trends(trend_data)
-            st.plotly_chart(trend_fig, use_container_width=True)
-
-            st.divider()
-            st.subheader("🔝 Most Frequently Plagiarized Documents")
             doc_data = get_most_plagiarized_documents(limit=10)
-            doc_fig = plot_most_plagiarized_documents(doc_data)
-            st.plotly_chart(doc_fig, use_container_width=True)
+
+            with st.expander(
+                "📈 High Severity Plagiarism Trends (Last 30 Days)",
+                expanded=False,
+            ):
+                load_trends = st.toggle(
+                    "Load trend chart",
+                    key="load_high_severity_trends",
+                )
+                trend_fig = build_visualization_lazily(
+                    load_trends,
+                    lambda: plot_high_severity_trends(trend_data),
+                )
+
+                if trend_fig is None:
+                    st.info(
+                        "Enable “Load trend chart” to generate this "
+                        "visualization."
+                    )
+                else:
+                    st.plotly_chart(
+                        trend_fig,
+                        use_container_width=True,
+                    )
+
+            with st.expander(
+                "🔝 Most Frequently Plagiarized Documents",
+                expanded=False,
+            ):
+                load_documents_chart = st.toggle(
+                    "Load document chart",
+                    key="load_most_plagiarized_documents",
+                )
+                doc_fig = build_visualization_lazily(
+                    load_documents_chart,
+                    lambda: plot_most_plagiarized_documents(doc_data),
+                )
+
+                if doc_fig is None:
+                    st.info(
+                        "Enable “Load document chart” to generate this "
+                        "visualization."
+                    )
+                else:
+                    st.plotly_chart(
+                        doc_fig,
+                        use_container_width=True,
+                    )
+
+            with st.expander(
+                "📊 Similarity Score Distribution",
+                expanded=False,
+            ):
+                analysis_results = st.session_state.get(
+                    "analysis_results"
+                )
+
+                if analysis_results is None:
+                    st.info(
+                        "Run a plagiarism analysis to see the "
+                        "similarity score distribution."
+                    )
+                else:
+                    load_distribution = st.toggle(
+                        "Load distribution chart",
+                        key="load_similarity_distribution",
+                    )
+                    sim_matrix = (
+                        analysis_results[4]
+                        if use_chunk_matrix
+                        else analysis_results[3]
+                    )
+                    dist_fig = build_visualization_lazily(
+                        load_distribution,
+                        lambda: plot_similarity_distribution(
+                            sim_matrix
+                        ),
+                    )
+
+                    if dist_fig is None:
+                        st.info(
+                            "Enable “Load distribution chart” to "
+                            "generate this visualization."
+                        )
+                    else:
+                        st.plotly_chart(
+                            dist_fig,
+                            use_container_width=True,
+                        )
 
             st.divider()
 
-            st.subheader("📊 Similarity Score Distribution")
-            analysis_results = st.session_state.get("analysis_results")
-            if analysis_results is not None:
-                sim_matrix = (
-                    analysis_results[4] if use_chunk_matrix else analysis_results[3]
-                )
-                dist_fig = plot_similarity_distribution(sim_matrix)
-                st.plotly_chart(dist_fig, use_container_width=True)
-            else:
-                st.info(
-                    "Run a plagiarism analysis to see the similarity score distribution."
-                )
-
-            st.divider()
-
-            # Summary statistics
+            # Summary statistics remain lightweight and always visible.
             st.subheader("📋 Analytics Summary")
             if trend_data:
-                total_high_severity = sum(item["count"] for item in trend_data)
+                total_high_severity = sum(
+                    item["count"] for item in trend_data
+                )
                 st.metric(
-                    "Total High Severity Incidents (30 days)", total_high_severity
+                    "Total High Severity Incidents (30 days)",
+                    total_high_severity,
                 )
             else:
-                st.info("No high severity incidents recorded in the last 30 days.")
+                st.info(
+                    "No high severity incidents recorded in the last "
+                    "30 days."
+                )
 
             if doc_data:
+                most_plagiarized = doc_data[0]
                 st.metric(
                     "Most Plagiarized Document",
-                    f"{doc_data[0]['document_name']} ({doc_data[0]['incident_count']} incidents)",
+                    (
+                        f"{most_plagiarized['document_name']} "
+                        f"({most_plagiarized['incident_count']} incidents)"
+                    ),
                 )
             else:
                 st.info("No plagiarism incidents recorded.")
@@ -2758,7 +2724,7 @@ if not st.session_state.authenticated:
             index=0,
             key="lang_selector",
         )
-        lang_code = "es" if selected_lang_name == "Español" else "en"
+        lang_code = _lang_reverse.get(selected_lang_name, "en")
 
         selected_theme = st.radio(
             get_text("theme", lang=lang_code),
@@ -2770,6 +2736,16 @@ if not st.session_state.authenticated:
         )
         if selected_theme != current_theme:
             set_theme(selected_theme)
+            st.rerun()
+
+        privacy_mode = st.toggle(
+            "Privacy Mode (Blur student names)",
+            value=st.session_state.get("privacy_mode", False),
+            key="privacy_mode_toggle",
+            help="Apply CSS filter: blur(4px) to student name labels for safe screenshots.",
+        )
+        if privacy_mode != st.session_state.get("privacy_mode", False):
+            st.session_state.privacy_mode = privacy_mode
             st.rerun()
 
         if user_role == "admin":
@@ -2875,6 +2851,39 @@ if not st.session_state.authenticated:
                     step=25,
                     key="ocr_dpi_slider",
                 )
+
+            st.markdown("")
+            config_backup = {
+                "theme": st.session_state.get("theme_selector", current_theme),
+                "threshold": st.session_state.get(
+                    "threshold_slider", DEFAULT_THRESHOLDS.plagiarism
+                ),
+                "class_filter": st.session_state.get(
+                    "class_filter_selectbox", "All Classes"
+                ),
+                "use_chunk_matrix": st.session_state.get(
+                    "chunk_matrix_checkbox", False
+                ),
+                "faiss_top_k": st.session_state.get("faiss_top_k_slider", 5),
+                "ignore_phrases": st.session_state.get(
+                    "ignore_phrases_textarea", ""
+                ),
+                "chunk_size": st.session_state.get("chunk_size_slider", 500),
+                "chunk_overlap": st.session_state.get("chunk_overlap_slider", 50),
+                "ocr_language": st.session_state.get(
+                    "ocr_language_selector",
+                    SUPPORTED_OCR_LANGUAGES[DEFAULT_OCR_LANGUAGE],
+                ),
+                "ocr_dpi": st.session_state.get("ocr_dpi_slider", DEFAULT_OCR_DPI),
+            }
+            st.download_button(
+                label="📥 Backup Configuration (JSON)",
+                data=json.dumps(config_backup, indent=2),
+                file_name="plagiarism_config_backup.json",
+                mime="application/json",
+                key="backup_config_button",
+                use_container_width=True,
+            )
 
             st.markdown("")
             if st.button(
