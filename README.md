@@ -754,9 +754,13 @@ Existing database files should not be deleted during an application upgrade.
 
 - [Architecture Overview](docs/ARCHITECTURE.md)
 
+- [NLP Architecture & Similarity Algorithm Guide](docs/ALGORITHMS.md)
+
+
 - [Bulk Export Formats & Data Fields](docs/EXPORTS.md)
 
 - [UI Customization and Theme Guide](docs/THEMING.md)
+
 
 ---
 
