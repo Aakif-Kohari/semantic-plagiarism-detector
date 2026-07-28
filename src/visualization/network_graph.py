@@ -76,9 +76,7 @@ def build_network_data(
     threshold: float = 0.59,
     min_degree: int = 0,
     theme_colors: Optional[dict] = None,
-    selected_node: Optional[str] = None,
-    document_tags: Optional[dict] = None,
-    doc_metadata: Optional[dict] = None,
+    highlighted_doc: Optional[str] = None,
 ) -> dict:
     """
     Processes similarity matrix data, constructs NetworkX graph layout, and formats node and edge traces.
@@ -88,8 +86,7 @@ def build_network_data(
         threshold: Edge threshold; pairs with similarity >= threshold are connected.
         min_degree: Minimum degree threshold; nodes with degree < min_degree are filtered out.
         theme_colors: Optional dictionary containing theme colors.
-        selected_node: Optional document name to highlight in the network.
-        document_tags: Optional dictionary mapping document names to tag strings or lists of tags.
+        highlighted_doc: Optional document name to search/highlight with larger size and bright yellow color.
 
     Returns:
         Dictionary containing shapes, edge_hover_trace, node_trace, graph, pos coordinates,
@@ -179,8 +176,16 @@ def build_network_data(
         # Line width based on similarity
         line_width = max(1.5, score * 6.0)
 
-        # Color based on severity
-        if score >= 0.90:
+        # Check if edge is connected to highlighted document
+        is_highlighted_edge = (
+            highlighted_doc is not None
+            and (doc_a == highlighted_doc or doc_b == highlighted_doc)
+        )
+
+        if is_highlighted_edge:
+            line_width = max(line_width * 1.8, 5.0)
+            color = "#FFD700"
+        elif score >= 0.90:
             color = (
                 theme_colors.get("danger", "#ff4b4b")
                 if theme_colors
@@ -260,41 +265,43 @@ def build_network_data(
         node_document_ids.append(node)
 
         deg = G.degree(node)
+        base_size = 20 + deg * 6
 
-        # Size based on degree
-        node_size.append(20 + deg * 6)
-
-        # Node color based on class tag if available, else degree
-        primary_tag = node_primary_tags.get(node)
-        if primary_tag and primary_tag in tag_color_map:
-            node_color.append(tag_color_map[primary_tag])
-        elif deg == 0:
-            node_color.append(
-                theme_colors.get(
-                    "success",
-                    "#2e7d32",
-                )
-                if theme_colors
-                else "#2e7d32"
-            )
-        elif deg == 1:
-            node_color.append(
-                theme_colors.get(
-                    "warning",
-                    "#f9a825",
-                )
-                if theme_colors
-                else "#f9a825"
-            )
+        if highlighted_doc is not None and node == highlighted_doc:
+            node_size.append(base_size + 15)
+            node_color.append("#FFFF00")  # Bright yellow for highlighted node
         else:
-            node_color.append(
-                theme_colors.get(
-                    "danger",
-                    "#c62828",
+            node_size.append(base_size)
+            # Color based on degree
+            if deg == 0:
+                node_color.append(
+                    theme_colors.get(
+                        "success",
+                        "#2e7d32",
+                    )
+                    if theme_colors
+                    else "#2e7d32"
                 )
-                if theme_colors
-                else "#c62828"
-            )
+
+            elif deg == 1:
+                node_color.append(
+                    theme_colors.get(
+                        "warning",
+                        "#f9a825",
+                    )
+                    if theme_colors
+                    else "#f9a825"
+                )
+
+            else:
+                node_color.append(
+                    theme_colors.get(
+                        "danger",
+                        "#c62828",
+                    )
+                    if theme_colors
+                    else "#c62828"
+                )
 
         # Calculate top match from similarity matrix
         top_match_str = "N/A"
@@ -466,7 +473,7 @@ def plot_similarity_network(
     min_degree: int = 0,
     title: str = "Document Plagiarism Network",
     theme_colors: Optional[dict] = None,
-    doc_metadata: Optional[dict] = None,
+    highlighted_doc: Optional[str] = None,
 ) -> go.Figure:
     """
     Builds a networkx graph from the similarity matrix and returns an interactive Plotly figure.
@@ -477,7 +484,7 @@ def plot_similarity_network(
         min_degree: Minimum degree threshold; nodes with degree < min_degree are filtered out.
         title: Title of the graph.
         theme_colors: Optional dictionary containing theme colors.
-        doc_metadata: Optional dictionary mapping document names to metadata.
+        highlighted_doc: Optional document name to search/highlight with larger size and bright yellow color.
 
     Returns:
         Plotly Graph Objects Figure.
@@ -487,7 +494,7 @@ def plot_similarity_network(
         threshold=threshold,
         min_degree=min_degree,
         theme_colors=theme_colors,
-        doc_metadata=doc_metadata,
+        highlighted_doc=highlighted_doc,
     )
     return render_network_plotly(
         network_data=network_data,

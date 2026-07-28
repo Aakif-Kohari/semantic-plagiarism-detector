@@ -2162,26 +2162,25 @@ if not st.session_state.authenticated:
                     ),
                 )
 
-                if heatmap_fig is None:
-                    st.info(
-                        "Enable “Load heatmap” to generate this "
-                        "visualization."
-                    )
-                else:
-                    st.pyplot(
-                        heatmap_fig,
-                        use_container_width=True,
-                    )
+            doc_select_options = ["None"] + list(active_sim_df.columns)
+            selected_highlight_doc = st.selectbox(
+                "Highlight Document Node",
+                options=doc_select_options,
+                index=0,
+                key="highlight_doc_node_selector",
+            )
+            highlighted_doc = (
+                selected_highlight_doc
+                if selected_highlight_doc != "None"
+                else None
+            )
 
-            if heatmap_fig is not None:
-                buf = _io.BytesIO()
-                heatmap_fig.savefig(
-                    buf,
-                    format="png",
-                    dpi=150,
-                    bbox_inches="tight",
-                )
-                buf.seek(0)
+            network_fig = plot_similarity_network(
+                similarity_df=active_sim_df,
+                threshold=threshold,
+                highlighted_doc=highlighted_doc,
+                title="Interactive Document Plagiarism Network",
+            )
 
                 st.download_button(
                     "⬇️ Download Heatmap PNG",
