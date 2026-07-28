@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import pandas as pd
 import streamlit as st
@@ -56,21 +56,33 @@ def _normalise_warning(warning: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def matches_query_predicate(query: str) -> Callable[[Mapping[str, Any]], bool]:
+    """Return a functional predicate matching query substrings against warning document names."""
+    clean_query = query.strip().casefold()
+    if not clean_query:
+        return lambda item: True
+    return lambda item: (
+        clean_query in item.get("doc_a", "").casefold()
+        or clean_query in item.get("doc_b", "").casefold()
+    )
+
+
 def filter_warnings(
     warnings: Iterable[Mapping[str, Any]],
     search_query: str = "",
 ) -> list[dict[str, Any]]:
+    """Filter normalized warnings using functional predicate matching."""
     normalised = [_normalise_warning(item) for item in warnings]
-    query = search_query.strip().casefold()
+    predicate = matches_query_predicate(search_query)
+    return [item for item in normalised if predicate(item)]
 
-    if not query:
-        return normalised
 
-    return [
-        item
-        for item in normalised
-        if query in item["doc_a"].casefold() or query in item["doc_b"].casefold()
-    ]
+def build_key_extractor(field: str) -> Callable[[Mapping[str, Any]], Any]:
+    """Return a key extraction function suitable for sorting warning items."""
+    def extract_key(item: Mapping[str, Any]) -> Any:
+        val = item.get(field, "")
+        return val.casefold() if isinstance(val, str) else val
+    return extract_key
 
 
 def sort_warnings(
@@ -81,23 +93,15 @@ def sort_warnings(
     secondary_field: str = "doc_a",
     secondary_descending: bool = False,
 ) -> list[dict[str, Any]]:
+    """Sort warning items using secondary and primary sorting keys."""
     items = [_normalise_warning(item) for item in warnings]
     allowed = {"similarity", "doc_a", "doc_b", "severity_rank"}
 
-    if primary_field not in allowed:
-        primary_field = "similarity"
-    if secondary_field not in allowed:
-        secondary_field = "doc_a"
+    p_field = primary_field if primary_field in allowed else "similarity"
+    s_field = secondary_field if secondary_field in allowed else "doc_a"
 
-    def key_for(field: str):
-        def key(item: Mapping[str, Any]):
-            value = item[field]
-            return value.casefold() if isinstance(value, str) else value
-
-        return key
-
-    items.sort(key=key_for(secondary_field), reverse=secondary_descending)
-    items.sort(key=key_for(primary_field), reverse=primary_descending)
+    items.sort(key=build_key_extractor(s_field), reverse=secondary_descending)
+    items.sort(key=build_key_extractor(p_field), reverse=primary_descending)
     return items
 
 
@@ -326,3 +330,4 @@ def render_warning_controls(
         ):
             st.session_state.warning_page = current_page.page + 1
             st.rerun()
+            
