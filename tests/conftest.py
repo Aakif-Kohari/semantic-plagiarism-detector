@@ -57,6 +57,13 @@ if "sentence_transformers" not in sys.modules:
     stub.SentenceTransformer = MagicMock  # type: ignore[attr-defined]
     sys.modules["sentence_transformers"] = stub
 
+if "torch" not in sys.modules:
+    torch_stub = types.ModuleType("torch")
+    class Tensor: pass
+    torch_stub.Tensor = Tensor  # type: ignore
+    sys.modules["torch"] = torch_stub
+
+
 for mod_name in [
     "lxml", "defusedxml", "defusedxml.lxml", "fitz", "docx", "redis", "bs4", "faker", "argon2", "argon2.exceptions",
     "pdfplumber", "langdetect", "striprtf", "striprtf.striprtf", "src.core.translator",
@@ -66,9 +73,11 @@ for mod_name in [
     "reportlab.lib.pagesizes", "reportlab.lib.utils", "plotly", "plotly.express", "plotly.graph_objects", 
     "matplotlib", "matplotlib.patches", "matplotlib.pyplot", "matplotlib.figure", "matplotlib.ticker", "networkx",
     "faiss", "torch", "psutil", "pytesseract", "sklearn", "sklearn.metrics", "sklearn.metrics.pairwise", "requests",
-    "bcrypt", "pyotp", "qrcode", "seaborn"
 ]:
-    sys.modules[mod_name] = MagicMock()
+    if mod_name not in sys.modules:
+        sys.modules[mod_name] = MagicMock()
+
+
 
 # ── Tesseract OCR Availability ────────────────────────────────────────────────
 TESSERACT_AVAILABLE = shutil.which("tesseract") is not None

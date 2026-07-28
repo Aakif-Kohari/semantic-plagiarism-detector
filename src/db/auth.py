@@ -115,7 +115,9 @@ def log_security_event(
 
 def _hash_password(password: str) -> str:
     """Return an Argon2 hash for the given password."""
-    return _ph.hash(password)
+    res = _ph.hash(password)
+    return str(res) if not isinstance(res, str) else res
+
 
 
 def _validate_username(username: str) -> str:
