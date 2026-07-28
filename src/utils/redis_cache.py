@@ -268,7 +268,7 @@ class RedisCache:
                     socket_connect_timeout=REDIS_TIMEOUT_SECONDS,
                 )
             self._client.ping()
-            print(f"[RedisCache] Connected to Redis at {REDIS_HOST}:{REDIS_PORT}")
+            logger.info(f"[RedisCache] Connected to Redis at {REDIS_HOST}:{REDIS_PORT}")
         except (
             RedisConnectionError,
             RedisTimeoutError,
