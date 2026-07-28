@@ -114,9 +114,11 @@ def test_document_metadata_fields():
     assert res is True
 
     # Retrieve and check fields
+    from src.db.schemas import Document
     docs = get_all_documents()
     assert len(docs) == 1
     doc = docs[0]
+    assert isinstance(doc, Document)
     assert doc["filename"] == "metadata_test.pdf"
     assert doc["class_section"] == "Class B"
     assert doc["student_name"] == "Alice Smith"

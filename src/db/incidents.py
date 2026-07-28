@@ -112,7 +112,8 @@ def _validate_incident(flag: Mapping[str, Any]) -> tuple[bool, str]:
     return True, ""
 
 
-def _fetch_all_incidents(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+def _fetch_all_incidents(conn: sqlite3.Connection) -> list[MatchResult]:
+    from src.db.schemas import MatchResult
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         """
@@ -128,7 +129,20 @@ def _fetch_all_incidents(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         """
     ).fetchall()
 
-    return [dict(row) for row in rows]
+    return [
+        MatchResult(
+            incident_id=row["incident_id"],
+            document_a=row["document_a"],
+            document_b=row["document_b"],
+            similarity_score=row["similarity_score"],
+            severity_rank=row["severity_rank"],
+            review_status=row["review_status"],
+            date_flagged=row["date_flagged"],
+            last_seen=row["last_seen"],
+            threshold_at_time_of_flag=row["threshold_at_time_of_flag"],
+        )
+        for row in rows
+    ]
 
 
 def sync_flagged_incidents(
@@ -137,7 +151,8 @@ def sync_flagged_incidents(
     *,
     now: str | None = None,
     threshold: float | None = None,
-) -> list[dict[str, Any]]:
+) -> list[MatchResult]:
+    from src.db.schemas import MatchResult
     init_incident_db(db_path)
     timestamp = now or _utc_now_iso()
 
@@ -200,7 +215,20 @@ def sync_flagged_incidents(
                 """
             ).fetchall()
 
-            return [dict(row) for row in rows]
+            return [
+                MatchResult(
+                    incident_id=row["incident_id"],
+                    document_a=row["document_a"],
+                    document_b=row["document_b"],
+                    similarity_score=row["similarity_score"],
+                    severity_rank=row["severity_rank"],
+                    review_status=row["review_status"],
+                    date_flagged=row["date_flagged"],
+                    last_seen=row["last_seen"],
+                    threshold_at_time_of_flag=row["threshold_at_time_of_flag"],
+                )
+                for row in rows
+            ]
 
         except sqlite3.Error as e:
             conn.rollback()
@@ -209,7 +237,7 @@ def sync_flagged_incidents(
 
 def get_all_incidents(
     db_path: str | Path = DEFAULT_DB_PATH,
-) -> list[dict[str, Any]]:
+) -> list[MatchResult]:
     init_incident_db(db_path)
     with closing(sqlite3.connect(str(db_path))) as conn:
         return _fetch_all_incidents(conn)
@@ -218,7 +246,8 @@ def get_all_incidents(
 def get_all_incidents_above_threshold_for_export(
     threshold: float,
     db_path: str | Path = DEFAULT_DB_PATH,
-) -> list[dict[str, Any]]:
+) -> list[MatchResult]:
+    from src.db.schemas import MatchResult
     init_incident_db(db_path)
     with closing(sqlite3.connect(str(db_path))) as conn:
         conn.row_factory = sqlite3.Row
@@ -237,7 +266,15 @@ def get_all_incidents_above_threshold_for_export(
             """,
             (threshold,)
         ).fetchall()
-        return [dict(row) for row in rows]
+        return [
+            MatchResult(
+                document_a=row["doc_a"],
+                document_b=row["doc_b"],
+                similarity_score=row["similarity"],
+                threshold_at_time_of_flag=row["threshold_at_time_of_flag"],
+            )
+            for row in rows
+        ]
 
 
 def update_review_status(
