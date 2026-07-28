@@ -19,11 +19,10 @@ from .core import (
     get_document_embedding,
     load_index,
     save_index,
-    search_similar_chunks,
-    send_plagiarism_alert,
-    dispatch_plagiarism_alert,
+    sanitize_zero_width_characters,
     translate_text,
 )
+
 from .db import (
     add_chunks,
     add_document,
