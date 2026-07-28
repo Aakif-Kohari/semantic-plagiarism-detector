@@ -8,6 +8,7 @@ import numpy as np
 from fastapi import (Depends, FastAPI, File, HTTPException, Query, UploadFile,
                      status)
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse, JSONResponse
 from fastapi.security import HTTPBearer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -109,6 +110,22 @@ _HEALTHZ_DB_PATHS = (
     os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "corpus.db")),
     os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "users.db")),
 )
+
+
+@app.get("/metrics", tags=["Monitoring"], response_class=PlainTextResponse)
+def metrics_prometheus():
+    """Prometheus-format metrics export for production monitoring."""
+    from src.core.metrics import generate_latest as _gen
+
+    return PlainTextResponse(_gen().decode("utf-8"))
+
+
+@app.get("/metrics/json", tags=["Monitoring"])
+def metrics_json():
+    """JSON-format metrics export for non-Prometheus monitoring setups."""
+    from src.core.metrics import generate_metrics_json
+
+    return JSONResponse(generate_metrics_json())
 
 
 @app.get("/healthz", tags=["Health"])
