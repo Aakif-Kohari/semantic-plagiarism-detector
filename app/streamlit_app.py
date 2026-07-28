@@ -2481,11 +2481,22 @@ if not st.session_state.authenticated:
                         expanded=st.session_state.expand_all_drill or (rank == 1),
                     ):
                         highlighted_ca, highlighted_cb = highlight_overlap(ca, cb, theme_colors=get_colors())
+                        from src.utils.warning_list import render_copy_button
                         st.markdown(
                             f"**{doc_a}:** {highlighted_ca}", unsafe_allow_html=True
                         )
+                        render_copy_button(
+                            text_to_copy=ca,
+                            button_id=f"copy_ca_{rank}",
+                            copy_label="📋 Copy Snippet",
+                        )
                         st.markdown(
                             f"**{doc_b}:** {highlighted_cb}", unsafe_allow_html=True
+                        )
+                        render_copy_button(
+                            text_to_copy=cb,
+                            button_id=f"copy_cb_{rank}",
+                            copy_label="📋 Copy Snippet",
                         )
 
             with drill_tab_viewer:

@@ -200,6 +200,78 @@ def _reset_page() -> None:
     st.session_state.warning_page = 1
 
 
+def render_copy_button(text_to_copy: str, button_id: str = "copy-btn", copy_label: str = "📋 Copy", copied_label: str = "✅ Copied!", height: int = 45) -> None:
+    escaped_text = (
+        text_to_copy.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("`", "\\`")
+        .replace("$", "\\$")
+        .replace("\n", "\\n")
+    )
+    html_code = f"""
+    <style>
+        body {{
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }}
+    </style>
+    <button id="{button_id}" style="
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background-color: white;
+        color: #31333f;
+        border: 1px solid #d6d6d8;
+        padding: 0.35rem 0.75rem;
+        border-radius: 0.25rem;
+        cursor: pointer;
+        font-weight: 400;
+        font-size: 0.875rem;
+        line-height: 1.6;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        width: 100%;
+        height: 38px;
+        user-select: none;
+        box-sizing: border-box;
+        transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+    " onmouseover="this.style.borderColor='#ff4b4b'; this.style.color='#ff4b4b'" onmouseout="this.style.borderColor='#d6d6d8'; this.style.color='#31333f'">
+        {copy_label}
+    </button>
+    <script>
+        document.getElementById("{button_id}").addEventListener("click", function() {{
+            const text = "{escaped_text}";
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            textArea.style.top = "0";
+            textArea.style.left = "0";
+            textArea.style.position = "fixed";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {{
+                const successful = document.execCommand('copy');
+                if (successful) {{
+                    const btn = document.getElementById("{button_id}");
+                    btn.innerHTML = "{copied_label}";
+                    btn.style.borderColor = "#28a745";
+                    btn.style.color = "#28a745";
+                    setTimeout(function() {{
+                        btn.innerHTML = "{copy_label}";
+                        btn.style.borderColor = "#d6d6d8";
+                        btn.style.color = "#31333f";
+                    }}, 2000);
+                }}
+            }} catch (err) {{
+                console.error("Could not copy: ", err);
+            }}
+            document.body.removeChild(textArea);
+        }});
+    </script>
+    """
+    st.components.v1.html(html_code, height=height)
+
+
 def _has_exact_match(doc_a: str, doc_b: str) -> bool:
     """Check if two documents share at least one exact matching chunk (ignoring whitespace)."""
     if (
@@ -573,70 +645,12 @@ def render_warning_controls(
         else:
             st.info(get_text("warn_no_match", lang=lang_code))
     with middle:
-        copy_label = "📋 Copy Summary"
-        copied_label = "✅ Copied!"
-        html_code = f"""
-        <style>
-            body {{
-                margin: 0;
-                padding: 0;
-                overflow: hidden;
-            }}
-        </style>
-        <button id="copy-btn" style="
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            background-color: white;
-            color: #31333f;
-            border: 1px solid #d6d6d8;
-            padding: 0.35rem 0.75rem;
-            border-radius: 0.25rem;
-            cursor: pointer;
-            font-weight: 400;
-            font-size: 0.875rem;
-            line-height: 1.6;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            width: 100%;
-            height: 38px;
-            user-select: none;
-            box-sizing: border-box;
-            transition: background-color 0.2s, color 0.2s, border-color 0.2s;
-        " onmouseover="this.style.borderColor='#ff4b4b'; this.style.color='#ff4b4b'" onmouseout="this.style.borderColor='#d6d6d8'; this.style.color='#31333f'">
-            {copy_label}
-        </button>
-        <script>
-            document.getElementById("copy-btn").addEventListener("click", function() {{
-                const text = "{escaped_text}";
-                const textArea = document.createElement("textarea");
-                textArea.value = text;
-                textArea.style.top = "0";
-                textArea.style.left = "0";
-                textArea.style.position = "fixed";
-                document.body.appendChild(textArea);
-                textArea.focus();
-                textArea.select();
-                try {{
-                    const successful = document.execCommand('copy');
-                    if (successful) {{
-                        const btn = document.getElementById("copy-btn");
-                        btn.innerHTML = "{copied_label}";
-                        btn.style.borderColor = "#28a745";
-                        btn.style.color = "#28a745";
-                        setTimeout(function() {{
-                            btn.innerHTML = "{copy_label}";
-                            btn.style.borderColor = "#d6d6d8";
-                            btn.style.color = "#31333f";
-                        }}, 2000);
-                    }}
-                }} catch (err) {{
-                    console.error("Could not copy: ", err);
-                }}
-                document.body.removeChild(textArea);
-            }});
-        </script>
-        """
-        st.components.v1.html(html_code, height=45)
+        render_copy_button(
+            text_to_copy=markdown_text,
+            button_id="copy-summary-btn",
+            copy_label="📋 Copy Summary",
+            copied_label="✅ Copied!"
+        )
     with right:
         st.download_button(
             get_text("warn_download_csv", lang=lang_code),
