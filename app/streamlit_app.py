@@ -77,6 +77,9 @@ from app.theme import (
     version_check_widget_html,
 )
 from src.core.config import DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD, severity_key
+from sklearn.metrics.pairwise import cosine_similarity
+from src.core.ai_detector import detect_documents_ai_probability
+from src.core.cross_lingual import prepare_text_for_embedding
 from src.core.document_parser import (
     DEFAULT_OCR_DPI,
     DEFAULT_OCR_LANGUAGE,
@@ -93,13 +96,15 @@ from src.core.faiss_index import (
     save_index,
     search_similar_chunks,
 )
+from src.core.faiss_indexer import build_index
 from src.core.similarity import (
     document_similarity_matrix,
     find_most_similar_chunks,
     flag_plagiarism,
 )
+from src.core.text_chunking import chunk_documents
 from src.core.webhook import send_plagiarism_alert
-from src.i18n.translator import _SUPPORTED_LANGUAGES
+from src.i18n.translator import _SUPPORTED_LANGUAGES, get_text
 from src.visualization.network_graph import (
     export_network_to_gexf_bytes,
     plot_similarity_network,
