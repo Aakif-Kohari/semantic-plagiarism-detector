@@ -61,26 +61,14 @@ PASSWORD_COMPLEXITY_REGEX = re.compile(
     r"^(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\])[A-Za-z\d@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\]{8,}$"
 )
 
-# Initialize Argon2 password hasher
-_ph = PasswordHasher()
-
-# Initialize Argon2 password hasher
-_ph = PasswordHasher()
-
+# Initialize Argon2 password hasher with an explicit 16-byte salt (minimum required).
+_ph = PasswordHasher(salt_len=16)
 
 
 def configure_db_path(db_path: str | os.PathLike) -> None:
     """Configure the SQLite database path used by the authentication module."""
     global _DB_PATH
     _DB_PATH = os.path.abspath(os.fspath(db_path))
-
-
-VALID_ROLES = {"admin", "teacher"}
-
-# Initialize Argon2 password hasher
-_ph = PasswordHasher()
-
-
 
 
 def _connect() -> sqlite3.Connection:
@@ -127,7 +115,9 @@ def log_security_event(
 
 def _hash_password(password: str) -> str:
     """Return an Argon2 hash for the given password."""
-    return _ph.hash(password)
+    res = _ph.hash(password)
+    return str(res) if not isinstance(res, str) else res
+
 
 
 def _validate_username(username: str) -> str:

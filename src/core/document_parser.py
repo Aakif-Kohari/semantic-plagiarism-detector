@@ -24,7 +24,11 @@ import docx
 
 import pdfplumber
 from langdetect import LangDetectException, detect
-from striprtf.striprtf import rtf_to_text
+try:
+    from striprtf.striprtf import rtf_to_text
+except ImportError:
+    def rtf_to_text(rtf_text: str) -> str:
+        return rtf_text
 
 logger = logging.getLogger(__name__)
 from src.core.translator import translate_text
@@ -47,6 +51,28 @@ MIN_OCR_DPI = 150
 MAX_OCR_DPI = 400
 DEFAULT_OCR_LANGUAGE = "eng"
 MAX_BATCH_SIZE = 50
+
+ZERO_WIDTH_CHARS_PATTERN = re.compile(r"[\u200B\u200C\u200D\uFEFF\u2060\u200E\u200F]")
+
+
+def sanitize_zero_width_characters(text: str, filename: Optional[str] = None) -> str:
+    """
+    Strips zero-width unicode characters (e.g. \u200B) often used to bypass plagiarism checkers.
+    Logs a security warning if any zero-width characters are found.
+    """
+    if not text:
+        return text
+
+    matches = ZERO_WIDTH_CHARS_PATTERN.findall(text)
+    if matches:
+        count = len(matches)
+        target = f"in file '{filename}'" if filename else "in document text"
+        logger.warning(
+            f"[document_parser] Security warning: Found and stripped {count} zero-width unicode character(s) {target}."
+        )
+        return ZERO_WIDTH_CHARS_PATTERN.sub("", text)
+    return text
+
 
 
 def check_batch_rate_limit(file_count: int, session_id: Optional[str] = None) -> None:
@@ -845,21 +871,38 @@ def extract_text_from_docx(file: PDFInput) -> str:
 
 
 def extract_text_from_txt(file: PDFInput) -> str:
-    """Extract text from a TXT file with UTF-8 fallback."""
+    """Extract text from a TXT file with encoding fallback."""
     text = ""
     try:
+        data = b""
         if isinstance(file, str):
-            with open(file, "r", encoding="utf-8", errors="ignore") as handle:
-                text = handle.read()
+            with open(file, "rb") as handle:
+                data = handle.read()
         elif isinstance(file, bytes):
-            text = file.decode("utf-8", errors="ignore")
+            data = file
         else:
-            data = file.read()
-            text = (
-                data.decode("utf-8", errors="ignore")
-                if isinstance(data, bytes)
-                else data
-            )
+            read_data = file.read()
+            if isinstance(read_data, bytes):
+                data = read_data
+            else:
+                text = read_data
+
+        if data:
+            # Construct candidate encodings. Prioritize UTF-16 only if we detect a BOM.
+            encodings = ["utf-8"]
+            if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+                encodings.insert(0, "utf-16")
+            else:
+                encodings.extend(["latin-1", "utf-16"])
+
+            for encoding in encodings:
+                try:
+                    text = data.decode(encoding)
+                    break
+                except UnicodeDecodeError:
+                    continue
+            else:
+                text = data.decode("utf-8", errors="ignore")
     except (OSError, UnicodeDecodeError, AttributeError, TypeError) as exc:
         print(f"[document_parser] Error reading TXT: {exc}")
     except Exception as exc:
@@ -1187,7 +1230,9 @@ def extract_text(
         raw = extract_text_from_txt(file)
 
     raw = strip_bibliography(raw)
+    raw = sanitize_zero_width_characters(raw, filename=filename)
     lang_code = detect_text_language(raw)
+
     logger.info(
         f"[document_parser] Detected language for document '{filename}': {lang_code}"
     )

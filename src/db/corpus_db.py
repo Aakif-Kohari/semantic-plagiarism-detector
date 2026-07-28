@@ -607,3 +607,43 @@ def check_database_integrity() -> list[str]:
     except Exception as e:
         logger.error(f"Integrity check failed: {e}")
         return [f"Error: {e}"]
+
+
+def optimize_database() -> dict[str, any]:
+    """
+    Executes SQLite VACUUM to reclaim database storage space.
+    Returns a dictionary containing:
+        - size_before: Database size in bytes before VACUUM.
+        - size_after: Database size in bytes after VACUUM.
+        - reclaimed_bytes: Bytes of storage space reclaimed.
+        - error: Error message if operation failed, else None.
+    """
+    path = get_corpus_db_path()
+    try:
+        size_before = path.stat().st_size if path.exists() else 0
+
+        # Run VACUUM outside transaction
+        conn = sqlite3.connect(os.path.abspath(path))
+        conn.isolation_level = None
+        try:
+            conn.execute("VACUUM")
+        finally:
+            conn.close()
+
+        size_after = path.stat().st_size if path.exists() else 0
+        reclaimed_bytes = max(0, size_before - size_after)
+
+        return {
+            "size_before": size_before,
+            "size_after": size_after,
+            "reclaimed_bytes": reclaimed_bytes,
+            "error": None,
+        }
+    except Exception as e:
+        logger.error(f"Database optimization (VACUUM) failed: {e}")
+        return {
+            "size_before": 0,
+            "size_after": 0,
+            "reclaimed_bytes": 0,
+            "error": str(e),
+        }

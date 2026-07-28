@@ -66,11 +66,18 @@ def _get_connection(db_path: str | Path) -> sqlite3.Connection:
     abs_path = os.path.abspath(str(db_path))
     try:
         os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-        return sqlite3.connect(abs_path)
+        conn = sqlite3.connect(abs_path)
     except (sqlite3.OperationalError, OSError, PermissionError):
         fallback_path = os.path.join(tempfile.gettempdir(), "semantic_plagiarism_detector", "data", os.path.basename(abs_path))
         os.makedirs(os.path.dirname(fallback_path), exist_ok=True)
-        return sqlite3.connect(fallback_path)
+        conn = sqlite3.connect(fallback_path)
+
+    conn.execute("PRAGMA foreign_keys = ON")
+    try:
+        migrate_corpus_database(conn)
+    except Exception:
+        pass
+    return conn
 
 
 def init_incident_db(
@@ -141,7 +148,7 @@ def sync_flagged_incidents(
     init_incident_db(db_path)
     timestamp = now or _utc_now_iso()
 
-    with closing(sqlite3.connect(str(db_path))) as conn:
+    with closing(_get_connection(db_path)) as conn:
         conn.row_factory = sqlite3.Row
 
         try:
@@ -161,9 +168,9 @@ def sync_flagged_incidents(
                     second,
                     _normalise_score(flag.get("similarity", 0.0)),
                     _severity_rank(flag),
+                    timestamp,
+                    timestamp,
                     _normalise_score(flag.get("threshold_at_time_of_flag", threshold or 0.0)),
-                    timestamp,
-                    timestamp,
                 ))
 
             if bulk_records:
@@ -211,7 +218,7 @@ def get_all_incidents(
     db_path: str | Path = DEFAULT_DB_PATH,
 ) -> list[dict[str, Any]]:
     init_incident_db(db_path)
-    with closing(sqlite3.connect(str(db_path))) as conn:
+    with closing(_get_connection(db_path)) as conn:
         return _fetch_all_incidents(conn)
 
 
@@ -220,7 +227,7 @@ def get_all_incidents_above_threshold_for_export(
     db_path: str | Path = DEFAULT_DB_PATH,
 ) -> list[dict[str, Any]]:
     init_incident_db(db_path)
-    with closing(sqlite3.connect(str(db_path))) as conn:
+    with closing(_get_connection(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """
@@ -304,7 +311,7 @@ def get_high_severity_trends(
     # Get daily count of High severity incidents over the specified number of days.
     # Returns list of dicts with 'date' and 'count' keys.
     init_incident_db(db_path)
-    with closing(sqlite3.connect(str(db_path))) as conn:
+    with closing(_get_connection(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """
@@ -333,7 +340,7 @@ def get_most_plagiarized_documents(
     # Get the most frequently plagiarized documents based on incident count.
     # Returns list of dicts with 'document_name' and 'incident_count' keys.
     init_incident_db(db_path)
-    with closing(sqlite3.connect(str(db_path))) as conn:
+    with closing(_get_connection(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """

@@ -286,8 +286,6 @@ def generate_plagiarism_report(
 
 
 
-    footer_text = get_pdf_footer_text()
-
     # ── Header / footer callback for logo ──
 
     def _draw_header(canvas_obj, _doc):

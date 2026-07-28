@@ -229,3 +229,33 @@ def test_get_document_word_counts():
 
     # "Doc2 has only one single chunk." -> 6 words
     assert word_counts["doc2.txt"] == 6
+
+
+def test_optimize_database_vacuum(mock_db):
+    from src.db.corpus_db import optimize_database
+
+    res = optimize_database()
+    assert "size_before" in res
+    assert "size_after" in res
+    assert "reclaimed_bytes" in res
+    assert "error" in res
+
+    assert res["error"] is None
+    assert res["size_before"] > 0
+    assert res["size_after"] > 0
+    assert res["reclaimed_bytes"] >= 0
+
+
+def test_optimize_database_error_handling():
+    from src.db.corpus_db import optimize_database, configure_db_path, get_corpus_db_path
+
+    original_path = get_corpus_db_path()
+    try:
+        configure_db_path("Z:\\invalid_dir_xyz_123\\corpus.db")
+        res = optimize_database()
+        assert res["error"] is not None
+        assert res["size_before"] == 0
+        assert res["size_after"] == 0
+        assert res["reclaimed_bytes"] == 0
+    finally:
+        configure_db_path(original_path)

@@ -448,3 +448,33 @@ def test_large_pdf_parsing_performance_benchmark():
     assert len(parsed_text) > 0
     assert "Page 199" in parsed_text
     assert duration < 3.0, f"Parsing 200-page PDF took too long: {duration:.2f} seconds (limit: 3.0s)"
+
+
+def test_extract_text_from_txt_utf16_fallback():
+    """Test that extract_text_from_txt successfully decodes a UTF-16 encoded buffer."""
+    original_text = "Hello in UTF-16 coding fallback test!"
+    utf16_bytes = original_text.encode("utf-16")
+    result = extract_text_from_txt(utf16_bytes)
+    assert result == original_text
+
+
+def test_extract_text_from_txt_latin1_fallback():
+    """Test that extract_text_from_txt successfully decodes a Latin-1 (ISO-8859-1) encoded buffer."""
+    original_text = "Café, naïve, and résumé contents in Latin-1!"
+    latin1_bytes = original_text.encode("latin-1")
+    result = extract_text_from_txt(latin1_bytes)
+    assert result == original_text
+
+
+def test_extract_text_routing_txt_latin1(tmp_path):
+    """Test that extract_text successfully routes and decodes a Latin-1 file."""
+    original_text = "Café and naïve text."
+    latin1_bytes = original_text.encode("latin-1")
+    
+    # Write the bytes to a temp file
+    file_path = tmp_path / "latin1_test.txt"
+    file_path.write_bytes(latin1_bytes)
+    
+    # Verify routing and decoding
+    result = extract_text(str(file_path), "latin1_test.txt")
+    assert result == original_text

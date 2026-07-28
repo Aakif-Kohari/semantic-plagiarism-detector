@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from app.theme import badge_html, get_colors, inject_css
+from app.theme import badge_html, get_colors, inject_css, sanitize_hex_color
 
 
 def test_get_colors_returns_valid_theme_colors():
@@ -63,6 +63,23 @@ def test_inject_css_generates_css_without_errors():
     assert isinstance(css, str)
     assert len(css.strip()) > 0
     assert "<style>" in css
+
+
+
+
+def test_sanitize_hex_color_valid_and_invalid():
+    """Verify regex validation for hex colors."""
+    # Valid hex colors (3 and 6 digits)
+    assert sanitize_hex_color("#FFF") == "#FFF"
+    assert sanitize_hex_color("#123456") == "#123456"
+    assert sanitize_hex_color("#aBcDeF") == "#aBcDeF"
+
+    # Invalid hex colors / injection attempts
+    assert sanitize_hex_color("red", fallback="#000000") == "#000000"
+    assert sanitize_hex_color("#12345", fallback="#000000") == "#000000"
+    assert sanitize_hex_color("#1234567", fallback="#000000") == "#000000"
+    assert sanitize_hex_color("url('http://evil')", fallback="#000000") == "#000000"
+    assert sanitize_hex_color("; background: red;", fallback="#000000") == "#000000"
 
 
 def test_badge_html_returns_valid_html():

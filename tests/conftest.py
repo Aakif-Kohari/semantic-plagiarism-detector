@@ -57,57 +57,28 @@ if "sentence_transformers" not in sys.modules:
     stub.SentenceTransformer = MagicMock  # type: ignore[attr-defined]
     sys.modules["sentence_transformers"] = stub
 
-import importlib
+if "torch" not in sys.modules:
+    torch_stub = types.ModuleType("torch")
+    class Tensor:
+        pass
+    torch_stub.Tensor = Tensor  # type: ignore
+    sys.modules["torch"] = torch_stub
+
+
 for mod_name in [
     "lxml", "defusedxml", "defusedxml.lxml", "fitz", "docx", "redis", "bs4", "faker", "argon2", "argon2.exceptions",
     "pdfplumber", "langdetect", "striprtf", "striprtf.striprtf", "src.core.translator",
+    "src.core.webhook",
     "pypdf", "PyPDF2", "reportlab", "reportlab.pdfgen", "reportlab.lib", "reportlab.platypus", 
     "reportlab.lib.colors", "reportlab.lib.enums", "reportlab.lib.styles", "reportlab.lib.units", 
-    "reportlab.lib.pagesizes", "reportlab.lib.utils", "plotly", "plotly.express", "plotly.graph_objects", 
-    "matplotlib", "matplotlib.patches", "matplotlib.pyplot", "matplotlib.figure", "matplotlib.ticker", "networkx",
+    "reportlab.lib.pagesizes", "reportlab.lib.utils", 
+    "matplotlib", "matplotlib.patches", "matplotlib.pyplot", "matplotlib.figure", "matplotlib.ticker",
     "faiss", "torch", "psutil", "pytesseract", "sklearn", "sklearn.metrics", "sklearn.metrics.pairwise", "requests",
-    "bcrypt", "pyotp", "qrcode", "seaborn"
 ]:
     if mod_name not in sys.modules:
-        if mod_name in ("lxml", "defusedxml.lxml"):
-            sys.modules[mod_name] = MagicMock()
-            if mod_name == "lxml":
-                sys.modules["lxml.etree"] = sys.modules["lxml"].etree
-            if mod_name == "defusedxml.lxml":
-                try:
-                    import defusedxml
-                    defusedxml.lxml = sys.modules[mod_name]
-                except ImportError:
-                    pass
-            continue
-        try:
-            importlib.import_module(mod_name)
-        except ImportError:
-            if mod_name == "docx":
-                class DummyDocxParagraph:
-                    def __init__(self, text):
-                        self.text = text
-                class DummyDocxDocument:
-                    def __init__(self, file=None):
-                        self.paragraphs = []
-                        if file is not None:
-                            try:
-                                content = file.read() if hasattr(file, "read") else file
-                                if content.startswith(b"PK\x03\x04"):
-                                    self.paragraphs.append(DummyDocxParagraph(content[4:].decode("utf-8")))
-                            except Exception:
-                                pass
-                    def add_paragraph(self, text):
-                        self.paragraphs.append(DummyDocxParagraph(text))
-                    def save(self, file):
-                        file.write(b"PK\x03\x04" + "\n\n".join(p.text for p in self.paragraphs).encode("utf-8"))
-                
-                class DummyDocxModule:
-                    Document = DummyDocxDocument
-                
-                sys.modules[mod_name] = DummyDocxModule()
-            else:
-                sys.modules[mod_name] = MagicMock()
+        sys.modules[mod_name] = MagicMock()
+
+
 
 # ── Tesseract OCR Availability ────────────────────────────────────────────────
 TESSERACT_AVAILABLE = shutil.which("tesseract") is not None
@@ -214,9 +185,9 @@ def mock_db(tmp_path):
     # We patch the database path at the module level for all db modules
     import unittest.mock
     
-    with unittest.mock.patch("src.db.corpus_db._DB_PATH", str(db_file)), \
-         unittest.mock.patch("src.db.incidents.DEFAULT_DB_PATH", str(db_file)), \
-         unittest.mock.patch("src.db.auth._DB_PATH", str(db_file)):
+    with unittest.mock.patch("src.db.corpus_db._DB_PATH", str(corpus_db_file)), \
+         unittest.mock.patch("src.db.incidents.DEFAULT_DB_PATH", str(corpus_db_file)), \
+         unittest.mock.patch("src.db.auth._DB_PATH", str(auth_db_file)):
         
         try:
             from src.db.corpus_db import init_corpus_db
@@ -225,8 +196,8 @@ def mock_db(tmp_path):
             init_corpus_db()
             init_incident_db()
             init_db()
-        except Exception as e:
+        except Exception:
             import traceback
             traceback.print_exc()
             
-        yield str(db_file)
+        yield str(corpus_db_file)
