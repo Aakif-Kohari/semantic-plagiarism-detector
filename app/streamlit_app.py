@@ -2293,22 +2293,23 @@ if not st.session_state.authenticated:
                 title="Interactive Document Plagiarism Network",
             )
 
-                    buf = _io.BytesIO()
-                    heatmap_fig.savefig(
-                        buf,
-                        format="png",
-                        dpi=150,
-                        bbox_inches="tight",
-                    )
-                    buf.seek(0)
+            if heatmap_fig is not None:
+                buf = _io.BytesIO()
+                heatmap_fig.savefig(
+                    buf,
+                    format="png",
+                    dpi=150,
+                    bbox_inches="tight",
+                )
+                buf.seek(0)
 
-                    st.download_button(
-                        "⬇️ Download Heatmap PNG",
-                        buf,
-                        "heatmap.png",
-                        "image/png",
-                        key="download_lazy_heatmap_png",
-                    )
+                st.download_button(
+                    "⬇️ Download Heatmap PNG",
+                    buf,
+                    "heatmap.png",
+                    "image/png",
+                    key="download_lazy_heatmap_png",
+                )
 
             with st.expander(
                 "🕸️ Interactive Plagiarism Network",
