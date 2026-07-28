@@ -188,15 +188,26 @@ init_db()
 
 try:
 
+    from src.utils.pdf_report import truncate_filename
+except ImportError:
+    def truncate_filename(filename: str, max_len: int = 30) -> str:
+        return filename
+
+try:
+
     from src.utils.pdf_highlighter import highlight_pdf_matches  # type: ignore
 except Exception:
     highlight_pdf_matches = None
 
     # Safe import for Google Drive integration
 
+
     from src.utils.excel_export import export_similarity_matrix_to_excel
     from src.utils.json_export import export_similarity_matrix_to_json
 except ImportError:
+
+    from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore[import-untyped,reportMissingImports]
+
 
     from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore[import-untyped,reportMissingImports]
 
@@ -647,6 +658,9 @@ with theme_col:
         st.rerun()
 
 
+
+# ── Sidebar (ROLE RESTRICTED Settings) ────────────────────────────────────────
+
 # ── Sidebar (ROLE RESTRICTED Settings & i18n) ─────────────────────────────────
 
 
@@ -659,6 +673,7 @@ def save_preferences_callback():
             "theme": st.session_state.get("theme_selector", "Light"),
         }
     update_user_preferences(st.session_state.username, prefs)
+
 
 
 with st.sidebar:
@@ -1163,11 +1178,20 @@ else:
 
 
 
+
+
+
         cached_signature = get_session_state(SESSION_ID, "analysis_file_signature")
         if cached_signature is not None:
             st.session_state.analysis_file_signature = cached_signature
 
+
+    if "failed_documents" not in st.session_state:
+        st.session_state.failed_documents = {}
+
+
     # 1. LOCAL FILE UPLOADER (Dynamic Title Translation)
+
     # 1. LOCAL FILE UPLOADER
     uploaded_files = st.file_uploader(
         get_text("upload_title", lang=lang_code),
@@ -1588,6 +1612,29 @@ if not st.session_state.authenticated:
                         st.error("Please enter a password.")
         st.stop()
 
+    # ── Failed Uploads Section (#582 Dedicated Expander & Filter View) ─────────────
+    if st.session_state.failed_documents:
+        failed_count = len(st.session_state.failed_documents)
+        with st.expander(f"⚠️ Failed Uploads ({failed_count} file(s))", expanded=True):
+            st.warning(
+                f"**{failed_count} file(s) failed text extraction during processing.** "
+                "Review the details below or attempt OCR retry."
+            )
+            for fname, fbytes in st.session_state.failed_documents.items():
+                st.markdown(f"- 📄 **`{fname}`** ({len(fbytes):,} bytes)")
+
+            col_retry, col_clear = st.columns([1, 1])
+            with col_retry:
+                if st.button("🔄 Retry Text Extraction", key="retry_failed_extraction_btn", type="primary", use_container_width=True):
+                    for fname, fbytes in st.session_state.failed_documents.items():
+                        file_bytes_dict[fname] = fbytes
+                    st.session_state.failed_documents = {}
+                    st.rerun()
+            with col_clear:
+                if st.button("🗑️ Clear Failed List", key="clear_failed_list_btn", use_container_width=True):
+                    st.session_state.failed_documents = {}
+                    st.rerun()
+
     # 4. PIPELINE STOP CHECK
     if len(file_bytes_dict) < 2 and url_text is None:
         if st.session_state.analysis_results is None:
@@ -1737,6 +1784,24 @@ if not st.session_state.authenticated:
         url_filename: str | None = None,
     ):
         raw_texts = {}
+
+        failed_files = {}
+
+        for name, data in file_bytes_dict.items():
+            try:
+                extracted = extract_text(
+                    _io.BytesIO(data),
+                    name,
+                    ocr_language=ocr_language,
+                    ocr_dpi=ocr_dpi,
+                )
+                if extracted and extracted.strip():
+                    raw_texts[name] = extracted
+                else:
+                    failed_files[name] = data
+            except Exception:
+                failed_files[name] = data
+
         failed_files = []
         failure_details = []
 
@@ -1753,6 +1818,7 @@ if not st.session_state.authenticated:
 
         if url_text and url_filename:
             raw_texts[url_filename] = url_text
+
 
         if failed_files:
             raise OCRFileBatchError(failed_files, failure_details)
@@ -1817,9 +1883,23 @@ if not st.session_state.authenticated:
             faiss_index,
             registry,
             ai_probabilities,
+            failed_files,
         )
 
     has_enough_files = (len(file_bytes_dict) + (1 if url_text else 0)) >= 2
+
+
+    (
+        raw_texts,
+        chunked_docs,
+        embeddings,
+        sim_df,
+        chunk_sim_df,
+        faiss_index,
+        registry,
+        ai_probabilities,
+        pipeline_failed_files,
+    ) = analysis_results
 
     # Run Pipeline if files uploaded
     if (len(file_bytes_dict) > 0 and any(file_bytes_dict.values())) or url_text:
@@ -1855,6 +1935,10 @@ if not st.session_state.authenticated:
             if exc.failed_files:
                 st.warning(f"Failed files: {', '.join(exc.failed_files)}")
             st.stop()
+
+
+    if pipeline_failed_files:
+        st.session_state.failed_documents.update(pipeline_failed_files)
 
     active_sim_df = chunk_sim_df if use_chunk_matrix else sim_df
     flags = flag_plagiarism(
@@ -1934,6 +2018,17 @@ if not st.session_state.authenticated:
             chunked_docs=chunked_docs,
             embeddings=embeddings,
         )
+
+
+    for flag in flags:
+        try:
+            send_plagiarism_alert(
+                doc_a=flag["doc_a"],
+                doc_b=flag["doc_b"],
+                similarity=float(flag["similarity"]),
+            )
+        except Exception:
+            pass
 
         # Network Graph Node Click Filtering setup
         selected_document_id = st.session_state.get("selected_document_id")
@@ -2022,6 +2117,7 @@ if not st.session_state.authenticated:
             "Export flagged plagiarism incidents for LMS review or "
             "human-readable offline analysis."
         )
+
 
         raw_incidents = get_all_incidents_above_threshold_for_export(
             threshold=threshold
