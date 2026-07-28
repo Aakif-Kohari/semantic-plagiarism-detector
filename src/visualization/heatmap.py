@@ -131,9 +131,58 @@ def validate_similarity_matrix(df: pd.DataFrame) -> pd.DataFrame:
         clean_df.fillna(0.0, inplace=True)
 
     clean_df = clean_df.clip(lower=0.0, upper=1.0)
-    np.fill_diagonal(clean_df.values, 1.0)
+    arr = clean_df.values.copy()
+    np.fill_diagonal(arr, 1.0)
+    clean_df = pd.DataFrame(arr, index=clean_df.index, columns=clean_df.columns)
 
     return clean_df
+
+
+def filter_heatmap_by_class_tag(
+    similarity_df: pd.DataFrame,
+    class_tag: Optional[str] = None,
+    doc_class_map: Optional[dict] = None,
+) -> pd.DataFrame:
+    """
+    Filter heatmap matrix rows and columns by matching document class section tags.
+
+    Args:
+        similarity_df (pd.DataFrame): Similarity matrix dataframe.
+        class_tag (str, optional): Class section tag to filter by (e.g., "Class A").
+            If None, empty, or "All Classes", returns the original dataframe.
+        doc_class_map (dict, optional): Mapping of filename -> class_section tag.
+            If None, attempts to load document metadata from corpus database.
+
+    Returns:
+        pd.DataFrame: Sub-matrix containing only rows and columns matching the class tag.
+    """
+    if similarity_df.empty or not class_tag or class_tag == "All Classes":
+        return similarity_df
+
+    if doc_class_map is None:
+        try:
+            from src.db.corpus_db import get_all_documents
+            all_docs = get_all_documents(include_deleted=True)
+            doc_class_map = {}
+            for d in all_docs:
+                fname = d.get("filename") if isinstance(d, dict) else getattr(d, "filename", None)
+                csec = d.get("class_section") if isinstance(d, dict) else getattr(d, "class_section", None)
+                if fname:
+                    doc_class_map[fname] = csec
+        except Exception as e:
+            logger.warning(f"Could not load document class map from database: {e}")
+            doc_class_map = {}
+
+    matching_cols = [
+        col for col in similarity_df.columns
+        if doc_class_map.get(str(col)) == class_tag
+    ]
+
+    if not matching_cols:
+        logger.info(f"No document cells match class tag '{class_tag}'.")
+        return pd.DataFrame()
+
+    return similarity_df.loc[matching_cols, matching_cols]
 
 
 def _get_theme_color(theme_colors: Optional[dict], key: str, fallback: str) -> str:
@@ -165,10 +214,17 @@ def plot_similarity_heatmap(
     theme_colors: Optional[dict] = None,
     colormap_name: str = DEFAULT_UI_COLORMAP,
     mask_threshold: Optional[float] = None,
+    class_tag: Optional[str] = None,
+    doc_class_map: Optional[dict] = None,
 ) -> Figure:
     """
     High-resolution Matplotlib heatmap optimized for static PNG export.
     """
+    if class_tag and class_tag != "All Classes":
+        similarity_df = filter_heatmap_by_class_tag(
+            similarity_df, class_tag=class_tag, doc_class_map=doc_class_map
+        )
+
     # Sanitize title input to prevent formatting injection (Issue #704)
     try:
         safe_title = TitleSanitizer.sanitize(title)
@@ -302,11 +358,18 @@ def plot_similarity_heatmap_plotly(
     colormap_name: str = DEFAULT_UI_COLORMAP,
     annotate: bool = True,
     mask_threshold: Optional[float] = None,
+    class_tag: Optional[str] = None,
+    doc_class_map: Optional[dict] = None,
 ):
     """
     Interactive Plotly heatmap featuring dynamic hover values and custom threshold bounds.
     """
     import plotly.graph_objects as go
+
+    if class_tag and class_tag != "All Classes":
+        similarity_df = filter_heatmap_by_class_tag(
+            similarity_df, class_tag=class_tag, doc_class_map=doc_class_map
+        )
 
     try:
         safe_title = TitleSanitizer.sanitize(title)
@@ -582,6 +645,29 @@ def render_heatmap_ui(
         horizontal=True,
         key="heatmap_zoom_mode",
     )
+
+    # Class Tag Filter selector
+    unique_classes = ["All Classes"]
+    try:
+        from src.db.corpus_db import get_unique_class_sections
+        unique_classes.extend(get_unique_class_sections())
+    except Exception:
+        pass
+
+    selected_class_tag = st.selectbox(
+        "Filter by Class Tag",
+        unique_classes,
+        index=0,
+        key="heatmap_class_tag_filter",
+        help="Filter heatmap rows and columns to documents matching the selected class tag.",
+    )
+
+    if selected_class_tag and selected_class_tag != "All Classes":
+        clean_df = filter_heatmap_by_class_tag(clean_df, class_tag=selected_class_tag)
+
+    if clean_df.empty:
+        st.info(f"No document pairs found matching class tag '{selected_class_tag}'.")
+        return
 
     # Colormap selector
     default_index = (
