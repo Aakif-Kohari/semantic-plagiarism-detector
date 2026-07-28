@@ -21,7 +21,7 @@ except ImportError:
         from fuzzywuzzy import fuzz  # type: ignore[import-untyped,reportMissingImports]
     except ImportError:
         fuzz = None
-FUZZY_THRESHOLD = 80
+FUZZY_THRESHOLD = 75
 
 _SORT_KEYS = {
     "warn_sort_similarity": "similarity",
@@ -148,7 +148,7 @@ def paginate_warnings(
     page: int = 1,
     page_size: int = 10,
 ) -> WarningPage:
-    safe_page_size = max(1, int(page_size))
+    safe_page_size = min(max(1, int(page_size)), 100)
     total_items = len(warnings)
     total_pages = max(1, math.ceil(total_items / safe_page_size))
     safe_page = min(max(1, int(page)), total_pages)
