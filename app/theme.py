@@ -127,6 +127,32 @@ PLOTLY_CMAP_MAPPING: dict[str, str] = {
 DEFAULT_UI_COLORMAP: str = "Viridis"
 
 
+def apply_matplotlib_theme(theme_colors: dict | None = None) -> None:
+    """
+    Applies active theme colors and default styling rules to Matplotlib rcParams.
+
+    Args:
+        theme_colors: Optional dictionary containing theme colors. If None, uses get_colors().
+    """
+    import matplotlib as mpl
+
+    colors = sanitize_theme_colors(theme_colors if theme_colors is not None else get_colors())
+
+    mpl.rcParams.update({
+        "figure.facecolor": colors.get("background", "#FFFFFF"),
+        "axes.facecolor": colors.get("surface", "#F8FAFC"),
+        "axes.edgecolor": colors.get("border", "#E2E8F0"),
+        "axes.labelcolor": colors.get("ink", "#0F172A"),
+        "xtick.color": colors.get("ink", "#0F172A"),
+        "ytick.color": colors.get("ink", "#0F172A"),
+        "text.color": colors.get("ink", "#0F172A"),
+        "grid.color": colors.get("border", "#E2E8F0"),
+        "figure.edgecolor": colors.get("border", "#E2E8F0"),
+        "savefig.facecolor": colors.get("background", "#FFFFFF"),
+        "savefig.edgecolor": colors.get("background", "#FFFFFF"),
+    })
+
+
 def initialize_theme() -> None:
     """Initialize the active theme for the current session."""
     try:
