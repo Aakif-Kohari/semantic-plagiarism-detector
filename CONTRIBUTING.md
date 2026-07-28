@@ -54,11 +54,32 @@ git checkout -b feature/your-feature-name
 
 ```bash
 pip install -r requirements.txt
+pip install pytest-cov
 ```
 
 ## 5. Run the project
 
 Ensure the project builds and runs correctly before making any changes.
+
+### 💡 Testing with Pre-populated Seed Data
+
+Instead of manually registering admin accounts and uploading test documents to verify dashboard visual styles or logic behavior, you can load pre-populated seed data:
+
+```bash
+make load-seed   # Or: python scripts/manage_seed.py load
+```
+This loads pre-configured accounts:
+* **Admin**: `admin` / `admin123`
+* **Teacher**: `teacher` / `teacher123`
+
+
+### Running Tests and Coverage
+
+To run tests with coverage reporting:
+```bash
+pytest --cov=src --cov-report=term-missing
+```
+The test suite enforces an 80% minimum coverage threshold.
 
 ---
 

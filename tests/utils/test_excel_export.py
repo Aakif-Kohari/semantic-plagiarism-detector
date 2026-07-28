@@ -5,8 +5,10 @@ Unit tests for styled Excel export utility.
 """
 
 import io
+
 import pandas as pd
 from openpyxl import load_workbook
+
 from src.utils.excel_export import export_similarity_matrix_to_excel
 
 
