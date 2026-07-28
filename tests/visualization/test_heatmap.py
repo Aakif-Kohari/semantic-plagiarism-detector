@@ -78,3 +78,36 @@ def test_plot_similarity_heatmap_plotly_no_annotation(single_doc_df):
     # In Plotly, annotations are stored in layout.annotations
     assert len(fig.layout.annotations) == 0
 
+
+def test_plot_similarity_heatmap_with_mask_threshold():
+    """Heatmap should mask cells below the mask_threshold."""
+    df = pd.DataFrame(
+        [[1.0, 0.4], [0.4, 1.0]],
+        columns=["doc1", "doc2"],
+        index=["doc1", "doc2"]
+    )
+    fig = plot_similarity_heatmap(df, title="Masked Heatmap", mask_threshold=0.5)
+    assert hasattr(fig, "axes")
+    main_ax = next(ax for ax in fig.axes if ax.get_title() == "Masked Heatmap")
+    texts = [t.get_text() for t in main_ax.texts if t.get_text()]
+    assert "1.00" in texts
+    assert "0.40" not in texts
+
+
+def test_plot_similarity_heatmap_plotly_with_mask_threshold():
+    """Plotly heatmap should mask cells below the mask_threshold in z_matrix."""
+    df = pd.DataFrame(
+        [[1.0, 0.4], [0.4, 1.0]],
+        columns=["doc1", "doc2"],
+        index=["doc1", "doc2"]
+    )
+    fig = plot_similarity_heatmap_plotly(df, title="Masked Plotly", mask_threshold=0.5)
+    assert hasattr(fig, "layout")
+    heatmap = next(trace for trace in fig.data if trace.type == "heatmap")
+    z_values = heatmap.z
+    assert z_values[0][1] is None
+    assert z_values[1][0] is None
+    assert z_values[0][0] == 1.0
+    assert z_values[1][1] == 1.0
+
+

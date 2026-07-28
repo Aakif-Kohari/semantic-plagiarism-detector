@@ -164,6 +164,7 @@ def plot_similarity_heatmap(
     dpi: int = 150,
     theme_colors: Optional[dict] = None,
     colormap_name: str = DEFAULT_UI_COLORMAP,
+    mask_threshold: Optional[float] = None,
 ) -> Figure:
     """
     High-resolution Matplotlib heatmap optimized for static PNG export.
@@ -195,6 +196,10 @@ def plot_similarity_heatmap(
         height = max(5.0, n * cell_size + 1.5)
         figsize = (width, height)
 
+    mask = None
+    if mask_threshold is not None:
+        mask = similarity_df < mask_threshold
+
     with matplotlib_figure(figsize=figsize, dpi=dpi) as (fig, ax):
         sns.heatmap(
             clean_df,
@@ -207,6 +212,7 @@ def plot_similarity_heatmap(
             linewidths=0.6,
             linecolor="#cccccc",
             square=True,
+            mask=mask,
             cbar_kws={"label": "Cosine Similarity", "shrink": 0.8, "pad": 0.02},
             annot_kws={"size": max(7, 14 - n), "weight": "bold"},
         )
@@ -295,6 +301,7 @@ def plot_similarity_heatmap_plotly(
     theme_colors: Optional[dict] = None,
     colormap_name: str = DEFAULT_UI_COLORMAP,
     annotate: bool = True,
+    mask_threshold: Optional[float] = None,
 ):
     """
     Interactive Plotly heatmap featuring dynamic hover values and custom threshold bounds.
@@ -322,6 +329,14 @@ def plot_similarity_heatmap_plotly(
 
     names = [TitleSanitizer.sanitize(str(col)) for col in clean_df.columns]
     z_matrix = clean_df.values.tolist()
+    if mask_threshold is not None:
+        z_matrix = [
+            [
+                val if val >= mask_threshold else None
+                for val in row
+            ]
+            for row in clean_df.values.tolist()
+        ]
     n = len(names)
 
     hover_text = [
@@ -359,6 +374,8 @@ def plot_similarity_heatmap_plotly(
         for i in range(n):
             for j in range(n):
                 val = clean_df.values[i, j]
+                if mask_threshold is not None and val < mask_threshold:
+                    continue
                 font_color = "black" if (0.3 < val < 0.8 and cmap not in ["Viridis", "Plasma"]) else "white"
 
                 if cmap == "YlOrRd" and val < 0.6:
@@ -382,6 +399,8 @@ def plot_similarity_heatmap_plotly(
     for i in range(n):
         for j in range(n):
             if i != j and clean_df.values[i, j] >= threshold:
+                if mask_threshold is not None and clean_df.values[i, j] < mask_threshold:
+                    continue
                 shapes.append(
                     dict(
                         type="rect",
