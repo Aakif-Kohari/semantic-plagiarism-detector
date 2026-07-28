@@ -2131,22 +2131,23 @@ if not st.session_state.authenticated:
                         use_container_width=True,
                     )
 
-                    buf = _io.BytesIO()
-                    heatmap_fig.savefig(
-                        buf,
-                        format="png",
-                        dpi=150,
-                        bbox_inches="tight",
-                    )
-                    buf.seek(0)
+            if heatmap_fig is not None:
+                buf = _io.BytesIO()
+                heatmap_fig.savefig(
+                    buf,
+                    format="png",
+                    dpi=150,
+                    bbox_inches="tight",
+                )
+                buf.seek(0)
 
-                    st.download_button(
-                        "⬇️ Download Heatmap PNG",
-                        buf,
-                        "heatmap.png",
-                        "image/png",
-                        key="download_lazy_heatmap_png",
-                    )
+                st.download_button(
+                    "⬇️ Download Heatmap PNG",
+                    buf,
+                    "heatmap.png",
+                    "image/png",
+                    key="download_lazy_heatmap_png",
+                )
 
             with st.expander(
                 "🕸️ Interactive Plagiarism Network",
@@ -2704,6 +2705,16 @@ if not st.session_state.authenticated:
         )
         if selected_theme != current_theme:
             set_theme(selected_theme)
+            st.rerun()
+
+        privacy_mode = st.toggle(
+            "Privacy Mode (Blur student names)",
+            value=st.session_state.get("privacy_mode", False),
+            key="privacy_mode_toggle",
+            help="Apply CSS filter: blur(4px) to student name labels for safe screenshots.",
+        )
+        if privacy_mode != st.session_state.get("privacy_mode", False):
+            st.session_state.privacy_mode = privacy_mode
             st.rerun()
 
         if user_role == "admin":
