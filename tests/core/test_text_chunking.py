@@ -4,7 +4,7 @@ tests/core/test_text_chunking.py
 Unit tests for customizable chunk size and overlap parameters.
 """
 
-from src.core.text_chunking import chunk_text, chunk_documents
+from src.core.text_chunking import chunk_documents, chunk_text
 
 
 def test_chunk_text_custom_parameters():
