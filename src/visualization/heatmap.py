@@ -294,6 +294,7 @@ def plot_similarity_heatmap_plotly(
     threshold: float = PLAGIARISM_THRESHOLD,
     theme_colors: Optional[dict] = None,
     colormap_name: str = DEFAULT_UI_COLORMAP,
+    annotate: bool = True,
 ):
     """
     Interactive Plotly heatmap featuring dynamic hover values and custom threshold bounds.
@@ -354,27 +355,28 @@ def plot_similarity_heatmap_plotly(
     )
 
     annotations = []
-    for i in range(n):
-        for j in range(n):
-            val = clean_df.values[i, j]
-            font_color = "black" if (0.3 < val < 0.8 and cmap not in ["Viridis", "Plasma"]) else "white"
-            
-            if cmap == "YlOrRd" and val < 0.6:
-                font_color = "black"
-                
-            annotations.append(
-                dict(
-                    x=names[j],
-                    y=names[i],
-                    text=f"{val:.2f}",
-                    showarrow=False,
-                    font=dict(
-                        size=max(9, 14 - n),
-                        color=font_color,
-                        family="Arial, sans-serif",
-                    ),
+    if annotate:
+        for i in range(n):
+            for j in range(n):
+                val = clean_df.values[i, j]
+                font_color = "black" if (0.3 < val < 0.8 and cmap not in ["Viridis", "Plasma"]) else "white"
+
+                if cmap == "YlOrRd" and val < 0.6:
+                    font_color = "black"
+
+                annotations.append(
+                    dict(
+                        x=names[j],
+                        y=names[i],
+                        text=f"{val:.2f}",
+                        showarrow=False,
+                        font=dict(
+                            size=max(9, 14 - n),
+                            color=font_color,
+                            family="Arial, sans-serif",
+                        ),
+                    )
                 )
-            )
 
     shapes = []
     for i in range(n):
