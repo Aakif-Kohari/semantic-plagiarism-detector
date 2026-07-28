@@ -871,21 +871,38 @@ def extract_text_from_docx(file: PDFInput) -> str:
 
 
 def extract_text_from_txt(file: PDFInput) -> str:
-    """Extract text from a TXT file with UTF-8 fallback."""
+    """Extract text from a TXT file with encoding fallback."""
     text = ""
     try:
+        data = b""
         if isinstance(file, str):
-            with open(file, "r", encoding="utf-8", errors="ignore") as handle:
-                text = handle.read()
+            with open(file, "rb") as handle:
+                data = handle.read()
         elif isinstance(file, bytes):
-            text = file.decode("utf-8", errors="ignore")
+            data = file
         else:
-            data = file.read()
-            text = (
-                data.decode("utf-8", errors="ignore")
-                if isinstance(data, bytes)
-                else data
-            )
+            read_data = file.read()
+            if isinstance(read_data, bytes):
+                data = read_data
+            else:
+                text = read_data
+
+        if data:
+            # Construct candidate encodings. Prioritize UTF-16 only if we detect a BOM.
+            encodings = ["utf-8"]
+            if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+                encodings.insert(0, "utf-16")
+            else:
+                encodings.extend(["latin-1", "utf-16"])
+
+            for encoding in encodings:
+                try:
+                    text = data.decode(encoding)
+                    break
+                except UnicodeDecodeError:
+                    continue
+            else:
+                text = data.decode("utf-8", errors="ignore")
     except (OSError, UnicodeDecodeError, AttributeError, TypeError) as exc:
         print(f"[document_parser] Error reading TXT: {exc}")
     except Exception as exc:
