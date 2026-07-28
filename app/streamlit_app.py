@@ -2149,6 +2149,13 @@ if not st.session_state.authenticated:
                     ),
                 )
 
+                show_cell_percentages = st.checkbox(
+                    "Show Cell Percentages",
+                    value=True,
+                    key="heatmap_show_percentages",
+                    help="Render similarity text labels inside heatmap cells.",
+                )
+
                 heatmap_fig = build_visualization_lazily(
                     load_heatmap,
                     lambda: plot_similarity_heatmap(
@@ -2156,7 +2163,8 @@ if not st.session_state.authenticated:
                         title="Document Semantic Similarity",
                         threshold=threshold,
                         theme_colors=get_colors(),
-                        cmap=heatmap_cmap,
+                        colormap_name=heatmap_cmap,
+                        annotate=show_cell_percentages,
                     ),
                 )
 

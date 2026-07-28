@@ -60,3 +60,21 @@ def test_plot_similarity_heatmap_plotly_single(single_doc_df):
     heatmap = next(trace for trace in fig.data if trace.type == "heatmap")
     z_values = [list(row) for row in heatmap.z]
     assert z_values == [[1.0]]
+
+
+def test_plot_similarity_heatmap_no_annotation(single_doc_df):
+    """Heatmap should not overlay numeric scores when annotate=False."""
+    fig = plot_similarity_heatmap(single_doc_df, title="No Annotation Heatmap", annotate=False)
+    assert hasattr(fig, "axes")
+    main_ax = next(ax for ax in fig.axes if ax.get_title() == "No Annotation Heatmap")
+    # Verify that the text annotations are empty
+    assert len(main_ax.texts) == 0
+
+
+def test_plot_similarity_heatmap_plotly_no_annotation(single_doc_df):
+    """Plotly heatmap should not contain annotations when annotate=False."""
+    fig = plot_similarity_heatmap_plotly(single_doc_df, title="No Annotation Plotly Heatmap", annotate=False)
+    assert hasattr(fig, "layout")
+    # In Plotly, annotations are stored in layout.annotations
+    assert len(fig.layout.annotations) == 0
+
