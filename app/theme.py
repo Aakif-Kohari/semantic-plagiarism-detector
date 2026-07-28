@@ -1,3 +1,63 @@
+"""
+app/theme.py
+------------
+Theme management and CSS utility functions for the Semantic Plagiarism Detector.
+
+Provides:
+- Light and Dark theme color definitions
+- CSS class name constants for consistent styling
+- HTML generation helpers for UI components
+- Dynamic theme injection for Streamlit
+"""
+
+from app.css_constants import (
+    HERO_KICKER,
+    BADGE,
+    META_CHIP,
+    META_CHIP_CODE,
+    EMPTY_STATE,
+    EMPTY_ICON,
+    EMPTY_TITLE,
+    EMPTY_DESC,
+    SIDEBAR_USER_BADGE,
+    AVATAR,
+    PIPELINE_STEPS,
+    PIPELINE_STEP,
+    PIPELINE_STEP_ACTIVE,
+    PIPELINE_STEP_DONE,
+    PIPELINE_ARROW,
+    MONO_TEXT,
+    SIM_PILL,
+    LOGIN_CONTAINER,
+    LOGIN_HEADER,
+    LOGIN_ICON,
+    LOGIN_TITLE,
+    LOGIN_SUBTITLE,
+    LOGIN_ACCENT_BAR,
+    APP_FOOTER,
+    LEGEND_CONTAINER,
+    LEGEND_ITEM,
+    LEGEND_COLOR,
+    ST_TEXT_INPUT,
+    ST_TEXT_AREA,
+    ST_NUMBER_INPUT,
+    ST_BUTTON,
+    ST_DOWNLOAD_BUTTON,
+    ST_FORM_SUBMIT_BUTTON,
+    ST_EXPANDER,
+    ST_FORM,
+    ST_DATAFRAME,
+    ST_TABLE,
+    ST_FILE_UPLOADER_DROPZONE,
+    ST_CAPTION_CONTAINER,
+    ST_CAPTION,
+    ST_TABS,
+    ST_TABS_BUTTON,
+    ST_TABS_BUTTON_ACTIVE,
+    WARNING_CARD_HIGH,
+    WARNING_CARD_MEDIUM,
+    WARNING_CARD_LOW,
+)
 import streamlit as st
 
 THEMES = {
@@ -622,7 +682,7 @@ def badge_html(tier: str, label: str = None) -> str:
         default_label = "🟢 Low"
 
     display_label = label if label is not None else default_label
-    return f'<span class="badge" style="background-color: {bg_color}; color: {text_color}; border: 1px solid {text_color};">{display_label}</span>'
+    return f'<span class="{BADGE}" style="background-color: {bg_color}; color: {text_color}; border: 1px solid {text_color};">{display_label}</span>'
 
 
 # ── UI helpers ────────────────────────────────────────────────────────────────
@@ -638,7 +698,7 @@ def format_similarity_html(score: float, threshold: float = 0.59) -> str:
     else:
         bg = colors["success"]
     return (
-        f'<span class="sim-pill" style="background:{bg};">'
+        f'<span class="{SIM_PILL}" style="background:{bg};">'
         f"Similarity: {score * 100:.1f}%</span>"
     )
 
@@ -646,10 +706,10 @@ def format_similarity_html(score: float, threshold: float = 0.59) -> str:
 def empty_state_html(icon: str, title: str, description: str) -> str:
     """Return styled empty-state HTML block."""
     return (
-        f'<div class="empty-state">'
-        f'<div class="empty-icon">{icon}</div>'
-        f'<div class="empty-title">{title}</div>'
-        f'<div class="empty-desc">{description}</div>'
+        f'<div class="{EMPTY_STATE}">'
+        f'<div class="{EMPTY_ICON}">{icon}</div>'
+        f'<div class="{EMPTY_TITLE}">{title}</div>'
+        f'<div class="{EMPTY_DESC}">{description}</div>'
         f"</div>"
     )
 
@@ -658,8 +718,8 @@ def sidebar_user_badge_html(username: str, role: str) -> str:
     """Return the sidebar user badge with avatar circle."""
     initial = username[0].upper() if username else "?"
     return (
-        f'<div class="sidebar-user-badge">'
-        f'<div class="avatar">{initial}</div>'
+        f'<div class="{SIDEBAR_USER_BADGE}">'
+        f'<div class="{AVATAR}">{initial}</div>'
         f'<div><strong>{username}</strong><br>'
         f'<span style="font-size:0.7rem;color:var(--muted);">{role.upper()}</span></div>'
         f"</div>"
@@ -678,17 +738,17 @@ def pipeline_progress_html(steps: list[str], active_index: int = -1) -> str:
     parts = []
     for i, step in enumerate(steps):
         if active_index < 0:
-            cls = "pipeline-step"
+            cls = PIPELINE_STEP
         elif i < active_index:
-            cls = "pipeline-step done"
+            cls = PIPELINE_STEP_DONE
         elif i == active_index:
-            cls = "pipeline-step active"
+            cls = PIPELINE_STEP_ACTIVE
         else:
-            cls = "pipeline-step"
+            cls = PIPELINE_STEP
 
         prefix = "✓ " if (active_index >= 0 and i < active_index) else ""
         parts.append(f'<span class="{cls}">{prefix}{step}</span>')
         if i < len(steps) - 1:
-            parts.append('<span class="pipeline-arrow">→</span>')
+            parts.append(f'<span class="{PIPELINE_ARROW}">→</span>')
 
-    return f'<div class="pipeline-steps">{"".join(parts)}</div>'
+    return f'<div class="{PIPELINE_STEPS}">{"".join(parts)}</div>'
