@@ -116,19 +116,15 @@ def build_network_data(
                 G.add_edge(doc_names[i], doc_names[j])
                 edge_similarities[(doc_names[i], doc_names[j])] = score
 
-    # Filter out nodes below the minimum degree threshold
-    if min_degree > 0:
-        low_degree_nodes = [
-            node for node, deg in dict(G.degree()).items() if deg < min_degree
-        ]
-        G.remove_nodes_from(low_degree_nodes)
-
     # Compute layout coordinates
-    # Seed layout for reproducibility
+    # Dynamic iteration depth for responsive performance on large node counts
+    num_nodes = len(G.nodes())
+    layout_iterations = 10 if num_nodes >= 100 else 25
     pos = nx.spring_layout(
         G,
         seed=42,
-        k=1.0 / np.sqrt(max(1, len(G.nodes()))),
+        k=1.0 / np.sqrt(max(1, num_nodes)),
+        iterations=layout_iterations,
     )
 
     # If document_tags is None, attempt to fetch from DB if available
@@ -162,15 +158,11 @@ def build_network_data(
     # ── Draw Edges ─────────────────────────────────────────────────────────────
 
     shapes = []
-
-    # For hover info, add a transparent trace over each edge
-    edge_trace_x = []
-    edge_trace_y = []
+    edge_hover_x = []
+    edge_hover_y = []
     edge_hover_texts = []
 
-    for edge in G.edges():
-        doc_a, doc_b = edge
-
+    for doc_a, doc_b in G.edges():
         x0, y0 = pos[doc_a]
         x1, y1 = pos[doc_b]
 
@@ -206,14 +198,6 @@ def build_network_data(
                 else "#21c55d"
             )
 
-
-        # Highlight edges touching the clicked node; dim the rest.
-        is_incident_edge = selected_node in (doc_a, doc_b)
-        if selected_node and not is_incident_edge:
-            color = "rgba(150,150,150,0.25)"
-        elif is_incident_edge:
-            line_width = max(line_width, 4.0)
-
         shapes.append(
             dict(
                 type="line",
@@ -229,30 +213,12 @@ def build_network_data(
             )
         )
 
-        # Add to hover trace
-        edge_trace_x.extend([x0, x1, None])
-
-        edge_trace_y.extend([y0, y1, None])
-
+        # Midpoint coordinate for hover info
+        edge_hover_x.append((x0 + x1) / 2.0)
+        edge_hover_y.append((y0 + y1) / 2.0)
         edge_hover_texts.append(
             f"<b>Match:</b> {doc_a} ↔ {doc_b}<br>" f"<b>Similarity:</b> {score:.1%}"
         )
-
-    # ── Edge Hover Trace ──────────────────────────────────────────────────────
-
-    edge_hover_x = []
-    edge_hover_y = []
-
-    for edge in G.edges():
-        doc_a, doc_b = edge
-
-        x0, y0 = pos[doc_a]
-        x1, y1 = pos[doc_b]
-
-        # Midpoint coordinate
-        edge_hover_x.append((x0 + x1) / 2.0)
-
-        edge_hover_y.append((y0 + y1) / 2.0)
 
     edge_hover_trace = go.Scatter(
         x=edge_hover_x,

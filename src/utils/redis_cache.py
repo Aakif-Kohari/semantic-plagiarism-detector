@@ -32,9 +32,15 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-RedisError = getattr(redis, "RedisError", Exception)
-RedisConnectionError = getattr(redis, "ConnectionError", ConnectionError)
-RedisTimeoutError = getattr(redis, "TimeoutError", TimeoutError)
+_RedisErr = getattr(redis, "RedisError", Exception)
+RedisError = _RedisErr if isinstance(_RedisErr, type) and issubclass(_RedisErr, BaseException) else Exception
+
+_ConnErr = getattr(redis, "ConnectionError", ConnectionError)
+RedisConnectionError = _ConnErr if isinstance(_ConnErr, type) and issubclass(_ConnErr, BaseException) else ConnectionError
+
+_TimeoutErr = getattr(redis, "TimeoutError", TimeoutError)
+RedisTimeoutError = _TimeoutErr if isinstance(_TimeoutErr, type) and issubclass(_TimeoutErr, BaseException) else TimeoutError
+
 
 
 # Redis connection configuration
@@ -43,6 +49,7 @@ REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 REDIS_DB = int(os.getenv("REDIS_DB", "0"))
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", None)
 REDIS_URL = os.getenv("REDIS_URL", f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}")
+REDIS_TIMEOUT_SECONDS = float(os.getenv("REDIS_TIMEOUT_SECONDS", "2.0"))
 
 # TTL settings (in seconds)
 SESSION_TTL = 15 * 60  # 15 minutes for session state
@@ -244,7 +251,7 @@ class RedisCache:
                     REDIS_URL,
                     password=REDIS_PASSWORD,
                     decode_responses=False,
-                    socket_connect_timeout=5,
+                    socket_connect_timeout=REDIS_TIMEOUT_SECONDS,
                 )
             else:
                 self._client = redis.Redis(
@@ -253,7 +260,7 @@ class RedisCache:
                     db=REDIS_DB,
                     password=REDIS_PASSWORD,
                     decode_responses=False,
-                    socket_connect_timeout=5,
+                    socket_connect_timeout=REDIS_TIMEOUT_SECONDS,
                 )
             self._client.ping()
             print(f"[RedisCache] Connected to Redis at {REDIS_HOST}:{REDIS_PORT}")
@@ -395,13 +402,25 @@ class RedisCache:
         if self.is_available():
             try:
                 keys = self._client.keys(pattern)
+                if keys and not isinstance(keys, (list, set, tuple)):
+                    keys = None
                 if keys:
-                    redis_count = self._client.delete(*keys)
-            except Exception as e:
-                logger.error(f"[RedisCache] Error clearing pattern {pattern}: {e}")
+                    res = self._client.delete(*keys)
+                    redis_count = int(res) if isinstance(res, (int, float)) else 0
+            except (
+                RedisError,
+                RedisConnectionError,
+                RedisTimeoutError,
+                ConnectionRefusedError,
+                ConnectionResetError,
+                Exception,
+            ) as e:
+                print(f"[RedisCache] Error clearing pattern {pattern}: {e}. Falling back to in-memory.")
+                logger.error(f"[RedisCache] Error clearing pattern {pattern}: {e}. Falling back to in-memory.")
 
         fallback_count = self._fallback_clear_pattern(pattern)
-        return redis_count + fallback_count
+        return (int(redis_count) if isinstance(redis_count, (int, float)) else 0) + fallback_count
+
 
     def close(self) -> None:
         with self._lock:
