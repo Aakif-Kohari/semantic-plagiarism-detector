@@ -77,6 +77,8 @@ def build_network_data(
     min_degree: int = 0,
     theme_colors: Optional[dict] = None,
     highlighted_doc: Optional[str] = None,
+    document_tags: Optional[dict] = None,
+    doc_metadata: Optional[dict] = None,
 ) -> dict:
     """
     Processes similarity matrix data, constructs NetworkX graph layout, and formats node and edge traces.
@@ -267,44 +269,9 @@ def build_network_data(
         deg = G.degree(node)
         base_size = 20 + deg * 6
 
-        if highlighted_doc is not None and node == highlighted_doc:
-            node_size.append(base_size + 15)
-            node_color.append("#FFFF00")  # Bright yellow for highlighted node
-        else:
-            node_size.append(base_size)
-            # Color based on degree
-            if deg == 0:
-                node_color.append(
-                    theme_colors.get(
-                        "success",
-                        "#2e7d32",
-                    )
-                    if theme_colors
-                    else "#2e7d32"
-                )
-
-            elif deg == 1:
-                node_color.append(
-                    theme_colors.get(
-                        "warning",
-                        "#f9a825",
-                    )
-                    if theme_colors
-                    else "#f9a825"
-                )
-
-            else:
-                node_color.append(
-                    theme_colors.get(
-                        "danger",
-                        "#c62828",
-                    )
-                    if theme_colors
-                    else "#c62828"
-                )
-
         # Calculate top match from similarity matrix
         top_match_str = "N/A"
+        max_score = 0.0
         if node in similarity_df.index and node in similarity_df.columns:
             sim_series = similarity_df.loc[node].drop(labels=[node], errors="ignore")
             if not sim_series.empty:
@@ -313,12 +280,37 @@ def build_network_data(
                     top_doc = sim_series.idxmax()
                     top_match_str = f"{top_doc} ({max_score:.1%})"
 
+        if highlighted_doc is not None and node == highlighted_doc:
+            node_size.append(base_size + 15)
+            node_color.append("#FFFF00")  # Bright yellow for highlighted node
+        else:
+            node_size.append(base_size)
+            # Color based on maximum similarity score (plagiarism severity tier) instead of degree
+            if max_score >= 0.90:
+                node_color.append(
+                    theme_colors.get("danger", "#c62828")
+                    if theme_colors
+                    else "#c62828"
+                )
+            elif max_score >= 0.75:
+                node_color.append(
+                    theme_colors.get("warning", "#f9a825")
+                    if theme_colors
+                    else "#f9a825"
+                )
+            else:
+                node_color.append(
+                    theme_colors.get("success", "#2e7d32")
+                    if theme_colors
+                    else "#2e7d32"
+                )
+
         meta = doc_metadata.get(node, {}) if doc_metadata and node in doc_metadata else {}
         word_count = meta.get("word_count", "N/A")
         upload_date = meta.get("upload_date", meta.get("created_at", "N/A"))
 
         node_hover.append(
-            f"<b>📄 Document:</b> {node}<br>"
+            f"<b>📄 Document Title:</b> {node}<br>"
             f"<b>🚨 Flagged connections:</b> {deg} / {max(1, len(doc_names) - 1)}<br>"
             f"<b>📝 Word Count:</b> {word_count}<br>"
             f"<b>📅 Upload Date:</b> {upload_date}<br>"
