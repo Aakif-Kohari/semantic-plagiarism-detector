@@ -395,7 +395,7 @@ def plot_similarity_heatmap_plotly(
     bg_color = _get_theme_color(theme_colors, "background", "rgba(0,0,0,0)")
     ink_color = _get_theme_color(theme_colors, "ink", "#0F172A")
 
-        fig.update_layout(
+    fig.update_layout(
         title=dict(
             text=safe_title,
             font=dict(
