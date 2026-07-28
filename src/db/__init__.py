@@ -11,9 +11,7 @@ from .corpus_db import (add_chunks, add_document, clear_all_data,
                         get_deleted_documents, soft_delete_document,
                         restore_document, permanently_delete_document,
                         empty_trash)
-from .incidents import (CSV_COLUMNS, build_incident_id, export_current_flags_csv,
-                       get_all_incidents, incidents_to_csv,
-                       sync_flagged_incidents, update_review_status)
+from .schemas import User, Document, MatchResult
 
 __all__ = [
     "init_db",
@@ -49,13 +47,9 @@ __all__ = [
     "restore_document",
     "permanently_delete_document",
     "empty_trash",
-    "CSV_COLUMNS",
-    "build_incident_id",
-    "export_current_flags_csv",
-    "get_all_incidents",
-    "incidents_to_csv",
-    "sync_flagged_incidents",
-    "update_review_status",
+    "User",
+    "Document",
+    "MatchResult",
 ]
 
 
