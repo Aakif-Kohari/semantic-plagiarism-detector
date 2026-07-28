@@ -1,5 +1,6 @@
 import io
 import shutil
+import time
 from unittest.mock import MagicMock, patch
 
 import docx
@@ -36,6 +37,24 @@ def _make_docx_bytes(text: str) -> bytes:
     """Create a minimal in-memory DOCX containing the given text."""
     doc = docx.Document()
     doc.add_paragraph(text)
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+def _make_large_docx_bytes(num_pages: int = 100) -> bytes:
+    """Create a multi-page in-memory DOCX containing realistic paragraphs."""
+    doc = docx.Document()
+    sample_paragraph = (
+        "Semantic Plagiarism Detection System performance benchmark paragraph. "
+        "This paragraph simulates student submission content across multiple pages "
+        "to ensure high-throughput processing and memory efficiency during analysis."
+    )
+    for i in range(num_pages):
+        doc.add_heading(f"Chapter {i + 1}: Section Overview", level=2)
+        doc.add_paragraph(f"Page {i + 1} content. {sample_paragraph}")
+        doc.add_page_break()
+
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue()
@@ -91,6 +110,19 @@ def test_extract_from_docx_bytes():
     docx_bytes = _make_docx_bytes("Hello DOCX")
     result = extract_text_from_docx(docx_bytes)
     assert result == "Hello DOCX"
+
+
+def test_docx_large_document_extraction_benchmark():
+    """Benchmark test asserting 100-page DOCX extraction completes under 2.0 seconds (#579)."""
+    large_docx_bytes = _make_large_docx_bytes(num_pages=100)
+
+    start_time = time.perf_counter()
+    extracted_text = extract_text_from_docx(large_docx_bytes)
+    elapsed_time = time.perf_counter() - start_time
+
+    assert len(extracted_text) > 0
+    assert "Chapter 100: Section Overview" in extracted_text
+    assert elapsed_time < 2.0, f"DOCX extraction took {elapsed_time:.3f}s (expected < 2.0s)"
 
 
 def test_extract_from_txt_bytes():
@@ -218,3 +250,4 @@ class TestStripBibliography:
         result = extract_text(docx_bytes, "test.docx")
         assert "Bibliography" not in result
         assert "Body content" in result
+        
