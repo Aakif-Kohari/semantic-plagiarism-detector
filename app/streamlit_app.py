@@ -3297,18 +3297,33 @@ if not st.session_state.authenticated:
                 if not export_flags:
                     st.info("No warnings selected for export. Please select warnings in the Flagged Incidents tab.")
                 else:
-                    zip_bytes = generate_bulk_reports_zip(
-                        export_flags,
-                        chunked_docs=chunked_docs,
-                        embeddings=embeddings,
-                    )
-                    st.download_button(
-                        label=f"⬇️ Download {len(export_flags)} Selected Flagged Pairs (ZIP)",
-                        data=zip_bytes,
-                        file_name="flagged_pairs_reports.zip",
-                        mime="application/zip",
-                        use_container_width=True,
-                    )
+                    # Artifact selection checkboxes
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        include_pdf = st.checkbox("PDF Reports", value=True, key="include_pdf")
+                    with col2:
+                        include_csv = st.checkbox("CSV Summary", value=True, key="include_csv")
+                    with col3:
+                        include_json = st.checkbox("JSON Metadata", value=True, key="include_json")
+
+                    if not (include_pdf or include_csv or include_json):
+                        st.warning("Select at least one artifact to export.")
+                    else:
+                        zip_bytes = generate_bulk_reports_zip(
+                            export_flags,
+                            chunked_docs=chunked_docs,
+                            embeddings=embeddings,
+                            include_pdf=include_pdf,
+                            include_csv=include_csv,
+                            include_json=include_json,
+                        )
+                        st.download_button(
+                            label=f"⬇️ Download {len(export_flags)} Selected Flagged Pairs (ZIP)",
+                            data=zip_bytes,
+                            file_name="flagged_pairs_reports.zip",
+                            mime="application/zip",
+                            use_container_width=True,
+                        )
 
             st.subheader("📈 High Severity Plagiarism Trends (Last 30 Days)")
             trend_data = get_high_severity_trends(days=30)
