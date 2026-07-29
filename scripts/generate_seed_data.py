@@ -318,11 +318,133 @@ def initialize_databases(verbose: bool):
     if verbose:
         logger.info("Initializing Auth DB...")
     init_auth_db()
+
     add_user("teacher", "teacher123", "teacher")
     
     if verbose:
         logger.info("Initializing Corpus DB...")
     init_corpus_db()
+
+    print("Corpus DB initialized.")
+
+    # Document contents
+    text_alice = (
+        "Artificial intelligence (AI) is intelligence demonstrated by machines, in contrast to the natural "
+        "intelligence displayed by humans and other animals. Study of intelligent agents: any device that "
+        "perceives its environment and takes actions that maximize its chance of successfully achieving its goals."
+    )
+    text_bob = (
+        "Artificial intelligence (AI) is intelligence demonstrated by machines, in contrast to the natural "
+        "intelligence displayed by humans and other animals. Study of intelligent agents: any device that "
+        "perceives its environment and takes actions that maximize its chance of successfully achieving its goals. "
+    )
+    text_charlie = (
+        "A blockchain is a decentralized, distributed, and public digital ledger that is used to record transactions "
+        "across many computers so that the record cannot be altered retroactively without the alteration of all "
+        "subsequent blocks."
+    )
+
+    # Document hashes
+    hash_alice = hashlib.sha256(text_alice.encode()).hexdigest()
+    hash_bob = hashlib.sha256(text_bob.encode()).hexdigest()
+    hash_charlie = hashlib.sha256(text_charlie.encode()).hexdigest()
+
+    print("Adding dummy documents...")
+    add_document(
+        filename="Introduction_to_AI.pdf",
+        file_hash=hash_alice,
+        class_section="CS-101",
+        student_name="Alice Smith",
+        assignment_title="Final Essay",
+    )
+    add_document(
+        filename="AI_Concepts_Homework.pdf",
+        file_hash=hash_bob,
+        class_section="CS-101",
+        student_name="Bob Jones",
+        assignment_title="Final Essay",
+    )
+    add_document(
+        filename="Introduction_to_Blockchain.pdf",
+        file_hash=hash_charlie,
+        class_section="CS-101",
+        student_name="Charlie Brown",
+        assignment_title="Final Essay",
+    )
+
+    # Generate mock embeddings (384-dimensional) with exact similarities
+    print("Generating mock embeddings with mathematical similarities...")
+    dim = 384
+    np.random.seed(42)  # For deterministic seed generation
+
+    # Alice vector (random normalized unit vector)
+    va = np.random.randn(dim)
+    va /= np.linalg.norm(va)
+
+    # Bob vector (similarity with Alice = 0.95)
+    noise_b = np.random.randn(dim)
+    noise_b -= np.dot(noise_b, va) * va
+    noise_b /= np.linalg.norm(noise_b)
+    vb = 0.95 * va + np.sqrt(1 - 0.95**2) * noise_b
+    vb /= np.linalg.norm(vb)
+
+    # Charlie vector (similarity with Alice = 0.15)
+    noise_c = np.random.randn(dim)
+    noise_c -= np.dot(noise_c, va) * va
+    noise_c -= np.dot(noise_c, vb) * vb
+    noise_c /= np.linalg.norm(noise_c)
+    vc = 0.15 * va + np.sqrt(1 - 0.15**2) * noise_c
+    vc /= np.linalg.norm(vc)
+
+    # Validate generated cosine similarities before persisting embeddings.
+    # Since the vectors are normalized, their dot product equals cosine similarity.
+    alice_bob_similarity = float(np.dot(va, vb))
+    alice_charlie_similarity = float(np.dot(va, vc))
+
+    expected_alice_bob_similarity = 0.95
+    expected_alice_charlie_similarity = 0.15
+    similarity_tolerance = 1e-6
+
+    if not np.isclose(
+        alice_bob_similarity,
+        expected_alice_bob_similarity,
+        atol=similarity_tolerance,
+        rtol=0.0,
+    ):
+        raise ValueError(
+            "Mock embedding validation failed for Alice/Bob: "
+            f"expected {expected_alice_bob_similarity}, "
+            f"got {alice_bob_similarity:.6f}"
+        )
+
+    if not np.isclose(
+        alice_charlie_similarity,
+        expected_alice_charlie_similarity,
+        atol=similarity_tolerance,
+        rtol=0.0,
+    ):
+        raise ValueError(
+            "Mock embedding validation failed for Alice/Charlie: "
+            f"expected {expected_alice_charlie_similarity}, "
+            f"got {alice_charlie_similarity:.6f}"
+        )
+
+    print(
+        "Validated mock similarities: "
+        f"Alice/Bob={alice_bob_similarity:.6f}, "
+        f"Alice/Charlie={alice_charlie_similarity:.6f}"
+    )
+
+    # Format chunks: (vector_id, filename, chunk_index, chunk_text, embedding)
+    chunks = [
+        (0, "Introduction_to_AI.pdf", 0, text_alice, va),
+        (1, "AI_Concepts_Homework.pdf", 0, text_bob, vb),
+        (2, "Introduction_to_Blockchain.pdf", 0, text_charlie, vc),
+    ]
+
+    print("Inserting chunks...")
+    add_chunks(chunks)
+
 
 
 def main():
