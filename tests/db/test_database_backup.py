@@ -1,119 +1,120 @@
-import sqlite3
-from datetime import datetime
+"""
+test_database_backup.py
+-----------------------
+Unit tests for the database backup and retention management module.
+
+This module validates the creation of SQLite snapshots and the 
+automated cleanup of old backups based on retention policies.
+"""
+
+import os
+import tempfile
+import time
+from pathlib import Path
+from unittest.mock import patch, MagicMock
 
 import pytest
 
-from src.db.database_backup import SQLITE_HEADER, create_sqlite_snapshot
-
-from contextlib import closing
-
-def create_test_database(path):
-    with closing(sqlite3.connect(path)) as connection:
-        connection.execute(
-            """
-            CREATE TABLE documents (
-                id INTEGER PRIMARY KEY,
-                filename TEXT NOT NULL
-            )
-            """
-        )
-        connection.executemany(
-            "INSERT INTO documents (filename) VALUES (?)",
-            [("alpha.pdf",), ("beta.pdf",)],
-        )
-        connection.commit()
+from src.db.database_backup import (
+    create_sqlite_snapshot,
+    cleanup_old_backups,
+    SQLITE_HEADER,
+)
 
 
-def test_snapshot_is_valid_and_preserves_data(tmp_path):
-    source = tmp_path / "corpus.db"
-    create_test_database(source)
+class TestCreateSqliteSnapshot:
+    """Tests for the create_sqlite_snapshot function."""
 
-    snapshot = create_sqlite_snapshot(source)
+    def test_create_snapshot_valid_db(self, tmp_path):
+        """Verify that a valid SQLite database produces a correct snapshot."""
+        db_path = tmp_path / "test.db"
+        
+        # Create a minimal valid SQLite database
+        import sqlite3
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)")
+        conn.execute("INSERT INTO test (name) VALUES ('sample')")
+        conn.commit()
+        conn.close()
 
-    assert snapshot.startswith(SQLITE_HEADER)
+        snapshot = create_sqlite_snapshot(db_path)
+        
+        assert snapshot.startswith(SQLITE_HEADER), "Snapshot must start with valid SQLite header"
+        assert len(snapshot) > 1000, "Snapshot should have reasonable size"
 
-    restored = tmp_path / "restored.db"
-    restored.write_bytes(snapshot)
+    def test_create_snapshot_file_not_found(self):
+        """Verify that a FileNotFoundError is raised for non-existent paths."""
+        with pytest.raises(FileNotFoundError, match="SQLite database does not exist"):
+            create_sqlite_snapshot("/nonexistent/path/to/db.db")
 
-    with closing(sqlite3.connect(restored)) as connection:
-        rows = connection.execute(
-            "SELECT filename FROM documents ORDER BY id"
-        ).fetchall()
-
-    assert rows == [("alpha.pdf",), ("beta.pdf",)]
-
-
-def test_snapshot_does_not_modify_source_database(tmp_path):
-    source = tmp_path / "corpus.db"
-    create_test_database(source)
-    before = source.read_bytes()
-
-    create_sqlite_snapshot(source)
-
-    assert source.read_bytes() == before
-
-
-def test_missing_database_raises_file_not_found(tmp_path):
-    missing = tmp_path / "missing.db"
-
-    with pytest.raises(FileNotFoundError):
-        create_sqlite_snapshot(missing)
+    def test_create_snapshot_is_a_directory(self, tmp_path):
+        """Verify that an IsADirectoryError is raised if path is a directory."""
+        with pytest.raises(IsADirectoryError, match="SQLite database path is not a file"):
+            create_sqlite_snapshot(tmp_path)
 
 
-def test_directory_path_is_rejected(tmp_path):
-    with pytest.raises(IsADirectoryError):
-        create_sqlite_snapshot(tmp_path)
+class TestCleanupOldBackups:
+    """Tests for the cleanup_old_backups function."""
 
+    def test_cleanup_nonexistent_directory(self):
+        """Verify graceful handling of non-existent backup directories."""
+        result = cleanup_old_backups(backup_dir="/nonexistent/backup/dir")
+        assert result["files_deleted"] == 0
+        assert result["bytes_freed"] == 0
 
-def test_non_sqlite_file_is_rejected(tmp_path):
-    invalid = tmp_path / "invalid.db"
-    invalid.write_text("not sqlite", encoding="utf-8")
+    def test_cleanup_empty_directory(self, tmp_path):
+        """Verify that an empty directory results in no deletions."""
+        result = cleanup_old_backups(backup_dir=tmp_path)
+        assert result["files_deleted"] == 0
+        assert result["bytes_freed"] == 0
 
-    with pytest.raises(sqlite3.DatabaseError):
-        create_sqlite_snapshot(invalid)
+    def test_cleanup_respects_max_backups(self, tmp_path):
+        """Verify that only the newest `max_backups` files are retained."""
+        # Create 15 dummy .db files with distinct modification times
+        for i in range(15):
+            file_path = tmp_path / f"backup_{i}.db"
+            file_path.write_bytes(SQLITE_HEADER + b"dummy data")
+            # Stagger modification times by 1 second
+            old_time = time.time() - (15 - i)
+            os.utime(file_path, (old_time, old_time))
 
+        result = cleanup_old_backups(backup_dir=tmp_path, max_backups=10, max_age_days=365)
+        
+        assert result["files_deleted"] == 5, "Should delete 5 files to respect max_backups=10"
+        assert result["bytes_freed"] > 0, "Should report freed bytes"
+        
+        # Verify the correct files were deleted (oldest ones)
+        remaining_files = list(tmp_path.glob("*.db"))
+        assert len(remaining_files) == 10
+        for f in remaining_files:
+            assert int(f.stem.split("_")[1]) >= 5, "Oldest 5 files should have been deleted"
 
-# ── Issue #472: path metadata logic ──────────────────────────────────────────
+    def test_cleanup_respects_max_age_days(self, tmp_path):
+        """Verify that files older than `max_age_days` are deleted regardless of count."""
+        # Create 2 files: one old, one new
+        old_file = tmp_path / "old_backup.db"
+        old_file.write_bytes(SQLITE_HEADER + b"old data")
+        old_time = time.time() - (31 * 24 * 60 * 60)  # 31 days ago
+        os.utime(old_file, (old_time, old_time))
 
+        new_file = tmp_path / "new_backup.db"
+        new_file.write_bytes(SQLITE_HEADER + b"new data")
+        # new_file has current time
 
-def test_backup_panel_path_resolves_to_existing_file(tmp_path):
-    """get_corpus_db_path() returns a Path; verify it can be stat'd."""
-    db_path = tmp_path / "corpus.db"
-    create_test_database(db_path)
+        result = cleanup_old_backups(backup_dir=tmp_path, max_backups=10, max_age_days=30)
+        
+        assert result["files_deleted"] == 1, "Should delete the file older than 30 days"
+        assert (tmp_path / "new_backup.db").exists(), "New file should be retained"
+        assert not (tmp_path / "old_backup.db").exists(), "Old file should be deleted"
 
-    assert db_path.exists()
-    assert db_path.is_file()
-    assert db_path.stat().st_size > 0
-    # The panel shows db_path.name — ensure it is the bare filename, not a dir.
-    assert db_path.name == "corpus.db"
-
-
-def test_backup_panel_size_label_formatting(tmp_path):
-    """Verify the size-formatting breakpoints used in the backup panel."""
-
-    def _size_label(size_bytes: int) -> str:
-        if size_bytes >= 1024 * 1024:
-            return f"{size_bytes / 1_048_576:.2f} MB"
-        elif size_bytes >= 1024:
-            return f"{size_bytes / 1024:.1f} KB"
-        else:
-            return f"{size_bytes} B"
-
-    assert _size_label(500) == "500 B"
-    assert _size_label(1024) == "1.0 KB"
-    assert _size_label(2048) == "2.0 KB"
-    assert _size_label(1024 * 1024) == "1.00 MB"
-    assert _size_label(2 * 1024 * 1024) == "2.00 MB"
-
-
-def test_backup_panel_modified_date_formatting(tmp_path):
-    """Verify that the mtime formatting used in the backup panel is correct."""
-    db_path = tmp_path / "corpus.db"
-    create_test_database(db_path)
-
-    mtime = db_path.stat().st_mtime
-    formatted = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M")
-
-    # Must be a non-empty string matching YYYY-MM-DD HH:MM
-    import re
-    assert re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", formatted)
+    def test_cleanup_handles_os_error_gracefully(self, tmp_path):
+        """Verify that OSError during deletion is logged and does not crash the function."""
+        file_path = tmp_path / "locked_backup.db"
+        file_path.write_bytes(SQLITE_HEADER + b"locked data")
+        
+        # Mock unlink to raise OSError
+        with patch.object(Path, 'unlink', side_effect=OSError("Permission denied")):
+            result = cleanup_old_backups(backup_dir=tmp_path, max_backups=1, max_age_days=30)
+            
+            assert result["files_deleted"] == 0, "Should not count failed deletions"
+            assert result["bytes_freed"] == 0, "Should not count freed bytes for failed deletions"

@@ -3,17 +3,20 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import math
 import os
 import sqlite3
 import tempfile
 from contextlib import closing
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Optional
 
 from src.core.config import (normalize_score, normalize_severity_label,
                              severity_from_score)
 from src.db.migrations import migrate_corpus_database
+from src.db.schemas import MatchResult
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parents[2] / "data" / "corpus.db"
 VALID_REVIEW_STATUSES = {"Pending", "Resolved"}
@@ -66,11 +69,18 @@ def _get_connection(db_path: str | Path) -> sqlite3.Connection:
     abs_path = os.path.abspath(str(db_path))
     try:
         os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-        return sqlite3.connect(abs_path)
+        conn = sqlite3.connect(abs_path)
     except (sqlite3.OperationalError, OSError, PermissionError):
         fallback_path = os.path.join(tempfile.gettempdir(), "semantic_plagiarism_detector", "data", os.path.basename(abs_path))
         os.makedirs(os.path.dirname(fallback_path), exist_ok=True)
-        return sqlite3.connect(fallback_path)
+        conn = sqlite3.connect(fallback_path)
+
+    conn.execute("PRAGMA foreign_keys = ON")
+    try:
+        migrate_corpus_database(conn)
+    except Exception:
+        pass
+    return conn
 
 
 def init_incident_db(
@@ -112,7 +122,8 @@ def _validate_incident(flag: Mapping[str, Any]) -> tuple[bool, str]:
     return True, ""
 
 
-def _fetch_all_incidents(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+def _fetch_all_incidents(conn: sqlite3.Connection) -> list[MatchResult]:
+    from src.db.schemas import MatchResult
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         """
@@ -128,7 +139,20 @@ def _fetch_all_incidents(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         """
     ).fetchall()
 
-    return [dict(row) for row in rows]
+    return [
+        MatchResult(
+            incident_id=row["incident_id"],
+            document_a=row["document_a"],
+            document_b=row["document_b"],
+            similarity_score=row["similarity_score"],
+            severity_rank=row["severity_rank"],
+            review_status=row["review_status"],
+            date_flagged=row["date_flagged"],
+            last_seen=row["last_seen"],
+            threshold_at_time_of_flag=row["threshold_at_time_of_flag"],
+        )
+        for row in rows
+    ]
 
 
 def sync_flagged_incidents(
@@ -137,11 +161,12 @@ def sync_flagged_incidents(
     *,
     now: str | None = None,
     threshold: float | None = None,
-) -> list[dict[str, Any]]:
+) -> list[MatchResult]:
+    from src.db.schemas import MatchResult
     init_incident_db(db_path)
     timestamp = now or _utc_now_iso()
 
-    with closing(sqlite3.connect(str(db_path))) as conn:
+    with closing(_get_connection(db_path)) as conn:
         conn.row_factory = sqlite3.Row
 
         try:
@@ -161,9 +186,9 @@ def sync_flagged_incidents(
                     second,
                     _normalise_score(flag.get("similarity", 0.0)),
                     _severity_rank(flag),
+                    timestamp,
+                    timestamp,
                     _normalise_score(flag.get("threshold_at_time_of_flag", threshold or 0.0)),
-                    timestamp,
-                    timestamp,
                 ))
 
             if bulk_records:
@@ -200,7 +225,20 @@ def sync_flagged_incidents(
                 """
             ).fetchall()
 
-            return [dict(row) for row in rows]
+            return [
+                MatchResult(
+                    incident_id=row["incident_id"],
+                    document_a=row["document_a"],
+                    document_b=row["document_b"],
+                    similarity_score=row["similarity_score"],
+                    severity_rank=row["severity_rank"],
+                    review_status=row["review_status"],
+                    date_flagged=row["date_flagged"],
+                    last_seen=row["last_seen"],
+                    threshold_at_time_of_flag=row["threshold_at_time_of_flag"],
+                )
+                for row in rows
+            ]
 
         except sqlite3.Error as e:
             conn.rollback()
@@ -209,18 +247,19 @@ def sync_flagged_incidents(
 
 def get_all_incidents(
     db_path: str | Path = DEFAULT_DB_PATH,
-) -> list[dict[str, Any]]:
+) -> list[MatchResult]:
     init_incident_db(db_path)
-    with closing(sqlite3.connect(str(db_path))) as conn:
+    with closing(_get_connection(db_path)) as conn:
         return _fetch_all_incidents(conn)
 
 
 def get_all_incidents_above_threshold_for_export(
     threshold: float,
     db_path: str | Path = DEFAULT_DB_PATH,
-) -> list[dict[str, Any]]:
+) -> list[MatchResult]:
+    from src.db.schemas import MatchResult
     init_incident_db(db_path)
-    with closing(sqlite3.connect(str(db_path))) as conn:
+    with closing(_get_connection(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """
@@ -237,7 +276,15 @@ def get_all_incidents_above_threshold_for_export(
             """,
             (threshold,)
         ).fetchall()
-        return [dict(row) for row in rows]
+        return [
+            MatchResult(
+                document_a=row["doc_a"],
+                document_b=row["doc_b"],
+                similarity_score=row["similarity"],
+                threshold_at_time_of_flag=row["threshold_at_time_of_flag"],
+            )
+            for row in rows
+        ]
 
 
 def update_review_status(
@@ -304,7 +351,7 @@ def get_high_severity_trends(
     # Get daily count of High severity incidents over the specified number of days.
     # Returns list of dicts with 'date' and 'count' keys.
     init_incident_db(db_path)
-    with closing(sqlite3.connect(str(db_path))) as conn:
+    with closing(_get_connection(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """
@@ -333,7 +380,7 @@ def get_most_plagiarized_documents(
     # Get the most frequently plagiarized documents based on incident count.
     # Returns list of dicts with 'document_name' and 'incident_count' keys.
     init_incident_db(db_path)
-    with closing(sqlite3.connect(str(db_path))) as conn:
+    with closing(_get_connection(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """
@@ -387,3 +434,146 @@ def get_false_positives(db_path: str | Path = DEFAULT_DB_PATH) -> set[tuple[str,
             "SELECT document_a, document_b FROM false_positives"
         ).fetchall()
         return set((row[0], row[1]) for row in rows)
+
+
+# ── Paginated query support ────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class PaginatedIncidents:
+    """Server-side paginated result for the incidents/warning list."""
+
+    items: list[MatchResult]
+    total_count: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+_ALLOWED_SORT_COLUMNS = frozenset(
+    {
+        "incident_id",
+        "document_a",
+        "document_b",
+        "similarity_score",
+        "severity_rank",
+        "review_status",
+        "date_flagged",
+    }
+)
+_ALLOWED_SORT_ORDERS = frozenset({"ASC", "DESC"})
+
+# ── SQL fragments reused by the paginated query ───────────────────────────────
+
+_JOIN_DOCUMENTS = """
+LEFT JOIN documents da ON pi.document_a = da.filename
+LEFT JOIN documents db ON pi.document_b = db.filename
+"""
+
+_WHERE_NOT_DELETED = "(da.is_deleted IS NULL OR da.is_deleted = 0) AND (db.is_deleted IS NULL OR db.is_deleted = 0)"
+
+
+def query_incidents_paginated(
+    *,
+    page: int = 1,
+    page_size: int = 50,
+    sort_by: str = "date_flagged",
+    sort_order: str = "DESC",
+    severity_filter: Optional[str] = None,
+    search_query: str = "",
+    db_path: str | Path = DEFAULT_DB_PATH,
+) -> PaginatedIncidents:
+    """Query plagiarism incidents with server-side pagination, sorting, and filtering.
+
+    Filters out incidents linked to soft-deleted documents (``is_deleted = 1``),
+    consistent with the rest of the incidents API.
+
+    Args:
+        page:           1-indexed page number (default 1).
+        page_size:      Items per page (default 50, clamped 1–200).
+        sort_by:        Column to sort on (whitelisted against :data:`_ALLOWED_SORT_COLUMNS`).
+        sort_order:     ``"ASC"`` or ``"DESC"``.
+        severity_filter: Optional severity level (``"Low"``, ``"Medium"``, ``"High"``).
+        search_query:   Filter by document name substring (matched against both doc_a and doc_b).
+        db_path:        Path to the SQLite corpus database.
+
+    Returns:
+        :class:`PaginatedIncidents` with the requested page of results.
+    """
+    init_incident_db(db_path)
+
+    safe_page = max(1, int(page))
+    safe_page_size = max(1, min(200, int(page_size)))
+    offset = (safe_page - 1) * safe_page_size
+
+    if sort_by not in _ALLOWED_SORT_COLUMNS:
+        sort_by = "date_flagged"
+    sort_order = sort_order.upper()
+    if sort_order not in _ALLOWED_SORT_ORDERS:
+        sort_order = "DESC"
+
+    where_clauses: list[str] = [_WHERE_NOT_DELETED]
+    params: list[Any] = []
+
+    if severity_filter:
+        sev = severity_filter.strip().title()
+        if sev in {"Low", "Medium", "High"}:
+            where_clauses.append("pi.severity_rank = ?")
+            params.append(sev)
+
+    query = search_query.strip()
+    if query:
+        where_clauses.append("(pi.document_a LIKE ? OR pi.document_b LIKE ?)")
+        like_param = f"%{query}%"
+        params.append(like_param)
+        params.append(like_param)
+
+    where_sql = "WHERE " + " AND ".join(where_clauses)
+
+    with closing(_get_connection(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+
+        # Total count
+        count_row = conn.execute(
+            f"SELECT COUNT(*) FROM plagiarism_incidents pi {_JOIN_DOCUMENTS} {where_sql}", params
+        ).fetchone()
+        total_count = count_row[0] if count_row else 0
+        total_pages = max(1, math.ceil(total_count / safe_page_size))
+
+        # Paginated fetch
+        order_sql = f"pi.{sort_by} {sort_order}, pi.incident_id ASC"
+        rows = conn.execute(
+            f"""
+            SELECT pi.incident_id, pi.document_a, pi.document_b,
+                   pi.similarity_score, pi.severity_rank,
+                   pi.review_status, pi.date_flagged, pi.last_seen,
+                   pi.threshold_at_time_of_flag
+            FROM plagiarism_incidents pi
+            {_JOIN_DOCUMENTS}
+            {where_sql}
+            ORDER BY {order_sql}
+            LIMIT ? OFFSET ?
+            """,
+            [*params, safe_page_size, offset],
+        ).fetchall()
+
+        return PaginatedIncidents(
+            items=[
+                MatchResult(
+                    incident_id=row["incident_id"],
+                    document_a=row["document_a"],
+                    document_b=row["document_b"],
+                    similarity_score=row["similarity_score"],
+                    severity_rank=row["severity_rank"],
+                    review_status=row["review_status"],
+                    date_flagged=row["date_flagged"],
+                    last_seen=row["last_seen"],
+                    threshold_at_time_of_flag=row["threshold_at_time_of_flag"],
+                )
+                for row in rows
+            ],
+            total_count=total_count,
+            page=safe_page,
+            page_size=safe_page_size,
+            total_pages=total_pages,
+        )

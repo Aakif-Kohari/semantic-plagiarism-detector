@@ -6,7 +6,6 @@ import csv
 import io
 import json
 import logging
-from typing import List, Dict, Optional
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -17,12 +16,54 @@ from src.errors import (
     ExportFailedError,
 )
 
-
 logger = logging.getLogger(__name__)
+
+SAFE_DOWNLOAD_CONTENT_TYPES = {
+    "text/csv": "text/csv; charset=utf-8",
+    "text/plain": "text/plain; charset=utf-8",
+    "application/json": "application/json; charset=utf-8",
+    "application/xml": "application/xml; charset=utf-8",
+    "application/octet-stream": "application/octet-stream",
+}
 
 
 class LMSExportEngine:
     """Generate LMS-compatible incident exports."""
+
+    @staticmethod
+    def build_download_response(
+        data: str | bytes,
+        *,
+        filename: str,
+        content_type: str,
+    ) -> tuple[bytes, dict[str, str]]:
+        """Build a byte payload with safe download headers for browsers."""
+        payload = data.encode("utf-8") if isinstance(data, str) else data
+
+        normalized_type = (
+            (content_type or "application/octet-stream")
+            .split(";", 1)[0]
+            .strip()
+            .lower()
+        )
+        resolved_content_type = SAFE_DOWNLOAD_CONTENT_TYPES.get(
+            normalized_type,
+            "application/octet-stream",
+        )
+        safe_filename = (
+            str(filename or "download")
+            .replace("\r", "")
+            .replace("\n", "")
+            .replace('"', "")
+            .replace(";", "")
+        )
+
+        headers = {
+            "Content-Type": resolved_content_type,
+            "X-Content-Type-Options": "nosniff",
+            "Content-Disposition": (f'attachment; filename="{safe_filename}"'),
+        }
+        return payload, headers
 
     @staticmethod
     def _calculate_severity(sim_score: float) -> str:
@@ -45,112 +86,6 @@ class LMSExportEngine:
         return f"{sim_score * 100:.1f}%"
 
     @staticmethod
-    def generate_incident_txt(
-        incidents: List[Dict[str, any]],
-    ) -> Optional[str]:
-        """Generate a readable plain-text summary of flagged incidents.
-
-        Args:
-            incidents: Incident dictionaries containing ``doc_a``, ``doc_b``,
-                and ``similarity``. Optional fields such as ``matched_length``
-                and ``matched_text`` are included when present.
-
-        Returns:
-            A UTF-8-compatible plain-text report, or ``None`` when there are
-            no incidents to export.
-        """
-        if not incidents:
-            logger.warning(
-                "Attempted to export an empty incident list to TXT."
-            )
-            return None
-
-        try:
-            lines = [
-                "SEMANTIC PLAGIARISM INCIDENT REPORT",
-                "=" * 38,
-                f"Total flagged pairs: {len(incidents)}",
-                "",
-            ]
-
-            for index, row in enumerate(incidents, start=1):
-                sim_score = float(row.get("similarity", 0))
-                severity = LMSExportEngine._calculate_severity(sim_score)
-                doc_a = LMSExportEngine._safe_document_name(
-                    row.get("doc_a")
-                )
-                doc_b = LMSExportEngine._safe_document_name(
-                    row.get("doc_b")
-                )
-
-                lines.extend(
-                    [
-                        f"Incident #{index}",
-                        "-" * 24,
-                        f"Document A: {doc_a}",
-                        f"Document B: {doc_b}",
-                        (
-                            "Similarity: "
-                            f"{LMSExportEngine._format_similarity_percent(sim_score)} "
-                            f"({sim_score:.4f})"
-                        ),
-                        f"Severity: {severity}",
-                    ]
-                )
-
-                matched_length = row.get("matched_length")
-                if matched_length not in (None, ""):
-                    lines.append(
-                        f"Matched length: {matched_length} words"
-                    )
-
-                matched_text = str(
-                    row.get("matched_text")
-                    or row.get("matching_text")
-                    or ""
-                ).strip()
-                if matched_text:
-                    lines.extend(
-                        [
-                            "Matching text:",
-                            matched_text,
-                        ]
-                    )
-
-                lines.append("")
-
-            lines.extend(
-                [
-                    "=" * 38,
-                    "End of report",
-                    "",
-                ]
-            )
-
-            txt_data = "\n".join(lines)
-            logger.info(
-                "Successfully generated TXT export for %s incidents.",
-                len(incidents),
-            )
-            return txt_data
-        except (TypeError, ValueError) as exc:
-            logger.error(
-                "Failed to format incident data as TXT: %s",
-                exc,
-            )
-            return None
-
-    @staticmethod
-    def generate_incident_csv(incidents: List[Dict[str, any]]) -> Optional[str]:
-        """
-        Generates a standardized CSV string representing flagged incidents.
-        
-        Args:
-            incidents: A list of dictionaries containing at least:
-                       'doc_a', 'doc_b', and 'similarity'
-        Returns:
-            A raw CSV formatted string ready for file writing or web download.
-        """
     def _wrap_generation_io_error(
         format_name: str,
         exception: OSError,
@@ -172,9 +107,7 @@ class LMSExportEngine:
     ) -> str | None:
         """Generate a readable plain-text summary of flagged incidents."""
         if not incidents:
-            logger.warning(
-                "Attempted to export an empty incident list to TXT."
-            )
+            logger.warning("Attempted to export an empty incident list to TXT.")
             return None
 
         try:
@@ -188,12 +121,8 @@ class LMSExportEngine:
             for index, row in enumerate(incidents, start=1):
                 sim_score = float(row.get("similarity", 0))
                 severity = LMSExportEngine._calculate_severity(sim_score)
-                doc_a = LMSExportEngine._safe_document_name(
-                    row.get("doc_a")
-                )
-                doc_b = LMSExportEngine._safe_document_name(
-                    row.get("doc_b")
-                )
+                doc_a = LMSExportEngine._safe_document_name(row.get("doc_a"))
+                doc_b = LMSExportEngine._safe_document_name(row.get("doc_b"))
 
                 lines.extend(
                     [
@@ -212,14 +141,10 @@ class LMSExportEngine:
 
                 matched_length = row.get("matched_length")
                 if matched_length not in (None, ""):
-                    lines.append(
-                        f"Matched length: {matched_length} words"
-                    )
+                    lines.append(f"Matched length: {matched_length} words")
 
                 matched_text = str(
-                    row.get("matched_text")
-                    or row.get("matching_text")
-                    or ""
+                    row.get("matched_text") or row.get("matching_text") or ""
                 ).strip()
                 if matched_text:
                     lines.extend(
@@ -264,9 +189,7 @@ class LMSExportEngine:
     ) -> str | None:
         """Generate a standardized LMS-compatible CSV string."""
         if not incidents:
-            logger.warning(
-                "Attempted to export an empty incident list to CSV."
-            )
+            logger.warning("Attempted to export an empty incident list to CSV.")
             return None
 
         try:
@@ -297,9 +220,7 @@ class LMSExportEngine:
                         ),
                         "Similarity Score": f"{sim_score:.4f}",
                         "Severity Flag": (
-                            LMSExportEngine._calculate_severity(
-                                sim_score
-                            )
+                            LMSExportEngine._calculate_severity(sim_score)
                         ),
                     }
                 )
@@ -330,9 +251,7 @@ class LMSExportEngine:
     ) -> str | None:
         """Generate a standardized JSON payload for LMS integrations."""
         if not incidents:
-            logger.warning(
-                "Attempted to export an empty incident list to JSON."
-            )
+            logger.warning("Attempted to export an empty incident list to JSON.")
             return None
 
         try:
@@ -349,20 +268,14 @@ class LMSExportEngine:
                 payload["incidents"].append(
                     {
                         "document_a": (
-                            LMSExportEngine._safe_document_name(
-                                row.get("doc_a")
-                            )
+                            LMSExportEngine._safe_document_name(row.get("doc_a"))
                         ),
                         "document_b": (
-                            LMSExportEngine._safe_document_name(
-                                row.get("doc_b")
-                            )
+                            LMSExportEngine._safe_document_name(row.get("doc_b"))
                         ),
                         "similarity_score": round(sim_score, 4),
                         "severity_flag": (
-                            LMSExportEngine._calculate_severity(
-                                sim_score
-                            )
+                            LMSExportEngine._calculate_severity(sim_score)
                         ),
                     }
                 )
@@ -430,9 +343,7 @@ class LMSExportEngine:
                     newline="",
                 )
             else:
-                raise TypeError(
-                    "Export data must be text or bytes."
-                )
+                raise TypeError("Export data must be text or bytes.")
         except OSError as exception:
             message = EXPORT_WRITE_FAILED.format(
                 format_name=format_name.upper(),

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import html
 import os
 import re
@@ -12,7 +13,7 @@ from typing import TypeVar
 
 
 DEFAULT_FILENAME = "document"
-MAX_FILENAME_LENGTH = 255
+MAX_FILENAME_LENGTH = 150
 
 _HTML_TAG_RE = re.compile(r"<[^>]*>")
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
@@ -104,9 +105,21 @@ def sanitize_filename(
         stem = f"_{stem}"
 
     maximum_stem_length = max_length - len(extension)
-    stem = stem[:maximum_stem_length].rstrip(" ._-")
-    if not stem:
-        stem = safe_fallback[:maximum_stem_length] or DEFAULT_FILENAME
+    if len(stem) > maximum_stem_length:
+        hash_prefix = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:4]
+        hash_suffix = f"_{hash_prefix}"
+        allowed_stem = maximum_stem_length - len(hash_suffix)
+        if allowed_stem > 0:
+            truncated_stem = stem[:allowed_stem].rstrip(" ._-")
+            if not truncated_stem:
+                truncated_stem = safe_fallback[:allowed_stem] or DEFAULT_FILENAME[:allowed_stem]
+            stem = f"{truncated_stem}{hash_suffix}"
+        else:
+            stem = hash_prefix[:maximum_stem_length]
+    else:
+        stem = stem[:maximum_stem_length].rstrip(" ._-")
+        if not stem:
+            stem = safe_fallback[:maximum_stem_length] or DEFAULT_FILENAME
 
     return f"{stem}{extension}"
 

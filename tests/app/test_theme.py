@@ -1,6 +1,17 @@
 from unittest.mock import patch
 
-from app.theme import badge_html, get_colors, inject_css
+import matplotlib as mpl
+from app.theme import (
+    COLORS,
+    apply_matplotlib_theme,
+    badge_html,
+    get_colors,
+    inject_css,
+    sanitize_hex_color,
+    severity_tier,
+    tier_color,
+    tier_from_severity_label,
+)
 
 
 def test_get_colors_returns_valid_theme_colors():
@@ -10,8 +21,6 @@ def test_get_colors_returns_valid_theme_colors():
     assert colors
     assert "background" in colors
     assert "accent" in colors
-from app.theme import (COLORS, severity_tier, tier_color,
-                       tier_from_severity_label)
 
 
 def test_severity_tier():
@@ -65,9 +74,6 @@ def test_inject_css_generates_css_without_errors():
     assert "<style>" in css
 
 
-from app.theme import (COLORS, badge_html, get_colors, inject_css,
-                       sanitize_hex_color, sanitize_theme_colors,
-                       severity_tier, tier_color, tier_from_severity_label)
 
 
 def test_sanitize_hex_color_valid_and_invalid():
@@ -91,3 +97,53 @@ def test_badge_html_returns_valid_html():
     assert isinstance(html, str)
     assert len(html.strip()) > 0
     assert "badge" in html
+
+
+import streamlit as st
+from unittest.mock import patch
+from app.theme import initialize_theme, set_theme
+
+def test_initialize_theme_loads_dark_from_query_params():
+    st.session_state.clear()
+    with patch("app.theme.st.query_params", {"theme": "dark"}):
+        initialize_theme()
+    assert st.session_state.theme == "Dark"
+
+def test_initialize_theme_loads_light_from_query_params():
+    st.session_state.clear()
+    with patch("app.theme.st.query_params", {"theme": "light"}):
+        initialize_theme()
+    assert st.session_state.theme == "Light"
+
+def test_initialize_theme_invalid_query_params_fallback():
+    st.session_state.clear()
+    with patch("app.theme.st.query_params", {"theme": "invalid_value"}):
+        initialize_theme()
+    assert st.session_state.theme == "Light"
+
+def test_set_theme_updates_query_params():
+    mock_query_params = {}
+    st.session_state.clear()
+    with patch("app.theme.st.query_params", mock_query_params):
+        set_theme("Dark")
+    assert mock_query_params["theme"] == "dark"
+    assert st.session_state.theme == "Dark"
+
+
+def test_apply_matplotlib_theme():
+    """Verify apply_matplotlib_theme updates Matplotlib rcParams correctly."""
+    custom_theme = {
+        "background": "#112233",
+        "surface": "#223344",
+        "border": "#334455",
+        "ink": "#ffffff",
+    }
+    apply_matplotlib_theme(custom_theme)
+
+    assert mpl.rcParams["figure.facecolor"] == "#112233"
+    assert mpl.rcParams["axes.facecolor"] == "#223344"
+    assert mpl.rcParams["axes.edgecolor"] == "#334455"
+    assert mpl.rcParams["axes.labelcolor"] == "#ffffff"
+    assert mpl.rcParams["xtick.color"] == "#ffffff"
+    assert mpl.rcParams["ytick.color"] == "#ffffff"
+    assert mpl.rcParams["text.color"] == "#ffffff"

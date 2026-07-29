@@ -77,6 +77,9 @@ from app.theme import (
     version_check_widget_html,
 )
 from src.core.config import DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD, severity_key
+from sklearn.metrics.pairwise import cosine_similarity
+from src.core.ai_detector import detect_documents_ai_probability
+from src.core.cross_lingual import prepare_text_for_embedding
 from src.core.document_parser import (
     DEFAULT_OCR_DPI,
     DEFAULT_OCR_LANGUAGE,
@@ -93,14 +96,20 @@ from src.core.faiss_index import (
     save_index,
     search_similar_chunks,
 )
+from src.core.faiss_indexer import build_index
 from src.core.similarity import (
     document_similarity_matrix,
     find_most_similar_chunks,
     flag_plagiarism,
 )
+from src.core.text_chunking import chunk_documents
 from src.core.webhook import send_plagiarism_alert
 from src.i18n.translator import _SUPPORTED_LANGUAGES, get_text
-from src.visualization.network_graph import plot_similarity_network
+from src.visualization.network_graph import (
+    export_network_to_csv_bytes,
+    export_network_to_gexf_bytes,
+    plot_similarity_network,
+)
 
 
 class OCRFileBatchError(Exception):
@@ -123,6 +132,10 @@ from src.db import (
     get_unique_class_sections,
     init_corpus_db,
 )
+
+from src.db.auth import get_all_users, get_user_role, init_db, verify_user
+from src.utils.pdf_report import highlight_pdf_matches, truncate_filename
+
 from src.db.auth import (
     authenticate_user,
     check_login_rate_limit,
@@ -151,6 +164,7 @@ from src.db.incidents import (  # noqa: E402
 from src.utils.diff_highlighter import highlight_overlap
 from src.utils.excel_export import export_similarity_matrix_to_excel
 from src.utils.pdf_report import highlight_pdf_matches  # noqa: E402
+
 from src.utils.redis_cache import (
     cache_session_state,
     clear_session,
@@ -175,18 +189,32 @@ init_db()
 
 try:
 
+    from src.utils.pdf_report import truncate_filename
+except ImportError:
+    def truncate_filename(filename: str, max_len: int = 30) -> str:
+        return filename
+
+try:
+
     from src.utils.pdf_highlighter import highlight_pdf_matches  # type: ignore
 except Exception:
     highlight_pdf_matches = None
 
     # Safe import for Google Drive integration
 
+
     from src.utils.excel_export import export_similarity_matrix_to_excel
     from src.utils.json_export import export_similarity_matrix_to_json
 except ImportError:
 
+    from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore[import-untyped,reportMissingImports]
+
+
+    from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore[import-untyped,reportMissingImports]
+
     from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore
     from utils.json_export import export_similarity_matrix_to_json
+
 
 
 # Initialize corpus database
@@ -223,6 +251,11 @@ _INDEX_PATH = os.path.abspath(
 from streamlit_tour import Tour
 
 try:
+
+    from streamlit_tour import Tour
+except Exception:
+    Tour = None
+
     from src.utils.google_drive import import_from_google_drive  # type: ignore
 except Exception:
     import_from_google_drive = None
@@ -230,6 +263,7 @@ except Exception:
 # -----------------------------------------------------------------------------
 # Page Configuration & Session State
 # -----------------------------------------------------------------------------
+
 
 
 # Page Configuration
@@ -615,8 +649,8 @@ with theme_col:
         from streamlit.runtime.scriptrunner import get_script_run_ctx
 
         _ctx = get_script_run_ctx()
-        if _ctx and _ctx.current_form_id:
-            _ctx.current_form_id = ""
+        if _ctx and getattr(_ctx, "current_form_id", None):
+            setattr(_ctx, "current_form_id", "")
     except Exception:
         pass
     if st.button(theme_icon, key="theme_toggle"):
@@ -624,6 +658,9 @@ with theme_col:
         set_theme(new_theme)
         st.rerun()
 
+
+
+# ── Sidebar (ROLE RESTRICTED Settings) ────────────────────────────────────────
 
 # ── Sidebar (ROLE RESTRICTED Settings & i18n) ─────────────────────────────────
 
@@ -637,6 +674,7 @@ def save_preferences_callback():
             "theme": st.session_state.get("theme_selector", "Light"),
         }
     update_user_preferences(st.session_state.username, prefs)
+
 
 
 with st.sidebar:
@@ -985,8 +1023,7 @@ else:
         try:
             import faiss
 
-            index_buffer = _io.BytesIO(cached_index_data)
-            faiss_index = faiss.deserialize_index(faiss.read_index(index_buffer))
+            faiss_index = faiss.deserialize_index(np.frombuffer(cached_index_data, dtype=np.uint8))
             registry = get_chunk_registry()
             st.info(
                 f"📂 Loaded FAISS index from Redis cache with {faiss_index.ntotal} vectors"
@@ -1025,6 +1062,11 @@ else:
             registry = []
 
 
+    if "analysis_results" not in st.session_state:
+        st.session_state.analysis_results = None
+
+
+
     def load_analysis_results_from_db():
         import numpy as np
         import pandas as pd
@@ -1057,13 +1099,14 @@ else:
                 emb = np.frombuffer(emb_blob, dtype=np.float32)
                 embeddings[fname].append(emb)
 
-            # Convert lists to numpy arrays
-            for fname in embeddings:
-                embeddings[fname] = np.vstack(embeddings[fname])
+            doc_embeddings: dict[str, Any] = {}
+            for fname, emb_list in embeddings.items():
+                if emb_list:
+                    doc_embeddings[fname] = np.vstack(emb_list)
 
-            sim_df = document_similarity_matrix(embeddings)
+            sim_df = document_similarity_matrix(doc_embeddings)
 
-            names = list(embeddings.keys())
+            names = list(doc_embeddings.keys())
             n = len(names)
             chunk_mat = np.zeros((n, n))
             for i, na in enumerate(names):
@@ -1071,10 +1114,11 @@ else:
                     if i == j:
                         chunk_mat[i, j] = 1.0
                     elif j > i:
-                        ea, eb = embeddings[na], embeddings[nb]
+                        ea, eb = doc_embeddings[na], doc_embeddings[nb]
+                        ea_arr, eb_arr = np.asarray(ea), np.asarray(eb)
                         score = (
-                            float(np.max(cosine_similarity(ea, eb)))
-                            if ea.size and eb.size
+                            float(np.max(cosine_similarity(ea_arr, eb_arr)))
+                            if ea_arr.size and eb_arr.size
                             else 0.0
                         )
                         chunk_mat[i, j] = score
@@ -1119,11 +1163,36 @@ else:
 
     if "analysis_file_signature" not in st.session_state:
         st.session_state.analysis_file_signature = None
+
+
         cached_signature = get_session_state(SESSION_ID, "analysis_file_signature")
         if cached_signature is not None:
             st.session_state.analysis_file_signature = cached_signature
 
+            faiss_index = (
+                load_index(_INDEX_PATH) if os.path.exists(_INDEX_PATH) else None
+            )
+            registry = get_chunk_registry()
+    else:
+        faiss_index = load_index(_INDEX_PATH) if os.path.exists(_INDEX_PATH) else None
+        registry = get_chunk_registry()
+
+
+
+
+
+
+        cached_signature = get_session_state(SESSION_ID, "analysis_file_signature")
+        if cached_signature is not None:
+            st.session_state.analysis_file_signature = cached_signature
+
+
+    if "failed_documents" not in st.session_state:
+        st.session_state.failed_documents = {}
+
+
     # 1. LOCAL FILE UPLOADER (Dynamic Title Translation)
+
     # 1. LOCAL FILE UPLOADER
     uploaded_files = st.file_uploader(
         get_text("upload_title", lang=lang_code),
@@ -1544,6 +1613,29 @@ if not st.session_state.authenticated:
                         st.error("Please enter a password.")
         st.stop()
 
+    # ── Failed Uploads Section (#582 Dedicated Expander & Filter View) ─────────────
+    if st.session_state.failed_documents:
+        failed_count = len(st.session_state.failed_documents)
+        with st.expander(f"⚠️ Failed Uploads ({failed_count} file(s))", expanded=True):
+            st.warning(
+                f"**{failed_count} file(s) failed text extraction during processing.** "
+                "Review the details below or attempt OCR retry."
+            )
+            for fname, fbytes in st.session_state.failed_documents.items():
+                st.markdown(f"- 📄 **`{fname}`** ({len(fbytes):,} bytes)")
+
+            col_retry, col_clear = st.columns([1, 1])
+            with col_retry:
+                if st.button("🔄 Retry Text Extraction", key="retry_failed_extraction_btn", type="primary", use_container_width=True):
+                    for fname, fbytes in st.session_state.failed_documents.items():
+                        file_bytes_dict[fname] = fbytes
+                    st.session_state.failed_documents = {}
+                    st.rerun()
+            with col_clear:
+                if st.button("🗑️ Clear Failed List", key="clear_failed_list_btn", use_container_width=True):
+                    st.session_state.failed_documents = {}
+                    st.rerun()
+
     # 4. PIPELINE STOP CHECK
     if len(file_bytes_dict) < 2 and url_text is None:
         if st.session_state.analysis_results is None:
@@ -1556,6 +1648,9 @@ if not st.session_state.authenticated:
                 unsafe_allow_html=True,
             )
             st.stop()
+
+
+    # ── Metadata Editor Section (#578 Character Count Statistics Included) ───────
 
     st.markdown("### 📝 Set Document Metadata")
     col1, col2 = st.columns(2)
@@ -1571,6 +1666,30 @@ if not st.session_state.authenticated:
         batch_tags = st.text_input("Tags (comma separated)", placeholder="#hw1, #draft")
 
     metadata_dict = {}
+
+    for filename, raw_bytes in file_bytes_dict.items():
+        base_name = os.path.splitext(filename)[0]
+        guessed_name = base_name.replace("_", " ").replace("-", " ").title()
+
+        # Calculate character and word count statistics
+        char_count = len(raw_bytes)
+        try:
+            text_str = raw_bytes.decode("utf-8", errors="ignore")
+            word_count = len(text_str.split())
+            char_count = len(text_str)
+        except Exception:
+            word_count = len(raw_bytes.split())
+
+        expander_label = (
+            f"📄 {filename}  "
+            f"(`{char_count:,}` chars | `{word_count:,}` words)"
+        )
+
+        with st.expander(expander_label, expanded=False):
+            st.caption(
+                f"📊 **Document Statistics:** {char_count:,} characters · {word_count:,} words"
+            )
+
     for filename in file_bytes_dict.keys():
         # Check if this filename is a virtual CSV document
         is_csv_doc = False
@@ -1618,13 +1737,14 @@ if not st.session_state.authenticated:
                 )
 
                 metadata_dict[filename] = {
-                    "student_name": student_name.strip(),
-                    "class_section": class_section.strip(),
-                    "assignment_title": assignment_title.strip(),
+                    "student_name": (student_name or "").strip(),
+                    "class_section": (class_section or "").strip(),
+                    "assignment_title": (assignment_title or "").strip(),
                 }
 
     if url_filename:
         with st.expander(f"🔗 {url_filename}", expanded=True):
+
             student_name = st.text_input(
                 f"Student Name for {url_filename}",
                 value="Web Source",
@@ -1644,7 +1764,12 @@ if not st.session_state.authenticated:
                 "student_name": student_name.strip(),
                 "class_section": class_section.strip(),
                 "assignment_title": assignment_title.strip(),
+
+                "char_count": char_count,
+                "word_count": word_count,
+
                 "tags": batch_tags.strip(),
+
             }
 
     @st.cache_data(show_spinner=False)
@@ -1656,10 +1781,28 @@ if not st.session_state.authenticated:
         chunk_overlap: int = 50,
         existing_index=None,
         existing_registry=None,
-        url_text: str = None,
-        url_filename: str = None,
+        url_text: str | None = None,
+        url_filename: str | None = None,
     ):
         raw_texts = {}
+
+        failed_files = {}
+
+        for name, data in file_bytes_dict.items():
+            try:
+                extracted = extract_text(
+                    _io.BytesIO(data),
+                    name,
+                    ocr_language=ocr_language,
+                    ocr_dpi=ocr_dpi,
+                )
+                if extracted and extracted.strip():
+                    raw_texts[name] = extracted
+                else:
+                    failed_files[name] = data
+            except Exception:
+                failed_files[name] = data
+
         failed_files = []
         failure_details = []
 
@@ -1676,6 +1819,7 @@ if not st.session_state.authenticated:
 
         if url_text and url_filename:
             raw_texts[url_filename] = url_text
+
 
         if failed_files:
             raise OCRFileBatchError(failed_files, failure_details)
@@ -1710,9 +1854,10 @@ if not st.session_state.authenticated:
                     chunk_mat[i, j] = 1.0
                 elif j > i:
                     ea, eb = embeddings[na], embeddings[nb]
+                    ea_arr, eb_arr = np.asarray(ea), np.asarray(eb)
                     score = (
-                        float(np.max(cosine_similarity(ea, eb)))
-                        if ea.size and eb.size
+                        float(np.max(cosine_similarity(ea_arr, eb_arr)))
+                        if ea_arr.size and eb_arr.size
                         else 0.0
                     )
                     chunk_mat[i, j] = score
@@ -1739,9 +1884,23 @@ if not st.session_state.authenticated:
             faiss_index,
             registry,
             ai_probabilities,
+            failed_files,
         )
 
     has_enough_files = (len(file_bytes_dict) + (1 if url_text else 0)) >= 2
+
+
+    (
+        raw_texts,
+        chunked_docs,
+        embeddings,
+        sim_df,
+        chunk_sim_df,
+        faiss_index,
+        registry,
+        ai_probabilities,
+        pipeline_failed_files,
+    ) = analysis_results
 
     # Run Pipeline if files uploaded
     if (len(file_bytes_dict) > 0 and any(file_bytes_dict.values())) or url_text:
@@ -1777,6 +1936,10 @@ if not st.session_state.authenticated:
             if exc.failed_files:
                 st.warning(f"Failed files: {', '.join(exc.failed_files)}")
             st.stop()
+
+
+    if pipeline_failed_files:
+        st.session_state.failed_documents.update(pipeline_failed_files)
 
     active_sim_df = chunk_sim_df if use_chunk_matrix else sim_df
     flags = flag_plagiarism(
@@ -1856,6 +2019,17 @@ if not st.session_state.authenticated:
             chunked_docs=chunked_docs,
             embeddings=embeddings,
         )
+
+
+    for flag in flags:
+        try:
+            send_plagiarism_alert(
+                doc_a=flag["doc_a"],
+                doc_b=flag["doc_b"],
+                similarity=float(flag["similarity"]),
+            )
+        except Exception:
+            pass
 
         # Network Graph Node Click Filtering setup
         selected_document_id = st.session_state.get("selected_document_id")
@@ -1944,6 +2118,7 @@ if not st.session_state.authenticated:
             "Export flagged plagiarism incidents for LMS review or "
             "human-readable offline analysis."
         )
+
 
         raw_incidents = get_all_incidents_above_threshold_for_export(
             threshold=threshold
@@ -2141,6 +2316,32 @@ if not st.session_state.authenticated:
                     ),
                 )
 
+                show_cell_percentages = st.checkbox(
+                    "Show Cell Percentages",
+                    value=True,
+                    key="heatmap_show_percentages",
+                    help="Render similarity text labels inside heatmap cells.",
+                )
+
+                mask_threshold = st.slider(
+                    "Minimum Similarity to Display",
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=0.0,
+                    step=0.05,
+                    format="%.2f",
+                    key="heatmap_mask_threshold",
+                    help="Hide cell colors for similarity values below this threshold.",
+                )
+
+                heatmap_class_filter = st.selectbox(
+                    "Filter Heatmap by Class Tag",
+                    options=unique_classes,
+                    index=0,
+                    key="heatmap_tab_class_filter",
+                    help="Filter heatmap rows and columns by matching document class tag.",
+                )
+
                 heatmap_fig = build_visualization_lazily(
                     load_heatmap,
                     lambda: plot_similarity_heatmap(
@@ -2148,32 +2349,34 @@ if not st.session_state.authenticated:
                         title="Document Semantic Similarity",
                         threshold=threshold,
                         theme_colors=get_colors(),
-                        cmap=heatmap_cmap,
+                        colormap_name=heatmap_cmap,
+                        annotate=show_cell_percentages,
+                        mask_threshold=mask_threshold,
+                        class_tag=heatmap_class_filter,
                     ),
                 )
 
-                if heatmap_fig is None:
-                    st.info(
-                        "Enable “Load heatmap” to generate this "
-                        "visualization."
-                    )
-                else:
-                    st.pyplot(
-                        heatmap_fig,
-                        use_container_width=True,
-                    )
+            doc_select_options = ["None"] + list(active_sim_df.columns)
+            selected_highlight_doc = st.selectbox(
+                "Highlight Document Node",
+                options=doc_select_options,
+                index=0,
+                key="highlight_doc_node_selector",
+            )
+            highlighted_doc = (
+                selected_highlight_doc
+                if selected_highlight_doc != "None"
+                else None
+            )
 
-            if heatmap_fig is not None:
-                buf = _io.BytesIO()
-                heatmap_fig.savefig(
-                    buf,
-                    format="png",
-                    dpi=150,
-                    bbox_inches="tight",
-                )
-                buf.seek(0)
+            network_fig = plot_similarity_network(
+                similarity_df=active_sim_df,
+                threshold=threshold,
+                highlighted_doc=highlighted_doc,
+                title="Interactive Document Plagiarism Network",
+            )
 
-                st.download_button(
+            st.download_button(
                     "⬇️ Download Heatmap PNG",
                     buf,
                     "heatmap.png",
@@ -2252,6 +2455,41 @@ if not st.session_state.authenticated:
                         network_fig,
                         use_container_width=True,
                     )
+
+                if network_fig is not None:
+                    col_gexf, col_csv = st.columns(2)
+                    with col_gexf:
+                        gexf_data = export_network_to_gexf_bytes(
+                            similarity_df=active_sim_df,
+                            threshold=threshold,
+                            min_degree=st.session_state.get(
+                                "min_connected_docs_slider", 0
+                            ),
+                        )
+                        st.download_button(
+                            "⬇️ Download Network (GEXF)",
+                            gexf_data,
+                            "plagiarism_network.gexf",
+                            "application/xml",
+                            key="download_network_gexf",
+                            use_container_width=True,
+                        )
+                    with col_csv:
+                        csv_data = export_network_to_csv_bytes(
+                            similarity_df=active_sim_df,
+                            threshold=threshold,
+                            min_degree=st.session_state.get(
+                                "min_connected_docs_slider", 0
+                            ),
+                        )
+                        st.download_button(
+                            "⬇️ Download Network Graph Data (CSV)",
+                            csv_data,
+                            "plagiarism_network.csv",
+                            "text/csv",
+                            key="download_network_csv",
+                            use_container_width=True,
+                        )
 
             selected_document_id = st.session_state.get(
                 "selected_document_id"
@@ -2367,11 +2605,22 @@ if not st.session_state.authenticated:
                         expanded=st.session_state.expand_all_drill or (rank == 1),
                     ):
                         highlighted_ca, highlighted_cb = highlight_overlap(ca, cb, theme_colors=get_colors())
+                        from src.utils.warning_list import render_copy_button
                         st.markdown(
                             f"**{doc_a}:** {highlighted_ca}", unsafe_allow_html=True
                         )
+                        render_copy_button(
+                            text_to_copy=ca,
+                            button_id=f"copy_ca_{rank}",
+                            copy_label="📋 Copy Snippet",
+                        )
                         st.markdown(
                             f"**{doc_b}:** {highlighted_cb}", unsafe_allow_html=True
+                        )
+                        render_copy_button(
+                            text_to_copy=cb,
+                            button_id=f"copy_cb_{rank}",
+                            copy_label="📋 Copy Snippet",
                         )
 
             with drill_tab_viewer:
@@ -2437,17 +2686,53 @@ if not st.session_state.authenticated:
                     lambda: plot_high_severity_trends(trend_data),
                 )
 
-                if trend_fig is None:
-                    st.info(
-                        "Enable “Load trend chart” to generate this "
-                        "visualization."
-                    )
-                else:
-                    st.plotly_chart(
-                        trend_fig,
-                        use_container_width=True,
-                    )
+        # Expect two PDF reports, a summary CSV, and a metadata JSON file
+        pdf_names = [n for n in names if n.lower().endswith(".pdf")]
+        assert len(pdf_names) == 2
 
+        assert "summary.csv" in names
+        assert "metadata.json" in names
+
+        # Verify metadata JSON content
+        meta_content = zf.read("metadata.json").decode("utf-8")
+        meta = json.loads(meta_content)
+
+        assert "generated_at" in meta
+        assert "flags" in meta
+        assert len(meta["flags"]) == 2
+
+        input_set = {(f["doc_a"], f["doc_b"]) for f in flags}
+        meta_set = {(f["doc_a"], f["doc_b"]) for f in meta["flags"]}
+        assert input_set == meta_set
+
+
+def test_generate_bulk_reports_zip_with_progress_bar():
+    from unittest.mock import Mock
+
+    flags = [
+        {
+            "doc1": "Alice.pdf",
+            "doc2": "Bob.docx",
+            "similarity_score": 0.85,
+            "matched_chunks": [],
+        },
+        {
+            "doc1": "Charlie.txt",
+            "doc2": "Dave.pdf",
+            "similarity_score": 0.95,
+            "matched_chunks": ["chunk1"],
+        },
+    ]
+
+    mock_pb = Mock()
+
+    generate_bulk_reports_zip(flags, progress_bar=mock_pb)
+
+    assert mock_pb.progress.call_count == 4
+    mock_pb.progress.assert_any_call(
+        1.0,
+        text="ZIP archive ready!",
+    )
             with st.expander(
                 "🔝 Most Frequently Plagiarized Documents",
                 expanded=False,
@@ -2672,7 +2957,7 @@ if not st.session_state.authenticated:
                     qr.make(fit=True)
                     img = qr.make_image(fill_color="black", back_color="white")
                     buf = BytesIO()
-                    img.save(buf, format="PNG")
+                    img.save(buf)
                     qr_bytes = buf.getvalue()
 
                     col1, col2 = st.columns([1, 2])

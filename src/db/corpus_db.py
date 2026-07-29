@@ -220,23 +220,31 @@ def get_document_by_hash(file_hash: str) -> str | None:
 
 def get_all_documents(include_deleted: bool = False) -> list:
     """Return all indexed documents sorted by upload date descending."""
+    from src.db.schemas import Document
+    query = (
+        "SELECT filename, file_hash, upload_date, class_section, student_name, "
+        "assignment_title, pdf_author, pdf_creation_date, pdf_title, detected_language "
+        "FROM documents"
+    )
+    if not include_deleted:
+        query += " WHERE is_deleted IS NULL OR is_deleted = 0"
+    query += " ORDER BY upload_date DESC"
+
     with _connect() as conn:
-        rows = conn.execute(
-            "SELECT filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, detected_language FROM documents ORDER BY upload_date DESC"
-        ).fetchall()
+        rows = conn.execute(query).fetchall()
     return [
-        {
-            "filename": r[0],
-            "file_hash": r[1],
-            "upload_date": r[2],
-            "class_section": r[3],
-            "student_name": r[4],
-            "assignment_title": r[5],
-            "pdf_author": r[6],
-            "pdf_creation_date": r[7],
-            "pdf_title": r[8],
-            "detected_language": r[9],
-        }
+        Document(
+            filename=r[0],
+            file_hash=r[1],
+            upload_date=r[2],
+            class_section=r[3],
+            student_name=r[4],
+            assignment_title=r[5],
+            pdf_author=r[6],
+            pdf_creation_date=r[7],
+            pdf_title=r[8],
+            detected_language=r[9],
+        )
         for r in rows
     ]
 
@@ -326,23 +334,24 @@ def soft_delete_document(filename: str) -> None:
 
 def get_deleted_documents() -> list:
     """Return all soft-deleted documents sorted by deleted_at descending."""
+    from src.db.schemas import Document
     with _connect() as conn:
         rows = conn.execute(
             "SELECT filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, deleted_at FROM documents WHERE is_deleted = 1 ORDER BY deleted_at DESC"
         ).fetchall()
     return [
-        {
-            "filename": r[0],
-            "file_hash": r[1],
-            "upload_date": r[2],
-            "class_section": r[3],
-            "student_name": r[4],
-            "assignment_title": r[5],
-            "pdf_author": r[6],
-            "pdf_creation_date": r[7],
-            "pdf_title": r[8],
-            "deleted_at": r[9],
-        }
+        Document(
+            filename=r[0],
+            file_hash=r[1],
+            upload_date=r[2],
+            class_section=r[3],
+            student_name=r[4],
+            assignment_title=r[5],
+            pdf_author=r[6],
+            pdf_creation_date=r[7],
+            pdf_title=r[8],
+            deleted_at=r[9],
+        )
         for r in rows
     ]
 
