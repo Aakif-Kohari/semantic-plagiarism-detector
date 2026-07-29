@@ -2,6 +2,7 @@ import os
 import sys
 from pathlib import Path
 
+
 # Fix Streamlit import paths by pointing to project root
 FILE_PATH = Path(__file__).resolve()
 ROOT_DIR = FILE_PATH.parent.parent  # Points to semantic-plagiarism-detector/
@@ -207,13 +208,13 @@ except Exception:
     from src.utils.json_export import export_similarity_matrix_to_json
 except ImportError:
 
-    from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore[import-untyped,reportMissingImports]
+    from src.utils.excel_export import export_similarity_matrix_to_excel  # type: ignore[import-untyped,reportMissingImports]
 
 
-    from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore[import-untyped,reportMissingImports]
+    from src.utils.excel_export import export_similarity_matrix_to_excel  # type: ignore[import-untyped,reportMissingImports]
 
-    from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore
-    from utils.json_export import export_similarity_matrix_to_json
+    from src.utils.excel_export import export_similarity_matrix_to_excel  # type: ignore
+    from src.utils.json_export import export_similarity_matrix_to_json
 
 
 
@@ -588,6 +589,46 @@ heatmap_cmap = "OrRd"
 unique_classes = ["All Classes"] + get_unique_class_sections()
 selected_class = st.session_state.get("class_filter_selectbox", "All Classes")
 
+@st.dialog("⚠️ Confirm Logout")
+def logout_dialog():
+    st.write("Are you sure you want to log out?")
+    st.info("Your current session will be cleared.")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button(
+            "Cancel",
+            use_container_width=True,
+            key="cancel_logout",
+        ):
+            st.rerun()
+
+    with col2:
+        if st.button(
+            "Log Out",
+            type="primary",
+            use_container_width=True,
+            key="confirm_logout",
+        ):
+            import logging
+            from datetime import datetime, timezone
+
+            logger = logging.getLogger(__name__)
+            username = st.session_state.get("username", "unknown")
+            timestamp = datetime.now(timezone.utc).isoformat()
+
+            logger.info("User '%s' logged out at %s", username, timestamp)
+
+            for key in ["authenticated", "username", "role"]:
+                if key in st.session_state:
+                    del st.session_state[key]
+
+            clear_session(SESSION_ID)
+            st.rerun()
+
+
+
 
 @st.dialog("⚠️ Confirm Bulk Clear")
 def clear_all_dialog():
@@ -688,19 +729,8 @@ with st.sidebar:
         pass
 
     if st.button("🚪 Log Out", use_container_width=True):
-        import logging
-        from datetime import datetime, timezone
-
-        logger = logging.getLogger(__name__)
-        username = st.session_state.get("username", "unknown")
-        timestamp = datetime.now(timezone.utc).isoformat()
-        logger.info("User '%s' logged out at %s", username, timestamp)
-
-        for key in ["authenticated", "username", "role"]:
-            if key in st.session_state:
-                del st.session_state[key]
-        clear_session(SESSION_ID)
-        st.rerun()
+        logout_dialog()
+        
 
     if user_role == "admin":
         st.markdown("---")
@@ -2733,7 +2763,7 @@ def test_generate_bulk_reports_zip_with_progress_bar():
         1.0,
         text="ZIP archive ready!",
     )
-            with st.expander(
+    with st.expander(
                 "🔝 Most Frequently Plagiarized Documents",
                 expanded=False,
             ):
@@ -2757,7 +2787,7 @@ def test_generate_bulk_reports_zip_with_progress_bar():
                         use_container_width=True,
                     )
 
-            with st.expander(
+    with st.expander(
                 "📊 Similarity Score Distribution",
                 expanded=False,
             ):
@@ -2798,35 +2828,35 @@ def test_generate_bulk_reports_zip_with_progress_bar():
                             use_container_width=True,
                         )
 
-            st.divider()
+    st.divider()
 
-            # Summary statistics remain lightweight and always visible.
-            st.subheader("📋 Analytics Summary")
-            if trend_data:
-                total_high_severity = sum(
-                    item["count"] for item in trend_data
-                )
-                st.metric(
-                    "Total High Severity Incidents (30 days)",
-                    total_high_severity,
-                )
-            else:
-                st.info(
-                    "No high severity incidents recorded in the last "
-                    "30 days."
-                )
+    # Summary statistics remain lightweight and always visible.
+    st.subheader("📋 Analytics Summary")
+    if trend_data:
+        total_high_severity = sum(
+            item["count"] for item in trend_data
+        )
+        st.metric(
+            "Total High Severity Incidents (30 days)",
+            total_high_severity,
+        )
+    else:
+        st.info(
+            "No high severity incidents recorded in the last "
+            "30 days."
+        )
 
-            if doc_data:
-                most_plagiarized = doc_data[0]
-                st.metric(
-                    "Most Plagiarized Document",
-                    (
-                        f"{most_plagiarized['document_name']} "
-                        f"({most_plagiarized['incident_count']} incidents)"
-                    ),
-                )
-            else:
-                st.info("No plagiarism incidents recorded.")
+    if doc_data:
+        most_plagiarized = doc_data[0]
+        st.metric(
+            "Most Plagiarized Document",
+            (
+                f"{most_plagiarized['document_name']} "
+                f"({most_plagiarized['incident_count']} incidents)"
+            ),
+        )
+    else:
+        st.info("No plagiarism incidents recorded.")
 
     # ══ TAB 7: User Management ═══════════════════════════════════════════════════
     with tab_users:
