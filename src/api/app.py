@@ -27,6 +27,17 @@ app = FastAPI(
     title="Semantic Plagiarism Detector API",
     description="REST API for programmatically checking documents for semantic plagiarism.",
     version="1.0.0",
+    contact={
+        "name": "API Support",
+        "url": "http://example.com/support",
+        "email": "support@example.com",
+    },
+    openapi_tags=[
+        {"name": "Authentication", "description": "Authenticate user"},
+        {"name": "Plagiarism Detection", "description": "Scanning operations"},
+        {"name": "System Administration", "description": "Admin operations"},
+        {"name": "Health", "description": "Health checks"}
+    ]
 )
 
 # Enable CORS for external LMS frontends
@@ -94,6 +105,12 @@ def get_corpus_documents_with_embeddings() -> Dict[str, Dict]:
 
 
 # ── API Endpoints ──────────────────────────────────────────────────────────────
+
+
+@app.post("/api/v1/auth/login", tags=["Authentication"], summary="Authenticate user")
+async def login():
+    """Authenticate user and return a session token."""
+    return {"token": "dummy-token"}
 
 
 @app.get("/health", tags=["Health"])
