@@ -655,15 +655,4 @@ def version_check_widget_html(local_version: str, latest_tag: str, repo_url: str
         </a>
     </span>
 </div>
-
-  def version_check_widget_html(local_version: str, latest_tag: str, repo_url: str = "https://github.com/Ganesh-403/semantic-plagiarism-detector/releases") -> str:
-    warning_soft = "rgba(255, 165, 0, 0.1)"
-    warning_color = "#ffa500"
-    ink = "#333333"
-
-    return f
-    <div style="background-color: {warning_soft}; border-left: 4px solid {warning_color}; padding: 1rem; border-radius: 4px; color: {ink};">
-        <strong>&#128276; Update available:</strong> v{local_version} &rarr; <strong>{latest_tag}</strong>. 
-        <a href="{repo_url}" target="_blank" style="color: {warning_color}; font-weight: 600; margin-left: 0.5rem;">View release &rarr;</a>
-    </div>
 """
