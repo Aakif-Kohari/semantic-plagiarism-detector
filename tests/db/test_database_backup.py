@@ -8,10 +8,9 @@ automated cleanup of old backups based on retention policies.
 """
 
 import os
-import tempfile
 import time
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 

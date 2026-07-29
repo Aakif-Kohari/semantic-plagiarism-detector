@@ -128,17 +128,12 @@ MOCK_SUBJECTS = [
 
 
 
-from src.core.faiss_index import build_index_from_matrix, save_index
-from src.db.auth import add_user
-from src.db.auth import init_db as init_auth_db
+
 from src.db.corpus_db import (
-    add_chunks,
-    add_document,
     get_all_documents,
     get_embedding_count,
-    init_corpus_db,
 )
-from src.db.incidents import get_all_incidents, sync_flagged_incidents
+from src.db.incidents import get_all_incidents
 
 MOCK_VERBS = [
     "analyzes", "evaluates", "investigates", "explores", "demonstrates",
@@ -152,28 +147,6 @@ MOCK_VERBS = [
     "deepens", "strengthens", "fortifies", "secures", "protects",
     "defends", "guards", "shields", "safeguards", "preserves",
 ]
-
-
-def main():
-    print("Cleaning existing local databases...")
-    for filename in SEED_DB_FILES:
-        path = os.path.join(seed_dir, filename)
-        if os.path.exists(path):
-            try:
-                os.remove(path)
-                print(f"Removed old seed {filename}")
-            except Exception as err:
-                print(f"Warning: Could not remove old seed {filename} ({err})")
-
-    print("Initializing databases...")
-
-    # Initialize Auth DB (Creates users.db and seeds admin/admin123)
-    init_auth_db()
-
-    # Add a teacher user
-    add_user(TEACHER_USERNAME, TEACHER_PASSWORD, TEACHER_ROLE)
-    print("Auth DB initialized and seeded.")
-
 
 MOCK_OBJECTS = [
     "complex systems", "algorithmic efficiency", "data structures",
@@ -552,7 +525,9 @@ def initialize_databases(verbose: bool):
             "doc_a": BOB_FILENAME,
             "doc_b": ALICE_FILENAME,
             "similarity": ALICE_BOB_SIMILARITY,
-            "severity": INCIDENT_SEVERITY,
+        }
+    ]
+    sync_flagged_incidents(flags)
 
 
 
@@ -656,7 +631,7 @@ def main():
 
     # Step 4: Sync Incidents
     logger.info("Syncing plagiarism incidents...")
-    sync_flagged_incidents(flags, db_path=corpus_db_path)
+    sync_flagged_incidents(flags, db_path=os.path.join(seed_dir, "corpus.db"))
 
     # Step 5: Build and Save FAISS Index
     logger.info("Building and saving FAISS index...")

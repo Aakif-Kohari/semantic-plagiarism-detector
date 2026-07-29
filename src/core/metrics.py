@@ -11,7 +11,7 @@ import functools
 import logging
 import os
 import time
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 from prometheus_client import Counter, Gauge, Histogram, generate_latest
 
@@ -154,7 +154,7 @@ def sync_telemetry_gauges() -> None:
         logger.warning("Failed to sync document count gauge: %s", exc)
 
     try:
-        user_count = TelemetryService.get_active_user_count()
+        TelemetryService.get_active_user_count()
     except Exception as exc:
         logger.warning("Failed to sync user count: %s", exc)
 

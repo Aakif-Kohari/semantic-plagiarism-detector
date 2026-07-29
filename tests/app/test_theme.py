@@ -100,7 +100,6 @@ def test_badge_html_returns_valid_html():
 
 
 import streamlit as st
-from unittest.mock import patch
 from app.theme import initialize_theme, set_theme
 
 def test_initialize_theme_loads_dark_from_query_params():

@@ -4,13 +4,9 @@ test_redis_cache.py
 Unit tests for Redis cache functionality.
 """
 
-import pytest
 import numpy as np
-from unittest.mock import Mock, patch
+import pytest
 from unittest.mock import Mock
-
-import numpy as np
-import pytest
 
 from src.utils.redis_cache import (
     CacheKeyPrefix,
@@ -20,7 +16,6 @@ from src.utils.redis_cache import (
     cache_session_state,
     clear_session,
     get_analysis_results,
-    _cache,
     RedisError,
     get_cache,
     get_faiss_index,
@@ -42,14 +37,11 @@ class TestRedisCache:
     @pytest.fixture
     def cache_with_mock(self, mock_redis_client):
         """Create a RedisCache instance with mocked client."""
-        from src.utils.redis_cache import _cache
 
         cache = RedisCache.__new__(RedisCache)
         cache._client = mock_redis_client
-        _cache._client = mock_redis_client
-        yield cache
-        _cache._client = None
 
+        yield cache
     def test_cache_set_get(self, cache_with_mock, mock_redis_client):
         """Test basic set and get operations."""
         import pickle
