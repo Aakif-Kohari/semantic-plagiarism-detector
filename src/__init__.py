@@ -1,3 +1,9 @@
+"""
+src/__init__.py
+---------------
+Package initialization for the Semantic Plagiarism Detector core utilities, database handlers, and visualization routines.
+"""
+
 from .core import (
     PLAGIARISM_THRESHOLD,
     ChunkRecord,
