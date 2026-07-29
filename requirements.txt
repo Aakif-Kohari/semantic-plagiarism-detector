@@ -84,3 +84,4 @@ pyzipper>=0.4.0                 # AES-256 encrypted ZIP archives for backups
 # ── Background Task Queue ─────────────────────────────────────────────────────
 rq>=1.16.0                      # Redis-backed background job queue for async upload processing
 hiredis>=2.3.0                  # C-extension Redis parser for faster RQ job dequeue
+slowapi

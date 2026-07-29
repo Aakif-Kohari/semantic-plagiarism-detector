@@ -16,6 +16,18 @@ from src.api.app import app, get_expected_bearer_token
 client = TestClient(app)
 
 
+def test_login_rate_limit():
+    """Verify that /api/v1/auth/login limits requests to 5 per minute per IP."""
+    # Send 5 successful requests
+    for _ in range(5):
+        response = client.post("/api/v1/auth/login")
+        assert response.status_code == 200
+
+    # The 6th request should fail with 429 Too Many Requests
+    response = client.post("/api/v1/auth/login")
+    assert response.status_code == 429
+    assert "detail" in response.json()
+
 def test_health_check():
     """Verify that GET /health returns 200 OK and healthy status."""
     response = client.get("/health")
