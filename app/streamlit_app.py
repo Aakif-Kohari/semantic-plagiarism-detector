@@ -1972,29 +1972,58 @@ else:
 
             st.warning(UI_NEED_MIN_DOCUMENTS)
         else:
-            c1, c2 = st.columns(2)
-            with c1:
-                doc_a = st.selectbox("Document A", doc_names, index=0, key="da")
-            with c2:
-                doc_b = st.selectbox(
-                    "Document B",
-                    [d for d in doc_names if d != doc_a],
-                    index=0,
-                    key="db",
-                )
+           query_doc_a = st.query_params.get("doc_a")
+    query_doc_b = st.query_params.get("doc_b")
 
-            score = float(active_sim_df.loc[doc_a, doc_b])
-            st.markdown(f"**Overall Similarity:** `{score:.1%}`")
-            st.progress(float(score))
-            st.divider()
+    default_a_index = (
+        doc_names.index(query_doc_a)
+        if query_doc_a in doc_names
+        else 0
+    )
 
-            drill_tab_analysis, drill_tab_viewer = st.tabs(
+    c1, c2 = st.columns(2)
+
+    with c1:
+        doc_a = st.selectbox(
+            "Document A",
+            doc_names,
+            index=default_a_index,
+            key="da",
+        )
+
+    available_doc_b = [d for d in doc_names if d != doc_a]
+
+    default_b_index = (
+        available_doc_b.index(query_doc_b)
+        if query_doc_b in available_doc_b
+        else 0
+    )
+
+    with c2:
+        doc_b = st.selectbox(
+            "Document B",
+            available_doc_b,
+            index=default_b_index,
+            key="db",
+        )
+
+    if st.button("🔗 Share This Pair", key="share_pair"):
+        st.query_params["doc_a"] = doc_a
+        st.query_params["doc_b"] = doc_b
+        st.success("✅ Shareable link created! Copy the URL from your browser.")
+
+    score = float(active_sim_df.loc[doc_a, doc_b])
+    st.markdown(f"**Overall Similarity:** `{score:.1%}`")
+    st.progress(float(score))
+    st.divider()
+
+    drill_tab_analysis, drill_tab_viewer = st.tabs(
                 ["📊 Chunk Matches & Report", "📄 Document Viewer"]
             )
-            chunks_a = chunked_docs.get(doc_a, [])
-            chunks_b = chunked_docs.get(doc_b, [])
+    chunks_a = chunked_docs.get(doc_a, [])
+    chunks_b = chunked_docs.get(doc_b, [])
 
-            with drill_tab_analysis:
+    with drill_tab_analysis:
                 top_pairs = find_most_similar_chunks(
                     chunks_a,
                     chunks_b,
@@ -2013,7 +2042,7 @@ else:
                         st.write(f"**{doc_a}:** {ca}")
                         st.write(f"**{doc_b}:** {cb}")
 
-            with drill_tab_viewer:
+    with drill_tab_viewer:
                 selected_view_doc = st.radio(
                     "Select Document to Preview:",
                     options=[doc_a, doc_b],
