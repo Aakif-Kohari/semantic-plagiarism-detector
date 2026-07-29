@@ -337,6 +337,150 @@ class TestRedisCache:
         cache2 = get_cache()
         assert cache1 is cache2
     
+    def test_redis_url_without_ssl_redis_scheme(self):
+        """Test that redis:// URL (without SSL) is handled correctly."""
+        test_url = "redis://localhost:6379/0"
+        
+        with patch.object(redis, 'from_url') as mock_from_url:
+            mock_client = Mock()
+            mock_client.ping.return_value = True
+            mock_from_url.return_value = mock_client
+            
+            # Temporarily modify REDIS_URL
+            import src.utils.redis_cache as redis_cache_module
+            original_url = redis_cache_module.REDIS_URL
+            
+            try:
+                redis_cache_module.REDIS_URL = test_url
+                
+                # Create new instance to trigger reconnection
+                cache = RedisCache.__new__(RedisCache)
+                cache._connect()
+                
+                # Verify from_url was called with the URL
+                mock_from_url.assert_called_once_with(
+                    test_url,
+                    password=None,
+                    decode_responses=False,
+                    socket_connect_timeout=5
+                )
+            finally:
+                redis_cache_module.REDIS_URL = original_url
+    
+    def test_redis_url_with_ssl_rediss_scheme(self):
+        """Test that rediss:// URL (with SSL) is handled correctly."""
+        test_url = "rediss://localhost:6380/0"
+        
+        with patch.object(redis, 'from_url') as mock_from_url:
+            mock_client = Mock()
+            mock_client.ping.return_value = True
+            mock_from_url.return_value = mock_client
+            
+            # Temporarily modify REDIS_URL
+            import src.utils.redis_cache as redis_cache_module
+            original_url = redis_cache_module.REDIS_URL
+            
+            try:
+                redis_cache_module.REDIS_URL = test_url
+                
+                # Create new instance to trigger reconnection
+                cache = RedisCache.__new__(RedisCache)
+                cache._connect()
+                
+                # Verify from_url was called with the URL
+                # Note: redis.from_url automatically sets ssl=True for rediss://
+                mock_from_url.assert_called_once_with(
+                    test_url,
+                    password=None,
+                    decode_responses=False,
+                    socket_connect_timeout=5
+                )
+            finally:
+                redis_cache_module.REDIS_URL = original_url
+    
+    def test_redis_url_with_password_and_ssl(self):
+        """Test that rediss:// URL with password is handled correctly."""
+        test_url = "rediss://user:password@redis.example.com:6380/1"
+        
+        with patch.object(redis, 'from_url') as mock_from_url:
+            mock_client = Mock()
+            mock_client.ping.return_value = True
+            mock_from_url.return_value = mock_client
+            
+            import src.utils.redis_cache as redis_cache_module
+            original_url = redis_cache_module.REDIS_URL
+            original_password = redis_cache_module.REDIS_PASSWORD
+            
+            try:
+                redis_cache_module.REDIS_URL = test_url
+                redis_cache_module.REDIS_PASSWORD = None  # Password is in URL
+                
+                cache = RedisCache.__new__(RedisCache)
+                cache._connect()
+                
+                # Verify from_url was called correctly
+                mock_from_url.assert_called_once_with(
+                    test_url,
+                    password=None,
+                    decode_responses=False,
+                    socket_connect_timeout=5
+                )
+            finally:
+                redis_cache_module.REDIS_URL = original_url
+                redis_cache_module.REDIS_PASSWORD = original_password
+    
+    def test_redis_host_port_without_ssl(self):
+        """Test that host/port config without SSL works correctly."""
+        # Use redis:// scheme to ensure SSL is disabled
+        test_url = "redis://localhost:6379/0"
+        
+        with patch.object(redis, 'from_url') as mock_from_url:
+            mock_client = Mock()
+            mock_client.ping.return_value = True
+            mock_from_url.return_value = mock_client
+            
+            import src.utils.redis_cache as redis_cache_module
+            original_url = redis_cache_module.REDIS_URL
+            
+            try:
+                redis_cache_module.REDIS_URL = test_url
+                
+                cache = RedisCache.__new__(RedisCache)
+                cache._connect()
+                
+                # Verify from_url was called
+                mock_from_url.assert_called_once()
+                
+                # Get the call arguments to verify SSL is not set to True
+                call_kwargs = mock_from_url.call_args.kwargs
+                # redis.from_url automatically sets ssl based on scheme
+                # For redis://, ssl defaults to False
+                assert 'ssl' not in call_kwargs or call_kwargs.get('ssl', False) is False
+            finally:
+                redis_cache_module.REDIS_URL = original_url
+    
+    def test_redis_connection_failure_with_message(self):
+        """Test that connection failures print appropriate error messages."""
+        test_url = "redis://unreachable-host:9999/0"
+        
+        with patch.object(redis, 'from_url') as mock_from_url:
+            # Simulate connection failure
+            mock_from_url.side_effect = redis.ConnectionError("Connection refused")
+            
+            import src.utils.redis_cache as redis_cache_module
+            original_url = redis_cache_module.REDIS_URL
+            
+            try:
+                redis_cache_module.REDIS_URL = test_url
+                
+                # This should not raise, but set _client to None
+                cache = RedisCache.__new__(RedisCache)
+                cache._connect()
+                
+                # Should be None after connection failure
+                assert cache._client is None
+            finally:
+                redis_cache_module.REDIS_URL = original_url
     def test_redis_failover_during_get(self):
         """Test graceful fallback when Redis fails during a get operation."""
         cache = RedisCache.__new__(RedisCache)
