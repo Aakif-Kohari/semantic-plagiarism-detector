@@ -54,6 +54,7 @@ try:
         MATPLOTLIB_CMAP_MAPPING,
         PLOTLY_CMAP_MAPPING,
         DEFAULT_UI_COLORMAP,
+        apply_matplotlib_theme,
     )
 except ImportError:
     # Fallback for standalone testing or isolated environments
@@ -61,6 +62,9 @@ except ImportError:
     MATPLOTLIB_CMAP_MAPPING = {"Viridis": "viridis"}
     PLOTLY_CMAP_MAPPING = {"Viridis": "Viridis"}
     DEFAULT_UI_COLORMAP = "Viridis"
+
+    def apply_matplotlib_theme(theme_colors=None):
+        pass
 
 
 # ── Security & Sanitization (Issue #704) ───────────────────────────────────────
@@ -255,6 +259,8 @@ def plot_similarity_heatmap(
     mask = None
     if mask_threshold is not None:
         mask = similarity_df < mask_threshold
+
+    apply_matplotlib_theme(theme_colors)
 
     with matplotlib_figure(figsize=figsize, dpi=dpi) as (fig, ax):
         sns.heatmap(
@@ -570,6 +576,8 @@ def plot_chunk_similarity_comparison(
 
     row_labels = [f"A{i + 1}: {short_label(c)}" for i, c in enumerate(chunks_a)]
     col_labels = [f"B{j + 1}: {short_label(c)}" for j, c in enumerate(chunks_b)]
+
+    apply_matplotlib_theme(theme_colors)
 
     with matplotlib_figure(figsize=(max(8, nb * 1.5), max(6, na * 0.8)), dpi=150) as (fig, ax):
         sns.heatmap(
