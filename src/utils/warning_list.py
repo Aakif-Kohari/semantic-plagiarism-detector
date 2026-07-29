@@ -770,4 +770,22 @@ def render_warning_controls(
         ):
             st.session_state.warning_page = current_page.page + 1
             st.rerun()
-            
+def matches_query_predicate(flag: dict, search_query: str) -> bool:
+    """
+    Check if a flagged incident matches a search query across document names or text snippets.
+    """
+    if not search_query or not search_query.strip():
+        return True
+
+    query = search_query.strip().lower()
+    doc_a = str(flag.get("doc_a", "")).lower()
+    doc_b = str(flag.get("doc_b", "")).lower()
+    snippet_a = str(flag.get("snippet_a", "")).lower()
+    snippet_b = str(flag.get("snippet_b", "")).lower()
+
+    return (
+        query in doc_a
+        or query in doc_b
+        or query in snippet_a
+        or query in snippet_b
+    )
