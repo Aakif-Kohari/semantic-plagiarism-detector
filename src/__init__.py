@@ -54,6 +54,7 @@ from .visualization import (
     build_network_data,
     export_graph_to_csv,
     export_network_to_csv_bytes,
+    filter_heatmap_by_class_tag,
     plot_chunk_similarity_comparison,
     plot_similarity_heatmap,
     plot_similarity_heatmap_plotly,

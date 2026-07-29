@@ -2334,6 +2334,14 @@ if not st.session_state.authenticated:
                     help="Hide cell colors for similarity values below this threshold.",
                 )
 
+                heatmap_class_filter = st.selectbox(
+                    "Filter Heatmap by Class Tag",
+                    options=unique_classes,
+                    index=0,
+                    key="heatmap_tab_class_filter",
+                    help="Filter heatmap rows and columns by matching document class tag.",
+                )
+
                 heatmap_fig = build_visualization_lazily(
                     load_heatmap,
                     lambda: plot_similarity_heatmap(
@@ -2344,6 +2352,7 @@ if not st.session_state.authenticated:
                         colormap_name=heatmap_cmap,
                         annotate=show_cell_percentages,
                         mask_threshold=mask_threshold,
+                        class_tag=heatmap_class_filter,
                     ),
                 )
 

@@ -111,3 +111,121 @@ def test_plot_similarity_heatmap_plotly_with_mask_threshold():
     assert z_values[1][1] == 1.0
 
 
+def test_filter_heatmap_by_class_tag_matches_subset():
+    """filter_heatmap_by_class_tag should filter matrix rows and columns to matching documents."""
+    from src.visualization.heatmap import filter_heatmap_by_class_tag
+
+    df = pd.DataFrame(
+        [
+            [1.0, 0.8, 0.2],
+            [0.8, 1.0, 0.3],
+            [0.2, 0.3, 1.0],
+        ],
+        columns=["doc1.pdf", "doc2.pdf", "doc3.pdf"],
+        index=["doc1.pdf", "doc2.pdf", "doc3.pdf"],
+    )
+    doc_class_map = {
+        "doc1.pdf": "Class A",
+        "doc2.pdf": "Class A",
+        "doc3.pdf": "Class B",
+    }
+
+    filtered_df = filter_heatmap_by_class_tag(
+        df, class_tag="Class A", doc_class_map=doc_class_map
+    )
+
+    assert list(filtered_df.columns) == ["doc1.pdf", "doc2.pdf"]
+    assert list(filtered_df.index) == ["doc1.pdf", "doc2.pdf"]
+    assert filtered_df.shape == (2, 2)
+
+
+def test_filter_heatmap_by_class_tag_all_classes_returns_full():
+    """class_tag='All Classes' or None should return the complete matrix without filtering."""
+    from src.visualization.heatmap import filter_heatmap_by_class_tag
+
+    df = pd.DataFrame(
+        [[1.0, 0.5], [0.5, 1.0]],
+        columns=["doc1.pdf", "doc2.pdf"],
+        index=["doc1.pdf", "doc2.pdf"],
+    )
+
+    full_all = filter_heatmap_by_class_tag(df, class_tag="All Classes")
+    full_none = filter_heatmap_by_class_tag(df, class_tag=None)
+
+    assert full_all.shape == (2, 2)
+    assert full_none.shape == (2, 2)
+
+
+def test_filter_heatmap_by_class_tag_no_match_returns_empty():
+    """Non-existent class tag should return an empty DataFrame."""
+    from src.visualization.heatmap import filter_heatmap_by_class_tag
+
+    df = pd.DataFrame(
+        [[1.0, 0.5], [0.5, 1.0]],
+        columns=["doc1.pdf", "doc2.pdf"],
+        index=["doc1.pdf", "doc2.pdf"],
+    )
+    doc_class_map = {"doc1.pdf": "Class A", "doc2.pdf": "Class A"}
+
+    empty_filtered = filter_heatmap_by_class_tag(
+        df, class_tag="Class Nonexistent", doc_class_map=doc_class_map
+    )
+
+    assert empty_filtered.empty
+
+
+def test_plot_similarity_heatmap_with_class_tag_filter():
+    """Static heatmap should apply class_tag filter when passed."""
+    df = pd.DataFrame(
+        [
+            [1.0, 0.8, 0.2],
+            [0.8, 1.0, 0.3],
+            [0.2, 0.3, 1.0],
+        ],
+        columns=["doc1.pdf", "doc2.pdf", "doc3.pdf"],
+        index=["doc1.pdf", "doc2.pdf", "doc3.pdf"],
+    )
+    doc_class_map = {
+        "doc1.pdf": "Class A",
+        "doc2.pdf": "Class A",
+        "doc3.pdf": "Class B",
+    }
+
+    fig = plot_similarity_heatmap(
+        df,
+        title="Class A Heatmap",
+        class_tag="Class A",
+        doc_class_map=doc_class_map,
+    )
+    assert hasattr(fig, "axes")
+
+
+def test_plot_similarity_heatmap_plotly_with_class_tag_filter():
+    """Plotly heatmap should apply class_tag filter and render subset."""
+    df = pd.DataFrame(
+        [
+            [1.0, 0.8, 0.2],
+            [0.8, 1.0, 0.3],
+            [0.2, 0.3, 1.0],
+        ],
+        columns=["doc1.pdf", "doc2.pdf", "doc3.pdf"],
+        index=["doc1.pdf", "doc2.pdf", "doc3.pdf"],
+    )
+    doc_class_map = {
+        "doc1.pdf": "Class A",
+        "doc2.pdf": "Class A",
+        "doc3.pdf": "Class B",
+    }
+
+    fig = plot_similarity_heatmap_plotly(
+        df,
+        title="Plotly Class A Heatmap",
+        class_tag="Class A",
+        doc_class_map=doc_class_map,
+    )
+    assert hasattr(fig, "layout")
+    heatmap = next(trace for trace in fig.data if trace.type == "heatmap")
+    assert list(heatmap.x) == ["doc1.pdf", "doc2.pdf"]
+
+
+
