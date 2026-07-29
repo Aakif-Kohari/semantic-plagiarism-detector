@@ -4,17 +4,17 @@ tests/visualization/test_network_graph.py
 Unit tests for plot_similarity_network edge cases.
 """
 
-import time
 from unittest.mock import patch
 
-import networkx as nx
-import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from src.visualization.network_graph import plot_similarity_network
 
 from src.visualization.network_graph import (
     build_network_data,
+    export_graph_to_csv,
     export_graph_to_gexf,
+    export_network_to_csv_bytes,
     export_network_to_gexf_bytes,
     plot_similarity_network,
     render_network_plotly,
@@ -247,4 +247,34 @@ def test_export_network_to_gexf_bytes_contains_nodes_and_edges():
     assert node_colors[0] == "#FFFF00"
     assert node_colors[1] != "#FFFF00"
     assert node_sizes[0] > node_sizes[1]
+
+
+def test_export_graph_to_csv():
+    """Verify export_graph_to_csv returns a CSV formatted string with Source,Target,Similarity header."""
+    G = nx.Graph()
+    G.add_edge("docA", "docB", similarity=0.88)
+    csv_str = export_graph_to_csv(G)
+
+    lines = csv_str.strip().splitlines()
+    assert lines[0] == "Source,Target,Similarity"
+    assert len(lines) == 2
+    assert "docA,docB,0.88" in lines[1] or "docB,docA,0.88" in lines[1]
+
+
+def test_export_network_to_csv_bytes():
+    """Verify export_network_to_csv_bytes builds graph and returns encoded CSV bytes."""
+    data = {
+        "doc1": [1.0, 0.92],
+        "doc2": [0.92, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2"])
+
+    csv_bytes = export_network_to_csv_bytes(df, threshold=0.75)
+    assert isinstance(csv_bytes, bytes)
+
+    decoded = csv_bytes.decode("utf-8")
+    lines = decoded.strip().splitlines()
+    assert lines[0] == "Source,Target,Similarity"
+    assert "doc1,doc2,0.92" in decoded or "doc2,doc1,0.92" in decoded
+
 
