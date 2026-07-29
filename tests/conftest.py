@@ -75,13 +75,16 @@ for mod_name in [
     "reportlab.lib.colors", "reportlab.lib.enums", "reportlab.lib.styles", "reportlab.lib.units", 
     "reportlab.lib.pagesizes", "reportlab.lib.utils", 
     "matplotlib", "matplotlib.patches", "matplotlib.pyplot", "matplotlib.figure", "matplotlib.ticker",
-    "faiss", "torch", "psutil", "pytesseract", "sklearn", "sklearn.metrics", "sklearn.metrics.pairwise", "requests",
+    "faiss", "torch", "psutil", "pytesseract", "sklearn", "sklearn.metrics", "sklearn.metrics.pairwise",
+    "sklearn.feature_extraction", "sklearn.feature_extraction.text", "requests",
 ]:
     if mod_name not in sys.modules:
         try:
-            top_pkg = mod_name.split(".")[0]
-            if importlib.util.find_spec(top_pkg) is None:
-                sys.modules[mod_name] = MagicMock()
+            spec = importlib.util.find_spec(mod_name)
+            if spec is None:
+                top_pkg = mod_name.split(".")[0]
+                if importlib.util.find_spec(top_pkg) is None:
+                    sys.modules[mod_name] = MagicMock()
         except Exception:
             sys.modules[mod_name] = MagicMock()
 

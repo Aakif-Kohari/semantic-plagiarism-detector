@@ -106,6 +106,7 @@ from src.core.text_chunking import chunk_documents
 from src.core.webhook import send_plagiarism_alert
 from src.i18n.translator import _SUPPORTED_LANGUAGES, get_text
 from src.visualization.network_graph import (
+    export_network_to_csv_bytes,
     export_network_to_gexf_bytes,
     plot_similarity_network,
 )
@@ -2447,21 +2448,39 @@ if not st.session_state.authenticated:
                     )
 
                 if network_fig is not None:
-                    gexf_data = export_network_to_gexf_bytes(
-                        similarity_df=active_sim_df,
-                        threshold=threshold,
-                        min_degree=st.session_state.get(
-                            "min_connected_docs_slider", 0
-                        ),
-                    )
-                    st.download_button(
-                        "⬇️ Download Network (GEXF)",
-                        gexf_data,
-                        "plagiarism_network.gexf",
-                        "application/xml",
-                        key="download_network_gexf",
-                        use_container_width=True,
-                    )
+                    col_gexf, col_csv = st.columns(2)
+                    with col_gexf:
+                        gexf_data = export_network_to_gexf_bytes(
+                            similarity_df=active_sim_df,
+                            threshold=threshold,
+                            min_degree=st.session_state.get(
+                                "min_connected_docs_slider", 0
+                            ),
+                        )
+                        st.download_button(
+                            "⬇️ Download Network (GEXF)",
+                            gexf_data,
+                            "plagiarism_network.gexf",
+                            "application/xml",
+                            key="download_network_gexf",
+                            use_container_width=True,
+                        )
+                    with col_csv:
+                        csv_data = export_network_to_csv_bytes(
+                            similarity_df=active_sim_df,
+                            threshold=threshold,
+                            min_degree=st.session_state.get(
+                                "min_connected_docs_slider", 0
+                            ),
+                        )
+                        st.download_button(
+                            "⬇️ Download Network Graph Data (CSV)",
+                            csv_data,
+                            "plagiarism_network.csv",
+                            "text/csv",
+                            key="download_network_csv",
+                            use_container_width=True,
+                        )
 
             selected_document_id = st.session_state.get(
                 "selected_document_id"
