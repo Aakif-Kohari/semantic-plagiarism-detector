@@ -155,19 +155,6 @@ streamlit run app/streamlit_app.py
 
 The app opens at **http://localhost:8501**.
 
-## Supported File Formats
-
-| File Type | Extension(s) | Max Size | Feature Support |
-|-----------|--------------|----------|-----------------|
-| PDF | `.pdf` | 10 MB | Text extraction with OCR support for scanned PDFs |
-| Microsoft Word | `.docx`, `.doc` | 10 MB | Text extraction |
-| Plain Text | `.txt` | 10 MB | Text extraction |
-| Rich Text | `.rtf` | 10 MB | Text extraction |
-| Markdown | `.md` | 10 MB | Text extraction |
-| EPUB | `.epub` | 10 MB | Text extraction |
-| ZIP Archive | `.zip` | 10 MB | Batch upload of supported files |
-| Images | `.png`, `.jpg`, `.jpeg` | 10 MB | OCR-based text extraction |
-
 ### 5. Pre-populated Seed Data (Optional for Contributors)
 
 To quickly test dashboard UI/CSS changes or verify logic without manually registering accounts or uploading documents, you can load pre-populated seed data:
@@ -524,20 +511,6 @@ service.
 | Embedding model | `paraphrase-multilingual-MiniLM-L12-v2` | Change in `src/core/embedding_model.py` or set `SEMANTIC_PLAGIARISM_MODEL` |
 | Batch size | `64` | Tune for GPU/CPU in `src/core/embedding_model.py` |
 
-### Webhook Security (SSRF)
-
-When `PLAGIARISM_WEBHOOK_URL` is configured, the URL is validated before dispatch.
-Webhook requests are only allowed over HTTPS and are blocked if DNS resolution maps
-to internal or special-purpose addresses.
-
-The validator explicitly blocks these private IPv4 CIDR ranges:
-
-- `10.0.0.0/8`
-- `172.16.0.0/12`
-- `192.168.0.0/16`
-
-Validation is implemented in `src/security/ssrf_protector.py`.
-
 ---
 
 ## 🧠 How It Works
@@ -777,8 +750,36 @@ Existing database files should not be deleted during an application upgrade.
 
 ---
 
+## Documentation
+
+- [Architecture](docs/ARCHITECTURE.md)
+- [API Reference](docs/API.md)
+- [Document Parsing & Formats](docs/PARSING.md)
+- [NLP Architecture & Similarity Algorithm Guide](docs/ALGORITHMS.md)
+
+
+- [Bulk Export Formats & Data Fields](docs/EXPORTS.md)
+
+- [UI Customization and Theme Guide](docs/THEMING.md)
+
+
+---
+
 ## 📄 License
 
-This project is licensed under the [MIT License](LICENSE).
+MIT License. Free for academic and educational use.
 
-See the [`LICENSE`](LICENSE) file for the full license text.
+
+## Webhook retry behaviour
+
+Plagiarism webhook delivery automatically retries temporary failures up to
+three times with exponential backoff.
+
+Retries apply to:
+
+- connection failures and request timeouts,
+- HTTP 408, 425, and 429,
+- HTTP 500, 502, 503, and 504.
+
+Permanent client errors such as HTTP 400 and 401 are not retried. Webhook SSRF
+validation runs before dispatch and is never bypassed or retried.

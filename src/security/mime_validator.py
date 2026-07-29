@@ -91,12 +91,13 @@ def validate_mime_type(file_bytes: bytes, filename: str) -> bool:
 
     # For text files, if magic failed, we can verify it contains mostly printable text
     if extension in {"txt", "csv", "md"}:
-        try:
-            # Verify if it can be decoded as UTF-8
-            file_bytes.decode("utf-8", errors="strict")
-            return True
-        except UnicodeDecodeError:
-            logger.warning(f"[mime_validator] Security warning: Text validation check failed for '{filename}' (not valid UTF-8).")
-            return False
+        for encoding in ("utf-8", "utf-16", "latin-1"):
+            try:
+                file_bytes.decode(encoding, errors="strict")
+                return True
+            except UnicodeDecodeError:
+                continue
+        logger.warning(f"[mime_validator] Security warning: Text validation check failed for '{filename}' (not valid UTF-8/UTF-16/Latin-1).")
+        return False
 
     return False

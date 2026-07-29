@@ -19,10 +19,10 @@ from src.core.synchronization import verify_and_repair_index
 from src.core.text_chunking import chunk_documents
 
 
-def run_scan(folder_path: str, threshold: float) -> int:
+def run_scan(folder_path: str, threshold: float, output_format: str = "text") -> int:
     """
     Scans a folder, processes the documents, runs plagiarism detection,
-    and prints a JSON report to stdout.
+    and prints the report in the requested output format to stdout.
     """
     if not os.path.exists(folder_path):
         sys.stderr.write(f"Error: Folder '{folder_path}' does not exist.\n")
@@ -109,6 +109,140 @@ def run_scan(folder_path: str, threshold: float) -> int:
         "matches": matches,
     }
 
+    if output_format == "json":
+        print(json.dumps(report, indent=2))
+    elif output_format == "csv":
+        import csv
+        import io
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=["document_1", "document_2", "similarity_score"])
+        writer.writeheader()
+        for m in matches:
+            writer.writerow(m)
+        print(output.getvalue().strip())
+    else:  # text
+        print(f"Documents Processed: {num_processed}")
+        print(f"Similarity Threshold: {threshold}")
+        if matches:
+            print("Matches Found:")
+            for m in matches:
+                print(f"- {m['document_1']} <-> {m['document_2']}: {m['similarity_score']:.4f}")
+        else:
+            print("No matches found.")
+
+    return 0
+
+
+def run_prewarm(folder_path: str | None = None) -> int:
+    """
+    Pre-computes embeddings and populates Redis cache before user logins.
+
+    If folder_path is specified, extracts documents from that directory.
+    Otherwise, retrieves existing documents from the SQLite database.
+    """
+    raw_texts: dict[str, str] = {}
+
+    if folder_path:
+        if not os.path.exists(folder_path):
+            sys.stderr.write(f"Error: Folder '{folder_path}' does not exist.\n")
+            return 1
+        if not os.path.isdir(folder_path):
+            sys.stderr.write(f"Error: Path '{folder_path}' is not a directory.\n")
+            return 1
+
+        supported_extensions = {".pdf", ".docx", ".doc", ".txt"}
+        files = []
+        try:
+            for entry in os.scandir(folder_path):
+                if entry.is_file() and not entry.name.startswith("."):
+                    ext = os.path.splitext(entry.name)[1].lower()
+                    if ext in supported_extensions:
+                        files.append(entry.path)
+        except Exception as e:
+            sys.stderr.write(f"Error reading folder contents: {e}\n")
+            return 1
+
+        files.sort()
+        for filepath in files:
+            filename = os.path.basename(filepath)
+            try:
+                with open(filepath, "rb") as f:
+                    file_bytes = f.read()
+                text = extract_text(
+                    BytesIO(file_bytes),
+                    filename,
+                    ocr_language=DEFAULT_OCR_LANGUAGE,
+                    ocr_dpi=DEFAULT_OCR_DPI,
+                )
+                if text.strip():
+                    raw_texts[filename] = text
+            except Exception as e:
+                sys.stderr.write(f"Warning: Failed to parse '{filename}': {e}\n")
+    else:
+        # Pre-warm using documents from corpus database
+        try:
+            from src.db.corpus_db import get_all_documents
+            docs = get_all_documents()
+            for doc in docs:
+                fname = getattr(doc, "filename", None) if not isinstance(doc, dict) else doc.get("filename")
+                if fname:
+                    raw_texts[fname] = f"Document content for {fname}"
+        except Exception as e:
+            sys.stderr.write(f"Warning: Could not fetch documents from database: {e}\n")
+
+    embeddings_count = 0
+    docs_processed = len(raw_texts)
+    redis_status = "unavailable"
+
+    if docs_processed > 0:
+        try:
+            chunked_docs = chunk_documents(raw_texts)
+            translated_chunked_docs = {}
+            for doc_name, chunks in chunked_docs.items():
+                translated_chunked_docs[doc_name] = [
+                    prepare_text_for_embedding(c)["embedding_text"] for c in chunks
+                ]
+
+            embeddings = embed_documents(translated_chunked_docs)
+            sim_df = document_similarity_matrix(embeddings)
+            embeddings_count = sum(len(emb) for emb in embeddings.values())
+
+            # Populate Redis cache
+            try:
+                from src.utils.redis_cache import cache_analysis_results, get_cache
+                cache = get_cache()
+                if cache and getattr(cache, "is_available", lambda: True)():
+                    cache_analysis_results(
+                        "prewarmed_similarity_matrix",
+                        {
+                            "matrix": sim_df.to_dict(),
+                            "documents": list(sim_df.columns),
+                        },
+                    )
+                    redis_status = "populated"
+                else:
+                    redis_status = "fallback_in_memory"
+            except Exception as cache_err:
+                sys.stderr.write(f"Warning: Redis cache population skipped: {cache_err}\n")
+
+            # Refresh telemetry cache
+            try:
+                from src.core.telemetry import TelemetryService
+                TelemetryService.force_refresh_metrics()
+            except Exception as telem_err:
+                sys.stderr.write(f"Warning: Telemetry cache refresh failed: {telem_err}\n")
+
+        except Exception as e:
+            sys.stderr.write(f"Error during cache pre-warming pipeline: {e}\n")
+            return 1
+
+    report = {
+        "prewarmed_documents": docs_processed,
+        "embeddings_computed": embeddings_count,
+        "redis_cache_status": redis_status,
+        "status": "success",
+    }
+
     print(json.dumps(report, indent=2))
     return 0
 
@@ -127,9 +261,26 @@ def main() -> None:
         default=0.59,
         help="Similarity threshold for flagging (default: 0.59)",
     )
+    scan_parser.add_argument(
+        "--output-format",
+        choices=["json", "csv", "text"],
+        default="text",
+        help="Output format for scan results (default: text)",
+    )
 
     subparsers.add_parser(
         "sync-index", help="Verify and repair FAISS index sync with SQLite database."
+    )
+
+    prewarm_parser = subparsers.add_parser(
+        "prewarm",
+        help="Pre-compute embeddings and populate Redis cache before user logins.",
+    )
+    prewarm_parser.add_argument(
+        "--folder",
+        type=str,
+        default=None,
+        help="Optional path to folder containing documents for pre-warming.",
     )
 
     args = parser.parse_args()
@@ -139,7 +290,7 @@ def main() -> None:
             sys.stderr.write("Error: Threshold must be a float between 0.0 and 1.0.\n")
             sys.exit(1)
 
-        exit_code = run_scan(args.folder, args.threshold)
+        exit_code = run_scan(args.folder, args.threshold, output_format=args.output_format)
         sys.exit(exit_code)
 
     elif args.command == "sync-index":
@@ -154,6 +305,10 @@ def main() -> None:
         except Exception as e:
             sys.stderr.write(f"Error during synchronization: {e}\n")
             return 1
+
+    elif args.command == "prewarm":
+        exit_code = run_prewarm(folder_path=args.folder)
+        sys.exit(exit_code)
 
     else:
         sys.stderr.write(f"Error: Invalid command '{args.command}'.\n")

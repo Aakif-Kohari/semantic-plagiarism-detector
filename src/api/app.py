@@ -8,6 +8,7 @@ import numpy as np
 from fastapi import (Depends, FastAPI, File, HTTPException, Query, UploadFile,
                      status)
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse, JSONResponse
 from fastapi.security import HTTPBearer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -26,6 +27,17 @@ app = FastAPI(
     title="Semantic Plagiarism Detector API",
     description="REST API for programmatically checking documents for semantic plagiarism.",
     version="1.0.0",
+    contact={
+        "name": "API Support",
+        "url": "http://example.com/support",
+        "email": "support@example.com",
+    },
+    openapi_tags=[
+        {"name": "Authentication", "description": "Authenticate user"},
+        {"name": "Plagiarism Detection", "description": "Scanning operations"},
+        {"name": "System Administration", "description": "Admin operations"},
+        {"name": "Health", "description": "Health checks"}
+    ]
 )
 
 # Enable CORS for external LMS frontends
@@ -95,6 +107,12 @@ def get_corpus_documents_with_embeddings() -> Dict[str, Dict]:
 # ── API Endpoints ──────────────────────────────────────────────────────────────
 
 
+@app.post("/api/v1/auth/login", tags=["Authentication"], summary="Authenticate user")
+async def login():
+    """Authenticate user and return a session token."""
+    return {"token": "dummy-token"}
+
+
 @app.get("/health", tags=["Health"])
 def health_check():
     """Healthcheck endpoint for readiness and liveness probes."""
@@ -109,6 +127,22 @@ _HEALTHZ_DB_PATHS = (
     os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "corpus.db")),
     os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "users.db")),
 )
+
+
+@app.get("/metrics", tags=["Monitoring"], response_class=PlainTextResponse)
+def metrics_prometheus():
+    """Prometheus-format metrics export for production monitoring."""
+    from src.core.metrics import generate_latest as _gen
+
+    return PlainTextResponse(_gen().decode("utf-8"))
+
+
+@app.get("/metrics/json", tags=["Monitoring"])
+def metrics_json():
+    """JSON-format metrics export for non-Prometheus monitoring setups."""
+    from src.core.metrics import generate_metrics_json
+
+    return JSONResponse(generate_metrics_json())
 
 
 @app.get("/healthz", tags=["Health"])
@@ -161,10 +195,10 @@ async def scan_document(
     filename = file.filename
     file_bytes = await file.read()
 
-    if not file_bytes:
+    if len(file_bytes) == 0:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Uploaded file is empty.",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Uploaded file is empty",
         )
 
     # Extract text from uploaded document

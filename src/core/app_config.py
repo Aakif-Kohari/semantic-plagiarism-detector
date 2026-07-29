@@ -55,12 +55,4 @@ def get_lock_timeout() -> int:
         return 30
 
 
-DEFAULT_PDF_FOOTER_TEXT: Final[str] = ""
 
-
-def get_pdf_footer_text() -> str:
-    """Return the configured PDF footer text.
-
-    If not set, returns an empty string.
-    """
-    return os.getenv("PDF_FOOTER_TEXT", DEFAULT_PDF_FOOTER_TEXT).strip()
