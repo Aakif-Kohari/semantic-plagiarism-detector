@@ -3,7 +3,11 @@ import os
 import zipfile
 from typing import Dict
 
-from src.utils.filename import unique_filename
+from src.utils.filename import (
+    InvalidFileExtensionError,
+    unique_filename,
+    validate_document_extension,
+)
 
 # Safety limits for ZIP bomb protection
 MAX_TOTAL_DECOMPRESSED_SIZE = 200 * 1024 * 1024  # 200 MB
@@ -40,19 +44,13 @@ def process_zip_file(zip_bytes: bytes) -> Dict[str, bytes]:
             total_size = 0
             for zip_info in zf.infolist():
                 if zip_info.file_size > MAX_SINGLE_FILE_SIZE:
-                    size_limit_mb = MAX_SINGLE_FILE_SIZE // (1024 * 1024)
-
                     raise ValueError(
-                        f"Entry '{zip_info.filename}' exceeds the single-file "
-                        f"decompression safety limit of {size_limit_mb}MB."
+                        f"Entry '{zip_info.filename}' exceeds single file decompression safety limit of {MAX_SINGLE_FILE_SIZE // (1024 * 1024)}MB."
                     )
                 total_size += zip_info.file_size
                 if total_size > MAX_TOTAL_DECOMPRESSED_SIZE:
-                    total_limit_mb = MAX_TOTAL_DECOMPRESSED_SIZE // (1024 * 1024)
-
                     raise ValueError(
-                        "ZIP archive total decompressed size exceeds the safety "
-                        f"limit of {total_limit_mb}MB."
+                        f"ZIP archive total decompressed size exceeds safety limit of {MAX_TOTAL_DECOMPRESSED_SIZE // (1024 * 1024)}MB."
                     )
 
             # 2. Extract and sanitize entries
@@ -97,7 +95,23 @@ def process_zip_file(zip_bytes: bytes) -> Dict[str, bytes]:
                 if not file_data:
                     continue
 
-                # Keep only the entry basename and sanitize it as untrusted input.
+                try:
+                    validate_document_extension(
+                        filename,
+                        allowed_extensions={
+                            ".csv",
+                            ".docx",
+                            ".pdf",
+                            ".rtf",
+                            ".txt",
+                        },
+                    )
+                except InvalidFileExtensionError:
+                    # Unsafe or unsupported archive members are ignored.
+                    continue
+
+                # Keep only the entry basename and sanitize it as untrusted
+                # input after strict final-extension validation.
                 unique_name = unique_filename(
                     filename,
                     extracted_files,
