@@ -10,6 +10,7 @@ import os
 import sys
 from io import BytesIO
 
+from src.core.app_config import FAISS_INDEX_PATH
 from src.core.cross_lingual import prepare_text_for_embedding
 from src.core.document_parser import (DEFAULT_OCR_DPI, DEFAULT_OCR_LANGUAGE,
                                       extract_text)
@@ -295,9 +296,11 @@ def main() -> None:
 
     elif args.command == "sync-index":
         print("Starting FAISS and Database synchronization verification...")
-        index_path = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "corpus.index")
-        )
+        # Use the centralized FAISS index path.  Previously this resolved to
+        # ``<repo>/src/corpus.index`` (relative to src/), which diverged from
+        # every other module that uses ``<repo>/corpus.index``.  Centralizing
+        # here fixes that drift.
+        index_path = str(FAISS_INDEX_PATH)
         try:
             verify_and_repair_index(index_path)
             print("Synchronization complete.")
@@ -305,7 +308,7 @@ def main() -> None:
         except Exception as e:
             sys.stderr.write(f"Error during synchronization: {e}\n")
             return 1
-
+          
     elif args.command == "prewarm":
         exit_code = run_prewarm(folder_path=args.folder)
         sys.exit(exit_code)
