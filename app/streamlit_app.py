@@ -299,15 +299,6 @@ if "lang" not in st.session_state:
 st.markdown(back_to_top_html(), unsafe_allow_html=True)
 inject_css()
 
-st.markdown(
-    """
-<style>
-    .block-container { padding-top: 2rem; }
-    .stAlert { border-radius: 8px; }
-</style>
-""",
-    unsafe_allow_html=True,
-)
 
 
 # ── SESSION TIMEOUT & ROUTE PROTECTION ────────────────────────────────────────

@@ -300,6 +300,14 @@ def inject_css() -> None:
         color: {colors['ink']} !important;
     }}
     
+    .block-container {{
+        padding-top: 2rem !important;
+    }}
+    
+    .stAlert {{
+        border-radius: 8px !important;
+    }}
+    
     .stCard {{
         background-color: {colors['card']} !important;
         border: 1px solid {colors['border']} !important;
