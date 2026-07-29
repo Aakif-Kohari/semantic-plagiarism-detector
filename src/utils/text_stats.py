@@ -1,4 +1,7 @@
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 
 
 def get_word_count(text: str) -> int:
@@ -72,9 +75,47 @@ def get_readability_metrics(text: str) -> tuple[float, float]:
     syllables = get_syllable_count(text)
 
     if words == 0 or sentences == 0:
+        if words == 0:
+            logger.debug("Word count is zero, returning 0.0 for readability metrics.")
         return 0.0, 0.0
 
     reading_ease = 206.835 - 1.015 * (words / sentences) - 84.6 * (syllables / words)
     grade_level = 0.39 * (words / sentences) + 11.8 * (syllables / words) - 15.59
 
     return round(reading_ease, 2), round(grade_level, 2)
+
+
+def get_text_stats(text: str) -> dict[str, int | float]:
+    """Calculate and return all text statistics in a structured dictionary.
+
+    Returns default values with zeroes when text is empty or only whitespace.
+    """
+    if not text or not text.strip():
+        logger.debug("Empty or whitespace-only text provided. Returning default zeroes.")
+        return {
+            "words": 0,
+            "characters": 0,
+            "sentences": 0,
+            "syllables": 0,
+            "reading_ease": 0.0,
+            "grade_level": 0.0,
+            "reading_time": 0,
+        }
+
+    words = get_word_count(text)
+    chars = get_char_count(text)
+    sentences = get_sentence_count(text)
+    syllables = get_syllable_count(text)
+    reading_ease, grade_level = get_readability_metrics(text)
+    reading_time = get_reading_time_minutes(text)
+
+    return {
+        "words": words,
+        "characters": chars,
+        "sentences": sentences,
+        "syllables": syllables,
+        "reading_ease": reading_ease,
+        "grade_level": grade_level,
+        "reading_time": reading_time,
+    }
+
