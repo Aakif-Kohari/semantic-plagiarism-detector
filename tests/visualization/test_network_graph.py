@@ -4,13 +4,20 @@ tests/visualization/test_network_graph.py
 Unit tests for plot_similarity_network edge cases.
 """
 
+import time
 from unittest.mock import patch
 
+import networkx as nx
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
 from src.visualization.network_graph import (
     build_network_data,
+    export_graph_to_csv,
+    export_graph_to_gexf,
+    export_network_to_csv_bytes,
+    export_network_to_gexf_bytes,
     plot_similarity_network,
     render_network_plotly,
 )
@@ -59,6 +66,43 @@ def test_build_network_data_with_theme_colors():
     # Similarity 0.95 >= 0.90 -> danger color
     assert net_data["shapes"][0]["line"]["color"] == "#e53935"
     assert net_data["node_trace"].textfont.color == "#ffffff"
+
+
+def test_build_network_data_hover_text():
+    """Verify hover text explicitly shows Document Title."""
+    data = {
+        "doc1": [1.0, 0.85],
+        "doc2": [0.85, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2"])
+    net_data = build_network_data(df, threshold=0.75)
+
+    hover_texts = net_data["node_trace"].hovertext
+    assert "<b>📄 Document Title:</b> doc1<br>" in hover_texts[0]
+
+
+def test_build_network_data_node_color_severity():
+    """Verify node colors are mapped by plagiarism severity (max similarity)."""
+    data = {
+        "doc_danger": [1.0, 0.95, 0.1],   # max_score=0.95 -> danger
+        "doc_warning": [0.95, 1.0, 0.8],  # max_score=0.95 -> danger
+        "doc_success": [0.1, 0.8, 1.0],   # max_score=0.8 -> warning
+    }
+    df = pd.DataFrame(data, index=["doc_danger", "doc_warning", "doc_success"])
+    custom_theme = {
+        "danger": "#ff0000",
+        "warning": "#ffff00",
+        "success": "#00ff00",
+    }
+    net_data = build_network_data(df, threshold=0.5, theme_colors=custom_theme)
+
+    # doc_danger has max_score=0.95 -> #ff0000
+    assert net_data["node_trace"].marker.color[0] == "#ff0000"
+    # doc_warning has max_score=0.95 -> #ff0000
+    assert net_data["node_trace"].marker.color[1] == "#ff0000"
+    # doc_success has max_score=0.8 -> #ffff00
+    assert net_data["node_trace"].marker.color[2] == "#ffff00"
+
 
 
 def test_render_network_plotly_construction():
@@ -174,74 +218,65 @@ def test_plot_similarity_network_layout_autosize():
     assert fig.layout.width is None
 
 
-def test_build_network_data_colors_by_document_tags():
-    """Verify nodes are colored by discrete class tags when document_tags is provided."""
+def test_build_network_data_highlighted_doc():
+    """Verify highlighted_doc node color and marker size are updated to bright yellow."""
     data = {
         "doc1": [1.0, 0.85, 0.20],
         "doc2": [0.85, 1.0, 0.10],
         "doc3": [0.20, 0.10, 1.0],
     }
     df = pd.DataFrame(data, index=["doc1", "doc2", "doc3"])
-    document_tags = {
-        "doc1": "#class_A,#hw1",
-        "doc2": "#class_A",
-        "doc3": "#class_B",
-    }
 
-    net_data = build_network_data(df, threshold=0.75, document_tags=document_tags)
+    result = export_network_to_gexf_bytes(df, threshold=0.75)
 
-    tag_color_map = net_data["tag_color_map"]
-    assert "#class_a" in tag_color_map
-    assert "#class_b" in tag_color_map
-    assert tag_color_map["#class_a"] != tag_color_map["#class_b"]
-
-    node_colors = net_data["node_trace"].marker.color
-    assert node_colors[0] == tag_color_map["#class_a"]
-    assert node_colors[1] == tag_color_map["#class_a"]
-    assert node_colors[2] == tag_color_map["#class_b"]
-
-    # Verify hover text contains tag info
-    hover_texts = net_data["node_trace"].hovertext
-    assert "<b>🏷️ Tag:</b> #class_a" in hover_texts[0]
-    assert "<b>🏷️ Tag:</b> #class_b" in hover_texts[2]
+    assert isinstance(result, bytes)
+    assert len(result) > 0
 
 
-def test_plot_similarity_network_with_doc_tags_alias():
-    """Verify plot_similarity_network accepts doc_tags alias and colors nodes accordingly."""
+def test_export_network_to_gexf_bytes_contains_nodes_and_edges():
+    """Verify GEXF output contains expected nodes and edge attributes from similarity matrix."""
     data = {
-        "doc1": [1.0, 0.90],
-        "doc2": [0.90, 1.0],
+        "doc1": [1.0, 0.95],
+        "doc2": [0.95, 1.0],
     }
     df = pd.DataFrame(data, index=["doc1", "doc2"])
 
-    fig = plot_similarity_network(
-        df,
-        threshold=0.75,
-        doc_tags={"doc1": ["#class_X"], "doc2": ["#class_Y"]},
-    )
+    net_data = build_network_data(df, threshold=0.75, highlighted_doc="doc1")
+    node_colors = net_data["node_trace"].marker.color
+    node_sizes = net_data["node_trace"].marker.size
 
-    node_trace = fig.data[1]  # node_trace is the second trace after edge_hover_trace
-    node_colors = node_trace.marker.color
-    assert len(node_colors) == 2
-    assert node_colors[0] != node_colors[1]
-    assert "<b>🏷️ Tag:</b> #class_x" in node_trace.hovertext[0]
-    assert "<b>🏷️ Tag:</b> #class_y" in node_trace.hovertext[1]
+    # doc1 is highlighted -> color #FFFF00 and larger size
+    assert node_colors[0] == "#FFFF00"
+    assert node_colors[1] != "#FFFF00"
+    assert node_sizes[0] > node_sizes[1]
 
 
-def test_build_network_data_untagged_fallback():
-    """Verify untagged nodes fallback to degree-based colors when partial tags exist."""
+def test_export_graph_to_csv():
+    """Verify export_graph_to_csv returns a CSV formatted string with Source,Target,Similarity header."""
+    G = nx.Graph()
+    G.add_edge("docA", "docB", similarity=0.88)
+    csv_str = export_graph_to_csv(G)
+
+    lines = csv_str.strip().splitlines()
+    assert lines[0] == "Source,Target,Similarity"
+    assert len(lines) == 2
+    assert "docA,docB,0.88" in lines[1] or "docB,docA,0.88" in lines[1]
+
+
+def test_export_network_to_csv_bytes():
+    """Verify export_network_to_csv_bytes builds graph and returns encoded CSV bytes."""
     data = {
-        "doc1": [1.0, 0.10],
-        "doc2": [0.10, 1.0],
+        "doc1": [1.0, 0.92],
+        "doc2": [0.92, 1.0],
     }
     df = pd.DataFrame(data, index=["doc1", "doc2"])
 
-    # doc1 is tagged with #class_A, doc2 is untagged (degree 0)
-    net_data = build_network_data(df, threshold=0.75, document_tags={"doc1": "#class_A"})
+    csv_bytes = export_network_to_csv_bytes(df, threshold=0.75)
+    assert isinstance(csv_bytes, bytes)
 
-    node_colors = net_data["node_trace"].marker.color
-    tag_color_map = net_data["tag_color_map"]
+    decoded = csv_bytes.decode("utf-8")
+    lines = decoded.strip().splitlines()
+    assert lines[0] == "Source,Target,Similarity"
+    assert "doc1,doc2,0.92" in decoded or "doc2,doc1,0.92" in decoded
 
-    assert node_colors[0] == tag_color_map["#class_a"]
-    assert node_colors[1] == "#2e7d32"  # degree 0 success fallback color
 

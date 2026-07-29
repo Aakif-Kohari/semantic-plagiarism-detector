@@ -1,4 +1,16 @@
-"""SQLite backup creation, retention, and secure restoration."""
+"""
+database_backup.py
+------------------
+Consistent SQLite database download helpers and retention management.
+
+This module provides utilities for creating transactionally consistent 
+snapshots of SQLite databases and managing the lifecycle of backup files 
+to prevent disk space exhaustion.
+
+Recent Additions (Issue #465):
+- Added `cleanup_old_backups` function to enforce retention policies 
+  (max backups count and max age in days).
+"""
 
 from __future__ import annotations
 
@@ -15,8 +27,9 @@ from typing import Dict, Union
 
 from src.db.corpus_db import get_corpus_db_path
 
-
+# ── Logger Configuration ───────────────────────────────────────────────────────
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 SQLITE_HEADER = b"SQLite format 3\x00"
 DEFAULT_BACKUP_DIRECTORY = Path("backups")
@@ -27,17 +40,30 @@ class BackupRestoreSecurityError(ValueError):
 
 
 def create_sqlite_snapshot(database_path: str | Path) -> bytes:
-    """Return a transactionally consistent SQLite snapshot."""
+    """
+    Return a transactionally consistent SQLite snapshot.
+
+    SQLite's online backup API is used instead of reading a live database
+    file directly. This includes committed pages correctly even when the
+    source database uses WAL journaling.
+    
+    Args:
+        database_path: Path to the source SQLite database.
+        
+    Returns:
+        bytes: The raw bytes of the SQLite snapshot.
+        
+    Raises:
+        FileNotFoundError: If the source database does not exist.
+        IsADirectoryError: If the source path is a directory.
+        sqlite3.DatabaseError: If the generated backup is invalid.
+    """
     source_path = Path(database_path).expanduser().resolve()
 
     if not source_path.exists():
-        raise FileNotFoundError(
-            f"SQLite database does not exist: {source_path}"
-        )
+        raise FileNotFoundError(f"SQLite database does not exist: {source_path}")
     if not source_path.is_file():
-        raise IsADirectoryError(
-            f"SQLite database path is not a file: {source_path}"
-        )
+        raise IsADirectoryError(f"SQLite database path is not a file: {source_path}")
 
     with tempfile.TemporaryDirectory(
         prefix="semantic-plagiarism-backup-"
@@ -61,12 +87,10 @@ def create_sqlite_snapshot(database_path: str | Path) -> bytes:
 
         snapshot = snapshot_path.read_bytes()
 
-    if not snapshot.startswith(SQLITE_HEADER):
-        raise sqlite3.DatabaseError(
-            "Generated backup is not a valid SQLite database."
-        )
+        if not snapshot.startswith(SQLITE_HEADER):
+            raise sqlite3.DatabaseError("Generated backup is not a valid SQLite database.")
 
-    return snapshot
+        return snapshot
 
 
 def create_corpus_database_snapshot() -> bytes:

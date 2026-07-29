@@ -18,9 +18,20 @@ def chunk_text(
     text: str,
     chunk_size: int = 500,
     chunk_overlap: int = 50,
+    min_words: int = 5,
 ) -> List[str]:
     """
     Splits text into chunks of a target character length with overlapping boundaries.
+
+    Args:
+        text: The input text to chunk.
+        chunk_size: Target character length per chunk.
+        chunk_overlap: Number of characters to overlap between chunks.
+        min_words: Minimum word count for a chunk to be included. Chunks with
+            fewer words are filtered out to reduce noise from headers/page numbers.
+
+    Returns:
+        List of chunk strings.
     """
     if not text or not text.strip():
         return []
@@ -43,7 +54,8 @@ def chunk_text(
                 if first_word_idx < len(word_headings) and word_headings[first_word_idx] is not None:
                     metadata["section_title"] = word_headings[first_word_idx]
 
-            chunks.append(ChunkString(chunk_str, metadata=metadata))
+            if len(chunk_str.split()) >= min_words:
+                chunks.append(ChunkString(chunk_str, metadata=metadata))
 
             # Retain overlap words from the end of the previous chunk
             overlap_words = []
@@ -67,7 +79,8 @@ def chunk_text(
             first_word_idx = current_chunk_with_indices[0][1]
             if first_word_idx < len(word_headings) and word_headings[first_word_idx] is not None:
                 metadata["section_title"] = word_headings[first_word_idx]
-        chunks.append(ChunkString(chunk_str, metadata=metadata))
+        if len(chunk_str.split()) >= min_words:
+            chunks.append(ChunkString(chunk_str, metadata=metadata))
 
     return chunks
 
@@ -81,6 +94,7 @@ def chunk_documents(
     documents: Dict[str, str],
     chunk_size: int = 500,
     chunk_overlap: int = 50,
+    min_words: int = 5,
 ) -> Dict[str, List[str]]:
     """
     Splits a dictionary of document raw texts into chunks respecting customizable
@@ -92,5 +106,6 @@ def chunk_documents(
             text,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
+            min_words=min_words,
         )
     return chunked_docs

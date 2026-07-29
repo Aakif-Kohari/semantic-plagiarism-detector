@@ -61,26 +61,14 @@ PASSWORD_COMPLEXITY_REGEX = re.compile(
     r"^(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\])[A-Za-z\d@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\]{8,}$"
 )
 
-# Initialize Argon2 password hasher
-_ph = PasswordHasher()
-
-# Initialize Argon2 password hasher
-_ph = PasswordHasher()
-
+# Initialize Argon2 password hasher with an explicit 16-byte salt (minimum required).
+_ph = PasswordHasher(salt_len=16)
 
 
 def configure_db_path(db_path: str | os.PathLike) -> None:
     """Configure the SQLite database path used by the authentication module."""
     global _DB_PATH
     _DB_PATH = os.path.abspath(os.fspath(db_path))
-
-
-VALID_ROLES = {"admin", "teacher"}
-
-# Initialize Argon2 password hasher
-_ph = PasswordHasher()
-
-
 
 
 def _connect() -> sqlite3.Connection:
@@ -127,7 +115,9 @@ def log_security_event(
 
 def _hash_password(password: str) -> str:
     """Return an Argon2 hash for the given password."""
-    return _ph.hash(password)
+    res = _ph.hash(password)
+    return str(res) if not isinstance(res, str) else res
+
 
 
 def _validate_username(username: str) -> str:
@@ -361,19 +351,20 @@ def add_user(username: str, password: str, role: str = "teacher") -> None:
         password = "REDACTED"
 
 def get_all_users() -> list:
-    """Return all users as a list of dicts (excludes password hashes)."""
+    """Return all users as a list of DTOs (excludes password hashes)."""
     try:
+        from src.db.schemas import User
         with _connect() as conn:
             rows = conn.execute(
                 "SELECT id, username, role, is_active FROM users ORDER BY id"
             ).fetchall()
             return [
-                {
-                    "id": r[0],
-                    "username": r[1],
-                    "role": r[2],
-                    "is_active": bool(r[3]),
-                }
+                User(
+                    id=r[0],
+                    username=r[1],
+                    role=r[2],
+                    is_active=bool(r[3]),
+                )
                 for r in rows
             ]
     except sqlite3.Error as e:
