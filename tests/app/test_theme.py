@@ -145,4 +145,4 @@ def test_apply_matplotlib_theme():
     assert mpl.rcParams["axes.labelcolor"] == "#ffffff"
     assert mpl.rcParams["xtick.color"] == "#ffffff"
     assert mpl.rcParams["ytick.color"] == "#ffffff"
-    assert mpl.rcParams["text.color"] == "#ffffff"
+    assert mpl.rcParams["text.color"] == "#ffffff"

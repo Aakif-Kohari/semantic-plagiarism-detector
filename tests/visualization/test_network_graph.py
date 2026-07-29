@@ -9,6 +9,7 @@ from unittest.mock import patch
 import networkx as nx
 import pandas as pd
 import plotly.graph_objects as go
+from src.visualization.network_graph import plot_similarity_network
 
 from src.visualization.network_graph import (
     build_network_data,

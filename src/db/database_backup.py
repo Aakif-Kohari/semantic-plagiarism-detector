@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import stat
 import tempfile
 import time
 from contextlib import closing
@@ -29,6 +30,11 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 SQLITE_HEADER = b"SQLite format 3\x00"
+DEFAULT_BACKUP_DIRECTORY = Path("backups")
+
+
+class BackupRestoreSecurityError(ValueError):
+    """Raised when a backup fails pre-restore security validation."""
 
 
 def create_sqlite_snapshot(database_path: str | Path) -> bytes:
@@ -57,12 +63,24 @@ def create_sqlite_snapshot(database_path: str | Path) -> bytes:
     if not source_path.is_file():
         raise IsADirectoryError(f"SQLite database path is not a file: {source_path}")
 
-    with tempfile.TemporaryDirectory(prefix="semantic-plagiarism-backup-") as temporary_directory:
-        snapshot_path = Path(temporary_directory) / source_path.name
+    with tempfile.TemporaryDirectory(
+        prefix="semantic-plagiarism-backup-"
+    ) as temporary_directory:
+        snapshot_path = (
+            Path(temporary_directory) / source_path.name
+        )
         source_uri = f"{source_path.as_uri()}?mode=ro"
 
-        with closing(sqlite3.connect(source_uri, uri=True, check_same_thread=False)) as source_connection:
-            with closing(sqlite3.connect(snapshot_path)) as destination:
+        with closing(
+            sqlite3.connect(
+                source_uri,
+                uri=True,
+                check_same_thread=False,
+            )
+        ) as source_connection:
+            with closing(
+                sqlite3.connect(snapshot_path)
+            ) as destination:
                 source_connection.backup(destination)
 
         snapshot = snapshot_path.read_bytes()
@@ -78,62 +96,257 @@ def create_corpus_database_snapshot() -> bytes:
     return create_sqlite_snapshot(get_corpus_db_path())
 
 
-def cleanup_old_backups(
-    backup_dir: Union[str, Path] = "backups",
-    max_backups: int = 10,
-    max_age_days: int = 30
-) -> Dict[str, int]:
+def _resolve_authorized_backup(
+    source: str | Path,
+    backup_dir: str | Path,
+) -> Path:
+    """Resolve and validate a backup source before restoration.
+
+    The resolved source must remain inside the resolved backup
+    directory. This blocks absolute-path injection, ``..`` traversal,
+    and symlinks that escape the authorized directory.
     """
-    Removes stale .db backup files based on a retention policy.
-    
-    This function prevents disk space exhaustion by enforcing two rules:
-    1. Keep at most `max_backups` files.
-    2. Delete any file older than `max_age_days`.
-    
+    authorized_directory = (
+        Path(backup_dir).expanduser().resolve(strict=True)
+    )
+    if not authorized_directory.is_dir():
+        raise NotADirectoryError(
+            "Designated backup path is not a directory: "
+            f"{authorized_directory}"
+        )
+
+    candidate = Path(source).expanduser()
+    if not candidate.is_absolute():
+        candidate = authorized_directory / candidate
+
+    try:
+        resolved_source = candidate.resolve(strict=True)
+    except FileNotFoundError:
+        raise FileNotFoundError(
+            f"Backup file does not exist: {candidate}"
+        ) from None
+
+    try:
+        resolved_source.relative_to(authorized_directory)
+    except ValueError as exc:
+        raise BackupRestoreSecurityError(
+            "Backup source must be inside the designated backup "
+            f"directory: {authorized_directory}"
+        ) from exc
+
+    source_stat = os.stat(resolved_source, follow_symlinks=True)
+
+    if not stat.S_ISREG(source_stat.st_mode):
+        raise BackupRestoreSecurityError(
+            "Backup source must be a regular file."
+        )
+
+    if source_stat.st_mode & stat.S_IWOTH:
+        raise BackupRestoreSecurityError(
+            "Refusing to restore a world-writable backup file."
+        )
+
+    return resolved_source
+
+
+def _validate_sqlite_backup(source: Path) -> None:
+    """Verify the SQLite header and integrity before replacement."""
+    with source.open("rb") as backup_file:
+        header = backup_file.read(len(SQLITE_HEADER))
+
+    if header != SQLITE_HEADER:
+        raise sqlite3.DatabaseError(
+            "Backup file is not a valid SQLite database."
+        )
+
+    source_uri = f"{source.as_uri()}?mode=ro"
+    with closing(
+        sqlite3.connect(source_uri, uri=True)
+    ) as connection:
+        result = connection.execute(
+            "PRAGMA integrity_check"
+        ).fetchone()
+
+    if result is None or result[0] != "ok":
+        details = result[0] if result else "unknown failure"
+        raise sqlite3.DatabaseError(
+            f"SQLite backup integrity check failed: {details}"
+        )
+
+
+def restore(
+    source: str | Path,
+    *,
+    backup_dir: str | Path = DEFAULT_BACKUP_DIRECTORY,
+    destination: str | Path | None = None,
+) -> Path:
+    """Securely restore an authorized SQLite backup.
+
+    Security validation happens before any destination file is
+    modified. The source must resolve inside ``backup_dir`` and must
+    not be world-writable. A valid backup is copied to a temporary
+    file in the destination directory and atomically installed with
+    ``os.replace``.
+
     Args:
-        backup_dir: Directory containing the backup files. Defaults to "backups".
-        max_backups: Maximum number of backup files to retain. Defaults to 10.
-        max_age_days: Maximum age in days for a backup file to be retained. Defaults to 30.
-        
+        source: Backup filename or path. Relative names are resolved
+            beneath ``backup_dir``.
+        backup_dir: Authorized directory containing restore sources.
+        destination: Live database path. Defaults to the configured
+            corpus database.
+
     Returns:
-        dict: A summary of the cleanup operation containing:
-            - "files_deleted": Number of files successfully removed.
-            - "bytes_freed": Total disk space freed in bytes.
+        The resolved destination path.
+
+    Raises:
+        BackupRestoreSecurityError: For unauthorized paths, unsafe
+            file types, or world-writable source files.
+        FileNotFoundError: When the backup directory or source is
+            missing.
+        sqlite3.DatabaseError: When the backup is not a healthy SQLite
+            database.
+        OSError: When the atomic file replacement fails.
     """
+    source_path = _resolve_authorized_backup(
+        source,
+        backup_dir,
+    )
+    _validate_sqlite_backup(source_path)
+
+    destination_path = Path(
+        destination
+        if destination is not None
+        else get_corpus_db_path()
+    ).expanduser().resolve()
+    destination_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    if source_path == destination_path:
+        raise BackupRestoreSecurityError(
+            "Backup source and restore destination must differ."
+        )
+
+    temporary_path: Path | None = None
+    try:
+        file_descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{destination_path.name}.restore-",
+            suffix=".tmp",
+            dir=destination_path.parent,
+        )
+        os.close(file_descriptor)
+        temporary_path = Path(temporary_name)
+
+        shutil.copyfile(source_path, temporary_path)
+        _validate_sqlite_backup(temporary_path)
+
+        with temporary_path.open("rb") as restored_file:
+            os.fsync(restored_file.fileno())
+
+        os.replace(temporary_path, destination_path)
+        temporary_path = None
+    finally:
+        if (
+            temporary_path is not None
+            and temporary_path.exists()
+        ):
+            temporary_path.unlink()
+
+    logger.info(
+        "Database restored securely from %s to %s.",
+        source_path,
+        destination_path,
+    )
+    return destination_path
+
+
+def restore_database_backup(
+    source: str | Path,
+    *,
+    backup_dir: str | Path = DEFAULT_BACKUP_DIRECTORY,
+    destination: str | Path | None = None,
+) -> Path:
+    """Descriptive alias for :func:`restore`."""
+    return restore(
+        source,
+        backup_dir=backup_dir,
+        destination=destination,
+    )
+
+
+def cleanup_old_backups(
+    backup_dir: Union[str, Path] = DEFAULT_BACKUP_DIRECTORY,
+    max_backups: int = 10,
+    max_age_days: int = 30,
+) -> Dict[str, int]:
+    """Remove stale ``.db`` backups using count and age limits."""
     backup_path = Path(backup_dir)
-    
+
     if not backup_path.exists() or not backup_path.is_dir():
-        logger.warning(f"Backup directory does not exist: {backup_path}")
-        return {"files_deleted": 0, "bytes_freed": 0}
-        
-    # Find all .db files in the directory
+        logger.warning(
+            "Backup directory does not exist: %s",
+            backup_path,
+        )
+        return {
+            "files_deleted": 0,
+            "bytes_freed": 0,
+        }
+
     db_files = list(backup_path.glob("*.db"))
     if not db_files:
-        logger.info("No .db backup files found to clean up.")
-        return {"files_deleted": 0, "bytes_freed": 0}
-        
-    # Sort by modification time, newest first
-    db_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-    
+        logger.info(
+            "No .db backup files found to clean up."
+        )
+        return {
+            "files_deleted": 0,
+            "bytes_freed": 0,
+        }
+
+    db_files.sort(
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
     current_time = time.time()
     max_age_seconds = max_age_days * 24 * 60 * 60
-    
+
     files_deleted = 0
     bytes_freed = 0
-    
-    for i, file_path in enumerate(db_files):
-        file_age_seconds = current_time - file_path.stat().st_mtime
-        file_size = file_path.stat().st_size
-        
-        # Check if it exceeds max_backups OR max_age_days
-        if i >= max_backups or file_age_seconds > max_age_seconds:
+
+    for index, file_path in enumerate(db_files):
+        file_stat = file_path.stat()
+        file_age_seconds = (
+            current_time - file_stat.st_mtime
+        )
+
+        if (
+            index >= max_backups
+            or file_age_seconds > max_age_seconds
+        ):
             try:
                 file_path.unlink()
                 files_deleted += 1
-                bytes_freed += file_size
-                logger.info(f"Deleted stale backup: {file_path.name} (Age: {file_age_seconds/86400:.1f} days)")
-            except OSError as e:
-                logger.error(f"Failed to delete backup {file_path.name}: {e}")
-                
-    logger.info(f"Backup cleanup complete. Deleted {files_deleted} files, freed {bytes_freed} bytes.")
-    return {"files_deleted": files_deleted, "bytes_freed": bytes_freed}
+                bytes_freed += file_stat.st_size
+                logger.info(
+                    "Deleted stale backup: %s "
+                    "(age: %.1f days)",
+                    file_path.name,
+                    file_age_seconds / 86400,
+                )
+            except OSError as exception:
+                logger.error(
+                    "Failed to delete backup %s: %s",
+                    file_path.name,
+                    exception,
+                )
+
+    logger.info(
+        "Backup cleanup complete. Deleted %s files, "
+        "freed %s bytes.",
+        files_deleted,
+        bytes_freed,
+    )
+    return {
+        "files_deleted": files_deleted,
+        "bytes_freed": bytes_freed,
+    }

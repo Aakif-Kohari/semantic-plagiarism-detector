@@ -1,3 +1,32 @@
+from __future__ import annotations
+"""
+app/theme.py
+------------
+Theme management and CSS utility functions for the Semantic Plagiarism Detector.
+
+Provides:
+- Light and Dark theme color definitions
+- CSS class name constants for consistent styling
+- HTML generation helpers for UI components
+- Dynamic theme injection for Streamlit
+"""
+
+from app.css_constants import (
+    BADGE,
+    EMPTY_STATE,
+    EMPTY_ICON,
+    EMPTY_TITLE,
+    EMPTY_DESC,
+    SIDEBAR_USER_BADGE,
+    AVATAR,
+    PIPELINE_STEPS,
+    PIPELINE_STEP,
+    PIPELINE_STEP_ACTIVE,
+    PIPELINE_STEP_DONE,
+    PIPELINE_ARROW,
+    SIM_PILL,
+)
+import base64
 """
 theme.py
 --------
@@ -470,6 +499,8 @@ def badge_html(tier: str, label: str = None) -> str:
         default_label = "🟢 Low"
 
     display_label = label if label is not None else default_label
+    return f'<span class="{BADGE}" style="background-color: {bg_color}; color: {text_color}; border: 1px solid {text_color};">{display_label}</span>'
+    return f'<span class="{CLASS_BADGE}" style="background-color: {bg_color}; color: {text_color}; border: 1px solid {text_color};">{display_label}</span>'
     return f'<span class="{CLASS_BADGE}" style="color: {text_color}; background-color: {bg_color};">{display_label}</span>'
 
 
@@ -488,12 +519,21 @@ def format_similarity_html(score: float, threshold: float = DEFAULT_THRESHOLDS.p
         bg = colors["success"]
         text = "#FFFFFF"
 
+    return (
+        f'<span class="{SIM_PILL}" style="background:{bg};">'
+        f'<span class="{CLASS_SIM_PILL}" style="background:{bg};">'
+        f"Similarity: {score * 100:.1f}%</span>"
+    )
     return f'<span class="{CLASS_SIM_PILL}" style="background-color: {bg}; color: {text};">Similarity: {score * 100:.1f}%</span>'
 
 
 def empty_state_html(icon: str, title: str, description: str) -> str:
     """Return styled empty-state HTML block."""
     return (
+        f'<div class="{EMPTY_STATE}">'
+        f'<div class="{EMPTY_ICON}">{icon}</div>'
+        f'<div class="{EMPTY_TITLE}">{title}</div>'
+        f'<div class="{EMPTY_DESC}">{description}</div>'
         f'<div class="{CLASS_EMPTY_STATE}">'
         f'<div class="{CLASS_EMPTY_ICON}">{icon}</div>'
         f'<div class="{CLASS_EMPTY_TITLE}">{title}</div>'
@@ -506,6 +546,9 @@ def sidebar_user_badge_html(username: str, role: str) -> str:
     """Return the sidebar user badge with avatar circle."""
     initial = username[0].upper() if username else "?"
     return (
+        f'<div class="{SIDEBAR_USER_BADGE}">'
+        f'<div class="{AVATAR}">{initial}</div>'
+        f'<div><strong>{username}</strong><br>'
         f'<div class="{CLASS_SIDEBAR_USER_BADGE}">'
         f'<div class="{CLASS_AVATAR}">{initial}</div>'
         f'<div>'
@@ -579,6 +622,31 @@ def version_check_widget_html(local_version: str, latest_tag: str, repo_url: str
     ink = colors["ink"]
 
     return f"""
+<div id="spd-update-banner" style="
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    margin-top: 8px;
+    background: {warning_soft};
+    border: 1px solid {warning_color};
+    border-radius: 8px;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.85rem;
+    color: {ink};
+">
+    <span style="font-size: 1.1rem;">🔔</span>
+    <span>
+        <strong>Update available:</strong>
+        v{local_version} &rarr; <strong>{latest_tag}</strong>.
+        &nbsp;
+        <a href="{repo_url}" target="_blank" rel="noopener noreferrer"
+           style="color: {warning_color}; font-weight: 600; text-decoration: underline;">
+            View release &rarr;
+        </a>
+    </span>
+</div>
+"""
     <div style="background-color: {warning_soft}; border-left: 4px solid {warning_color}; padding: 1rem; border-radius: 4px; color: {ink};">
         <strong>🔔 Update available:</strong> v{local_version} → <strong>{latest_tag}</strong>. 
         <a href="{repo_url}" target="_blank" style="color: {warning_color}; font-weight: 600; margin-left: 0.5rem;">View release →</ a>

@@ -1,96 +1,39 @@
-# filepath: scripts/generate_seed_data.py
 """
-scripts/generate_seed_data.py
-----------------------------
-Programmatic script to generate seed databases and FAISS index with realistic dummy data.
-Uses mathematical mock embeddings to avoid downloading a large SentenceTransformer model.
-Now includes robust CLI argument parsing for configurable dataset generation.
+Generate deterministic seed databases and a FAISS index.
+
+The optional ``--target-similarity`` flag controls the cosine
+similarity of the seeded Alice/Bob plagiarism pair.
 """
+
+from __future__ import annotations
 
 import argparse
 import hashlib
-import logging
 import os
-import random
 import sys
 from dataclasses import dataclass
-from typing import Tuple
-
-# Ensure repository root is in sys.path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-from src.core.faiss_index import build_index_from_matrix, save_index
-from src.db.auth import (
-    add_user,
-    configure_db_path as configure_auth_db_path,
-    init_db as init_auth_db,
-)
-from src.db.corpus_db import (
-    add_chunks,
-    add_document,
-    configure_db_path as configure_corpus_db_path,
-    init_corpus_db,
-)
-from src.db.incidents import sync_flagged_incidents
 
 import numpy as np
 
-# Configure Logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
+
+# Ensure repository root is in sys.path.
+ROOT_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..")
 )
-logger = logging.getLogger("SeedDataGenerator")
+sys.path.insert(0, ROOT_DIR)
 
-# Create seed directory tests/dummy_data/ if it doesn't exist
-root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-seed_dir = os.path.join(root_dir, "tests", "dummy_data")
-os.makedirs(seed_dir, exist_ok=True)
+SEED_DIR = os.path.join(
+    ROOT_DIR,
+    "tests",
+    "dummy_data",
+)
+os.makedirs(SEED_DIR, exist_ok=True)
 
-
-
-# ---------------------------------------------------------------------------
-# Seed data configuration
-# ---------------------------------------------------------------------------
-
-# Generated files
-SEED_DB_FILES = ("users.db", "corpus.db", "corpus.index")
-USERS_DB_FILENAME = "users.db"
-CORPUS_DB_FILENAME = "corpus.db"
-FAISS_INDEX_FILENAME = "corpus.index"
-
-# Seed user
-TEACHER_USERNAME = "teacher"
-TEACHER_PASSWORD = "teacher123"
-TEACHER_ROLE = "teacher"
-
-# Shared document metadata
-CLASS_SECTION = "CS-101"
-ASSIGNMENT_TITLE = "Final Essay"
-
-# Seed document filenames
-ALICE_FILENAME = "Introduction_to_AI.pdf"
-BOB_FILENAME = "AI_Concepts_Homework.pdf"
-CHARLIE_FILENAME = "Introduction_to_Blockchain.pdf"
-
-# Seed student names
-ALICE_STUDENT_NAME = "Alice Smith"
-BOB_STUDENT_NAME = "Bob Jones"
-CHARLIE_STUDENT_NAME = "Charlie Brown"
-
-# Mock embedding configuration
-EMBEDDING_DIM = 384
+DEFAULT_TARGET_SIMILARITY = 0.95
+BACKGROUND_SIMILARITY = 0.15
+EMBEDDING_DIMENSION = 384
 RANDOM_SEED = 42
-ALICE_BOB_SIMILARITY = 0.95
-ALICE_CHARLIE_SIMILARITY = 0.15
 
-# Incident configuration
-INCIDENT_SEVERITY = "High"
-
-
-# Patch the DB paths to point to the tests/dummy_data/ folder directly!
-# This avoids file locks and permission errors when moving files on Windows.
 import src.db.auth
 import src.db.corpus_db
 import src.db.incidents
@@ -203,320 +146,174 @@ class ConfigArgs:
     verbose: bool = False
 
 
-class ArgumentParserManager:
-    """Manages CLI argument parsing for the seed data generator."""
+def parse_target_similarity(value: str) -> float:
+    """Parse decimal or percentage similarity into ``0.0``–``1.0``.
 
-    def __init__(self):
-        self.parser = argparse.ArgumentParser(
-            description="Programmatic script to generate seed databases and FAISS index with realistic dummy data.",
-            formatter_class=argparse.RawTextHelpFormatter,
-        )
-        self._setup_arguments()
+    Supported examples include ``0.85``, ``85``, and ``85%``.
+    """
+    raw_value = value.strip()
+    is_percentage = raw_value.endswith("%")
+    numeric_text = (
+        raw_value[:-1].strip()
+        if is_percentage
+        else raw_value
+    )
 
-    def _setup_arguments(self):
-        """Configure all CLI flags and arguments."""
-        self.parser.add_argument(
-            "--documents",
-            type=int,
-            default=3,
-            help="Number of unique mock documents to generate (default: 3).\n"
-                 "Higher values will increase generation time but provide a larger test corpus.",
-        )
-        self.parser.add_argument(
-            "--pairs",
-            type=int,
-            default=1,
-            help="Number of flagged plagiarism pairs to generate (default: 1).\n"
-                 "Must be less than or equal to (documents * (documents - 1)) / 2.",
-        )
-        self.parser.add_argument(
-            "--seed",
-            type=int,
-            default=42,
-            help="Random seed for deterministic generation (default: 42).",
-        )
-        self.parser.add_argument(
-            "--verbose",
-            "-v",
-            action="store_true",
-            help="Enable verbose logging output.",
+    try:
+        parsed_value = float(numeric_text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "target similarity must be a number such as "
+            "0.85, 85, or 85%"
+        ) from exc
+
+    if is_percentage or parsed_value > 1.0:
+        parsed_value /= 100.0
+
+    if not 0.0 <= parsed_value <= 1.0:
+        raise argparse.ArgumentTypeError(
+            "target similarity must be between 0 and 1 "
+            "(or between 0% and 100%)"
         )
 
-    def parse(self) -> ConfigArgs:
-        """Parse arguments and return a strictly validated ConfigArgs object."""
-        args = self.parser.parse_args()
-        
-        if args.documents < 1:
-            self.parser.error("Number of documents must be at least 1.")
-            
-        max_possible_pairs = (args.documents * (args.documents - 1)) // 2
-        if args.pairs > max_possible_pairs:
-            self.parser.error(
-                f"Requested {args.pairs} pairs, but only {max_possible_pairs} "
-                f"are possible with {args.documents} documents."
+    return parsed_value
+
+
+def build_argument_parser() -> argparse.ArgumentParser:
+    """Create the seed-data command-line parser."""
+    parser = argparse.ArgumentParser(
+        description=(
+            "Generate deterministic seed databases and a FAISS "
+            "index for local testing."
+        )
+    )
+    parser.add_argument(
+        "--target-similarity",
+        type=parse_target_similarity,
+        default=DEFAULT_TARGET_SIMILARITY,
+        metavar="VALUE",
+        help=(
+            "Cosine similarity for the flagged Alice/Bob pair. "
+            "Accepts 0.85, 85, or 85%% "
+            f"(default: {DEFAULT_TARGET_SIMILARITY})."
+        ),
+    )
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Print detailed similarity validation output.",
+    )
+    return parser
+
+
+def parse_args(
+    argv: list[str] | None = None,
+) -> SeedConfig:
+    """Parse and return validated generator configuration."""
+    namespace = build_argument_parser().parse_args(argv)
+    return SeedConfig(
+        target_similarity=namespace.target_similarity,
+        verbose=namespace.verbose,
+    )
+
+
+def generate_similar_vector(
+    base_vector: np.ndarray,
+    target_similarity: float,
+    random_generator: np.random.Generator,
+) -> np.ndarray:
+    """Create a unit vector at an exact cosine similarity."""
+    noise = random_generator.standard_normal(
+        base_vector.shape[0]
+    )
+    noise -= np.dot(noise, base_vector) * base_vector
+
+    noise_norm = np.linalg.norm(noise)
+    if noise_norm < 1e-12:
+        raise RuntimeError(
+            "Unable to generate an orthogonal noise vector."
+        )
+
+    noise /= noise_norm
+    generated = (
+        target_similarity * base_vector
+        + np.sqrt(1 - target_similarity**2) * noise
+    )
+    generated /= np.linalg.norm(generated)
+    return generated
+
+
+def calculate_cosine_similarity(
+    first: np.ndarray,
+    second: np.ndarray,
+) -> float:
+    """Return cosine similarity for two non-zero vectors."""
+    denominator = (
+        np.linalg.norm(first)
+        * np.linalg.norm(second)
+    )
+    if denominator == 0:
+        raise ValueError(
+            "Cosine similarity requires non-zero vectors."
+        )
+    return float(np.dot(first, second) / denominator)
+
+
+def validate_target_similarity(
+    base_vector: np.ndarray,
+    generated_vector: np.ndarray,
+    target_similarity: float,
+    *,
+    tolerance: float = 1e-6,
+) -> float:
+    """Validate the generated pair before persistence."""
+    actual_similarity = calculate_cosine_similarity(
+        base_vector,
+        generated_vector,
+    )
+
+    if not np.isclose(
+        actual_similarity,
+        target_similarity,
+        atol=tolerance,
+        rtol=0.0,
+    ):
+        raise ValueError(
+            "Generated similarity does not match target: "
+            f"expected {target_similarity:.6f}, "
+            f"got {actual_similarity:.6f}"
+        )
+
+    return actual_similarity
+
+
+def _clean_seed_files() -> None:
+    """Delete previously generated seed artifacts."""
+    for filename in (
+        "users.db",
+        "corpus.db",
+        "corpus.index",
+    ):
+        path = os.path.join(SEED_DIR, filename)
+        if not os.path.exists(path):
+            continue
+
+        try:
+            os.remove(path)
+            print(f"Removed old seed {filename}")
+        except OSError as error:
+            print(
+                "Warning: Could not remove old seed "
+                f"{filename} ({error})"
             )
 
-        return ConfigArgs(
-            documents=args.documents,
-            pairs=args.pairs,
-            seed=args.seed,
-            verbose=args.verbose,
-        )
 
-
-class MockDocumentGenerator:
-    """Generates realistic mock documents using stochastic combination models."""
-
-    def __init__(self, seed: int):
-        self.random_state = random.Random(seed)
-
-    def _generate_sentence(self) -> str:
-        """Generates a single structurally coherent academic sentence."""
-        subject = self.random_state.choice(MOCK_SUBJECTS)
-        verb = self.random_state.choice(MOCK_VERBS)
-        obj = self.random_state.choice(MOCK_OBJECTS)
-        
-        structures = [
-            f"The field of {subject.lower()} frequently {verb} various {obj}.",
-            f"Recent advancements in {subject.lower()} have shown how it {verb} modern {obj}.",
-            f"An essential aspect of {subject.lower()} is the way it {verb} critical {obj}.",
-            f"By leveraging {subject.lower()}, researchers can ensure the system {verb} {obj}.",
-            f"Traditional approaches to {subject.lower()} lack the capacity to properly handle {obj}, which this methodology {verb}."
-        ]
-        return self.random_state.choice(structures)
-
-    def generate_paragraph(self, min_sentences: int = 3, max_sentences: int = 7) -> str:
-        """Generates a full paragraph of text."""
-        count = self.random_state.randint(min_sentences, max_sentences)
-        sentences = [self._generate_sentence() for _ in range(count)]
-        return " ".join(sentences)
-
-    def generate_document(self, min_paragraphs: int = 2, max_paragraphs: int = 5) -> str:
-        """Generates a full document corpus."""
-        count = self.random_state.randint(min_paragraphs, max_paragraphs)
-        paragraphs = [self.generate_paragraph() for _ in range(count)]
-        return "\n\n".join(paragraphs)
-
-    def generate_metadata(self) -> Tuple[str, str, str]:
-        """Generates mock metadata: (student_name, class_section, filename)."""
-        student = self.random_state.choice(MOCK_NAMES)
-        cls = self.random_state.choice(MOCK_CLASSES)
-        topic = self.random_state.choice(MOCK_SUBJECTS).replace(" ", "_")
-        filename = f"{student.replace(' ', '_')}_{topic}_Essay.pdf"
-        return student, cls, filename
-
-
-class VectorMathGenerator:
-    """Handles high-dimensional math for semantic embedding mocks."""
-
-    def __init__(self, seed: int, dim: int = 384):
-        self.seed = seed
-        self.dim = dim
-        self.rng = np.random.default_rng(seed)
-
-    def generate_base_vector(self) -> np.ndarray:
-        """Generates a random normalized unit vector."""
-        vec = self.rng.standard_normal(self.dim)
-        vec /= np.linalg.norm(vec)
-        return vec
-
-    def generate_similar_vector(self, base_vec: np.ndarray, target_similarity: float) -> np.ndarray:
-        """
-        Generates a new vector that has exactly `target_similarity` 
-        cosine similarity with `base_vec`.
-        """
-        target_similarity = np.clip(target_similarity, -1.0, 1.0)
-        noise = self.rng.standard_normal(self.dim)
-        
-        # Orthogonalize noise against base_vec
-        noise -= np.dot(noise, base_vec) * base_vec
-        
-        # Handle edge case where noise is zero vector
-        norm = np.linalg.norm(noise)
-        if norm < 1e-10:
-            noise = self.rng.standard_normal(self.dim)
-            noise -= np.dot(noise, base_vec) * base_vec
-            norm = np.linalg.norm(noise)
-            
-        noise /= norm
-        
-        # Combine
-        new_vec = target_similarity * base_vec + np.sqrt(1 - target_similarity**2) * noise
-        new_vec /= np.linalg.norm(new_vec)
-        return new_vec
-
-
-def clear_existing_databases(verbose: bool):
-    """Removes old database files to ensure a clean slate."""
-    db_files = ["users.db", "corpus.db", "corpus.index"]
-    if verbose:
-        logger.info("Cleaning existing local databases...")
-        
-    for f in db_files:
-        path = os.path.join(seed_dir, f)
-        if os.path.exists(path):
-            try:
-                os.remove(path)
-                if verbose:
-                    logger.info(f"Removed old seed file: {f}")
-            except PermissionError as err:
-                logger.warning(
-                    f"Permission denied while removing seed file {f} "
-                    f"({err}). The file may be locked or in use."
-                )
-            except OSError as err:
-                logger.warning(f"OS error while removing seed file {f}: {err}")
-
-
-def initialize_databases(verbose: bool):
-    """Configures paths and initializes sqlite tables."""
-    if verbose:
-        logger.info("Configuring database paths...")
-    configure_auth_db_path(auth_db_path)
-    configure_corpus_db_path(corpus_db_path)
-
-    if verbose:
-        logger.info("Initializing Auth DB...")
-    init_auth_db()
-
-
-    add_user("teacher", "teacher123", "teacher")
-    
-    if verbose:
-        logger.info("Initializing Corpus DB...")
-    init_corpus_db()
-
-    print("Corpus DB initialized.")
-
-    # Document contents
-    text_alice = (
-        "Artificial intelligence (AI) is intelligence demonstrated by machines, in contrast to the natural "
-        "intelligence displayed by humans and other animals. Study of intelligent agents: any device that "
-        "perceives its environment and takes actions that maximize its chance of successfully achieving its goals."
-    )
-    text_bob = (
-        "Artificial intelligence (AI) is intelligence demonstrated by machines, in contrast to the natural "
-        "intelligence displayed by humans and other animals. Study of intelligent agents: any device that "
-        "perceives its environment and takes actions that maximize its chance of successfully achieving its goals. "
-    )
-    text_charlie = (
-        "A blockchain is a decentralized, distributed, and public digital ledger that is used to record transactions "
-        "across many computers so that the record cannot be altered retroactively without the alteration of all "
-        "subsequent blocks."
-    )
-
-    # Document hashes
-    hash_alice = hashlib.sha256(text_alice.encode()).hexdigest()
-    hash_bob = hashlib.sha256(text_bob.encode()).hexdigest()
-    hash_charlie = hashlib.sha256(text_charlie.encode()).hexdigest()
-
-    print("Adding dummy documents...")
-
-    add_document(
-        filename=ALICE_FILENAME,
-        file_hash=hash_alice,
-        class_section=CLASS_SECTION,
-        student_name=ALICE_STUDENT_NAME,
-        assignment_title=ASSIGNMENT_TITLE,
-    )
-
-    add_document(
-        filename=BOB_FILENAME,
-        file_hash=hash_bob,
-        class_section=CLASS_SECTION,
-        student_name=BOB_STUDENT_NAME,
-        assignment_title=ASSIGNMENT_TITLE,
-    )
-
-    add_document(
-        filename=CHARLIE_FILENAME,
-        file_hash=hash_charlie,
-        class_section=CLASS_SECTION,
-        student_name=CHARLIE_STUDENT_NAME,
-        assignment_title=ASSIGNMENT_TITLE,
-    )
-
-    # Generate mock embeddings with deterministic similarities
-    print("Generating mock embeddings with mathematical similarities...")
-    np.random.seed(RANDOM_SEED)
-
-    # Alice vector (random normalized unit vector)
-    va = np.random.randn(EMBEDDING_DIM)
-    va /= np.linalg.norm(va)
-
-    # Bob vector
-    noise_b = np.random.randn(EMBEDDING_DIM)
-    noise_b -= np.dot(noise_b, va) * va
-    noise_b /= np.linalg.norm(noise_b)
-
-    vb = (
-        ALICE_BOB_SIMILARITY * va
-        + np.sqrt(1 - ALICE_BOB_SIMILARITY**2) * noise_b
-    )
-    vb /= np.linalg.norm(vb)
-
-    # Charlie vector
-    noise_c = np.random.randn(EMBEDDING_DIM)
-    noise_c -= np.dot(noise_c, va) * va
-    noise_c -= np.dot(noise_c, vb) * vb
-    noise_c /= np.linalg.norm(noise_c)
-
-    vc = (
-        ALICE_CHARLIE_SIMILARITY * va
-        + np.sqrt(1 - ALICE_CHARLIE_SIMILARITY**2) * noise_c
-    )
-    vc /= np.linalg.norm(vc)
-
-
-    # Validate generated cosine similarities before persisting embeddings.
-    # Since the vectors are normalized, their dot product equals cosine similarity.
-    alice_bob_similarity = float(np.dot(va, vb))
-    alice_charlie_similarity = float(np.dot(va, vc))
-
-    expected_alice_bob_similarity = 0.95
-    expected_alice_charlie_similarity = 0.15
-    similarity_tolerance = 1e-6
-
-    if not np.isclose(
-        alice_bob_similarity,
-        expected_alice_bob_similarity,
-        atol=similarity_tolerance,
-        rtol=0.0,
-    ):
-        raise ValueError(
-            "Mock embedding validation failed for Alice/Bob: "
-            f"expected {expected_alice_bob_similarity}, "
-            f"got {alice_bob_similarity:.6f}"
-        )
-
-    if not np.isclose(
-        alice_charlie_similarity,
-        expected_alice_charlie_similarity,
-        atol=similarity_tolerance,
-        rtol=0.0,
-    ):
-        raise ValueError(
-            "Mock embedding validation failed for Alice/Charlie: "
-            f"expected {expected_alice_charlie_similarity}, "
-            f"got {alice_charlie_similarity:.6f}"
-        )
-
-    print(
-        "Validated mock similarities: "
-        f"Alice/Bob={alice_bob_similarity:.6f}, "
-        f"Alice/Charlie={alice_charlie_similarity:.6f}"
-    )
-
-
-    chunks = [
-        (0, ALICE_FILENAME, 0, text_alice, va),
-        (1, BOB_FILENAME, 0, text_bob, vb),
-        (2, CHARLIE_FILENAME, 0, text_charlie, vc),
-    ]
-
-    print("Inserting chunks...")
-    add_chunks(chunks)
-
+def main(
+    argv: list[str] | None = None,
+) -> None:
+    """Generate databases, incidents, embeddings, and FAISS index."""
+    config = parse_args(argv)
 
     # Sync plagiarism incidents
     print("Syncing plagiarism incidents...")
@@ -638,71 +435,174 @@ def main():
     matrix = np.vstack(vectors)
     index = build_index_from_matrix(matrix)
 
+    print("Initializing databases...")
+    init_auth_db()
+    add_user(
+        "teacher",
+        "teacher123",
+        "teacher",
+    )
+    print("Auth DB initialized and seeded.")
 
-    index_path = os.path.join(seed_dir, FAISS_INDEX_FILENAME)
+    init_corpus_db()
+    print("Corpus DB initialized.")
 
-    
-    index_path = os.path.join(seed_dir, "corpus.index")
+    text_alice = (
+        "Artificial intelligence (AI) is intelligence "
+        "demonstrated by machines, in contrast to the natural "
+        "intelligence displayed by humans and other animals. "
+        "Study of intelligent agents: any device that perceives "
+        "its environment and takes actions that maximize its "
+        "chance of successfully achieving its goals."
+    )
+    text_bob = (
+        "Artificial intelligence (AI) is intelligence "
+        "demonstrated by machines, in contrast to the natural "
+        "intelligence displayed by humans and other animals. "
+        "Study of intelligent agents: any device that perceives "
+        "its environment and takes actions that maximize its "
+        "chance of successfully achieving its goals."
+    )
+    text_charlie = (
+        "A blockchain is a decentralized, distributed, and "
+        "public digital ledger used to record transactions "
+        "across many computers."
+    )
 
-    save_index(index, index_path)
+    documents = [
+        (
+            "Introduction_to_AI.pdf",
+            text_alice,
+            "Alice Smith",
+        ),
+        (
+            "AI_Concepts_Homework.pdf",
+            text_bob,
+            "Bob Jones",
+        ),
+        (
+            "Introduction_to_Blockchain.pdf",
+            text_charlie,
+            "Charlie Brown",
+        ),
+    ]
 
-
-    # Validate generated seed data before reporting success
-    print("Validating generated seed data...")
-
-    expected_documents = 3
-    expected_chunks = 3
-    expected_incidents = 1
-    expected_vectors = 3
-
-    actual_documents = len(get_all_documents())
-    actual_chunks = get_embedding_count()
-
-    # Pass the seed DB path explicitly because incidents.py accepts a db_path
-    # parameter and its function defaults are evaluated at definition time.
-    corpus_db_path = os.path.join(seed_dir, "corpus.db")
-    actual_incidents = len(get_all_incidents(db_path=corpus_db_path))
-
-    # FAISS exposes the number of stored vectors through ntotal.
-    actual_vectors = index.ntotal
-
-    validation_checks = {
-        "documents": (actual_documents, expected_documents),
-        "chunks": (actual_chunks, expected_chunks),
-        "incidents": (actual_incidents, expected_incidents),
-        "FAISS vectors": (actual_vectors, expected_vectors),
-    }
-
-    validation_errors = []
-
-    for name, (actual, expected) in validation_checks.items():
-        if actual != expected:
-            validation_errors.append(
-                f"{name}: expected {expected}, found {actual}"
-            )
-
-    if validation_errors:
-        raise RuntimeError(
-            "Seed data validation failed: " + "; ".join(validation_errors)
+    print("Adding dummy documents...")
+    for filename, text, student_name in documents:
+        add_document(
+            filename=filename,
+            file_hash=hashlib.sha256(
+                text.encode()
+            ).hexdigest(),
+            class_section="CS-101",
+            student_name=student_name,
+            assignment_title="Final Essay",
         )
 
     print(
-        "Seed data validation passed: "
-        f"{actual_documents} documents, "
-        f"{actual_chunks} chunks, "
-        f"{actual_incidents} incident, "
-        f"{actual_vectors} FAISS vectors."
+        "Generating mock embeddings with mathematical "
+        "similarities..."
+    )
+    random_generator = np.random.default_rng(
+        RANDOM_SEED
     )
 
-    print("Seed data successfully generated and stored in tests/dummy_data/!")
+    alice_vector = random_generator.standard_normal(
+        EMBEDDING_DIMENSION
+    )
+    alice_vector /= np.linalg.norm(alice_vector)
 
-    logger.info("==========================================================")
-    logger.info("Seed data successfully generated and stored in tests/dummy_data/!")
-    logger.info(f"Total Documents: {args.documents}")
-    logger.info(f"Total Flagged Pairs: {args.pairs}")
-    logger.info(f"Dimensionality: {args.dim}")
-    logger.info("==========================================================")
+    bob_vector = generate_similar_vector(
+        alice_vector,
+        config.target_similarity,
+        random_generator,
+    )
+    actual_target_similarity = validate_target_similarity(
+        alice_vector,
+        bob_vector,
+        config.target_similarity,
+    )
 
+    charlie_vector = generate_similar_vector(
+        alice_vector,
+        BACKGROUND_SIMILARITY,
+        random_generator,
+    )
+    validate_target_similarity(
+        alice_vector,
+        charlie_vector,
+        BACKGROUND_SIMILARITY,
+    )
+
+    if config.verbose:
+        print(
+            "Validated target pair similarity: "
+            f"requested={config.target_similarity:.6f}, "
+            f"actual={actual_target_similarity:.6f}"
+        )
+
+    chunks = [
+        (
+            0,
+            "Introduction_to_AI.pdf",
+            0,
+            text_alice,
+            alice_vector,
+        ),
+        (
+            1,
+            "AI_Concepts_Homework.pdf",
+            0,
+            text_bob,
+            bob_vector,
+        ),
+        (
+            2,
+            "Introduction_to_Blockchain.pdf",
+            0,
+            text_charlie,
+            charlie_vector,
+        ),
+    ]
+
+    print("Inserting chunks...")
+    add_chunks(chunks)
+
+    print("Syncing plagiarism incidents...")
+    sync_flagged_incidents(
+        [
+            {
+                "doc_a": "AI_Concepts_Homework.pdf",
+                "doc_b": "Introduction_to_AI.pdf",
+                "similarity": actual_target_similarity,
+                "severity": (
+                    "High"
+                    if actual_target_similarity >= 0.80
+                    else "Medium"
+                ),
+            }
+        ]
+    )
+
+    print("Building and saving FAISS index...")
+    matrix = np.vstack(
+        [
+            alice_vector,
+            bob_vector,
+            charlie_vector,
+        ]
+    )
+    index = build_index_from_matrix(matrix)
+    save_index(
+        index,
+        os.path.join(SEED_DIR, "corpus.index"),
+    )
+
+    print(
+        "Seed data successfully generated with target "
+        f"similarity {actual_target_similarity:.1%} and stored "
+        "in tests/dummy_data/!"
+    )
 
 
 if __name__ == "__main__":
