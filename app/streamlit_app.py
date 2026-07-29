@@ -23,9 +23,44 @@ ROOT_DIR = FILE_PATH.parent.parent  # Points to semantic-plagiarism-detector/
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+
 # Silence harmless Windows asyncio Proactor connection lost bugs
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+
+import base64
+import html
+import json
+
+# Standard / Third-party imports
+import time
+from datetime import datetime
+import numpy as np
+import pandas as pd
+import streamlit as st
+
+from src.security.metadata_stripper import strip_exif_metadata
+from src.utils.filename import (
+    InvalidFileExtensionError,
+    sanitize_filename,
+    unique_filename,
+    validate_document_extension,
+)
+
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
+from typing import Any
+
+try:
+    from streamlit_plotly_events import plotly_events
+except ImportError:  # pragma: no cover - optional dependency
+    plotly_events = None
+
+import logging
+
 
 logger = logging.getLogger(__name__)
 
@@ -1001,6 +1036,134 @@ else:
                 ),
                 key="settings_semantic_slider",
             )
+
+
+            ocr_language = DEFAULT_OCR_LANGUAGE
+            ocr_dpi = DEFAULT_OCR_DPI
+
+            with st.expander("🔤 OCR Settings", expanded=False):
+                st.caption(
+                    "Used only for scanned or image-only PDF pages. Text-based PDFs continue to use native extraction."
+                )
+                ocr_language_labels = {
+                    display_name: code
+                    for code, display_name in SUPPORTED_OCR_LANGUAGES.items()
+                }
+                language_names = list(ocr_language_labels)
+                default_language_name = SUPPORTED_OCR_LANGUAGES[DEFAULT_OCR_LANGUAGE]
+
+                selected_ocr_language_name = st.selectbox(
+                    "OCR Language",
+                    options=language_names,
+                    index=language_names.index(default_language_name),
+                    key="ocr_language_selector",
+                )
+                ocr_language = ocr_language_labels[selected_ocr_language_name]
+
+                ocr_dpi = st.slider(
+                    "OCR DPI Resolution",
+                    min_value=150,
+                    max_value=400,
+                    value=DEFAULT_OCR_DPI,
+                    step=25,
+                    key="ocr_dpi_slider",
+                )
+
+            st.markdown("### 💾 Backup")
+            from src.db.database_backup import (
+                create_corpus_database_snapshot,
+                create_password_protected_backup,
+            )
+
+            backup_password = st.text_input(
+                "🔑 Backup Password (optional)",
+                type="password",
+                help="If set, the backup file will be AES-256-encrypted.",
+                key="backup_password_input",
+            )
+            snapshot = create_corpus_database_snapshot()
+            if backup_password:
+                backup_data = create_password_protected_backup(
+                    snapshot, backup_password,
+                )
+                st.download_button(
+                    label="⬇️ Download raw Database",
+                    data=backup_data,
+                    file_name="corpus_backup.zip",
+                    mime="application/zip",
+                    key="download_raw_corpus_database",
+                )
+            else:
+                st.download_button(
+                    label="⬇️ Download raw Database",
+                    data=snapshot,
+                    file_name="corpus.db",
+                    mime="application/vnd.sqlite3",
+                    key="download_raw_corpus_database",
+                )
+
+            st.download_button(
+                label="📥 Backup Configuration (JSON)",
+                data=json.dumps(
+                    {
+                        "theme": st.session_state.get("theme", "Light"),
+                        "threshold": st.session_state.get("threshold_slider", 0.75),
+                        "class_filter": st.session_state.get("class_filter_selectbox", ""),
+                        "use_chunk_matrix": st.session_state.get("chunk_matrix_checkbox", False),
+                        "faiss_top_k": st.session_state.get("faiss_top_k_slider", 5),
+                        "ignore_phrases": st.session_state.get("ignore_phrases_textarea", ""),
+                        "chunk_size": st.session_state.get("chunk_size_slider", 500),
+                        "chunk_overlap": st.session_state.get("chunk_overlap_slider", 50),
+                        "ocr_language": st.session_state.get("ocr_language_selector", "eng"),
+                        "ocr_dpi": st.session_state.get("ocr_dpi_slider", 250),
+                    },
+                    indent=2,
+                ),
+                file_name="plagiarism_config_backup.json",
+                mime="application/json",
+                key="backup_config_button",
+            )
+
+            st.markdown("")
+            if st.button(
+                "🔄 Reset to Factory Defaults",
+                key="reset_defaults_button",
+                use_container_width=True,
+            ):
+                keys_to_reset = [
+                    "theme_selector",
+                    "threshold_slider",
+                    "class_filter_selectbox",
+                    "chunk_matrix_checkbox",
+                    "faiss_top_k_slider",
+                    "ignore_phrases_textarea",
+                    "chunk_size_slider",
+                    "chunk_overlap_slider",
+                    "ocr_language_selector",
+                    "ocr_dpi_slider",
+                ]
+                for key in keys_to_reset:
+                    if key in st.session_state:
+                        del st.session_state[key]
+                if "threshold" in st.query_params:
+                    del st.query_params["threshold"]
+                set_theme("Light")
+                st.success("✅ Settings reset to defaults!")
+                st.rerun()
+
+            st.markdown("")
+            if st.button(
+                "🔍 Ping Redis", key="ping_redis_button", use_container_width=True
+            ):
+                from src.utils.redis_cache import get_cache
+
+                connected, latency = get_cache().ping()
+                if connected:
+                    st.success(f"✅ Connected ({latency} ms ping)")
+                else:
+                    st.error("🚨 Disconnected")
+                st.rerun()
+
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.divider()
