@@ -5,8 +5,8 @@ import pytest
 
 from src.db.auth import (add_user, delete_user, disable_2fa, enable_2fa,
                          get_2fa_status, get_user_active_status, get_user_role,
-                         init_db, is_user_active, set_user_active_status,
-                         update_password, verify_user)
+                         init_db, is_user_active, log_security_event,
+                         set_user_active_status, update_password, verify_user)
 
 
 @pytest.fixture(autouse=True)
@@ -182,5 +182,98 @@ def test_user_theme(mock_db):
     # Invalid themes should fallback to light
     set_user_theme(user, "purple")
     assert get_user_theme(user) == "light"
+
+
+def test_delete_user_removes_user_row_and_audit_log(mock_db):
+    """delete_user() must remove the user row and associated security_audit_log entries."""
+    user = f"user_{uuid.uuid4().hex[:8]}"
+    add_user(user, "password123")
+
+    # Seed an audit log entry for this user
+    log_security_event("password_change", user, "test entry")
+
+    # Confirm the audit entry exists before deletion
+    with sqlite3.connect(mock_db) as conn:
+        audit_before = conn.execute(
+            "SELECT COUNT(*) FROM security_audit_log WHERE username = ?", (user,)
+        ).fetchone()[0]
+    assert audit_before >= 1
+
+    delete_user(user)
+
+    # User row must be gone
+    assert get_user_role(user) is None
+
+    # Audit log entries for the deleted user must also be removed
+    with sqlite3.connect(mock_db) as conn:
+        audit_after = conn.execute(
+            "SELECT COUNT(*) FROM security_audit_log WHERE username = ?", (user,)
+        ).fetchone()[0]
+    assert audit_after == 0
+
+
+def test_delete_user_removes_matching_session_and_authorization_rows(mock_db):
+    """delete_user() should remove matching session and authorization rows for the deleted user."""
+    user = f"user_{uuid.uuid4().hex[:8]}"
+    add_user(user, "password123")
+
+    with sqlite3.connect(mock_db) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                session_state TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS authorization_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL,
+                token TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO user_sessions (username, session_state) VALUES (?, ?)",
+            (user, '{"page": "dashboard"}'),
+        )
+        conn.execute(
+            "INSERT INTO authorization_tokens (username, token) VALUES (?, ?)",
+            (user, "token-for-user"),
+        )
+        conn.execute(
+            "INSERT INTO user_sessions (username, session_state) VALUES (?, ?)",
+            ("other_user", '{"page": "dashboard"}'),
+        )
+        conn.execute(
+            "INSERT INTO authorization_tokens (username, token) VALUES (?, ?)",
+            ("other_user", "token-for-other"),
+        )
+        conn.commit()
+
+    delete_user(user)
+
+    with sqlite3.connect(mock_db) as conn:
+        user_session_count = conn.execute(
+            "SELECT COUNT(*) FROM user_sessions WHERE username = ?", (user,)
+        ).fetchone()[0]
+        user_token_count = conn.execute(
+            "SELECT COUNT(*) FROM authorization_tokens WHERE username = ?", (user,)
+        ).fetchone()[0]
+        other_session_count = conn.execute(
+            "SELECT COUNT(*) FROM user_sessions WHERE username = ?", ("other_user",)
+        ).fetchone()[0]
+        other_token_count = conn.execute(
+            "SELECT COUNT(*) FROM authorization_tokens WHERE username = ?", ("other_user",)
+        ).fetchone()[0]
+
+    assert get_user_role(user) is None
+    assert user_session_count == 0
+    assert user_token_count == 0
+    assert other_session_count == 1
+    assert other_token_count == 1
 
 
