@@ -12,8 +12,6 @@ Model: paraphrase-multilingual-MiniLM-L12-v2
   - MIT licensed; safe for academic use
 """
 
-# pylint: disable=streamlit-global-mutation
-
 import logging
 import os
 from typing import List

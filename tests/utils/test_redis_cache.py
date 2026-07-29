@@ -4,22 +4,29 @@ test_redis_cache.py
 Unit tests for Redis cache functionality.
 """
 
+import pytest
+import numpy as np
+from unittest.mock import Mock, patch
 from unittest.mock import Mock
 
 import numpy as np
 import pytest
 
 from src.utils.redis_cache import (
+    CacheKeyPrefix,
     RedisCache,
     cache_analysis_results,
     cache_faiss_index,
     cache_session_state,
     clear_session,
     get_analysis_results,
+    _cache,
+    RedisError,
     get_cache,
     get_faiss_index,
     get_session_state,
 )
+import redis
 
 
 class TestRedisCache:
@@ -96,7 +103,7 @@ class TestRedisCache:
         value = True
 
         cache_session_state(session_id, key, value)
-        expected_key = f"spd:v1:session:{session_id}:{key}"
+        expected_key = f"{CacheKeyPrefix.SESSION.value}:{session_id}:{key}"
         mock_redis_client.setex.assert_called_once()
 
         mock_redis_client.get.return_value = b"\x80"
@@ -107,14 +114,14 @@ class TestRedisCache:
         """Test clearing session data."""
         session_id = "test_session"
         mock_redis_client.keys.return_value = [
-            b"spd:v1:session:test_session:key1",
-            b"spd:v1:session:test_session:key2",
+            f"{CacheKeyPrefix.SESSION.value}:test_session:key1".encode("utf-8"),
+            f"{CacheKeyPrefix.SESSION.value}:test_session:key2".encode("utf-8"),
         ]
         mock_redis_client.delete.return_value = 2
 
         result = clear_session(session_id)
         assert result is True
-        mock_redis_client.keys.assert_called_once_with(f"spd:v1:session:{session_id}:*")
+        mock_redis_client.keys.assert_called_once_with(f"{CacheKeyPrefix.SESSION.value}:{session_id}:*")
 
     def test_faiss_index_caching(self, cache_with_mock, mock_redis_client):
         """Test FAISS index caching."""
@@ -136,7 +143,7 @@ class TestRedisCache:
         results = {"embeddings": np.array([[1, 2, 3]]), "similarity": 0.85}
 
         cache_analysis_results(analysis_key, results)
-        expected_key = f"spd:v1:analysis:{analysis_key}"
+        expected_key = f"{CacheKeyPrefix.ANALYSIS.value}:{analysis_key}"
         mock_redis_client.setex.assert_called_once()
 
         mock_redis_client.get.return_value = b"\x80"
@@ -176,8 +183,8 @@ class TestRedisCache:
         key2_called = call_args_list[1][0][0]
 
         assert key1_called != key2_called
-        assert key1_called == f"analysis:{simulated_hash1}"
-        assert key2_called == f"analysis:{simulated_hash2}"
+        assert key1_called == f"{CacheKeyPrefix.LEGACY_ANALYSIS_PREFIX.value}{simulated_hash1}"
+        assert key2_called == f"{CacheKeyPrefix.LEGACY_ANALYSIS_PREFIX.value}{simulated_hash2}"
 
     # ------------------------------------------------------------------
     # Issue #531 – hash-prefix boundary / collision tests
@@ -259,8 +266,8 @@ class TestRedisCache:
         assert safe_key_a != safe_key_b, (
             "Full-digest keys must be distinct for different queries."
         )
-        assert safe_key_a == f"analysis:{full_hash_a}"
-        assert safe_key_b == f"analysis:{full_hash_b}"
+        assert safe_key_a == f"{CacheKeyPrefix.LEGACY_ANALYSIS_PREFIX.value}{full_hash_a}"
+        assert safe_key_b == f"{CacheKeyPrefix.LEGACY_ANALYSIS_PREFIX.value}{full_hash_b}"
 
     @pytest.mark.parametrize(
         "query_a, query_b",
@@ -321,11 +328,250 @@ class TestRedisCache:
             "Full-digest analysis keys must not collide for distinct queries."
         )
         # Secondary: keys must be well-formed with the 'analysis:' namespace
-        assert redis_key_a == f"analysis:{key_a}"
-        assert redis_key_b == f"analysis:{key_b}"
+        assert redis_key_a == f"{CacheKeyPrefix.LEGACY_ANALYSIS_PREFIX.value}{key_a}"
+        assert redis_key_b == f"{CacheKeyPrefix.LEGACY_ANALYSIS_PREFIX.value}{key_b}"
 
     def test_get_cache_singleton(self):
         """Test that get_cache returns the same instance."""
         cache1 = get_cache()
         cache2 = get_cache()
         assert cache1 is cache2
+    
+    def test_redis_failover_during_get(self):
+        """Test graceful fallback when Redis fails during a get operation."""
+        cache = RedisCache.__new__(RedisCache)
+        mock_client = Mock()
+        
+        # Simulate Redis disconnection during get
+        mock_client.get.side_effect = RedisError("Connection refused")
+        cache._client = mock_client
+        
+        # Should return None gracefully without crashing
+        result = cache.get("test_key")
+        assert result is None
+    
+    def test_redis_failover_during_set(self):
+        """Test graceful fallback when Redis fails during a set operation."""
+        cache = RedisCache.__new__(RedisCache)
+        mock_client = Mock()
+        
+        # Simulate Redis disconnection during set
+        mock_client.setex.side_effect = RedisError("Connection timeout")
+        cache._client = mock_client
+        
+        # Should return False gracefully
+        result = cache.set("test_key", "test_value", ttl=60)
+        assert result is False
+    
+    def test_redis_failover_during_delete(self):
+        """Test graceful fallback when Redis fails during a delete operation."""
+        cache = RedisCache.__new__(RedisCache)
+        mock_client = Mock()
+        
+        # Simulate Redis disconnection during delete
+        mock_client.delete.side_effect = RedisError("Connection lost")
+        cache._client = mock_client
+        
+        # Should return False gracefully
+        result = cache.delete("test_key")
+        assert result is False
+    
+    def test_redis_failover_during_exists(self):
+        """Test graceful fallback when Redis fails during an exists check."""
+        cache = RedisCache.__new__(RedisCache)
+        mock_client = Mock()
+        
+        # Simulate Redis disconnection during exists check
+        mock_client.exists.side_effect = RedisError("Server unavailable")
+        cache._client = mock_client
+        
+        # Should return False gracefully
+        result = cache.exists("test_key")
+        assert result is False
+    
+    def test_redis_failover_during_get_json(self):
+        """Test graceful fallback when Redis fails during JSON get."""
+        cache = RedisCache.__new__(RedisCache)
+        mock_client = Mock()
+        
+        # Simulate Redis disconnection during JSON get
+        mock_client.get.side_effect = RedisError("Connection refused")
+        cache._client = mock_client
+        
+        # Should return None gracefully
+        result = cache.get_json("test_json")
+        assert result is None
+    
+    def test_redis_failover_during_set_json(self):
+        """Test graceful fallback when Redis fails during JSON set."""
+        cache = RedisCache.__new__(RedisCache)
+        mock_client = Mock()
+        
+        # Simulate Redis disconnection during JSON set
+        mock_client.setex.side_effect = RedisError("Connection timeout")
+        cache._client = mock_client
+        
+        # Should return False gracefully
+        result = cache.set_json("test_json", {"key": "value"}, ttl=60)
+        assert result is False
+    
+    def test_redis_failover_during_clear_pattern(self):
+        """Test graceful fallback when Redis fails during pattern clear."""
+        cache = RedisCache.__new__(RedisCache)
+        mock_client = Mock()
+        
+        # Simulate Redis disconnection during pattern clear
+        mock_client.keys.side_effect = RedisError("Connection lost")
+        cache._client = mock_client
+        
+        # Should return 0 gracefully
+        result = cache.clear_pattern("session:*")
+        assert result == 0
+    
+    def test_redis_failover_during_is_available(self):
+        """Test is_available returns False when Redis is unavailable."""
+        cache = RedisCache.__new__(RedisCache)
+        cache._client = Mock()
+        cache._client.ping.side_effect = RedisError("Connection refused")
+        
+        # Should return False without crashing
+        result = cache.is_available()
+        assert result is False
+    
+    def test_cache_fallback_when_redis_unavailable(self):
+        """Test that cache gracefully falls back when Redis is completely unavailable."""
+        cache = RedisCache.__new__(RedisCache)
+        cache._client = None
+        
+        # All operations should return None/False gracefully
+        assert cache.is_available() is False
+        assert cache.get("test_key") is None
+        assert cache.set("test_key", "test_value") is False
+        assert cache.delete("test_key") is False
+        assert cache.exists("test_key") is False
+        assert cache.get_json("test_key") is None
+        assert cache.set_json("test_key", {"value": 1}) is False
+        assert cache.clear_pattern("session:*") == 0
+    
+    def test_session_state_fallback_when_redis_unavailable(self):
+        """Test that session state functions gracefully when Redis is unavailable."""
+        from src.utils.redis_cache import _cache as global_cache
+        
+        # Temporarily disable Redis
+        original_client = global_cache._client
+        global_cache._client = None
+        
+        try:
+            # These should not crash, just return False/None
+            assert cache_session_state("test_session", "key", "value") is False
+            assert get_session_state("test_session", "key") is None
+            assert clear_session("test_session") is False
+        finally:
+            # Restore original client
+            global_cache._client = original_client
+    
+    def test_faiss_index_fallback_when_redis_unavailable(self):
+        """Test that FAISS index functions gracefully when Redis is unavailable."""
+        from src.utils.redis_cache import _cache as global_cache
+        
+        # Temporarily disable Redis
+        original_client = global_cache._client
+        global_cache._client = None
+        
+        try:
+            # These should not crash, just return None/False
+            assert cache_faiss_index("test_key", b"test_data") is False
+            assert get_faiss_index("test_key") is None
+        finally:
+            # Restore original client
+            global_cache._client = original_client
+    
+    def test_analysis_results_fallback_when_redis_unavailable(self):
+        """Test that analysis results functions gracefully when Redis is unavailable."""
+        from src.utils.redis_cache import _cache as global_cache
+        
+        # Temporarily disable Redis
+        original_client = global_cache._client
+        global_cache._client = None
+        
+        try:
+            # These should not crash, just return None/False
+            assert cache_analysis_results("test_key", {"results": []}) is False
+            assert get_analysis_results("test_key") is None
+        finally:
+            # Restore original client
+            global_cache._client = original_client
+    
+    def test_pickle_error_handling_in_get(self):
+        """Test graceful handling of pickle deserialization errors."""
+        cache = RedisCache.__new__(RedisCache)
+        mock_client = Mock()
+        
+        # Simulate valid connection but invalid pickle data
+        mock_client.get.return_value = b"invalid_pickle_data"
+        cache._client = mock_client
+        
+        # Should return None gracefully instead of crashing
+        result = cache.get("test_key")
+        assert result is None
+    
+    def test_json_decode_error_handling_in_get_json(self):
+        """Test graceful handling of JSON deserialization errors."""
+        cache = RedisCache.__new__(RedisCache)
+        mock_client = Mock()
+        
+        # Simulate valid connection but invalid JSON data
+        mock_client.get.return_value = "invalid json {"
+        cache._client = mock_client
+        
+        # Should return None gracefully instead of crashing
+        result = cache.get_json("test_json")
+        assert result is None
+    
+    def test_redis_timeout_during_get(self):
+        """Test graceful handling of Redis timeout during get."""
+        from src.utils.redis_cache import RedisError
+        
+        cache = RedisCache.__new__(RedisCache)
+        mock_client = Mock()
+        
+        # Simulate Redis timeout
+        mock_client.get.side_effect = redis.TimeoutError("Request timed out") if hasattr(redis, 'TimeoutError') else RedisError("Timeout")
+        cache._client = mock_client
+        
+        # Should return None gracefully
+        result = cache.get("test_key")
+        assert result is None
+
+    def test_cache_stats_tracking(self, cache_with_mock, mock_redis_client):
+        """Test tracking of hits, misses, hit ratio, and total items in cache stats."""
+        # Reset hits/misses to start fresh
+        cache_with_mock._hits = 0
+        cache_with_mock._misses = 0
+        cache_with_mock._fallback_cache.clear()
+
+        # Set mock expectations
+        mock_redis_client.dbsize.return_value = 5
+        mock_redis_client.get.return_value = None
+
+        # 1. Access non-existing key (should be a miss)
+        val = cache_with_mock.get("missing_key")
+        assert val is None
+        stats = cache_with_mock.get_stats()
+        assert stats["hits"] == 0
+        assert stats["misses"] == 1
+        assert stats["hit_ratio"] == 0.0
+        assert stats["total_items"] == 5
+
+        # 2. Write key & read back (should be a hit)
+        cache_with_mock.set("existing_key", "hello")
+        import pickle
+        mock_redis_client.get.return_value = pickle.dumps("hello")
+
+        val2 = cache_with_mock.get("existing_key")
+        assert val2 == "hello"
+        stats2 = cache_with_mock.get_stats()
+        assert stats2["hits"] == 1
+        assert stats2["misses"] == 1
+        assert stats2["hit_ratio"] == 0.5
+

@@ -4,6 +4,9 @@ import logging
 import zipfile
 from datetime import datetime
 from typing import Dict, List, Optional
+import numpy as np
+
+import pandas as pd
 
 from src.core.similarity import find_most_similar_chunks
 from src.utils.pdf_report import generate_plagiarism_report
@@ -13,37 +16,45 @@ logger = logging.getLogger(__name__)
 
 def _sanitise_filename(name: str) -> str:
     """Strip non-alphanumeric characters (except ``-``, ``_``) for safe filenames."""
-    return "".join(c for c in name if c.isalnum() or c in ("-", "_")).rstrip() or "unnamed"
+    return "".join(c for c in name if c.isalnum() or c in ("-", "_")) .rstrip() or "unnamed"
 
 
 def generate_bulk_reports_zip(
     flags: List[Dict],
+    *,
     chunked_docs: Optional[Dict[str, List[str]]] = None,
     embeddings: Optional[Dict[str, "np.ndarray"]] = None,
+    include_pdf: bool = True,
+    include_csv: bool = True,
+    include_json: bool = True,
 ) -> bytes:
-    """Generate a ZIP file containing PDF reports for all flagged pairs.
-
-    When *chunked_docs* and *embeddings* are provided, each PDF includes
-    the top-3 most similar paragraph pairs with side-by-side comparison.
-    Otherwise a simplified report is generated with the available metadata.
+    """Generate a ZIP file containing selected artefacts for flagged document pairs.
 
     Parameters
     ----------
     flags:
         List of flag dicts returned by :func:`~src.core.similarity.flag_plagiarism`.
-        Each dict must contain ``doc_a``, ``doc_b``, ``similarity``, and
+        Each dict must contain ``doc_a``, ``doc_b``, ``similarity`` and
         ``threshold_at_time_of_flag``.
     chunked_docs:
         Optional mapping of document name → list of text chunks.
     embeddings:
         Optional mapping of document name → NumPy embedding array.
+    include_pdf:
+        Whether to generate per‑pair PDF reports.
+    include_csv:
+        Whether to include a summary CSV of all flagged pairs.
+    include_json:
+        Whether to include a metadata JSON file describing the export.
 
     Returns
     -------
     bytes
-        In-memory ZIP file contents.
+        In‑memory ZIP file contents.
     """
+
     memory_file = io.BytesIO()
+    csv_rows = []  # collect rows for optional CSV
 
     with zipfile.ZipFile(memory_file, "w", zipfile.ZIP_DEFLATED) as zf:
         for idx, flag in enumerate(flags):
@@ -51,6 +62,14 @@ def generate_bulk_reports_zip(
             doc_b = flag.get("doc_b", f"doc_B_{idx}")
             score = float(flag.get("similarity", 0.0))
             threshold = float(flag.get("threshold_at_time_of_flag", 0.5))
+
+            # Gather CSV row data early
+            csv_rows.append({
+                "doc_a": doc_a,
+                "doc_b": doc_b,
+                "similarity_score": score,
+                "threshold_at_time_of_flag": threshold,
+            })
 
             # Attempt to enrich the report with top matching chunk pairs
             top_pairs = []
@@ -67,37 +86,60 @@ def generate_bulk_reports_zip(
                         threshold=threshold,
                     )
                 except Exception as exc:
-                    logger.debug("Could not compute chunk pairs for %s ↔ %s: %s", doc_a, doc_b, exc)
+                    logger.debug(
+                        "Could not compute chunk pairs for %s ↔ %s: %s",
+                        doc_a,
+                        doc_b,
+                        exc,
+                    )
 
+            if include_pdf:
+                try:
+                    pdf_buffer = generate_plagiarism_report(
+                        doc_a=doc_a,
+                        doc_b=doc_b,
+                        overall_similarity=score,
+                        threshold=threshold,
+                        top_pairs=top_pairs,
+                        report_title=f"Plagiarism Report: {doc_a} vs {doc_b}",
+                    )
+                    safe_a = _sanitise_filename(doc_a)
+                    safe_b = _sanitise_filename(doc_b)
+                    pdf_filename = f"report_{safe_a}_{safe_b}.pdf"
+                    zf.writestr(pdf_filename, pdf_buffer.getvalue())
+                except Exception as exc:
+                    logger.error("Failed to generate PDF for %s ↔ %s: %s", doc_a, doc_b, exc)
+                    # Fallback JSON per‑pair if PDF generation fails
+                    safe_a = _sanitise_filename(doc_a)
+                    safe_b = _sanitise_filename(doc_b)
+                    fallback = {
+                        "generated_at": datetime.now().isoformat(),
+                        "document_a": doc_a,
+                        "document_b": doc_b,
+                        "similarity_score": score,
+                        "threshold": threshold,
+                        "note": "PDF generation failed; JSON fallback provided.",
+                    }
+                    zf.writestr(f"report_{safe_a}_{safe_b}.json", json.dumps(fallback, indent=2))
+
+        # Optional CSV summary
+        if include_csv:
             try:
-                pdf_buffer = generate_plagiarism_report(
-                    doc_a=doc_a,
-                    doc_b=doc_b,
-                    overall_similarity=score,
-                    threshold=threshold,
-                    top_pairs=top_pairs,
-                    report_title=f"Plagiarism Report: {doc_a} vs {doc_b}",
-                )
-                safe_a = _sanitise_filename(doc_a)
-                safe_b = _sanitise_filename(doc_b)
-                pdf_filename = f"report_{safe_a}_{safe_b}.pdf"
-                zf.writestr(pdf_filename, pdf_buffer.getvalue())
+                df = pd.DataFrame(csv_rows)
+                csv_bytes = df.to_csv(index=False).encode("utf-8")
+                zf.writestr("summary.csv", csv_bytes)
             except Exception as exc:
-                logger.error("Failed to generate PDF for %s ↔ %s: %s", doc_a, doc_b, exc)
-                # Fallback: include a JSON report if PDF generation fails
-                safe_a = _sanitise_filename(doc_a)
-                safe_b = _sanitise_filename(doc_b)
-                fallback = {
+                logger.warning("Failed to generate CSV summary: %s", exc)
+
+        # Optional JSON metadata
+        if include_json:
+            try:
+                metadata = {
                     "generated_at": datetime.now().isoformat(),
-                    "document_a": doc_a,
-                    "document_b": doc_b,
-                    "similarity_score": score,
-                    "threshold": threshold,
-                    "note": "PDF generation failed; JSON fallback provided.",
+                    "flags": flags,
                 }
-                zf.writestr(
-                    f"report_{safe_a}_{safe_b}.json",
-                    json.dumps(fallback, indent=2),
-                )
+                zf.writestr("metadata.json", json.dumps(metadata, indent=2))
+            except Exception as exc:
+                logger.warning("Failed to generate JSON metadata: %s", exc)
 
     return memory_file.getvalue()

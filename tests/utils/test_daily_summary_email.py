@@ -209,3 +209,84 @@ def test_send_daily_summary(mock_get_incidents, mock_get_emails, mock_send_email
     mock_send_email.assert_called_once()
     call_args = mock_send_email.call_args
     assert "Daily Plagiarism Summary" in call_args[0][1]  # subject
+
+
+# ---------------------------------------------------------------------------
+# Tests for custom SMTP port configuration (Issue #944)
+# ---------------------------------------------------------------------------
+
+
+@patch("smtplib.SMTP_SSL")
+@patch.dict(
+    "os.environ",
+    {
+        "SMTP_SERVER": "smtp.example.com",
+        "SMTP_PORT": "465",
+        "SMTP_USERNAME": "test@example.com",
+        "SMTP_PASSWORD": "password",
+        "FROM_EMAIL": "test@example.com",
+    },
+)
+def test_send_email_ssl_port_465(mock_smtp_ssl):
+    """Port 465 should use SMTP_SSL (implicit SSL), not STARTTLS."""
+    mock_server = MagicMock()
+    mock_smtp_ssl.return_value.__enter__.return_value = mock_server
+
+    result = send_email(["recipient@example.com"], "Test Subject", "<p>Body</p>")
+
+    assert result is True
+    mock_smtp_ssl.assert_called_once_with("smtp.example.com", 465)
+    # SMTP_SSL does NOT call starttls
+    mock_server.starttls.assert_not_called()
+    mock_server.login.assert_called_once_with("test@example.com", "password")
+    mock_server.send_message.assert_called_once()
+
+
+@patch("smtplib.SMTP")
+@patch.dict(
+    "os.environ",
+    {
+        "SMTP_SERVER": "smtp.example.com",
+        "SMTP_PORT": "2525",
+        "SMTP_USERNAME": "test@example.com",
+        "SMTP_PASSWORD": "password",
+        "FROM_EMAIL": "test@example.com",
+    },
+)
+def test_send_email_starttls_custom_port_2525(mock_smtp):
+    """Custom port 2525 (non-465) should use SMTP + STARTTLS."""
+    mock_server = MagicMock()
+    mock_smtp.return_value.__enter__.return_value = mock_server
+
+    result = send_email(["recipient@example.com"], "Test Subject", "<p>Body</p>")
+
+    assert result is True
+    mock_smtp.assert_called_once_with("smtp.example.com", 2525)
+    mock_server.starttls.assert_called_once()
+    mock_server.login.assert_called_once_with("test@example.com", "password")
+    mock_server.send_message.assert_called_once()
+
+
+@patch("smtplib.SMTP")
+@patch.dict(
+    "os.environ",
+    {
+        "SMTP_SERVER": "smtp.example.com",
+        # SMTP_PORT intentionally omitted – should default to 587
+        "SMTP_USERNAME": "test@example.com",
+        "SMTP_PASSWORD": "password",
+        "FROM_EMAIL": "test@example.com",
+    },
+)
+def test_send_email_starttls_default_port_587(mock_smtp):
+    """When SMTP_PORT is not set, it should default to 587 with STARTTLS."""
+    mock_server = MagicMock()
+    mock_smtp.return_value.__enter__.return_value = mock_server
+
+    result = send_email(["recipient@example.com"], "Test Subject", "<p>Body</p>")
+
+    assert result is True
+    mock_smtp.assert_called_once_with("smtp.example.com", 587)
+    mock_server.starttls.assert_called_once()
+    mock_server.login.assert_called_once_with("test@example.com", "password")
+    mock_server.send_message.assert_called_once()

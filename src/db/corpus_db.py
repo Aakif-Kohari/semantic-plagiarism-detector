@@ -10,6 +10,7 @@ Enables incremental updates and index rebuilding without re-embedding.
 import logging
 import os
 import sqlite3
+import tempfile
 import threading
 from contextlib import contextmanager
 from datetime import datetime
@@ -24,7 +25,7 @@ from src.db.migrations import (delete_all_if_table_exists,
 from src.utils.filename import sanitize_filename
 
 _DB_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "corpus.db")
+    os.path.join(os.path.dirname(__file__), "..", "..", "data", "corpus.db")
 )
 
 _connection_pool = threading.local()
@@ -64,10 +65,21 @@ def _connect():
     handles when the process or a test is finished with the database.
     """
     path = os.path.abspath(_DB_PATH)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+    except (OSError, PermissionError):
+        path = os.path.join(tempfile.gettempdir(), "semantic_plagiarism_detector", "data", "corpus.db")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+
     pool = _pool()
     conn = pool.get(path)
     if conn is None:
-        conn = sqlite3.connect(path, check_same_thread=False)
+        try:
+            conn = sqlite3.connect(path, check_same_thread=False)
+        except sqlite3.OperationalError:
+            path = os.path.join(tempfile.gettempdir(), "semantic_plagiarism_detector", "data", "corpus.db")
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            conn = sqlite3.connect(path, check_same_thread=False)
         conn.execute("PRAGMA foreign_keys = ON")
         pool[path] = conn
 
@@ -103,9 +115,10 @@ def init_corpus_db() -> None:
                 pdf_author       TEXT,
                 pdf_creation_date TEXT,
                 pdf_title        TEXT,
-                tags             TEXT
+                tags             TEXT,
+                detected_language TEXT
             )
-        """
+            """
         )
 
         # Schema migration fallback logic: add missing columns if documents table already existed
@@ -123,34 +136,24 @@ def init_corpus_db() -> None:
             conn.execute("ALTER TABLE documents ADD COLUMN pdf_creation_date TEXT")
         if "pdf_title" not in columns:
             conn.execute("ALTER TABLE documents ADD COLUMN pdf_title TEXT")
-        if "is_deleted" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0")
-        if "deleted_at" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN deleted_at TEXT")
+        if "tags" not in columns:
+            conn.execute("ALTER TABLE documents ADD COLUMN tags TEXT")
+        if "detected_language" not in columns:
+            conn.execute("ALTER TABLE documents ADD COLUMN detected_language TEXT")
 
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS chunks (
-                vector_id    INTEGER PRIMARY KEY,
-                filename     TEXT    NOT NULL,
-                chunk_index  INTEGER NOT NULL,
-                chunk_text   TEXT    NOT NULL,
-                embedding    BLOB    NOT NULL,
-                FOREIGN KEY (filename) REFERENCES documents(filename) ON DELETE CASCADE
+                vector_id   INTEGER PRIMARY KEY,
+                filename    TEXT NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                chunk_text  TEXT NOT NULL,
+                embedding   BLOB NOT NULL,
+                FOREIGN KEY (filename)
+                    REFERENCES documents(filename)
+                    ON DELETE CASCADE
             )
-        """
-        )
-        conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS deleted_chunks (
-                vector_id    INTEGER,
-                filename     TEXT    NOT NULL,
-                chunk_index  INTEGER NOT NULL,
-                chunk_text   TEXT    NOT NULL,
-                embedding    BLOB    NOT NULL,
-                FOREIGN KEY (filename) REFERENCES documents(filename) ON DELETE CASCADE
-            )
-        """
         )
         migrate_corpus_database(conn)
 
@@ -172,6 +175,7 @@ def add_document(
     pdf_creation_date: str = None,
     pdf_title: str = None,
     tags: str = None,
+    detected_language: str = None,
 ) -> bool:
     """
     Insert a new document metadata row using parameterized execution.
@@ -185,7 +189,7 @@ def add_document(
     try:
         with _connect() as conn:
             conn.execute(
-                "INSERT INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, tags, detected_language) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     filename,
                     file_hash,
@@ -197,6 +201,7 @@ def add_document(
                     pdf_creation_date,
                     pdf_title,
                     tags,
+                    detected_language,
                 ),
             )
         return True
@@ -215,45 +220,33 @@ def get_document_by_hash(file_hash: str) -> str | None:
 
 def get_all_documents(include_deleted: bool = False) -> list:
     """Return all indexed documents sorted by upload date descending."""
+    from src.db.schemas import Document
+    query = (
+        "SELECT filename, file_hash, upload_date, class_section, student_name, "
+        "assignment_title, pdf_author, pdf_creation_date, pdf_title, detected_language "
+        "FROM documents"
+    )
+    if not include_deleted:
+        query += " WHERE is_deleted IS NULL OR is_deleted = 0"
+    query += " ORDER BY upload_date DESC"
+
     with _connect() as conn:
-        if include_deleted:
-            rows = conn.execute(
-                "SELECT filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, is_deleted, deleted_at FROM documents ORDER BY upload_date DESC"
-            ).fetchall()
-            return [
-                {
-                    "filename": r[0],
-                    "file_hash": r[1],
-                    "upload_date": r[2],
-                    "class_section": r[3],
-                    "student_name": r[4],
-                    "assignment_title": r[5],
-                    "pdf_author": r[6],
-                    "pdf_creation_date": r[7],
-                    "pdf_title": r[8],
-                    "is_deleted": r[9],
-                    "deleted_at": r[10],
-                }
-                for r in rows
-            ]
-        else:
-            rows = conn.execute(
-                "SELECT filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title FROM documents WHERE is_deleted = 0 ORDER BY upload_date DESC"
-            ).fetchall()
-            return [
-                {
-                    "filename": r[0],
-                    "file_hash": r[1],
-                    "upload_date": r[2],
-                    "class_section": r[3],
-                    "student_name": r[4],
-                    "assignment_title": r[5],
-                    "pdf_author": r[6],
-                    "pdf_creation_date": r[7],
-                    "pdf_title": r[8],
-                }
-                for r in rows
-            ]
+        rows = conn.execute(query).fetchall()
+    return [
+        Document(
+            filename=r[0],
+            file_hash=r[1],
+            upload_date=r[2],
+            class_section=r[3],
+            student_name=r[4],
+            assignment_title=r[5],
+            pdf_author=r[6],
+            pdf_creation_date=r[7],
+            pdf_title=r[8],
+            detected_language=r[9],
+        )
+        for r in rows
+    ]
 
 
 def add_chunks(chunks_to_add: list) -> None:
@@ -341,23 +334,24 @@ def soft_delete_document(filename: str) -> None:
 
 def get_deleted_documents() -> list:
     """Return all soft-deleted documents sorted by deleted_at descending."""
+    from src.db.schemas import Document
     with _connect() as conn:
         rows = conn.execute(
             "SELECT filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, deleted_at FROM documents WHERE is_deleted = 1 ORDER BY deleted_at DESC"
         ).fetchall()
     return [
-        {
-            "filename": r[0],
-            "file_hash": r[1],
-            "upload_date": r[2],
-            "class_section": r[3],
-            "student_name": r[4],
-            "assignment_title": r[5],
-            "pdf_author": r[6],
-            "pdf_creation_date": r[7],
-            "pdf_title": r[8],
-            "deleted_at": r[9],
-        }
+        Document(
+            filename=r[0],
+            file_hash=r[1],
+            upload_date=r[2],
+            class_section=r[3],
+            student_name=r[4],
+            assignment_title=r[5],
+            pdf_author=r[6],
+            pdf_creation_date=r[7],
+            pdf_title=r[8],
+            deleted_at=r[9],
+        )
         for r in rows
     ]
 
@@ -494,6 +488,10 @@ def add_documents_bulk(documents: list) -> int:
     formatted_docs = []
     now = datetime.now().isoformat()
     for doc in documents:
+        if not doc.get("file_hash"):
+            raise sqlite3.IntegrityError("NOT NULL constraint failed: documents.file_hash")
+        if not doc.get("filename"):
+            raise sqlite3.IntegrityError("NOT NULL constraint failed: documents.filename")
         formatted_docs.append(
             (
                 doc.get("filename"),
@@ -506,16 +504,23 @@ def add_documents_bulk(documents: list) -> int:
                 doc.get("pdf_creation_date"),
                 doc.get("pdf_title"),
                 doc.get("tags"),
+                doc.get("detected_language"),
             )
         )
 
     success_count = 0
     with _connect() as conn:
-        conn.executemany(
-            "INSERT OR IGNORE INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            formatted_docs,
-        )
-        success_count = conn.execute("SELECT changes()").fetchone()[0]
+        try:
+            total_before = conn.total_changes
+            conn.executemany(
+                "INSERT OR IGNORE INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, tags, detected_language) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                formatted_docs,
+            )
+            success_count = conn.total_changes - total_before
+            conn.commit()
+        except sqlite3.Error as e:
+            conn.rollback()
+            raise e
     return success_count
 
 
@@ -611,3 +616,43 @@ def check_database_integrity() -> list[str]:
     except Exception as e:
         logger.error(f"Integrity check failed: {e}")
         return [f"Error: {e}"]
+
+
+def optimize_database() -> dict[str, any]:
+    """
+    Executes SQLite VACUUM to reclaim database storage space.
+    Returns a dictionary containing:
+        - size_before: Database size in bytes before VACUUM.
+        - size_after: Database size in bytes after VACUUM.
+        - reclaimed_bytes: Bytes of storage space reclaimed.
+        - error: Error message if operation failed, else None.
+    """
+    path = get_corpus_db_path()
+    try:
+        size_before = path.stat().st_size if path.exists() else 0
+
+        # Run VACUUM outside transaction
+        conn = sqlite3.connect(os.path.abspath(path))
+        conn.isolation_level = None
+        try:
+            conn.execute("VACUUM")
+        finally:
+            conn.close()
+
+        size_after = path.stat().st_size if path.exists() else 0
+        reclaimed_bytes = max(0, size_before - size_after)
+
+        return {
+            "size_before": size_before,
+            "size_after": size_after,
+            "reclaimed_bytes": reclaimed_bytes,
+            "error": None,
+        }
+    except Exception as e:
+        logger.error(f"Database optimization (VACUUM) failed: {e}")
+        return {
+            "size_before": 0,
+            "size_after": 0,
+            "reclaimed_bytes": 0,
+            "error": str(e),
+        }
