@@ -2686,17 +2686,53 @@ if not st.session_state.authenticated:
                     lambda: plot_high_severity_trends(trend_data),
                 )
 
-                if trend_fig is None:
-                    st.info(
-                        "Enable “Load trend chart” to generate this "
-                        "visualization."
-                    )
-                else:
-                    st.plotly_chart(
-                        trend_fig,
-                        use_container_width=True,
-                    )
+        # Expect two PDF reports, a summary CSV, and a metadata JSON file
+        pdf_names = [n for n in names if n.lower().endswith(".pdf")]
+        assert len(pdf_names) == 2
 
+        assert "summary.csv" in names
+        assert "metadata.json" in names
+
+        # Verify metadata JSON content
+        meta_content = zf.read("metadata.json").decode("utf-8")
+        meta = json.loads(meta_content)
+
+        assert "generated_at" in meta
+        assert "flags" in meta
+        assert len(meta["flags"]) == 2
+
+        input_set = {(f["doc_a"], f["doc_b"]) for f in flags}
+        meta_set = {(f["doc_a"], f["doc_b"]) for f in meta["flags"]}
+        assert input_set == meta_set
+
+
+def test_generate_bulk_reports_zip_with_progress_bar():
+    from unittest.mock import Mock
+
+    flags = [
+        {
+            "doc1": "Alice.pdf",
+            "doc2": "Bob.docx",
+            "similarity_score": 0.85,
+            "matched_chunks": [],
+        },
+        {
+            "doc1": "Charlie.txt",
+            "doc2": "Dave.pdf",
+            "similarity_score": 0.95,
+            "matched_chunks": ["chunk1"],
+        },
+    ]
+
+    mock_pb = Mock()
+
+    generate_bulk_reports_zip(flags, progress_bar=mock_pb)
+
+    assert mock_pb.progress.call_count == 4
+    mock_pb.progress.assert_any_call(
+        1.0,
+        text="ZIP archive ready!",
+    )
             with st.expander(
                 "🔝 Most Frequently Plagiarized Documents",
                 expanded=False,
