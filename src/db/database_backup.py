@@ -14,6 +14,9 @@ Recent Additions (Issue #465):
 Recent Additions (Issue #468):
 - Added `create_password_protected_backup` function to wrap a snapshot
   in an optionally AES-256-encrypted ZIP archive.
+
+Recent Additions (Issue #932):
+- Added `optimize_database` function to run PRAGMA optimize, VACUUM, and ANALYZE.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from __future__ import annotations
 import io
 import logging
 import os
+import shutil
 import sqlite3
 import stat
 import tempfile
@@ -396,3 +400,66 @@ def cleanup_old_backups(
         "files_deleted": files_deleted,
         "bytes_freed": bytes_freed,
     }
+
+
+def optimize_database(db_path: str | Path) -> bool:
+    """
+    Optimize the SQLite database by reclaiming disk space and updating query optimizer statistics.
+    
+    This function executes PRAGMA optimize and VACUUM to reduce file fragmentation 
+    caused by frequent document deletions and index builds.
+    
+    Args:
+        db_path: Path to the SQLite database file.
+        
+    Returns:
+        bool: True if optimization was successful, False otherwise.
+    """
+    target_path = Path(db_path).expanduser().resolve()
+    
+    if not target_path.exists():
+        logger.warning(f"Cannot optimize: Database file not found at {target_path}")
+        return False
+        
+    try:
+        # Record initial size
+        initial_size_bytes = target_path.stat().st_size
+        initial_size_mb = initial_size_bytes / (1024 * 1024)
+        logger.info(f"Starting database optimization. Initial size: {initial_size_mb:.2f} MB")
+        
+        # Connect and execute optimization commands
+        with closing(sqlite3.connect(str(target_path))) as conn:
+            # PRAGMA optimize updates statistics for the query planner
+            logger.info("Executing PRAGMA optimize...")
+            conn.execute("PRAGMA optimize;")
+            
+            # VACUUM rebuilds the database file, defragmenting it and reclaiming unused space
+            logger.info("Executing VACUUM...")
+            conn.execute("VACUUM;")
+            
+            # ANALYZE updates the sqlite_stat1 table for better query planning
+            logger.info("Executing ANALYZE...")
+            conn.execute("ANALYZE;")
+        
+        # Record final size
+        final_size_bytes = target_path.stat().st_size
+        final_size_mb = final_size_bytes / (1024 * 1024)
+        size_reduction_mb = initial_size_mb - final_size_mb
+        reduction_percentage = (size_reduction_mb / initial_size_mb * 100) if initial_size_mb > 0 else 0.0
+        
+        logger.info(
+            f"Database optimization completed successfully. "
+            f"Final size: {final_size_mb:.2f} MB. "
+            f"Space reclaimed: {size_reduction_mb:.2f} MB ({reduction_percentage:.1f}%)"
+        )
+        return True
+        
+    except sqlite3.Error as e:
+        logger.error(f"SQLite optimization failed: {e}")
+        return False
+    except OSError as e:
+        logger.error(f"File system error during optimization: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error during database optimization: {e}")
+        return False
