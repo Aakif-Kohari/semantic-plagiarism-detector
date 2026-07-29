@@ -10,6 +10,7 @@ Provides:
 - HTML generation helpers for UI components
 - Dynamic theme injection for Streamlit
 """
+# -*- coding: utf-8 -*-
 
 from app.css_constants import (
     BADGE,
@@ -297,6 +298,14 @@ def inject_css() -> None:
     .stApp {{
         background-color: {colors['background']} !important;
         color: {colors['ink']} !important;
+    }}
+    
+    .block-container {{
+        padding-top: 2rem !important;
+    }}
+    
+    .stAlert {{
+        border-radius: 8px !important;
     }}
     
     .stCard {{
