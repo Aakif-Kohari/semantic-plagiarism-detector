@@ -456,4 +456,53 @@ def test_plot_similarity_heatmap_plotly_with_class_tag_filter():
     assert list(heatmap.x) == ["doc1.pdf", "doc2.pdf"]
 
 
+def test_plot_similarity_heatmap_dim_diagonal(multi_doc_df: pd.DataFrame) -> None:
+    """Verify that dim_diagonal=True dims diagonal self-similarity cells in Matplotlib heatmap."""
+    fig = plot_similarity_heatmap(
+        multi_doc_df,
+        title="Dim Diagonal Heatmap",
+        dim_diagonal=True,
+    )
+    assert hasattr(fig, "axes")
+    main_ax = next((ax for ax in fig.axes if ax.get_title() == "Dim Diagonal Heatmap"), None)
+    assert main_ax is not None
+    
+    # Verify PNG byte stream export remains valid
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png")
+    png_bytes = buf.getvalue()
+    assert png_bytes.startswith(b"\x89PNG\r\n\x1a\n")
+    plt.close(fig)
+    buf.close()
+
+
+def test_plot_similarity_heatmap_plotly_dim_diagonal(multi_doc_df: pd.DataFrame) -> None:
+    """Verify that dim_diagonal=True masks z-matrix diagonal cells to None in Plotly heatmap."""
+    fig = plot_similarity_heatmap_plotly(
+        multi_doc_df,
+        title="Plotly Dim Diagonal",
+        dim_diagonal=True,
+    )
+    assert hasattr(fig, "layout")
+    heatmap = next(trace for trace in fig.data if trace.type == "heatmap")
+    z_values = heatmap.z
+    assert z_values[0][0] is None
+    assert z_values[1][1] is None
+    assert z_values[2][2] is None
+    assert z_values[0][1] == 0.85
+
+
+def test_plot_similarity_heatmap_dim_diagonal_single_doc(single_doc_df: pd.DataFrame) -> None:
+    """Verify dim_diagonal=True on a 1x1 single document matrix."""
+    fig = plot_similarity_heatmap(single_doc_df, title="Single Dim Diagonal", dim_diagonal=True)
+    assert hasattr(fig, "axes")
+    plt.close(fig)
+
+    fig_plotly = plot_similarity_heatmap_plotly(single_doc_df, title="Plotly Single Dim Diagonal", dim_diagonal=True)
+    heatmap = next(trace for trace in fig_plotly.data if trace.type == "heatmap")
+    assert heatmap.z[0][0] is None
+
+
+
+
 

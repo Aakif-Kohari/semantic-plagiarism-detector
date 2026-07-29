@@ -2334,6 +2334,13 @@ if not st.session_state.authenticated:
                     help="Hide cell colors for similarity values below this threshold.",
                 )
 
+                dim_diagonal = st.checkbox(
+                    "Dim Self-Similarity Diagonal",
+                    value=False,
+                    key="heatmap_dim_diagonal",
+                    help="Grey out or dim the 100% self-similarity diagonal cells (doc_A vs doc_A) on the heatmap.",
+                )
+
                 heatmap_class_filter = st.selectbox(
                     "Filter Heatmap by Class Tag",
                     options=unique_classes,
@@ -2353,6 +2360,7 @@ if not st.session_state.authenticated:
                         annotate=show_cell_percentages,
                         mask_threshold=mask_threshold,
                         class_tag=heatmap_class_filter,
+                        dim_diagonal=dim_diagonal,
                     ),
                 )
 
