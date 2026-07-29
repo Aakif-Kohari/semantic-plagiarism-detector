@@ -8,7 +8,6 @@ Provides side-by-side comparison of suspicious paragraph pairs with visual simil
 from __future__ import annotations
 
 
-import os
 
 from datetime import datetime
 from io import BytesIO
@@ -24,48 +23,14 @@ from reportlab.lib.units import inch
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 from reportlab.platypus import (
-    PageBreak,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
     Table,
     TableStyle,
+    PageBreak,
 )
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
-from reportlab.lib import colors
-from reportlab.lib.utils import ImageReader
-from io import BytesIO
-from typing import List, Optional, Tuple, Dict
-from datetime import datetime
-from src.utils.text_stats import compute_text_stats, format_stats_for_pdf
-
-try:
-    import fitz  # PyMuPDF
-
-    _HAS_FITZ = True
-except Exception:
-    _HAS_FITZ = False
-
-
-def truncate_filename(filename: str, max_len: int = 30) -> str:
-    """
-    Truncates a filename to max_len characters with an ellipsis if needed,
-    preserving its file extension.
-    Example: 'final_essay_v2_final_really_final_draft_john_smith.pdf' -> 'final_essay_v2_f...h.pdf'
-    """
-    if len(filename) <= max_len:
-        return filename
-
-    name, ext = os.path.splitext(filename)
-    needed_len = max_len - len(ext) - 3
-
-    if needed_len <= 2:
-        return filename[: max_len - 3] + "..."
-
-    half = needed_len // 2
-    truncated_name = f"{name[:half]}...{name[-(needed_len - half):]}"
-    return f"{truncated_name}{ext}"
+from src.utils.text_stats import compute_text_stats
 
 
 def get_similarity_color(score: float) -> HexColor:
@@ -426,7 +391,6 @@ def generate_plagiarism_report(
         ]
         
         # Calculate column widths - give more space to document names
-        total_width = 6 * inch
         col_widths = [1.5 * inch, 2.25 * inch, 2.25 * inch]
         
         stats_table = Table(stats_data, colWidths=col_widths, hAlign=TA_LEFT)
@@ -624,16 +588,7 @@ def generate_plagiarism_report(
     doc.build(story, onFirstPage=_draw_header, onLaterPages=_draw_header)
     buffer.seek(0)
     return buffer
-
-    # Build PDF
-    doc.build(
-        story,
-        onFirstPage=_draw_header,
-        onLaterPages=_draw_header,
-        canvasmaker=NumberedCanvas,
-    )
-    return compress_pdf_buffer(buffer)
-
+import fitz  # PyMuPDF
 
 
 def highlight_pdf_matches(
@@ -695,3 +650,59 @@ def highlight_pdf_matches(
     doc.close()
 
     return output_buffer
+
+
+def highlight_pdf_matches(
+    pdf_source: str | bytes,
+    matching_chunks: List[str],
+    highlight_color: Tuple[float, float, float] = (1.0, 0.85, 0.0),  # Yellow
+) -> bytes:
+    """Opens a PDF, searches for matching text chunks, applies yellow highlights
+
+    on exact bounding box coordinates, and returns the modified PDF bytes.
+    """
+    if isinstance(pdf_source, bytes):
+        doc = fitz.open(stream=pdf_source, filetype="pdf")
+    else:
+        doc = fitz.open(pdf_source)
+
+    for page in doc:
+        for chunk in matching_chunks:
+            chunk_clean = str(chunk).strip()
+            # Avoid highlighting tiny single words/chars to prevent false positives
+            if len(chunk_clean) < 3:
+                continue
+
+            # Search page for matching text coordinates
+            quad_matches = page.search_for(chunk_clean)
+            for rect in quad_matches:
+                annot = page.add_highlight_annot(rect)
+                annot.set_colors(stroke=highlight_color)
+                annot.update()
+
+    output_bytes = doc.tobytes()
+    doc.close()
+
+    return output_bytes
+import os
+
+def truncate_filename(filename: str, max_len: int = 30) -> str:
+    """
+    Truncates a filename to max_len characters with an ellipsis if needed,
+    preserving its file extension.
+    """
+    if len(filename) <= max_len:
+        return filename
+
+    name, ext = os.path.splitext(filename)
+    needed_len = max_len - len(ext) - 3
+
+    if needed_len <= 2:
+        return filename[: max_len - 3] + "..."
+
+    half = needed_len // 2
+    truncated_name = f"{name[:half]}...{name[-(needed_len - half):]}"
+    return f"{truncated_name}{ext}"
+
+    return output_bytes
+

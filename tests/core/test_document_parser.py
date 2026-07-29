@@ -19,16 +19,9 @@ from src.core.document_parser import (
 )
 
 import time
-from unittest.mock import MagicMock, patch
 
-import docx
 
-from src.core.document_parser import (clean_text, extract_text,
-                                      extract_text_from_docx,
-                                      extract_text_from_pdf,
-                                      extract_text_from_txt, extract_texts,
-                                      remove_ignore_phrases,
-                                      strip_bibliography)
+from src.core.document_parser import (clean_text, remove_ignore_phrases)
 
 
 # Skip OCR tests when Tesseract binary is not present on this machine
@@ -85,12 +78,6 @@ def _make_large_docx_bytes(num_pages: int = 100) -> bytes:
 
     return buf.getvalue()
 
-
-@pytest.mark.skipif(
-    not TESSERACT_AVAILABLE, reason="Tesseract OCR is not installed on this machine"
-)
-def test_extract_from_pdf_bytes():
-    pdf_bytes = _make_pdf_bytes("Hello PDF")
 
 @patch("src.core.document_parser._ocr_pdf_page", return_value="")
 def test_extract_from_pdf_bytes(mock_ocr):
@@ -189,12 +176,6 @@ class TestCorruptedZipHandling:
         with pytest.raises(CorruptedArchiveError):
             extract_text(corrupted_bytes, "submission_batch.zip")
 
-
-@pytest.mark.skipif(
-    not TESSERACT_AVAILABLE, reason="Tesseract OCR is not installed on this machine"
-)
-def test_extract_text_routing():
-    pdf_bytes = _make_pdf_bytes("Hello PDF")
 
 @patch("src.core.document_parser._ocr_pdf_page", return_value="")
 def test_extract_text_routing(mock_ocr):

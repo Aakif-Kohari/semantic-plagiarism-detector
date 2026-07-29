@@ -15,7 +15,6 @@ Recent Additions (Issue #696):
 """
 
 import io
-from typing import List, Tuple
 
 import pandas as pd
 import pytest

@@ -19,7 +19,6 @@ from src.db.corpus_db import (
 )
 from src.db.incidents import (
     init_incident_db,
-    get_all_incidents,
     _get_connection,
 )
 

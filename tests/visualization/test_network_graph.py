@@ -4,18 +4,16 @@ tests/visualization/test_network_graph.py
 Unit tests for plot_similarity_network edge cases.
 """
 
-import time
 from unittest.mock import patch
 
 import networkx as nx
-import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from src.visualization.network_graph import plot_similarity_network
 
 from src.visualization.network_graph import (
     build_network_data,
     export_graph_to_csv,
-    export_graph_to_gexf,
     export_network_to_csv_bytes,
     export_network_to_gexf_bytes,
     plot_similarity_network,
