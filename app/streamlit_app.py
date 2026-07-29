@@ -2,6 +2,10 @@ import os
 import sys
 import asyncio
 
+
+# Fix Streamlit import paths by pointing to project root
+FILE_PATH = Path(__file__).resolve()
+ROOT_DIR = FILE_PATH.parent.parent  # Points to semantic-plagiarism-detector/
 # Silence harmless Windows asyncio Proactor connection lost bugs
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -209,6 +213,14 @@ except Exception:
     from src.utils.json_export import export_similarity_matrix_to_json
 except ImportError:
 
+    from src.utils.excel_export import export_similarity_matrix_to_excel  # type: ignore[import-untyped,reportMissingImports]
+
+
+    from src.utils.excel_export import export_similarity_matrix_to_excel  # type: ignore[import-untyped,reportMissingImports]
+
+    from src.utils.excel_export import export_similarity_matrix_to_excel  # type: ignore
+    from src.utils.json_export import export_similarity_matrix_to_json
+    from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore
     from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore[import-untyped,reportMissingImports]
 
 
@@ -455,6 +467,80 @@ with st.sidebar:
 
 # Resolve fallback configuration variables (ensuring all roles have access to these settings)
 selected_lang_name = st.session_state.get("lang_selector", "English")
+_lang_reverse = {v: k for k, v in _SUPPORTED_LANGUAGES.items()}
+lang_code = _lang_reverse.get(selected_lang_name, "en")
+
+threshold = st.session_state.get("threshold_slider", DEFAULT_THRESHOLDS.plagiarism)
+faiss_top_k = st.session_state.get("faiss_top_k_slider", 5)
+use_chunk_matrix = st.session_state.get("chunk_matrix_checkbox", False)
+chunk_size = st.session_state.get("chunk_size_slider", 500)
+chunk_overlap = st.session_state.get("chunk_overlap_slider", 50)
+ignore_phrases = st.session_state.get("ignore_phrases_textarea", "")
+ocr_language_selector_val = st.session_state.get(
+    "ocr_language_selector", DEFAULT_OCR_LANGUAGE
+)
+ocr_language_map = {
+    "English": "eng",
+    "Español": "spa",
+    "Français": "fra",
+    "eng": "eng",
+    "spa": "spa",
+    "fra": "fra",
+}
+ocr_language = ocr_language_map.get(ocr_language_selector_val, DEFAULT_OCR_LANGUAGE)
+ocr_dpi = st.session_state.get("ocr_dpi_slider", DEFAULT_OCR_DPI)
+heatmap_cmap = "OrRd"
+
+unique_classes = ["All Classes"] + get_unique_class_sections()
+selected_class = st.session_state.get("class_filter_selectbox", "All Classes")
+
+@st.dialog("⚠️ Confirm Logout")
+def logout_dialog():
+    st.write("Are you sure you want to log out?")
+    st.info("Your current session will be cleared.")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button(
+            "Cancel",
+            use_container_width=True,
+            key="cancel_logout",
+        ):
+            st.rerun()
+
+    with col2:
+        if st.button(
+            "Log Out",
+            type="primary",
+            use_container_width=True,
+            key="confirm_logout",
+        ):
+            import logging
+            from datetime import datetime, timezone
+
+            logger = logging.getLogger(__name__)
+            username = st.session_state.get("username", "unknown")
+            timestamp = datetime.now(timezone.utc).isoformat()
+
+            logger.info("User '%s' logged out at %s", username, timestamp)
+
+            for key in ["authenticated", "username", "role"]:
+                if key in st.session_state:
+                    del st.session_state[key]
+
+            clear_session(SESSION_ID)
+            st.rerun()
+
+
+
+
+@st.dialog("⚠️ Confirm Bulk Clear")
+def clear_all_dialog():
+    st.markdown(
+        "**WARNING:** This action is destructive and cannot be undone. "
+        "This will permanently delete all student documents, paragraph chunks, "
+        "and plagiarism incidents from the database, and reset the FAISS index."
 lang_code = "es" if selected_lang_name == "Español" else "en"
 
 
@@ -595,6 +681,9 @@ if len(file_bytes_dict) < 2:
     st.info("Upload at least 2 files to begin analysis.")
     st.stop()
 
+    if st.button("🚪 Log Out", use_container_width=True):
+        logout_dialog()
+        
 # ── Pipeline Execution ────────────────────────────────────────────────────────
 @st.cache_data(show_spinner=False)
 def run_pipeline(
@@ -2520,6 +2609,27 @@ if not st.session_state.authenticated:
                     lambda: plot_high_severity_trends(trend_data),
                 )
 
+    assert mock_pb.progress.call_count == 4
+    mock_pb.progress.assert_any_call(
+        1.0,
+        text="ZIP archive ready!",
+    )
+    with st.expander(
+                "🔝 Most Frequently Plagiarized Documents",
+                expanded=False,
+            ):
+                load_documents_chart = st.toggle(
+                    "Load document chart",
+                    key="load_most_plagiarized_documents",
+                )
+                doc_fig = build_visualization_lazily(
+                    load_documents_chart,
+                    lambda: plot_most_plagiarized_documents(doc_data),
+                )
+
+                if doc_fig is None:
+                    st.info(
+                        "Enable “Load document chart” to generate this "
                 if trend_fig is None:
                     st.info(
                         "Enable “Load trend chart” to generate this "
@@ -2527,6 +2637,85 @@ if not st.session_state.authenticated:
                     )
                 else:
                     st.plotly_chart(
+                        doc_fig,
+                        use_container_width=True,
+                    )
+
+    with st.expander(
+                "📊 Similarity Score Distribution",
+                expanded=False,
+            ):
+                analysis_results = st.session_state.get(
+                    "analysis_results"
+                )
+
+                if analysis_results is None:
+                    st.info(
+                        "Run a plagiarism analysis to see the "
+                        "similarity score distribution."
+                    )
+                else:
+                    load_distribution = st.toggle(
+                        "Load distribution chart",
+                        key="load_similarity_distribution",
+                    )
+                    sim_matrix = (
+                        analysis_results[4]
+                        if use_chunk_matrix
+                        else analysis_results[3]
+                    )
+                    dist_fig = build_visualization_lazily(
+                        load_distribution,
+                        lambda: plot_similarity_distribution(
+                            sim_matrix
+                        ),
+                    )
+
+                    if dist_fig is None:
+                        st.info(
+                            "Enable “Load distribution chart” to "
+                            "generate this visualization."
+                        )
+                    else:
+                        st.plotly_chart(
+                            dist_fig,
+                            use_container_width=True,
+                        )
+
+    st.divider()
+
+    # Summary statistics remain lightweight and always visible.
+    st.subheader("📋 Analytics Summary")
+    if trend_data:
+        total_high_severity = sum(
+            item["count"] for item in trend_data
+        )
+        st.metric(
+            "Total High Severity Incidents (30 days)",
+            total_high_severity,
+        )
+    else:
+        st.info(
+            "No high severity incidents recorded in the last "
+            "30 days."
+        )
+
+    if doc_data:
+        most_plagiarized = doc_data[0]
+        st.metric(
+            "Most Plagiarized Document",
+            (
+                f"{most_plagiarized['document_name']} "
+                f"({most_plagiarized['incident_count']} incidents)"
+            ),
+        )
+    else:
+        st.info("No plagiarism incidents recorded.")
+            st.subheader("📊 Similarity Score Distribution")
+            analysis_results = st.session_state.get("analysis_results")
+            if analysis_results is not None:
+                sim_matrix = (
+                    analysis_results[4] if use_chunk_matrix else analysis_results[3]
                         trend_fig,
                         use_container_width=True,
                     )
