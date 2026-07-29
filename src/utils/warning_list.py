@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import math
-from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import pandas as pd
@@ -13,6 +11,7 @@ from app.theme import badge_html, tier_from_severity_label
 from src.core.config import normalize_severity_label, severity_from_score, severity_rank
 from src.db.incidents import _normalise_pair, add_false_positive, get_false_positives
 from src.i18n.translator import get_text
+from src.utils.pagination import PaginationPage, paginate_items
 
 try:
     from thefuzz import fuzz
@@ -36,15 +35,7 @@ def _sort_display_names(lang_code: str) -> dict[str, str]:
     return {get_text(k, lang=lang_code): v for k, v in _SORT_KEYS.items()}
 
 
-@dataclass(frozen=True)
-class WarningPage:
-    items: list[dict[str, Any]]
-    total_items: int
-    page: int
-    page_size: int
-    total_pages: int
-    start_index: int
-    end_index: int
+WarningPage = PaginationPage[dict[str, Any]]
 
 
 def _normalise_warning(
@@ -165,22 +156,13 @@ def paginate_warnings(
     page: int = 1,
     page_size: int = 10,
 ) -> WarningPage:
-    safe_page_size = min(max(1, int(page_size)), 100)
-    total_items = len(warnings)
-    total_pages = max(1, math.ceil(total_items / safe_page_size))
-    safe_page = min(max(1, int(page)), total_pages)
-
-    start = (safe_page - 1) * safe_page_size
-    end = min(start + safe_page_size, total_items)
-
-    return WarningPage(
-        items=[dict(item) for item in warnings[start:end]],
-        total_items=total_items,
-        page=safe_page,
-        page_size=safe_page_size,
-        total_pages=total_pages,
-        start_index=start + 1 if total_items else 0,
-        end_index=end,
+    """Return a clamped page of warning dictionaries."""
+    normalized_warnings = [dict(item) for item in warnings]
+    return paginate_items(
+        normalized_warnings,
+        page=page,
+        page_size=page_size,
+        max_page_size=100,
     )
 
 
