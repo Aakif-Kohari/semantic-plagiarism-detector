@@ -441,7 +441,55 @@ def inject_css() -> None:
         }
         """
 
+    # ── Search Hotkey: press "/" to focus the warning search bar ──────────
+    hotkey_js = """
+    <script>
+    (function() {
+        // Prevent duplicate listeners (Streamlit re-runs on rerender)
+        if (window.__chalu_hotkey_installed) return;
+        window.__chalu_hotkey_installed = true;
+
+        document.addEventListener('keydown', function(e) {
+            // Only trigger on "/" key
+            if (e.key !== '/') return;
+            // Don't intercept if user is already typing in an input/textarea
+            var active = document.activeElement;
+            if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
+                return;
+            }
+            // Don't intercept modifier combos (Cmd+/, Ctrl+/)
+            if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+            e.preventDefault();
+
+            // Find the warning search input by its Streamlit widget key
+            // Streamlit renders st.text_input(key="warning_search") with a
+            // data attribute or aria-label matching the label text.
+            var searchInputs = document.querySelectorAll('input[type="text"]');
+            for (var i = 0; i < searchInputs.length; i++) {
+                var input = searchInputs[i];
+                // Match by the placeholder or aria-label containing "search"
+                var label = (input.getAttribute('placeholder') || '') +
+                            (input.getAttribute('aria-label') || '');
+                if (label.toLowerCase().indexOf('search') !== -1) {
+                    input.focus();
+                    input.select();
+                    return;
+                }
+            }
+            // Fallback: try the .stTextInput class
+            var textInputs = document.querySelectorAll('.stTextInput input[type="text"]');
+            if (textInputs.length > 0) {
+                textInputs[0].focus();
+                textInputs[0].select();
+            }
+        });
+    })();
+    </script>
+    """
+
     st.markdown(css, unsafe_allow_html=True)
+    st.markdown(hotkey_js, unsafe_allow_html=True)
 
 
 # ── Severity Helpers ───────────────────────────────────────────────────────────
