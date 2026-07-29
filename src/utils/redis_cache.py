@@ -16,6 +16,11 @@ except ImportError:
     redis = None
 from dotenv import load_dotenv
 
+try:
+    from src.core.app_config import REDIS_CACHE_TTL
+except ImportError:
+    REDIS_CACHE_TTL = int(os.getenv("REDIS_CACHE_TTL", "3600"))
+
 load_dotenv()
 
 RedisError = getattr(redis, "RedisError", Exception)
@@ -89,8 +94,8 @@ class RedisCache:
         except Exception:
             return False
 
-    def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
-        """Store a value in Redis with optional TTL."""
+    def set(self, key: str, value: Any, ttl: Optional[int] = REDIS_CACHE_TTL) -> bool:
+        """Store a value in Redis with optional TTL (defaults to REDIS_CACHE_TTL)."""
         if not self.is_available():
             return False
 
@@ -131,7 +136,7 @@ class RedisCache:
             print(f"[RedisCache] Error deleting key {key}: {e}")
             return False
 
-    def set_json(self, key: str, value: dict, ttl: Optional[int] = None) -> bool:
+    def set_json(self, key: str, value: dict, ttl: Optional[int] = REDIS_CACHE_TTL) -> bool:
         """Store a JSON-serializable dict in Redis."""
         if not self.is_available():
             return False
