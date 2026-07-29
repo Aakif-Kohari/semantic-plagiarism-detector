@@ -106,6 +106,7 @@ from src.core.similarity import (
 from src.core.webhook import send_plagiarism_alert
 from src.i18n.translator import _SUPPORTED_LANGUAGES
 from src.visualization.network_graph import plot_similarity_network
+from src.utils.storage_metrics import calculate_storage_usage
 
 
 class OCRFileBatchError(Exception):
@@ -795,6 +796,20 @@ st.write(f"Processed **{len(raw_texts)}** documents with Chunk Size: `{chunk_siz
     st.caption("Semantic Plagiarism Detector · FAISS edition")
 
     if user_role == "admin":
+        st.markdown("---")
+        st.markdown("### 💾 Storage Space Used")
+        storage_info = calculate_storage_usage()
+        st.metric(
+            label="Total Storage Used",
+            value=storage_info["formatted_total"],
+            help="Combined SQLite database + FAISS index disk usage",
+        )
+        col_db, col_idx = st.columns(2)
+        with col_db:
+            st.caption(f"🗄️ DB: **{storage_info['formatted_sqlite']}**")
+        with col_idx:
+            st.caption(f"⚡ FAISS: **{storage_info['formatted_faiss']}**")
+
         st.markdown("---")
         st.markdown("### 📁 Document Management")
         existing_docs = get_all_documents()
