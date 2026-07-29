@@ -8,6 +8,8 @@ import os
 import re
 import shutil
 import subprocess
+import zipfile
+import xml.etree.ElementTree
 import tempfile
 from collections import Counter
 from pathlib import Path
@@ -1112,6 +1114,39 @@ def extract_text_from_md(file: PDFInput) -> str:
     return strip_markdown_syntax(raw_text)
 
 
+def extract_text_from_odt(file: PDFInput) -> str:
+    """Extract plain text from an ODT (OpenDocument Text) file.
+    ODT files are ZIP archives containing content.xml with ODF XML.
+    """
+    try:
+        raw_data = _read_pdf_bytes(file)
+        text_parts: List[str] = []
+
+        with zipfile.ZipFile(io.BytesIO(raw_data), "r") as archive:
+            with archive.open("content.xml") as xml_file:
+                tree = xml.etree.ElementTree.parse(xml_file)
+
+        ns = {
+            "text": "urn:oasis:names:tc:opendocument:xmlns:text:1.0",
+            "office": "urn:oasis:names:tc:opendocument:xmlns:office:1.0",
+        }
+
+        body = tree.find(".//office:body", ns)
+        if body is not None:
+            office_text = body.find("office:text", ns)
+            if office_text is not None:
+                for p in office_text.iter("{urn:oasis:names:tc:opendocument:xmlns:text:1.0}p"):
+                    text_parts.append("".join(p.itertext()))
+
+        return "\n\n".join(text_parts).strip()
+
+    except (KeyError, ValueError, zipfile.BadZipFile, xml.etree.ElementTree.ParseError) as exc:
+        print(f"[document_parser] Error reading ODT: {exc}")
+    except Exception as exc:
+        logger.error(f"[document_parser] Error reading ODT: {exc}")
+    return ""
+
+
 def extract_text_from_image(
     file: PDFInput, *, ocr_language: str = DEFAULT_OCR_LANGUAGE
 ) -> str:
@@ -1183,6 +1218,8 @@ def extract_text(
         raw = extract_text_from_epub(file)
     elif extension in ("png", "jpg", "jpeg"):
         raw = extract_text_from_image(file, ocr_language=ocr_language)
+    elif extension == "odt":
+        raw = extract_text_from_odt(file)
     else:
         raw = extract_text_from_txt(file)
 

@@ -18,8 +18,8 @@ def build_network_data(
     threshold: float = 0.59,
     theme_colors: Optional[dict] = None,
     selected_node: Optional[str] = None,
-) -> dict:    """
-    Processes similarity matrix data, constructs NetworkX graph layout, and formats node and edge traces.
+) -> dict:
+    """Processes similarity matrix data, constructs NetworkX graph layout, and formats node and edge traces.
 
     Args:
         similarity_df: Square N×N DataFrame of similarity scores.
@@ -29,7 +29,6 @@ def build_network_data(
     Returns:
         Dictionary containing shapes, edge_hover_trace, node_trace, graph, and pos coordinates.
     """
-    # Create networkx graph
     G = nx.Graph()
 
     # Add all documents as nodes
@@ -49,7 +48,7 @@ def build_network_data(
             if score >= threshold:
                 G.add_edge(doc_names[i], doc_names[j])
 
-edge_similarities[(doc_names[i], doc_names[j])] = score
+                edge_similarities[(doc_names[i], doc_names[j])] = score
 
     # Nodes directly connected to the clicked node — used below to
     # highlight them and dim everything else.
@@ -102,7 +101,7 @@ edge_similarities[(doc_names[i], doc_names[j])] = score
                 if theme_colors
                 else "#ffa500"
             )
-else:
+        else:
             color = (
                 theme_colors.get("success", "#21c55d")
                 if theme_colors
@@ -389,8 +388,8 @@ def plot_similarity_network(
     title: str = "Document Plagiarism Network",
     theme_colors: Optional[dict] = None,
     selected_node: Optional[str] = None,
-) -> go.Figure:    """
-    Builds a networkx graph from the similarity matrix and returns an interactive Plotly figure.
+) -> go.Figure:
+    """Builds a networkx graph from the similarity matrix and returns an interactive Plotly figure.
 
     Args:
         similarity_df: Square N×N DataFrame of similarity scores.
@@ -401,12 +400,13 @@ def plot_similarity_network(
     Returns:
         Plotly Graph Objects Figure.
     """
-network_data = build_network_data(
+    network_data = build_network_data(
         similarity_df=similarity_df,
         threshold=threshold,
         theme_colors=theme_colors,
         selected_node=selected_node,
-    )    return render_network_plotly(
+    )
+    return render_network_plotly(
         network_data=network_data,
         title=title,
         theme_colors=theme_colors,

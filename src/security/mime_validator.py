@@ -23,6 +23,11 @@ ALLOWED_MIME_TYPES = {
     "md": {"text/markdown", "text/plain", "application/octet-stream"},
     "rtf": {"application/rtf", "text/rtf", "text/plain"},
     "epub": {"application/epub+zip", "application/zip", "application/octet-stream"},
+    "odt": {
+        "application/vnd.oasis.opendocument.text",
+        "application/zip",
+        "application/octet-stream",
+    },
 }
 
 # Fallback headers checking if python-magic is unavailable or has issues
@@ -31,6 +36,7 @@ ALLOWED_MAGIC_HEADERS = {
     "docx": [b"PK\x03\x04"],
     "zip": [b"PK\x03\x04"],
     "epub": [b"PK\x03\x04"],
+    "odt": [b"PK\x03\x04"],
     "doc": [b"\xd0\xcf\x11\xe0"],
     "rtf": [b"{\\rtf"],
 }

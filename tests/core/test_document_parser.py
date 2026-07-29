@@ -6,6 +6,7 @@ import docx
 
 from src.core.document_parser import (clean_text, extract_text,
                                       extract_text_from_docx,
+                                      extract_text_from_odt,
                                       extract_text_from_pdf,
                                       extract_text_from_txt, extract_texts,
                                       remove_ignore_phrases,
@@ -35,6 +36,30 @@ def _make_docx_bytes(text: str) -> bytes:
     doc.add_paragraph(text)
     buf = io.BytesIO()
     doc.save(buf)
+    return buf.getvalue()
+
+
+import zipfile
+
+
+def _make_odt_bytes(text: str) -> bytes:
+    """Create a minimal in-memory ODT containing the given text."""
+    content_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<office:document-content '
+        'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+        'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" '
+        'office:version="1.2">'
+        '<office:body>'
+        '<office:text>'
+        f'<text:p>{text}</text:p>'
+        '</office:text>'
+        '</office:body>'
+        '</office:document-content>'
+    )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("content.xml", content_xml.encode("utf-8"))
     return buf.getvalue()
 
 
@@ -88,6 +113,18 @@ def test_extract_from_docx_bytes():
     docx_bytes = _make_docx_bytes("Hello DOCX")
     result = extract_text_from_docx(docx_bytes)
     assert result == "Hello DOCX"
+
+
+def test_extract_from_odt_bytes():
+    odt_bytes = _make_odt_bytes("Hello ODT")
+    result = extract_text_from_odt(odt_bytes)
+    assert result == "Hello ODT"
+
+
+def test_extract_text_routing_odt():
+    odt_bytes = _make_odt_bytes("ODT content via routing")
+    result = extract_text(odt_bytes, "test.odt")
+    assert result == "ODT content via routing"
 
 
 def test_extract_from_txt_bytes():

@@ -51,14 +51,24 @@ from .db import (
     update_password,
     verify_user,
 )
-from .visualization import (
-    build_network_data,
-    plot_chunk_similarity_comparison,
-    plot_similarity_heatmap,
-    plot_similarity_heatmap_plotly,
-    plot_similarity_network,
-    render_network_plotly,
-)
+try:
+    from .visualization import (
+        build_network_data,
+        plot_chunk_similarity_comparison,
+        plot_similarity_heatmap,
+        plot_similarity_heatmap_plotly,
+        plot_similarity_network,
+        render_network_plotly,
+    )
+except ImportError:
+    build_network_data = None
+    plot_chunk_similarity_comparison = None
+    plot_similarity_heatmap = None
+    plot_similarity_heatmap_plotly = None
+    plot_similarity_network = None
+    render_network_plotly = None
+except ImportError:
+    pass
 
 
 __all__ = [
