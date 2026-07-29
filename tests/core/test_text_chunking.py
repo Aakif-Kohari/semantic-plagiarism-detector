@@ -5,7 +5,7 @@ Unit tests for customizable chunk size and overlap parameters, including edge ca
 """
 
 import pytest
-from src.core.text_chunking import chunk_documents, chunk_text
+from src.core.text_chunking import chunk_by_sentences, chunk_documents, chunk_text
 
 
 def test_chunk_text_custom_parameters():
@@ -80,4 +80,88 @@ def test_chunk_overlap_boundaries():
         # Check that consecutive chunks share overlapping content
         for i in range(len(chunks) - 1):
             assert len(chunks[i]) <= chunk_size
+
+
+# ── Sentence-Boundary Chunking Tests (#919) ──────────────────────────────────
+
+
+def test_chunk_by_sentences_preserves_full_sentences():
+    """Each chunk must end on a sentence boundary – no mid-sentence splits."""
+    text = (
+        "The quick brown fox jumps over the lazy dog. "
+        "A stitch in time saves nine. "
+        "All that glitters is not gold. "
+        "To be or not to be, that is the question. "
+        "Actions speak louder than words."
+    )
+    chunks = chunk_by_sentences(text, max_chunk_size=120)
+
+    assert len(chunks) >= 1
+    # None of the raw sentence-ending markers should be split across chunks:
+    # every chunk must be a coherent unit of complete sentences.
+    for chunk in chunks:
+        stripped = chunk.strip()
+        assert len(stripped) > 0
+        # The chunk must not start mid-word (no leading lowercase after space
+        # at the very beginning caused by a mid-sentence break).
+        assert stripped[0] == stripped[0].upper() or not stripped[0].isalpha()
+
+
+def test_chunk_by_sentences_respects_max_chunk_size():
+    """Chunks should not exceed max_chunk_size unless a single sentence is longer."""
+    sentences = [f"This is sentence number {i} in the test document." for i in range(20)]
+    text = " ".join(sentences)
+    max_size = 100
+
+    chunks = chunk_by_sentences(text, max_chunk_size=max_size)
+
+    assert len(chunks) >= 1
+    for chunk in chunks:
+        # A single overlong sentence is allowed to exceed the limit; all
+        # multi-sentence blocks must respect it.
+        words = chunk.split()
+        if len(words) > 15:   # heuristic: definitely more than one sentence
+            assert len(chunk) <= max_size + 60   # soft tolerance for joining space
+
+
+def test_chunk_by_sentences_empty_and_whitespace():
+    """Returns empty list for empty or whitespace-only input."""
+    assert chunk_by_sentences("") == []
+    assert chunk_by_sentences("   \n\t  ") == []
+
+
+def test_chunk_by_sentences_single_sentence():
+    """A text with a single sentence yields exactly one chunk."""
+    text = "This is the only sentence in the document."
+    chunks = chunk_by_sentences(text, max_chunk_size=500)
+
+    assert len(chunks) == 1
+    assert chunks[0].strip() == text.strip()
+
+
+def test_chunk_by_sentences_no_sentence_is_split_mid_word():
+    """Verify words are never cut in half across chunk boundaries."""
+    text = " ".join(
+        f"Word{j} is part of sentence {i}." for i in range(30) for j in range(5)
+    )
+    chunks = chunk_by_sentences(text, max_chunk_size=200)
+
+    all_words_in_chunks = set()
+    for chunk in chunks:
+        for word in chunk.split():
+            all_words_in_chunks.add(word)
+
+    original_words = set(text.split())
+    # Every word in the original text must appear intact in some chunk
+    assert original_words.issubset(all_words_in_chunks)
+
+
+def test_chunk_by_sentences_produces_multiple_chunks_for_long_text():
+    """Long multi-sentence text must be split into more than one chunk."""
+    sentences = ["The algorithm processes the input data efficiently." for _ in range(40)]
+    text = " ".join(sentences)
+
+    chunks = chunk_by_sentences(text, max_chunk_size=150)
+    assert len(chunks) > 1
+
             

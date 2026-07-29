@@ -10,7 +10,7 @@ from .faiss_index import (ChunkRecord, build_index, build_index_from_matrix,
 from .similarity import (PLAGIARISM_THRESHOLD, calculate_paragraph_similarity_breakdown,
                          chunk_similarity_matrix, document_similarity_matrix,
                          find_most_similar_chunks, flag_plagiarism)
-from .text_chunking import chunk_document, chunk_documents
+from .text_chunking import chunk_by_sentences, chunk_document, chunk_documents
 from .translator import translate_text
 from .webhook import send_plagiarism_alert
 
@@ -22,6 +22,7 @@ __all__ = [
     "extract_texts",
     "chunk_document",
     "chunk_documents",
+    "chunk_by_sentences",
     "embed_chunks",
     "embed_documents",
     "get_document_embedding",
