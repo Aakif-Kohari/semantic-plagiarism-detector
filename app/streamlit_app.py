@@ -140,18 +140,14 @@ from src.db.auth import (
     disable_2fa,
     enable_2fa,
     get_2fa_status,
-    get_all_users,
-    get_notification_preferences,
     get_tour_completed,
     get_user_preferences,
-    get_user_role,
     is_user_active,
     record_failed_login,
     set_tour_completed,
     set_user_active_status,
     update_notification_preferences,
     update_user_preferences,
-    verify_user,
 )
 from src.db.incidents import (  # noqa: E402
     get_all_incidents_above_threshold_for_export,
@@ -161,7 +157,7 @@ from src.db.incidents import (  # noqa: E402
 )
 from src.utils.diff_highlighter import highlight_overlap
 from src.utils.excel_export import export_similarity_matrix_to_excel
-from src.utils.pdf_report import highlight_pdf_matches  # noqa: E402
+
 from src.utils.redis_cache import (
     cache_session_state,
     clear_session,
@@ -225,6 +221,10 @@ except ImportError:
     from src.utils.excel_export import export_similarity_matrix_to_excel  # type: ignore
     from src.utils.json_export import export_similarity_matrix_to_json
     from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore
+    from utils.excel_export import export_similarity_matrix_to_excel  # type: ignore[import-untyped,reportMissingImports]
+
+
+
     from utils.json_export import export_similarity_matrix_to_json
 
 
@@ -1933,6 +1933,7 @@ if not st.session_state.authenticated:
 
     has_enough_files = (len(file_bytes_dict) + (1 if url_text else 0)) >= 2
 
+
     # Run Pipeline if files uploaded
     if (len(file_bytes_dict) > 0 and any(file_bytes_dict.values())) or url_text:
         try:
@@ -1948,16 +1949,6 @@ if not st.session_state.authenticated:
                     url_filename=url_filename,
                 )
                 elapsed_time = time.time() - start_time
-                (
-                    raw_texts,
-                    chunked_docs,
-                    embeddings,
-                    sim_df,
-                    chunk_sim_df,
-                    faiss_index,
-                    registry,
-                    ai_probabilities,
-                ) = analysis_results
                 st.session_state.analysis_results = analysis_results
                 st.toast(f"Successfully processed in {elapsed_time:.2f} seconds 🚀")
         except OCRFileBatchError as exc:
@@ -1967,6 +1958,23 @@ if not st.session_state.authenticated:
             if exc.failed_files:
                 st.warning(f"Failed files: {', '.join(exc.failed_files)}")
             st.stop()
+    else:
+        analysis_results = st.session_state.analysis_results
+
+    (
+        raw_texts,
+        chunked_docs,
+        embeddings,
+        sim_df,
+        chunk_sim_df,
+        faiss_index,
+        registry,
+        ai_probabilities,
+        pipeline_failed_files,
+    ) = analysis_results
+
+    if pipeline_failed_files:
+        st.session_state.failed_documents.update(pipeline_failed_files)
 
     active_sim_df = chunk_sim_df if use_chunk_matrix else sim_df
     flags = flag_plagiarism(
@@ -2007,45 +2015,7 @@ if not st.session_state.authenticated:
                 flagged_tags_filtered.append(flag)
         filtered_flags = flagged_tags_filtered
 
-        # Run Pipeline if files uploaded
-        if (len(file_bytes_dict) > 0 and any(file_bytes_dict.values())) or url_text:
-            try:
-                with st.spinner("🧠 Processing files and building embeddings…"):
-                    analysis_results = run_pipeline(
-                        file_bytes_dict=file_bytes_dict,
-                        ocr_language=ocr_language,
-                        ocr_dpi=ocr_dpi,
-                        chunk_size=chunk_size,
-                        chunk_overlap=chunk_overlap,
-                        url_text=url_text,
-                        url_filename=url_filename,
-                    )
-                    (
-                        raw_texts,
-                        chunked_docs,
-                        embeddings,
-                        sim_df,
-                        chunk_sim_df,
-                        faiss_index,
-                        registry,
-                        ai_probabilities,
-                    ) = analysis_results
-                    st.session_state.analysis_results = analysis_results
-            except OCRFileBatchError as exc:
-                from src.errors import OCR_DEPENDENCIES_MISSING
 
-                st.error(f"🚨 {OCR_DEPENDENCIES_MISSING}")
-                if exc.failed_files:
-                    st.warning(f"Failed files: {', '.join(exc.failed_files)}")
-                st.stop()
-
-        active_sim_df = chunk_sim_df if use_chunk_matrix else sim_df
-        flags = flag_plagiarism(
-            active_sim_df,
-            threshold=threshold,
-            chunked_docs=chunked_docs,
-            embeddings=embeddings,
-        )
 
         # Network Graph Node Click Filtering setup
         selected_document_id = st.session_state.get("selected_document_id")
@@ -2368,13 +2338,45 @@ if not st.session_state.authenticated:
                 title="Interactive Document Plagiarism Network",
             )
 
-            if plotly_events is not None:
-                selected_points = plotly_events(
-                    network_fig,
-                    click_event=True,
-                    hover_event=False,
-                    select_event=False,
-                    key="plagiarism_network",
+            with st.expander(
+                "🕸️ Interactive Plagiarism Network",
+                expanded=False,
+            ):
+                st.caption(
+                    "Documents are shown as nodes. Connections appear when "
+                    "their similarity is greater than or equal to the "
+                    "selected threshold."
+                )
+                load_network = st.toggle(
+                    "Load network graph",
+                    key="load_plagiarism_network",
+                    help=(
+                        "Generate the interactive network only when needed."
+                    ),
+                )
+
+                max_degree = max(0, len(active_sim_df) - 1)
+                min_degree = st.slider(
+                    "Minimum Connected Documents",
+                    min_value=0,
+                    max_value=max_degree,
+                    value=0,
+                    key="min_connected_docs_slider",
+                )
+
+                network_fig = build_visualization_lazily(
+                    load_network,
+                    lambda: plot_similarity_network(
+                        similarity_df=active_sim_df,
+                        threshold=threshold,
+                        min_degree=min_degree,
+                        title=(
+                            "Interactive Document Plagiarism Network"
+                        ),
+                        selected_node=st.session_state.get(
+                            "selected_document_id"
+                        ),
+                    ),
                 )
 
                 if selected_points:
@@ -2462,29 +2464,58 @@ if not st.session_state.authenticated:
 
             st.warning(UI_NEED_MIN_DOCUMENTS)
         else:
-            c1, c2 = st.columns(2)
-            with c1:
-                doc_a = st.selectbox("Document A", doc_names, index=0, key="da")
-            with c2:
-                doc_b = st.selectbox(
-                    "Document B",
-                    [d for d in doc_names if d != doc_a],
-                    index=0,
-                    key="db",
-                )
+           query_doc_a = st.query_params.get("doc_a")
+    query_doc_b = st.query_params.get("doc_b")
 
-            score = float(active_sim_df.loc[doc_a, doc_b])
-            st.markdown(f"**Overall Similarity:** `{score:.1%}`")
-            st.progress(float(score))
-            st.divider()
+    default_a_index = (
+        doc_names.index(query_doc_a)
+        if query_doc_a in doc_names
+        else 0
+    )
 
-            drill_tab_analysis, drill_tab_viewer = st.tabs(
+    c1, c2 = st.columns(2)
+
+    with c1:
+        doc_a = st.selectbox(
+            "Document A",
+            doc_names,
+            index=default_a_index,
+            key="da",
+        )
+
+    available_doc_b = [d for d in doc_names if d != doc_a]
+
+    default_b_index = (
+        available_doc_b.index(query_doc_b)
+        if query_doc_b in available_doc_b
+        else 0
+    )
+
+    with c2:
+        doc_b = st.selectbox(
+            "Document B",
+            available_doc_b,
+            index=default_b_index,
+            key="db",
+        )
+
+    if st.button("🔗 Share This Pair", key="share_pair"):
+        st.query_params["doc_a"] = doc_a
+        st.query_params["doc_b"] = doc_b
+        st.success("✅ Shareable link created! Copy the URL from your browser.")
+
+    score = float(active_sim_df.loc[doc_a, doc_b])
+    st.markdown(f"**Overall Similarity:** `{score:.1%}`")
+    st.progress(float(score))
+    st.divider()
+
+    drill_tab_analysis, drill_tab_viewer = st.tabs(
                 ["📊 Chunk Matches & Report", "📄 Document Viewer"]
             )
-            chunks_a = chunked_docs.get(doc_a, [])
-            chunks_b = chunked_docs.get(doc_b, [])
+    chunks_a = chunked_docs.get(doc_a, [])
+    chunks_b = chunked_docs.get(doc_b, [])
 
-            with drill_tab_analysis:
+    with drill_tab_analysis:
                 top_pairs = find_most_similar_chunks(
                     chunks_a,
                     chunks_b,
@@ -2508,7 +2539,7 @@ if not st.session_state.authenticated:
                             f"**{doc_b}:** {highlighted_cb}", unsafe_allow_html=True
                         )
 
-            with drill_tab_viewer:
+    with drill_tab_viewer:
                 selected_view_doc = st.radio(
                     "Select Document to Preview:",
                     options=[doc_a, doc_b],
@@ -2563,16 +2594,20 @@ if not st.session_state.authenticated:
 
             st.subheader("📈 High Severity Plagiarism Trends (Last 30 Days)")
             trend_data = get_high_severity_trends(days=30)
-            trend_fig = plot_high_severity_trends(trend_data)
-            st.plotly_chart(trend_fig, use_container_width=True)
-
-            st.divider()
-            st.subheader("🔝 Most Frequently Plagiarized Documents")
             doc_data = get_most_plagiarized_documents(limit=10)
-            doc_fig = plot_most_plagiarized_documents(doc_data)
-            st.plotly_chart(doc_fig, use_container_width=True)
 
-            st.divider()
+            with st.expander(
+                "📈 High Severity Plagiarism Trends (Last 30 Days)",
+                expanded=False,
+            ):
+                load_trends = st.toggle(
+                    "Load trend chart",
+                    key="load_high_severity_trends",
+                )
+                trend_fig = build_visualization_lazily(
+                    load_trends,
+                    lambda: plot_high_severity_trends(trend_data),
+                )
 
     assert mock_pb.progress.call_count == 4
     mock_pb.progress.assert_any_call(
@@ -2595,6 +2630,9 @@ if not st.session_state.authenticated:
                 if doc_fig is None:
                     st.info(
                         "Enable “Load document chart” to generate this "
+                if trend_fig is None:
+                    st.info(
+                        "Enable “Load trend chart” to generate this "
                         "visualization."
                     )
                 else:
@@ -2678,6 +2716,16 @@ if not st.session_state.authenticated:
             if analysis_results is not None:
                 sim_matrix = (
                     analysis_results[4] if use_chunk_matrix else analysis_results[3]
+                        trend_fig,
+                        use_container_width=True,
+                    )
+            with st.expander(
+                "🔝 Most Frequently Plagiarized Documents",
+                expanded=False,
+            ):
+                load_documents_chart = st.toggle(
+                    "Load document chart",
+                    key="load_most_plagiarized_documents",
                 )
                 dist_fig = plot_similarity_distribution(sim_matrix)
                 st.plotly_chart(dist_fig, use_container_width=True)

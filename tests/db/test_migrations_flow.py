@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import sqlite3
 
-import pytest
 
 from src.db.migrations import (
     AUTH_MIGRATIONS,
@@ -189,8 +188,7 @@ class TestCorpusMigrationFlow:
             )
             conn.commit()
 
-            # Complete remaining upgrades
-            remaining = {v: fn for v, fn in CORPUS_MIGRATIONS.items() if v > 1}
+
             run_migrations(conn, migrations=CORPUS_MIGRATIONS, target_version=CORPUS_SCHEMA_VERSION)
 
             row = conn.execute(
