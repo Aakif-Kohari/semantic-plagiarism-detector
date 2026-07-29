@@ -754,7 +754,7 @@ Existing database files should not be deleted during an application upgrade.
 
 - [Architecture Overview](docs/ARCHITECTURE.md)
 - [API Guide](docs/API.md)
-
+- [Database Schema](docs/DATABASE.md)
 - [NLP Architecture & Similarity Algorithm Guide](docs/ALGORITHMS.md)
 
 
