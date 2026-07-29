@@ -4,13 +4,42 @@ analytics.py
 Plotly visualizations for plagiarism analytics dashboard.
 """
 
-from typing import Any
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
+
+FigureT = TypeVar("FigureT")
+
+
+
+
+def build_visualization_lazily(
+    enabled: bool,
+    factory: Callable[[], FigureT],
+) -> FigureT | None:
+    """Build a visualization only after the user explicitly enables it.
+
+    Streamlit evaluates the bodies of all tabs during a script rerun. Merely
+    placing a chart inside a tab therefore does not defer expensive figure
+    construction. This helper keeps the figure factory uncalled until the UI
+    control for that visualization is enabled.
+
+    Args:
+        enabled: Whether the user requested the visualization.
+        factory: Zero-argument callable that creates the figure.
+
+    Returns:
+        The created figure when enabled, otherwise ``None``.
+    """
+    if not enabled:
+        return None
+
+    return factory()
 
 def plot_high_severity_trends(trend_data: list[dict[str, Any]]) -> go.Figure:
     """
@@ -201,3 +230,57 @@ def plot_similarity_distribution(sim_matrix: pd.DataFrame, title: str = "Distrib
     )
 
     return fig
+
+
+def plot_document_sizes(word_counts: dict[str, int]) -> go.Figure:
+    """Create a bar chart visualizing document word counts.
+
+    Args:
+        word_counts: Dictionary mapping document names to word counts.
+
+    Returns:
+        Plotly Figure object.
+    """
+    if not word_counts:
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No documents currently in the database",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
+            font=dict(size=16, color="gray"),
+        )
+        fig.update_layout(title="Document Word Counts", height=400)
+        return fig
+
+    doc_names = list(word_counts.keys())
+    counts = list(word_counts.values())
+
+    display_names = [
+        name[:30] + "..." if len(name) > 30 else name for name in doc_names
+    ]
+
+    fig = px.bar(
+        x=display_names,
+        y=counts,
+        title="Document Word Counts",
+        labels={"x": "Document Name", "y": "Word Count"},
+    )
+
+    fig.update_layout(
+        xaxis_title="Document Name",
+        yaxis_title="Word Count",
+        height=400,
+        showlegend=False,
+    )
+
+    fig.update_traces(
+        marker_color="#00cc96",
+        customdata=doc_names,
+        hovertemplate="<b>%{customdata}</b><br>Words: %{y}<extra></extra>",
+    )
+
+    return fig
+

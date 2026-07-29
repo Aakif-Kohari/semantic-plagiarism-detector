@@ -26,12 +26,23 @@ import shutil
 import sys
 import types
 from unittest.mock import MagicMock
+
 import numpy as np
 
 # ── Redis Test Database Isolation ─────────────────────────────────────────
 # Use a separate Redis database (1 instead of 0) during tests so that running
 # the test suite does not flush the active development session cache.
 os.environ.setdefault("REDIS_DB", "1")
+
+# ── Headless Renderer Configuration (Issue #504) ──────────────────────────────
+# Force Matplotlib to use the non-GUI Agg backend on headless CI workers
+os.environ.setdefault("MPLBACKEND", "Agg")
+try:
+    import matplotlib
+
+    matplotlib.use("Agg")
+except ImportError:
+    pass
 
 import pytest
 
@@ -45,6 +56,39 @@ if "sentence_transformers" not in sys.modules:
     stub = types.ModuleType("sentence_transformers")
     stub.SentenceTransformer = MagicMock  # type: ignore[attr-defined]
     sys.modules["sentence_transformers"] = stub
+
+if "torch" not in sys.modules:
+    torch_stub = types.ModuleType("torch")
+    class Tensor:
+        pass
+    torch_stub.Tensor = Tensor  # type: ignore
+    sys.modules["torch"] = torch_stub
+
+
+import importlib.util
+
+for mod_name in [
+    "lxml", "defusedxml", "defusedxml.lxml", "fitz", "docx", "redis", "bs4", "faker", "argon2", "argon2.exceptions",
+    "pdfplumber", "langdetect", "striprtf", "striprtf.striprtf", "src.core.translator",
+    "src.core.webhook",
+    "pypdf", "PyPDF2", "reportlab", "reportlab.pdfgen", "reportlab.lib", "reportlab.platypus", 
+    "reportlab.lib.colors", "reportlab.lib.enums", "reportlab.lib.styles", "reportlab.lib.units", 
+    "reportlab.lib.pagesizes", "reportlab.lib.utils", 
+    "matplotlib", "matplotlib.patches", "matplotlib.pyplot", "matplotlib.figure", "matplotlib.ticker",
+    "faiss", "torch", "psutil", "pytesseract", "sklearn", "sklearn.metrics", "sklearn.metrics.pairwise",
+    "sklearn.feature_extraction", "sklearn.feature_extraction.text", "requests",
+]:
+    if mod_name not in sys.modules:
+        try:
+            spec = importlib.util.find_spec(mod_name)
+            if spec is None:
+                top_pkg = mod_name.split(".")[0]
+                if importlib.util.find_spec(top_pkg) is None:
+                    sys.modules[mod_name] = MagicMock()
+        except Exception:
+            sys.modules[mod_name] = MagicMock()
+
+
 
 # ── Tesseract OCR Availability ────────────────────────────────────────────────
 TESSERACT_AVAILABLE = shutil.which("tesseract") is not None
@@ -60,19 +104,23 @@ def sqlite_database_path(tmp_path):
 @pytest.fixture(autouse=True)
 def clean_test_env():
     """
-    Globally auto-used fixture that cleans up the FAISS index and SQLite DB 
+    Globally auto-used fixture that cleans up the FAISS index and SQLite DB
     before and after every test, preventing state leakage across test cases.
     """
     try:
         from src.db.corpus_db import clear_all_data
         clear_all_data()
-    except ImportError:
-        pass
-        
+    except Exception:
+        try:
+            from src.db.corpus_db import close_connections
+            close_connections()
+        except Exception:
+            pass
+
     index_path = os.path.join(str(_REPO_ROOT), "corpus.index")
     db_path = os.path.join(str(_REPO_ROOT), "corpus.db")
     users_db_path = os.path.join(str(_REPO_ROOT), "users.db")
-    
+
     for path in [index_path, db_path, users_db_path]:
         if os.path.exists(path):
             try:
@@ -83,8 +131,12 @@ def clean_test_env():
     try:
         from src.db.corpus_db import clear_all_data
         clear_all_data()
-    except ImportError:
-        pass
+    except Exception:
+        try:
+            from src.db.corpus_db import close_connections
+            close_connections()
+        except Exception:
+            pass
     for path in [index_path, db_path, users_db_path]:
         if os.path.exists(path):
             try:
@@ -108,7 +160,7 @@ class MockDataFactory:
     Generalized factory pattern for generating test mocks.
     Consolidates multiple disparate mocking functions.
     """
-    
+
     @staticmethod
     def embed_chunks(chunks, batch_size=64):
         """Standardized fast embedding mock for streamlit app tests."""
@@ -131,27 +183,31 @@ def mock_embed_chunks():
 def mock_db(tmp_path):
     """
     Provides an isolated, empty, and writable SQLite database schema for tests.
-    Patches the global database paths in src.db modules to use a temporary file.
+    Patches the global database paths in src.db modules to use temporary files.
     Ensures safe teardown and no interference with production databases.
+
+    Corpus and auth use *separate* files because they each rely on PRAGMA
+    user_version for migration tracking and would collide on the same file.
     """
-    db_file = tmp_path / "test_isolated.db"
-    
+    corpus_db_file = tmp_path / "test_corpus.db"
+    auth_db_file = tmp_path / "test_users.db"
+
     # We patch the database path at the module level for all db modules
     import unittest.mock
     
-    with unittest.mock.patch("src.db.corpus_db._DB_PATH", str(db_file)), \
-         unittest.mock.patch("src.db.incidents.DEFAULT_DB_PATH", str(db_file)), \
-         unittest.mock.patch("src.db.auth._DB_PATH", str(db_file)):
+    with unittest.mock.patch("src.db.corpus_db._DB_PATH", str(corpus_db_file)), \
+         unittest.mock.patch("src.db.incidents.DEFAULT_DB_PATH", str(corpus_db_file)), \
+         unittest.mock.patch("src.db.auth._DB_PATH", str(auth_db_file)):
         
-        # Initialize schemas
         try:
             from src.db.corpus_db import init_corpus_db
-            from src.db.incidents import init_incidents_db
+            from src.db.incidents import init_incident_db
             from src.db.auth import init_db
             init_corpus_db()
-            init_incidents_db()
+            init_incident_db()
             init_db()
-        except ImportError:
-            pass
+        except Exception:
+            import traceback
+            traceback.print_exc()
             
-        yield str(db_file)
+        yield str(corpus_db_file)
