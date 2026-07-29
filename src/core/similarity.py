@@ -9,8 +9,8 @@ Uses cosine similarity. Since embeddings are L2-normalised in embedding_model.py
 cosine similarity reduces to the dot product, making this very fast.
 """
 
-from typing import Dict, List, Optional, Tuple, Union
-
+from typing import Dict, List, Optional, Set, Tuple, Union
+import faiss  # type: ignore
 import numpy as np
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
@@ -198,6 +198,55 @@ def chunk_similarity_matrix(
     return df
 
 
+# ── ANN Pre-filtering ──────────────────────────────────────────────────────────
+
+
+def find_candidate_pairs(
+    doc_names: List[str],
+    doc_vectors: List[np.ndarray],
+    *,
+    top_k: int = 10,
+) -> Set[Tuple[str, str]]:
+    """
+    Use a temporary FAISS flat index to find the top-K nearest-neighbour
+    document pairs for each document.
+
+    This replaces the O(n²) brute-force pair enumeration with an O(n log n)
+    approximate search.  When the number of documents is smaller than *top_k*,
+    all pairs are returned (no filtering is needed).
+
+    Args:
+        doc_names:   Sorted list of document names.
+        doc_vectors: List of document-level embedding vectors (same order).
+        top_k:       Number of nearest neighbours to retrieve per document.
+
+    Returns:
+        A set of ``(doc_a, doc_b)`` tuples (sorted alphabetically) that
+        should be checked for plagiarism.
+    """
+    n = len(doc_names)
+    if n <= top_k:
+        return {(doc_names[i], doc_names[j]) for i in range(n) for j in range(i + 1, n)}
+
+    matrix = np.vstack([v.astype("float32") for v in doc_vectors])
+    dim = matrix.shape[1]
+
+    index = faiss.IndexFlatIP(dim)
+    index.add(matrix)
+
+    candidates: Set[Tuple[str, str]] = set()
+    for i in range(n):
+        query = matrix[i].reshape(1, -1)
+        _, indices = index.search(query, top_k + 1)
+        for j in indices[0]:
+            if j == i or j >= n:
+                continue
+            pair: Tuple[str, str] = tuple(sorted([doc_names[i], doc_names[j]]))
+            candidates.add(pair)
+
+    return candidates
+
+
 # ── Plagiarism flagging ────────────────────────────────────────────────────────
 
 
@@ -206,54 +255,62 @@ def flag_plagiarism(
     threshold: float = PLAGIARISM_THRESHOLD,
     chunked_docs: dict = None,
     embeddings: dict = None,
+    *,
+    candidate_pairs: Optional[Set[Tuple[str, str]]] = None,
 ) -> List[Dict]:
     """Identify document pairs whose similarity reaches the threshold.
 
     Flagging uses the configurable plagiarism threshold. Severity uses the
     central fixed boundaries: Medium at 0.75 and High at 0.90.
 
+    When *candidate_pairs* is provided (e.g. from :func:`find_candidate_pairs`),
+    only those pairs are checked instead of the full upper triangle, which
+    significantly reduces computation for large document sets.
     """
     flags = []
     doc_names = similarity_df.columns.tolist()
+    name_to_idx = {name: i for i, name in enumerate(doc_names)}
 
+    if candidate_pairs is not None:
+        pairs_to_check = [
+            (name_to_idx[a], name_to_idx[b])
+            for a, b in candidate_pairs
+            if a in name_to_idx and b in name_to_idx
+        ]
+    else:
+        pairs_to_check = [
+            (i, j) for i in range(len(doc_names)) for j in range(i + 1, len(doc_names))
+        ]
 
-    for i in range(len(doc_names)):
-        for j in range(i + 1, len(doc_names)):
-            score = float(similarity_df.iloc[i, j])
+    for i, j in pairs_to_check:
+        score = float(similarity_df.iloc[i, j])
 
-            if is_plagiarism(score, threshold):
+        if is_plagiarism(score, threshold):
+            doc_a = doc_names[i]
+            doc_b = doc_names[j]
+            matched_length = 0
 
-
-                doc_a = doc_names[i]
-                doc_b = doc_names[j]
-                matched_length = 0
-
-                # Find the exact matching chunk and its word count
-                if chunked_docs is not None and embeddings is not None:
-                    sim_matrix = cosine_similarity(embeddings[doc_a], embeddings[doc_b])
-                    idx_a, idx_b = np.unravel_index(
-                        np.argmax(sim_matrix), sim_matrix.shape
-                    )
-                    chunk_text = chunked_docs[doc_a][idx_a]
-                    matched_length = len(chunk_text.split())
-
-
-                flags.append(
-                    {
-                        "doc_a": doc_a,
-                        "doc_b": doc_b,
-                        "similarity": round(score, 4),
-                        "threshold_at_time_of_flag": float(threshold),
-                        "matched_length": matched_length,
-                        "severity": severity_from_score(
-                            score,
-                            DEFAULT_THRESHOLDS,
-                        ),
-                    }
+            if chunked_docs is not None and embeddings is not None:
+                sim_matrix = cosine_similarity(embeddings[doc_a], embeddings[doc_b])
+                idx_a, idx_b = np.unravel_index(
+                    np.argmax(sim_matrix), sim_matrix.shape
                 )
+                chunk_text = chunked_docs[doc_a][idx_a]
+                matched_length = len(chunk_text.split())
 
-
-    flags.sort(key=lambda x: x["similarity"], reverse=True)
+            flags.append(
+                {
+                    "doc_a": doc_a,
+                    "doc_b": doc_b,
+                    "similarity": round(score, 4),
+                    "threshold_at_time_of_flag": float(threshold),
+                    "matched_length": matched_length,
+                    "severity": severity_from_score(
+                        score,
+                        DEFAULT_THRESHOLDS,
+                    ),
+                }
+            )
 
     flags.sort(key=lambda item: item["similarity"], reverse=True)
 

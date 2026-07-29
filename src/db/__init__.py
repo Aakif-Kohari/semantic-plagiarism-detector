@@ -1,25 +1,44 @@
-from .auth import (add_user, delete_user, disable_2fa, enable_2fa,
-                   get_2fa_status, get_all_users, get_user_active_status,
-                   get_user_role, init_db, is_user_active,
-                   set_user_active_status, update_password, verify_user)
-from .corpus_db import (add_chunks, add_document, clear_all_data,
-                        delete_document, delete_tag, get_all_documents,
-                        get_all_embeddings, get_all_tags, get_chunk_registry,
-                        get_document_by_hash, get_document_chunks_count,
-                        get_document_word_counts, get_documents_by_class,
-                        get_unique_class_sections, init_corpus_db,
-                        get_deleted_documents, soft_delete_document,
-                        restore_document, permanently_delete_document,
-                        empty_trash)
-from .schemas import User, Document, MatchResult
+from .auth import (
+    add_user,
+    delete_user,
+    disable_2fa,
+    enable_2fa,
+    get_2fa_status,
+    get_all_users,
+    get_notification_preferences,
+    get_user_active_status,
+    get_user_role,
+    init_db,
+    is_user_active,
+    set_user_active_status,
+    update_notification_preferences,
+    update_password,
+    verify_user,
+)
+from .corpus_db import (
+    add_chunks,
+    add_document,
+    clear_all_data,
+    delete_document,
+    get_all_documents,
+    get_all_embeddings,
+    get_chunk_registry,
+    get_document_by_hash,
+    get_document_chunks_count,
+    get_documents_by_class,
+    get_unique_class_sections,
+    init_corpus_db,
+)
 
 __all__ = [
     "init_db",
     "verify_user",
     "get_user_role",
     "get_all_users",
+    "get_notification_preferences",
     "add_user",
     "delete_user",
+    "update_notification_preferences",
     "update_password",
     "get_2fa_status",
     "enable_2fa",
@@ -35,26 +54,14 @@ __all__ = [
     "get_chunk_registry",
     "get_all_embeddings",
     "delete_document",
-    "delete_tag",
     "clear_all_data",
     "get_document_chunks_count",
-    "get_all_tags",
     "get_unique_class_sections",
     "get_documents_by_class",
-    "get_document_word_counts",
-    "get_deleted_documents",
-    "soft_delete_document",
-    "restore_document",
-    "permanently_delete_document",
-    "empty_trash",
-    "User",
-    "Document",
-    "MatchResult",
 ]
 
 
-from .migrations import \
-    AUTH_SCHEMA_VERSION as AUTH_SCHEMA_VERSION  # noqa: F401
+from .migrations import AUTH_SCHEMA_VERSION as AUTH_SCHEMA_VERSION  # noqa: F401
 from .migrations import CORPUS_SCHEMA_VERSION as CORPUS_SCHEMA_VERSION
 from .migrations import column_exists as column_exists
 from .migrations import get_user_version as get_user_version

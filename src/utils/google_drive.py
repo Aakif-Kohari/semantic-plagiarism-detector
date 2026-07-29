@@ -14,8 +14,6 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
-from src.utils.filename import unique_filename
-
 # Supported extensions for the plagiarism detection pipeline
 SUPPORTED_EXTENSIONS = (".pdf", ".docx", ".doc", ".txt")
 
