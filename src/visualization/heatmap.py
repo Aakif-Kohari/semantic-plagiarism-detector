@@ -50,6 +50,7 @@ try:
         MATPLOTLIB_CMAP_MAPPING,
         PLOTLY_CMAP_MAPPING,
         DEFAULT_UI_COLORMAP,
+        apply_matplotlib_theme,
     )
 except ImportError:
     # Fallback for standalone testing or isolated environments
@@ -57,6 +58,9 @@ except ImportError:
     MATPLOTLIB_CMAP_MAPPING = {"Viridis": "viridis"}
     PLOTLY_CMAP_MAPPING = {"Viridis": "Viridis"}
     DEFAULT_UI_COLORMAP = "Viridis"
+
+    def apply_matplotlib_theme(theme_colors=None):
+        pass
 
 
 # ── Security & Sanitization ────────────────────────────────────────────────────
@@ -105,6 +109,61 @@ def validate_similarity_matrix(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _get_theme_color(theme_colors: Optional[Dict[str, str]], key: str, fallback: str) -> str:
+    arr = clean_df.values.copy()
+    np.fill_diagonal(arr, 1.0)
+    clean_df = pd.DataFrame(arr, index=clean_df.index, columns=clean_df.columns)
+
+    return clean_df
+
+
+def filter_heatmap_by_class_tag(
+    similarity_df: pd.DataFrame,
+    class_tag: Optional[str] = None,
+    doc_class_map: Optional[dict] = None,
+) -> pd.DataFrame:
+    """
+    Filter heatmap matrix rows and columns by matching document class section tags.
+
+    Args:
+        similarity_df (pd.DataFrame): Similarity matrix dataframe.
+        class_tag (str, optional): Class section tag to filter by (e.g., "Class A").
+            If None, empty, or "All Classes", returns the original dataframe.
+        doc_class_map (dict, optional): Mapping of filename -> class_section tag.
+            If None, attempts to load document metadata from corpus database.
+
+    Returns:
+        pd.DataFrame: Sub-matrix containing only rows and columns matching the class tag.
+    """
+    if similarity_df.empty or not class_tag or class_tag == "All Classes":
+        return similarity_df
+
+    if doc_class_map is None:
+        try:
+            from src.db.corpus_db import get_all_documents
+            all_docs = get_all_documents(include_deleted=True)
+            doc_class_map = {}
+            for d in all_docs:
+                fname = d.get("filename") if isinstance(d, dict) else getattr(d, "filename", None)
+                csec = d.get("class_section") if isinstance(d, dict) else getattr(d, "class_section", None)
+                if fname:
+                    doc_class_map[fname] = csec
+        except Exception as e:
+            logger.warning(f"Could not load document class map from database: {e}")
+            doc_class_map = {}
+
+    matching_cols = [
+        col for col in similarity_df.columns
+        if doc_class_map.get(str(col)) == class_tag
+    ]
+
+    if not matching_cols:
+        logger.info(f"No document cells match class tag '{class_tag}'.")
+        return pd.DataFrame()
+
+    return similarity_df.loc[matching_cols, matching_cols]
+
+
+def _get_theme_color(theme_colors: Optional[dict], key: str, fallback: str) -> str:
     """Safely retrieves a color from a theme dictionary with a fallback."""
     if not theme_colors:
         return fallback
@@ -133,6 +192,8 @@ def plot_similarity_heatmap(
     colormap_name: str = DEFAULT_UI_COLORMAP,
     mask_threshold: Optional[float] = None,
     log_scale: bool = False,  # <-- NEW PARAMETER (Issue #628)
+    class_tag: Optional[str] = None,
+    doc_class_map: Optional[dict] = None,
 ) -> Figure:
     """
     High-resolution Matplotlib heatmap optimized for static PNG export.
@@ -152,6 +213,12 @@ def plot_similarity_heatmap(
     Returns:
         A Matplotlib Figure object.
     """
+    if class_tag and class_tag != "All Classes":
+        similarity_df = filter_heatmap_by_class_tag(
+            similarity_df, class_tag=class_tag, doc_class_map=doc_class_map
+        )
+
+    # Sanitize title input to prevent formatting injection (Issue #704)
     try:
         safe_title = TitleSanitizer.sanitize(title)
     except MatplotlibInjectionError:
@@ -188,6 +255,7 @@ def plot_similarity_heatmap(
         # while still capturing the full 0.0-1.0 range visually.
         norm = mcolors.LogNorm(vmin=1e-3, vmax=1.0)
         logger.info("Applied logarithmic color scaling to heatmap.")
+    apply_matplotlib_theme(theme_colors)
 
     with matplotlib_figure(figsize=figsize, dpi=dpi) as (fig, ax):
         sns.heatmap(
@@ -291,6 +359,8 @@ def plot_similarity_heatmap_plotly(
     annotate: bool = True,
     mask_threshold: Optional[float] = None,
     log_scale: bool = False,  # <-- NEW PARAMETER
+    class_tag: Optional[str] = None,
+    doc_class_map: Optional[dict] = None,
 ):
     """
     Interactive Plotly heatmap featuring dynamic hover values and custom threshold bounds.
@@ -299,6 +369,11 @@ def plot_similarity_heatmap_plotly(
     but we pass it here for API symmetry.
     """
     import plotly.graph_objects as go
+
+    if class_tag and class_tag != "All Classes":
+        similarity_df = filter_heatmap_by_class_tag(
+            similarity_df, class_tag=class_tag, doc_class_map=doc_class_map
+        )
 
     try:
         safe_title = TitleSanitizer.sanitize(title)
@@ -417,7 +492,78 @@ def plot_similarity_heatmap_plotly(
     return fig
 
 
-# ── Streamlit UI Wrapper ───────────────────────────────────────────────────────
+# ── Granular Analysis (Chunk-Level Heatmap) ────────────────────────────────────
+
+def plot_chunk_similarity_comparison(
+    doc_a_name: str,
+    doc_b_name: str,
+    chunks_a: list,
+    chunks_b: list,
+    sim_matrix: np.ndarray,
+    theme_colors: Optional[dict] = None,
+    colormap_name: str = DEFAULT_UI_COLORMAP,
+) -> Figure:
+    """
+    Renders a granular, chunk-level similarity heatmap between two specific documents.
+    """
+    try:
+        safe_doc_a = TitleSanitizer.sanitize(doc_a_name)
+        safe_doc_b = TitleSanitizer.sanitize(doc_b_name)
+    except MatplotlibInjectionError:
+        safe_doc_a, safe_doc_b = "Doc A", "Doc B"
+
+    cmap = MATPLOTLIB_CMAP_MAPPING.get(colormap_name, "viridis")
+    
+    sim_matrix = np.clip(sim_matrix, 0.0, 1.0)
+    na, nb = sim_matrix.shape
+
+    def short_label(text, max_chars=40):
+        clean_text = " ".join(str(text).split())
+        return TitleSanitizer.sanitize(clean_text[:max_chars].strip() + "…" if len(clean_text) > max_chars else clean_text)
+
+    row_labels = [f"A{i + 1}: {short_label(c)}" for i, c in enumerate(chunks_a)]
+    col_labels = [f"B{j + 1}: {short_label(c)}" for j, c in enumerate(chunks_b)]
+
+    apply_matplotlib_theme(theme_colors)
+
+    with matplotlib_figure(figsize=(max(8, nb * 1.5), max(6, na * 0.8)), dpi=150) as (fig, ax):
+        sns.heatmap(
+            sim_matrix,
+            ax=ax,
+            annot=True,
+            fmt=".2f",
+            cmap=cmap,
+            vmin=0.0,
+            vmax=1.0,
+            linewidths=0.5,
+            linecolor="#cccccc",
+            xticklabels=col_labels,
+            yticklabels=row_labels,
+            annot_kws={"size": 8},
+            cbar_kws={"label": "Cosine Similarity", "shrink": 0.7},
+        )
+
+        ax.set_title(
+            f"Chunk-Level Similarity: {safe_doc_a}  vs  {safe_doc_b}",
+            fontsize=13,
+            fontweight="bold",
+            pad=14,
+        )
+        ax.set_xlabel(f"Chunks from {safe_doc_b}", fontsize=10)
+        ax.set_ylabel(f"Chunks from {safe_doc_a}", fontsize=10)
+        ax.set_xticklabels(ax.get_xticklabels(), rotation=30, ha="right", fontsize=7)
+        ax.set_yticklabels(ax.get_yticklabels(), rotation=0, fontsize=7)
+
+        if theme_colors:
+            fig.patch.set_facecolor(theme_colors.get("background", "#FFFFFF"))
+            ax.set_facecolor(theme_colors.get("surface", "#F8FAFC"))
+            ax.tick_params(colors=theme_colors.get("ink", "#0F172A"))
+            ax.xaxis.label.set_color(theme_colors.get("ink", "#0F172A"))
+            ax.yaxis.label.set_color(theme_colors.get("ink", "#0F172A"))
+            ax.title.set_color(theme_colors.get("ink", "#0F172A"))
+
+        fig.tight_layout()
+        return fig
 def render_heatmap_ui(
     similarity_df: pd.DataFrame,
     threshold: float = PLAGIARISM_THRESHOLD,
@@ -451,6 +597,47 @@ def render_heatmap_ui(
             horizontal=True,
             key="heatmap_zoom_mode",
         )
+    # Heatmap view controls
+    zoom_mode = st.radio(
+        "Heatmap View",
+        [
+            "Fit Matrix",
+            "High Similarity Focus",
+            "Reset View",
+        ],
+        horizontal=True,
+        key="heatmap_zoom_mode",
+    )
+
+    # Class Tag Filter selector
+    unique_classes = ["All Classes"]
+    try:
+        from src.db.corpus_db import get_unique_class_sections
+        unique_classes.extend(get_unique_class_sections())
+    except Exception:
+        pass
+
+    selected_class_tag = st.selectbox(
+        "Filter by Class Tag",
+        unique_classes,
+        index=0,
+        key="heatmap_class_tag_filter",
+        help="Filter heatmap rows and columns to documents matching the selected class tag.",
+    )
+
+    if selected_class_tag and selected_class_tag != "All Classes":
+        clean_df = filter_heatmap_by_class_tag(clean_df, class_tag=selected_class_tag)
+
+    if clean_df.empty:
+        st.info(f"No document pairs found matching class tag '{selected_class_tag}'.")
+        return
+
+    # Colormap selector
+    default_index = (
+        UI_COLORMAP_OPTIONS.index(DEFAULT_UI_COLORMAP)
+        if DEFAULT_UI_COLORMAP in UI_COLORMAP_OPTIONS
+        else 0
+    )
 
     with col2:
         colormap_name = st.selectbox(
