@@ -19,10 +19,10 @@ from src.core.synchronization import verify_and_repair_index
 from src.core.text_chunking import chunk_documents
 
 
-def run_scan(folder_path: str, threshold: float) -> int:
+def run_scan(folder_path: str, threshold: float, output_format: str = "text") -> int:
     """
     Scans a folder, processes the documents, runs plagiarism detection,
-    and prints a JSON report to stdout.
+    and prints the report in the requested output format to stdout.
     """
     if not os.path.exists(folder_path):
         sys.stderr.write(f"Error: Folder '{folder_path}' does not exist.\n")
@@ -109,7 +109,27 @@ def run_scan(folder_path: str, threshold: float) -> int:
         "matches": matches,
     }
 
-    print(json.dumps(report, indent=2))
+    if output_format == "json":
+        print(json.dumps(report, indent=2))
+    elif output_format == "csv":
+        import csv
+        import io
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=["document_1", "document_2", "similarity_score"])
+        writer.writeheader()
+        for m in matches:
+            writer.writerow(m)
+        print(output.getvalue().strip())
+    else:  # text
+        print(f"Documents Processed: {num_processed}")
+        print(f"Similarity Threshold: {threshold}")
+        if matches:
+            print("Matches Found:")
+            for m in matches:
+                print(f"- {m['document_1']} <-> {m['document_2']}: {m['similarity_score']:.4f}")
+        else:
+            print("No matches found.")
+
     return 0
 
 
@@ -241,6 +261,12 @@ def main() -> None:
         default=0.59,
         help="Similarity threshold for flagging (default: 0.59)",
     )
+    scan_parser.add_argument(
+        "--output-format",
+        choices=["json", "csv", "text"],
+        default="text",
+        help="Output format for scan results (default: text)",
+    )
 
     subparsers.add_parser(
         "sync-index", help="Verify and repair FAISS index sync with SQLite database."
@@ -264,7 +290,7 @@ def main() -> None:
             sys.stderr.write("Error: Threshold must be a float between 0.0 and 1.0.\n")
             sys.exit(1)
 
-        exit_code = run_scan(args.folder, args.threshold)
+        exit_code = run_scan(args.folder, args.threshold, output_format=args.output_format)
         sys.exit(exit_code)
 
     elif args.command == "sync-index":
