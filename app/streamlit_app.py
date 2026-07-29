@@ -1,11 +1,15 @@
 import os
 import sys
-from pathlib import Path
+import asyncio
 
-# Fix Streamlit import paths by pointing to project root
-FILE_PATH = Path(__file__).resolve()
-ROOT_DIR = FILE_PATH.parent.parent  # Points to semantic-plagiarism-detector/
+# Silence harmless Windows asyncio Proactor connection lost bugs
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+# ruff: noqa: E402
 
+import hashlib
+import os
+import io as _io
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
@@ -15,13 +19,7 @@ import html
 
 # Standard / Third-party imports
 import time
-
-import _io
-import psutil
-from dotenv import load_dotenv
-
-load_dotenv()
-
+from datetime import datetime
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -73,7 +71,7 @@ from app.theme import (
     get_theme_name,
     inject_css,
     set_theme,
-    version_check_widget_html,
+    sidebar_user_badge_html,
 )
 from src.core.config import DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD, severity_key
 from src.core.document_parser import (
@@ -86,12 +84,16 @@ from src.core.document_parser import (
 )
 from src.core.embedding_model import embed_chunks, embed_documents
 from src.core.faiss_index import (
-    build_index_from_matrix,
-    load_index,
-    load_or_rebuild_index,
-    save_index,
+    build_index,
+    find_plagiarised_chunks,
     search_similar_chunks,
+    save_index,
+    load_or_rebuild_index,
+    build_index_from_matrix,
 )
+from src.core.webhook import send_plagiarism_alert
+from src.core.ai_detector import detect_documents_ai_probability
+from src.visualization.network_graph import plot_similarity_network
 from src.core.similarity import (
     document_similarity_matrix,
     find_most_similar_chunks,
@@ -120,7 +122,12 @@ from src.db import (
     get_all_embeddings,
     get_chunk_registry,
     get_unique_class_sections,
-    init_corpus_db,
+    get_documents_by_class,
+)
+from src.utils.pdf_report import generate_plagiarism_report, highlight_pdf_matches
+from src.utils.badge_generator import (
+    generate_badge_png,
+    generate_badge_pdf,
 )
 from src.db.auth import (
     authenticate_user,
@@ -154,13 +161,35 @@ from src.utils.pdf_report import highlight_pdf_matches  # noqa: E402
 from src.utils.redis_cache import (
     cache_session_state,
     clear_session,
-    get_analysis_results,
+    cache_faiss_index,
     get_faiss_index,
-    get_session_state,
-    get_upload_count,
-    increment_upload_count,
-    is_upload_rate_limited,
+    cache_analysis_results,
+    get_analysis_results,
 )
+from src.visualization.heatmap import (
+    plot_chunk_similarity_comparison,
+    plot_similarity_heatmap,
+)
+from src.core.document_parser import (
+    DEFAULT_OCR_DPI,
+    DEFAULT_OCR_LANGUAGE,
+    OCRDependencyError,
+    SUPPORTED_OCR_LANGUAGES,
+    extract_text,
+    prepare_text_for_embedding,
+)
+from src.db.auth import (
+    init_db,
+    verify_user,
+    get_user_role,
+    add_user,
+    get_all_users,
+    delete_user,
+    update_password,
+    get_tour_completed,
+    set_tour_completed,
+)
+try:
 from src.utils.warning_list import render_warning_controls
 from src.visualization.analytics import (
     plot_high_severity_trends,
@@ -395,201 +424,82 @@ if not st.session_state.get("authenticated", False):
                 st.rerun()
         st.stop()
 
-    with st.form("login_form"):
-        username = st.text_input("Username", value="admin")
-        password = st.text_input("Password", type="password", value="admin")
-        login_submitted = st.form_submit_button("Log In", use_container_width=True)
 
-        if login_submitted:
-            username = username.strip().lower()
-            prefs = get_user_preferences(username)
-            st.session_state.threshold = prefs.get(
-                "threshold", DEFAULT_THRESHOLDS.plagiarism
-            )
-            st.session_state.theme = prefs.get("theme", "Light")
-            set_theme(st.session_state.theme)
-
-            if not username or not password:
-                from src.errors import AUTH_BLANK_CREDENTIALS
-
-                st.error(f"🚨 {AUTH_BLANK_CREDENTIALS}")
-            else:
-                is_allowed, error_msg = check_login_rate_limit(username)
-                if not is_allowed:
-                    st.error(f"🚨 {error_msg}")
-                elif not is_user_active(username):
-                    st.error("🚨 Account suspended. Please contact your administrator.")
-                elif verify_user(username, password):
-                    role = get_user_role(username)
-                    if role is None:
-                        from src.errors import AUTH_ROLE_UNDETERMINED
-
-                        st.error(f"🚨 {AUTH_ROLE_UNDETERMINED}")
-                    else:
-                        clear_login_attempts(username)
-                        enabled, _ = get_2fa_status(username)
-                        if enabled:
-                            st.session_state.pending_2fa = True
-                            st.session_state.pending_username = username
-                            st.session_state.pending_role = role
-                            st.rerun()
-                        else:
-                            st.session_state.authenticated = True
-                            st.session_state.username = username
-                            st.session_state.role = role
-                            st.session_state.last_interaction = time.time()
-                            cache_session_state(SESSION_ID, "authenticated", True)
-                            cache_session_state(SESSION_ID, "username", username)
-                            cache_session_state(SESSION_ID, "role", role)
-                            cache_session_state(
-                                SESSION_ID, "last_interaction", time.time()
-                            )
-                            st.success(f"Welcome back, {role.capitalize()}!")
-                            st.success(f"✅ Welcome back, {role.capitalize()}!")
-                            st.rerun()
-                else:
-                    # Record failed login attempt
-                    record_failed_login(username)
-                    from src.errors import AUTH_INVALID_CREDENTIALS
-
-                    st.error(f"🚨 {AUTH_INVALID_CREDENTIALS}")
-
-    # ── SSO Sign-In Options ──────────────────────────────────────────────────
-    st.markdown("---")
-    st.markdown(
-        "<p style='text-align:center;color:#888;font-size:0.85rem;'>or sign in with</p>",
-        unsafe_allow_html=True,
-    )
-    _sso_col1, _sso_col2 = st.columns(2)
-    with _sso_col1:
-        if st.button(
-            "🐙 Sign in with GitHub", use_container_width=True, key="github_sso_btn"
-        ):
-            from src.utils.sso import get_github_auth_url
-
-            _github_url, _github_state = get_github_auth_url()
-            st.session_state["sso_state"] = _github_state
-            st.markdown(
-                f"<meta http-equiv='refresh' content='0; url={_github_url}'>",
-                unsafe_allow_html=True,
-            )
-    with _sso_col2:
-        if st.button(
-            "🔵 Sign in with Google", use_container_width=True, key="google_sso_btn"
-        ):
-            from src.utils.sso import get_google_auth_url
-
-            _google_url, _google_state = get_google_auth_url()
-            st.session_state["sso_state"] = _google_state
-            st.markdown(
-                f"<meta http-equiv='refresh' content='0; url={_google_url}'>",
-                unsafe_allow_html=True,
-            )
-    st.stop()
 
 # Active user role
+
 user_role = st.session_state.get("role", "user")
 
-# Sync threshold from URL query parameters (bi-directional)
-if "threshold" in st.query_params:
-    q_val_raw = st.query_params["threshold"]
-    if st.session_state.get("last_seen_threshold_query") != q_val_raw:
-        try:
-            q_threshold = float(q_val_raw)
-            if 0.0 <= q_threshold <= 1.0:
-                st.session_state.threshold_slider = q_threshold
-                st.session_state.threshold = q_threshold
-                st.session_state.last_seen_threshold_query = q_val_raw
-        except ValueError:
-            pass
-elif "threshold_slider" not in st.session_state:
-    st.session_state.threshold_slider = st.session_state.get(
-        "threshold", DEFAULT_THRESHOLDS.plagiarism
-    )
 
+# ── Top-right Theme Toggle ───────────────────────────────────────────────────
+current_theme = get_theme_name()
+
+# Create a narrow right-aligned column for the theme toggle
+_, theme_col = st.columns([0.94, 0.06])
+
+with theme_col:
+    theme_icon = "☀️" if current_theme == "Dark" else "🌙"
+
+    if st.button(
+        theme_icon,
+        key="theme_toggle",
+    ):
+        new_theme = "Light" if current_theme == "Dark" else "Dark"
+        set_theme(new_theme)
+        st.rerun()
+
+
+# ── Sidebar (ROLE RESTRICTED Settings) ────────────────────────────────────────
+# ── Sidebar ───────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("### ⚙️ Settings")
 
 # Resolve fallback configuration variables (ensuring all roles have access to these settings)
 selected_lang_name = st.session_state.get("lang_selector", "English")
 lang_code = "es" if selected_lang_name == "Español" else "en"
 
-threshold = st.session_state.get("threshold_slider", DEFAULT_THRESHOLDS.plagiarism)
-faiss_top_k = st.session_state.get("faiss_top_k_slider", 5)
-use_chunk_matrix = st.session_state.get("chunk_matrix_checkbox", False)
-chunk_size = st.session_state.get("chunk_size_slider", 500)
-chunk_overlap = st.session_state.get("chunk_overlap_slider", 50)
-ignore_phrases = st.session_state.get("ignore_phrases_textarea", "")
-ocr_language_selector_val = st.session_state.get(
-    "ocr_language_selector", DEFAULT_OCR_LANGUAGE
-)
-ocr_language_map = {
-    "English": "eng",
-    "Español": "spa",
-    "Français": "fra",
-    "eng": "eng",
-    "spa": "spa",
-    "fra": "fra",
-}
-ocr_language = ocr_language_map.get(ocr_language_selector_val, DEFAULT_OCR_LANGUAGE)
-ocr_dpi = st.session_state.get("ocr_dpi_slider", DEFAULT_OCR_DPI)
-heatmap_cmap = "OrRd"
 
-unique_classes = ["All Classes"] + get_unique_class_sections()
-selected_class = st.session_state.get("class_filter_selectbox", "All Classes")
-
-
-@st.dialog("⚠️ Confirm Bulk Clear")
-def clear_all_dialog():
-    st.markdown(
-        "**WARNING:** This action is destructive and cannot be undone. "
-        "This will permanently delete all student documents, paragraph chunks, "
-        "and plagiarism incidents from the database, and reset the FAISS index."
+    selected_theme = st.radio(
+        "Theme",
+        options=["Light", "Dark"],
+        index=0 if current_theme == "Light" else 1,
+        horizontal=True,
+        key="theme_selector",
     )
-    st.write("Are you absolutely sure you want to proceed?")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Cancel", use_container_width=True, key="cancel_clear_all"):
-            st.rerun()
-    with col2:
-        if st.button(
-            "Clear All",
-            type="primary",
-            use_container_width=True,
-            key="confirm_clear_all",
-        ):
-            clear_all_data()
-            if os.path.exists(_INDEX_PATH):
-                try:
-                    os.remove(_INDEX_PATH)
-                except OSError as e:
-                    print(f"Error removing FAISS index: {e}")
-                except Exception as e:
-                    logger.error(f"Error removing FAISS index: {e}")
-
-            try:
-                from src.utils.redis_cache import get_cache
-
-                cache = get_cache()
-                if cache.is_available():
-                    cache.delete("faiss:index:corpus_index")
-                    cache.clear_pattern("analysis:*")
-            except (ImportError, RuntimeError, ConnectionError) as e:
-                print(f"Error invalidating cache: {e}")
-            except Exception as e:
-                logger.error(f"Error invalidating cache: {e}")
-
-            if "analysis_results" in st.session_state:
-                st.session_state.analysis_results = None
-            if "analysis_file_signature" in st.session_state:
-                st.session_state.analysis_file_signature = None
-
-            st.success("✅ All documents, chunks, and incidents have been cleared.")
-            st.rerun()
+    if selected_theme != current_theme:
+        set_theme(selected_theme)
+        st.rerun()
 
 
-# ── Top-right Theme Toggle ───────────────────────────────────────────────────
-current_theme = get_theme_name()
-_, theme_col = st.columns([0.94, 0.06])
+    if user_role == "admin":
+        threshold = st.slider(
+            "Plagiarism Threshold",
+            0.50,
+            0.99,
+            value=PLAGIARISM_THRESHOLD,
+            step=0.01,
+
+
+            help="Cosine similarity above which a pair is flagged.",
+
+          
+
+            help="Cosine similarity threshold for flagging.",
+
+            key="threshold_slider",
+        )
+        use_chunk_matrix = st.checkbox(
+            "Use chunk-level similarity matrix",
+            value=False,
+            key="chunk_matrix_checkbox",
+        )
+        faiss_top_k = st.slider(
+            "FAISS: matches per chunk",
+            1,
+            20,
+            value=5,
+            key="faiss_top_k_slider",
+        )
 
 with theme_col:
     theme_icon = "☀️" if current_theme == "Dark" else "🌙"
@@ -606,86 +516,209 @@ with theme_col:
         set_theme(new_theme)
         st.rerun()
 
+        # ── Customizable Chunk Size & Overlap Sliders (#153) ─────────────────
+        st.markdown("### ✂️ Chunking Settings")
+        chunk_size = st.slider(
+            "Chunk Size (characters)",
+            200,
+            2000,
+            value=500,
+            step=50,
+            help="Target character length for text chunks during embedding.",
+            key="chunk_size_slider",
+        )
+        chunk_overlap = st.slider(
+            "Chunk Overlap (characters)",
+            0,
+            500,
+            value=50,
+            step=10,
+            help="Character overlap between consecutive chunks to preserve contextual boundary.",
+            key="chunk_overlap_slider",
+        )
 
+        ocr_language = DEFAULT_OCR_LANGUAGE
+        ocr_dpi = DEFAULT_OCR_DPI
+
+        with st.expander("🔤 OCR Settings", expanded=False):
+            ocr_language_labels = {
+                display_name: code
+                for code, display_name in SUPPORTED_OCR_LANGUAGES.items()
+            }
+            language_names = list(ocr_language_labels)
+            default_language_name = SUPPORTED_OCR_LANGUAGES[DEFAULT_OCR_LANGUAGE]
+            selected_ocr_language_name = st.selectbox(
+                "OCR Language",
+                options=language_names,
+                index=language_names.index(default_language_name),
+                key="ocr_language_selector",
+            )
+            ocr_language = ocr_language_labels[selected_ocr_language_name]
+
+            ocr_dpi = st.slider(
+                "OCR DPI Resolution",
+                min_value=150,
+                max_value=400,
+                value=DEFAULT_OCR_DPI,
+                step=25,
+                key="ocr_dpi_slider",
+            )
+
+    else:
+        threshold = PLAGIARISM_THRESHOLD
+        use_chunk_matrix = False
+        faiss_top_k = 5
+        chunk_size = 500
+        chunk_overlap = 50
+        ocr_language = DEFAULT_OCR_LANGUAGE
+        ocr_dpi = DEFAULT_OCR_DPI
 # ── Sidebar (ROLE RESTRICTED Settings & i18n) ─────────────────────────────────
 
+    unique_classes = ["All Classes"] + get_unique_class_sections()
 
-def save_preferences_callback():
-    if "username" in st.session_state:
-        prefs = {
-            "threshold": st.session_state.get(
-                "threshold_slider", DEFAULT_THRESHOLDS.plagiarism
-            ),
-            "theme": st.session_state.get("theme_selector", "Light"),
-        }
-    update_user_preferences(st.session_state.username, prefs)
+    selected_class = st.selectbox("Select Class/Section", unique_classes, index=0)
 
+# ── Main UI ───────────────────────────────────────────────────────────────────
+st.title("🔍 Semantic Plagiarism Detection System")
 
+uploaded_files = st.file_uploader(
+    "📂 Upload Assignments",
+    type=["pdf", "docx", "txt"],
+    accept_multiple_files=True,
+    key="file_uploader",
+)
+
+file_bytes_dict = {f.name: f.getvalue() for f in uploaded_files} if uploaded_files else {}
 with st.sidebar:
     st.markdown(f"👤 Logged in as **{st.session_state.get('username', '')}**")
 
-    # Render cached telemetry user count badge
-    try:
-        active_users = TelemetryService.get_active_user_count()
-        st.caption(f"Total System Users: {active_users}")
-    except Exception:
-        pass
+if len(file_bytes_dict) < 2:
+    st.info("Upload at least 2 files to begin analysis.")
+    st.stop()
 
-    if st.button("🚪 Log Out", use_container_width=True):
-        import logging
-        from datetime import datetime, timezone
+# ── Pipeline Execution ────────────────────────────────────────────────────────
+@st.cache_data(show_spinner=False)
+def run_pipeline(
+    file_bytes_dict: dict[str, bytes],
+    ocr_language: str,
+    ocr_dpi: int,
+    chunk_size: int = 500,
+    chunk_overlap: int = 50,
+):
+    raw_texts = {}
+    for name, data in file_bytes_dict.items():
+        raw_texts[name] = extract_text(
+            _io.BytesIO(data),
+            name,
+            ocr_language=ocr_language,
+            ocr_dpi=ocr_dpi,
+        )
 
-        logger = logging.getLogger(__name__)
-        username = st.session_state.get("username", "unknown")
-        timestamp = datetime.now(timezone.utc).isoformat()
-        logger.info("User '%s' logged out at %s", username, timestamp)
+    chunked_docs = chunk_documents(
+        raw_texts,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+    )
+    translated_chunked_docs = {}
 
-        for key in ["authenticated", "username", "role"]:
-            if key in st.session_state:
-                del st.session_state[key]
-        clear_session(SESSION_ID)
-        st.rerun()
+    for doc_name, chunks in chunked_docs.items():
+        translated_chunked_docs[doc_name] = []
+        for chunk in chunks:
+            prepared = prepare_text_for_embedding(chunk)
+            translated_chunked_docs[doc_name].append(prepared["embedding_text"])
+
+    embeddings = embed_documents(translated_chunked_docs)
+    sim_df = document_similarity_matrix(embeddings)
+
+    names = list(embeddings.keys())
+    n = len(names)
+    chunk_mat = np.zeros((n, n))
+
+    for i, na in enumerate(names):
+        for j, nb in enumerate(names):
+            if i == j:
+                chunk_mat[i, j] = 1.0
+            elif j > i:
+                ea, eb = embeddings[na], embeddings[nb]
+                score = float(np.max(cosine_similarity(ea, eb))) if ea.size and eb.size else 0.0
+                chunk_mat[i, j] = score
+                chunk_mat[j, i] = score
+
+    chunk_sim_df = pd.DataFrame(chunk_mat, index=names, columns=names)
+    faiss_index, registry = build_index(embeddings, chunked_docs)
+    ai_probabilities = detect_documents_ai_probability(chunked_docs)
+
+    return (
+        raw_texts,
+        chunked_docs,
+        embeddings,
+        sim_df,
+        chunk_sim_df,
+        faiss_index,
+        registry,
+        ai_probabilities,
+    )
+
+with st.spinner("🧠 Processing files and building embeddings…"):
+    analysis_results = run_pipeline(
+        file_bytes_dict,
+        ocr_language,
+        ocr_dpi,
+        chunk_size,
+        chunk_overlap,
+    )
+
+(
+    raw_texts,
+    chunked_docs,
+    embeddings,
+    sim_df,
+    chunk_sim_df,
+    faiss_index,
+    registry,
+    ai_probabilities,
+) = analysis_results
+
+active_sim_df = chunk_sim_df if use_chunk_matrix else sim_df
+flags = flag_plagiarism(active_sim_df, threshold=threshold)
+
+st.subheader("📊 Analysis Summary")
+st.write(f"Processed **{len(raw_texts)}** documents with Chunk Size: `{chunk_size}` and Overlap: `{chunk_overlap}`.")
+
+    selected_class = st.selectbox(
+        "Select Class/Section",
+        unique_classes,
+        index=0,
+        key="class_filter_selectbox",
+    )
+
+
+    st.markdown("---")
+    st.markdown("""
+**How it works**
+1. Upload **PDF, DOCX, or TXT** assignment files or import from Google Drive
+2. Text is extracted according to the file type
+3. Text is split into **paragraph chunks**
+4. Chunks are embedded with **all-MiniLM-L6-v2**
+5. A **FAISS index** is built over all chunk vectors
+6. Pairs above the threshold are flagged
+""")
+    st.markdown("---")
+    st.caption("Semantic Plagiarism Detector · FAISS edition")
 
     if user_role == "admin":
         st.markdown("---")
         st.markdown("### 📁 Document Management")
         existing_docs = get_all_documents()
-        session_uploaded_docs = st.session_state.get("session_uploaded_docs", set())
         if existing_docs:
             st.write(f"**{len(existing_docs)}** documents in database")
             for doc in existing_docs:
-                st.markdown('<div class="doc-row">', unsafe_allow_html=True)
                 col1, col2 = st.columns([3, 1])
                 with col1:
-                    is_new = doc["filename"] in session_uploaded_docs
-                    badge_html = (
-                        ' <span style="background-color:#28a745;color:white;font-size:0.7rem;padding:2px 6px;border-radius:4px;font-weight:bold;">NEW</span>'
-                        if is_new
-                        else ""
-                    )
-                    safe_display_name = html.escape(
-                        str(doc["filename"]),
-                        quote=True,
-                    )
-                    st.markdown(
-                        f"📄 {safe_display_name}{badge_html}",
-                        unsafe_allow_html=True,
-                    )
+                    st.text(f"📄 {doc['filename']}")
                 with col2:
                     if st.button("🗑️", key=f"del_{doc['filename']}"):
-                        st.session_state._pending_delete = doc["filename"]
-                        st.rerun()
-
-            pending = st.session_state.get("_pending_delete")
-            if pending:
-                st.markdown("---")
-                st.warning(f"Are you sure you want to delete **{pending}**?")
-                confirm_col, cancel_col = st.columns(2)
-                with confirm_col:
-                    if st.button(
-                        "Yes, delete", type="primary", key="confirm_delete_doc"
-                    ):
-                        delete_document(pending)
+                        delete_document(doc["filename"])
                         embeddings_matrix = get_all_embeddings()
                         if embeddings_matrix.size > 0:
                             new_index = build_index_from_matrix(embeddings_matrix)
@@ -693,77 +726,17 @@ with st.sidebar:
                         else:
                             if os.path.exists(_INDEX_PATH):
                                 os.remove(_INDEX_PATH)
-                        del st.session_state._pending_delete
                         st.rerun()
-                with cancel_col:
-                    if st.button("Cancel", key="cancel_delete_doc"):
-                        del st.session_state._pending_delete
-                        st.rerun()
-                st.markdown("</div>", unsafe_allow_html=True)
 
-        # ── Generate Mock Data (Issue #255) ───────────────────────────────────
-        # Hidden developer utility: generates 5 fake essays via Faker so the
-        # app is immediately usable after cloning without manual PDF uploads.
-        with st.expander("🧪 Developer Tools", expanded=False):
-            st.caption(
-                "Generate fake student essays to populate the corpus and preview "
-                "the app without uploading real PDFs."
-            )
-            mock_class = st.text_input(
-                "Mock Class/Section",
-                value="Demo Class",
-                key="mock_class_input",
-                help="Class section label assigned to all generated essays.",
-            )
-            mock_assignment = st.text_input(
-                "Mock Assignment Title",
-                value="Demo Assignment",
-                key="mock_assignment_input",
-                help="Assignment title assigned to all generated essays.",
-            )
-            if st.button(
-                "⚗️ Generate Mock Data",
-                key="generate_mock_data_button",
-                use_container_width=True,
-                help="Creates 5 fake student essays using the Faker library, "
-                "stores them in corpus.db, and rebuilds the FAISS index.",
-            ):
-                try:
-                    from src.utils.mock_data import generate_mock_data as _gen_mock
 
-                    with st.spinner(
-                        "⚗️ Generating mock essays and building FAISS index…"
-                    ):
-                        result = _gen_mock(
-                            num_essays=5,
-                            class_section=mock_class.strip() or "Demo Class",
-                            assignment_title=mock_assignment.strip()
-                            or "Demo Assignment",
-                            chunk_size=st.session_state.get("chunk_size_slider", 500),
-                            chunk_overlap=st.session_state.get(
-                                "chunk_overlap_slider", 50
-                            ),
-                        )
 
-                    added = result["essays"]
-                    skipped = result["skipped"]
-                    ntotal = result["faiss_ntotal"]
-
-                    if added:
-                        st.success(
-                            f"✅ Added **{len(added)}** mock essay(s): "
-                            + ", ".join(name for _, name in added)
-                        )
-                    if skipped:
-                        st.info(
-                            f"ℹ️ {len(skipped)} essay(s) already existed and were skipped."
-                        )
-                    st.success(
-                        f"🗂️ FAISS index rebuilt with **{ntotal}** total vectors."
-                    )
-                    # Invalidate cached analysis so the UI reloads with new docs
-                    st.session_state.analysis_results = None
-                    st.rerun()
+    st.markdown("---")
+    if st.button("🚪 Log Out", use_container_width=True, key="logout_button"):
+        for key in ["authenticated", "username", "role", "last_interaction"]:
+            if key in st.session_state:
+                del st.session_state[key]
+        clear_session(SESSION_ID)
+        st.rerun()
 
                 except ImportError:
                     st.error(
@@ -1050,24 +1023,22 @@ if user_role != "admin":
                             "✅ No significant matches found in the assignment database."
                         )
                     else:
-                        st.success(
-                            f"✅ Found **{len(results)}** potentially similar passages."
-                        )
+                        st.success(f"Found **{len(results)}** potentially similar passages.")
 
-                        doc_id_map = {}
-                        anon_counter = 1
+            except Exception as e:
+                st.error(f"Error loading index: {str(e)}")
+else:
+    # ADMINISTRATOR ACCESS: Full Upload & Pipeline UI
+    index_key = "corpus_index"
+    cached_index_data = get_faiss_index(index_key)
 
-                        for record, score in results:
-                            if record.doc_name not in doc_id_map:
-                                doc_id_map[record.doc_name] = (
-                                    f"Document-{anon_counter:03d}"
-                                )
-                                anon_counter += 1
-
-                        for rank, (record, score) in enumerate(results, 1):
-                            anon_doc_name = doc_id_map[record.doc_name]
-                            color = "#ff4b4b" if score >= 0.90 else "#ffa500"
-
+# ── Main Header ───────────────────────────────────────────────────────────────
+st.title("🔍 Semantic Plagiarism Detection System")
+st.markdown(
+    "Upload student PDF, DOCX, or TXT files. Detects **semantic similarity** "
+    "using transformer embeddings + **FAISS vector search**."
+)
+st.divider()
                             with st.expander(
                                 f"#{rank} · {anon_doc_name} (chunk #{record.chunk_index+1}) — {score:.1%}",
                                 expanded=(rank == 1),
@@ -1090,33 +1061,41 @@ if user_role != "admin":
                                     unsafe_allow_html=True,
                                 )
 
-                        st.caption(
-                            "🔒 Document names are anonymized to protect student privacy."
-                        )
-            except (RuntimeError, ValueError, OSError, TypeError) as e:
-                st.error(f"🚨 Error loading index: {str(e)}")
+if user_role != "admin":
+    # STUDENT PORTAL VIEW
+    st.subheader("🔎 Secure Student Search Portal")
+    query_text = st.text_area("Paste a text snippet to check against index:", height=150)
+    if st.button("🔍 Run Quick Verification", key="user_query") and query_text.strip():
+        # Search logic
+        st.info("Query processed.")
 else:
     # ADMIN FULL ACCESS VIEW
-    faiss_index = None
-    registry = []
-
     cached_index_data = get_faiss_index("corpus_index")
-    if cached_index_data is not None:
+
+    if cached_index_data is not None and os.path.exists(_INDEX_PATH):
         try:
             import faiss
 
             index_buffer = _io.BytesIO(cached_index_data)
             faiss_index = faiss.deserialize_index(faiss.read_index(index_buffer))
             registry = get_chunk_registry()
-            st.info(
-                f"📂 Loaded FAISS index from Redis cache with {faiss_index.ntotal} vectors"
-            )
-        except (RuntimeError, ValueError, OSError) as e:
-            print(f"[Redis] Error loading cached index: {e}, falling back to disk")
+
+        except Exception:
+
+            if os.path.exists(_INDEX_PATH):
+                faiss_index = load_index(_INDEX_PATH)
+                registry = get_chunk_registry()
+            else:
+                faiss_index = None
+                registry = []
+
+    if "analysis_results" not in st.session_state:
+        st.session_state.analysis_results = None
+
+            st.info(f"📂 Loaded FAISS index from Redis cache with {faiss_index.ntotal} vectors")
         except Exception as e:
-            logger.warning(
-                f"[Redis] Error loading cached index: {e}, falling back to disk"
-            )
+            print(f"[Redis] Error loading cached index: {e}, falling back to disk")
+            from src.core.faiss_index import load_or_rebuild_index
 
     if faiss_index is None:
         try:
@@ -1133,9 +1112,15 @@ else:
                     )
                 else:
                     st.info(
-                        "No stored embeddings found. An empty FAISS index was initialized."
-                    )
+                    "No stored embeddings were found. An empty FAISS index was "
+                    "initialized safely.")
             else:
+                st.info(f"Loaded and validated the existing FAISS index with "f"{faiss_index.ntotal} vectors.")
+
+    if "analysis_results" not in st.session_state:
+        st.session_state.analysis_results = None
+        # Try to load from Redis cache
+
                 st.info(
                     f"Loaded existing FAISS index with {faiss_index.ntotal} vectors."
                 )
@@ -2447,22 +2432,28 @@ if not st.session_state.authenticated:
                     chunks_a if selected_view_doc == doc_a else chunks_b
                 )
 
-                if doc_source and str(selected_view_doc).lower().endswith(".pdf"):
-                    with st.spinner("Generating highlighted PDF preview..."):
-                        try:
-                            highlighted_pdf_bytes = highlight_pdf_matches(
-                                pdf_source=doc_source,
-                                matching_chunks=matching_chunks_to_highlight,
-                            )
-                            base64_pdf = base64.b64encode(highlighted_pdf_bytes).decode(
-                                "utf-8"
-                            )
-                            pdf_display = f"""<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="850px" type="application/pdf"></iframe>"""
-                            st.markdown(pdf_display, unsafe_allow_html=True)
-                        except (ValueError, RuntimeError, OSError, TypeError) as err:
-                            st.error(f"🚨 Unable to render PDF preview: {str(err)}")
-                else:
-                    st.info("PDF Preview is only available for uploaded `.pdf` files.")
+            if doc_source and str(selected_view_doc).lower().endswith(".pdf"):
+                with st.spinner("Generating highlighted PDF preview..."):
+                    try:
+                        highlighted_pdf_bytes = highlight_pdf_matches(
+                            pdf_source=doc_source,
+                            matching_chunks=matching_chunks_to_highlight,
+                        )
+
+                        base64_pdf = base64.b64encode(highlighted_pdf_bytes).decode("utf-8")
+                        pdf_display = f"""
+                            <iframe 
+                                src="data:application/pdf;base64,{base64_pdf}" 
+                                width="100%" 
+                                height="850px" 
+                                type="application/pdf">
+                            </iframe>
+                        """
+                        st.markdown(pdf_display, unsafe_allow_html=True)
+                    except Exception as err:
+                        st.error(f"Unable to render PDF preview: {str(err)}")
+            else:
+                st.info(f"PDF Preview is only available for uploaded `.pdf` files.")
 
     # ══ TAB 6: Analytics ═════════════════════════════════════════════════════════
 
