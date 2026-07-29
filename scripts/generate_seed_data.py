@@ -75,6 +75,19 @@ MOCK_SUBJECTS = [
     "Quantum Algorithms", "Quantum Cryptography", "Quantum Teleportation",
 ]
 
+
+from src.core.faiss_index import build_index_from_matrix, save_index
+from src.db.auth import add_user
+from src.db.auth import init_db as init_auth_db
+from src.db.corpus_db import (
+    add_chunks,
+    add_document,
+    get_all_documents,
+    get_embedding_count,
+    init_corpus_db,
+)
+from src.db.incidents import get_all_incidents, sync_flagged_incidents
+
 MOCK_VERBS = [
     "analyzes", "evaluates", "investigates", "explores", "demonstrates",
     "illustrates", "examines", "proposes", "introduces", "presents",
@@ -87,6 +100,7 @@ MOCK_VERBS = [
     "deepens", "strengthens", "fortifies", "secures", "protects",
     "defends", "guards", "shields", "safeguards", "preserves",
 ]
+
 
 MOCK_OBJECTS = [
     "complex systems", "algorithmic efficiency", "data structures",
@@ -556,12 +570,63 @@ def main():
     index_path = os.path.join(seed_dir, "corpus.index")
     save_index(index, index_path)
 
+
+    # Validate generated seed data before reporting success
+    print("Validating generated seed data...")
+
+    expected_documents = 3
+    expected_chunks = 3
+    expected_incidents = 1
+    expected_vectors = 3
+
+    actual_documents = len(get_all_documents())
+    actual_chunks = get_embedding_count()
+
+    # Pass the seed DB path explicitly because incidents.py accepts a db_path
+    # parameter and its function defaults are evaluated at definition time.
+    corpus_db_path = os.path.join(seed_dir, "corpus.db")
+    actual_incidents = len(get_all_incidents(db_path=corpus_db_path))
+
+    # FAISS exposes the number of stored vectors through ntotal.
+    actual_vectors = index.ntotal
+
+    validation_checks = {
+        "documents": (actual_documents, expected_documents),
+        "chunks": (actual_chunks, expected_chunks),
+        "incidents": (actual_incidents, expected_incidents),
+        "FAISS vectors": (actual_vectors, expected_vectors),
+    }
+
+    validation_errors = []
+
+    for name, (actual, expected) in validation_checks.items():
+        if actual != expected:
+            validation_errors.append(
+                f"{name}: expected {expected}, found {actual}"
+            )
+
+    if validation_errors:
+        raise RuntimeError(
+            "Seed data validation failed: " + "; ".join(validation_errors)
+        )
+
+    print(
+        "Seed data validation passed: "
+        f"{actual_documents} documents, "
+        f"{actual_chunks} chunks, "
+        f"{actual_incidents} incident, "
+        f"{actual_vectors} FAISS vectors."
+    )
+
+    print("Seed data successfully generated and stored in tests/dummy_data/!")
+
     logger.info("==========================================================")
     logger.info("Seed data successfully generated and stored in tests/dummy_data/!")
     logger.info(f"Total Documents: {args.documents}")
     logger.info(f"Total Flagged Pairs: {args.pairs}")
     logger.info(f"Dimensionality: {args.dim}")
     logger.info("==========================================================")
+
 
 
 if __name__ == "__main__":
