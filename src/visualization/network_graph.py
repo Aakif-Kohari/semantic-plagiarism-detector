@@ -5,6 +5,8 @@ Generates interactive document plagiarism network graphs using networkx and Plot
 Documents are represented as nodes, and similarities above the threshold are edges.
 """
 
+import csv
+import io
 from typing import Optional
 
 import networkx as nx
@@ -550,5 +552,74 @@ def export_network_to_gexf_bytes(
 
     gexf_str = export_graph_to_gexf(G)
     return gexf_str.encode("utf-8")
+
+
+def export_graph_to_csv(
+    graph: nx.Graph,
+    similarity_df: Optional[pd.DataFrame] = None,
+) -> str:
+    """
+    Serialize NetworkX graph edges into CSV format string.
+
+    CSV format:
+    Source,Target,Similarity
+
+    Args:
+        graph: NetworkX Graph object.
+        similarity_df: Optional square DataFrame with pairwise similarities.
+
+    Returns:
+        CSV string with header Source,Target,Similarity.
+    """
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Source", "Target", "Similarity"])
+
+    name_to_idx = {}
+    if similarity_df is not None and not similarity_df.empty:
+        doc_names = list(similarity_df.columns)
+        name_to_idx = {name: i for i, name in enumerate(doc_names)}
+
+    for u, v, data in graph.edges(data=True):
+        if similarity_df is not None and u in name_to_idx and v in name_to_idx:
+            i = name_to_idx[u]
+            j = name_to_idx[v]
+            score = float(similarity_df.iloc[i, j])
+        elif "similarity" in data:
+            score = float(data["similarity"])
+        else:
+            score = 0.0
+        writer.writerow([u, v, score])
+
+    return output.getvalue()
+
+
+def export_network_to_csv_bytes(
+    similarity_df: pd.DataFrame,
+    threshold: float = 0.59,
+    min_degree: int = 0,
+) -> bytes:
+    """
+    Build a network from the similarity matrix and export as CSV edge list bytes.
+
+    CSV edge list format is supported by Gephi, Cytoscape, and other external graph tools.
+
+    Args:
+        similarity_df: Square N×N DataFrame of similarity scores.
+        threshold: Edge threshold; pairs with similarity >= threshold are connected.
+        min_degree: Minimum degree threshold.
+
+    Returns:
+        CSV edge list as UTF-8 encoded bytes, ready for download.
+    """
+    network_data = build_network_data(
+        similarity_df=similarity_df,
+        threshold=threshold,
+        min_degree=min_degree,
+    )
+    G = network_data["graph"]
+    csv_str = export_graph_to_csv(G, similarity_df=similarity_df)
+    return csv_str.encode("utf-8")
+
 
 
