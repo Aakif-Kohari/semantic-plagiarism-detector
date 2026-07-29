@@ -15,7 +15,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
 # Supported extensions for the plagiarism detection pipeline
-SUPPORTED_EXTENSIONS = (".pdf", ".docx", ".txt")
+SUPPORTED_EXTENSIONS = (".pdf", ".docx", ".doc", ".txt")
 
 
 def extract_folder_id(url_or_id: str) -> Optional[str]:
@@ -120,9 +120,13 @@ def bulk_download_drive_folder(
     downloaded_files_dict = {}
     downloaded_names = []
 
-    for f in files_to_download:
-        file_bytes = download_file_bytes(service, f["id"])
-        downloaded_files_dict[f["name"]] = file_bytes
-        downloaded_names.append(f["name"])
+    for file_record in files_to_download:
+        file_bytes = download_file_bytes(service, file_record["id"])
+        safe_name = unique_filename(
+            file_record["name"],
+            downloaded_files_dict,
+        )
+        downloaded_files_dict[safe_name] = file_bytes
+        downloaded_names.append(safe_name)
 
     return downloaded_files_dict, downloaded_names

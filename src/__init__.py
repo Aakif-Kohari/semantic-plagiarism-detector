@@ -25,10 +25,10 @@ from .core import (
     get_document_embedding,
     load_index,
     save_index,
-    search_similar_chunks,
-    send_plagiarism_alert,
+    sanitize_zero_width_characters,
     translate_text,
 )
+
 from .db import (
     add_chunks,
     add_document,
@@ -36,6 +36,9 @@ from .db import (
     clear_all_data,
     delete_document,
     delete_user,
+    disable_2fa,
+    enable_2fa,
+    get_2fa_status,
     get_all_documents,
     get_all_embeddings,
     get_all_users,
@@ -44,18 +47,27 @@ from .db import (
     get_document_chunks_count,
     get_documents_by_class,
     get_unique_class_sections,
+    get_user_active_status,
     get_user_role,
     init_corpus_db,
     init_db,
+    is_user_active,
+    set_user_active_status,
     update_password,
     verify_user,
 )
 from .visualization import (
+    build_network_data,
+    export_graph_to_csv,
+    export_network_to_csv_bytes,
+    filter_heatmap_by_class_tag,
     plot_chunk_similarity_comparison,
     plot_similarity_heatmap,
     plot_similarity_heatmap_plotly,
     plot_similarity_network,
+    render_network_plotly,
 )
+
 
 __all__ = [
     "extract_text_from_pdf",
@@ -74,10 +86,17 @@ __all__ = [
     "PLAGIARISM_THRESHOLD",
     "plot_similarity_heatmap",
     "plot_similarity_heatmap_plotly",
+    "filter_heatmap_by_class_tag",
     "plot_chunk_similarity_comparison",
+    "build_network_data",
+    "export_graph_to_csv",
+    "export_network_to_csv_bytes",
+    "render_network_plotly",
     "plot_similarity_network",
+
     "translate_text",
     "send_plagiarism_alert",
+    "dispatch_plagiarism_alert",
     "build_index",
     "search_similar_chunks",
     "find_plagiarised_chunks",
@@ -92,6 +111,12 @@ __all__ = [
     "add_user",
     "delete_user",
     "update_password",
+    "get_2fa_status",
+    "enable_2fa",
+    "disable_2fa",
+    "get_user_active_status",
+    "set_user_active_status",
+    "is_user_active",
     "init_corpus_db",
     "add_document",
     "get_document_by_hash",
@@ -104,4 +129,5 @@ __all__ = [
     "get_document_chunks_count",
     "get_unique_class_sections",
     "get_documents_by_class",
+    "sanitize_zero_width_characters",
 ]

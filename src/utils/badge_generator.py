@@ -21,7 +21,8 @@ from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import (Paragraph, SimpleDocTemplate, Spacer, Table,
+                                TableStyle)
 
 
 def generate_badge_png(
@@ -349,5 +350,6 @@ def generate_badge_pdf(
 
     # Build PDF
     doc.build(story)
-    buffer.seek(0)
-    return buffer
+    from src.utils.pdf_report import compress_pdf_buffer
+
+    return compress_pdf_buffer(buffer)

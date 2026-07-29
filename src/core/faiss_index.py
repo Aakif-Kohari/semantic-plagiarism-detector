@@ -12,20 +12,21 @@ Index types available:
   - IndexFlatIP  : Exact inner product (brute-force). O(N) per query.
                    Best for < 10k vectors. No approximation error.
   - IndexIVFFlat : Inverted-file index with Voronoi cells. O(N/nlist × nprobe)
-                   per query — significantly faster at scale.  Requires training.
+                   per query — significantly faster at scale. Requires training.
                    Best for 10k–10M vectors.
 
 Since embeddings are L2-normalised in embedding_model.py,
 inner product == cosine similarity.
 """
 
-import os
-import tempfile
+import logging
 from typing import Dict, List, Optional, Tuple
 
 # FAISS has no official type stubs; suppress Pylance false positives
 import faiss  # type: ignore
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 # ── Threshold for automatic index selection ────────────────────────────────────
 _IVF_THRESHOLD = 5_000  # Switch from flat to IVF when vectors exceed this
@@ -34,12 +35,13 @@ _IVF_THRESHOLD = 5_000  # Switch from flat to IVF when vectors exceed this
 class ChunkRecord:
     """Stores metadata for a single chunk stored in the FAISS index."""
 
-    __slots__ = ("doc_name", "chunk_index", "chunk_text")
+    __slots__ = ("doc_name", "chunk_index", "chunk_text", "metadata")
 
-    def __init__(self, doc_name: str, chunk_index: int, chunk_text: str):
+    def __init__(self, doc_name: str, chunk_index: int, chunk_text: str, metadata: Optional[dict] = None):
         self.doc_name = doc_name
         self.chunk_index = chunk_index
         self.chunk_text = chunk_text
+        self.metadata = metadata or getattr(chunk_text, "metadata", {})
 
     def __repr__(self):
         preview = self.chunk_text[:60].replace("\n", " ")
@@ -103,7 +105,7 @@ def build_index(
         index.train(matrix)  # type: ignore[arg-type]
         index.add(matrix)  # type: ignore[arg-type]
         index.nprobe = nprobe
-        print(
+        logger.info(
             f"[faiss_index] Built IndexIVFFlat  "
             f"({n_vectors} vectors, nlist={nlist}, nprobe={nprobe})"
         )
@@ -111,7 +113,9 @@ def build_index(
         # Flat index — exact search, best for small-to-medium collections
         index = faiss.IndexFlatIP(dim)
         index.add(matrix)  # type: ignore[arg-type]
-        print(f"[faiss_index] Built IndexFlatIP  ({n_vectors} vectors, exact search)")
+        logger.info(
+            f"[faiss_index] Built IndexFlatIP  ({n_vectors} vectors, exact search)"
+        )
 
     return index, registry
 
@@ -146,7 +150,14 @@ def search_similar_chunks(
 
     results = []
     for score, idx in zip(scores[0], indices[0]):
-        if idx < 0 or idx >= len(registry):
+        if idx < 0:
+            continue
+        if idx >= len(registry):
+            logger.warning(
+                f"[faiss_index] search returned out-of-range index {idx} "
+                f"(registry size: {len(registry)}). "
+                "Call compact_index() after removals to restore alignment."
+            )
             continue
         record = registry[idx]
         if exclude_doc and record.doc_name == exclude_doc:
@@ -207,7 +218,9 @@ def find_plagiarised_chunks(
                 matches.append(
                     {
                         "source_doc": doc_name,
-                        "source_chunk_text": chunks[chunk_idx],
+                        "source_chunk_text": (
+                            chunks[chunk_idx] if chunk_idx < len(chunks) else ""
+                        ),
                         "match_doc": record.doc_name,
                         "match_chunk_text": record.chunk_text,
                         "similarity": round(score, 4),
@@ -218,114 +231,148 @@ def find_plagiarised_chunks(
     return matches
 
 
-def save_index(index: faiss.Index, path: str) -> None:
-    """Persist a FAISS index atomically."""
-    destination = os.path.abspath(path)
-    directory = os.path.dirname(destination) or "."
-    os.makedirs(directory, exist_ok=True)
-
-    fd, temporary_path = tempfile.mkstemp(
-        prefix=f".{os.path.basename(destination)}.",
-        suffix=".tmp",
-        dir=directory,
-    )
-    os.close(fd)
-
-    try:
-        faiss.write_index(index, temporary_path)
-        os.replace(temporary_path, destination)
-    finally:
-        if os.path.exists(temporary_path):
-            os.remove(temporary_path)
-
-    print(f"[faiss_index] Index saved to {destination} " f"({index.ntotal} vectors)")
-
-
-def validate_index(
-    index: Optional[faiss.Index],
-    expected_vector_count: int,
-    *,
-    expected_dimension: Optional[int] = None,
-) -> bool:
-    """Return whether a loaded index matches durable corpus data."""
-    if index is None or expected_vector_count < 0:
-        return False
-
-    try:
-        if int(index.ntotal) != int(expected_vector_count):
-            return False
-        if expected_dimension is not None and int(index.d) != int(expected_dimension):
-            return False
-    except (AttributeError, TypeError, ValueError):
-        return False
-
-    return True
-
-
-def rebuild_index_from_database(
-    index_path: str,
+def add_to_index(
+    index: faiss.Index,
+    registry: List[ChunkRecord],
+    embeddings: Dict[str, np.ndarray],
+    chunked_docs: Dict[str, List[str]],
 ) -> Tuple[faiss.Index, List[ChunkRecord]]:
-    """Rebuild and atomically persist a FAISS index from SQLite."""
-    from src.db.corpus_db import get_all_embeddings, get_chunk_registry
+    """
+    Incrementally add new chunk vectors to an existing FAISS index without a full rebuild.
 
-    matrix = get_all_embeddings()
-    registry = get_chunk_registry()
+    Wraps the index with ``IndexIDMap`` on first call if it isn't already, then uses
+    ``add_with_ids()`` to append vectors with sequential IDs starting from the current
+    registry length.
 
-    if matrix.ndim != 2:
-        raise ValueError("Stored embeddings must be two-dimensional.")
-    if matrix.shape[0] != len(registry):
-        raise ValueError(
-            "Corpus embedding count does not match chunk registry count: "
-            f"{matrix.shape[0]} != {len(registry)}"
-        )
+    Args:
+        index:      Existing FAISS index (bare or already IDMap-wrapped).
+        registry:   Existing chunk registry list.
+        embeddings: Dict mapping doc name -> embedding matrix (chunks x dim).
+        chunked_docs: Dict mapping doc name -> list of chunk strings.
 
-    index = build_index_from_matrix(matrix, index_type="auto")
-    save_index(index, index_path)
-    return index, registry
+    Returns:
+        (updated_index, updated_registry) — the index may be wrapped in ``IndexIDMap``
+        if it was bare on entry.
+    """
+    new_vectors: List[np.ndarray] = []
+    new_registry: List[ChunkRecord] = []
 
+    for doc_name, emb in embeddings.items():
+        chunks = chunked_docs.get(doc_name, [])
+        if emb.ndim != 2 or emb.shape[0] == 0:
+            continue
+        for i, (vec, text) in enumerate(zip(emb, chunks)):
+            new_vectors.append(vec.astype("float32"))
+            new_registry.append(ChunkRecord(doc_name, i, text))
 
-def load_or_rebuild_index(
-    index_path: str,
-) -> Tuple[faiss.Index, List[ChunkRecord], bool]:
-    """Load a valid index or recover it from the corpus database."""
-    from src.db.corpus_db import get_all_embeddings, get_chunk_registry
+    if not new_vectors:
+        return index, registry
 
-    matrix = get_all_embeddings()
-    registry = get_chunk_registry()
-    expected_count = int(matrix.shape[0]) if matrix.ndim == 2 else 0
-    expected_dimension = (
-        int(matrix.shape[1]) if matrix.ndim == 2 and matrix.shape[1] > 0 else 384
+    matrix = np.vstack(new_vectors)
+    offset = len(registry)
+    ids = np.arange(offset, offset + len(new_vectors), dtype=np.int64)
+
+    # Wrap bare index with IndexIDMap on first incremental add
+    if not isinstance(index, faiss.IndexIDMap):
+        index = faiss.IndexIDMap(index)
+
+    index.add_with_ids(matrix, ids)
+    logger.info(
+        f"[faiss_index] Incrementally added {len(new_vectors)} vectors "
+        f"(total: {index.ntotal})"
     )
+    return index, registry + new_registry
 
-    if expected_count != len(registry):
+
+def remove_vectors_by_doc(
+    index: faiss.Index,
+    registry: List[ChunkRecord],
+    doc_name: str,
+) -> Tuple[faiss.Index, List[ChunkRecord]]:
+    """
+    Remove all vectors belonging to a given document from the index.
+
+    .. note::
+
+       After removal the ID-to-registry alignment is broken.  Call
+       :func:`compact_index` to restore alignment, or call
+       :func:`load_or_rebuild_index` for a full rebuild.
+
+    Args:
+        index:    FAISS index (should be ``IndexIDMap``).
+        registry: Current chunk registry.
+        doc_name: Document whose vectors should be removed.
+
+    Returns:
+        (index, updated_registry) — the registry is filtered but ID indices may
+        no longer align with its positions.
+    """
+    if not isinstance(index, faiss.IndexIDMap):
+        logger.warning(
+            "[faiss_index] Cannot remove vectors by doc — index is not IDMap-wrapped. "
+            "Call load_or_rebuild_index() instead."
+        )
+        return index, registry
+
+    ids_to_remove = [
+        np.int64(i) for i, rec in enumerate(registry) if rec.doc_name == doc_name
+    ]
+    if not ids_to_remove:
+        return index, registry
+
+    selector = faiss.IDSelectorArray(np.array(ids_to_remove, dtype=np.int64))
+    index.remove_ids(selector)
+    updated_registry = [rec for rec in registry if rec.doc_name != doc_name]
+
+    logger.info(
+        f"[faiss_index] Removed {len(ids_to_remove)} vectors for doc '{doc_name}' "
+        f"(remaining: {index.ntotal})"
+    )
+    return index, updated_registry
+
+
+def compact_index(
+    index: faiss.Index,
+    registry: List[ChunkRecord],
+) -> Tuple[faiss.Index, List[ChunkRecord]]:
+    """
+    Rebuild the index with sequential IDs matching the current registry order.
+
+    Use after :func:`remove_vectors_by_doc` to restore ID-to-registry alignment
+    without loading embeddings from the database.
+
+    The underlying embedding matrix is reconstructed by re-wrapping the remaining
+    vectors from the index itself (for flat indexes) or by loading from the
+    database (for IVF indexes).
+    """
+    from src.db.corpus_db import get_all_embeddings
+
+    matrix = get_all_embeddings()
+    n_matrix = matrix.shape[0] if (matrix is not None and matrix.size > 0) else 0
+    if n_matrix != len(registry):
         raise ValueError(
-            "Corpus embedding count does not match chunk registry count: "
-            f"{expected_count} != {len(registry)}"
+            f"Embedding count ({n_matrix}) does not match registry size ({len(registry)})"
         )
 
-    loaded_index: Optional[faiss.Index] = None
-    if os.path.exists(index_path):
-        try:
-            loaded_index = load_index(index_path)
-        except (OSError, RuntimeError, ValueError):
-            loaded_index = None
+    if n_matrix == 0:
+        dim = 384
+        return faiss.IndexFlatIP(dim), registry
 
-    if validate_index(
-        loaded_index,
-        expected_count,
-        expected_dimension=expected_dimension,
-    ):
-        return loaded_index, registry, False  # type: ignore[return-value]
+    nprobe = getattr(index, "nprobe", 10)
+    new_index = build_index_from_matrix(matrix, nprobe=nprobe)
+    return new_index, registry
 
-    rebuilt = build_index_from_matrix(matrix, index_type="auto")
-    save_index(rebuilt, index_path)
-    return rebuilt, registry, True
+
+def save_index(index: faiss.Index, path: str) -> None:
+    """Persist a FAISS index to disk."""
+    faiss.write_index(index, path)
+    logger.info(f"[faiss_index] Index saved → {path}  ({index.ntotal} vectors)")
 
 
 def load_index(path: str) -> faiss.Index:
     """Load a FAISS index from disk."""
     index = faiss.read_index(path)
-    print(f"[faiss_index] Index loaded from {path}  ({index.ntotal} vectors)")
+    logger.info(f"[faiss_index] Index loaded ← {path}  ({index.ntotal} vectors)")
     return index
 
 
@@ -334,13 +381,21 @@ def build_index_from_matrix(
     index_type: str = "auto",
     nlist: Optional[int] = None,
     nprobe: int = 10,
+    *,
+    use_id_map: bool = True,
 ) -> faiss.Index:
-    """Build a FAISS index from a pre-computed 2D numpy matrix of embeddings."""
+    """Build a FAISS index from a pre-computed 2D numpy matrix of embeddings.
+
+    When *use_id_map* is True (default) the index is wrapped with ``IndexIDMap``
+    so that ``add_to_index()`` and ``remove_vectors_by_doc()`` can be used later
+    without a full rebuild.
+    """
     dim = 384
     if matrix.size == 0 or matrix.shape[0] == 0:
         return faiss.IndexFlatIP(dim)
 
     n_vectors = matrix.shape[0]
+    mat = matrix.astype("float32")
 
     # Resolve index type
     if index_type == "auto":
@@ -352,12 +407,73 @@ def build_index_from_matrix(
         nlist = min(nlist, n_vectors)
 
         quantizer = faiss.IndexFlatIP(dim)
-        index = faiss.IndexIVFFlat(quantizer, dim, nlist, faiss.METRIC_INNER_PRODUCT)
-        index.train(matrix.astype("float32"))
-        index.add(matrix.astype("float32"))
-        index.nprobe = nprobe
+        base = faiss.IndexIVFFlat(quantizer, dim, nlist, faiss.METRIC_INNER_PRODUCT)
+        base.train(mat)
+
+        if use_id_map:
+            ids = np.arange(n_vectors, dtype=np.int64)
+            index = faiss.IndexIDMap(base)
+            index.add_with_ids(mat, ids)
+            base.nprobe = nprobe
+        else:
+            base.add(mat)
+            base.nprobe = nprobe
+            index = base
     else:
-        index = faiss.IndexFlatIP(dim)
-        index.add(matrix.astype("float32"))
+        base = faiss.IndexFlatIP(dim)
+        if use_id_map:
+            ids = np.arange(n_vectors, dtype=np.int64)
+            index = faiss.IndexIDMap(base)
+            index.add_with_ids(mat, ids)
+        else:
+            base.add(mat)
+            index = base
 
     return index
+
+
+def validate_index(
+    index: Optional[faiss.Index], expected_count: int, expected_dimension: int = 384
+) -> bool:
+    """Check whether a loaded index matches the expected vector count and dimension."""
+    if index is None:
+        return False
+    try:
+        return bool(index.ntotal == expected_count and index.d == expected_dimension)
+    except Exception:
+        return False
+
+
+def load_or_rebuild_index(filepath: str) -> Tuple[faiss.Index, List[ChunkRecord], bool]:
+    """
+    Load a FAISS index from disk if valid, otherwise rebuild it from corpus.db.
+    Returns (index, registry, recovered_flag).
+    """
+    import os
+
+    from src.db.corpus_db import get_all_embeddings, get_chunk_registry
+
+    matrix = get_all_embeddings()
+    registry = get_chunk_registry()
+
+    n_matrix = matrix.shape[0] if (matrix is not None and matrix.size > 0) else 0
+    n_registry = len(registry)
+
+    if n_matrix != n_registry:
+        from src.errors import FAISS_EMB_REGISTRY_MISMATCH
+
+        raise ValueError(
+            FAISS_EMB_REGISTRY_MISMATCH.format(emb_count=n_matrix, reg_count=n_registry)
+        )
+
+    if os.path.exists(filepath):
+        try:
+            index = load_index(filepath)
+            if validate_index(index, n_matrix, 384):
+                return index, registry, False
+        except Exception:
+            pass
+
+    index = build_index_from_matrix(matrix)
+    save_index(index, filepath)
+    return index, registry, True

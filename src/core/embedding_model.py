@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 embedding_model.py
 ------------------
@@ -10,11 +12,14 @@ Model: paraphrase-multilingual-MiniLM-L12-v2
   - MIT licensed; safe for academic use
 """
 
+import logging
 import os
 from typing import List
 
 import numpy as np
 from sentence_transformers import SentenceTransformer
+
+logger = logging.getLogger(__name__)
 
 # ── Singleton model loader ─────────────────────────────────────────────────────
 # We load the model once and reuse it across calls to avoid repeated I/O.
@@ -40,9 +45,9 @@ def _get_model() -> SentenceTransformer:
     global _model
     if _model is None:
         model_name = _get_model_name()
-        print(f"[embedding_model] Loading model: {model_name} …")
+        logger.info(f"[embedding_model] Loading model: {model_name} …")
         _model = SentenceTransformer(model_name)
-        print("[embedding_model] Model loaded successfully.")
+        logger.info("[embedding_model] Model loaded successfully.")
     return _model
 
 
@@ -95,7 +100,9 @@ def embed_documents(chunked_docs: dict, batch_size: int = 64) -> dict:
 
     for doc_name, chunks in chunked_docs.items():
         if not chunks:
-            print(f"[embedding_model] Warning: '{doc_name}' has no chunks. Skipping.")
+            logger.warning(
+                f"[embedding_model] Warning: '{doc_name}' has no chunks. Skipping."
+            )
             continue
         all_chunks.extend(chunks)
         doc_chunk_counts.append(len(chunks))
