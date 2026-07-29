@@ -1,6 +1,5 @@
 """Tests for app/theme.py theming and styling utilities."""
 
-import pytest
 from app.theme import (
     THEMES,
     COLORS,

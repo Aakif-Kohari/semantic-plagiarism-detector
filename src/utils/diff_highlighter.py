@@ -1,4 +1,5 @@
 """Diff highlighting utility for exact matches between text chunks."""
+from __future__ import annotations
 
 import difflib
 import re

@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 app/theme.py
 ------------
@@ -11,10 +12,7 @@ Provides:
 """
 
 from app.css_constants import (
-    HERO_KICKER,
     BADGE,
-    META_CHIP,
-    META_CHIP_CODE,
     EMPTY_STATE,
     EMPTY_ICON,
     EMPTY_TITLE,
@@ -26,38 +24,9 @@ from app.css_constants import (
     PIPELINE_STEP_ACTIVE,
     PIPELINE_STEP_DONE,
     PIPELINE_ARROW,
-    MONO_TEXT,
     SIM_PILL,
-    LOGIN_CONTAINER,
-    LOGIN_HEADER,
-    LOGIN_ICON,
-    LOGIN_TITLE,
-    LOGIN_SUBTITLE,
-    LOGIN_ACCENT_BAR,
-    APP_FOOTER,
-    LEGEND_CONTAINER,
-    LEGEND_ITEM,
-    LEGEND_COLOR,
-    ST_TEXT_INPUT,
-    ST_TEXT_AREA,
-    ST_NUMBER_INPUT,
-    ST_BUTTON,
-    ST_DOWNLOAD_BUTTON,
-    ST_FORM_SUBMIT_BUTTON,
-    ST_EXPANDER,
-    ST_FORM,
-    ST_DATAFRAME,
-    ST_TABLE,
-    ST_FILE_UPLOADER_DROPZONE,
-    ST_CAPTION_CONTAINER,
-    ST_CAPTION,
-    ST_TABS,
-    ST_TABS_BUTTON,
-    ST_TABS_BUTTON_ACTIVE,
-    WARNING_CARD_HIGH,
-    WARNING_CARD_MEDIUM,
-    WARNING_CARD_LOW,
 )
+import base64
 import re
 import streamlit as st
 
@@ -1054,13 +1023,6 @@ def pipeline_progress_html(
 
     for i, step in enumerate(steps):
         if active_index < 0:
-            cls = PIPELINE_STEP
-        elif i < active_index:
-            cls = PIPELINE_STEP_DONE
-        elif i == active_index:
-            cls = PIPELINE_STEP_ACTIVE
-        else:
-            cls = PIPELINE_STEP
             cls = CLASS_PIPELINE_STEP
         elif i < active_index:
             cls = f"{CLASS_PIPELINE_STEP} {CLASS_PIPELINE_DONE}"
@@ -1073,9 +1035,6 @@ def pipeline_progress_html(
         parts.append(f'<span class="{cls}">{prefix}{step}</span>')
 
         if i < len(steps) - 1:
-            parts.append(f'<span class="{PIPELINE_ARROW}">→</span>')
-
-    return f'<div class="{PIPELINE_STEPS}">{"".join(parts)}</div>'
             parts.append(f'<span class="{CLASS_PIPELINE_ARROW}">→</span>')
 
     progress = f'<div class="{CLASS_PIPELINE_STEPS}">{"".join(parts)}</div>'
