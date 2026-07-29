@@ -15,8 +15,6 @@ Recent Additions (Issue #465):
 from __future__ import annotations
 
 import logging
-import os
-import shutil
 import sqlite3
 import stat
 import tempfile

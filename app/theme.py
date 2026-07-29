@@ -429,15 +429,15 @@ def inject_css() -> None:
     css = base_css + file_uploader_css
 
     if st.session_state.get("privacy_mode", False):
-        css += f"""
+        css += """
         /* Privacy Mode: Blur student name labels */
-        [class*="st-key-student_"] {{
+        [class*="st-key-student_"] {
             filter: blur(4px) !important;
             transition: filter 0.3s ease;
-        }}
-        [class*="st-key-student_"]:hover {{
+        }
+        [class*="st-key-student_"]:hover {
             filter: none !important;
-        }}
+        }
         """
 
     st.markdown(css, unsafe_allow_html=True)
@@ -453,8 +453,10 @@ except ImportError:
     DEFAULT_THRESHOLDS = DefaultThresholds()
     def normalize_severity_label(label: str) -> str: return label.lower()
     def severity_key(score: float) -> str:
-        if score >= 0.90: return "high"
-        if score >= 0.59: return "medium"
+        if score >= 0.90:
+            return "high"
+        if score >= 0.59:
+            return "medium"
         return "low"
 
 

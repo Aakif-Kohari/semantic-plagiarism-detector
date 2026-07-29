@@ -30,14 +30,7 @@ from reportlab.platypus import (
     TableStyle,
     PageBreak,
 )
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
-from reportlab.lib import colors
-from reportlab.lib.utils import ImageReader
-from io import BytesIO
-from typing import List, Optional, Tuple, Dict
-from datetime import datetime
-from src.utils.text_stats import compute_text_stats, format_stats_for_pdf
+from src.utils.text_stats import compute_text_stats
 
 
 def get_similarity_color(score: float) -> HexColor:
@@ -398,7 +391,6 @@ def generate_plagiarism_report(
         ]
         
         # Calculate column widths - give more space to document names
-        total_width = 6 * inch
         col_widths = [1.5 * inch, 2.25 * inch, 2.25 * inch]
         
         stats_table = Table(stats_data, colWidths=col_widths, hAlign=TA_LEFT)

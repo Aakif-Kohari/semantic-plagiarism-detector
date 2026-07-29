@@ -30,13 +30,10 @@ Poll for status::
 
 from __future__ import annotations
 
-import io
-import json
 import logging
 import os
-import pickle
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from redis import Redis
 from rq import Queue
@@ -151,7 +148,7 @@ def _run_upload_job(
             "elapsed_seconds": round(elapsed, 2),
         }
 
-    except Exception as exc:
+    except Exception:
         logger.exception("Background job failed")
         raise
 
