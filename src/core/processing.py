@@ -23,8 +23,6 @@ from src.core.faiss_index import build_index, ChunkRecord
 from src.core.similarity import document_similarity_matrix, flag_plagiarism
 from src.core.text_chunking import chunk_documents
 from src.core.ai_detector import detect_documents_ai_probability
-from src.utils.processing_time import uploaded_files_total_bytes
-from src.db.incidents import sync_flagged_incidents
 
 logger = logging.getLogger(__name__)
 
