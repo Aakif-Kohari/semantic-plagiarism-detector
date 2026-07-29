@@ -20,6 +20,7 @@ if str(ROOT_DIR) not in sys.path:
 
 import base64
 import html
+import json
 
 # Standard / Third-party imports
 import time
@@ -3140,6 +3141,61 @@ if not st.session_state.authenticated:
                     step=25,
                     key="ocr_dpi_slider",
                 )
+
+            st.markdown("### 💾 Backup")
+            from src.db.database_backup import (
+                create_corpus_database_snapshot,
+                create_password_protected_backup,
+            )
+
+            backup_password = st.text_input(
+                "🔑 Backup Password (optional)",
+                type="password",
+                help="If set, the backup file will be AES-256-encrypted.",
+                key="backup_password_input",
+            )
+            snapshot = create_corpus_database_snapshot()
+            if backup_password:
+                backup_data = create_password_protected_backup(
+                    snapshot, backup_password,
+                )
+                st.download_button(
+                    label="⬇️ Download raw Database",
+                    data=backup_data,
+                    file_name="corpus_backup.zip",
+                    mime="application/zip",
+                    key="download_raw_corpus_database",
+                )
+            else:
+                st.download_button(
+                    label="⬇️ Download raw Database",
+                    data=snapshot,
+                    file_name="corpus.db",
+                    mime="application/vnd.sqlite3",
+                    key="download_raw_corpus_database",
+                )
+
+            st.download_button(
+                label="📥 Backup Configuration (JSON)",
+                data=json.dumps(
+                    {
+                        "theme": st.session_state.get("theme", "Light"),
+                        "threshold": st.session_state.get("threshold_slider", 0.75),
+                        "class_filter": st.session_state.get("class_filter_selectbox", ""),
+                        "use_chunk_matrix": st.session_state.get("chunk_matrix_checkbox", False),
+                        "faiss_top_k": st.session_state.get("faiss_top_k_slider", 5),
+                        "ignore_phrases": st.session_state.get("ignore_phrases_textarea", ""),
+                        "chunk_size": st.session_state.get("chunk_size_slider", 500),
+                        "chunk_overlap": st.session_state.get("chunk_overlap_slider", 50),
+                        "ocr_language": st.session_state.get("ocr_language_selector", "eng"),
+                        "ocr_dpi": st.session_state.get("ocr_dpi_slider", 250),
+                    },
+                    indent=2,
+                ),
+                file_name="plagiarism_config_backup.json",
+                mime="application/json",
+                key="backup_config_button",
+            )
 
             st.markdown("")
             if st.button(

@@ -647,8 +647,3 @@ def version_check_widget_html(local_version: str, latest_tag: str, repo_url: str
     </span>
 </div>
 """
-    <div style="background-color: {warning_soft}; border-left: 4px solid {warning_color}; padding: 1rem; border-radius: 4px; color: {ink};">
-        <strong>🔔 Update available:</strong> v{local_version} → <strong>{latest_tag}</strong>. 
-        <a href="{repo_url}" target="_blank" style="color: {warning_color}; font-weight: 600; margin-left: 0.5rem;">View release →</ a>
-    </div>
-    """

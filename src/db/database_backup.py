@@ -10,18 +10,25 @@ to prevent disk space exhaustion.
 Recent Additions (Issue #465):
 - Added `cleanup_old_backups` function to enforce retention policies 
   (max backups count and max age in days).
+
+Recent Additions (Issue #468):
+- Added `create_password_protected_backup` function to wrap a snapshot
+  in an optionally AES-256-encrypted ZIP archive.
 """
 
 from __future__ import annotations
 
+import io
 import logging
+import os
 import sqlite3
 import stat
 import tempfile
 import time
+import zipfile
 from contextlib import closing
 from pathlib import Path
-from typing import Dict, Union
+from typing import Dict, Optional, Union
 
 from src.db.corpus_db import get_corpus_db_path
 
@@ -94,6 +101,45 @@ def create_sqlite_snapshot(database_path: str | Path) -> bytes:
 def create_corpus_database_snapshot() -> bytes:
     """Return a downloadable snapshot of the configured corpus DB."""
     return create_sqlite_snapshot(get_corpus_db_path())
+
+
+def create_password_protected_backup(
+    snapshot_bytes: bytes,
+    password: Optional[str] = None,
+    *,
+    archive_name: str = "corpus.db",
+) -> bytes:
+    """Wrap snapshot bytes in a ZIP archive, optionally AES-256-encrypted.
+
+    When *password* is provided the archive uses AES-256 encryption via
+    ``pyzipper``.  Without a password a standard (unencrypted) ZIP is
+    created with ``zipfile``.
+
+    Args:
+        snapshot_bytes: Raw bytes of the SQLite snapshot.
+        password: Optional encryption password.  ``None`` or empty string
+            produces an unencrypted ZIP.
+        archive_name: Filename used for the entry inside the ZIP.
+
+    Returns:
+        The complete ZIP archive as raw bytes.
+    """
+    buf = io.BytesIO()
+    if password:
+        import pyzipper
+
+        with pyzipper.AESZipFile(
+            buf,
+            "w",
+            compression=pyzipper.ZIP_DEFLATED,
+            encryption=pyzipper.WZ_AES,
+        ) as zf:
+            zf.setpassword(password.encode("utf-8"))
+            zf.writestr(archive_name, snapshot_bytes)
+    else:
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr(archive_name, snapshot_bytes)
+    return buf.getvalue()
 
 
 def _resolve_authorized_backup(
