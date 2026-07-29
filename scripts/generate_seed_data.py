@@ -48,6 +48,57 @@ root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 seed_dir = os.path.join(root_dir, "tests", "dummy_data")
 os.makedirs(seed_dir, exist_ok=True)
 
+
+
+# ---------------------------------------------------------------------------
+# Seed data configuration
+# ---------------------------------------------------------------------------
+
+# Generated files
+SEED_DB_FILES = ("users.db", "corpus.db", "corpus.index")
+USERS_DB_FILENAME = "users.db"
+CORPUS_DB_FILENAME = "corpus.db"
+FAISS_INDEX_FILENAME = "corpus.index"
+
+# Seed user
+TEACHER_USERNAME = "teacher"
+TEACHER_PASSWORD = "teacher123"
+TEACHER_ROLE = "teacher"
+
+# Shared document metadata
+CLASS_SECTION = "CS-101"
+ASSIGNMENT_TITLE = "Final Essay"
+
+# Seed document filenames
+ALICE_FILENAME = "Introduction_to_AI.pdf"
+BOB_FILENAME = "AI_Concepts_Homework.pdf"
+CHARLIE_FILENAME = "Introduction_to_Blockchain.pdf"
+
+# Seed student names
+ALICE_STUDENT_NAME = "Alice Smith"
+BOB_STUDENT_NAME = "Bob Jones"
+CHARLIE_STUDENT_NAME = "Charlie Brown"
+
+# Mock embedding configuration
+EMBEDDING_DIM = 384
+RANDOM_SEED = 42
+ALICE_BOB_SIMILARITY = 0.95
+ALICE_CHARLIE_SIMILARITY = 0.15
+
+# Incident configuration
+INCIDENT_SEVERITY = "High"
+
+
+# Patch the DB paths to point to the tests/dummy_data/ folder directly!
+# This avoids file locks and permission errors when moving files on Windows.
+import src.db.auth
+import src.db.corpus_db
+import src.db.incidents
+
+src.db.auth._DB_PATH = os.path.join(seed_dir, USERS_DB_FILENAME)
+src.db.corpus_db._DB_PATH = os.path.join(seed_dir, CORPUS_DB_FILENAME)
+src.db.incidents.DEFAULT_DB_PATH = os.path.join(seed_dir, CORPUS_DB_FILENAME)
+
 # Explicit seed database paths
 auth_db_path = os.path.join(seed_dir, "users.db")
 corpus_db_path = os.path.join(seed_dir, "corpus.db")
@@ -76,6 +127,7 @@ MOCK_SUBJECTS = [
 ]
 
 
+
 from src.core.faiss_index import build_index_from_matrix, save_index
 from src.db.auth import add_user
 from src.db.auth import init_db as init_auth_db
@@ -100,6 +152,27 @@ MOCK_VERBS = [
     "deepens", "strengthens", "fortifies", "secures", "protects",
     "defends", "guards", "shields", "safeguards", "preserves",
 ]
+
+
+def main():
+    print("Cleaning existing local databases...")
+    for filename in SEED_DB_FILES:
+        path = os.path.join(seed_dir, filename)
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+                print(f"Removed old seed {filename}")
+            except Exception as err:
+                print(f"Warning: Could not remove old seed {filename} ({err})")
+
+    print("Initializing databases...")
+
+    # Initialize Auth DB (Creates users.db and seeds admin/admin123)
+    init_auth_db()
+
+    # Add a teacher user
+    add_user(TEACHER_USERNAME, TEACHER_PASSWORD, TEACHER_ROLE)
+    print("Auth DB initialized and seeded.")
 
 
 MOCK_OBJECTS = [
@@ -333,6 +406,7 @@ def initialize_databases(verbose: bool):
         logger.info("Initializing Auth DB...")
     init_auth_db()
 
+
     add_user("teacher", "teacher123", "teacher")
     
     if verbose:
@@ -364,51 +438,62 @@ def initialize_databases(verbose: bool):
     hash_charlie = hashlib.sha256(text_charlie.encode()).hexdigest()
 
     print("Adding dummy documents...")
+
     add_document(
-        filename="Introduction_to_AI.pdf",
+        filename=ALICE_FILENAME,
         file_hash=hash_alice,
-        class_section="CS-101",
-        student_name="Alice Smith",
-        assignment_title="Final Essay",
-    )
-    add_document(
-        filename="AI_Concepts_Homework.pdf",
-        file_hash=hash_bob,
-        class_section="CS-101",
-        student_name="Bob Jones",
-        assignment_title="Final Essay",
-    )
-    add_document(
-        filename="Introduction_to_Blockchain.pdf",
-        file_hash=hash_charlie,
-        class_section="CS-101",
-        student_name="Charlie Brown",
-        assignment_title="Final Essay",
+        class_section=CLASS_SECTION,
+        student_name=ALICE_STUDENT_NAME,
+        assignment_title=ASSIGNMENT_TITLE,
     )
 
-    # Generate mock embeddings (384-dimensional) with exact similarities
+    add_document(
+        filename=BOB_FILENAME,
+        file_hash=hash_bob,
+        class_section=CLASS_SECTION,
+        student_name=BOB_STUDENT_NAME,
+        assignment_title=ASSIGNMENT_TITLE,
+    )
+
+    add_document(
+        filename=CHARLIE_FILENAME,
+        file_hash=hash_charlie,
+        class_section=CLASS_SECTION,
+        student_name=CHARLIE_STUDENT_NAME,
+        assignment_title=ASSIGNMENT_TITLE,
+    )
+
+    # Generate mock embeddings with deterministic similarities
     print("Generating mock embeddings with mathematical similarities...")
-    dim = 384
-    np.random.seed(42)  # For deterministic seed generation
+    np.random.seed(RANDOM_SEED)
 
     # Alice vector (random normalized unit vector)
-    va = np.random.randn(dim)
+    va = np.random.randn(EMBEDDING_DIM)
     va /= np.linalg.norm(va)
 
-    # Bob vector (similarity with Alice = 0.95)
-    noise_b = np.random.randn(dim)
+    # Bob vector
+    noise_b = np.random.randn(EMBEDDING_DIM)
     noise_b -= np.dot(noise_b, va) * va
     noise_b /= np.linalg.norm(noise_b)
-    vb = 0.95 * va + np.sqrt(1 - 0.95**2) * noise_b
+
+    vb = (
+        ALICE_BOB_SIMILARITY * va
+        + np.sqrt(1 - ALICE_BOB_SIMILARITY**2) * noise_b
+    )
     vb /= np.linalg.norm(vb)
 
-    # Charlie vector (similarity with Alice = 0.15)
-    noise_c = np.random.randn(dim)
+    # Charlie vector
+    noise_c = np.random.randn(EMBEDDING_DIM)
     noise_c -= np.dot(noise_c, va) * va
     noise_c -= np.dot(noise_c, vb) * vb
     noise_c /= np.linalg.norm(noise_c)
-    vc = 0.15 * va + np.sqrt(1 - 0.15**2) * noise_c
+
+    vc = (
+        ALICE_CHARLIE_SIMILARITY * va
+        + np.sqrt(1 - ALICE_CHARLIE_SIMILARITY**2) * noise_c
+    )
     vc /= np.linalg.norm(vc)
+
 
     # Validate generated cosine similarities before persisting embeddings.
     # Since the vectors are normalized, their dot product equals cosine similarity.
@@ -449,15 +534,25 @@ def initialize_databases(verbose: bool):
         f"Alice/Charlie={alice_charlie_similarity:.6f}"
     )
 
-    # Format chunks: (vector_id, filename, chunk_index, chunk_text, embedding)
+
     chunks = [
-        (0, "Introduction_to_AI.pdf", 0, text_alice, va),
-        (1, "AI_Concepts_Homework.pdf", 0, text_bob, vb),
-        (2, "Introduction_to_Blockchain.pdf", 0, text_charlie, vc),
+        (0, ALICE_FILENAME, 0, text_alice, va),
+        (1, BOB_FILENAME, 0, text_bob, vb),
+        (2, CHARLIE_FILENAME, 0, text_charlie, vc),
     ]
 
     print("Inserting chunks...")
     add_chunks(chunks)
+
+
+    # Sync plagiarism incidents
+    print("Syncing plagiarism incidents...")
+    flags = [
+        {
+            "doc_a": BOB_FILENAME,
+            "doc_b": ALICE_FILENAME,
+            "similarity": ALICE_BOB_SIMILARITY,
+            "severity": INCIDENT_SEVERITY,
 
 
 
@@ -506,6 +601,7 @@ def main():
             "hash": file_hash,
             "student": student,
             "class": cls
+
         }
         documents_data.append(doc_info)
         
@@ -566,8 +662,13 @@ def main():
     logger.info("Building and saving FAISS index...")
     matrix = np.vstack(vectors)
     index = build_index_from_matrix(matrix)
+
+
+    index_path = os.path.join(seed_dir, FAISS_INDEX_FILENAME)
+
     
     index_path = os.path.join(seed_dir, "corpus.index")
+
     save_index(index, index_path)
 
 
