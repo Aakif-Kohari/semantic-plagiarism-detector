@@ -135,7 +135,8 @@ def test_inject_css_generates_css_without_errors():
 
     assert isinstance(css, str)
     assert len(css.strip()) > 0
-    assert "<style>" in css
+    assert "block-container" in css
+    assert "stAlert" in css
 
 
 
@@ -353,7 +354,8 @@ def test_inject_css_generates_css_without_errors():
 
     assert isinstance(css, str)
     assert len(css.strip()) > 0
-    assert "<style>" in css
+    assert "block-container" in css
+    assert "stAlert" in css
 
 
 
