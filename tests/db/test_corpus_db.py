@@ -1,19 +1,12 @@
 import numpy as np
 import pytest
 
-from src.db.corpus_db import (
-    add_chunks,
-    add_document,
-    clear_all_data,
-    delete_document,
-    get_all_documents,
-    get_all_embeddings,
-    get_chunk_registry,
-    get_document_by_hash,
-    get_document_chunks_count,
-    get_documents_by_class,
-    get_unique_class_sections,
-)
+from src.db.corpus_db import (add_chunks, add_document, clear_all_data,
+                              delete_document, get_all_documents,
+                              get_all_embeddings, get_chunk_registry,
+                              get_document_by_hash, get_document_chunks_count,
+                              get_documents_by_class,
+                              get_unique_class_sections)
 
 
 @pytest.fixture(autouse=True)
@@ -116,17 +109,21 @@ def test_document_metadata_fields():
         class_section="Class B",
         student_name="Alice Smith",
         assignment_title="Homework 1",
+        detected_language="en",
     )
     assert res is True
 
     # Retrieve and check fields
+    from src.db.schemas import Document
     docs = get_all_documents()
     assert len(docs) == 1
     doc = docs[0]
+    assert isinstance(doc, Document)
     assert doc["filename"] == "metadata_test.pdf"
     assert doc["class_section"] == "Class B"
     assert doc["student_name"] == "Alice Smith"
     assert doc["assignment_title"] == "Homework 1"
+    assert doc["detected_language"] == "en"
 
 
 def test_class_queries():
@@ -171,8 +168,11 @@ def test_class_queries():
     assert len(class_b_docs) == 1
 
 
-def test_clear_all_data_clears_incidents():
+def test_clear_all_data_clears_incidents(mock_db):
     from src.db.incidents import get_all_incidents, sync_flagged_incidents
+    from pathlib import Path
+
+    db_path = Path(mock_db)
 
     # 1. Add mock documents
     add_document("doc1.pdf", "hash1")
@@ -187,10 +187,10 @@ def test_clear_all_data_clears_incidents():
             "severity": "High",
         }
     ]
-    sync_flagged_incidents(flags)
+    sync_flagged_incidents(flags, db_path=db_path)
 
     # Verify they exist
-    incidents = get_all_incidents()
+    incidents = get_all_incidents(db_path=db_path)
     assert len(incidents) == 1
 
     # 3. Clear all data
@@ -198,4 +198,66 @@ def test_clear_all_data_clears_incidents():
 
     # Verify everything is cleared
     assert len(get_all_documents()) == 0
-    assert len(get_all_incidents()) == 0
+    assert len(get_all_incidents(db_path=db_path)) == 0
+
+
+def test_get_document_word_counts():
+    import numpy as np
+
+    from src.db.corpus_db import (add_chunks, add_document, clear_all_data,
+                                  get_document_word_counts)
+
+    clear_all_data()
+
+    # 1. Add mock documents
+    add_document("doc1.txt", "hash_doc1")
+    add_document("doc2.txt", "hash_doc2")
+
+    # 2. Add chunks with text
+    chunks = [
+        (1, "doc1.txt", 0, "This is the first chunk.", np.zeros(384)),
+        (2, "doc1.txt", 1, "And this is the second chunk of doc1.", np.zeros(384)),
+        (3, "doc2.txt", 0, "Doc2 has only one single chunk.", np.zeros(384)),
+    ]
+    add_chunks(chunks)
+
+    # 3. Retrieve word counts
+    word_counts = get_document_word_counts()
+
+    # "This is the first chunk." -> 5 words
+    # "And this is the second chunk of doc1." -> 8 words
+    # doc1 total = 13 words
+    assert word_counts["doc1.txt"] == 13
+
+    # "Doc2 has only one single chunk." -> 6 words
+    assert word_counts["doc2.txt"] == 6
+
+
+def test_optimize_database_vacuum(mock_db):
+    from src.db.corpus_db import optimize_database
+
+    res = optimize_database()
+    assert "size_before" in res
+    assert "size_after" in res
+    assert "reclaimed_bytes" in res
+    assert "error" in res
+
+    assert res["error"] is None
+    assert res["size_before"] > 0
+    assert res["size_after"] > 0
+    assert res["reclaimed_bytes"] >= 0
+
+
+def test_optimize_database_error_handling():
+    from src.db.corpus_db import optimize_database, configure_db_path, get_corpus_db_path
+
+    original_path = get_corpus_db_path()
+    try:
+        configure_db_path("Z:\\invalid_dir_xyz_123\\corpus.db")
+        res = optimize_database()
+        assert res["error"] is not None
+        assert res["size_before"] == 0
+        assert res["size_after"] == 0
+        assert res["reclaimed_bytes"] == 0
+    finally:
+        configure_db_path(original_path)

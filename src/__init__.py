@@ -19,10 +19,10 @@ from .core import (
     get_document_embedding,
     load_index,
     save_index,
-    search_similar_chunks,
-    send_plagiarism_alert,
+    sanitize_zero_width_characters,
     translate_text,
 )
+
 from .db import (
     add_chunks,
     add_document,
@@ -51,11 +51,17 @@ from .db import (
     verify_user,
 )
 from .visualization import (
+    build_network_data,
+    export_graph_to_csv,
+    export_network_to_csv_bytes,
+    filter_heatmap_by_class_tag,
     plot_chunk_similarity_comparison,
     plot_similarity_heatmap,
     plot_similarity_heatmap_plotly,
     plot_similarity_network,
+    render_network_plotly,
 )
+
 
 __all__ = [
     "extract_text_from_pdf",
@@ -75,9 +81,15 @@ __all__ = [
     "plot_similarity_heatmap",
     "plot_similarity_heatmap_plotly",
     "plot_chunk_similarity_comparison",
+    "build_network_data",
+    "export_graph_to_csv",
+    "export_network_to_csv_bytes",
+    "render_network_plotly",
     "plot_similarity_network",
+
     "translate_text",
     "send_plagiarism_alert",
+    "dispatch_plagiarism_alert",
     "build_index",
     "search_similar_chunks",
     "find_plagiarised_chunks",
@@ -110,4 +122,5 @@ __all__ = [
     "get_document_chunks_count",
     "get_unique_class_sections",
     "get_documents_by_class",
+    "sanitize_zero_width_characters",
 ]
