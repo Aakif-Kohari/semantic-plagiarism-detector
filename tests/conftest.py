@@ -68,7 +68,7 @@ if "torch" not in sys.modules:
 import importlib.util
 
 for mod_name in [
-    "lxml", "defusedxml", "defusedxml.lxml", "fitz", "docx", "redis", "bs4", "faker", "argon2", "argon2.exceptions",
+    "fitz", "redis", "bs4", "faker", "argon2", "argon2.exceptions",
     "pdfplumber", "langdetect", "striprtf", "striprtf.striprtf", "src.core.translator",
     "src.core.webhook",
     "pypdf", "PyPDF2", "reportlab", "reportlab.pdfgen", "reportlab.lib", "reportlab.platypus",

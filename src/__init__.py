@@ -1,15 +1,8 @@
-"""
-src/__init__.py
----------------
-Package initialization for the Semantic Plagiarism Detector core utilities, database handlers, and visualization routines.
-"""
-
 from .core import (
     PLAGIARISM_THRESHOLD,
     ChunkRecord,
     build_index,
     build_index_from_matrix,
-    calculate_paragraph_similarity_breakdown,
     chunk_document,
     chunk_documents,
     chunk_similarity_matrix,
@@ -26,10 +19,11 @@ from .core import (
     get_document_embedding,
     load_index,
     save_index,
-    sanitize_zero_width_characters,
+    search_similar_chunks,
+    send_plagiarism_alert,
+    dispatch_plagiarism_alert,
     translate_text,
 )
-
 from .db import (
     add_chunks,
     add_document,
@@ -57,17 +51,22 @@ from .db import (
     update_password,
     verify_user,
 )
-from .visualization import (
-    build_network_data,
-    export_graph_to_csv,
-    export_network_to_csv_bytes,
-    filter_heatmap_by_class_tag,
-    plot_chunk_similarity_comparison,
-    plot_similarity_heatmap,
-    plot_similarity_heatmap_plotly,
-    plot_similarity_network,
-    render_network_plotly,
-)
+try:
+    from .visualization import (
+        build_network_data,
+        plot_chunk_similarity_comparison,
+        plot_similarity_heatmap,
+        plot_similarity_heatmap_plotly,
+        plot_similarity_network,
+        render_network_plotly,
+    )
+except ImportError:
+    build_network_data = None
+    plot_chunk_similarity_comparison = None
+    plot_similarity_heatmap = None
+    plot_similarity_heatmap_plotly = None
+    plot_similarity_network = None
+    render_network_plotly = None
 
 
 __all__ = [
@@ -84,15 +83,11 @@ __all__ = [
     "chunk_similarity_matrix",
     "flag_plagiarism",
     "find_most_similar_chunks",
-    "calculate_paragraph_similarity_breakdown",
     "PLAGIARISM_THRESHOLD",
     "plot_similarity_heatmap",
     "plot_similarity_heatmap_plotly",
-    "filter_heatmap_by_class_tag",
     "plot_chunk_similarity_comparison",
     "build_network_data",
-    "export_graph_to_csv",
-    "export_network_to_csv_bytes",
     "render_network_plotly",
     "plot_similarity_network",
 
@@ -131,5 +126,4 @@ __all__ = [
     "get_document_chunks_count",
     "get_unique_class_sections",
     "get_documents_by_class",
-    "sanitize_zero_width_characters",
 ]

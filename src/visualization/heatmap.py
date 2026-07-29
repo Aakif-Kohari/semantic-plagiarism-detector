@@ -3,23 +3,29 @@ heatmap.py
 ----------
 Generates similarity heatmaps for Semantic Plagiarism Detector.
 
-This module provides high-quality, customizable heatmap visualizations for
-document similarity matrices. It bridges the gap between backend scoring
-and frontend rendering, offering both static (Matplotlib/Seaborn) and
-interactive (Plotly) options.
+This module provides high-quality, customizable heatmap visualizations for 
+document similarity matrices. It bridges the gap between backend scoring 
+and frontend rendering, offering both static (Matplotlib/Seaborn) and 
+interactive (Plotly) options. 
 
-Recent additions (Issue #628):
-- Added `log_scale` parameter to `plot_similarity_heatmap` and `render_heatmap_ui`.
-- Implemented Matplotlib `LogNorm` for better visualization of highly skewed similarity distributions.
+Recent additions (Issue #697):
+- Streamlit UI components (`render_heatmap_ui`) to inject interactive controls.
+- Dynamic colormap selection (Viridis, Plasma, Coolwarm, YlOrRd) accessible to end-users.
+- Enhanced matrix validation and error handling for robust UI behavior.
+- Support for both light and dark modes inherited from the application theme system.
+
+Exports:
+    - plot_similarity_heatmap: Matplotlib/Seaborn (high-res PNG download)
+    - plot_similarity_heatmap_plotly: Plotly (interactive hover values)
+    - plot_chunk_similarity_comparison: Matplotlib chunk-level heatmap
+    - render_heatmap_ui: Streamlit component rendering the heatmap with interactive controls
 """
 
-import re
-import logging
 from contextlib import contextmanager
-from typing import Generator, Optional, Dict
+from typing import Generator, Optional
+import logging
 
 import matplotlib
-import matplotlib.colors as mcolors
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
@@ -29,7 +35,7 @@ import streamlit as st
 from matplotlib.figure import Figure
 from matplotlib.ticker import PercentFormatter
 
-# Enforce non-interactive backend for standard plot generation to prevent thread-safety
+# Enforce non-interactive backend for standard plot generation to prevent thread-safety 
 # issues in web environments like Streamlit.
 matplotlib.use("Agg")
 
@@ -44,13 +50,14 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 # ── Colormap Mappings & Constants ──────────────────────────────────────────────
+# Colormap options/mappings now live in app/theme.py (Issue #633).
+
 try:
     from app.theme import (
         UI_COLORMAP_OPTIONS,
         MATPLOTLIB_CMAP_MAPPING,
         PLOTLY_CMAP_MAPPING,
         DEFAULT_UI_COLORMAP,
-        apply_matplotlib_theme,
     )
 except ImportError:
     # Fallback for standalone testing or isolated environments
@@ -59,117 +66,74 @@ except ImportError:
     PLOTLY_CMAP_MAPPING = {"Viridis": "Viridis"}
     DEFAULT_UI_COLORMAP = "Viridis"
 
-    def apply_matplotlib_theme(theme_colors=None):
-        pass
-
-
-# ── Security & Sanitization ────────────────────────────────────────────────────
-class MatplotlibInjectionError(ValueError):
-    """Raised when a string contains forbidden formatting or injection tokens."""
-    pass
-
-
-class TitleSanitizer:
-    """Sanitizes user-provided titles and labels to prevent injection exploits."""
-    MATHTEXT_PATTERN = re.compile(r"[\$\_\^\{\}]")
-    HTML_TAG_PATTERN = re.compile(r"<[^>]*?>")
-
-    @classmethod
-    def sanitize(cls, text: Optional[str], strict: bool = False) -> str:
-        if not text:
-            return ""
-        clean_text = cls.HTML_TAG_PATTERN.sub("", str(text))
-        if strict and cls.MATHTEXT_PATTERN.search(clean_text):
-            logger.error("Potential Matplotlib text injection detected.")
-            raise MatplotlibInjectionError("Provided string contains unauthorized formatting characters.")
-        clean_text = clean_text.replace("\n", " ").replace("\r", " ")
-        return clean_text.strip()
-
-
 # ── Data Validation Helpers ────────────────────────────────────────────────────
+
 def validate_similarity_matrix(df: pd.DataFrame) -> pd.DataFrame:
-    """Validates and cleans the input similarity matrix before visualization."""
+    """
+    Validates and cleans the input similarity matrix before visualization.
+    
+    Ensures that:
+    1. The matrix is square.
+    2. Values are strictly bounded between 0.0 and 1.0.
+    3. Null values are appropriately filled.
+    
+    Args:
+        df (pd.DataFrame): The raw similarity matrix.
+        
+    Returns:
+        pd.DataFrame: A cleaned, safe-to-plot DataFrame.
+        
+    Raises:
+        ValueError: If the dataframe cannot be coerced into a valid square matrix.
+    """
+    # 1. Check if DataFrame is empty
     if df.empty:
         logger.warning("Empty DataFrame provided to heatmap generator.")
         return df
 
+    # 2. Verify square dimensions
     rows, cols = df.shape
     if rows != cols:
         logger.error(f"Similarity matrix must be square. Received {rows}x{cols}.")
         raise ValueError("Similarity matrix is not square.")
 
+    # 3. Create a safe copy to avoid mutating the original data
     clean_df = df.copy()
+
+    # 4. Handle missing values (NaNs) by assuming 0 similarity for unknown pairs
     if clean_df.isnull().values.any():
         logger.info("NaN values detected in similarity matrix. Filling with 0.0.")
         clean_df.fillna(0.0, inplace=True)
 
+    # 5. Bound constraints (Cosine similarity should be [-1, 1], but in this context 
+    # we represent it as [0, 1]. We clamp values to prevent colormap overflow).
     clean_df = clean_df.clip(lower=0.0, upper=1.0)
+
+    # 6. Ensure the diagonal is exactly 1.0 (self-similarity)
     np.fill_diagonal(clean_df.values, 1.0)
+
     return clean_df
 
 
-def _get_theme_color(theme_colors: Optional[Dict[str, str]], key: str, fallback: str) -> str:
-    """Safely extract color from theme dictionary with fallback."""
-    if theme_colors and key in theme_colors:
-        return theme_colors[key]
-    return fallback
-
-
-def filter_heatmap_by_class_tag(
-    similarity_df: pd.DataFrame,
-    class_tag: Optional[str] = None,
-    doc_class_map: Optional[dict] = None,
-) -> pd.DataFrame:
-    """
-    Filter heatmap matrix rows and columns by matching document class section tags.
-
-    Args:
-        similarity_df (pd.DataFrame): Similarity matrix dataframe.
-        class_tag (str, optional): Class section tag to filter by (e.g., "Class A").
-            If None, empty, or "All Classes", returns the original dataframe.
-        doc_class_map (dict, optional): Mapping of filename -> class_section tag.
-            If None, attempts to load document metadata from corpus database.
-
-    Returns:
-        pd.DataFrame: Sub-matrix containing only rows and columns matching the class tag.
-    """
-    if similarity_df.empty or not class_tag or class_tag == "All Classes":
-        return similarity_df
-
-    if doc_class_map is None:
-        try:
-            from src.db.corpus_db import get_all_documents
-            all_docs = get_all_documents(include_deleted=True)
-            doc_class_map = {}
-            for d in all_docs:
-                fname = d.get("filename") if isinstance(d, dict) else getattr(d, "filename", None)
-                csec = d.get("class_section") if isinstance(d, dict) else getattr(d, "class_section", None)
-                if fname:
-                    doc_class_map[fname] = csec
-        except Exception as e:
-            logger.warning(f"Could not load document class map from database: {e}")
-            doc_class_map = {}
-
-    matching_cols = [
-        col for col in similarity_df.columns
-        if doc_class_map.get(str(col)) == class_tag
-    ]
-
-    if not matching_cols:
-        logger.info(f"No document cells match class tag '{class_tag}'.")
-        return pd.DataFrame()
-
-    return similarity_df.loc[matching_cols, matching_cols]
-
-
 def _get_theme_color(theme_colors: Optional[dict], key: str, fallback: str) -> str:
-    """Safely retrieves a color from a theme dictionary with a fallback."""
+    """
+    Safely retrieves a color from a theme dictionary with a fallback.
+    
+    Args:
+        theme_colors (Optional[dict]): The theme dictionary injected from the app.
+        key (str): The specific color key to lookup (e.g., 'background', 'ink').
+        fallback (str): The hex code to use if the key or dictionary is missing.
+        
+    Returns:
+        str: A valid hex color code.
+    """
     if not theme_colors:
         return fallback
     return theme_colors.get(key, fallback)
 
 
 # ── Static Visualization (Matplotlib/Seaborn) ──────────────────────────────────
+
 @contextmanager
 def matplotlib_figure(*args, **kwargs) -> Generator[tuple, None, None]:
     """Context manager that yields (fig, ax) and guarantees plt.close(fig)."""
@@ -187,89 +151,66 @@ def plot_similarity_heatmap(
     figsize: Optional[tuple] = None,
     annotate: bool = True,
     dpi: int = 150,
-    theme_colors: Optional[Dict[str, str]] = None,
+    theme_colors: Optional[dict] = None,
     colormap_name: str = DEFAULT_UI_COLORMAP,
-    mask_threshold: Optional[float] = None,
-    log_scale: bool = False,  # <-- NEW PARAMETER (Issue #628)
-    class_tag: Optional[str] = None,
-    doc_class_map: Optional[dict] = None,
 ) -> Figure:
     """
     High-resolution Matplotlib heatmap optimized for static PNG export.
-    
+
+    This function generates a highly detailed, publication-ready heatmap. It 
+    highlights potentially plagiarized document pairs by analyzing the intersection
+    of their similarity scores against the defined threshold.
+
     Args:
-        similarity_df: The square similarity matrix to plot.
-        title: The title of the heatmap.
-        threshold: The similarity threshold for flagging plagiarism.
-        figsize: Optional tuple for figure dimensions.
-        annotate: Whether to display numeric values in cells.
-        dpi: Resolution of the output figure.
-        theme_colors: Dictionary of theme colors for styling.
-        colormap_name: Name of the colormap to use.
-        mask_threshold: Optional threshold to mask low-similarity cells.
-        log_scale: If True, applies a logarithmic color scale (Issue #628).
-        
+        similarity_df (pd.DataFrame): Square N×N DataFrame of cosine similarity scores.
+        title (str): Plot title displayed at the top.
+        threshold (float): Scores >= this threshold receive a distinctive red border.
+        figsize (Optional[tuple]): (width, height) in inches; auto-calculated if None.
+        annotate (bool): Whether to explicitly overlay numeric scores on the cells.
+        dpi (int): Resolution for the figure export (default 150 -> high-res).
+        theme_colors (Optional[dict]): Optional dictionary for dark/light mode injection.
+        colormap_name (str): UI string for the desired colormap (e.g., "Viridis").
+
     Returns:
-        A Matplotlib Figure object.
+        Figure: A rendered Matplotlib Figure object.
     """
-    if class_tag and class_tag != "All Classes":
-        similarity_df = filter_heatmap_by_class_tag(
-            similarity_df, class_tag=class_tag, doc_class_map=doc_class_map
-        )
-
-    # Sanitize title input to prevent formatting injection (Issue #704)
-    try:
-        safe_title = TitleSanitizer.sanitize(title)
-    except MatplotlibInjectionError:
-        safe_title = "Semantic Similarity Matrix (Sanitized)"
-
+    # Map the UI friendly name to the specific Matplotlib colormap string
     cmap = MATPLOTLIB_CMAP_MAPPING.get(colormap_name, "viridis")
-
+    
+    # Process and validate the incoming data
     try:
         clean_df = validate_similarity_matrix(similarity_df)
     except ValueError as ve:
         logger.error(f"Validation failed: {ve}")
-        clean_df = similarity_df
-
+        clean_df = similarity_df  # Attempt to proceed anyway or return empty
+        
     n = len(clean_df)
+
+    # 1. Guard clause for empty datasets
     if n == 0:
         with matplotlib_figure() as (fig, ax):
-            ax.set_title(safe_title)
+            ax.set_title(title)
             return fig
 
+    # 2. Dynamic aspect ratio and figure sizing based on document count
     if figsize is None:
         cell_size = max(1.2, 6 / n)
         width = max(6.0, n * cell_size + 2.0)
         height = max(5.0, n * cell_size + 1.5)
         figsize = (width, height)
 
-    mask = None
-    if mask_threshold is not None:
-        mask = similarity_df < mask_threshold
-
-    # Issue #628: Apply LogNorm if log_scale is enabled
-    norm = None
-    if log_scale:
-        # vmin must be > 0 for LogNorm. We use 1e-3 to avoid math domain errors 
-        # while still capturing the full 0.0-1.0 range visually.
-        norm = mcolors.LogNorm(vmin=1e-3, vmax=1.0)
-        logger.info("Applied logarithmic color scaling to heatmap.")
-    apply_matplotlib_theme(theme_colors)
-
     with matplotlib_figure(figsize=figsize, dpi=dpi) as (fig, ax):
         sns.heatmap(
-            clean_df,
+            similarity_df,
             ax=ax,
             annot=annotate,
             fmt=".2f" if annotate else "",
-            cmap=cmap,
-            vmin=0.0 if not log_scale else None,
+            cmap=_CMAP,
+            vmin=0.0,
             vmax=1.0,
-            norm=norm,  # <-- NEW ARGUMENT
             linewidths=0.6,
             linecolor="#cccccc",
             square=True,
-            mask=mask,
             cbar_kws={"label": "Cosine Similarity", "shrink": 0.8, "pad": 0.02},
             annot_kws={"size": max(7, 14 - n), "weight": "bold"},
         )
@@ -287,11 +228,15 @@ def plot_similarity_heatmap(
         else:
             title_color = "black"
 
-        data = clean_df.values
+        data = similarity_df.values
+
+        # Diagonal border (self-similarity)
         for i in range(n):
             ax.add_patch(
                 mpatches.FancyBboxPatch(
-                    (i, i), 1, 1,
+                    (i, i),
+                    1,
+                    1,
                     boxstyle="square,pad=0",
                     linewidth=2,
                     edgecolor="#555555",
@@ -300,12 +245,15 @@ def plot_similarity_heatmap(
                 )
             )
 
+        # Red border on flagged pairs
         for i in range(n):
             for j in range(n):
                 if i != j and data[i, j] >= threshold:
                     ax.add_patch(
                         mpatches.FancyBboxPatch(
-                            (j, i), 1, 1,
+                            (j, i),
+                            1,
+                            1,
                             boxstyle="square,pad=0",
                             linewidth=2.5,
                             edgecolor="#d62728",
@@ -314,13 +262,13 @@ def plot_similarity_heatmap(
                         )
                     )
 
-        ax.set_title(safe_title, fontsize=15, fontweight="bold", pad=16, color=title_color)
+        ax.set_title(title, fontsize=15, fontweight="bold", pad=16, color=title_color)
         ax.set_xlabel("Documents", fontsize=11, labelpad=10)
         ax.set_ylabel("Documents", fontsize=11, labelpad=10)
-
-        safe_labels = [TitleSanitizer.sanitize(str(lbl)) for lbl in clean_df.columns]
-        ax.set_xticklabels(safe_labels, rotation=30, ha="right", fontsize=max(8, 11 - n // 3))
-        ax.set_yticklabels(safe_labels, rotation=0, fontsize=max(8, 11 - n // 3))
+        ax.set_xticklabels(
+            ax.get_xticklabels(), rotation=30, ha="right", fontsize=max(8, 11 - n // 3)
+        )
+        ax.set_yticklabels(ax.get_yticklabels(), rotation=0, fontsize=max(8, 11 - n // 3))
 
         red_patch = mpatches.Patch(
             edgecolor="#d62728",
@@ -335,7 +283,6 @@ def plot_similarity_heatmap(
             frameon=True,
             fontsize=9,
         )
-        
         if theme_colors:
             legend = ax.get_legend()
             if legend:
@@ -349,61 +296,54 @@ def plot_similarity_heatmap(
 
 
 # ── Interactive Visualization (Plotly) ─────────────────────────────────────────
+
 def plot_similarity_heatmap_plotly(
     similarity_df: pd.DataFrame,
     title: str = "Semantic Similarity Matrix",
     threshold: float = PLAGIARISM_THRESHOLD,
-    theme_colors: Optional[Dict[str, str]] = None,
+    theme_colors: Optional[dict] = None,
     colormap_name: str = DEFAULT_UI_COLORMAP,
-    annotate: bool = True,
-    mask_threshold: Optional[float] = None,
-    log_scale: bool = False,  # <-- NEW PARAMETER
-    class_tag: Optional[str] = None,
-    doc_class_map: Optional[dict] = None,
 ):
     """
     Interactive Plotly heatmap featuring dynamic hover values and custom threshold bounds.
-    Note: Plotly does not natively support LogNorm on colorscales easily without 
-    transforming the Z data. For consistency, log_scale primarily affects Matplotlib, 
-    but we pass it here for API symmetry.
+
+    This function utilizes plotly.graph_objects to create a rich, web-native 
+    interactive chart. It includes custom hovering templates that clearly state 
+    the documents being compared and overlays shapes for threshold violations.
+
+    Args:
+        similarity_df (pd.DataFrame): Square N×N DataFrame of cosine similarity scores.
+        title (str): Chart title.
+        threshold (float): Similarity score threshold for drawing red alert boxes.
+        theme_colors (Optional[dict]): Theme dict for mapping dark/light modes.
+        colormap_name (str): UI string representing the requested colormap.
+
+    Returns:
+        plotly.graph_objects.Figure: A Plotly figure ready for `st.plotly_chart()`.
     """
     import plotly.graph_objects as go
 
-    if class_tag and class_tag != "All Classes":
-        similarity_df = filter_heatmap_by_class_tag(
-            similarity_df, class_tag=class_tag, doc_class_map=doc_class_map
-        )
-
-    try:
-        safe_title = TitleSanitizer.sanitize(title)
-    except MatplotlibInjectionError:
-        safe_title = "Semantic Similarity Matrix"
-
+    # 1. Map the chosen UI string to Plotly's internal colorscale naming convention
     cmap = PLOTLY_CMAP_MAPPING.get(colormap_name, "Viridis")
 
+    # 2. Guard for empty DataFrame (0 documents)
     if similarity_df.empty or len(similarity_df) == 0:
         fig = go.Figure()
-        fig.update_layout(title=safe_title)
+        fig.update_layout(title=title)
         fig.add_annotation(text="No data available to plot.", showarrow=False, font=dict(size=14))
         return fig
-
+        
     try:
         clean_df = validate_similarity_matrix(similarity_df)
-    except ValueError as error:
-        logger.error(error)
-        return go.Figure()
+    except ValueError:
+        clean_df = similarity_df
 
-    names = [TitleSanitizer.sanitize(str(col)) for col in clean_df.columns]
+    names = list(clean_df.columns)
     z_matrix = clean_df.values.tolist()
-    
-    if mask_threshold is not None:
-        z_matrix = [
-            [val if val >= mask_threshold else None for val in row]
-            for row in clean_df.values.tolist()
-        ]
-        
     n = len(names)
 
+    # 3. Construct a highly readable, rich HTML hover text matrix
+    # Plotly expects a 2D array of strings corresponding to the Z values.
     hover_text = [
         [
             f"<b>{names[i]}</b> vs <b>{names[j]}</b><br>"
@@ -414,49 +354,60 @@ def plot_similarity_heatmap_plotly(
         for i in range(n)
     ]
 
+    # 4. Initialize the Heatmap trace
     fig = go.Figure(
         data=go.Heatmap(
             z=z_matrix,
             x=names,
             y=names,
             text=hover_text,
-            hovertemplate="%{text}",
+            hovertemplate="%{text}<extra></extra>",
             colorscale=cmap,
             zmin=0.0,
             zmax=1.0,
-            colorbar=dict(title="Cosine Similarity", thickness=15, tickformat=".0%"),
-            xgap=2,
+            colorbar=dict(
+                title="Cosine Similarity", 
+                thickness=15,
+                tickformat=".0%"
+            ),
+            xgap=2, # Creates a grid-like separation between cells
             ygap=2,
         )
     )
 
+    # 5. Programmatically annotate each cell with its numeric score
+    # We alter the text color based on the cell's background intensity to maintain contrast.
     annotations = []
-    if annotate:
-        for i in range(n):
-            for j in range(n):
-                val = clean_df.values[i, j]
-                if mask_threshold is not None and val < mask_threshold:
-                    continue
-                font_color = "black" if (0.3 < val < 0.8 and cmap not in ["Viridis", "Plasma"]) else "white"
-                if cmap == "YlOrRd" and val < 0.6:
-                    font_color = "black"
-
-                annotations.append(
-                    dict(
-                        x=names[j],
-                        y=names[i],
-                        text=f"{val:.2f}",
-                        showarrow=False,
-                        font=dict(size=max(9, 14 - n), color=font_color, family="Arial, sans-serif"),
-                    )
+    for i in range(n):
+        for j in range(n):
+            val = clean_df.values[i, j]
+            # Simple heuristic for text color based on general colormap luminance 
+            # In production with specific maps, this might need tuning.
+            font_color = "black" if (0.3 < val < 0.8 and cmap not in ["Viridis", "Plasma"]) else "white"
+            
+            # For lighter maps like YlOrRd, darker text is generally better at lower values
+            if cmap == "YlOrRd" and val < 0.6:
+                font_color = "black"
+                
+            annotations.append(
+                dict(
+                    x=names[j],
+                    y=names[i],
+                    text=f"{val:.2f}",
+                    showarrow=False,
+                    font=dict(
+                        size=max(9, 14 - n),
+                        color=font_color,
+                        family="Arial, sans-serif",
+                    ),
                 )
+            )
 
+    # 6. Overlay distinctive red bounding boxes for flagged document pairs
     shapes = []
     for i in range(n):
         for j in range(n):
             if i != j and clean_df.values[i, j] >= threshold:
-                if mask_threshold is not None and clean_df.values[i, j] < mask_threshold:
-                    continue
                 shapes.append(
                     dict(
                         type="rect",
@@ -465,27 +416,32 @@ def plot_similarity_heatmap_plotly(
                         y0=i - 0.5,
                         y1=i + 0.5,
                         line=dict(color="#d62728", width=3),
-                        fillcolor="rgba(0,0,0,0)"
+                        fillcolor="rgba(0,0,0,0)" # Transparent fill
                     )
                 )
 
+    # 7. Apply dynamic responsive dimensions and layout theme
     cell_px = max(80, 600 // n)
-    bg_color = _get_theme_color(theme_colors, "background", "rgba(0,0,0,0)")
+    bg_color = _get_theme_color(theme_colors, "background", "rgba(0,0,0,0)") # Default to transparent for native integration
     ink_color = _get_theme_color(theme_colors, "ink", "#0F172A")
 
     fig.update_layout(
-        title=dict(text=safe_title, font=dict(size=18, family="Arial, sans-serif", color=ink_color)),
+        title=dict(text=title, font=dict(size=18, family="Arial, sans-serif", color=ink_color)),
         height=max(500, n * cell_px + 150),
         autosize=True,
-        xaxis=dict(side="bottom", tickangle=-30, title="Document ID", color=ink_color, fixedrange=False),
-        yaxis=dict(autorange="reversed", title="Document ID", color=ink_color, fixedrange=False),
+        xaxis=dict(side="bottom", tickangle=-30, title="Document ID", color=ink_color),
+        yaxis=dict(autorange="reversed", title="Document ID", color=ink_color),
         annotations=annotations,
         shapes=shapes,
         margin=dict(l=140, r=60, t=70, b=140),
         paper_bgcolor=bg_color,
         plot_bgcolor=bg_color,
         font=dict(color=ink_color),
-        hoverlabel=dict(bgcolor=_get_theme_color(theme_colors, "surface", "white"), font_size=14, font_family="Arial")
+        hoverlabel=dict(
+            bgcolor=_get_theme_color(theme_colors, "surface", "white"),
+            font_size=14,
+            font_family="Arial"
+        )
     )
 
     return fig
@@ -504,26 +460,38 @@ def plot_chunk_similarity_comparison(
 ) -> Figure:
     """
     Renders a granular, chunk-level similarity heatmap between two specific documents.
-    """
-    try:
-        safe_doc_a = TitleSanitizer.sanitize(doc_a_name)
-        safe_doc_b = TitleSanitizer.sanitize(doc_b_name)
-    except MatplotlibInjectionError:
-        safe_doc_a, safe_doc_b = "Doc A", "Doc B"
+    
+    This function is critical for deep-dive analysis, allowing users to pinpoint 
+    exactly which paragraphs or sentences within two documents triggered a 
+    plagiarism alert.
 
+    Args:
+        doc_a_name (str): Identifier for the primary document.
+        doc_b_name (str): Identifier for the comparative document.
+        chunks_a (list): List of text chunks (strings) from Document A.
+        chunks_b (list): List of text chunks (strings) from Document B.
+        sim_matrix (np.ndarray): 2D numpy array of shape (len(chunks_a), len(chunks_b)).
+        theme_colors (Optional[dict]): UI Theme dictionary.
+        colormap_name (str): UI colormap selection.
+
+    Returns:
+        Figure: A rendered Matplotlib Figure for the chunk comparison.
+    """
     cmap = MATPLOTLIB_CMAP_MAPPING.get(colormap_name, "viridis")
     
+    # Ensure matrix bounds
     sim_matrix = np.clip(sim_matrix, 0.0, 1.0)
     na, nb = sim_matrix.shape
 
+    # Helper function to truncate chunk text for axis labels
     def short_label(text, max_chars=40):
+        # Clean newlines and extra spaces for cleaner labels
         clean_text = " ".join(str(text).split())
-        return TitleSanitizer.sanitize(clean_text[:max_chars].strip() + "…" if len(clean_text) > max_chars else clean_text)
+        return clean_text[:max_chars].strip() + "…" if len(clean_text) > max_chars else clean_text
 
+    # Generate axis labels mapping to the text chunks
     row_labels = [f"A{i + 1}: {short_label(c)}" for i, c in enumerate(chunks_a)]
     col_labels = [f"B{j + 1}: {short_label(c)}" for j, c in enumerate(chunks_b)]
-
-    apply_matplotlib_theme(theme_colors)
 
     with matplotlib_figure(figsize=(max(8, nb * 1.5), max(6, na * 0.8)), dpi=150) as (fig, ax):
         sns.heatmap(
@@ -531,7 +499,7 @@ def plot_chunk_similarity_comparison(
             ax=ax,
             annot=True,
             fmt=".2f",
-            cmap=cmap,
+            cmap=_CMAP,
             vmin=0.0,
             vmax=1.0,
             linewidths=0.5,
@@ -543,13 +511,13 @@ def plot_chunk_similarity_comparison(
         )
 
         ax.set_title(
-            f"Chunk-Level Similarity: {safe_doc_a}  vs  {safe_doc_b}",
+            f"Chunk-Level Similarity: {doc_a_name}  vs  {doc_b_name}",
             fontsize=13,
             fontweight="bold",
             pad=14,
         )
-        ax.set_xlabel(f"Chunks from {safe_doc_b}", fontsize=10)
-        ax.set_ylabel(f"Chunks from {safe_doc_a}", fontsize=10)
+        ax.set_xlabel(f"Chunks from {doc_b_name}", fontsize=10)
+        ax.set_ylabel(f"Chunks from {doc_a_name}", fontsize=10)
         ax.set_xticklabels(ax.get_xticklabels(), rotation=30, ha="right", fontsize=7)
         ax.set_yticklabels(ax.get_yticklabels(), rotation=0, fontsize=7)
 
@@ -563,119 +531,3 @@ def plot_chunk_similarity_comparison(
 
         fig.tight_layout()
         return fig
-def render_heatmap_ui(
-    similarity_df: pd.DataFrame,
-    threshold: float = PLAGIARISM_THRESHOLD,
-    theme_colors: Optional[Dict[str, str]] = None,
-):
-    """
-    Streamlit UI wrapper for similarity heatmap controls.
-    
-    Provides:
-    - Fit Matrix view
-    - High Similarity Focus view
-    - Reset View
-    - Dynamic colormap selection
-    - Logarithmic Scale toggle (Issue #628)
-    """
-    if similarity_df.empty:
-        st.warning("No similarity data available.")
-        return
-
-    clean_df = validate_similarity_matrix(similarity_df)
-    if clean_df.empty:
-        st.warning("Validated similarity matrix is empty.")
-        return
-
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
-        zoom_mode = st.radio(
-            "Heatmap View",
-            ["Fit Matrix", "High Similarity Focus", "Reset View"],
-            horizontal=True,
-            key="heatmap_zoom_mode",
-        )
-    # Heatmap view controls
-    zoom_mode = st.radio(
-        "Heatmap View",
-        [
-            "Fit Matrix",
-            "High Similarity Focus",
-            "Reset View",
-        ],
-        horizontal=True,
-        key="heatmap_zoom_mode",
-    )
-
-    # Class Tag Filter selector
-    unique_classes = ["All Classes"]
-    try:
-        from src.db.corpus_db import get_unique_class_sections
-        unique_classes.extend(get_unique_class_sections())
-    except Exception:
-        pass
-
-    selected_class_tag = st.selectbox(
-        "Filter by Class Tag",
-        unique_classes,
-        index=0,
-        key="heatmap_class_tag_filter",
-        help="Filter heatmap rows and columns to documents matching the selected class tag.",
-    )
-
-    if selected_class_tag and selected_class_tag != "All Classes":
-        clean_df = filter_heatmap_by_class_tag(clean_df, class_tag=selected_class_tag)
-
-    if clean_df.empty:
-        st.info(f"No document pairs found matching class tag '{selected_class_tag}'.")
-        return
-
-    # Colormap selector
-
-    with col2:
-        colormap_name = st.selectbox(
-            "Color Map",
-            UI_COLORMAP_OPTIONS,
-            index=UI_COLORMAP_OPTIONS.index(DEFAULT_UI_COLORMAP) if DEFAULT_UI_COLORMAP in UI_COLORMAP_OPTIONS else 0,
-            key="heatmap_colormap",
-        )
-        
-        # Issue #628: Logarithmic Scale Toggle
-        log_scale = st.checkbox(
-            "Logarithmic Scale",
-            value=False,
-            key="heatmap_log_scale",
-            help="Apply logarithmic color scaling to better visualize highly skewed similarity distributions."
-        )
-
-    n = len(clean_df)
-
-    fig = plot_similarity_heatmap_plotly(
-        clean_df,
-        threshold=threshold,
-        theme_colors=theme_colors,
-        colormap_name=colormap_name,
-        log_scale=log_scale,  # <-- PASSED TO PLOTLY (for API symmetry)
-    )
-
-    if zoom_mode == "Fit Matrix":
-        fig.update_xaxes(range=[-0.5, n - 0.5])
-        fig.update_yaxes(range=[n - 0.5, -0.5])
-    elif zoom_mode == "High Similarity Focus":
-        matrix = clean_df.values
-        coords = np.where(matrix >= threshold)
-        if len(coords[0]) > 0:
-            min_x = max(min(coords[1]) - 1, -0.5)
-            max_x = min(max(coords[1]) + 1, n - 0.5)
-            min_y = max(min(coords[0]) - 1, -0.5)
-            max_y = min(max(coords[0]) + 1, n - 0.5)
-            fig.update_xaxes(range=[min_x, max_x])
-            fig.update_yaxes(range=[max_y, min_y])
-        else:
-            st.info("No document pairs found above the similarity threshold.")
-    elif zoom_mode == "Reset View":
-        fig.update_xaxes(autorange=True)
-        fig.update_yaxes(autorange=True)
-
-    st.plotly_chart(fig, use_container_width=True)

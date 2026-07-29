@@ -51,13 +51,14 @@ def _make_docx_bytes(text: str) -> bytes:
     return buf.getvalue()
 
 
-
 def _make_valid_zip_bytes(files: dict) -> bytes:
     """Create a valid in-memory ZIP archive containing given file names and contents."""
+    import zipfile
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         for filename, content in files.items():
             zf.writestr(filename, content)
+    return buf.getvalue()
 
 
 def _make_large_docx_bytes(num_pages: int = 100) -> bytes:
@@ -75,7 +76,20 @@ def _make_large_docx_bytes(num_pages: int = 100) -> bytes:
 
     buf = io.BytesIO()
     doc.save(buf)
+    return buf.getvalue()
 
+
+def _make_docx_with_headings() -> bytes:
+    """Create an in-memory DOCX with Heading 1, Heading 2, and Normal paragraphs."""
+    doc = docx.Document()
+    doc.add_heading("Chapter 1", level=1)
+    doc.add_paragraph("Introductory paragraph.")
+    doc.add_heading("Section A", level=2)
+    doc.add_paragraph("Detailed content here.")
+    doc.add_heading("Subsection", level=3)
+    doc.add_paragraph("Even more detail.")
+    buf = io.BytesIO()
+    doc.save(buf)
     return buf.getvalue()
 
 
@@ -132,6 +146,7 @@ def test_extract_from_docx_bytes():
     assert result == "Hello DOCX"
 
 
+<<<<<<< HEAD
 def test_docx_large_document_extraction_benchmark():
     """Benchmark test asserting 100-page DOCX extraction completes under 2.0 seconds (#579)."""
     large_docx_bytes = _make_large_docx_bytes(num_pages=100)
@@ -143,6 +158,47 @@ def test_docx_large_document_extraction_benchmark():
     assert len(extracted_text) > 0
     assert "Chapter 100: Section Overview" in extracted_text
     assert elapsed_time < 2.0, f"DOCX extraction took {elapsed_time:.3f}s (expected < 2.0s)"
+=======
+def _make_docx_with_headings() -> bytes:
+    """Create an in-memory DOCX with Heading 1, Heading 2, and Normal paragraphs."""
+    doc = docx.Document()
+    doc.add_heading("Chapter 1", level=1)
+    doc.add_paragraph("Introductory paragraph.")
+    doc.add_heading("Section A", level=2)
+    doc.add_paragraph("Detailed content here.")
+    doc.add_heading("Subsection", level=3)
+    doc.add_paragraph("Even more detail.")
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+def test_extract_from_docx_heading_markers():
+    docx_bytes = _make_docx_with_headings()
+    result = extract_text_from_docx(docx_bytes)
+    assert "# Chapter 1" in result
+    assert "## Section A" in result
+    assert "### Subsection" in result
+    assert "Introductory paragraph." in result
+    assert "Detailed content here." in result
+    assert "Even more detail." in result
+
+
+def test_extract_from_docx_plain_paragraph_unchanged():
+    """Normal paragraphs without heading style must not get # prefixes."""
+    docx_bytes = _make_docx_bytes("Just a normal paragraph.")
+    result = extract_text_from_docx(docx_bytes)
+    assert result == "Just a normal paragraph."
+    assert not result.startswith("#")
+
+
+def test_extract_text_routing_docx_with_headings():
+    """Verify heading markers survive the full extract_text routing pipeline."""
+    docx_bytes = _make_docx_with_headings()
+    result = extract_text(docx_bytes, "test.docx")
+    assert "# Chapter 1" in result
+    assert "## Section A" in result
+>>>>>>> ad1e354 (feat(docx): add Markdown heading markers (#826))
 
 
 def test_extract_from_txt_bytes():
