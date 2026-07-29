@@ -16,7 +16,7 @@ Recent additions (Issue #628):
 import re
 import logging
 from contextlib import contextmanager
-from typing import Generator, Optional, Dict, Any
+from typing import Generator, Optional, Dict
 
 import matplotlib
 import matplotlib.colors as mcolors
@@ -109,11 +109,10 @@ def validate_similarity_matrix(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _get_theme_color(theme_colors: Optional[Dict[str, str]], key: str, fallback: str) -> str:
-    arr = clean_df.values.copy()
-    np.fill_diagonal(arr, 1.0)
-    clean_df = pd.DataFrame(arr, index=clean_df.index, columns=clean_df.columns)
-
-    return clean_df
+    """Safely extract color from theme dictionary with fallback."""
+    if theme_colors and key in theme_colors:
+        return theme_colors[key]
+    return fallback
 
 
 def filter_heatmap_by_class_tag(
@@ -633,11 +632,6 @@ def render_heatmap_ui(
         return
 
     # Colormap selector
-    default_index = (
-        UI_COLORMAP_OPTIONS.index(DEFAULT_UI_COLORMAP)
-        if DEFAULT_UI_COLORMAP in UI_COLORMAP_OPTIONS
-        else 0
-    )
 
     with col2:
         colormap_name = st.selectbox(

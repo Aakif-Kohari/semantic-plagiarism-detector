@@ -80,6 +80,7 @@ __all__ = [
     "PLAGIARISM_THRESHOLD",
     "plot_similarity_heatmap",
     "plot_similarity_heatmap_plotly",
+    "filter_heatmap_by_class_tag",
     "plot_chunk_similarity_comparison",
     "build_network_data",
     "export_graph_to_csv",

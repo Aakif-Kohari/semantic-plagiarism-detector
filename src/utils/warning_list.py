@@ -74,28 +74,34 @@ def filter_warnings(
     search_query: str = "",
     min_match_length: int = 0,
 ) -> list[dict[str, Any]]:
-
     """Filter normalized warnings using functional predicate matching."""
     normalised = [_normalise_warning(item) for item in warnings]
-    predicate = matches_query_predicate(search_query)
-    return [item for item in normalised if predicate(item)]
-
-    """
-    Filters warnings by query using exact substring matching and
-    fuzzy string matching (thefuzz/fuzzywuzzy) to handle minor typos.
-    """
-    normalised = [_normalise_warning(item) for item in warnings]
-
+    
     if min_match_length > 0:
         normalised = [
-            item
-            for item in normalised
-            if item.get("matched_length", 0) >= min_match_length
+            item for item in normalised if item.get("matched_length", 0) >= min_match_length
         ]
-
+        
     query = _truncate_search_query(search_query).casefold()
+    if not query:
+        return normalised
 
+    filtered = []
+    for item in normalised:
+        doc_a = item["doc_a"].casefold()
+        doc_b = item["doc_b"].casefold()
 
+        if query in doc_a or query in doc_b:
+            filtered.append(item)
+            continue
+
+        if fuzz is not None:
+            score_a = max(fuzz.partial_ratio(query, doc_a), fuzz.token_set_ratio(query, doc_a))
+            score_b = max(fuzz.partial_ratio(query, doc_b), fuzz.token_set_ratio(query, doc_b))
+            if score_a >= FUZZY_THRESHOLD or score_b >= FUZZY_THRESHOLD:
+                filtered.append(item)
+
+    return filtered
 
 
 def build_key_extractor(field: str) -> Callable[[Mapping[str, Any]], Any]:
@@ -104,30 +110,6 @@ def build_key_extractor(field: str) -> Callable[[Mapping[str, Any]], Any]:
         val = item.get(field, "")
         return val.casefold() if isinstance(val, str) else val
     return extract_key
-
-    filtered = []
-    for item in normalised:
-        doc_a = item["doc_a"].casefold()
-        doc_b = item["doc_b"].casefold()
-
-        # 1. Check exact substring match
-        if query in doc_a or query in doc_b:
-            filtered.append(item)
-            continue
-
-        # 2. Check fuzzy match if fuzz library is available
-        if fuzz is not None:
-            score_a = max(
-                fuzz.partial_ratio(query, doc_a), fuzz.token_set_ratio(query, doc_a)
-            )
-            score_b = max(
-                fuzz.partial_ratio(query, doc_b), fuzz.token_set_ratio(query, doc_b)
-            )
-
-            if score_a >= FUZZY_THRESHOLD or score_b >= FUZZY_THRESHOLD:
-                filtered.append(item)
-
-    return filtered
 
 
 def sort_warnings(
@@ -646,13 +628,7 @@ def render_warning_controls(
             )
         markdown_text = "\n".join(markdown_lines)
 
-    escaped_text = (
-        markdown_text.replace("\\", "\\\\")
-        .replace('"', '\\"')
-        .replace("`", "\\`")
-        .replace("$", "\\$")
-        .replace("\n", "\\n")
-    )
+
 
     left, middle, right = st.columns([3, 2, 2])
     with left:

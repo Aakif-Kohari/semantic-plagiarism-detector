@@ -1,3 +1,4 @@
+import csv
 import io
 import json
 import logging
@@ -12,6 +13,79 @@ from src.core.similarity import find_most_similar_chunks
 from src.utils.pdf_report import generate_plagiarism_report
 
 logger = logging.getLogger(__name__)
+
+# Standard column headers for the incident CSV export
+_CSV_HEADERS = [
+    "Incident ID",
+    "Doc A",
+    "Doc B",
+    "Similarity",
+    "Severity",
+    "Status",
+    "Date",
+]
+
+
+def export_incidents_csv_stream(incidents_list: List[Dict]) -> io.StringIO:
+    """Stream a list of incident dicts into a CSV-formatted :class:`io.StringIO`.
+
+    The function writes the following columns in order:
+
+    * **Incident ID** – ``incident_id`` field (default: empty string)
+    * **Doc A**       – ``document_a`` field
+    * **Doc B**       – ``document_b`` field
+    * **Similarity**  – ``similarity_score`` formatted as a percentage (e.g. ``95.00%``)
+    * **Severity**    – ``severity_rank`` field
+    * **Status**      – ``review_status`` field
+    * **Date**        – ``date_flagged`` field
+
+    Parameters
+    ----------
+    incidents_list:
+        A list of incident dictionaries, as returned by
+        :func:`~src.db.incidents.get_all_incidents`.
+
+    Returns
+    -------
+    io.StringIO
+        A seeked-to-position-0 ``StringIO`` buffer ready for reading or
+        passing directly to a Streamlit download button.
+
+    Examples
+    --------
+    >>> buf = export_incidents_csv_stream(incidents)
+    >>> csv_text = buf.read()
+    """
+    output = io.StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=_CSV_HEADERS,
+        extrasaction="ignore",
+        lineterminator="\r\n",
+    )
+    writer.writeheader()
+
+    for incident in incidents_list:
+        raw_score = incident.get("similarity_score", 0.0)
+        try:
+            similarity_str = f"{float(raw_score):.2%}"
+        except (TypeError, ValueError):
+            similarity_str = str(raw_score)
+
+        writer.writerow(
+            {
+                "Incident ID": incident.get("incident_id", ""),
+                "Doc A": incident.get("document_a", ""),
+                "Doc B": incident.get("document_b", ""),
+                "Similarity": similarity_str,
+                "Severity": incident.get("severity_rank", ""),
+                "Status": incident.get("review_status", ""),
+                "Date": incident.get("date_flagged", ""),
+            }
+        )
+
+    output.seek(0)
+    return output
 
 
 def _sanitise_filename(name: str) -> str:

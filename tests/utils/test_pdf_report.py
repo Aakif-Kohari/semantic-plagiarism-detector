@@ -59,7 +59,6 @@ def _generate_snapshot_pdf():
 from tests.utils import FIXTURES_DIR, compare_pdf_bytes, assert_pdf_matches
 
 # Test utilities for golden fixture comparison
-from tests.utils import FIXTURES_DIR, compare_pdf_bytes, assert_pdf_matches
 
 # Text stats utilities
 from src.utils.text_stats import (
@@ -253,16 +252,6 @@ def test_generate_plagiarism_report_with_text_stats():
     sample_text_b = "This is the second document with different content. It has some similar words but mostly unique text. The purpose is to compare with the first document for plagiarism detection purposes."
     
     pdf_buffer = generate_plagiarism_report(
-def test_compress_pdf_buffer_reduces_size(monkeypatch):
-    # Mock compress_pdf_buffer to get the raw uncompressed buffer size
-    from src.utils import pdf_report
-
-    original_compress = pdf_report.compress_pdf_buffer
-
-    monkeypatch.setattr(pdf_report, "compress_pdf_buffer", lambda x: x)
-
-    # Generate uncompressed report (with many matching pairs to make it larger)
-    uncompressed_buffer = generate_plagiarism_report(
         doc_a="student_a.pdf",
         doc_b="student_b.pdf",
         overall_similarity=0.934,
@@ -289,6 +278,40 @@ def test_compress_pdf_buffer_reduces_size(monkeypatch):
 
 def test_generate_plagiarism_report_without_text_stats():
     """Test PDF generation without text statistics (backward compatibility)."""
+    pdf_buffer = generate_plagiarism_report(
+        doc_a="student_a.pdf",
+        doc_b="student_b.pdf",
+        overall_similarity=0.934,
+        threshold=0.59,
+        top_pairs=[
+            ("First matching paragraph.", "Second matching paragraph.", 0.96),
+        ],
+    )
+    
+    pdf_bytes = pdf_buffer.getvalue()
+    assert pdf_bytes.startswith(b"%PDF")
+    assert len(pdf_bytes) > 1000
+    
+    # Statistics section should not be present when text not provided
+    text = _read_text(pdf_bytes)
+    assert "Document Statistics" not in text
+
+
+def test_compress_pdf_buffer_reduces_size(monkeypatch):
+    # Mock compress_pdf_buffer to get the raw uncompressed buffer size
+    from src.utils import pdf_report
+
+    original_compress = pdf_report.compress_pdf_buffer
+
+    monkeypatch.setattr(pdf_report, "compress_pdf_buffer", lambda x: x)
+
+    # Generate uncompressed report (with many matching pairs to make it larger)
+    uncompressed_buffer = generate_plagiarism_report(
+        doc_a="student_a.pdf",
+        doc_b="student_b.pdf",
+        overall_similarity=0.934,
+        threshold=0.59,
+        top_pairs=[
             ("First matching paragraph.", "Second matching paragraph.", 0.96),
         ]
         * 50,
@@ -467,15 +490,6 @@ def test_generate_plagiarism_report_dark_mode():
         top_pairs=[
             ("First matching paragraph.", "Second matching paragraph.", 0.96),
         ],
-    )
-    
-    pdf_bytes = pdf_buffer.getvalue()
-    assert pdf_bytes.startswith(b"%PDF")
-    assert len(pdf_bytes) > 1000
-    
-    # Statistics section should not be present when text not provided
-    text = _read_text(pdf_bytes)
-    assert "Document Statistics" not in text
         dark_mode=True,
     )
     pdf_bytes = pdf_buffer.getvalue()
