@@ -6,10 +6,11 @@ This guide explains how to use the headless command-line interface (`cli.py`) fo
 
 # Overview
 
-The CLI provides two commands:
+The CLI provides three commands:
 
 - `scan` – Scan a folder of documents and generate a plagiarism report.
 - `sync-index` – Verify and repair synchronization between the FAISS index and the SQLite database.
+- `prewarm` – Pre-compute embeddings and populate Redis cache before user logins.
 
 ---
 
@@ -55,6 +56,34 @@ Verifies that the FAISS index and SQLite database are synchronized and repairs i
 
 ```bash
 python cli.py sync-index
+```
+
+---
+
+## prewarm
+
+Pre-computes document chunk embeddings, similarity matrices, and populates Redis cache and telemetry before user logins.
+
+### Syntax
+
+```bash
+python cli.py prewarm [--folder <path>]
+```
+
+### Options
+
+| Option | Default | Description |
+|---------|---------|-------------|
+| `--folder` | `None` | Optional path to a directory containing documents to prewarm. If omitted, uses indexed database documents. |
+
+---
+
+# Examples
+
+## Prewarm cache for documents in a folder
+
+```bash
+python cli.py prewarm --folder ./assignments
 ```
 
 ---

@@ -1,7 +1,6 @@
 """Tests for zero-width unicode character sanitizer (Issue #609)."""
 
 import logging
-import pytest
 from src.core.document_parser import (
     ZERO_WIDTH_CHARS_PATTERN,
     extract_text,

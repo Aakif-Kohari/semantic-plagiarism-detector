@@ -18,6 +18,14 @@ import zlib
 from enum import Enum
 from typing import Any, Optional
 
+
+class CacheKeyPrefix(str, Enum):
+    LOGIN_ATTEMPTS = "login_attempts:"
+    UPLOAD_COUNT = "upload_count:"
+    SIMILARITY_RESULT = "similarity:"
+    DOCUMENT_CACHE = "doc:"
+    LEGACY_UPLOADS_PREFIX = "upload_count:"
+
 try:
     import redis
 except ImportError:
@@ -260,7 +268,7 @@ class RedisCache:
                     socket_connect_timeout=REDIS_TIMEOUT_SECONDS,
                 )
             self._client.ping()
-            print(f"[RedisCache] Connected to Redis at {REDIS_HOST}:{REDIS_PORT}")
+            logger.info(f"[RedisCache] Connected to Redis at {REDIS_HOST}:{REDIS_PORT}")
         except (
             RedisConnectionError,
             RedisTimeoutError,

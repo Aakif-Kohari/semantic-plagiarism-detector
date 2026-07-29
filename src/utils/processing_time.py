@@ -14,7 +14,7 @@ from collections import defaultdict
 from collections.abc import Iterable
 from contextlib import contextmanager
 from numbers import Real
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 BYTES_PER_MB = 1024 * 1024
 DEFAULT_SECONDS_PER_MB = 2.0
