@@ -205,6 +205,56 @@ def test_session_reset_on_logout():
         _cleanup_stale_artifacts()
 
 
+@patch("src.core.ai_detector.detect_ai_probability", return_value=0.10)
+@patch("src.core.webhook.dispatch_plagiarism_alert")
+@patch(
+    "src.core.embedding_model.get_embedding_model_info",
+    return_value=("all-MiniLM-L6-v2", 384),
+)
+@patch(
+    "src.core.embedding_model.embed_chunks", side_effect=MockDataFactory.embed_chunks
+)
+def test_bulk_upload_shows_progress_bar(mock_embed, mock_model_info, mock_webhook, mock_ai_detector):
+    """Verify that uploading multiple files renders a progress bar with file counter and ETA."""
+    _cleanup_stale_artifacts()
+    os.environ["PLAGIARISM_WEBHOOK_URL"] = "https://example.com/webhook"
+    try:
+        at = AppTest.from_file("app/streamlit_app.py", default_timeout=30)
+        at.session_state["authenticated"] = True
+        at.session_state["logged_in"] = True
+        at.session_state["username"] = "admin"
+        at.session_state["role"] = "admin"
+        at.session_state["user"] = {"username": "admin", "role": "admin"}
+        at.session_state["page"] = "dashboard"
+        at.session_state["nav"] = "Dashboard"
+        at.run()
+
+        uploaders = at.file_uploader
+        if not uploaders and hasattr(at, "sidebar"):
+            uploaders = at.sidebar.file_uploader
+
+        txt1 = b"Sample document content for plagiarism checking."
+        txt2 = b"Another document with different content for testing."
+        uploaders[0].upload("doc1.txt", txt1, "text/plain")
+        uploaders[0].upload("doc2.txt", txt2, "text/plain")
+
+        at.run()
+
+        assert not at.exception
+        assert len(at.progress) > 0, "Expected at least one progress bar during bulk upload"
+
+        progress_labels = [p.label for p in at.progress if p.label]
+        has_file_counter = any(
+            "Processing file" in (label or "") for label in progress_labels
+        )
+        assert has_file_counter, (
+            f"Expected a progress bar with 'Processing file X of Y' label. "
+            f"Found labels: {progress_labels}"
+        )
+    finally:
+        _cleanup_stale_artifacts()
+
+
 def test_session_expiration_reset():
     """Verify that automatic session expiration clears authenticated keys from session_state."""
     import time

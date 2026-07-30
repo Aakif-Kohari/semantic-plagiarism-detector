@@ -164,6 +164,12 @@ from src.db.incidents import (
 )
 from src.i18n.translator import _SUPPORTED_LANGUAGES, get_text
 from src.security.metadata_stripper import strip_exif_metadata
+from src.utils.processing_time import (
+    estimate_processing_seconds,
+    format_processing_duration,
+    processing_eta_text,
+    uploaded_files_total_bytes,
+)
 from src.utils.badge_generator import generate_badge_pdf, generate_badge_png
 from src.utils.diff_highlighter import highlight_overlap
 from src.utils.excel_export import export_similarity_matrix_to_excel
@@ -863,21 +869,14 @@ else:
     has_enough_files = len(file_bytes_dict) >= 2
 
     @st.cache_data(show_spinner=False)
-    def run_pipeline(
-        file_bytes_dict: dict[str, bytes],
-        ocr_language: str,
-        ocr_dpi: int,
+    def run_extraction_pipeline(
+        raw_texts_items: tuple,
         chunk_size: int = 500,
         chunk_overlap: int = 50,
     ):
-        raw_texts = {}
-        for name, data in file_bytes_dict.items():
-            raw_texts[name] = extract_text(
-                _io.BytesIO(data), name, ocr_language=ocr_language, ocr_dpi=ocr_dpi
-            )
-
+        raw_texts_dict = dict(raw_texts_items)
         chunked_docs = chunk_documents(
-            raw_texts, chunk_size=chunk_size, chunk_overlap=chunk_overlap
+            raw_texts_dict, chunk_size=chunk_size, chunk_overlap=chunk_overlap
         )
         translated_chunked_docs = {}
 
@@ -909,7 +908,6 @@ else:
         ai_probabilities = detect_documents_ai_probability(chunked_docs)
 
         return (
-            raw_texts,
             chunked_docs,
             embeddings,
             sim_df,
@@ -920,25 +918,38 @@ else:
         )
 
     if has_enough_files:
-        with st.spinner("🧠 Processing files and building embeddings…"):
-            analysis_results = run_pipeline(
-                file_bytes_dict,
-                ocr_language,
-                ocr_dpi,
-                chunk_size,
-                chunk_overlap,
+        total_bytes = sum(len(data) for data in file_bytes_dict.values())
+        file_count = len(file_bytes_dict)
+
+        progress_bar = st.progress(0, text="Preparing files…")
+        raw_texts = {}
+        for i, (name, data) in enumerate(file_bytes_dict.items()):
+            raw_texts[name] = extract_text(
+                _io.BytesIO(data), name, ocr_language=ocr_language, ocr_dpi=ocr_dpi
+            )
+            fraction = (i + 1) / file_count
+            remaining_bytes = total_bytes * (file_count - i - 1) // max(1, file_count)
+            remaining_est = estimate_processing_seconds(remaining_bytes)
+            eta = format_processing_duration(remaining_est) if remaining_est else "a moment"
+            progress_bar.progress(
+                fraction,
+                text=f"Processing file {i + 1} of {file_count} (ETA: {eta})",
             )
 
-            (
-                raw_texts,
-                chunked_docs,
-                embeddings,
-                sim_df,
-                chunk_sim_df,
-                faiss_index,
-                registry,
-                ai_probabilities,
-            ) = analysis_results
+        raw_texts_tuple = tuple(sorted(raw_texts.items()))
+        (
+            chunked_docs,
+            embeddings,
+            sim_df,
+            chunk_sim_df,
+            faiss_index,
+            registry,
+            ai_probabilities,
+        ) = run_extraction_pipeline(
+            raw_texts_tuple,
+            chunk_size,
+            chunk_overlap,
+        )
 
         active_sim_df = chunk_sim_df if use_chunk_matrix else sim_df
         flags = flag_plagiarism(active_sim_df, threshold=threshold)
