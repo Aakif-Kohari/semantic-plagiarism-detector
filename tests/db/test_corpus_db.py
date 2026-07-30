@@ -350,3 +350,20 @@ def test_purge_stale_trash_ignores_active_documents(mock_db):
             ("active_old_doc.pdf",)
         ).fetchone()
         assert row is not None and (row[0] == 0 or row[0] is None)
+
+
+def test_add_chunks_logs_memory_usage(mock_db, caplog):
+    """Test that add_chunks logs memory usage before and after insertions."""
+    import logging
+    add_document("doc_mem_test.pdf", "hash_mem_test")
+    dummy_emb = np.ones(384, dtype=np.float32) * 0.5
+    chunks = [(100, "doc_mem_test.pdf", 0, "Memory test chunk", dummy_emb)]
+
+    with caplog.at_level(logging.INFO):
+        add_chunks(chunks)
+
+    # Check for expected messages in log records
+    log_messages = [record.message for record in caplog.records]
+    assert any("Memory usage before batch chunk insertion:" in msg for msg in log_messages)
+    assert any("Memory usage after batch chunk insertion:" in msg for msg in log_messages)
+
