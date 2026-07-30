@@ -5,7 +5,7 @@ on:
     types: [created]
 
   pull_request_target:
-    types: [opened]
+    types: [opened, closed]
 
   schedule:
     - cron: '0 0 * * *'
@@ -181,34 +181,60 @@ jobs:
           script: |
             const pr = context.payload.pull_request;
             const author = pr.user.login;
+            const action = context.payload.action;
 
-            // Assign PR author (if user is a collaborator)
-            try {
-              await github.rest.issues.addAssignees({
+            if (action === 'opened') {
+              // Assign PR author (if user is a collaborator)
+              try {
+                await github.rest.issues.addAssignees({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr.number,
+                  assignees: [author]
+                });
+              } catch (err) {
+                console.log(`Could not assign ${author} (user might not be a collaborator):`, err.message);
+              }
+
+              // Add label
+              await github.rest.issues.addLabels({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: pr.number,
-                assignees: [author]
+                labels: ["ECSoC26"]
               });
-            } catch (err) {
-              console.log(`Could not assign ${author} (user might not be a collaborator):`, err.message);
+
+              // Welcome comment for PR
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                body: `🎉 Thanks @${author} for opening this Pull Request for **ECSoC26**! A maintainer will review it soon.`
+              });
+            } else if (action === 'closed' && pr.merged) {
+              // Merge thank you comment for PR
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                body: `🎉 Hey @${author}!
+
+Your PR has been merged successfully! 🚀
+
+Thank you for investing your time and effort into improving **Semantic Plagiarism Detector**.
+
+Open source grows because of contributors like you.
+
+If you enjoyed contributing:
+
+• ⭐ Star the repository
+• 🔍 Explore more issues
+• 💡 Suggest new ideas in Discussions
+• 📢 Share your contribution with others
+
+Hope to see you back soon. Happy coding! ❤️`
+              });
             }
-
-            // Add label
-            await github.rest.issues.addLabels({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: pr.number,
-              labels: ["ECSoC26"]
-            });
-
-            // Welcome comment for PR
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: pr.number,
-              body: `🎉 Thanks @${author} for opening this Pull Request for **ECSoC26**! A maintainer will review it soon.`
-            });
 
   auto-unassign-stale:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
