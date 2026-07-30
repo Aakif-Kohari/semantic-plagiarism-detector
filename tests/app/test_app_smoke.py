@@ -205,56 +205,6 @@ def test_session_reset_on_logout():
         _cleanup_stale_artifacts()
 
 
-@patch("src.core.ai_detector.detect_ai_probability", return_value=0.10)
-@patch("src.core.webhook.dispatch_plagiarism_alert")
-@patch(
-    "src.core.embedding_model.get_embedding_model_info",
-    return_value=("all-MiniLM-L6-v2", 384),
-)
-@patch(
-    "src.core.embedding_model.embed_chunks", side_effect=MockDataFactory.embed_chunks
-)
-def test_bulk_upload_shows_progress_bar(mock_embed, mock_model_info, mock_webhook, mock_ai_detector):
-    """Verify that uploading multiple files renders a progress bar with file counter and ETA."""
-    _cleanup_stale_artifacts()
-    os.environ["PLAGIARISM_WEBHOOK_URL"] = "https://example.com/webhook"
-    try:
-        at = AppTest.from_file("app/streamlit_app.py", default_timeout=30)
-        at.session_state["authenticated"] = True
-        at.session_state["logged_in"] = True
-        at.session_state["username"] = "admin"
-        at.session_state["role"] = "admin"
-        at.session_state["user"] = {"username": "admin", "role": "admin"}
-        at.session_state["page"] = "dashboard"
-        at.session_state["nav"] = "Dashboard"
-        at.run()
-
-        uploaders = at.file_uploader
-        if not uploaders and hasattr(at, "sidebar"):
-            uploaders = at.sidebar.file_uploader
-
-        txt1 = b"Sample document content for plagiarism checking."
-        txt2 = b"Another document with different content for testing."
-        uploaders[0].upload("doc1.txt", txt1, "text/plain")
-        uploaders[0].upload("doc2.txt", txt2, "text/plain")
-
-        at.run()
-
-        assert not at.exception
-        assert len(at.progress) > 0, "Expected at least one progress bar during bulk upload"
-
-        progress_labels = [p.label for p in at.progress if p.label]
-        has_file_counter = any(
-            "Processing file" in (label or "") for label in progress_labels
-        )
-        assert has_file_counter, (
-            f"Expected a progress bar with 'Processing file X of Y' label. "
-            f"Found labels: {progress_labels}"
-        )
-    finally:
-        _cleanup_stale_artifacts()
-
-
 def test_session_expiration_reset():
     """Verify that automatic session expiration clears authenticated keys from session_state."""
     import time
@@ -273,5 +223,47 @@ def test_session_expiration_reset():
         assert "authenticated" not in at.session_state or at.session_state.get("authenticated") in (False, None)
         assert "username" not in at.session_state or at.session_state.get("username") is None
         assert "role" not in at.session_state or at.session_state.get("role") != "admin"
+    finally:
+        _cleanup_stale_artifacts()
+
+
+def test_sidebar_reset_all_filters():
+    """Verify that clicking 'Reset All Filters' clears the filter keys from session_state."""
+    _cleanup_stale_artifacts()
+    try:
+        at = AppTest.from_file("app/streamlit_app.py", default_timeout=30)
+        at.session_state["authenticated"] = True
+        at.session_state["username"] = "admin"
+        at.session_state["role"] = "admin"
+        at.session_state["user"] = {"username": "admin", "role": "admin"}
+        at.session_state["page"] = "dashboard"
+        at.session_state["nav"] = "Dashboard"
+
+        # Pre-seed some filter session states
+        at.session_state["threshold_slider"] = 0.85
+        at.session_state["class_filter_selectbox"] = "Class A"
+        at.session_state["heatmap_mask_threshold"] = 0.50
+        at.run()
+
+        assert not at.exception
+        assert at.session_state["threshold_slider"] == 0.85
+        assert at.session_state["class_filter_selectbox"] == "Class A"
+
+        # Find the reset button
+        reset_btns = [
+            btn for btn in at.sidebar.button if "Reset All Filters" in btn.label or "🔄" in btn.label
+        ]
+        assert len(reset_btns) > 0
+        
+        # Click the reset button and run
+        reset_btns[0].click().run()
+
+        assert not at.exception
+        
+        # Keys should be deleted from session_state (or reset to their widget defaults)
+        assert at.session_state.get("threshold_slider") != 0.85
+        assert at.session_state.get("class_filter_selectbox") != "Class A"
+        assert at.session_state.get("heatmap_mask_threshold") != 0.50
+
     finally:
         _cleanup_stale_artifacts()

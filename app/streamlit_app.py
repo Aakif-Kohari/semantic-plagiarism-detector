@@ -658,6 +658,31 @@ with st.sidebar:
     unique_classes = ["All Classes"] + get_unique_class_sections()
     selected_class = st.selectbox("Select Class/Section", unique_classes, index=0, key="class_filter_selectbox")
 
+    if st.button("🔄 Reset All Filters", key="reset_all_filters_button", use_container_width=True):
+        keys_to_reset = [
+            "threshold_slider",
+            "lexical_threshold_slider",
+            "semantic_threshold_slider",
+            "chunk_matrix_checkbox",
+            "faiss_top_k_slider",
+            "chunk_size_slider",
+            "chunk_overlap_slider",
+            "ocr_language_selector",
+            "ocr_dpi_slider",
+            "class_filter_selectbox",
+            "heatmap_mask_threshold",
+            "heatmap_show_percentages",
+            "heatmap_dim_diagonal",
+            "heatmap_tab_class_filter",
+        ]
+        for key in keys_to_reset:
+            if key in st.session_state:
+                del st.session_state[key]
+        if "threshold" in st.query_params:
+            del st.query_params["threshold"]
+        st.success("✅ Filters reset to defaults!")
+        st.rerun()
+
     st.markdown("---")
     if st.session_state.get("scanning", False):
         st.markdown(
