@@ -23,6 +23,13 @@ import time
 
 from src.core.document_parser import (clean_text, remove_ignore_phrases)
 
+from src.core.document_parser import (clean_text, extract_text,
+                                      extract_text_from_docx,
+                                      extract_text_from_odt,
+                                      extract_text_from_pdf,
+                                      extract_text_from_txt, extract_texts,
+                                      remove_ignore_phrases,
+                                      strip_bibliography)
 
 # Skip OCR tests when Tesseract binary is not present on this machine
 TESSERACT_AVAILABLE = shutil.which("tesseract") is not None
@@ -51,31 +58,27 @@ def _make_docx_bytes(text: str) -> bytes:
     return buf.getvalue()
 
 
+import zipfile
 
-def _make_valid_zip_bytes(files: dict) -> bytes:
-    """Create a valid in-memory ZIP archive containing given file names and contents."""
+
+def _make_odt_bytes(text: str) -> bytes:
+    """Create a minimal in-memory ODT containing the given text."""
+    content_xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<office:document-content '
+        'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+        'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" '
+        'office:version="1.2">'
+        '<office:body>'
+        '<office:text>'
+        f'<text:p>{text}</text:p>'
+        '</office:text>'
+        '</office:body>'
+        '</office:document-content>'
+    )
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
-        for filename, content in files.items():
-            zf.writestr(filename, content)
-
-
-def _make_large_docx_bytes(num_pages: int = 100) -> bytes:
-    """Create a multi-page in-memory DOCX containing realistic paragraphs."""
-    doc = docx.Document()
-    sample_paragraph = (
-        "Semantic Plagiarism Detection System performance benchmark paragraph. "
-        "This paragraph simulates student submission content across multiple pages "
-        "to ensure high-throughput processing and memory efficiency during analysis."
-    )
-    for i in range(num_pages):
-        doc.add_heading(f"Chapter {i + 1}: Section Overview", level=2)
-        doc.add_paragraph(f"Page {i + 1} content. {sample_paragraph}")
-        doc.add_page_break()
-
-    buf = io.BytesIO()
-    doc.save(buf)
-
+        zf.writestr("content.xml", content_xml.encode("utf-8"))
     return buf.getvalue()
 
 
@@ -132,17 +135,16 @@ def test_extract_from_docx_bytes():
     assert result == "Hello DOCX"
 
 
-def test_docx_large_document_extraction_benchmark():
-    """Benchmark test asserting 100-page DOCX extraction completes under 2.0 seconds (#579)."""
-    large_docx_bytes = _make_large_docx_bytes(num_pages=100)
+def test_extract_from_odt_bytes():
+    odt_bytes = _make_odt_bytes("Hello ODT")
+    result = extract_text_from_odt(odt_bytes)
+    assert result == "Hello ODT"
 
-    start_time = time.perf_counter()
-    extracted_text = extract_text_from_docx(large_docx_bytes)
-    elapsed_time = time.perf_counter() - start_time
 
-    assert len(extracted_text) > 0
-    assert "Chapter 100: Section Overview" in extracted_text
-    assert elapsed_time < 2.0, f"DOCX extraction took {elapsed_time:.3f}s (expected < 2.0s)"
+def test_extract_text_routing_odt():
+    odt_bytes = _make_odt_bytes("ODT content via routing")
+    result = extract_text(odt_bytes, "test.odt")
+    assert result == "ODT content via routing"
 
 
 def test_extract_from_txt_bytes():

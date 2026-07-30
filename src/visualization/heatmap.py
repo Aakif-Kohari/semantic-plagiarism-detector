@@ -16,7 +16,8 @@ Recent additions (Issue #628):
 import re
 import logging
 from contextlib import contextmanager
-from typing import Generator, Optional, Dict
+from typing import Generator, Optional
+import logging
 
 import matplotlib
 import matplotlib.colors as mcolors
@@ -101,18 +102,14 @@ def validate_similarity_matrix(df: pd.DataFrame) -> pd.DataFrame:
     clean_df = df.copy()
     if clean_df.isnull().values.any():
         logger.info("NaN values detected in similarity matrix. Filling with 0.0.")
-        clean_df.fillna(0.0, inplace=True)
+        clean_df = clean_df.fillna(0.0)
 
     clean_df = clean_df.clip(lower=0.0, upper=1.0)
-    np.fill_diagonal(clean_df.values, 1.0)
+    arr = clean_df.to_numpy(copy=True)
+    np.fill_diagonal(arr, 1.0)
+    clean_df = pd.DataFrame(arr, index=df.index, columns=df.columns)
     return clean_df
 
-
-def _get_theme_color(theme_colors: Optional[Dict[str, str]], key: str, fallback: str) -> str:
-    """Safely extract color from theme dictionary with fallback."""
-    if theme_colors and key in theme_colors:
-        return theme_colors[key]
-    return fallback
 
 
 def filter_heatmap_by_class_tag(
@@ -193,6 +190,7 @@ def plot_similarity_heatmap(
     log_scale: bool = False,  # <-- NEW PARAMETER (Issue #628)
     class_tag: Optional[str] = None,
     doc_class_map: Optional[dict] = None,
+    dim_diagonal: bool = False,  # <-- NEW PARAMETER (Issue #500)
 ) -> Figure:
     """
     High-resolution Matplotlib heatmap optimized for static PNG export.
@@ -208,6 +206,7 @@ def plot_similarity_heatmap(
         colormap_name: Name of the colormap to use.
         mask_threshold: Optional threshold to mask low-similarity cells.
         log_scale: If True, applies a logarithmic color scale (Issue #628).
+        dim_diagonal: If True, greys out / dims 100% self-similarity diagonal cells (Issue #500).
         
     Returns:
         A Matplotlib Figure object.
@@ -237,6 +236,12 @@ def plot_similarity_heatmap(
             ax.set_title(safe_title)
             return fig
 
+    if dim_diagonal and n > 0:
+        clean_df = clean_df.copy()
+        vals = clean_df.to_numpy(copy=True)
+        np.fill_diagonal(vals, np.nan)
+        clean_df = pd.DataFrame(vals, index=clean_df.index, columns=clean_df.columns)
+
     if figsize is None:
         cell_size = max(1.2, 6 / n)
         width = max(6.0, n * cell_size + 2.0)
@@ -246,6 +251,9 @@ def plot_similarity_heatmap(
     mask = None
     if mask_threshold is not None:
         mask = similarity_df < mask_threshold
+    if dim_diagonal and n > 0:
+        diag_mask = np.eye(n, dtype=bool)
+        mask = diag_mask if mask is None else (mask | diag_mask)
 
     # Issue #628: Apply LogNorm if log_scale is enabled
     norm = None
@@ -287,6 +295,18 @@ def plot_similarity_heatmap(
         else:
             title_color = "black"
 
+        if dim_diagonal:
+            dim_color = theme_colors.get("border", "#cccccc") if theme_colors else "#cccccc"
+            for i in range(n):
+                ax.add_patch(
+                    mpatches.Rectangle(
+                        (i, i), 1, 1,
+                        facecolor=dim_color,
+                        alpha=0.4,
+                        zorder=2,
+                    )
+                )
+
         data = clean_df.values
         for i in range(n):
             ax.add_patch(
@@ -294,7 +314,7 @@ def plot_similarity_heatmap(
                     (i, i), 1, 1,
                     boxstyle="square,pad=0",
                     linewidth=2,
-                    edgecolor="#555555",
+                    edgecolor="#777777" if dim_diagonal else "#555555",
                     facecolor="none",
                     zorder=3,
                 )
@@ -302,7 +322,7 @@ def plot_similarity_heatmap(
 
         for i in range(n):
             for j in range(n):
-                if i != j and data[i, j] >= threshold:
+                if i != j and not np.isnan(data[i, j]) and data[i, j] >= threshold:
                     ax.add_patch(
                         mpatches.FancyBboxPatch(
                             (j, i), 1, 1,
@@ -360,6 +380,7 @@ def plot_similarity_heatmap_plotly(
     log_scale: bool = False,  # <-- NEW PARAMETER
     class_tag: Optional[str] = None,
     doc_class_map: Optional[dict] = None,
+    dim_diagonal: bool = False,  # <-- NEW PARAMETER (Issue #500)
 ):
     """
     Interactive Plotly heatmap featuring dynamic hover values and custom threshold bounds.
@@ -402,13 +423,23 @@ def plot_similarity_heatmap_plotly(
             for row in clean_df.values.tolist()
         ]
         
+    if dim_diagonal:
+        z_matrix = [
+            [None if i == j else val for j, val in enumerate(row)]
+            for i, row in enumerate(z_matrix)
+        ]
+
     n = len(names)
 
     hover_text = [
         [
             f"<b>{names[i]}</b> vs <b>{names[j]}</b><br>"
-            f"Similarity: {clean_df.values[i, j]:.2%}<br>"
-            f"Status: {'Flagged' if (i != j and clean_df.values[i, j] >= threshold) else 'Normal'}"
+            + (
+                "Self-Similarity: Dimmed"
+                if (dim_diagonal and i == j)
+                else f"Similarity: {clean_df.values[i, j]:.2%}<br>"
+                f"Status: {'Flagged' if (i != j and clean_df.values[i, j] >= threshold) else 'Normal'}"
+            )
             for j in range(n)
         ]
         for i in range(n)
@@ -434,8 +465,10 @@ def plot_similarity_heatmap_plotly(
     if annotate:
         for i in range(n):
             for j in range(n):
+                if dim_diagonal and i == j:
+                    continue
                 val = clean_df.values[i, j]
-                if mask_threshold is not None and val < mask_threshold:
+                if pd.isna(val) or (mask_threshold is not None and val < mask_threshold):
                     continue
                 font_color = "black" if (0.3 < val < 0.8 and cmap not in ["Viridis", "Plasma"]) else "white"
                 if cmap == "YlOrRd" and val < 0.6:
@@ -563,6 +596,8 @@ def plot_chunk_similarity_comparison(
 
         fig.tight_layout()
         return fig
+
+
 def render_heatmap_ui(
     similarity_df: pd.DataFrame,
     threshold: float = PLAGIARISM_THRESHOLD,
@@ -577,6 +612,7 @@ def render_heatmap_ui(
     - Reset View
     - Dynamic colormap selection
     - Logarithmic Scale toggle (Issue #628)
+    - Dim Self-Similarity Diagonal toggle (Issue #500)
     """
     if similarity_df.empty:
         st.warning("No similarity data available.")
@@ -596,17 +632,6 @@ def render_heatmap_ui(
             horizontal=True,
             key="heatmap_zoom_mode",
         )
-    # Heatmap view controls
-    zoom_mode = st.radio(
-        "Heatmap View",
-        [
-            "Fit Matrix",
-            "High Similarity Focus",
-            "Reset View",
-        ],
-        horizontal=True,
-        key="heatmap_zoom_mode",
-    )
 
     # Class Tag Filter selector
     unique_classes = ["All Classes"]
@@ -631,8 +656,6 @@ def render_heatmap_ui(
         st.info(f"No document pairs found matching class tag '{selected_class_tag}'.")
         return
 
-    # Colormap selector
-
     with col2:
         colormap_name = st.selectbox(
             "Color Map",
@@ -649,6 +672,14 @@ def render_heatmap_ui(
             help="Apply logarithmic color scaling to better visualize highly skewed similarity distributions."
         )
 
+        # Issue #500: Dim Self-Similarity Diagonal Toggle
+        dim_diagonal = st.checkbox(
+            "Dim Self-Similarity Diagonal",
+            value=False,
+            key="heatmap_dim_diagonal",
+            help="Grey out or dim 100% self-similarity diagonal cells to focus visual attention on cross-document matches."
+        )
+
     n = len(clean_df)
 
     fig = plot_similarity_heatmap_plotly(
@@ -656,7 +687,8 @@ def render_heatmap_ui(
         threshold=threshold,
         theme_colors=theme_colors,
         colormap_name=colormap_name,
-        log_scale=log_scale,  # <-- PASSED TO PLOTLY (for API symmetry)
+        log_scale=log_scale,
+        dim_diagonal=dim_diagonal,
     )
 
     if zoom_mode == "Fit Matrix":
@@ -679,3 +711,4 @@ def render_heatmap_ui(
         fig.update_yaxes(autorange=True)
 
     st.plotly_chart(fig, use_container_width=True)
+

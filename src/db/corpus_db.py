@@ -20,13 +20,19 @@ logger = logging.getLogger(__name__)
 
 import numpy as np
 
+from src.core.app_config import CORPUS_DB_PATH, FALLBACK_CORPUS_DB_PATH
 from src.db.migrations import (delete_all_if_table_exists,
                                migrate_corpus_database)
 from src.utils.filename import sanitize_filename
 
-_DB_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "data", "corpus.db")
-)
+# Seed the corpus DB path from the centralized app_config.  ``_DB_PATH`` is
+# intentionally kept as a module-level string (rather than replaced with a
+# direct import of ``CORPUS_DB_PATH``) because:
+#   1. tests monkey-patch ``src.db.corpus_db._DB_PATH`` directly
+#      (tests/conftest.py, tests/db/test_filename_security.py), and
+#   2. ``configure_db_path()`` below mutates it at runtime for test/seed
+#      isolation (scripts/generate_seed_data.py, tests/db/test_corpus_db.py).
+_DB_PATH = os.path.abspath(str(CORPUS_DB_PATH))
 
 _connection_pool = threading.local()
 
@@ -68,7 +74,9 @@ def _connect():
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
     except (OSError, PermissionError):
-        path = os.path.join(tempfile.gettempdir(), "semantic_plagiarism_detector", "data", "corpus.db")
+        # Use the centralized fallback so all DB modules agree on the
+        # temp-dir location when the primary data dir is not writable.
+        path = str(FALLBACK_CORPUS_DB_PATH)
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
     pool = _pool()
@@ -77,7 +85,7 @@ def _connect():
         try:
             conn = sqlite3.connect(path, check_same_thread=False)
         except sqlite3.OperationalError:
-            path = os.path.join(tempfile.gettempdir(), "semantic_plagiarism_detector", "data", "corpus.db")
+            path = str(FALLBACK_CORPUS_DB_PATH)
             os.makedirs(os.path.dirname(path), exist_ok=True)
             conn = sqlite3.connect(path, check_same_thread=False)
         conn.execute("PRAGMA foreign_keys = ON")

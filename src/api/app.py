@@ -2,16 +2,23 @@
 
 import logging
 import os
+import time
 from typing import Dict
 
 import numpy as np
+from fastapi import Request
 from fastapi import (Depends, FastAPI, File, HTTPException, Query, UploadFile,
                      status)
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, JSONResponse
 from fastapi.security import HTTPBearer
 from sklearn.metrics.pairwise import cosine_similarity
 
+from src.core.app_config import FAISS_INDEX_PATH, HEALTHZ_DB_PATHS
 from src.core.document_parser import extract_text
 from src.core.embedding_model import embed_chunks, get_document_embedding
 from src.core.similarity import (PLAGIARISM_THRESHOLD, chunk_max_similarity,
@@ -48,6 +55,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# SlowAPI Rate Limiting setup
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+
+def custom_rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+    response = JSONResponse(
+        {"detail": f"Rate limit exceeded: {exc.detail}"}, status_code=429
+    )
+    response = request.app.state.limiter._inject_headers(
+        response, request.state.view_rate_limit
+    )
+    return response
+
+app.add_exception_handler(RateLimitExceeded, custom_rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 # ── Bearer Token Authentication ────────────────────────────────────────────────
 
@@ -108,7 +131,8 @@ def get_corpus_documents_with_embeddings() -> Dict[str, Dict]:
 
 
 @app.post("/api/v1/auth/login", tags=["Authentication"], summary="Authenticate user")
-async def login():
+@limiter.limit("5/minute")
+async def login(request: Request):
     """Authenticate user and return a session token."""
     return {"token": "dummy-token"}
 
@@ -123,10 +147,10 @@ def health_check():
     }
 
 
-_HEALTHZ_DB_PATHS = (
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "corpus.db")),
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "users.db")),
-)
+# ``HEALTHZ_DB_PATHS`` is centralized in app_config.  Keep a local alias as a
+# tuple of str for backward compatibility with the original implementation
+# (and so any code doing string comparison on these paths keeps working).
+_HEALTHZ_DB_PATHS = tuple(str(p) for p in HEALTHZ_DB_PATHS)
 
 
 @app.get("/metrics", tags=["Monitoring"], response_class=PlainTextResponse)
@@ -314,9 +338,9 @@ async def scan_document(
 # ── System Administration ──────────────────────────────────────────────────────
 
 logger = logging.getLogger(__name__)
-INDEX_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "corpus.index")
-)
+# Cast to str for consistency with callers that may pass it to faiss.*
+# or other C-extension APIs that require str paths.
+INDEX_PATH = str(FAISS_INDEX_PATH)
 
 
 @app.post("/api/v1/clear", tags=["System Administration"])

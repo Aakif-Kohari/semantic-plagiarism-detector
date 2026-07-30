@@ -238,9 +238,11 @@ if "session_id" not in st.session_state:
 
 SESSION_ID = st.session_state.session_id
 
-_INDEX_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "corpus.index")
-)
+# FAISS index location is centralized in src.core.app_config so this module,
+# src/api/app.py, src/cli.py and src/utils/mock_data.py all agree on it.
+# Cast to str because faiss.write_index / faiss.read_index require str paths.
+from src.core.app_config import FAISS_INDEX_PATH
+_INDEX_PATH = str(FAISS_INDEX_PATH)
 
 # -----------------------------------------------------------------------------
 # Page Configuration & Session State
@@ -1006,7 +1008,247 @@ else:
             heatmap_fig = plot_similarity_heatmap(
                 active_sim_df, threshold=threshold, theme_colors=get_colors()
             )
-            st.pyplot(heatmap_fig, use_container_width=True)
+        else:
+            with st.expander(
+                "🗺️ Similarity Heatmap",
+                expanded=False,
+            ):
+                load_heatmap = st.toggle(
+                    "Load heatmap",
+                    key="load_similarity_heatmap",
+                    help=(
+                        "Generate the heatmap only when needed. "
+                        "This can improve responsiveness for large analyses."
+                    ),
+                )
+
+                show_cell_percentages = st.checkbox(
+                    "Show Cell Percentages",
+                    value=True,
+                    key="heatmap_show_percentages",
+                    help="Render similarity text labels inside heatmap cells.",
+                )
+
+                mask_threshold = st.slider(
+                    "Minimum Similarity to Display",
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=0.0,
+                    step=0.05,
+                    format="%.2f",
+                    key="heatmap_mask_threshold",
+                    help="Hide cell colors for similarity values below this threshold.",
+                )
+
+                dim_diagonal = st.checkbox(
+                    "Dim Self-Similarity Diagonal",
+                    value=False,
+                    key="heatmap_dim_diagonal",
+                    help="Grey out or dim the 100% self-similarity diagonal cells (doc_A vs doc_A) on the heatmap.",
+                )
+
+                heatmap_class_filter = st.selectbox(
+                    "Filter Heatmap by Class Tag",
+                    options=unique_classes,
+                    index=0,
+                    key="heatmap_tab_class_filter",
+                    help="Filter heatmap rows and columns by matching document class tag.",
+                )
+
+                heatmap_fig = build_visualization_lazily(
+                    load_heatmap,
+                    lambda: plot_similarity_heatmap(
+                        active_sim_df,
+                        title="Document Semantic Similarity",
+                        threshold=threshold,
+                        theme_colors=get_colors(),
+                        colormap_name=heatmap_cmap,
+                        annotate=show_cell_percentages,
+                        mask_threshold=mask_threshold,
+                        class_tag=heatmap_class_filter,
+                        dim_diagonal=dim_diagonal,
+                    ),
+                )
+
+            doc_select_options = ["None"] + list(active_sim_df.columns)
+            selected_highlight_doc = st.selectbox(
+                "Highlight Document Node",
+                options=doc_select_options,
+                index=0,
+                key="highlight_doc_node_selector",
+            )
+            highlighted_doc = (
+                selected_highlight_doc
+                if selected_highlight_doc != "None"
+                else None
+            )
+
+            network_fig = plot_similarity_network(
+                similarity_df=active_sim_df,
+                threshold=threshold,
+                highlighted_doc=highlighted_doc,
+                title="Interactive Document Plagiarism Network",
+            )
+
+            st.download_button(
+                    "⬇️ Download Heatmap PNG",
+                    buf,
+                    "heatmap.png",
+                    "image/png",
+                    key="download_lazy_heatmap_png",
+                )
+
+            with st.expander(
+                "🕸️ Interactive Plagiarism Network",
+                expanded=False,
+            ):
+                st.caption(
+                    "Documents are shown as nodes. Connections appear when "
+                    "their similarity is greater than or equal to the "
+                    "selected threshold."
+                )
+                load_network = st.toggle(
+                    "Load network graph",
+                    key="load_plagiarism_network",
+                    help=(
+                        "Generate the interactive network only when needed."
+                    ),
+                )
+
+                max_degree = max(0, len(active_sim_df) - 1)
+                min_degree = st.slider(
+                    "Minimum Connected Documents",
+                    min_value=0,
+                    max_value=max_degree,
+                    value=0,
+                    key="min_connected_docs_slider",
+                )
+
+                network_fig = build_visualization_lazily(
+                    load_network,
+                    lambda: plot_similarity_network(
+                        similarity_df=active_sim_df,
+                        threshold=threshold,
+                        min_degree=min_degree,
+                        title=(
+                            "Interactive Document Plagiarism Network"
+                        ),
+                        selected_node=st.session_state.get(
+                            "selected_document_id"
+                        ),
+                    ),
+                )
+
+                if network_fig is None:
+                    st.info(
+                        "Enable “Load network graph” to generate this "
+                        "visualization."
+                    )
+                elif plotly_events is not None:
+                    selected_points = plotly_events(
+                        network_fig,
+                        click_event=True,
+                        hover_event=False,
+                        select_event=False,
+                        key="plagiarism_network",
+                    )
+
+                    if selected_points:
+                        clicked_point = selected_points[0]
+                        point_index = clicked_point.get("pointIndex")
+
+                        if (
+                            point_index is not None
+                            and 0 <= point_index < len(doc_names)
+                        ):
+                            st.session_state.selected_document_id = (
+                                doc_names[point_index]
+                            )
+                else:
+                    st.plotly_chart(
+                        network_fig,
+                        use_container_width=True,
+                    )
+
+                if network_fig is not None:
+                    col_gexf, col_csv = st.columns(2)
+                    with col_gexf:
+                        gexf_data = export_network_to_gexf_bytes(
+                            similarity_df=active_sim_df,
+                            threshold=threshold,
+                            min_degree=st.session_state.get(
+                                "min_connected_docs_slider", 0
+                            ),
+                        )
+                        st.download_button(
+                            "⬇️ Download Network (GEXF)",
+                            gexf_data,
+                            "plagiarism_network.gexf",
+                            "application/xml",
+                            key="download_network_gexf",
+                            use_container_width=True,
+                        )
+                    with col_csv:
+                        csv_data = export_network_to_csv_bytes(
+                            similarity_df=active_sim_df,
+                            threshold=threshold,
+                            min_degree=st.session_state.get(
+                                "min_connected_docs_slider", 0
+                            ),
+                        )
+                        st.download_button(
+                            "⬇️ Download Network Graph Data (CSV)",
+                            csv_data,
+                            "plagiarism_network.csv",
+                            "text/csv",
+                            key="download_network_csv",
+                            use_container_width=True,
+                        )
+
+            selected_document_id = st.session_state.get(
+                "selected_document_id"
+            )
+
+            if selected_document_id:
+                filtered_flags = [
+                    flag
+                    for flag in flags
+                    if (
+                        flag["doc_a"] == selected_document_id
+                        or flag["doc_b"] == selected_document_id
+                    )
+                ]
+            else:
+                filtered_flags = flags
+
+    # ── Summary Metrics ───────────────────────────────────────────────────────────
+
+    if len(file_bytes_dict) < 2:
+        st.markdown(
+            empty_state_html(
+                "Waiting for Files",
+                "Please upload at least 2 PDF, DOCX, or TXT assignments to begin analysis.",
+                "📂",
+            ),
+            unsafe_allow_html=True,
+        )
+        st.stop()
+
+    if "sent_alerts" not in st.session_state:
+        st.session_state.sent_alerts = set()
+
+    for flag in filtered_flags:
+        alert_key = (flag["doc_a"], flag["doc_b"])
+        if alert_key not in st.session_state.sent_alerts:
+            try:
+                send_plagiarism_alert(
+                    doc_a=flag["doc_a"],
+                    doc_b=flag["doc_b"],
+                    similarity=float(flag["similarity"]),
+                )
+                st.session_state.sent_alerts.add(alert_key)
+            except Exception as e:
+                logger.error(f"Failed to send webhook alert: {e}")
 
     # ══ TAB 5: PAIR DRILL-DOWN ════════════════════════════════════════════════
     with tab_drill:
@@ -1233,3 +1475,4 @@ with _footer_col2:
         )
     else:
         st.caption("✅ Up to date")
+        
