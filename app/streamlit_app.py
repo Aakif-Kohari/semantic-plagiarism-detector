@@ -1438,6 +1438,25 @@ else:
 
             st.markdown("")
             if st.button(
+                "🗑️ Clear Application Cache", 
+                key="clear_app_cache_button", 
+                use_container_width=True,
+                type="primary",
+            ):
+                from src.utils.redis_cache import get_cache
+                st.cache_data.clear()
+                try:
+                    cache = get_cache()
+                    if cache._client:
+                        cache._client.flushdb()
+                    elif hasattr(cache, "clear_pattern"):
+                        cache.clear_pattern("*")
+                except Exception as e:
+                    pass
+                st.success("✅ Application cache cleared successfully!")
+
+            st.markdown("")
+            if st.button(
                 "🔍 Ping Redis", key="ping_redis_button", use_container_width=True
             ):
                 from src.utils.redis_cache import get_cache
