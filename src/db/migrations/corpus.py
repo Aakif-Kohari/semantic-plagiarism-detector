@@ -6,7 +6,7 @@ import sqlite3
 
 from .common import column_exists, run_migrations
 
-CORPUS_SCHEMA_VERSION = 8
+CORPUS_SCHEMA_VERSION = 9
 
 
 def migration_001_create_base_schema(
@@ -152,6 +152,18 @@ def migration_008_add_soft_delete(
         )
 
 
+def migration_009_add_file_hash_index(
+    connection: sqlite3.Connection,
+) -> None:
+    """Add index on the file_hash column in documents table."""
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_documents_file_hash
+        ON documents(file_hash)
+        """
+    )
+
+
 CORPUS_MIGRATIONS = {
     1: migration_001_create_base_schema,
     2: migration_002_add_document_metadata,
@@ -161,6 +173,7 @@ CORPUS_MIGRATIONS = {
     6: migration_006_add_incident_threshold_snapshot,
     7: migration_007_add_document_language,
     8: migration_008_add_soft_delete,
+    9: migration_009_add_file_hash_index,
 }
 
 
