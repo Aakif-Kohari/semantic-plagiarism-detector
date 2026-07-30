@@ -844,7 +844,7 @@ def extract_text_from_pdf(
 
 
 def extract_text_from_docx(file: PDFInput) -> str:
-    """Extract text from a DOCX file."""
+    """Extract text from a DOCX file, prefixing headings with Markdown # markers."""
     try:
         doc_file = io.BytesIO(file) if isinstance(file, bytes) else file
         document = docx.Document(doc_file)
@@ -855,12 +855,16 @@ def extract_text_from_docx(file: PDFInput) -> str:
 
         for paragraph in document.paragraphs:
             p_text = paragraph.text
-            paragraphs_text.append(p_text)
-
             style_name = paragraph.style.name if paragraph.style else ""
-            if style_name in ("Heading 1", "Heading 2"):
+
+            heading_match = re.match(r"^Heading\s+(\d+)$", style_name or "")
+            if heading_match:
+                level = int(heading_match.group(1))
+                prefix = "#" * level + " "
+                p_text = prefix + p_text
                 current_heading = p_text.strip()
 
+            paragraphs_text.append(p_text)
             p_words = p_text.split()
             word_headings.extend([current_heading] * len(p_words))
 
