@@ -115,6 +115,10 @@ from src.core.similarity import (
     find_most_similar_chunks,
     flag_plagiarism,
 )
+from src.visualization.network_graph import (
+    NETWORK_GRAPH_CONFIG,
+    plot_similarity_network,
+)
 from src.core.tag_manager import TagManager
 from src.core.telemetry import TelemetryService
 from src.core.text_chunking import chunk_documents
@@ -1219,6 +1223,7 @@ else:
                     st.plotly_chart(
                         network_fig,
                         use_container_width=True,
+                        config=NETWORK_GRAPH_CONFIG,
                     )
 
                 if network_fig is not None:

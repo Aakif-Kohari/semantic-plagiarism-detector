@@ -27,7 +27,13 @@ DEFAULT_TAG_COLORS = [
     "#6366F1",  # Indigo
     "#14B8A6",  # Teal
 ]
-
+NETWORK_GRAPH_CONFIG = {
+    "toImageButtonOptions": {
+        "format": "png",
+        "filename": "plagiarism_network",
+        "scale": 2,
+    },
+}
 
 def _parse_document_tags(tags_val: object) -> list[str]:
     """Extracts a list of normalized tag strings from string, list, set or tuple input."""
