@@ -9,6 +9,7 @@ This module validates:
 - Secure database restore workflow.
 - Database optimization via VACUUM and PRAGMA optimize.
 - Automated cleanup of old backups based on retention policies.
+- Database file size inspection (issue #1047).
 """
 
 import logging
@@ -27,6 +28,7 @@ from src.db.database_backup import (
     create_corpus_database_snapshot,
     create_password_protected_backup,
     create_sqlite_snapshot,
+    get_database_size_bytes,
     optimize_database,
     restore,
     restore_database_backup,
@@ -270,3 +272,92 @@ class TestCleanupOldBackups:
 
             assert result["files_deleted"] == 0, "Should not count failed deletions"
             assert result["bytes_freed"] == 0, "Should not count freed bytes for failed deletions"
+
+
+class TestGetDatabaseSizeBytes:
+    """Tests for the get_database_size_bytes helper (issue #1047)."""
+
+    def test_returns_zero_for_nonexistent_file(self, tmp_path):
+        """A missing database file must report size 0, not raise."""
+        missing_db = tmp_path / "does_not_exist.db"
+
+        size = get_database_size_bytes(missing_db)
+
+        assert size == 0
+
+    def test_returns_zero_for_nonexistent_file_string_path(self, tmp_path):
+        """The function must accept str paths as well as Path objects."""
+        missing_db = str(tmp_path / "does_not_exist.db")
+
+        size = get_database_size_bytes(missing_db)
+
+        assert size == 0
+
+    def test_returns_size_for_temp_db(self, tmp_path):
+        """Verify size calculation for a temp DB created with known content.
+
+        Acceptance criterion from issue #1047:
+            "Add unit test verifying size calculation for temp DB."
+        """
+        db_path = tmp_path / "test_size.db"
+
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE sample (id INTEGER PRIMARY KEY, payload TEXT)")
+        conn.executemany(
+            "INSERT INTO sample (payload) VALUES (?)",
+            [(f"row-{i}",) for i in range(50)],
+        )
+        conn.commit()
+        conn.close()
+
+        size = get_database_size_bytes(db_path)
+
+        # The file must exist and report a positive size.
+        assert size > 0
+        # The reported size must match the actual on-disk size.
+        assert size == db_path.stat().st_size
+
+    def test_size_grows_after_insert(self, tmp_path):
+        """Inserting more data must increase the reported size."""
+        db_path = tmp_path / "test_grow.db"
+
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE docs (id INTEGER PRIMARY KEY, content TEXT)")
+        conn.execute("INSERT INTO docs (content) VALUES ('seed')")
+        conn.commit()
+        conn.close()
+
+        size_before = get_database_size_bytes(db_path)
+
+        conn = sqlite3.connect(str(db_path))
+        conn.executemany(
+            "INSERT INTO docs (content) VALUES (?)",
+            [(f"padding-{'x' * 200}-{i}",) for i in range(100)],
+        )
+        conn.commit()
+        conn.close()
+
+        size_after = get_database_size_bytes(db_path)
+
+        assert size_after > size_before
+
+    def test_accepts_path_and_str_equivalently(self, tmp_path):
+        """Both Path and str inputs must resolve to the same size."""
+        db_path = tmp_path / "test_type.db"
+        db_path.write_bytes(SQLITE_HEADER + b"payload")
+
+        size_from_path = get_database_size_bytes(db_path)
+        size_from_str = get_database_size_bytes(str(db_path))
+
+        assert size_from_path == size_from_str == db_path.stat().st_size
+
+    def test_expands_user_home(self, monkeypatch, tmp_path):
+        """A leading ``~`` must be expanded against the home directory."""
+        db_path = tmp_path / "home_db.db"
+        db_path.write_bytes(b"not-a-real-sqlite-db-but-size-still-works")
+        # Path.expanduser() reads $HOME (not Path.home()), so patch the env var.
+        monkeypatch.setenv("HOME", str(tmp_path))
+
+        size = get_database_size_bytes("~/home_db.db")
+
+        assert size == db_path.stat().st_size
