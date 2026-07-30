@@ -226,10 +226,9 @@ except ImportError:
     Tour = None
 
 try:
-    from src.utils.google_drive import bulk_download_drive_folder, import_from_google_drive
+    from src.utils.google_drive import bulk_download_drive_folder
 except Exception:
     bulk_download_drive_folder = None
-    import_from_google_drive = None
 
 class OCRFileBatchError(Exception):
     """Exception raised when OCR extraction fails on one or more files in a batch."""
@@ -870,6 +869,66 @@ else:
 
     MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024 # 10MB limit
     file_bytes_dict = {}
+
+    if bulk_download_drive_folder is not None:
+        with st.expander("📁 Import from Google Drive", expanded=False):
+            drive_folder_input = st.text_input(
+                "Google Drive folder URL or ID",
+                key="drive_folder_input",
+                placeholder="https://drive.google.com/drive/folders/…",
+            )
+            drive_api_key = st.text_input(
+                "Google Drive API key",
+                key="drive_api_key",
+                type="password",
+                help="Optional if GOOGLE_DRIVE_API_KEY is set in the environment.",
+            )
+            if st.button("Import from Drive", key="drive_import_btn"):
+                if not drive_folder_input:
+                    st.error("Please enter a Google Drive folder URL or ID.")
+                else:
+                    drive_progress_bar = st.progress(
+                        0, text="Connecting to Google Drive…"
+                    )
+
+                    def _update_drive_progress(bytes_downloaded, total_bytes):
+                        fraction = (
+                            min(bytes_downloaded / total_bytes, 1.0)
+                            if total_bytes
+                            else 0
+                        )
+                        drive_progress_bar.progress(
+                            fraction,
+                            text=(
+                                f"Downloading from Drive… "
+                                f"{bytes_downloaded / 1024:.0f} KB"
+                                + (
+                                    f" / {total_bytes / 1024:.0f} KB"
+                                    if total_bytes
+                                    else ""
+                                )
+                            ),
+                        )
+
+                    try:
+                        drive_files, drive_names = bulk_download_drive_folder(
+                            drive_folder_input,
+                            api_key=drive_api_key or None,
+                            progress_callback=_update_drive_progress,
+                        )
+                        st.session_state.setdefault("drive_imported_files", {})
+                        st.session_state["drive_imported_files"].update(drive_files)
+                        drive_progress_bar.progress(
+                            1.0, text=f"Imported {len(drive_names)} file(s)."
+                        )
+                        st.success(
+                            f"Imported {len(drive_names)} file(s) from Google Drive: "
+                            f"{', '.join(drive_names)}"
+                        )
+                    except Exception as exc:
+                        drive_progress_bar.empty()
+                        st.error(f"⚠️ Google Drive import failed: {exc}")
+
     if uploaded_files:
         for uploaded_file in uploaded_files:
             original_name = uploaded_file.name
@@ -889,6 +948,10 @@ else:
                 continue
 
             file_bytes_dict[safe_name] = strip_exif_metadata(uploaded_file.read(), safe_name)
+
+    for drive_name, drive_bytes in st.session_state.get("drive_imported_files", {}).items():
+        safe_drive_name = unique_filename(drive_name, file_bytes_dict)
+        file_bytes_dict[safe_drive_name] = drive_bytes
 
     has_enough_files = len(file_bytes_dict) >= 2
 
