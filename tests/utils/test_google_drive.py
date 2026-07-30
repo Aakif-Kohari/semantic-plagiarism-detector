@@ -171,6 +171,40 @@ def test_download_file_bytes(mock_downloader_cls):
 
 
 @patch("src.utils.google_drive.MediaIoBaseDownload")
+def test_download_file_bytes_calls_progress_callback(mock_downloader_cls):
+    status1 = Mock(resumable_progress=50, total_size=100)
+    status2 = Mock(resumable_progress=100, total_size=100)
+    mock_downloader = Mock()
+    mock_downloader.next_chunk.side_effect = [(status1, False), (status2, True)]
+    mock_downloader_cls.return_value = mock_downloader
+
+    service = Mock()
+    service.files.return_value.get_media.return_value = Mock()
+
+    calls = []
+    download_file_bytes(service, "file123", progress_callback=lambda d, t: calls.append((d, t)))
+
+    # One callback per chunk, plus a guaranteed final 100% callback.
+    assert calls[0] == (50, 100)
+    assert calls[1] == (100, 100)
+    assert calls[-1][0] == calls[-1][1]
+
+
+@patch("src.utils.google_drive.MediaIoBaseDownload")
+def test_download_file_bytes_progress_callback_optional(mock_downloader_cls):
+    mock_downloader = Mock()
+    mock_downloader.next_chunk.side_effect = [(None, False), (None, True)]
+    mock_downloader_cls.return_value = mock_downloader
+
+    service = Mock()
+    service.files.return_value.get_media.return_value = Mock()
+
+    # Should not raise when no progress_callback is supplied.
+    result = download_file_bytes(service, "file123")
+    assert isinstance(result, bytes)
+
+
+@patch("src.utils.google_drive.MediaIoBaseDownload")
 def test_download_file_bytes_handles_api_error(mock_downloader_cls):
     mock_downloader = Mock()
     mock_downloader.next_chunk.side_effect = Exception("403 Forbidden")
@@ -221,6 +255,41 @@ def test_bulk_download_drive_folder_handles_download_error(
             "https://drive.google.com/drive/folders/folder123",
             api_key="key",
         )
+
+
+@patch("src.utils.google_drive.download_file_bytes")
+@patch("src.utils.google_drive.list_files_in_folder")
+@patch("src.utils.google_drive.get_drive_service")
+def test_bulk_download_drive_folder_reports_aggregate_progress(
+    mock_get_service, mock_list, mock_download
+):
+    mock_list.return_value = [
+        {"id": "f1", "name": "doc1.pdf", "size": "100"},
+        {"id": "f2", "name": "doc2.docx", "size": "200"},
+    ]
+
+    def fake_download(service, file_id, progress_callback=None):
+        if progress_callback:
+            if file_id == "f1":
+                progress_callback(100, 100)
+            else:
+                progress_callback(200, 200)
+        return b"x" * (100 if file_id == "f1" else 200)
+
+    mock_download.side_effect = fake_download
+
+    calls = []
+    bulk_download_drive_folder(
+        "https://drive.google.com/drive/folders/folder123",
+        api_key="key",
+        progress_callback=lambda d, t: calls.append((d, t)),
+    )
+
+    # Progress accumulates across files against the batch total (300 bytes),
+    # and the final call always reaches 100%.
+    assert calls[0] == (100, 300)
+    assert calls[1] == (300, 300)
+    assert calls[-1] == (300, 300)
 
 
 def test_bulk_download_drive_folder_invalid_folder():
