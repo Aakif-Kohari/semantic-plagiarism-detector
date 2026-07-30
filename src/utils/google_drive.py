@@ -20,6 +20,16 @@ from src.utils.filename import unique_filename
 SUPPORTED_EXTENSIONS = (".pdf", ".docx", ".doc", ".txt")
 
 
+def get_supported_file_extensions() -> List[str]:
+    """
+    Return the list of supported file extensions for the plagiarism detection pipeline.
+
+    Returns:
+        A sorted list of supported file extensions (e.g., [".docx", ".pdf", ".txt"]).
+    """
+    return sorted(SUPPORTED_EXTENSIONS)
+
+
 def extract_folder_id(url_or_id: str) -> Optional[str]:
     """
     Extracts the Google Drive Folder ID from a full Drive URL or raw ID string.
