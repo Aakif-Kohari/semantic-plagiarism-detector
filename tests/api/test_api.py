@@ -11,7 +11,8 @@ from unittest.mock import patch
 import numpy as np
 from fastapi.testclient import TestClient
 
-from src.api.app import app, get_expected_bearer_token
+from src.api.app import app
+from src.api.middleware import get_expected_bearer_token
 
 client = TestClient(app)
 
