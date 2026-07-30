@@ -225,3 +225,45 @@ def test_session_expiration_reset():
         assert "role" not in at.session_state or at.session_state.get("role") != "admin"
     finally:
         _cleanup_stale_artifacts()
+
+
+def test_sidebar_reset_all_filters():
+    """Verify that clicking 'Reset All Filters' clears the filter keys from session_state."""
+    _cleanup_stale_artifacts()
+    try:
+        at = AppTest.from_file("app/streamlit_app.py", default_timeout=30)
+        at.session_state["authenticated"] = True
+        at.session_state["username"] = "admin"
+        at.session_state["role"] = "admin"
+        at.session_state["user"] = {"username": "admin", "role": "admin"}
+        at.session_state["page"] = "dashboard"
+        at.session_state["nav"] = "Dashboard"
+
+        # Pre-seed some filter session states
+        at.session_state["threshold_slider"] = 0.85
+        at.session_state["class_filter_selectbox"] = "Class A"
+        at.session_state["heatmap_mask_threshold"] = 0.50
+        at.run()
+
+        assert not at.exception
+        assert at.session_state["threshold_slider"] == 0.85
+        assert at.session_state["class_filter_selectbox"] == "Class A"
+
+        # Find the reset button
+        reset_btns = [
+            btn for btn in at.sidebar.button if "Reset All Filters" in btn.label or "🔄" in btn.label
+        ]
+        assert len(reset_btns) > 0
+        
+        # Click the reset button and run
+        reset_btns[0].click().run()
+
+        assert not at.exception
+        
+        # Keys should be deleted from session_state (or reset to their widget defaults)
+        assert at.session_state.get("threshold_slider") != 0.85
+        assert at.session_state.get("class_filter_selectbox") != "Class A"
+        assert at.session_state.get("heatmap_mask_threshold") != 0.50
+
+    finally:
+        _cleanup_stale_artifacts()
