@@ -19,15 +19,13 @@ import streamlit as st
 
 # Fix Streamlit import paths by pointing to project root
 FILE_PATH = Path(__file__).resolve()
-ROOT_DIR = FILE_PATH.parent.parent  # Points to semantic-plagiarism-detector/
+ROOT_DIR = FILE_PATH.parent.parent # Points to semantic-plagiarism-detector/
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
-
 
 # Silence harmless Windows asyncio Proactor connection lost bugs
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-
 
 import base64
 import html
@@ -56,11 +54,10 @@ from typing import Any
 
 try:
     from streamlit_plotly_events import plotly_events
-except ImportError:  # pragma: no cover - optional dependency
+except ImportError: # pragma: no cover - optional dependency
     plotly_events = None
 
 import logging
-
 
 logger = logging.getLogger(__name__)
 
@@ -223,15 +220,12 @@ except Exception:
     bulk_download_drive_folder = None
     import_from_google_drive = None
 
-
 class OCRFileBatchError(Exception):
     """Exception raised when OCR extraction fails on one or more files in a batch."""
-
     def __init__(self, failed_files: list[str], failure_details: list[str]):
         self.failed_files = failed_files
         self.failure_details = failure_details
         super().__init__(f"OCR failed for files: {failed_files}")
-
 
 # Initialize databases
 init_corpus_db()
@@ -240,7 +234,6 @@ init_db()
 # Generate unique session ID for this Streamlit session
 if "session_id" not in st.session_state:
     import uuid
-
     st.session_state.session_id = str(uuid.uuid4())
 
 SESSION_ID = st.session_state.session_id
@@ -274,7 +267,6 @@ if "lang" not in st.session_state:
 st.markdown(back_to_top_html(), unsafe_allow_html=True)
 inject_css()
 
-
 def save_preferences_callback():
     """Persist settings to user DB profile when modified."""
     if st.session_state.get("authenticated") and st.session_state.get("username"):
@@ -284,16 +276,14 @@ def save_preferences_callback():
         }
         update_user_preferences(st.session_state.username, prefs)
 
-
 def build_visualization_lazily(is_enabled, build_fn):
     """Utility to lazily load heavy chart visualizations when requested."""
     if is_enabled:
         return build_fn()
     return None
 
-
 # ── SESSION TIMEOUT & ROUTE PROTECTION ────────────────────────────────────────
-TIMEOUT_LIMIT = 15 * 60  # 15 minutes in seconds
+TIMEOUT_LIMIT = 15 * 60 # 15 minutes in seconds
 
 cached_last_interaction = get_session_state(SESSION_ID, "last_interaction")
 if cached_last_interaction is not None:
@@ -311,7 +301,6 @@ if last_interaction and st.session_state.get("authenticated", False):
                 del st.session_state[key]
         clear_session(SESSION_ID)
         from src.errors import UI_SESSION_EXPIRED
-
         st.warning(UI_SESSION_EXPIRED)
         st.stop()
     else:
@@ -331,6 +320,7 @@ if not st.session_state.get("authenticated", False):
             _user_info = exchange_google_code(_code)
         elif _state.startswith("github_"):
             _user_info = exchange_github_code(_code)
+            
         if _user_info and _user_info.get("email"):
             _email = _user_info["email"]
             if not is_user_active(_email):
@@ -370,7 +360,6 @@ if not st.session_state.get("authenticated", False):
                 enabled, otp_secret = get_2fa_status(username)
                 if enabled and otp_secret:
                     import pyotp
-
                     totp = pyotp.TOTP(otp_secret)
                     if totp.verify(otp_code.strip()):
                         role = st.session_state.get("pending_role")
@@ -404,7 +393,7 @@ if not st.session_state.get("authenticated", False):
                 del st.session_state["pending_username"]
                 del st.session_state["pending_role"]
                 st.rerun()
-        st.stop()
+            st.stop()
 
     st.header("🔑 Login")
     username_input = st.text_input("Username")
@@ -467,7 +456,6 @@ def logout_dialog():
             clear_session(SESSION_ID)
             st.rerun()
 
-
 @st.dialog("⚠️ Confirm Bulk Clear")
 def clear_all_dialog():
     st.markdown(
@@ -486,7 +474,6 @@ def clear_all_dialog():
                 os.remove(_INDEX_PATH)
             st.success("All corpus data has been deleted.")
             st.rerun()
-
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -619,6 +606,64 @@ with st.sidebar:
     st.markdown("---")
     st.caption("Semantic Plagiarism Detector · FAISS edition")
 
+    # ── SESSION EXPIRY COUNTDOWN TIMER WIDGET ─────────────────────────────────
+    # Injects a lightweight JavaScript countdown that updates every second
+    # without requiring Streamlit reruns, improving UX and reducing server load.
+    safe_last_interaction = int(last_interaction or time.time())
+    st.markdown(
+        f"""
+        <div id="session-timer" style="
+            background-color: rgba(255, 165, 0, 0.1);
+            border: 1px solid rgba(255, 165, 0, 0.3);
+            border-radius: 8px;
+            padding: 12px;
+            margin-top: 16px;
+            text-align: center;
+            font-family: monospace;
+            font-size: 14px;
+            color: #ffa500;
+        ">
+            ⏱️ Session expires in: <span id="timer-display">15:00</span>
+        </div>
+        <script>
+        (function() {{
+            const timeoutLimit = {TIMEOUT_LIMIT};
+            const lastInteraction = {safe_last_interaction};
+            const display = document.getElementById('timer-display');
+            
+            function updateTimer() {{
+                const now = Math.floor(Date.now() / 1000);
+                const elapsed = now - lastInteraction;
+                const remaining = Math.max(0, timeoutLimit - elapsed);
+                
+                if (remaining <= 0) {{
+                    display.textContent = "00:00";
+                    display.parentElement.style.borderColor = "#ff4b4b";
+                    display.parentElement.style.color = "#ff4b4b";
+                    display.parentElement.innerHTML = "⚠️ Session Expired. Reloading...";
+                    setTimeout(() => window.location.reload(), 2000);
+                    return;
+                }}
+                
+                const minutes = Math.floor(remaining / 60);
+                const seconds = remaining % 60;
+                display.textContent = `${{minutes.toString().padStart(2, '0')}}:${{seconds.toString().padStart(2, '0')}}`;
+                
+                if (remaining < 60) {{
+                    display.parentElement.style.borderColor = "#ff4b4b";
+                    display.parentElement.style.color = "#ff4b4b";
+                }}
+            }}
+            
+            updateTimer();
+            setInterval(updateTimer, 1000);
+        }})();
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
+    # ───────────────────────────────────────────────────────────────────────────
+
     if user_role == "admin":
         st.markdown("---")
         st.markdown("### 💾 Storage Space Used")
@@ -650,14 +695,14 @@ with st.sidebar:
                                 os.remove(_INDEX_PATH)
                         st.rerun()
 
-        st.markdown('<div class="clear-all-container">', unsafe_allow_html=True)
+        st.markdown('<br>', unsafe_allow_html=True)
         if st.button("🗑️ Clear All Documents", key="clear_all_documents_button", use_container_width=True):
             clear_all_dialog()
-        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown('<br>', unsafe_allow_html=True)
 
-    st.markdown("---")
-    if st.button("🚪 Log Out", use_container_width=True, key="logout_button"):
-        logout_dialog()
+        st.markdown("---")
+        if st.button("🚪 Log Out", use_container_width=True, key="logout_button"):
+            logout_dialog()
 
 # ── Onboarding Tour for First-Time Admin Users ───────────────────────────────────
 if Tour is not None and user_role == "admin" and not get_tour_completed(st.session_state.username):
@@ -757,10 +802,9 @@ if user_role != "admin":
                                     st.warning(record.chunk_text)
 
                                 st.markdown(
-                                    f"<div style='text-align:right;'>"
-                                    f"<span style='background:{color};color:white;padding:3px 12px;"
-                                    f"border-radius:10px;font-size:0.85rem;font-weight:700;'>"
-                                    f"Similarity: {score*100:.1f}%</span></div>",
+                                    f"<div style='background:{color};color:white;padding:8px;border-radius:4px;text-align:center;'>"
+                                    f"Similarity: {score*100:.1f}%"
+                                    f"</div>",
                                     unsafe_allow_html=True,
                                 )
             except Exception as e:
@@ -780,7 +824,7 @@ else:
         key="file_uploader",
     )
 
-    MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 10MB limit
+    MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024 # 10MB limit
     file_bytes_dict = {}
     if uploaded_files:
         for uploaded_file in uploaded_files:
@@ -871,16 +915,16 @@ else:
                 chunk_overlap,
             )
 
-        (
-            raw_texts,
-            chunked_docs,
-            embeddings,
-            sim_df,
-            chunk_sim_df,
-            faiss_index,
-            registry,
-            ai_probabilities,
-        ) = analysis_results
+            (
+                raw_texts,
+                chunked_docs,
+                embeddings,
+                sim_df,
+                chunk_sim_df,
+                faiss_index,
+                registry,
+                ai_probabilities,
+            ) = analysis_results
 
         active_sim_df = chunk_sim_df if use_chunk_matrix else sim_df
         flags = flag_plagiarism(active_sim_df, threshold=threshold)
@@ -1279,7 +1323,6 @@ else:
                 key="settings_semantic_slider",
             )
 
-
             ocr_language = DEFAULT_OCR_LANGUAGE
             ocr_dpi = DEFAULT_OCR_DPI
 
@@ -1406,7 +1449,6 @@ else:
                     st.error("🚨 Disconnected")
                 st.rerun()
 
-
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.divider()
 from src.utils.version_check import APP_VERSION, check_for_update_sync
@@ -1420,7 +1462,7 @@ _footer_col1, _footer_col2 = st.columns([3, 1])
 with _footer_col1:
     st.caption(
         f"🎓 Semantic Plagiarism Detection System · v{APP_VERSION} · Streamlit · "
-        "[🐛 Report Bug / Feedback](https://github.com/Ganesh-403/semantic-plagiarism-detector/issues)"
+        "🐛 Report Bug / Feedback"
     )
 with _footer_col2:
     if _latest_tag:
