@@ -37,21 +37,17 @@ CSV_COLUMNS = [
     "Date Flagged",
 ]
 
-
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
-
 def _normalise_pair(doc_a: str, doc_b: str) -> tuple[str, str]:
-    return tuple(sorted((str(doc_a).strip(), str(doc_b).strip())))  # type: ignore[return-value]
-
+    return tuple(sorted((str(doc_a).strip(), str(doc_b).strip()))) # type: ignore[return-value]
 
 def _normalise_score(value: Any) -> float:
     try:
         return normalize_score(float(value))
     except (TypeError, ValueError):
         return 0.0
-
 
 def _severity_rank(flag: Mapping[str, Any]) -> str:
     raw = str(flag.get("severity", "")).strip()
@@ -64,12 +60,10 @@ def _severity_rank(flag: Mapping[str, Any]) -> str:
     score = _normalise_score(flag.get("similarity", 0.0))
     return severity_from_score(score)
 
-
 def build_incident_id(doc_a: str, doc_b: str) -> str:
     first, second = _normalise_pair(doc_a, doc_b)
-    digest = hashlib.sha256(f"{first}\0{second}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(f"{first}0{second}".encode("utf-8")).hexdigest()
     return f"INC-{digest[:12].upper()}"
-
 
 def _get_connection(db_path: str | Path) -> sqlite3.Connection:
     abs_path = os.path.abspath(str(db_path))
@@ -90,7 +84,6 @@ def _get_connection(db_path: str | Path) -> sqlite3.Connection:
         pass
     return conn
 
-
 def init_incident_db(
     db_path: str | Path = DEFAULT_DB_PATH,
 ) -> None:
@@ -104,7 +97,6 @@ def init_incident_db(
             raise sqlite3.Error(
                 f"Failed to initialize incident database: {exc}"
             ) from exc
-
 
 def _validate_incident(flag: Mapping[str, Any]) -> tuple[bool, str]:
     doc_a = str(flag.get("doc_a", "")).strip()
@@ -128,7 +120,6 @@ def _validate_incident(flag: Mapping[str, Any]) -> tuple[bool, str]:
         return False, "Similarity score must be between 0.0 and 1.0."
 
     return True, ""
-
 
 def _fetch_all_incidents(conn: sqlite3.Connection) -> list[MatchResult]:
     from src.db.schemas import MatchResult
@@ -161,7 +152,6 @@ def _fetch_all_incidents(conn: sqlite3.Connection) -> list[MatchResult]:
         )
         for row in rows
     ]
-
 
 def sync_flagged_incidents(
     flags: Iterable[Mapping[str, Any]],
@@ -216,7 +206,7 @@ def sync_flagged_incidents(
                     """,
                     bulk_records
                 )
-            conn.commit()
+                conn.commit()
 
             rows = conn.execute(
                 """
@@ -252,14 +242,12 @@ def sync_flagged_incidents(
             conn.rollback()
             raise sqlite3.Error(f"Failed to synchronize incidents: {e}") from e
 
-
 def get_all_incidents(
     db_path: str | Path = DEFAULT_DB_PATH,
 ) -> list[MatchResult]:
     init_incident_db(db_path)
     with closing(_get_connection(db_path)) as conn:
         return _fetch_all_incidents(conn)
-
 
 def get_all_incidents_above_threshold_for_export(
     threshold: float,
@@ -294,7 +282,6 @@ def get_all_incidents_above_threshold_for_export(
             for row in rows
         ]
 
-
 def update_review_status(
     incident_id: str,
     review_status: str,
@@ -323,7 +310,6 @@ def update_review_status(
             conn.rollback()
             raise sqlite3.Error(f"Failed to update review status: {e}") from e
 
-
 def incidents_to_csv(incidents: Iterable[Mapping[str, Any]]) -> bytes:
     buffer = io.StringIO(newline="")
     writer = csv.DictWriter(buffer, fieldnames=CSV_COLUMNS)
@@ -343,14 +329,12 @@ def incidents_to_csv(incidents: Iterable[Mapping[str, Any]]) -> bytes:
         )
     return buffer.getvalue().encode("utf-8-sig")
 
-
 def export_current_flags_csv(
     flags: Iterable[Mapping[str, Any]],
     db_path: str | Path = DEFAULT_DB_PATH,
 ) -> bytes:
     sync_flagged_incidents(flags, db_path)
     return incidents_to_csv(get_all_incidents(db_path))
-
 
 def get_high_severity_trends(
     days: int = 30,
@@ -370,16 +354,15 @@ def get_high_severity_trends(
             LEFT JOIN documents da ON pi.document_a = da.filename
             LEFT JOIN documents db ON pi.document_b = db.filename
             WHERE pi.severity_rank = 'High'
-                AND pi.date_flagged >= datetime('now', '-' || ? || ' days')
-                AND (da.is_deleted IS NULL OR da.is_deleted = 0)
-                AND (db.is_deleted IS NULL OR db.is_deleted = 0)
+              AND pi.date_flagged >= datetime('now', '-' || ? || ' days')
+              AND (da.is_deleted IS NULL OR da.is_deleted = 0)
+              AND (db.is_deleted IS NULL OR db.is_deleted = 0)
             GROUP BY DATE(pi.date_flagged)
             ORDER BY date ASC
             """,
             (days,),
         ).fetchall()
-    return [dict(row) for row in rows]
-
+        return [dict(row) for row in rows]
 
 def get_most_plagiarized_documents(
     limit: int = 10,
@@ -416,8 +399,7 @@ def get_most_plagiarized_documents(
             """,
             (limit,),
         ).fetchall()
-    return [dict(row) for row in rows]
-
+        return [dict(row) for row in rows]
 
 def add_false_positive(
     doc_a: str, doc_b: str, db_path: str | Path = DEFAULT_DB_PATH
@@ -433,7 +415,6 @@ def add_false_positive(
         )
         conn.commit()
 
-
 def get_false_positives(db_path: str | Path = DEFAULT_DB_PATH) -> set[tuple[str, str]]:
     """Returns a set of all normalized dismissed pairs for fast filtering."""
     init_incident_db(db_path)
@@ -443,20 +424,16 @@ def get_false_positives(db_path: str | Path = DEFAULT_DB_PATH) -> set[tuple[str,
         ).fetchall()
         return set((row[0], row[1]) for row in rows)
 
-
 # ── Paginated query support ────────────────────────────────────────────────────
-
 
 @dataclass(frozen=True)
 class PaginatedIncidents:
     """Server-side paginated result for the incidents/warning list."""
-
     items: list[MatchResult]
     total_count: int
     page: int
     page_size: int
     total_pages: int
-
 
 _ALLOWED_SORT_COLUMNS = frozenset(
     {
@@ -480,7 +457,6 @@ LEFT JOIN documents db ON pi.document_b = db.filename
 
 _WHERE_NOT_DELETED = "(da.is_deleted IS NULL OR da.is_deleted = 0) AND (db.is_deleted IS NULL OR db.is_deleted = 0)"
 
-
 def query_incidents_paginated(
     *,
     page: int = 1,
@@ -497,13 +473,13 @@ def query_incidents_paginated(
     consistent with the rest of the incidents API.
 
     Args:
-        page:           1-indexed page number (default 1).
-        page_size:      Items per page (default 50, clamped 1–200).
-        sort_by:        Column to sort on (whitelisted against :data:`_ALLOWED_SORT_COLUMNS`).
-        sort_order:     ``"ASC"`` or ``"DESC"``.
+        page: 1-indexed page number (default 1).
+        page_size: Items per page (default 50, clamped 1–200).
+        sort_by: Column to sort on (whitelisted against :data:`_ALLOWED_SORT_COLUMNS`).
+        sort_order: ``"ASC"`` or ``"DESC"``.
         severity_filter: Optional severity level (``"Low"``, ``"Medium"``, ``"High"``).
-        search_query:   Filter by document name substring (matched against both doc_a and doc_b).
-        db_path:        Path to the SQLite corpus database.
+        search_query: Filter by document name substring (matched against both doc_a and doc_b).
+        db_path: Path to the SQLite corpus database.
 
     Returns:
         :class:`PaginatedIncidents` with the requested page of results.
@@ -585,3 +561,36 @@ def query_incidents_paginated(
             page_size=safe_page_size,
             total_pages=total_pages,
         )
+
+def purge_old_incidents(
+    days_old: int = 90,
+    status: str = 'Resolved',
+    db_path: str | Path = DEFAULT_DB_PATH,
+) -> int:
+    """
+    Purge old plagiarism incidents that match a specific review status.
+    
+    This function helps maintain database performance and compliance by 
+    automatically removing resolved incidents that are older than a 
+    configurable number of days.
+    
+    Args:
+        days_old: Number of days after which incidents should be purged.
+        status: The review status of incidents to purge (default: 'Resolved').
+        db_path: Path to the SQLite corpus database.
+        
+    Returns:
+        int: The number of deleted records.
+    """
+    init_incident_db(db_path)
+    with closing(_get_connection(db_path)) as conn:
+        cursor = conn.execute(
+            """
+            DELETE FROM plagiarism_incidents 
+            WHERE review_status = ? 
+            AND date_flagged < datetime('now', '-' || ? || ' days')
+            """,
+            (status, days_old)
+        )
+        conn.commit()
+        return cursor.rowcount
