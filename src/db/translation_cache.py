@@ -11,7 +11,13 @@ import sqlite3
 import tempfile
 from typing import Optional
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "corpus.db")
+from src.core.app_config import CORPUS_DB_PATH, FALLBACK_CORPUS_DB_PATH
+
+# Seed the translation cache DB path from the centralized app_config.
+# ``DB_PATH`` is intentionally kept as a module-level string so that tests
+# importing ``src.db.translation_cache.DB_PATH`` continue to work
+# (tests/db/test_translation_cache.py).
+DB_PATH = str(CORPUS_DB_PATH)
 
 
 def _init_db():
@@ -21,7 +27,9 @@ def _init_db():
         os.makedirs(os.path.dirname(path), exist_ok=True)
         conn = sqlite3.connect(path)
     except (sqlite3.OperationalError, OSError, PermissionError):
-        path = os.path.join(tempfile.gettempdir(), "semantic_plagiarism_detector", "data", "corpus.db")
+        # Centralized temp-dir fallback (matches corpus_db.py and
+        # incidents.py so all three modules agree on the location).
+        path = str(FALLBACK_CORPUS_DB_PATH)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         conn = sqlite3.connect(path)
 
@@ -100,4 +108,3 @@ def cache_translation(
             (text_hash, foreign_text, translated_text, source_lang, target_lang),
         )
         conn.commit()
-        

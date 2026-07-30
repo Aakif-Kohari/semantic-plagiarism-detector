@@ -245,9 +245,11 @@ if "session_id" not in st.session_state:
 
 SESSION_ID = st.session_state.session_id
 
-_INDEX_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "corpus.index")
-)
+# FAISS index location is centralized in src.core.app_config so this module,
+# src/api/app.py, src/cli.py and src/utils/mock_data.py all agree on it.
+# Cast to str because faiss.write_index / faiss.read_index require str paths.
+from src.core.app_config import FAISS_INDEX_PATH
+_INDEX_PATH = str(FAISS_INDEX_PATH)
 
 # -----------------------------------------------------------------------------
 # Page Configuration & Session State

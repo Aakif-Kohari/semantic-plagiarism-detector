@@ -13,12 +13,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional
 
+from src.core.app_config import CORPUS_DB_PATH, FALLBACK_DATA_DIR
 from src.core.config import (normalize_score, normalize_severity_label,
                              severity_from_score)
 from src.db.migrations import migrate_corpus_database
 from src.db.schemas import MatchResult
 
-DEFAULT_DB_PATH = Path(__file__).resolve().parents[2] / "data" / "corpus.db"
+# Seed the incidents default DB path from the centralized app_config.
+# ``DEFAULT_DB_PATH`` is intentionally kept as a module-level constant so
+# that callers/tests importing ``src.db.incidents.DEFAULT_DB_PATH`` continue
+# to work (tests/conftest.py, tests/infrastructure/test_fixtures.py,
+# app/components/incident_export.py, src/utils/daily_summary_email.py).
+DEFAULT_DB_PATH = CORPUS_DB_PATH
 VALID_REVIEW_STATUSES = {"Pending", "Resolved"}
 CSV_COLUMNS = [
     "Incident ID",
@@ -69,11 +75,13 @@ def _get_connection(db_path: str | Path) -> sqlite3.Connection:
     abs_path = os.path.abspath(str(db_path))
     try:
         os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-        conn = sqlite3.connect(abs_path)
+        return sqlite3.connect(abs_path)
     except (sqlite3.OperationalError, OSError, PermissionError):
-        fallback_path = os.path.join(tempfile.gettempdir(), "semantic_plagiarism_detector", "data", os.path.basename(abs_path))
+        # Centralized temp-dir fallback (matches corpus_db.py and
+        # translation_cache.py so all three modules agree on the location).
+        fallback_path = str(FALLBACK_DATA_DIR / os.path.basename(abs_path))
         os.makedirs(os.path.dirname(fallback_path), exist_ok=True)
-        conn = sqlite3.connect(fallback_path)
+        return sqlite3.connect(fallback_path)
 
     conn.execute("PRAGMA foreign_keys = ON")
     try:

@@ -21,8 +21,6 @@ set_tour_completed(username, completed)-> None
 from __future__ import annotations
 
 import datetime
-import json
-import logging
 import os
 import re
 import sqlite3
@@ -31,13 +29,20 @@ import bcrypt
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError, VerifyMismatchError
 
+# Database setup
+from src.core.app_config import AUTH_DB_PATH
 from src.db.migrations import migrate_auth_database
+import logging
 
 logger = logging.getLogger(__name__)
 
-_DB_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "users.db")
-)
+# Seed the auth DB path from the centralized app_config.  ``_DB_PATH`` is
+# intentionally kept as a module-level string so that:
+#   1. tests monkey-patching ``src.db.auth._DB_PATH`` continue to work
+#      (tests/conftest.py, tests/infrastructure/test_fixtures.py), and
+#   2. ``configure_db_path()`` below can still mutate it at runtime for
+#      test/seed isolation (scripts/generate_seed_data.py).
+_DB_PATH = os.path.abspath(str(AUTH_DB_PATH))
 
 VALID_ROLES = {"admin", "teacher"}
 

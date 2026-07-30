@@ -18,6 +18,7 @@ from fastapi.responses import PlainTextResponse, JSONResponse
 from fastapi.security import HTTPBearer
 from sklearn.metrics.pairwise import cosine_similarity
 
+from src.core.app_config import FAISS_INDEX_PATH, HEALTHZ_DB_PATHS
 from src.core.document_parser import extract_text
 from src.core.embedding_model import embed_chunks, get_document_embedding
 from src.core.similarity import (PLAGIARISM_THRESHOLD, chunk_max_similarity,
@@ -146,10 +147,10 @@ def health_check():
     }
 
 
-_HEALTHZ_DB_PATHS = (
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "corpus.db")),
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "users.db")),
-)
+# ``HEALTHZ_DB_PATHS`` is centralized in app_config.  Keep a local alias as a
+# tuple of str for backward compatibility with the original implementation
+# (and so any code doing string comparison on these paths keeps working).
+_HEALTHZ_DB_PATHS = tuple(str(p) for p in HEALTHZ_DB_PATHS)
 
 
 @app.get("/metrics", tags=["Monitoring"], response_class=PlainTextResponse)
@@ -337,9 +338,9 @@ async def scan_document(
 # ── System Administration ──────────────────────────────────────────────────────
 
 logger = logging.getLogger(__name__)
-INDEX_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "corpus.index")
-)
+# Cast to str for consistency with callers that may pass it to faiss.*
+# or other C-extension APIs that require str paths.
+INDEX_PATH = str(FAISS_INDEX_PATH)
 
 
 @app.post("/api/v1/clear", tags=["System Administration"])

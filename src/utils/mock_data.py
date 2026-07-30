@@ -247,8 +247,9 @@ def _get_current_vector_count() -> int:
 
 def _get_index_path() -> str:
     """Return the absolute path to corpus.index."""
-    import os
+    # Use the centralized FAISS index path from app_config so this module
+    # agrees with app/streamlit_app.py and src/api/app.py on the index
+    # location.
+    from src.core.app_config import FAISS_INDEX_PATH
 
-    # Walk up from this file: src/utils/mock_data.py → project root
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    return os.path.join(project_root, "corpus.index")
+    return str(FAISS_INDEX_PATH)
