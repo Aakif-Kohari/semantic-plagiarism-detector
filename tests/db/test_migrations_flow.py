@@ -135,6 +135,26 @@ class TestCorpusMigrationFlow:
         finally:
             conn.close()
 
+    def test_version_8_adds_soft_delete_columns(self):
+        conn = _connect()
+        try:
+            _apply_up_to(conn, CORPUS_MIGRATIONS, 8)
+            assert get_user_version(conn) == 8
+            assert column_exists(conn, "documents", "is_deleted")
+            assert column_exists(conn, "documents", "deleted_at")
+        finally:
+            conn.close()
+
+    def test_version_9_adds_file_hash_index(self):
+        conn = _connect()
+        try:
+            _apply_up_to(conn, CORPUS_MIGRATIONS, 9)
+            assert get_user_version(conn) == 9
+            assert index_exists(conn, "idx_documents_file_hash")
+        finally:
+            conn.close()
+
+
     def test_full_corpus_flow_reaches_latest_version(self):
         """Single end-to-end pass: v0 → CORPUS_SCHEMA_VERSION via migrate_corpus_database."""
         conn = _connect()
@@ -167,6 +187,7 @@ class TestCorpusMigrationFlow:
                 "idx_documents_class_section",
                 "idx_chunks_filename",
                 "idx_incidents_status",
+                "idx_documents_file_hash",
             ):
                 assert index_exists(conn, idx), f"Missing index: {idx}"
         finally:
