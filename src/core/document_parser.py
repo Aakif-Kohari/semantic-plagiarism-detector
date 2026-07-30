@@ -1327,9 +1327,9 @@ def extract_text(
     raw = sanitize_zero_width_characters(raw, filename=filename)
     lang_code = detect_text_language(raw)
 
-logger.info(
-        f"[document_parser] Detected language for document '{filename}': {lang_code}"
-    )
+    logger.info(
+            f"[document_parser] Detected language for document '{filename}': {lang_code}"
+        )
     return raw
 
 
@@ -1338,7 +1338,8 @@ def get_supported_file_extensions() -> list[str]:
     return sorted(ALLOWED_EXTENSIONS)
 
 
-def extract_texts_from_pdfs(files: list, session_id: Optional[str] = None) -> Dict[str, str]:    """Legacy compatibility wrapper."""
+def extract_texts_from_pdfs(files: list, session_id: Optional[str] = None) -> Dict[str, str]:
+    """Legacy compatibility wrapper."""
     return extract_texts(files, session_id=session_id)
 
 
