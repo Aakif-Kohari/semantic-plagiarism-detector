@@ -27,19 +27,7 @@ EMBEDDING_DIMENSION = 384
 RANDOM_SEED = 42
 
 MOCK_NAMES = [
-    "Alice Smith", "Bob Jones", "Charlie Brown", "David Miller",
-    "Eve Davis", "Frank Wilson", "Grace Taylor", "Heidi Anderson",
-    "Ivan Thomas", "Judy Jackson", "Kevin White", "Linda Harris",
-    "Michael Martin", "Nancy Thompson", "Oscar Garcia", "Pamela Martinez",
-    "Quinn Robinson", "Rachel Clark", "Steve Rodriguez", "Tina Lewis",
-    "Ursula Lee", "Victor Walker", "Wendy Hall", "Xavier Allen",
-    "Yvonne Young", "Zachary Hernandez", "Aaron King", "Betty Wright",
-    "Carl Lopez", "Diana Hill", "Ethan Scott", "Fiona Green",
-    "George Adams", "Hannah Baker", "Ian Gonzalez", "Julia Nelson",
-    "Kyle Carter", "Laura Mitchell", "Matthew Perez", "Nora Roberts",
-    "Owen Turner", "Paula Phillips", "Quincy Campbell", "Rebecca Parker",
-    "Samuel Evans", "Tara Edwards", "Ulysses Collins", "Victoria Stewart",
-    "William Sanchez", "Xena Morris", "Yusuf Rogers", "Zoe Reed",
+    f"Student_{i:04d}" for i in range(1, 53)
 ]
 
 
@@ -214,9 +202,9 @@ def main(argv: list[str] | None = None) -> None:
         )
 
         documents = [
-            ("Introduction_to_AI.pdf", text_alice, "Alice Smith"),
-            ("AI_Concepts_Homework.pdf", text_bob, "Bob Jones"),
-            ("Introduction_to_Blockchain.pdf", text_charlie, "Charlie Brown"),
+            ("Introduction_to_AI.pdf", text_alice, "Student_0001"),
+            ("AI_Concepts_Homework.pdf", text_bob, "Student_0002"),
+            ("Introduction_to_Blockchain.pdf", text_charlie, "Student_0003"),
         ]
 
         print("Adding dummy documents...")

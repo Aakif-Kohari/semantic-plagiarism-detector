@@ -266,4 +266,4 @@ def test_sidebar_reset_all_filters():
         assert at.session_state.get("heatmap_mask_threshold") != 0.50
 
     finally:
-        _cleanup_stale_artifacts()
+        _cleanup_stale_artifacts()
