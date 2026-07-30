@@ -17,6 +17,13 @@ Recent Additions (Issue #468):
 
 Recent Additions (Issue #932):
 - Added `optimize_database` function to run PRAGMA optimize, VACUUM, and ANALYZE.
+
+Recent Additions (Issue #1047):
+- Added `get_database_size_bytes` helper returning the on-disk size of a
+  SQLite database file (0 if the file does not exist).
+- Added `get_total_database_size_bytes` convenience that sums the size of
+  every path in `src.core.app_config.HEALTHZ_DB_PATHS` (corpus.db +
+  users.db).
 """
 
 from __future__ import annotations
@@ -105,6 +112,68 @@ def create_sqlite_snapshot(database_path: str | Path) -> bytes:
 def create_corpus_database_snapshot() -> bytes:
     """Return a downloadable snapshot of the configured corpus DB."""
     return create_sqlite_snapshot(get_corpus_db_path())
+
+
+def get_database_size_bytes(db_path: str | Path) -> int:
+    """Return the size of a SQLite database file in bytes.
+
+    Acceptance criteria (issue #1047):
+        - Returns the on-disk file size in bytes for an existing database.
+        - Returns ``0`` when the database file does not exist.
+
+    The function resolves the path with :meth:`Path.expanduser` /
+    :meth:`Path.resolve` so ``~`` and relative paths behave predictably.
+    It intentionally does **not** raise for missing files — admin dashboards
+    and ``/healthz``-style probes need a numeric value they can render
+    without try/except noise.  A non-existent DB simply contributes ``0``
+    to any aggregate total.
+
+    Args:
+        db_path: Path to the SQLite database file (``corpus.db`` or
+            ``users.db``).  Accepts ``str`` or :class:`~pathlib.Path`.
+
+    Returns:
+        File size in bytes, or ``0`` if the file does not exist.
+
+    Raises:
+        OSError: Propagated only for genuine filesystem errors that are
+            *not* "file not found" (e.g. permission denied on a parent
+            directory).  ``FileNotFoundError`` is swallowed and mapped to
+            ``0``.
+
+    Example:
+        >>> from src.db.database_backup import get_database_size_bytes
+        >>> from src.db.corpus_db import get_corpus_db_path
+        >>> size = get_database_size_bytes(get_corpus_db_path())
+        >>> print(f"corpus.db is {size / 1024:.1f} KB")
+    """
+    resolved_path = Path(db_path).expanduser()
+
+    try:
+        return resolved_path.stat().st_size
+    except FileNotFoundError:
+        logger.debug(
+            "Database file does not exist (size reported as 0): %s",
+            resolved_path,
+        )
+        return 0
+
+
+def get_total_database_size_bytes() -> int:
+    """Return the combined on-disk size of all production SQLite databases.
+
+    Sums the file sizes of every path in
+    :data:`src.core.app_config.HEALTHZ_DB_PATHS` (currently ``corpus.db``
+    and ``users.db``) using :func:`get_database_size_bytes`.  Missing
+    files contribute ``0``, so this never raises for an unprovisioned
+    environment.
+
+    Returns:
+        Total bytes consumed by all configured SQLite databases.
+    """
+    from src.core.app_config import HEALTHZ_DB_PATHS
+
+    return sum(get_database_size_bytes(path) for path in HEALTHZ_DB_PATHS)
 
 
 def create_password_protected_backup(
