@@ -27,6 +27,7 @@ import os
 import html
 # Standard / Third-party imports
 import time
+from src.utils.processing_time import ProcessingTimer, StageTiming
 
 import _io
 import psutil
@@ -239,17 +240,149 @@ init_db()
 
 # Start lightweight REST API server for /healthz endpoint in background
 import threading
-
+import time
+import datetime
 import uvicorn
-
 from src.api.app import app as fastapi_app
+import src.core.app_config as app_config
 
+def update_global_activity():
+    """Update the global last_activity timestamp."""
+    try:
+        from src.utils.redis_cache import get_cache
+        cache = get_cache()
+        cache.set("spd:v1:global:last_activity", time.time())
+    except Exception as e:
+        logger.error(f"Failed to update global activity: {e}")
+
+# Register Streamlit user interaction (updates on every script rerun)
+update_global_activity()
 
 def _start_api_server():
     uvicorn.run(fastapi_app, host="0.0.0.0", port=8000, log_level="warning")
 
+if not getattr(app_config, "_api_server_started", False):
+    app_config._api_server_started = True
+    
+    from starlette.middleware.base import BaseHTTPMiddleware
+    
+    class ActivityMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request, call_next):
+            # Exclude automated health probes
+            if request.url.path not in ("/health", "/healthz"):
+                update_global_activity()
+            return await call_next(request)
+            
+    fastapi_app.add_middleware(ActivityMiddleware)
+    threading.Thread(target=_start_api_server, daemon=True).start()
 
-threading.Thread(target=_start_api_server, daemon=True).start()
+def get_active_sessions_count() -> int:
+    """Return the number of active Streamlit sessions."""
+    try:
+        from src.utils.redis_cache import get_cache, get_session_state
+        cache = get_cache()
+        now = time.time()
+        active_count = 0
+        keys = []
+        
+        if cache.is_available():
+            try:
+                raw_keys = cache._client.keys("spd:v1:session:*:last_interaction")
+                keys = [k.decode("utf-8") if isinstance(k, bytes) else k for k in raw_keys]
+            except Exception as e:
+                logger.error(f"Failed to scan Redis session keys: {e}")
+                
+        try:
+            fallback_keys = [
+                k for k in cache.fallback_cache.keys()
+                if k.startswith("spd:v1:session:") and k.endswith(":last_interaction")
+            ]
+            for k in fallback_keys:
+                if k not in keys:
+                    keys.append(k)
+        except Exception as e:
+            logger.error(f"Failed to scan fallback cache session keys: {e}")
+
+        for key in keys:
+            try:
+                parts = key.split(":")
+                if len(parts) >= 4:
+                    session_id = parts[3]
+                    last_interaction = get_session_state(session_id, "last_interaction")
+                    if last_interaction is not None:
+                        # 15 * 60 is the TIMEOUT_LIMIT used for sessions
+                        if now - last_interaction <= 15 * 60:
+                            active_count += 1
+            except Exception as e:
+                logger.error(f"Error checking session activity for key {key}: {e}")
+                
+        return active_count
+    except Exception as e:
+        logger.error(f"Error in get_active_sessions_count: {e}")
+        return 0
+
+def _run_backup_daemon():
+    """Background loop to take automated backups after inactivity."""
+    last_backup_time = 0.0
+    try:
+        from src.utils.redis_cache import get_cache
+        cache = get_cache()
+        cached_val = cache.get("spd:v1:global:last_backup_time")
+        if cached_val is not None:
+            last_backup_time = float(cached_val)
+    except Exception:
+        pass
+
+    logger.info("Database backup background daemon started.")
+    
+    while True:
+        time.sleep(30)
+        try:
+            from src.core.app_config import get_backup_idle_timeout
+            backup_timeout = get_backup_idle_timeout()
+            
+            from src.utils.redis_cache import get_cache
+            cache = get_cache()
+            last_activity = cache.get("spd:v1:global:last_activity")
+            if last_activity is None:
+                last_activity = time.time()
+                cache.set("spd:v1:global:last_activity", last_activity)
+                
+            current_time = time.time()
+            idle_duration = current_time - last_activity
+            active_sessions = get_active_sessions_count()
+            
+            if active_sessions == 0 and idle_duration >= backup_timeout:
+                # Ensure we only backup once per idle period
+                if last_activity > last_backup_time:
+                    logger.info(
+                        f"Inactivity threshold met ({idle_duration:.1f}s >= {backup_timeout}s) "
+                        f"with {active_sessions} active sessions. Triggering automated database backup..."
+                    )
+                    from src.db.database_backup import create_corpus_database_snapshot
+                    from src.db.corpus_db import get_corpus_db_path
+                    
+                    snapshot_bytes = create_corpus_database_snapshot()
+                    db_path = get_corpus_db_path()
+                    backup_dir = db_path.parent / "backups"
+                    backup_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    backup_file_path = backup_dir / f"corpus_backup_{timestamp}.db"
+                    backup_file_path.write_bytes(snapshot_bytes)
+                    logger.info(f"Automated database backup saved to: {backup_file_path}")
+                    
+                    last_backup_time = current_time
+                    try:
+                        cache.set("spd:v1:global:last_backup_time", last_backup_time)
+                    except Exception:
+                        pass
+        except Exception as e:
+            logger.error(f"Error in database backup daemon: {e}")
+
+if not getattr(app_config, "_backup_daemon_started", False):
+    app_config._backup_daemon_started = True
+    threading.Thread(target=_run_backup_daemon, daemon=True).start()
 
 # Generate unique session ID for this Streamlit session
 if "session_id" not in st.session_state:
