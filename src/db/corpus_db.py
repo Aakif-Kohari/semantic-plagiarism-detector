@@ -9,6 +9,7 @@ Enables incremental updates and index rebuilding without re-embedding.
 
 import logging
 import os
+import psutil
 import sqlite3
 import tempfile
 import threading
@@ -250,6 +251,10 @@ def add_chunks(chunks_to_add: list) -> None:
 
     chunks_to_add: list of tuples: (vector_id, filename, chunk_index, chunk_text, embedding_np_array)
     """
+    process = psutil.Process()
+    mem_before = process.memory_info().rss / (1024 * 1024)
+    logger.info("Memory usage before batch chunk insertion: %.2f MB", mem_before)
+
     formatted_chunks = []
     for vid, fname, idx, text, emb in chunks_to_add:
         # Convert float32 numpy array to raw bytes BLOB
@@ -261,6 +266,9 @@ def add_chunks(chunks_to_add: list) -> None:
             "INSERT OR REPLACE INTO chunks (vector_id, filename, chunk_index, chunk_text, embedding) VALUES (?, ?, ?, ?, ?)",
             formatted_chunks,
         )
+
+    mem_after = process.memory_info().rss / (1024 * 1024)
+    logger.info("Memory usage after batch chunk insertion: %.2f MB", mem_after)
 
 def get_chunk_registry() -> list:
     """Reconstructs the registry of ChunkRecord objects ordered by vector_id."""
