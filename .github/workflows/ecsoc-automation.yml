@@ -294,6 +294,18 @@ jobs:
                 console.log(`Could not assign ${author} (user might not be a collaborator):`, err.message);
               }
 
+              // Auto-label PR with ECSoC26
+              try {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr.number,
+                  labels: ["ECSoC26"]
+                });
+              } catch (err) {
+                console.log(`Could not add ECSoC26 label to PR #${pr.number}:`, err.message);
+              }
+
               // Welcome comment for PR
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
