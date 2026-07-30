@@ -15,7 +15,8 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, JSONResponse
-from fastapi.security import HTTPBearer
+
+from src.api.middleware import verify_bearer_token
 from sklearn.metrics.pairwise import cosine_similarity
 
 from src.core.app_config import FAISS_INDEX_PATH, HEALTHZ_DB_PATHS
@@ -44,7 +45,8 @@ app = FastAPI(
         {"name": "Plagiarism Detection", "description": "Scanning operations"},
         {"name": "System Administration", "description": "Admin operations"},
         {"name": "Health", "description": "Health checks"}
-    ]
+    ],
+    dependencies=[Depends(verify_bearer_token)]
 )
 
 # Enable CORS for external LMS frontends
@@ -71,30 +73,6 @@ def custom_rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded)
 
 app.add_exception_handler(RateLimitExceeded, custom_rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
-
-# ── Bearer Token Authentication ────────────────────────────────────────────────
-
-security = HTTPBearer()
-
-
-def get_expected_bearer_token() -> str:
-    """Retrieve the API Bearer Token from environment variable or default fallback."""
-    return os.getenv("API_BEARER_TOKEN", "dev-bearer-token")
-
-
-def verify_bearer_token(
-    credentials=Depends(security),
-) -> str:
-    """Validate incoming Bearer token against configured secret."""
-    expected_token = get_expected_bearer_token()
-    if not credentials or credentials.credentials != expected_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing authentication token.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    return credentials.credentials
-
 
 # ── Database Helpers ───────────────────────────────────────────────────────────
 
@@ -207,7 +185,6 @@ async def scan_document(
         le=10,
         description="Number of top matching paragraph pairs to include per matched document",
     ),
-    _token: str = Depends(verify_bearer_token),
 ):
     """Scan an uploaded document against the indexed corpus database for plagiarism."""
     if not file.filename:
@@ -348,7 +325,6 @@ async def clear_all_documents(
     username: str = Query(
         ..., description="Username of the administrator executing the operation"
     ),
-    _token: str = Depends(verify_bearer_token),
 ):
     """
     Remove all documents, text chunks, and plagiarism incidents from the SQLite database,
