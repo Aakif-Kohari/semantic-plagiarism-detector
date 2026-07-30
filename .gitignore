@@ -190,3 +190,15 @@ CampusConnect/
 # ── Root level files to ignore ────────────────────────────────────────────────
 package-lock.json
 test_sandbox.py
+
+# ── AI agents, IDE & assistant workdirs ────────────────────────────────────────
+.gemini/
+.antigravity/
+.brain/
+scratch/
+.scratch/
+
+# ── Temporary & working files ──────────────────────────────────────────────────
+tmp/
+*.tmp
+
