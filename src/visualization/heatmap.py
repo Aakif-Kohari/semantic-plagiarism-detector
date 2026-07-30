@@ -21,8 +21,9 @@ Exports:
     - render_heatmap_ui: Streamlit component rendering the heatmap with interactive controls
 """
 
+import logging
 from contextlib import contextmanager
-from typing import Generator, Optional
+from typing import Dict, Generator, List, Optional
 
 import matplotlib
 import matplotlib.patches as mpatches
