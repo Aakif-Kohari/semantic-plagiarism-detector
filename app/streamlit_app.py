@@ -244,6 +244,7 @@ SESSION_ID = st.session_state.session_id
 from src.core.app_config import FAISS_INDEX_PATH
 _INDEX_PATH = str(FAISS_INDEX_PATH)
 
+
 # -----------------------------------------------------------------------------
 # Page Configuration & Session State
 # -----------------------------------------------------------------------------
@@ -254,6 +255,19 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="auto",
 )
+
+def update_page_title(tab_name: str):
+    """
+    Update browser title based on active tab.
+    """
+    st.markdown(
+        f"""
+        <script>
+            document.title = "{tab_name} | Semantic Plagiarism Detector";
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
 
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
@@ -974,6 +988,7 @@ else:
 
     # ══ TAB 1: WARNINGS ═══════════════════════════════════════════════════════
     with tab_warnings:
+        update_page_title("Warnings")
         st.subheader(get_text("tab_warnings", lang=lang_code))
         if not flags:
             st.info("No plagiarism incidents detected above configured threshold.")
@@ -982,6 +997,7 @@ else:
 
     # ══ TAB 2: FAISS ══════════════════════════════════════════════════════════
     with tab_faiss:
+        update_page_title("FAISS")
         st.subheader("⚡ FAISS Vector Search")
         if faiss_index is not None:
             st.info(f"Index total: {faiss_index.ntotal} vectors.")
@@ -997,12 +1013,14 @@ else:
 
     # ══ TAB 3: MATRIX ═════════════════════════════════════════════════════════
     with tab_matrix:
+        update_page_title("Matrix")
         st.subheader("📋 Similarity Matrix")
         if active_sim_df is not None:
             st.dataframe(active_sim_df.style.format("{:.4f}"), use_container_width=True)
 
     # ══ TAB 4: HEATMAP ════════════════════════════════════════════════════════
     with tab_heatmap:
+        update_page_title("Heatmap")
         st.subheader("🗺️ Heatmap & Network")
         if active_sim_df is not None:
             heatmap_fig = plot_similarity_heatmap(
@@ -1252,6 +1270,7 @@ else:
 
     # ══ TAB 5: PAIR DRILL-DOWN ════════════════════════════════════════════════
     with tab_drill:
+        update_page_title("Drill Down")
         st.subheader("🔬 Pair Drill-Down")
         if active_sim_df is not None and len(doc_names) >= 2:
             c1, c2 = st.columns(2)
@@ -1264,11 +1283,13 @@ else:
 
     # ══ TAB 6: ANALYTICS ══════════════════════════════════════════════════════
     with tab_analytics:
+        update_page_title("Analytics")
         st.subheader("📊 Analytics Dashboard")
         st.info("Analytics metrics summary loaded.")
 
     # ══ TAB 7: USERS ══════════════════════════════════════════════════════════
     with tab_users:
+        update_page_title("Users")
         st.subheader("👥 User Management")
         users = get_all_users()
         for u in users:
@@ -1276,6 +1297,7 @@ else:
 
     # ══ TAB 8: SETTINGS ═══════════════════════════════════════════════════════
     with tab_settings:
+        update_page_title("Settings")
         st.subheader("⚙️ System Configuration")
         if user_role == "admin":
             st.markdown("### ⚙️ Advanced Configuration")
