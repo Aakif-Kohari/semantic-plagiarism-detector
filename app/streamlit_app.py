@@ -99,7 +99,10 @@ from src.core.similarity import (
 )
 from src.core.webhook import send_plagiarism_alert
 from src.i18n.translator import _SUPPORTED_LANGUAGES
-from src.visualization.network_graph import plot_similarity_network
+from src.visualization.network_graph import (
+    NETWORK_GRAPH_CONFIG,
+    plot_similarity_network,
+)
 
 
 class OCRFileBatchError(Exception):
@@ -2367,6 +2370,7 @@ if not st.session_state.authenticated:
                     st.plotly_chart(
                         network_fig,
                         use_container_width=True,
+                        config=NETWORK_GRAPH_CONFIG,
                     )
 
             selected_document_id = st.session_state.get(
