@@ -15,17 +15,15 @@ on:
 
   workflow_dispatch:
 
-permissions:
-  issues: write
-  pull-requests: write
-
 jobs:
   issue-claim:
+    permissions:
+      issues: write
     if: github.event_name == 'issue_comment'
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/github-script@v8
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
             const issue = context.payload.issue;
@@ -175,10 +173,12 @@ jobs:
             });
 
   issue-auto-label:
+    permissions:
+      issues: write
     if: github.event_name == 'issues' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/github-script@v8
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
             const labelRules = [
@@ -267,11 +267,14 @@ jobs:
             }
 
   pr-automation:
+    permissions:
+      issues: write
+      pull-requests: write
     if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/github-script@v8
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
             const pr = context.payload.pull_request;
@@ -412,12 +415,14 @@ jobs:
             }
 
   auto-unassign-stale:
+    permissions:
+      issues: write
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
     steps:
       - name: Cleanup Excess Claims (> 5 open issues)
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
             const maxAllowed = 5;
@@ -514,7 +519,7 @@ jobs:
             }
 
       - name: Progressive Inactivity Reminders & Unassign (Day 2, Day 3, Day 4)
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
             const twoDaysMs = 2 * 24 * 60 * 60 * 1000;
