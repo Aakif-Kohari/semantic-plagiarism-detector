@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 embedding_model.py
 ------------------
@@ -10,14 +12,18 @@ Model: paraphrase-multilingual-MiniLM-L12-v2
   - MIT licensed; safe for academic use
 """
 
+import logging
 import os
 from typing import List
 
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
+from src.core.config import EMBEDDING_BATCH_SIZE
+
+logger = logging.getLogger(__name__)
+
 # ── Singleton model loader ─────────────────────────────────────────────────────
-# We load the model once and reuse it across calls to avoid repeated I/O.
 _DEFAULT_MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
 _model: SentenceTransformer | None = None
 
@@ -40,22 +46,24 @@ def _get_model() -> SentenceTransformer:
     global _model
     if _model is None:
         model_name = _get_model_name()
-        print(f"[embedding_model] Loading model: {model_name} …")
+        logger.info(f"[embedding_model] Loading model: {model_name} …")
         _model = SentenceTransformer(model_name)
-        print("[embedding_model] Model loaded successfully.")
+        logger.info("[embedding_model] Model loaded successfully.")
     return _model
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 
-def embed_chunks(chunks: List[str], batch_size: int = 64) -> np.ndarray:
+def embed_chunks(
+    chunks: List[str], batch_size: int = EMBEDDING_BATCH_SIZE
+) -> np.ndarray:
     """
     Generate embeddings for a list of text chunks.
 
     Args:
         chunks:     List of text strings to embed.
-        batch_size: Number of texts encoded per forward pass (tune for GPU/CPU).
+        batch_size: Number of texts encoded per forward pass (defaults to EMBEDDING_BATCH_SIZE).
 
     Returns:
         numpy array of shape (N, 384) where N = len(chunks).
@@ -73,7 +81,9 @@ def embed_chunks(chunks: List[str], batch_size: int = 64) -> np.ndarray:
     return embeddings
 
 
-def embed_documents(chunked_docs: dict, batch_size: int = 64) -> dict:
+def embed_documents(
+    chunked_docs: dict, batch_size: int = EMBEDDING_BATCH_SIZE
+) -> dict:
     """
     Embed all chunks across multiple documents.
 
@@ -95,7 +105,9 @@ def embed_documents(chunked_docs: dict, batch_size: int = 64) -> dict:
 
     for doc_name, chunks in chunked_docs.items():
         if not chunks:
-            print(f"[embedding_model] Warning: '{doc_name}' has no chunks. Skipping.")
+            logger.warning(
+                f"[embedding_model] Warning: '{doc_name}' has no chunks. Skipping."
+            )
             continue
         all_chunks.extend(chunks)
         doc_chunk_counts.append(len(chunks))
@@ -120,9 +132,6 @@ def embed_documents(chunked_docs: dict, batch_size: int = 64) -> dict:
 def get_document_embedding(doc_embedding: np.ndarray) -> np.ndarray:
     """
     Compute a single document-level embedding by averaging its chunk embeddings.
-
-    Using mean pooling over chunks gives a compact representation
-    of the whole document for document-level similarity comparisons.
 
     Args:
         doc_embedding: Array of shape (N, 384) for N chunks.
