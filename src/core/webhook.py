@@ -82,6 +82,9 @@ def _log_retry(retry_state: RetryCallState) -> None:
     )
 
 
+_attempt_counter = 0
+
+
 @retry(
     retry=retry_if_exception(_is_retryable_request_error),
     stop=stop_after_attempt(WEBHOOK_MAX_ATTEMPTS),
@@ -101,6 +104,8 @@ def _post_webhook(
 
     Tenacity retries this function for transient request failures only.
     """
+    global _attempt_counter
+    _attempt_counter += 1
     response = requests.post(
         webhook_url,
         json=payload,
@@ -131,6 +136,9 @@ def send_plagiarism_alert(
         indicating delivery success, and ``total_attempts`` is the total number
         of HTTP delivery attempts made.
     """
+    global _attempt_counter
+    _attempt_counter = 0
+
     webhook_url = os.getenv("PLAGIARISM_WEBHOOK_URL")
 
     if not webhook_url:
@@ -168,11 +176,9 @@ def send_plagiarism_alert(
 
     try:
         _post_webhook(webhook_url, payload)
-        attempts = _post_webhook.retry.statistics.get("attempt_number", 1)
+        attempts = _attempt_counter
     except requests.exceptions.RequestException as exception:
-        attempts = _post_webhook.retry.statistics.get(
-            "attempt_number", WEBHOOK_MAX_ATTEMPTS
-        )
+        attempts = _attempt_counter
         logger.error(
             "Failed to send webhook notification for pair %s <-> %s "
             "after %s attempt(s): %s",
