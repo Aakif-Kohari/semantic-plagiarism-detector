@@ -192,7 +192,7 @@ from src.visualization.heatmap import (
 from src.visualization.network_graph import plot_similarity_network
 
 try:
-    from src.utils.warning_list import render_warning_controls
+    from src.utils.warning_list import render_warning_controls, render_copy_button
     from src.visualization.analytics import (
         plot_high_severity_trends,
         plot_most_plagiarized_documents,
@@ -200,6 +200,7 @@ try:
     )
 except ImportError:
     render_warning_controls = None
+    render_copy_button = None
     plot_high_severity_trends = None
     plot_most_plagiarized_documents = None
     plot_similarity_distribution = None
@@ -1280,6 +1281,36 @@ else:
                 db = st.selectbox("Document B", [d for d in doc_names if d != da], key="db")
             sim_val = float(active_sim_df.loc[da, db])
             st.write(f"Overall Similarity: `{sim_val:.1%}`")
+            
+            pair_flags = [
+                f for f in flags 
+                if (f["doc_a"] == da and f["doc_b"] == db) or (f["doc_a"] == db and f["doc_b"] == da)
+            ]
+            
+            if pair_flags:
+                st.markdown("### 📝 Flagged Snippets")
+                for rank, flag in enumerate(pair_flags, 1):
+                    ca = str(flag.get("snippet_a", ""))
+                    cb = str(flag.get("snippet_b", ""))
+                    
+                    if flag["doc_a"] == db:
+                        ca, cb = cb, ca
+                        
+                    highlighted_ca, highlighted_cb = highlight_overlap(ca, cb)
+                    
+                    with st.expander(f"Incident #{rank} - Similarity: {flag.get('similarity', 0.0):.1%}", expanded=(rank == 1)):
+                        c_a, c_b = st.columns(2)
+                        with c_a:
+                            st.markdown(f"**{da}**")
+                            st.markdown(highlighted_ca, unsafe_allow_html=True)
+                            if render_copy_button:
+                                render_copy_button(text_to_copy=ca, button_id=f"copy_ca_{rank}", copy_label="📋 Copy Snippet")
+                        with c_b:
+                            st.markdown(f"**{db}**")
+                            st.markdown(highlighted_cb, unsafe_allow_html=True)
+                            if render_copy_button:
+                                render_copy_button(text_to_copy=cb, button_id=f"copy_cb_{rank}", copy_label="📋 Copy Snippet")
+
 
     # ══ TAB 6: ANALYTICS ══════════════════════════════════════════════════════
     with tab_analytics:
