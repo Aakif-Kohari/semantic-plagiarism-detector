@@ -43,7 +43,52 @@ Recent Additions (Issue #572):
 """
 
 import re
+import secrets
 import streamlit as st
+
+# ── CSP Nonce Generation (Issue #644) ──────────────────────────────────────────
+def generate_csp_nonce(length: int = 16) -> str:
+    """Generate a cryptographically secure random hex nonce for use in CSP headers."""
+    return secrets.token_hex(length)
+
+
+def get_csp_nonce() -> str:
+    """
+    Retrieve or create a per-session CSP nonce stored in st.session_state.
+
+    Generates a new nonce on the first call each session and returns the
+    cached value on subsequent calls, ensuring a consistent nonce is used
+    across all inline <style> and <script> blocks rendered in one page load.
+    """
+    try:
+        if isinstance(st.session_state, dict):
+            # Dict-like mock used in unit tests
+            if not st.session_state.get("csp_nonce"):
+                st.session_state["csp_nonce"] = generate_csp_nonce()
+            return st.session_state["csp_nonce"]
+        if "csp_nonce" not in st.session_state or not st.session_state.csp_nonce:
+            st.session_state.csp_nonce = generate_csp_nonce()
+        return st.session_state.csp_nonce
+    except Exception:
+        return generate_csp_nonce()
+
+
+# ── Matplotlib Theme Helper ────────────────────────────────────────────────────
+def apply_matplotlib_theme(theme_colors: dict | None = None) -> None:
+    """Apply the active theme colours to Matplotlib's global rcParams."""
+    try:
+        import matplotlib as mpl
+        colors = theme_colors if theme_colors is not None else get_colors()
+        mpl.rcParams["figure.facecolor"] = colors.get("background", "#FFFFFF")
+        mpl.rcParams["axes.facecolor"] = colors.get("surface", "#F8FAFC")
+        mpl.rcParams["axes.edgecolor"] = colors.get("border", "#E2E8F0")
+        mpl.rcParams["axes.labelcolor"] = colors.get("ink", "#0F172A")
+        mpl.rcParams["xtick.color"] = colors.get("ink", "#0F172A")
+        mpl.rcParams["ytick.color"] = colors.get("ink", "#0F172A")
+        mpl.rcParams["text.color"] = colors.get("ink", "#0F172A")
+    except Exception:
+        pass
+
 
 # ── Validation Patterns ────────────────────────────────────────────────────────
 HEX_COLOR_PATTERN = re.compile(r"^#(?:[0-9a-fA-F]{3}){1,2}$")
@@ -415,22 +460,26 @@ def inject_css() -> None:
         }
         """
 
+    # Issue #644: wrap CSS in a nonced <style> block
+    nonce = get_csp_nonce()
+    css_html = f'<style nonce="{nonce}">\n{css}\n</style>'
+
     # ── Search Hotkey: press "/" to focus the warning search bar ──────────
-    hotkey_js = """
-    <script>
-    (function() {
+    hotkey_js = f"""
+    <script nonce="{nonce}">
+    (function() {{
         // Prevent duplicate listeners (Streamlit re-runs on rerender)
         if (window.__chalu_hotkey_installed) return;
         window.__chalu_hotkey_installed = true;
 
-        document.addEventListener('keydown', function(e) {
+        document.addEventListener('keydown', function(e) {{
             // Only trigger on "/" key
             if (e.key !== '/') return;
             // Don't intercept if user is already typing in an input/textarea
             var active = document.activeElement;
-            if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
+            if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {{
                 return;
-            }
+            }}
             // Don't intercept modifier combos (Cmd+/, Ctrl+/)
             if (e.metaKey || e.ctrlKey || e.altKey) return;
 
@@ -440,29 +489,29 @@ def inject_css() -> None:
             // Streamlit renders st.text_input(key="warning_search") with a
             // data attribute or aria-label matching the label text.
             var searchInputs = document.querySelectorAll('input[type="text"]');
-            for (var i = 0; i < searchInputs.length; i++) {
+            for (var i = 0; i < searchInputs.length; i++) {{
                 var input = searchInputs[i];
                 // Match by the placeholder or aria-label containing "search"
                 var label = (input.getAttribute('placeholder') || '') +
                             (input.getAttribute('aria-label') || '');
-                if (label.toLowerCase().indexOf('search') !== -1) {
+                if (label.toLowerCase().indexOf('search') !== -1) {{
                     input.focus();
                     input.select();
                     return;
-                }
-            }
+                }}
+            }}
             // Fallback: try the .stTextInput class
             var textInputs = document.querySelectorAll('.stTextInput input[type="text"]');
-            if (textInputs.length > 0) {
+            if (textInputs.length > 0) {{
                 textInputs[0].focus();
                 textInputs[0].select();
-            }
-        });
-    })();
+            }}
+        }});
+    }})();
     </script>
     """
 
-    st.markdown(css, unsafe_allow_html=True)
+    st.markdown(css_html, unsafe_allow_html=True)
     st.markdown(hotkey_js, unsafe_allow_html=True)
 
 
@@ -637,13 +686,14 @@ def back_to_top_html(scroll_threshold: int = 250) -> str:
     re-queries the button on each event so that Streamlit reruns (which
     recreate the DOM) do not break the feature.
     """
+    nonce = get_csp_nonce()
     return f"""
     <button id="back-to-top-btn"            type="button"
             aria-label="Back to top"
 title="Back to top">
         ⬆️ Top
     </button>
-    <div id="back-to-top-status" class="sr-only" role="status" aria-live="polite"></div>    <script>
+    <div id="back-to-top-status" class="sr-only" role="status" aria-live="polite"></div>    <script nonce="{nonce}">
     (function () {{
         if (window.__backToTopInitialized) return;
         window.__backToTopInitialized = true;

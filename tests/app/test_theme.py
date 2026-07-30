@@ -129,9 +129,9 @@ def test_inject_css_generates_css_without_errors():
     with patch("app.theme.st.markdown") as mock_markdown:
         inject_css()
 
-    mock_markdown.assert_called_once()
+    assert mock_markdown.call_count == 2
 
-    css = mock_markdown.call_args.args[0]
+    css = mock_markdown.call_args_list[0].args[0]
 
     assert isinstance(css, str)
     assert len(css.strip()) > 0
@@ -344,13 +344,13 @@ def test_badge_html_default():
     assert "🔴 High" in html
 
 
-def test_inject_css_generates_css_without_errors():
+def test_inject_css_generates_css_without_errors_duplicate():
     with patch("app.theme.st.markdown") as mock_markdown:
         inject_css()
 
-    mock_markdown.assert_called_once()
+    assert mock_markdown.call_count == 2
 
-    css = mock_markdown.call_args.args[0]
+    css = mock_markdown.call_args_list[0].args[0]
 
     assert isinstance(css, str)
     assert len(css.strip()) > 0
@@ -431,3 +431,52 @@ def test_apply_matplotlib_theme():
     assert mpl.rcParams["xtick.color"] == "#ffffff"
     assert mpl.rcParams["ytick.color"] == "#ffffff"
     assert mpl.rcParams["text.color"] == "#ffffff"
+
+
+# ── Issue #644: CSP Nonce Tests ───────────────────────────────────────────────
+from app.theme import generate_csp_nonce, get_csp_nonce, back_to_top_html
+
+
+def test_generate_csp_nonce_returns_unique_hex_strings():
+    """generate_csp_nonce() should return a non-empty, unique 32-char hex string."""
+    nonce1 = generate_csp_nonce()
+    nonce2 = generate_csp_nonce()
+    assert isinstance(nonce1, str)
+    assert len(nonce1) == 32  # 16 bytes -> 32 hex chars
+    assert nonce1 != nonce2  # cryptographically unique
+
+
+def test_get_csp_nonce_persists_in_session_state():
+    """get_csp_nonce() stores and reuses the nonce from st.session_state."""
+    mock_state: dict = {}
+    with patch("app.theme.st.session_state", mock_state):
+        nonce = get_csp_nonce()
+        assert "csp_nonce" in mock_state
+        assert mock_state["csp_nonce"] == nonce
+        # second call returns the cached nonce
+        assert get_csp_nonce() == nonce
+
+
+def test_inject_css_includes_csp_nonce():
+    """inject_css() must attach nonce="..." to both the <style> and <script> blocks."""
+    mock_state: dict = {}
+    with patch("app.theme.st.session_state", mock_state):
+        nonce = get_csp_nonce()          # prime the nonce in mock state
+        with patch("app.theme.st.markdown") as mock_md:
+            inject_css()
+
+        assert mock_md.call_count == 2
+        style_html = mock_md.call_args_list[0].args[0]
+        script_html = mock_md.call_args_list[1].args[0]
+
+        assert f'<style nonce="{nonce}">' in style_html
+        assert f'<script nonce="{nonce}">' in script_html
+
+
+def test_back_to_top_html_includes_csp_nonce():
+    """back_to_top_html() must attach nonce="..." to its <script> block."""
+    mock_state: dict = {}
+    with patch("app.theme.st.session_state", mock_state):
+        nonce = get_csp_nonce()
+        html = back_to_top_html()
+        assert f'<script nonce="{nonce}">' in html
