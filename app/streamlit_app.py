@@ -199,6 +199,26 @@ from src.visualization.heatmap import (
     plot_chunk_similarity_comparison,
     plot_similarity_heatmap,
 )
+from src.core.document_parser import (
+    DEFAULT_OCR_DPI,
+    DEFAULT_OCR_LANGUAGE,
+    OCRDependencyError,
+    SUPPORTED_OCR_LANGUAGES,
+    extract_text,
+    prepare_text_for_embedding,
+)
+from src.db.auth import (
+    init_db,
+    verify_user,
+    get_user_role,
+    add_user,
+    get_all_users,
+    delete_user,
+    update_password,
+    get_tour_completed,
+    set_tour_completed,
+)
+from src.core.config import get_branding_config
 from src.visualization.network_graph import plot_similarity_network
 
 try:
@@ -255,6 +275,15 @@ SESSION_ID = st.session_state.session_id
 from src.core.app_config import FAISS_INDEX_PATH
 _INDEX_PATH = str(FAISS_INDEX_PATH)
 
+# Load validated branding configuration
+branding_config = get_branding_config()
+_INDEX_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "corpus.index")
+)
+try:
+    from streamlit_tour import Tour
+except ImportError:
+    Tour = None
 
 # -----------------------------------------------------------------------------
 # Page Configuration & Session State

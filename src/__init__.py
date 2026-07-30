@@ -29,6 +29,11 @@ from .core import (
     save_index,
     sanitize_zero_width_characters,
     translate_text,
+    send_plagiarism_alert,
+    BrandingConfig,
+    get_branding_config,
+    reload_branding_config,
+    load_branding_config,
 )
 
 from .db import (
@@ -140,5 +145,9 @@ __all__ = [
     "get_document_chunks_count",
     "get_unique_class_sections",
     "get_documents_by_class",
+    "BrandingConfig",
+    "get_branding_config",
+    "reload_branding_config",
+    "load_branding_config",
     "sanitize_zero_width_characters",
 ]

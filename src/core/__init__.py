@@ -13,6 +13,12 @@ from .similarity import (PLAGIARISM_THRESHOLD, calculate_paragraph_similarity_br
 from .text_chunking import chunk_by_sentences, chunk_document, chunk_documents
 from .translator import translate_text
 from .webhook import send_plagiarism_alert
+from .config import (
+    BrandingConfig,
+    get_branding_config,
+    reload_branding_config,
+    load_branding_config,
+)
 
 
 __all__ = [
@@ -41,6 +47,10 @@ __all__ = [
     "build_index_from_matrix",
     "translate_text",
     "send_plagiarism_alert",
+    "BrandingConfig",
+    "get_branding_config",
+    "reload_branding_config",
+    "load_branding_config",
     "dispatch_plagiarism_alert",
     "sanitize_zero_width_characters",
 ]
