@@ -64,6 +64,11 @@ from src.db import (
     get_unique_class_sections,
     get_documents_by_class,
 )
+from src.db.incidents import (
+    init_incident_db,
+    get_all_incidents,
+    sync_flagged_incidents,
+)
 from src.utils.pdf_report import generate_plagiarism_report, highlight_pdf_matches
 from src.utils.badge_generator import (
     generate_badge_png,
@@ -264,12 +269,6 @@ with st.sidebar:
             0.99,
             value=PLAGIARISM_THRESHOLD,
             step=0.01,
-
-
-            help="Cosine similarity above which a pair is flagged.",
-
-          
-
             help="Cosine similarity threshold for flagging.",
 
             key="threshold_slider",
@@ -454,16 +453,8 @@ flags = flag_plagiarism(active_sim_df, threshold=threshold)
 st.subheader("📊 Analysis Summary")
 st.write(f"Processed **{len(raw_texts)}** documents with Chunk Size: `{chunk_size}` and Overlap: `{chunk_overlap}`.")
 
-    selected_class = st.selectbox(
-        "Select Class/Section",
-        unique_classes,
-        index=0,
-        key="class_filter_selectbox",
-    )
-
-
-    st.markdown("---")
-    st.markdown("""
+st.markdown("---")
+st.markdown("""
 **How it works**
 1. Upload **PDF, DOCX, or TXT** assignment files or import from Google Drive
 2. Text is extracted according to the file type
@@ -472,16 +463,16 @@ st.write(f"Processed **{len(raw_texts)}** documents with Chunk Size: `{chunk_siz
 5. A **FAISS index** is built over all chunk vectors
 6. Pairs above the threshold are flagged
 """)
-    st.markdown("---")
-    st.caption("Semantic Plagiarism Detector · FAISS edition")
+st.markdown("---")
+st.caption("Semantic Plagiarism Detector · FAISS edition")
 
-    if user_role == "admin":
-        st.markdown("---")
-        st.markdown("### 📁 Document Management")
-        existing_docs = get_all_documents()
-        if existing_docs:
-            st.write(f"**{len(existing_docs)}** documents in database")
-            for doc in existing_docs:
+if user_role == "admin":
+    st.markdown("---")
+    st.markdown("### 📁 Document Management")
+    existing_docs = get_all_documents()
+    if existing_docs:
+        st.write(f"**{len(existing_docs)}** documents in database")
+        for doc in existing_docs:
                 col1, col2 = st.columns([3, 1])
                 with col1:
                     st.text(f"📄 {doc['filename']}")
@@ -640,19 +631,6 @@ else:
             index_buffer = _io.BytesIO(cached_index_data)
             faiss_index = faiss.deserialize_index(faiss.read_index(index_buffer))
             registry = get_chunk_registry()
-
-        except Exception:
-
-            if os.path.exists(_INDEX_PATH):
-                faiss_index = load_index(_INDEX_PATH)
-                registry = get_chunk_registry()
-            else:
-                faiss_index = None
-                registry = []
-
-    if "analysis_results" not in st.session_state:
-        st.session_state.analysis_results = None
-
             st.info(f"📂 Loaded FAISS index from Redis cache with {faiss_index.ntotal} vectors")
         except Exception as e:
             print(f"[Redis] Error loading cached index: {e}, falling back to disk")
@@ -669,6 +647,13 @@ else:
                     "initialized safely.")
             else:
                 st.info(f"Loaded and validated the existing FAISS index with "f"{faiss_index.ntotal} vectors.")
+    else:
+        if os.path.exists(_INDEX_PATH):
+            faiss_index = load_index(_INDEX_PATH)
+            registry = get_chunk_registry()
+        else:
+            faiss_index = None
+            registry = []
 
     if "analysis_results" not in st.session_state:
         st.session_state.analysis_results = None
@@ -920,6 +905,10 @@ else:
 
     active_sim_df = sim_df
     flags = flag_plagiarism(active_sim_df, threshold=threshold)
+    
+    # Sync incidents to database
+    init_incident_db()
+    incidents = sync_flagged_incidents(flags)
 
     # ── Summary Metrics ───────────────────────────────────────────────────────
 
@@ -937,9 +926,10 @@ else:
     st.divider()
 
     # ── Application Tabs ──────────────────────────────────────────────────────
-    tab_warnings, tab_faiss, tab_matrix, tab_heatmap, tab_drill, tab_users = st.tabs(
+    tab_warnings, tab_incidents, tab_faiss, tab_matrix, tab_heatmap, tab_drill, tab_users = st.tabs(
         [
             "⚠️ Plagiarism Warnings",
+            "📋 Incidents",
             "⚡ FAISS Chunk Search",
             "📋 Similarity Matrix",
             "🗺️ Heatmap",
@@ -956,44 +946,82 @@ else:
         st.subheader("⚠️ Plagiarism Warnings")
         render_warning_controls(flags, threshold=threshold, ai_probabilities=ai_probabilities)
 
+    # ══ TAB 2: INCIDENTS ═══════════════════════════════════════════════════════
+    
+    with tab_incidents:
+        st.subheader("📋 Incidents")
+        
+        # Add search input
+        search_query = st.text_input(
+            "Search incidents",
+            placeholder="Search by Student Name, Assignment Title, or Document Name…",
+            key="incidents_search",
+        )
+        
+        # Get all documents for metadata lookup
+        all_docs = get_all_documents()
+        doc_metadata = {doc["filename"]: doc for doc in all_docs}
+        
+        # Filter incidents based on search query
+        filtered_incidents = []
+        query = search_query.strip().casefold()
+        
+        for incident in incidents:
+            doc_a = incident["document_a"]
+            doc_b = incident["document_b"]
+            
+            # Get metadata for both documents
+            meta_a = doc_metadata.get(doc_a, {})
+            meta_b = doc_metadata.get(doc_b, {})
+            
+            student_name_a = meta_a.get("student_name", "")
+            assignment_title_a = meta_a.get("assignment_title", "")
+            student_name_b = meta_b.get("student_name", "")
+            assignment_title_b = meta_b.get("assignment_title", "")
+            
+            # Check if search query matches any field
+            if not query:
+                filtered_incidents.append(incident)
+            elif (
+                query in student_name_a.casefold() or
+                query in assignment_title_a.casefold() or
+                query in doc_a.casefold() or
+                query in student_name_b.casefold() or
+                query in assignment_title_b.casefold() or
+                query in doc_b.casefold()
+            ):
+                filtered_incidents.append(incident)
+        
+        # Show status line
+        total_incidents = len(incidents)
+        matching_count = len(filtered_incidents)
+        
+        if matching_count > 0:
+            st.markdown(f"Showing **{matching_count}** of **{total_incidents}** incidents")
+        else:
+            st.info("No incidents match the current search.")
+        
+        # Display incidents table if there are matches
+        if filtered_incidents:
+            incidents_df = pd.DataFrame([
+                {
+                    "Incident ID": inc["incident_id"],
+                    "Document A": inc["document_a"],
+                    "Document B": inc["document_b"],
+                    "Similarity Score": f"{inc['similarity_score']:.4f}",
+                    "Severity Rank": inc["severity_rank"],
+                    "Review Status": inc["review_status"],
+                    "Date Flagged": inc["date_flagged"],
+                }
+                for inc in filtered_incidents
+            ])
+            st.dataframe(incidents_df, use_container_width=True)
+
 
     with tab_faiss:
         st.subheader("⚡ FAISS Vector Search")
         st.info(f"FAISS Index contains **{faiss_index.ntotal}** vectors.")
 
-    with tab_matrix:
-        st.subheader("📋 Similarity Matrix")
-        if active_sim_df is not None:
-            st.dataframe(active_sim_df.style.format("{:.4f}"), use_container_width=True)
-
-    with tab_heatmap:
-        st.subheader("🗺️ Similarity Heatmap")
-        if active_sim_df is not None:
-            heatmap_fig = plot_similarity_heatmap(
-                active_sim_df, title="Document Semantic Similarity", threshold=threshold, theme_colors=get_colors()
-            )
-            st.pyplot(heatmap_fig, use_container_width=True)
-
-    with tab_drill:
-        st.subheader("🔬 Pair Drill-Down")
-        if n_docs >= 2:
-            c1, c2 = st.columns(2)
-            with c1:
-                doc_a = st.selectbox("Document A", doc_names, index=0, key="da")
-            with c2:
-                doc_b = st.selectbox("Document B", [d for d in doc_names if d != doc_a], index=0, key="db")
-
-            score = float(active_sim_df.loc[doc_a, doc_b])
-            st.markdown(f"**Overall Similarity:** `{score:.1%}`")
-            st.progress(float(score))
-
-
-    # ══ TAB 2: FAISS ══════════════════════════════════════════════════════════
-    with tab_faiss:
-        st.subheader("⚡ FAISS Vector Search")
-        st.info(f"Index total: {faiss_index.ntotal} vectors.")
-
-    # ══ TAB 3: MATRIX ═════════════════════════════════════════════════════════
     with tab_matrix:
         st.subheader("📋 Similarity Matrix")
 
@@ -1043,83 +1071,80 @@ else:
                     use_container_width=True,
                 )
 
-        st.dataframe(active_sim_df.style.format("{:.4f}"), use_container_width=True)
-
-
-    # ══ TAB 4: HEATMAP ════════════════════════════════════════════════════════
     with tab_heatmap:
         st.subheader("🗺️ Similarity Heatmap")
-        heatmap_fig = plot_similarity_heatmap(
-            active_sim_df, title="Document Semantic Similarity", threshold=threshold, theme_colors=get_colors()
-        )
-        st.pyplot(heatmap_fig, use_container_width=True)
+        if active_sim_df is not None:
+            heatmap_fig = plot_similarity_heatmap(
+                active_sim_df, title="Document Semantic Similarity", threshold=threshold, theme_colors=get_colors()
+            )
+            st.pyplot(heatmap_fig, use_container_width=True)
 
-    # ══ TAB 5: PAIR DRILL-DOWN (#145 Feature Included) ════════════════════════
     with tab_drill:
         st.subheader("🔬 Pair Drill-Down")
-        c1, c2 = st.columns(2)
-        with c1:
-            doc_a = st.selectbox("Document A", doc_names, index=0, key="da")
-        with c2:
-            doc_b = st.selectbox("Document B", [d for d in doc_names if d != doc_a], index=0, key="db")
+        if n_docs >= 2:
+            c1, c2 = st.columns(2)
+            with c1:
+                doc_a = st.selectbox("Document A", doc_names, index=0, key="da")
+            with c2:
+                doc_b = st.selectbox("Document B", [d for d in doc_names if d != doc_a], index=0, key="db")
 
-        score = float(active_sim_df.loc[doc_a, doc_b])
-        st.markdown(f"**Overall Similarity:** `{score:.1%}`")
-        st.progress(float(score))
-        st.divider()
+            score = float(active_sim_df.loc[doc_a, doc_b])
+            st.markdown(f"**Overall Similarity:** `{score:.1%}`")
+            st.progress(float(score))
+            st.divider()
 
-        drill_tab_analysis, drill_tab_viewer = st.tabs(
-            ["📊 Chunk Matches & Report", "📄 Document Viewer"]
-        )
-
-        chunks_a = chunked_docs.get(doc_a, [])
-        chunks_b = chunked_docs.get(doc_b, [])
-
-        with drill_tab_analysis:
-            top_pairs = find_most_similar_chunks(
-                chunks_a, chunks_b, embeddings[doc_a], embeddings[doc_b], top_k=5, threshold=threshold
-            )
-            for rank, (ca, cb, sim) in enumerate(top_pairs, 1):
-                with st.expander(f"#{rank} — Similarity: {sim:.1%}"):
-                    st.write(f"**{doc_a}:** {ca}")
-                    st.write(f"**{doc_b}:** {cb}")
-
-        # --- In-App PDF Preview with Highlighted Matches (#145) ---
-        with drill_tab_viewer:
-            st.subheader("📄 In-App PDF Preview with Highlighted Matches")
-            selected_view_doc = st.radio(
-                "Select Document to Preview:",
-                options=[doc_a, doc_b],
-                horizontal=True,
-                key="doc_viewer_select",
+            drill_tab_analysis, drill_tab_viewer = st.tabs(
+                ["📊 Chunk Matches & Report", "📄 Document Viewer"]
             )
 
-            # Retrieve file bytes directly from uploaded files dict
-            doc_source = file_bytes_dict.get(selected_view_doc)
-            matching_chunks_to_highlight = chunks_a if selected_view_doc == doc_a else chunks_b
+            chunks_a = chunked_docs.get(doc_a, [])
+            chunks_b = chunked_docs.get(doc_b, [])
 
-            if doc_source and str(selected_view_doc).lower().endswith(".pdf"):
-                with st.spinner("Generating highlighted PDF preview..."):
-                    try:
-                        highlighted_pdf_bytes = highlight_pdf_matches(
-                            pdf_source=doc_source,
-                            matching_chunks=matching_chunks_to_highlight,
-                        )
+            with drill_tab_analysis:
+                top_pairs = find_most_similar_chunks(
+                    chunks_a, chunks_b, embeddings[doc_a], embeddings[doc_b], top_k=5, threshold=threshold
+                )
+                for rank, (ca, cb, sim) in enumerate(top_pairs, 1):
+                    with st.expander(f"#{rank} — Similarity: {sim:.1%}"):
+                        st.write(f"**{doc_a}:** {ca}")
+                        st.write(f"**{doc_b}:** {cb}")
 
-                        base64_pdf = base64.b64encode(highlighted_pdf_bytes).decode("utf-8")
-                        pdf_display = f"""
-                            <iframe 
-                                src="data:application/pdf;base64,{base64_pdf}" 
-                                width="100%" 
-                                height="850px" 
-                                type="application/pdf">
-                            </iframe>
-                        """
-                        st.markdown(pdf_display, unsafe_allow_html=True)
-                    except Exception as err:
-                        st.error(f"Unable to render PDF preview: {str(err)}")
-            else:
-                st.info(f"PDF Preview is only available for uploaded `.pdf` files.")
+            # --- In-App PDF Preview with Highlighted Matches (#145) ---
+            with drill_tab_viewer:
+                st.subheader("📄 In-App PDF Preview with Highlighted Matches")
+                selected_view_doc = st.radio(
+                    "Select Document to Preview:",
+                    options=[doc_a, doc_b],
+                    horizontal=True,
+                    key="doc_viewer_select",
+                )
+
+                # Retrieve file bytes directly from uploaded files dict
+                doc_source = file_bytes_dict.get(selected_view_doc)
+                matching_chunks_to_highlight = chunks_a if selected_view_doc == doc_a else chunks_b
+
+                if doc_source and str(selected_view_doc).lower().endswith(".pdf"):
+                    with st.spinner("Generating highlighted PDF preview..."):
+                        try:
+                            highlighted_pdf_bytes = highlight_pdf_matches(
+                                pdf_source=doc_source,
+                                matching_chunks=matching_chunks_to_highlight,
+                            )
+
+                            base64_pdf = base64.b64encode(highlighted_pdf_bytes).decode("utf-8")
+                            pdf_display = f"""
+                                <iframe 
+                                    src="data:application/pdf;base64,{base64_pdf}" 
+                                    width="100%" 
+                                    height="850px" 
+                                    type="application/pdf">
+                                </iframe>
+                            """
+                            st.markdown(pdf_display, unsafe_allow_html=True)
+                        except Exception as err:
+                            st.error(f"Unable to render PDF preview: {str(err)}")
+                else:
+                    st.info(f"PDF Preview is only available for uploaded `.pdf` files.")
 
     # ══ TAB 6: USERS ══════════════════════════════════════════════════════════
     with tab_users:
