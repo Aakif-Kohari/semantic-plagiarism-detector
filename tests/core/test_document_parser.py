@@ -642,3 +642,9 @@ def test_extract_text_routing_txt_latin1(tmp_path):
     result = extract_text(str(file_path), "latin1_test.txt")
     assert result == original_text
 
+def test_get_supported_file_extensions():
+    """get_supported_file_extensions should return the expected sorted list."""
+    from src.core.document_parser import get_supported_file_extensions
+
+    extensions = get_supported_file_extensions()
+    assert extensions == [".csv", ".docx", ".epub", ".html", ".pdf", ".rtf", ".txt"]

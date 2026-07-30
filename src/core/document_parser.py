@@ -57,6 +57,8 @@ MAX_OCR_DPI = 400
 DEFAULT_OCR_LANGUAGE = "eng"
 MAX_BATCH_SIZE = 50
 
+# File extensions supported by the extraction pipeline, exposed for UI display
+ALLOWED_EXTENSIONS = {".pdf", ".docx", ".csv", ".epub", ".html", ".rtf", ".txt"}
 ZERO_WIDTH_CHARS_PATTERN = re.compile(r"[\u200B\u200C\u200D\uFEFF\u2060\u200E\u200F]")
 
 
@@ -1325,14 +1327,18 @@ def extract_text(
     raw = sanitize_zero_width_characters(raw, filename=filename)
     lang_code = detect_text_language(raw)
 
-    logger.info(
+logger.info(
         f"[document_parser] Detected language for document '{filename}': {lang_code}"
     )
     return raw
 
 
-def extract_texts_from_pdfs(files: list, session_id: Optional[str] = None) -> Dict[str, str]:
-    """Legacy compatibility wrapper."""
+def get_supported_file_extensions() -> list[str]:
+    """Return a sorted list of file extensions supported for upload/display."""
+    return sorted(ALLOWED_EXTENSIONS)
+
+
+def extract_texts_from_pdfs(files: list, session_id: Optional[str] = None) -> Dict[str, str]:    """Legacy compatibility wrapper."""
     return extract_texts(files, session_id=session_id)
 
 
