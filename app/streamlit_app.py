@@ -614,6 +614,25 @@ with st.sidebar:
     selected_class = st.selectbox("Select Class/Section", unique_classes, index=0, key="class_filter_selectbox")
 
     st.markdown("---")
+    if st.session_state.get("scanning", False):
+        st.markdown(
+            "<span style='color:#FFA500;font-size:0.85rem;'>"
+            "● Scan in progress…</span>",
+            unsafe_allow_html=True,
+        )
+    elif faiss_index is not None:
+        st.markdown(
+            f"<span style='color:#00CC66;font-size:0.85rem;'>"
+            f"● Index ready ({faiss_index.ntotal} vectors)</span>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            "<span style='color:#999;font-size:0.85rem;'>"
+            "○ No index loaded</span>",
+            unsafe_allow_html=True,
+        )
+    st.markdown("---")
     st.markdown("""
 **How it works**
 1. Upload **PDF, DOCX, or TXT** assignment files or import from Google Drive
@@ -918,6 +937,7 @@ else:
         )
 
     if has_enough_files:
+        st.session_state["scanning"] = True
         total_bytes = sum(len(data) for data in file_bytes_dict.values())
         file_count = len(file_bytes_dict)
 
@@ -951,6 +971,7 @@ else:
             chunk_overlap,
         )
 
+        st.session_state["scanning"] = False
         active_sim_df = chunk_sim_df if use_chunk_matrix else sim_df
         flags = flag_plagiarism(active_sim_df, threshold=threshold)
     else:
