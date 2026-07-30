@@ -74,7 +74,6 @@ for mod_name in [
     "pypdf", "PyPDF2", "reportlab", "reportlab.pdfgen", "reportlab.lib", "reportlab.platypus",
     "reportlab.lib.colors", "reportlab.lib.enums", "reportlab.lib.styles", "reportlab.lib.units",
     "reportlab.lib.pagesizes", "reportlab.lib.utils",
-    "plotly", "plotly.express", "plotly.graph_objects",
     "matplotlib", "matplotlib.patches", "matplotlib.pyplot", "matplotlib.figure", "matplotlib.ticker",
     "networkx",
     "faiss", "torch", "psutil", "pytesseract",
