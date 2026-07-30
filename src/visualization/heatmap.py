@@ -13,11 +13,9 @@ Recent additions (Issue #628):
 - Implemented Matplotlib `LogNorm` for better visualization of highly skewed similarity distributions.
 """
 
-import re
 import logging
 from contextlib import contextmanager
-from typing import Generator, Optional
-import logging
+from typing import Dict, Generator, List, Optional
 
 import matplotlib
 import matplotlib.colors as mcolors

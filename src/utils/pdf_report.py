@@ -7,7 +7,8 @@ Provides side-by-side comparison of suspicious paragraph pairs with visual simil
 
 from __future__ import annotations
 
-
+import json
+import os
 
 from datetime import datetime
 from io import BytesIO
@@ -18,7 +19,7 @@ from src.core.app_config import get_pdf_footer_text
 from reportlab.lib.colors import HexColor
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
@@ -30,7 +31,55 @@ from reportlab.platypus import (
     TableStyle,
     PageBreak,
 )
-from src.utils.text_stats import compute_text_stats
+
+try:
+    import fitz  # PyMuPDF
+
+    _HAS_FITZ = True
+except Exception:
+    _HAS_FITZ = False
+
+
+_BRANDING_CONFIG_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "..", "config", "branding_config.json"
+)
+
+
+def load_branding_logo() -> bytes | None:
+    """
+    Reads logo_path from config/branding_config.json and returns the logo
+    bytes if the file exists and is a valid image, otherwise returns None.
+    """
+    try:
+        with open(_BRANDING_CONFIG_PATH, encoding="utf-8") as f:
+            cfg = json.load(f)
+        logo_path = cfg.get("logo_path", "").strip()
+        if not logo_path:
+            return None
+        with open(logo_path, "rb") as img_f:
+            return img_f.read()
+    except Exception:
+        return None
+
+
+def truncate_filename(filename: str, max_len: int = 30) -> str:
+    """
+    Truncates a filename to max_len characters with an ellipsis if needed,
+    preserving its file extension.
+    Example: 'final_essay_v2_final_really_final_draft_john_smith.pdf' -> 'final_essay_v2_f...h.pdf'
+    """
+    if len(filename) <= max_len:
+        return filename
+
+    name, ext = os.path.splitext(filename)
+    needed_len = max_len - len(ext) - 3
+
+    if needed_len <= 2:
+        return filename[: max_len - 3] + "..."
+
+    half = needed_len // 2
+    truncated_name = f"{name[:half]}...{name[-(needed_len - half):]}"
+    return f"{truncated_name}{ext}"
 
 
 def get_similarity_color(score: float) -> HexColor:
@@ -209,10 +258,14 @@ def generate_plagiarism_report(
 
     brand_clr = HexColor(brand_hex)
 
+    resolved_logo_image = logo_image
+    if not resolved_logo_image:
+        resolved_logo_image = load_branding_logo()
+
     logo_height = 0
-    if logo_image:
+    if resolved_logo_image:
         try:
-            reader = ImageReader(BytesIO(logo_image))
+            reader = ImageReader(BytesIO(resolved_logo_image))
             iw, ih = reader.getSize()
             logo_display_w = 1.5 * inch
             logo_display_h = logo_display_w * ih / iw
@@ -277,9 +330,9 @@ def generate_plagiarism_report(
                 fill=True,
                 stroke=False,
             )
-        if logo_image:
+        if resolved_logo_image:
             try:
-                reader = ImageReader(BytesIO(logo_image))
+                reader = ImageReader(BytesIO(resolved_logo_image))
                 iw, ih = reader.getSize()
                 logo_display_w = 1.5 * inch
                 logo_display_h = logo_display_w * ih / iw

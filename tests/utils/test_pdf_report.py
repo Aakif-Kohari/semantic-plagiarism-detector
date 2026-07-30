@@ -436,11 +436,10 @@ def _save_golden_hash(pdf_hash: str) -> None:
 
 
 def test_snapshot_pdf_content_match():
-    """Verify generated PDF content matches the golden fixture.
+    """Verify generated PDF text content matches the golden fixture.
 
-    The test generates a PDF with deterministic inputs (datetime is mocked),
-    computes a SHA-256 hash of the output bytes, and compares it against a
-    pre-computed golden hash stored in tests/fixtures/pdf_report_golden.hash.
+    Compares extracted text content (not raw bytes) since ReportLab embeds
+    a non-deterministic creation timestamp in the PDF binary on every run.
 
     To update the golden fixture (e.g. after intentional layout changes), set
     the environment variable ``UPDATE_PDF_GOLDEN=1`` and run:
@@ -448,7 +447,8 @@ def test_snapshot_pdf_content_match():
     """
     pdf_buffer = _generate_snapshot_pdf()
     pdf_bytes = pdf_buffer.getvalue()
-    current_hash = hashlib.sha256(pdf_bytes).hexdigest()
+    current_text = _read_text(pdf_bytes)
+    current_hash = hashlib.sha256(current_text.encode()).hexdigest()
 
     golden_hash = _load_golden_hash()
 
@@ -457,7 +457,7 @@ def test_snapshot_pdf_content_match():
         return
 
     assert current_hash == golden_hash, (
-        f"PDF content hash mismatch.\n"
+        f"PDF text content hash mismatch.\n"
         f"  Expected: {golden_hash}\n"
         f"  Got:      {current_hash}\n"
         f"  Run with UPDATE_PDF_GOLDEN=1 to update the golden fixture."
@@ -496,6 +496,125 @@ def test_generate_plagiarism_report_dark_mode():
     assert pdf_bytes.startswith(b"%PDF")
     text = _read_text(pdf_bytes)
     assert "student_a.pdf" in text
+
+
+# ── Branding logo tests ────────────────────────────────────────────────────
+
+
+def test_load_branding_logo_returns_bytes_for_valid_path(tmp_path):
+    """load_branding_logo returns bytes when logo_path points to a real file."""
+    import json
+    from src.utils.pdf_report import load_branding_logo, _BRANDING_CONFIG_PATH
+
+    logo_file = tmp_path / "logo.png"
+    logo_file.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)  # minimal PNG header
+
+    cfg = {"logo_path": str(logo_file)}
+    with patch("builtins.open", side_effect=[
+        __import__("io").StringIO(json.dumps(cfg)),
+        open(str(logo_file), "rb"),
+    ]):
+        pass  # use monkeypatch approach below
+
+    # Directly patch _BRANDING_CONFIG_PATH via monkeypatch on the module
+    config_file = tmp_path / "branding_config.json"
+    config_file.write_text(json.dumps({"logo_path": str(logo_file)}))
+
+    import src.utils.pdf_report as pdf_mod
+    original = pdf_mod._BRANDING_CONFIG_PATH
+    pdf_mod._BRANDING_CONFIG_PATH = str(config_file)
+    try:
+        result = load_branding_logo()
+        assert result is not None
+        assert isinstance(result, bytes)
+        assert len(result) > 0
+    finally:
+        pdf_mod._BRANDING_CONFIG_PATH = original
+
+
+def test_load_branding_logo_returns_none_for_missing_path(tmp_path):
+    """load_branding_logo returns None when logo_path is empty."""
+    import json
+    from src.utils.pdf_report import load_branding_logo
+
+    config_file = tmp_path / "branding_config.json"
+    config_file.write_text(json.dumps({"logo_path": ""}))
+
+    import src.utils.pdf_report as pdf_mod
+    original = pdf_mod._BRANDING_CONFIG_PATH
+    pdf_mod._BRANDING_CONFIG_PATH = str(config_file)
+    try:
+        assert load_branding_logo() is None
+    finally:
+        pdf_mod._BRANDING_CONFIG_PATH = original
+
+
+def test_load_branding_logo_returns_none_for_invalid_path(tmp_path):
+    """load_branding_logo returns None when logo_path points to a non-existent file."""
+    import json
+    from src.utils.pdf_report import load_branding_logo
+
+    config_file = tmp_path / "branding_config.json"
+    config_file.write_text(json.dumps({"logo_path": "/nonexistent/logo.png"}))
+
+    import src.utils.pdf_report as pdf_mod
+    original = pdf_mod._BRANDING_CONFIG_PATH
+    pdf_mod._BRANDING_CONFIG_PATH = str(config_file)
+    try:
+        assert load_branding_logo() is None
+    finally:
+        pdf_mod._BRANDING_CONFIG_PATH = original
+
+
+def test_pdf_generation_succeeds_with_custom_logo(tmp_path):
+    """PDF generation succeeds when load_branding_logo returns valid image bytes."""
+    from PIL import Image
+    import io
+
+    img = Image.new("RGB", (200, 80), color=(30, 58, 138))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    logo_bytes = buf.getvalue()
+
+    pdf_buffer = generate_plagiarism_report(
+        doc_a="student_a.pdf",
+        doc_b="student_b.pdf",
+        overall_similarity=0.85,
+        threshold=0.59,
+        top_pairs=[("Paragraph A text.", "Paragraph B text.", 0.87)],
+        logo_image=logo_bytes,
+    )
+    pdf_bytes = pdf_buffer.getvalue()
+    assert pdf_bytes.startswith(b"%PDF")
+    assert _read_text(pdf_bytes) is not None
+
+
+def test_generate_plagiarism_report_uses_configured_logo_when_no_bytes_are_provided(monkeypatch):
+    """PDF generation should fall back to the branding helper when no logo bytes are passed."""
+    import src.utils.pdf_report as pdf_mod
+
+    seen_payloads = []
+
+    class FakeImageReader:
+        def __init__(self, payload):
+            seen_payloads.append(payload.getvalue())
+
+        def getSize(self):
+            return (100, 40)
+
+    monkeypatch.setattr(pdf_mod, "ImageReader", FakeImageReader)
+    monkeypatch.setattr(pdf_mod, "load_branding_logo", lambda: b"configured-logo")
+
+    pdf_buffer = generate_plagiarism_report(
+        doc_a="student_a.pdf",
+        doc_b="student_b.pdf",
+        overall_similarity=0.85,
+        threshold=0.59,
+        top_pairs=[("Paragraph A text.", "Paragraph B text.", 0.87)],
+    )
+
+    assert pdf_buffer.getvalue().startswith(b"%PDF")
+    assert seen_payloads == [b"configured-logo", b"configured-logo", b"configured-logo"]
 
 
 def test_generate_plagiarism_report_auto_detect_dark_mode():
