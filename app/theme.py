@@ -176,32 +176,6 @@ PLOTLY_CMAP_MAPPING: dict[str, str] = {
 DEFAULT_UI_COLORMAP: str = "Viridis"
 
 
-def apply_matplotlib_theme(theme_colors: dict | None = None) -> None:
-    """
-    Applies active theme colors and default styling rules to Matplotlib rcParams.
-
-    Args:
-        theme_colors: Optional dictionary containing theme colors. If None, uses get_colors().
-    """
-    import matplotlib as mpl
-
-    colors = sanitize_theme_colors(theme_colors if theme_colors is not None else get_colors())
-
-    mpl.rcParams.update({
-        "figure.facecolor": colors.get("background", "#FFFFFF"),
-        "axes.facecolor": colors.get("surface", "#F8FAFC"),
-        "axes.edgecolor": colors.get("border", "#E2E8F0"),
-        "axes.labelcolor": colors.get("ink", "#0F172A"),
-        "xtick.color": colors.get("ink", "#0F172A"),
-        "ytick.color": colors.get("ink", "#0F172A"),
-        "text.color": colors.get("ink", "#0F172A"),
-        "grid.color": colors.get("border", "#E2E8F0"),
-        "figure.edgecolor": colors.get("border", "#E2E8F0"),
-        "savefig.facecolor": colors.get("background", "#FFFFFF"),
-        "savefig.edgecolor": colors.get("background", "#FFFFFF"),
-    })
-
-
 def initialize_theme() -> None:
     """Initialize the active theme for the current session."""
     try:
@@ -603,23 +577,65 @@ def pipeline_progress_html(steps: list[str], active_index: int = -1, estimated_s
 
 
 def back_to_top_html(scroll_threshold: int = 250) -> str:
-    """Return HTML for a floating back-to-top button."""
-    return """
-    <style>
-        .back-to-top {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background-color: #0D9488;
-            color: white;
-            padding: 10px 15px;
-            border-radius: 50%;
-            cursor: pointer;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            z-index: 999;
-        }
-    </style>
-    <a href="#top" class="back-to-top">⬆️</a>
+    """Return HTML and JavaScript for a floating back-to-top button.
+    The button is hidden by default and fades in once the user scrolls past
+    the configured threshold.  Clicking it smoothly scrolls the page to the top.
+
+    Streamlit (>= 1.28) scrolls inside a container whose parent holds
+    ``[data-testid="block-container"]``, not the window viewport.
+
+    The IIFE guards against duplicate listener registration across Streamlit
+    reruns.  The click handler uses event delegation and the scroll handler
+    re-queries the button on each event so that Streamlit reruns (which
+    recreate the DOM) do not break the feature.
+    """
+    return f"""
+    <button id="back-to-top-btn"            type="button"
+            aria-label="Back to top"
+title="Back to top">
+        ⬆️ Top
+    </button>
+    <div id="back-to-top-status" class="sr-only" role="status" aria-live="polite"></div>    <script>
+    (function () {{
+        if (window.__backToTopInitialized) return;
+        window.__backToTopInitialized = true;
+
+var SCROLL_THRESHOLD = {scroll_threshold};
+        /* Streamlit >= 1.28 scrolls inside the parent of
+           [data-testid="block-container"], not the window. */
+        var scrollContainer =
+            document.querySelector('[data-testid="block-container"]')
+                ?.parentElement
+            || document.querySelector('section.main > div')
+            || window;
+
+        /* Event delegation — works even after Streamlit recreates the
+           button element on a rerun. */
+        scrollContainer.addEventListener('click', function (e) {{
+            if (e.target.closest('#back-to-top-btn')) {{
+                scrollContainer.scrollTo({{ top: 0, behavior: 'smooth' }});
+            }}
+        }});
+
+        /* Re-query the button every scroll tick so the .visible class
+           is always applied to the live element, not a detached one. */
+scrollContainer.addEventListener('scroll', function () {{
+            var btn = document.getElementById('back-to-top-btn');
+            var status = document.getElementById('back-to-top-status');
+            if (!btn) return;
+            var scrollTop = scrollContainer === window
+                ? window.scrollY
+                : scrollContainer.scrollTop;
+            var shouldShow = scrollTop > SCROLL_THRESHOLD;
+            var wasVisible = btn.classList.contains('visible');
+            btn.classList.toggle('visible', shouldShow);
+            if (status && shouldShow && !wasVisible) {{
+                status.textContent = 'Back to top button available';
+            }} else if (status && !shouldShow && wasVisible) {{
+                status.textContent = '';
+            }}
+        }}, {{ passive: true }});    }})();
+    </script>
     """
 
 

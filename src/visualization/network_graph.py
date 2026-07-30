@@ -78,12 +78,9 @@ def build_network_data(
     threshold: float = 0.59,
     min_degree: int = 0,
     theme_colors: Optional[dict] = None,
-    highlighted_doc: Optional[str] = None,
-    document_tags: Optional[dict] = None,
-    doc_metadata: Optional[dict] = None,
+    selected_node: Optional[str] = None,
 ) -> dict:
-    """
-    Processes similarity matrix data, constructs NetworkX graph layout, and formats node and edge traces.
+    """Processes similarity matrix data, constructs NetworkX graph layout, and formats node and edge traces.
 
     Args:
         similarity_df: Square N×N DataFrame of similarity scores.
@@ -96,8 +93,6 @@ def build_network_data(
         Dictionary containing shapes, edge_hover_trace, node_trace, graph, pos coordinates,
         tag_color_map, and document_tags.
     """
-
-    # Create networkx graph
     G = nx.Graph()
 
     # Add all documents as nodes
@@ -118,10 +113,13 @@ def build_network_data(
                 G.add_edge(doc_names[i], doc_names[j])
                 edge_similarities[(doc_names[i], doc_names[j])] = score
 
-    # Compute layout coordinates
-    # Dynamic iteration depth for responsive performance on large node counts
-    num_nodes = len(G.nodes())
-    layout_iterations = 10 if num_nodes >= 100 else 25
+                edge_similarities[(doc_names[i], doc_names[j])] = score
+
+    # Nodes directly connected to the clicked node — used below to
+    # highlight them and dim everything else.
+    neighbor_nodes = set(G.neighbors(selected_node)) if selected_node in G else set()
+
+    # Compute layout coordinates    # Seed layout for reproducibility
     pos = nx.spring_layout(
         G,
         seed=42,
@@ -467,10 +465,9 @@ def plot_similarity_network(
     min_degree: int = 0,
     title: str = "Document Plagiarism Network",
     theme_colors: Optional[dict] = None,
-    highlighted_doc: Optional[str] = None,
+    selected_node: Optional[str] = None,
 ) -> go.Figure:
-    """
-    Builds a networkx graph from the similarity matrix and returns an interactive Plotly figure.
+    """Builds a networkx graph from the similarity matrix and returns an interactive Plotly figure.
 
     Args:
         similarity_df: Square N×N DataFrame of similarity scores.
@@ -488,7 +485,7 @@ def plot_similarity_network(
         threshold=threshold,
         min_degree=min_degree,
         theme_colors=theme_colors,
-        highlighted_doc=highlighted_doc,
+        selected_node=selected_node,
     )
     return render_network_plotly(
         network_data=network_data,
