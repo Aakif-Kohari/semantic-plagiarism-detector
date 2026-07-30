@@ -24,6 +24,12 @@ from .faiss_index import (
 )
 from .translator import translate_text
 from .webhook import send_plagiarism_alert
+from .config import (
+    BrandingConfig,
+    get_branding_config,
+    reload_branding_config,
+    load_branding_config,
+)
 
 __all__ = [
     "extract_text_from_pdf",
@@ -49,4 +55,8 @@ __all__ = [
     "build_index_from_matrix",
     "translate_text",
     "send_plagiarism_alert",
+    "BrandingConfig",
+    "get_branding_config",
+    "reload_branding_config",
+    "load_branding_config",
 ]

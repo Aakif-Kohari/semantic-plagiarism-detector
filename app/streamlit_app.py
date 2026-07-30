@@ -101,6 +101,7 @@ from src.db.auth import (
     get_tour_completed,
     set_tour_completed,
 )
+from src.core.config import get_branding_config
 try:
     from src.utils.excel_export import export_similarity_matrix_to_excel
 except ImportError:
@@ -117,8 +118,8 @@ if "session_id" not in st.session_state:
 SESSION_ID = st.session_state.session_id
 
 
-_BRANDING_CONFIG_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "branding_config.json"))
-_BRANDING_LOGO_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "branding_logo.png"))
+# Load validated branding configuration
+branding_config = get_branding_config()
 _INDEX_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "corpus.index")
 )
