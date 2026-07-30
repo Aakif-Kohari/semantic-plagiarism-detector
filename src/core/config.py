@@ -5,6 +5,8 @@ Configuration management and validation for branding settings.
 Provides safe loading and validation of branding_config.json with graceful fallbacks.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import os
@@ -185,8 +187,6 @@ def reload_branding_config() -> BrandingConfig:
     _branding_config = load_branding_config()
     return _branding_config
 """Central plagiarism threshold and severity configuration."""
-
-from __future__ import annotations
 
 from dataclasses import dataclass
 import os
