@@ -14,10 +14,7 @@ def _matrix(count: int, dim: int = 384) -> np.ndarray:
 
 
 def _registry(count: int):
-    return [
-        module.ChunkRecord(f"{i}.pdf", 0, f"text-{i}")
-        for i in range(count)
-    ]
+    return [module.ChunkRecord(f"{i}.pdf", 0, f"text-{i}") for i in range(count)]
 
 
 def test_validate_index_accepts_matching_index():
