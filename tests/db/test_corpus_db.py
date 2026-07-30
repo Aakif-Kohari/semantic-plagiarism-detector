@@ -1,13 +1,24 @@
+from datetime import datetime, timedelta
+
 import numpy as np
 import pytest
 
-from src.db.corpus_db import (add_chunks, add_document, clear_all_data,
-                              delete_document, get_all_documents,
-                              get_all_embeddings, get_chunk_registry,
-                              get_document_by_hash, get_document_chunks_count,
-                              get_documents_by_class,
-                              get_unique_class_sections)
-
+from src.db.corpus_db import (
+    _connect,
+    add_chunks,
+    add_document,
+    clear_all_data,
+    delete_document,
+    get_all_documents,
+    get_all_embeddings,
+    get_chunk_registry,
+    get_document_by_hash,
+    get_document_chunks_count,
+    get_documents_by_class,
+    get_unique_class_sections,
+    purge_stale_trash,
+    soft_delete_document,
+)
 
 @pytest.fixture(autouse=True)
 def setup_test_db(mock_db):
@@ -17,7 +28,6 @@ def setup_test_db(mock_db):
     """
     yield
 
-
 def test_add_document_metadata():
     # Add first document
     res1 = add_document("test1.pdf", "hash_abc_123")
@@ -25,12 +35,11 @@ def test_add_document_metadata():
 
     # Try adding a duplicate hash/document
     res2 = add_document("test2.pdf", "hash_abc_123")
-    assert res2 is False  # Unique hash constraint triggers
+    assert res2 is False # Unique hash constraint triggers
 
     # Try adding a duplicate filename
     res3 = add_document("test1.pdf", "different_hash")
-    assert res3 is False  # Unique filename constraint triggers
-
+    assert res3 is False # Unique filename constraint triggers
 
 def test_get_document_by_hash():
     add_document("doc_alpha.txt", "hash_xyz_789")
@@ -40,7 +49,6 @@ def test_get_document_by_hash():
 
     no_match = get_document_by_hash("nonexistent_hash")
     assert no_match is None
-
 
 def test_add_and_retrieve_chunks():
     add_document("doc1.pdf", "hash_1")
@@ -71,7 +79,6 @@ def test_add_and_retrieve_chunks():
     assert np.allclose(embs[0], dummy_emb_1)
     assert np.allclose(embs[1], dummy_emb_2)
 
-
 def test_delete_document_cascades():
     add_document("doc1.pdf", "hash_1")
     add_document("doc2.pdf", "hash_2")
@@ -100,7 +107,6 @@ def test_delete_document_cascades():
     embs = get_all_embeddings()
     assert embs.shape == (1, 384)
 
-
 def test_document_metadata_fields():
     # Insert with metadata fields
     res = add_document(
@@ -114,15 +120,16 @@ def test_document_metadata_fields():
     assert res is True
 
     # Retrieve and check fields
+    from src.db.schemas import Document
     docs = get_all_documents()
     assert len(docs) == 1
     doc = docs[0]
+    assert isinstance(doc, Document)
     assert doc["filename"] == "metadata_test.pdf"
     assert doc["class_section"] == "Class B"
     assert doc["student_name"] == "Alice Smith"
     assert doc["assignment_title"] == "Homework 1"
     assert doc["detected_language"] == "en"
-
 
 def test_class_queries():
     # Add documents belonging to different classes
@@ -147,13 +154,13 @@ def test_class_queries():
         student_name="Student C",
         assignment_title="Title C",
     )
-    add_document("doc_empty.pdf", "hash_empty")  # No metadata class
+    add_document("doc_empty.pdf", "hash_empty") # No metadata class
 
     # Verify unique class list
     classes = get_unique_class_sections()
     assert "Class A" in classes
     assert "Class B" in classes
-    assert len(classes) == 2  # None or empty string shouldn't be included
+    assert len(classes) == 2 # None or empty string shouldn't be included
 
     # Verify getting documents by class
     class_a_docs = get_documents_by_class("Class A")
@@ -164,7 +171,6 @@ def test_class_queries():
     class_b_docs = get_documents_by_class("Class B")
     assert "doc_b.pdf" in class_b_docs
     assert len(class_b_docs) == 1
-
 
 def test_clear_all_data_clears_incidents(mock_db):
     from src.db.incidents import get_all_incidents, sync_flagged_incidents
@@ -198,7 +204,6 @@ def test_clear_all_data_clears_incidents(mock_db):
     assert len(get_all_documents()) == 0
     assert len(get_all_incidents(db_path=db_path)) == 0
 
-
 def test_get_document_word_counts():
     import numpy as np
 
@@ -230,7 +235,6 @@ def test_get_document_word_counts():
     # "Doc2 has only one single chunk." -> 6 words
     assert word_counts["doc2.txt"] == 6
 
-
 def test_optimize_database_vacuum(mock_db):
     from src.db.corpus_db import optimize_database
 
@@ -245,7 +249,6 @@ def test_optimize_database_vacuum(mock_db):
     assert res["size_after"] > 0
     assert res["reclaimed_bytes"] >= 0
 
-
 def test_optimize_database_error_handling():
     from src.db.corpus_db import optimize_database, configure_db_path, get_corpus_db_path
 
@@ -259,3 +262,91 @@ def test_optimize_database_error_handling():
         assert res["reclaimed_bytes"] == 0
     finally:
         configure_db_path(original_path)
+
+# ==============================================================================
+# NEW TESTS FOR ISSUE #929: Soft Delete Cleanup Helper
+# ==============================================================================
+
+def test_purge_stale_trash_deletes_old_documents(mock_db):
+    """Test that purge_stale_trash deletes documents older than the threshold."""
+    # 1. Add a document
+    add_document("old_trash_doc.pdf", "hash_old_trash")
+    
+    # 2. Soft delete it
+    soft_delete_document("old_trash_doc.pdf")
+    
+    # 3. Manually backdate the deleted_at timestamp to 40 days ago
+    old_date = (datetime.now() - timedelta(days=40)).isoformat()
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE documents SET deleted_at = ? WHERE filename = ?",
+            (old_date, "old_trash_doc.pdf")
+        )
+    
+    # Verify it exists as deleted
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT is_deleted FROM documents WHERE filename = ?", 
+            ("old_trash_doc.pdf",)
+        ).fetchone()
+        assert row is not None and row[0] == 1
+    
+    # 4. Purge stale trash (default 30 days)
+    deleted_count = purge_stale_trash(days_in_trash=30)
+    
+    assert deleted_count == 1
+    
+    # 5. Verify it is permanently gone
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT filename FROM documents WHERE filename = ?", 
+            ("old_trash_doc.pdf",)
+        ).fetchone()
+        assert row is None
+
+def test_purge_stale_trash_retains_recently_deleted(mock_db):
+    """Test that purge_stale_trash retains documents deleted recently."""
+    # 1. Add a document
+    add_document("recent_trash_doc.pdf", "hash_recent_trash")
+    
+    # 2. Soft delete it (deleted_at is set to NOW)
+    soft_delete_document("recent_trash_doc.pdf")
+    
+    # 3. Attempt to purge with 30 days threshold
+    deleted_count = purge_stale_trash(days_in_trash=30)
+    
+    assert deleted_count == 0
+    
+    # 4. Verify it still exists in soft-deleted state
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT is_deleted FROM documents WHERE filename = ?", 
+            ("recent_trash_doc.pdf",)
+        ).fetchone()
+        assert row is not None and row[0] == 1
+
+def test_purge_stale_trash_ignores_active_documents(mock_db):
+    """Test that purge_stale_trash does not affect active (is_deleted=0) documents."""
+    # 1. Add an active document
+    add_document("active_old_doc.pdf", "hash_active_old")
+    
+    # 2. Manually backdate its upload date to 100 days ago (but is_deleted is 0 or NULL)
+    old_date = (datetime.now() - timedelta(days=100)).isoformat()
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE documents SET upload_date = ? WHERE filename = ?",
+            (old_date, "active_old_doc.pdf")
+        )
+    
+    # 3. Attempt to purge
+    deleted_count = purge_stale_trash(days_in_trash=30)
+    
+    assert deleted_count == 0
+    
+    # 4. Verify active document remains
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT is_deleted FROM documents WHERE filename = ?", 
+            ("active_old_doc.pdf",)
+        ).fetchone()
+        assert row is not None and (row[0] == 0 or row[0] is None)

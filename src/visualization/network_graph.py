@@ -5,6 +5,8 @@ Generates interactive document plagiarism network graphs using networkx and Plot
 Documents are represented as nodes, and similarities above the threshold are edges.
 """
 
+import csv
+import io
 from typing import Optional
 
 import networkx as nx
@@ -83,25 +85,24 @@ def build_network_data(
     min_degree: int = 0,
     theme_colors: Optional[dict] = None,
     selected_node: Optional[str] = None,
+    document_tags: Optional[dict] = None,
+    doc_metadata: Optional[dict] = None,
 ) -> dict:
-    """
-    Processes similarity matrix data, constructs NetworkX graph layout, and formats node and edge traces.
+    """Processes similarity matrix data, constructs NetworkX graph layout, and formats node and edge traces.
 
     Args:
         similarity_df: Square N×N DataFrame of similarity scores.
         threshold: Edge threshold; pairs with similarity >= threshold are connected.
         min_degree: Minimum degree threshold; nodes with degree < min_degree are filtered out.
         theme_colors: Optional dictionary containing theme colors.
-        document_tags: Optional dictionary mapping document names to tag strings or lists of tags.
+        selected_node: Optional document name to highlight.
+        document_tags: Optional dictionary mapping document names to tags.
+        doc_metadata: Optional dictionary mapping document names to metadata (word_count, upload_date, etc.).
 
     Returns:
         Dictionary containing shapes, edge_hover_trace, node_trace, graph, pos coordinates,
         tag_color_map, and document_tags.
     """
-    if document_tags is None and "doc_tags" in kwargs:
-        document_tags = kwargs.pop("doc_tags")
-
-    # Create networkx graph
     G = nx.Graph()
 
     # Add all documents as nodes
@@ -122,19 +123,20 @@ def build_network_data(
                 G.add_edge(doc_names[i], doc_names[j])
                 edge_similarities[(doc_names[i], doc_names[j])] = score
 
-    # Filter out nodes below the minimum degree threshold
-    if min_degree > 0:
-        low_degree_nodes = [
-            node for node, deg in dict(G.degree()).items() if deg < min_degree
-        ]
-        G.remove_nodes_from(low_degree_nodes)
+                edge_similarities[(doc_names[i], doc_names[j])] = score
 
-    # Compute layout coordinates
-    # Seed layout for reproducibility
+    # Nodes directly connected to the clicked node — used below to
+    # highlight them and dim everything else.
+    neighbor_nodes = set(G.neighbors(selected_node)) if selected_node in G else set()
+
+    # Compute layout coordinates    # Seed layout for reproducibility
+    num_nodes = len(G.nodes())
+    layout_iterations = 50
     pos = nx.spring_layout(
         G,
         seed=42,
-        k=1.0 / np.sqrt(max(1, len(G.nodes()))),
+        k=1.0 / np.sqrt(max(1, num_nodes)),
+        iterations=layout_iterations,
     )
 
     # If document_tags is None, attempt to fetch from DB if available
@@ -168,15 +170,11 @@ def build_network_data(
     # ── Draw Edges ─────────────────────────────────────────────────────────────
 
     shapes = []
-
-    # For hover info, add a transparent trace over each edge
-    edge_trace_x = []
-    edge_trace_y = []
+    edge_hover_x = []
+    edge_hover_y = []
     edge_hover_texts = []
 
-    for edge in G.edges():
-        doc_a, doc_b = edge
-
+    for doc_a, doc_b in G.edges():
         x0, y0 = pos[doc_a]
         x1, y1 = pos[doc_b]
 
@@ -192,8 +190,16 @@ def build_network_data(
         # Line width based on similarity
         line_width = max(1.5, score * 6.0)
 
-        # Color based on severity
-        if score >= 0.90:
+        # Check if edge is connected to highlighted document
+        is_highlighted_edge = (
+            selected_node is not None
+            and (doc_a == selected_node or doc_b == selected_node)
+        )
+
+        if is_highlighted_edge:
+            line_width = max(line_width * 1.8, 5.0)
+            color = "#FFD700"
+        elif score >= 0.90:
             color = (
                 theme_colors.get("danger", "#ff4b4b")
                 if theme_colors
@@ -212,14 +218,6 @@ def build_network_data(
                 else "#21c55d"
             )
 
-
-        # Highlight edges touching the clicked node; dim the rest.
-        is_incident_edge = selected_node in (doc_a, doc_b)
-        if selected_node and not is_incident_edge:
-            color = "rgba(150,150,150,0.25)"
-        elif is_incident_edge:
-            line_width = max(line_width, 4.0)
-
         shapes.append(
             dict(
                 type="line",
@@ -235,30 +233,12 @@ def build_network_data(
             )
         )
 
-        # Add to hover trace
-        edge_trace_x.extend([x0, x1, None])
-
-        edge_trace_y.extend([y0, y1, None])
-
+        # Midpoint coordinate for hover info
+        edge_hover_x.append((x0 + x1) / 2.0)
+        edge_hover_y.append((y0 + y1) / 2.0)
         edge_hover_texts.append(
             f"<b>Match:</b> {doc_a} ↔ {doc_b}<br>" f"<b>Similarity:</b> {score:.1%}"
         )
-
-    # ── Edge Hover Trace ──────────────────────────────────────────────────────
-
-    edge_hover_x = []
-    edge_hover_y = []
-
-    for edge in G.edges():
-        doc_a, doc_b = edge
-
-        x0, y0 = pos[doc_a]
-        x1, y1 = pos[doc_b]
-
-        # Midpoint coordinate
-        edge_hover_x.append((x0 + x1) / 2.0)
-
-        edge_hover_y.append((y0 + y1) / 2.0)
 
     edge_hover_trace = go.Scatter(
         x=edge_hover_x,
@@ -299,56 +279,56 @@ def build_network_data(
         node_document_ids.append(node)
 
         deg = G.degree(node)
+        base_size = 20 + deg * 6
 
-        # Size based on degree
-        node_size.append(20 + deg * 6)
+        # Calculate top match from similarity matrix
+        top_match_str = "N/A"
+        max_score = 0.0
+        if node in similarity_df.index and node in similarity_df.columns:
+            sim_series = similarity_df.loc[node].drop(labels=[node], errors="ignore")
+            if not sim_series.empty:
+                max_score = float(sim_series.max())
+                if max_score > 0:
+                    top_doc = sim_series.idxmax()
+                    top_match_str = f"{top_doc} ({max_score:.1%})"
 
-        # Node color based on class tag if available, else degree
-        primary_tag = node_primary_tags.get(node)
-        if primary_tag and primary_tag in tag_color_map:
-            node_color.append(tag_color_map[primary_tag])
-        elif deg == 0:
-            node_color.append(
-                theme_colors.get(
-                    "success",
-                    "#2e7d32",
-                )
-                if theme_colors
-                else "#2e7d32"
-            )
-        elif deg == 1:
-            node_color.append(
-                theme_colors.get(
-                    "warning",
-                    "#f9a825",
-                )
-                if theme_colors
-                else "#f9a825"
-            )
+        if selected_node is not None and node == selected_node:
+            node_size.append(base_size + 15)
+            node_color.append("#FFFF00")  # Bright yellow for highlighted node
         else:
-            node_color.append(
-                theme_colors.get(
-                    "danger",
-                    "#c62828",
+            node_size.append(base_size)
+            # Color based on maximum similarity score (plagiarism severity tier) instead of degree
+            if max_score >= 0.90:
+                node_color.append(
+                    theme_colors.get("danger", "#c62828")
+                    if theme_colors
+                    else "#c62828"
                 )
-                if theme_colors
-                else "#c62828"
-            )
-
-        # Highlight the clicked node and its direct neighbors; dim the rest.
-        if selected_node:
-            if node == selected_node:
-                node_size[-1] = node_size[-1] + 10
-            elif node in neighbor_nodes:
-                node_size[-1] = node_size[-1] + 4
+            elif max_score >= 0.75:
+                node_color.append(
+                    theme_colors.get("warning", "#f9a825")
+                    if theme_colors
+                    else "#f9a825"
+                )
             else:
-                node_color[-1] = "rgba(180,180,180,0.35)"
+                node_color.append(
+                    theme_colors.get("success", "#2e7d32")
+                    if theme_colors
+                    else "#2e7d32"
+                )
 
-        hover_parts = [f"<b>📄 Document:</b> {node}"]
-        if primary_tag:
-            hover_parts.append(f"<b>🏷️ Tag:</b> {primary_tag}")
-        hover_parts.append(f"<b>🚨 Flagged connections:</b> {deg} / {len(doc_names) - 1}")
-        node_hover.append("<br>".join(hover_parts))
+        meta = doc_metadata.get(node, {}) if doc_metadata and node in doc_metadata else {}
+        word_count = meta.get("word_count", "N/A")
+        upload_date = meta.get("upload_date", meta.get("created_at", "N/A"))
+
+        node_hover.append(
+            f"<b>📄 Document Title:</b> {node}<br>"
+            f"<b>🚨 Flagged connections:</b> {deg} / {max(1, len(doc_names) - 1)}<br>"
+            f"<b>📝 Word Count:</b> {word_count}<br>"
+            f"<b>📅 Upload Date:</b> {upload_date}<br>"
+            f"<b>🔗 Top Match:</b> {top_match_str}"
+        )
+
     # ── Plotly Node Trace ──────────────────────────────────────────────────────
 
     node_trace = go.Scatter(
@@ -499,8 +479,7 @@ def plot_similarity_network(
     theme_colors: Optional[dict] = None,
     selected_node: Optional[str] = None,
 ) -> go.Figure:
-    """
-    Builds a networkx graph from the similarity matrix and returns an interactive Plotly figure.
+    """Builds a networkx graph from the similarity matrix and returns an interactive Plotly figure.
 
     Args:
         similarity_df: Square N×N DataFrame of similarity scores.
@@ -508,7 +487,7 @@ def plot_similarity_network(
         min_degree: Minimum degree threshold; nodes with degree < min_degree are filtered out.
         title: Title of the graph.
         theme_colors: Optional dictionary containing theme colors.
-        document_tags: Optional dictionary mapping document names to tag strings or lists of tags.
+        highlighted_doc: Optional document name to search/highlight with larger size and bright yellow color.
 
     Returns:
         Plotly Graph Objects Figure.
@@ -519,11 +498,143 @@ def plot_similarity_network(
         min_degree=min_degree,
         theme_colors=theme_colors,
         selected_node=selected_node,
+        document_tags=None,
+        doc_metadata=None,
     )
     return render_network_plotly(
         network_data=network_data,
         title=title,
         theme_colors=theme_colors,
     )
+
+
+def export_graph_to_gexf(graph: nx.Graph) -> str:
+    """
+    Serialize a NetworkX graph to GEXF XML format string.
+
+    GEXF (Graph Exchange XML Format) is the standard format supported by
+    Gephi, Sigma.js, and other graph visualization tools.
+
+    Args:
+        graph: NetworkX Graph object.
+
+    Returns:
+        GEXF XML string.
+    """
+    return "".join(nx.generate_gexf(graph))
+
+
+def export_network_to_gexf_bytes(
+    similarity_df: pd.DataFrame,
+    threshold: float = 0.59,
+    min_degree: int = 0,
+) -> bytes:
+    """
+    Build a network from the similarity matrix and export as GEXF bytes.
+
+    GEXF (Graph Exchange XML Format) is supported by Gephi, Sigma.js,
+    and other graph visualization tools. Similarity scores are attached
+    as edge attributes for visualization in Gephi.
+
+    Args:
+        similarity_df: Square N×N DataFrame of similarity scores.
+        threshold: Edge threshold; pairs with similarity >= threshold
+            are connected.
+        min_degree: Minimum degree threshold; nodes with degree below
+            this value are excluded.
+
+    Returns:
+        GEXF XML as UTF-8 encoded bytes, ready for download.
+    """
+    network_data = build_network_data(
+        similarity_df=similarity_df,
+        threshold=threshold,
+        min_degree=min_degree,
+        document_tags=None,
+        doc_metadata=None,
+    )
+    G = network_data["graph"]
+
+    doc_names = list(similarity_df.columns)
+    name_to_idx = {name: i for i, name in enumerate(doc_names)}
+
+    for u, v in G.edges():
+        i = name_to_idx[u]
+        j = name_to_idx[v]
+        G[u][v]["similarity"] = float(similarity_df.iloc[i, j])
+
+    gexf_str = export_graph_to_gexf(G)
+    return gexf_str.encode("utf-8")
+
+
+def export_graph_to_csv(
+    graph: nx.Graph,
+    similarity_df: Optional[pd.DataFrame] = None,
+) -> str:
+    """
+    Serialize NetworkX graph edges into CSV format string.
+
+    CSV format:
+    Source,Target,Similarity
+
+    Args:
+        graph: NetworkX Graph object.
+        similarity_df: Optional square DataFrame with pairwise similarities.
+
+    Returns:
+        CSV string with header Source,Target,Similarity.
+    """
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Source", "Target", "Similarity"])
+
+    name_to_idx = {}
+    if similarity_df is not None and not similarity_df.empty:
+        doc_names = list(similarity_df.columns)
+        name_to_idx = {name: i for i, name in enumerate(doc_names)}
+
+    for u, v, data in graph.edges(data=True):
+        if similarity_df is not None and u in name_to_idx and v in name_to_idx:
+            i = name_to_idx[u]
+            j = name_to_idx[v]
+            score = float(similarity_df.iloc[i, j])
+        elif "similarity" in data:
+            score = float(data["similarity"])
+        else:
+            score = 0.0
+        writer.writerow([u, v, score])
+
+    return output.getvalue()
+
+
+def export_network_to_csv_bytes(
+    similarity_df: pd.DataFrame,
+    threshold: float = 0.59,
+    min_degree: int = 0,
+) -> bytes:
+    """
+    Build a network from the similarity matrix and export as CSV edge list bytes.
+
+    CSV edge list format is supported by Gephi, Cytoscape, and other external graph tools.
+
+    Args:
+        similarity_df: Square N×N DataFrame of similarity scores.
+        threshold: Edge threshold; pairs with similarity >= threshold are connected.
+        min_degree: Minimum degree threshold.
+
+    Returns:
+        CSV edge list as UTF-8 encoded bytes, ready for download.
+    """
+    network_data = build_network_data(
+        similarity_df=similarity_df,
+        threshold=threshold,
+        min_degree=min_degree,
+        document_tags=None,
+        doc_metadata=None,
+    )
+    G = network_data["graph"]
+    csv_str = export_graph_to_csv(G, similarity_df=similarity_df)
+    return csv_str.encode("utf-8")
+
 
 
