@@ -239,7 +239,7 @@ def test_export_network_to_gexf_bytes_contains_nodes_and_edges():
     }
     df = pd.DataFrame(data, index=["doc1", "doc2"])
 
-    net_data = build_network_data(df, threshold=0.75, highlighted_doc="doc1")
+    net_data = build_network_data(df, threshold=0.75, selected_node="doc1")
     node_colors = net_data["node_trace"].marker.color
     node_sizes = net_data["node_trace"].marker.size
 
@@ -276,5 +276,93 @@ def test_export_network_to_csv_bytes():
     lines = decoded.strip().splitlines()
     assert lines[0] == "Source,Target,Similarity"
     assert "doc1,doc2,0.92" in decoded or "doc2,doc1,0.92" in decoded
+
+
+def test_plot_similarity_network_json_serialization():
+    """Verify network graph figures serialize to valid JSON without circular references."""
+    # Test with multiple documents and edges
+    data = {
+        "doc1": [1.0, 0.85, 0.20],
+        "doc2": [0.85, 1.0, 0.10],
+        "doc3": [0.20, 0.10, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2", "doc3"])
+
+    fig = plot_similarity_network(df, threshold=0.75)
+
+    # Verify fig.to_json() succeeds without raising an exception
+    json_str = fig.to_json()
+    assert json_str is not None
+    assert len(json_str) > 0
+
+
+def test_plot_similarity_network_json_serialization_with_theme():
+    """Verify JSON serialization works with custom theme colors."""
+    data = {
+        "doc1": [1.0, 0.95],
+        "doc2": [0.95, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2"])
+    custom_theme = {
+        "danger": "#e53935",
+        "warning": "#fb8c00",
+        "success": "#43a047",
+        "background": "#121212",
+        "ink": "#ffffff",
+    }
+
+    fig = plot_similarity_network(df, threshold=0.75, theme_colors=custom_theme)
+
+    # Verify fig.to_json() succeeds
+    json_str = fig.to_json()
+    assert json_str is not None
+    assert len(json_str) > 0
+
+
+def test_plot_similarity_network_json_serialization_single_doc():
+    """Verify JSON serialization works for single document graph."""
+    data = {"doc1": [1.0]}
+    df = pd.DataFrame(data, index=["doc1"])
+
+    fig = plot_similarity_network(df, threshold=0.75)
+
+    # Verify fig.to_json() succeeds
+    json_str = fig.to_json()
+    assert json_str is not None
+    assert len(json_str) > 0
+
+
+def test_plot_similarity_network_json_serialization_no_edges():
+    """Verify JSON serialization works when no edges exist."""
+    data = {
+        "doc1": [1.0, 0.10, 0.20],
+        "doc2": [0.10, 1.0, 0.15],
+        "doc3": [0.20, 0.15, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2", "doc3"])
+
+    fig = plot_similarity_network(df, threshold=0.75)
+
+    # Verify fig.to_json() succeeds
+    json_str = fig.to_json()
+    assert json_str is not None
+    assert len(json_str) > 0
+
+
+def test_plot_similarity_network_json_serialization_with_highlighted_node():
+    """Verify JSON serialization works with highlighted node."""
+    data = {
+        "doc1": [1.0, 0.85, 0.20],
+        "doc2": [0.85, 1.0, 0.10],
+        "doc3": [0.20, 0.10, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2", "doc3"])
+
+    fig = plot_similarity_network(df, threshold=0.75, selected_node="doc1")
+
+    # Verify fig.to_json() succeeds
+    json_str = fig.to_json()
+    assert json_str is not None
+    assert len(json_str) > 0
 
 

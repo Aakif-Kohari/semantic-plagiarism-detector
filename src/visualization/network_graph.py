@@ -79,6 +79,8 @@ def build_network_data(
     min_degree: int = 0,
     theme_colors: Optional[dict] = None,
     selected_node: Optional[str] = None,
+    document_tags: Optional[dict] = None,
+    doc_metadata: Optional[dict] = None,
 ) -> dict:
     """Processes similarity matrix data, constructs NetworkX graph layout, and formats node and edge traces.
 
@@ -87,7 +89,9 @@ def build_network_data(
         threshold: Edge threshold; pairs with similarity >= threshold are connected.
         min_degree: Minimum degree threshold; nodes with degree < min_degree are filtered out.
         theme_colors: Optional dictionary containing theme colors.
-        highlighted_doc: Optional document name to search/highlight with larger size and bright yellow color.
+        selected_node: Optional document name to highlight.
+        document_tags: Optional dictionary mapping document names to tags.
+        doc_metadata: Optional dictionary mapping document names to metadata (word_count, upload_date, etc.).
 
     Returns:
         Dictionary containing shapes, edge_hover_trace, node_trace, graph, pos coordinates,
@@ -120,6 +124,8 @@ def build_network_data(
     neighbor_nodes = set(G.neighbors(selected_node)) if selected_node in G else set()
 
     # Compute layout coordinates    # Seed layout for reproducibility
+    num_nodes = len(G.nodes())
+    layout_iterations = 50
     pos = nx.spring_layout(
         G,
         seed=42,
@@ -180,8 +186,8 @@ def build_network_data(
 
         # Check if edge is connected to highlighted document
         is_highlighted_edge = (
-            highlighted_doc is not None
-            and (doc_a == highlighted_doc or doc_b == highlighted_doc)
+            selected_node is not None
+            and (doc_a == selected_node or doc_b == selected_node)
         )
 
         if is_highlighted_edge:
@@ -280,7 +286,7 @@ def build_network_data(
                     top_doc = sim_series.idxmax()
                     top_match_str = f"{top_doc} ({max_score:.1%})"
 
-        if highlighted_doc is not None and node == highlighted_doc:
+        if selected_node is not None and node == selected_node:
             node_size.append(base_size + 15)
             node_color.append("#FFFF00")  # Bright yellow for highlighted node
         else:
@@ -486,6 +492,8 @@ def plot_similarity_network(
         min_degree=min_degree,
         theme_colors=theme_colors,
         selected_node=selected_node,
+        document_tags=None,
+        doc_metadata=None,
     )
     return render_network_plotly(
         network_data=network_data,
@@ -536,6 +544,8 @@ def export_network_to_gexf_bytes(
         similarity_df=similarity_df,
         threshold=threshold,
         min_degree=min_degree,
+        document_tags=None,
+        doc_metadata=None,
     )
     G = network_data["graph"]
 
@@ -613,6 +623,8 @@ def export_network_to_csv_bytes(
         similarity_df=similarity_df,
         threshold=threshold,
         min_degree=min_degree,
+        document_tags=None,
+        doc_metadata=None,
     )
     G = network_data["graph"]
     csv_str = export_graph_to_csv(G, similarity_df=similarity_df)
