@@ -23,18 +23,28 @@ ALLOWED_MIME_TYPES = {
     "md": {"text/markdown", "text/plain", "application/octet-stream"},
     "rtf": {"application/rtf", "text/rtf", "text/plain"},
     "epub": {"application/epub+zip", "application/zip", "application/octet-stream"},
+"odt": {
+        "application/vnd.oasis.opendocument.text",
+        "application/zip",
+        "application/octet-stream",
+    },
+    "png": {"image/png"},
+    "jpg": {"image/jpeg"},
+    "jpeg": {"image/jpeg"},
 }
-
 # Fallback headers checking if python-magic is unavailable or has issues
 ALLOWED_MAGIC_HEADERS = {
     "pdf": [b"%PDF-"],
     "docx": [b"PK\x03\x04"],
     "zip": [b"PK\x03\x04"],
     "epub": [b"PK\x03\x04"],
-    "doc": [b"\xd0\xcf\x11\xe0"],
+    "odt": [b"PK\x03\x04"],
+"doc": [b"\xd0\xcf\x11\xe0"],
     "rtf": [b"{\\rtf"],
+    "png": [b"\x89PNG\r\n\x1a\n"],
+    "jpg": [b"\xff\xd8\xff"],
+    "jpeg": [b"\xff\xd8\xff"],
 }
-
 def validate_mime_type(file_bytes: bytes, filename: str) -> bool:
     """Validate the uploaded file bytes against a whitelist of allowed MIME signatures based on file extension.
 
@@ -85,12 +95,13 @@ def validate_mime_type(file_bytes: bytes, filename: str) -> bool:
 
     # For text files, if magic failed, we can verify it contains mostly printable text
     if extension in {"txt", "csv", "md"}:
-        try:
-            # Verify if it can be decoded as UTF-8
-            file_bytes.decode("utf-8", errors="strict")
-            return True
-        except UnicodeDecodeError:
-            logger.warning(f"[mime_validator] Security warning: Text validation check failed for '{filename}' (not valid UTF-8).")
-            return False
+        for encoding in ("utf-8", "utf-16", "latin-1"):
+            try:
+                file_bytes.decode(encoding, errors="strict")
+                return True
+            except UnicodeDecodeError:
+                continue
+        logger.warning(f"[mime_validator] Security warning: Text validation check failed for '{filename}' (not valid UTF-8/UTF-16/Latin-1).")
+        return False
 
     return False

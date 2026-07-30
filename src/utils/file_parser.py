@@ -15,17 +15,38 @@ class EncryptedPDFError(Exception):
     pass
 
 
+def get_file_size_formatted(num_bytes: int) -> str:
+    """
+    Convert a file size in bytes to a human-readable string.
+
+    Args:
+        num_bytes (int): File size in bytes.
+
+    Returns:
+        str: Human-readable file size using B, KB, MB, or GB.
+    """
+    units = ["B", "KB", "MB", "GB"]
+    size = float(num_bytes)
+
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(size)} {unit}"
+            return f"{size:.2f} {unit}"
+        size /= 1024
+
+
 def extract_text_from_pdf(file_bytes: bytes, password: Optional[str] = None) -> Tuple[str, bool]:
     """
     Extracts text from PDF bytes.
-    
+
     Args:
         file_bytes (bytes): Raw bytes of the uploaded PDF file.
         password (str, optional): Password to decrypt the PDF if protected.
-        
+
     Returns:
         Tuple[str, bool]: Extracted text, and a boolean flag indicating if the PDF was password-protected.
-        
+
     Raises:
         EncryptedPDFError: If the PDF is encrypted and no password (or an incorrect password) is provided.
     """
@@ -35,7 +56,7 @@ def extract_text_from_pdf(file_bytes: bytes, password: Optional[str] = None) -> 
     if is_protected:
         if not password:
             raise EncryptedPDFError("PDF is password-protected. Password required.")
-        
+
         # doc.authenticate returns > 0 on success
         auth_success = doc.authenticate(password)
         if not auth_success:

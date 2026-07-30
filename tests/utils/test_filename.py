@@ -43,8 +43,30 @@ def test_extension_is_preserved_and_normalized():
 def test_long_filename_preserves_extension_and_limit():
     result = sanitize_filename("a" * 400 + ".pdf")
 
-    assert len(result) == 255
+    assert len(result) == 150
     assert result.endswith(".pdf")
+
+
+def test_300_plus_character_filename_truncation_and_hash_uniqueness():
+    file1 = "a" * 300 + "_doc1.pdf"
+    file2 = "a" * 300 + "_doc2.pdf"
+
+    sanitized1 = sanitize_filename(file1)
+    sanitized2 = sanitize_filename(file2)
+
+    assert len(sanitized1) <= 150
+    assert len(sanitized2) <= 150
+    assert sanitized1.endswith(".pdf")
+    assert sanitized2.endswith(".pdf")
+    assert sanitized1 != sanitized2
+
+
+def test_custom_max_length_truncation_with_hash():
+    file_input = "b" * 350 + ".docx"
+    sanitized = sanitize_filename(file_input, max_length=50)
+
+    assert len(sanitized) <= 50
+    assert sanitized.endswith(".docx")
 
 
 def test_unique_filename_resolves_case_insensitive_collisions():

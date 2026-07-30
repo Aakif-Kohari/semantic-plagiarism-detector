@@ -5,10 +5,10 @@ Generates professional PDF plagiarism reports using ReportLab.
 Provides side-by-side comparison of suspicious paragraph pairs with visual similarity indicators.
 """
 
-
-import os
-
 from __future__ import annotations
+
+import json
+import os
 
 from datetime import datetime
 from io import BytesIO
@@ -19,17 +19,17 @@ from src.core.app_config import get_pdf_footer_text
 from reportlab.lib.colors import HexColor
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 from reportlab.platypus import (
-    PageBreak,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
     Table,
     TableStyle,
+    PageBreak,
 )
 
 try:
@@ -38,6 +38,28 @@ try:
     _HAS_FITZ = True
 except Exception:
     _HAS_FITZ = False
+
+
+_BRANDING_CONFIG_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "..", "config", "branding_config.json"
+)
+
+
+def load_branding_logo() -> bytes | None:
+    """
+    Reads logo_path from config/branding_config.json and returns the logo
+    bytes if the file exists and is a valid image, otherwise returns None.
+    """
+    try:
+        with open(_BRANDING_CONFIG_PATH, encoding="utf-8") as f:
+            cfg = json.load(f)
+        logo_path = cfg.get("logo_path", "").strip()
+        if not logo_path:
+            return None
+        with open(logo_path, "rb") as img_f:
+            return img_f.read()
+    except Exception:
+        return None
 
 
 def truncate_filename(filename: str, max_len: int = 30) -> str:
@@ -194,6 +216,8 @@ def generate_plagiarism_report(
     overall_similarity: float,
     threshold: float,
     top_pairs: List[Tuple[str, str, float]],
+    doc_a_text: Optional[str] = None,
+    doc_b_text: Optional[str] = None,
     report_title: str = "Plagiarism Detection Report",
     logo_image: Optional[bytes] = None,
     brand_color: Optional[str] = None,
@@ -211,6 +235,8 @@ def generate_plagiarism_report(
         overall_similarity: Overall similarity score between documents (0-1)
         threshold: Plagiarism threshold used for detection
         top_pairs: List of (chunk_a, chunk_b, similarity) tuples for top matches
+        doc_a_text: Optional raw text of document A for statistics calculation
+        doc_b_text: Optional raw text of document B for statistics calculation
         report_title: Title for the PDF report
         logo_image: Optional raw bytes of a PNG/JPG logo for the PDF header
         brand_color: Optional hex color string (e.g. "#1e3a8a") for headings
@@ -232,10 +258,14 @@ def generate_plagiarism_report(
 
     brand_clr = HexColor(brand_hex)
 
+    resolved_logo_image = logo_image
+    if not resolved_logo_image:
+        resolved_logo_image = load_branding_logo()
+
     logo_height = 0
-    if logo_image:
+    if resolved_logo_image:
         try:
-            reader = ImageReader(BytesIO(logo_image))
+            reader = ImageReader(BytesIO(resolved_logo_image))
             iw, ih = reader.getSize()
             logo_display_w = 1.5 * inch
             logo_display_h = logo_display_w * ih / iw
@@ -253,8 +283,6 @@ def generate_plagiarism_report(
         bottomMargin=40,
     )
 
-
-    styles = getSampleStyleSheet()
 
     # Get custom styles
 
@@ -288,8 +316,6 @@ def generate_plagiarism_report(
 
 
 
-    footer_text = get_pdf_footer_text()
-
     # ── Header / footer callback for logo ──
 
     def _draw_header(canvas_obj, _doc):
@@ -304,9 +330,9 @@ def generate_plagiarism_report(
                 fill=True,
                 stroke=False,
             )
-        if logo_image:
+        if resolved_logo_image:
             try:
-                reader = ImageReader(BytesIO(logo_image))
+                reader = ImageReader(BytesIO(resolved_logo_image))
                 iw, ih = reader.getSize()
                 logo_display_w = 1.5 * inch
                 logo_display_h = logo_display_w * ih / iw
@@ -323,6 +349,18 @@ def generate_plagiarism_report(
                 )
             except Exception:
                 pass
+
+        footer_text = get_pdf_footer_text()
+        if footer_text:
+            canvas_obj.setFont("Helvetica", 9)
+            if dark_mode:
+                canvas_obj.setFillColor(HexColor("#94a3b8"))
+            else:
+                canvas_obj.setFillColor(HexColor("#6b7280"))
+            canvas_obj.drawCentredString(
+                _doc.pagesize[0] / 2.0, 0.5 * inch, footer_text
+            )
+
         canvas_obj.restoreState()
 
 
@@ -387,6 +425,48 @@ def generate_plagiarism_report(
     story.append(doc_table)
     story.append(Spacer(1, 0.3 * inch))
 
+    # Text statistics (if available)
+    if doc_a_text is not None or doc_b_text is not None:
+        story.append(Paragraph("Document Statistics", heading_style))
+        story.append(Spacer(1, 0.1 * inch))
+        
+        # Compute statistics for each document
+        doc_a_stats = compute_text_stats(doc_a_text) if doc_a_text else None
+        doc_b_stats = compute_text_stats(doc_b_text) if doc_b_text else None
+        
+        # Create statistics table
+        stats_data = [
+            ['', doc_a, doc_b],
+            ['Word Count', str(doc_a_stats['word_count']) if doc_a_stats else 'N/A', str(doc_b_stats['word_count']) if doc_b_stats else 'N/A'],
+            ['Sentence Count', str(doc_a_stats['sentence_count']) if doc_a_stats else 'N/A', str(doc_b_stats['sentence_count']) if doc_b_stats else 'N/A'],
+            ['Unique Words', str(doc_a_stats['unique_word_count']) if doc_a_stats else 'N/A', str(doc_b_stats['unique_word_count']) if doc_b_stats else 'N/A'],
+            ['Unique Word Ratio', f"{doc_a_stats['unique_word_ratio']:.2%}" if doc_a_stats else 'N/A', f"{doc_b_stats['unique_word_ratio']:.2%}" if doc_b_stats else 'N/A'],
+        ]
+        
+        # Calculate column widths - give more space to document names
+        col_widths = [1.5 * inch, 2.25 * inch, 2.25 * inch]
+        
+        stats_table = Table(stats_data, colWidths=col_widths, hAlign=TA_LEFT)
+        stats_table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (0, -1), HexColor("#f3f4f6")),
+                    ("TEXTCOLOR", (0, 0), (0, -1), HexColor("#374151")),
+                    ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+                    ("FONTNAME", (1, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 10),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                    ("TOPPADDING", (0, 0), (-1, -1), 8),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 12),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ]
+            )
+        )
+        story.append(stats_table)
+        story.append(Spacer(1, 0.3 * inch))
+
+    # Visual similarity bar
     sim_color = get_similarity_color(overall_similarity)
     story.append(Paragraph("Similarity Score Visualization", heading_style))
 
@@ -561,16 +641,7 @@ def generate_plagiarism_report(
     doc.build(story, onFirstPage=_draw_header, onLaterPages=_draw_header)
     buffer.seek(0)
     return buffer
-
-    # Build PDF
-    doc.build(
-        story,
-        onFirstPage=_draw_header,
-        onLaterPages=_draw_header,
-        canvasmaker=NumberedCanvas,
-    )
-    return compress_pdf_buffer(buffer)
-
+import fitz  # PyMuPDF
 
 
 def highlight_pdf_matches(
@@ -631,6 +702,60 @@ def highlight_pdf_matches(
     output_buffer = doc.tobytes()
     doc.close()
 
+    return output_buffer
+
+
+def highlight_pdf_matches(
+    pdf_source: str | bytes,
+    matching_chunks: List[str],
+    highlight_color: Tuple[float, float, float] = (1.0, 0.85, 0.0),  # Yellow
+) -> bytes:
+    """Opens a PDF, searches for matching text chunks, applies yellow highlights
+
+    on exact bounding box coordinates, and returns the modified PDF bytes.
+    """
+    if isinstance(pdf_source, bytes):
+        doc = fitz.open(stream=pdf_source, filetype="pdf")
+    else:
+        doc = fitz.open(pdf_source)
+
+    for page in doc:
+        for chunk in matching_chunks:
+            chunk_clean = str(chunk).strip()
+            # Avoid highlighting tiny single words/chars to prevent false positives
+            if len(chunk_clean) < 3:
+                continue
+
+            # Search page for matching text coordinates
+            quad_matches = page.search_for(chunk_clean)
+            for rect in quad_matches:
+                annot = page.add_highlight_annot(rect)
+                annot.set_colors(stroke=highlight_color)
+                annot.update()
+
+    output_bytes = doc.tobytes()
+    doc.close()
+
+    return output_bytes
+import os
+
+def truncate_filename(filename: str, max_len: int = 30) -> str:
+    """
+    Truncates a filename to max_len characters with an ellipsis if needed,
+    preserving its file extension.
+    """
+    if len(filename) <= max_len:
+        return filename
+
+    name, ext = os.path.splitext(filename)
+    needed_len = max_len - len(ext) - 3
+
+    if needed_len <= 2:
+        return filename[: max_len - 3] + "..."
+
+    half = needed_len // 2
+    truncated_name = f"{name[:half]}...{name[-(needed_len - half):]}"
+    return f"{truncated_name}{ext}"
+
     return output_bytes
 
-    return output_buffer
