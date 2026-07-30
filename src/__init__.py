@@ -1,25 +1,33 @@
+"""
+src/__init__.py
+---------------
+Package initialization for the Semantic Plagiarism Detector core utilities, database handlers, and visualization routines.
+"""
+
 from .core import (
-    extract_text_from_pdf,
-    extract_texts_from_pdfs,
-    extract_text,
-    extract_texts,
+    PLAGIARISM_THRESHOLD,
+    ChunkRecord,
+    build_index,
+    build_index_from_matrix,
+    calculate_paragraph_similarity_breakdown,
+    chunk_by_sentences,
     chunk_document,
     chunk_documents,
+    chunk_similarity_matrix,
+    document_similarity_matrix,
     embed_chunks,
     embed_documents,
-    get_document_embedding,
-    document_similarity_matrix,
-    chunk_similarity_matrix,
-    flag_plagiarism,
+    extract_text,
+    extract_text_from_pdf,
+    extract_texts,
+    extract_texts_from_pdfs,
     find_most_similar_chunks,
-    PLAGIARISM_THRESHOLD,
-    build_index,
-    search_similar_chunks,
     find_plagiarised_chunks,
-    save_index,
+    flag_plagiarism,
+    get_document_embedding,
     load_index,
-    ChunkRecord,
-    build_index_from_matrix,
+    save_index,
+    sanitize_zero_width_characters,
     translate_text,
     send_plagiarism_alert,
     BrandingConfig,
@@ -27,33 +35,53 @@ from .core import (
     reload_branding_config,
     load_branding_config,
 )
+
 from .db import (
-    init_db,
-    verify_user,
-    get_user_role,
-    get_all_users,
-    add_user,
-    delete_user,
-    update_password,
-    init_corpus_db,
-    add_document,
-    get_document_by_hash,
-    get_all_documents,
     add_chunks,
-    get_chunk_registry,
-    get_all_embeddings,
-    delete_document,
+    add_document,
+    add_user,
     clear_all_data,
+    delete_document,
+    delete_user,
+    disable_2fa,
+    enable_2fa,
+    get_2fa_status,
+    get_all_documents,
+    get_all_embeddings,
+    get_all_users,
+    get_chunk_registry,
+    get_document_by_hash,
     get_document_chunks_count,
-    get_unique_class_sections,
     get_documents_by_class,
+    get_unique_class_sections,
+    get_user_active_status,
+    get_user_role,
+    init_corpus_db,
+    init_db,
+    is_user_active,
+    set_user_active_status,
+    update_password,
+    verify_user,
 )
-from .visualization import (
-    plot_similarity_heatmap,
-    plot_similarity_heatmap_plotly,
-    plot_chunk_similarity_comparison,
-    plot_similarity_network,
-)
+try:
+    from .visualization import (
+        build_network_data,
+        plot_chunk_similarity_comparison,
+        plot_similarity_heatmap,
+        plot_similarity_heatmap_plotly,
+        plot_similarity_network,
+        render_network_plotly,
+    )
+except ImportError:
+    build_network_data = None
+    plot_chunk_similarity_comparison = None
+    plot_similarity_heatmap = None
+    plot_similarity_heatmap_plotly = None
+    plot_similarity_network = None
+    render_network_plotly = None
+except ImportError:
+    pass
+
 
 __all__ = [
     "extract_text_from_pdf",
@@ -62,6 +90,7 @@ __all__ = [
     "extract_texts",
     "chunk_document",
     "chunk_documents",
+    "chunk_by_sentences",
     "embed_chunks",
     "embed_documents",
     "get_document_embedding",
@@ -69,13 +98,21 @@ __all__ = [
     "chunk_similarity_matrix",
     "flag_plagiarism",
     "find_most_similar_chunks",
+    "calculate_paragraph_similarity_breakdown",
     "PLAGIARISM_THRESHOLD",
     "plot_similarity_heatmap",
     "plot_similarity_heatmap_plotly",
+    "filter_heatmap_by_class_tag",
     "plot_chunk_similarity_comparison",
+    "build_network_data",
+    "export_graph_to_csv",
+    "export_network_to_csv_bytes",
+    "render_network_plotly",
     "plot_similarity_network",
+
     "translate_text",
     "send_plagiarism_alert",
+    "dispatch_plagiarism_alert",
     "build_index",
     "search_similar_chunks",
     "find_plagiarised_chunks",
@@ -90,6 +127,12 @@ __all__ = [
     "add_user",
     "delete_user",
     "update_password",
+    "get_2fa_status",
+    "enable_2fa",
+    "disable_2fa",
+    "get_user_active_status",
+    "set_user_active_status",
+    "is_user_active",
     "init_corpus_db",
     "add_document",
     "get_document_by_hash",
@@ -106,4 +149,5 @@ __all__ = [
     "get_branding_config",
     "reload_branding_config",
     "load_branding_config",
+    "sanitize_zero_width_characters",
 ]
