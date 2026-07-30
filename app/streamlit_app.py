@@ -1313,6 +1313,29 @@ else:
         if user_role == "admin":
             st.markdown("### ⚙️ Advanced Configuration")
 
+            st.markdown("### 🧪 Seed Data")
+            if st.button(
+                "📥 Load Demo Database",
+                key="load_seed_data_button",
+                use_container_width=True,
+                help="Populate the database with sample documents for testing and demonstration.",
+            ):
+                with st.spinner("Generating seed data..."):
+                    import subprocess
+                    import sys
+                    seed_script = os.path.join(ROOT_DIR, "scripts", "generate_seed_data.py")
+                    result = subprocess.run(
+                        [sys.executable, seed_script],
+                        capture_output=True, text=True, timeout=120,
+                    )
+                    if result.returncode == 0:
+                        st.success("✅ Demo database loaded successfully!")
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Seed data generation failed:\n{result.stderr}")
+
+            st.markdown("### ⚙️ Thresholds")
             threshold = st.slider(
                 get_text("threshold", lang=lang_code),
                 min_value=0.0,
