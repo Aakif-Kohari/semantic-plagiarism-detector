@@ -164,6 +164,12 @@ from src.db.incidents import (
 )
 from src.i18n.translator import _SUPPORTED_LANGUAGES, get_text
 from src.security.metadata_stripper import strip_exif_metadata
+from src.utils.processing_time import (
+    estimate_processing_seconds,
+    format_processing_duration,
+    processing_eta_text,
+    uploaded_files_total_bytes,
+)
 from src.utils.badge_generator import generate_badge_pdf, generate_badge_png
 from src.utils.diff_highlighter import highlight_overlap
 from src.utils.excel_export import export_similarity_matrix_to_excel
@@ -608,6 +614,25 @@ with st.sidebar:
     selected_class = st.selectbox("Select Class/Section", unique_classes, index=0, key="class_filter_selectbox")
 
     st.markdown("---")
+    if st.session_state.get("scanning", False):
+        st.markdown(
+            "<span style='color:#FFA500;font-size:0.85rem;'>"
+            "● Scan in progress…</span>",
+            unsafe_allow_html=True,
+        )
+    elif faiss_index is not None:
+        st.markdown(
+            f"<span style='color:#00CC66;font-size:0.85rem;'>"
+            f"● Index ready ({faiss_index.ntotal} vectors)</span>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            "<span style='color:#999;font-size:0.85rem;'>"
+            "○ No index loaded</span>",
+            unsafe_allow_html=True,
+        )
+    st.markdown("---")
     st.markdown("""
 **How it works**
 1. Upload **PDF, DOCX, or TXT** assignment files or import from Google Drive
@@ -863,21 +888,14 @@ else:
     has_enough_files = len(file_bytes_dict) >= 2
 
     @st.cache_data(show_spinner=False)
-    def run_pipeline(
-        file_bytes_dict: dict[str, bytes],
-        ocr_language: str,
-        ocr_dpi: int,
+    def run_extraction_pipeline(
+        raw_texts_items: tuple,
         chunk_size: int = 500,
         chunk_overlap: int = 50,
     ):
-        raw_texts = {}
-        for name, data in file_bytes_dict.items():
-            raw_texts[name] = extract_text(
-                _io.BytesIO(data), name, ocr_language=ocr_language, ocr_dpi=ocr_dpi
-            )
-
+        raw_texts_dict = dict(raw_texts_items)
         chunked_docs = chunk_documents(
-            raw_texts, chunk_size=chunk_size, chunk_overlap=chunk_overlap
+            raw_texts_dict, chunk_size=chunk_size, chunk_overlap=chunk_overlap
         )
         translated_chunked_docs = {}
 
@@ -909,7 +927,6 @@ else:
         ai_probabilities = detect_documents_ai_probability(chunked_docs)
 
         return (
-            raw_texts,
             chunked_docs,
             embeddings,
             sim_df,
@@ -920,26 +937,41 @@ else:
         )
 
     if has_enough_files:
-        with st.spinner("🧠 Processing files and building embeddings…"):
-            analysis_results = run_pipeline(
-                file_bytes_dict,
-                ocr_language,
-                ocr_dpi,
-                chunk_size,
-                chunk_overlap,
+        st.session_state["scanning"] = True
+        total_bytes = sum(len(data) for data in file_bytes_dict.values())
+        file_count = len(file_bytes_dict)
+
+        progress_bar = st.progress(0, text="Preparing files…")
+        raw_texts = {}
+        for i, (name, data) in enumerate(file_bytes_dict.items()):
+            raw_texts[name] = extract_text(
+                _io.BytesIO(data), name, ocr_language=ocr_language, ocr_dpi=ocr_dpi
+            )
+            fraction = (i + 1) / file_count
+            remaining_bytes = total_bytes * (file_count - i - 1) // max(1, file_count)
+            remaining_est = estimate_processing_seconds(remaining_bytes)
+            eta = format_processing_duration(remaining_est) if remaining_est else "a moment"
+            progress_bar.progress(
+                fraction,
+                text=f"Processing file {i + 1} of {file_count} (ETA: {eta})",
             )
 
-            (
-                raw_texts,
-                chunked_docs,
-                embeddings,
-                sim_df,
-                chunk_sim_df,
-                faiss_index,
-                registry,
-                ai_probabilities,
-            ) = analysis_results
+        raw_texts_tuple = tuple(sorted(raw_texts.items()))
+        (
+            chunked_docs,
+            embeddings,
+            sim_df,
+            chunk_sim_df,
+            faiss_index,
+            registry,
+            ai_probabilities,
+        ) = run_extraction_pipeline(
+            raw_texts_tuple,
+            chunk_size,
+            chunk_overlap,
+        )
 
+        st.session_state["scanning"] = False
         active_sim_df = chunk_sim_df if use_chunk_matrix else sim_df
         flags = flag_plagiarism(active_sim_df, threshold=threshold)
     else:
@@ -1302,6 +1334,29 @@ else:
         if user_role == "admin":
             st.markdown("### ⚙️ Advanced Configuration")
 
+            st.markdown("### 🧪 Seed Data")
+            if st.button(
+                "📥 Load Demo Database",
+                key="load_seed_data_button",
+                use_container_width=True,
+                help="Populate the database with sample documents for testing and demonstration.",
+            ):
+                with st.spinner("Generating seed data..."):
+                    import subprocess
+                    import sys
+                    seed_script = os.path.join(ROOT_DIR, "scripts", "generate_seed_data.py")
+                    result = subprocess.run(
+                        [sys.executable, seed_script],
+                        capture_output=True, text=True, timeout=120,
+                    )
+                    if result.returncode == 0:
+                        st.success("✅ Demo database loaded successfully!")
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Seed data generation failed:\n{result.stderr}")
+
+            st.markdown("### ⚙️ Thresholds")
             threshold = st.slider(
                 get_text("threshold", lang=lang_code),
                 min_value=0.0,
