@@ -31,9 +31,19 @@ app = FastAPI(
 )
 
 # Enable CORS for external LMS frontends
+origins = os.getenv("CORS_ALLOWED_ORIGINS", "*")
+if origins.strip() == "*":
+    allowed_origins = ["*"]
+else:
+    allowed_origins = [
+        origin.strip()
+        for origin in origins.split(",")
+        if origin.strip()
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
