@@ -1,5 +1,7 @@
 # 🔍 Semantic Plagiarism Detection System
 
+![Semantic Plagiarism Detector Banner](assets/hero_banner.png)
+
 > **[▶ Live Demo](https://semantic-plagiarism-detector.streamlit.app/)**
 
 A production-ready NLP application that detects **semantic plagiarism** in student
@@ -94,6 +96,7 @@ semantic_plagiarism_detector/
 │   ├── components/           # Incident export and UI helper components
 │   ├── streamlit_app.py      # Main Streamlit dashboard entrypoint
 │   └── theme.py              # Visual design system and CSS injection
+├── assets/                   # Project visual assets & AI header graphics
 ├── src/                      # Core backend source package
 │   ├── core/                 # Parsing, chunking, embedding, FAISS & similarity
 │   ├── db/                   # SQLite authentication, corpus & incident databases
@@ -514,6 +517,8 @@ service.
 ---
 
 ## 🧠 How It Works
+
+![Semantic Vector Search & AI NLP Architecture](assets/vector_search_concept.png)
 
 ### Step 1 – Text Extraction
 PyPDF2 reads each PDF page and concatenates the text.

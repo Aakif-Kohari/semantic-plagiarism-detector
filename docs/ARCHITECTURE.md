@@ -108,3 +108,28 @@ Scoring happens at two levels:
 1. **Document-Level**: Chunk embeddings are mean-pooled into a single vector per document. Cosine similarity is computed between these document vectors.
 2. **Chunk-Level**: Computes the maximum pairwise cosine similarity between individual chunks of two documents to detect localized plagiarism.
 Based on configured thresholds (e.g. 0.75 for Medium, 0.90 for High), the scoring pipeline flags plagiarized documents.
+
+## System Architecture Diagram
+
+The following Mermaid sequence diagram illustrates the flow of a document through the application, from upload to storage and incident logging.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Streamlit as streamlit_app.py
+    participant Parser as document_parser.py
+    participant Embedder as embeddings.py
+    participant FAISS as faiss_index.py
+    participant SQLite as SQLite DB
+
+    User->>Streamlit: Upload document
+    Streamlit->>Parser: Parse uploaded document
+    Parser-->>Streamlit: Extracted text
+    Streamlit->>Embedder: Generate embeddings
+    Embedder-->>Streamlit: Vector embeddings
+    Streamlit->>FAISS: Store/Search embeddings
+    FAISS-->>Streamlit: Similarity results
+    Streamlit->>SQLite: Store metadata & incident logs
+    SQLite-->>Streamlit: Confirmation
+    Streamlit-->>User: Display plagiarism results
+```

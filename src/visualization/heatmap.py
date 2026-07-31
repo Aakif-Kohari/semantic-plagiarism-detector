@@ -13,11 +13,11 @@ Recent additions (Issue #628):
 - Implemented Matplotlib `LogNorm` for better visualization of highly skewed similarity distributions.
 """
 
+import logging
+import io
 import re
-import logging
 from contextlib import contextmanager
-from typing import Generator, Optional
-import logging
+from typing import Dict, Generator, Optional
 
 import matplotlib
 import matplotlib.colors as mcolors
@@ -110,6 +110,19 @@ def validate_similarity_matrix(df: pd.DataFrame) -> pd.DataFrame:
     clean_df = pd.DataFrame(arr, index=df.index, columns=df.columns)
     return clean_df
 
+
+def export_heatmap_matrix_csv(df: pd.DataFrame) -> bytes:
+    """Export a similarity matrix DataFrame as UTF-8 encoded CSV bytes.
+
+    Args:
+        df: The similarity matrix DataFrame to export.
+
+    Returns:
+        CSV bytes encoded as UTF-8.
+    """
+    buf = io.BytesIO()
+    df.to_csv(buf, encoding="utf-8", index=True)
+    return buf.getvalue()
 
 
 def filter_heatmap_by_class_tag(

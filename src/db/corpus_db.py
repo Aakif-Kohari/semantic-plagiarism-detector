@@ -9,8 +9,8 @@ Enables incremental updates and index rebuilding without re-embedding.
 
 import logging
 import os
+import psutil
 import sqlite3
-import tempfile
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -174,6 +174,7 @@ def add_document(
     pdf_title: str = None,
     tags: str = None,
     detected_language: str = None,
+    owner: str = None,
 ) -> bool:
     """
     Insert a new document metadata row using parameterized execution.
@@ -181,13 +182,17 @@ def add_document(
 
     The filename is sanitized again here so direct database callers cannot
     persist HTML, JavaScript, traversal components, or control characters.
+
+    The ``owner`` parameter records the username of the account that
+    uploaded the document, enabling per-user analytics via
+    :func:`get_document_count_by_user`.
     """
     filename = sanitize_filename(filename)
 
     try:
         with _connect() as conn:
             conn.execute(
-                "INSERT INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, tags, detected_language) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, tags, detected_language, owner) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     filename,
                     file_hash,
@@ -200,6 +205,7 @@ def add_document(
                     pdf_title,
                     tags,
                     detected_language,
+                    owner,
                 ),
             )
             return True
@@ -250,6 +256,10 @@ def add_chunks(chunks_to_add: list) -> None:
 
     chunks_to_add: list of tuples: (vector_id, filename, chunk_index, chunk_text, embedding_np_array)
     """
+    process = psutil.Process()
+    mem_before = process.memory_info().rss / (1024 * 1024)
+    logger.info("Memory usage before batch chunk insertion: %.2f MB", mem_before)
+
     formatted_chunks = []
     for vid, fname, idx, text, emb in chunks_to_add:
         # Convert float32 numpy array to raw bytes BLOB
@@ -261,6 +271,9 @@ def add_chunks(chunks_to_add: list) -> None:
             "INSERT OR REPLACE INTO chunks (vector_id, filename, chunk_index, chunk_text, embedding) VALUES (?, ?, ?, ?, ?)",
             formatted_chunks,
         )
+
+    mem_after = process.memory_info().rss / (1024 * 1024)
+    logger.info("Memory usage after batch chunk insertion: %.2f MB", mem_after)
 
 def get_chunk_registry() -> list:
     """Reconstructs the registry of ChunkRecord objects ordered by vector_id."""
@@ -456,6 +469,28 @@ def get_embedding_count() -> int:
     """Return the number of durable chunk embeddings in the corpus."""
     with _connect() as conn:
         row = conn.execute("SELECT COUNT(1) FROM chunks").fetchone()
+        return int(row[0]) if row else 0
+      
+def get_document_count_by_user(owner_username: str) -> int:
+    """Return the number of non-deleted documents owned by a specific user.
+
+    Executes ``SELECT COUNT(1) FROM documents WHERE owner = ? AND is_deleted = 0``
+    so that soft-deleted documents are excluded from the count.
+
+    Args:
+        owner_username: The username of the account whose documents should
+            be counted.
+
+    Returns:
+        The count of active (non-soft-deleted) documents owned by the
+        user.  Returns ``0`` if the user owns no documents or the
+        username does not exist in the corpus.
+    """
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(1) FROM documents WHERE owner = ? AND is_deleted = 0",
+            (owner_username,),
+        ).fetchone()
         return int(row[0]) if row else 0
 
 def add_documents_bulk(documents: list) -> int:

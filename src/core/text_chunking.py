@@ -13,7 +13,7 @@ Two strategies are available:
 """
 
 import re
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 
 # ── Sentence splitting helper ─────────────────────────────────────────────────

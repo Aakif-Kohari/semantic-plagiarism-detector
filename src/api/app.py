@@ -2,7 +2,6 @@
 
 import logging
 import os
-import time
 from typing import Dict
 
 import numpy as np
@@ -17,6 +16,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, JSONResponse
 
 from src.api.middleware import verify_bearer_token
+from src.api.schemas import (
+    ClearDataResponse,
+    ErrorResponse,
+    HealthCheckResponse,
+    HealthzResponse,
+    LoginResponse,
+    SimilarityCheckResponse,
+)
 from sklearn.metrics.pairwise import cosine_similarity
 
 from src.core.app_config import FAISS_INDEX_PATH, HEALTHZ_DB_PATHS
@@ -108,14 +115,30 @@ def get_corpus_documents_with_embeddings() -> Dict[str, Dict]:
 # ── API Endpoints ──────────────────────────────────────────────────────────────
 
 
-@app.post("/api/v1/auth/login", tags=["Authentication"], summary="Authenticate user")
+@app.post(
+    "/api/v1/auth/login",
+    tags=["Authentication"],
+    summary="Authenticate user",
+    response_model=LoginResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        400: {"model": ErrorResponse, "description": "Bad Request"},
+        401: {"model": ErrorResponse, "description": "Unauthorized"},
+        500: {"model": ErrorResponse, "description": "Internal Server Error"},
+    },
+)
 @limiter.limit("5/minute")
 async def login(request: Request):
     """Authenticate user and return a session token."""
     return {"token": "dummy-token"}
 
 
-@app.get("/health", tags=["Health"])
+@app.get(
+    "/health",
+    tags=["Health"],
+    response_model=HealthCheckResponse,
+    status_code=status.HTTP_200_OK,
+)
 def health_check():
     """Healthcheck endpoint for readiness and liveness probes."""
     return {
@@ -147,7 +170,12 @@ def metrics_json():
     return JSONResponse(generate_metrics_json())
 
 
-@app.get("/healthz", tags=["Health"])
+@app.get(
+    "/healthz",
+    tags=["Health"],
+    response_model=HealthzResponse,
+    status_code=status.HTTP_200_OK,
+)
 def healthz():
     """Lightweight /healthz endpoint for DevOps monitoring and load balancer probes.
 
@@ -168,7 +196,17 @@ def healthz():
     }
 
 
-@app.post("/api/v1/scan", tags=["Plagiarism Detection"])
+@app.post(
+    "/api/v1/scan",
+    tags=["Plagiarism Detection"],
+    response_model=SimilarityCheckResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        400: {"model": ErrorResponse, "description": "Bad Request"},
+        422: {"model": ErrorResponse, "description": "Unprocessable Entity"},
+        500: {"model": ErrorResponse, "description": "Internal Server Error"},
+    },
+)
 async def scan_document(
     file: UploadFile = File(
         ..., description="Document file to scan (.pdf, .docx, .txt)"
@@ -320,7 +358,16 @@ logger = logging.getLogger(__name__)
 INDEX_PATH = str(FAISS_INDEX_PATH)
 
 
-@app.post("/api/v1/clear", tags=["System Administration"])
+@app.post(
+    "/api/v1/clear",
+    tags=["System Administration"],
+    response_model=ClearDataResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        403: {"model": ErrorResponse, "description": "Forbidden"},
+        500: {"model": ErrorResponse, "description": "Internal Server Error"},
+    },
+)
 async def clear_all_documents(
     username: str = Query(
         ..., description="Username of the administrator executing the operation"

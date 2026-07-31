@@ -27,7 +27,13 @@ DEFAULT_TAG_COLORS = [
     "#6366F1",  # Indigo
     "#14B8A6",  # Teal
 ]
-
+NETWORK_GRAPH_CONFIG = {
+    "toImageButtonOptions": {
+        "format": "png",
+        "filename": "plagiarism_network",
+        "scale": 2,
+    },
+}
 
 def _parse_document_tags(tags_val: object) -> list[str]:
     """Extracts a list of normalized tag strings from string, list, set or tuple input."""
@@ -77,6 +83,7 @@ def build_network_data(
     similarity_df: pd.DataFrame,
     threshold: float = 0.59,
     min_degree: int = 0,
+    node_scale: float = 1.0,
     theme_colors: Optional[dict] = None,
     selected_node: Optional[str] = None,
     document_tags: Optional[dict] = None,
@@ -273,7 +280,7 @@ def build_network_data(
         node_document_ids.append(node)
 
         deg = G.degree(node)
-        base_size = 20 + deg * 6
+        base_size = (20 + deg * 6) * node_scale
 
         # Calculate top match from similarity matrix
         top_match_str = "N/A"
@@ -470,6 +477,7 @@ def plot_similarity_network(
     threshold: float = 0.59,
     min_degree: int = 0,
     title: str = "Document Plagiarism Network",
+    node_scale: float = 1.0,
     theme_colors: Optional[dict] = None,
     selected_node: Optional[str] = None,
 ) -> go.Figure:
@@ -490,6 +498,7 @@ def plot_similarity_network(
         similarity_df=similarity_df,
         threshold=threshold,
         min_degree=min_degree,
+        node_scale=node_scale,
         theme_colors=theme_colors,
         selected_node=selected_node,
         document_tags=None,

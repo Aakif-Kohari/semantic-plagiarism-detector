@@ -1,10 +1,9 @@
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 # Strict mapping of file extension to allowed MIME types/signatures
-# Note: For zip-based files like docx and epub, their magic byte type from the OS might occasionally
-# be detected as generic application/zip, which is also allowed.
 ALLOWED_MIME_TYPES = {
     "pdf": {"application/pdf"},
     "docx": {
@@ -32,6 +31,9 @@ ALLOWED_MIME_TYPES = {
         "application/zip",
         "application/octet-stream",
     },
+    "png": {"image/png"},
+    "jpg": {"image/jpeg"},
+    "jpeg": {"image/jpeg"},
 }
 
 # Fallback headers checking if python-magic is unavailable or has issues
@@ -43,7 +45,11 @@ ALLOWED_MAGIC_HEADERS = {
     "odt": [b"PK\x03\x04"],
     "doc": [b"\xd0\xcf\x11\xe0"],
     "rtf": [b"{\\rtf"],
+    "png": [b"\x89PNG\r\n\x1a\n"],
+    "jpg": [b"\xff\xd8\xff"],
+    "jpeg": [b"\xff\xd8\xff"],
 }
+
 
 
 def validate_mime_type(file_bytes: bytes, filename: str) -> bool:
@@ -79,6 +85,16 @@ def validate_mime_type(file_bytes: bytes, filename: str) -> bool:
     # ------------------------------------------------------------------
     # 1. Try python-magic validation
     # ------------------------------------------------------------------
+
+def _check_magic_bytes(file_bytes: bytes, extension: str, filename: str) -> Optional[bool]:
+    """Attempt MIME type validation using python-magic.
+
+    Returns:
+        True: MIME type is verified and valid.
+        False: Mismatch detected; explicit validation failure.
+        None: python-magic failed or is unavailable; caller should trigger fallback.
+    """
+
     try:
         import magic
 
@@ -91,10 +107,14 @@ def validate_mime_type(file_bytes: bytes, filename: str) -> bool:
             if mime_type_clean in allowed:
                 return True
 
+
             if (
                 mime_type_clean.startswith("text/")
                 and extension in {"txt", "csv", "md", "rtf"}
             ):
+
+            if mime_type_clean.startswith("text/") and extension in {"txt", "csv", "md", "rtf"}:
+
                 return True
 
             logger.warning(
@@ -102,6 +122,7 @@ def validate_mime_type(file_bytes: bytes, filename: str) -> bool:
                 f"'{filename}'. Expected one of {allowed}, "
                 f"got '{mime_type_clean}'."
             )
+
 
     except Exception as e:
         logger.debug(
@@ -112,6 +133,21 @@ def validate_mime_type(file_bytes: bytes, filename: str) -> bool:
     # ------------------------------------------------------------------
     # 2. Fallback: Magic Byte Header Check
     # ------------------------------------------------------------------
+
+            return False
+    except (ImportError, ModuleNotFoundError) as e:
+        logger.debug(f"[mime_validator] python-magic not installed, falling back to header validation: {e}")
+        return None
+    except Exception as e:
+        logger.debug(f"[mime_validator] python-magic execution failed, falling back to header validation: {e}")
+        return None
+
+    return None
+
+
+def _check_extension_fallback(file_bytes: bytes, extension: str, filename: str) -> bool:
+    """Fallback validation checking binary header magic bytes or text encoding."""
+
     if extension in ALLOWED_MAGIC_HEADERS:
         headers = ALLOWED_MAGIC_HEADERS[extension]
 
@@ -125,11 +161,16 @@ def validate_mime_type(file_bytes: bytes, filename: str) -> bool:
         )
         return False
 
-    # ------------------------------------------------------------------
-    # Text file validation
-    # ------------------------------------------------------------------
+
     if extension in {"txt", "csv", "md"}:
-        for encoding in ("utf-8", "utf-16", "latin-1"):
+        if b"\x00" in file_bytes:
+            logger.warning(
+                f"[mime_validator] Security warning: Text validation check failed for '{filename}' "
+                f"(contains binary null bytes)."
+            )
+            return False
+
+        for encoding in ("utf-8", "utf-16"):
             try:
                 file_bytes.decode(encoding, errors="strict")
                 return True
@@ -137,9 +178,37 @@ def validate_mime_type(file_bytes: bytes, filename: str) -> bool:
                 continue
 
         logger.warning(
+
             f"[mime_validator] Security warning: Text validation check failed "
             f"for '{filename}' (not valid UTF-8/UTF-16/Latin-1)."
         )
         return False
 
     return False
+
+            f"[mime_validator] Security warning: Text validation check failed for '{filename}' "
+            f"(not valid UTF-8/UTF-16)."
+        )
+        return False
+
+    return False
+
+
+def validate_mime_type(file_bytes: bytes, filename: str) -> bool:
+    """Validate uploaded file bytes against allowed MIME signatures based on file extension.
+
+    Returns True if valid, False otherwise.
+    """
+    if not file_bytes:
+        return False
+
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if not extension or extension not in ALLOWED_MIME_TYPES:
+        logger.warning(f"[mime_validator] Security check: Unsupported file extension '{extension}' for file '{filename}'.")
+        return False
+
+    magic_result = _check_magic_bytes(file_bytes, extension, filename)
+    if magic_result is not None:
+        return magic_result
+
+    return _check_extension_fallback(file_bytes, extension, filename)

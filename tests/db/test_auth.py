@@ -8,6 +8,7 @@ from src.db.auth import (
     delete_user,
     disable_2fa,
     enable_2fa,
+    format_user_created_date,
     get_2fa_status,
     get_user_active_status,
     get_user_role,
@@ -243,5 +244,21 @@ def test_delete_user_removes_matching_session_and_authorization_rows(mock_db):
     assert user_token_count == 0
     assert other_session_count == 1
     assert other_token_count == 1
+
+# ──────────────────────────────────────────────────────────────────────────────
+# format_user_created_date — issue #1049
+# ──────────────────────────────────────────────────────────────────────────────
+
+def test_connect_uses_fifteen_second_timeout():
+    """Verify that _connect helper sets sqlite3 timeout to 15.0 seconds."""
+    from unittest.mock import patch
+    from src.db.auth import _connect
+
+    with patch("sqlite3.connect") as mock_connect:
+        _connect()
+        mock_connect.assert_called_once()
+        kwargs = mock_connect.call_args[1]
+        assert kwargs.get("timeout") == 15.0
+
 
 

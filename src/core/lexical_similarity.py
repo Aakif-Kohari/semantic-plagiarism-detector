@@ -1,27 +1,24 @@
-"""
-lexical_similarity.py
+"""lexical_similarity.py
 ---------------------
-Computes lexical similarity between documents using TF-IDF vectorization.
+Computes lexical similarity between documents using TF-IDF vectorization, Jaccard similarity,
+Dice coefficient, overlap coefficient, and n-gram overlap.
 
-This module provides a TF-IDF based baseline for plagiarism detection,
-which excels at identifying identical lexical copy-pasting.
+This module provides a TF-IDF based baseline and set-theoretic similarity metrics
+for plagiarism detection, which excel at identifying identical lexical copy-pasting.
 
-Issue #222: Stop-words (the, and, is, a, …) are filtered out before the
-TF-IDF set intersection is computed, so common function words cannot
-artificially inflate the lexical similarity between unrelated essays.
-Filtering is applied both in the TF-IDF vectorizer (via ``stop_words``)
-and in the standalone ``jaccard_similarity`` / ``remove_stopwords``
-helpers, so any Jaccard-style fallback comparison benefits from the same
-filtering.
-
-Issue #845: Supports custom_stopwords parameter to extend stop-word sets
-for domain-specific academic filler words (e.g. "ibid", "figure", "table").
+Mathematical Formulas:
+    - Jaccard Similarity: J(A, B) = |A ∩ B| / |A ∪ B|
+    - Sørensen-Dice Coefficient: Dice(A, B) = (2 * |A ∩ B|) / (|A| + |B|)
+    - Overlap Coefficient: Overlap(A, B) = |A ∩ B| / min(|A|, |B|)
+    - TF-IDF Cosine Similarity: Cosine(u, v) = (u · v) / (||u|| * ||v||)
 """
+
+from __future__ import annotations
 
 import functools
 import hashlib
 import re
-from typing import Dict, Iterable, Optional, Set
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import numpy as np
 import pandas as pd
@@ -30,133 +27,34 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 # ── Stop-word handling (issue #222) ───────────────────────────────────────────
 
-_TOKEN_RE = re.compile(r"[a-z0-9]+(?:'[a-z]+)?")
+_TOKEN_RE: re.Pattern[str] = re.compile(r"[a-z0-9]+(?:'[a-z]+)?")
 
 # Compact fallback list — covers high-frequency English function words.
 _FALLBACK_STOPWORDS: Set[str] = {
-    "a",
-    "an",
-    "the",
-    "and",
-    "or",
-    "but",
-    "if",
-    "then",
-    "else",
-    "when",
-    "at",
-    "by",
-    "for",
-    "with",
-    "about",
-    "against",
-    "between",
-    "into",
-    "through",
-    "during",
-    "before",
-    "after",
-    "above",
-    "below",
-    "to",
-    "from",
-    "up",
-    "down",
-    "in",
-    "out",
-    "on",
-    "off",
-    "over",
-    "under",
-    "again",
-    "further",
-    "is",
-    "are",
-    "was",
-    "were",
-    "be",
-    "been",
-    "being",
-    "am",
-    "have",
-    "has",
-    "had",
-    "having",
-    "do",
-    "does",
-    "did",
-    "doing",
-    "will",
-    "would",
-    "shall",
-    "should",
-    "can",
-    "could",
-    "may",
-    "might",
-    "must",
-    "of",
-    "as",
-    "it",
-    "its",
-    "this",
-    "that",
-    "these",
-    "those",
-    "i",
-    "you",
-    "he",
-    "she",
-    "we",
-    "they",
-    "them",
-    "his",
-    "her",
-    "their",
-    "our",
-    "my",
-    "your",
-    "me",
-    "him",
-    "us",
-    "so",
-    "than",
-    "too",
-    "very",
-    "s",
-    "t",
-    "just",
-    "also",
-    "not",
-    "no",
-    "nor",
-    "only",
-    "own",
-    "same",
-    "such",
-    "more",
-    "most",
-    "other",
-    "some",
-    "any",
-    "each",
-    "few",
-    "both",
-    "all",
-    "there",
-    "here",
-    "where",
-    "why",
-    "how",
-    "what",
-    "which",
-    "who",
-    "whom",
+    "a", "an", "the", "and", "or", "but", "if", "then", "else", "when",
+    "at", "by", "for", "with", "about", "against", "between", "into",
+    "through", "during", "before", "after", "above", "below", "to", "from",
+    "up", "down", "in", "out", "on", "off", "over", "under", "again",
+    "further", "is", "are", "was", "were", "be", "been", "being", "am",
+    "have", "has", "had", "having", "do", "does", "did", "doing", "will",
+    "would", "shall", "should", "can", "could", "may", "might", "must",
+    "of", "as", "it", "its", "this", "that", "these", "those", "i", "you",
+    "he", "she", "we", "they", "them", "his", "her", "their", "our", "my",
+    "your", "me", "him", "us", "so", "than", "too", "very", "s", "t",
+    "just", "also", "not", "no", "nor", "only", "own", "same", "such",
+    "more", "most", "other", "some", "any", "each", "few", "both", "all",
+    "there", "here", "where", "why", "how", "what", "which", "who", "whom",
 }
 
 
 def _load_stopwords() -> Set[str]:
-    """Resolve the English stop-word set."""
+    """Resolve the English stop-word set from NLTK corpus with fallback.
+
+    Returns
+    -------
+    Set[str]
+        Set of lower-case English stop-words.
+    """
     try:
         from nltk.corpus import stopwords as _nltk_stopwords  # type: ignore
 
@@ -172,42 +70,286 @@ STOPWORDS: Set[str] = _load_stopwords()
 def _get_combined_stopwords(
     custom_stopwords: Optional[Iterable[str]] = None,
 ) -> Set[str]:
-    """Combine base STOPWORDS with optional custom stop-words."""
-    combined = set(STOPWORDS)
+    """Combine base module STOPWORDS with optional custom domain stop-words.
+
+    Parameters
+    ----------
+    custom_stopwords : Optional[Iterable[str]], default=None
+        Optional list or set of custom domain-specific stop-words.
+
+    Returns
+    -------
+    Set[str]
+        Combined set of normalized lower-case stop-words.
+    """
+    combined: Set[str] = set(STOPWORDS)
     if custom_stopwords:
-        combined.update(w.lower() for w in custom_stopwords)
+        combined.update(w.lower().strip() for w in custom_stopwords if isinstance(w, str))
     return combined
 
 
-def remove_stopwords(text: str, stopwords: Optional[Iterable[str]] = None) -> str:
-    """Return ``text`` with stop-words removed (case-insensitive)."""
-    if not text:
+def remove_stopwords(
+    text: str,
+    stopwords: Optional[Iterable[str]] = None,
+) -> str:
+    """Filter out stop-words from input text while preserving token order.
+
+    Parameters
+    ----------
+    text : str
+        Input document text string.
+    stopwords : Optional[Iterable[str]], default=None
+        Optional iterable of stop-words to exclude. Defaults to module STOPWORDS.
+
+    Returns
+    -------
+    str
+        Space-separated string of non-stop-word tokens.
+    """
+    if not text or not isinstance(text, str):
         return ""
-    stop_set = set(stopwords) if stopwords is not None else STOPWORDS
-    tokens = [tok for tok in _TOKEN_RE.findall(text.lower()) if tok not in stop_set]
+    stop_set: Set[str] = set(stopwords) if stopwords is not None else STOPWORDS
+    tokens: List[str] = [tok for tok in _TOKEN_RE.findall(text.lower()) if tok not in stop_set]
     return " ".join(tokens)
 
 
-def tokenize(text: str, stopwords: Optional[Iterable[str]] = None) -> Set[str]:
-    """Tokenize ``text`` into a set of lower-cased non-stop-word tokens."""
-    if not text:
+def tokenize(
+    text: str,
+    stopwords: Optional[Iterable[str]] = None,
+) -> Set[str]:
+    """Tokenize input text into a set of lower-cased non-stop-word tokens.
+
+    Parameters
+    ----------
+    text : str
+        Input text to tokenize.
+    stopwords : Optional[Iterable[str]], default=None
+        Optional iterable of stop-words to exclude. Defaults to module STOPWORDS.
+
+    Returns
+    -------
+    Set[str]
+        Set of unique lower-case non-stop-word token strings.
+    """
+    if not text or not isinstance(text, str):
         return set()
-    stop_set = set(stopwords) if stopwords is not None else STOPWORDS
+    stop_set: Set[str] = set(stopwords) if stopwords is not None else STOPWORDS
     return {tok for tok in _TOKEN_RE.findall(text.lower()) if tok not in stop_set}
 
 
-def jaccard_similarity(
-    text_a: str, text_b: str, stopwords: Optional[Iterable[str]] = None
+def get_ngrams(
+    text: str,
+    n: int = 3,
+    stopwords: Optional[Iterable[str]] = None,
+) -> Set[Tuple[str, ...]]:
+    """Extract word-level n-grams from text after stop-word filtering.
+
+    Mathematical Formula
+    --------------------
+    An n-gram G_i = (w_i, w_{i+1}, ..., w_{i+n-1}) is a sequence of n contiguous words.
+
+    Parameters
+    ----------
+    text : str
+        Input document text string.
+    n : int, default=3
+        N-gram sequence length (number of contiguous tokens).
+    stopwords : Optional[Iterable[str]], default=None
+        Optional iterable of stop-words to filter out prior to n-gram extraction.
+
+    Returns
+    -------
+    Set[Tuple[str, ...]]
+        Set of n-gram tuples extracted from the filtered token sequence.
+    """
+    if not text or not isinstance(text, str) or n < 1:
+        return set()
+    stop_set: Set[str] = set(stopwords) if stopwords is not None else STOPWORDS
+    tokens: List[str] = [tok for tok in _TOKEN_RE.findall(text.lower()) if tok not in stop_set]
+    if len(tokens) < n:
+        return set()
+    return {tuple(tokens[i : i + n]) for i in range(len(tokens) - n + 1)}
+
+
+def n_gram_overlap(
+    text_a: str,
+    text_b: str,
+    n: int = 3,
+    stopwords: Optional[Iterable[str]] = None,
 ) -> float:
-    """Jaccard similarity over stop-word-filtered token sets."""
-    set_a = tokenize(text_a, stopwords=stopwords)
-    set_b = tokenize(text_b, stopwords=stopwords)
-    if not set_a and not set_b:
+    """Compute word-level n-gram overlap Jaccard coefficient between two texts.
+
+    Mathematical Formula
+    --------------------
+    .. math::
+
+        Overlap_N(A, B) = \\frac{|G_n(A) \\cap G_n(B)|}{|G_n(A) \\cup G_n(B)|}
+
+    where :math:`G_n(X)` represents the set of n-gram tuples for text X.
+
+    Parameters
+    ----------
+    text_a : str
+        First document text string.
+    text_b : str
+        Second document text string.
+    n : int, default=3
+        Order of n-grams to extract.
+    stopwords : Optional[Iterable[str]], default=None
+        Optional iterable of stop-words to filter out.
+
+    Returns
+    -------
+    float
+        Overlap score bounded between 0.0 and 1.0.
+    """
+    ngrams_a: Set[Tuple[str, ...]] = get_ngrams(text_a, n=n, stopwords=stopwords)
+    ngrams_b: Set[Tuple[str, ...]] = get_ngrams(text_b, n=n, stopwords=stopwords)
+
+    if not ngrams_a and not ngrams_b:
         return 0.0
-    union = set_a | set_b
+    union: Set[Tuple[str, ...]] = ngrams_a | ngrams_b
     if not union:
         return 0.0
-    return len(set_a & set_b) / len(union)
+    return float(len(ngrams_a & ngrams_b) / len(union))
+
+
+def jaccard_similarity(
+    text_a: str,
+    text_b: str,
+    stopwords: Optional[Iterable[str]] = None,
+) -> float:
+    """Compute Jaccard similarity index over stop-word-filtered token sets.
+
+    Mathematical Formula
+    --------------------
+    .. math::
+
+        J(A, B) = \\frac{|A \\cap B|}{|A \\cup B|} = \\frac{|A \\cap B|}{|A| + |B| - |A \\cap B|}
+
+    where A and B are sets of unique non-stop-word tokens from text_a and text_b.
+
+    Parameters
+    ----------
+    text_a : str
+        First document text string.
+    text_b : str
+        Second document text string.
+    stopwords : Optional[Iterable[str]], default=None
+        Optional iterable of stop-words to exclude during tokenization.
+
+    Returns
+    -------
+    float
+        Jaccard similarity index bounded between 0.0 and 1.0.
+    """
+    set_a: Set[str] = tokenize(text_a, stopwords=stopwords)
+    set_b: Set[str] = tokenize(text_b, stopwords=stopwords)
+    if not set_a and not set_b:
+        return 0.0
+    union: Set[str] = set_a | set_b
+    if not union:
+        return 0.0
+    return float(len(set_a & set_b) / len(union))
+
+
+def jaccard_index(
+    text_a: str,
+    text_b: str,
+    stopwords: Optional[Iterable[str]] = None,
+) -> float:
+    """Alias helper for jaccard_similarity.
+
+    Parameters
+    ----------
+    text_a : str
+        First document text string.
+    text_b : str
+        Second document text string.
+    stopwords : Optional[Iterable[str]], default=None
+        Optional stop-word set.
+
+    Returns
+    -------
+    float
+        Jaccard similarity index between 0.0 and 1.0.
+    """
+    return jaccard_similarity(text_a, text_b, stopwords=stopwords)
+
+
+def dice_coefficient(
+    text_a: str,
+    text_b: str,
+    stopwords: Optional[Iterable[str]] = None,
+) -> float:
+    """Compute Sørensen-Dice coefficient similarity score between two texts.
+
+    Mathematical Formula
+    --------------------
+    .. math::
+
+        Dice(A, B) = \\frac{2 \\cdot |A \\cap B|}{|A| + |B|}
+
+    where A and B are unique token sets extracted from text_a and text_b.
+
+    Parameters
+    ----------
+    text_a : str
+        First document text.
+    text_b : str
+        Second document text.
+    stopwords : Optional[Iterable[str]], default=None
+        Optional stop-words filter.
+
+    Returns
+    -------
+    float
+        Sørensen-Dice coefficient score bounded between 0.0 and 1.0.
+    """
+    set_a: Set[str] = tokenize(text_a, stopwords=stopwords)
+    set_b: Set[str] = tokenize(text_b, stopwords=stopwords)
+    total_len = len(set_a) + len(set_b)
+    if total_len == 0:
+        return 0.0
+    intersection_len = len(set_a & set_b)
+    return float((2.0 * intersection_len) / total_len)
+
+
+def overlap_coefficient(
+    text_a: str,
+    text_b: str,
+    stopwords: Optional[Iterable[str]] = None,
+) -> float:
+    """Compute Szymkiewicz-Simpson Overlap coefficient between two texts.
+
+    Mathematical Formula
+    --------------------
+    .. math::
+
+        Overlap(A, B) = \\frac{|A \\cap B|}{\\min(|A|, |B|)}
+
+    where A and B are token sets. Evaluates subset inclusion robustly against length disparity.
+
+    Parameters
+    ----------
+    text_a : str
+        First document text.
+    text_b : str
+        Second document text.
+    stopwords : Optional[Iterable[str]], default=None
+        Optional stop-words filter.
+
+    Returns
+    -------
+    float
+        Overlap coefficient score bounded between 0.0 and 1.0.
+    """
+    set_a: Set[str] = tokenize(text_a, stopwords=stopwords)
+    set_b: Set[str] = tokenize(text_b, stopwords=stopwords)
+    min_len = min(len(set_a), len(set_b))
+    if min_len == 0:
+        return 0.0
+    return float(len(set_a & set_b) / min_len)
 
 
 def calculate_lexical_similarity(
@@ -215,22 +357,34 @@ def calculate_lexical_similarity(
     text_b: str,
     custom_stopwords: Optional[Set[str]] = None,
 ) -> float:
-    """
-    Calculate lexical similarity between two text strings using TF-IDF cosine similarity.
+    """Calculate lexical similarity between two text strings using TF-IDF cosine similarity.
 
-    Args:
-        text_a: First document text.
-        text_b: Second document text.
-        custom_stopwords: Optional set of custom stop-words (e.g. "ibid", "figure")
-            to merge with default NLTK stop-words.
+    Mathematical Formula
+    --------------------
+    .. math::
 
-    Returns:
-        Float score between 0.0 and 1.0.
+        Cosine(u, v) = \\frac{u \\cdot v}{||u||_2 \\cdot ||v||_2}
+
+    where u and v are L2-normalized TF-IDF vector representations of text_a and text_b.
+
+    Parameters
+    ----------
+    text_a : str
+        First document text string.
+    text_b : str
+        Second document text string.
+    custom_stopwords : Optional[Set[str]], default=None
+        Optional set of custom stop-words (e.g. 'ibid', 'figure') to merge with default stop-words.
+
+    Returns
+    -------
+    float
+        Cosine similarity score bounded between 0.0 and 1.0.
     """
-    if not text_a.strip() or not text_b.strip():
+    if not text_a or not text_b or not text_a.strip() or not text_b.strip():
         return 0.0
 
-    stop_words_list = list(_get_combined_stopwords(custom_stopwords))
+    stop_words_list: List[str] = list(_get_combined_stopwords(custom_stopwords))
 
     try:
         vectorizer = TfidfVectorizer(stop_words=stop_words_list)
@@ -246,29 +400,57 @@ def _make_documents_hash(
     documents: Dict[str, str],
     custom_stopwords: Optional[Set[str]] = None,
 ) -> str:
-    """Create a stable hash from document contents and custom stopwords for caching."""
-    sorted_items = sorted(documents.items())
-    sorted_custom = sorted(custom_stopwords) if custom_stopwords else []
-    hash_input = str((sorted_items, sorted_custom)).encode("utf-8")
+    """Create a deterministic SHA-256 hash for caching similarity matrix computations.
+
+    Parameters
+    ----------
+    documents : Dict[str, str]
+        Dictionary mapping document titles to text content.
+    custom_stopwords : Optional[Set[str]], default=None
+        Custom stop-words set.
+
+    Returns
+    -------
+    str
+        Hexadecimal SHA-256 hash string digest.
+    """
+    sorted_items: List[Tuple[str, str]] = sorted(documents.items())
+    sorted_custom: List[str] = sorted(custom_stopwords) if custom_stopwords else []
+    hash_input: bytes = str((sorted_items, sorted_custom)).encode("utf-8")
     return hashlib.sha256(hash_input).hexdigest()
 
 
 @functools.lru_cache(maxsize=32)
 def _cached_lexical_similarity_matrix(
     documents_hash: str,
-    documents_tuple: tuple,
-    custom_stopwords_tuple: tuple,
+    documents_tuple: Tuple[Tuple[str, str], ...],
+    custom_stopwords_tuple: Tuple[str, ...],
 ) -> pd.DataFrame:
-    """Internal cached implementation of lexical similarity matrix."""
-    documents = dict(documents_tuple)
-    doc_names = list(documents.keys())
-    n = len(doc_names)
+    """LRU-cached implementation of TF-IDF similarity matrix calculation.
+
+    Parameters
+    ----------
+    documents_hash : str
+        Deterministic SHA-256 hash of the input corpus.
+    documents_tuple : Tuple[Tuple[str, str], ...]
+        Immutable tuple representation of (doc_name, doc_text) pairs.
+    custom_stopwords_tuple : Tuple[str, ...]
+        Immutable tuple of custom stop-words.
+
+    Returns
+    -------
+    pd.DataFrame
+        N x N DataFrame matrix of similarity scores indexed by document titles.
+    """
+    documents: Dict[str, str] = dict(documents_tuple)
+    doc_names: List[str] = list(documents.keys())
+    n: int = len(doc_names)
 
     if n == 0:
         return pd.DataFrame()
 
-    texts = [documents[name] for name in doc_names]
-    stop_words_list = list(
+    texts: List[str] = [documents[name] for name in doc_names]
+    stop_words_list: List[str] = list(
         _get_combined_stopwords(set(custom_stopwords_tuple) if custom_stopwords_tuple else None)
     )
 
@@ -278,7 +460,7 @@ def _cached_lexical_similarity_matrix(
         sim_matrix = cosine_similarity(tfidf_matrix)
         sim_matrix = np.clip(sim_matrix, 0.0, 1.0)
     except ValueError:
-        sim_matrix = np.zeros((n, n))
+        sim_matrix = np.zeros((n, n), dtype=float)
 
     return pd.DataFrame(sim_matrix, index=doc_names, columns=doc_names)
 
@@ -288,32 +470,56 @@ def lexical_similarity_matrix(
     use_cache: bool = True,
     custom_stopwords: Optional[Set[str]] = None,
 ) -> pd.DataFrame:
-    """Build an N×N TF-IDF cosine similarity matrix between all document pairs."""
-    custom_tuple = tuple(sorted(custom_stopwords)) if custom_stopwords else ()
+    """Build an N x N TF-IDF cosine similarity matrix across all document pairs in a corpus.
+
+    Mathematical Formula
+    --------------------
+    For each pair of documents :math:`d_i` and :math:`d_j`:
+
+    .. math::
+
+        M_{i,j} = \\frac{\\mathbf{v}_i \\cdot \\mathbf{v}_j}{\\|\\mathbf{v}_i\\|_2 \\|\\mathbf{v}_j\\|_2}
+
+    where :math:`\\mathbf{v}_i` is the TF-IDF vector of document :math:`d_i`.
+
+    Parameters
+    ----------
+    documents : Dict[str, str]
+        Dictionary mapping document filenames/identifiers to document text strings.
+    use_cache : bool, default=True
+        Whether to leverage LRU cache for identical corpus and stop-word inputs.
+    custom_stopwords : Optional[Set[str]], default=None
+        Optional set of domain-specific stop-words to exclude.
+
+    Returns
+    -------
+    pd.DataFrame
+        Square N x N pandas DataFrame containing similarity scores in range [0.0, 1.0].
+    """
+    custom_tuple: Tuple[str, ...] = tuple(sorted(custom_stopwords)) if custom_stopwords else ()
 
     if use_cache:
-        documents_tuple = tuple(sorted(documents.items()))
-        documents_hash = _make_documents_hash(documents, custom_stopwords)
+        documents_tuple: Tuple[Tuple[str, str], ...] = tuple(sorted(documents.items()))
+        documents_hash: str = _make_documents_hash(documents, custom_stopwords)
         return _cached_lexical_similarity_matrix(
             documents_hash, documents_tuple, custom_tuple
         )
-    else:
-        doc_names = list(documents.keys())
-        n = len(doc_names)
 
-        if n == 0:
-            return pd.DataFrame()
+    doc_names: List[str] = list(documents.keys())
+    n: int = len(doc_names)
 
-        texts = [documents[name] for name in doc_names]
-        stop_words_list = list(_get_combined_stopwords(custom_stopwords))
+    if n == 0:
+        return pd.DataFrame()
 
-        try:
-            vectorizer = TfidfVectorizer(stop_words=stop_words_list)
-            tfidf_matrix = vectorizer.fit_transform(texts)
-            sim_matrix = cosine_similarity(tfidf_matrix)
-            sim_matrix = np.clip(sim_matrix, 0.0, 1.0)
-        except ValueError:
-            sim_matrix = np.zeros((n, n))
+    texts: List[str] = [documents[name] for name in doc_names]
+    stop_words_list: List[str] = list(_get_combined_stopwords(custom_stopwords))
 
-        return pd.DataFrame(sim_matrix, index=doc_names, columns=doc_names)
-    
+    try:
+        vectorizer = TfidfVectorizer(stop_words=stop_words_list)
+        tfidf_matrix = vectorizer.fit_transform(texts)
+        sim_matrix = cosine_similarity(tfidf_matrix)
+        sim_matrix = np.clip(sim_matrix, 0.0, 1.0)
+    except ValueError:
+        sim_matrix = np.zeros((n, n), dtype=float)
+
+    return pd.DataFrame(sim_matrix, index=doc_names, columns=doc_names)

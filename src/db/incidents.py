@@ -6,7 +6,6 @@ import io
 import math
 import os
 import sqlite3
-import tempfile
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -69,13 +68,13 @@ def _get_connection(db_path: str | Path) -> sqlite3.Connection:
     abs_path = os.path.abspath(str(db_path))
     try:
         os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-        return sqlite3.connect(abs_path)
+        conn = sqlite3.connect(abs_path)
     except (sqlite3.OperationalError, OSError, PermissionError):
         # Centralized temp-dir fallback (matches corpus_db.py and
         # translation_cache.py so all three modules agree on the location).
         fallback_path = str(FALLBACK_DATA_DIR / os.path.basename(abs_path))
         os.makedirs(os.path.dirname(fallback_path), exist_ok=True)
-        return sqlite3.connect(fallback_path)
+        conn = sqlite3.connect(fallback_path)
 
     conn.execute("PRAGMA foreign_keys = ON")
     try:
@@ -248,6 +247,70 @@ def get_all_incidents(
     init_incident_db(db_path)
     with closing(_get_connection(db_path)) as conn:
         return _fetch_all_incidents(conn)
+
+def get_incident_by_id(
+    incident_id: int | str,
+    db_path: str | Path = DEFAULT_DB_PATH,
+) -> dict[str, Any] | None:
+    """Fetch a single plagiarism incident record by its incident_id primary key.
+
+    Args:
+        incident_id: Integer or string primary key of the incident.
+        db_path: Path to the SQLite corpus database.
+
+    Returns:
+        Dictionary containing incident record columns, or None if not found.
+    """
+    init_incident_db(db_path)
+    with closing(_get_connection(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT pi.incident_id, pi.document_a, pi.document_b,
+                   pi.similarity_score, pi.severity_rank,
+                   pi.review_status, pi.date_flagged, pi.last_seen,
+                   pi.threshold_at_time_of_flag
+            FROM plagiarism_incidents pi
+            LEFT JOIN documents da ON pi.document_a = da.filename
+            LEFT JOIN documents db ON pi.document_b = db.filename
+            WHERE (pi.incident_id = ? OR pi.incident_id = ?)
+              AND (da.is_deleted IS NULL OR da.is_deleted = 0)
+              AND (db.is_deleted IS NULL OR db.is_deleted = 0)
+            """,
+            (incident_id, str(incident_id)),
+        ).fetchone()
+
+        if row is None:
+            return None
+        return dict(row)
+
+
+def get_incidents_by_severity(
+    severity: str,
+    db_path: str | Path = DEFAULT_DB_PATH,
+) -> list[dict[str, Any]]:
+    init_incident_db(db_path)
+    try:
+        norm_severity = normalize_severity_label(severity)
+    except ValueError:
+        return []
+
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT incident_id, document_a, document_b,
+                   similarity_score, severity_rank,
+                   review_status, date_flagged, last_seen,
+                   threshold_at_time_of_flag
+            FROM plagiarism_incidents
+            WHERE severity_rank = ?
+            ORDER BY date_flagged DESC, incident_id ASC
+            """,
+            (norm_severity,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
 
 def get_all_incidents_above_threshold_for_export(
     threshold: float,

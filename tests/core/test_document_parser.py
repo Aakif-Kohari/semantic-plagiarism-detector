@@ -21,15 +21,8 @@ from src.core.document_parser import (
 import time
 
 
-from src.core.document_parser import (clean_text, remove_ignore_phrases)
-
-from src.core.document_parser import (clean_text, extract_text,
-                                      extract_text_from_docx,
-                                      extract_text_from_odt,
-                                      extract_text_from_pdf,
-                                      extract_text_from_txt, extract_texts,
-                                      remove_ignore_phrases,
-                                      strip_bibliography)
+from src.core.document_parser import (clean_text, extract_text_from_odt,
+                                      remove_ignore_phrases)
 
 # Skip OCR tests when Tesseract binary is not present on this machine
 TESSERACT_AVAILABLE = shutil.which("tesseract") is not None
@@ -58,9 +51,6 @@ def _make_docx_bytes(text: str) -> bytes:
     return buf.getvalue()
 
 
-import zipfile
-
-
 def _make_odt_bytes(text: str) -> bytes:
     """Create a minimal in-memory ODT containing the given text."""
     content_xml = (
@@ -79,6 +69,47 @@ def _make_odt_bytes(text: str) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         zf.writestr("content.xml", content_xml.encode("utf-8"))
+    return buf.getvalue()
+
+
+def _make_valid_zip_bytes(files: dict) -> bytes:
+    """Create a valid in-memory ZIP archive containing given file names and contents."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for filename, content in files.items():
+            zf.writestr(filename, content)
+    return buf.getvalue()
+
+
+def _make_large_docx_bytes(num_pages: int = 100) -> bytes:
+    """Create a multi-page in-memory DOCX containing realistic paragraphs."""
+    doc = docx.Document()
+    sample_paragraph = (
+        "Semantic Plagiarism Detection System performance benchmark paragraph. "
+        "This paragraph simulates student submission content across multiple pages "
+        "to ensure high-throughput processing and memory efficiency during analysis."
+    )
+    for i in range(num_pages):
+        doc.add_heading(f"Chapter {i + 1}: Section Overview", level=2)
+        doc.add_paragraph(f"Page {i + 1} content. {sample_paragraph}")
+        doc.add_page_break()
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+def _make_docx_with_headings() -> bytes:
+    """Create an in-memory DOCX with Heading 1, Heading 2, and Normal paragraphs."""
+    doc = docx.Document()
+    doc.add_heading("Chapter 1", level=1)
+    doc.add_paragraph("Introductory paragraph.")
+    doc.add_heading("Section A", level=2)
+    doc.add_paragraph("Detailed content here.")
+    doc.add_heading("Subsection", level=3)
+    doc.add_paragraph("Even more detail.")
+    buf = io.BytesIO()
+    doc.save(buf)
     return buf.getvalue()
 
 
@@ -141,10 +172,50 @@ def test_extract_from_odt_bytes():
     assert result == "Hello ODT"
 
 
+def test_docx_large_document_extraction_benchmark():
+    """Benchmark test asserting 100-page DOCX extraction completes under 2.0 seconds (#579)."""
+    large_docx_bytes = _make_large_docx_bytes(num_pages=100)
+
+    start_time = time.perf_counter()
+    extracted_text = extract_text_from_docx(large_docx_bytes)
+    elapsed_time = time.perf_counter() - start_time
+
+    assert len(extracted_text) > 0
+    assert "Chapter 100: Section Overview" in extracted_text
+    assert elapsed_time < 2.0, f"DOCX extraction took {elapsed_time:.3f}s (expected < 2.0s)"
+
+
 def test_extract_text_routing_odt():
     odt_bytes = _make_odt_bytes("ODT content via routing")
     result = extract_text(odt_bytes, "test.odt")
     assert result == "ODT content via routing"
+
+
+def test_extract_from_docx_heading_markers():
+    docx_bytes = _make_docx_with_headings()
+    result = extract_text_from_docx(docx_bytes)
+    assert "# Chapter 1" in result
+    assert "## Section A" in result
+    assert "### Subsection" in result
+    assert "Introductory paragraph." in result
+    assert "Detailed content here." in result
+    assert "Even more detail." in result
+
+
+def test_extract_from_docx_plain_paragraph_unchanged():
+    """Normal paragraphs without heading style must not get # prefixes."""
+    docx_bytes = _make_docx_bytes("Just a normal paragraph.")
+    result = extract_text_from_docx(docx_bytes)
+    assert result == "Just a normal paragraph."
+    assert not result.startswith("#")
+
+
+def test_extract_text_routing_docx_with_headings():
+    """Verify heading markers survive the full extract_text routing pipeline."""
+    docx_bytes = _make_docx_with_headings()
+    result = extract_text(docx_bytes, "test.docx")
+    assert "# Chapter 1" in result
+    assert "## Section A" in result
 
 
 def test_extract_from_txt_bytes():
@@ -566,3 +637,9 @@ def test_extract_text_routing_txt_latin1(tmp_path):
     result = extract_text(str(file_path), "latin1_test.txt")
     assert result == original_text
 
+def test_get_supported_file_extensions():
+    """get_supported_file_extensions should return the expected sorted list."""
+    from src.core.document_parser import get_supported_file_extensions
+
+    extensions = get_supported_file_extensions()
+    assert extensions == [".csv", ".docx", ".epub", ".html", ".pdf", ".rtf", ".txt"]

@@ -9,7 +9,7 @@ Tracks request counts per IP/user and returns appropriate headers when limits ar
 
 import logging
 import time
-from typing import Dict, Optional, Tuple
+from typing import Dict, Tuple
 
 import redis
 
