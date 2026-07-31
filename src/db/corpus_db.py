@@ -174,6 +174,7 @@ def add_document(
     pdf_title: str = None,
     tags: str = None,
     detected_language: str = None,
+    owner: str = None,
 ) -> bool:
     """
     Insert a new document metadata row using parameterized execution.
@@ -181,13 +182,17 @@ def add_document(
 
     The filename is sanitized again here so direct database callers cannot
     persist HTML, JavaScript, traversal components, or control characters.
+
+    The ``owner`` parameter records the username of the account that
+    uploaded the document, enabling per-user analytics via
+    :func:`get_document_count_by_user`.
     """
     filename = sanitize_filename(filename)
 
     try:
         with _connect() as conn:
             conn.execute(
-                "INSERT INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, tags, detected_language) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, tags, detected_language, owner) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     filename,
                     file_hash,
@@ -200,6 +205,7 @@ def add_document(
                     pdf_title,
                     tags,
                     detected_language,
+                    owner,
                 ),
             )
             return True
@@ -463,6 +469,28 @@ def get_embedding_count() -> int:
     """Return the number of durable chunk embeddings in the corpus."""
     with _connect() as conn:
         row = conn.execute("SELECT COUNT(1) FROM chunks").fetchone()
+        return int(row[0]) if row else 0
+      
+def get_document_count_by_user(owner_username: str) -> int:
+    """Return the number of non-deleted documents owned by a specific user.
+
+    Executes ``SELECT COUNT(1) FROM documents WHERE owner = ? AND is_deleted = 0``
+    so that soft-deleted documents are excluded from the count.
+
+    Args:
+        owner_username: The username of the account whose documents should
+            be counted.
+
+    Returns:
+        The count of active (non-soft-deleted) documents owned by the
+        user.  Returns ``0`` if the user owns no documents or the
+        username does not exist in the corpus.
+    """
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(1) FROM documents WHERE owner = ? AND is_deleted = 0",
+            (owner_username,),
+        ).fetchone()
         return int(row[0]) if row else 0
 
 def add_documents_bulk(documents: list) -> int:
