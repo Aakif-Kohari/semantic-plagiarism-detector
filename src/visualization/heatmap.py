@@ -14,6 +14,7 @@ Recent additions (Issue #628):
 """
 
 import logging
+import re
 from contextlib import contextmanager
 from typing import Dict, Generator, List, Optional
 

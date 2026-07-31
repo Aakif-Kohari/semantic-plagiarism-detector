@@ -249,6 +249,43 @@ def get_all_incidents(
     with closing(_get_connection(db_path)) as conn:
         return _fetch_all_incidents(conn)
 
+def get_incident_by_id(
+    incident_id: int | str,
+    db_path: str | Path = DEFAULT_DB_PATH,
+) -> dict[str, Any] | None:
+    """Fetch a single plagiarism incident record by its incident_id primary key.
+
+    Args:
+        incident_id: Integer or string primary key of the incident.
+        db_path: Path to the SQLite corpus database.
+
+    Returns:
+        Dictionary containing incident record columns, or None if not found.
+    """
+    init_incident_db(db_path)
+    with closing(_get_connection(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT pi.incident_id, pi.document_a, pi.document_b,
+                   pi.similarity_score, pi.severity_rank,
+                   pi.review_status, pi.date_flagged, pi.last_seen,
+                   pi.threshold_at_time_of_flag
+            FROM plagiarism_incidents pi
+            LEFT JOIN documents da ON pi.document_a = da.filename
+            LEFT JOIN documents db ON pi.document_b = db.filename
+            WHERE (pi.incident_id = ? OR pi.incident_id = ?)
+              AND (da.is_deleted IS NULL OR da.is_deleted = 0)
+              AND (db.is_deleted IS NULL OR db.is_deleted = 0)
+            """,
+            (incident_id, str(incident_id)),
+        ).fetchone()
+
+        if row is None:
+            return None
+        return dict(row)
+
+
 def get_all_incidents_above_threshold_for_export(
     threshold: float,
     db_path: str | Path = DEFAULT_DB_PATH,
