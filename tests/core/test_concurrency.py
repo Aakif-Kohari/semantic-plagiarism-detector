@@ -102,6 +102,41 @@ def test_concurrent_faiss_rebuild_sequencing(tmp_path):
     assert sorted(shared_resource) == list(range(num_threads)) # All threads executed sequentially
 
 
+def test_thread_pool_handles_1000_concurrent_tasks(tmp_path):
+    """
+    Submit 1,000 concurrent tasks to the thread pool all contending for the
+    same FAISS lock.  Verifies the pool queues them cleanly and no fatal
+    exception is raised — every task either acquires the lock or times out
+    gracefully.
+    """
+    lock_file = str(tmp_path / "thousand.lock")
+    results: list[int] = []
+    errors: list[BaseException] = []
+    lock = threading.Lock()
+
+    def task(task_id: int):
+        try:
+            with faiss_write_lock(lock_path=lock_file, timeout=30):
+                time.sleep(0.001)
+                with lock:
+                    results.append(task_id)
+        except ConcurrencyTimeoutError:
+            with lock:
+                results.append(-1)
+        except BaseException as exc:
+            with lock:
+                errors.append(exc)
+
+    num_tasks = 1000
+    with ThreadPoolExecutor(max_workers=64) as executor:
+        list(executor.map(task, range(num_tasks)))
+
+    assert not errors, f"Fatal exception(s) raised: {errors}"
+    assert len(results) == num_tasks, (
+        f"Expected {num_tasks} results, got {len(results)}"
+    )
+
+
 def test_faiss_lock_configurable_timeout(mocker):
     mocker.patch('src.core.app_config.get_lock_timeout', return_value=15)
     from src.core.concurrency import FAISSLock

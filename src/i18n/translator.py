@@ -1,130 +1,149 @@
 """
 src/i18n/translator.py
-----------------------
-
-Translation dictionary and helper function for UI internationalization
-and translation API integration with SQLite caching.
-"""
-
-from typing import Optional
-
-from src.db.translation_cache import cache_translation, get_cached_translation
-
-TRANSLATIONS = {
-    "en": {
-        "title": "Semantic Plagiarism Detector",
-        "subtitle": "Advanced NLP & Vector Search Plagiarism Detection System",
-        "settings": "Settings",
-        "threshold": "Similarity Threshold",
-        "upload_title": "📤 Document Upload",
-        "analysis_summary": "📊 Analysis Summary",
-        "metric_docs": "Total Documents",
-        "metric_pairs": "Compared Pairs",
-        "metric_flagged": "Flagged Pairs",
-        "metric_faiss": "FAISS Vectors",
-        "tab_warnings": "🚨 Plagiarism Warnings",
-        "tab_matrix": "📈 Similarity Matrix",
-        "tab_users": "🔐 Account Settings",
-        "download_excel": "📥 Download Excel Matrix",
-    },
-    "es": {
-        "title": "Detector Semántico de Plagio",
-        "subtitle": "Sistema Avanzado de Detección de Plagio con NLP y Búsqueda Vectorial",
-        "settings": "Configuración",
-        "threshold": "Umbral de Similitud",
-        "upload_title": "📤 Cargar Documentos",
-        "analysis_summary": "📊 Resumen del Análisis",
-        "metric_docs": "Documentos Totales",
-        "metric_pairs": "Pares Comparados",
-        "metric_flagged": "Pares Marcados",
-        "metric_faiss": "Vectores FAISS",
-        "tab_warnings": "🚨 Advertencias de Plagio",
-        "tab_matrix": "📈 Matriz de Similitud",
-        "tab_users": "🔐 Configuración de Cuenta",
-        "download_excel": "📥 Descargar Matriz en Excel",
-    },
-}
-
-
-def get_text(key: str, lang: str = "en") -> str:
-    """Retrieve translated UI string for given key and language code."""
-    lang_dict = TRANSLATIONS.get(lang, TRANSLATIONS["en"])
-    return lang_dict.get(key, key)
-
-
-def translate_text(
-    text: str, source_lang: str = "auto", target_lang: str = "en"
-) -> str:
-    """
-    Translates foreign text into target language while utilizing SQLite caching.
-    
-    Checks cache first to save API quota. On cache miss, performs translation 
-    and caches the result.
-    """
-    if not text or not text.strip():
-        return text
-
-    # 1. Check SQLite translation cache
-    cached_result = get_cached_translation(
-        text, source_lang=source_lang, target_lang=target_lang
-    )
-    if cached_result is not None:
-        return cached_result
-
-    # 2. External Translation API call fallback/logic
-    # Replace this with your actual external API call if present (e.g. Google/DeepL API)
-    translated_text = text
-
-    # 3. Cache the new translation in SQLite
-    cache_translation(
-        foreign_text=text,
-        translated_text=translated_text,
-        source_lang=source_lang,
-        target_lang=target_lang,
-    )
-
-    return translated_text
+---------------------
 
 Translation manager for dynamic UI internationalization (i18n).
 """
 
 # pylint: disable=streamlit-global-mutation
 
+from __future__ import annotations
+
+import html
 import json
+import logging
 import os
-from typing import Dict
+from typing import Any, Dict
+
+import streamlit as st
+
+
+logger = logging.getLogger(__name__)
 
 _I18N_DIR = os.path.dirname(os.path.abspath(__file__))
-_SUPPORTED_LANGUAGES = {"en": "English", "es": "Español"}
+_SUPPORTED_LANGUAGES = {
+    "en": "English",
+    "es": "Español",
+    "fr": "Français",
+}
+LANGUAGE_DISPLAY = _SUPPORTED_LANGUAGES
+DISPLAY_TO_CODE = {
+    display_name: code
+    for code, display_name in _SUPPORTED_LANGUAGES.items()
+}
 
 _translations: Dict[str, Dict[str, str]] = {}
 
 
+@st.cache_data(show_spinner=False)
+def _load_translation_dictionary(
+    file_path: str,
+) -> Dict[str, str]:
+    """Read and cache one translation JSON dictionary.
+
+    The resolved file path is part of Streamlit's cache key, so each
+    language file is cached independently. ``st.cache_data`` returns a
+    deserialised copy to callers, preventing accidental mutation of the
+    cached value.
+    """
+    with open(file_path, "r", encoding="utf-8") as translation_file:
+        loaded = json.load(translation_file)
+
+    if not isinstance(loaded, dict):
+        raise ValueError(
+            "Translation file must contain a JSON object: "
+            f"{file_path}"
+        )
+
+    return {
+        str(key): str(value)
+        for key, value in loaded.items()
+    }
+
+
 def load_translations() -> None:
-    """Loads all JSON translation files from the i18n directory."""
+    """Load all supported dictionaries through the Streamlit cache.
+
+    Missing or malformed non-English files are skipped with a warning.
+    A malformed English dictionary is also logged; ``get_text`` then
+    safely falls back to returning the requested key.
+    """
     global _translations
+
+    loaded_translations: Dict[str, Dict[str, str]] = {}
+
+    for lang_code in _SUPPORTED_LANGUAGES:
+        file_path = os.path.join(
+            _I18N_DIR,
+            f"{lang_code}.json",
+        )
+
+        if not os.path.isfile(file_path):
+            logger.warning(
+                "Translation file is missing for language %s: %s",
+                lang_code,
+                file_path,
+            )
+            continue
+
+        try:
+            loaded_translations[lang_code] = (
+                _load_translation_dictionary(file_path)
+            )
+        except (
+            OSError,
+            json.JSONDecodeError,
+            ValueError,
+        ) as exception:
+            logger.warning(
+                "Unable to load translation file for %s: %s",
+                lang_code,
+                exception,
+            )
+
+    _translations = loaded_translations
+
+
+def clear_translation_cache() -> None:
+    """Clear cached dictionaries and reload them from disk on demand."""
+    global _translations
+
+    _load_translation_dictionary.clear()
     _translations = {}
-    for lang_code in _SUPPORTED_LANGUAGES.keys():
-        file_path = os.path.join(_I18N_DIR, f"{lang_code}.json")
-        if os.path.exists(file_path):
-            with open(file_path, "r", encoding="utf-8") as f:
-                _translations[lang_code] = json.load(f)
 
 
-# Preload translations on module import
+# Preload translations on module import. Streamlit's cache prevents
+# repeated disk I/O when this function is invoked during reruns.
 load_translations()
 
 
-def get_text(key: str, lang: str = "en") -> str:
-    """
-    Returns the translated string for a given key and language code.
-    Fallbacks to English if key or language is missing.
+def get_text(
+    key: str,
+    lang: str = "en",
+    **kwargs: Any,
+) -> str:
+    """Return translated text with English and key fallbacks.
+
+    Keyword values are HTML-escaped before ``str.format`` substitution
+    to prevent untrusted values from injecting markup.
     """
     if not _translations:
         load_translations()
 
-    lang_dict = _translations.get(lang)
-    if not lang_dict:
-        lang_dict = _translations.get("en", {})
+    language_dictionary = _translations.get(lang)
+    if not language_dictionary:
+        language_dictionary = _translations.get("en", {})
 
-    return lang_dict.get(key, _translations.get("en", {}).get(key, key))
+    text = language_dictionary.get(
+        key,
+        _translations.get("en", {}).get(key, key),
+    )
+
+    if kwargs:
+        escaped_values = {
+            name: html.escape(str(value))
+            for name, value in kwargs.items()
+        }
+        text = text.format(**escaped_values)
+
+    return text
