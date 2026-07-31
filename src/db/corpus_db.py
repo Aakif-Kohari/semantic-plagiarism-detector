@@ -9,27 +9,25 @@ Enables incremental updates and index rebuilding without re-embedding.
 
 import logging
 import os
+import psutil
 import sqlite3
-import tempfile
 import threading
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 import numpy as np
 
-from src.db.migrations import (delete_all_if_table_exists,
-                               migrate_corpus_database)
+from src.core.app_config import CORPUS_DB_PATH, FALLBACK_CORPUS_DB_PATH
+from src.db.migrations import delete_all_if_table_exists
 from src.utils.filename import sanitize_filename
 
-_DB_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "data", "corpus.db")
-)
+# Seed the corpus DB path from the centralized app_config.
+_DB_PATH = os.path.abspath(str(CORPUS_DB_PATH))
 
 _connection_pool = threading.local()
-
 
 
 def configure_db_path(db_path: str | os.PathLike) -> None:
@@ -37,8 +35,6 @@ def configure_db_path(db_path: str | os.PathLike) -> None:
     global _DB_PATH
     close_connections()
     _DB_PATH = os.path.abspath(os.fspath(db_path))
-
-
 
 
 def get_corpus_db_path() -> Path:
@@ -57,18 +53,12 @@ def _pool() -> dict[str, sqlite3.Connection]:
 
 @contextmanager
 def _connect():
-    """Borrow a reusable connection and manage the operation transaction.
-
-    Connections are kept per thread and database path so consecutive database
-    operations reuse the same SQLite handle.  The context manager commits on
-    success and rolls back on failure; :func:`close_connections` closes the
-    handles when the process or a test is finished with the database.
-    """
+    """Borrow a reusable connection and manage the operation transaction."""
     path = os.path.abspath(_DB_PATH)
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
     except (OSError, PermissionError):
-        path = os.path.join(tempfile.gettempdir(), "semantic_plagiarism_detector", "data", "corpus.db")
+        path = str(FALLBACK_CORPUS_DB_PATH)
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
     pool = _pool()
@@ -77,7 +67,7 @@ def _connect():
         try:
             conn = sqlite3.connect(path, check_same_thread=False)
         except sqlite3.OperationalError:
-            path = os.path.join(tempfile.gettempdir(), "semantic_plagiarism_detector", "data", "corpus.db")
+            path = str(FALLBACK_CORPUS_DB_PATH)
             os.makedirs(os.path.dirname(path), exist_ok=True)
             conn = sqlite3.connect(path, check_same_thread=False)
         conn.execute("PRAGMA foreign_keys = ON")
@@ -102,26 +92,82 @@ def close_connections() -> None:
 def init_corpus_db() -> None:
     """Create or upgrade corpus.db without deleting persisted data."""
     with _connect() as conn:
+        # 1. ALWAYS CREATE TABLES FIRST
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS documents (
-                id               INTEGER PRIMARY KEY AUTOINCREMENT,
-                filename         TEXT    UNIQUE NOT NULL,
-                file_hash        TEXT    UNIQUE NOT NULL,
-                upload_date      TEXT    NOT NULL,
-                class_section    TEXT,
-                student_name     TEXT,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT UNIQUE NOT NULL,
+                file_hash TEXT UNIQUE NOT NULL,
+                upload_date TEXT NOT NULL,
+                class_section TEXT,
+                student_name TEXT,
                 assignment_title TEXT,
-                pdf_author       TEXT,
+                pdf_author TEXT,
                 pdf_creation_date TEXT,
-                pdf_title        TEXT,
-                tags             TEXT,
-                detected_language TEXT
+                pdf_title TEXT,
+                tags TEXT,
+                detected_language TEXT,
+                owner TEXT,
+                is_deleted INTEGER DEFAULT 0,
+                deleted_at TEXT
             )
             """
         )
 
-        # Schema migration fallback logic: add missing columns if documents table already existed
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chunks (
+                vector_id INTEGER PRIMARY KEY,
+                filename TEXT NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                chunk_text TEXT NOT NULL,
+                embedding BLOB NOT NULL,
+                FOREIGN KEY (filename)
+                REFERENCES documents(filename)
+                ON DELETE CASCADE
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS deleted_chunks (
+                vector_id INTEGER PRIMARY KEY,
+                filename TEXT NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                chunk_text TEXT NOT NULL,
+                embedding BLOB NOT NULL
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS plagiarism_incidents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                incident_id TEXT UNIQUE,
+                document_a TEXT NOT NULL,
+                document_b TEXT NOT NULL,
+                similarity REAL NOT NULL,
+                severity TEXT NOT NULL,
+                timestamp TEXT NOT NULL
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS false_positives (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                document_a TEXT NOT NULL,
+                document_b TEXT NOT NULL,
+                timestamp TEXT NOT NULL
+            )
+            """
+        )
+
+        # 2. RUN SCHEMA MIGRATIONS / ALTER TABLES AFTER CREATION
         cursor = conn.execute("PRAGMA table_info(documents)")
         columns = [row[1] for row in cursor.fetchall()]
         if "class_section" not in columns:
@@ -140,29 +186,17 @@ def init_corpus_db() -> None:
             conn.execute("ALTER TABLE documents ADD COLUMN tags TEXT")
         if "detected_language" not in columns:
             conn.execute("ALTER TABLE documents ADD COLUMN detected_language TEXT")
+        if "owner" not in columns:
+            conn.execute("ALTER TABLE documents ADD COLUMN owner TEXT")
+        if "is_deleted" not in columns:
+            conn.execute("ALTER TABLE documents ADD COLUMN is_deleted INTEGER DEFAULT 0")
+        if "deleted_at" not in columns:
+            conn.execute("ALTER TABLE documents ADD COLUMN deleted_at TEXT")
 
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS chunks (
-                vector_id   INTEGER PRIMARY KEY,
-                filename    TEXT NOT NULL,
-                chunk_index INTEGER NOT NULL,
-                chunk_text  TEXT NOT NULL,
-                embedding   BLOB NOT NULL,
-                FOREIGN KEY (filename)
-                    REFERENCES documents(filename)
-                    ON DELETE CASCADE
-            )
-            """
-        )
-        migrate_corpus_database(conn)
-
-    # Restrict database file permissions to owner read/write only
-    # Prevents other local users on the server from reading the corpus data
-    try:
-        os.chmod(_DB_PATH, 0o600)
-    except OSError:
-        pass  # Best-effort; some platforms (e.g., Windows) may not support chmod
+        try:
+            os.chmod(_DB_PATH, 0o600)
+        except OSError:
+            pass
 
 
 def add_document(
@@ -176,20 +210,15 @@ def add_document(
     pdf_title: str = None,
     tags: str = None,
     detected_language: str = None,
+    owner: str = None,
 ) -> bool:
-    """
-    Insert a new document metadata row using parameterized execution.
-    Returns True if successfully inserted, False if it already exists.
-
-    The filename is sanitized again here so direct database callers cannot
-    persist HTML, JavaScript, traversal components, or control characters.
-    """
+    """Insert a new document metadata row using parameterized execution."""
     filename = sanitize_filename(filename)
 
     try:
         with _connect() as conn:
             conn.execute(
-                "INSERT INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, tags, detected_language) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, tags, detected_language, owner) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     filename,
                     file_hash,
@@ -202,9 +231,10 @@ def add_document(
                     pdf_title,
                     tags,
                     detected_language,
+                    owner,
                 ),
             )
-        return True
+            return True
     except sqlite3.IntegrityError:
         return False
 
@@ -215,12 +245,13 @@ def get_document_by_hash(file_hash: str) -> str | None:
         row = conn.execute(
             "SELECT filename FROM documents WHERE file_hash = ?", (file_hash,)
         ).fetchone()
-    return row[0] if row else None
+        return row[0] if row else None
 
 
 def get_all_documents(include_deleted: bool = False) -> list:
     """Return all indexed documents sorted by upload date descending."""
     from src.db.schemas import Document
+
     query = (
         "SELECT filename, file_hash, upload_date, class_section, student_name, "
         "assignment_title, pdf_author, pdf_creation_date, pdf_title, detected_language "
@@ -232,32 +263,31 @@ def get_all_documents(include_deleted: bool = False) -> list:
 
     with _connect() as conn:
         rows = conn.execute(query).fetchall()
-    return [
-        Document(
-            filename=r[0],
-            file_hash=r[1],
-            upload_date=r[2],
-            class_section=r[3],
-            student_name=r[4],
-            assignment_title=r[5],
-            pdf_author=r[6],
-            pdf_creation_date=r[7],
-            pdf_title=r[8],
-            detected_language=r[9],
-        )
-        for r in rows
-    ]
+        return [
+            Document(
+                filename=r[0],
+                file_hash=r[1],
+                upload_date=r[2],
+                class_section=r[3],
+                student_name=r[4],
+                assignment_title=r[5],
+                pdf_author=r[6],
+                pdf_creation_date=r[7],
+                pdf_title=r[8],
+                detected_language=r[9],
+            )
+            for r in rows
+        ]
 
 
 def add_chunks(chunks_to_add: list) -> None:
-    """
-    Insert a batch of chunks with their raw text and embedded BLOBs.
+    """Insert a batch of chunks with their raw text and embedded BLOBs."""
+    process = psutil.Process()
+    mem_before = process.memory_info().rss / (1024 * 1024)
+    logger.info("Memory usage before batch chunk insertion: %.2f MB", mem_before)
 
-    chunks_to_add: list of tuples: (vector_id, filename, chunk_index, chunk_text, embedding_np_array)
-    """
     formatted_chunks = []
     for vid, fname, idx, text, emb in chunks_to_add:
-        # Convert float32 numpy array to raw bytes BLOB
         emb_blob = emb.astype(np.float32).tobytes()
         formatted_chunks.append((vid, fname, idx, text, emb_blob))
 
@@ -266,6 +296,9 @@ def add_chunks(chunks_to_add: list) -> None:
             "INSERT OR REPLACE INTO chunks (vector_id, filename, chunk_index, chunk_text, embedding) VALUES (?, ?, ?, ?, ?)",
             formatted_chunks,
         )
+
+    mem_after = process.memory_info().rss / (1024 * 1024)
+    logger.info("Memory usage after batch chunk insertion: %.2f MB", mem_after)
 
 
 def get_chunk_registry() -> list:
@@ -276,7 +309,7 @@ def get_chunk_registry() -> list:
         rows = conn.execute(
             "SELECT filename, chunk_index, chunk_text FROM chunks ORDER BY vector_id ASC"
         ).fetchall()
-    return [ChunkRecord(r[0], r[1], r[2]) for r in rows]
+        return [ChunkRecord(r[0], r[1], r[2]) for r in rows]
 
 
 def get_all_embeddings() -> np.ndarray:
@@ -294,26 +327,16 @@ def get_all_embeddings() -> np.ndarray:
 
 
 def delete_document(filename: str) -> None:
-    """
-    Delete a document and all its associated chunks (cascade).
-    After deletion, vector_ids will have gaps, so we need to compact the vector IDs.
-    """
+    """Delete a document and all its associated chunks (cascade)."""
     with _connect() as conn:
-        # Delete related plagiarism incidents and false positives manually since there are no FK cascades
         conn.execute("DELETE FROM plagiarism_incidents WHERE document_a = ? OR document_b = ?", (filename, filename))
         conn.execute("DELETE FROM false_positives WHERE document_a = ? OR document_b = ?", (filename, filename))
-        # Delete document (triggers cascading delete on chunks and deleted_chunks)
         conn.execute("DELETE FROM documents WHERE filename = ?", (filename,))
-
-    # Re-index all remaining chunks so vector_ids are sequential [0, 1, ..., N-1]
-    _compact_vector_ids()
+        _compact_vector_ids()
 
 
 def soft_delete_document(filename: str) -> None:
-    """
-    Soft delete a document by setting is_deleted=1, moving its chunks to deleted_chunks,
-    and compacting vector IDs for the remaining active chunks.
-    """
+    """Soft delete a document by setting is_deleted=1 and moving chunks to deleted_chunks."""
     with _connect() as conn:
         conn.execute(
             "UPDATE documents SET is_deleted = 1, deleted_at = ? WHERE filename = ?",
@@ -329,49 +352,45 @@ def soft_delete_document(filename: str) -> None:
             (filename,),
         )
         conn.execute("DELETE FROM chunks WHERE filename = ?", (filename,))
-    _compact_vector_ids()
+        _compact_vector_ids()
 
 
 def get_deleted_documents() -> list:
     """Return all soft-deleted documents sorted by deleted_at descending."""
     from src.db.schemas import Document
+
     with _connect() as conn:
         rows = conn.execute(
             "SELECT filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, deleted_at FROM documents WHERE is_deleted = 1 ORDER BY deleted_at DESC"
         ).fetchall()
-    return [
-        Document(
-            filename=r[0],
-            file_hash=r[1],
-            upload_date=r[2],
-            class_section=r[3],
-            student_name=r[4],
-            assignment_title=r[5],
-            pdf_author=r[6],
-            pdf_creation_date=r[7],
-            pdf_title=r[8],
-            deleted_at=r[9],
-        )
-        for r in rows
-    ]
+        return [
+            Document(
+                filename=r[0],
+                file_hash=r[1],
+                upload_date=r[2],
+                class_section=r[3],
+                student_name=r[4],
+                assignment_title=r[5],
+                pdf_author=r[6],
+                pdf_creation_date=r[7],
+                pdf_title=r[8],
+                deleted_at=r[9],
+            )
+            for r in rows
+        ]
 
 
 def restore_document(filename: str) -> None:
-    """
-    Restore a soft-deleted document by setting is_deleted=0, moving its chunks back
-    to chunks, and re-compacting vector IDs.
-    """
+    """Restore a soft-deleted document by setting is_deleted=0 and moving chunks back."""
     with _connect() as conn:
         conn.execute(
             "UPDATE documents SET is_deleted = 0, deleted_at = NULL WHERE filename = ?",
             (filename,),
         )
-        # Fetch restored chunks (ignoring their stale vector_ids)
         restored = conn.execute(
             "SELECT filename, chunk_index, chunk_text, embedding FROM deleted_chunks WHERE filename = ?",
             (filename,),
         ).fetchall()
-        # Append them after the current max vector_id
         max_id_row = conn.execute("SELECT COALESCE(MAX(vector_id), -1) FROM chunks").fetchone()
         next_id = max_id_row[0] + 1
         for i, row in enumerate(restored):
@@ -380,7 +399,7 @@ def restore_document(filename: str) -> None:
                 (next_id + i, row[0], row[1], row[2], row[3]),
             )
         conn.execute("DELETE FROM deleted_chunks WHERE filename = ?", (filename,))
-    _compact_vector_ids()
+        _compact_vector_ids()
 
 
 def permanently_delete_document(filename: str) -> None:
@@ -391,7 +410,6 @@ def permanently_delete_document(filename: str) -> None:
 def empty_trash() -> None:
     """Permanently delete all soft-deleted documents."""
     with _connect() as conn:
-        # Get all filenames of soft-deleted documents to manually clean up plagiarism_incidents and false_positives
         deleted_docs = [
             r[0] for r in conn.execute("SELECT filename FROM documents WHERE is_deleted = 1").fetchall()
         ]
@@ -404,15 +422,12 @@ def empty_trash() -> None:
 def _compact_vector_ids() -> None:
     """Re-index the vector_id column to remove any gaps left by deleted documents."""
     with _connect() as conn:
-        # Retrieve all chunks ordered by current vector_id
         chunks = conn.execute(
             "SELECT filename, chunk_index, chunk_text, embedding FROM chunks ORDER BY vector_id ASC"
         ).fetchall()
 
-        # Clear chunks table
         conn.execute("DELETE FROM chunks")
 
-        # Insert them back with fresh sequential IDs starting at 0
         if chunks:
             formatted = [(i, r[0], r[1], r[2], r[3]) for i, r in enumerate(chunks)]
             conn.executemany(
@@ -427,11 +442,11 @@ def get_document_chunks_count(filename: str) -> int:
         row = conn.execute(
             "SELECT COUNT(1) FROM chunks WHERE filename = ?", (filename,)
         ).fetchone()
-    return row[0] if row else 0
+        return row[0] if row else 0
 
 
 def get_document_word_counts() -> dict[str, int]:
-    """Calculate and return the total word count for each document currently in the database based on its chunks."""
+    """Calculate and return the total word count for each document currently in the database."""
     import re
 
     with _connect() as conn:
@@ -452,6 +467,7 @@ def clear_all_data() -> None:
         delete_all_if_table_exists(conn, "deleted_chunks")
         delete_all_if_table_exists(conn, "documents")
         delete_all_if_table_exists(conn, "plagiarism_incidents")
+        delete_all_if_table_exists(conn, "false_positives")
 
 
 def get_unique_class_sections() -> list:
@@ -460,7 +476,7 @@ def get_unique_class_sections() -> list:
         rows = conn.execute(
             "SELECT DISTINCT class_section FROM documents WHERE class_section IS NOT NULL AND class_section != ''"
         ).fetchall()
-    return [r[0] for r in rows]
+        return [r[0] for r in rows]
 
 
 def get_documents_by_class(class_section: str) -> list:
@@ -469,22 +485,28 @@ def get_documents_by_class(class_section: str) -> list:
         rows = conn.execute(
             "SELECT filename FROM documents WHERE class_section = ?", (class_section,)
         ).fetchall()
-    return [r[0] for r in rows]
+        return [r[0] for r in rows]
 
 
 def get_embedding_count() -> int:
     """Return the number of durable chunk embeddings in the corpus."""
     with _connect() as conn:
         row = conn.execute("SELECT COUNT(1) FROM chunks").fetchone()
-    return int(row[0]) if row else 0
+        return int(row[0]) if row else 0
+
+
+def get_document_count_by_user(owner_username: str) -> int:
+    """Return the number of non-deleted documents owned by a specific user."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(1) FROM documents WHERE owner = ? AND (is_deleted IS NULL OR is_deleted = 0)",
+            (owner_username,),
+        ).fetchone()
+        return int(row[0]) if row else 0
 
 
 def add_documents_bulk(documents: list) -> int:
-    """
-    Insert a batch of new documents in a single transaction using executemany.
-    documents: list of dicts containing metadata (filename, file_hash, class_section, etc).
-    Returns the number of documents successfully inserted.
-    """
+    """Insert a batch of new documents in a single transaction using executemany."""
     formatted_docs = []
     now = datetime.now().isoformat()
     for doc in documents:
@@ -533,10 +555,9 @@ def get_all_tags() -> list[str]:
             )
             all_tags_lists = [row[0] for row in cursor.fetchall()]
 
-            # Use TagManager to extract unique
-            from src.core.tag_manager import TagManager
+        from src.core.tag_manager import TagManager
 
-            return TagManager.extract_unique_tags(all_tags_lists)
+        return TagManager.extract_unique_tags(all_tags_lists)
     except Exception:
         return []
 
@@ -562,17 +583,14 @@ def update_document_tags(filename: str, tags: str) -> bool:
                 "UPDATE documents SET tags = ? WHERE filename = ?",
                 (tags, filename)
             )
-        return True
+            return True
     except Exception as e:
         logger.error(f"Failed to update tags for '{filename}': {e}")
         return False
 
 
 def delete_tag(tag: str) -> int:
-    """
-    Removes a specific tag from ALL documents in the database.
-    Returns the number of documents that were modified.
-    """
+    """Removes a specific tag from ALL documents in the database."""
     if not tag or not isinstance(tag, str):
         return 0
     tag = tag.strip()
@@ -619,19 +637,11 @@ def check_database_integrity() -> list[str]:
 
 
 def optimize_database() -> dict[str, any]:
-    """
-    Executes SQLite VACUUM to reclaim database storage space.
-    Returns a dictionary containing:
-        - size_before: Database size in bytes before VACUUM.
-        - size_after: Database size in bytes after VACUUM.
-        - reclaimed_bytes: Bytes of storage space reclaimed.
-        - error: Error message if operation failed, else None.
-    """
+    """Executes SQLite VACUUM to reclaim database storage space."""
     path = get_corpus_db_path()
     try:
         size_before = path.stat().st_size if path.exists() else 0
 
-        # Run VACUUM outside transaction
         conn = sqlite3.connect(os.path.abspath(path))
         conn.isolation_level = None
         try:
@@ -656,3 +666,30 @@ def optimize_database() -> dict[str, any]:
             "reclaimed_bytes": 0,
             "error": str(e),
         }
+
+
+def purge_stale_trash(days_in_trash: int = 30) -> int:
+    """Automatically purge documents that have been soft-deleted for over a specified number of days."""
+    threshold_date = (datetime.now() - timedelta(days=days_in_trash)).isoformat()
+
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT filename FROM documents 
+            WHERE is_deleted = 1 AND deleted_at < ?
+            """,
+            (threshold_date,)
+        ).fetchall()
+
+        filenames_to_purge = [row[0] for row in rows]
+
+    deleted_count = 0
+    for filename in filenames_to_purge:
+        try:
+            permanently_delete_document(filename)
+            deleted_count += 1
+            logger.info(f"Purged stale trashed document: {filename}")
+        except Exception as e:
+            logger.error(f"Failed to purge stale trashed document {filename}: {e}")
+
+    return deleted_count

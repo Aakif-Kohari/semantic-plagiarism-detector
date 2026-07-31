@@ -20,7 +20,6 @@ import argparse
 import sys
 import io
 from pathlib import Path
-from datetime import datetime
 
 # We'll use reportlab directly to generate the PDF
 from reportlab.lib.pagesizes import A4
@@ -234,7 +233,7 @@ def generate_test_pdf(
             wrapped_b = wrap_text(chunk_b, max_chars=500)
 
             pair_data = [
-                [f"<b>From student_a.pdf:</b>", f"<b>From student_b.pdf:</b>"],
+                ["<b>From student_a.pdf:</b>", "<b>From student_b.pdf:</b>"],
                 [wrapped_a, wrapped_b],
             ]
 

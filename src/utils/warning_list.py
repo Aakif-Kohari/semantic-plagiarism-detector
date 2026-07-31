@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import math
-from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import pandas as pd
@@ -13,6 +11,7 @@ from app.theme import badge_html, tier_from_severity_label
 from src.core.config import normalize_severity_label, severity_from_score, severity_rank
 from src.db.incidents import _normalise_pair, add_false_positive, get_false_positives
 from src.i18n.translator import get_text
+from src.utils.pagination import PaginationPage, paginate_items
 
 try:
     from thefuzz import fuzz
@@ -36,15 +35,7 @@ def _sort_display_names(lang_code: str) -> dict[str, str]:
     return {get_text(k, lang=lang_code): v for k, v in _SORT_KEYS.items()}
 
 
-@dataclass(frozen=True)
-class WarningPage:
-    items: list[dict[str, Any]]
-    total_items: int
-    page: int
-    page_size: int
-    total_pages: int
-    start_index: int
-    end_index: int
+WarningPage = PaginationPage[dict[str, Any]]
 
 
 def _normalise_warning(
@@ -83,28 +74,34 @@ def filter_warnings(
     search_query: str = "",
     min_match_length: int = 0,
 ) -> list[dict[str, Any]]:
-
     """Filter normalized warnings using functional predicate matching."""
     normalised = [_normalise_warning(item) for item in warnings]
-    predicate = matches_query_predicate(search_query)
-    return [item for item in normalised if predicate(item)]
-
-    """
-    Filters warnings by query using exact substring matching and
-    fuzzy string matching (thefuzz/fuzzywuzzy) to handle minor typos.
-    """
-    normalised = [_normalise_warning(item) for item in warnings]
-
+    
     if min_match_length > 0:
         normalised = [
-            item
-            for item in normalised
-            if item.get("matched_length", 0) >= min_match_length
+            item for item in normalised if item.get("matched_length", 0) >= min_match_length
         ]
-
+        
     query = _truncate_search_query(search_query).casefold()
+    if not query:
+        return normalised
 
+    filtered = []
+    for item in normalised:
+        doc_a = item["doc_a"].casefold()
+        doc_b = item["doc_b"].casefold()
 
+        if query in doc_a or query in doc_b:
+            filtered.append(item)
+            continue
+
+        if fuzz is not None:
+            score_a = max(fuzz.partial_ratio(query, doc_a), fuzz.token_set_ratio(query, doc_a))
+            score_b = max(fuzz.partial_ratio(query, doc_b), fuzz.token_set_ratio(query, doc_b))
+            if score_a >= FUZZY_THRESHOLD or score_b >= FUZZY_THRESHOLD:
+                filtered.append(item)
+
+    return filtered
 
 
 def build_key_extractor(field: str) -> Callable[[Mapping[str, Any]], Any]:
@@ -113,30 +110,6 @@ def build_key_extractor(field: str) -> Callable[[Mapping[str, Any]], Any]:
         val = item.get(field, "")
         return val.casefold() if isinstance(val, str) else val
     return extract_key
-
-    filtered = []
-    for item in normalised:
-        doc_a = item["doc_a"].casefold()
-        doc_b = item["doc_b"].casefold()
-
-        # 1. Check exact substring match
-        if query in doc_a or query in doc_b:
-            filtered.append(item)
-            continue
-
-        # 2. Check fuzzy match if fuzz library is available
-        if fuzz is not None:
-            score_a = max(
-                fuzz.partial_ratio(query, doc_a), fuzz.token_set_ratio(query, doc_a)
-            )
-            score_b = max(
-                fuzz.partial_ratio(query, doc_b), fuzz.token_set_ratio(query, doc_b)
-            )
-
-            if score_a >= FUZZY_THRESHOLD or score_b >= FUZZY_THRESHOLD:
-                filtered.append(item)
-
-    return filtered
 
 
 def sort_warnings(
@@ -165,22 +138,13 @@ def paginate_warnings(
     page: int = 1,
     page_size: int = 10,
 ) -> WarningPage:
-    safe_page_size = min(max(1, int(page_size)), 100)
-    total_items = len(warnings)
-    total_pages = max(1, math.ceil(total_items / safe_page_size))
-    safe_page = min(max(1, int(page)), total_pages)
-
-    start = (safe_page - 1) * safe_page_size
-    end = min(start + safe_page_size, total_items)
-
-    return WarningPage(
-        items=[dict(item) for item in warnings[start:end]],
-        total_items=total_items,
-        page=safe_page,
-        page_size=safe_page_size,
-        total_pages=total_pages,
-        start_index=start + 1 if total_items else 0,
-        end_index=end,
+    """Return a clamped page of warning dictionaries."""
+    normalized_warnings = [dict(item) for item in warnings]
+    return paginate_items(
+        normalized_warnings,
+        page=page,
+        page_size=page_size,
+        max_page_size=100,
     )
 
 
@@ -664,13 +628,7 @@ def render_warning_controls(
             )
         markdown_text = "\n".join(markdown_lines)
 
-    escaped_text = (
-        markdown_text.replace("\\", "\\\\")
-        .replace('"', '\\"')
-        .replace("`", "\\`")
-        .replace("$", "\\$")
-        .replace("\n", "\\n")
-    )
+
 
     left, middle, right = st.columns([3, 2, 2])
     with left:
@@ -812,4 +770,22 @@ def render_warning_controls(
         ):
             st.session_state.warning_page = current_page.page + 1
             st.rerun()
-            
+def matches_query_predicate(flag: dict, search_query: str) -> bool:
+    """
+    Check if a flagged incident matches a search query across document names or text snippets.
+    """
+    if not search_query or not search_query.strip():
+        return True
+
+    query = search_query.strip().lower()
+    doc_a = str(flag.get("doc_a", "")).lower()
+    doc_b = str(flag.get("doc_b", "")).lower()
+    snippet_a = str(flag.get("snippet_a", "")).lower()
+    snippet_b = str(flag.get("snippet_b", "")).lower()
+
+    return (
+        query in doc_a
+        or query in doc_b
+        or query in snippet_a
+        or query in snippet_b
+    )

@@ -5,6 +5,8 @@ Generates interactive document plagiarism network graphs using networkx and Plot
 Documents are represented as nodes, and similarities above the threshold are edges.
 """
 
+import csv
+import io
 from typing import Optional
 
 import networkx as nx
@@ -25,7 +27,13 @@ DEFAULT_TAG_COLORS = [
     "#6366F1",  # Indigo
     "#14B8A6",  # Teal
 ]
-
+NETWORK_GRAPH_CONFIG = {
+    "toImageButtonOptions": {
+        "format": "png",
+        "filename": "plagiarism_network",
+        "scale": 2,
+    },
+}
 
 def _parse_document_tags(tags_val: object) -> list[str]:
     """Extracts a list of normalized tag strings from string, list, set or tuple input."""
@@ -75,27 +83,27 @@ def build_network_data(
     similarity_df: pd.DataFrame,
     threshold: float = 0.59,
     min_degree: int = 0,
+    node_scale: float = 1.0,
     theme_colors: Optional[dict] = None,
-    highlighted_doc: Optional[str] = None,
+    selected_node: Optional[str] = None,
     document_tags: Optional[dict] = None,
     doc_metadata: Optional[dict] = None,
 ) -> dict:
-    """
-    Processes similarity matrix data, constructs NetworkX graph layout, and formats node and edge traces.
+    """Processes similarity matrix data, constructs NetworkX graph layout, and formats node and edge traces.
 
     Args:
         similarity_df: Square N×N DataFrame of similarity scores.
         threshold: Edge threshold; pairs with similarity >= threshold are connected.
         min_degree: Minimum degree threshold; nodes with degree < min_degree are filtered out.
         theme_colors: Optional dictionary containing theme colors.
-        highlighted_doc: Optional document name to search/highlight with larger size and bright yellow color.
+        selected_node: Optional document name to highlight.
+        document_tags: Optional dictionary mapping document names to tags.
+        doc_metadata: Optional dictionary mapping document names to metadata (word_count, upload_date, etc.).
 
     Returns:
         Dictionary containing shapes, edge_hover_trace, node_trace, graph, pos coordinates,
         tag_color_map, and document_tags.
     """
-
-    # Create networkx graph
     G = nx.Graph()
 
     # Add all documents as nodes
@@ -116,10 +124,15 @@ def build_network_data(
                 G.add_edge(doc_names[i], doc_names[j])
                 edge_similarities[(doc_names[i], doc_names[j])] = score
 
-    # Compute layout coordinates
-    # Dynamic iteration depth for responsive performance on large node counts
+                edge_similarities[(doc_names[i], doc_names[j])] = score
+
+    # Nodes directly connected to the clicked node — used below to
+    # highlight them and dim everything else.
+    neighbor_nodes = set(G.neighbors(selected_node)) if selected_node in G else set()
+
+    # Compute layout coordinates    # Seed layout for reproducibility
     num_nodes = len(G.nodes())
-    layout_iterations = 10 if num_nodes >= 100 else 25
+    layout_iterations = 50
     pos = nx.spring_layout(
         G,
         seed=42,
@@ -180,8 +193,8 @@ def build_network_data(
 
         # Check if edge is connected to highlighted document
         is_highlighted_edge = (
-            highlighted_doc is not None
-            and (doc_a == highlighted_doc or doc_b == highlighted_doc)
+            selected_node is not None
+            and (doc_a == selected_node or doc_b == selected_node)
         )
 
         if is_highlighted_edge:
@@ -267,7 +280,7 @@ def build_network_data(
         node_document_ids.append(node)
 
         deg = G.degree(node)
-        base_size = 20 + deg * 6
+        base_size = (20 + deg * 6) * node_scale
 
         # Calculate top match from similarity matrix
         top_match_str = "N/A"
@@ -280,7 +293,7 @@ def build_network_data(
                     top_doc = sim_series.idxmax()
                     top_match_str = f"{top_doc} ({max_score:.1%})"
 
-        if highlighted_doc is not None and node == highlighted_doc:
+        if selected_node is not None and node == selected_node:
             node_size.append(base_size + 15)
             node_color.append("#FFFF00")  # Bright yellow for highlighted node
         else:
@@ -464,11 +477,11 @@ def plot_similarity_network(
     threshold: float = 0.59,
     min_degree: int = 0,
     title: str = "Document Plagiarism Network",
+    node_scale: float = 1.0,
     theme_colors: Optional[dict] = None,
-    highlighted_doc: Optional[str] = None,
+    selected_node: Optional[str] = None,
 ) -> go.Figure:
-    """
-    Builds a networkx graph from the similarity matrix and returns an interactive Plotly figure.
+    """Builds a networkx graph from the similarity matrix and returns an interactive Plotly figure.
 
     Args:
         similarity_df: Square N×N DataFrame of similarity scores.
@@ -485,8 +498,11 @@ def plot_similarity_network(
         similarity_df=similarity_df,
         threshold=threshold,
         min_degree=min_degree,
+        node_scale=node_scale,
         theme_colors=theme_colors,
-        highlighted_doc=highlighted_doc,
+        selected_node=selected_node,
+        document_tags=None,
+        doc_metadata=None,
     )
     return render_network_plotly(
         network_data=network_data,
@@ -537,6 +553,8 @@ def export_network_to_gexf_bytes(
         similarity_df=similarity_df,
         threshold=threshold,
         min_degree=min_degree,
+        document_tags=None,
+        doc_metadata=None,
     )
     G = network_data["graph"]
 
@@ -550,5 +568,98 @@ def export_network_to_gexf_bytes(
 
     gexf_str = export_graph_to_gexf(G)
     return gexf_str.encode("utf-8")
+
+
+def export_graph_to_csv(
+    graph: nx.Graph,
+    similarity_df: Optional[pd.DataFrame] = None,
+) -> str:
+    """
+    Serialize NetworkX graph edges into CSV format string.
+
+    CSV format:
+    Source,Target,Similarity
+
+    Args:
+        graph: NetworkX Graph object.
+        similarity_df: Optional square DataFrame with pairwise similarities.
+
+    Returns:
+        CSV string with header Source,Target,Similarity.
+    """
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Source", "Target", "Similarity"])
+
+    name_to_idx = {}
+    if similarity_df is not None and not similarity_df.empty:
+        doc_names = list(similarity_df.columns)
+        name_to_idx = {name: i for i, name in enumerate(doc_names)}
+
+    for u, v, data in graph.edges(data=True):
+        if similarity_df is not None and u in name_to_idx and v in name_to_idx:
+            i = name_to_idx[u]
+            j = name_to_idx[v]
+            score = float(similarity_df.iloc[i, j])
+        elif "similarity" in data:
+            score = float(data["similarity"])
+        else:
+            score = 0.0
+        writer.writerow([u, v, score])
+
+    return output.getvalue()
+
+def export_network_adjacency_csv(graph: nx.Graph) -> str:
+    """
+    Export a NetworkX graph as an adjacency list CSV.
+
+    CSV format:
+    Source,Target,Weight
+
+    Args:
+        graph: NetworkX Graph object.
+
+    Returns:
+        CSV formatted string.
+    """
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    writer.writerow(["Source", "Target", "Weight"])
+
+    for source, target, data in graph.edges(data=True):
+        weight = data.get("weight", 1.0)
+        writer.writerow([source, target, weight])
+
+    return output.getvalue()
+def export_network_to_csv_bytes(
+    similarity_df: pd.DataFrame,
+    threshold: float = 0.59,
+    min_degree: int = 0,
+) -> bytes:
+    """
+    Build a network from the similarity matrix and export as CSV edge list bytes.
+
+    CSV edge list format is supported by Gephi, Cytoscape, and other external graph tools.
+
+    Args:
+        similarity_df: Square N×N DataFrame of similarity scores.
+        threshold: Edge threshold; pairs with similarity >= threshold are connected.
+        min_degree: Minimum degree threshold.
+
+    Returns:
+        CSV edge list as UTF-8 encoded bytes, ready for download.
+    """
+    network_data = build_network_data(
+        similarity_df=similarity_df,
+        threshold=threshold,
+        min_degree=min_degree,
+        document_tags=None,
+        doc_metadata=None,
+    )
+    G = network_data["graph"]
+    csv_str = export_graph_to_csv(G, similarity_df=similarity_df)
+    return csv_str.encode("utf-8")
+
 
 

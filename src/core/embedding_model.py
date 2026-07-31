@@ -12,8 +12,6 @@ Model: paraphrase-multilingual-MiniLM-L12-v2
   - MIT licensed; safe for academic use
 """
 
-# pylint: disable=streamlit-global-mutation
-
 import logging
 import os
 from typing import List
@@ -21,10 +19,11 @@ from typing import List
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
+from src.core.config import EMBEDDING_BATCH_SIZE
+
 logger = logging.getLogger(__name__)
 
 # ── Singleton model loader ─────────────────────────────────────────────────────
-# We load the model once and reuse it across calls to avoid repeated I/O.
 _DEFAULT_MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
 _model: SentenceTransformer | None = None
 
@@ -42,27 +41,53 @@ def get_embedding_model_info() -> tuple[str, int]:
     return _get_model_name(), model.get_sentence_embedding_dimension()
 
 
+class EmbeddingModelManager:
+    """Manages the SentenceTransformer embedding model lifecycle and fallbacks."""
+    _instance = None
+
+    @classmethod
+    def get_instance(cls) -> EmbeddingModelManager:
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def get_model(self) -> SentenceTransformer:
+        global _model
+        if _model is None:
+            primary = _get_model_name()
+            fallback = "all-MiniLM-L6-v2"
+            logger.info(f"[embedding_model] Loading model: {primary} …")
+            try:
+                _model = SentenceTransformer(primary)
+                logger.info("[embedding_model] Model loaded successfully.")
+            except Exception:
+                logger.warning(
+                    "Primary embedding model %s unavailable. Falling back to %s",
+                    primary,
+                    fallback,
+                )
+                _model = SentenceTransformer(fallback)
+        return _model
+
+
 def _get_model() -> SentenceTransformer:
     """Lazy-load the Sentence Transformer model (singleton pattern)."""
-    global _model
-    if _model is None:
-        model_name = _get_model_name()
-        logger.info(f"[embedding_model] Loading model: {model_name} …")
-        _model = SentenceTransformer(model_name)
-        logger.info("[embedding_model] Model loaded successfully.")
-    return _model
+    return EmbeddingModelManager.get_instance().get_model()
+
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 
-def embed_chunks(chunks: List[str], batch_size: int = 64) -> np.ndarray:
+def embed_chunks(
+    chunks: List[str], batch_size: int = EMBEDDING_BATCH_SIZE
+) -> np.ndarray:
     """
     Generate embeddings for a list of text chunks.
 
     Args:
         chunks:     List of text strings to embed.
-        batch_size: Number of texts encoded per forward pass (tune for GPU/CPU).
+        batch_size: Number of texts encoded per forward pass (defaults to EMBEDDING_BATCH_SIZE).
 
     Returns:
         numpy array of shape (N, 384) where N = len(chunks).
@@ -80,7 +105,9 @@ def embed_chunks(chunks: List[str], batch_size: int = 64) -> np.ndarray:
     return embeddings
 
 
-def embed_documents(chunked_docs: dict, batch_size: int = 64) -> dict:
+def embed_documents(
+    chunked_docs: dict, batch_size: int = EMBEDDING_BATCH_SIZE
+) -> dict:
     """
     Embed all chunks across multiple documents.
 
@@ -129,9 +156,6 @@ def embed_documents(chunked_docs: dict, batch_size: int = 64) -> dict:
 def get_document_embedding(doc_embedding: np.ndarray) -> np.ndarray:
     """
     Compute a single document-level embedding by averaging its chunk embeddings.
-
-    Using mean pooling over chunks gives a compact representation
-    of the whole document for document-level similarity comparisons.
 
     Args:
         doc_embedding: Array of shape (N, 384) for N chunks.

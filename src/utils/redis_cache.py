@@ -33,6 +33,12 @@ except ImportError:
 
 from dotenv import load_dotenv
 
+
+try:
+    from src.core.app_config import REDIS_CACHE_TTL
+except ImportError:
+    REDIS_CACHE_TTL = int(os.getenv("REDIS_CACHE_TTL", "3600"))
+
 logger = logging.getLogger(__name__)
 
 load_dotenv()
@@ -268,7 +274,7 @@ class RedisCache:
                     socket_connect_timeout=REDIS_TIMEOUT_SECONDS,
                 )
             self._client.ping()
-            print(f"[RedisCache] Connected to Redis at {REDIS_HOST}:{REDIS_PORT}")
+            logger.info(f"[RedisCache] Connected to Redis at {REDIS_HOST}:{REDIS_PORT}")
         except (
             RedisConnectionError,
             RedisTimeoutError,
@@ -288,9 +294,12 @@ class RedisCache:
         except Exception:
             return False
 
+
+
     def ping(self) -> tuple[bool, Optional[float]]:
         if self._client is None:
             return False, None
+
         try:
             start = time.monotonic()
             self._client.ping()
@@ -378,6 +387,7 @@ class RedisCache:
                 logger.error(f"[RedisCache] Error setting JSON key {key}: {e}")
 
         return self._fallback_set_json(key, value, ttl)
+
 
     def get_json(self, key: str) -> Optional[dict]:
         """Retrieve a JSON value from Redis with automatic decompression."""

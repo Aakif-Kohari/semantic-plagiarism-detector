@@ -82,6 +82,9 @@ def _log_retry(retry_state: RetryCallState) -> None:
     )
 
 
+_attempt_counter = 0
+
+
 @retry(
     retry=retry_if_exception(_is_retryable_request_error),
     stop=stop_after_attempt(WEBHOOK_MAX_ATTEMPTS),
@@ -101,6 +104,8 @@ def _post_webhook(
 
     Tenacity retries this function for transient request failures only.
     """
+    global _attempt_counter
+    _attempt_counter += 1
     response = requests.post(
         webhook_url,
         json=payload,
@@ -114,12 +119,12 @@ def send_plagiarism_alert(
     doc_a: str,
     doc_b: str,
     similarity: float,
-) -> bool:
-    """Send a plagiarism alert to the configured webhook.
+) -> tuple[bool, int]:
+    """Send a plagiarism alert to the configured webhook with retry logic.
 
     The webhook URL is validated once before any outbound request. Temporary
     connection failures, timeouts, rate limiting, and selected 5xx responses
-    are retried up to three times with exponential backoff.
+    (500, 502, 503, 504) are retried up to 3 times with exponential backoff.
 
     Args:
         doc_a: Name of the first student document.
@@ -127,15 +132,20 @@ def send_plagiarism_alert(
         similarity: Cosine similarity score between 0.0 and 1.0.
 
     Returns:
-        ``True`` when delivery succeeds; otherwise ``False``.
+        A tuple of ``(success, total_attempts)`` where ``success`` is a boolean
+        indicating delivery success, and ``total_attempts`` is the total number
+        of HTTP delivery attempts made.
     """
+    global _attempt_counter
+    _attempt_counter = 0
+
     webhook_url = os.getenv("PLAGIARISM_WEBHOOK_URL")
 
     if not webhook_url:
         logger.warning(
             "PLAGIARISM_WEBHOOK_URL is not configured in the environment."
         )
-        return False
+        return False, 0
 
     base_url = os.getenv(
         "APP_BASE_URL",
@@ -157,28 +167,33 @@ def send_plagiarism_alert(
     try:
         # Validate once. Retrying cannot make an unsafe URL safe.
         SSRFProtector.validate_webhook_url(webhook_url)
-        _post_webhook(webhook_url, payload)
     except SSRFSecurityException as exception:
         logger.error(
             "SECURITY BLOCKED: Webhook failed SSRF validation: %s",
             exception,
         )
-        return False
+        return False, 0
+
+    try:
+        _post_webhook(webhook_url, payload)
+        attempts = _attempt_counter
     except requests.exceptions.RequestException as exception:
+        attempts = _attempt_counter
         logger.error(
             "Failed to send webhook notification for pair %s <-> %s "
-            "after at most %s attempts: %s",
+            "after %s attempt(s): %s",
             doc_a,
             doc_b,
-            WEBHOOK_MAX_ATTEMPTS,
+            attempts,
             exception,
         )
-        return False
+        return False, attempts
 
     logger.info(
-        "Webhook alert successfully sent for pair %s <-> %s (%.1f%%).",
+        "Webhook alert successfully sent for pair %s <-> %s (%.1f%%) after %s attempt(s).",
         doc_a,
         doc_b,
         similarity_percent,
+        attempts,
     )
-    return True
+    return True, attempts
