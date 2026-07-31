@@ -2089,6 +2089,11 @@ with tab_settings:
                 key="ocr_dpi_slider",
             )
 
+        st.markdown("### 🔑 API Settings")
+        st.caption("Active API Bearer Token for external REST API endpoints:")
+        api_bearer_token = os.getenv("API_BEARER_TOKEN", "default-token-secret-key-12345")
+        st.code(api_bearer_token, language=None)
+
         st.markdown("### 💾 Backup")
         from src.db.database_backup import (
             create_corpus_database_snapshot,

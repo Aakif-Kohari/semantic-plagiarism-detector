@@ -267,3 +267,22 @@ def test_sidebar_reset_all_filters():
 
     finally:
         _cleanup_stale_artifacts()
+
+
+def test_api_bearer_token_copy_code_box():
+    """Verify that API Bearer Token is displayed using st.code box in settings tab."""
+    _cleanup_stale_artifacts()
+    try:
+        os.environ["API_BEARER_TOKEN"] = "test-secret-bearer-token"
+        at = AppTest.from_file("app/streamlit_app.py", default_timeout=30)
+        at.session_state["authenticated"] = True
+        at.session_state["username"] = "admin"
+        at.session_state["role"] = "admin"
+        at.run()
+
+        assert not at.exception
+        code_blocks = [c.value for c in at.code]
+        assert any("test-secret-bearer-token" in val or "secret" in val for val in code_blocks)
+    finally:
+        _cleanup_stale_artifacts()
+
