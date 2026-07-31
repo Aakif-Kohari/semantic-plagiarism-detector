@@ -1,12 +1,12 @@
 """
 src/utils/file_parser.py
 ------------------------
-Utility functions for parsing PDF, DOCX, and TXT files.
+Utility functions for parsing PDF, DOCX, TXT, and Markdown files.
 Supports decrypted and password-protected PDF parsing using PyMuPDF (fitz),
 along with file categorization and validation helpers.
 """
 
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import fitz  # PyMuPDF
 
@@ -97,6 +97,8 @@ def get_file_mime_category(filename: str) -> str:
         'docx': 'word_document',
         'txt': 'text',
         'md': 'text',
+        'markdown': 'text',
+        'mdown': 'text',
         'csv': 'text',
         'rtf': 'text',
         'py': 'code',

@@ -55,7 +55,7 @@ DEFAULT_OCR_LANGUAGE = "eng"
 MAX_BATCH_SIZE = 50
 
 # File extensions supported by the extraction pipeline, exposed for UI display
-ALLOWED_EXTENSIONS = {".pdf", ".docx", ".csv", ".epub", ".html", ".rtf", ".txt"}
+ALLOWED_EXTENSIONS = {".pdf", ".docx", ".csv", ".epub", ".html", ".md", ".markdown", ".mdown", ".rtf", ".txt"}
 ZERO_WIDTH_CHARS_PATTERN = re.compile(r"[\u200B\u200C\u200D\uFEFF\u2060\u200E\u200F]")
 
 
@@ -1103,7 +1103,7 @@ def extract_text_from_url(url: str) -> str:
         raise Exception(f"Failed to parse webpage content: {exc}") from exc
 
 
-# --- Markdown (.md) support -------------------------------------------------
+# --- Markdown (.md, .markdown, .mdown) support -------------------------------------------------
 
 _MD_FENCE = re.compile(r"^\s*(```|~~~)")
 _MD_ATX_HEADER = re.compile(r"^\s{0,3}#{1,6}\s+")
@@ -1200,7 +1200,7 @@ def extract_text_from_epub(file: PDFInput) -> str:
 
 
 def extract_text_from_md(file: PDFInput) -> str:
-    """Extract plain text from a Markdown (.md) file."""
+    """Extract plain text from a Markdown (.md, .markdown, .mdown) file."""
     raw_text = extract_text_from_txt(file)
     if not raw_text:
         return ""
@@ -1301,7 +1301,7 @@ def extract_text(
         raw = extract_text_from_docx(file)
     elif extension == "doc":
         raw = extract_text_from_doc(file)
-    elif extension == "md":
+    elif extension in ("md", "markdown", "mdown"):
         raw = extract_text_from_md(file)
 
     elif extension in ("zip", "7z", "tar", "gz"):
