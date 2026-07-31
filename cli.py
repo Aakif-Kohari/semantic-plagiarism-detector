@@ -10,6 +10,7 @@ import os
 import sys
 from io import BytesIO
 
+from src.core.logging_config import setup_logging
 from src.core.cross_lingual import prepare_text_for_embedding
 from src.core.document_parser import (DEFAULT_OCR_DPI, DEFAULT_OCR_LANGUAGE,
                                       extract_text)
@@ -114,6 +115,7 @@ def run_scan(folder_path: str, threshold: float) -> int:
 
 
 def main() -> None:
+    setup_logging()
     parser = argparse.ArgumentParser(
         description="Headless CLI Version for Plagiarism Detection Automation"
     )
