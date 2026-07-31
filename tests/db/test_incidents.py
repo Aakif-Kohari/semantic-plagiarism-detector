@@ -7,6 +7,7 @@ from src.db.incidents import (
     build_incident_id,
     export_current_flags_csv,
     get_all_incidents,
+    get_incidents_by_severity,
     incidents_to_csv,
     sync_flagged_incidents,
     update_review_status,
@@ -202,3 +203,28 @@ def test_export_current_flags_csv_exports_incidents(test_db):
 
     assert "doc1.pdf" in text
     assert "doc2.pdf" in text
+
+
+def test_get_incidents_by_severity(test_db):
+    """Verify incidents can be filtered by severity."""
+    flags = [
+        {
+            "doc_a": "high_doc1.pdf",
+            "doc_b": "high_doc2.pdf",
+            "similarity": 0.95,
+        },
+        {
+            "doc_a": "low_doc1.pdf",
+            "doc_b": "low_doc2.pdf",
+            "similarity": 0.20,
+        },
+    ]
+
+    sync_flagged_incidents(flags, test_db)
+
+    results = get_incidents_by_severity("High", test_db)
+
+    assert len(results) == 1
+    assert results[0]["severity_rank"] == "High"
+    assert results[0]["document_a"] == "high_doc1.pdf"
+

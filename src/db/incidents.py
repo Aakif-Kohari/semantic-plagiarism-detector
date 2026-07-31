@@ -197,6 +197,33 @@ def get_all_incidents(
         return _fetch_all_incidents(conn)
 
 
+def get_incidents_by_severity(
+    severity: str,
+    db_path: str | Path = DEFAULT_DB_PATH,
+) -> list[dict[str, Any]]:
+    init_incident_db(db_path)
+    try:
+        norm_severity = normalize_severity_label(severity)
+    except ValueError:
+        return []
+
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT incident_id, document_a, document_b,
+                   similarity_score, severity_rank,
+                   review_status, date_flagged, last_seen,
+                   threshold_at_time_of_flag
+            FROM plagiarism_incidents
+            WHERE severity_rank = ?
+            ORDER BY date_flagged DESC, incident_id ASC
+            """,
+            (norm_severity,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
 def get_all_incidents_above_threshold_for_export(
     threshold: float,
     db_path: str | Path = DEFAULT_DB_PATH,
