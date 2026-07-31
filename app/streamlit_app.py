@@ -797,7 +797,14 @@ with st.sidebar:
 
 # ── Main UI ───────────────────────────────────────────────────────────────────
 st.title("🔍 Semantic Plagiarism Detection System")
-
+with st.expander("ℹ️ How Semantic Plagiarism Detection Works"):
+    st.markdown(
+        """
+        - **1. Upload files** — Upload the documents you want to compare.
+        - **2. AI vector embeddings generated** — The documents are converted into vector embeddings for semantic comparison.
+        - **3. View similarity heatmap & incident logs** — Review detected similarities through the heatmap and incident logs.
+        """
+    )
 uploaded_files = st.file_uploader(
     "📂 Upload Assignments",
     type=["pdf", "docx", "txt"],
