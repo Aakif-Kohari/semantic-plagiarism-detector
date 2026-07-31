@@ -83,6 +83,7 @@ def build_network_data(
     similarity_df: pd.DataFrame,
     threshold: float = 0.59,
     min_degree: int = 0,
+    node_scale: float = 1.0,
     theme_colors: Optional[dict] = None,
     selected_node: Optional[str] = None,
     document_tags: Optional[dict] = None,
@@ -279,7 +280,7 @@ def build_network_data(
         node_document_ids.append(node)
 
         deg = G.degree(node)
-        base_size = 20 + deg * 6
+        base_size = (20 + deg * 6) * node_scale
 
         # Calculate top match from similarity matrix
         top_match_str = "N/A"
@@ -476,6 +477,7 @@ def plot_similarity_network(
     threshold: float = 0.59,
     min_degree: int = 0,
     title: str = "Document Plagiarism Network",
+    node_scale: float = 1.0,
     theme_colors: Optional[dict] = None,
     selected_node: Optional[str] = None,
 ) -> go.Figure:
@@ -496,6 +498,7 @@ def plot_similarity_network(
         similarity_df=similarity_df,
         threshold=threshold,
         min_degree=min_degree,
+        node_scale=node_scale,
         theme_colors=theme_colors,
         selected_node=selected_node,
         document_tags=None,

@@ -37,29 +37,13 @@ def test_plot_similarity_heatmap_large_dataframe():
     assert isinstance(fig, Figure)
     # Verify the figure contains at least one Axes
     assert len(fig.axes) > 0
-test_heatmap.py
----------------
-Comprehensive unit tests for the heatmap visualization module.
 
-This module validates the behavior of both static (Matplotlib/Seaborn) and 
-interactive (Plotly) heatmap generation functions. It ensures robust handling 
-of edge cases, empty data, single-document matrices, masking thresholds, and 
-critical export functionalities such as PNG byte stream generation.
-
-Recent Additions (Issue #696):
-- Added rigorous assertions to verify that Matplotlib figure PNG exports 
-  produce valid, non-corrupted binary byte streams with correct magic headers.
-- Expanded parameterized testing for various dataframe shapes and configurations.
-"""
 
 import io
 
-import pandas as pd
-import pytest
 import matplotlib.pyplot as plt
 
 from src.visualization.heatmap import (
-    plot_similarity_heatmap,
     plot_similarity_heatmap_plotly,
 )
 
@@ -540,6 +524,39 @@ def test_plot_similarity_heatmap_dim_diagonal_single_doc(single_doc_df: pd.DataF
     assert heatmap.z[0][0] is None
 
 
+# ==============================================================================
+# CSV Export Tests (Issue #1063)
+# ==============================================================================
 
 
+def test_export_heatmap_matrix_csv_valid_output():
+    """Verify CSV export returns valid UTF-8 encoded CSV bytes with correct content."""
+    from src.visualization.heatmap import export_heatmap_matrix_csv
 
+    df = pd.DataFrame(
+        [
+            [1.00, 0.85, 0.45],
+            [0.85, 1.00, 0.60],
+            [0.45, 0.60, 1.00],
+        ],
+        columns=["doc_A", "doc_B", "doc_C"],
+        index=["doc_A", "doc_B", "doc_C"],
+    )
+
+    csv_bytes = export_heatmap_matrix_csv(df)
+
+    assert isinstance(csv_bytes, bytes)
+    decoded = csv_bytes.decode("utf-8")
+    assert "doc_A" in decoded
+    lines = decoded.strip().splitlines()
+    assert len(lines) == 4  # header + 3 data rows
+
+
+def test_export_heatmap_matrix_csv_empty_dataframe():
+    """Verify CSV export handles an empty DataFrame gracefully."""
+    from src.visualization.heatmap import export_heatmap_matrix_csv
+
+    df = pd.DataFrame()
+    csv_bytes = export_heatmap_matrix_csv(df)
+
+    assert isinstance(csv_bytes, bytes)

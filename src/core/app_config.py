@@ -120,3 +120,12 @@ def get_lock_timeout() -> int:
         return max(1, timeout)
     except ValueError:
         return 30
+
+
+def get_backup_idle_timeout() -> int:
+    """Return the configured backup idle timeout in seconds (default 30 minutes)."""
+    try:
+        timeout_minutes = int(os.getenv("BACKUP_IDLE_TIMEOUT_MINUTES", "30"))
+        return max(1, timeout_minutes) * 60
+    except ValueError:
+        return 30 * 60

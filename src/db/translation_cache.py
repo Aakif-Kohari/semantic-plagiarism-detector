@@ -8,7 +8,6 @@ Maps SHA-256 hash of (foreign_text, source_lang, target_lang) -> cached_text.
 import hashlib
 import os
 import sqlite3
-import tempfile
 from typing import Optional
 
 from src.core.app_config import CORPUS_DB_PATH, FALLBACK_CORPUS_DB_PATH

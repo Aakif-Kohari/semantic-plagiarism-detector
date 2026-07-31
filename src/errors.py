@@ -51,13 +51,22 @@ BADGE_PIL_REQUIRED = "PIL/Pillow is required for PNG badge generation"
 
 # Similarity & FAISS Errors
 SIM_BATCH_SIZE_INVALID = "batch_size must be an integer"
-SIM_WEIGHT_OUT_OF_RANGE = "Weight w must be between 0.0 and 1.0, got {w}"
+
+
+def sim_weight_out_of_range(w):
+    return f"Weight w must be between 0.0 and 1.0, got {w}"
+
+
 SIM_SHAPE_MISMATCH = "Semantic and lexical matrices must have the same shape"
 SIM_INDEX_MISMATCH = (
     "Semantic and lexical matrices must have the same index and columns"
 )
 FAISS_STORED_EMB_DIM_INVALID = "Stored embeddings must be two-dimensional."
-FAISS_EMB_REGISTRY_MISMATCH = "Corpus embedding count does not match chunk registry count: {emb_count} != {reg_count}"
+
+
+def faiss_emb_registry_mismatch(emb_count, reg_count):
+    return f"Corpus embedding count does not match chunk registry count: {emb_count} != {reg_count}"
+
 
 # Incident Database Errors
 INCIDENT_DB_INIT_FAILED = "Failed to initialize incident database: {error}"
@@ -138,6 +147,8 @@ SSRF_BLOCKED_PRIVATE = "Blocked private network IP: {ip}"
 SSRF_BLOCKED_LINK_LOCAL = "Blocked link-local IP: {ip}"
 SSRF_BLOCKED_MULTICAST = "Blocked multicast IP: {ip}"
 SSRF_BLOCKED_UNSPECIFIED = "Blocked unspecified IP: {ip}"
+
+
 class ExportFailedError(RuntimeError):
     """Raised when an export cannot be generated or written safely."""
 

@@ -10,6 +10,7 @@ import os
 import sys
 from io import BytesIO
 
+from src.core.logging_config import setup_logging
 from src.core.app_config import FAISS_INDEX_PATH
 from src.core.cross_lingual import prepare_text_for_embedding
 from src.core.document_parser import (DEFAULT_OCR_DPI, DEFAULT_OCR_LANGUAGE,
@@ -249,6 +250,7 @@ def run_prewarm(folder_path: str | None = None) -> int:
 
 
 def main() -> None:
+    setup_logging()
     parser = argparse.ArgumentParser(
         description="Headless CLI Version for Plagiarism Detection Automation"
     )

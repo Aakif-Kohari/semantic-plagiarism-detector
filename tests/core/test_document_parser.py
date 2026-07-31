@@ -21,13 +21,8 @@ from src.core.document_parser import (
 import time
 
 
-from src.core.document_parser import (clean_text, extract_text,
-                                      extract_text_from_docx,
-                                      extract_text_from_odt,
-                                      extract_text_from_pdf,
-                                      extract_text_from_txt, extract_texts,
-                                      remove_ignore_phrases,
-                                      strip_bibliography)
+from src.core.document_parser import (clean_text, extract_text_from_odt,
+                                      remove_ignore_phrases)
 
 # Skip OCR tests when Tesseract binary is not present on this machine
 TESSERACT_AVAILABLE = shutil.which("tesseract") is not None
