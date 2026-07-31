@@ -11,7 +11,7 @@ on:
     types: [opened, closed]
 
   schedule:
-    - cron: '0 0 * * *'
+    - cron: '0 */12 * * *'
 
   workflow_dispatch:
 
@@ -324,94 +324,6 @@ jobs:
                 } catch (err) {
                   console.log("Could not post welcome comment:", err.message);
                 }
-              }
-
-              // AI PR Reviewer
-              try {
-                const files = await github.paginate(github.rest.pulls.listFiles, {
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: pr.number,
-                  per_page: 100
-                });
-
-                const issuesFound = [];
-                let pythonFilesModified = false;
-                let requirementsModified = false;
-                let testsModified = false;
-                let coreSrcModified = false;
-
-                for (const file of files) {
-                  const filename = file.filename;
-                  const patch = file.patch || '';
-                  const addedLines = patch.split('\n').filter(line => line.startsWith('+') && !line.startsWith('+++'));
-                  const addedText = addedLines.join('\n');
-
-                  if (filename.endsWith('.py')) pythonFilesModified = true;
-                  if (filename.includes('requirements') || filename.includes('pyproject.toml')) requirementsModified = true;
-                  if (filename.startsWith('tests/') || filename.includes('test_')) testsModified = true;
-                  if (filename.startsWith('src/')) coreSrcModified = true;
-
-                  // Defensive / Null check warning
-                  if (/(?:req|res|data|user|config|payload|item|obj)\.[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+/.test(addedText) &&
-                      !/(?:if|optional|\?\.|get\(|hasattr|in\s)/.test(addedText)) {
-                    if (!issuesFound.some(i => i.includes('Missing null check'))) {
-                      issuesFound.push('Missing null check');
-                    }
-                  }
-
-                  // Leftover debug statement warning
-                  if (/(?:print\(|console\.log\(|debugger|breakpoint\(\)|import\s+pdb|pdb\.set_trace\(\))/.test(addedText)) {
-                    if (!issuesFound.some(i => i.includes('Variable never used') || i.includes('Leftover debug'))) {
-                      issuesFound.push('Variable never used or leftover debug statement');
-                    }
-                  }
-
-                  // Large block warning (duplicate logic risk)
-                  if (addedLines.length > 50) {
-                    if (!issuesFound.some(i => i.includes('Duplicate logic'))) {
-                      issuesFound.push(`Duplicate logic in ${filename}`);
-                    }
-                  }
-                }
-
-                if (pythonFilesModified && !requirementsModified) {
-                  let hasNewImport = false;
-                  for (const file of files) {
-                    if (file.filename.endsWith('.py') && file.patch) {
-                      const added = file.patch.split('\n').filter(l => l.startsWith('+') && !l.startsWith('+++')).join('\n');
-                      if (/(?:^\+|\s)(?:import|from)\s+[a-zA-Z0-9_]+/.test(added)) {
-                        hasNewImport = true;
-                        break;
-                      }
-                    }
-                  }
-                  if (hasNewImport) {
-                    issuesFound.push('requirements.txt not updated');
-                  }
-                }
-
-                if (coreSrcModified && !testsModified) {
-                  if (!issuesFound.some(i => i.includes('tests'))) {
-                    issuesFound.push('tests not updated for core changes');
-                  }
-                }
-
-                let reviewBody = '🤖 **AI PR Reviewer**\n\n';
-                if (issuesFound.length > 0) {
-                  reviewBody += 'Potential issues:\n\n' + issuesFound.map(i => `- ${i}`).join('\n');
-                } else {
-                  reviewBody += 'Looks good.';
-                }
-
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: pr.number,
-                  body: reviewBody
-                });
-              } catch (reviewErr) {
-                console.log("Error performing AI PR review:", reviewErr.message);
               }
             } else if (action === 'closed' && pr.merged) {
               // Merge thank you comment for PR
