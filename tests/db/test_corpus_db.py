@@ -14,6 +14,7 @@ from src.db.corpus_db import (
     get_chunk_registry,
     get_document_by_hash,
     get_document_chunks_count,
+    get_document_count_by_user,
     get_documents_by_class,
     get_unique_class_sections,
     purge_stale_trash,
@@ -367,3 +368,62 @@ def test_add_chunks_logs_memory_usage(mock_db, caplog):
     assert any("Memory usage before batch chunk insertion:" in msg for msg in log_messages)
     assert any("Memory usage after batch chunk insertion:" in msg for msg in log_messages)
 
+
+# ==============================================================================
+# get_document_count_by_user — issue #1048
+# ==============================================================================
+
+
+def test_get_document_count_by_user_returns_zero_for_unknown_user(mock_db):
+    """A username with no documents must return 0."""
+    assert get_document_count_by_user("nobody") == 0
+
+
+def test_get_document_count_by_user_counts_active_documents(mock_db):
+    """Documents owned by the user that are NOT soft-deleted must be counted."""
+    add_document("doc1.pdf", "hash_1", owner="alice")
+    add_document("doc2.pdf", "hash_2", owner="alice")
+    add_document("doc3.pdf", "hash_3", owner="bob")
+
+    assert get_document_count_by_user("alice") == 2
+    assert get_document_count_by_user("bob") == 1
+
+
+def test_get_document_count_by_user_excludes_soft_deleted(mock_db):
+    """Soft-deleted documents must not be counted (is_deleted = 0 filter)."""
+    add_document("active.pdf", "hash_active", owner="alice")
+    add_document("trashed.pdf", "hash_trashed", owner="alice")
+    soft_delete_document("trashed.pdf")
+
+    # Only the active document should be counted
+    assert get_document_count_by_user("alice") == 1
+
+
+def test_get_document_count_by_user_excludes_other_owners(mock_db):
+    """Documents owned by other users must not be counted."""
+    add_document("alice_doc.pdf", "hash_a", owner="alice")
+    add_document("bob_doc.pdf", "hash_b", owner="bob")
+    add_document("charlie_doc.pdf", "hash_c", owner="charlie")
+
+    assert get_document_count_by_user("alice") == 1
+    assert get_document_count_by_user("bob") == 1
+    assert get_document_count_by_user("charlie") == 1
+
+
+def test_get_document_count_by_user_handles_none_owner(mock_db):
+    """Documents with owner=NULL must not be counted for any username."""
+    # add_document without owner → owner is NULL
+    add_document("no_owner.pdf", "hash_none")
+    add_document("alice_doc.pdf", "hash_alice", owner="alice")
+
+    # NULL owner should not match any username
+    assert get_document_count_by_user("alice") == 1
+    assert get_document_count_by_user("") == 0
+
+
+def test_get_document_count_by_user_returns_int(mock_db):
+    """The return type must be int, not None or sqlite3.Row."""
+    add_document("doc.pdf", "hash", owner="alice")
+    result = get_document_count_by_user("alice")
+    assert isinstance(result, int)
+    assert result == 1
