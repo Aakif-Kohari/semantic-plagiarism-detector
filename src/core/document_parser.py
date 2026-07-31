@@ -6,7 +6,7 @@ import io
 import logging
 import os
 import re
-
+import zipfile
 import shutil
 import subprocess
 import xml.etree.ElementTree
@@ -1172,7 +1172,7 @@ def extract_text_from_epub(file: PDFInput) -> str:
     """Extract plain text from an EPUB file."""
     try:
         from bs4 import BeautifulSoup
-        from ebooklib import epub
+        from ebooklib import epub # type: ignore
 
         epub_file = io.BytesIO(file) if isinstance(file, bytes) else file
 
@@ -1330,8 +1330,21 @@ def extract_text(
     return raw
 
 
+ALLOWED_EXTENSIONS = {
+    ".pdf",
+    ".docx",
+    ".csv",
+    ".epub",
+    ".html",
+    ".md",
+    ".markdown",
+    ".mdown",
+    ".rtf",
+    ".txt",
+}
+
+
 def get_supported_file_extensions() -> list[str]:
-    """Return a sorted list of file extensions supported for upload/display."""
     return sorted(ALLOWED_EXTENSIONS)
 
 
