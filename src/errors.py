@@ -51,13 +51,22 @@ BADGE_PIL_REQUIRED = "PIL/Pillow is required for PNG badge generation"
 
 # Similarity & FAISS Errors
 SIM_BATCH_SIZE_INVALID = "batch_size must be an integer"
-SIM_WEIGHT_OUT_OF_RANGE = "Weight w must be between 0.0 and 1.0, got {w}"
+
+
+def sim_weight_out_of_range(w):
+    return f"Weight w must be between 0.0 and 1.0, got {w}"
+
+
 SIM_SHAPE_MISMATCH = "Semantic and lexical matrices must have the same shape"
 SIM_INDEX_MISMATCH = (
     "Semantic and lexical matrices must have the same index and columns"
 )
 FAISS_STORED_EMB_DIM_INVALID = "Stored embeddings must be two-dimensional."
-FAISS_EMB_REGISTRY_MISMATCH = "Corpus embedding count does not match chunk registry count: {emb_count} != {reg_count}"
+
+
+def faiss_emb_registry_mismatch(emb_count, reg_count):
+    return f"Corpus embedding count does not match chunk registry count: {emb_count} != {reg_count}"
+
 
 # Incident Database Errors
 INCIDENT_DB_INIT_FAILED = "Failed to initialize incident database: {error}"
@@ -65,8 +74,21 @@ INCIDENT_SYNC_FAILED = "Failed to synchronize incidents: {error}"
 INCIDENT_INVALID_REVIEW_STATUS = "review_status must be one of {valid_statuses}"
 INCIDENT_UPDATE_STATUS_FAILED = "Failed to update review status: {error}"
 
-# API Errors
-API_UNAUTHORIZED = "Invalid or missing authentication token."
+# SSRF / Webhook Security Errors
+SSRF_WEBHOOK_URL_EMPTY = "Webhook URL cannot be empty."
+SSRF_INSECURE_SCHEME = "Insecure scheme '{scheme}'. Webhooks must use 'https'."
+SSRF_MISSING_HOSTNAME = "Invalid URL: missing hostname."
+SSRF_INVALID_IP_FORMAT = "Resolved invalid IP address format: {error}"
+SSRF_BLOCKED_PRIVATE_SUBNET = "Blocked private IPv4 subnet IP: {ip} ({subnet})"
+SSRF_BLOCKED_LOOPBACK = "Blocked loopback IP: {ip}"
+SSRF_BLOCKED_PRIVATE_NETWORK = "Blocked private network IP: {ip}"
+SSRF_BLOCKED_LINK_LOCAL = "Blocked link-local IP: {ip}"
+SSRF_BLOCKED_MULTICAST = "Blocked multicast IP: {ip}"
+SSRF_BLOCKED_UNSPECIFIED = "Blocked unspecified IP: {ip}"
+SSRF_DNS_NO_ADDRESSES = "No addresses found for hostname '{hostname}'"
+SSRF_DNS_RESOLUTION_FAILED = "DNS resolution failed for hostname '{hostname}': {error}"
+
+# API ErrorsAPI_UNAUTHORIZED = "Invalid or missing authentication token."
 API_FILENAME_MISSING = "Filename must be provided."
 API_FILE_EMPTY = "Uploaded file is empty."
 API_TEXT_EXTRACTION_FAILED = "Failed to extract readable text from the uploaded file."
@@ -111,6 +133,20 @@ CLI_PARSE_FILE_FAILED = "Warning: Failed to parse '{filename}': {error}\n"
 CLI_PIPELINE_FAILED = "Error during plagiarism detection pipeline: {error}\n"
 CLI_THRESHOLD_INVALID = "Error: Threshold must be a float between 0.0 and 1.0.\n"
 CLI_INVALID_COMMAND = "Error: Invalid command '{command}'.\n"
+
+
+# SSRF Protection Errors
+SSRF_EMPTY_URL = "Webhook URL cannot be empty."
+SSRF_INSECURE_SCHEME = "Insecure scheme '{scheme}'. Webhooks must use 'https'."
+SSRF_MISSING_HOSTNAME = "Invalid URL: missing hostname."
+SSRF_NO_ADDRESSES = "No addresses found for hostname '{hostname}'"
+SSRF_DNS_RESOLUTION_FAILED = "DNS resolution failed for hostname '{hostname}': {error}"
+SSRF_INVALID_IP = "Resolved invalid IP address format: {error}"
+SSRF_BLOCKED_LOOPBACK = "Blocked loopback IP: {ip}"
+SSRF_BLOCKED_PRIVATE = "Blocked private network IP: {ip}"
+SSRF_BLOCKED_LINK_LOCAL = "Blocked link-local IP: {ip}"
+SSRF_BLOCKED_MULTICAST = "Blocked multicast IP: {ip}"
+SSRF_BLOCKED_UNSPECIFIED = "Blocked unspecified IP: {ip}"
 
 
 class ExportFailedError(RuntimeError):

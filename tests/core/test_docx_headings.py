@@ -1,9 +1,7 @@
 import io
 import docx
-import pytest
 from src.core.document_parser import extract_text_from_docx
 from src.core.text_chunking import chunk_text
-from src.core.faiss_index import ChunkRecord
 
 def test_docx_headings_extraction_and_chunking():
     # Create an in-memory DOCX file
@@ -28,13 +26,13 @@ def test_docx_headings_extraction_and_chunking():
     assert len(chunks) >= 2
     
     # First chunk inherits the correct section title (Heading 1 Title)
-    assert chunks[0].metadata.get("section_title") == "Heading 1 Title"
+    assert chunks[0].metadata.get("section_title") == "# Heading 1 Title"
     
     # Heading changes updating subsequent chunks (Heading 2 Title)
     found_heading_2 = False
     for chunk in chunks:
         if "second section" in chunk:
-            assert chunk.metadata.get("section_title") == "Heading 2 Title"
+            assert chunk.metadata.get("section_title") == "## Heading 2 Title"
             found_heading_2 = True
     assert found_heading_2
 

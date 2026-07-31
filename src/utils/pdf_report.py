@@ -7,7 +7,7 @@ Provides side-by-side comparison of suspicious paragraph pairs with visual simil
 
 from __future__ import annotations
 
-
+import json
 import os
 
 from datetime import datetime
@@ -24,12 +24,12 @@ from reportlab.lib.units import inch
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 from reportlab.platypus import (
-    PageBreak,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
     Table,
     TableStyle,
+    PageBreak,
 )
 
 try:
@@ -38,6 +38,45 @@ try:
     _HAS_FITZ = True
 except Exception:
     _HAS_FITZ = False
+
+
+_BRANDING_CONFIG_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "..", "config", "branding_config.json"
+)
+
+
+def load_branding_logo() -> bytes | None:
+    """
+    Reads logo_path from config/branding_config.json and returns the logo
+    bytes if the file exists and is a valid image, otherwise returns None.
+    """
+    try:
+        with open(_BRANDING_CONFIG_PATH, encoding="utf-8") as f:
+            cfg = json.load(f)
+        logo_path = cfg.get("logo_path", "").strip()
+        if not logo_path:
+            return None
+        with open(logo_path, "rb") as img_f:
+            return img_f.read()
+    except Exception:
+        return None
+
+
+def compute_text_stats(text: str) -> dict:
+    """Computes basic text statistics for document summary tables."""
+    words = text.split() if text else []
+    sentences = [s for s in text.split('.') if s.strip()] if text else []
+    unique_words = set(w.lower() for w in words)
+    word_count = len(words)
+    unique_count = len(unique_words)
+    ratio = unique_count / max(word_count, 1)
+    return {
+        "word_count": word_count,
+        "sentence_count": len(sentences),
+        "unique_word_count": unique_count,
+        "unique_word_ratio": ratio,
+    }
+
 
 
 def truncate_filename(filename: str, max_len: int = 30) -> str:
@@ -194,6 +233,8 @@ def generate_plagiarism_report(
     overall_similarity: float,
     threshold: float,
     top_pairs: List[Tuple[str, str, float]],
+    doc_a_text: Optional[str] = None,
+    doc_b_text: Optional[str] = None,
     report_title: str = "Plagiarism Detection Report",
     logo_image: Optional[bytes] = None,
     brand_color: Optional[str] = None,
@@ -211,6 +252,8 @@ def generate_plagiarism_report(
         overall_similarity: Overall similarity score between documents (0-1)
         threshold: Plagiarism threshold used for detection
         top_pairs: List of (chunk_a, chunk_b, similarity) tuples for top matches
+        doc_a_text: Optional raw text of document A for statistics calculation
+        doc_b_text: Optional raw text of document B for statistics calculation
         report_title: Title for the PDF report
         logo_image: Optional raw bytes of a PNG/JPG logo for the PDF header
         brand_color: Optional hex color string (e.g. "#1e3a8a") for headings
@@ -232,10 +275,14 @@ def generate_plagiarism_report(
 
     brand_clr = HexColor(brand_hex)
 
+    resolved_logo_image = logo_image
+    if not resolved_logo_image:
+        resolved_logo_image = load_branding_logo()
+
     logo_height = 0
-    if logo_image:
+    if resolved_logo_image:
         try:
-            reader = ImageReader(BytesIO(logo_image))
+            reader = ImageReader(BytesIO(resolved_logo_image))
             iw, ih = reader.getSize()
             logo_display_w = 1.5 * inch
             logo_display_h = logo_display_w * ih / iw
@@ -286,8 +333,6 @@ def generate_plagiarism_report(
 
 
 
-    footer_text = get_pdf_footer_text()
-
     # ── Header / footer callback for logo ──
 
     def _draw_header(canvas_obj, _doc):
@@ -302,9 +347,9 @@ def generate_plagiarism_report(
                 fill=True,
                 stroke=False,
             )
-        if logo_image:
+        if resolved_logo_image:
             try:
-                reader = ImageReader(BytesIO(logo_image))
+                reader = ImageReader(BytesIO(resolved_logo_image))
                 iw, ih = reader.getSize()
                 logo_display_w = 1.5 * inch
                 logo_display_h = logo_display_w * ih / iw
@@ -397,6 +442,48 @@ def generate_plagiarism_report(
     story.append(doc_table)
     story.append(Spacer(1, 0.3 * inch))
 
+    # Text statistics (if available)
+    if doc_a_text is not None or doc_b_text is not None:
+        story.append(Paragraph("Document Statistics", heading_style))
+        story.append(Spacer(1, 0.1 * inch))
+        
+        # Compute statistics for each document
+        doc_a_stats = compute_text_stats(doc_a_text) if doc_a_text else None
+        doc_b_stats = compute_text_stats(doc_b_text) if doc_b_text else None
+        
+        # Create statistics table
+        stats_data = [
+            ['', doc_a, doc_b],
+            ['Word Count', str(doc_a_stats['word_count']) if doc_a_stats else 'N/A', str(doc_b_stats['word_count']) if doc_b_stats else 'N/A'],
+            ['Sentence Count', str(doc_a_stats['sentence_count']) if doc_a_stats else 'N/A', str(doc_b_stats['sentence_count']) if doc_b_stats else 'N/A'],
+            ['Unique Words', str(doc_a_stats['unique_word_count']) if doc_a_stats else 'N/A', str(doc_b_stats['unique_word_count']) if doc_b_stats else 'N/A'],
+            ['Unique Word Ratio', f"{doc_a_stats['unique_word_ratio']:.2%}" if doc_a_stats else 'N/A', f"{doc_b_stats['unique_word_ratio']:.2%}" if doc_b_stats else 'N/A'],
+        ]
+        
+        # Calculate column widths - give more space to document names
+        col_widths = [1.5 * inch, 2.25 * inch, 2.25 * inch]
+        
+        stats_table = Table(stats_data, colWidths=col_widths, hAlign=TA_LEFT)
+        stats_table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (0, -1), HexColor("#f3f4f6")),
+                    ("TEXTCOLOR", (0, 0), (0, -1), HexColor("#374151")),
+                    ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+                    ("FONTNAME", (1, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 10),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                    ("TOPPADDING", (0, 0), (-1, -1), 8),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 12),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ]
+            )
+        )
+        story.append(stats_table)
+        story.append(Spacer(1, 0.3 * inch))
+
+    # Visual similarity bar
     sim_color = get_similarity_color(overall_similarity)
     story.append(Paragraph("Similarity Score Visualization", heading_style))
 
@@ -571,16 +658,7 @@ def generate_plagiarism_report(
     doc.build(story, onFirstPage=_draw_header, onLaterPages=_draw_header)
     buffer.seek(0)
     return buffer
-
-    # Build PDF
-    doc.build(
-        story,
-        onFirstPage=_draw_header,
-        onLaterPages=_draw_header,
-        canvasmaker=NumberedCanvas,
-    )
-    return compress_pdf_buffer(buffer)
-
+import fitz  # PyMuPDF
 
 
 def highlight_pdf_matches(
@@ -641,4 +719,5 @@ def highlight_pdf_matches(
     output_buffer = doc.tobytes()
     doc.close()
 
-    return output_buffer
+
+
