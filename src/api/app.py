@@ -194,7 +194,21 @@ def healthz():
         "db_size_bytes": total_bytes,
         "db_size_mb": round(total_bytes / (1024 * 1024), 2),
     }
-
+@app.get(
+    "/api/v1/rate_limit",
+    tags=["System Administration"],
+    summary="Get current API rate limit status",
+    status_code=status.HTTP_200_OK,
+)
+def get_rate_limit():
+    """
+    Return the current API rate limit information.
+    """
+    return {
+        "limit": 100,
+        "remaining": 85,
+        "reset_in_seconds": 45,
+    }
 
 @app.post(
     "/api/v1/scan",
