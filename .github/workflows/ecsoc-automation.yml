@@ -11,7 +11,7 @@ on:
     types: [opened, closed]
 
   schedule:
-    - cron: '0 */12 * * *'
+    - cron: '0 */6 * * *'
 
   workflow_dispatch:
 
@@ -583,5 +583,109 @@ jobs:
                     });
                   }
                 }
+              }
+            }
+
+  pr-conflict-reminder:
+    permissions:
+      issues: write
+      pull-requests: write
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const isBotComment = (c) => c.user && (c.user.type === 'Bot' || (c.user.login && c.user.login.endsWith('[bot]')));
+            const sixHoursMs = 5.5 * 60 * 60 * 1000; // Buffer for 6-hour cron schedule jitter
+            const now = new Date();
+
+            let prs = [];
+            if (context.eventName === 'pull_request_target') {
+              if (context.payload.pull_request) {
+                prs = [context.payload.pull_request];
+              }
+            } else {
+              prs = await github.paginate(github.rest.pulls.list, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'open',
+                per_page: 100
+              });
+            }
+
+            for (const pr of prs) {
+              if (pr.state !== 'open') continue;
+
+              // Fetch detailed PR object to get mergeable status
+              let prDetail;
+              try {
+                prDetail = await github.rest.pulls.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: pr.number
+                });
+
+                // GitHub calculates mergeability asynchronously; retry up to 3 times if null
+                let retries = 0;
+                while (prDetail.data.mergeable === null && retries < 3) {
+                  await new Promise(resolve => setTimeout(resolve, 2000));
+                  prDetail = await github.rest.pulls.get({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    pull_number: pr.number
+                  });
+                  retries++;
+                }
+              } catch (err) {
+                console.log(`Error fetching details for PR #${pr.number}:`, err.message);
+                continue;
+              }
+
+              // Check if PR has merge conflicts
+              const hasConflict = prDetail.data.mergeable === false || prDetail.data.mergeable_state === 'dirty';
+              if (!hasConflict) {
+                console.log(`PR #${pr.number} does not have merge conflicts.`);
+                continue;
+              }
+
+              const author = pr.user ? pr.user.login : null;
+
+              // Check existing comments on the PR to enforce 6-hour reminder interval
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                per_page: 100
+              });
+
+              const conflictBotComments = comments.filter(c =>
+                isBotComment(c) && c.body && (
+                  c.body.includes("merge conflicts") ||
+                  c.body.includes("resolve them")
+                )
+              );
+
+              if (conflictBotComments.length > 0) {
+                const lastComment = conflictBotComments[conflictBotComments.length - 1];
+                const lastCommentTime = new Date(lastComment.created_at);
+                if ((now - lastCommentTime) < sixHoursMs) {
+                  console.log(`Skipping PR #${pr.number}: Merge conflict reminder already posted within the last 6 hours.`);
+                  continue;
+                }
+              }
+
+              // Post reminder comment
+              console.log(`Posting merge conflict reminder on PR #${pr.number}...`);
+              try {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr.number,
+                  body: `⚠️ ${author ? `@${author}` : 'Contributor'}, this Pull Request has **merge conflicts** that need to be resolved before it can be merged. Please resolve the conflicts with the target branch!`
+                });
+              } catch (err) {
+                console.log(`Failed to post comment on PR #${pr.number}:`, err.message);
               }
             }
