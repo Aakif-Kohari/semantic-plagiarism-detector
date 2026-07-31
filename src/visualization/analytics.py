@@ -70,6 +70,7 @@ def plot_high_severity_trends(trend_data: list[dict[str, Any]], show_grid: bool 
             xaxis_title="Date",
             yaxis_title="Number of High Severity Incidents",
             height=400,
+            autosize=True,
         )
         fig.update_xaxes(showgrid=show_grid)
         fig.update_yaxes(showgrid=show_grid)
@@ -93,6 +94,7 @@ def plot_high_severity_trends(trend_data: list[dict[str, Any]], show_grid: bool 
         hovermode="x unified",
         height=400,
         showlegend=False,
+        autosize=True,
     )
 
     fig.update_xaxes(showgrid=show_grid)
@@ -132,6 +134,7 @@ def plot_most_plagiarized_documents(doc_data: list[dict[str, Any]], show_grid: b
             xaxis_title="Document Name",
             yaxis_title="Number of Incidents",
             height=400,
+            autosize=True,
         )
         fig.update_xaxes(showgrid=show_grid)
         fig.update_yaxes(showgrid=show_grid)
@@ -161,6 +164,7 @@ def plot_most_plagiarized_documents(doc_data: list[dict[str, Any]], show_grid: b
         yaxis_title="Number of Incidents",
         height=400,
         showlegend=False,
+        autosize=True,
     )
 
     fig.update_xaxes(showgrid=show_grid)
@@ -212,7 +216,7 @@ def plot_similarity_distribution(sim_matrix: pd.DataFrame, title: str = "Distrib
             showarrow=False,
             font=dict(size=16, color="gray"),
         )
-        fig.update_layout(title=title, height=400)
+        fig.update_layout(title=title, height=400, autosize=True)
         fig.update_xaxes(showgrid=show_grid)
         fig.update_yaxes(showgrid=show_grid)
         return fig
@@ -234,6 +238,7 @@ def plot_similarity_distribution(sim_matrix: pd.DataFrame, title: str = "Distrib
         bargap=0.05,
         height=400,
         showlegend=False,
+        autosize=True,
     )
 
     fig.update_xaxes(showgrid=show_grid)
@@ -269,7 +274,7 @@ def plot_document_sizes(word_counts: dict[str, int], show_grid: bool = True) -> 
             showarrow=False,
             font=dict(size=16, color="gray"),
         )
-        fig.update_layout(title="Document Word Counts", height=400)
+        fig.update_layout(title="Document Word Counts", height=400, autosize=True)
         fig.update_xaxes(showgrid=show_grid)
         fig.update_yaxes(showgrid=show_grid)
         return fig
@@ -293,6 +298,7 @@ def plot_document_sizes(word_counts: dict[str, int], show_grid: bool = True) -> 
         yaxis_title="Word Count",
         height=400,
         showlegend=False,
+        autosize=True,
     )
 
     fig.update_xaxes(showgrid=show_grid)
