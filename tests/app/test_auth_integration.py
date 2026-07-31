@@ -35,8 +35,13 @@ def setup_test_db(mock_db):
     yield
 
 
-def _unique_username(prefix: str = "user") -> str:
-    return f"{prefix}_{uuid.uuid4().hex[:8]}"
+@pytest.fixture
+def user_with_2fa() -> str:
+    """Create a user with 2FA enabled and return the username."""
+    username = f"user_{uuid.uuid4().hex[:8]}"
+    add_user(username, PASSWORD, role="teacher")
+    enable_2fa(username, TEST_OTP_SECRET)
+    return username
 
 
 def _generate_otp(secret: str) -> str:
@@ -54,7 +59,7 @@ def test_full_auth_and_2fa_lifecycle():
     """Run the complete acceptance sequence end-to-end:
     add_user -> verify_user -> enable_2fa -> verify TOTP token -> disable_2fa.
     """
-    username = _unique_username()
+    username = f"user_{uuid.uuid4().hex[:8]}"
 
     # 1. add_user creates the account
     add_user(username, PASSWORD, role="teacher")
@@ -86,12 +91,14 @@ def test_full_auth_and_2fa_lifecycle():
     assert verify_user(username, PASSWORD) is True
 
 
-def test_invalid_totp_code_fails_authentication():
-    """An invalid TOTP code must fail the 2FA check."""
-    username = _unique_username()
-    add_user(username, PASSWORD)
-    enable_2fa(username, TEST_OTP_SECRET)
+def test_valid_totp_code_passes(user_with_2fa):
+    """A freshly generated TOTP token passes the app's verification logic."""
+    valid_code = _generate_otp(TEST_OTP_SECRET)
+    assert _verify_otp(TEST_OTP_SECRET, valid_code) is True
 
+
+def test_invalid_totp_code_fails(user_with_2fa):
+    """An invalid TOTP code must fail the 2FA check."""
     valid_code = _generate_otp(TEST_OTP_SECRET)
     invalid_code = str((int(valid_code) + 1) % 1_000_000).zfill(6)
 
@@ -99,21 +106,13 @@ def test_invalid_totp_code_fails_authentication():
     assert _verify_otp(TEST_OTP_SECRET, invalid_code) is False
 
 
-def test_totp_code_from_different_secret_fails():
+def test_totp_code_from_different_secret_fails(user_with_2fa):
     """A TOTP code generated from another account's secret must fail."""
-    username = _unique_username()
-    add_user(username, PASSWORD)
-    enable_2fa(username, TEST_OTP_SECRET)
-
     foreign_code = _generate_otp(DIFFERENT_OTP_SECRET)
     assert _verify_otp(TEST_OTP_SECRET, foreign_code) is False
 
 
-def test_empty_totp_code_fails():
+def test_empty_totp_code_fails(user_with_2fa):
     """A blank verification code must fail the 2FA check."""
-    username = _unique_username()
-    add_user(username, PASSWORD)
-    enable_2fa(username, TEST_OTP_SECRET)
-
     assert _verify_otp(TEST_OTP_SECRET, "") is False
     assert _verify_otp(TEST_OTP_SECRET, "   ") is False
