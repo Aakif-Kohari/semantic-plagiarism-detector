@@ -1327,8 +1327,8 @@ def extract_text(
     lang_code = detect_text_language(raw)
 
     logger.info(
-            f"[document_parser] Detected language for document '{filename}': {lang_code}"
-        )
+        f"[document_parser] Detected language for document '{filename}': {lang_code}"
+    )
     return raw
 
 

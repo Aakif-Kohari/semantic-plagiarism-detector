@@ -306,6 +306,36 @@ def inject_css() -> None:
     }}
     """
 
+    # Issue #1028: Active Sidebar Tab Accent Border Styling
+    sidebar_active_tab_css = f"""
+    /* Active Sidebar Navigation Tab Highlight (Issue #1028) */
+    section[data-testid="stSidebar"] .stButton button[data-selected="true"],
+    section[data-testid="stSidebar"] [data-testid="stBaseButton-secondary"][aria-selected="true"],
+    section[data-testid="stSidebar"] button[aria-selected="true"],
+    section[data-testid="stSidebar"] .stButton button.st-active,
+    .stButton button[data-selected="true"] {{
+        border-left: 4px solid #4f46e5 !important;
+        background-color: {colors.get('neutral_soft', '#F1F5F9')} !important;
+        color: {colors.get('accent', '#0D9488')} !important;
+        font-weight: 700 !important;
+        border-top-left-radius: 0 !important;
+        border-bottom-left-radius: 0 !important;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
+        transition: border-left-color 0.2s ease, background-color 0.2s ease, color 0.2s ease !important;
+    }}
+
+    section[data-testid="stSidebar"] .stButton button[data-selected="true"]:hover,
+    .stButton button[data-selected="true"]:hover {{
+        border-left: 4px solid #4f46e5 !important;
+        background-color: {colors.get('surface', '#F8FAFC')} !important;
+    }}
+
+    section[data-testid="stSidebar"] .stButton button:hover {{
+        border-left: 4px solid #4f46e5;
+        transition: border-left 0.2s ease !important;
+    }}
+    """
+
     base_css = f"""
     /* Global Theme Overrides */
     .stApp {{
@@ -440,7 +470,7 @@ def inject_css() -> None:
     }}
     """
 
-    css = base_css + file_uploader_css
+    css = base_css + file_uploader_css + sidebar_active_tab_css
 
     if st.session_state.get("privacy_mode", False):
         css += """
@@ -764,3 +794,330 @@ def version_check_widget_html(local_version: str, latest_tag: str, repo_url: str
     </span>
 </div>
 """
+
+
+def active_tab_border_style(color: str = "#4f46e5", width: int = 4) -> str:
+    """Return inline CSS string for an active navigation tab accent border (Issue #1028).
+
+    Args:
+        color: Hex or CSS color string for the accent border.
+        width: Border width in pixels.
+
+    Returns:
+        CSS declaration string, e.g. "border-left: 4px solid #4f46e5;".
+    """
+    valid_color = sanitize_hex_color(color, fallback="#4f46e5")
+    return f"border-left: {width}px solid {valid_color};"
+
+
+def get_active_sidebar_tab_css(accent_border_color: str = "#4f46e5") -> str:
+    """Generate standalone CSS snippet for active sidebar tab buttons.
+
+    Args:
+        accent_border_color: Primary border color for active state.
+
+    Returns:
+        CSS style block string.
+    """
+    colors = get_colors()
+    border = sanitize_hex_color(accent_border_color, fallback="#4f46e5")
+    bg = colors.get("neutral_soft", "#F1F5F9")
+    accent = colors.get("accent", "#0D9488")
+    return f"""
+    section[data-testid="stSidebar"] .stButton button[data-selected="true"],
+    section[data-testid="stSidebar"] [data-testid="stBaseButton-secondary"][aria-selected="true"],
+    .stButton button[data-selected="true"] {{
+        border-left: 4px solid {border} !important;
+        background-color: {bg} !important;
+        color: {accent} !important;
+        font-weight: 700 !important;
+    }}
+    """
+
+
+def get_sidebar_tab_style(
+    is_selected: bool = False,
+    accent_border_color: str = "#4f46e5",
+) -> dict[str, str]:
+    """Return a dictionary of inline CSS properties for sidebar tab rendering.
+
+    Args:
+        is_selected: Whether the tab is currently active/selected.
+        accent_border_color: Border accent color for the active state.
+
+    Returns:
+        Dictionary of CSS property names to values.
+    """
+    colors = get_colors()
+    border = sanitize_hex_color(accent_border_color, fallback="#4f46e5")
+    if is_selected:
+        return {
+            "border-left": f"4px solid {border}",
+            "background-color": colors.get("neutral_soft", "#F1F5F9"),
+            "color": colors.get("accent", "#0D9488"),
+            "font-weight": "700",
+        }
+    return {
+        "border-left": "4px solid transparent",
+        "background-color": "transparent",
+        "color": colors.get("ink", "#0F172A"),
+        "font-weight": "400",
+    }
+
+
+# Theme Accent Palettes for custom sidebar highlight customization
+THEME_ACCENT_PALETTES: dict[str, dict[str, str]] = {
+    "Indigo": {"primary": "#4f46e5", "hover": "#4338ca", "light": "#e0e7ff"},
+    "Teal": {"primary": "#0d9488", "hover": "#0f766e", "light": "#ccfbf1"},
+    "Emerald": {"primary": "#059669", "hover": "#047857", "light": "#d1fae5"},
+    "Rose": {"primary": "#e11d48", "hover": "#be123c", "light": "#ffe4e6"},
+    "Violet": {"primary": "#7c3aed", "hover": "#6d28d9", "light": "#ede9fe"},
+    "Amber": {"primary": "#d97706", "hover": "#b45309", "light": "#fef3c7"},
+}
+
+
+def get_theme_accent_color(theme_name: str | None = None) -> str:
+    """Retrieve the primary accent color for a specified theme or active theme.
+
+    Args:
+        theme_name: Optional theme name ('Light', 'Dark', or palette name).
+
+    Returns:
+        Hex color string for active accent.
+    """
+    if theme_name in THEME_ACCENT_PALETTES:
+        return THEME_ACCENT_PALETTES[theme_name]["primary"]
+    if theme_name in THEMES:
+        return THEMES[theme_name].get("accent", "#4f46e5")
+    colors = get_colors()
+    return colors.get("accent", "#4f46e5")
+
+
+def build_active_tab_custom_css(
+    accent_hex: str = "#4f46e5",
+    border_width: int = 4,
+    bg_hover: str | None = None,
+) -> str:
+    """Build dynamic custom CSS for active sidebar tab navigation.
+
+    Args:
+        accent_hex: Hex code for the left border accent.
+        border_width: Width of the active border in pixels.
+        bg_hover: Optional background color on hover.
+
+    Returns:
+        CSS text block with rules targeting active tab selectors.
+    """
+    border_color = sanitize_hex_color(accent_hex, fallback="#4f46e5")
+    hover_bg = sanitize_hex_color(bg_hover, fallback="#F1F5F9") if bg_hover else "#F1F5F9"
+    return f"""
+    /* Custom Active Sidebar Tab Highlight */
+    section[data-testid="stSidebar"] .stButton button[data-selected="true"],
+    section[data-testid="stSidebar"] [aria-selected="true"],
+    .stButton button[data-selected="true"] {{
+        border-left: {border_width}px solid {border_color} !important;
+        background-color: {hover_bg} !important;
+        font-weight: 700 !important;
+        transition: border-left 0.2s ease, background-color 0.2s ease !important;
+    }}
+    section[data-testid="stSidebar"] .stButton button[data-selected="true"]:hover {{
+        border-left-color: {border_color} !important;
+    }}
+    """
+
+
+def generate_active_tab_theme_tokens(theme_name: str | None = None) -> dict[str, str]:
+    """Generate design system tokens for sidebar tab navigation states.
+
+    Args:
+        theme_name: Active theme ('Light' or 'Dark').
+
+    Returns:
+        Dictionary mapping tab state token keys to CSS color/dimension values.
+    """
+    selected_theme = theme_name if theme_name in THEMES else get_theme_name()
+    palette = THEMES.get(selected_theme, THEMES["Light"])
+    return {
+        "active_border_color": "#4f46e5",
+        "active_border_width": "4px",
+        "active_bg_color": palette.get("neutral_soft", "#F1F5F9"),
+        "active_text_color": palette.get("accent", "#0D9488"),
+        "active_font_weight": "700",
+        "inactive_bg_color": "transparent",
+        "inactive_text_color": palette.get("ink", "#0F172A"),
+        "inactive_font_weight": "400",
+        "hover_border_color": "#4f46e5",
+        "hover_bg_color": palette.get("surface", "#F8FAFC"),
+    }
+
+
+def get_sidebar_navigation_config() -> dict[str, Any]:
+    """Return central configuration parameters for sidebar active tab rendering.
+
+    Returns:
+        Dictionary containing active tab style settings.
+    """
+    colors = get_colors()
+    return {
+        "accent_border_color": "#4f46e5",
+        "accent_border_width_px": 4,
+        "active_background": colors.get("neutral_soft", "#F1F5F9"),
+        "active_text_color": colors.get("accent", "#0D9488"),
+        "transition_duration_ms": 200,
+        "border_position": "left",
+        "supported_selectors": [
+            'section[data-testid="stSidebar"] .stButton button[data-selected="true"]',
+            'section[data-testid="stSidebar"] [data-testid="stBaseButton-secondary"][aria-selected="true"]',
+            'section[data-testid="stSidebar"] button[aria-selected="true"]',
+            'section[data-testid="stSidebar"] .stButton button.st-active',
+            '.stButton button[data-selected="true"]',
+        ],
+    }
+
+
+def render_active_tab_badge_html(tab_name: str, is_active: bool = False) -> str:
+    """Render an HTML badge snippet representing an active/inactive tab indicator.
+
+    Args:
+        tab_name: Name of the navigation tab.
+        is_active: Whether the tab is currently selected.
+
+    Returns:
+        HTML string representation.
+    """
+    colors = get_colors()
+    if is_active:
+        style = (
+            f"border-left: 4px solid #4f46e5; "
+            f"background-color: {colors.get('neutral_soft', '#F1F5F9')}; "
+            f"color: {colors.get('accent', '#0D9488')}; "
+            f"font-weight: 700; padding: 6px 12px; border-radius: 0 4px 4px 0;"
+        )
+    else:
+        style = (
+            f"border-left: 4px solid transparent; "
+            f"background-color: transparent; "
+            f"color: {colors.get('muted', '#64748B')}; "
+            f"font-weight: 400; padding: 6px 12px;"
+        )
+    return f'<div class="sidebar-tab-badge" style="{style}">{tab_name}</div>'
+
+
+SIDEBAR_TAB_THEME_TEMPLATES: dict[str, dict[str, str]] = {
+    "Default": {
+        "border_width": "4px",
+        "border_style": "solid",
+        "border_color": "#4f46e5",
+        "border_radius": "0 6px 6px 0",
+        "shadow": "0 1px 3px rgba(0,0,0,0.05)",
+    },
+    "Modern": {
+        "border_width": "4px",
+        "border_style": "solid",
+        "border_color": "#4f46e5",
+        "border_radius": "0 8px 8px 0",
+        "shadow": "0 2px 4px rgba(79,70,229,0.15)",
+    },
+    "Glassmorphism": {
+        "border_width": "4px",
+        "border_style": "solid",
+        "border_color": "#4f46e5",
+        "border_radius": "0 10px 10px 0",
+        "shadow": "0 4px 12px rgba(0,0,0,0.1)",
+    },
+    "Minimal": {
+        "border_width": "3px",
+        "border_style": "solid",
+        "border_color": "#4f46e5",
+        "border_radius": "0",
+        "shadow": "none",
+    },
+    "High Contrast": {
+        "border_width": "5px",
+        "border_style": "solid",
+        "border_color": "#4f46e5",
+        "border_radius": "0 4px 4px 0",
+        "shadow": "0 0 0 2px #000000",
+    },
+}
+
+
+def generate_sidebar_theme_stylesheet(
+    template_name: str = "Modern",
+    accent_color: str = "#4f46e5",
+) -> str:
+    """Generate complete CSS stylesheet rules for sidebar navigation tabs.
+
+    Args:
+        template_name: Name of sidebar tab theme template.
+        accent_color: Primary border accent color.
+
+    Returns:
+        Formatted CSS stylesheet block string.
+    """
+    template = SIDEBAR_TAB_THEME_TEMPLATES.get(template_name, SIDEBAR_TAB_THEME_TEMPLATES["Default"])
+    border = sanitize_hex_color(accent_color, fallback="#4f46e5")
+    colors = get_colors()
+    return f"""
+    /* Sidebar Navigation Stylesheet ({template_name}) */
+    section[data-testid="stSidebar"] .stButton button[data-selected="true"],
+    section[data-testid="stSidebar"] [data-testid="stBaseButton-secondary"][aria-selected="true"],
+    section[data-testid="stSidebar"] button[aria-selected="true"],
+    .stButton button[data-selected="true"] {{
+        border-left: {template['border_width']} {template['border_style']} {border} !important;
+        border-radius: {template['border_radius']} !important;
+        box-shadow: {template['shadow']} !important;
+        background-color: {colors.get('neutral_soft', '#F1F5F9')} !important;
+        color: {colors.get('accent', '#0D9488')} !important;
+        font-weight: 700 !important;
+    }}
+    """
+
+
+def get_active_tab_accessibility_attributes(is_active: bool = True) -> dict[str, str]:
+    """Return WAI-ARIA accessibility attributes for tab navigation buttons.
+
+    Args:
+        is_active: Whether the tab button is currently active.
+
+    Returns:
+        Dictionary of HTML attribute key-value pairs.
+    """
+    if is_active:
+        return {
+            "aria-selected": "true",
+            "data-selected": "true",
+            "tabindex": "0",
+            "role": "tab",
+        }
+    return {
+        "aria-selected": "false",
+        "data-selected": "false",
+        "tabindex": "-1",
+        "role": "tab",
+    }
+
+
+def render_sidebar_navigation_menu(
+    tabs: list[tuple[str, str]],
+    active_tab_id: str,
+) -> str:
+    """Render an HTML string representing a complete sidebar navigation menu with active indicator.
+
+    Args:
+        tabs: List of tuples (tab_id, tab_label).
+        active_tab_id: ID of the currently selected tab.
+
+    Returns:
+        HTML string containing menu container and tab elements.
+    """
+    html_items = []
+    for tab_id, label in tabs:
+        is_active = (tab_id == active_tab_id)
+        badge = render_active_tab_badge_html(label, is_active=is_active)
+        html_items.append(f'<li data-tab-id="{tab_id}">{badge}</li>')
+
+    return f'<ul class="sidebar-nav-menu" style="list-style: none; padding: 0; margin: 0;">{"".join(html_items)}</ul>'
+
+
+
