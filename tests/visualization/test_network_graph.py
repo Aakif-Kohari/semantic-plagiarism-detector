@@ -8,8 +8,7 @@ from unittest.mock import patch
 
 import networkx as nx
 import pandas as pd
-import plotly.graph_objects as go
-from src.visualization.network_graph import plot_similarity_network
+import pytest
 
 from src.visualization.network_graph import (
     build_network_data,
@@ -364,5 +363,40 @@ def test_plot_similarity_network_json_serialization_with_highlighted_node():
     json_str = fig.to_json()
     assert json_str is not None
     assert len(json_str) > 0
+
+
+# ==============================================================================
+# Node Scale Factor Tests (Issue #1062)
+# ==============================================================================
+
+
+def test_build_network_data_node_scale_default():
+    """Verify default node_scale=1.0 produces expected base node sizes."""
+    data = {
+        "doc1": [1.0, 0.85],
+        "doc2": [0.85, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2"])
+    net_data = build_network_data(df, threshold=0.75)
+    sizes = net_data["node_trace"].marker.size
+    # doc1 degree=1 -> base_size = (20 + 1*6) * 1.0 = 26
+    assert sizes[0] == 26.0 or sizes[0] == 26
+
+
+def test_build_network_data_node_scale_custom():
+    """Verify node_scale=2.0 doubles the base node sizes compared to default."""
+    data = {
+        "doc1": [1.0, 0.85],
+        "doc2": [0.85, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2"])
+    net_data_default = build_network_data(df, threshold=0.75)
+    net_data_scaled = build_network_data(df, threshold=0.75, node_scale=2.0)
+
+    default_sizes = net_data_default["node_trace"].marker.size
+    scaled_sizes = net_data_scaled["node_trace"].marker.size
+
+    for d, s in zip(default_sizes, scaled_sizes):
+        assert s == pytest.approx(d * 2.0)
 
 

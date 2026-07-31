@@ -6,7 +6,6 @@ import io
 import math
 import os
 import sqlite3
-import tempfile
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -69,13 +68,13 @@ def _get_connection(db_path: str | Path) -> sqlite3.Connection:
     abs_path = os.path.abspath(str(db_path))
     try:
         os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-        return sqlite3.connect(abs_path)
+        conn = sqlite3.connect(abs_path)
     except (sqlite3.OperationalError, OSError, PermissionError):
         # Centralized temp-dir fallback (matches corpus_db.py and
         # translation_cache.py so all three modules agree on the location).
         fallback_path = str(FALLBACK_DATA_DIR / os.path.basename(abs_path))
         os.makedirs(os.path.dirname(fallback_path), exist_ok=True)
-        return sqlite3.connect(fallback_path)
+        conn = sqlite3.connect(fallback_path)
 
     conn.execute("PRAGMA foreign_keys = ON")
     try:
