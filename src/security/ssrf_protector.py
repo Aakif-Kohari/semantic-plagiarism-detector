@@ -45,6 +45,7 @@ class SSRFProtector:
         ipaddress.ip_network("172.16.0.0/12"),
         ipaddress.ip_network("192.168.0.0/16"),
     )
+    ALLOWED_CIDRS: tuple[ipaddress._BaseNetwork, ...] = ()
 
     @classmethod
     def _resolve_hostname(cls, hostname: str) -> str:
@@ -109,6 +110,15 @@ class SSRFProtector:
 
         try:
             ip = ipaddress.ip_address(ip_str)
+            if cls.ALLOWED_CIDRS:
+                for network in cls.ALLOWED_CIDRS:
+                    if ip in network:
+                        logger.debug(
+                            "SSRF whitelist matched %s in %s",
+                            ip_str,
+                            network,
+                        )
+                        return True
         except ValueError as e:
             raise SSRFSecurityException(SSRF_INVALID_IP_FORMAT.format(error=e))
 
@@ -130,3 +140,16 @@ class SSRFProtector:
         # If it passed all checks, it's considered safe (public routable IP)
         logger.debug(f"SSRF Check passed for {url} -> {ip_str}")
         return True
+@classmethod
+def configure_allowed_cidrs(
+    cls,
+    allowed_cidrs: list[str] | None = None,
+) -> None:
+    """
+    Configure CIDR ranges that are allowed even if they are private.
+    """
+    cls.ALLOWED_CIDRS = (
+        tuple(ipaddress.ip_network(cidr) for cidr in allowed_cidrs)
+        if allowed_cidrs
+        else ()
+    )
