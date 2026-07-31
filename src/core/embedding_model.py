@@ -41,15 +41,39 @@ def get_embedding_model_info() -> tuple[str, int]:
     return _get_model_name(), model.get_sentence_embedding_dimension()
 
 
+class EmbeddingModelManager:
+    """Manages the SentenceTransformer embedding model lifecycle and fallbacks."""
+    _instance = None
+
+    @classmethod
+    def get_instance(cls) -> EmbeddingModelManager:
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def get_model(self) -> SentenceTransformer:
+        global _model
+        if _model is None:
+            primary = _get_model_name()
+            fallback = "all-MiniLM-L6-v2"
+            logger.info(f"[embedding_model] Loading model: {primary} …")
+            try:
+                _model = SentenceTransformer(primary)
+                logger.info("[embedding_model] Model loaded successfully.")
+            except Exception:
+                logger.warning(
+                    "Primary embedding model %s unavailable. Falling back to %s",
+                    primary,
+                    fallback,
+                )
+                _model = SentenceTransformer(fallback)
+        return _model
+
+
 def _get_model() -> SentenceTransformer:
     """Lazy-load the Sentence Transformer model (singleton pattern)."""
-    global _model
-    if _model is None:
-        model_name = _get_model_name()
-        logger.info(f"[embedding_model] Loading model: {model_name} …")
-        _model = SentenceTransformer(model_name)
-        logger.info("[embedding_model] Model loaded successfully.")
-    return _model
+    return EmbeddingModelManager.get_instance().get_model()
+
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────

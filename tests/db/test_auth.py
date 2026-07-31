@@ -8,6 +8,7 @@ from src.db.auth import (
     delete_user,
     disable_2fa,
     enable_2fa,
+    format_user_created_date,
     get_2fa_status,
     get_user_active_status,
     get_user_role,
@@ -244,6 +245,9 @@ def test_delete_user_removes_matching_session_and_authorization_rows(mock_db):
     assert other_session_count == 1
     assert other_token_count == 1
 
+# ──────────────────────────────────────────────────────────────────────────────
+# format_user_created_date — issue #1049
+# ──────────────────────────────────────────────────────────────────────────────
 
 def test_connect_uses_fifteen_second_timeout():
     """Verify that _connect helper sets sqlite3 timeout to 15.0 seconds."""
