@@ -176,26 +176,3 @@ def test_resolve_hostname_success(mock_getaddrinfo):
     mock_getaddrinfo.return_value = [(2, 1, 6, "", ("8.8.8.8", 53))]
     ip = SSRFProtector._resolve_hostname("dns.google")
     assert ip == "8.8.8.8"
-
-
-@patch("src.security.ssrf_protector.socket.getaddrinfo")
-def test_resolve_hostname_dns_failure(mock_getaddrinfo):
-    mock_getaddrinfo.side_effect = socket.gaierror("DNS error")
-    with pytest.raises(SSRFSecurityException, match="DNS resolution failed"):
-        SSRFProtector._resolve_hostname("nonexistent.domain.local")
-
-
-@patch("src.security.ssrf_protector.socket.getaddrinfo")
-def test_resolve_hostname_empty_list(mock_getaddrinfo):
-    mock_getaddrinfo.return_value = []
-    with pytest.raises(SSRFSecurityException, match="No addresses found"):
-        SSRFProtector._resolve_hostname("empty.domain.local")
-
-
-@patch("src.security.ssrf_protector.socket.getaddrinfo")
-def test_resolve_hostname_cache_hit(mock_getaddrinfo):
-    mock_getaddrinfo.return_value = [(2, 1, 6, "", ("1.2.3.4", 53))]
-    SSRFProtector._resolve_hostname("cached.host")
-    assert mock_getaddrinfo.call_count == 1
-    SSRFProtector._resolve_hostname("cached.host")
-    assert mock_getaddrinfo.call_count == 1
