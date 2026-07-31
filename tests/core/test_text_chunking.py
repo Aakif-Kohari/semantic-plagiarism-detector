@@ -4,7 +4,6 @@ tests/core/test_text_chunking.py
 Unit tests for customizable chunk size and overlap parameters, including edge cases.
 """
 
-import pytest
 from src.core.text_chunking import chunk_by_sentences, chunk_documents, chunk_text
 
 

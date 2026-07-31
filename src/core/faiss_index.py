@@ -37,7 +37,13 @@ class ChunkRecord:
 
     __slots__ = ("doc_name", "chunk_index", "chunk_text", "metadata")
 
-    def __init__(self, doc_name: str, chunk_index: int, chunk_text: str, metadata: Optional[dict] = None):
+    def __init__(
+        self,
+        doc_name: str,
+        chunk_index: int,
+        chunk_text: str,
+        metadata: Optional[dict] = None,
+    ):
         self.doc_name = doc_name
         self.chunk_index = chunk_index
         self.chunk_text = chunk_text
@@ -460,11 +466,9 @@ def load_or_rebuild_index(filepath: str) -> Tuple[faiss.Index, List[ChunkRecord]
     n_registry = len(registry)
 
     if n_matrix != n_registry:
-        from src.errors import FAISS_EMB_REGISTRY_MISMATCH
+        from src.errors import faiss_emb_registry_mismatch
 
-        raise ValueError(
-            FAISS_EMB_REGISTRY_MISMATCH.format(emb_count=n_matrix, reg_count=n_registry)
-        )
+        raise ValueError(faiss_emb_registry_mismatch(n_matrix, n_registry))
 
     if os.path.exists(filepath):
         try:

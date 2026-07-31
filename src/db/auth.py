@@ -21,6 +21,7 @@ set_tour_completed(username, completed)-> None
 from __future__ import annotations
 
 import datetime
+import json
 import os
 import re
 import sqlite3
@@ -612,34 +613,4 @@ def get_user_count() -> int:
     with _connect() as conn:
         cursor = conn.execute("SELECT COUNT(*) FROM users")
         row = cursor.fetchone()
-        return row[0] if row else 0
 
-def get_notification_preferences(username: str) -> dict:
-    """
-    Retrieve notification preferences (email & webhook) for a given user.
-    """
-    user_prefs = get_user_preferences(username)
-    return {
-        "email_notifications": user_prefs.get("email_notifications", True),
-        "webhook_notifications": user_prefs.get("webhook_notifications", True),
-    }
-
-def get_notification_preferences(username: str) -> dict:
-    """Retrieve notification preferences (email & webhook) for a given user."""
-    user_prefs = get_user_preferences(username)
-    return {
-        "email_notifications": user_prefs.get("email_notifications", True),
-        "webhook_notifications": user_prefs.get("webhook_notifications", True),
-    }
-
-
-def update_notification_preferences(
-    username: str, email_notifications: bool, webhook_notifications: bool
-) -> dict:
-    """Update notification preferences for a given user."""
-    prefs = {
-        "email_notifications": email_notifications,
-        "webhook_notifications": webhook_notifications,
-    }
-    update_user_preferences(username, prefs)
-    return prefs

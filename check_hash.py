@@ -1,6 +1,5 @@
 import hashlib
 import json
-import sys
 from datetime import datetime
 from unittest.mock import patch
 

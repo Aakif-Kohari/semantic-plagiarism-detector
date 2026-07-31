@@ -20,14 +20,8 @@ from app.css_constants import (
     EMPTY_DESC,
     SIDEBAR_USER_BADGE,
     AVATAR,
-    PIPELINE_STEPS,
-    PIPELINE_STEP,
-    PIPELINE_STEP_ACTIVE,
-    PIPELINE_STEP_DONE,
-    PIPELINE_ARROW,
     SIM_PILL,
 )
-import base64
 """
 theme.py
 --------
