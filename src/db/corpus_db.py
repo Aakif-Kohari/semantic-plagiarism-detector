@@ -693,3 +693,16 @@ def purge_stale_trash(days_in_trash: int = 30) -> int:
             logger.error(f"Failed to purge stale trashed document {filename}: {e}")
 
     return deleted_count
+
+
+def get_total_document_count(include_deleted: bool = False) -> int:
+    """Return the total count of non-deleted (or all) indexed documents in the corpus database."""
+    with _connect() as conn:
+        if include_deleted:
+            row = conn.execute("SELECT COUNT(1) FROM documents").fetchone()
+        else:
+            row = conn.execute(
+                "SELECT COUNT(1) FROM documents WHERE is_deleted IS NULL OR is_deleted = 0"
+            ).fetchone()
+        return int(row[0]) if row else 0
+
