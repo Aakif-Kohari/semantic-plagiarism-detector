@@ -14,6 +14,7 @@ from src.errors import (
     SSRF_BLOCKED_UNSPECIFIED,
     SSRF_DNS_NO_ADDRESSES,
     SSRF_DNS_RESOLUTION_FAILED,
+    SSRF_DOMAIN_NOT_ALLOWED,
     SSRF_WEBHOOK_URL_EMPTY,
     SSRF_INSECURE_SCHEME,
     SSRF_INVALID_IP_FORMAT,
@@ -77,19 +78,26 @@ class SSRFProtector:
             )
 
     @classmethod
-    def validate_webhook_url(cls, url: str) -> bool:
+    def validate_webhook_url(
+        cls,
+        url: str,
+        allowed_domains: list[str] | None = None,
+    ) -> bool:
         """
         Validates that a provided webhook URL is safe to dispatch.
-        Ensures the URL uses HTTPS and does not resolve to any internal network IP.
+        Ensures the URL uses HTTPS, its domain is in ALLOWED_WEBHOOK_DOMAINS (if configured),
+        and does not resolve to any internal network IP.
 
         Args:
             url: The webhook URL string
+            allowed_domains: Optional list of allowed domain hostnames. If None,
+                fetches configured domains via ``get_allowed_webhook_domains()``.
 
         Returns:
             True if the URL is strictly safe.
 
         Raises:
-            SSRFSecurityException: If the URL is malicious.
+            SSRFSecurityException: If the URL is malicious or unapproved.
         """
         if not url:
             raise SSRFSecurityException(SSRF_WEBHOOK_URL_EMPTY)
@@ -103,6 +111,24 @@ class SSRFProtector:
         hostname = parsed.hostname
         if not hostname:
             raise SSRFSecurityException(SSRF_MISSING_HOSTNAME)
+
+        # Domain whitelist validation
+        if allowed_domains is None:
+            from src.core.app_config import get_allowed_webhook_domains
+            allowed_domains = get_allowed_webhook_domains()
+
+        if allowed_domains:
+            host_lower = hostname.lower()
+            allowed = False
+            for domain in allowed_domains:
+                dom_lower = domain.lower()
+                if host_lower == dom_lower or host_lower.endswith("." + dom_lower):
+                    allowed = True
+                    break
+            if not allowed:
+                raise SSRFSecurityException(
+                    SSRF_DOMAIN_NOT_ALLOWED.format(hostname=hostname)
+                )
 
         # 2. DNS Resolution
         ip_str = cls._resolve_hostname(hostname)

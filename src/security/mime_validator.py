@@ -107,14 +107,7 @@ def _check_magic_bytes(file_bytes: bytes, extension: str, filename: str) -> Opti
             if mime_type_clean in allowed:
                 return True
 
-
-            if (
-                mime_type_clean.startswith("text/")
-                and extension in {"txt", "csv", "md", "rtf"}
-            ):
-
             if mime_type_clean.startswith("text/") and extension in {"txt", "csv", "md", "rtf"}:
-
                 return True
 
             logger.warning(
@@ -122,25 +115,16 @@ def _check_magic_bytes(file_bytes: bytes, extension: str, filename: str) -> Opti
                 f"'{filename}'. Expected one of {allowed}, "
                 f"got '{mime_type_clean}'."
             )
+            return False
 
-
+    except (ImportError, ModuleNotFoundError) as e:
+        logger.debug(
+            f"[mime_validator] python-magic not installed, falling back to header validation: {e}"
+        )
     except Exception as e:
         logger.debug(
-            f"[mime_validator] python-magic failed, "
-            f"falling back to header validation: {e}"
+            f"[mime_validator] python-magic failed, falling back to header validation: {e}"
         )
-
-    # ------------------------------------------------------------------
-    # 2. Fallback: Magic Byte Header Check
-    # ------------------------------------------------------------------
-
-            return False
-    except (ImportError, ModuleNotFoundError) as e:
-        logger.debug(f"[mime_validator] python-magic not installed, falling back to header validation: {e}")
-        return None
-    except Exception as e:
-        logger.debug(f"[mime_validator] python-magic execution failed, falling back to header validation: {e}")
-        return None
 
     return None
 
@@ -178,16 +162,8 @@ def _check_extension_fallback(file_bytes: bytes, extension: str, filename: str) 
                 continue
 
         logger.warning(
-
             f"[mime_validator] Security warning: Text validation check failed "
             f"for '{filename}' (not valid UTF-8/UTF-16/Latin-1)."
-        )
-        return False
-
-    return False
-
-            f"[mime_validator] Security warning: Text validation check failed for '{filename}' "
-            f"(not valid UTF-8/UTF-16)."
         )
         return False
 

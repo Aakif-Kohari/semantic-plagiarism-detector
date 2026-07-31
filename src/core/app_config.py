@@ -129,3 +129,17 @@ def get_backup_idle_timeout() -> int:
         return max(1, timeout_minutes) * 60
     except ValueError:
         return 30 * 60
+
+
+def get_allowed_webhook_domains() -> list[str]:
+    """Return the list of allowed webhook domain hostnames.
+
+    Configured via the ``ALLOWED_WEBHOOK_DOMAINS`` environment variable as a
+    comma-separated string (e.g. ``hooks.slack.com, discord.com``). Returns an
+    empty list if not set or empty (allowing any domain subject to SSRF checks).
+    """
+    raw = os.getenv("ALLOWED_WEBHOOK_DOMAINS", "").strip()
+    if not raw:
+        return []
+    return [domain.strip().lower() for domain in raw.split(",") if domain.strip()]
+

@@ -87,6 +87,7 @@ SSRF_BLOCKED_MULTICAST = "Blocked multicast IP: {ip}"
 SSRF_BLOCKED_UNSPECIFIED = "Blocked unspecified IP: {ip}"
 SSRF_DNS_NO_ADDRESSES = "No addresses found for hostname '{hostname}'"
 SSRF_DNS_RESOLUTION_FAILED = "DNS resolution failed for hostname '{hostname}': {error}"
+SSRF_DOMAIN_NOT_ALLOWED = "Webhook domain '{hostname}' is not in ALLOWED_WEBHOOK_DOMAINS."
 
 # API ErrorsAPI_UNAUTHORIZED = "Invalid or missing authentication token."
 API_FILENAME_MISSING = "Filename must be provided."
