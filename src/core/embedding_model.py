@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 embedding_model.py
 ------------------
@@ -10,8 +12,6 @@ Model: paraphrase-multilingual-MiniLM-L12-v2
   - MIT licensed; safe for academic use
 """
 
-# pylint: disable=streamlit-global-mutation
-
 import logging
 import os
 from typing import List
@@ -19,10 +19,11 @@ from typing import List
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
+from src.core.config import EMBEDDING_BATCH_SIZE
+
 logger = logging.getLogger(__name__)
 
 # ── Singleton model loader ─────────────────────────────────────────────────────
-# We load the model once and reuse it across calls to avoid repeated I/O.
 _DEFAULT_MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
 _model: SentenceTransformer | None = None
 
@@ -54,13 +55,15 @@ def _get_model() -> SentenceTransformer:
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 
-def embed_chunks(chunks: List[str], batch_size: int = 64) -> np.ndarray:
+def embed_chunks(
+    chunks: List[str], batch_size: int = EMBEDDING_BATCH_SIZE
+) -> np.ndarray:
     """
     Generate embeddings for a list of text chunks.
 
     Args:
         chunks:     List of text strings to embed.
-        batch_size: Number of texts encoded per forward pass (tune for GPU/CPU).
+        batch_size: Number of texts encoded per forward pass (defaults to EMBEDDING_BATCH_SIZE).
 
     Returns:
         numpy array of shape (N, 384) where N = len(chunks).
@@ -78,7 +81,9 @@ def embed_chunks(chunks: List[str], batch_size: int = 64) -> np.ndarray:
     return embeddings
 
 
-def embed_documents(chunked_docs: dict, batch_size: int = 64) -> dict:
+def embed_documents(
+    chunked_docs: dict, batch_size: int = EMBEDDING_BATCH_SIZE
+) -> dict:
     """
     Embed all chunks across multiple documents.
 
@@ -127,9 +132,6 @@ def embed_documents(chunked_docs: dict, batch_size: int = 64) -> dict:
 def get_document_embedding(doc_embedding: np.ndarray) -> np.ndarray:
     """
     Compute a single document-level embedding by averaging its chunk embeddings.
-
-    Using mean pooling over chunks gives a compact representation
-    of the whole document for document-level similarity comparisons.
 
     Args:
         doc_embedding: Array of shape (N, 384) for N chunks.

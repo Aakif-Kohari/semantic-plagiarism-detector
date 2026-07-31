@@ -1,0 +1,11 @@
+{
+  "hash": "2c1d2e2236b12e114f3f5bdd87e6b8e62eb5276ab17e3eb99aaa8f97fdb1d0e6",
+  "inputs": {
+    "doc_a": "essay_john_doe.pdf",
+    "doc_b": "essay_jane_smith.pdf",
+    "overall_similarity": 0.873,
+    "threshold": 0.6,
+    "top_pairs_count": 3
+  },
+  "generated_at": "2025-06-15T12:00:00"
+}

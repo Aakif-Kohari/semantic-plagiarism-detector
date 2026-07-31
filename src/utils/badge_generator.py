@@ -5,10 +5,10 @@ Generates "Originality Verified" badges for students with 0% similarity results.
 Supports both PNG and PDF output formats for gamification and academic integrity encouragement.
 """
 
+import re
 from datetime import datetime
 from io import BytesIO
 from typing import Optional
-
 try:
     from PIL import Image, ImageDraw, ImageFont
 except ImportError:
@@ -21,11 +21,25 @@ from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import (Paragraph, SimpleDocTemplate, Spacer, Table,
+                                TableStyle)
+
+HEX_COLOR_PATTERN = re.compile(r"^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$")
+DEFAULT_BADGE_COLOR = "#4f46e5"
 
 
-def generate_badge_png(
-    student_name: str = "Student",
+def validate_hex_color(color: Optional[str]) -> str:
+    """Validate a hex color string, auto-prepending '#' if missing, and
+    falling back to a safe default if the value is invalid."""
+    if not color:
+        return DEFAULT_BADGE_COLOR
+    candidate = color if color.startswith("#") else f"#{color}"
+    if HEX_COLOR_PATTERN.match(candidate):
+        return candidate
+    return DEFAULT_BADGE_COLOR
+
+
+def generate_badge_png(    student_name: str = "Student",
     date: Optional[str] = None,
     text_preview: str = "",
 ) -> BytesIO:
@@ -188,9 +202,8 @@ def generate_badge_pdf(
     Returns:
         BytesIO buffer containing the PDF certificate
     """
-    brand_hex = brand_color or "#1e3a8a"
+    brand_hex = validate_hex_color(brand_color)
     brand_clr = HexColor(brand_hex)
-
     buffer = BytesIO()
     doc = SimpleDocTemplate(
         buffer,

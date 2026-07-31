@@ -7,10 +7,13 @@ semantic space.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict, dataclass
 from typing import Callable, Iterable
 
-from langdetect import DetectorFactory, LangDetectException, detect
+from langdetect import DetectorFactory, LangDetectException, detect_langs
+
+logger = logging.getLogger(__name__)
 
 from src.core.translator import translate_text
 
@@ -42,29 +45,46 @@ def _normalise_language_code(language: str | None) -> str:
     return code.split("-", 1)[0] or "unknown"
 
 
-def detect_language(text: str) -> str:
-    """Detect an ISO 639-1 language code.
+def detect_language(text: str, min_confidence: float = 0.8) -> tuple[str, bool]:
+    """Detect an ISO 639-1 language code and return a (detected_lang, is_confident) tuple.
 
-    Empty, very short, numeric, or otherwise undetectable text returns
-    ``"unknown"`` instead of raising an exception.
+    Empty, very short, numeric, or otherwise undetectable text defaults to
+    "en" with is_confident=False instead of raising an exception.
     """
     cleaned = " ".join(str(text or "").split())
     if len(cleaned) < MIN_DETECTION_CHARACTERS:
-        return "unknown"
+        return "en", False
 
     if not any(character.isalpha() for character in cleaned):
-        return "unknown"
+        return "en", False
 
     try:
-        return _normalise_language_code(detect(cleaned))
-    except (LangDetectException, ValueError, TypeError):
-        return "unknown"
+        langs = detect_langs(cleaned)
+        if not langs:
+            return "en", False
+        top_lang = langs[0]
+        detected_lang = _normalise_language_code(top_lang.lang)
+        confidence = top_lang.prob
+
+        if confidence < min_confidence:
+            logger.warning(
+                "Low-confidence language detection (%.4f < %.2f) for text: %s. Defaulting to 'en'.",
+                confidence,
+                min_confidence,
+                cleaned[:50]
+            )
+            return "en", False
+
+        return detected_lang, True
+    except (LangDetectException, ValueError, TypeError) as e:
+        logger.warning("Language detection failed: %s. Defaulting to 'en'.", e)
+        return "en", False
 
 
 def prepare_text_for_embedding(
     text: str,
     *,
-    detector: Callable[[str], str] | None = None,
+    detector: Callable[[str], str | tuple[str, bool]] | None = None,
     translator: Callable[..., str] | None = None,
 ) -> dict[str, object]:
     """Prepare one source paragraph for English-aligned embedding.
@@ -88,9 +108,14 @@ def prepare_text_for_embedding(
     translator_fn = translator or translate_text
 
     try:
-        language = _normalise_language_code(detector_fn(original_text))
+        res = detector_fn(original_text)
+        if isinstance(res, tuple):
+            detected_lang, _ = res
+        else:
+            detected_lang = res
+        language = _normalise_language_code(detected_lang)
     except Exception:
-        language = "unknown"
+        language = "en"
 
     if language in ENGLISH_CODES or language == "unknown":
         return PreparedText(

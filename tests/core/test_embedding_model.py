@@ -4,11 +4,8 @@ import numpy as np
 import pytest
 
 import src.core.embedding_model as embedding_model
-from src.core.embedding_model import (
-    embed_chunks,
-    embed_documents,
-    get_document_embedding,
-)
+from src.core.embedding_model import (embed_chunks, embed_documents,
+                                      get_document_embedding)
 
 
 def _mock_encode(
@@ -34,6 +31,14 @@ def test_embed_chunks_shape(mock_model):
 def test_embed_chunks_empty():
     result = embed_chunks([])
     assert result.size == 0
+
+def test_embed_empty_text(mock_model):
+    """Test embedding a single empty string."""
+
+    result = embedding_model.embed_chunks([""])
+
+    assert result.shape == (1, 384)
+    assert result.dtype == np.float32
 
 
 def test_embed_chunks_returns_float32(mock_model):

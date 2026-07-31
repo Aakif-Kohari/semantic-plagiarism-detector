@@ -6,15 +6,33 @@ Maps SHA-256 hash of (foreign_text, source_lang, target_lang) -> cached_text.
 """
 
 import hashlib
+import os
 import sqlite3
 from typing import Optional
 
-DB_PATH = "corpus.db"
+from src.core.app_config import CORPUS_DB_PATH, FALLBACK_CORPUS_DB_PATH
+
+# Seed the translation cache DB path from the centralized app_config.
+# ``DB_PATH`` is intentionally kept as a module-level string so that tests
+# importing ``src.db.translation_cache.DB_PATH`` continue to work
+# (tests/db/test_translation_cache.py).
+DB_PATH = str(CORPUS_DB_PATH)
 
 
 def _init_db():
     """Initializes the translation cache table if it does not exist."""
-    with sqlite3.connect(DB_PATH) as conn:
+    path = DB_PATH
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        conn = sqlite3.connect(path)
+    except (sqlite3.OperationalError, OSError, PermissionError):
+        # Centralized temp-dir fallback (matches corpus_db.py and
+        # incidents.py so all three modules agree on the location).
+        path = str(FALLBACK_CORPUS_DB_PATH)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        conn = sqlite3.connect(path)
+
+    with conn:
         cursor = conn.cursor()
         cursor.execute(
             """
@@ -28,11 +46,15 @@ def _init_db():
             )
             """
         )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_translation_cache_created_at
+            ON translation_cache(created_at)
+            """
+        )
         conn.commit()
 
 
-# Initialize table on import
-_init_db()
 
 
 def _hash_text(
@@ -47,6 +69,7 @@ def get_cached_translation(
     text: str, source_lang: str = "auto", target_lang: str = "en"
 ) -> Optional[str]:
     """Retrieves cached translation if available."""
+    _init_db()
     if not text or not text.strip():
         return None
 
@@ -68,6 +91,7 @@ def cache_translation(
     target_lang: str = "en",
 ) -> None:
     """Stores a new translation in the SQLite cache."""
+    _init_db()
     if not foreign_text or not translated_text:
         return
 
@@ -83,4 +107,3 @@ def cache_translation(
             (text_hash, foreign_text, translated_text, source_lang, target_lang),
         )
         conn.commit()
-        

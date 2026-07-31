@@ -10,10 +10,12 @@ import atexit
 import io
 import os
 import tempfile
+
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.formatting.rule import ColorScaleRule
 from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.comments import Comment
 
 
 def _create_managed_temp_file(suffix: str = ".xlsx", prefix: str = "temp_") -> str:
@@ -32,6 +34,22 @@ def _create_managed_temp_file(suffix: str = ".xlsx", prefix: str = "temp_") -> s
     return temp_path
 
 
+def _truncate_title(title: str, max_length: int = 60) -> str:
+    """
+    Truncate a title to max_length characters, appending '...' if truncated.
+    
+    Args:
+        title: The title to truncate
+        max_length: Maximum length before truncation (default: 60)
+        
+    Returns:
+        Truncated title with '...' suffix if original was longer
+    """
+    if len(title) <= max_length:
+        return title
+    return title[: max_length - 3] + "..."
+
+
 def build_similarity_workbook(
     df: pd.DataFrame, threshold: float = 0.59
 ) -> Workbook:
@@ -40,13 +58,22 @@ def build_similarity_workbook(
     ws = wb.active
     ws.title = "Similarity Matrix"
 
-    # Write headers and index labels
+    # Write headers and index labels with truncated titles, preserving full names in comments
     ws.cell(row=1, column=1, value="Document")
     for col_idx, col_name in enumerate(df.columns, start=2):
-        ws.cell(row=1, column=col_idx, value=col_name)
+        truncated_name = _truncate_title(col_name)
+        cell = ws.cell(row=1, column=col_idx, value=truncated_name)
+        # Add full title as comment if truncated
+        if len(col_name) > 60:
+            cell.comment = Comment(col_name, "Excel Export")
 
     for row_idx, (index_label, row) in enumerate(df.iterrows(), start=2):
-        ws.cell(row=row_idx, column=1, value=index_label)
+        truncated_label = _truncate_title(index_label)
+        cell = ws.cell(row=row_idx, column=1, value=truncated_label)
+        # Add full title as comment if truncated
+        if len(index_label) > 60:
+            cell.comment = Comment(index_label, "Excel Export")
+            
         for col_idx, val in enumerate(row, start=2):
             cell = ws.cell(row=row_idx, column=col_idx, value=float(val))
             cell.number_format = "0.0%"
