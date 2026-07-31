@@ -11,7 +11,7 @@ import logging
 from dataclasses import asdict, dataclass
 from typing import Callable, Iterable
 
-from langdetect import DetectorFactory, LangDetectException, detect, detect_langs
+from langdetect import DetectorFactory, LangDetectException, detect_langs
 
 logger = logging.getLogger(__name__)
 

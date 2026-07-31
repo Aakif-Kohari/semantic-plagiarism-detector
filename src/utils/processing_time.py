@@ -14,7 +14,15 @@ from collections import defaultdict
 from collections.abc import Iterable
 from contextlib import contextmanager
 from numbers import Real
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
+
+
+@dataclass
+class StageTiming:
+    """Data class representing timing for a specific pipeline stage."""
+    stage_name: str
+    duration_seconds: float
 
 BYTES_PER_MB = 1024 * 1024
 DEFAULT_SECONDS_PER_MB = 2.0

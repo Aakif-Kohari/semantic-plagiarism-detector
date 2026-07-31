@@ -25,13 +25,11 @@ from src.db.database_backup import (
     SQLITE_HEADER,
     BackupRestoreSecurityError,
     cleanup_old_backups,
-    create_corpus_database_snapshot,
     create_password_protected_backup,
     create_sqlite_snapshot,
     get_database_size_bytes,
     optimize_database,
     restore,
-    restore_database_backup,
 )
 
 
