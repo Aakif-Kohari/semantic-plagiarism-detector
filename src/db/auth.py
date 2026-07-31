@@ -61,7 +61,7 @@ def configure_db_path(db_path: str | os.PathLike) -> None:
 
 
 def _connect() -> sqlite3.Connection:
-    return sqlite3.connect(_DB_PATH, check_same_thread=False)
+    return sqlite3.connect(_DB_PATH, timeout=15.0, check_same_thread=False)
 
 
 def log_security_event(
