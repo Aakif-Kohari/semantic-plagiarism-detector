@@ -586,11 +586,33 @@ def update_document_tags(filename: str, tags: str) -> bool:
             return True
     except Exception as e:
         logger.error(f"Failed to update tags for '{filename}': {e}")
-        return False
+return False
 
 
-def delete_tag(tag: str) -> int:
-    """Removes a specific tag from ALL documents in the database."""
+def get_tag_document_count(tag: str) -> int:
+    """Counts how many documents currently have the given tag."""
+    if not tag or not isinstance(tag, str):
+        return 0
+    tag = tag.strip()
+    if not tag:
+        return 0
+
+    count = 0
+    try:
+        with _connect() as conn:
+            cursor = conn.execute(
+                "SELECT tags FROM documents WHERE tags IS NOT NULL AND tags != ''"
+            )
+            for (tags_str,) in cursor.fetchall():
+                individual_tags = [t.strip() for t in tags_str.split(",") if t.strip()]
+                if tag in individual_tags:
+                    count += 1
+    except Exception as e:
+        logger.error(f"Failed to count documents for tag '{tag}': {e}")
+    return count
+
+
+def delete_tag(tag: str) -> int:    """Removes a specific tag from ALL documents in the database."""
     if not tag or not isinstance(tag, str):
         return 0
     tag = tag.strip()
