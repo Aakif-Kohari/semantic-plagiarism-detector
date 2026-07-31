@@ -10,13 +10,18 @@ cosine similarity reduces to the dot product, making this very fast.
 """
 
 from typing import Dict, List, Optional, Set, Tuple, Union
+
 import faiss  # type: ignore
 import numpy as np
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 
-from src.core.config import (DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD,
-                             is_plagiarism, severity_from_score)
+from src.core.config import (
+    DEFAULT_THRESHOLDS,
+    PLAGIARISM_THRESHOLD,
+    is_plagiarism,
+    severity_from_score,
+)
 
 # ── Validation helpers ─────────────────────────────────────────────────────────
 
@@ -120,9 +125,9 @@ def hybrid_similarity_matrix(
     Combine semantic and lexical similarity matrices using a weighted formula.
     """
     if not (0.0 <= w <= 1.0):
-        from src.errors import SIM_WEIGHT_OUT_OF_RANGE
+        from src.errors import sim_weight_out_of_range
 
-        raise ValueError(SIM_WEIGHT_OUT_OF_RANGE.format(w=w))
+        raise ValueError(sim_weight_out_of_range(w))
 
     if semantic_df.shape != lexical_df.shape:
         from src.errors import SIM_SHAPE_MISMATCH
@@ -292,9 +297,7 @@ def flag_plagiarism(
 
             if chunked_docs is not None and embeddings is not None:
                 sim_matrix = cosine_similarity(embeddings[doc_a], embeddings[doc_b])
-                idx_a, idx_b = np.unravel_index(
-                    np.argmax(sim_matrix), sim_matrix.shape
-                )
+                idx_a, idx_b = np.unravel_index(np.argmax(sim_matrix), sim_matrix.shape)
                 chunk_text = chunked_docs[doc_a][idx_a]
                 matched_length = len(chunk_text.split())
 
@@ -387,4 +390,3 @@ def calculate_paragraph_similarity_breakdown(
 
     breakdown.sort(key=lambda t: t[2], reverse=True)
     return breakdown
-
