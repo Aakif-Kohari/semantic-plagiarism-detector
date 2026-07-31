@@ -845,9 +845,15 @@ with st.sidebar:
         ocr_language = DEFAULT_OCR_LANGUAGE
         ocr_dpi = DEFAULT_OCR_DPI
 
-    unique_classes = ["All Classes"] + get_unique_class_sections()
-    selected_class = st.selectbox("Select Class/Section", unique_classes, index=0, key="class_filter_selectbox")
-
+unique_classes = get_unique_class_sections()
+selected_classes = st.multiselect(
+    "Select Class/Section(s)",
+    unique_classes,
+    default=unique_classes,
+    key="class_filter_selectbox",
+)
+if not selected_classes:
+    selected_classes = unique_classes
     if st.button("🔄 Reset All Filters", key="reset_all_filters_button", use_container_width=True):
         keys_to_reset = [
             "threshold_slider",
