@@ -173,6 +173,9 @@ def bulk_download_drive_folder(
     downloaded_names = []
     bytes_done_before_current_file = 0
 
+    if progress_callback is not None:
+        progress_callback(0, batch_total_bytes)
+
     for file_record in files_to_download:
         file_progress_cb = None
         if progress_callback is not None:
@@ -194,7 +197,9 @@ def bulk_download_drive_folder(
         )
         downloaded_files_dict[safe_name] = file_bytes
         downloaded_names.append(safe_name)
-        bytes_done_before_current_file += int(file_record.get("size") or 0)
+        bytes_done_before_current_file += int(file_record.get("size") or len(file_bytes))
+        if progress_callback is not None:
+            progress_callback(bytes_done_before_current_file, batch_total_bytes)
 
     if progress_callback is not None:
         # Final callback guarantees the bar always reaches 100% even if reported
