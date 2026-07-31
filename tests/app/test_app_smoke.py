@@ -267,3 +267,27 @@ def test_sidebar_reset_all_filters():
 
     finally:
         _cleanup_stale_artifacts()
+
+
+def test_clear_cache_toast_message():
+    """Verify that clicking Clear Application Cache displays a toast confirmation message."""
+    _cleanup_stale_artifacts()
+    try:
+        at = AppTest.from_file("app/streamlit_app.py", default_timeout=30)
+        at.session_state["authenticated"] = True
+        at.session_state["username"] = "admin"
+        at.session_state["role"] = "admin"
+        at.run()
+
+        assert not at.exception
+        clear_btns = [
+            btn for btn in at.button if "Clear Application Cache" in btn.label or "🗑️" in btn.label
+        ]
+        if clear_btns:
+            clear_btns[0].click().run()
+            assert not at.exception
+            # Verify st.toast was rendered
+            assert len(at.toast) > 0 or any("Session cache cleared" in str(t) for t in at.toast)
+    finally:
+        _cleanup_stale_artifacts()
+

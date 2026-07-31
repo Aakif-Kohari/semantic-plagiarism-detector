@@ -2189,6 +2189,7 @@ with tab_settings:
             except Exception as e:
                 pass
             st.success("✅ Application cache cleared successfully!")
+            st.toast("✅ Session cache cleared successfully!")
 
         st.markdown("")
         if st.button(
