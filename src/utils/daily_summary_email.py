@@ -230,9 +230,12 @@ def send_email(to_emails: List[str], subject: str, html_body: str) -> bool:
         return False
 
 
-def send_daily_summary() -> bool:
+def send_daily_summary(subject_prefix: str = "[Plagiarism Alert]") -> bool:
     """
     Main function to aggregate daily incidents and send summary email.
+
+    Args:
+        subject_prefix: Prefix to prepend to the email subject line
 
     Returns:
         True if email sent successfully, False otherwise
@@ -251,7 +254,8 @@ def send_daily_summary() -> bool:
     html_body = format_daily_summary(incidents)
 
     # Send the email
-    subject = f"Daily Plagiarism Summary - {datetime.now().strftime('%Y-%m-%d')}"
+    prefix = f"{subject_prefix} " if subject_prefix else ""
+    subject = f"{prefix}Daily Plagiarism Summary - {datetime.now().strftime('%Y-%m-%d')}"
     success = send_email(admin_emails, subject, html_body)
 
     return success
