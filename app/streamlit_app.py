@@ -65,7 +65,9 @@ except ImportError: # pragma: no cover - optional dependency
     plotly_events = None
 
 import logging
+from src.core.logging_config import setup_logging
 
+setup_logging()
 logger = logging.getLogger(__name__)
 
 # Validate required environment variables during application startup
