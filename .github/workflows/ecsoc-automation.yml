@@ -409,20 +409,20 @@ jobs:
                 issue_number: pr.number,
                 body: `🎉 Hey @${author}!
 
-                Your PR has been merged successfully! 🚀
+Your PR has been merged successfully! 🚀
 
-                Thank you for investing your time and effort into improving **Semantic Plagiarism Detector**.
+Thank you for investing your time and effort into improving **Semantic Plagiarism Detector**.
 
-                Open source grows because of contributors like you.
+Open source grows because of contributors like you.
 
-                If you enjoyed contributing:
+If you enjoyed contributing:
 
-                • ⭐ Star the repository
-                • 🔍 Explore more issues
-                • 💡 Suggest new ideas in Discussions
-                • 📢 Share your contribution with others
+• ⭐ Star the repository
+• 🔍 Explore more issues
+• 💡 Suggest new ideas in Discussions
+• 📢 Share your contribution with others
 
-                Hope to see you back soon. Happy coding! ❤️`
+Hope to see you back soon. Happy coding! ❤️`
               });
             }
 
