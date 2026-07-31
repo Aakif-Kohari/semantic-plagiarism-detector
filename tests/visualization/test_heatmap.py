@@ -540,6 +540,39 @@ def test_plot_similarity_heatmap_dim_diagonal_single_doc(single_doc_df: pd.DataF
     assert heatmap.z[0][0] is None
 
 
+# ==============================================================================
+# CSV Export Tests (Issue #1063)
+# ==============================================================================
 
 
+def test_export_heatmap_matrix_csv_valid_output():
+    """Verify CSV export returns valid UTF-8 encoded CSV bytes with correct content."""
+    from src.visualization.heatmap import export_heatmap_matrix_csv
 
+    df = pd.DataFrame(
+        [
+            [1.00, 0.85, 0.45],
+            [0.85, 1.00, 0.60],
+            [0.45, 0.60, 1.00],
+        ],
+        columns=["doc_A", "doc_B", "doc_C"],
+        index=["doc_A", "doc_B", "doc_C"],
+    )
+
+    csv_bytes = export_heatmap_matrix_csv(df)
+
+    assert isinstance(csv_bytes, bytes)
+    decoded = csv_bytes.decode("utf-8")
+    assert "doc_A" in decoded
+    lines = decoded.strip().splitlines()
+    assert len(lines) == 4  # header + 3 data rows
+
+
+def test_export_heatmap_matrix_csv_empty_dataframe():
+    """Verify CSV export handles an empty DataFrame gracefully."""
+    from src.visualization.heatmap import export_heatmap_matrix_csv
+
+    df = pd.DataFrame()
+    csv_bytes = export_heatmap_matrix_csv(df)
+
+    assert isinstance(csv_bytes, bytes)

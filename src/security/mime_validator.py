@@ -23,13 +23,15 @@ ALLOWED_MIME_TYPES = {
     "md": {"text/markdown", "text/plain", "application/octet-stream"},
     "rtf": {"application/rtf", "text/rtf", "text/plain"},
     "epub": {"application/epub+zip", "application/zip", "application/octet-stream"},
-    "odt": {
+"odt": {
         "application/vnd.oasis.opendocument.text",
         "application/zip",
         "application/octet-stream",
     },
+    "png": {"image/png"},
+    "jpg": {"image/jpeg"},
+    "jpeg": {"image/jpeg"},
 }
-
 # Fallback headers checking if python-magic is unavailable or has issues
 ALLOWED_MAGIC_HEADERS = {
     "pdf": [b"%PDF-"],
@@ -37,10 +39,12 @@ ALLOWED_MAGIC_HEADERS = {
     "zip": [b"PK\x03\x04"],
     "epub": [b"PK\x03\x04"],
     "odt": [b"PK\x03\x04"],
-    "doc": [b"\xd0\xcf\x11\xe0"],
+"doc": [b"\xd0\xcf\x11\xe0"],
     "rtf": [b"{\\rtf"],
+    "png": [b"\x89PNG\r\n\x1a\n"],
+    "jpg": [b"\xff\xd8\xff"],
+    "jpeg": [b"\xff\xd8\xff"],
 }
-
 def validate_mime_type(file_bytes: bytes, filename: str) -> bool:
     """Validate the uploaded file bytes against a whitelist of allowed MIME signatures based on file extension.
 
