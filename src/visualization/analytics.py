@@ -1,10 +1,13 @@
+from __future__ import annotations
+
 """
 analytics.py
 -----------
 Plotly visualizations for plagiarism analytics dashboard.
 """
 
-from typing import Any
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 import numpy as np
 import pandas as pd
@@ -12,7 +15,35 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 
-def plot_high_severity_trends(trend_data: list[dict[str, Any]]) -> go.Figure:
+FigureT = TypeVar("FigureT")
+
+
+
+
+def build_visualization_lazily(
+    enabled: bool,
+    factory: Callable[[], FigureT],
+) -> FigureT | None:
+    """Build a visualization only after the user explicitly enables it.
+
+    Streamlit evaluates the bodies of all tabs during a script rerun. Merely
+    placing a chart inside a tab therefore does not defer expensive figure
+    construction. This helper keeps the figure factory uncalled until the UI
+    control for that visualization is enabled.
+
+    Args:
+        enabled: Whether the user requested the visualization.
+        factory: Zero-argument callable that creates the figure.
+
+    Returns:
+        The created figure when enabled, otherwise ``None``.
+    """
+    if not enabled:
+        return None
+
+    return factory()
+
+def plot_high_severity_trends(trend_data: list[dict[str, Any]], show_grid: bool = True) -> go.Figure:
     """
     Create an interactive line chart showing High severity plagiarism incidents over time.
 
@@ -39,7 +70,10 @@ def plot_high_severity_trends(trend_data: list[dict[str, Any]]) -> go.Figure:
             xaxis_title="Date",
             yaxis_title="Number of High Severity Incidents",
             height=400,
+            autosize=True,
         )
+        fig.update_xaxes(showgrid=show_grid)
+        fig.update_yaxes(showgrid=show_grid)
         return fig
 
     df = pd.DataFrame(trend_data)
@@ -60,7 +94,11 @@ def plot_high_severity_trends(trend_data: list[dict[str, Any]]) -> go.Figure:
         hovermode="x unified",
         height=400,
         showlegend=False,
+        autosize=True,
     )
+
+    fig.update_xaxes(showgrid=show_grid)
+    fig.update_yaxes(showgrid=show_grid)
 
     fig.update_traces(
         line=dict(color="#ff4b4b", width=3), marker=dict(size=8, color="#ff4b4b")
@@ -69,7 +107,7 @@ def plot_high_severity_trends(trend_data: list[dict[str, Any]]) -> go.Figure:
     return fig
 
 
-def plot_most_plagiarized_documents(doc_data: list[dict[str, Any]]) -> go.Figure:
+def plot_most_plagiarized_documents(doc_data: list[dict[str, Any]], show_grid: bool = True) -> go.Figure:
     """
     Create a bar chart showing the most frequently plagiarized documents.
 
@@ -96,7 +134,10 @@ def plot_most_plagiarized_documents(doc_data: list[dict[str, Any]]) -> go.Figure
             xaxis_title="Document Name",
             yaxis_title="Number of Incidents",
             height=400,
+            autosize=True,
         )
+        fig.update_xaxes(showgrid=show_grid)
+        fig.update_yaxes(showgrid=show_grid)
         return fig
 
     df = pd.DataFrame(doc_data)
@@ -123,7 +164,11 @@ def plot_most_plagiarized_documents(doc_data: list[dict[str, Any]]) -> go.Figure
         yaxis_title="Number of Incidents",
         height=400,
         showlegend=False,
+        autosize=True,
     )
+
+    fig.update_xaxes(showgrid=show_grid)
+    fig.update_yaxes(showgrid=show_grid)
 
     fig.update_traces(
         marker_color="#ffa500",
@@ -146,9 +191,7 @@ def plot_most_plagiarized_documents(doc_data: list[dict[str, Any]]) -> go.Figure
     return fig
 
 
-def plot_similarity_distribution(
-    sim_matrix: pd.DataFrame, title: str = "Distribution of Similarity Scores"
-) -> go.Figure:
+def plot_similarity_distribution(sim_matrix: pd.DataFrame, title: str = "Distribution of Similarity Scores", show_grid: bool = True) -> go.Figure:
     """
     Create a histogram showing the distribution of all pairwise similarity scores.
 
@@ -173,7 +216,9 @@ def plot_similarity_distribution(
             showarrow=False,
             font=dict(size=16, color="gray"),
         )
-        fig.update_layout(title=title, height=400)
+        fig.update_layout(title=title, height=400, autosize=True)
+        fig.update_xaxes(showgrid=show_grid)
+        fig.update_yaxes(showgrid=show_grid)
         return fig
 
     mask = np.triu(np.ones(sim_matrix.shape, dtype=bool), k=1)
@@ -193,7 +238,11 @@ def plot_similarity_distribution(
         bargap=0.05,
         height=400,
         showlegend=False,
+        autosize=True,
     )
+
+    fig.update_xaxes(showgrid=show_grid)
+    fig.update_yaxes(showgrid=show_grid)
 
     fig.update_traces(
         marker_color="#636efa",
@@ -205,15 +254,14 @@ def plot_similarity_distribution(
     return fig
 
 
-def plot_document_sizes(word_counts: dict[str, int]) -> go.Figure:
-    """
-    Create a bar chart showing the word counts of all documents.
+def plot_document_sizes(word_counts: dict[str, int], show_grid: bool = True) -> go.Figure:
+    """Create a bar chart visualizing document word counts.
 
     Args:
-        word_counts: Dictionary mapping document filenames to word counts
+        word_counts: Dictionary mapping document names to word counts.
 
     Returns:
-        Plotly Figure object
+        Plotly Figure object.
     """
     if not word_counts:
         fig = go.Figure()
@@ -226,34 +274,23 @@ def plot_document_sizes(word_counts: dict[str, int]) -> go.Figure:
             showarrow=False,
             font=dict(size=16, color="gray"),
         )
-        fig.update_layout(
-            title="Document Word Counts",
-            xaxis_title="Document Name",
-            yaxis_title="Word Count",
-            height=400,
-        )
+        fig.update_layout(title="Document Word Counts", height=400, autosize=True)
+        fig.update_xaxes(showgrid=show_grid)
+        fig.update_yaxes(showgrid=show_grid)
         return fig
 
-    # Create DataFrame
-    df = pd.DataFrame(
-        list(word_counts.items()), columns=["document_name", "word_count"]
-    )
-    df = df.sort_values(by="word_count", ascending=False)
+    doc_names = list(word_counts.keys())
+    counts = list(word_counts.values())
 
-    df["display_name"] = df["document_name"].apply(
-        lambda x: x[:30] + "..." if len(x) > 30 else x
-    )
+    display_names = [
+        name[:30] + "..." if len(name) > 30 else name for name in doc_names
+    ]
 
     fig = px.bar(
-        df,
-        x="display_name",
-        y="word_count",
+        x=display_names,
+        y=counts,
         title="Document Word Counts",
-        labels={
-            "display_name": "Document Name",
-            "word_count": "Word Count",
-        },
-        orientation="v",
+        labels={"x": "Document Name", "y": "Word Count"},
     )
 
     fig.update_layout(
@@ -261,14 +298,17 @@ def plot_document_sizes(word_counts: dict[str, int]) -> go.Figure:
         yaxis_title="Word Count",
         height=400,
         showlegend=False,
+        autosize=True,
     )
 
+    fig.update_xaxes(showgrid=show_grid)
+    fig.update_yaxes(showgrid=show_grid)
+
     fig.update_traces(
-        marker_color="#1f77b4",
-        marker_line_color="#1a6294",
-        marker_line_width=1.5,
-        hovertemplate="<b>%{customdata}</b><br>Word Count: %{y}<extra></extra>",
-        customdata=df["document_name"].tolist(),
+        marker_color="#00cc96",
+        customdata=doc_names,
+        hovertemplate="<b>%{customdata}</b><br>Words: %{y}<extra></extra>",
     )
 
     return fig
+

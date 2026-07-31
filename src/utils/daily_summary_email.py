@@ -165,6 +165,12 @@ def send_email(to_emails: List[str], subject: str, html_body: str) -> bool:
     """
     Send an email using SMTP.
 
+    The connection method is chosen automatically based on ``SMTP_PORT``:
+
+    * **Port 465** – uses :class:`smtplib.SMTP_SSL` (implicit SSL).
+    * **Any other port** (default: 587) – uses :class:`smtplib.SMTP` with
+      ``STARTTLS`` upgrade.
+
     Args:
         to_emails: List of recipient email addresses
         subject: Email subject line
@@ -198,13 +204,24 @@ def send_email(to_emails: List[str], subject: str, html_body: str) -> bool:
         html_part = MIMEText(html_body, "html")
         msg.attach(html_part)
 
-        with smtplib.SMTP(smtp_server, smtp_port) as server:
-            server.starttls()
-            server.login(smtp_username, smtp_password)
-            server.send_message(msg)
+        # Port 465 uses implicit SSL; all other ports use STARTTLS.
+        if smtp_port == 465:
+            logger.debug("Using SMTP_SSL (implicit SSL) on port %d", smtp_port)
+            with smtplib.SMTP_SSL(smtp_server, smtp_port) as server:
+                server.login(smtp_username, smtp_password)
+                server.send_message(msg)
+        else:
+            logger.debug(
+                "Using SMTP with STARTTLS on port %d", smtp_port
+            )
+            with smtplib.SMTP(smtp_server, smtp_port) as server:
+                server.starttls()
+                server.login(smtp_username, smtp_password)
+                server.send_message(msg)
 
         logger.info(
-            f"Daily summary email sent successfully to {len(to_emails)} recipients"
+            "Daily summary email sent successfully to %d recipients",
+            len(to_emails),
         )
         return True
 

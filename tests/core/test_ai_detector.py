@@ -4,12 +4,29 @@ test_ai_detector.py
 Tests for AI-generated text detection functionality.
 """
 
+
+from unittest.mock import MagicMock, patch
+import pytest
+
 from src.core.ai_detector import (
+    detect_ai_generated_text,
     detect_ai_probability,
     detect_ai_probability_batch,
     detect_document_ai_probability,
     detect_documents_ai_probability,
 )
+
+
+
+@pytest.fixture(autouse=True)
+def mock_transformers_pipeline():
+    """Autouse fixture to mock Hugging Face pipeline across all tests in this module."""
+    with patch("transformers.pipeline") as mock_pipe:
+        mock_classifier = MagicMock()
+        # Mock pipeline output format: [{'label': 'Fake', 'score': 0.85}]
+        mock_classifier.return_value = [[{"label": "Fake", "score": 0.85}]]
+        mock_pipe.return_value = mock_classifier
+        yield mock_pipe
 
 
 def test_detect_ai_probability_empty_text():
@@ -70,3 +87,38 @@ def test_detect_ai_probability_batch_mixed():
     assert result[2] == 0.0  # None
     assert 0.0 <= result[0] <= 1.0
     assert 0.0 <= result[3] <= 1.0
+
+
+def test_detect_ai_generated_text_empty():
+    """Verify that empty text returns low confidence default dictionary."""
+    res = detect_ai_generated_text("")
+    assert res["ai_probability"] == 0.0
+    assert res["confidence_tier"] == "low"
+    assert res["perplexity_score"] == 150.0
+
+
+def test_detect_ai_generated_text_tiers():
+    """Verify that confidence categorizations partition correctly."""
+    with patch("src.core.ai_detector.detect_ai_probability") as mock_prob:
+        # High confidence AI (>= 0.75)
+        mock_prob.return_value = 0.85
+        res = detect_ai_generated_text("Test AI text")
+        assert res["ai_probability"] == 0.85
+        assert res["confidence_tier"] == "high"
+        assert res["perplexity_score"] == float(150.0 - 110.0 * 0.85)
+
+        # Medium confidence (0.40 <= prob < 0.75)
+        mock_prob.return_value = 0.55
+        res = detect_ai_generated_text("Test medium text")
+        assert res["ai_probability"] == 0.55
+        assert res["confidence_tier"] == "medium"
+        assert res["perplexity_score"] == float(150.0 - 110.0 * 0.55)
+
+        # Low confidence (< 0.40)
+        mock_prob.return_value = 0.25
+        res = detect_ai_generated_text("Test human text")
+        assert res["ai_probability"] == 0.25
+        assert res["confidence_tier"] == "low"
+        assert res["perplexity_score"] == float(150.0 - 110.0 * 0.25)
+
+    

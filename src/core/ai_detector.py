@@ -35,7 +35,8 @@ def _get_model_and_tokenizer():
         logger.info(f"[ai_detector] Loading model: {model_name} …")
 
         try:
-            from transformers import AutoModelForSequenceClassification, AutoTokenizer
+            from transformers import (AutoModelForSequenceClassification,
+                                      AutoTokenizer)
 
             _tokenizer = AutoTokenizer.from_pretrained(model_name)
             _model = AutoModelForSequenceClassification.from_pretrained(model_name)
@@ -206,3 +207,48 @@ def detect_documents_ai_probability(
         results[doc_name] = detect_document_ai_probability(chunks)
 
     return results
+
+
+def detect_ai_generated_text(text: str) -> Dict[str, Any]:
+    """
+    Detect the likelihood that a given text was AI-generated.
+
+    Confidence threshold tiers:
+    - 'high': ai_probability >= 0.75
+    - 'medium': 0.40 <= ai_probability < 0.75
+    - 'low': ai_probability < 0.40
+
+    Args:
+        text: Input text string to analyze.
+
+    Returns:
+        A dictionary containing:
+            - ai_probability (float): Probability score between 0.0 and 1.0.
+            - confidence_tier (str): Categorized tier ('high', 'medium', 'low').
+            - perplexity_score (float): Estimated perplexity score.
+    """
+    if not text or not text.strip():
+        return {
+            "ai_probability": 0.0,
+            "confidence_tier": "low",
+            "perplexity_score": 150.0,
+        }
+
+    ai_probability = detect_ai_probability(text)
+
+    if ai_probability >= 0.75:
+        confidence_tier = "high"
+    elif ai_probability >= 0.40:
+        confidence_tier = "medium"
+    else:
+        confidence_tier = "low"
+
+    # Perplexity estimation: higher for human (low probability), lower for AI (high probability)
+    perplexity_score = float(150.0 - 110.0 * ai_probability)
+
+    return {
+        "ai_probability": ai_probability,
+        "confidence_tier": confidence_tier,
+        "perplexity_score": perplexity_score,
+    }
+
