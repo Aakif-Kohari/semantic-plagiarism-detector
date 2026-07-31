@@ -8,6 +8,7 @@ import numpy as np
 from fastapi import Request
 from fastapi import (Depends, FastAPI, File, HTTPException, Query, UploadFile,
                      status)
+from fastapi.exceptions import RequestValidationError
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -77,7 +78,26 @@ def custom_rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded)
         response, request.state.view_rate_limit
     )
     return response
-
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """
+    Return a standardized JSON response for request validation errors.
+    """
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={
+            "error": True,
+            "message": "Validation failed.",
+            "details": [
+                {
+                    "field": ".".join(map(str, err["loc"])),
+                    "message": err["msg"],
+                    "type": err["type"],
+                }
+                for err in exc.errors()
+            ],
+        },
+    )
 app.add_exception_handler(RateLimitExceeded, custom_rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
