@@ -11,7 +11,6 @@ import logging
 import os
 import psutil
 import sqlite3
-import tempfile
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta

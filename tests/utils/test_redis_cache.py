@@ -6,7 +6,7 @@ Unit tests for Redis cache functionality.
 
 import numpy as np
 import pytest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from src.utils.redis_cache import (
     CacheKeyPrefix,

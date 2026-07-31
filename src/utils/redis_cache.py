@@ -295,11 +295,6 @@ class RedisCache:
             return False
 
 
-    def set(self, key: str, value: Any, ttl: Optional[int] = REDIS_CACHE_TTL) -> bool:
-        """Store a value in Redis with optional TTL (defaults to REDIS_CACHE_TTL)."""
-        if not self.is_available():
-            return False
-
 
     def ping(self) -> tuple[bool, Optional[float]]:
         if self._client is None:
@@ -375,22 +370,6 @@ class RedisCache:
 
         fallback_deleted = self._fallback_delete(key)
         return redis_deleted or fallback_deleted
-
-    def set_json(self, key: str, value: dict, ttl: Optional[int] = REDIS_CACHE_TTL) -> bool:
-        """Store a JSON-serializable dict in Redis."""
-        if not self.is_available():
-            return False
-
-        try:
-            serialized = json.dumps(value)
-            if ttl:
-                self._client.setex(key, ttl, serialized)
-            else:
-                self._client.set(key, serialized)
-            return True
-        except (RedisError, json.JSONDecodeError) as e:
-            print(f"[RedisCache] Error setting JSON key {key}: {e}")
-            return False
 
     def set_json(self, key: str, value: dict, ttl: Optional[int] = None) -> bool:
         """Store a JSON-serializable dict in Redis with automatic compression."""

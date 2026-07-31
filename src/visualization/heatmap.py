@@ -15,8 +15,9 @@ Recent additions (Issue #628):
 
 import logging
 import io
+import re
 from contextlib import contextmanager
-from typing import Dict, Generator, List, Optional
+from typing import Dict, Generator, Optional
 
 import matplotlib
 import matplotlib.colors as mcolors

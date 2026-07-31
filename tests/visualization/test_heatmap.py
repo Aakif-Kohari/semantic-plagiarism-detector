@@ -37,29 +37,13 @@ def test_plot_similarity_heatmap_large_dataframe():
     assert isinstance(fig, Figure)
     # Verify the figure contains at least one Axes
     assert len(fig.axes) > 0
-test_heatmap.py
----------------
-Comprehensive unit tests for the heatmap visualization module.
 
-This module validates the behavior of both static (Matplotlib/Seaborn) and 
-interactive (Plotly) heatmap generation functions. It ensures robust handling 
-of edge cases, empty data, single-document matrices, masking thresholds, and 
-critical export functionalities such as PNG byte stream generation.
-
-Recent Additions (Issue #696):
-- Added rigorous assertions to verify that Matplotlib figure PNG exports 
-  produce valid, non-corrupted binary byte streams with correct magic headers.
-- Expanded parameterized testing for various dataframe shapes and configurations.
-"""
 
 import io
 
-import pandas as pd
-import pytest
 import matplotlib.pyplot as plt
 
 from src.visualization.heatmap import (
-    plot_similarity_heatmap,
     plot_similarity_heatmap_plotly,
 )
 

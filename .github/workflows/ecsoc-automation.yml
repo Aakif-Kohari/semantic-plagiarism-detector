@@ -278,20 +278,26 @@ jobs:
         with:
           script: |
             const pr = context.payload.pull_request;
-            const author = pr.user.login;
+            if (!pr) {
+              console.log("No pull_request in context payload. Skipping.");
+              return;
+            }
+            const author = pr.user ? pr.user.login : null;
             const action = context.payload.action;
 
             if (action === 'opened') {
-              // Assign PR author (if user is a collaborator)
-              try {
-                await github.rest.issues.addAssignees({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: pr.number,
-                  assignees: [author]
-                });
-              } catch (err) {
-                console.log(`Could not assign ${author} (user might not be a collaborator):`, err.message);
+              if (author) {
+                // Assign PR author (if user is a collaborator)
+                try {
+                  await github.rest.issues.addAssignees({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: pr.number,
+                    assignees: [author]
+                  });
+                } catch (err) {
+                  console.log(`Could not assign ${author} (user might not be a collaborator):`, err.message);
+                }
               }
 
               // Auto-label PR with ECSoC26
@@ -307,12 +313,18 @@ jobs:
               }
 
               // Welcome comment for PR
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: pr.number,
-                body: `🎉 Thanks @${author} for opening this Pull Request for **ECSoC26**! A maintainer will review it soon.`
-              });
+              if (author) {
+                try {
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: pr.number,
+                    body: `🎉 Thanks @${author} for opening this Pull Request for **ECSoC26**! A maintainer will review it soon.`
+                  });
+                } catch (err) {
+                  console.log("Could not post welcome comment:", err.message);
+                }
+              }
 
               // AI PR Reviewer
               try {
@@ -403,11 +415,12 @@ jobs:
               }
             } else if (action === 'closed' && pr.merged) {
               // Merge thank you comment for PR
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: pr.number,
-                body: `🎉 Hey @${author}!
+              try {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr.number,
+                  body: `🎉 Hey @${author || 'contributor'}!
 
 Your PR has been merged successfully! 🚀
 
@@ -423,7 +436,10 @@ If you enjoyed contributing:
 • 📢 Share your contribution with others
 
 Hope to see you back soon. Happy coding! ❤️`
-              });
+                });
+              } catch (err) {
+                console.log("Could not post PR merge comment:", err.message);
+              }
             }
 
   auto-unassign-stale:

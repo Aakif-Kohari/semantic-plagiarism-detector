@@ -11,7 +11,6 @@ import zipfile
 
 import shutil
 import subprocess
-import zipfile
 import xml.etree.ElementTree
 import tempfile
 from collections import Counter

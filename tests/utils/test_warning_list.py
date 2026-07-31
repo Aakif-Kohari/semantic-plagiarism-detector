@@ -1,4 +1,3 @@
-import pytest
 
 from src.utils.warning_list import (
     build_key_extractor,
