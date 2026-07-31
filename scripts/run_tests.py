@@ -5,6 +5,8 @@ import subprocess
 import sys
 from datetime import datetime
 
+from src.core.logging_config import setup_logging
+
 
 def check_dependencies():
     """Ensure pytest and coverage are installed."""
@@ -70,6 +72,8 @@ def run_tests(args):
         sys.exit(1)
 
 def main():
+    setup_logging()
+    
     parser = argparse.ArgumentParser(description="Automated Test Runner for Semantic Plagiarism Detector")
     group = parser.add_mutually_exclusive_group(required=False)
     group.add_argument("--all", action="store_true", help="Run the entire test suite (unit + integration)")

@@ -19,7 +19,7 @@ from src.core.app_config import get_pdf_footer_text
 from reportlab.lib.colors import HexColor
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
@@ -60,6 +60,23 @@ def load_branding_logo() -> bytes | None:
             return img_f.read()
     except Exception:
         return None
+
+
+def compute_text_stats(text: str) -> dict:
+    """Computes basic text statistics for document summary tables."""
+    words = text.split() if text else []
+    sentences = [s for s in text.split('.') if s.strip()] if text else []
+    unique_words = set(w.lower() for w in words)
+    word_count = len(words)
+    unique_count = len(unique_words)
+    ratio = unique_count / max(word_count, 1)
+    return {
+        "word_count": word_count,
+        "sentence_count": len(sentences),
+        "unique_word_count": unique_count,
+        "unique_word_ratio": ratio,
+    }
+
 
 
 def truncate_filename(filename: str, max_len: int = 30) -> str:
@@ -702,60 +719,5 @@ def highlight_pdf_matches(
     output_buffer = doc.tobytes()
     doc.close()
 
-    return output_buffer
 
-
-def highlight_pdf_matches(
-    pdf_source: str | bytes,
-    matching_chunks: List[str],
-    highlight_color: Tuple[float, float, float] = (1.0, 0.85, 0.0),  # Yellow
-) -> bytes:
-    """Opens a PDF, searches for matching text chunks, applies yellow highlights
-
-    on exact bounding box coordinates, and returns the modified PDF bytes.
-    """
-    if isinstance(pdf_source, bytes):
-        doc = fitz.open(stream=pdf_source, filetype="pdf")
-    else:
-        doc = fitz.open(pdf_source)
-
-    for page in doc:
-        for chunk in matching_chunks:
-            chunk_clean = str(chunk).strip()
-            # Avoid highlighting tiny single words/chars to prevent false positives
-            if len(chunk_clean) < 3:
-                continue
-
-            # Search page for matching text coordinates
-            quad_matches = page.search_for(chunk_clean)
-            for rect in quad_matches:
-                annot = page.add_highlight_annot(rect)
-                annot.set_colors(stroke=highlight_color)
-                annot.update()
-
-    output_bytes = doc.tobytes()
-    doc.close()
-
-    return output_bytes
-import os
-
-def truncate_filename(filename: str, max_len: int = 30) -> str:
-    """
-    Truncates a filename to max_len characters with an ellipsis if needed,
-    preserving its file extension.
-    """
-    if len(filename) <= max_len:
-        return filename
-
-    name, ext = os.path.splitext(filename)
-    needed_len = max_len - len(ext) - 3
-
-    if needed_len <= 2:
-        return filename[: max_len - 3] + "..."
-
-    half = needed_len // 2
-    truncated_name = f"{name[:half]}...{name[-(needed_len - half):]}"
-    return f"{truncated_name}{ext}"
-
-    return output_bytes
 

@@ -32,6 +32,14 @@ def test_embed_chunks_empty():
     result = embed_chunks([])
     assert result.size == 0
 
+def test_embed_empty_text(mock_model):
+    """Test embedding a single empty string."""
+
+    result = embedding_model.embed_chunks([""])
+
+    assert result.shape == (1, 384)
+    assert result.dtype == np.float32
+
 
 def test_embed_chunks_returns_float32(mock_model):
     mock_model.encode.side_effect = lambda texts, **kw: np.ones(

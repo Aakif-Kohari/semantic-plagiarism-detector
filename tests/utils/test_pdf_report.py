@@ -504,7 +504,7 @@ def test_generate_plagiarism_report_dark_mode():
 def test_load_branding_logo_returns_bytes_for_valid_path(tmp_path):
     """load_branding_logo returns bytes when logo_path points to a real file."""
     import json
-    from src.utils.pdf_report import load_branding_logo, _BRANDING_CONFIG_PATH
+    from src.utils.pdf_report import load_branding_logo
 
     logo_file = tmp_path / "logo.png"
     logo_file.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)  # minimal PNG header

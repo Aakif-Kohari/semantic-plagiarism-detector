@@ -1,6 +1,5 @@
 import csv
 import io
-import time
 from datetime import datetime, timedelta, timezone
 
 import pytest

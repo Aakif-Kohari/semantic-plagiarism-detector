@@ -202,7 +202,7 @@ def generate_badge_pdf(
     Returns:
         BytesIO buffer containing the PDF certificate
     """
-brand_hex = validate_hex_color(brand_color)
+    brand_hex = validate_hex_color(brand_color)
     brand_clr = HexColor(brand_hex)
     buffer = BytesIO()
     doc = SimpleDocTemplate(

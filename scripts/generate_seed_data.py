@@ -135,7 +135,6 @@ def _clean_seed_files() -> None:
 
 def main(argv: list[str] | None = None) -> None:
     import importlib
-    import types
 
     _init_py = os.path.join(ROOT_DIR, "src", "__init__.py")
     with open(_init_py, "r", encoding="utf-8") as _f:
@@ -162,7 +161,7 @@ def main(argv: list[str] | None = None) -> None:
             add_document,
             init_corpus_db,
         )
-        from src.db.incidents import DEFAULT_DB_PATH, sync_flagged_incidents  # noqa: F811
+        from src.db.incidents import sync_flagged_incidents  # noqa: F811
 
         config = parse_args(argv)
 
