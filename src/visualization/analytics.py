@@ -42,7 +42,47 @@ def build_visualization_lazily(
         return None
 
     return factory()
+def get_top_similar_pairs(
+    similarity_df: pd.DataFrame,
+    top_n: int = 5,
+) -> list[tuple[str, str, float]]:
+    """
+    Return the top-N highest similarity document pairs.
 
+    Extracts only the upper triangle of the similarity matrix to avoid
+    duplicate pairs and excludes self-similarity.
+
+    Args:
+        similarity_df: Square DataFrame containing pairwise similarity scores.
+        top_n: Number of highest similarity pairs to return.
+
+    Returns:
+        List of tuples in the form:
+        (document_a, document_b, similarity_score)
+        sorted by similarity score in descending order.
+    """
+    if similarity_df.empty or similarity_df.shape[0] < 2:
+        return []
+
+    pairs: list[tuple[str, str, float]] = []
+
+    doc_names = list(similarity_df.index)
+
+    for i in range(len(doc_names)):
+        for j in range(i + 1, len(doc_names)):
+            score = float(similarity_df.iloc[i, j])
+
+            pairs.append(
+                (
+                    doc_names[i],
+                    doc_names[j],
+                    score,
+                )
+            )
+
+    pairs.sort(key=lambda pair: pair[2], reverse=True)
+
+    return pairs[:top_n]
 def plot_high_severity_trends(trend_data: list[dict[str, Any]], show_grid: bool = True) -> go.Figure:
     """
     Create an interactive line chart showing High severity plagiarism incidents over time.
