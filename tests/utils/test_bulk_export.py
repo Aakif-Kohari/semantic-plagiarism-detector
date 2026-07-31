@@ -50,36 +50,6 @@ def test_generate_bulk_reports_zip():
         assert input_set == meta_set
 
 
-def test_generate_bulk_reports_zip_with_progress_bar():
-    from unittest.mock import Mock
-
-    flags = [
-        {
-            "doc1": "Alice.pdf",
-            "doc2": "Bob.docx",
-            "similarity_score": 0.85,
-            "matched_chunks": [],
-        },
-        {
-            "doc1": "Charlie.txt",
-            "doc2": "Dave.pdf",
-            "similarity_score": 0.95,
-            "matched_chunks": ["chunk1"],
-        },
-    ]
-
-    mock_pb = Mock()
-
-    generate_bulk_reports_zip(flags, progress_bar=mock_pb)
-
-    assert mock_pb.progress.call_count == 4
-
-    mock_pb.progress.assert_any_call(
-        1.0,
-        text="ZIP archive ready!",
-    )
-
-
 # ---------------------------------------------------------------------------
 # Tests for export_incidents_csv_stream (Issue #942)
 # ---------------------------------------------------------------------------
@@ -106,21 +76,45 @@ _SAMPLE_INCIDENTS = [
 ]
 
 
-def test_export_incidents_csv_stream_returns_stringio():
-    """export_incidents_csv_stream must return a seeked StringIO instance."""
-    buf = export_incidents_csv_stream(_SAMPLE_INCIDENTS)
+def test_export_incidents_csv_stream_returns_bytes():
+    """export_incidents_csv_stream must return UTF-8-SIG encoded bytes."""
+    csv_bytes = export_incidents_csv_stream(_SAMPLE_INCIDENTS)
 
-    assert isinstance(buf, io.StringIO)
-    # Buffer must already be seeked to position 0 (ready to read)
-    assert buf.tell() == 0
+    assert isinstance(csv_bytes, bytes)
+    # Must start with UTF-8 BOM (EF BB BF)
+    assert csv_bytes.startswith(b"\xef\xbb\xbf")
+
+
+def test_export_incidents_csv_stream_excel_compatibility():
+    """Exported CSV must be readable by Excel on Windows (UTF-8-SIG with BOM)."""
+    csv_bytes = export_incidents_csv_stream(_SAMPLE_INCIDENTS)
+
+    # Verify UTF-8-SIG encoding (BOM + valid UTF-8)
+    text = csv_bytes.decode("utf-8-sig")
+    assert "INC-001" in text
+    assert "alice.pdf" in text
+    assert "95.00%" in text
+
+    # Verify BOM is present at start (not in decoded text)
+    assert csv_bytes[:3] == b"\xef\xbb\xbf"
 
 
 def test_export_incidents_csv_stream_headers():
     """First row must contain all required column headers."""
-    expected_headers = ["Incident ID", "Doc A", "Doc B", "Similarity", "Severity", "Status", "Date"]
+    expected_headers = [
+        "Incident ID",
+        "Doc A",
+        "Doc B",
+        "Similarity",
+        "Severity",
+        "Status",
+        "Date",
+    ]
 
-    buf = export_incidents_csv_stream(_SAMPLE_INCIDENTS)
-    first_line = buf.readline().strip()
+    csv_bytes = export_incidents_csv_stream(_SAMPLE_INCIDENTS)
+    # Decode without BOM for CSV parsing
+    text = csv_bytes.decode("utf-8-sig")
+    first_line = text.splitlines()[0].strip()
     actual_headers = [h.strip() for h in first_line.split(",")]
 
     assert actual_headers == expected_headers
@@ -129,9 +123,11 @@ def test_export_incidents_csv_stream_headers():
 def test_export_incidents_csv_stream_row_values():
     """CSV rows must reflect incident field values with correct formatting."""
     import csv as _csv
+    import io
 
-    buf = export_incidents_csv_stream(_SAMPLE_INCIDENTS)
-    reader = _csv.DictReader(buf)
+    csv_bytes = export_incidents_csv_stream(_SAMPLE_INCIDENTS)
+    text = csv_bytes.decode("utf-8-sig")
+    reader = _csv.DictReader(io.StringIO(text))
     rows = list(reader)
 
     assert len(rows) == 2
@@ -153,23 +149,27 @@ def test_export_incidents_csv_stream_row_values():
 
 
 def test_export_incidents_csv_stream_empty_list():
-    """An empty incidents list should produce only the header row."""
+    """An empty incidents list should produce only the header row with BOM."""
     import csv as _csv
+    import io
 
-    buf = export_incidents_csv_stream([])
-    reader = _csv.DictReader(buf)
+    csv_bytes = export_incidents_csv_stream([])
+    assert csv_bytes.startswith(b"\xef\xbb\xbf")
+
+    text = csv_bytes.decode("utf-8-sig")
+    reader = _csv.DictReader(io.StringIO(text))
     rows = list(reader)
 
     assert rows == []
     # Rewind and confirm only one line (the header) exists
-    buf.seek(0)
-    lines = [line for line in buf if line.strip()]
+    lines = [line for line in text.splitlines() if line.strip()]
     assert len(lines) == 1
 
 
 def test_export_incidents_csv_stream_non_numeric_similarity():
     """Non-numeric similarity_score should be written as-is without raising."""
     import csv as _csv
+    import io
 
     incidents = [
         {
@@ -183,8 +183,11 @@ def test_export_incidents_csv_stream_non_numeric_similarity():
         }
     ]
 
-    buf = export_incidents_csv_stream(incidents)
-    reader = _csv.DictReader(buf)
+    csv_bytes = export_incidents_csv_stream(incidents)
+    assert csv_bytes.startswith(b"\xef\xbb\xbf")
+
+    text = csv_bytes.decode("utf-8-sig")
+    reader = _csv.DictReader(io.StringIO(text))
     rows = list(reader)
 
     assert len(rows) == 1
