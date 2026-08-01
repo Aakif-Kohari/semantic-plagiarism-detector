@@ -24,7 +24,7 @@ from src.security.ssrf_protector import (
 )
 
 
-def test_private_subnet_blocked(monkeypatch):
+def test_private_subnet_blocked(monkeypatch, caplog):
     SSRFProtector.configure_allowed_cidrs(None)
 
     monkeypatch.setattr(
@@ -37,6 +37,7 @@ def test_private_subnet_blocked(monkeypatch):
         SSRFProtector.validate_webhook_url(
             "https://internal.example.com"
         )
+    assert "Blocked SSRF attempt to target URL: https://internal.example.com" in caplog.text
     assert (
         SSRFProtector.validate_webhook_url(
             "https://internal.example.com"
@@ -72,10 +73,11 @@ def test_validate_webhook_url_dns_failure(mock_getaddrinfo):
 
 
 @patch("src.security.ssrf_protector.socket.getaddrinfo")
-def test_validate_webhook_url_loopback(mock_getaddrinfo):
+def test_validate_webhook_url_loopback(mock_getaddrinfo, caplog):
     mock_getaddrinfo.return_value = [(2, 1, 6, "", ("127.0.0.1", 443))]
     with pytest.raises(SSRFSecurityException, match="Blocked loopback IP: 127.0.0.1"):
         SSRFProtector.validate_webhook_url("https://localhost:8080/hook")
+    assert "Blocked SSRF attempt to target URL: https://localhost:8080/hook" in caplog.text
 
 
 @patch("src.security.ssrf_protector.socket.getaddrinfo")
@@ -90,78 +92,88 @@ def test_validate_webhook_url_loopback(mock_getaddrinfo):
     ],
 )
 def test_validate_webhook_url_private_ipv4_subnet_blocklist(
-    mock_getaddrinfo, blocked_ip
+    mock_getaddrinfo, blocked_ip, caplog
 ):
     mock_getaddrinfo.return_value = [(2, 1, 6, "", (blocked_ip, 443))]
     with pytest.raises(SSRFSecurityException, match="Blocked private network IP"):
         SSRFProtector.validate_webhook_url("https://internal.corp.network/webhook")
+    assert "Blocked SSRF attempt to target URL: https://internal.corp.network/webhook" in caplog.text
 
 
 @patch("src.security.ssrf_protector.socket.getaddrinfo")
-def test_validate_webhook_url_link_local(mock_getaddrinfo):
+def test_validate_webhook_url_link_local(mock_getaddrinfo, caplog):
     mock_getaddrinfo.return_value = [(2, 1, 6, "", ("169.254.169.254", 443))]
     with pytest.raises(
         SSRFSecurityException, match="Blocked link-local IP: 169.254.169.254"
     ):
         SSRFProtector.validate_webhook_url("https://aws-metadata-service.local/data")
+    assert "Blocked SSRF attempt to target URL: https://aws-metadata-service.local/data" in caplog.text
 
 
 @patch("src.security.ssrf_protector.socket.getaddrinfo")
-def test_validate_webhook_url_multicast(mock_getaddrinfo):
+def test_validate_webhook_url_multicast(mock_getaddrinfo, caplog):
     mock_getaddrinfo.return_value = [(2, 1, 6, "", ("224.0.0.1", 443))]
     with pytest.raises(SSRFSecurityException, match="Blocked multicast IP: 224.0.0.1"):
         SSRFProtector.validate_webhook_url("https://multicast.local/data")
+    assert "Blocked SSRF attempt to target URL: https://multicast.local/data" in caplog.text
 
 
 @patch("src.security.ssrf_protector.socket.getaddrinfo")
-def test_validate_webhook_url_ipv6_loopback(mock_getaddrinfo):
+def test_validate_webhook_url_ipv6_loopback(mock_getaddrinfo, caplog):
     mock_getaddrinfo.return_value = [(10, 1, 6, "", ("::1", 443, 0, 0))]
     with pytest.raises(SSRFSecurityException, match="Blocked loopback IP: ::1"):
         SSRFProtector.validate_webhook_url("https://ipv6-localhost.local/hook")
+    assert "Blocked SSRF attempt to target URL: https://ipv6-localhost.local/hook" in caplog.text
 
 
 @patch("src.security.ssrf_protector.socket.getaddrinfo")
-def test_validate_webhook_url_ipv6_private(mock_getaddrinfo):
+def test_validate_webhook_url_ipv6_private(mock_getaddrinfo, caplog):
     mock_getaddrinfo.return_value = [(10, 1, 6, "", ("fd00::1", 443, 0, 0))]
     with pytest.raises(
         SSRFSecurityException, match="Blocked private network IP: fd00::1"
     ):
         SSRFProtector.validate_webhook_url("https://ipv6-internal.local/hook")
+    assert "Blocked SSRF attempt to target URL: https://ipv6-internal.local/hook" in caplog.text
 
 
 @patch("src.security.ssrf_protector.socket.getaddrinfo")
-def test_validate_webhook_url_ipv6_link_local(mock_getaddrinfo):
+def test_validate_webhook_url_ipv6_link_local(mock_getaddrinfo, caplog):
     mock_getaddrinfo.return_value = [(10, 1, 6, "", ("fe80::1", 443, 0, 0))]
     with pytest.raises(SSRFSecurityException, match="Blocked link-local IP: fe80::1"):
         SSRFProtector.validate_webhook_url("https://ipv6-link-local.local/hook")
+    assert "Blocked SSRF attempt to target URL: https://ipv6-link-local.local/hook" in caplog.text
 
 
 @patch("src.security.ssrf_protector.socket.getaddrinfo")
-def test_validate_webhook_url_ipv6_multicast(mock_getaddrinfo):
+def test_validate_webhook_url_ipv6_multicast(mock_getaddrinfo, caplog):
     mock_getaddrinfo.return_value = [(10, 1, 6, "", ("ff00::1", 443, 0, 0))]
     with pytest.raises(SSRFSecurityException, match="Blocked multicast IP: ff00::1"):
         SSRFProtector.validate_webhook_url("https://ipv6-multicast.local/hook")
+    assert "Blocked SSRF attempt to target URL: https://ipv6-multicast.local/hook" in caplog.text
 
 
 @patch("src.security.ssrf_protector.socket.getaddrinfo")
-def test_validate_webhook_url_ipv6_unspecified(mock_getaddrinfo):
+def test_validate_webhook_url_ipv6_unspecified(mock_getaddrinfo, caplog):
     mock_getaddrinfo.return_value = [(10, 1, 6, "", ("::", 443, 0, 0))]
     with pytest.raises(SSRFSecurityException, match="Blocked unspecified IP"):
         SSRFProtector.validate_webhook_url("https://unspecified.local/hook")
+    assert "Blocked SSRF attempt to target URL: https://unspecified.local/hook" in caplog.text
 
 
 @patch("src.security.ssrf_protector.socket.getaddrinfo")
-def test_validate_webhook_url_ipv6_mapped_ipv4_loopback(mock_getaddrinfo):
+def test_validate_webhook_url_ipv6_mapped_ipv4_loopback(mock_getaddrinfo, caplog):
     mock_getaddrinfo.return_value = [(10, 1, 6, "", ("::ffff:127.0.0.1", 443, 0, 0))]
     with pytest.raises(SSRFSecurityException, match="Blocked loopback IP"):
         SSRFProtector.validate_webhook_url("https://mapped-ipv6-loopback.local/hook")
+    assert "Blocked SSRF attempt to target URL: https://mapped-ipv6-loopback.local/hook" in caplog.text
 
 
 @patch("src.security.ssrf_protector.socket.getaddrinfo")
-def test_validate_webhook_url_ipv6_mapped_ipv4_private(mock_getaddrinfo):
+def test_validate_webhook_url_ipv6_mapped_ipv4_private(mock_getaddrinfo, caplog):
     mock_getaddrinfo.return_value = [(10, 1, 6, "", ("::ffff:10.0.0.1", 443, 0, 0))]
     with pytest.raises(SSRFSecurityException, match="Blocked private network IP"):
         SSRFProtector.validate_webhook_url("https://mapped-ipv6-private.local/hook")
+    assert "Blocked SSRF attempt to target URL: https://mapped-ipv6-private.local/hook" in caplog.text
 
 
 @patch("src.security.ssrf_protector.socket.getaddrinfo")

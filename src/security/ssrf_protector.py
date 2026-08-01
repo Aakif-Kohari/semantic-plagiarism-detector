@@ -151,16 +151,22 @@ class SSRFProtector:
         if isinstance(ip, ipaddress.IPv4Address):
             for subnet in cls.BLOCKED_PRIVATE_IPV4_SUBNETS:
                 if ip in subnet:
+                    logger.warning("Blocked SSRF attempt to target URL: %s", url)
                     raise SSRFSecurityException(SSRF_BLOCKED_PRIVATE.format(ip=ip_str))
         if ip.is_loopback:
+            logger.warning("Blocked SSRF attempt to target URL: %s", url)
             raise SSRFSecurityException(SSRF_BLOCKED_LOOPBACK.format(ip=ip_str))
         if ip.is_link_local:
+            logger.warning("Blocked SSRF attempt to target URL: %s", url)
             raise SSRFSecurityException(SSRF_BLOCKED_LINK_LOCAL.format(ip=ip_str))
         if ip.is_multicast:
+            logger.warning("Blocked SSRF attempt to target URL: %s", url)
             raise SSRFSecurityException(SSRF_BLOCKED_MULTICAST.format(ip=ip_str))
         if ip.is_unspecified:
+            logger.warning("Blocked SSRF attempt to target URL: %s", url)
             raise SSRFSecurityException(SSRF_BLOCKED_UNSPECIFIED.format(ip=ip_str))
         if ip.is_private:
+            logger.warning("Blocked SSRF attempt to target URL: %s", url)
             raise SSRFSecurityException(SSRF_BLOCKED_PRIVATE.format(ip=ip_str))
 
         # If it passed all checks, it's considered safe (public routable IP)
