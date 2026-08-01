@@ -225,16 +225,26 @@ The CLI is covered by automated tests that verify:
 - Errors and warnings are written to standard error (stderr).
 - Reports can be redirected to a file using standard shell redirection.
 
-## Optimize a SQLite database
+## Database migration status
 
-Reclaim pages left behind by document deletions and refresh SQLite query
-planner statistics without starting Streamlit:
+Inspect schema migrations without modifying the database:
 
 ```powershell
-python -m src.cli --optimize corpus.db
-python -m src.cli --optimize users.db
+python -m src.cli db-status corpus.db --db-type corpus
 ```
 
-The command validates the SQLite header and integrity, checkpoints committed
-WAL pages, runs `PRAGMA optimize`, `VACUUM`, and `ANALYZE`, then closes its
-dedicated connection. It exits with code `0` on success and `1` on failure.
+The issue-requested flag form is also supported:
+
+```powershell
+python -m src.cli --db-status users.db --db-type auth
+```
+
+JSON output:
+
+```powershell
+python -m src.cli db-status corpus.db --db-type corpus --output-format json
+```
+
+The command reports the current schema version, supported target version, and
+ordered pending migration versions. It opens the database read-only and never
+applies migrations.
