@@ -6,7 +6,8 @@ import io as _io
 import logging
 import os
 import traceback
-import functoolsfrom pathlib import Path
+import functools
+from pathlib import Path
 import sqlite3
 import sys
 import time
@@ -201,11 +202,13 @@ from src.utils.badge_generator import (
 )
 from src.db.corpus_db import (
     delete_tag,
+    get_all_documents,
     get_all_tags,
     get_document_tags,
     get_tag_document_count,
     init_corpus_db,
-)from src.db.incidents import (
+)
+from src.db.incidents import (
     get_all_incidents_above_threshold_for_export,
     get_high_severity_trends,
     get_most_plagiarized_documents,
@@ -295,12 +298,7 @@ try:
 except Exception:
     bulk_download_drive_folder = None
 
-class OCRFileBatchError(Exception):
-    """Exception raised when OCR extraction fails on one or more files in a batch."""
-    def __init__(self, failed_files: list[str], failure_details: list[str]):
-        self.failed_files = failed_files
-        self.failure_details = failure_details
-        super().__init__(f"OCR failed for files: {failed_files}")
+from src.errors import OCRFileBatchError
 
 # Initialize databases
 init_corpus_db()
@@ -1064,51 +1062,7 @@ else:
             "○ No index loaded</span>",
             unsafe_allow_html=True,
         )
-
-    chunked_docs = chunk_documents(
-        raw_texts,
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-    )
-    translated_chunked_docs = {}
-
-    for doc_name, chunks in chunked_docs.items():
-        translated_chunked_docs[doc_name] = []
-        for chunk in chunks:
-            prepared = prepare_text_for_embedding(chunk)
-            translated_chunked_docs[doc_name].append(prepared["embedding_text"])
-
-    embeddings = embed_documents(translated_chunked_docs)
-    sim_df = document_similarity_matrix(embeddings)
-
-    names = list(embeddings.keys())
-    n = len(names)
-    chunk_mat = np.zeros((n, n))
-
-    for i, na in enumerate(names):
-        for j, nb in enumerate(names):
-            if i == j:
-                chunk_mat[i, j] = 1.0
-            elif j > i:
-                ea, eb = embeddings[na], embeddings[nb]
-                score = float(np.max(cosine_similarity(ea, eb))) if ea.size and eb.size else 0.0
-                chunk_mat[i, j] = score
-                chunk_mat[j, i] = score
-
-    chunk_sim_df = pd.DataFrame(chunk_mat, index=names, columns=names)
-    faiss_index, registry = build_index(embeddings, chunked_docs)
-    ai_probabilities = detect_documents_ai_probability(chunked_docs)
-
-    return (
-        raw_texts,
-        chunked_docs,
-        embeddings,
-        sim_df,
-        chunk_sim_df,
-        faiss_index,
-        registry,
-        ai_probabilities,
-    )
+    st.markdown("---")
 
 with st.spinner("🧠 Processing files and building embeddings…"):
     analysis_results = run_pipeline(
@@ -1156,6 +1110,7 @@ if user_role == "admin":
     if existing_docs:
         st.write(f"**{len(existing_docs)}** documents in database")
         for doc in existing_docs:
+            st.text(doc)
     # ── SESSION EXPIRY COUNTDOWN TIMER WIDGET ─────────────────────────────────
     # Injects a lightweight JavaScript countdown that updates every second
     # without requiring Streamlit reruns, improving UX and reducing server load.
@@ -1617,34 +1572,18 @@ else:
             chunk_size,
             chunk_overlap,
         )
-        st.stop()
+        st.session_state["scanning"] = False
+        active_sim_df = chunk_sim_df if use_chunk_matrix else sim_df
+        flags = flag_plagiarism(active_sim_df, threshold=threshold)
 
-    # Process files pipeline
-    raw_texts = {}
-    for name, data in file_bytes_dict.items():
-        raw_texts[name] = extract_text(_io.BytesIO(data), name, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
-
-    chunked_docs = chunk_documents(raw_texts)
-    embeddings = embed_documents(chunked_docs)
-    sim_df = document_similarity_matrix(embeddings)
-    faiss_index, registry = build_index(embeddings, chunked_docs)
-    ai_probabilities = detect_documents_ai_probability(chunked_docs)
-
-    active_sim_df = sim_df
-    flags = flag_plagiarism(active_sim_df, threshold=threshold)
-    
-    # Sync incidents to database
-    init_incident_db()
-    incidents = sync_flagged_incidents(flags)
-
-    st.session_state["scanning"] = False
-    active_sim_df = chunk_sim_df if use_chunk_matrix else sim_df
-    flags = flag_plagiarism(active_sim_df, threshold=threshold)
-else:
-    flags = []
-    active_sim_df = None
-    raw_texts = {}
-    ai_probabilities = {}
+        # Sync incidents to database
+        init_incident_db()
+        incidents = sync_flagged_incidents(flags)
+    else:
+        flags = []
+        active_sim_df = None
+        raw_texts = {}
+        ai_probabilities = {}
 
 st.subheader(get_text("analysis_summary", lang=lang_code))
 doc_names = list(raw_texts.keys())
@@ -1721,9 +1660,10 @@ with tab_heatmap:
     update_page_title("Heatmap")
     st.subheader("🗺️ Heatmap & Network")
     if active_sim_df is not None:
-heatmap_fig = ui_exception_handler("Similarity Heatmap")(plot_similarity_heatmap)(
+        heatmap_fig = ui_exception_handler("Similarity Heatmap")(plot_similarity_heatmap)(
             active_sim_df, threshold=threshold, theme_colors=get_colors()
-        )    else:
+        )
+    else:
         with st.expander(
             "🗺️ Similarity Heatmap",
             expanded=False,
@@ -1797,7 +1737,7 @@ lambda: ui_exception_handler("Similarity Heatmap")(plot_similarity_heatmap)(    
             else None
         )
 
-network_fig = ui_exception_handler("Plagiarism Network")(plot_similarity_network)(
+        network_fig = ui_exception_handler("Plagiarism Network")(plot_similarity_network)(
             similarity_df=active_sim_df,
             threshold=threshold,
             highlighted_doc=highlighted_doc,
@@ -2124,7 +2064,7 @@ with tab_settings:
                 key="ocr_dpi_slider",
             )
 
-st.markdown("### 🏷️ Tag Management")
+        st.markdown("### 🏷️ Tag Management")
         all_tags = get_all_tags()
         if all_tags:
             tag_to_delete = st.selectbox(
@@ -2145,7 +2085,8 @@ st.markdown("### 🏷️ Tag Management")
         else:
             st.caption("No tags found in the corpus.")
 
-        st.markdown("### 💾 Backup")        from src.db.database_backup import (
+        st.markdown("### 💾 Backup")
+        from src.db.database_backup import (
             create_corpus_database_snapshot,
             create_password_protected_backup,
         )
