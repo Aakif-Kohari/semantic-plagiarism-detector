@@ -1,7 +1,7 @@
 import pytest
 
-from src.utils.filename import (sanitize_filename, sanitize_filename_mapping,
-                                unique_filename)
+from src.utils.filename import (_safe_extension, sanitize_filename,
+                                sanitize_filename_mapping, unique_filename)
 
 
 @pytest.mark.parametrize(
@@ -87,6 +87,24 @@ def test_mapping_preserves_entries_after_sanitization_collision():
         "report.pdf": b"one",
         "report_1.pdf": b"two",
     }
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected"),
+    [
+        (".PDF", ".pdf"),
+        (".DocX", ".docx"),
+        ("file.txt", ".txt"),
+        ("no_extension", ""),
+    ],
+)
+def test_get_file_extension_sanitized(filename, expected):
+    """get_file_extension_sanitized returns lowercase, well-formed extensions."""
+    assert _safe_extension(filename) == expected
+
+
+def test_get_file_extension_sanitized_handles_empty_filename():
+    assert _safe_extension("") == ""
 
 
 @pytest.mark.parametrize("value", [True, 7.5, "255"])
