@@ -107,7 +107,7 @@ def test_plot_similarity_heatmap_single(single_doc_df: pd.DataFrame) -> None:
 
 
 def test_plot_similarity_heatmap_multi(multi_doc_df: pd.DataFrame) -> None:
-    fig = plot_similarity_heatmap(multi_doc_df, title="Multi Document Heatmap", annotate=True)
+    fig = plot_similarity_heatmap(multi_doc_df, title="Multi Document Heatmap", show_annotations=True)
     main_ax = next((ax for ax in fig.axes if ax.get_title() == "Multi Document Heatmap"), None)
     assert main_ax is not None
     assert len(main_ax.texts) > 0
@@ -117,7 +117,7 @@ def test_plot_similarity_heatmap_multi(multi_doc_df: pd.DataFrame) -> None:
 
 
 def test_plot_similarity_heatmap_no_annotation(multi_doc_df: pd.DataFrame) -> None:
-    fig = plot_similarity_heatmap(multi_doc_df, title="No Annotation Heatmap", annotate=False)
+    fig = plot_similarity_heatmap(multi_doc_df, title="No Annotation Heatmap", show_annotations=False)
     main_ax = next((ax for ax in fig.axes if ax.get_title() == "No Annotation Heatmap"), None)
     assert main_ax is not None
     assert len(main_ax.texts) == 0
@@ -161,7 +161,7 @@ def test_plot_similarity_heatmap_plotly_no_annotation(multi_doc_df: pd.DataFrame
     fig = plot_similarity_heatmap_plotly(
         multi_doc_df, 
         title="No Annotation Plotly Heatmap", 
-        annotate=False
+        show_annotations=False
     )
     assert hasattr(fig, "layout")
     assert len(fig.layout.annotations) == 0

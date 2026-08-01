@@ -1717,7 +1717,7 @@ lambda: ui_exception_handler("Similarity Heatmap")(plot_similarity_heatmap)(    
                     threshold=threshold,
                     theme_colors=get_colors(),
                     colormap_name=heatmap_cmap,
-                    annotate=show_cell_percentages,
+                    show_annotations=show_cell_percentages,
                     mask_threshold=mask_threshold,
                     class_tag=heatmap_class_filter,
                     dim_diagonal=dim_diagonal,
