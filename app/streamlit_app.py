@@ -198,8 +198,13 @@ from src.utils.badge_generator import (
     generate_badge_png,
     generate_badge_pdf,
 )
-from src.db.corpus_db import get_document_tags, init_corpus_db
-from src.db.incidents import (
+from src.db.corpus_db import (
+    delete_tag,
+    get_all_tags,
+    get_document_tags,
+    get_tag_document_count,
+    init_corpus_db,
+)from src.db.incidents import (
     get_all_incidents_above_threshold_for_export,
     get_high_severity_trends,
     get_most_plagiarized_documents,
@@ -2111,8 +2116,28 @@ with tab_settings:
                 key="ocr_dpi_slider",
             )
 
-        st.markdown("### 💾 Backup")
-        from src.db.database_backup import (
+st.markdown("### 🏷️ Tag Management")
+        all_tags = get_all_tags()
+        if all_tags:
+            tag_to_delete = st.selectbox(
+                "Select Tag to Delete",
+                options=all_tags,
+                key="tag_delete_selectbox",
+            )
+            affected_docs = get_tag_document_count(tag_to_delete)
+            with st.popover("🗑️ Delete Tag"):
+                st.warning(
+                    f"Are you sure you want to delete tag '{tag_to_delete}'? "
+                    f"This affects {affected_docs} documents."
+                )
+                if st.button("Confirm Delete", key="confirm_delete_tag_button"):
+                    delete_tag(tag_to_delete)
+                    st.success(f"✅ Tag '{tag_to_delete}' deleted successfully!")
+                    st.rerun()
+        else:
+            st.caption("No tags found in the corpus.")
+
+        st.markdown("### 💾 Backup")        from src.db.database_backup import (
             create_corpus_database_snapshot,
             create_password_protected_backup,
         )
