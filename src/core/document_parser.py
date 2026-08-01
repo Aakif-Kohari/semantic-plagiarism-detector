@@ -34,6 +34,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 from src.core.translator import translate_text
+import string
 
 # OCR dependencies are imported lazily so TXT/DOCX and normal text PDFs still
 # work even when Tesseract is not installed on the machine.
@@ -57,6 +58,22 @@ MAX_BATCH_SIZE = 50
 # File extensions supported by the extraction pipeline, exposed for UI display
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".csv", ".epub", ".html", ".md", ".markdown", ".mdown", ".rtf", ".txt"}
 ZERO_WIDTH_CHARS_PATTERN = re.compile(r"[\u200B\u200C\u200D\uFEFF\u2060\u200E\u200F]")
+
+# Standard English stopwords for lexical analysis noise reduction
+ENGLISH_STOPWORDS = frozenset({
+    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
+    "of", "with", "by", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did", "will", "would", "shall",
+    "should", "can", "could", "may", "might", "must", "i", "me", "my",
+    "myself", "we", "our", "ours", "ourselves", "you", "your", "yours",
+    "yourself", "yourselves", "he", "him", "his", "himself", "she", "her",
+    "hers", "herself", "it", "its", "itself", "they", "them", "their",
+    "theirs", "themselves", "what", "which", "who", "whom", "this", "that",
+    "these", "those", "am", "as", "if", "then", "than", "too", "very", "s",
+    "t", "just", "don", "now", "d", "ll", "m", "o", "re", "ve", "y", "ain",
+    "aren", "couldn", "didn", "doesn", "hadn", "hasn", "haven", "isn", "ma",
+    "mightn", "mustn", "needn", "shan", "shouldn", "wasn", "weren", "won", "wouldn"
+})
 
 
 def sanitize_zero_width_characters(text: str, filename: Optional[str] = None) -> str:
@@ -193,8 +210,19 @@ def strip_bibliography(text: str) -> str:
 
 
 
-def clean_text(raw_text: str) -> str:
-    """Normalize whitespace and remove unwanted Unicode characters."""
+def clean_text(raw_text: str, remove_stopwords: bool = False) -> str:
+    """
+    Normalize whitespace and remove unwanted Unicode characters.
+    Optionally removes standard English stopwords to reduce noise in lexical analysis.
+
+    Args:
+        raw_text (str): The raw text string to be cleaned.
+        remove_stopwords (bool): If True, filters out standard English stopwords.
+                                 Defaults to False.
+
+    Returns:
+        str: The cleaned and optionally filtered text.
+    """
     text = raw_text
 
     text = text.translate(
@@ -216,6 +244,15 @@ def clean_text(raw_text: str) -> str:
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = re.sub(r"[ \t]+\n", "\n", text)
     text = re.sub(r"\n[ \t]+", "\n", text)
+
+    if remove_stopwords:
+        # Tokenize, filter, and rejoin while preserving basic structure
+        words = text.split()
+        filtered_words = [
+            word for word in words
+            if word.lower().strip(string.punctuation) not in ENGLISH_STOPWORDS
+        ]
+        text = " ".join(filtered_words)
 
     return text.strip()
 

@@ -259,6 +259,22 @@ def get_rate_limit():
     }
 
 
+@app.get(
+    "/api/v1/version",
+    tags=["System Administration"],
+    summary="Get API version",
+    status_code=status.HTTP_200_OK,
+)
+def get_version(request: Request):
+    """
+    Return the lightweight API version.
+    """
+    return {
+        "version": request.app.version,
+        "status": "active",
+    }
+
+
 @app.post(
     "/api/v1/scan",
     tags=["Plagiarism Detection"],
@@ -299,8 +315,8 @@ async def scan_document(
 
     if len(file_bytes) == 0:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Uploaded file is empty",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file is empty (0 bytes)",
         )
 
     # Extract text from uploaded document
