@@ -1,12 +1,11 @@
+from unittest.mock import MagicMock, patch
+
 import numpy as np
 import pytest
-from unittest.mock import patch, MagicMock
+
 import src.core.embedding_model as embedding_model
-from src.core.embedding_model import (
-    embed_chunks,
-    embed_documents,
-    get_document_embedding,
-)
+from src.core.embedding_model import (EmbeddingModelManager, embed_chunks,
+                                      embed_documents, get_document_embedding)
 
 
 def _mock_encode(
@@ -32,6 +31,14 @@ def test_embed_chunks_shape(mock_model):
 def test_embed_chunks_empty():
     result = embed_chunks([])
     assert result.size == 0
+
+def test_embed_empty_text(mock_model):
+    """Test embedding a single empty string."""
+
+    result = embedding_model.embed_chunks([""])
+
+    assert result.shape == (1, 384)
+    assert result.dtype == np.float32
 
 
 def test_embed_chunks_returns_float32(mock_model):
@@ -96,3 +103,33 @@ def test_get_model_uses_environment_override(monkeypatch):
 
     assert result is model
     sentence_transformer.assert_called_once_with("distiluse-base-multilingual-cased-v2")
+
+
+def test_embedding_model_manager_fallback(caplog, monkeypatch):
+    """Test that EmbeddingModelManager falls back to lightweight model and logs a warning on failure."""
+    import logging
+
+    monkeypatch.setattr(embedding_model, "_model", None)
+    monkeypatch.setattr(EmbeddingModelManager, "_instance", None)
+
+    primary = embedding_model._get_model_name()
+    fallback = "all-MiniLM-L6-v2"
+
+    def mock_sentence_transformer(model_name):
+        if model_name == primary:
+            raise RuntimeError("Failed to load primary model")
+        return MagicMock()
+
+    monkeypatch.setattr(embedding_model, "SentenceTransformer", mock_sentence_transformer)
+
+    with caplog.at_level(logging.WARNING):
+        manager = EmbeddingModelManager.get_instance()
+        model = manager.get_model()
+
+        assert model is not None
+        # Verify the warning was logged
+        assert any(
+            f"Primary embedding model {primary} unavailable. Falling back to {fallback}" in record.message
+            for record in caplog.records
+        )
+

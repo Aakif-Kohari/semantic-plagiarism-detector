@@ -1,6 +1,6 @@
 """
-similarity.py
--------------
+src/core/similarity.py
+----------------------
 Computes semantic similarity between documents at two levels:
   1. Document-level  – single score per pair (mean-pooled embeddings)
   2. Chunk-level     – max-similarity per chunk pair (detects local plagiarism)
@@ -9,35 +9,39 @@ Uses cosine similarity. Since embeddings are L2-normalised in embedding_model.py
 cosine similarity reduces to the dot product, making this very fast.
 """
 
+from typing import Dict, List, Optional, Set, Tuple, Union
+
+import faiss  # type: ignore
 import numpy as np
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
-from typing import Dict, List, Optional, Tuple
 
-# ── Threshold ──────────────────────────────────────────────────────────────────
-# Empirically determined optimal value via evaluation/evaluate.py (F1 = 1.0).
-# Previous arbitrary default was 0.75; data-driven analysis found 0.59 to be
-# the lowest threshold achieving perfect precision AND recall on the benchmark.
-PLAGIARISM_THRESHOLD = 0.59
-
+from src.core.config import (
+    DEFAULT_THRESHOLDS,
+    PLAGIARISM_THRESHOLD,
+    is_plagiarism,
+    severity_from_score,
+)
 
 # ── Validation helpers ─────────────────────────────────────────────────────────
 
 
 def _validated_batch_size(batch_size: Optional[int]) -> Optional[int]:
     """Return a safe integer batch size or None for unbatched execution."""
+    from src.errors import SIM_BATCH_SIZE_INVALID
+
     if batch_size is None:
         return None
     if isinstance(batch_size, bool):
-        raise ValueError("batch_size must be an integer")
+        raise ValueError(SIM_BATCH_SIZE_INVALID)
     if isinstance(batch_size, (float, np.floating)):
         if not float(batch_size).is_integer():
-            raise ValueError("batch_size must be an integer")
+            raise ValueError(SIM_BATCH_SIZE_INVALID)
         batch_size = int(batch_size)
     try:
         size = int(batch_size)
     except (TypeError, ValueError) as exc:
-        raise ValueError("batch_size must be an integer") from exc
+        raise ValueError(SIM_BATCH_SIZE_INVALID) from exc
     return size if size > 0 else None
 
 
@@ -45,24 +49,26 @@ def _validated_batch_size(batch_size: Optional[int]) -> Optional[int]:
 
 
 def document_similarity_matrix(
-    doc_embeddings: Dict[str, np.ndarray],
+    doc_embeddings: Union[Dict[str, np.ndarray], np.ndarray, List[np.ndarray]],
     batch_size: Optional[int] = None,
-) -> pd.DataFrame:
+) -> Union[pd.DataFrame, np.ndarray]:
     """
     Build an N×N cosine similarity matrix between all document pairs.
 
-    Each document is represented by the mean of its chunk embeddings.
-
     Args:
-        doc_embeddings: Dict mapping doc name → embedding array (chunks × 384).
+        doc_embeddings: Dict mapping doc name → embedding array, or direct array/list of embeddings.
         batch_size: Optional number of documents to compare per batch.
-            When set, the similarity computation is carried out in smaller blocks
-            to reduce peak memory usage for larger datasets.
 
     Returns:
-        Symmetric pandas DataFrame with document names as index and columns.
-        Values range 0.0 – 1.0 (1.0 = identical).
+        Symmetric pandas DataFrame or numpy ndarray with similarity values.
     """
+    if isinstance(doc_embeddings, (np.ndarray, list)):
+        stacked = np.array(doc_embeddings)
+        if stacked.ndim == 1 or stacked.size == 0:
+            return np.array([[]])
+        sim = cosine_similarity(stacked)
+        return np.clip(sim, 0.0, 1.0)
+
     doc_names = list(doc_embeddings.keys())
     n = len(doc_names)
 
@@ -70,21 +76,24 @@ def document_similarity_matrix(
     doc_vectors = []
     for name in doc_names:
         emb = doc_embeddings[name]
-        if emb.ndim == 2 and emb.shape[0] > 0:
-            vec = np.mean(emb, axis=0)
-        elif emb.ndim == 1 and emb.shape[0] > 0:
-            vec = emb
+        if isinstance(emb, np.ndarray):
+            if emb.ndim == 2 and emb.shape[0] > 0:
+                vec = np.mean(emb, axis=0)
+            elif emb.ndim == 1 and emb.shape[0] > 0:
+                vec = emb
+            else:
+                vec = np.zeros(384)
         else:
-            vec = np.zeros(384)  # Fallback for empty docs
+            vec = np.zeros(384)
         doc_vectors.append(vec)
 
     matrix = np.zeros((n, n))
     if doc_vectors:
-        stacked = np.vstack(doc_vectors)  # (N, 384)
+        stacked = np.vstack(doc_vectors)
         safe_batch_size = _validated_batch_size(batch_size)
         if safe_batch_size is None:
-            sim = cosine_similarity(stacked)  # (N, N)
-            matrix = np.clip(sim, 0.0, 1.0)  # Numerical safety
+            sim = cosine_similarity(stacked)
+            matrix = np.clip(sim, 0.0, 1.0)
         else:
             for start in range(0, n, safe_batch_size):
                 end = min(start + safe_batch_size, n)
@@ -95,6 +104,17 @@ def document_similarity_matrix(
     return df
 
 
+def compute_similarity_matrix(
+    embeddings: Union[Dict[str, np.ndarray], np.ndarray, List[np.ndarray]],
+    batch_size: Optional[int] = None,
+) -> Union[pd.DataFrame, np.ndarray]:
+    """
+    Direct alias/wrapper for document_similarity_matrix to maintain backwards compatibility
+    with app/streamlit_app.py and external modules.
+    """
+    return document_similarity_matrix(embeddings, batch_size=batch_size)
+
+
 # ── Hybrid similarity (lexical + semantic) ─────────────────────────────────────
 
 
@@ -103,29 +123,22 @@ def hybrid_similarity_matrix(
 ) -> pd.DataFrame:
     """
     Combine semantic and lexical similarity matrices using a weighted formula.
-
-    Args:
-        semantic_df: Symmetric DataFrame from document_similarity_matrix().
-        lexical_df: Symmetric DataFrame from lexical_similarity_matrix().
-        w: Weight for semantic similarity (0.0 = pure lexical, 1.0 = pure semantic).
-           Default is 0.7, favoring semantic similarity.
-
-    Returns:
-        Symmetric DataFrame with hybrid similarity scores.
-        hybrid_score = w * semantic + (1 - w) * lexical
     """
     if not (0.0 <= w <= 1.0):
-        raise ValueError(f"Weight w must be between 0.0 and 1.0, got {w}")
+        from src.errors import sim_weight_out_of_range
 
-    # Ensure both DataFrames have the same shape and index/columns
+        raise ValueError(sim_weight_out_of_range(w))
+
     if semantic_df.shape != lexical_df.shape:
-        raise ValueError("Semantic and lexical matrices must have the same shape")
+        from src.errors import SIM_SHAPE_MISMATCH
+
+        raise ValueError(SIM_SHAPE_MISMATCH)
     if not semantic_df.index.equals(lexical_df.index) or not semantic_df.columns.equals(
         lexical_df.columns
     ):
-        raise ValueError(
-            "Semantic and lexical matrices must have the same index and columns"
-        )
+        from src.errors import SIM_INDEX_MISMATCH
+
+        raise ValueError(SIM_INDEX_MISMATCH)
 
     hybrid_df = w * semantic_df + (1 - w) * lexical_df
     return hybrid_df
@@ -141,26 +154,13 @@ def chunk_max_similarity(
 ) -> float:
     """
     Compute the maximum pairwise cosine similarity between chunks of two documents.
-
-    This catches cases where only a section of one document was plagiarised
-    from another – even if the overall document similarity is low.
-
-    Args:
-        emb_a: Chunk embeddings for document A  (Na × 384)
-        emb_b: Chunk embeddings for document B  (Nb × 384)
-        batch_size: Optional number of rows/columns to compare per batch.
-            When set, the comparison is processed in smaller blocks to lower
-            peak memory usage for large chunk sets.
-
-    Returns:
-        Maximum cosine similarity across all chunk pairs (float 0–1).
     """
     if emb_a.size == 0 or emb_b.size == 0:
         return 0.0
 
     safe_batch_size = _validated_batch_size(batch_size)
     if safe_batch_size is None:
-        sim_matrix = cosine_similarity(emb_a, emb_b)  # (Na, Nb)
+        sim_matrix = cosine_similarity(emb_a, emb_b)
         return float(np.max(sim_matrix))
 
     max_score = 0.0
@@ -181,17 +181,6 @@ def chunk_similarity_matrix(
 ) -> pd.DataFrame:
     """
     Build an N×N matrix where each cell is the MAX chunk-pair similarity.
-
-    This is more sensitive than document-level similarity for detecting
-    partial plagiarism.
-
-    Args:
-        doc_embeddings: Dict mapping doc name → embedding array.
-        batch_size: Optional number of chunks to compare per batch for each
-            document pair.
-
-    Returns:
-        Symmetric pandas DataFrame with max-chunk similarity values.
     """
     doc_names = list(doc_embeddings.keys())
     n = len(doc_names)
@@ -208,52 +197,126 @@ def chunk_similarity_matrix(
                     batch_size=batch_size,
                 )
                 matrix[i][j] = score
-                matrix[j][i] = score  # Symmetric
+                matrix[j][i] = score
 
     df = pd.DataFrame(matrix, index=doc_names, columns=doc_names)
     return df
+
+
+# ── ANN Pre-filtering ──────────────────────────────────────────────────────────
+
+
+def find_candidate_pairs(
+    doc_names: List[str],
+    doc_vectors: List[np.ndarray],
+    *,
+    top_k: int = 10,
+) -> Set[Tuple[str, str]]:
+    """
+    Use a temporary FAISS flat index to find the top-K nearest-neighbour
+    document pairs for each document.
+
+    This replaces the O(n²) brute-force pair enumeration with an O(n log n)
+    approximate search.  When the number of documents is smaller than *top_k*,
+    all pairs are returned (no filtering is needed).
+
+    Args:
+        doc_names:   Sorted list of document names.
+        doc_vectors: List of document-level embedding vectors (same order).
+        top_k:       Number of nearest neighbours to retrieve per document.
+
+    Returns:
+        A set of ``(doc_a, doc_b)`` tuples (sorted alphabetically) that
+        should be checked for plagiarism.
+    """
+    n = len(doc_names)
+    if n <= top_k:
+        return {(doc_names[i], doc_names[j]) for i in range(n) for j in range(i + 1, n)}
+
+    matrix = np.vstack([v.astype("float32") for v in doc_vectors])
+    dim = matrix.shape[1]
+
+    index = faiss.IndexFlatIP(dim)
+    index.add(matrix)
+
+    candidates: Set[Tuple[str, str]] = set()
+    for i in range(n):
+        query = matrix[i].reshape(1, -1)
+        _, indices = index.search(query, top_k + 1)
+        for j in indices[0]:
+            if j == i or j >= n:
+                continue
+            pair: Tuple[str, str] = tuple(sorted([doc_names[i], doc_names[j]]))
+            candidates.add(pair)
+
+    return candidates
 
 
 # ── Plagiarism flagging ────────────────────────────────────────────────────────
 
 
 def flag_plagiarism(
-    similarity_df: pd.DataFrame, threshold: float = PLAGIARISM_THRESHOLD
+    similarity_df: pd.DataFrame,
+    threshold: float = PLAGIARISM_THRESHOLD,
+    chunked_docs: dict = None,
+    embeddings: dict = None,
+    *,
+    candidate_pairs: Optional[Set[Tuple[str, str]]] = None,
 ) -> List[Dict]:
-    """
-    Identify document pairs whose similarity exceeds the threshold.
+    """Identify document pairs whose similarity reaches the threshold.
 
-    Args:
-        similarity_df: Symmetric similarity DataFrame (doc × doc).
-        threshold:     Minimum similarity to flag (default: 0.75).
+    Flagging uses the configurable plagiarism threshold. Severity uses the
+    central fixed boundaries: Medium at 0.75 and High at 0.90.
 
-    Returns:
-        List of dicts, each containing:
-          - doc_a     : Name of first document
-          - doc_b     : Name of second document
-          - similarity: Cosine similarity score (float)
-          - severity  : "High" (≥0.90) | "Medium" (≥0.75)
+    When *candidate_pairs* is provided (e.g. from :func:`find_candidate_pairs`),
+    only those pairs are checked instead of the full upper triangle, which
+    significantly reduces computation for large document sets.
     """
     flags = []
     doc_names = similarity_df.columns.tolist()
-    n = len(doc_names)
+    name_to_idx = {name: i for i, name in enumerate(doc_names)}
 
-    for i in range(n):
-        for j in range(i + 1, n):  # Upper triangle only (avoid duplicates)
-            score = similarity_df.iloc[i, j]
-            if score >= threshold:
-                severity = "🔴 High" if score >= 0.90 else "🟡 Medium"
-                flags.append(
-                    {
-                        "doc_a": doc_names[i],
-                        "doc_b": doc_names[j],
-                        "similarity": round(float(score), 4),
-                        "severity": severity,
-                    }
-                )
+    if candidate_pairs is not None:
+        pairs_to_check = [
+            (name_to_idx[a], name_to_idx[b])
+            for a, b in candidate_pairs
+            if a in name_to_idx and b in name_to_idx
+        ]
+    else:
+        pairs_to_check = [
+            (i, j) for i in range(len(doc_names)) for j in range(i + 1, len(doc_names))
+        ]
 
-    # Sort by similarity descending
-    flags.sort(key=lambda x: x["similarity"], reverse=True)
+    for i, j in pairs_to_check:
+        score = float(similarity_df.iloc[i, j])
+
+        if is_plagiarism(score, threshold):
+            doc_a = doc_names[i]
+            doc_b = doc_names[j]
+            matched_length = 0
+
+            if chunked_docs is not None and embeddings is not None:
+                sim_matrix = cosine_similarity(embeddings[doc_a], embeddings[doc_b])
+                idx_a, idx_b = np.unravel_index(np.argmax(sim_matrix), sim_matrix.shape)
+                chunk_text = chunked_docs[doc_a][idx_a]
+                matched_length = len(chunk_text.split())
+
+            flags.append(
+                {
+                    "doc_a": doc_a,
+                    "doc_b": doc_b,
+                    "similarity": round(score, 4),
+                    "threshold_at_time_of_flag": float(threshold),
+                    "matched_length": matched_length,
+                    "severity": severity_from_score(
+                        score,
+                        DEFAULT_THRESHOLDS,
+                    ),
+                }
+            )
+
+    flags.sort(key=lambda item: item["similarity"], reverse=True)
+
     return flags
 
 
@@ -267,26 +330,12 @@ def find_most_similar_chunks(
 ) -> List[Tuple[str, str, float]]:
     """
     Find the top-K most similar chunk pairs between two documents.
-
-    Useful for showing teachers WHICH paragraphs are suspicious.
-
-    Args:
-        chunks_a: Raw text chunks from document A.
-        chunks_b: Raw text chunks from document B.
-        emb_a:    Embeddings for document A (Na × 384).
-        emb_b:    Embeddings for document B (Nb × 384).
-        top_k:    Number of top pairs to return.
-        threshold: Only return pairs above this threshold.
-
-    Returns:
-        List of (chunk_from_A, chunk_from_B, similarity_score) tuples.
     """
     if emb_a.size == 0 or emb_b.size == 0:
         return []
 
-    sim_matrix = cosine_similarity(emb_a, emb_b)  # (Na, Nb)
+    sim_matrix = cosine_similarity(emb_a, emb_b)
 
-    # Flatten and sort
     pairs = []
     for i in range(sim_matrix.shape[0]):
         for j in range(sim_matrix.shape[1]):
@@ -296,3 +345,89 @@ def find_most_similar_chunks(
 
     pairs.sort(key=lambda x: x[2], reverse=True)
     return pairs[:top_k]
+
+
+# ── Per-Paragraph Similarity Breakdown ────────────────────────────────────────
+
+
+def calculate_paragraph_similarity_breakdown(
+    emb_a: np.ndarray,
+    emb_b: np.ndarray,
+) -> List[Tuple[int, int, float]]:
+    """
+    Compute a per-paragraph similarity breakdown between two documents.
+
+    For each paragraph (chunk) in Document A, finds the single best-matching
+    paragraph in Document B using cosine similarity and returns a structured list
+    of ``(paragraph_a_idx, paragraph_b_idx, score)`` tuples, sorted by
+    descending similarity score.
+
+    Args:
+        emb_a: Paragraph embedding matrix for Document A. Shape ``(n_paragraphs, dim)``
+               or ``(dim,)`` for a single paragraph.
+        emb_b: Paragraph embedding matrix for Document B. Shape ``(m_paragraphs, dim)``
+               or ``(dim,)`` for a single paragraph.
+
+    Returns:
+        A list of ``(paragraph_a_idx, paragraph_b_idx, score)`` tuples, sorted
+        by descending score. Returns an empty list when either input is empty.
+    """
+    if emb_a.size == 0 or emb_b.size == 0:
+        return []
+
+    # Ensure 2-D matrices so cosine_similarity works uniformly.
+    matrix_a = emb_a.reshape(1, -1) if emb_a.ndim == 1 else emb_a
+    matrix_b = emb_b.reshape(1, -1) if emb_b.ndim == 1 else emb_b
+
+    # shape: (n_paragraphs_a, n_paragraphs_b)
+    sim_matrix = cosine_similarity(matrix_a, matrix_b)
+
+    breakdown: List[Tuple[int, int, float]] = []
+    for idx_a in range(sim_matrix.shape[0]):
+        idx_b = int(np.argmax(sim_matrix[idx_a]))
+        score = float(np.clip(sim_matrix[idx_a, idx_b], 0.0, 1.0))
+        breakdown.append((idx_a, idx_b, score))
+
+    breakdown.sort(key=lambda t: t[2], reverse=True)
+    return breakdown
+
+
+def find_exact_matches(
+    text_a: str,
+    text_b: str,
+    case_sensitive: bool = False,
+) -> List[str]:
+    """
+    Find exact matching sentences/segments from text_a that exist in text_b.
+
+    Args:
+        text_a: Source text containing potential matches.
+        text_b: Reference text to search within.
+        case_sensitive: If True, performs strict case-sensitive matching.
+
+    Returns:
+        List of matching segments.
+    """
+    if not text_a or not text_b:
+        return []
+
+    # Lowercase both text buffers before comparison when case_sensitive=False
+    if not case_sensitive:
+        norm_a = text_a.lower()
+        norm_b = text_b.lower()
+    else:
+        norm_a = text_a
+        norm_b = text_b
+
+    import re
+    segments = [s.strip() for s in re.split(r'[\n\.]', text_a) if s.strip()]
+    segments_norm = [s.strip() for s in re.split(r'[\n\.]', norm_a) if s.strip()]
+
+    matches = []
+    for orig, norm in zip(segments, segments_norm):
+        if norm in norm_b:
+            if orig not in matches:
+                matches.append(orig)
+
+    return matches
+

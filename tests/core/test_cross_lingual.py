@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from src.core.cross_lingual import (
-    detect_language,
-    prepare_chunks_for_embedding,
-    prepare_documents_for_embedding,
-    prepare_text_for_embedding,
-)
+from src.core.cross_lingual import (detect_language,
+                                    prepare_chunks_for_embedding,
+                                    prepare_documents_for_embedding,
+                                    prepare_text_for_embedding)
 
 
 def test_detects_english_text():
@@ -13,7 +11,7 @@ def test_detects_english_text():
         "Artificial intelligence helps teachers provide faster feedback "
         "and personalise classroom learning."
     )
-    assert detect_language(text) == "en"
+    assert detect_language(text) == ("en", True)
 
 
 def test_detects_hindi_text():
@@ -21,7 +19,7 @@ def test_detects_hindi_text():
         "कृत्रिम बुद्धिमत्ता शिक्षकों को विद्यार्थियों के लिए व्यक्तिगत "
         "शिक्षण सामग्री तैयार करने में सहायता करती है।"
     )
-    assert detect_language(text) == "hi"
+    assert detect_language(text) == ("hi", True)
 
 
 def test_english_text_is_not_translated():
@@ -78,12 +76,43 @@ def test_translation_failure_falls_back_to_original():
 
 
 def test_short_or_empty_text_is_safe():
-    assert detect_language("") == "unknown"
-    assert detect_language("12345") == "unknown"
+    assert detect_language("") == ("en", False)
+    assert detect_language("12345") == ("en", False)
 
     result = prepare_text_for_embedding("")
     assert result["embedding_text"] == ""
     assert result["translated"] is False
+
+
+def test_detect_language_low_confidence(caplog):
+    """Verify that low-confidence detections return 'en', is_confident=False and log warnings."""
+    from unittest.mock import patch
+    from langdetect.language import Language
+    import logging
+
+    with patch("src.core.cross_lingual.detect_langs") as mock_detect_langs:
+        mock_detect_langs.return_value = [Language("fr", 0.5)]
+        
+        with caplog.at_level(logging.WARNING):
+            lang, confident = detect_language("some text in french but low confidence")
+            
+        assert lang == "en"
+        assert confident is False
+        assert any("Low-confidence language detection" in record.message for record in caplog.records)
+
+
+def test_detect_language_high_confidence():
+    """Verify that high-confidence detections return the correct language and is_confident=True."""
+    from unittest.mock import patch
+    from langdetect.language import Language
+
+    with patch("src.core.cross_lingual.detect_langs") as mock_detect_langs:
+        mock_detect_langs.return_value = [Language("fr", 0.9)]
+        lang, confident = detect_language("some text in french")
+        
+        assert lang == "fr"
+        assert confident is True
+
 
 
 def test_chunk_preparation_preserves_original_order():
