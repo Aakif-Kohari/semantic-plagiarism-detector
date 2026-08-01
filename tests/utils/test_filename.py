@@ -1,4 +1,5 @@
 import pytest
+from unittest.mock import patch
 
 from src.utils.filename import (sanitize_filename, sanitize_filename_mapping,
                                 unique_filename)
@@ -93,3 +94,75 @@ def test_mapping_preserves_entries_after_sanitization_collision():
 def test_invalid_max_length_type_is_rejected(value):
     with pytest.raises(TypeError):
         sanitize_filename("file.pdf", max_length=value)
+
+
+# ---------------------------------------------------------------------------
+# Cross-platform path separator compatibility tests  (#870)
+# ---------------------------------------------------------------------------
+
+@patch("src.utils.filename.os.name", "nt")
+@patch("src.utils.filename.os.path.sep", "\\")
+def test_sanitize_filename_windows_style_path_under_nt_mock():
+    """Windows absolute path stripped to a bare filename with no separators."""
+    result = sanitize_filename(r"C:\Users\attacker\..\secret.pdf")
+
+    assert "\\" not in result
+    assert "/" not in result
+    assert result == "secret.pdf"
+
+
+@patch("src.utils.filename.os.name", "nt")
+@patch("src.utils.filename.os.path.sep", "\\")
+def test_sanitize_filename_deep_windows_traversal_under_nt_mock():
+    """Deep Windows traversal collapsed to the leaf filename."""
+    result = sanitize_filename(r"D:\work\projects\..\..\sensitive\report.docx")
+
+    assert "\\" not in result
+    assert "/" not in result
+    assert result == "report.docx"
+
+
+@patch("src.utils.filename.os.name", "posix")
+@patch("src.utils.filename.os.path.sep", "/")
+def test_sanitize_filename_posix_absolute_path_under_posix_mock():
+    """POSIX absolute path stripped to the leaf filename."""
+    result = sanitize_filename("/etc/passwd")
+
+    assert "/" not in result
+    assert "\\" not in result
+    assert result == "passwd"
+
+
+@patch("src.utils.filename.os.name", "nt")
+@patch("src.utils.filename.os.path.sep", "\\")
+def test_sanitize_filename_mixed_separators_under_nt_mock():
+    """Input mixing forward and back slashes resolved to a flat filename."""
+    result = sanitize_filename("uploads/2024\\report.pdf")
+
+    assert "/" not in result
+    assert "\\" not in result
+    assert result == "report.pdf"
+
+
+@patch("src.utils.filename.os.name", "nt")
+@patch("src.utils.filename.os.path.sep", "\\")
+def test_unique_filename_no_separator_in_output_under_nt_mock():
+    """unique_filename() returns a separator-free name even under mocked Windows."""
+    existing = {"report.pdf", "report_1.pdf"}
+    result = unique_filename(r"C:\Users\user\report.pdf", existing)
+
+    assert "\\" not in result
+    assert "/" not in result
+    assert result == "report_2.pdf"
+
+
+@patch("src.utils.filename.os.name", "posix")
+@patch("src.utils.filename.os.path.sep", "/")
+def test_unique_filename_no_separator_in_output_under_posix_mock():
+    """unique_filename() returns a separator-free name even under mocked POSIX."""
+    existing = {"report.pdf"}
+    result = unique_filename("/home/user/docs/report.pdf", existing)
+
+    assert "/" not in result
+    assert "\\" not in result
+    assert result == "report_1.pdf"
