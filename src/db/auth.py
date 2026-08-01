@@ -561,6 +561,31 @@ def enable_2fa(username: str, secret: str) -> None:
         conn.commit()
 
 
+def get_security_audit_logs(limit: int = 50, offset: int = 0, username: str | None = None) -> list[dict]:
+    """Return a paginated list of security audit logs, ordered by timestamp DESC."""
+    if limit < 0 or offset < 0:
+        raise ValueError("Limit and offset must be non-negative.")
+        
+    query = "SELECT * FROM security_audit_log"
+    params = []
+    
+    if username is not None:
+        query += " WHERE username = ?"
+        params.append(username)
+        
+    query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
+    
+    with _connect() as conn:
+        # Use Row factory to easily convert rows to dicts
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(query, tuple(params)).fetchall()
+        
+    return [dict(row) for row in rows]
+def test_get_all_users():
+    username = uuid.uuid4().hex
+
+
 def disable_2fa(username: str) -> None:
     """Disable 2FA for a user and clear their OTP secret."""
     with _connect() as conn:
