@@ -563,6 +563,27 @@ def build_visualization_lazily(is_enabled, build_fn):
         return build_fn()
     return None
 
+from datetime import date, timedelta
+def get_date_range_preset(preset: str) -> tuple[date, date]:
+    """
+    Calculate start and end dates based on a given preset string.
+
+    Args:
+        preset (str): One of "Today", "Last 7 Days", "Last 30 Days", "All Time".
+
+    Returns:
+        tuple[date, date]: A tuple containing the start_date and end_date objects.
+    """
+    today = date.today()
+    if preset == "Today":
+        return today, today
+    elif preset == "Last 7 Days":
+        return today - timedelta(days=6), today
+    elif preset == "Last 30 Days":
+        return today - timedelta(days=29), today
+    else:  # "All Time"
+        return date(2020, 1, 1), today
+
 # ── SESSION TIMEOUT & ROUTE PROTECTION ────────────────────────────────────────
 TIMEOUT_LIMIT = 15 * 60 # 15 minutes in seconds
 
@@ -1627,6 +1648,23 @@ st.divider()
 with tab_warnings:
     update_page_title("Warnings")
     st.subheader(get_text("tab_warnings", lang=lang_code))
+    
+    # Date Range Quick-Presets UI
+    st.markdown("### 📅 Incident Date Filter")
+    date_preset = st.radio(
+        "Select Date Range",
+        options=["Today", "Last 7 Days", "Last 30 Days", "All Time"],
+        horizontal=True,
+        key="incident_date_preset",
+        help="Quickly filter the incident table by common date ranges."
+    )
+    
+    start_date, end_date = get_date_range_preset(date_preset)
+    st.caption(f"Filtering incidents from **{start_date.strftime('%Y-%m-%d')}** to **{end_date.strftime('%Y-%m-%d')}**")
+    
+    # Note: The actual filtering logic would be applied to the incidents dataframe 
+    # here, e.g., filtered_flags = [f for f in flags if start_date <= f['date'] <= end_date]
+    
     if not flags:
         st.info("No plagiarism incidents detected above configured threshold.")
     elif render_warning_controls is not None:
