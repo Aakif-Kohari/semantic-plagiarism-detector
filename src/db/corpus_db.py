@@ -583,7 +583,7 @@ def update_document_tags(filename: str, tags: str) -> bool:
         with _connect() as conn:
             conn.execute(
                 "UPDATE documents SET tags = ? WHERE filename = ?",
-                (tags, filename)
+                (tags, filename),
             )
             return True
     except Exception as e:
@@ -718,3 +718,33 @@ def purge_stale_trash(days_in_trash: int = 30) -> int:
             logger.error(f"Failed to purge stale trashed document {filename}: {e}")
 
     return deleted_count
+def get_documents_by_extension(ext: str) -> list[dict]:
+    """
+    Fetch all active document records matching a specific file extension (e.g. '.pdf' or 'pdf').
+
+    Args:
+        ext: File extension to filter by (with or without leading dot).
+
+    Returns:
+        list[dict]: List of document dictionaries matching the extension.
+    """
+    if not ext or not isinstance(ext, str):
+        return []
+
+    clean_ext = ext.strip().lstrip(".").lower()
+    if not clean_ext:
+        return []
+
+    pattern = f"%.{clean_ext}"
+
+    try:
+        with _connect() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM documents WHERE filename LIKE ? AND is_deleted = 0",
+                (pattern,),
+            )
+            columns = [column[0] for column in cursor.description]
+            return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    except Exception as exc:
+        logger.error(f"[corpus_db] Failed to fetch documents by extension '{ext}': {exc}")
+        return []

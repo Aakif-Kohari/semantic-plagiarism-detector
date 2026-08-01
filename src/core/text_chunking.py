@@ -92,8 +92,7 @@ def chunk_text(
     min_words: int = 5,
     overlap_percentage: float | None = None,
 ) -> List[str]:
-    """
-    Splits text into chunks of a target character length with overlapping boundaries.
+    """Splits text into chunks of a target character length with overlapping boundaries.
 
     Args:
         text: The input text to chunk.
@@ -251,8 +250,7 @@ def chunk_documents(
     chunk_overlap: int = 50,
     min_words: int = 5,
 ) -> Dict[str, List[str]]:
-    """
-    Splits a dictionary of document raw texts into chunks respecting customizable
+    """Splits a dictionary of document raw texts into chunks respecting customizable
     chunk size and overlap parameters.
     """
     chunked_docs = {}
@@ -264,4 +262,3 @@ def chunk_documents(
             min_words=min_words,
         )
     return chunked_docs
-
