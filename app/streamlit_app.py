@@ -11,12 +11,12 @@ from pathlib import Path
 import sqlite3
 import sys
 import time
-from src.utils.temp_manager import purge_expired_temp_files
 from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
 import pandas as pd
+import plotly.io as pio
 import psutil
 import streamlit as st
 
@@ -34,9 +34,14 @@ import base64
 import html
 import json
 
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
 # Standard / Third-party imports
 import time
 from src.utils.processing_time import ProcessingTimer, StageTiming
+from src.utils.temp_manager import purge_expired_temp_files
 
 import _io
 import psutil
@@ -56,9 +61,7 @@ from src.utils.filename import (
     validate_document_extension,
 )
 
-_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
+
 
 from typing import Any
 
@@ -72,6 +75,143 @@ from src.core.logging_config import setup_logging
 
 setup_logging()
 logger = logging.getLogger(__name__)
+
+
+class ChunkRecord:
+    def __init__(self, doc_name, chunk_index, chunk_text, chunk_id=None):
+        self.doc_name = doc_name
+        self.chunk_index = chunk_index
+        self.chunk_text = chunk_text
+        self.chunk_id = chunk_id
+
+
+def run_pipeline(file_bytes_dict, ocr_language, ocr_dpi, chunk_size, chunk_overlap):
+    """Run the document parsing -> chunking -> embedding -> similarity pipeline."""
+    raw_texts = []
+    chunked_docs = []
+    embeddings = []
+    registry = []
+    ai_probabilities = []
+
+    if not file_bytes_dict:
+        empty_sim_df = pd.DataFrame(columns=["doc_a", "doc_b", "similarity"])
+        empty_chunk_df = pd.DataFrame(
+            columns=["doc_name", "chunk_index", "chunk_text", "similarity"]
+        )
+        return (
+            raw_texts,
+            chunked_docs,
+            np.empty((0, 0), dtype=float),
+            empty_sim_df,
+            empty_chunk_df,
+            None,
+            registry,
+            ai_probabilities,
+        )
+
+    for filename, file_bytes in file_bytes_dict.items():
+        try:
+            extracted_text = extract_text(
+                file_bytes,
+                filename=filename,
+                language=ocr_language,
+                dpi=ocr_dpi,
+            )
+        except Exception:
+            extracted_text = ""
+
+        if not extracted_text:
+            continue
+
+        prepared_text = prepare_text_for_embedding(extracted_text)
+        raw_texts.append(prepared_text)
+
+        text_chunks = chunk_documents(
+            [prepared_text],
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
+        if not text_chunks:
+            continue
+
+        chunked_docs.extend(text_chunks)
+        chunk_vectors = embed_chunks(text_chunks)
+        if isinstance(chunk_vectors, np.ndarray):
+            embeddings.extend(chunk_vectors.tolist())
+        else:
+            embeddings.extend(chunk_vectors)
+
+        for chunk_index, chunk_text in enumerate(text_chunks):
+            registry.append(
+                ChunkRecord(
+                    doc_name=filename,
+                    chunk_index=chunk_index,
+                    chunk_text=chunk_text,
+                    chunk_id=f"{filename}:{chunk_index}",
+                )
+            )
+
+    if embeddings:
+        emb_matrix = np.asarray(embeddings, dtype=float)
+        if emb_matrix.ndim == 1:
+            emb_matrix = emb_matrix.reshape(1, -1)
+        faiss_index = build_index_from_matrix(emb_matrix)
+    else:
+        emb_matrix = np.empty((0, 0), dtype=float)
+        faiss_index = None
+
+    doc_names = [Path(name).stem for name in file_bytes_dict.keys()]
+    if len(raw_texts) > 1:
+        doc_embeddings = []
+        for text in raw_texts:
+            text_chunks = chunk_documents(
+                [text],
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+            )
+            if not text_chunks:
+                continue
+            chunk_vectors = embed_chunks(text_chunks)
+            if isinstance(chunk_vectors, np.ndarray):
+                doc_embeddings.append(np.mean(chunk_vectors, axis=0))
+            else:
+                doc_embeddings.append(np.mean(np.asarray(chunk_vectors, dtype=float), axis=0))
+
+        if doc_embeddings:
+            doc_matrix = np.asarray(doc_embeddings, dtype=float)
+            if doc_matrix.ndim == 1:
+                doc_matrix = doc_matrix.reshape(1, -1)
+            sim_matrix = cosine_similarity(doc_matrix)
+            sim_rows = []
+            for i in range(len(doc_names)):
+                for j in range(i + 1, len(doc_names)):
+                    sim_rows.append(
+                        {
+                            "doc_a": doc_names[i],
+                            "doc_b": doc_names[j],
+                            "similarity": float(sim_matrix[i, j]),
+                        }
+                    )
+            sim_df = pd.DataFrame(sim_rows)
+        else:
+            sim_df = pd.DataFrame(columns=["doc_a", "doc_b", "similarity"])
+    else:
+        sim_df = pd.DataFrame(columns=["doc_a", "doc_b", "similarity"])
+
+    chunk_sim_df = pd.DataFrame(
+        columns=["doc_name", "chunk_index", "chunk_text", "similarity"]
+    )
+
+    return (
+        raw_texts,
+        chunked_docs,
+        emb_matrix,
+        sim_df,
+        chunk_sim_df,
+        faiss_index,
+        registry,
+        ai_probabilities,
+    )
 
 
 def ui_exception_handler(component_name: str):
@@ -148,6 +288,8 @@ from src.core.similarity import (
 )
 from src.visualization.network_graph import (
     NETWORK_GRAPH_CONFIG,
+    export_network_to_csv_bytes,
+    export_network_to_gexf_bytes,
     plot_similarity_network,
 )
 from src.core.tag_manager import TagManager
@@ -1117,6 +1259,12 @@ else:
         )
     st.markdown("---")
 
+file_bytes_dict = (
+    {uploaded_file.name: uploaded_file.getvalue() for uploaded_file in uploaded_files}
+    if uploaded_files
+    else {}
+)
+
 with st.spinner("🧠 Processing files and building embeddings…"):
     analysis_results = run_pipeline(
         file_bytes_dict,
@@ -1680,7 +1828,11 @@ st.divider()
 with tab_warnings:
     update_page_title("Warnings")
     st.subheader(get_text("tab_warnings", lang=lang_code))
-    
+
+    # Initialize expand/collapse state
+    if "warnings_expand_all" not in st.session_state:
+        st.session_state.warnings_expand_all = False
+
     # Date Range Quick-Presets UI
     st.markdown("### 📅 Incident Date Filter")
     date_preset = st.radio(
@@ -1690,17 +1842,39 @@ with tab_warnings:
         key="incident_date_preset",
         help="Quickly filter the incident table by common date ranges."
     )
-    
+
     start_date, end_date = get_date_range_preset(date_preset)
-    st.caption(f"Filtering incidents from **{start_date.strftime('%Y-%m-%d')}** to **{end_date.strftime('%Y-%m-%d')}**")
-    
-    # Note: The actual filtering logic would be applied to the incidents dataframe 
+    st.caption(
+        f"Filtering incidents from **{start_date.strftime('%Y-%m-%d')}** "
+        f"to **{end_date.strftime('%Y-%m-%d')}**"
+    )
+
+    # Note: The actual filtering logic would be applied to the incidents dataframe
     # here, e.g., filtered_flags = [f for f in flags if start_date <= f['date'] <= end_date]
-    
+
     if not flags:
         st.info("No plagiarism incidents detected above configured threshold.")
     elif render_warning_controls is not None:
-        render_warning_controls(flags, threshold=threshold, ai_probabilities=ai_probabilities)
+
+        # Master Expand/Collapse button
+        button_label = (
+            "📂 Expand All"
+            if not st.session_state.warnings_expand_all
+            else "📁 Collapse All"
+        )
+
+        if st.button(button_label, key="toggle_warning_accordions"):
+            st.session_state.warnings_expand_all = (
+                not st.session_state.warnings_expand_all
+            )
+            st.rerun()
+
+        render_warning_controls(
+            flags,
+            threshold=threshold,
+            ai_probabilities=ai_probabilities,
+            expanded=st.session_state.warnings_expand_all,   # <-- pass state
+        )
 
 # ══ TAB 2: FAISS ══════════════════════════════════════════════════════════
 with tab_faiss:
@@ -1780,6 +1954,22 @@ with tab_heatmap:
                 help="Filter heatmap rows and columns by matching document class tag.",
             )
 
+            heatmap_cmap = st.selectbox(
+                "Heatmap Colormap",
+                options=[
+                    "viridis",
+                    "plasma",
+                    "inferno",
+                    "magma",
+                    "cividis",
+                    "coolwarm",
+                    "Blues",
+                ],
+                index=0,
+                key="heatmap_cmap_selector",
+                help="Choose the color palette used for the similarity heatmap.",
+            )
+
             heatmap_fig = build_visualization_lazily(
                 load_heatmap,
 lambda: ui_exception_handler("Similarity Heatmap")(plot_similarity_heatmap)(                    active_sim_df,
@@ -1813,6 +2003,17 @@ lambda: ui_exception_handler("Similarity Heatmap")(plot_similarity_heatmap)(    
             highlighted_doc=highlighted_doc,
             title="Interactive Document Plagiarism Network",
         )
+
+        buf = _io.BytesIO()
+        if heatmap_fig is not None:
+            try:
+                buf.write(pio.to_image(heatmap_fig, format="png"))
+            except Exception as exc:
+                logger.exception(
+                    "Failed to generate heatmap PNG for download: %s",
+                    exc,
+                )
+        buf.seek(0)
         st.download_button(
             "⬇️ Download Heatmap PNG",
             buf,
