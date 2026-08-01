@@ -357,15 +357,14 @@ def get_incident_by_id(
 
 
 def get_incidents_by_severity(
-    severity: str,
+    severity_level: str,
     db_path: str | Path = DEFAULT_DB_PATH,
 ) -> list[dict[str, Any]]:
     init_incident_db(db_path)
     try:
-        norm_severity = normalize_severity_label(severity)
+        norm_severity = normalize_severity_label(severity_level)
     except ValueError:
         return []
-
     with closing(sqlite3.connect(str(db_path))) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
