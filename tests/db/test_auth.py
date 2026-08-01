@@ -10,6 +10,7 @@ from src.db.auth import (
     enable_2fa,
     format_user_created_date,
     get_2fa_status,
+    get_active_users_count,
     get_user_active_status,
     get_user_role,
     get_user_theme,
@@ -307,3 +308,33 @@ class TestFormatUserCreatedDate:
         """Non-string input (int, list) must return 'Unknown'."""
         assert format_user_created_date(12345) == "Unknown"  # type: ignore[arg-type]
         assert format_user_created_date([]) == "Unknown"  # type: ignore[arg-type]
+
+
+def test_get_active_users_count():
+    """Verify get_active_users_count counts only active users."""
+    # 1. Starting count should be 1 (the default seeded 'admin' is active)
+    initial_count = get_active_users_count()
+    assert initial_count == 1
+
+    # 2. Add an active user
+    user1 = f"active_{uuid.uuid4().hex[:8]}"
+    add_user(user1, "SecurePass123!")
+    assert get_active_users_count() == 2
+
+    # 3. Add another user and suspend them
+    user2 = f"suspended_{uuid.uuid4().hex[:8]}"
+    add_user(user2, "SecurePass123!")
+    set_user_active_status(user2, False)
+    # The count should still be 2 because user2 is inactive
+    assert get_active_users_count() == 2
+
+    # 4. Reactivate user2
+    set_user_active_status(user2, True)
+    assert get_active_users_count() == 3
+
+    # 5. Delete user1
+    delete_user(user1)
+    assert get_active_users_count() == 2
+
+    delete_user(user2)
+
