@@ -38,6 +38,15 @@ def test_health_check():
     assert "Semantic Plagiarism Detector API" in data["service"]
 
 
+def test_version_endpoint():
+    """Verify that GET /api/v1/version returns the correct version and active status."""
+    response = client.get("/api/v1/version")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["version"] == "1.0.0"
+    assert data["status"] == "active"
+
+
 def test_scan_no_auth_header():
     """Verify that requests without Authorization header return 401/403 error."""
     response = client.post(

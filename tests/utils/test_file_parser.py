@@ -79,6 +79,9 @@ class TestFileMimeCategory:
             ("notes.doc", "word_document"),
             ("readme.txt", "text"),
             ("documentation.md", "text"),
+            ("guide.markdown", "text"),
+            ("notes.mdown", "text"),
+            ("NOTES.MARKDOWN", "text"),  # Case insensitive
             ("data.csv", "text"),
             ("script.py", "code"),
             ("app.js", "code"),
@@ -113,9 +116,12 @@ class TestFileMimeCategory:
             ("document.pdf", ["pdf", "text"], True),
             ("script.py", ["pdf", "text"], False),
             ("notes.txt", None, True),  # Defaults to all known except unknown
+            ("guide.markdown", None, True),
+            ("notes.mdown", None, True),
             ("archive.zip", ["text", "code"], False),
         ]
     )
     def test_is_extension_supported(self, filename, allowed_categories, expected_result):
         """Test extension support validation against allowed categories."""
         assert is_extension_supported(filename, allowed_categories) == expected_result
+        

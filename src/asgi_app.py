@@ -14,9 +14,12 @@ Run with:
     streamlit run asgi_app.py
 """
 
+import os
+
 import streamlit as st
 from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -29,8 +32,30 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class ContentLengthLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        max_bytes_str = os.environ.get("MAX_REQUEST_BYTES", "52428800")
+        try:
+            max_bytes = int(max_bytes_str)
+        except ValueError:
+            max_bytes = 52428800
+
+        content_length = request.headers.get("content-length")
+        if content_length is not None:
+            try:
+                if int(content_length) > max_bytes:
+                    return Response("Payload Too Large", status_code=413)
+            except ValueError:
+                pass
+
+        return await call_next(request)
+
 
 app = st.App(
     "app/streamlit_app.py",
-    middleware=[Middleware(SecurityHeadersMiddleware)],
+    middleware=[
+        Middleware(SecurityHeadersMiddleware),
+        Middleware(ContentLengthLimitMiddleware),
+    ],
 )
+

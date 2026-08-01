@@ -14,6 +14,7 @@ PUBLIC_PATHS = {
     "/metrics",
     "/metrics/json",
     "/api/v1/auth/login",
+    "/api/v1/version",
     "/docs",
     "/redoc",
     "/openapi.json"

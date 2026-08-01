@@ -6,12 +6,14 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
-def strip_exif_metadata(file_bytes: bytes, filename: str) -> bytes:
+def strip_exif_metadata(file_bytes: bytes, filename: str, max_bytes: int = 25_000_000) -> bytes:
     """
     Strips EXIF, XMP, and other identifying metadata from files in-memory.
     Supports PDF and common image formats (JPEG, PNG).
     Returns the sanitized file bytes.
     """
+    if len(file_bytes) > max_bytes:
+        raise ValueError("File size exceeds EXIF stripping limit")
     ext = filename.lower().split('.')[-1]
     
     if ext == 'pdf':

@@ -609,7 +609,29 @@ def export_graph_to_csv(
 
     return output.getvalue()
 
+def export_network_adjacency_csv(graph: nx.Graph) -> str:
+    """
+    Export a NetworkX graph as an adjacency list CSV.
 
+    CSV format:
+    Source,Target,Weight
+
+    Args:
+        graph: NetworkX Graph object.
+
+    Returns:
+        CSV formatted string.
+    """
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    writer.writerow(["Source", "Target", "Weight"])
+
+    for source, target, data in graph.edges(data=True):
+        weight = data.get("weight", 1.0)
+        writer.writerow([source, target, weight])
+
+    return output.getvalue()
 def export_network_to_csv_bytes(
     similarity_df: pd.DataFrame,
     threshold: float = 0.59,

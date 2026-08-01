@@ -249,8 +249,67 @@ def run_prewarm(folder_path: str | None = None) -> int:
     return 0
 
 
+
+def run_db_status(
+    db_path: str,
+    db_type: str,
+    output_format: str = "text",
+) -> int:
+    """Print migration status for an auth or corpus SQLite database."""
+    try:
+        from src.db.migrations import (
+            AUTH_MIGRATIONS,
+            CORPUS_MIGRATIONS,
+            get_migration_status,
+        )
+
+        migrations = (
+            AUTH_MIGRATIONS
+            if db_type == "auth"
+            else CORPUS_MIGRATIONS
+        )
+        status = get_migration_status(db_path, migrations)
+    except (
+        FileNotFoundError,
+        IsADirectoryError,
+        ValueError,
+        RuntimeError,
+        OSError,
+    ) as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
+    except Exception as exc:
+        sys.stderr.write(
+            f"Error: Unable to inspect database migration status: {exc}\n"
+        )
+        return 1
+
+    if output_format == "json":
+        print(json.dumps(status, indent=2))
+    else:
+        pending = status["pending_migrations"]
+        pending_text = (
+            ", ".join(str(version) for version in pending)
+            if pending
+            else "none"
+        )
+        print(f"Database: {db_path}")
+        print(f"Type: {db_type}")
+        print(f"Current version: {status['current_version']}")
+        print(f"Target version: {status['target_version']}")
+        print(f"Pending migrations: {pending_text}")
+
+    return 0
+
 def main() -> None:
     setup_logging()
+
+    # Support the issue-requested flag form:
+    # ``python -m src.cli --db-status path --db-type corpus``.
+    # Internally it is normalized to the regular ``db-status`` subcommand.
+    argv = sys.argv[1:]
+    if argv and argv[0] == "--db-status":
+        argv[0] = "db-status"
     parser = argparse.ArgumentParser(
         description="Headless CLI Version for Plagiarism Detection Automation"
     )
@@ -286,7 +345,28 @@ def main() -> None:
         help="Optional path to folder containing documents for pre-warming.",
     )
 
-    args = parser.parse_args()
+    db_status_parser = subparsers.add_parser(
+        "db-status",
+        help="Inspect pending SQLite schema migrations without applying them.",
+    )
+    db_status_parser.add_argument(
+        "database",
+        help="Path to an existing SQLite database file.",
+    )
+    db_status_parser.add_argument(
+        "--db-type",
+        choices=["auth", "corpus"],
+        default="corpus",
+        help="Migration set to inspect (default: corpus).",
+    )
+    db_status_parser.add_argument(
+        "--output-format",
+        choices=["text", "json"],
+        default="text",
+        help="Status output format (default: text).",
+    )
+
+    args = parser.parse_args(argv)
 
     if args.command == "scan":
         if args.threshold < 0.0 or args.threshold > 1.0:
@@ -311,6 +391,14 @@ def main() -> None:
             sys.stderr.write(f"Error during synchronization: {e}\n")
             return 1
           
+    elif args.command == "db-status":
+        exit_code = run_db_status(
+            args.database,
+            args.db_type,
+            output_format=args.output_format,
+        )
+        sys.exit(exit_code)
+
     elif args.command == "prewarm":
         exit_code = run_prewarm(folder_path=args.folder)
         sys.exit(exit_code)

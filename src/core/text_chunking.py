@@ -90,6 +90,7 @@ def chunk_text(
     chunk_size: int = 500,
     chunk_overlap: int = 50,
     min_words: int = 5,
+    overlap_percentage: float | None = None,
 ) -> List[str]:
     """
     Splits text into chunks of a target character length with overlapping boundaries.
@@ -107,8 +108,10 @@ def chunk_text(
     if not text or not text.strip():
         return []
 
-    word_headings = getattr(text, "word_headings", None)
+    if overlap_percentage is not None:
+        chunk_overlap = int(chunk_size * overlap_percentage)
 
+    word_headings = getattr(text, "word_headings", None)
     words = text.split()
     chunks = []
     current_chunk_with_indices = []

@@ -11,6 +11,7 @@ import logging
 import sqlite3
 from collections.abc import Callable, Mapping
 from contextlib import contextmanager
+from pathlib import Path
 
 try:
     from typing import TypeAlias
@@ -125,6 +126,71 @@ def get_user_version(connection: sqlite3.Connection) -> int:
     return int(row[0]) if row else 0
 
 
+
+def get_migration_status(
+    db_path: str | Path,
+    migrations_dict: Mapping[int, Migration],
+) -> dict[str, int | list[int]]:
+    """Inspect migration status without modifying the database.
+
+    Args:
+        db_path: Existing SQLite database file.
+        migrations_dict: Mapping of migration version to callable.
+
+    Returns:
+        Dictionary containing ``current_version``, ``target_version``, and
+        ordered ``pending_migrations``.
+
+    Raises:
+        FileNotFoundError: If ``db_path`` does not exist.
+        IsADirectoryError: If ``db_path`` is not a regular file.
+        ValueError: If migration versions are invalid or incomplete.
+        RuntimeError: If the database schema is newer than supported.
+        sqlite3.DatabaseError: If the file is not a readable SQLite database.
+    """
+    from pathlib import Path
+
+    path = Path(db_path).expanduser()
+    if not path.exists():
+        raise FileNotFoundError(f"Database file does not exist: {path}")
+    if not path.is_file():
+        raise IsADirectoryError(f"Database path is not a file: {path}")
+
+    versions = sorted(int(version) for version in migrations_dict)
+    if any(version <= 0 for version in versions):
+        raise ValueError("Migration versions must be positive integers.")
+
+    target_version = versions[-1] if versions else 0
+    expected = list(range(1, target_version + 1))
+    if versions != expected:
+        missing = sorted(set(expected).difference(versions))
+        raise ValueError(
+            "Migration definitions are missing for versions: "
+            + ", ".join(map(str, missing))
+        )
+
+    database_uri = f"{path.resolve().as_uri()}?mode=ro"
+    with sqlite3.connect(database_uri, uri=True) as connection:
+        current_version = get_user_version(connection)
+        connection.execute("PRAGMA schema_version").fetchone()
+
+    if current_version > target_version:
+        raise RuntimeError(
+            f"Database schema version {current_version} is newer than "
+            f"supported version {target_version}."
+        )
+
+    pending = [
+        version
+        for version in versions
+        if version > current_version
+    ]
+    return {
+        "current_version": current_version,
+        "target_version": target_version,
+        "pending_migrations": pending,
+    }
+
 def set_user_version(connection: sqlite3.Connection, version: int) -> None:
     """
     Set the SQLite PRAGMA user_version using a trusted integer.
@@ -207,8 +273,17 @@ def run_migrations(
 
     with migration_transaction(connection):
         for version in range(current + 1, target + 1):
-            migrations[version]()
+            migrations[version](connection)
         set_user_version(connection, target)
+
+    # Issue #1051: log successful migration completion so manual
+    # troubleshooting isn't silent. This fires once per database (corpus
+    # and auth each call run_migrations independently).
+    logger.info(
+        "Database migration from version %d to %d completed successfully.",
+        current,
+        target,
+    )
 
     return target
 

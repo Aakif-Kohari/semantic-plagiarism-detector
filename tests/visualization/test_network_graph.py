@@ -9,7 +9,28 @@ from unittest.mock import patch
 import networkx as nx
 import pandas as pd
 import pytest
+import networkx as nx
 
+from src.visualization.network_graph import export_network_adjacency_csv
+
+
+def test_export_network_adjacency_csv():
+    graph = nx.Graph()
+
+    graph.add_edge("Doc A", "Doc B", weight=0.95)
+    graph.add_edge("Doc B", "Doc C", weight=0.82)
+
+    csv_output = export_network_adjacency_csv(graph)
+
+    assert "Source,Target,Weight" in csv_output
+    assert "Doc A,Doc B,0.95" in csv_output
+    assert "Doc B,Doc C,0.82" in csv_output
+def test_export_network_adjacency_csv_empty_graph():
+    graph = nx.Graph()
+
+    csv_output = export_network_adjacency_csv(graph)
+
+    assert csv_output.strip() == "Source,Target,Weight"
 from src.visualization.network_graph import (
     build_network_data,
     export_graph_to_csv,

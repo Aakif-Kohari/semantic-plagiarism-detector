@@ -61,7 +61,7 @@ def configure_db_path(db_path: str | os.PathLike) -> None:
 
 
 def _connect() -> sqlite3.Connection:
-    return sqlite3.connect(_DB_PATH, check_same_thread=False)
+    return sqlite3.connect(_DB_PATH, timeout=15.0, check_same_thread=False)
 
 
 def log_security_event(
@@ -94,6 +94,32 @@ def _hash_password(password: str) -> str:
     """Return an Argon2 hash for the given password."""
     return _ph.hash(password)
 
+
+
+
+def _verify_stored_password(
+    stored_hash: str,
+    supplied_password: str,
+) -> bool:
+    """Verify Argon2 or legacy bcrypt password hashes."""
+    try:
+        if stored_hash.startswith("$argon2"):
+            return _ph.verify(stored_hash, supplied_password)
+
+        if stored_hash.startswith(("$2a$", "$2b$", "$2y$")):
+            return bcrypt.checkpw(
+                supplied_password.encode("utf-8"),
+                stored_hash.encode("utf-8"),
+            )
+    except (
+        VerificationError,
+        VerifyMismatchError,
+        ValueError,
+        TypeError,
+    ):
+        return False
+
+    return False
 
 def _validate_username(username: str) -> str:
     username = str(username).strip().lower()
@@ -335,19 +361,131 @@ def delete_user(username: str) -> None:
         raise sqlite3.Error(f"Failed to delete user: {e}") from e
 
 
-def update_password(username: str, new_password: str) -> None:
-    """Update a user's password with a new Argon2 hash."""
+
+
+def _log_password_change_failure(
+    username: str,
+    reason: str,
+) -> None:
+    """Write a password-change failure without exposing credentials."""
+    safe_username = str(username).strip().lower() or "<unknown>"
+    details = json.dumps(
+        {"reason": reason},
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    log_security_event(
+        event_type="password_change_failed",
+        username=safe_username,
+        details=details,
+    )
+
+def update_password(
+    username: str,
+    new_password: str,
+    current_user: str | None = None,
+    old_password: str | None = None,
+) -> None:
+    """Update a user's password and audit every rejected attempt.
+
+    Args:
+        username: Account whose password will be changed.
+        new_password: Proposed replacement password.
+        current_user: Optional authenticated actor. A different actor must
+            have the ``admin`` role.
+        old_password: Optional current password. When supplied, it must verify
+            before the replacement is written.
+
+    Raises:
+        PermissionError: If a non-admin actor targets another account.
+        ValueError: If credentials, account, or password policy are invalid.
+        sqlite3.Error: If the database update fails.
+    """
+    audit_username = str(username).strip().lower() or "<unknown>"
+
     try:
         username = _validate_username(username)
-        new_password = _validate_password(new_password)
+    except ValueError:
+        _log_password_change_failure(
+            audit_username,
+            "invalid_username",
+        )
+        raise
 
-        with _connect() as conn:
-            cursor = conn.execute(
-                "SELECT COUNT(1) FROM users WHERE username = ?",
-                (username,),
+    try:
+        normalized_actor = (
+            _validate_username(current_user)
+            if current_user is not None
+            else None
+        )
+    except ValueError:
+        _log_password_change_failure(
+            username,
+            "unauthorized_actor",
+        )
+        raise PermissionError(
+            "Unauthorized password modification."
+        ) from None
+
+    if normalized_actor and normalized_actor != username:
+        if get_user_role(normalized_actor) != "admin":
+            _log_password_change_failure(
+                username,
+                "unauthorized_actor",
             )
-            if cursor.fetchone()[0] == 0:
+            raise PermissionError(
+                "Unauthorized password modifications for foreign user_ids"
+            )
+
+    try:
+        new_password = _validate_password(new_password)
+        _validate_password_complexity(new_password)
+    except ValueError:
+        _log_password_change_failure(
+            username,
+            "complexity_failed",
+        )
+        raise
+
+    try:
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT password FROM users WHERE username = ?",
+                (username,),
+            ).fetchone()
+
+            if row is None:
+                _log_password_change_failure(
+                    username,
+                    "user_not_found",
+                )
                 raise ValueError("User not found.")
+
+            if old_password is not None:
+                try:
+                    supplied_old_password = _validate_password(
+                        old_password
+                    )
+                except ValueError:
+                    _log_password_change_failure(
+                        username,
+                        "incorrect_old_password",
+                    )
+                    raise ValueError(
+                        "Current password is incorrect."
+                    ) from None
+
+                if not _verify_stored_password(
+                    row[0],
+                    supplied_old_password,
+                ):
+                    _log_password_change_failure(
+                        username,
+                        "incorrect_old_password",
+                    )
+                    raise ValueError(
+                        "Current password is incorrect."
+                    )
 
             hashed = _hash_password(new_password)
             conn.execute(
@@ -361,11 +499,17 @@ def update_password(username: str, new_password: str) -> None:
             username=username,
             details="Password updated successfully.",
         )
-    except sqlite3.Error as e:
-        raise sqlite3.Error(f"Failed to update password: {e}") from e
+    except sqlite3.Error as error:
+        _log_password_change_failure(
+            username,
+            "database_error",
+        )
+        raise sqlite3.Error(
+            f"Failed to update password: {error}"
+        ) from error
     finally:
         new_password = "REDACTED"
-
+        old_password = "REDACTED"
 
 def get_tour_completed(username: str) -> bool:
     """Return whether a user has completed the onboarding tour."""
@@ -415,6 +559,31 @@ def enable_2fa(username: str, secret: str) -> None:
             (secret, username.lower()),
         )
         conn.commit()
+
+
+def get_security_audit_logs(limit: int = 50, offset: int = 0, username: str | None = None) -> list[dict]:
+    """Return a paginated list of security audit logs, ordered by timestamp DESC."""
+    if limit < 0 or offset < 0:
+        raise ValueError("Limit and offset must be non-negative.")
+        
+    query = "SELECT * FROM security_audit_log"
+    params = []
+    
+    if username is not None:
+        query += " WHERE username = ?"
+        params.append(username)
+        
+    query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
+    
+    with _connect() as conn:
+        # Use Row factory to easily convert rows to dicts
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(query, tuple(params)).fetchall()
+        
+    return [dict(row) for row in rows]
+def test_get_all_users():
+    username = uuid.uuid4().hex
 
 
 def disable_2fa(username: str) -> None:
@@ -612,6 +781,14 @@ def get_user_count() -> int:
     """Returns the total number of registered users in the system."""
     with _connect() as conn:
         cursor = conn.execute("SELECT COUNT(*) FROM users")
+        row = cursor.fetchone()
+        return row[0] if row else 0
+
+
+def get_active_users_count() -> int:
+    """Returns the total number of active registered users in the system."""
+    with _connect() as conn:
+        cursor = conn.execute("SELECT COUNT(1) FROM users WHERE is_active = 1")
         row = cursor.fetchone()
         return row[0] if row else 0
 

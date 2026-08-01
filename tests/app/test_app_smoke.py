@@ -267,3 +267,22 @@ def test_sidebar_reset_all_filters():
 
     finally:
         _cleanup_stale_artifacts()
+
+
+def test_sidebar_keyboard_shortcuts_footnote():
+    """Verify that keyboard shortcut helper footnote expander is rendered in the sidebar."""
+    _cleanup_stale_artifacts()
+    try:
+        at = AppTest.from_file("app/streamlit_app.py", default_timeout=30)
+        at.session_state["authenticated"] = True
+        at.session_state["username"] = "admin"
+        at.session_state["role"] = "admin"
+        at.run()
+
+        assert not at.exception
+        # Check sidebar expanders or captions for keyboard shortcuts text
+        sidebar_expanders = [exp.label for exp in at.sidebar.expander]
+        assert any("Keyboard Shortcuts" in label for label in sidebar_expanders)
+    finally:
+        _cleanup_stale_artifacts()
+

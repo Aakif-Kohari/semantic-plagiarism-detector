@@ -16,6 +16,8 @@ from src.db.translation_cache import (
     DB_PATH,
     cache_translation,
     get_cached_translation,
+    get_translation_cache_hit_rate,
+    reset_translation_cache_counters,
 )
 
 
@@ -27,9 +29,13 @@ def test_translation_cache_hit_and_store():
     foreign_text = "Bonjour le monde"
     expected_english = "Hello world"
 
-    cache_translation(foreign_text, expected_english, source_lang="fr", target_lang="en")
+    cache_translation(
+        foreign_text, expected_english, source_lang="fr", target_lang="en"
+    )
 
-    cached_result = get_cached_translation(foreign_text, source_lang="fr", target_lang="en")
+    cached_result = get_cached_translation(
+        foreign_text, source_lang="fr", target_lang="en"
+    )
     assert cached_result == expected_english
 
 
@@ -73,11 +79,18 @@ class TestTranslationCacheTTL:
         for days_ago in days_ago_list:
             cursor.execute(
                 """
-                INSERT INTO translation_cache 
+                INSERT INTO translation_cache
                 (text_hash, foreign_text, translated_text, source_lang, target_lang, created_at)
                 VALUES (?, ?, ?, ?, ?, datetime('now', '-' || ? || ' days'))
                 """,
-                (f"hash_{days_ago}", f"foreign_{days_ago}", f"translated_{days_ago}", "auto", "en", days_ago)
+                (
+                    f"hash_{days_ago}",
+                    f"foreign_{days_ago}",
+                    f"translated_{days_ago}",
+                    "auto",
+                    "en",
+                    days_ago,
+                ),
             )
         conn.commit()
 
@@ -88,9 +101,9 @@ class TestTranslationCacheTTL:
         translation_cache.get_cached_translation("init")
         # Seed: 2 entries at 30 days (should stay), 2 entries at 90 days (should be purged)
         self._seed_cache_with_dates(conn, [30, 30, 90, 90])
-        
+
         deleted_count = translation_cache.purge_expired_translation_cache()
-        
+
         assert deleted_count == 2
         conn.execute("SELECT COUNT(*) FROM translation_cache")
         assert conn.fetchone()[0] == 2
@@ -101,9 +114,9 @@ class TestTranslationCacheTTL:
         translation_cache.get_cached_translation("init")
         # Seed: 1 entry at 10 days, 1 entry at 20 days, 1 entry at 30 days
         self._seed_cache_with_dates(conn, [10, 20, 30])
-        
+
         deleted_count = translation_cache.purge_expired_translation_cache(days_old=15)
-        
+
         assert deleted_count == 2  # 20 and 30 days old are purged
         conn.execute("SELECT COUNT(*) FROM translation_cache")
         assert conn.fetchone()[0] == 1  # Only the 10-day-old entry remains
@@ -114,15 +127,15 @@ class TestTranslationCacheTTL:
         translation_cache.get_cached_translation("init")
         conn.execute(
             """
-            INSERT INTO translation_cache 
+            INSERT INTO translation_cache
             (text_hash, foreign_text, translated_text, source_lang, target_lang)
             VALUES ('hash_now', 'foreign', 'translated', 'auto', 'en')
             """
         )
         conn.commit()
-        
+
         deleted_count = translation_cache.purge_expired_translation_cache(days_old=0)
-        
+
         # Entries created at 'now' are not strictly less than 'now', so 0 deleted
         assert deleted_count == 0
 
@@ -136,9 +149,9 @@ class TestTranslationCacheTTL:
         with patch("sqlite3.connect") as mock_connect:
             mock_conn = mock_connect.return_value.__enter__.return_value
             mock_conn.cursor.return_value.execute.side_effect = sqlite3.Error("DB locked")
-            
+
             deleted_count = translation_cache.purge_expired_translation_cache()
-            
+
             assert deleted_count == 0
 
     def test_get_translation_cache_stats(self, temp_db_path):
@@ -146,9 +159,9 @@ class TestTranslationCacheTTL:
         conn = sqlite3.connect(temp_db_path)
         translation_cache.get_cached_translation("init")
         self._seed_cache_with_dates(conn, [10, 50, 100])
-        
+
         stats = translation_cache.get_translation_cache_stats()
-        
+
         assert stats["total_entries"] == 3
         assert stats["oldest_entry_days"] == 100
 
@@ -157,3 +170,31 @@ class TestTranslationCacheTTL:
         stats = translation_cache.get_translation_cache_stats()
         assert stats["total_entries"] == 0
         assert stats["oldest_entry_days"] == 0
+
+    def test_translation_cache_hit_rate(self, temp_db_path):
+        """Test lookup hit rate calculation for translation cache."""
+        # 1. Reset counters
+        reset_translation_cache_counters()
+
+        # 2. Check hit rate is 0.0 initially (division by zero handled)
+        assert get_translation_cache_hit_rate() == 0.0
+
+        # 3. Perform a lookup that misses
+        get_cached_translation("non-existent-text-xyz")
+        assert get_translation_cache_hit_rate() == 0.0
+
+        # 4. Cache a translation and perform lookups
+        cache_translation("Hola", "Hello", "es", "en")
+
+        # First hit
+        res = get_cached_translation("Hola", "es", "en")
+        assert res == "Hello"
+        assert get_translation_cache_hit_rate() == 0.5
+
+        # Second hit
+        get_cached_translation("Hola", "es", "en")
+        assert abs(get_translation_cache_hit_rate() - (2 / 3)) < 1e-6
+
+        # 5. Reset and check
+        reset_translation_cache_counters()
+        assert get_translation_cache_hit_rate() == 0.0

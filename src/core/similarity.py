@@ -390,3 +390,44 @@ def calculate_paragraph_similarity_breakdown(
 
     breakdown.sort(key=lambda t: t[2], reverse=True)
     return breakdown
+
+
+def find_exact_matches(
+    text_a: str,
+    text_b: str,
+    case_sensitive: bool = False,
+) -> List[str]:
+    """
+    Find exact matching sentences/segments from text_a that exist in text_b.
+
+    Args:
+        text_a: Source text containing potential matches.
+        text_b: Reference text to search within.
+        case_sensitive: If True, performs strict case-sensitive matching.
+
+    Returns:
+        List of matching segments.
+    """
+    if not text_a or not text_b:
+        return []
+
+    # Lowercase both text buffers before comparison when case_sensitive=False
+    if not case_sensitive:
+        norm_a = text_a.lower()
+        norm_b = text_b.lower()
+    else:
+        norm_a = text_a
+        norm_b = text_b
+
+    import re
+    segments = [s.strip() for s in re.split(r'[\n\.]', text_a) if s.strip()]
+    segments_norm = [s.strip() for s in re.split(r'[\n\.]', norm_a) if s.strip()]
+
+    matches = []
+    for orig, norm in zip(segments, segments_norm):
+        if norm in norm_b:
+            if orig not in matches:
+                matches.append(orig)
+
+    return matches
+

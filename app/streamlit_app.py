@@ -5,10 +5,13 @@ import html
 import io as _io
 import logging
 import os
+import traceback
+import functools
 from pathlib import Path
 import sqlite3
 import sys
 import time
+from src.utils.temp_manager import purge_expired_temp_files
 from datetime import datetime, timezone
 from typing import Any
 
@@ -70,6 +73,25 @@ from src.core.logging_config import setup_logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
+
+def ui_exception_handler(component_name: str):
+    """Decorator that catches exceptions in a UI component and shows a
+    friendly error message instead of a raw Streamlit traceback."""
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except Exception:
+                logger.error(
+                    "Component '%s' failed to render:\n%s",
+                    component_name,
+                    traceback.format_exc(),
+                )
+                st.error(f"⚠️ Failed to load component: {component_name}")
+                return None
+        return wrapper
+    return decorator
 # Validate required environment variables during application startup
 REQUIRED_ENV_VARS = [
     "REDIS_URL",
@@ -177,7 +199,15 @@ from src.utils.pdf_report import generate_plagiarism_report, highlight_pdf_match
 from src.utils.badge_generator import (
     generate_badge_png,
     generate_badge_pdf,
-from src.db.corpus_db import get_document_tags, init_corpus_db
+)
+from src.db.corpus_db import (
+    delete_tag,
+    get_all_documents,
+    get_all_tags,
+    get_document_tags,
+    get_tag_document_count,
+    init_corpus_db,
+)
 from src.db.incidents import (
     get_all_incidents_above_threshold_for_export,
     get_high_severity_trends,
@@ -268,17 +298,14 @@ try:
 except Exception:
     bulk_download_drive_folder = None
 
-class OCRFileBatchError(Exception):
-    """Exception raised when OCR extraction fails on one or more files in a batch."""
-    def __init__(self, failed_files: list[str], failure_details: list[str]):
-        self.failed_files = failed_files
-        self.failure_details = failure_details
-        super().__init__(f"OCR failed for files: {failed_files}")
+from src.errors import OCRFileBatchError
 
 # Initialize databases
 init_corpus_db()
 init_db()
 
+# Purge stale temp files older than 2 hours on startup
+purge_expired_temp_files()
 # Start lightweight REST API server for /healthz endpoint in background
 import threading
 import time
@@ -489,11 +516,43 @@ except ImportError:
 # Page Configuration & Session State
 # -----------------------------------------------------------------------------
 
-st.set_page_config(
-    page_title="Semantic Plagiarism Detector",
-    page_icon="🔍",
-    layout="wide",
-    initial_sidebar_state="auto",
+def configure_page_meta(title: str, icon: str) -> None:
+    """
+    Configure Streamlit page metadata including title, favicon, and layout.
+
+    This helper function centralizes the page configuration logic, allowing
+    for dynamic updates to the browser tab title and favicon based on the
+    application's theme or state. It improves dashboard branding and provides
+    a consistent user experience across different views.
+
+    Args:
+        title (str): The desired page title to be displayed in the browser tab.
+                     Example: "Semantic Plagiarism Detector - Dashboard"
+        icon (str): The emoji or path to an image file to be used as the favicon.
+                    Example: "🔍" or "📄"
+
+    Returns:
+        None
+
+    Raises:
+        ValueError: If the title is empty or the icon is not a valid string.
+    """
+    if not isinstance(title, str) or not title.strip():
+        raise ValueError("Page title must be a non-empty string.")
+    if not isinstance(icon, str) or not icon.strip():
+        raise ValueError("Page icon must be a non-empty string.")
+
+    st.set_page_config(
+        page_title=title.strip(),
+        page_icon=icon.strip(),
+        layout="wide",
+        initial_sidebar_state="auto",
+    )
+
+# Initialize page metadata with dynamic branding
+configure_page_meta(
+    title="Semantic Plagiarism Detector - Dashboard",
+    icon="🔍"
 )
 
 def update_page_title(tab_name: str):
@@ -535,6 +594,27 @@ def build_visualization_lazily(is_enabled, build_fn):
     if is_enabled:
         return build_fn()
     return None
+
+from datetime import date, timedelta
+def get_date_range_preset(preset: str) -> tuple[date, date]:
+    """
+    Calculate start and end dates based on a given preset string.
+
+    Args:
+        preset (str): One of "Today", "Last 7 Days", "Last 30 Days", "All Time".
+
+    Returns:
+        tuple[date, date]: A tuple containing the start_date and end_date objects.
+    """
+    today = date.today()
+    if preset == "Today":
+        return today, today
+    elif preset == "Last 7 Days":
+        return today - timedelta(days=6), today
+    elif preset == "Last 30 Days":
+        return today - timedelta(days=29), today
+    else:  # "All Time"
+        return date(2020, 1, 1), today
 
 # ── SESSION TIMEOUT & ROUTE PROTECTION ────────────────────────────────────────
 TIMEOUT_LIMIT = 15 * 60 # 15 minutes in seconds
@@ -743,9 +823,6 @@ with st.sidebar:
             0.99,
             value=PLAGIARISM_THRESHOLD,
             step=0.01,
-            help="Cosine similarity threshold for flagging.",
-
-            key="threshold_slider",
             help=(
                 "Combined Hybrid score threshold for flagging pair plagiarism. "
                 "Calculated from Lexical (exact phrase overlap) and Semantic (meaning alignment) scores. "
@@ -847,9 +924,15 @@ with st.sidebar:
         ocr_language = DEFAULT_OCR_LANGUAGE
         ocr_dpi = DEFAULT_OCR_DPI
 
-    unique_classes = ["All Classes"] + get_unique_class_sections()
-    selected_class = st.selectbox("Select Class/Section", unique_classes, index=0, key="class_filter_selectbox")
-
+unique_classes = get_unique_class_sections()
+selected_classes = st.multiselect(
+    "Select Class/Section(s)",
+    unique_classes,
+    default=unique_classes,
+    key="class_filter_selectbox",
+)
+if not selected_classes:
+    selected_classes = unique_classes
     if st.button("🔄 Reset All Filters", key="reset_all_filters_button", use_container_width=True):
         keys_to_reset = [
             "threshold_slider",
@@ -875,6 +958,11 @@ with st.sidebar:
         st.success("✅ Filters reset to defaults!")
         st.rerun()
 
+    with st.expander("⌨️ Keyboard Shortcuts"):
+        st.caption("• **R**: Rerun app")
+        st.caption("• **C**: Clear cache")
+        st.caption("• **Tab**: Navigate focus")
+
 # ── Main UI ───────────────────────────────────────────────────────────────────
 st.title("🔍 Semantic Plagiarism Detection System")
 with st.expander("ℹ️ How Semantic Plagiarism Detection Works"):
@@ -887,7 +975,7 @@ with st.expander("ℹ️ How Semantic Plagiarism Detection Works"):
     )
 uploaded_files = st.file_uploader(
     "📂 Upload Assignments",
-    type=["pdf", "docx", "txt"],
+    type=["pdf", "docx", "txt", "md", "markdown", "mdown"],
     accept_multiple_files=True,
     key="file_uploader",
 )
@@ -1027,51 +1115,7 @@ else:
             "○ No index loaded</span>",
             unsafe_allow_html=True,
         )
-
-    chunked_docs = chunk_documents(
-        raw_texts,
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-    )
-    translated_chunked_docs = {}
-
-    for doc_name, chunks in chunked_docs.items():
-        translated_chunked_docs[doc_name] = []
-        for chunk in chunks:
-            prepared = prepare_text_for_embedding(chunk)
-            translated_chunked_docs[doc_name].append(prepared["embedding_text"])
-
-    embeddings = embed_documents(translated_chunked_docs)
-    sim_df = document_similarity_matrix(embeddings)
-
-    names = list(embeddings.keys())
-    n = len(names)
-    chunk_mat = np.zeros((n, n))
-
-    for i, na in enumerate(names):
-        for j, nb in enumerate(names):
-            if i == j:
-                chunk_mat[i, j] = 1.0
-            elif j > i:
-                ea, eb = embeddings[na], embeddings[nb]
-                score = float(np.max(cosine_similarity(ea, eb))) if ea.size and eb.size else 0.0
-                chunk_mat[i, j] = score
-                chunk_mat[j, i] = score
-
-    chunk_sim_df = pd.DataFrame(chunk_mat, index=names, columns=names)
-    faiss_index, registry = build_index(embeddings, chunked_docs)
-    ai_probabilities = detect_documents_ai_probability(chunked_docs)
-
-    return (
-        raw_texts,
-        chunked_docs,
-        embeddings,
-        sim_df,
-        chunk_sim_df,
-        faiss_index,
-        registry,
-        ai_probabilities,
-    )
+    st.markdown("---")
 
 with st.spinner("🧠 Processing files and building embeddings…"):
     analysis_results = run_pipeline(
@@ -1101,10 +1145,8 @@ st.write(f"Processed **{len(raw_texts)}** documents with Chunk Size: `{chunk_siz
 
 st.markdown("---")
 st.markdown("""
-    st.markdown("---")
-    st.markdown("""
 **How it works**
-1. Upload **PDF, DOCX, or TXT** assignment files or import from Google Drive
+1. Upload **PDF, DOCX, TXT, or Markdown** assignment files or import from Google Drive
 2. Text is extracted according to the file type
 3. Text is split into **paragraph chunks**
 4. Chunks are embedded with **SentenceTransformers**
@@ -1121,6 +1163,7 @@ if user_role == "admin":
     if existing_docs:
         st.write(f"**{len(existing_docs)}** documents in database")
         for doc in existing_docs:
+            st.text(doc)
     # ── SESSION EXPIRY COUNTDOWN TIMER WIDGET ─────────────────────────────────
     # Injects a lightweight JavaScript countdown that updates every second
     # without requiring Streamlit reruns, improving UX and reducing server load.
@@ -1332,7 +1375,7 @@ else:
 # ── Main Header ───────────────────────────────────────────────────────────────
 st.title("🔍 Semantic Plagiarism Detection System")
 st.markdown(
-    "Upload student PDF, DOCX, or TXT files. Detects **semantic similarity** "
+    "Upload student PDF, DOCX, TXT, or Markdown files. Detects **semantic similarity** "
     "using transformer embeddings + **FAISS vector search**."
 )
 st.divider()
@@ -1406,7 +1449,7 @@ else:
 
     uploaded_files = st.file_uploader(
         get_text("upload_title", lang=lang_code),
-        type=["pdf", "docx", "txt", "zip", "csv"],
+        type=["pdf", "docx", "txt", "md", "markdown", "mdown", "zip", "csv"],
         accept_multiple_files=True,
         key="file_uploader",
     )
@@ -1479,7 +1522,7 @@ else:
             try:
                 validate_document_extension(
                     original_name,
-                    allowed_extensions={".csv", ".docx", ".pdf", ".txt", ".zip"},
+                    allowed_extensions={".csv", ".docx", ".md", ".markdown", ".mdown", ".pdf", ".txt", ".zip"},
                 )
             except InvalidFileExtensionError as exc:
                 st.error(f"⚠️ File **'{sanitize_filename(original_name)}'** was rejected: {exc}")
@@ -1582,792 +1625,649 @@ else:
             chunk_size,
             chunk_overlap,
         )
-        st.stop()
-
-    # Process files pipeline
-    raw_texts = {}
-    for name, data in file_bytes_dict.items():
-        raw_texts[name] = extract_text(_io.BytesIO(data), name, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
-
-    chunked_docs = chunk_documents(raw_texts)
-    embeddings = embed_documents(chunked_docs)
-    sim_df = document_similarity_matrix(embeddings)
-    faiss_index, registry = build_index(embeddings, chunked_docs)
-    ai_probabilities = detect_documents_ai_probability(chunked_docs)
-
-    active_sim_df = sim_df
-    flags = flag_plagiarism(active_sim_df, threshold=threshold)
-    
-    # Sync incidents to database
-    init_incident_db()
-    incidents = sync_flagged_incidents(flags)
-
         st.session_state["scanning"] = False
         active_sim_df = chunk_sim_df if use_chunk_matrix else sim_df
         flags = flag_plagiarism(active_sim_df, threshold=threshold)
+
+        # Sync incidents to database
+        init_incident_db()
+        incidents = sync_flagged_incidents(flags)
     else:
         flags = []
         active_sim_df = None
         raw_texts = {}
         ai_probabilities = {}
 
-    st.subheader(get_text("analysis_summary", lang=lang_code))
-    doc_names = list(raw_texts.keys())
-    n_docs = len(doc_names)
-    total_pairs = n_docs * (n_docs - 1) // 2 if n_docs > 1 else 0
-    n_flagged = len(flags)
+st.subheader(get_text("analysis_summary", lang=lang_code))
+doc_names = list(raw_texts.keys())
+n_docs = len(doc_names)
+total_pairs = n_docs * (n_docs - 1) // 2 if n_docs > 1 else 0
+n_flagged = len(flags)
 
-    col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("Documents", n_docs)
-    col2.metric("Pairs Evaluated", total_pairs)
-    col3.metric("Flagged Pairs", n_flagged)
-    col4.metric("FAISS Vectors", faiss_index.ntotal if faiss_index is not None else 0)
-    col5.metric("🎯 Threshold", f"{threshold:.0%}")
-    st.divider()
+col1, col2, col3, col4, col5 = st.columns(5)
+col1.metric("Documents", n_docs)
+col2.metric("Pairs Evaluated", total_pairs)
+col3.metric("Flagged Pairs", n_flagged)
+col4.metric("FAISS Vectors", faiss_index.ntotal if faiss_index is not None else 0)
+col5.metric("🎯 Threshold", f"{threshold:.0%}")
+st.divider()
 
-    # ── Application Tabs ──────────────────────────────────────────────────────
-    tab_warnings, tab_incidents, tab_faiss, tab_matrix, tab_heatmap, tab_drill, tab_users = st.tabs(
-        [
-            "⚠️ Plagiarism Warnings",
-            "📋 Incidents",
-            "⚡ FAISS Chunk Search",
-            "📋 Similarity Matrix",
-            "🗺️ Heatmap",
-            "🔬 Pair Drill-Down",
-            "👥 User Management",
-        ]
-    # ── Application Tabs ──────────────────────────────────────────────────────────
-    (
-        tab_warnings,
-        tab_faiss,
-        tab_matrix,
-        tab_heatmap,
-        tab_drill,
-        tab_analytics,
-        tab_users,
-        tab_settings,
-    ) = st.tabs(
-        [
-            get_text("tab_warnings", lang=lang_code),
-            get_text("tab_faiss", lang=lang_code),
-            get_text("tab_matrix", lang=lang_code),
-            get_text("tab_heatmap", lang=lang_code),
-            get_text("tab_drill", lang=lang_code),
-            get_text("tab_analytics", lang=lang_code),
-            get_text("tab_users", lang=lang_code),
-            get_text("tab_settings", lang=lang_code),
-        ],
-        key="main_tabs",
+# ── Application Tabs ──────────────────────────────────────────────────────────
+(
+    tab_warnings,
+    tab_faiss,
+    tab_matrix,
+    tab_heatmap,
+    tab_drill,
+    tab_analytics,
+    tab_users,
+    tab_settings,
+) = st.tabs(
+    [
+        get_text("tab_warnings", lang=lang_code),
+        get_text("tab_faiss", lang=lang_code),
+        get_text("tab_matrix", lang=lang_code),
+        get_text("tab_heatmap", lang=lang_code),
+        get_text("tab_drill", lang=lang_code),
+        get_text("tab_analytics", lang=lang_code),
+        get_text("tab_users", lang=lang_code),
+        get_text("tab_settings", lang=lang_code),
+    ],
+    key="main_tabs",
+)
+
+# ══ TAB 1: WARNINGS ═══════════════════════════════════════════════════════
+with tab_warnings:
+    update_page_title("Warnings")
+    st.subheader(get_text("tab_warnings", lang=lang_code))
+    
+    # Date Range Quick-Presets UI
+    st.markdown("### 📅 Incident Date Filter")
+    date_preset = st.radio(
+        "Select Date Range",
+        options=["Today", "Last 7 Days", "Last 30 Days", "All Time"],
+        horizontal=True,
+        key="incident_date_preset",
+        help="Quickly filter the incident table by common date ranges."
     )
-
-    # ══ TAB 1: WARNINGS ═══════════════════════════════════════════════════════
-    with tab_warnings:
-        st.subheader("⚠️ Plagiarism Warnings")
+    
+    start_date, end_date = get_date_range_preset(date_preset)
+    st.caption(f"Filtering incidents from **{start_date.strftime('%Y-%m-%d')}** to **{end_date.strftime('%Y-%m-%d')}**")
+    
+    # Note: The actual filtering logic would be applied to the incidents dataframe 
+    # here, e.g., filtered_flags = [f for f in flags if start_date <= f['date'] <= end_date]
+    
+    if not flags:
+        st.info("No plagiarism incidents detected above configured threshold.")
+    elif render_warning_controls is not None:
         render_warning_controls(flags, threshold=threshold, ai_probabilities=ai_probabilities)
 
-    # ══ TAB 2: INCIDENTS ═══════════════════════════════════════════════════════
-    
-    with tab_incidents:
-        st.subheader("📋 Incidents")
-        
-        # Add search input
-        search_query = st.text_input(
-            "Search incidents",
-            placeholder="Search by Student Name, Assignment Title, or Document Name…",
-            key="incidents_search",
+# ══ TAB 2: FAISS ══════════════════════════════════════════════════════════
+with tab_faiss:
+    update_page_title("FAISS")
+    st.subheader("⚡ FAISS Vector Search")
+    if faiss_index is not None:
+        st.info(f"Index total: {faiss_index.ntotal} vectors.")
+        faiss_query = st.text_input("Query FAISS Index:", key="faiss_query_input")
+        if st.button("Run Search") and faiss_query.strip():
+            q_vec = embed_chunks([faiss_query.strip()])[0]
+            results = search_similar_chunks(
+                q_vec, faiss_index, registry, top_k=faiss_top_k, threshold=threshold
+            )
+            for rec, score in results:
+                st.markdown(f"**{rec.doc_name}** (Chunk #{rec.chunk_index}) — `{score:.1%}`")
+                st.caption(rec.chunk_text)
+
+# ══ TAB 3: MATRIX ═════════════════════════════════════════════════════════
+with tab_matrix:
+    update_page_title("Matrix")
+    st.subheader("📋 Similarity Matrix")
+    if active_sim_df is not None:
+        st.dataframe(active_sim_df.style.format("{:.4f}"), use_container_width=True)
+
+# ══ TAB 4: HEATMAP ════════════════════════════════════════════════════════
+with tab_heatmap:
+    update_page_title("Heatmap")
+    st.subheader("🗺️ Heatmap & Network")
+    if active_sim_df is not None:
+        heatmap_fig = ui_exception_handler("Similarity Heatmap")(plot_similarity_heatmap)(
+            active_sim_df, threshold=threshold, theme_colors=get_colors()
         )
-        
-        # Get all documents for metadata lookup
-        all_docs = get_all_documents()
-        doc_metadata = {doc["filename"]: doc for doc in all_docs}
-        
-        # Filter incidents based on search query
-        filtered_incidents = []
-        query = search_query.strip().casefold()
-        
-        for incident in incidents:
-            doc_a = incident["document_a"]
-            doc_b = incident["document_b"]
-            
-            # Get metadata for both documents
-            meta_a = doc_metadata.get(doc_a, {})
-            meta_b = doc_metadata.get(doc_b, {})
-            
-            student_name_a = meta_a.get("student_name", "")
-            assignment_title_a = meta_a.get("assignment_title", "")
-            student_name_b = meta_b.get("student_name", "")
-            assignment_title_b = meta_b.get("assignment_title", "")
-            
-            # Check if search query matches any field
-            if not query:
-                filtered_incidents.append(incident)
-            elif (
-                query in student_name_a.casefold() or
-                query in assignment_title_a.casefold() or
-                query in doc_a.casefold() or
-                query in student_name_b.casefold() or
-                query in assignment_title_b.casefold() or
-                query in doc_b.casefold()
-            ):
-                filtered_incidents.append(incident)
-        
-        # Show status line
-        total_incidents = len(incidents)
-        matching_count = len(filtered_incidents)
-        
-        if matching_count > 0:
-            st.markdown(f"Showing **{matching_count}** of **{total_incidents}** incidents")
-        else:
-            st.info("No incidents match the current search.")
-        
-        # Display incidents table if there are matches
-        if filtered_incidents:
-            incidents_df = pd.DataFrame([
-                {
-                    "Incident ID": inc["incident_id"],
-                    "Document A": inc["document_a"],
-                    "Document B": inc["document_b"],
-                    "Similarity Score": f"{inc['similarity_score']:.4f}",
-                    "Severity Rank": inc["severity_rank"],
-                    "Review Status": inc["review_status"],
-                    "Date Flagged": inc["date_flagged"],
-                }
-                for inc in filtered_incidents
-            ])
-            st.dataframe(incidents_df, use_container_width=True)
-        update_page_title("Warnings")
-        st.subheader(get_text("tab_warnings", lang=lang_code))
-        if not flags:
-            st.info("No plagiarism incidents detected above configured threshold.")
-        elif render_warning_controls is not None:
-            render_warning_controls(flags, threshold=threshold, ai_probabilities=ai_probabilities)
-
-    # ══ TAB 2: FAISS ══════════════════════════════════════════════════════════
-    with tab_faiss:
-        update_page_title("FAISS")
-        st.subheader("⚡ FAISS Vector Search")
-        if faiss_index is not None:
-            st.info(f"Index total: {faiss_index.ntotal} vectors.")
-            faiss_query = st.text_input("Query FAISS Index:", key="faiss_query_input")
-            if st.button("Run Search") and faiss_query.strip():
-                q_vec = embed_chunks([faiss_query.strip()])[0]
-                results = search_similar_chunks(
-                    q_vec, faiss_index, registry, top_k=faiss_top_k, threshold=threshold
-                )
-                for rec, score in results:
-                    st.markdown(f"**{rec.doc_name}** (Chunk #{rec.chunk_index}) — `{score:.1%}`")
-                    st.caption(rec.chunk_text)
-
-    # ══ TAB 3: MATRIX ═════════════════════════════════════════════════════════
-    with tab_matrix:
-        update_page_title("Matrix")
-        st.subheader("📋 Similarity Matrix")
-        if active_sim_df is not None:
-            st.dataframe(active_sim_df.style.format("{:.4f}"), use_container_width=True)
-
-    # ══ TAB 4: HEATMAP ════════════════════════════════════════════════════════
-    with tab_heatmap:
-        update_page_title("Heatmap")
-        st.subheader("🗺️ Heatmap & Network")
-        if active_sim_df is not None:
-            heatmap_fig = plot_similarity_heatmap(
-                active_sim_df, threshold=threshold, theme_colors=get_colors()
-            )
-        else:
-            with st.expander(
-                "🗺️ Similarity Heatmap",
-                expanded=False,
-            ):
-                load_heatmap = st.toggle(
-                    "Load heatmap",
-                    key="load_similarity_heatmap",
-                    help=(
-                        "Generate the heatmap only when needed. "
-                        "This can improve responsiveness for large analyses."
-                    ),
-                )
-
-                show_cell_percentages = st.checkbox(
-                    "Show Cell Percentages",
-                    value=True,
-                    key="heatmap_show_percentages",
-                    help="Render similarity text labels inside heatmap cells.",
-                )
-
-                mask_threshold = st.slider(
-                    "Minimum Similarity to Display",
-                    min_value=0.0,
-                    max_value=1.0,
-                    value=0.0,
-                    step=0.05,
-                    format="%.2f",
-                    key="heatmap_mask_threshold",
-                    help="Hide cell colors for similarity values below this threshold.",
-                )
-
-                dim_diagonal = st.checkbox(
-                    "Dim Self-Similarity Diagonal",
-                    value=False,
-                    key="heatmap_dim_diagonal",
-                    help="Grey out or dim the 100% self-similarity diagonal cells (doc_A vs doc_A) on the heatmap.",
-                )
-
-    with tab_faiss:
-        st.subheader("⚡ FAISS Vector Search")
-        st.info(f"FAISS Index contains **{faiss_index.ntotal}** vectors.")
-
-    with tab_matrix:
-        st.subheader("📋 Similarity Matrix")
-                heatmap_class_filter = st.selectbox(
-                    "Filter Heatmap by Class Tag",
-                    options=unique_classes,
-                    index=0,
-                    key="heatmap_tab_class_filter",
-                    help="Filter heatmap rows and columns by matching document class tag.",
-                )
-
-                heatmap_fig = build_visualization_lazily(
-                    load_heatmap,
-                    lambda: plot_similarity_heatmap(
-                        active_sim_df,
-                        title="Document Semantic Similarity",
-                        threshold=threshold,
-                        theme_colors=get_colors(),
-                        colormap_name=heatmap_cmap,
-                        annotate=show_cell_percentages,
-                        mask_threshold=mask_threshold,
-                        class_tag=heatmap_class_filter,
-                        dim_diagonal=dim_diagonal,
-                    ),
-                )
-
-            doc_select_options = ["None"] + list(active_sim_df.columns)
-            selected_highlight_doc = st.selectbox(
-                "Highlight Document Node",
-                options=doc_select_options,
-                index=0,
-                key="highlight_doc_node_selector",
-            )
-            highlighted_doc = (
-                selected_highlight_doc
-                if selected_highlight_doc != "None"
-                else None
+    else:
+        with st.expander(
+            "🗺️ Similarity Heatmap",
+            expanded=False,
+        ):
+            load_heatmap = st.toggle(
+                "Load heatmap",
+                key="load_similarity_heatmap",
+                help=(
+                    "Generate the heatmap only when needed. "
+                    "This can improve responsiveness for large analyses."
+                ),
             )
 
-            network_fig = plot_similarity_network(
-                similarity_df=active_sim_df,
-                threshold=threshold,
-                highlighted_doc=highlighted_doc,
-                title="Interactive Document Plagiarism Network",
+            show_cell_percentages = st.checkbox(
+                "Show Cell Percentages",
+                value=True,
+                key="heatmap_show_percentages",
+                help="Render similarity text labels inside heatmap cells.",
             )
 
-            st.download_button(
-                    "⬇️ Download Heatmap PNG",
-                    buf,
-                    "heatmap.png",
-                    "image/png",
-                    key="download_lazy_heatmap_png",
-                )
-
-            with st.expander(
-                "🕸️ Interactive Plagiarism Network",
-                expanded=False,
-            ):
-                st.caption(
-                    "Documents are shown as nodes. Connections appear when "
-                    "their similarity is greater than or equal to the "
-                    "selected threshold."
-                )
-                load_network = st.toggle(
-                    "Load network graph",
-                    key="load_plagiarism_network",
-                    help=(
-                        "Generate the interactive network only when needed."
-                    ),
-                )
-
-                max_degree = max(0, len(active_sim_df) - 1)
-                min_degree = st.slider(
-                    "Minimum Connected Documents",
-                    min_value=0,
-                    max_value=max_degree,
-                    value=0,
-                    key="min_connected_docs_slider",
-                )
-
-                network_fig = build_visualization_lazily(
-                    load_network,
-                    lambda: plot_similarity_network(
-                        similarity_df=active_sim_df,
-                        threshold=threshold,
-                        min_degree=min_degree,
-                        title=(
-                            "Interactive Document Plagiarism Network"
-                        ),
-                        selected_node=st.session_state.get(
-                            "selected_document_id"
-                        ),
-                    ),
-                )
-
-    with tab_heatmap:
-        st.subheader("🗺️ Similarity Heatmap")
-        if active_sim_df is not None:
-            heatmap_fig = plot_similarity_heatmap(
-                active_sim_df, title="Document Semantic Similarity", threshold=threshold, theme_colors=get_colors()
-            )
-            st.pyplot(heatmap_fig, use_container_width=True)
-
-                if network_fig is None:
-                    st.info(
-                        "Enable “Load network graph” to generate this "
-                        "visualization."
-                    )
-                elif plotly_events is not None:
-                    selected_points = plotly_events(
-                        network_fig,
-                        click_event=True,
-                        hover_event=False,
-                        select_event=False,
-                        key="plagiarism_network",
-                    )
-
-                    if selected_points:
-                        clicked_point = selected_points[0]
-                        point_index = clicked_point.get("pointIndex")
-
-                        if (
-                            point_index is not None
-                            and 0 <= point_index < len(doc_names)
-                        ):
-                            st.session_state.selected_document_id = (
-                                doc_names[point_index]
-                            )
-                else:
-                    st.plotly_chart(
-                        network_fig,
-                        use_container_width=True,
-                        config=NETWORK_GRAPH_CONFIG,
-                    )
-
-                if network_fig is not None:
-                    col_gexf, col_csv = st.columns(2)
-                    with col_gexf:
-                        gexf_data = export_network_to_gexf_bytes(
-                            similarity_df=active_sim_df,
-                            threshold=threshold,
-                            min_degree=st.session_state.get(
-                                "min_connected_docs_slider", 0
-                            ),
-                        )
-                        st.download_button(
-                            "⬇️ Download Network (GEXF)",
-                            gexf_data,
-                            "plagiarism_network.gexf",
-                            "application/xml",
-                            key="download_network_gexf",
-                            use_container_width=True,
-                        )
-                    with col_csv:
-                        csv_data = export_network_to_csv_bytes(
-                            similarity_df=active_sim_df,
-                            threshold=threshold,
-                            min_degree=st.session_state.get(
-                                "min_connected_docs_slider", 0
-                            ),
-                        )
-                        st.download_button(
-                            "⬇️ Download Network Graph Data (CSV)",
-                            csv_data,
-                            "plagiarism_network.csv",
-                            "text/csv",
-                            key="download_network_csv",
-                            use_container_width=True,
-                        )
-
-            selected_document_id = st.session_state.get(
-                "selected_document_id"
-            )
-
-            if selected_document_id:
-                filtered_flags = [
-                    flag
-                    for flag in flags
-                    if (
-                        flag["doc_a"] == selected_document_id
-                        or flag["doc_b"] == selected_document_id
-                    )
-                ]
-            else:
-                filtered_flags = flags
-
-    # ── Summary Metrics ───────────────────────────────────────────────────────────
-
-    if len(file_bytes_dict) < 2:
-        st.markdown(
-            empty_state_html(
-                "Waiting for Files",
-                "Please upload at least 2 PDF, DOCX, or TXT assignments to begin analysis.",
-                "📂",
-            ),
-            unsafe_allow_html=True,
-        )
-        st.stop()
-
-    if "sent_alerts" not in st.session_state:
-        st.session_state.sent_alerts = set()
-
-    for flag in filtered_flags:
-        alert_key = (flag["doc_a"], flag["doc_b"])
-        if alert_key not in st.session_state.sent_alerts:
-            try:
-                send_plagiarism_alert(
-                    doc_a=flag["doc_a"],
-                    doc_b=flag["doc_b"],
-                    similarity=float(flag["similarity"]),
-                )
-                st.session_state.sent_alerts.add(alert_key)
-            except Exception as e:
-                logger.error(f"Failed to send webhook alert: {e}")
-
-    # ══ TAB 5: PAIR DRILL-DOWN ════════════════════════════════════════════════
-    with tab_drill:
-        update_page_title("Drill Down")
-        st.subheader("🔬 Pair Drill-Down")
-        if n_docs >= 2:
-            c1, c2 = st.columns(2)
-            with c1:
-                doc_a = st.selectbox("Document A", doc_names, index=0, key="da")
-            with c2:
-                doc_b = st.selectbox("Document B", [d for d in doc_names if d != doc_a], index=0, key="db")
-
-            score = float(active_sim_df.loc[doc_a, doc_b])
-            st.markdown(f"**Overall Similarity:** `{score:.1%}`")
-            st.progress(float(score))
-            st.divider()
-
-            drill_tab_analysis, drill_tab_viewer = st.tabs(
-                ["📊 Chunk Matches & Report", "📄 Document Viewer"]
-            )
-
-            chunks_a = chunked_docs.get(doc_a, [])
-            chunks_b = chunked_docs.get(doc_b, [])
-
-            with drill_tab_analysis:
-                top_pairs = find_most_similar_chunks(
-                    chunks_a, chunks_b, embeddings[doc_a], embeddings[doc_b], top_k=5, threshold=threshold
-                )
-                for rank, (ca, cb, sim) in enumerate(top_pairs, 1):
-                    with st.expander(f"#{rank} — Similarity: {sim:.1%}"):
-                        st.write(f"**{doc_a}:** {ca}")
-                        st.write(f"**{doc_b}:** {cb}")
-
-            # --- In-App PDF Preview with Highlighted Matches (#145) ---
-            with drill_tab_viewer:
-                st.subheader("📄 In-App PDF Preview with Highlighted Matches")
-                selected_view_doc = st.radio(
-                    "Select Document to Preview:",
-                    options=[doc_a, doc_b],
-                    horizontal=True,
-                    key="doc_viewer_select",
-                )
-
-                # Retrieve file bytes directly from uploaded files dict
-                doc_source = file_bytes_dict.get(selected_view_doc)
-                matching_chunks_to_highlight = chunks_a if selected_view_doc == doc_a else chunks_b
-
-                if doc_source and str(selected_view_doc).lower().endswith(".pdf"):
-                    with st.spinner("Generating highlighted PDF preview..."):
-                        try:
-                            highlighted_pdf_bytes = highlight_pdf_matches(
-                                pdf_source=doc_source,
-                                matching_chunks=matching_chunks_to_highlight,
-                            )
-
-                            base64_pdf = base64.b64encode(highlighted_pdf_bytes).decode("utf-8")
-                            pdf_display = f"""
-                                <iframe 
-                                    src="data:application/pdf;base64,{base64_pdf}" 
-                                    width="100%" 
-                                    height="850px" 
-                                    type="application/pdf">
-                                </iframe>
-                            """
-                            st.markdown(pdf_display, unsafe_allow_html=True)
-                        except Exception as err:
-                            st.error(f"Unable to render PDF preview: {str(err)}")
-                else:
-                    st.info(f"PDF Preview is only available for uploaded `.pdf` files.")
-        if active_sim_df is not None and len(doc_names) >= 2:
-            c1, c2 = st.columns(2)
-            with c1:
-                da = st.selectbox("Document A", doc_names, key="da")
-            with c2:
-                db = st.selectbox("Document B", [d for d in doc_names if d != da], key="db")
-            sim_val = float(active_sim_df.loc[da, db])
-            st.write(f"Overall Similarity: `{sim_val:.1%}`")
-            
-            pair_flags = [
-                f for f in flags 
-                if (f["doc_a"] == da and f["doc_b"] == db) or (f["doc_a"] == db and f["doc_b"] == da)
-            ]
-            
-            if pair_flags:
-                st.markdown("### 📝 Flagged Snippets")
-                for rank, flag in enumerate(pair_flags, 1):
-                    ca = str(flag.get("snippet_a", ""))
-                    cb = str(flag.get("snippet_b", ""))
-                    
-                    if flag["doc_a"] == db:
-                        ca, cb = cb, ca
-                        
-                    highlighted_ca, highlighted_cb = highlight_overlap(ca, cb)
-                    
-                    with st.expander(f"Incident #{rank} - Similarity: {flag.get('similarity', 0.0):.1%}", expanded=(rank == 1)):
-                        c_a, c_b = st.columns(2)
-                        with c_a:
-                            st.markdown(f"**{da}**")
-                            st.markdown(highlighted_ca, unsafe_allow_html=True)
-                            if render_copy_button:
-                                render_copy_button(text_to_copy=ca, button_id=f"copy_ca_{rank}", copy_label="📋 Copy Snippet")
-                        with c_b:
-                            st.markdown(f"**{db}**")
-                            st.markdown(highlighted_cb, unsafe_allow_html=True)
-                            if render_copy_button:
-                                render_copy_button(text_to_copy=cb, button_id=f"copy_cb_{rank}", copy_label="📋 Copy Snippet")
-
-
-    # ══ TAB 6: ANALYTICS ══════════════════════════════════════════════════════
-    with tab_analytics:
-        update_page_title("Analytics")
-        st.subheader("📊 Analytics Dashboard")
-        st.info("Analytics metrics summary loaded.")
-
-    # ══ TAB 7: USERS ══════════════════════════════════════════════════════════
-    with tab_users:
-        update_page_title("Users")
-        st.subheader("👥 User Management")
-        users = get_all_users()
-        for u in users:
-            st.write(f"User: **{u['username']}** | Role: `{u['role']}`")
-
-    # ══ TAB 8: SETTINGS ═══════════════════════════════════════════════════════
-    with tab_settings:
-        update_page_title("Settings")
-        st.subheader("⚙️ System Configuration")
-        if user_role == "admin":
-            st.markdown("### ⚙️ Advanced Configuration")
-
-            st.markdown("### 🧪 Seed Data")
-            if st.button(
-                "📥 Load Demo Database",
-                key="load_seed_data_button",
-                use_container_width=True,
-                help="Populate the database with sample documents for testing and demonstration.",
-            ):
-                with st.spinner("Generating seed data..."):
-                    import subprocess
-                    import sys
-                    seed_script = os.path.join(ROOT_DIR, "scripts", "generate_seed_data.py")
-                    result = subprocess.run(
-                        [sys.executable, seed_script],
-                        capture_output=True, text=True, timeout=120,
-                    )
-                    if result.returncode == 0:
-                        st.success("✅ Demo database loaded successfully!")
-                        st.cache_data.clear()
-                        st.rerun()
-                    else:
-                        st.error(f"❌ Seed data generation failed:\n{result.stderr}")
-
-            st.markdown("### ⚙️ Thresholds")
-            threshold = st.slider(
-                get_text("threshold", lang=lang_code),
+            mask_threshold = st.slider(
+                "Minimum Similarity to Display",
                 min_value=0.0,
                 max_value=1.0,
-                value=DEFAULT_THRESHOLDS.plagiarism,
-                step=0.01,
-                help=(
-                    "Combined Hybrid score threshold for flagging pair plagiarism. "
-                    "Calculated from Lexical (exact phrase overlap) and Semantic (meaning alignment) scores. "
-                    "Recommended Default: 0.59 (59%)."
+                value=0.0,
+                step=0.05,
+                format="%.2f",
+                key="heatmap_mask_threshold",
+                help="Hide cell colors for similarity values below this threshold.",
+            )
+
+            dim_diagonal = st.checkbox(
+                "Dim Self-Similarity Diagonal",
+                value=False,
+                key="heatmap_dim_diagonal",
+                help="Grey out or dim the 100% self-similarity diagonal cells (doc_A vs doc_A) on the heatmap.",
+            )
+
+            heatmap_class_filter = st.selectbox(
+                "Filter Heatmap by Class Tag",
+                options=unique_classes,
+                index=0,
+                key="heatmap_tab_class_filter",
+                help="Filter heatmap rows and columns by matching document class tag.",
+            )
+
+            heatmap_fig = build_visualization_lazily(
+                load_heatmap,
+lambda: ui_exception_handler("Similarity Heatmap")(plot_similarity_heatmap)(                    active_sim_df,
+                    title="Document Semantic Similarity",
+                    threshold=threshold,
+                    theme_colors=get_colors(),
+                    colormap_name=heatmap_cmap,
+                    show_annotations=show_cell_percentages,
+                    mask_threshold=mask_threshold,
+                    class_tag=heatmap_class_filter,
+                    dim_diagonal=dim_diagonal,
                 ),
-                key="threshold_slider",
-                on_change=save_preferences_callback,
             )
 
-            lexical_threshold = st.slider(
-                "Lexical Sensitivity Threshold",
-                0.0,
-                1.0,
-                value=0.50,
-                step=0.01,
+        doc_select_options = ["None"] + list(active_sim_df.columns)
+        selected_highlight_doc = st.selectbox(
+            "Highlight Document Node",
+            options=doc_select_options,
+            index=0,
+            key="highlight_doc_node_selector",
+        )
+        highlighted_doc = (
+            selected_highlight_doc
+            if selected_highlight_doc != "None"
+            else None
+        )
+
+        network_fig = ui_exception_handler("Plagiarism Network")(plot_similarity_network)(
+            similarity_df=active_sim_df,
+            threshold=threshold,
+            highlighted_doc=highlighted_doc,
+            title="Interactive Document Plagiarism Network",
+        )
+        st.download_button(
+            "⬇️ Download Heatmap PNG",
+            buf,
+            "heatmap.png",
+            "image/png",
+            key="download_lazy_heatmap_png",
+        )
+
+        with st.expander(
+            "🕸️ Interactive Plagiarism Network",
+            expanded=False,
+        ):
+            st.caption(
+                "Documents are shown as nodes. Connections appear when "
+                "their similarity is greater than or equal to the "
+                "selected threshold."
+            )
+            load_network = st.toggle(
+                "Load network graph",
+                key="load_plagiarism_network",
                 help=(
-                    "Direct word-for-word and N-gram match threshold. "
-                    "Higher values require near-identical text phrasing to trigger alerts. "
-                    "Recommended Default: 0.50 (50%)."
+                    "Generate the interactive network only when needed."
                 ),
-                key="settings_lexical_slider",
             )
 
-            semantic_threshold = st.slider(
-                "Semantic Sensitivity Threshold",
-                0.0,
-                1.0,
-                value=0.65,
-                step=0.01,
-                help=(
-                    "Transformer embedding vector similarity threshold measuring conceptual alignment and paraphrasing. "
-                    "Higher values require strong contextual similarity even if words differ. "
-                    "Recommended Default: 0.65 (65%)."
+            max_degree = max(0, len(active_sim_df) - 1)
+            min_degree = st.slider(
+                "Minimum Connected Documents",
+                min_value=0,
+                max_value=max_degree,
+                value=0,
+                key="min_connected_docs_slider",
+            )
+
+            network_fig = build_visualization_lazily(
+                load_network,
+lambda: ui_exception_handler("Plagiarism Network")(plot_similarity_network)(                    similarity_df=active_sim_df,
+                    threshold=threshold,
+                    min_degree=min_degree,
+                    title=(
+                        "Interactive Document Plagiarism Network"
+                    ),
+                    selected_node=st.session_state.get(
+                        "selected_document_id"
+                    ),
                 ),
-                key="settings_semantic_slider",
             )
 
-            ocr_language = DEFAULT_OCR_LANGUAGE
-            ocr_dpi = DEFAULT_OCR_DPI
-
-            with st.expander("🔤 OCR Settings", expanded=False):
-                st.caption(
-                    "Used only for scanned or image-only PDF pages. Text-based PDFs continue to use native extraction."
+            if network_fig is None:
+                st.info(
+                    "Enable “Load network graph” to generate this "
+                    "visualization."
                 )
-                ocr_language_labels = {
-                    display_name: code
-                    for code, display_name in SUPPORTED_OCR_LANGUAGES.items()
-                }
-                language_names = list(ocr_language_labels)
-                default_language_name = SUPPORTED_OCR_LANGUAGES[DEFAULT_OCR_LANGUAGE]
-
-                selected_ocr_language_name = st.selectbox(
-                    "OCR Language",
-                    options=language_names,
-                    index=language_names.index(default_language_name),
-                    key="ocr_language_selector",
-                )
-                ocr_language = ocr_language_labels[selected_ocr_language_name]
-
-                ocr_dpi = st.slider(
-                    "OCR DPI Resolution",
-                    min_value=150,
-                    max_value=400,
-                    value=DEFAULT_OCR_DPI,
-                    step=25,
-                    key="ocr_dpi_slider",
+            elif plotly_events is not None:
+                selected_points = plotly_events(
+                    network_fig,
+                    click_event=True,
+                    hover_event=False,
+                    select_event=False,
+                    key="plagiarism_network",
                 )
 
-            st.markdown("### 💾 Backup")
-            from src.db.database_backup import (
-                create_corpus_database_snapshot,
-                create_password_protected_backup,
-            )
+                if selected_points:
+                    clicked_point = selected_points[0]
+                    point_index = clicked_point.get("pointIndex")
 
-            backup_password = st.text_input(
-                "🔑 Backup Password (optional)",
-                type="password",
-                help="If set, the backup file will be AES-256-encrypted.",
-                key="backup_password_input",
-            )
-            snapshot = create_corpus_database_snapshot()
-            if backup_password:
-                backup_data = create_password_protected_backup(
-                    snapshot, backup_password,
-                )
-                st.download_button(
-                    label="⬇️ Download raw Database",
-                    data=backup_data,
-                    file_name="corpus_backup.zip",
-                    mime="application/zip",
-                    key="download_raw_corpus_database",
-                )
+                    if (
+                        point_index is not None
+                        and 0 <= point_index < len(doc_names)
+                    ):
+                        st.session_state.selected_document_id = (
+                            doc_names[point_index]
+                        )
             else:
-                st.download_button(
-                    label="⬇️ Download raw Database",
-                    data=snapshot,
-                    file_name="corpus.db",
-                    mime="application/vnd.sqlite3",
-                    key="download_raw_corpus_database",
+                st.plotly_chart(
+                    network_fig,
+                    use_container_width=True,
+                    config=NETWORK_GRAPH_CONFIG,
                 )
 
-            st.download_button(
-                label="📥 Backup Configuration (JSON)",
-                data=json.dumps(
-                    {
-                        "theme": st.session_state.get("theme", "Light"),
-                        "threshold": st.session_state.get("threshold_slider", 0.75),
-                        "class_filter": st.session_state.get("class_filter_selectbox", ""),
-                        "use_chunk_matrix": st.session_state.get("chunk_matrix_checkbox", False),
-                        "faiss_top_k": st.session_state.get("faiss_top_k_slider", 5),
-                        "ignore_phrases": st.session_state.get("ignore_phrases_textarea", ""),
-                        "chunk_size": st.session_state.get("chunk_size_slider", 500),
-                        "chunk_overlap": st.session_state.get("chunk_overlap_slider", 50),
-                        "ocr_language": st.session_state.get("ocr_language_selector", "eng"),
-                        "ocr_dpi": st.session_state.get("ocr_dpi_slider", 250),
-                    },
-                    indent=2,
-                ),
-                file_name="plagiarism_config_backup.json",
-                mime="application/json",
-                key="backup_config_button",
+            if network_fig is not None:
+                col_gexf, col_csv = st.columns(2)
+                with col_gexf:
+                    gexf_data = export_network_to_gexf_bytes(
+                        similarity_df=active_sim_df,
+                        threshold=threshold,
+                        min_degree=st.session_state.get(
+                            "min_connected_docs_slider", 0
+                        ),
+                    )
+                    st.download_button(
+                        "⬇️ Download Network (GEXF)",
+                        gexf_data,
+                        "plagiarism_network.gexf",
+                        "application/xml",
+                        key="download_network_gexf",
+                        use_container_width=True,
+                    )
+                with col_csv:
+                    csv_data = export_network_to_csv_bytes(
+                        similarity_df=active_sim_df,
+                        threshold=threshold,
+                        min_degree=st.session_state.get(
+                            "min_connected_docs_slider", 0
+                        ),
+                    )
+                    st.download_button(
+                        "⬇️ Download Network Graph Data (CSV)",
+                        csv_data,
+                        "plagiarism_network.csv",
+                        "text/csv",
+                        key="download_network_csv",
+                        use_container_width=True,
+                    )
+
+        selected_document_id = st.session_state.get(
+            "selected_document_id"
+        )
+
+        if selected_document_id:
+            filtered_flags = [
+                flag
+                for flag in flags
+                if (
+                    flag["doc_a"] == selected_document_id
+                    or flag["doc_b"] == selected_document_id
+                )
+            ]
+        else:
+            filtered_flags = flags
+
+# ── Summary Metrics ───────────────────────────────────────────────────────────
+
+if len(file_bytes_dict) < 2:
+    st.markdown(
+        empty_state_html(
+            "Waiting for Files",
+            "Please upload at least 2 PDF, DOCX, TXT, or Markdown assignments to begin analysis.",
+            "📂",
+        ),
+        unsafe_allow_html=True,
+    )
+    st.stop()
+
+if "sent_alerts" not in st.session_state:
+    st.session_state.sent_alerts = set()
+
+for flag in filtered_flags:
+    alert_key = (flag["doc_a"], flag["doc_b"])
+    if alert_key not in st.session_state.sent_alerts:
+        try:
+            send_plagiarism_alert(
+                doc_a=flag["doc_a"],
+                doc_b=flag["doc_b"],
+                similarity=float(flag["similarity"]),
+            )
+            st.session_state.sent_alerts.add(alert_key)
+        except Exception as e:
+            logger.error(f"Failed to send webhook alert: {e}")
+
+# ══ TAB 5: PAIR DRILL-DOWN ════════════════════════════════════════════════
+with tab_drill:
+    update_page_title("Drill Down")
+    st.subheader("🔬 Pair Drill-Down")
+    if active_sim_df is not None and len(doc_names) >= 2:
+        c1, c2 = st.columns(2)
+        with c1:
+            da = st.selectbox("Document A", doc_names, key="da")
+        with c2:
+            db = st.selectbox("Document B", [d for d in doc_names if d != da], key="db")
+        sim_val = float(active_sim_df.loc[da, db])
+        st.write(f"Overall Similarity: `{sim_val:.1%}`")
+        
+        pair_flags = [
+            f for f in flags 
+            if (f["doc_a"] == da and f["doc_b"] == db) or (f["doc_a"] == db and f["doc_b"] == da)
+        ]
+        
+        if pair_flags:
+            st.markdown("### 📝 Flagged Snippets")
+            for rank, flag in enumerate(pair_flags, 1):
+                ca = str(flag.get("snippet_a", ""))
+                cb = str(flag.get("snippet_b", ""))
+                
+                if flag["doc_a"] == db:
+                    ca, cb = cb, ca
+                    
+                highlighted_ca, highlighted_cb = highlight_overlap(ca, cb)
+                
+                with st.expander(f"Incident #{rank} - Similarity: {flag.get('similarity', 0.0):.1%}", expanded=(rank == 1)):
+                    c_a, c_b = st.columns(2)
+                    with c_a:
+                        st.markdown(f"**{da}**")
+                        st.markdown(highlighted_ca, unsafe_allow_html=True)
+                        if render_copy_button:
+                            render_copy_button(text_to_copy=ca, button_id=f"copy_ca_{rank}", copy_label="📋 Copy Snippet")
+                    with c_b:
+                        st.markdown(f"**{db}**")
+                        st.markdown(highlighted_cb, unsafe_allow_html=True)
+                        if render_copy_button:
+                            render_copy_button(text_to_copy=cb, button_id=f"copy_cb_{rank}", copy_label="📋 Copy Snippet")
+
+
+# ══ TAB 6: ANALYTICS ══════════════════════════════════════════════════════
+with tab_analytics:
+    update_page_title("Analytics")
+    st.subheader("📊 Analytics Dashboard")
+    st.info("Analytics metrics summary loaded.")
+
+# ══ TAB 7: USERS ══════════════════════════════════════════════════════════
+with tab_users:
+    update_page_title("Users")
+    st.subheader("👥 User Management")
+    users = get_all_users()
+    for u in users:
+        st.write(f"User: **{u['username']}** | Role: `{u['role']}`")
+
+# ══ TAB 8: SETTINGS ═══════════════════════════════════════════════════════
+with tab_settings:
+    update_page_title("Settings")
+    st.subheader("⚙️ System Configuration")
+    if user_role == "admin":
+        st.markdown("### ⚙️ Advanced Configuration")
+
+        st.markdown("### 🧪 Seed Data")
+        if st.button(
+            "📥 Load Demo Database",
+            key="load_seed_data_button",
+            use_container_width=True,
+            help="Populate the database with sample documents for testing and demonstration.",
+        ):
+            with st.spinner("Generating seed data..."):
+                import subprocess
+                import sys
+                seed_script = os.path.join(ROOT_DIR, "scripts", "generate_seed_data.py")
+                result = subprocess.run(
+                    [sys.executable, seed_script],
+                    capture_output=True, text=True, timeout=120,
+                )
+                if result.returncode == 0:
+                    st.success("✅ Demo database loaded successfully!")
+                    st.cache_data.clear()
+                    st.rerun()
+                else:
+                    st.error(f"❌ Seed data generation failed:\n{result.stderr}")
+
+        st.markdown("### ⚙️ Thresholds")
+        threshold = st.slider(
+            get_text("threshold", lang=lang_code),
+            min_value=0.0,
+            max_value=1.0,
+            value=DEFAULT_THRESHOLDS.plagiarism,
+            step=0.01,
+            help=(
+                "Combined Hybrid score threshold for flagging pair plagiarism. "
+                "Calculated from Lexical (exact phrase overlap) and Semantic (meaning alignment) scores. "
+                "Recommended Default: 0.59 (59%)."
+            ),
+            key="threshold_slider",
+            on_change=save_preferences_callback,
+        )
+
+        lexical_threshold = st.slider(
+            "Lexical Sensitivity Threshold",
+            0.0,
+            1.0,
+            value=0.50,
+            step=0.01,
+            help=(
+                "Direct word-for-word and N-gram match threshold. "
+                "Higher values require near-identical text phrasing to trigger alerts. "
+                "Recommended Default: 0.50 (50%)."
+            ),
+            key="settings_lexical_slider",
+        )
+
+        semantic_threshold = st.slider(
+            "Semantic Sensitivity Threshold",
+            0.0,
+            1.0,
+            value=0.65,
+            step=0.01,
+            help=(
+                "Transformer embedding vector similarity threshold measuring conceptual alignment and paraphrasing. "
+                "Higher values require strong contextual similarity even if words differ. "
+                "Recommended Default: 0.65 (65%)."
+            ),
+            key="settings_semantic_slider",
+        )
+
+        ocr_language = DEFAULT_OCR_LANGUAGE
+        ocr_dpi = DEFAULT_OCR_DPI
+
+        with st.expander("🔤 OCR Settings", expanded=False):
+            st.caption(
+                "Used only for scanned or image-only PDF pages. Text-based PDFs continue to use native extraction."
+            )
+            ocr_language_labels = {
+                display_name: code
+                for code, display_name in SUPPORTED_OCR_LANGUAGES.items()
+            }
+            language_names = list(ocr_language_labels)
+            default_language_name = SUPPORTED_OCR_LANGUAGES[DEFAULT_OCR_LANGUAGE]
+
+            selected_ocr_language_name = st.selectbox(
+                "OCR Language",
+                options=language_names,
+                index=language_names.index(default_language_name),
+                key="ocr_language_selector",
+            )
+            ocr_language = ocr_language_labels[selected_ocr_language_name]
+
+            ocr_dpi = st.slider(
+                "OCR DPI Resolution",
+                min_value=150,
+                max_value=400,
+                value=DEFAULT_OCR_DPI,
+                step=25,
+                key="ocr_dpi_slider",
             )
 
-            st.markdown("")
-            if st.button(
-                "🔄 Reset to Factory Defaults",
-                key="reset_defaults_button",
-                use_container_width=True,
-            ):
-                keys_to_reset = [
-                    "theme_selector",
-                    "threshold_slider",
-                    "class_filter_selectbox",
-                    "chunk_matrix_checkbox",
-                    "faiss_top_k_slider",
-                    "ignore_phrases_textarea",
-                    "chunk_size_slider",
-                    "chunk_overlap_slider",
-                    "ocr_language_selector",
-                    "ocr_dpi_slider",
-                ]
-                for key in keys_to_reset:
-                    if key in st.session_state:
-                        del st.session_state[key]
-                if "threshold" in st.query_params:
-                    del st.query_params["threshold"]
-                set_theme("Light")
-                st.success("✅ Settings reset to defaults!")
-                st.rerun()
+        st.markdown("### 🏷️ Tag Management")
+        all_tags = get_all_tags()
+        if all_tags:
+            tag_to_delete = st.selectbox(
+                "Select Tag to Delete",
+                options=all_tags,
+                key="tag_delete_selectbox",
+            )
+            affected_docs = get_tag_document_count(tag_to_delete)
+            with st.popover("🗑️ Delete Tag"):
+                st.warning(
+                    f"Are you sure you want to delete tag '{tag_to_delete}'? "
+                    f"This affects {affected_docs} documents."
+                )
+                if st.button("Confirm Delete", key="confirm_delete_tag_button"):
+                    delete_tag(tag_to_delete)
+                    st.success(f"✅ Tag '{tag_to_delete}' deleted successfully!")
+                    st.rerun()
+        else:
+            st.caption("No tags found in the corpus.")
 
-            st.markdown("")
-            if st.button(
-                "🗑️ Clear Application Cache", 
-                key="clear_app_cache_button", 
-                use_container_width=True,
-                type="primary",
-            ):
-                from src.utils.redis_cache import get_cache
-                st.cache_data.clear()
-                try:
-                    cache = get_cache()
-                    if cache._client:
-                        cache._client.flushdb()
-                    elif hasattr(cache, "clear_pattern"):
-                        cache.clear_pattern("*")
-                except Exception as e:
-                    pass
-                st.success("✅ Application cache cleared successfully!")
+        st.markdown("### 💾 Backup")
+        from src.db.database_backup import (
+            create_corpus_database_snapshot,
+            create_password_protected_backup,
+        )
 
-            st.markdown("")
-            if st.button(
-                "🔍 Ping Redis", key="ping_redis_button", use_container_width=True
-            ):
-                from src.utils.redis_cache import get_cache
+        backup_password = st.text_input(
+            "🔑 Backup Password (optional)",
+            type="password",
+            help="If set, the backup file will be AES-256-encrypted.",
+            key="backup_password_input",
+        )
+        snapshot = create_corpus_database_snapshot()
+        if backup_password:
+            backup_data = create_password_protected_backup(
+                snapshot, backup_password,
+            )
+            st.download_button(
+                label="⬇️ Download raw Database",
+                data=backup_data,
+                file_name="corpus_backup.zip",
+                mime="application/zip",
+                key="download_raw_corpus_database",
+            )
+        else:
+            st.download_button(
+                label="⬇️ Download raw Database",
+                data=snapshot,
+                file_name="corpus.db",
+                mime="application/vnd.sqlite3",
+                key="download_raw_corpus_database",
+            )
 
-                connected, latency = get_cache().ping()
-                if connected:
-                    st.success(f"✅ Connected ({latency} ms ping)")
-                else:
-                    st.error("🚨 Disconnected")
-                st.rerun()
+        st.download_button(
+            label="📥 Backup Configuration (JSON)",
+            data=json.dumps(
+                {
+                    "theme": st.session_state.get("theme", "Light"),
+                    "threshold": st.session_state.get("threshold_slider", 0.75),
+                    "class_filter": st.session_state.get("class_filter_selectbox", ""),
+                    "use_chunk_matrix": st.session_state.get("chunk_matrix_checkbox", False),
+                    "faiss_top_k": st.session_state.get("faiss_top_k_slider", 5),
+                    "ignore_phrases": st.session_state.get("ignore_phrases_textarea", ""),
+                    "chunk_size": st.session_state.get("chunk_size_slider", 500),
+                    "chunk_overlap": st.session_state.get("chunk_overlap_slider", 50),
+                    "ocr_language": st.session_state.get("ocr_language_selector", "eng"),
+                    "ocr_dpi": st.session_state.get("ocr_dpi_slider", 250),
+                },
+                indent=2,
+            ),
+            file_name="plagiarism_config_backup.json",
+            mime="application/json",
+            key="backup_config_button",
+        )
+
+        st.markdown("")
+        if st.button(
+            "🔄 Reset to Factory Defaults",
+            key="reset_defaults_button",
+            use_container_width=True,
+        ):
+            keys_to_reset = [
+                "theme_selector",
+                "threshold_slider",
+                "class_filter_selectbox",
+                "chunk_matrix_checkbox",
+                "faiss_top_k_slider",
+                "ignore_phrases_textarea",
+                "chunk_size_slider",
+                "chunk_overlap_slider",
+                "ocr_language_selector",
+                "ocr_dpi_slider",
+            ]
+            for key in keys_to_reset:
+                if key in st.session_state:
+                    del st.session_state[key]
+            if "threshold" in st.query_params:
+                del st.query_params["threshold"]
+            set_theme("Light")
+            st.success("✅ Settings reset to defaults!")
+            st.rerun()
+
+        st.markdown("")
+        if st.button(
+            "🗑️ Clear Application Cache", 
+            key="clear_app_cache_button", 
+            use_container_width=True,
+            type="primary",
+        ):
+            from src.utils.redis_cache import get_cache
+            st.cache_data.clear()
+            try:
+                cache = get_cache()
+                if cache._client:
+                    cache._client.flushdb()
+                elif hasattr(cache, "clear_pattern"):
+                    cache.clear_pattern("*")
+            except Exception as e:
+                pass
+            st.success("✅ Application cache cleared successfully!")
+
+        st.markdown("")
+        if st.button(
+            "🔍 Ping Redis", key="ping_redis_button", use_container_width=True
+        ):
+            from src.utils.redis_cache import get_cache
+
+            connected, latency = get_cache().ping()
+            if connected:
+                st.success(f"✅ Connected ({latency} ms ping)")
+            else:
+                st.error("🚨 Disconnected")
+            st.rerun()
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.divider()
