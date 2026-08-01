@@ -5,7 +5,8 @@ import html
 import io as _io
 import logging
 import os
-from pathlib import Path
+import traceback
+import functoolsfrom pathlib import Path
 import sqlite3
 import sys
 import time
@@ -70,6 +71,25 @@ from src.core.logging_config import setup_logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
+
+def ui_exception_handler(component_name: str):
+    """Decorator that catches exceptions in a UI component and shows a
+    friendly error message instead of a raw Streamlit traceback."""
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except Exception:
+                logger.error(
+                    "Component '%s' failed to render:\n%s",
+                    component_name,
+                    traceback.format_exc(),
+                )
+                st.error(f"⚠️ Failed to load component: {component_name}")
+                return None
+        return wrapper
+    return decorator
 # Validate required environment variables during application startup
 REQUIRED_ENV_VARS = [
     "REDIS_URL",
@@ -1688,10 +1708,9 @@ with tab_heatmap:
     update_page_title("Heatmap")
     st.subheader("🗺️ Heatmap & Network")
     if active_sim_df is not None:
-        heatmap_fig = plot_similarity_heatmap(
+heatmap_fig = ui_exception_handler("Similarity Heatmap")(plot_similarity_heatmap)(
             active_sim_df, threshold=threshold, theme_colors=get_colors()
-        )
-    else:
+        )    else:
         with st.expander(
             "🗺️ Similarity Heatmap",
             expanded=False,
@@ -1740,8 +1759,7 @@ with tab_heatmap:
 
             heatmap_fig = build_visualization_lazily(
                 load_heatmap,
-                lambda: plot_similarity_heatmap(
-                    active_sim_df,
+lambda: ui_exception_handler("Similarity Heatmap")(plot_similarity_heatmap)(                    active_sim_df,
                     title="Document Semantic Similarity",
                     threshold=threshold,
                     theme_colors=get_colors(),
@@ -1766,13 +1784,12 @@ with tab_heatmap:
             else None
         )
 
-        network_fig = plot_similarity_network(
+network_fig = ui_exception_handler("Plagiarism Network")(plot_similarity_network)(
             similarity_df=active_sim_df,
             threshold=threshold,
             highlighted_doc=highlighted_doc,
             title="Interactive Document Plagiarism Network",
         )
-
         st.download_button(
             "⬇️ Download Heatmap PNG",
             buf,
@@ -1809,8 +1826,7 @@ with tab_heatmap:
 
             network_fig = build_visualization_lazily(
                 load_network,
-                lambda: plot_similarity_network(
-                    similarity_df=active_sim_df,
+lambda: ui_exception_handler("Plagiarism Network")(plot_similarity_network)(                    similarity_df=active_sim_df,
                     threshold=threshold,
                     min_degree=min_degree,
                     title=(
