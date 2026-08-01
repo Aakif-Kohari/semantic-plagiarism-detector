@@ -26,9 +26,9 @@ def _split_into_sentences(text: str) -> List[str]:
     (e.g. CI containers without the punkt corpus downloaded).
     """
     try:
-        import nltk
+        import nltk # type: ignore
         try:
-            from nltk.tokenize import sent_tokenize
+            from nltk.tokenize import sent_tokenize # type: ignore
             sentences = sent_tokenize(text)
             if sentences:
                 return sentences
@@ -36,7 +36,7 @@ def _split_into_sentences(text: str) -> List[str]:
             # punkt_tab / punkt corpus not downloaded – trigger download once
             try:
                 nltk.download("punkt_tab", quiet=True)
-                from nltk.tokenize import sent_tokenize
+                from nltk.tokenize import sent_tokenize # type: ignore
                 return sent_tokenize(text)
             except Exception:
                 pass

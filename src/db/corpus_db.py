@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from numpy.ma import count
+
 """
 corpus_db.py
 ------------
