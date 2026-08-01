@@ -472,63 +472,128 @@ def cleanup_old_backups(
 
 
 def optimize_database(db_path: str | Path) -> bool:
-    """
-    Optimize the SQLite database by reclaiming disk space and updating query optimizer statistics.
-    
-    This function executes PRAGMA optimize and VACUUM to reduce file fragmentation 
-    caused by frequent document deletions and index builds.
-    
+    """Reclaim unused SQLite pages and refresh query-planner statistics.
+
+    A dedicated autocommit connection is opened for the maintenance task and
+    always closed before this function returns.  ``VACUUM`` cannot run inside
+    an active transaction, so autocommit mode is used and the WAL is
+    checkpointed before optimisation where possible.
+
     Args:
-        db_path: Path to the SQLite database file.
-        
+        db_path: Path to an existing SQLite database file.
+
     Returns:
-        bool: True if optimization was successful, False otherwise.
+        ``True`` when all maintenance commands complete successfully;
+        otherwise ``False``. Failures are logged without deleting or replacing
+        the database file.
     """
     target_path = Path(db_path).expanduser().resolve()
-    
+
     if not target_path.exists():
-        logger.warning(f"Cannot optimize: Database file not found at {target_path}")
+        logger.warning(
+            "Cannot optimize: database file not found at %s",
+            target_path,
+        )
         return False
-        
+    if not target_path.is_file():
+        logger.warning(
+            "Cannot optimize: database path is not a file: %s",
+            target_path,
+        )
+        return False
+
     try:
-        # Record initial size
-        initial_size_bytes = target_path.stat().st_size
-        initial_size_mb = initial_size_bytes / (1024 * 1024)
-        logger.info(f"Starting database optimization. Initial size: {initial_size_mb:.2f} MB")
-        
-        # Connect and execute optimization commands
-        with closing(sqlite3.connect(str(target_path))) as conn:
-            # PRAGMA optimize updates statistics for the query planner
+        with target_path.open("rb") as database_file:
+            if database_file.read(len(SQLITE_HEADER)) != SQLITE_HEADER:
+                logger.error(
+                    "Cannot optimize: file is not a valid SQLite database: %s",
+                    target_path,
+                )
+                return False
+    except OSError as exc:
+        logger.error(
+            "Cannot read database before optimization: %s",
+            exc,
+        )
+        return False
+
+    initial_size_bytes = target_path.stat().st_size
+    logger.info(
+        "Starting database optimization. Initial size: %.2f MB",
+        initial_size_bytes / (1024 * 1024),
+    )
+
+    try:
+        # isolation_level=None keeps the maintenance connection in autocommit
+        # mode. This guarantees VACUUM is not executed inside a transaction.
+        with closing(
+            sqlite3.connect(
+                str(target_path),
+                timeout=5.0,
+                isolation_level=None,
+            )
+        ) as connection:
+            connection.execute("PRAGMA busy_timeout = 5000")
+
+            quick_check = connection.execute(
+                "PRAGMA quick_check"
+            ).fetchone()
+            if quick_check is None or quick_check[0] != "ok":
+                details = quick_check[0] if quick_check else "unknown failure"
+                logger.error(
+                    "Cannot optimize database because integrity check failed: %s",
+                    details,
+                )
+                return False
+
+            # Flush committed WAL pages before rebuilding the main database.
+            # A non-WAL database accepts this pragma harmlessly.
+            try:
+                connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except sqlite3.DatabaseError:
+                logger.debug(
+                    "WAL checkpoint was unavailable for %s",
+                    target_path,
+                    exc_info=True,
+                )
+
             logger.info("Executing PRAGMA optimize...")
-            conn.execute("PRAGMA optimize;")
-            
-            # VACUUM rebuilds the database file, defragmenting it and reclaiming unused space
+            connection.execute("PRAGMA optimize")
+
             logger.info("Executing VACUUM...")
-            conn.execute("VACUUM;")
-            
-            # ANALYZE updates the sqlite_stat1 table for better query planning
+            connection.execute("VACUUM")
+
             logger.info("Executing ANALYZE...")
-            conn.execute("ANALYZE;")
-        
-        # Record final size
+            connection.execute("ANALYZE")
+
         final_size_bytes = target_path.stat().st_size
-        final_size_mb = final_size_bytes / (1024 * 1024)
-        size_reduction_mb = initial_size_mb - final_size_mb
-        reduction_percentage = (size_reduction_mb / initial_size_mb * 100) if initial_size_mb > 0 else 0.0
-        
+        reclaimed_bytes = max(0, initial_size_bytes - final_size_bytes)
+        reduction_percentage = (
+            reclaimed_bytes / initial_size_bytes * 100
+            if initial_size_bytes
+            else 0.0
+        )
+
         logger.info(
-            f"Database optimization completed successfully. "
-            f"Final size: {final_size_mb:.2f} MB. "
-            f"Space reclaimed: {size_reduction_mb:.2f} MB ({reduction_percentage:.1f}%)"
+            "Database optimization completed successfully. "
+            "Final size: %.2f MB. Space reclaimed: %.2f MB (%.1f%%)",
+            final_size_bytes / (1024 * 1024),
+            reclaimed_bytes / (1024 * 1024),
+            reduction_percentage,
         )
         return True
-        
-    except sqlite3.Error as e:
-        logger.error(f"SQLite optimization failed: {e}")
+    except sqlite3.Error as exc:
+        logger.error(
+            "SQLite optimization failed for %s: %s",
+            target_path,
+            exc,
+        )
         return False
-    except OSError as e:
-        logger.error(f"File system error during optimization: {e}")
+    except OSError as exc:
+        logger.error(
+            "File-system error during optimization of %s: %s",
+            target_path,
+            exc,
+        )
         return False
-    except Exception as e:
-        logger.error(f"Unexpected error during database optimization: {e}")
-        return False
+

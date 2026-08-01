@@ -218,3 +218,33 @@ def test_ssrf_failure_does_not_send_or_retry(
     assert attempts == 0
     mock_validate_url.assert_called_once_with(WEBHOOK_URL)
     mock_post.assert_not_called()
+
+
+@patch("src.security.ssrf_protector.socket.getaddrinfo")
+@patch("src.core.webhook.requests.post")
+def test_send_plagiarism_alert_with_domain_whitelist(
+    mock_post,
+    mock_getaddrinfo,
+    monkeypatch,
+):
+    mock_getaddrinfo.return_value = [(2, 1, 6, "", ("142.250.190.46", 443))]
+    mock_post.return_value = make_response(200)
+
+    monkeypatch.setenv("PLAGIARISM_WEBHOOK_URL", "https://discord.com/api/webhooks/123")
+    monkeypatch.setenv("ALLOWED_WEBHOOK_DOMAINS", "slack.com, discord.com")
+
+    # Allowed domain sends successfully
+    success, attempts = send_plagiarism_alert("DocA", "DocB", 0.95)
+    assert success is True
+    assert attempts == 1
+    mock_post.assert_called_once()
+
+    # Change webhook URL to unallowed domain
+    mock_post.reset_mock()
+    monkeypatch.setenv("PLAGIARISM_WEBHOOK_URL", "https://unallowed.org/webhook")
+
+    success, attempts = send_plagiarism_alert("DocA", "DocB", 0.95)
+    assert success is False
+    assert attempts == 0
+    mock_post.assert_not_called()
+

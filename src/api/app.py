@@ -2,12 +2,12 @@
 
 import logging
 import os
-from typing import Dict
-
+import psutil
 import numpy as np
+
+from typing import Dict
 from fastapi import Request
-from fastapi import (Depends, FastAPI, File, HTTPException, Query, UploadFile,
-                     status)
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
 from fastapi.exceptions import RequestValidationError
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -30,8 +30,11 @@ from sklearn.metrics.pairwise import cosine_similarity
 from src.core.app_config import FAISS_INDEX_PATH, HEALTHZ_DB_PATHS
 from src.core.document_parser import extract_text
 from src.core.embedding_model import embed_chunks, get_document_embedding
-from src.core.similarity import (PLAGIARISM_THRESHOLD, chunk_max_similarity,
-                                 find_most_similar_chunks)
+from src.core.similarity import (
+    PLAGIARISM_THRESHOLD,
+    chunk_max_similarity,
+    find_most_similar_chunks,
+)
 from src.core.text_chunking import chunk_document
 from src.db.auth import get_user_role
 from src.db.corpus_db import _connect, clear_all_data, init_corpus_db
@@ -52,15 +55,25 @@ app = FastAPI(
         {"name": "Authentication", "description": "Authenticate user"},
         {"name": "Plagiarism Detection", "description": "Scanning operations"},
         {"name": "System Administration", "description": "Admin operations"},
-        {"name": "Health", "description": "Health checks"}
+        {"name": "Health", "description": "Health checks"},
     ],
-    dependencies=[Depends(verify_bearer_token)]
+    dependencies=[Depends(verify_bearer_token)],
 )
 
 # Enable CORS for external LMS frontends
+origins = os.getenv("CORS_ALLOWED_ORIGINS", "*")
+if origins.strip() == "*":
+    allowed_origins = ["*"]
+else:
+    allowed_origins = [
+        origin.strip()
+        for origin in origins.split(",")
+        if origin.strip()
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -70,6 +83,7 @@ app.add_middleware(
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 
+
 def custom_rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
     response = JSONResponse(
         {"detail": f"Rate limit exceeded: {exc.detail}"}, status_code=429
@@ -78,6 +92,8 @@ def custom_rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded)
         response, request.state.view_rate_limit
     )
     return response
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """
@@ -98,6 +114,8 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             ],
         },
     )
+
+
 app.add_exception_handler(RateLimitExceeded, custom_rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
@@ -194,26 +212,36 @@ def metrics_json():
     "/healthz",
     tags=["Health"],
     response_model=HealthzResponse,
-    status_code=status.HTTP_200_OK,
 )
 def healthz():
-    """Lightweight /healthz endpoint for DevOps monitoring and load balancer probes.
+    """Health endpoint for container orchestration."""
 
-    Returns 200 OK with the combined SQLite database size so operators can
-    monitor storage growth without rendering the Streamlit UI.
-    """
-    total_bytes = 0
-    for path in _HEALTHZ_DB_PATHS:
-        try:
-            total_bytes += os.path.getsize(path) if os.path.exists(path) else 0
-        except OSError:
-            pass
+    try:
+        with _connect() as conn:
+            conn.execute("SELECT 1")
 
-    return {
-        "status": "ok",
-        "db_size_bytes": total_bytes,
-        "db_size_mb": round(total_bytes / (1024 * 1024), 2),
-    }
+        memory = psutil.virtual_memory()
+
+        if memory.available <= 0:
+            raise RuntimeError("Low memory")
+
+        return {
+            "status": "ok",
+            "db": "connected",
+            "memory": "ok",
+        }
+
+    except Exception:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "degraded",
+                "db": "disconnected",
+                "memory": "unavailable",
+            },
+        )
+
+
 @app.get(
     "/api/v1/rate_limit",
     tags=["System Administration"],
@@ -229,6 +257,23 @@ def get_rate_limit():
         "remaining": 85,
         "reset_in_seconds": 45,
     }
+
+
+@app.get(
+    "/api/v1/version",
+    tags=["System Administration"],
+    summary="Get API version",
+    status_code=status.HTTP_200_OK,
+)
+def get_version(request: Request):
+    """
+    Return the lightweight API version.
+    """
+    return {
+        "version": request.app.version,
+        "status": "active",
+    }
+
 
 @app.post(
     "/api/v1/scan",
@@ -270,8 +315,8 @@ async def scan_document(
 
     if len(file_bytes) == 0:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Uploaded file is empty",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file is empty (0 bytes)",
         )
 
     # Extract text from uploaded document

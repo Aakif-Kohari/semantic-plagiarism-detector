@@ -10,8 +10,8 @@ import logging
 import os
 import shutil
 import tempfile
+import time
 from typing import List, Optional
-
 # Global list of registered temporary paths to clean up
 _REGISTERED_TEMP_PATHS: List[str] = []
 
@@ -82,3 +82,43 @@ def create_managed_temp_dir(
     temp_dir = tempfile.mkdtemp(suffix=suffix, prefix=prefix)
     register_temp_path(temp_dir)
     return temp_dir
+
+
+def purge_expired_temp_files(max_age_seconds: int = 7200) -> int:
+    """
+    Scans the system temp directory and removes files whose last modification
+    time is older than max_age_seconds (default: 2 hours). Intended to run on
+    application startup or on a periodic schedule to prevent temp file buildup.
+
+    Returns:
+        int: Number of files purged.
+    """
+    temp_dir = tempfile.gettempdir()
+    now = time.time()
+    purged_count = 0
+    freed_bytes = 0
+
+    try:
+        with os.scandir(temp_dir) as entries:
+            for entry in entries:
+                try:
+                    if not entry.is_file(follow_symlinks=False):
+                        continue
+                    file_stat = entry.stat()
+                    age_seconds = now - file_stat.st_mtime
+                    if age_seconds > max_age_seconds:
+                        file_size = file_stat.st_size
+                        os.remove(entry.path)
+                        purged_count += 1
+                        freed_bytes += file_size
+                except OSError as exc:
+                    logger.warning("Failed to purge temp file %s: %s", entry.path, exc)
+    except OSError as exc:
+        logger.warning("Failed to scan temp directory %s: %s", temp_dir, exc)
+
+    logger.info(
+        "Temp file cleanup complete: purged %d file(s), freed %d byte(s).",
+        purged_count,
+        freed_bytes,
+    )
+    return purged_count
