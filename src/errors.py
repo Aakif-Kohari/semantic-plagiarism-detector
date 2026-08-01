@@ -89,7 +89,8 @@ SSRF_DNS_NO_ADDRESSES = "No addresses found for hostname '{hostname}'"
 SSRF_DNS_RESOLUTION_FAILED = "DNS resolution failed for hostname '{hostname}': {error}"
 SSRF_DOMAIN_NOT_ALLOWED = "Webhook domain '{hostname}' is not in ALLOWED_WEBHOOK_DOMAINS."
 
-# API ErrorsAPI_UNAUTHORIZED = "Invalid or missing authentication token."
+# API Errors
+API_UNAUTHORIZED = "Invalid or missing authentication token."
 API_FILENAME_MISSING = "Filename must be provided."
 API_FILE_EMPTY = "Uploaded file is empty."
 API_TEXT_EXTRACTION_FAILED = "Failed to extract readable text from the uploaded file."
@@ -152,6 +153,16 @@ SSRF_BLOCKED_UNSPECIFIED = "Blocked unspecified IP: {ip}"
 
 class ExportFailedError(RuntimeError):
     """Raised when an export cannot be generated or written safely."""
+
+
+class OCRFileBatchError(Exception):
+    """Raised when OCR extraction fails on one or more files in a batch."""
+
+    def __init__(self, failed_files: list, failure_details: list) -> None:
+        self.failed_files = failed_files
+        self.failure_details = failure_details
+        joined = "; ".join(failure_details) if failure_details else ", ".join(failed_files)
+        super().__init__(f"OCR extraction failed for {len(failed_files)} file(s): {joined}")
 
 
 EXPORT_WRITE_FAILED = (
