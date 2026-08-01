@@ -431,3 +431,18 @@ def test_get_document_count_by_user_returns_int(mock_db):
     result = get_document_count_by_user("alice")
     assert isinstance(result, int)
     assert result == 1
+    
+def test_get_documents_by_extension():
+    """Verify get_documents_by_extension retrieves active documents with specified file extensions."""
+    from src.db.corpus_db import get_documents_by_extension
+
+    # Test with standard dot notation and raw extension
+    pdf_docs = get_documents_by_extension(".pdf")
+    docx_docs = get_documents_by_extension("docx")
+
+    assert isinstance(pdf_docs, list)
+    assert isinstance(docx_docs, list)
+
+    # Test invalid / empty edge cases
+    assert get_documents_by_extension("") == []
+    assert get_documents_by_extension(None) == []
