@@ -13,7 +13,7 @@ pymupdf>=1.24.0                  # PyMuPDF for rendering & highlighting PDF matc
 pypdf>=5.0.0                     # Extract text from PDF files
 pdfplumber>=0.11.0               # Robust PDF text extraction
 python-docx>=1.1.0               # Extract text from Word documents
-PyPDF2>=3.0.0                    # Legacy PDF manipulation support
+pypdf>=3.9.0                       # Legacy PDF manipulation support
 reportlab>=5.0.0                 # PDF document generation
 pytesseract>=0.3.13              # OCR text extraction from scanned images
 Pillow>=10.0.0                   # Image processing library
@@ -36,6 +36,7 @@ streamlit-tour>=1.1.0            # Interactive guided tour component
 streamlit-plotly-events==0.0.6
 
 # ── Data & ML ─────────────────────────────────────────────────────────────────
+numpy>=1.26.0,<2.5.0
 numpy>=2.5.1
 pandas>=2.2.0
 scikit-learn>=1.4.0              # cosine_similarity utility

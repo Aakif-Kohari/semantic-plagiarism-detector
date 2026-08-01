@@ -5,7 +5,44 @@ import pytest
 
 from src.security.ssrf_protector import SSRFProtector, SSRFSecurityException
 
+from src.security.ssrf_protector import SSRFProtector
 
+
+def test_whitelisted_private_subnet(monkeypatch):
+    SSRFProtector.configure_allowed_cidrs(["10.0.0.0/8"])
+
+    monkeypatch.setattr(
+        SSRFProtector,
+        "_resolve_hostname",
+        classmethod(lambda cls, hostname: "10.1.2.3"),
+    )
+
+
+from src.security.ssrf_protector import (
+    SSRFSecurityException,
+    SSRFProtector,
+)
+
+
+def test_private_subnet_blocked(monkeypatch):
+    SSRFProtector.configure_allowed_cidrs(None)
+
+    monkeypatch.setattr(
+        SSRFProtector,
+        "_resolve_hostname",
+        classmethod(lambda cls, hostname: "10.1.2.3"),
+    )
+
+    with pytest.raises(SSRFSecurityException):
+        SSRFProtector.validate_webhook_url(
+            "https://internal.example.com"
+        )
+    assert (
+        SSRFProtector.validate_webhook_url(
+            "https://internal.example.com"
+        )
+        is True
+    )
 @pytest.fixture(autouse=True)
 def clear_cache():
     """Ensure the DNS cache is cleared before every test."""

@@ -75,7 +75,7 @@ def process_zip_file(zip_bytes: bytes) -> Dict[str, bytes]:
                     or any(p.startswith("..") for p in parts)
                     or filename.startswith("/")
                 ):
-                    continue
+                    raise ValueError("Path traversal attempt detected in ZIP archive.")
 
                 # Filter by supported document extensions
                 _, ext = os.path.splitext(filename)

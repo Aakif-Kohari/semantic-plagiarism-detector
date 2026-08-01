@@ -25,6 +25,10 @@
   "tab_trash": "🗑️ Trash",
   "trash_empty_msg": "Your trash is empty.",
   "tab_health": "🖥️ System Health",
+  "pdf_document_name": "Document Name",
+  "pdf_similarity_score": "Similarity Score",
+  "pdf_severity_rank": "Severity Rank",
+  "pdf_detection_threshold": "Detection Threshold"
   "warn_ai_prob": "🤖 AI Prob: {doc_a}: {ai_a:.1%} | {doc_b}: {ai_b:.1%}",
   "warn_ascending": "Ascending ▲",
   "warn_col_doc_a": "Document A",

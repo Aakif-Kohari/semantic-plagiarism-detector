@@ -161,21 +161,7 @@ def compress_pdf_buffer(pdf_buffer: BytesIO) -> BytesIO:
             out_buf.seek(0)
             return out_buf
         except ImportError:
-            try:
-                from PyPDF2 import PdfReader, PdfWriter
-
-                reader = PdfReader(BytesIO(pdf_bytes))
-                writer = PdfWriter()
-                for page in reader.pages:
-                    writer.add_page(page)
-                for page in writer.pages:
-                    page.compress_content_streams()
-                out_buf = BytesIO()
-                writer.write(out_buf)
-                out_buf.seek(0)
-                return out_buf
-            except ImportError:
-                pass
+            pass
 
         # If all compression attempts fail, return the original buffer
         pdf_buffer.seek(original_pos)
@@ -239,7 +225,10 @@ def generate_plagiarism_report(
     logo_image: Optional[bytes] = None,
     brand_color: Optional[str] = None,
     dark_mode: Optional[bool] = None,
+    language: str = "en",
 ) -> BytesIO:
+
+    from src.i18n.translator import get_text
 
     brand_hex = brand_color or "#1e3a8a"
 
@@ -406,10 +395,10 @@ def generate_plagiarism_report(
     story.append(Paragraph("Document Comparison", heading_style))
 
     doc_data = [
-        ["Document A", truncate_filename(doc_a, 40)],
-        ["Document B", truncate_filename(doc_b, 40)],
-        ["Overall Similarity", f"{overall_similarity:.1%}"],
-        ["Detection Threshold", f"{threshold:.1%}"],
+        [get_text("pdf_document_name", language), truncate_filename(doc_a, 40)],
+        [get_text("pdf_document_name", language), truncate_filename(doc_b, 40)],
+        [get_text("pdf_similarity_score", language), f"{overall_similarity:.1%}"],
+        [get_text("pdf_detection_threshold", language), f"{threshold:.1%}"],
     ]
 
     doc_table = Table(doc_data, colWidths=[2 * inch, 4 * inch], hAlign=TA_LEFT)

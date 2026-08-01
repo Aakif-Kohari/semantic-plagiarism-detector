@@ -120,13 +120,35 @@ def _validate_incident(flag: Mapping[str, Any]) -> tuple[bool, str]:
 
     return True, ""
 
-def _fetch_all_incidents(conn: sqlite3.Connection) -> list[MatchResult]:
+def _validate_pagination(limit: int, offset: int) -> tuple[int, int]:
+    """Validate and normalize SQL pagination arguments."""
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        raise TypeError("limit must be an integer.")
+    if isinstance(offset, bool) or not isinstance(offset, int):
+        raise TypeError("offset must be an integer.")
+    if limit <= 0:
+        raise ValueError("limit must be greater than 0.")
+    if offset < 0:
+        raise ValueError("offset must be greater than or equal to 0.")
+    return limit, offset
+
+
+def _fetch_all_incidents(
+    conn: sqlite3.Connection,
+    *,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[MatchResult]:
+    """Fetch one deterministic page of visible incidents."""
     from src.db.schemas import MatchResult
+
+    safe_limit, safe_offset = _validate_pagination(limit, offset)
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         """
-        SELECT pi.incident_id, pi.document_a, pi.document_b, pi.similarity_score,
-               pi.severity_rank, pi.review_status, pi.date_flagged, pi.last_seen,
+        SELECT pi.incident_id, pi.document_a, pi.document_b,
+               pi.similarity_score, pi.severity_rank,
+               pi.review_status, pi.date_flagged, pi.last_seen,
                pi.threshold_at_time_of_flag
         FROM plagiarism_incidents pi
         LEFT JOIN documents da ON pi.document_a = da.filename
@@ -134,7 +156,9 @@ def _fetch_all_incidents(conn: sqlite3.Connection) -> list[MatchResult]:
         WHERE (da.is_deleted IS NULL OR da.is_deleted = 0)
           AND (db.is_deleted IS NULL OR db.is_deleted = 0)
         ORDER BY pi.date_flagged DESC, pi.incident_id ASC
-        """
+        LIMIT ? OFFSET ?
+        """,
+        (safe_limit, safe_offset),
     ).fetchall()
 
     return [
@@ -147,7 +171,9 @@ def _fetch_all_incidents(conn: sqlite3.Connection) -> list[MatchResult]:
             review_status=row["review_status"],
             date_flagged=row["date_flagged"],
             last_seen=row["last_seen"],
-            threshold_at_time_of_flag=row["threshold_at_time_of_flag"],
+            threshold_at_time_of_flag=row[
+                "threshold_at_time_of_flag"
+            ],
         )
         for row in rows
     ]
@@ -243,10 +269,55 @@ def sync_flagged_incidents(
 
 def get_all_incidents(
     db_path: str | Path = DEFAULT_DB_PATH,
+    limit: int = 50,
+    offset: int = 0,
 ) -> list[MatchResult]:
+    """Return one page of visible plagiarism incidents.
+
+    Incidents are ordered by newest ``date_flagged`` first, with
+    ``incident_id`` as a deterministic tie-breaker.
+
+    Args:
+        db_path: SQLite corpus database path.
+        limit: Maximum number of incidents to return. Defaults to 50.
+        offset: Number of matching incidents to skip. Defaults to 0.
+
+    Raises:
+        TypeError: If ``limit`` or ``offset`` is not an integer.
+        ValueError: If ``limit`` is not positive or ``offset`` is negative.
+    """
+    safe_limit, safe_offset = _validate_pagination(limit, offset)
     init_incident_db(db_path)
     with closing(_get_connection(db_path)) as conn:
-        return _fetch_all_incidents(conn)
+        return _fetch_all_incidents(
+            conn,
+            limit=safe_limit,
+            offset=safe_offset,
+        )
+
+
+def get_total_incidents_count(
+    db_path: str | Path = DEFAULT_DB_PATH,
+) -> int:
+    """Return the number of visible plagiarism incidents.
+
+    The count uses the same soft-deletion filters as
+    :func:`get_all_incidents`, so pagination metadata cannot include
+    incidents linked to deleted documents.
+    """
+    init_incident_db(db_path)
+    with closing(_get_connection(db_path)) as conn:
+        row = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM plagiarism_incidents pi
+            LEFT JOIN documents da ON pi.document_a = da.filename
+            LEFT JOIN documents db ON pi.document_b = db.filename
+            WHERE (da.is_deleted IS NULL OR da.is_deleted = 0)
+              AND (db.is_deleted IS NULL OR db.is_deleted = 0)
+            """
+        ).fetchone()
+    return int(row[0]) if row is not None else 0
 
 def get_incident_by_id(
     incident_id: int | str,
@@ -396,8 +467,18 @@ def export_current_flags_csv(
     flags: Iterable[Mapping[str, Any]],
     db_path: str | Path = DEFAULT_DB_PATH,
 ) -> bytes:
+    """Synchronize and export every visible incident, not only one page."""
     sync_flagged_incidents(flags, db_path)
-    return incidents_to_csv(get_all_incidents(db_path))
+    total = get_total_incidents_count(db_path)
+    if total == 0:
+        return incidents_to_csv([])
+    return incidents_to_csv(
+        get_all_incidents(
+            db_path,
+            limit=total,
+            offset=0,
+        )
+    )
 
 def get_high_severity_trends(
     days: int = 30,
