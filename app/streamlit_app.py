@@ -516,11 +516,43 @@ except ImportError:
 # Page Configuration & Session State
 # -----------------------------------------------------------------------------
 
-st.set_page_config(
-    page_title="Semantic Plagiarism Detector",
-    page_icon="🔍",
-    layout="wide",
-    initial_sidebar_state="auto",
+def configure_page_meta(title: str, icon: str) -> None:
+    """
+    Configure Streamlit page metadata including title, favicon, and layout.
+
+    This helper function centralizes the page configuration logic, allowing
+    for dynamic updates to the browser tab title and favicon based on the
+    application's theme or state. It improves dashboard branding and provides
+    a consistent user experience across different views.
+
+    Args:
+        title (str): The desired page title to be displayed in the browser tab.
+                     Example: "Semantic Plagiarism Detector - Dashboard"
+        icon (str): The emoji or path to an image file to be used as the favicon.
+                    Example: "🔍" or "📄"
+
+    Returns:
+        None
+
+    Raises:
+        ValueError: If the title is empty or the icon is not a valid string.
+    """
+    if not isinstance(title, str) or not title.strip():
+        raise ValueError("Page title must be a non-empty string.")
+    if not isinstance(icon, str) or not icon.strip():
+        raise ValueError("Page icon must be a non-empty string.")
+
+    st.set_page_config(
+        page_title=title.strip(),
+        page_icon=icon.strip(),
+        layout="wide",
+        initial_sidebar_state="auto",
+    )
+
+# Initialize page metadata with dynamic branding
+configure_page_meta(
+    title="Semantic Plagiarism Detector - Dashboard",
+    icon="🔍"
 )
 
 def update_page_title(tab_name: str):
