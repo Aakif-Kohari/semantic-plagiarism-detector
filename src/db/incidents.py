@@ -542,7 +542,15 @@ def get_incidents_count_by_date(
 ) -> list[dict[str, Any]]:
     """Get the daily count of all plagiarism incidents.
 
-    Returns a list of dicts with 'date' and 'count' keys.
+    Incidents are grouped by calendar date and returned in ascending date order.
+    Incidents associated with deleted documents are excluded from the count.
+
+    Returns:
+        A list of dictionaries, where each dictionary contains a 'date' string
+        and an integer 'count'. For example:
+        [
+            {"date": "2026-07-28", "count": 5}
+        ]
     """
     init_incident_db(db_path)
     with closing(_get_connection(db_path)) as conn:
