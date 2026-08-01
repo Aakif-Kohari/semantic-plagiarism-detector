@@ -143,6 +143,29 @@ def set_tour_completed(username: str, completed: bool = True) -> None:
             (1 if completed else 0, username.lower()),
         )
         conn.commit()
+
+
+def get_security_audit_logs(limit: int = 50, offset: int = 0, username: str | None = None) -> list[dict]:
+    """Return a paginated list of security audit logs, ordered by timestamp DESC."""
+    if limit < 0 or offset < 0:
+        raise ValueError("Limit and offset must be non-negative.")
+        
+    query = "SELECT * FROM security_audit_log"
+    params = []
+    
+    if username is not None:
+        query += " WHERE username = ?"
+        params.append(username)
+        
+    query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
+    
+    with _connect() as conn:
+        # Use Row factory to easily convert rows to dicts
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(query, tuple(params)).fetchall()
+        
+    return [dict(row) for row in rows]
 def test_get_all_users():
     username = uuid.uuid4().hex
 
