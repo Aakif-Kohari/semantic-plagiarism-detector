@@ -36,7 +36,7 @@ streamlit-tour>=1.1.0            # Interactive guided tour component
 streamlit-plotly-events==0.0.6
 
 # ── Data & ML ─────────────────────────────────────────────────────────────────
-numpy>=2.5.1
+numpy>=2.0.0
 pandas>=2.2.0
 scikit-learn>=1.4.0              # cosine_similarity utility
 openpyxl>=3.1.5                  # Engine for exporting DataFrames to Excel
