@@ -1,11 +1,21 @@
 from __future__ import annotations
 
+
 import logging
 
 from src.core.cross_lingual import (detect_language,
                                     prepare_chunks_for_embedding,
                                     prepare_documents_for_embedding,
                                     prepare_text_for_embedding)
+
+from src.core.cross_lingual import (
+    detect_language,
+    prepare_chunks_for_embedding,
+    prepare_documents_for_embedding,
+    prepare_text_for_embedding,
+    translate_to_english,
+)
+
 
 def test_detects_english_text():
     text = (
@@ -136,7 +146,6 @@ def test_detect_language_high_confidence():
         assert confident is True
 
 
-
 def test_chunk_preparation_preserves_original_order():
     chunks = ["English paragraph", "Texto en español"]
     translations = iter(["English paragraph", "Text in Spanish"])
@@ -199,3 +208,25 @@ def test_document_preparation_does_not_mutate_source_chunks(monkeypatch):
     assert source["spanish.pdf"][0] == "La IA apoya la educación."
     assert aligned["spanish.pdf"][0] == "AI supports education."
     assert metadata["spanish.pdf"][0]["translated"] is True
+
+
+def test_translate_to_english_confidence():
+    """Verify translate_to_english returns dictionary with confidence metrics."""
+    # 1. English text -> confidence should be 1.0
+    english_input = "Artificial intelligence supports modern education."
+    res_en = translate_to_english(english_input)
+    assert res_en["confidence"] == 1.0
+    assert res_en["source_language"] == "en"
+    assert res_en["translated_text"] == english_input
+
+    # 2. Non-English text with mock translator
+    spanish_input = "La inteligencia artificial ayuda a los profesores en el aula."
+
+    def mock_translator(text, target_lang="en", source_lang="es"):
+        return "Artificial intelligence helps teachers in the classroom."
+
+    res_es = translate_to_english(spanish_input, translator=mock_translator)
+    assert res_es["source_language"] == "es"
+    assert isinstance(res_es["confidence"], float)
+    assert 0.0 <= res_es["confidence"] <= 1.0
+    assert res_es["translated_text"] == "Artificial intelligence helps teachers in the classroom."

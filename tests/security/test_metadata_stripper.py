@@ -1,4 +1,6 @@
+import io
 import pytest
+from PIL import Image
 from src.security.metadata_stripper import strip_exif_metadata
 
 def test_strip_exif_metadata_size_within_limit():
@@ -27,3 +29,36 @@ def test_strip_exif_metadata_exactly_at_custom_limit():
     data = b"0" * 100
     result = strip_exif_metadata(data, "test.txt", max_bytes=100)
     assert result == data
+
+def test_strip_image_metadata_dimension_safety_limit_width():
+    # Create a dummy image that exceeds the 10,000px width limit
+    # We create a minimal valid PNG header + fake large dimensions
+    # Using PIL to generate a 10001x100 image to trigger the check
+    img = Image.new('RGB', (10001, 100), color='red')
+    img_bytes = io.BytesIO()
+    img.save(img_bytes, format='PNG')
+    
+    with pytest.raises(ValueError) as excinfo:
+        strip_exif_metadata(img_bytes.getvalue(), "test.png")
+    assert "Image dimensions exceed 10,000px safety limit" in str(excinfo.value)
+
+def test_strip_image_metadata_dimension_safety_limit_height():
+    # Create a dummy image that exceeds the 10,000px height limit
+    img = Image.new('RGB', (100, 10001), color='blue')
+    img_bytes = io.BytesIO()
+    img.save(img_bytes, format='JPEG')
+    
+    with pytest.raises(ValueError) as excinfo:
+        strip_exif_metadata(img_bytes.getvalue(), "test.jpg")
+    assert "Image dimensions exceed 10,000px safety limit" in str(excinfo.value)
+
+def test_strip_image_metadata_dimension_exactly_at_limit():
+    # Create a dummy image exactly at the 10,000px limit (should pass)
+    img = Image.new('RGB', (10000, 10000), color='green')
+    img_bytes = io.BytesIO()
+    img.save(img_bytes, format='PNG')
+    
+    # Should not raise an error
+    result = strip_exif_metadata(img_bytes.getvalue(), "test.png")
+    assert isinstance(result, bytes)
+    assert len(result) > 0

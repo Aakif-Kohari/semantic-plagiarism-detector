@@ -28,9 +28,9 @@ def _split_into_sentences(text: str) -> List[str]:
     (e.g. CI containers without the punkt corpus downloaded).
     """
     try:
-        import nltk
+        import nltk # type: ignore
         try:
-            from nltk.tokenize import sent_tokenize
+            from nltk.tokenize import sent_tokenize # type: ignore
             sentences = sent_tokenize(text)
             if sentences:
                 return sentences
@@ -38,7 +38,7 @@ def _split_into_sentences(text: str) -> List[str]:
             # punkt_tab / punkt corpus not downloaded – trigger download once
             try:
                 nltk.download("punkt_tab", quiet=True)
-                from nltk.tokenize import sent_tokenize
+                from nltk.tokenize import sent_tokenize # type: ignore
                 return sent_tokenize(text)
             except Exception:
                 pass
@@ -95,8 +95,7 @@ def chunk_text(
     overlap_percentage: float | None = None,
     max_chunks: int = 1000,
 ) -> List[str]:
-    """
-    Splits text into chunks of a target character length with overlapping boundaries.
+    """Splits text into chunks of a target character length with overlapping boundaries.
 
     Args:
         text: The input text to chunk.
@@ -262,8 +261,7 @@ def chunk_documents(
     chunk_overlap: int = 50,
     min_words: int = 5,
 ) -> Dict[str, List[str]]:
-    """
-    Splits a dictionary of document raw texts into chunks respecting customizable
+    """Splits a dictionary of document raw texts into chunks respecting customizable
     chunk size and overlap parameters.
     """
     chunked_docs = {}
@@ -275,4 +273,3 @@ def chunk_documents(
             min_words=min_words,
         )
     return chunked_docs
-
