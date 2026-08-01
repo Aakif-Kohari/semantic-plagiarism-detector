@@ -10,7 +10,7 @@ exclude =
     .streamlit,
     .devcontainer
 
-# Enforce PEP 8 line length limits (E501) and correctness checks (F*) globally, 
+# Enforce PEP 8 line length limits (E501) and correctness checks (F*) globally,
 # while ignoring minor stylistic legacy warnings.
 ignore = E111, E121, E122, E127, E131, E221, E226, E241, E261, E272, E301, E302, E303, E401, E402, E701, E702, W291, W292, W293, W391, W503
 
