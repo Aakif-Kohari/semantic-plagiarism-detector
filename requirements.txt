@@ -27,7 +27,7 @@ argon2-cffi>=23.1.0              # Password hashing
 # ── Web UI ────────────────────────────────────────────────────────────────────
 streamlit>=1.60.0                # Dashboard framework
 bcrypt>=4.0.0                    # Password hashing for auth
-pyotp>=2.9.0                     # TOTP generator/verifier for 2FA
+pyotp>=2.10.0                     # TOTP generator/verifier for 2FA
 qrcode>=7.4.2                    # Local QR code generator for 2FA setup
 python-dotenv>=1.0.0             # Load credentials from .env
 plotly>=5.20.0                   # Interactive heatmap with hover values
@@ -37,6 +37,7 @@ streamlit-plotly-events==0.0.6
 
 # ── Data & ML ─────────────────────────────────────────────────────────────────
 numpy>=1.26.0,<2.5.0
+numpy>=2.5.1
 pandas>=2.2.0
 scikit-learn>=1.4.0              # cosine_similarity utility
 openpyxl>=3.1.5                  # Engine for exporting DataFrames to Excel
@@ -69,7 +70,7 @@ python-multipart>=0.0.6         # Multipart form parsing for file uploads
 httpx>=0.26.0                   # Async HTTP client for API testing
 
 # ── Observability & Monitoring ────────────────────────────────────────────────
-prometheus-client>=0.19.0       # Prometheus metrics export for production monitoring
+prometheus-client>=0.26.0       # Prometheus metrics export for production monitoring
 # ── Code Formatting & Linting ──────────────────────────────────────────────────
 pre-commit>=3.6.0               # Client-side Git hooks manager
 black>=24.1.0                   # Opinionated Python code formatter
@@ -83,6 +84,6 @@ google-auth>=2.56.2
 pyzipper>=0.4.0                 # AES-256 encrypted ZIP archives for backups
 
 # ── Background Task Queue ─────────────────────────────────────────────────────
-rq>=1.16.0                      # Redis-backed background job queue for async upload processing
+rq>=2.10.0                      # Redis-backed background job queue for async upload processing
 hiredis>=2.3.0                  # C-extension Redis parser for faster RQ job dequeue
 slowapi

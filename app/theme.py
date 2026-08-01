@@ -922,6 +922,7 @@ def inject_css() -> None:
                 max-width: 85vw !important;
             }}
         }}
+    """
     # Issue #572: File Uploader Drag-Zone Customization
     file_uploader_css = f"""
     /* File Uploader Drag-Zone Customization */
@@ -1124,9 +1125,6 @@ def inject_css() -> None:
     css = base_css + file_uploader_css + sidebar_active_tab_css
 
     if st.session_state.get("privacy_mode", False):
-        css = css.replace(
-            "</style>",
-            """
         css += """
         /* Privacy Mode: Blur student name labels */
         [class*="st-key-student_"] {
@@ -1136,9 +1134,6 @@ def inject_css() -> None:
         [class*="st-key-student_"]:hover {
             filter: none !important;
         }
-    </style>
-        """,
-        )
         """
 
     # Issue #644: wrap CSS in a nonced <style> block
@@ -1298,7 +1293,6 @@ def format_similarity_html(
     score: float,
     threshold: float = DEFAULT_THRESHOLDS.plagiarism,
 ) -> str:
-def format_similarity_html(score: float, threshold: float = DEFAULT_THRESHOLDS.plagiarism) -> str:
     """Return a themed similarity pill using central severity boundaries."""
     colors = get_colors()
     tier = severity_key(score)

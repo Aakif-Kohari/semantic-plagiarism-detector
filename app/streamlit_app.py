@@ -5,10 +5,12 @@ import html
 import io as _io
 import logging
 import os
-from pathlib import Path
+import traceback
+import functoolsfrom pathlib import Path
 import sqlite3
 import sys
 import time
+from src.utils.temp_manager import purge_expired_temp_files
 from datetime import datetime, timezone
 from typing import Any
 
@@ -70,6 +72,25 @@ from src.core.logging_config import setup_logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
+
+def ui_exception_handler(component_name: str):
+    """Decorator that catches exceptions in a UI component and shows a
+    friendly error message instead of a raw Streamlit traceback."""
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except Exception:
+                logger.error(
+                    "Component '%s' failed to render:\n%s",
+                    component_name,
+                    traceback.format_exc(),
+                )
+                st.error(f"⚠️ Failed to load component: {component_name}")
+                return None
+        return wrapper
+    return decorator
 # Validate required environment variables during application startup
 REQUIRED_ENV_VARS = [
     "REDIS_URL",
@@ -178,8 +199,13 @@ from src.utils.badge_generator import (
     generate_badge_png,
     generate_badge_pdf,
 )
-from src.db.corpus_db import get_document_tags, init_corpus_db
-from src.db.incidents import (
+from src.db.corpus_db import (
+    delete_tag,
+    get_all_tags,
+    get_document_tags,
+    get_tag_document_count,
+    init_corpus_db,
+)from src.db.incidents import (
     get_all_incidents_above_threshold_for_export,
     get_high_severity_trends,
     get_most_plagiarized_documents,
@@ -280,6 +306,8 @@ class OCRFileBatchError(Exception):
 init_corpus_db()
 init_db()
 
+# Purge stale temp files older than 2 hours on startup
+purge_expired_temp_files()
 # Start lightweight REST API server for /healthz endpoint in background
 import threading
 import time
@@ -845,9 +873,15 @@ with st.sidebar:
         ocr_language = DEFAULT_OCR_LANGUAGE
         ocr_dpi = DEFAULT_OCR_DPI
 
-    unique_classes = ["All Classes"] + get_unique_class_sections()
-    selected_class = st.selectbox("Select Class/Section", unique_classes, index=0, key="class_filter_selectbox")
-
+unique_classes = get_unique_class_sections()
+selected_classes = st.multiselect(
+    "Select Class/Section(s)",
+    unique_classes,
+    default=unique_classes,
+    key="class_filter_selectbox",
+)
+if not selected_classes:
+    selected_classes = unique_classes
     if st.button("🔄 Reset All Filters", key="reset_all_filters_button", use_container_width=True):
         keys_to_reset = [
             "threshold_slider",
@@ -872,6 +906,11 @@ with st.sidebar:
             del st.query_params["threshold"]
         st.success("✅ Filters reset to defaults!")
         st.rerun()
+
+    with st.expander("⌨️ Keyboard Shortcuts"):
+        st.caption("• **R**: Rerun app")
+        st.caption("• **C**: Clear cache")
+        st.caption("• **Tab**: Navigate focus")
 
 # ── Main UI ───────────────────────────────────────────────────────────────────
 st.title("🔍 Semantic Plagiarism Detection System")
@@ -1682,10 +1721,9 @@ with tab_heatmap:
     update_page_title("Heatmap")
     st.subheader("🗺️ Heatmap & Network")
     if active_sim_df is not None:
-        heatmap_fig = plot_similarity_heatmap(
+heatmap_fig = ui_exception_handler("Similarity Heatmap")(plot_similarity_heatmap)(
             active_sim_df, threshold=threshold, theme_colors=get_colors()
-        )
-    else:
+        )    else:
         with st.expander(
             "🗺️ Similarity Heatmap",
             expanded=False,
@@ -1734,8 +1772,7 @@ with tab_heatmap:
 
             heatmap_fig = build_visualization_lazily(
                 load_heatmap,
-                lambda: plot_similarity_heatmap(
-                    active_sim_df,
+lambda: ui_exception_handler("Similarity Heatmap")(plot_similarity_heatmap)(                    active_sim_df,
                     title="Document Semantic Similarity",
                     threshold=threshold,
                     theme_colors=get_colors(),
@@ -1760,13 +1797,12 @@ with tab_heatmap:
             else None
         )
 
-        network_fig = plot_similarity_network(
+network_fig = ui_exception_handler("Plagiarism Network")(plot_similarity_network)(
             similarity_df=active_sim_df,
             threshold=threshold,
             highlighted_doc=highlighted_doc,
             title="Interactive Document Plagiarism Network",
         )
-
         st.download_button(
             "⬇️ Download Heatmap PNG",
             buf,
@@ -1803,8 +1839,7 @@ with tab_heatmap:
 
             network_fig = build_visualization_lazily(
                 load_network,
-                lambda: plot_similarity_network(
-                    similarity_df=active_sim_df,
+lambda: ui_exception_handler("Plagiarism Network")(plot_similarity_network)(                    similarity_df=active_sim_df,
                     threshold=threshold,
                     min_degree=min_degree,
                     title=(
@@ -2089,8 +2124,28 @@ with tab_settings:
                 key="ocr_dpi_slider",
             )
 
-        st.markdown("### 💾 Backup")
-        from src.db.database_backup import (
+st.markdown("### 🏷️ Tag Management")
+        all_tags = get_all_tags()
+        if all_tags:
+            tag_to_delete = st.selectbox(
+                "Select Tag to Delete",
+                options=all_tags,
+                key="tag_delete_selectbox",
+            )
+            affected_docs = get_tag_document_count(tag_to_delete)
+            with st.popover("🗑️ Delete Tag"):
+                st.warning(
+                    f"Are you sure you want to delete tag '{tag_to_delete}'? "
+                    f"This affects {affected_docs} documents."
+                )
+                if st.button("Confirm Delete", key="confirm_delete_tag_button"):
+                    delete_tag(tag_to_delete)
+                    st.success(f"✅ Tag '{tag_to_delete}' deleted successfully!")
+                    st.rerun()
+        else:
+            st.caption("No tags found in the corpus.")
+
+        st.markdown("### 💾 Backup")        from src.db.database_backup import (
             create_corpus_database_snapshot,
             create_password_protected_backup,
         )

@@ -176,3 +176,24 @@ def test_resolve_hostname_success(mock_getaddrinfo):
     mock_getaddrinfo.return_value = [(2, 1, 6, "", ("8.8.8.8", 53))]
     ip = SSRFProtector._resolve_hostname("dns.google")
     assert ip == "8.8.8.8"
+
+
+@patch("src.security.ssrf_protector.socket.getaddrinfo")
+def test_validate_webhook_url_allowed_webhook_domains(mock_getaddrinfo, monkeypatch):
+    mock_getaddrinfo.return_value = [(2, 1, 6, "", ("142.250.190.46", 443))]
+    monkeypatch.setenv("ALLOWED_WEBHOOK_DOMAINS", "hooks.slack.com, discord.com")
+
+    # Allowed domain exact match passes
+    assert SSRFProtector.validate_webhook_url("https://discord.com/api/webhooks/123/abc") is True
+
+    # Allowed domain subdomain match passes
+    assert SSRFProtector.validate_webhook_url("https://hooks.slack.com/services/123") is True
+    assert SSRFProtector.validate_webhook_url("https://sub.hooks.slack.com/services/123") is True
+
+    # Disallowed domain raises SSRFSecurityException without calling DNS resolution
+    mock_getaddrinfo.reset_mock()
+    with pytest.raises(SSRFSecurityException, match="is not in ALLOWED_WEBHOOK_DOMAINS"):
+        SSRFProtector.validate_webhook_url("https://unallowed-domain.org/webhook")
+
+    mock_getaddrinfo.assert_not_called()
+
