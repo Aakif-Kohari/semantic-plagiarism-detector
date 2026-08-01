@@ -207,7 +207,7 @@ def run_migrations(
 
     with migration_transaction(connection):
         for version in range(current + 1, target + 1):
-            migrations[version]()
+            migrations[version](connection)
         set_user_version(connection, target)
 
     return target

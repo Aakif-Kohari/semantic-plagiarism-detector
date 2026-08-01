@@ -6,19 +6,19 @@ import urllib.parse
 from typing import Dict
 
 
-from src import errors
-
 from src.errors import (
-    SSRF_EMPTY_URL,
-    SSRF_INSECURE_SCHEME,
-    SSRF_MISSING_HOSTNAME,
-    SSRF_DNS_RESOLUTION_FAILED,
-    SSRF_INVALID_IP,
-    SSRF_BLOCKED_LOOPBACK,
-    SSRF_BLOCKED_PRIVATE,
     SSRF_BLOCKED_LINK_LOCAL,
+    SSRF_BLOCKED_LOOPBACK,
     SSRF_BLOCKED_MULTICAST,
+    SSRF_BLOCKED_PRIVATE,
     SSRF_BLOCKED_UNSPECIFIED,
+    SSRF_DNS_NO_ADDRESSES,
+    SSRF_DNS_RESOLUTION_FAILED,
+    SSRF_DOMAIN_NOT_ALLOWED,
+    SSRF_WEBHOOK_URL_EMPTY,
+    SSRF_INSECURE_SCHEME,
+    SSRF_INVALID_IP_FORMAT,
+    SSRF_MISSING_HOSTNAME,
 )
 
 
@@ -41,7 +41,6 @@ class SSRFProtector:
     # slow-DNS denial of service attacks. (Format: {hostname: (ip_str, timestamp)})
     _dns_cache: Dict[str, tuple[str, float]] = {}
     DNS_CACHE_TTL_SECONDS = 300  # 5 minutes
-    DNS_CACHE_TTL_SECONDS = 300 # 5 minutes
     BLOCKED_PRIVATE_IPV4_SUBNETS = (
         ipaddress.ip_network("10.0.0.0/8"),
         ipaddress.ip_network("172.16.0.0/12"),
@@ -63,56 +62,46 @@ class SSRFProtector:
 
         # Cache miss or expired, perform DNS resolution
         try:
-            # socket.getaddrinfo is used to support both IPv4 and IPv6 resolution safely
             addr_info = socket.getaddrinfo(hostname, None)
             if not addr_info:
+                raise SSRFSecurityException(
+                    SSRF_DNS_NO_ADDRESSES.format(hostname=hostname)
+                )
 
-                raise SSRFSecurityException(errors.SSRF_DNS_NO_ADDRESSES.format(hostname=hostname))            
-
-                            # Extract the first resolved IP
-                ip_str = addr_info[0][4]
-                # Store in cache
-                cls._dns_cache[hostname] = (ip_str, current_time)
-                return ip_str
+            ip_str = addr_info[0][4][0]
+            cls._dns_cache[hostname] = (ip_str, current_time)
+            return ip_str
 
         except socket.gaierror as e:
-
-            raise SSRFSecurityException(errors.SSRF_DNS_RESOLUTION_FAILED.format(hostname=hostname, error=e))
-
             raise SSRFSecurityException(
                 SSRF_DNS_RESOLUTION_FAILED.format(hostname=hostname, error=e)
             )
 
-
     @classmethod
-    def validate_webhook_url(cls, url: str) -> bool:
+    def validate_webhook_url(
+        cls,
+        url: str,
+        allowed_domains: list[str] | None = None,
+    ) -> bool:
         """
         Validates that a provided webhook URL is safe to dispatch.
-        Ensures the URL uses HTTPS and does not resolve to any internal network IP.
+        Ensures the URL uses HTTPS, its domain is in ALLOWED_WEBHOOK_DOMAINS (if configured),
+        and does not resolve to any internal network IP.
 
         Args:
             url: The webhook URL string
+            allowed_domains: Optional list of allowed domain hostnames. If None,
+                fetches configured domains via ``get_allowed_webhook_domains()``.
 
         Returns:
             True if the URL is strictly safe.
 
         Raises:
-            SSRFSecurityException: If the URL is malicious.
+            SSRFSecurityException: If the URL is malicious or unapproved.
         """
         if not url:
+            raise SSRFSecurityException(SSRF_WEBHOOK_URL_EMPTY)
 
-            raise SSRFSecurityException(errors.SSRF_WEBHOOK_URL_EMPTY)            
-                    # 1. Scheme Validation
-            parsed = urllib.parse.urlparse(url)
-            if parsed.scheme != "https":
-                raise SSRFSecurityException(errors.SSRF_INSECURE_SCHEME.format(scheme=parsed.scheme))            
-                hostname = parsed.hostname
-            if not hostname:
-                raise SSRFSecurityException(errors.SSRF_MISSING_HOSTNAME)            
-
-            raise SSRFSecurityException(SSRF_EMPTY_URL)
-
-        # 1. Scheme Validation
         parsed = urllib.parse.urlparse(url)
         if parsed.scheme != "https":
             raise SSRFSecurityException(
@@ -123,6 +112,23 @@ class SSRFProtector:
         if not hostname:
             raise SSRFSecurityException(SSRF_MISSING_HOSTNAME)
 
+        # Domain whitelist validation
+        if allowed_domains is None:
+            from src.core.app_config import get_allowed_webhook_domains
+            allowed_domains = get_allowed_webhook_domains()
+
+        if allowed_domains:
+            host_lower = hostname.lower()
+            allowed = False
+            for domain in allowed_domains:
+                dom_lower = domain.lower()
+                if host_lower == dom_lower or host_lower.endswith("." + dom_lower):
+                    allowed = True
+                    break
+            if not allowed:
+                raise SSRFSecurityException(
+                    SSRF_DOMAIN_NOT_ALLOWED.format(hostname=hostname)
+                )
 
         # 2. DNS Resolution
         ip_str = cls._resolve_hostname(hostname)
@@ -130,44 +136,22 @@ class SSRFProtector:
         try:
             ip = ipaddress.ip_address(ip_str)
         except ValueError as e:
+            raise SSRFSecurityException(SSRF_INVALID_IP_FORMAT.format(error=e))
 
-            raise SSRFSecurityException(errors.SSRF_INVALID_IP_FORMAT.format(error=e))            
-
-            raise SSRFSecurityException(SSRF_INVALID_IP.format(error=e))
-            
-
-        # 3. Block explicit RFC1918 private IPv4 subnets using CIDR checks
         if isinstance(ip, ipaddress.IPv4Address):
             for subnet in cls.BLOCKED_PRIVATE_IPV4_SUBNETS:
                 if ip in subnet:
-                    raise SSRFSecurityException(
-                        errors.SSRF_BLOCKED_PRIVATE_SUBNET.format(ip=ip_str, subnet=subnet)
-                    )
-        # 4. Block private IPv6 addresses and special-purpose ranges
+                    raise SSRFSecurityException(SSRF_BLOCKED_PRIVATE.format(ip=ip_str))
         if ip.is_loopback:
-
-            raise SSRFSecurityException(errors.SSRF_BLOCKED_LOOPBACK.format(ip=ip_str))            
-            if ip.is_private:
-                raise SSRFSecurityException(errors.SSRF_BLOCKED_PRIVATE_NETWORK.format(ip=ip_str))            
-            if ip.is_link_local:
-                raise SSRFSecurityException(errors.SSRF_BLOCKED_LINK_LOCAL.format(ip=ip_str))            
-            if ip.is_multicast:
-                raise SSRFSecurityException(errors.SSRF_BLOCKED_MULTICAST.format(ip=ip_str))            
-            if ip.is_unspecified:
-                raise SSRFSecurityException(errors.SSRF_BLOCKED_UNSPECIFIED.format(ip=ip_str))            
-
             raise SSRFSecurityException(SSRF_BLOCKED_LOOPBACK.format(ip=ip_str))
-
-        if ip.is_private:
-            raise SSRFSecurityException(SSRF_BLOCKED_PRIVATE.format(ip=ip_str))
         if ip.is_link_local:
             raise SSRFSecurityException(SSRF_BLOCKED_LINK_LOCAL.format(ip=ip_str))
         if ip.is_multicast:
             raise SSRFSecurityException(SSRF_BLOCKED_MULTICAST.format(ip=ip_str))
-
         if ip.is_unspecified:
             raise SSRFSecurityException(SSRF_BLOCKED_UNSPECIFIED.format(ip=ip_str))
-
+        if ip.is_private:
+            raise SSRFSecurityException(SSRF_BLOCKED_PRIVATE.format(ip=ip_str))
 
         # If it passed all checks, it's considered safe (public routable IP)
         logger.debug(f"SSRF Check passed for {url} -> {ip_str}")

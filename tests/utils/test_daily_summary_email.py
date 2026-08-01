@@ -193,7 +193,7 @@ def test_send_email_no_recipients():
 @patch("src.utils.daily_summary_email.get_admin_emails")
 @patch("src.utils.daily_summary_email.get_incidents_last_24h")
 def test_send_daily_summary(mock_get_incidents, mock_get_emails, mock_send_email):
-    """Test the complete daily summary workflow."""
+    """Test the complete daily summary workflow with default prefix."""
     mock_get_incidents.return_value = [
         {
             "incident_id": "INC-123",
@@ -214,7 +214,25 @@ def test_send_daily_summary(mock_get_incidents, mock_get_emails, mock_send_email
     assert result is True
     mock_send_email.assert_called_once()
     call_args = mock_send_email.call_args
-    assert "Daily Plagiarism Summary" in call_args[0][1]  # subject
+    assert call_args[0][1].startswith("[Plagiarism Alert] Daily Plagiarism Summary")  # subject
+
+
+@patch("src.utils.daily_summary_email.send_email")
+@patch("src.utils.daily_summary_email.get_admin_emails")
+@patch("src.utils.daily_summary_email.get_incidents_last_24h")
+def test_send_daily_summary_custom_prefix(mock_get_incidents, mock_get_emails, mock_send_email):
+    """Test the complete daily summary workflow with a custom prefix."""
+    mock_get_incidents.return_value = []
+    mock_get_emails.return_value = ["admin@example.com"]
+    mock_send_email.return_value = True
+
+    result = send_daily_summary(subject_prefix="[Custom Alert Prefix]")
+
+    assert result is True
+    mock_send_email.assert_called_once()
+    call_args = mock_send_email.call_args
+    assert call_args[0][1].startswith("[Custom Alert Prefix] Daily Plagiarism Summary")
+
 
 
 # ---------------------------------------------------------------------------

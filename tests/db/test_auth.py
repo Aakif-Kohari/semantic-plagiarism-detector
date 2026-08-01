@@ -250,6 +250,17 @@ def test_delete_user_removes_matching_session_and_authorization_rows(mock_db):
 # format_user_created_date — issue #1049
 # ──────────────────────────────────────────────────────────────────────────────
 
+def test_connect_uses_fifteen_second_timeout():
+    """Verify that _connect helper sets sqlite3 timeout to 15.0 seconds."""
+    from unittest.mock import patch
+    from src.db.auth import _connect
+
+    with patch("sqlite3.connect") as mock_connect:
+        _connect()
+        mock_connect.assert_called_once()
+        kwargs = mock_connect.call_args[1]
+        assert kwargs.get("timeout") == 15.0
+
 
 class TestFormatUserCreatedDate:
     """Tests for the format_user_created_date helper (issue #1049)."""

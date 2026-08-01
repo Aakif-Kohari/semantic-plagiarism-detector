@@ -61,7 +61,7 @@ def configure_db_path(db_path: str | os.PathLike) -> None:
 
 
 def _connect() -> sqlite3.Connection:
-    return sqlite3.connect(_DB_PATH, check_same_thread=False)
+    return sqlite3.connect(_DB_PATH, timeout=15.0, check_same_thread=False)
 
 
 def log_security_event(
@@ -335,8 +335,12 @@ def delete_user(username: str) -> None:
         raise sqlite3.Error(f"Failed to delete user: {e}") from e
 
 
-def update_password(username: str, new_password: str) -> None:
+def update_password(username: str, new_password: str, current_user: str | None = None) -> None:
     """Update a user's password with a new Argon2 hash."""
+    if current_user and current_user != username:
+        if get_user_role(current_user) != "admin":
+            raise PermissionError("Unauthorized password modifications for foreign user_ids")
+
     try:
         username = _validate_username(username)
         new_password = _validate_password(new_password)

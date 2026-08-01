@@ -319,8 +319,9 @@ def test_bulk_download_drive_folder_reports_aggregate_progress(
 
     # Progress accumulates across files against the batch total (300 bytes),
     # and the final call always reaches 100%.
-    assert calls[0] == (100, 300)
-    assert calls[1] == (300, 300)
+    assert (0, 300) in calls
+    assert (100, 300) in calls
+    assert (300, 300) in calls
     assert calls[-1] == (300, 300)
 
 

@@ -124,6 +124,44 @@ def sanitize_theme_colors(colors: dict) -> dict:
     return sanitized
 
 
+try:
+    from app.css_constants import (
+        CLASS_AVATAR,
+        CLASS_BADGE,
+        CLASS_EMPTY_DESC,
+        CLASS_EMPTY_ICON,
+        CLASS_EMPTY_STATE,
+        CLASS_EMPTY_TITLE,
+        CLASS_PIPELINE_ACTIVE,
+        CLASS_PIPELINE_ARROW,
+        CLASS_PIPELINE_DONE,
+        CLASS_PIPELINE_ETA,
+        CLASS_PIPELINE_STEP,
+        CLASS_PIPELINE_STEPS,
+        CLASS_SIDEBAR_USER_BADGE,
+        CLASS_SIM_PILL,
+        CLASS_WELCOME_BANNER,
+    )
+except ImportError:
+    from css_constants import (
+        CLASS_AVATAR,
+        CLASS_BADGE,
+        CLASS_EMPTY_DESC,
+        CLASS_EMPTY_ICON,
+        CLASS_EMPTY_STATE,
+        CLASS_EMPTY_TITLE,
+        CLASS_PIPELINE_ACTIVE,
+        CLASS_PIPELINE_ARROW,
+        CLASS_PIPELINE_DONE,
+        CLASS_PIPELINE_ETA,
+        CLASS_PIPELINE_STEP,
+        CLASS_PIPELINE_STEPS,
+        CLASS_SIDEBAR_USER_BADGE,
+        CLASS_SIM_PILL,
+        CLASS_WELCOME_BANNER,
+    )
+from src.core.config import DEFAULT_THRESHOLDS, normalize_severity_label, severity_key
+
 # ── CSS Class Constants ────────────────────────────────────────────────────────
 try:
     from app.css_constants import (
@@ -271,6 +309,620 @@ def inject_css() -> None:
     """
     colors = sanitize_theme_colors(get_colors())
 
+    css = f"""
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;0,6..72,700;1,6..72,400&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
+
+        :root {{
+            --background: {colors["background"]};
+            --surface: {colors["surface"]};
+            --card: {colors["card"]};
+            --ink: {colors["ink"]};
+            --muted: {colors["muted"]};
+            --accent: {colors["accent"]};
+            --border: {colors["border"]};
+            --input: {colors["input"]};
+            --neutral-soft: {colors["neutral_soft"]};
+            --danger: {colors["danger"]};
+            --danger-soft: {colors["danger_soft"]};
+            --warning: {colors["warning"]};
+            --warning-soft: {colors["warning_soft"]};
+            --success: {colors["success"]};
+            --success-soft: {colors["success_soft"]};
+        }}
+
+        html,
+        body,
+        [class*="css"] {{
+            font-family: 'Inter', sans-serif !important;
+        }}
+
+        .stApp {{
+            background-color: var(--background) !important;
+            color: var(--ink) !important;
+        }}
+
+        [data-testid="stHeader"] {{
+            background-color: var(--background) !important;
+        }}
+
+        [data-testid="stToolbar"] {{
+            color: var(--ink) !important;
+        }}
+
+        h1,
+        h2,
+        h3,
+        h4,
+        h5,
+        h6 {{
+            font-family: 'Newsreader', Georgia, serif !important;
+            color: var(--ink) !important;
+            font-weight: 700 !important;
+        }}
+
+        p,
+        label,
+        span,
+        li,
+        [data-testid="stMarkdownContainer"],
+        [data-testid="stWidgetLabel"] {{
+            color: var(--ink);
+        }}
+
+        [data-testid="stCaptionContainer"],
+        .stCaption {{
+            color: var(--muted) !important;
+        }}
+
+        .hero-kicker {{
+            font-family: 'Inter', sans-serif;
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: var(--accent);
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            margin-bottom: 0.25rem;
+        }}
+
+        /* ── Sidebar ────────────────────────────────────────────────── */
+
+        [data-testid="stSidebar"] {{
+            background-color: var(--surface) !important;
+            border-right: 1px solid var(--border) !important;
+        }}
+
+        [data-testid="stSidebar"] * {{
+            color: var(--ink);
+        }}
+
+        .sidebar-brand-title {{
+            font-family: 'Newsreader', serif;
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--ink);
+            text-align: center;
+            line-height: 1.2;
+            margin-top: 0.25rem;
+            margin-bottom: 0;
+        }}
+
+        .sidebar-brand-kicker {{
+            font-family: 'Inter', sans-serif;
+            font-size: 0.7rem;
+            font-weight: 700;
+            color: var(--accent);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            text-align: center;
+            margin-bottom: 1.25rem;
+        }}
+
+        .sidebar-section-label {{
+            font-family: 'Inter', sans-serif;
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-top: 1rem;
+            margin-bottom: 0.5rem;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 2px;
+        }}
+
+        .sidebar-user-badge {{
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            background-color: var(--neutral-soft);
+            border: 1px solid var(--border);
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--ink);
+            margin-bottom: 0.75rem;
+        }}
+
+        .sidebar-user-badge .avatar {{
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background-color: var(--accent);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: 700;
+            flex-shrink: 0;
+        }}
+
+        /* ── Document row (sidebar) ─────────────────────────────────── */
+
+        .doc-row {{
+            border-radius: 8px;
+            padding: 4px 8px;
+            margin-bottom: 2px;
+            transition: background-color 0.18s ease, box-shadow 0.18s ease;
+            cursor: default;
+        }}
+
+        .doc-row:hover {{
+            background-color: var(--neutral-soft);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+        }}
+
+        /* ── Metric cards ───────────────────────────────────────────── */
+
+        div[data-testid="stMetric"] {{
+            background-color: var(--card) !important;
+            border: 1px solid var(--border) !important;
+            border-top: 4px solid var(--accent) !important;
+            border-radius: 8px !important;
+            padding: 14px 16px !important;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12) !important;
+        }}
+
+        div[data-testid="stMetricLabel"] > div {{
+            font-family: 'Inter', sans-serif !important;
+            font-size: 0.75rem !important;
+            font-weight: 700 !important;
+            color: var(--muted) !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.05em !important;
+        }}
+
+        div[data-testid="stMetricValue"] > div {{
+            font-family: 'IBM Plex Mono', monospace !important;
+            font-size: 1.6rem !important;
+            font-weight: 700 !important;
+            color: var(--ink) !important;
+        }}
+
+        div[data-testid="stMetricDelta"] > div {{
+            font-family: 'Inter', sans-serif !important;
+            font-size: 0.8rem !important;
+            font-weight: 600 !important;
+        }}
+
+        /* ── Badge ──────────────────────────────────────────────────── */
+
+        .badge {{
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            font-family: 'IBM Plex Mono', monospace;
+            text-align: center;
+        }}
+
+        .meta-chip {{
+            background-color: var(--neutral-soft);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 4px 10px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--ink);
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }}
+
+        .meta-chip code {{
+            font-family: 'IBM Plex Mono', monospace !important;
+            background: none !important;
+            padding: 0 !important;
+            color: var(--accent) !important;
+            font-weight: 700 !important;
+        }}
+
+        /* ── Login container ────────────────────────────────────────── */
+
+        .login-container {{
+            background-color: var(--card) !important;
+            border: 1px solid var(--border) !important;
+            border-radius: 12px !important;
+            padding: 2.5rem !important;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.18) !important;
+            max-width: 480px;
+            margin: 2rem auto;
+            animation: loginSlideIn 0.4s ease-out;
+        }}
+
+        .login-container .login-header {{
+            text-align: center;
+            margin-bottom: 1.5rem;
+        }}
+
+        .login-container .login-icon {{
+            font-size: 3rem;
+            line-height: 1;
+            margin-bottom: 0.5rem;
+        }}
+
+        .login-container .login-title {{
+            font-family: 'Newsreader', serif;
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--ink);
+            margin-bottom: 0.25rem;
+        }}
+
+        .login-container .login-subtitle {{
+            font-size: 0.85rem;
+            color: var(--muted);
+        }}
+
+        .login-accent-bar {{
+            height: 4px;
+            background: linear-gradient(90deg, var(--accent), transparent);
+            border-radius: 2px;
+            margin-bottom: 1.5rem;
+        }}
+
+        @keyframes loginSlideIn {{
+            from {{
+                opacity: 0;
+                transform: translateY(12px);
+            }}
+            to {{
+                opacity: 1;
+                transform: translateY(0);
+            }}
+        }}
+
+        /* ── Warning card accent borders ────────────────────────────── */
+
+        .warning-card-high {{
+            border-left: 4px solid var(--danger) !important;
+        }}
+
+        .warning-card-medium {{
+            border-left: 4px solid var(--warning) !important;
+        }}
+
+        .warning-card-low {{
+            border-left: 4px solid var(--success) !important;
+        }}
+
+        /* ── Warning list container animation (#369) ─────────────────
+           The threshold slider re-filters the warning list on every
+           change. This transition smooths out the resulting layout /
+           opacity shifts on the container instead of snapping instantly. */
+
+        .st-key-warning_list_container {{
+            transition: all 0.3s ease;
+        }}
+
+        /* ── Similarity score pill ──────────────────────────────────── */
+
+        .sim-pill {{
+            display: inline-block;
+            padding: 3px 12px;
+            border-radius: 10px;
+            font-size: 0.85rem;
+            font-weight: 700;
+            font-family: 'IBM Plex Mono', monospace;
+            color: white;
+        }}
+
+        /* ── Mono text ──────────────────────────────────────────────── */
+
+        .mono-text {{
+            font-family: 'IBM Plex Mono', monospace !important;
+        }}
+
+        /* ── Legend ─────────────────────────────────────────────────── */
+
+        .legend-container {{
+            display: flex;
+            gap: 16px;
+            align-items: center;
+            margin-bottom: 1rem;
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: var(--muted);
+        }}
+
+        .legend-item {{
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }}
+
+        .legend-color {{
+            width: 12px;
+            height: 12px;
+            border-radius: 3px;
+            display: inline-block;
+        }}
+
+        /* ── Form inputs ────────────────────────────────────────────── */
+
+        .stTextInput input,
+        .stTextArea textarea,
+        .stNumberInput input,
+        [data-baseweb="select"] > div {{
+            background-color: var(--input) !important;
+            color: var(--ink) !important;
+            border-color: var(--border) !important;
+        }}
+
+        [data-baseweb="popover"],
+        [data-baseweb="menu"],
+        [role="listbox"] {{
+            background-color: var(--card) !important;
+            color: var(--ink) !important;
+        }}
+
+        .stButton button,
+        .stDownloadButton button,
+        .stFormSubmitButton button {{
+            border-color: var(--border) !important;
+        }}
+
+        .clear-all-container button {{
+            background-color: var(--danger) !important;
+            color: white !important;
+            border-color: var(--danger) !important;
+            font-weight: 600 !important;
+        }}
+
+        .clear-all-container button:hover {{
+            background-color: #ff3333 !important;
+            color: white !important;
+            border-color: #ff3333 !important;
+        }}
+
+        .{CLASS_WELCOME_BANNER} {{
+    background-color: {colors["surface"]};
+    border: 1px solid {colors["border"]};
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    color: {colors["ink"]};
+    font-size: 0.95rem;
+}}
+
+        [data-testid="stExpander"],
+        [data-testid="stForm"] {{
+            background-color: var(--card) !important;
+            border-color: var(--border) !important;
+        }}
+
+        [data-testid="stDataFrame"],
+        [data-testid="stTable"] {{
+            border-color: var(--border) !important;
+        }}
+
+        [data-testid="stFileUploaderDropzone"] {{
+            background-color: var(--surface) !important;
+            border-color: var(--border) !important;
+        }}
+
+        /* ── Tabs ───────────────────────────────────────────────────── */
+
+        [data-testid="stTabs"] button {{
+            color: var(--muted) !important;
+        }}
+
+        [data-testid="stTabs"] button[aria-selected="true"] {{
+            color: var(--accent) !important;
+            border-bottom-color: var(--accent) !important;
+        }}
+
+        hr {{
+            border-color: var(--border) !important;
+        }}
+
+        /* ── Enhanced footer ────────────────────────────────────────── */
+
+        .app-footer {{
+            text-align: center;
+            padding: 1rem 0 0.5rem;
+            font-size: 0.78rem;
+            color: var(--muted);
+        }}
+
+        .app-footer a {{
+            color: var(--accent);
+            text-decoration: none;
+        }}
+
+        .app-footer a:hover {{
+            text-decoration: underline;
+        }}
+
+        /* ── Empty state ────────────────────────────────────────────── */
+
+        .empty-state {{
+            text-align: center;
+            padding: 2.5rem 1rem;
+            color: var(--muted);
+        }}
+
+        .empty-state .empty-icon {{
+            font-size: 3rem;
+            line-height: 1;
+            margin-bottom: 0.75rem;
+        }}
+
+        .empty-state .empty-title {{
+            font-family: 'Newsreader', serif;
+            font-size: 1.15rem;
+            font-weight: 700;
+            color: var(--ink);
+            margin-bottom: 0.25rem;
+        }}
+
+        .empty-state .empty-desc {{
+            font-size: 0.85rem;
+            max-width: 400px;
+            margin: 0 auto;
+        }}
+
+        /* ── Pipeline progress ──────────────────────────────────────── */
+
+        .pipeline-steps {{
+            display: flex;
+            gap: 4px;
+            align-items: center;
+            justify-content: center;
+            margin: 1rem 0;
+            flex-wrap: wrap;
+        }}
+
+        .pipeline-step {{
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            background-color: var(--neutral-soft);
+            color: var(--muted);
+            border: 1px solid var(--border);
+        }}
+
+        .pipeline-step.active {{
+            background-color: var(--accent);
+            color: white;
+            border-color: var(--accent);
+            animation: pipelinePulse 1.2s ease-in-out infinite;
+        }}
+
+        .pipeline-step.done {{
+            background-color: var(--success-soft);
+            color: var(--success);
+            border-color: var(--success);
+        }}
+
+        .pipeline-arrow {{
+            color: var(--muted);
+            font-size: 0.7rem;
+        }}
+
+        @keyframes pipelinePulse {{
+            0%, 100% {{ opacity: 1; }}
+            50% {{ opacity: 0.7; }}
+        }}
+
+        /* ── Back to Top Button ─────────────────────────────────────── */
+
+.sr-only {{
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }}           
+        
+        #back-to-top-btn {{
+            position: fixed;
+            bottom: max(2rem, env(safe-area-inset-bottom, 2rem));
+            right: max(2rem, env(safe-area-inset-right, 2rem));
+            z-index: 9999;
+            background-color: var(--accent);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 14px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(12px);
+            transition: opacity 0.3s ease, visibility 0.3s ease,
+                        transform 0.3s ease, box-shadow 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }}
+
+        #back-to-top-btn.visible {{
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0);
+        }}
+
+        #back-to-top-btn:hover {{
+            filter: brightness(0.85);
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
+            transform: translateY(-2px);
+        }}
+
+        #back-to-top-btn:focus-visible {{
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }}
+
+        @media (prefers-reduced-motion: reduce) {{
+            #back-to-top-btn {{
+                transition: opacity 0.15s ease, visibility 0.15s ease;
+            }}
+
+            #back-to-top-btn.visible,
+            #back-to-top-btn:hover {{
+                transform: none;
+            }}
+        }}
+
+        /* ── Responsive: mobile / tablet ────────────────────────────── */
+
+        @media (max-width: 768px) {{
+            .login-container {{
+                padding: 1.5rem !important;
+                margin: 1rem auto;
+            }}
+
+            .sidebar-brand-title {{
+                font-size: 1.25rem;
+            }}
+
+            div[data-testid="stMetricValue"] > div {{
+                font-size: 1.3rem !important;
+            }}
+
+            /* Issue #258: when the sidebar is opened on a phone/small
+               tablet, keep it from covering the whole screen so the
+               similarity matrix / heatmap stay legible behind it. */
+            [data-testid="stSidebar"] {{
+                min-width: 85vw !important;
+                max-width: 85vw !important;
+            }}
+        }}
+    """
     # Issue #572: File Uploader Drag-Zone Customization
     file_uploader_css = f"""
     /* File Uploader Drag-Zone Customization */
@@ -586,6 +1238,17 @@ def tier_color(tier: str) -> str:
     return colors["neutral_soft"]
 
 
+def empty_state_html(icon: str, title: str, description: str) -> str:
+    """Return styled empty-state HTML block."""
+    return (
+        f'<div class="{CLASS_EMPTY_STATE}">'
+        f'<div class="{CLASS_EMPTY_ICON}">{icon}</div>'
+        f'<div class="{CLASS_EMPTY_TITLE}">{title}</div>'
+        f'<div class="{CLASS_EMPTY_DESC}">{description}</div>'
+        f"</div>"
+    )
+
+
 def badge_html(tier: str, label: str = None) -> str:
     """Generates standard HTML badge chip for severity."""
     colors = get_colors()
@@ -603,12 +1266,33 @@ def badge_html(tier: str, label: str = None) -> str:
         default_label = "🟢 Low"
 
     display_label = label if label is not None else default_label
+
     return f'<span class="{BADGE}" style="background-color: {bg_color}; color: {text_color}; border: 1px solid {text_color};">{display_label}</span>'
     return f'<span class="{CLASS_BADGE}" style="background-color: {bg_color}; color: {text_color}; border: 1px solid {text_color};">{display_label}</span>'
     return f'<span class="{CLASS_BADGE}" style="color: {text_color}; background-color: {bg_color};">{display_label}</span>'
 
+    tooltip_map = {
+        "high": "Similarity >= 80%",
+        "medium": "Similarity between 50% and 79%",
+        "low": "Similarity < 50%",
+    }
 
-def format_similarity_html(score: float, threshold: float = DEFAULT_THRESHOLDS.plagiarism) -> str:
+    tooltip = tooltip_map.get(tier, "Similarity score")
+
+    return (
+        f'<span class="{CLASS_BADGE}" '
+        f'title="{tooltip}" '
+        f'style="background-color: {bg_color}; '
+        f"color: {text_color}; "
+        f'border: 1px solid {text_color};">'
+        f"{display_label}</span>"
+    )
+
+# ── UI helpers ────────────────────────────────────────────────────────────────
+def format_similarity_html(
+    score: float,
+    threshold: float = DEFAULT_THRESHOLDS.plagiarism,
+) -> str:
     """Return a themed similarity pill using central severity boundaries."""
     colors = get_colors()
     tier = severity_key(score)
@@ -629,6 +1313,7 @@ def format_similarity_html(score: float, threshold: float = DEFAULT_THRESHOLDS.p
         f"Similarity: {score * 100:.1f}%</span>"
     )
     return f'<span class="{CLASS_SIM_PILL}" style="background-color: {bg}; color: {text};">Similarity: {score * 100:.1f}%</span>'
+
 
 
 def empty_state_html(icon: str, title: str, description: str) -> str:
@@ -761,6 +1446,31 @@ scrollContainer.addEventListener('scroll', function () {{
     """
 
 
+def version_check_widget_html(
+    local_version: str,
+    latest_tag: str,
+    repo_url: str = "https://github.com/Ganesh-403/semantic-plagiarism-detector/releases/latest",
+) -> str:
+    """Return an HTML snippet that renders an update-available notification banner.
+
+    The banner is intentionally lightweight — pure HTML/CSS with no external
+    dependencies — so it renders reliably inside ``st.markdown(...,
+    unsafe_allow_html=True)``.
+
+    Parameters
+    ----------
+    local_version:
+        The version string of the currently running application.
+    latest_tag:
+        The newer tag string returned by the GitHub API (e.g. ``"v1.2.0"``).
+    repo_url:
+        Link target for the "View release" call-to-action.
+
+    Returns
+    -------
+    str
+        A self-contained HTML string ready for ``st.markdown``.
+    """
 def version_check_widget_html(local_version: str, latest_tag: str, repo_url: str = "https://github.com/Ganesh-403/semantic-plagiarism-detector/releases/latest") -> str:
     """Return an HTML snippet that renders an update-available notification banner."""
     colors = get_colors()
@@ -794,6 +1504,7 @@ def version_check_widget_html(local_version: str, latest_tag: str, repo_url: str
     </span>
 </div>
 """
+
 
 
 def active_tab_border_style(color: str = "#4f46e5", width: int = 4) -> str:
@@ -1118,6 +1829,5 @@ def render_sidebar_navigation_menu(
         html_items.append(f'<li data-tab-id="{tab_id}">{badge}</li>')
 
     return f'<ul class="sidebar-nav-menu" style="list-style: none; padding: 0; margin: 0;">{"".join(html_items)}</ul>'
-
 
 

@@ -160,7 +160,21 @@ def test_chunk_by_sentences_produces_multiple_chunks_for_long_text():
     sentences = ["The algorithm processes the input data efficiently." for _ in range(40)]
     text = " ".join(sentences)
 
-    chunks = chunk_by_sentences(text, max_chunk_size=150)
+chunks = chunk_by_sentences(text, max_chunk_size=150)
     assert len(chunks) > 1
 
+
+def test_chunk_text_percentage_overlap():
+    """Verify overlap_percentage correctly derives chunk_overlap from chunk_size."""
+    text = "Word " * 200
+    chunk_size = 200
+    overlap_percentage = 0.10  # expected chunk_overlap = int(200 * 0.10) = 20
+
+    percentage_chunks = chunk_text(
+        text, chunk_size=chunk_size, overlap_percentage=overlap_percentage
+    )
+    absolute_chunks = chunk_text(text, chunk_size=chunk_size, chunk_overlap=20)
+
+    assert len(percentage_chunks) == len(absolute_chunks)
+    assert percentage_chunks == absolute_chunks
             
