@@ -10,6 +10,7 @@ import functoolsfrom pathlib import Path
 import sqlite3
 import sys
 import time
+from src.utils.temp_manager import purge_expired_temp_files
 from datetime import datetime, timezone
 from typing import Any
 
@@ -305,6 +306,8 @@ class OCRFileBatchError(Exception):
 init_corpus_db()
 init_db()
 
+# Purge stale temp files older than 2 hours on startup
+purge_expired_temp_files()
 # Start lightweight REST API server for /healthz endpoint in background
 import threading
 import time
