@@ -10,6 +10,8 @@ import os
 import re
 from typing import Callable, Dict, List, Optional, Tuple
 
+import requests
+
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
@@ -211,3 +213,22 @@ def bulk_download_drive_folder(
         progress_callback(batch_total_bytes, batch_total_bytes)
 
     return downloaded_files_dict, downloaded_names
+
+
+def check_folder_access(folder_id: str) -> bool:
+    """Checks if a Google Drive folder is publicly accessible via a lightweight HTTP HEAD request.
+
+    Args:
+        folder_id: The Google Drive folder ID to verify.
+
+    Returns:
+        bool: True if the folder is publicly accessible (returns 200 OK), False otherwise.
+    """
+    if not folder_id or not re.match(r"^[a-zA-Z0-9_-]+$", folder_id):
+        return False
+    url = f"https://drive.google.com/drive/folders/{folder_id}"
+    try:
+        response = requests.head(url, allow_redirects=False, timeout=10)
+        return response.status_code == 200
+    except requests.RequestException:
+        return False
