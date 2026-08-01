@@ -86,12 +86,10 @@ def clean_smoke_test_env():
     return_value=("all-MiniLM-L6-v2", 384),
 )
 
-@patch("src.core.embedding_model.embed_chunks", side_effect=mock_embed_chunks)
-def test_app_smoke(mock_embed, mock_model_info, mock_webhook, mock_ai_detector):
 @patch(
     "src.core.embedding_model.embed_chunks", side_effect=MockDataFactory.embed_chunks
 )
-def test_app_smoke(mock_embed, mock_model_info, mock_webhook):
+def test_app_smoke(mock_embed, mock_model_info, mock_webhook, mock_ai_detector):
     # Clean up stale artifacts from prior test runs
 
     _cleanup_stale_artifacts()

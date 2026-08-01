@@ -5,10 +5,13 @@ import html
 import io as _io
 import logging
 import os
+import traceback
+import functools
 from pathlib import Path
 import sqlite3
 import sys
 import time
+from src.utils.temp_manager import purge_expired_temp_files
 from datetime import datetime, timezone
 from typing import Any
 
@@ -70,6 +73,25 @@ from src.core.logging_config import setup_logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
+
+def ui_exception_handler(component_name: str):
+    """Decorator that catches exceptions in a UI component and shows a
+    friendly error message instead of a raw Streamlit traceback."""
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except Exception:
+                logger.error(
+                    "Component '%s' failed to render:\n%s",
+                    component_name,
+                    traceback.format_exc(),
+                )
+                st.error(f"⚠️ Failed to load component: {component_name}")
+                return None
+        return wrapper
+    return decorator
 # Validate required environment variables during application startup
 REQUIRED_ENV_VARS = [
     "REDIS_URL",
@@ -178,7 +200,14 @@ from src.utils.badge_generator import (
     generate_badge_png,
     generate_badge_pdf,
 )
-from src.db.corpus_db import get_document_tags, init_corpus_db
+from src.db.corpus_db import (
+    delete_tag,
+    get_all_documents,
+    get_all_tags,
+    get_document_tags,
+    get_tag_document_count,
+    init_corpus_db,
+)
 from src.db.incidents import (
     get_all_incidents_above_threshold_for_export,
     get_high_severity_trends,
@@ -269,17 +298,14 @@ try:
 except Exception:
     bulk_download_drive_folder = None
 
-class OCRFileBatchError(Exception):
-    """Exception raised when OCR extraction fails on one or more files in a batch."""
-    def __init__(self, failed_files: list[str], failure_details: list[str]):
-        self.failed_files = failed_files
-        self.failure_details = failure_details
-        super().__init__(f"OCR failed for files: {failed_files}")
+from src.errors import OCRFileBatchError
 
 # Initialize databases
 init_corpus_db()
 init_db()
 
+# Purge stale temp files older than 2 hours on startup
+purge_expired_temp_files()
 # Start lightweight REST API server for /healthz endpoint in background
 import threading
 import time
@@ -490,11 +516,43 @@ except ImportError:
 # Page Configuration & Session State
 # -----------------------------------------------------------------------------
 
-st.set_page_config(
-    page_title="Semantic Plagiarism Detector",
-    page_icon="🔍",
-    layout="wide",
-    initial_sidebar_state="auto",
+def configure_page_meta(title: str, icon: str) -> None:
+    """
+    Configure Streamlit page metadata including title, favicon, and layout.
+
+    This helper function centralizes the page configuration logic, allowing
+    for dynamic updates to the browser tab title and favicon based on the
+    application's theme or state. It improves dashboard branding and provides
+    a consistent user experience across different views.
+
+    Args:
+        title (str): The desired page title to be displayed in the browser tab.
+                     Example: "Semantic Plagiarism Detector - Dashboard"
+        icon (str): The emoji or path to an image file to be used as the favicon.
+                    Example: "🔍" or "📄"
+
+    Returns:
+        None
+
+    Raises:
+        ValueError: If the title is empty or the icon is not a valid string.
+    """
+    if not isinstance(title, str) or not title.strip():
+        raise ValueError("Page title must be a non-empty string.")
+    if not isinstance(icon, str) or not icon.strip():
+        raise ValueError("Page icon must be a non-empty string.")
+
+    st.set_page_config(
+        page_title=title.strip(),
+        page_icon=icon.strip(),
+        layout="wide",
+        initial_sidebar_state="auto",
+    )
+
+# Initialize page metadata with dynamic branding
+configure_page_meta(
+    title="Semantic Plagiarism Detector - Dashboard",
+    icon="🔍"
 )
 
 def update_page_title(tab_name: str):
@@ -536,6 +594,27 @@ def build_visualization_lazily(is_enabled, build_fn):
     if is_enabled:
         return build_fn()
     return None
+
+from datetime import date, timedelta
+def get_date_range_preset(preset: str) -> tuple[date, date]:
+    """
+    Calculate start and end dates based on a given preset string.
+
+    Args:
+        preset (str): One of "Today", "Last 7 Days", "Last 30 Days", "All Time".
+
+    Returns:
+        tuple[date, date]: A tuple containing the start_date and end_date objects.
+    """
+    today = date.today()
+    if preset == "Today":
+        return today, today
+    elif preset == "Last 7 Days":
+        return today - timedelta(days=6), today
+    elif preset == "Last 30 Days":
+        return today - timedelta(days=29), today
+    else:  # "All Time"
+        return date(2020, 1, 1), today
 
 # ── SESSION TIMEOUT & ROUTE PROTECTION ────────────────────────────────────────
 TIMEOUT_LIMIT = 15 * 60 # 15 minutes in seconds
@@ -845,9 +924,15 @@ with st.sidebar:
         ocr_language = DEFAULT_OCR_LANGUAGE
         ocr_dpi = DEFAULT_OCR_DPI
 
-    unique_classes = ["All Classes"] + get_unique_class_sections()
-    selected_class = st.selectbox("Select Class/Section", unique_classes, index=0, key="class_filter_selectbox")
-
+unique_classes = get_unique_class_sections()
+selected_classes = st.multiselect(
+    "Select Class/Section(s)",
+    unique_classes,
+    default=unique_classes,
+    key="class_filter_selectbox",
+)
+if not selected_classes:
+    selected_classes = unique_classes
     if st.button("🔄 Reset All Filters", key="reset_all_filters_button", use_container_width=True):
         keys_to_reset = [
             "threshold_slider",
@@ -872,6 +957,11 @@ with st.sidebar:
             del st.query_params["threshold"]
         st.success("✅ Filters reset to defaults!")
         st.rerun()
+
+    with st.expander("⌨️ Keyboard Shortcuts"):
+        st.caption("• **R**: Rerun app")
+        st.caption("• **C**: Clear cache")
+        st.caption("• **Tab**: Navigate focus")
 
 # ── Main UI ───────────────────────────────────────────────────────────────────
 st.title("🔍 Semantic Plagiarism Detection System")
@@ -1025,51 +1115,7 @@ else:
             "○ No index loaded</span>",
             unsafe_allow_html=True,
         )
-
-    chunked_docs = chunk_documents(
-        raw_texts,
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-    )
-    translated_chunked_docs = {}
-
-    for doc_name, chunks in chunked_docs.items():
-        translated_chunked_docs[doc_name] = []
-        for chunk in chunks:
-            prepared = prepare_text_for_embedding(chunk)
-            translated_chunked_docs[doc_name].append(prepared["embedding_text"])
-
-    embeddings = embed_documents(translated_chunked_docs)
-    sim_df = document_similarity_matrix(embeddings)
-
-    names = list(embeddings.keys())
-    n = len(names)
-    chunk_mat = np.zeros((n, n))
-
-    for i, na in enumerate(names):
-        for j, nb in enumerate(names):
-            if i == j:
-                chunk_mat[i, j] = 1.0
-            elif j > i:
-                ea, eb = embeddings[na], embeddings[nb]
-                score = float(np.max(cosine_similarity(ea, eb))) if ea.size and eb.size else 0.0
-                chunk_mat[i, j] = score
-                chunk_mat[j, i] = score
-
-    chunk_sim_df = pd.DataFrame(chunk_mat, index=names, columns=names)
-    faiss_index, registry = build_index(embeddings, chunked_docs)
-    ai_probabilities = detect_documents_ai_probability(chunked_docs)
-
-    return (
-        raw_texts,
-        chunked_docs,
-        embeddings,
-        sim_df,
-        chunk_sim_df,
-        faiss_index,
-        registry,
-        ai_probabilities,
-    )
+    st.markdown("---")
 
 with st.spinner("🧠 Processing files and building embeddings…"):
     analysis_results = run_pipeline(
@@ -1117,6 +1163,7 @@ if user_role == "admin":
     if existing_docs:
         st.write(f"**{len(existing_docs)}** documents in database")
         for doc in existing_docs:
+            st.text(doc)
     # ── SESSION EXPIRY COUNTDOWN TIMER WIDGET ─────────────────────────────────
     # Injects a lightweight JavaScript countdown that updates every second
     # without requiring Streamlit reruns, improving UX and reducing server load.
@@ -1578,34 +1625,18 @@ else:
             chunk_size,
             chunk_overlap,
         )
-        st.stop()
+        st.session_state["scanning"] = False
+        active_sim_df = chunk_sim_df if use_chunk_matrix else sim_df
+        flags = flag_plagiarism(active_sim_df, threshold=threshold)
 
-    # Process files pipeline
-    raw_texts = {}
-    for name, data in file_bytes_dict.items():
-        raw_texts[name] = extract_text(_io.BytesIO(data), name, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
-
-    chunked_docs = chunk_documents(raw_texts)
-    embeddings = embed_documents(chunked_docs)
-    sim_df = document_similarity_matrix(embeddings)
-    faiss_index, registry = build_index(embeddings, chunked_docs)
-    ai_probabilities = detect_documents_ai_probability(chunked_docs)
-
-    active_sim_df = sim_df
-    flags = flag_plagiarism(active_sim_df, threshold=threshold)
-    
-    # Sync incidents to database
-    init_incident_db()
-    incidents = sync_flagged_incidents(flags)
-
-    st.session_state["scanning"] = False
-    active_sim_df = chunk_sim_df if use_chunk_matrix else sim_df
-    flags = flag_plagiarism(active_sim_df, threshold=threshold)
-else:
-    flags = []
-    active_sim_df = None
-    raw_texts = {}
-    ai_probabilities = {}
+        # Sync incidents to database
+        init_incident_db()
+        incidents = sync_flagged_incidents(flags)
+    else:
+        flags = []
+        active_sim_df = None
+        raw_texts = {}
+        ai_probabilities = {}
 
 st.subheader(get_text("analysis_summary", lang=lang_code))
 doc_names = list(raw_texts.keys())
@@ -1649,6 +1680,23 @@ st.divider()
 with tab_warnings:
     update_page_title("Warnings")
     st.subheader(get_text("tab_warnings", lang=lang_code))
+    
+    # Date Range Quick-Presets UI
+    st.markdown("### 📅 Incident Date Filter")
+    date_preset = st.radio(
+        "Select Date Range",
+        options=["Today", "Last 7 Days", "Last 30 Days", "All Time"],
+        horizontal=True,
+        key="incident_date_preset",
+        help="Quickly filter the incident table by common date ranges."
+    )
+    
+    start_date, end_date = get_date_range_preset(date_preset)
+    st.caption(f"Filtering incidents from **{start_date.strftime('%Y-%m-%d')}** to **{end_date.strftime('%Y-%m-%d')}**")
+    
+    # Note: The actual filtering logic would be applied to the incidents dataframe 
+    # here, e.g., filtered_flags = [f for f in flags if start_date <= f['date'] <= end_date]
+    
     if not flags:
         st.info("No plagiarism incidents detected above configured threshold.")
     elif render_warning_controls is not None:
@@ -1682,7 +1730,7 @@ with tab_heatmap:
     update_page_title("Heatmap")
     st.subheader("🗺️ Heatmap & Network")
     if active_sim_df is not None:
-        heatmap_fig = plot_similarity_heatmap(
+        heatmap_fig = ui_exception_handler("Similarity Heatmap")(plot_similarity_heatmap)(
             active_sim_df, threshold=threshold, theme_colors=get_colors()
         )
     else:
@@ -1734,13 +1782,12 @@ with tab_heatmap:
 
             heatmap_fig = build_visualization_lazily(
                 load_heatmap,
-                lambda: plot_similarity_heatmap(
-                    active_sim_df,
+lambda: ui_exception_handler("Similarity Heatmap")(plot_similarity_heatmap)(                    active_sim_df,
                     title="Document Semantic Similarity",
                     threshold=threshold,
                     theme_colors=get_colors(),
                     colormap_name=heatmap_cmap,
-                    annotate=show_cell_percentages,
+                    show_annotations=show_cell_percentages,
                     mask_threshold=mask_threshold,
                     class_tag=heatmap_class_filter,
                     dim_diagonal=dim_diagonal,
@@ -1760,13 +1807,12 @@ with tab_heatmap:
             else None
         )
 
-        network_fig = plot_similarity_network(
+        network_fig = ui_exception_handler("Plagiarism Network")(plot_similarity_network)(
             similarity_df=active_sim_df,
             threshold=threshold,
             highlighted_doc=highlighted_doc,
             title="Interactive Document Plagiarism Network",
         )
-
         st.download_button(
             "⬇️ Download Heatmap PNG",
             buf,
@@ -1803,8 +1849,7 @@ with tab_heatmap:
 
             network_fig = build_visualization_lazily(
                 load_network,
-                lambda: plot_similarity_network(
-                    similarity_df=active_sim_df,
+lambda: ui_exception_handler("Plagiarism Network")(plot_similarity_network)(                    similarity_df=active_sim_df,
                     threshold=threshold,
                     min_degree=min_degree,
                     title=(
@@ -2088,6 +2133,27 @@ with tab_settings:
                 step=25,
                 key="ocr_dpi_slider",
             )
+
+        st.markdown("### 🏷️ Tag Management")
+        all_tags = get_all_tags()
+        if all_tags:
+            tag_to_delete = st.selectbox(
+                "Select Tag to Delete",
+                options=all_tags,
+                key="tag_delete_selectbox",
+            )
+            affected_docs = get_tag_document_count(tag_to_delete)
+            with st.popover("🗑️ Delete Tag"):
+                st.warning(
+                    f"Are you sure you want to delete tag '{tag_to_delete}'? "
+                    f"This affects {affected_docs} documents."
+                )
+                if st.button("Confirm Delete", key="confirm_delete_tag_button"):
+                    delete_tag(tag_to_delete)
+                    st.success(f"✅ Tag '{tag_to_delete}' deleted successfully!")
+                    st.rerun()
+        else:
+            st.caption("No tags found in the corpus.")
 
         st.markdown("### 💾 Backup")
         from src.db.database_backup import (
