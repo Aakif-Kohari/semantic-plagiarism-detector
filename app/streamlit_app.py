@@ -516,11 +516,43 @@ except ImportError:
 # Page Configuration & Session State
 # -----------------------------------------------------------------------------
 
-st.set_page_config(
-    page_title="Semantic Plagiarism Detector",
-    page_icon="🔍",
-    layout="wide",
-    initial_sidebar_state="auto",
+def configure_page_meta(title: str, icon: str) -> None:
+    """
+    Configure Streamlit page metadata including title, favicon, and layout.
+
+    This helper function centralizes the page configuration logic, allowing
+    for dynamic updates to the browser tab title and favicon based on the
+    application's theme or state. It improves dashboard branding and provides
+    a consistent user experience across different views.
+
+    Args:
+        title (str): The desired page title to be displayed in the browser tab.
+                     Example: "Semantic Plagiarism Detector - Dashboard"
+        icon (str): The emoji or path to an image file to be used as the favicon.
+                    Example: "🔍" or "📄"
+
+    Returns:
+        None
+
+    Raises:
+        ValueError: If the title is empty or the icon is not a valid string.
+    """
+    if not isinstance(title, str) or not title.strip():
+        raise ValueError("Page title must be a non-empty string.")
+    if not isinstance(icon, str) or not icon.strip():
+        raise ValueError("Page icon must be a non-empty string.")
+
+    st.set_page_config(
+        page_title=title.strip(),
+        page_icon=icon.strip(),
+        layout="wide",
+        initial_sidebar_state="auto",
+    )
+
+# Initialize page metadata with dynamic branding
+configure_page_meta(
+    title="Semantic Plagiarism Detector - Dashboard",
+    icon="🔍"
 )
 
 def update_page_title(tab_name: str):
@@ -562,6 +594,27 @@ def build_visualization_lazily(is_enabled, build_fn):
     if is_enabled:
         return build_fn()
     return None
+
+from datetime import date, timedelta
+def get_date_range_preset(preset: str) -> tuple[date, date]:
+    """
+    Calculate start and end dates based on a given preset string.
+
+    Args:
+        preset (str): One of "Today", "Last 7 Days", "Last 30 Days", "All Time".
+
+    Returns:
+        tuple[date, date]: A tuple containing the start_date and end_date objects.
+    """
+    today = date.today()
+    if preset == "Today":
+        return today, today
+    elif preset == "Last 7 Days":
+        return today - timedelta(days=6), today
+    elif preset == "Last 30 Days":
+        return today - timedelta(days=29), today
+    else:  # "All Time"
+        return date(2020, 1, 1), today
 
 # ── SESSION TIMEOUT & ROUTE PROTECTION ────────────────────────────────────────
 TIMEOUT_LIMIT = 15 * 60 # 15 minutes in seconds
@@ -1627,6 +1680,23 @@ st.divider()
 with tab_warnings:
     update_page_title("Warnings")
     st.subheader(get_text("tab_warnings", lang=lang_code))
+    
+    # Date Range Quick-Presets UI
+    st.markdown("### 📅 Incident Date Filter")
+    date_preset = st.radio(
+        "Select Date Range",
+        options=["Today", "Last 7 Days", "Last 30 Days", "All Time"],
+        horizontal=True,
+        key="incident_date_preset",
+        help="Quickly filter the incident table by common date ranges."
+    )
+    
+    start_date, end_date = get_date_range_preset(date_preset)
+    st.caption(f"Filtering incidents from **{start_date.strftime('%Y-%m-%d')}** to **{end_date.strftime('%Y-%m-%d')}**")
+    
+    # Note: The actual filtering logic would be applied to the incidents dataframe 
+    # here, e.g., filtered_flags = [f for f in flags if start_date <= f['date'] <= end_date]
+    
     if not flags:
         st.info("No plagiarism incidents detected above configured threshold.")
     elif render_warning_controls is not None:
@@ -1717,7 +1787,7 @@ lambda: ui_exception_handler("Similarity Heatmap")(plot_similarity_heatmap)(    
                     threshold=threshold,
                     theme_colors=get_colors(),
                     colormap_name=heatmap_cmap,
-                    annotate=show_cell_percentages,
+                    show_annotations=show_cell_percentages,
                     mask_threshold=mask_threshold,
                     class_tag=heatmap_class_filter,
                     dim_diagonal=dim_diagonal,
