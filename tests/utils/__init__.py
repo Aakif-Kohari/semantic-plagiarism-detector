@@ -39,8 +39,8 @@ def compare_pdf_bytes(
     if not golden_path.exists():
         return (False, f"Golden fixture not found: {golden_path}")
 
-    # Extract text from both PDFs using PyPDF2
-    from PyPDF2 import PdfReader
+    # Extract text from both PDFs using pypdf
+    from pypdf import PdfReader
     from io import BytesIO
     import re
 

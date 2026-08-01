@@ -128,28 +128,18 @@ def test_process_zip_duplicate_name_collision_fallback():
     assert result["a_b_1.txt"] == b"Second content"
 
 
-def test_process_zip_path_traversal():
-    """Verify path traversal attempts are safely skipped."""
-    zip_data = create_in_memory_zip(
-        {
-            "doc.pdf": b"Safe file",
-            "../traversal.pdf": b"Traversal payload",
-            "folder/../../traversal2.txt": b"Traversal payload 2",
-            "/absolute.pdf": b"Absolute traversal payload",
-        }
-    )
+def test_rejects_path_traversal_entries():
+    """Ensure ZIP archives containing path traversal filenames are rejected."""
 
-    result = process_zip_file(zip_data)
+    zip_buffer = io.BytesIO()
 
-    assert "doc.pdf" in result
-    assert result["doc.pdf"] == b"Safe file"
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("../evil.py", "print('malicious')")
 
-    # Traversal files must be ignored/skipped
-    assert "traversal.pdf" not in result
-    assert "folder_../../traversal2.txt" not in result
-    assert "../traversal.pdf" not in result
-    assert "absolute.pdf" not in result
-    assert "/absolute.pdf" not in result
+    zip_buffer.seek(0)
+
+    with pytest.raises(ValueError):
+        process_zip_file(zip_buffer.read())
 
 
 def test_process_zip_bomb_safety_total_size():

@@ -16,6 +16,8 @@ from src.db.translation_cache import (
     DB_PATH,
     cache_translation,
     get_cached_translation,
+    get_translation_cache_hit_rate,
+    reset_translation_cache_counters,
 )
 
 
@@ -168,3 +170,31 @@ class TestTranslationCacheTTL:
         stats = translation_cache.get_translation_cache_stats()
         assert stats["total_entries"] == 0
         assert stats["oldest_entry_days"] == 0
+
+    def test_translation_cache_hit_rate(self, temp_db_path):
+        """Test lookup hit rate calculation for translation cache."""
+        # 1. Reset counters
+        reset_translation_cache_counters()
+
+        # 2. Check hit rate is 0.0 initially (division by zero handled)
+        assert get_translation_cache_hit_rate() == 0.0
+
+        # 3. Perform a lookup that misses
+        get_cached_translation("non-existent-text-xyz")
+        assert get_translation_cache_hit_rate() == 0.0
+
+        # 4. Cache a translation and perform lookups
+        cache_translation("Hola", "Hello", "es", "en")
+
+        # First hit
+        res = get_cached_translation("Hola", "es", "en")
+        assert res == "Hello"
+        assert get_translation_cache_hit_rate() == 0.5
+
+        # Second hit
+        get_cached_translation("Hola", "es", "en")
+        assert abs(get_translation_cache_hit_rate() - (2 / 3)) < 1e-6
+
+        # 5. Reset and check
+        reset_translation_cache_counters()
+        assert get_translation_cache_hit_rate() == 0.0

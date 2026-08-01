@@ -177,7 +177,7 @@ def plot_similarity_heatmap(
     title: str = "Semantic Similarity Matrix",
     threshold: float = PLAGIARISM_THRESHOLD,
     figsize: Optional[tuple] = None,
-    annotate: bool = True,
+    show_annotations: bool = True,
     dpi: int = 150,
     theme_colors: Optional[Dict[str, str]] = None,
     colormap_name: str = DEFAULT_UI_COLORMAP,
@@ -256,8 +256,8 @@ def plot_similarity_heatmap(
         sns.heatmap(
             clean_df,
             ax=ax,
-            annot=annotate,
-            fmt=".2f" if annotate else "",
+            annot=show_annotations,
+            fmt=".2f" if show_annotations else "",
             cmap=cmap,
             vmin=0.0 if not log_scale else None,
             vmax=1.0,
@@ -363,7 +363,7 @@ def plot_similarity_heatmap_plotly(
     threshold: float = PLAGIARISM_THRESHOLD,
     theme_colors: Optional[Dict[str, str]] = None,
     colormap_name: str = DEFAULT_UI_COLORMAP,
-    annotate: bool = True,
+    show_annotations: bool = True,
     mask_threshold: Optional[float] = None,
     log_scale: bool = False,
     class_tag: Optional[str] = None,
@@ -426,6 +426,8 @@ def plot_similarity_heatmap_plotly(
         ]
 
     n = len(names)
+    if n > 15:
+        show_annotations = False
 
     hover_text = [
         [
@@ -458,7 +460,7 @@ def plot_similarity_heatmap_plotly(
     )
 
     annotations = []
-    if annotate:
+    if show_annotations:
         for i in range(n):
             for j in range(n):
                 if dim_diagonal and i == j:
@@ -530,6 +532,7 @@ def plot_chunk_similarity_comparison(
     sim_matrix: np.ndarray,
     theme_colors: Optional[dict] = None,
     colormap_name: str = DEFAULT_UI_COLORMAP,
+    show_annotations: bool = True,
 ) -> Figure:
     """Renders a granular, chunk-level similarity heatmap between two specific documents."""
     try:
@@ -556,8 +559,8 @@ def plot_chunk_similarity_comparison(
         sns.heatmap(
             sim_matrix,
             ax=ax,
-            annot=True,
-            fmt=".2f",
+            annot=show_annotations,
+            fmt=".2f" if show_annotations else "",
             cmap=cmap,
             vmin=0.0,
             vmax=1.0,
@@ -667,6 +670,11 @@ def render_heatmap_ui(
         )
 
     n = len(clean_df)
+    show_annotations = st.checkbox(
+        "Show Cell Annotations",
+        value=True,
+        help="Display similarity scores inside each heatmap cell.",
+    )
 
     fig = plot_similarity_heatmap_plotly(
         clean_df,
@@ -675,6 +683,7 @@ def render_heatmap_ui(
         colormap_name=colormap_name,
         log_scale=log_scale,
         dim_diagonal=dim_diagonal,
+        show_annotations=show_annotations,
     )
 
     if zoom_mode == "Fit Matrix":
