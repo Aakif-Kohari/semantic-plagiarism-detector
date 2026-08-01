@@ -907,6 +907,11 @@ if not selected_classes:
         st.success("✅ Filters reset to defaults!")
         st.rerun()
 
+    with st.expander("⌨️ Keyboard Shortcuts"):
+        st.caption("• **R**: Rerun app")
+        st.caption("• **C**: Clear cache")
+        st.caption("• **Tab**: Navigate focus")
+
 # ── Main UI ───────────────────────────────────────────────────────────────────
 st.title("🔍 Semantic Plagiarism Detection System")
 with st.expander("ℹ️ How Semantic Plagiarism Detection Works"):
