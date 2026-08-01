@@ -210,6 +210,15 @@ def run_migrations(
             migrations[version](connection)
         set_user_version(connection, target)
 
+    # Issue #1051: log successful migration completion so manual
+    # troubleshooting isn't silent. This fires once per database (corpus
+    # and auth each call run_migrations independently).
+    logger.info(
+        "Database migration from version %d to %d completed successfully.",
+        current,
+        target,
+    )
+
     return target
 
 

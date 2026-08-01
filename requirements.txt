@@ -36,6 +36,7 @@ streamlit-tour>=1.1.0            # Interactive guided tour component
 streamlit-plotly-events==0.0.6
 
 # ── Data & ML ─────────────────────────────────────────────────────────────────
+numpy>=1.26.0,<2.5.0
 numpy>=2.5.1
 pandas>=2.2.0
 scikit-learn>=1.4.0              # cosine_similarity utility
