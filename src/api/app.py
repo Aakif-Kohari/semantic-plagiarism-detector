@@ -259,6 +259,22 @@ def get_rate_limit():
     }
 
 
+@app.get(
+    "/api/v1/version",
+    tags=["System Administration"],
+    summary="Get API version",
+    status_code=status.HTTP_200_OK,
+)
+def get_version(request: Request):
+    """
+    Return the lightweight API version.
+    """
+    return {
+        "version": request.app.version,
+        "status": "active",
+    }
+
+
 @app.post(
     "/api/v1/scan",
     tags=["Plagiarism Detection"],
