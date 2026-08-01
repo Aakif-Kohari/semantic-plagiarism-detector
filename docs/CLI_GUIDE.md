@@ -224,3 +224,17 @@ The CLI is covered by automated tests that verify:
 - Output is written to standard output (stdout) as formatted JSON.
 - Errors and warnings are written to standard error (stderr).
 - Reports can be redirected to a file using standard shell redirection.
+
+## Optimize a SQLite database
+
+Reclaim pages left behind by document deletions and refresh SQLite query
+planner statistics without starting Streamlit:
+
+```powershell
+python -m src.cli --optimize corpus.db
+python -m src.cli --optimize users.db
+```
+
+The command validates the SQLite header and integrity, checkpoints committed
+WAL pages, runs `PRAGMA optimize`, `VACUUM`, and `ANALYZE`, then closes its
+dedicated connection. It exits with code `0` on success and `1` on failure.
