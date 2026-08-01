@@ -1,340 +1,135 @@
-# 🏗️ System Architecture
+# Architecture Overview
 
-This document explains the high-level architecture and data flow of the **Semantic Plagiarism Detection System**.
+This document explains the high-level architecture, data flow, and subsystem responsibilities of the Semantic Plagiarism Detection System.
 
-The application uses **Streamlit** as the user interface, **Sentence Transformers** for semantic embeddings, **FAISS** for efficient vector similarity search, and **SQLite** for persistent storage of users, documents, chunks, embeddings, and incidents.
+## High-Level Architecture
 
----
-
-## 🔄 Data Pipeline
-
-The following diagram shows the primary data flow when a user uploads documents for semantic plagiarism detection.
+The following sequence diagram illustrates the core data flow when a user uploads a document for plagiarism detection:
 
 ```mermaid
-flowchart TD
-    A[👤 User] --> B[🖥️ Streamlit Dashboard]
+sequenceDiagram
+    participant User
+    participant App as app/ (Streamlit/API)
+    participant Parser as src/core (Parser)
+    participant Embedder as src/core (Embedder)
+    participant FAISS as src/core (FAISS)
+    participant Scorer as src/core (Scorer)
+    participant Database as src/db (SQLite)
 
-    B --> C[📄 File Upload]
-    
-    C --> D[📑 Document Parser]
-    
-    D --> E[📝 Text Extraction]
-    
-    E --> F[✂️ Text Chunking]
-    
-    F --> G[🧠 Sentence Transformer]
-    
-    G --> H[🔢 384-D L2-Normalised Embeddings]
-
-    H --> I[🔎 FAISS Index]
-    
-    F --> J[(🗄️ SQLite Database)]
-    
-    H --> J
-    
-    C --> J
-
-    I --> K[📊 Similarity Search]
-    
-    K --> L[⚠️ Plagiarism Detection]
-    
-    L --> M[📈 Similarity Matrix]
-    
-    L --> N[🔥 Heatmap]
-    
-    L --> O[🔍 Pair Drill-Down]
-    
-    L --> P[📋 Plagiarism Warnings]
-
-    J --> B
-    I --> B
+    User->>App: Upload document
+    App->>Parser: Extract & chunk text
+    Parser-->>App: Parsed text chunks
+    App->>Embedder: Generate embeddings
+    Embedder-->>App: Vector embeddings (384-D)
+    App->>FAISS: Build index & Similarity search
+    FAISS-->>App: Candidate matches
+    App->>Scorer: Compute plagiarism score
+    Scorer-->>App: Final score & flags
+    App->>Database: Save results & document data
+    App-->>User: Return plagiarism report
 ```
 
----
+## Request Flow
 
-## 🧩 Architecture Components
-
-### 1. Streamlit Dashboard
-
-**Location:** `app/streamlit_app.py`
-
-The Streamlit application provides the main user interface.
-
-It is responsible for:
-
-- User authentication and role-based access
-- Uploading PDF, DOCX, and TXT files
-- Triggering document processing
-- Running FAISS searches
-- Displaying plagiarism warnings
-- Rendering similarity matrices
-- Displaying interactive heatmaps
-- Providing pair-level plagiarism drill-down
-- Managing users for administrators
+1. **Document Upload**: The user uploads a document (PDF, DOCX, TXT) via the Streamlit dashboard or API.
+2. **Text Extraction & Chunking**: The system extracts the raw text. Scanned PDFs are optionally processed with OCR. The text is then split into paragraph-sized chunks to detect localized plagiarism.
+3. **Embedding Generation**: The text chunks are passed to the `SentenceTransformer` model (`paraphrase-multilingual-MiniLM-L12-v2`), which outputs L2-normalized semantic vector embeddings.
+4. **FAISS Indexing & Search**: These embeddings are indexed using FAISS (`IndexFlatIP` or `IndexIVFFlat`). The system searches the index for similar chunks across the entire document corpus.
+5. **Similarity Scoring**: The system computes similarity at two levels:
+   - *Chunk-level*: Pairwise cosine similarity between text chunks.
+   - *Document-level*: Cosine similarity between mean-pooled document embeddings.
+6. **Persistence**: The original document metadata, chunk texts, and vector embeddings are saved to the local SQLite database.
+7. **Reporting**: The final plagiarism flags, severity levels, and matched chunks are returned to the user through interactive visualizations.
 
 ---
 
-### 2. File Upload and Document Parsing
+## Directory Responsibilities
 
-**Location:** `src/core/document_parser.py`
+### `app/`
 
-Users can upload supported document formats through the Streamlit dashboard.
+**Purpose**: The user interface and primary entry point.
+- Hosts the Streamlit dashboard (`streamlit_app.py`) and UI themes (`theme.py`).
+- Orchestrates the backend modules (parsing, embedding, search, scoring) based on user interactions.
+- Displays plagiarism warnings, heatmaps, and analytics.
 
-The document parser extracts raw text from:
+### `src/core/`
 
-- PDF files
-- DOCX files
-- TXT files
+**Purpose**: The core processing and natural language processing logic.
+- **Document Parsing (`document_parser.py`)**: Extracts text from PDFs and Word documents, using Tesseract OCR for scanned pages.
+- **Text Chunking (`text_chunking.py`)**: Splits documents into semantically meaningful chunks (paragraphs).
+- **Embedding Model (`embedding_model.py`)**: Wraps the Hugging Face `SentenceTransformer` to generate semantic vectors.
+- **FAISS Search (`faiss_index.py`, `faiss_indexer.py`)**: Handles building the FAISS index and querying for semantic similarity.
+- **Similarity Scoring (`similarity.py`)**: Calculates cosine similarity and flags potential plagiarism based on thresholds.
 
-Scanned or image-only PDFs can optionally be processed through the OCR pipeline using PyMuPDF and Tesseract.
+### `src/db/`
 
-The extracted text is passed to the text chunking stage.
+**Purpose**: Local persistent storage and data management.
+- **Corpus DB (`corpus_db.py`)**: SQLite interface for storing document metadata, chunk text, and raw embedding BLOBs.
+- **Auth DB (`auth.py`)**: Manages user authentication, roles (Admin/Teacher), and passwords.
+- **Migrations (`migrations/`)**: Handles versioned SQLite schema upgrades.
 
----
+### `src/security/`
 
-### 3. Text Chunking
+**Purpose**: Application security and safety.
+- **SSRF Protection (`ssrf_protector.py`)**: Validates URLs to prevent Server-Side Request Forgery attacks.
+- **MIME Validation (`mime_validator.py`)**: Verifies uploaded file types to prevent malicious uploads.
+- **Metadata Stripping (`metadata_stripper.py`)**: Removes sensitive metadata from files.
 
-**Location:** `src/core/text_chunking.py`
+### `src/utils/`
 
-Extracted documents are divided into smaller paragraph-level chunks.
+**Purpose**: Shared helper functions and generic utilities.
+- Contains modules for caching (`redis_cache.py`), file naming (`filename.py`), report generation (`pdf_report.py`, `excel_export.py`), and managing temporary files (`temp_manager.py`).
 
-The default configuration uses:
+### `src/visualization/`
 
-- Minimum chunk size: **20 words**
-- Maximum chunk size: **200 words**
-
-Short sections such as headers and captions are discarded, while longer sections are split at sentence boundaries.
-
-Chunking enables the system to identify **localised plagiarism** rather than only comparing entire documents.
-
----
-
-### 4. Semantic Embeddings
-
-**Location:** `src/core/embedding_model.py`
-
-Each text chunk is converted into a semantic vector using:
-
-```text
-paraphrase-multilingual-MiniLM-L12-v2
-```
-
-The model generates:
-
-- 384-dimensional embeddings
-- L2-normalised vectors
-- Multilingual semantic representations
-
-Because the vectors are L2-normalised, their inner product is equivalent to cosine similarity.
-
-This allows the system to detect plagiarism even when the original text has been significantly paraphrased.
+**Purpose**: Data visualization generation.
+- Generates the interactive Plotly and Seaborn visual components used in the dashboard.
+- Includes modules for heatmaps (`heatmap.py`), network graphs (`network_graph.py`), and analytics charts (`analytics.py`).
 
 ---
 
-### 5. FAISS Vector Search
+## Database Relationships
 
-**Location:** `src/core/faiss_index.py`
+The system relies on a relational schema in `corpus.db` to maintain the relationships between documents and their contents:
+- **`documents`**: The parent table containing `filename`, `file_hash`, and upload metadata.
+- **`chunks`**: The child table linking back to `documents` via `filename`. It stores the raw `chunk_text` and the binary `embedding` vector.
 
-The generated embeddings are indexed using FAISS.
+## Search Pipeline
 
-The system automatically selects an index based on collection size:
+FAISS (`faiss-cpu`) is used for the vector search pipeline. Depending on the size of the corpus, it dynamically switches from `IndexFlatIP` (exact search) to `IndexIVFFlat` (approximate nearest neighbors).
 
-```text
-< 5,000 vectors
-        │
-        ▼
-IndexFlatIP
-Exact similarity search
+## Embedding Pipeline
 
-≥ 5,000 vectors
-        │
-        ▼
-IndexIVFFlat
-Approximate nearest-neighbour search
-```
+The system uses `paraphrase-multilingual-MiniLM-L12-v2`. This model was chosen for its high accuracy in detecting semantic similarities across multiple languages while maintaining a fast execution speed locally.
 
-FAISS enables efficient chunk-level similarity searches across the document corpus.
+## Scoring Pipeline
 
-The search results are used to identify highly similar document and paragraph pairs.
+Scoring happens at two levels:
+1. **Document-Level**: Chunk embeddings are mean-pooled into a single vector per document. Cosine similarity is computed between these document vectors.
+2. **Chunk-Level**: Computes the maximum pairwise cosine similarity between individual chunks of two documents to detect localized plagiarism.
+Based on configured thresholds (e.g. 0.75 for Medium, 0.90 for High), the scoring pipeline flags plagiarized documents.
 
----
+## System Architecture Diagram
 
-### 6. SQLite Database
-
-**Locations:**
-
-```text
-src/db/auth.py
-src/db/corpus_db.py
-src/db/migrations/
-```
-
-SQLite provides persistent local storage for application data.
-
-The project uses separate databases for different responsibilities:
-
-- `users.db` — authentication and user accounts
-- `corpus.db` — document metadata, text chunks, embeddings, and related corpus data
-
-The database schema is versioned using SQLite's:
-
-```sql
-PRAGMA user_version
-```
-
-Migrations are applied automatically when the application starts, allowing existing databases to be upgraded without deleting user or corpus data.
-
----
-
-### 7. Similarity Analysis
-
-**Location:** `src/core/similarity.py`
-
-Similarity analysis operates at two levels.
-
-#### Document-level similarity
-
-Mean-pooled chunk embeddings are compared to produce an N×N document similarity matrix.
-
-#### Chunk-level similarity
-
-FAISS searches for the nearest neighbours of each chunk and identifies the strongest matching chunks between documents.
-
-Pairs are flagged when their similarity score meets or exceeds the configured plagiarism threshold.
-
-Default thresholds:
-
-| Classification | Similarity |
-|---|---:|
-| Plagiarism Flag | `>= 0.59` |
-| Medium Severity | `>= 0.75` |
-| High Severity | `>= 0.90` |
-
----
-
-## 📊 Result Visualisation
-
-After similarity analysis, results are presented through the Streamlit dashboard.
+The following Mermaid sequence diagram illustrates the flow of a document through the application, from upload to storage and incident logging.
 
 ```mermaid
-flowchart LR
-    A[Similarity Analysis] --> B[📋 Plagiarism Warnings]
-    A --> C[📊 Similarity Matrix]
-    A --> D[🔥 Interactive Heatmap]
-    A --> E[🔍 Pair Drill-Down]
-    A --> F[🕸️ Plagiarism Network Graph]
+sequenceDiagram
+    participant User
+    participant Streamlit as streamlit_app.py
+    participant Parser as document_parser.py
+    participant Embedder as embeddings.py
+    participant FAISS as faiss_index.py
+    participant SQLite as SQLite DB
+
+    User->>Streamlit: Upload document
+    Streamlit->>Parser: Parse uploaded document
+    Parser-->>Streamlit: Extracted text
+    Streamlit->>Embedder: Generate embeddings
+    Embedder-->>Streamlit: Vector embeddings
+    Streamlit->>FAISS: Store/Search embeddings
+    FAISS-->>Streamlit: Similarity results
+    Streamlit->>SQLite: Store metadata & incident logs
+    SQLite-->>Streamlit: Confirmation
+    Streamlit-->>User: Display plagiarism results
 ```
-
-### Plagiarism Warnings
-
-Displays flagged document pairs sorted by severity.
-
-### Similarity Matrix
-
-Provides a complete N×N comparison between documents.
-
-### Heatmap
-
-Visualises similarity scores between documents using Plotly or Seaborn.
-
-### Pair Drill-Down
-
-Shows the specific paragraphs that contributed to a high similarity score.
-
-### Network Graph
-
-Displays relationships between documents as an interactive plagiarism network.
-
----
-
-## 🔐 Authentication Flow
-
-User authentication is handled through SQLite and bcrypt password hashing.
-
-```mermaid
-flowchart TD
-    A[👤 User] --> B[🔐 Login]
-    B --> C{Credentials Valid?}
-
-    C -->|No| D[❌ Access Denied]
-    C -->|Yes| E[👥 Check User Role]
-
-    E --> F[👨‍🏫 Teacher]
-    E --> G[👑 Admin]
-
-    F --> H[📊 Dashboard]
-    G --> H
-
-    G --> I[⚙️ User Management]
-```
-
-Administrators have access to user management functionality, while teachers can use the plagiarism detection features available to their role.
-
----
-
-## 🗂️ Component Overview
-
-| Component | Location | Responsibility |
-|---|---|---|
-| Streamlit Dashboard | `app/streamlit_app.py` | User interface and application workflow |
-| Document Parser | `src/core/document_parser.py` | Extract text from uploaded files |
-| Text Chunking | `src/core/text_chunking.py` | Split documents into paragraph chunks |
-| Embedding Model | `src/core/embedding_model.py` | Generate semantic embeddings |
-| FAISS Index | `src/core/faiss_index.py` | Fast vector similarity search |
-| Similarity Engine | `src/core/similarity.py` | Document and chunk similarity analysis |
-| Auth Database | `src/db/auth.py` | User authentication and management |
-| Corpus Database | `src/db/corpus_db.py` | Store document and corpus data |
-| Heatmap | `src/visualization/heatmap.py` | Similarity visualisation |
-| Network Graph | `src/visualization/network_graph.py` | Plagiarism relationship visualisation |
-
----
-
-## 🚀 End-to-End Flow
-
-At a high level, the complete processing pipeline is:
-
-```text
-User
-  │
-  ▼
-Streamlit Dashboard
-  │
-  ▼
-File Upload
-  │
-  ▼
-Document Parsing
-  │
-  ▼
-Text Extraction
-  │
-  ▼
-Paragraph Chunking
-  │
-  ├──────────────────────┐
-  ▼                      ▼
-SQLite               Sentence Transformer
-Metadata             Embedding Generation
-Storage                   │
-  │                       ▼
-  │                  Vector Embeddings
-  │                       │
-  │                       ▼
-  │                  FAISS Index
-  │                       │
-  └───────────┬───────────┘
-              ▼
-      Similarity Analysis
-              │
-              ▼
-      Plagiarism Detection
-              │
-              ▼
-    ┌─────────┼──────────┐
-    ▼         ▼          ▼
- Warnings  Heatmaps  Pair Drill-Down
-```
-
-This architecture allows the system to combine **semantic NLP**, **vector search**, and **persistent local storage** to detect plagiarism efficiently while providing an interactive interface for academic review.
-
-> **Note:** Redis is not currently part of the application's documented architecture. If Redis is introduced in a future version and enabled for a specific deployment or configuration, this architecture diagram should be updated to show its role in caching, session management, or background processing.Redis is an optional service and is not required for the standard local development workflow described in this repository.

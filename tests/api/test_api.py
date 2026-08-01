@@ -11,10 +11,23 @@ from unittest.mock import patch
 import numpy as np
 from fastapi.testclient import TestClient
 
-from src.api.app import app, get_expected_bearer_token
+from src.api.app import app
+from src.api.middleware import get_expected_bearer_token
 
 client = TestClient(app)
 
+
+def test_login_rate_limit():
+    """Verify that /api/v1/auth/login limits requests to 5 per minute per IP."""
+    # Send 5 successful requests
+    for _ in range(5):
+        response = client.post("/api/v1/auth/login")
+        assert response.status_code == 200
+
+    # The 6th request should fail with 429 Too Many Requests
+    response = client.post("/api/v1/auth/login")
+    assert response.status_code == 429
+    assert "detail" in response.json()
 
 def test_health_check():
     """Verify that GET /health returns 200 OK and healthy status."""
@@ -109,14 +122,14 @@ def test_scan_matching_corpus_flag(mock_embed, mock_corpus):
 
 
 def test_scan_empty_file_upload():
-    """Verify that uploading an empty file returns 400 Bad Request."""
+    """Verify that uploading an empty file returns 422 Unprocessable Entity."""
     expected_token = get_expected_bearer_token()
     response = client.post(
         "/api/v1/scan",
         headers={"Authorization": f"Bearer {expected_token}"},
         files={"file": ("empty.txt", b"", "text/plain")},
     )
-    assert response.status_code == 400
+    assert response.status_code == 422
     assert "Uploaded file is empty" in response.json()["detail"]
 
 

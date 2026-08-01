@@ -44,3 +44,11 @@ def test_validate_mime_type_magic_fallback():
         
         invalid_pdf_bytes = b"MZ\x90\x00\x03\x00\x00\x00"
         assert validate_mime_type(invalid_pdf_bytes, "malicious.pdf") is False
+def test_invalid_pdf_header_rejected():
+    fake_pdf = b"This is not a PDF"
+
+    assert validate_mime_type(fake_pdf, "document.pdf") is False
+def test_valid_pdf_header_accepted():
+    valid_pdf = b"%PDF-1.7\n%Test PDF"
+
+    assert validate_mime_type(valid_pdf, "document.pdf") is True
