@@ -48,7 +48,7 @@ TRANSLATIONS = {
 }
 
 _I18N_DIR = os.path.dirname(os.path.abspath(__file__))
-_SUPPORTED_LANGUAGES = {"en": "English", "es": "Español"}
+_SUPPORTED_LANGUAGES = {"en": "English", "es": "Español", "fr": "Français"}
 
 _translations: Dict[str, Dict[str, str]] = {}
 

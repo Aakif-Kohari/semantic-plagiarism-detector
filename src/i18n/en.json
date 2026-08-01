@@ -24,5 +24,9 @@
   "no_documents_db": "No documents currently in the database.",
   "tab_trash": "🗑️ Trash",
   "trash_empty_msg": "Your trash is empty.",
-  "tab_health": "🖥️ System Health"
+  "tab_health": "🖥️ System Health",
+  "pdf_document_name": "Document Name",
+  "pdf_similarity_score": "Similarity Score",
+  "pdf_severity_rank": "Severity Rank",
+  "pdf_detection_threshold": "Detection Threshold"
 }

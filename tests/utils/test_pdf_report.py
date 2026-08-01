@@ -433,3 +433,38 @@ def test_generate_plagiarism_report_auto_detect_dark_mode():
     pdf_bytes = pdf_buffer.getvalue()
     assert pdf_bytes.startswith(b"%PDF")
     st.session_state.theme = "Light"
+
+
+# ── i18n / language header tests ──────────────────────────────────────────
+
+
+def test_pdf_report_headers_spanish():
+    """PDF table headers are translated to Spanish when language='es'."""
+    pdf_buffer = generate_plagiarism_report(
+        doc_a="alumno_a.pdf",
+        doc_b="alumno_b.pdf",
+        overall_similarity=0.80,
+        threshold=0.59,
+        top_pairs=[("Párrafo A.", "Párrafo B.", 0.82)],
+        language="es",
+    )
+    text = _read_text(pdf_buffer.getvalue())
+    assert "Nombre del Documento" in text
+    assert "Puntuación de Similitud" in text or "Puntuaci" in text
+    assert "Umbral de Detección" in text or "Umbral de Detecci" in text
+
+
+def test_pdf_report_headers_french():
+    """PDF table headers are translated to French when language='fr'."""
+    pdf_buffer = generate_plagiarism_report(
+        doc_a="etudiant_a.pdf",
+        doc_b="etudiant_b.pdf",
+        overall_similarity=0.80,
+        threshold=0.59,
+        top_pairs=[("Paragraphe A.", "Paragraphe B.", 0.82)],
+        language="fr",
+    )
+    text = _read_text(pdf_buffer.getvalue())
+    assert "Nom du Document" in text
+    assert "Score de Similarit" in text
+    assert "Seuil de D" in text

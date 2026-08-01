@@ -24,5 +24,9 @@
   "no_documents_db": "No hay documentos actualmente en la base de datos.",
   "tab_trash": "🗑️ Papelera",
   "trash_empty_msg": "La papelera está vacía.",
-  "tab_health": "🖥️ Estado del Sistema"
+  "tab_health": "🖥️ Estado del Sistema",
+  "pdf_document_name": "Nombre del Documento",
+  "pdf_similarity_score": "Puntuación de Similitud",
+  "pdf_severity_rank": "Nivel de Gravedad",
+  "pdf_detection_threshold": "Umbral de Detección"
 }
