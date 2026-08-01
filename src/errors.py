@@ -155,6 +155,16 @@ class ExportFailedError(RuntimeError):
     """Raised when an export cannot be generated or written safely."""
 
 
+class OCRFileBatchError(Exception):
+    """Raised when OCR extraction fails on one or more files in a batch."""
+
+    def __init__(self, failed_files: list, failure_details: list) -> None:
+        self.failed_files = failed_files
+        self.failure_details = failure_details
+        joined = "; ".join(failure_details) if failure_details else ", ".join(failed_files)
+        super().__init__(f"OCR extraction failed for {len(failed_files)} file(s): {joined}")
+
+
 EXPORT_WRITE_FAILED = (
     "Unable to write the {format_name} export to '{destination}'. "
     "Check the destination permissions and available disk space, then try again."

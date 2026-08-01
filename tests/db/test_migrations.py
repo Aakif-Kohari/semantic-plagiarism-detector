@@ -271,3 +271,92 @@ def test_schema_inspection_helpers_handle_missing_objects():
         assert not index_exists(connection, "missing_index")
     finally:
         connection.close()
+
+
+# ---------------------------------------------------------------------------
+# Issue #1051 — Log informational message on successful migration execution
+# ---------------------------------------------------------------------------
+
+
+def test_successful_migration_logs_info_message(tmp_path, caplog):
+    """run_migrations must log an INFO message with the old and new versions
+    after a successful migration (issue #1051)."""
+    import logging
+
+    connection = sqlite3.connect(str(tmp_path / "log-test.db"))
+    try:
+        with caplog.at_level(logging.INFO, logger="src.db.migrations.common"):
+            run_migrations(
+                connection,
+                migrations={1: lambda conn: None},
+                target_version=1,
+            )
+
+        assert any(
+            "Database migration from version 0 to 1 completed successfully."
+            in record.message
+            for record in caplog.records
+        ), f"Expected migration log message not found in: {[r.message for r in caplog.records]}"
+    finally:
+        connection.close()
+
+
+def test_corpus_migration_logs_info_message(tmp_path, caplog):
+    """migrate_corpus_database must log an INFO message on success (issue #1051)."""
+    import logging
+
+    with connect(tmp_path / "corpus-log.db") as connection:
+        with caplog.at_level(logging.INFO, logger="src.db.migrations.common"):
+            migrate_corpus_database(connection)
+
+        assert any(
+            "completed successfully" in record.message
+            for record in caplog.records
+        ), f"Expected migration log message not found in: {[r.message for r in caplog.records]}"
+
+
+def test_auth_migration_logs_info_message(tmp_path, caplog):
+    """migrate_auth_database must log an INFO message on success (issue #1051)."""
+    import logging
+
+    with connect(tmp_path / "auth-log.db") as connection:
+        with caplog.at_level(logging.INFO, logger="src.db.migrations.common"):
+            migrate_auth_database(connection)
+
+        assert any(
+            "completed successfully" in record.message
+            for record in caplog.records
+        ), f"Expected migration log message not found in: {[r.message for r in caplog.records]}"
+
+
+def test_no_log_when_already_at_target_version(tmp_path, caplog):
+    """run_migrations must NOT log when the database is already at the target
+    version (no migration was performed)."""
+    import logging
+
+    connection = sqlite3.connect(str(tmp_path / "noop-test.db"))
+    try:
+        # First run: brings it to version 1
+        run_migrations(
+            connection,
+            migrations={1: lambda conn: None},
+            target_version=1,
+        )
+
+        caplog.clear()
+
+        # Second run: already at version 1, should be a no-op
+        with caplog.at_level(logging.INFO, logger="src.db.migrations.common"):
+            result = run_migrations(
+                connection,
+                migrations={1: lambda conn: None},
+                target_version=1,
+            )
+
+        assert result == 1
+        assert not any(
+            "completed successfully" in record.message
+            for record in caplog.records
+        ), "Should not log when no migration was performed"
+    finally:
+        connection.close()

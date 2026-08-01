@@ -224,3 +224,27 @@ The CLI is covered by automated tests that verify:
 - Output is written to standard output (stdout) as formatted JSON.
 - Errors and warnings are written to standard error (stderr).
 - Reports can be redirected to a file using standard shell redirection.
+
+## Database migration status
+
+Inspect schema migrations without modifying the database:
+
+```powershell
+python -m src.cli db-status corpus.db --db-type corpus
+```
+
+The issue-requested flag form is also supported:
+
+```powershell
+python -m src.cli --db-status users.db --db-type auth
+```
+
+JSON output:
+
+```powershell
+python -m src.cli db-status corpus.db --db-type corpus --output-format json
+```
+
+The command reports the current schema version, supported target version, and
+ordered pending migration versions. It opens the database read-only and never
+applies migrations.
