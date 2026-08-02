@@ -171,3 +171,49 @@ def test_class_queries():
     class_b_docs = get_documents_by_class("Class B")
     assert "doc_b.pdf" in class_b_docs
     assert len(class_b_docs) == 1
+
+
+def test_batch_soft_delete_documents():
+    from src.db.corpus_db import batch_soft_delete_documents, _connect
+
+    # Add some test documents
+    add_document("doc_soft1.pdf", "hash_s1")
+    add_document("doc_soft2.pdf", "hash_s2")
+    add_document("doc_soft3.pdf", "hash_s3")
+
+    # Fetch their IDs
+    with _connect() as conn:
+        rows = conn.execute("SELECT id, filename FROM documents ORDER BY id").fetchall()
+        doc_ids = {row[1]: row[0] for row in rows}
+
+    id1 = doc_ids["doc_soft1.pdf"]
+    id2 = doc_ids["doc_soft2.pdf"]
+    id3 = doc_ids["doc_soft3.pdf"]
+
+    # 1. Multiple valid IDs
+    count = batch_soft_delete_documents([id1, id2])
+    assert count == 2
+
+    # Check that they are deleted
+    with _connect() as conn:
+        deleted = conn.execute(
+            "SELECT is_deleted FROM documents WHERE id IN (?, ?)", (id1, id2)
+        ).fetchall()
+        assert all(row[0] == 1 for row in deleted)
+        not_deleted = conn.execute(
+            "SELECT is_deleted FROM documents WHERE id = ?", (id3,)
+        ).fetchone()
+        assert not_deleted[0] == 0
+
+    # 2. Empty list
+    assert batch_soft_delete_documents([]) == 0
+
+    # 3. Invalid/non-existing IDs
+    count = batch_soft_delete_documents([9999, 10000])
+    assert count == 0
+
+    # 4. Already deleted documents
+    count = batch_soft_delete_documents([id1])
+    assert (
+        count == 1
+    )  # SQLite UPDATE rowcount still returns matched rows even if value didn't change

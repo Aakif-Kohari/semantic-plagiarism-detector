@@ -5,6 +5,7 @@ SQLite database manager to persist document metadata, chunk text, and embeddings
 Enables incremental updates and index rebuilding without re-embedding.
 """
 
+from __future__ import annotations
 import sqlite3
 import os
 import numpy as np
@@ -24,7 +25,8 @@ def _connect() -> sqlite3.Connection:
 def init_corpus_db() -> None:
     """Create the corpus and chunks tables if they do not exist."""
     with _connect() as conn:
-        conn.execute("""
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS documents (
                 id               INTEGER PRIMARY KEY AUTOINCREMENT,
                 filename         TEXT    UNIQUE NOT NULL,
@@ -32,9 +34,11 @@ def init_corpus_db() -> None:
                 upload_date      TEXT    NOT NULL,
                 class_section    TEXT,
                 student_name     TEXT,
-                assignment_title TEXT
+                assignment_title TEXT,
+                is_deleted       INTEGER DEFAULT 0
             )
-        """)
+        """
+        )
 
         # Schema migration fallback logic: add missing columns if documents table already existed
         cursor = conn.execute("PRAGMA table_info(documents)")
@@ -45,8 +49,13 @@ def init_corpus_db() -> None:
             conn.execute("ALTER TABLE documents ADD COLUMN student_name TEXT")
         if "assignment_title" not in columns:
             conn.execute("ALTER TABLE documents ADD COLUMN assignment_title TEXT")
+        if "is_deleted" not in columns:
+            conn.execute(
+                "ALTER TABLE documents ADD COLUMN is_deleted INTEGER DEFAULT 0"
+            )
 
-        conn.execute("""
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS chunks (
                 vector_id    INTEGER PRIMARY KEY,
                 filename     TEXT    NOT NULL,
@@ -55,7 +64,8 @@ def init_corpus_db() -> None:
                 embedding    BLOB    NOT NULL,
                 FOREIGN KEY (filename) REFERENCES documents(filename) ON DELETE CASCADE
             )
-        """)
+        """
+        )
         conn.commit()
 
 
@@ -174,6 +184,23 @@ def delete_document(filename: str) -> None:
 
     # Re-index all remaining chunks so vector_ids are sequential [0, 1, ..., N-1]
     _compact_vector_ids()
+
+
+def batch_soft_delete_documents(doc_ids: list[int]) -> int:
+    """
+    Batch soft delete documents by updating their is_deleted flag.
+    Returns the number of rows updated.
+    """
+    if not doc_ids:
+        return 0
+
+    placeholders = ",".join(["?"] * len(doc_ids))
+    query = f"UPDATE documents SET is_deleted = 1 WHERE id IN ({placeholders})"
+
+    with _connect() as conn:
+        cursor = conn.execute(query, tuple(doc_ids))
+        conn.commit()
+        return cursor.rowcount
 
 
 def _compact_vector_ids() -> None:
