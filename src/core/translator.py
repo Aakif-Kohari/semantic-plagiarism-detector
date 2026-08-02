@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
 from deep_translator import GoogleTranslator
 
 # Comprehensive ISO-639-1 (and ISO-639-2) language code database

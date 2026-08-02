@@ -169,7 +169,6 @@ def test_class_queries():
 
 def test_clear_all_data_clears_incidents(mock_db):
     from pathlib import Path
-    from src.db.incidents import sync_flagged_incidents
 
     db_path = Path(mock_db)
 
