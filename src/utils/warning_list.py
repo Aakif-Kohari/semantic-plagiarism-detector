@@ -322,6 +322,7 @@ def render_warning_controls(
     threshold: float,
     ai_probabilities: dict[str, dict[str, Any]] | None = None,
     lang_code: str = "en",
+    expanded: bool = False,
 ) -> None:
     if "warning_page" not in st.session_state:
         st.session_state.warning_page = 1
