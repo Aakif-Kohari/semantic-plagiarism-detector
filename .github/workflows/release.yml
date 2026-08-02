@@ -10,6 +10,7 @@
 name: Release Draft Generator
 
 on:
+  workflow_dispatch:
   push:
     # Trigger on strictly semver compatible tag pushes
     tags:
