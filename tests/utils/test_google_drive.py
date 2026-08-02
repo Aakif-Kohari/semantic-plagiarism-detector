@@ -1,3 +1,44 @@
+import pytest
+from src.utils.google_drive import extract_google_drive_folder_id
+
+def test_extract_google_drive_folder_id_valid_id():
+    valid_id = "1A2B3C4D5E6F7G8H9I0J1K2L3M4N5O6P7"
+    assert len(valid_id) == 33
+    assert extract_google_drive_folder_id(valid_id) == valid_id
+
+def test_extract_google_drive_folder_id_valid_url():
+    valid_id = "1A2B3C4D5E6F7G8H9I0J1K2L3M4N5O6P7"
+    url = f"https://drive.google.com/drive/folders/{valid_id}"
+    assert extract_google_drive_folder_id(url) == valid_id
+
+def test_extract_google_drive_folder_id_valid_url_with_query():
+    valid_id = "1A2B3C4D5E6F7G8H9I0J1K2L3M4N5O6P7"
+    url = f"https://drive.google.com/drive/folders/{valid_id}?usp=sharing"
+    assert extract_google_drive_folder_id(url) == valid_id
+
+def test_extract_google_drive_folder_id_malformed_url():
+    url = "https://drive.google.com/drive/folders/shortid"
+    assert extract_google_drive_folder_id(url) is None
+
+def test_extract_google_drive_folder_id_empty_string():
+    assert extract_google_drive_folder_id("") is None
+
+def test_extract_google_drive_folder_id_random_string():
+    assert extract_google_drive_folder_id("random_garbage_string_not_an_id") is None
+
+def test_extract_google_drive_folder_id_unsupported_url():
+    url = "https://google.com"
+    assert extract_google_drive_folder_id(url) is None
+
+def test_extract_google_drive_folder_id_whitespace():
+    valid_id = "1A2B3C4D5E6F7G8H9I0J1K2L3M4N5O6P7"
+    assert extract_google_drive_folder_id(f"  {valid_id}  ") == valid_id
+    url = f"  https://drive.google.com/drive/folders/{valid_id}?usp=sharing  "
+    assert extract_google_drive_folder_id(url) == valid_id
+
+def test_extract_google_drive_folder_id_invalid_type():
+    assert extract_google_drive_folder_id(None) is None
+    assert extract_google_drive_folder_id(12345) is None
 """
 tests/utils/test_google_drive.py
 ---------------------------------
@@ -38,6 +79,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from src.utils.google_drive import (bulk_download_drive_folder,
+                                    check_folder_access,
                                     download_file_bytes, extract_folder_id,
                                     get_drive_service, list_files_in_folder)
 
@@ -343,3 +385,47 @@ def test_bulk_download_drive_folder_handles_list_error(
             "https://drive.google.com/drive/folders/folder123",
             api_key="key",
         )
+
+
+@patch("src.utils.google_drive.requests.head")
+def test_check_folder_access_accessible(mock_head):
+    mock_response = Mock()
+    mock_response.status_code = 200
+    mock_head.return_value = mock_response
+
+    result = check_folder_access("valid-folder-id")
+
+    assert result is True
+    mock_head.assert_called_once_with(
+        "https://drive.google.com/drive/folders/valid-folder-id",
+        allow_redirects=False,
+        timeout=10,
+    )
+
+
+@patch("src.utils.google_drive.requests.head")
+def test_check_folder_access_not_accessible(mock_head):
+    mock_response = Mock()
+    mock_response.status_code = 302
+    mock_head.return_value = mock_response
+
+    result = check_folder_access("private-folder-id")
+    assert result is False
+
+    mock_response.status_code = 404
+    result = check_folder_access("nonexistent-folder-id")
+    assert result is False
+
+
+@patch("src.utils.google_drive.requests.head")
+def test_check_folder_access_request_exception(mock_head):
+    from requests import RequestException
+    mock_head.side_effect = RequestException("Timeout")
+
+    result = check_folder_access("error-folder-id")
+    assert result is False
+
+
+def test_check_folder_access_invalid_folder_id():
+    assert check_folder_access("") is False
+    assert check_folder_access("folder/with/slashes") is False

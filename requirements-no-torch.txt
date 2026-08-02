@@ -12,7 +12,7 @@ pypdf>=5.0.0                     # Extract text from PDF files
 pdfplumber>=0.11.0               # Robust PDF text extraction
 python-docx>=1.1.0               # Extract text from Word documents
 defusedxml>=0.7.1                # Protect against XML External Entity (XXE) attacks
-PyPDF2>=3.0.0                    # Legacy PDF manipulation support
+
 reportlab>=5.0.0                 # PDF document generation
 pytesseract>=0.3.13              # OCR text extraction from scanned images
 Pillow>=10.0.0                   # Image processing library
@@ -32,7 +32,7 @@ streamlit-tour>=1.1.0            # Interactive guided tour component
 streamlit-plotly-events==0.0.6
 
 # ── Data & ML ─────────────────────────────────────────────────────────────────
-numpy>=2.5.1
+numpy>=2.0.0
 pandas>=2.2.0
 scikit-learn>=1.4.0              # cosine_similarity utility
 openpyxl>=3.1.5                  # Engine for exporting DataFrames to Excel

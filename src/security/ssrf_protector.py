@@ -46,6 +46,7 @@ class SSRFProtector:
         ipaddress.ip_network("172.16.0.0/12"),
         ipaddress.ip_network("192.168.0.0/16"),
     )
+    ALLOWED_CIDRS: tuple[ipaddress._BaseNetwork, ...] = ()
 
     @classmethod
     def _resolve_hostname(cls, hostname: str) -> str:
@@ -135,24 +136,52 @@ class SSRFProtector:
 
         try:
             ip = ipaddress.ip_address(ip_str)
+            if cls.ALLOWED_CIDRS:
+                for network in cls.ALLOWED_CIDRS:
+                    if ip in network:
+                        logger.debug(
+                            "SSRF whitelist matched %s in %s",
+                            ip_str,
+                            network,
+                        )
+                        return True
         except ValueError as e:
             raise SSRFSecurityException(SSRF_INVALID_IP_FORMAT.format(error=e))
 
         if isinstance(ip, ipaddress.IPv4Address):
             for subnet in cls.BLOCKED_PRIVATE_IPV4_SUBNETS:
                 if ip in subnet:
+                    logger.warning("Blocked SSRF attempt to target URL: %s", url)
                     raise SSRFSecurityException(SSRF_BLOCKED_PRIVATE.format(ip=ip_str))
         if ip.is_loopback:
+            logger.warning("Blocked SSRF attempt to target URL: %s", url)
             raise SSRFSecurityException(SSRF_BLOCKED_LOOPBACK.format(ip=ip_str))
         if ip.is_link_local:
+            logger.warning("Blocked SSRF attempt to target URL: %s", url)
             raise SSRFSecurityException(SSRF_BLOCKED_LINK_LOCAL.format(ip=ip_str))
         if ip.is_multicast:
+            logger.warning("Blocked SSRF attempt to target URL: %s", url)
             raise SSRFSecurityException(SSRF_BLOCKED_MULTICAST.format(ip=ip_str))
         if ip.is_unspecified:
+            logger.warning("Blocked SSRF attempt to target URL: %s", url)
             raise SSRFSecurityException(SSRF_BLOCKED_UNSPECIFIED.format(ip=ip_str))
         if ip.is_private:
+            logger.warning("Blocked SSRF attempt to target URL: %s", url)
             raise SSRFSecurityException(SSRF_BLOCKED_PRIVATE.format(ip=ip_str))
 
         # If it passed all checks, it's considered safe (public routable IP)
         logger.debug(f"SSRF Check passed for {url} -> {ip_str}")
         return True
+@classmethod
+def configure_allowed_cidrs(
+    cls,
+    allowed_cidrs: list[str] | None = None,
+) -> None:
+    """
+    Configure CIDR ranges that are allowed even if they are private.
+    """
+    cls.ALLOWED_CIDRS = (
+        tuple(ipaddress.ip_network(cidr) for cidr in allowed_cidrs)
+        if allowed_cidrs
+        else ()
+    )

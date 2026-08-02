@@ -122,7 +122,7 @@ from src.visualization.heatmap import plot_similarity_heatmap
 fig = plot_similarity_heatmap(
     similarity_df,
     colormap_name="Plasma",
-    annotate=True,
+    show_annotations=True,
 )
 ```
 
@@ -138,7 +138,7 @@ from src.visualization.heatmap import plot_similarity_heatmap
 
 fig = plot_similarity_heatmap(
     similarity_df,
-    annotate=True,
+    show_annotations=True,
 )
 ```
 
@@ -147,7 +147,7 @@ Hide the numeric values for a cleaner visualization of larger matrices:
 ```python
 fig = plot_similarity_heatmap(
     similarity_df,
-    annotate=False,
+    show_annotations=False,
 )
 ```
 

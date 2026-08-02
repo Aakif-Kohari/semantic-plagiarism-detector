@@ -568,6 +568,45 @@ class TestCleanText:
         text = "   \n\t\n  "
         result = clean_text(text)
         assert result == ""
+    
+    def test_removes_stopwords_when_enabled(self):
+        text = "The quick brown fox jumps over the lazy dog."
+        result = clean_text(text, remove_stopwords=True)
+        # "The", "the", "over", "the" should be removed
+        assert "quick" in result
+        assert "brown" in result
+        assert "fox" in result
+        assert "jumps" in result
+        assert "lazy" in result
+        assert "dog" in result
+        assert "the" not in result.lower()
+        assert "over" not in result.lower()
+
+    def test_preserves_text_when_stopwords_disabled(self):
+        text = "The quick brown fox jumps over the lazy dog."
+        result = clean_text(text, remove_stopwords=False)
+        assert result == "The quick brown fox jumps over the lazy dog."
+
+    def test_stopword_removal_handles_punctuation(self):
+        text = "Hello, world! This is a test."
+        result = clean_text(text, remove_stopwords=True)
+        # "is", "a" should be removed, punctuation remains attached to words
+        assert "Hello," in result
+        assert "world!" in result
+        assert "This" in result
+        assert "test." in result
+        assert " is " not in result
+        assert " a " not in result
+
+    def test_stopword_removal_empty_string(self):
+        text = ""
+        result = clean_text(text, remove_stopwords=True)
+        assert result == ""
+
+    def test_stopword_removal_all_stopwords(self):
+        text = "is are was were be been being"
+        result = clean_text(text, remove_stopwords=True)
+        assert result == ""
 
 
 def test_extract_empty_pdf_gracefully(caplog):

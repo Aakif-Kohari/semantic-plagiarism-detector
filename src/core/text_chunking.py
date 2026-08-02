@@ -251,8 +251,7 @@ def chunk_documents(
     chunk_overlap: int = 50,
     min_words: int = 5,
 ) -> Dict[str, List[str]]:
-    """
-    Splits a dictionary of document raw texts into chunks respecting customizable
+    """Splits a dictionary of document raw texts into chunks respecting customizable
     chunk size and overlap parameters.
     """
     chunked_docs = {}
