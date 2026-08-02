@@ -1523,8 +1523,8 @@ else:
             safe_name = unique_filename(original_name, file_bytes_dict)
 
             if uploaded_file.size > MAX_FILE_SIZE_BYTES:
-                st.error(f"⚠️ File **'{safe_name}'** exceeds maximum size limit of 10MB.")
-                continue
+                mb_size = uploaded_file.size / (1024 * 1024)
+                st.warning(f"⚠️ File **'{safe_name}'** is large ({mb_size:.1f} MB). Processing may take up to 30 seconds.")
 
             file_bytes_dict[safe_name] = strip_exif_metadata(uploaded_file.read(), safe_name)
 
