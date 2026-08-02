@@ -18,6 +18,7 @@ from typing import List
 
 import numpy as np
 from sentence_transformers import SentenceTransformer
+import torch
 
 from src.core.config import EMBEDDING_BATCH_SIZE
 
@@ -26,6 +27,36 @@ logger = logging.getLogger(__name__)
 # ── Singleton model loader ─────────────────────────────────────────────────────
 _DEFAULT_MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
 _model: SentenceTransformer | None = None
+
+
+def _detect_device(model: SentenceTransformer | None = None) -> str:
+    """Detect active PyTorch compute device (cpu, cuda, or mps)."""
+    if model is not None and hasattr(model, "device"):
+        dev = getattr(model, "device")
+        if isinstance(dev, str):
+            return dev
+        if hasattr(dev, "type") and isinstance(getattr(dev, "type", None), str):
+            return dev.type
+    try:
+        if (
+            hasattr(torch, "cuda")
+            and hasattr(torch.cuda, "is_available")
+            and torch.cuda.is_available()
+        ):
+            return "cuda"
+    except Exception:
+        pass
+    try:
+        if (
+            hasattr(torch, "backends")
+            and hasattr(torch.backends, "mps")
+            and hasattr(torch.backends.mps, "is_available")
+            and torch.backends.mps.is_available()
+        ):
+            return "mps"
+    except Exception:
+        pass
+    return "cpu"
 
 
 def _get_model_name() -> str:
@@ -59,6 +90,12 @@ class EmbeddingModelManager:
             logger.info(f"[embedding_model] Loading model: {primary} …")
             try:
                 _model = SentenceTransformer(primary)
+                device = _detect_device(_model)
+                logger.info(
+                    "Initializing SentenceTransformer model [%s] on device [%s]",
+                    primary,
+                    device,
+                )
                 logger.info("[embedding_model] Model loaded successfully.")
             except Exception:
                 logger.warning(
@@ -67,6 +104,12 @@ class EmbeddingModelManager:
                     fallback,
                 )
                 _model = SentenceTransformer(fallback)
+                device = _detect_device(_model)
+                logger.info(
+                    "Initializing SentenceTransformer model [%s] on device [%s]",
+                    fallback,
+                    device,
+                )
         return _model
 
 
