@@ -732,39 +732,52 @@ def count_pdf_images(pdf_bytes: bytes) -> int:
 
 
 def extract_pdf_metadata(file: PDFInput) -> Dict[str, str]:
-    """Extract PDF metadata (Author, Creation Date, Title) using PyMuPDF.
+    """Extract PDF metadata (Author, Title, Creation Date, Creator, Producer) using PyMuPDF.
 
     Returns:
-        Dictionary with keys 'author', 'creation_date', 'title'.
+        Dictionary with keys 'author', 'title', 'creation_date', 'creator', 'producer'.
         Values are None if metadata is not available.
     """
     pdf_bytes = _read_pdf_bytes(file)
-    metadata = {"author": None, "creation_date": None, "title": None}
+
+    metadata = {
+        "author": None,
+        "title": None,
+        "creation_date": None,
+        "creator": None,
+        "producer": None,
+    }
 
     try:
         import fitz  # PyMuPDF
 
         with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
-            doc_metadata = doc.metadata
+            doc_metadata = doc.metadata or {}
+
             metadata["author"] = doc_metadata.get("author")
-            metadata["creation_date"] = doc_metadata.get("creationDate")
             metadata["title"] = doc_metadata.get("title")
+            metadata["creation_date"] = doc_metadata.get("creationDate")
+            metadata["creator"] = doc_metadata.get("creator")
+            metadata["producer"] = doc_metadata.get("producer")
+
     except (ValueError, RuntimeError, OSError, TypeError) as exc:
         print(f"[document_parser] Error extracting PDF metadata: {exc}")
+
     except Exception as exc:
         logger.error(f"[document_parser] Error extracting PDF metadata: {exc}")
 
     image_count = count_pdf_images(pdf_bytes)
+
     if image_count:
         logger.info(
             "[document_parser] PDF contains %d embedded image(s): %s",
             image_count,
             metadata.get("title") or "unknown",
         )
+
     metadata["image_count"] = image_count
 
     return metadata
-
 
 def extract_text_from_pdf(
     file: PDFInput,
