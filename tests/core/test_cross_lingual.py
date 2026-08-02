@@ -1,5 +1,13 @@
 from __future__ import annotations
 
+
+import logging
+
+from src.core.cross_lingual import (detect_language,
+                                    prepare_chunks_for_embedding,
+                                    prepare_documents_for_embedding,
+                                    prepare_text_for_embedding)
+
 from src.core.cross_lingual import (
     detect_language,
     prepare_chunks_for_embedding,
@@ -24,6 +32,27 @@ def test_detects_hindi_text():
     )
     assert detect_language(text) == ("hi", True)
 
+
+def test_low_confidence_logs_warning(monkeypatch, caplog):
+    """A detection confidence below 0.7 should trigger a warning log."""
+
+    class FakeLang:
+        lang = "fr"
+        prob = 0.5
+
+    monkeypatch.setattr(
+        "src.core.cross_lingual.detect_langs", lambda text: [FakeLang()]
+    )
+
+    with caplog.at_level(logging.WARNING):
+        detect_language(
+            "This is a sufficiently long snippet of text for detection to run."
+        )
+
+    assert any(
+        "Low language detection confidence" in record.message
+        for record in caplog.records
+    )
 
 def test_english_text_is_not_translated():
     calls = []
