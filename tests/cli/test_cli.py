@@ -1,4 +1,7 @@
 import json
+import sqlite3
+import subprocess
+from pathlib import Path
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -201,3 +204,148 @@ def test_cli_main_scan_format(mock_embed, mock_model_info, temp_assignments_dir,
         report = json.loads(captured.out)
         assert report["documents_processed"] == 2
 
+
+
+
+def _normalized_sql(sql: str | None) -> str:
+    """Normalize SQLite DDL for stable schema comparisons."""
+    return " ".join((sql or "").split()).casefold()
+
+
+def _database_schema_snapshot(db_path: Path) -> dict:
+    """Return tables, columns, indexes, foreign keys, and user version."""
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("PRAGMA foreign_keys = ON")
+
+        table_rows = connection.execute(
+            """
+            SELECT name, sql
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name NOT LIKE 'sqlite_%'
+            ORDER BY name
+            """
+        ).fetchall()
+
+        snapshot = {
+            "user_version": connection.execute(
+                "PRAGMA user_version"
+            ).fetchone()[0],
+            "tables": {},
+        }
+
+        for table_name, create_sql in table_rows:
+            columns = [
+                {
+                    "cid": row[0],
+                    "name": row[1],
+                    "type": row[2].upper(),
+                    "not_null": row[3],
+                    "default": row[4],
+                    "primary_key": row[5],
+                }
+                for row in connection.execute(
+                    f'PRAGMA table_info("{table_name}")'
+                ).fetchall()
+            ]
+
+            indexes = []
+            for index_row in connection.execute(
+                f'PRAGMA index_list("{table_name}")'
+            ).fetchall():
+                index_name = index_row[1]
+                index_columns = [
+                    row[2]
+                    for row in connection.execute(
+                        f'PRAGMA index_info("{index_name}")'
+                    ).fetchall()
+                ]
+                indexes.append(
+                    {
+                        "name": index_name,
+                        "unique": index_row[2],
+                        "origin": index_row[3],
+                        "partial": index_row[4],
+                        "columns": index_columns,
+                    }
+                )
+
+            foreign_keys = [
+                {
+                    "table": row[2],
+                    "from": row[3],
+                    "to": row[4],
+                    "on_update": row[5],
+                    "on_delete": row[6],
+                    "match": row[7],
+                }
+                for row in connection.execute(
+                    f'PRAGMA foreign_key_list("{table_name}")'
+                ).fetchall()
+            ]
+
+            snapshot["tables"][table_name] = {
+                "sql": _normalized_sql(create_sql),
+                "columns": columns,
+                "indexes": sorted(
+                    indexes,
+                    key=lambda item: item["name"],
+                ),
+                "foreign_keys": sorted(
+                    foreign_keys,
+                    key=lambda item: (
+                        item["table"],
+                        item["from"],
+                        item["to"],
+                    ),
+                ),
+            }
+
+        return snapshot
+
+
+def test_seed_data_database_matches_active_corpus_schema(tmp_path):
+    """Seed output must match a database initialized by corpus_db.py."""
+    repository_root = Path(__file__).resolve().parents[2]
+    generated_dir = tmp_path / "generated-seed"
+    reference_db = tmp_path / "reference-corpus.db"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(repository_root / "scripts" / "generate_seed_data.py"),
+            "--seed-dir",
+            str(generated_dir),
+        ],
+        cwd=repository_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, (
+        "Seed generation failed.\n"
+        f"STDOUT:\n{result.stdout}\n"
+        f"STDERR:\n{result.stderr}"
+    )
+
+    generated_db = generated_dir / "corpus.db"
+    assert generated_db.is_file()
+    assert (generated_dir / "users.db").is_file()
+    assert (generated_dir / "corpus.index").is_file()
+
+    # Initialize a separate database using the active corpus_db definitions.
+    from src.db import corpus_db
+
+    original_path = corpus_db.get_corpus_db_path()
+    try:
+        corpus_db.configure_db_path(reference_db)
+        corpus_db.init_corpus_db()
+        corpus_db.close_connections()
+    finally:
+        corpus_db.configure_db_path(original_path)
+
+    generated_schema = _database_schema_snapshot(generated_db)
+    reference_schema = _database_schema_snapshot(reference_db)
+
+    assert generated_schema == reference_schema
