@@ -11,7 +11,7 @@ on:
     types: [opened, closed]
 
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: '0 */8 * * *'
 
   workflow_dispatch:
 
@@ -357,6 +357,7 @@ jobs:
   auto-unassign-stale:
     permissions:
       issues: write
+      pull-requests: write
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
@@ -586,6 +587,53 @@ jobs:
               }
             }
 
+      - name: Auto-close Stale PRs (Open for 72+ hours)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const seventyTwoHoursMs = 72 * 60 * 60 * 1000;
+            const now = new Date();
+            console.log("Checking for PRs open for 72 hours or more...");
+
+            const openPRs = await github.paginate(github.rest.pulls.list, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100
+            });
+
+            for (const pr of openPRs) {
+              const createdAt = new Date(pr.created_at);
+              const ageMs = now - createdAt;
+
+              if (ageMs >= seventyTwoHoursMs) {
+                const author = pr.user ? pr.user.login : 'contributor';
+                console.log(`Closing PR #${pr.number} (open for ${Math.round(ageMs / (1000 * 60 * 60))} hours)...`);
+
+                try {
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: pr.number,
+                    body: `⏰ @${author}, this Pull Request has been open for 72 hours or more without being merged. It has been automatically closed due to inactivity, and the task is unassigned and open for anyone to claim!`
+                  });
+                } catch (e) {
+                  console.log(`Error posting comment on PR #${pr.number}:`, e.message);
+                }
+
+                try {
+                  await github.rest.pulls.update({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    pull_number: pr.number,
+                    state: 'closed'
+                  });
+                } catch (e) {
+                  console.log(`Error closing PR #${pr.number}:`, e.message);
+                }
+              }
+            }
+
   pr-conflict-reminder:
     permissions:
       issues: write
@@ -598,7 +646,7 @@ jobs:
         with:
           script: |
             const isBotComment = (c) => c.user && (c.user.type === 'Bot' || (c.user.login && c.user.login.endsWith('[bot]')));
-            const sixHoursMs = 5.5 * 60 * 60 * 1000; // Buffer for 6-hour cron schedule jitter
+            const eightHoursMs = 7.5 * 60 * 60 * 1000; // Buffer for 8-hour cron schedule jitter
             const now = new Date();
 
             let prs = [];
@@ -670,8 +718,8 @@ jobs:
               if (conflictBotComments.length > 0) {
                 const lastComment = conflictBotComments[conflictBotComments.length - 1];
                 const lastCommentTime = new Date(lastComment.created_at);
-                if ((now - lastCommentTime) < sixHoursMs) {
-                  console.log(`Skipping PR #${pr.number}: Merge conflict reminder already posted within the last 6 hours.`);
+                if ((now - lastCommentTime) < eightHoursMs) {
+                  console.log(`Skipping PR #${pr.number}: Merge conflict reminder already posted within the last 8 hours.`);
                   continue;
                 }
               }
