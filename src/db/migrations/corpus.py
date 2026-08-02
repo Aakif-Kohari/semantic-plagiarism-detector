@@ -6,7 +6,7 @@ import sqlite3
 
 from .common import column_exists, run_migrations
 
-CORPUS_SCHEMA_VERSION = 10
+CORPUS_SCHEMA_VERSION = 11
 
 
 def migration_001_create_base_schema(
@@ -186,6 +186,22 @@ def migration_010_add_document_owner(
     )
 
 
+def migration_011_add_documents_created_at_index(
+    connection: sqlite3.Connection,
+) -> None:
+    """Add created_at column and its index to documents table to optimize query performance."""
+    if not column_exists(connection, "documents", "created_at"):
+        connection.execute(
+            "ALTER TABLE documents ADD COLUMN created_at TEXT"
+        )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_documents_created_at
+        ON documents(created_at)
+        """
+    )
+
+
 CORPUS_MIGRATIONS = {
     1: migration_001_create_base_schema,
     2: migration_002_add_document_metadata,
@@ -197,6 +213,7 @@ CORPUS_MIGRATIONS = {
     8: migration_008_add_soft_delete,
     9: migration_009_add_file_hash_index,
     10: migration_010_add_document_owner,
+    11: migration_011_add_documents_created_at_index,
 }
 
 

@@ -493,3 +493,19 @@ def test_get_total_document_count(mock_db):
     soft_delete_document("doc1.pdf")
     assert get_total_document_count() == 1
     assert get_total_document_count(include_deleted=True) == 2
+
+
+def test_documents_created_at_index_exists(mock_db):
+    from src.db.corpus_db import get_corpus_db_path
+    import sqlite3
+    db_path = get_corpus_db_path()
+    conn = sqlite3.connect(db_path)
+    try:
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='documents'"
+        )
+        indexes = [row[0] for row in cursor.fetchall()]
+        assert "idx_documents_created_at" in indexes
+    finally:
+        conn.close()
+

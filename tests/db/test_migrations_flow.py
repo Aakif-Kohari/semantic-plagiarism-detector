@@ -154,6 +154,26 @@ class TestCorpusMigrationFlow:
         finally:
             conn.close()
 
+    def test_version_10_adds_document_owner(self):
+        conn = _connect()
+        try:
+            _apply_up_to(conn, CORPUS_MIGRATIONS, 10)
+            assert get_user_version(conn) == 10
+            assert column_exists(conn, "documents", "owner")
+            assert index_exists(conn, "idx_documents_owner")
+        finally:
+            conn.close()
+
+    def test_version_11_adds_documents_created_at_index(self):
+        conn = _connect()
+        try:
+            _apply_up_to(conn, CORPUS_MIGRATIONS, 11)
+            assert get_user_version(conn) == 11
+            assert column_exists(conn, "documents", "created_at")
+            assert index_exists(conn, "idx_documents_created_at")
+        finally:
+            conn.close()
+
 
     def test_full_corpus_flow_reaches_latest_version(self):
         """Single end-to-end pass: v0 → CORPUS_SCHEMA_VERSION via migrate_corpus_database."""
@@ -174,7 +194,7 @@ class TestCorpusMigrationFlow:
             for col in (
                 "id", "filename", "file_hash", "upload_date",
                 "class_section", "student_name", "assignment_title",
-                "detected_language",
+                "detected_language", "owner", "created_at",
             ):
                 assert column_exists(conn, "documents", col), f"Missing column: {col}"
 
@@ -188,6 +208,8 @@ class TestCorpusMigrationFlow:
                 "idx_chunks_filename",
                 "idx_incidents_status",
                 "idx_documents_file_hash",
+                "idx_documents_owner",
+                "idx_documents_created_at",
             ):
                 assert index_exists(conn, idx), f"Missing index: {idx}"
         finally:
