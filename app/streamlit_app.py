@@ -712,6 +712,14 @@ if "pdf_passwords" not in st.session_state:
 if "lang" not in st.session_state:
     st.session_state.lang = "en"
 
+if "model_load_time" not in st.session_state:
+    from src.core.embedding_model import EmbeddingModelManager
+    
+    with st.spinner("Initializing Vector Embedding Model..."):
+        _start_time = time.perf_counter()
+        EmbeddingModelManager.get_instance().get_model()
+        st.session_state.model_load_time = time.perf_counter() - _start_time
+
 st.markdown(back_to_top_html(), unsafe_allow_html=True)
 inject_css()
 
@@ -1097,6 +1105,10 @@ if not selected_classes:
         st.caption("• **R**: Rerun app")
         st.caption("• **C**: Clear cache")
         st.caption("• **Tab**: Navigate focus")
+
+    if "model_load_time" in st.session_state:
+        st.divider()
+        st.caption(f"⚡ Vector Model Loaded in {st.session_state.model_load_time:.2f} seconds")
 
 # ── Main UI ───────────────────────────────────────────────────────────────────
 st.title("🔍 Semantic Plagiarism Detection System")
