@@ -1,5 +1,6 @@
 import io
 import shutil
+from pathlib import Path
 
 import zipfile
 from unittest.mock import MagicMock, patch
@@ -16,6 +17,7 @@ from src.core.document_parser import (
     extract_text_from_txt,
     extract_text_from_zip,
     extract_texts,
+    parallel_extract_texts,
     strip_bibliography,
 )
 
@@ -323,6 +325,28 @@ def test_extract_texts_mixed():
 
     assert results["doc1.docx"] == "Parsed doc1.docx"
     assert results["doc2.txt"] == "Parsed doc2.txt"
+
+
+def test_parallel_extract_texts_matches_sequential(tmp_path):
+    """Verify that parallel_extract_texts produces identical results to sequential extraction."""
+    file1 = tmp_path / "doc1.txt"
+    file2 = tmp_path / "doc2.txt"
+
+    file1.write_text("Text content of document one.", encoding="utf-8")
+    file2.write_text("Text content of document two.", encoding="utf-8")
+
+    file_paths = [file1, file2]
+
+    # Sequential extraction
+    sequential_results = {
+        path.name: extract_text(path.read_bytes(), path.name)
+        for path in file_paths
+    }
+
+    # Parallel extraction
+    parallel_results = parallel_extract_texts(file_paths, max_workers=2)
+
+    assert parallel_results == sequential_results
 
 
 # ---------------------------------------------------------------------------
@@ -727,3 +751,4 @@ def test_get_supported_file_extensions():
         ".rtf",
         ".txt",
     ]
+    

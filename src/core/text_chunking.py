@@ -92,7 +92,8 @@ def chunk_text(
     min_words: int = 5,
     overlap_percentage: float | None = None,
 ) -> List[str]:
-    """Splits text into chunks of a target character length with overlapping boundaries.
+    """
+    Splits text into chunks of a target character length with overlapping boundaries.
 
     Args:
         text: The input text to chunk.

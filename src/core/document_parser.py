@@ -95,7 +95,6 @@ def sanitize_zero_width_characters(text: str, filename: Optional[str] = None) ->
     return text
 
 
-
 def check_batch_rate_limit(file_count: int, session_id: Optional[str] = None) -> None:
     """
     Validates batch file collection size against session rate limits.
@@ -115,7 +114,6 @@ def check_batch_rate_limit(file_count: int, session_id: Optional[str] = None) ->
 
 # More values may be added later without changing the extraction API.
 from src.core.app_config import SUPPORTED_OCR_LANGUAGES
-
 
 
 class CorruptedArchiveError(ValueError):
@@ -209,20 +207,8 @@ def strip_bibliography(text: str) -> str:
     return text
 
 
-
-def clean_text(raw_text: str, remove_stopwords: bool = False) -> str:
-    """
-    Normalize whitespace and remove unwanted Unicode characters.
-    Optionally removes standard English stopwords to reduce noise in lexical analysis.
-
-    Args:
-        raw_text (str): The raw text string to be cleaned.
-        remove_stopwords (bool): If True, filters out standard English stopwords.
-                                 Defaults to False.
-
-    Returns:
-        str: The cleaned and optionally filtered text.
-    """
+def clean_text(raw_text: str) -> str:
+    """Normalize whitespace and remove unwanted Unicode characters."""
     text = raw_text
 
     text = text.translate(
@@ -913,7 +899,6 @@ def extract_text_from_docx(file: PDFInput) -> str:
     return ""
 
 
-
 def extract_text_from_txt(file: PDFInput) -> str:
     """Extract text from a TXT file with encoding fallback."""
     text = ""
@@ -978,7 +963,6 @@ def extract_text_from_rtf(file: PDFInput) -> str:
     return text.strip()
 
 
-
 def extract_text_from_zip(
     file: PDFInput,
     *,
@@ -1025,6 +1009,7 @@ def extract_text_from_zip(
         raise CorruptedArchiveError(f"Uploaded ZIP submission is corrupted: {exc}") from exc
 
     return "\n\n".join(extracted_texts).strip()
+
 
 def extract_text_from_doc(file: PDFInput) -> str:
     """Extract plain text from a legacy Word Document (.doc) using antiword."""
@@ -1204,7 +1189,6 @@ def strip_markdown_syntax(raw_text: str) -> str:
     return text.strip()
 
 
-
 def extract_text_from_epub(file: PDFInput) -> str:
     """Extract plain text from an EPUB file."""
     try:
@@ -1233,7 +1217,6 @@ def extract_text_from_epub(file: PDFInput) -> str:
     except Exception as exc:
         logger.error(f"[document_parser] Error reading EPUB: {exc}")
         return ""
-
 
 
 def extract_text_from_md(file: PDFInput) -> str:
@@ -1344,7 +1327,6 @@ def extract_text(
     elif extension in ("zip", "7z", "tar", "gz"):
         raw = extract_text_from_zip(file, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
 
-
     elif extension == "rtf":
         raw = extract_text_from_rtf(file)
 
@@ -1388,6 +1370,68 @@ def get_supported_file_extensions() -> list[str]:
 def extract_texts_from_pdfs(files: list, session_id: Optional[str] = None) -> Dict[str, str]:
     """Legacy compatibility wrapper."""
     return extract_texts(files, session_id=session_id)
+
+
+def _extract_text_from_file_path(file_path: Path) -> tuple[str, str]:
+    """Helper worker to extract text from a Path object in a process worker."""
+    file_path = Path(file_path)
+    filename = file_path.name
+    try:
+        content_bytes = file_path.read_bytes()
+        extracted = extract_text(content_bytes, filename)
+        return filename, extracted
+    except Exception as exc:
+        logger.error(f"[document_parser] Error extracting text from path {file_path}: {exc}")
+        return filename, ""
+
+
+def parallel_extract_texts(
+    file_paths: list[Path], max_workers: int = 4
+) -> dict[str, str]:
+    """
+    Extract text from multiple file paths concurrently using a ProcessPoolExecutor.
+
+    Args:
+        file_paths: List of file Path objects to extract text from.
+        max_workers: Maximum process workers to spawn (default: 4).
+
+    Returns:
+        dict[str, str]: Mapping of filename to extracted text string.
+    """
+    if not file_paths:
+        return {}
+
+    paths = [Path(p) for p in file_paths]
+
+    if len(paths) == 1 or not _should_use_parallel():
+        results = {}
+        for path in paths:
+            filename, text = _extract_text_from_file_path(path)
+            results[filename] = text
+        return results
+
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
+    results = {}
+    try:
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            future_to_path = {
+                executor.submit(_extract_text_from_file_path, path): path
+                for path in paths
+            }
+            for future in as_completed(future_to_path):
+                filename, text = future.result()
+                results[filename] = text
+    except (RuntimeError, OSError) as exc:
+        logger.warning(
+            f"[document_parser] ProcessPoolExecutor failed ({exc}), falling back to sequential extraction."
+        )
+        results = {}
+        for path in paths:
+            filename, text = _extract_text_from_file_path(path)
+            results[filename] = text
+
+    return results
 
 
 def extract_texts(files: list, session_id: Optional[str] = None) -> Dict[str, str]:
