@@ -42,27 +42,30 @@ def _init_db() -> None:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         conn = sqlite3.connect(path)
 
-    with conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS translation_cache (
-                text_hash TEXT PRIMARY KEY,
-                foreign_text TEXT NOT NULL,
-                translated_text TEXT NOT NULL,
-                source_lang TEXT,
-                target_lang TEXT DEFAULT 'en',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS translation_cache (
+                    text_hash TEXT PRIMARY KEY,
+                    foreign_text TEXT NOT NULL,
+                    translated_text TEXT NOT NULL,
+                    source_lang TEXT,
+                    target_lang TEXT DEFAULT 'en',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
             )
-            """
-        )
-        cursor.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_translation_cache_created_at
-            ON translation_cache(created_at)
-            """
-        )
-        conn.commit()
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_translation_cache_created_at
+                ON translation_cache(created_at)
+                """
+            )
+            conn.commit()
+    finally:
+        conn.close()
 
 
 def _hash_text(text: str, source_lang: str = "auto", target_lang: str = "en") -> str:

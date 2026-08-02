@@ -1,7 +1,7 @@
 """Tests for scanned and mixed PDF OCR fallback."""
 
 import io
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -94,3 +94,40 @@ def test_ocr_dependency_error_is_not_hidden(mock_ocr, mock_pdf_open):
 
     with pytest.raises(OCRDependencyError, match="Tesseract"):
         extract_text_from_pdf(io.BytesIO(b"%PDF-fake-pdf"))
+
+
+@patch("src.core.document_parser.pytesseract.image_to_string")
+@patch("src.core.document_parser.fitz.open")
+def test_ocr_pdf_page_oom(mock_fitz_open, mock_image_to_string):
+    from src.core.document_parser import _ocr_pdf_page
+
+    mock_doc = MagicMock()
+    mock_page = MagicMock()
+    mock_doc.load_page.return_value = mock_page
+    mock_pixmap = MagicMock()
+    mock_pixmap.samples = b"\x00" * 3
+    mock_pixmap.width = 1
+    mock_pixmap.height = 1
+    mock_page.get_pixmap.return_value = mock_pixmap
+    mock_fitz_open.return_value.__enter__.return_value = mock_doc
+
+    mock_image_to_string.side_effect = MemoryError("Out of memory mock error")
+
+    # Call with fake PDF bytes
+    res = _ocr_pdf_page(b"%PDF-1.4", 0)
+    assert "[OCR extraction failed for page 0]" in res
+
+
+@patch("src.core.document_parser.pytesseract.image_to_string")
+@patch("src.core.document_parser.Image.open")
+def test_extract_text_from_image_oom(mock_image_open, mock_image_to_string):
+    from src.core.document_parser import extract_text_from_image
+
+    mock_img = MagicMock()
+    mock_image_open.return_value = mock_img
+
+    mock_image_to_string.side_effect = MemoryError("Out of memory mock error")
+
+    res = extract_text_from_image(b"fake image bytes")
+    assert "[OCR extraction failed for the file]" in res
+

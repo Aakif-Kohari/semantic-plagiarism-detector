@@ -231,12 +231,39 @@ def test_get_incidents_by_severity(test_db):
 
     sync_flagged_incidents(flags, test_db)
 
-    results = get_incidents_by_severity("High", test_db)
+results = get_incidents_by_severity("High", test_db)
 
     assert len(results) == 1
     assert results[0]["severity_rank"] == "High"
     assert results[0]["document_a"] == "high_doc1.pdf"
 
+
+
+def test_get_incidents_by_severity_orders_by_timestamp_desc(test_db):
+    """Verify same-severity incidents are returned newest first."""
+    flags = [
+        {
+            "doc_a": "high_doc_older_a.pdf",
+            "doc_b": "high_doc_older_b.pdf",
+            "similarity": 0.91,
+        },
+    ]
+    sync_flagged_incidents(flags, test_db, now="2024-01-01T00:00:00+00:00")
+
+    flags_newer = [
+        {
+            "doc_a": "high_doc_newer_a.pdf",
+            "doc_b": "high_doc_newer_b.pdf",
+            "similarity": 0.92,
+        },
+    ]
+    sync_flagged_incidents(flags_newer, test_db, now="2024-06-01T00:00:00+00:00")
+
+    results = get_incidents_by_severity("High", test_db)
+
+    assert len(results) == 2
+    assert results[0]["document_a"] == "high_doc_newer_a.pdf"
+    assert results[1]["document_a"] == "high_doc_older_a.pdf"
 
 def test_purge_old_incidents_deletes_resolved_older_than_days(test_db):
     """Test that purge_old_incidents deletes resolved incidents older than specified days."""

@@ -26,10 +26,12 @@ def test_fresh_corpus_database_reaches_latest_version(tmp_path):
         assert table_exists(connection, "chunks")
         assert table_exists(connection, "plagiarism_incidents")
         assert column_exists(connection, "documents", "detected_language")
+        assert column_exists(connection, "documents", "created_at")
         assert index_exists(connection, "idx_documents_upload_date")
         assert index_exists(connection, "idx_documents_class_section")
         assert index_exists(connection, "idx_chunks_filename")
         assert index_exists(connection, "idx_incidents_status")
+        assert index_exists(connection, "idx_documents_created_at")
 
 
 def test_fresh_auth_database_reaches_latest_version(tmp_path):
@@ -360,3 +362,28 @@ def test_no_log_when_already_at_target_version(tmp_path, caplog):
         ), "Should not log when no migration was performed"
     finally:
         connection.close()
+
+
+def test_migration_duration_logging(tmp_path, caplog):
+    """run_migrations must log the execution duration for each executed migration function."""
+    import logging
+
+    def migration_dummy_test_func(conn: sqlite3.Connection) -> None:
+        conn.execute("CREATE TABLE dummy_test (id INT)")
+
+    connection = sqlite3.connect(str(tmp_path / "duration-test.db"))
+    try:
+        with caplog.at_level(logging.INFO, logger="src.db.migrations.common"):
+            run_migrations(
+                connection,
+                migrations={1: migration_dummy_test_func},
+                target_version=1,
+            )
+
+        assert any(
+            "Migration [migration_dummy_test_func] executed in" in record.message
+            for record in caplog.records
+        ), f"Expected duration log message not found in: {[r.message for r in caplog.records]}"
+    finally:
+        connection.close()
+

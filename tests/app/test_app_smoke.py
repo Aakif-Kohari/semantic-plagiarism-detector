@@ -269,10 +269,11 @@ def test_sidebar_reset_all_filters():
         _cleanup_stale_artifacts()
 
 
-def test_sidebar_keyboard_shortcuts_footnote():
-    """Verify that keyboard shortcut helper footnote expander is rendered in the sidebar."""
+def test_api_bearer_token_copy_code_box():
+    """Verify that API Bearer Token is displayed using st.code box in settings tab."""
     _cleanup_stale_artifacts()
     try:
+        os.environ["API_BEARER_TOKEN"] = "test-secret-bearer-token"
         at = AppTest.from_file("app/streamlit_app.py", default_timeout=30)
         at.session_state["authenticated"] = True
         at.session_state["username"] = "admin"
@@ -280,9 +281,8 @@ def test_sidebar_keyboard_shortcuts_footnote():
         at.run()
 
         assert not at.exception
-        # Check sidebar expanders or captions for keyboard shortcuts text
-        sidebar_expanders = [exp.label for exp in at.sidebar.expander]
-        assert any("Keyboard Shortcuts" in label for label in sidebar_expanders)
+        code_blocks = [c.value for c in at.code]
+        assert any("test-secret-bearer-token" in val or "secret" in val for val in code_blocks)
     finally:
         _cleanup_stale_artifacts()
 

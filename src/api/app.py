@@ -5,6 +5,7 @@ import os
 import psutil
 import numpy as np
 
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status, Request
 from typing import Dict
 from fastapi import Request
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
@@ -118,6 +119,16 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 app.add_exception_handler(RateLimitExceeded, custom_rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
+
+def validate_content_type(request: Request) -> None:
+    """Ensure the request is multipart/form-data before parsing."""
+    content_type = request.headers.get("content-type", "")
+    if "multipart/form-data" not in content_type:
+        raise HTTPException(
+            status_code=415,
+            detail="Unsupported Media Type: Request must be multipart/form-data"
+        )
+
 
 # ── Database Helpers ───────────────────────────────────────────────────────────
 
@@ -302,6 +313,8 @@ async def scan_document(
         le=10,
         description="Number of top matching paragraph pairs to include per matched document",
     ),
+    _token: str = Depends(verify_bearer_token),
+    _content_type: None = Depends(validate_content_type),
 ):
     """Scan an uploaded document against the indexed corpus database for plagiarism."""
     if not file.filename:

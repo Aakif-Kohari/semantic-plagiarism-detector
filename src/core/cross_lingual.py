@@ -62,12 +62,17 @@ def detect_language(text: str, min_confidence: float = 0.8) -> tuple[str, bool]:
         langs = detect_langs(cleaned)
         if not langs:
             return "en", False
-        top_lang = langs[0]
+top_lang = langs[0]
         detected_lang = _normalise_language_code(top_lang.lang)
         confidence = top_lang.prob
 
-        if confidence < min_confidence:
+        if confidence < 0.7:
             logger.warning(
+                "Low language detection confidence (%.2f) for input text snippet",
+                confidence,
+            )
+
+        if confidence < min_confidence:            logger.warning(
                 "Low-confidence language detection (%.4f < %.2f) for text: %s. Defaulting to 'en'.",
                 confidence,
                 min_confidence,

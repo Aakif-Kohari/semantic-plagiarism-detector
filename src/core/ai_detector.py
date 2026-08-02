@@ -246,9 +246,28 @@ def detect_ai_generated_text(text: str) -> Dict[str, Any]:
     # Perplexity estimation: higher for human (low probability), lower for AI (high probability)
     perplexity_score = float(150.0 - 110.0 * ai_probability)
 
-    return {
+return {
         "ai_probability": ai_probability,
         "confidence_tier": confidence_tier,
         "perplexity_score": perplexity_score,
     }
 
+
+def categorize_ai_probability(score: float) -> str:
+    """
+    Map a raw AI probability score to a human-readable confidence category.
+
+    Args:
+        score: AI probability score between 0.0 and 1.0.
+
+    Returns:
+        "High Probability" for score >= 0.8,
+        "Moderate Probability" for 0.5 <= score < 0.8,
+        "Low Probability" for score < 0.5.
+    """
+    if score >= 0.8:
+        return "High Probability"
+    elif score >= 0.5:
+        return "Moderate Probability"
+    else:
+        return "Low Probability"

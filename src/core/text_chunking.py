@@ -12,11 +12,15 @@ Two strategies are available:
   is split mid-word or mid-clause.
 """
 
+from __future__ import annotations
+import logging
 import re
 from typing import Dict, List
 
+logger = logging.getLogger(__name__)
 
 # ── Sentence splitting helper ─────────────────────────────────────────────────
+
 
 def _split_into_sentences(text: str) -> List[str]:
     """Return a list of sentences from *text*.
@@ -26,9 +30,11 @@ def _split_into_sentences(text: str) -> List[str]:
     (e.g. CI containers without the punkt corpus downloaded).
     """
     try:
-        import nltk # type: ignore
+        import nltk  # type: ignore
+
         try:
-            from nltk.tokenize import sent_tokenize # type: ignore
+            from nltk.tokenize import sent_tokenize  # type: ignore
+
             sentences = sent_tokenize(text)
             if sentences:
                 return sentences
@@ -36,7 +42,8 @@ def _split_into_sentences(text: str) -> List[str]:
             # punkt_tab / punkt corpus not downloaded – trigger download once
             try:
                 nltk.download("punkt_tab", quiet=True)
-                from nltk.tokenize import sent_tokenize # type: ignore
+                from nltk.tokenize import sent_tokenize  # type: ignore
+
                 return sent_tokenize(text)
             except Exception:
                 pass
@@ -91,8 +98,10 @@ def chunk_text(
     chunk_overlap: int = 50,
     min_words: int = 5,
     overlap_percentage: float | None = None,
+    max_chunks: int = 1000,
 ) -> List[str]:
-    """Splits text into chunks of a target character length with overlapping boundaries.
+    """
+    Splits text into chunks of a target character length with overlapping boundaries.
 
     Args:
         text: The input text to chunk.
@@ -100,6 +109,9 @@ def chunk_text(
         chunk_overlap: Number of characters to overlap between chunks.
         min_words: Minimum word count for a chunk to be included. Chunks with
             fewer words are filtered out to reduce noise from headers/page numbers.
+        max_chunks: Maximum number of chunks to generate. Chunking stops once
+            this limit is reached, and a warning is logged, to avoid memory
+            spikes on extremely large documents.
 
     Returns:
         List of chunk strings.
@@ -124,11 +136,21 @@ def chunk_text(
             metadata = {}
             if word_headings:
                 first_word_idx = current_chunk_with_indices[0][1]
-                if first_word_idx < len(word_headings) and word_headings[first_word_idx] is not None:
+                if (
+                    first_word_idx < len(word_headings)
+                    and word_headings[first_word_idx] is not None
+                ):
                     metadata["section_title"] = word_headings[first_word_idx]
 
             if len(chunk_str.split()) >= min_words:
                 chunks.append(ChunkString(chunk_str, metadata=metadata))
+
+            if len(chunks) >= max_chunks:
+                logger.warning(
+                    f"[text_chunking] Document exceeded max_chunks limit "
+                    f"({max_chunks}); truncating remaining chunks."
+                )
+                return chunks
 
             # Retain overlap words from the end of the previous chunk
             overlap_words = []
@@ -150,7 +172,10 @@ def chunk_text(
         metadata = {}
         if word_headings:
             first_word_idx = current_chunk_with_indices[0][1]
-            if first_word_idx < len(word_headings) and word_headings[first_word_idx] is not None:
+            if (
+                first_word_idx < len(word_headings)
+                and word_headings[first_word_idx] is not None
+            ):
                 metadata["section_title"] = word_headings[first_word_idx]
         if len(chunk_str.split()) >= min_words:
             chunks.append(ChunkString(chunk_str, metadata=metadata))
@@ -220,7 +245,10 @@ def chunk_by_sentences(
         if current_sentences and current_length + added_length > max_chunk_size:
             # Flush the current block if it meets the minimum sentence count
             block = " ".join(current_sentences)
-            if len(current_sentences) >= min_sentences and len(block.split()) >= min_words:
+            if (
+                len(current_sentences) >= min_sentences
+                and len(block.split()) >= min_words
+            ):
                 chunks.append(ChunkString(block))
             elif current_sentences:
                 # Below min_sentences threshold – still emit to avoid data loss
