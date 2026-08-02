@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 """
 app/theme.py
 ------------
@@ -22,6 +23,7 @@ from app.css_constants import (
     AVATAR,
     SIM_PILL,
 )
+
 """
 theme.py
 --------
@@ -39,6 +41,7 @@ Recent Additions (Issue #572):
 import re
 import secrets
 import streamlit as st
+
 
 # ── CSP Nonce Generation (Issue #644) ──────────────────────────────────────────
 def generate_csp_nonce(length: int = 16) -> str:
@@ -72,6 +75,7 @@ def apply_matplotlib_theme(theme_colors: dict | None = None) -> None:
     """Apply the active theme colours to Matplotlib's global rcParams."""
     try:
         import matplotlib as mpl
+
         colors = theme_colors if theme_colors is not None else get_colors()
         mpl.rcParams["figure.facecolor"] = colors.get("background", "#FFFFFF")
         mpl.rcParams["axes.facecolor"] = colors.get("surface", "#F8FAFC")
@@ -165,11 +169,21 @@ from src.core.config import DEFAULT_THRESHOLDS, normalize_severity_label, severi
 # ── CSS Class Constants ────────────────────────────────────────────────────────
 try:
     from app.css_constants import (
-        CLASS_AVATAR, CLASS_BADGE, CLASS_EMPTY_DESC, CLASS_EMPTY_ICON,
-        CLASS_EMPTY_STATE, CLASS_EMPTY_TITLE, CLASS_PIPELINE_ACTIVE,
-        CLASS_PIPELINE_ARROW, CLASS_PIPELINE_DONE, CLASS_PIPELINE_ETA,
-        CLASS_PIPELINE_STEP, CLASS_PIPELINE_STEPS, CLASS_SIDEBAR_USER_BADGE,
-        CLASS_SIM_PILL, CLASS_WELCOME_BANNER
+        CLASS_AVATAR,
+        CLASS_BADGE,
+        CLASS_EMPTY_DESC,
+        CLASS_EMPTY_ICON,
+        CLASS_EMPTY_STATE,
+        CLASS_EMPTY_TITLE,
+        CLASS_PIPELINE_ACTIVE,
+        CLASS_PIPELINE_ARROW,
+        CLASS_PIPELINE_DONE,
+        CLASS_PIPELINE_ETA,
+        CLASS_PIPELINE_STEP,
+        CLASS_PIPELINE_STEPS,
+        CLASS_SIDEBAR_USER_BADGE,
+        CLASS_SIM_PILL,
+        CLASS_WELCOME_BANNER,
     )
 except ImportError:
     # Fallbacks for isolated testing
@@ -232,18 +246,26 @@ THEMES = {
 COLORS = THEMES["Light"]
 
 # ── Colormap Mappings & Constants ──────────────────────────────────────────────
-UI_COLORMAP_OPTIONS: list[str] = ["Viridis", "Plasma", "Coolwarm", "YlOrRd"]
+UI_COLORMAP_OPTIONS = [
+    "Viridis",
+    "Cividis",
+    "Plasma",
+    "Coolwarm",
+    "YlOrRd",
+]
 
 MATPLOTLIB_CMAP_MAPPING: dict[str, str] = {
     "Viridis": "viridis",
+    "Cividis": "cividis",
     "Plasma": "plasma",
     "Coolwarm": "coolwarm",
     "YlOrRd": "YlOrRd",
     "Legacy Red/Green": "RdYlGn_r",
 }
 
-PLOTLY_CMAP_MAPPING: dict[str, str] = {
+PLOTLY_CMAP_MAPPING = {
     "Viridis": "Viridis",
+    "Cividis": "Cividis",
     "Plasma": "Plasma",
     "Coolwarm": "RdBu_r",
     "YlOrRd": "YlOrRd",
@@ -264,7 +286,7 @@ def initialize_theme() -> None:
                 st.session_state.theme = "Light"
             else:
                 st.session_state.theme = "Light"
-                
+
         if "theme_colors" not in st.session_state:
             st.session_state.theme_colors = THEMES[st.session_state.theme]
     except Exception:
@@ -303,8 +325,8 @@ def get_colors() -> dict:
 def inject_css() -> None:
     """
     Inject CSS for the currently selected Light or Dark theme.
-    
-    Includes comprehensive styling for file uploaders, empty states, 
+
+    Includes comprehensive styling for file uploaders, empty states,
     pipeline indicators, and severity badges to ensure a cohesive UI.
     """
     colors = sanitize_theme_colors(get_colors())
@@ -1193,13 +1215,21 @@ def inject_css() -> None:
 
 # ── Severity Helpers ───────────────────────────────────────────────────────────
 try:
-    from src.core.config import DEFAULT_THRESHOLDS, normalize_severity_label, severity_key
+    from src.core.config import (
+        DEFAULT_THRESHOLDS,
+        normalize_severity_label,
+        severity_key,
+    )
 except ImportError:
     # Fallbacks for testing
     class DefaultThresholds:
         plagiarism = 0.59
+
     DEFAULT_THRESHOLDS = DefaultThresholds()
-    def normalize_severity_label(label: str) -> str: return label.lower()
+
+    def normalize_severity_label(label: str) -> str:
+        return label.lower()
+
     def severity_key(score: float) -> str:
         if score >= 0.90:
             return "high"
@@ -1208,7 +1238,9 @@ except ImportError:
         return "low"
 
 
-def severity_tier(score: float, threshold: float = DEFAULT_THRESHOLDS.plagiarism) -> str:
+def severity_tier(
+    score: float, threshold: float = DEFAULT_THRESHOLDS.plagiarism
+) -> str:
     """Return the severity tier based on score and threshold."""
     if score >= 0.90:
         return "high"
@@ -1288,6 +1320,7 @@ def badge_html(tier: str, label: str = None) -> str:
         f"{display_label}</span>"
     )
 
+
 # ── UI helpers ────────────────────────────────────────────────────────────────
 def format_similarity_html(
     score: float,
@@ -1315,7 +1348,6 @@ def format_similarity_html(
     return f'<span class="{CLASS_SIM_PILL}" style="background-color: {bg}; color: {text};">Similarity: {score * 100:.1f}%</span>'
 
 
-
 def empty_state_html(icon: str, title: str, description: str) -> str:
     """Return styled empty-state HTML block."""
     return (
@@ -1327,7 +1359,7 @@ def empty_state_html(icon: str, title: str, description: str) -> str:
         f'<div class="{CLASS_EMPTY_ICON}">{icon}</div>'
         f'<div class="{CLASS_EMPTY_TITLE}">{title}</div>'
         f'<div class="{CLASS_EMPTY_DESC}">{description}</div>'
-        f'</div>'
+        f"</div>"
     )
 
 
@@ -1337,18 +1369,20 @@ def sidebar_user_badge_html(username: str, role: str) -> str:
     return (
         f'<div class="{SIDEBAR_USER_BADGE}">'
         f'<div class="{AVATAR}">{initial}</div>'
-        f'<div><strong>{username}</strong><br>'
+        f"<div><strong>{username}</strong><br>"
         f'<div class="{CLASS_SIDEBAR_USER_BADGE}">'
         f'<div class="{CLASS_AVATAR}">{initial}</div>'
-        f'<div>'
+        f"<div>"
         f'<div style="font-weight: 600;">{username}</div>'
         f'<div style="font-size: 0.8rem; color: {get_colors()["muted"]};">{role.upper()}</div>'
-        f'</div>'
-        f'</div>'
+        f"</div>"
+        f"</div>"
     )
 
 
-def pipeline_progress_html(steps: list[str], active_index: int = -1, estimated_seconds: int | None = None) -> str:
+def pipeline_progress_html(
+    steps: list[str], active_index: int = -1, estimated_seconds: int | None = None
+) -> str:
     """Return a horizontal pipeline progress indicator with optional ETA."""
     parts = []
     for i, step in enumerate(steps):
@@ -1374,10 +1408,11 @@ def pipeline_progress_html(steps: list[str], active_index: int = -1, estimated_s
 
     try:
         from src.utils.processing_time import format_processing_duration
+
         duration = format_processing_duration(estimated_seconds)
     except ImportError:
         duration = f"{estimated_seconds}s"
-        
+
     eta = f'<div class="{CLASS_PIPELINE_ETA}">Estimated processing time: about {duration}</div>'
     return f"{progress}{eta}"
 
@@ -1471,7 +1506,13 @@ def version_check_widget_html(
     str
         A self-contained HTML string ready for ``st.markdown``.
     """
-def version_check_widget_html(local_version: str, latest_tag: str, repo_url: str = "https://github.com/Ganesh-403/semantic-plagiarism-detector/releases/latest") -> str:
+
+
+def version_check_widget_html(
+    local_version: str,
+    latest_tag: str,
+    repo_url: str = "https://github.com/Ganesh-403/semantic-plagiarism-detector/releases/latest",
+) -> str:
     """Return an HTML snippet that renders an update-available notification banner."""
     colors = get_colors()
     warning_color = colors["warning"]
@@ -1504,7 +1545,6 @@ def version_check_widget_html(local_version: str, latest_tag: str, repo_url: str
     </span>
 </div>
 """
-
 
 
 def active_tab_border_style(color: str = "#4f46e5", width: int = 4) -> str:
@@ -1620,7 +1660,9 @@ def build_active_tab_custom_css(
         CSS text block with rules targeting active tab selectors.
     """
     border_color = sanitize_hex_color(accent_hex, fallback="#4f46e5")
-    hover_bg = sanitize_hex_color(bg_hover, fallback="#F1F5F9") if bg_hover else "#F1F5F9"
+    hover_bg = (
+        sanitize_hex_color(bg_hover, fallback="#F1F5F9") if bg_hover else "#F1F5F9"
+    )
     return f"""
     /* Custom Active Sidebar Tab Highlight */
     section[data-testid="stSidebar"] .stButton button[data-selected="true"],
@@ -1766,7 +1808,9 @@ def generate_sidebar_theme_stylesheet(
     Returns:
         Formatted CSS stylesheet block string.
     """
-    template = SIDEBAR_TAB_THEME_TEMPLATES.get(template_name, SIDEBAR_TAB_THEME_TEMPLATES["Default"])
+    template = SIDEBAR_TAB_THEME_TEMPLATES.get(
+        template_name, SIDEBAR_TAB_THEME_TEMPLATES["Default"]
+    )
     border = sanitize_hex_color(accent_color, fallback="#4f46e5")
     colors = get_colors()
     return f"""
@@ -1824,10 +1868,8 @@ def render_sidebar_navigation_menu(
     """
     html_items = []
     for tab_id, label in tabs:
-        is_active = (tab_id == active_tab_id)
+        is_active = tab_id == active_tab_id
         badge = render_active_tab_badge_html(label, is_active=is_active)
         html_items.append(f'<li data-tab-id="{tab_id}">{badge}</li>')
 
     return f'<ul class="sidebar-nav-menu" style="list-style: none; padding: 0; margin: 0;">{"".join(html_items)}</ul>'
-
-
