@@ -3,7 +3,7 @@
 import os
 from typing import Dict
 
-from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer
 import numpy as np
@@ -58,6 +58,16 @@ def verify_bearer_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
     return credentials.credentials
+
+
+def validate_content_type(request: Request) -> None:
+    """Ensure the request is multipart/form-data before parsing."""
+    content_type = request.headers.get("content-type", "")
+    if "multipart/form-data" not in content_type:
+        raise HTTPException(
+            status_code=415,
+            detail="Unsupported Media Type: Request must be multipart/form-data"
+        )
 
 
 # ── Database Helpers ───────────────────────────────────────────────────────────
@@ -118,6 +128,7 @@ async def scan_document(
         description="Number of top matching paragraph pairs to include per matched document",
     ),
     _token: str = Depends(verify_bearer_token),
+    _content_type: None = Depends(validate_content_type),
 ):
     """Scan an uploaded document against the indexed corpus database for plagiarism."""
     if not file.filename:
