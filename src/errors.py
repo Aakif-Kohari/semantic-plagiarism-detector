@@ -174,3 +174,13 @@ EXPORT_GENERATION_IO_FAILED = (
     "Unable to generate the {format_name} export because an I/O operation failed. "
     "Please try again."
 )
+
+
+class OCRFileBatchError(Exception):
+    """Exception raised when OCR extraction fails on one or more files in a batch."""
+
+    def __init__(self, failed_files: list[str], failure_details: list[str]):
+        self.failed_files = failed_files
+        self.failure_details = failure_details
+        super().__init__(f"OCR failed for files: {failed_files}")
+

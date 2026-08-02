@@ -38,6 +38,15 @@ def test_health_check():
     assert "Semantic Plagiarism Detector API" in data["service"]
 
 
+def test_version_endpoint():
+    """Verify that GET /api/v1/version returns the correct version and active status."""
+    response = client.get("/api/v1/version")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["version"] == "1.0.0"
+    assert data["status"] == "active"
+
+
 def test_scan_no_auth_header():
     """Verify that requests without Authorization header return 401/403 error."""
     response = client.post(
@@ -122,15 +131,15 @@ def test_scan_matching_corpus_flag(mock_embed, mock_corpus):
 
 
 def test_scan_empty_file_upload():
-    """Verify that uploading an empty file returns 422 Unprocessable Entity."""
+    """Verify that uploading an empty file returns 400 Bad Request."""
     expected_token = get_expected_bearer_token()
     response = client.post(
         "/api/v1/scan",
         headers={"Authorization": f"Bearer {expected_token}"},
         files={"file": ("empty.txt", b"", "text/plain")},
     )
-    assert response.status_code == 422
-    assert "Uploaded file is empty" in response.json()["detail"]
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Uploaded file is empty (0 bytes)"
 
 
 def test_clear_all_documents_no_auth_header():

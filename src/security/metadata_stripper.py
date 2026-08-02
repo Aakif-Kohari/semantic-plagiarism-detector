@@ -15,13 +15,13 @@ def strip_exif_metadata(file_bytes: bytes, filename: str, max_bytes: int = 25_00
     if len(file_bytes) > max_bytes:
         raise ValueError("File size exceeds EXIF stripping limit")
     ext = filename.lower().split('.')[-1]
-    
+
     if ext == 'pdf':
         return _strip_pdf_metadata(file_bytes)
     elif ext in ['jpg', 'jpeg', 'png', 'tiff', 'webp']:
         return _strip_image_metadata(file_bytes)
     else:
-        # For DOCX, TXT, CSV, ZIP, we return as-is for now, 
+        # For DOCX, TXT, CSV, ZIP, we return as-is for now,
         # or implement specific strippers if needed.
         return file_bytes
 
@@ -29,11 +29,11 @@ def _strip_pdf_metadata(file_bytes: bytes) -> bytes:
     """Uses PyMuPDF (fitz) to remove PDF Info dict and XMP metadata."""
     try:
         doc = fitz.open(stream=file_bytes, filetype="pdf")
-        
+
         # 1. Remove XML/XMP Metadata
         if doc.is_pdf:
             doc.del_xml_metadata()
-            
+
         # 2. Clear standard Info dictionary (Author, Title, Creator, etc.)
         doc.set_metadata({
             "creationDate": "",
@@ -46,7 +46,7 @@ def _strip_pdf_metadata(file_bytes: bytes) -> bytes:
             "producer": "",
             "trapped": ""
         })
-        
+
         # Save to a new bytes buffer with garbage collection to ensure scrubbed data is dropped
         out_bytes = doc.write(garbage=4, clean=True)
         doc.close()
@@ -58,21 +58,45 @@ def _strip_pdf_metadata(file_bytes: bytes) -> bytes:
         return file_bytes
 
 def _strip_image_metadata(file_bytes: bytes) -> bytes:
-    """Uses Pillow to read the image and save it without EXIF data."""
+    """
+    Uses Pillow to read the image and save it without EXIF data.
+    Includes safety checks to prevent decompression bombs or excessive memory usage
+    by validating image dimensions before full decoding.
+
+    Args:
+        file_bytes (bytes): The raw byte content of the image file.
+
+    Returns:
+        bytes: The sanitized image bytes without EXIF metadata.
+
+    Raises:
+        ValueError: If the image dimensions exceed the 10,000px safety limit.
+    """
+    MAX_DIMENSION = 10000
+
     try:
-        image = Image.open(io.BytesIO(file_bytes))
-        
-        # We extract only the image data, discarding info/exif
-        data = list(image.getdata())
-        image_without_exif = Image.new(image.mode, image.size)
-        image_without_exif.putdata(data)
-        
-        out_io = io.BytesIO()
-        # Save format defaults to JPEG if original was JPEG, PNG for PNG, etc.
-        save_format = image.format if image.format else 'JPEG'
-        image_without_exif.save(out_io, format=save_format)
-        
-        return out_io.getvalue()
+        # Open image to inspect dimensions without fully decoding pixel data
+        with Image.open(io.BytesIO(file_bytes)) as image:
+            width, height = image.size
+
+            # Safety check: prevent decompression bombs or excessive memory allocation
+            if width > MAX_DIMENSION or height > MAX_DIMENSION:
+                raise ValueError("Image dimensions exceed 10,000px safety limit")
+
+            # We extract only the image data, discarding info/exif
+            data = list(image.getdata())
+            image_without_exif = Image.new(image.mode, image.size)
+            image_without_exif.putdata(data)
+
+            out_io = io.BytesIO()
+            # Save format defaults to JPEG if original was JPEG, PNG for PNG, etc.
+            save_format = image.format if image.format else 'JPEG'
+            image_without_exif.save(out_io, format=save_format)
+
+            return out_io.getvalue()
+    except ValueError:
+        # Re-raise ValueError to ensure safety limits are strictly enforced
+        raise
     except Exception as e:
         logger.error(f"Failed to strip image metadata: {e}")
         return file_bytes

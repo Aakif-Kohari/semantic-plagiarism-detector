@@ -785,6 +785,14 @@ def get_user_count() -> int:
         return row[0] if row else 0
 
 
+def get_active_users_count() -> int:
+    """Returns the total number of active registered users in the system."""
+    with _connect() as conn:
+        cursor = conn.execute("SELECT COUNT(1) FROM users WHERE is_active = 1")
+        row = cursor.fetchone()
+        return row[0] if row else 0
+
+
 def format_user_created_date(iso_str: str) -> str:
     """Format an ISO date string as a human-readable date (e.g. "Jul 28, 2026").
 

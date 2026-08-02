@@ -1,5 +1,6 @@
 import io
 import shutil
+from pathlib import Path
 
 import zipfile
 from unittest.mock import MagicMock, patch
@@ -16,7 +17,9 @@ from src.core.document_parser import (
     extract_text_from_txt,
     extract_text_from_zip,
     extract_texts,
+    parallel_extract_texts,
     strip_bibliography,
+    normalize_unicode_spaces,
 )
 
 import time
@@ -325,6 +328,28 @@ def test_extract_texts_mixed():
     assert results["doc2.txt"] == "Parsed doc2.txt"
 
 
+def test_parallel_extract_texts_matches_sequential(tmp_path):
+    """Verify that parallel_extract_texts produces identical results to sequential extraction."""
+    file1 = tmp_path / "doc1.txt"
+    file2 = tmp_path / "doc2.txt"
+
+    file1.write_text("Text content of document one.", encoding="utf-8")
+    file2.write_text("Text content of document two.", encoding="utf-8")
+
+    file_paths = [file1, file2]
+
+    # Sequential extraction
+    sequential_results = {
+        path.name: extract_text(path.read_bytes(), path.name)
+        for path in file_paths
+    }
+
+    # Parallel extraction
+    parallel_results = parallel_extract_texts(file_paths, max_workers=2)
+
+    assert parallel_results == sequential_results
+
+
 # ---------------------------------------------------------------------------
 # strip_bibliography tests (Issue #116)
 # ---------------------------------------------------------------------------
@@ -544,6 +569,45 @@ class TestCleanText:
         text = "   \n\t\n  "
         result = clean_text(text)
         assert result == ""
+    
+    def test_removes_stopwords_when_enabled(self):
+        text = "The quick brown fox jumps over the lazy dog."
+        result = clean_text(text, remove_stopwords=True)
+        # "The", "the", "over", "the" should be removed
+        assert "quick" in result
+        assert "brown" in result
+        assert "fox" in result
+        assert "jumps" in result
+        assert "lazy" in result
+        assert "dog" in result
+        assert "the" not in result.lower()
+        assert "over" not in result.lower()
+
+    def test_preserves_text_when_stopwords_disabled(self):
+        text = "The quick brown fox jumps over the lazy dog."
+        result = clean_text(text, remove_stopwords=False)
+        assert result == "The quick brown fox jumps over the lazy dog."
+
+    def test_stopword_removal_handles_punctuation(self):
+        text = "Hello, world! This is a test."
+        result = clean_text(text, remove_stopwords=True)
+        # "is", "a" should be removed, punctuation remains attached to words
+        assert "Hello," in result
+        assert "world!" in result
+        assert "This" in result
+        assert "test." in result
+        assert " is " not in result
+        assert " a " not in result
+
+    def test_stopword_removal_empty_string(self):
+        text = ""
+        result = clean_text(text, remove_stopwords=True)
+        assert result == ""
+
+    def test_stopword_removal_all_stopwords(self):
+        text = "is are was were be been being"
+        result = clean_text(text, remove_stopwords=True)
+        assert result == ""
 
 
 def test_extract_empty_pdf_gracefully(caplog):
@@ -688,3 +752,11 @@ def test_get_supported_file_extensions():
         ".rtf",
         ".txt",
     ]
+    
+    
+def test_normalize_unicode_spaces():
+    text = "Hello\u00A0World\u00AD！\u2009Python，Testing。"
+
+    normalized = normalize_unicode_spaces(text)
+
+    assert normalized == "Hello World! Python,Testing."    

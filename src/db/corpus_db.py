@@ -7,10 +7,10 @@ SQLite database manager to persist document metadata, chunk text, and embeddings
 Enables incremental updates and index rebuilding without re-embedding.
 """
 
+import sqlite3
 import logging
 import os
 import psutil
-import sqlite3
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -110,7 +110,8 @@ def init_corpus_db() -> None:
                 detected_language TEXT,
                 owner TEXT,
                 is_deleted INTEGER DEFAULT 0,
-                deleted_at TEXT
+                deleted_at TEXT,
+                created_at TEXT
             )
             """
         )
@@ -176,6 +177,7 @@ def init_corpus_db() -> None:
             conn.execute("ALTER TABLE documents ADD COLUMN student_name TEXT")
         if "assignment_title" not in columns:
             conn.execute("ALTER TABLE documents ADD COLUMN assignment_title TEXT")
+        conn.commit()
         if "pdf_author" not in columns:
             conn.execute("ALTER TABLE documents ADD COLUMN pdf_author TEXT")
         if "pdf_creation_date" not in columns:
@@ -189,9 +191,17 @@ def init_corpus_db() -> None:
         if "owner" not in columns:
             conn.execute("ALTER TABLE documents ADD COLUMN owner TEXT")
         if "is_deleted" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN is_deleted INTEGER DEFAULT 0")
+            conn.execute(
+                "ALTER TABLE documents ADD COLUMN is_deleted INTEGER DEFAULT 0"
+            )
         if "deleted_at" not in columns:
             conn.execute("ALTER TABLE documents ADD COLUMN deleted_at TEXT")
+        if "created_at" not in columns:
+            conn.execute("ALTER TABLE documents ADD COLUMN created_at TEXT")
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at)"
+        )
 
         try:
             os.chmod(_DB_PATH, 0o600)
@@ -329,8 +339,14 @@ def get_all_embeddings() -> np.ndarray:
 def delete_document(filename: str) -> None:
     """Delete a document and all its associated chunks (cascade)."""
     with _connect() as conn:
-        conn.execute("DELETE FROM plagiarism_incidents WHERE document_a = ? OR document_b = ?", (filename, filename))
-        conn.execute("DELETE FROM false_positives WHERE document_a = ? OR document_b = ?", (filename, filename))
+        conn.execute(
+            "DELETE FROM plagiarism_incidents WHERE document_a = ? OR document_b = ?",
+            (filename, filename),
+        )
+        conn.execute(
+            "DELETE FROM false_positives WHERE document_a = ? OR document_b = ?",
+            (filename, filename),
+        )
         conn.execute("DELETE FROM documents WHERE filename = ?", (filename,))
         _compact_vector_ids()
 
@@ -391,7 +407,9 @@ def restore_document(filename: str) -> None:
             "SELECT filename, chunk_index, chunk_text, embedding FROM deleted_chunks WHERE filename = ?",
             (filename,),
         ).fetchall()
-        max_id_row = conn.execute("SELECT COALESCE(MAX(vector_id), -1) FROM chunks").fetchone()
+        max_id_row = conn.execute(
+            "SELECT COALESCE(MAX(vector_id), -1) FROM chunks"
+        ).fetchone()
         next_id = max_id_row[0] + 1
         for i, row in enumerate(restored):
             conn.execute(
@@ -411,12 +429,59 @@ def empty_trash() -> None:
     """Permanently delete all soft-deleted documents."""
     with _connect() as conn:
         deleted_docs = [
-            r[0] for r in conn.execute("SELECT filename FROM documents WHERE is_deleted = 1").fetchall()
+            r[0]
+            for r in conn.execute(
+                "SELECT filename FROM documents WHERE is_deleted = 1"
+            ).fetchall()
         ]
         for filename in deleted_docs:
-            conn.execute("DELETE FROM plagiarism_incidents WHERE document_a = ? OR document_b = ?", (filename, filename))
-            conn.execute("DELETE FROM false_positives WHERE document_a = ? OR document_b = ?", (filename, filename))
+            conn.execute(
+                "DELETE FROM plagiarism_incidents WHERE document_a = ? OR document_b = ?",
+                (filename, filename),
+            )
+            conn.execute(
+                "DELETE FROM false_positives WHERE document_a = ? OR document_b = ?",
+                (filename, filename),
+            )
         conn.execute("DELETE FROM documents WHERE is_deleted = 1")
+
+
+def batch_soft_delete_documents(doc_ids: list[int]) -> int:
+    """
+    Batch soft delete documents by updating their is_deleted flag and moving chunks to deleted_chunks.
+    Returns the number of rows updated.
+    """
+    if not doc_ids:
+        return 0
+
+    placeholders = ",".join(["?"] * len(doc_ids))
+    now = datetime.now().isoformat()
+
+    with _connect() as conn:
+        conn.execute(
+            f"""
+            INSERT INTO deleted_chunks (vector_id, filename, chunk_index, chunk_text, embedding)
+            SELECT vector_id, filename, chunk_index, chunk_text, embedding
+            FROM chunks
+            WHERE filename IN (SELECT filename FROM documents WHERE id IN ({placeholders}))
+            """,
+            tuple(doc_ids),
+        )
+        conn.execute(
+            f"""
+            DELETE FROM chunks 
+            WHERE filename IN (SELECT filename FROM documents WHERE id IN ({placeholders}))
+            """,
+            tuple(doc_ids),
+        )
+        cursor = conn.execute(
+            f"UPDATE documents SET is_deleted = 1, deleted_at = ? WHERE id IN ({placeholders})",
+            (now, *doc_ids),
+        )
+        rowcount = cursor.rowcount
+
+    _compact_vector_ids()
+    return rowcount
 
 
 def _compact_vector_ids() -> None:
@@ -511,9 +576,13 @@ def add_documents_bulk(documents: list) -> int:
     now = datetime.now().isoformat()
     for doc in documents:
         if not doc.get("file_hash"):
-            raise sqlite3.IntegrityError("NOT NULL constraint failed: documents.file_hash")
+            raise sqlite3.IntegrityError(
+                "NOT NULL constraint failed: documents.file_hash"
+            )
         if not doc.get("filename"):
-            raise sqlite3.IntegrityError("NOT NULL constraint failed: documents.filename")
+            raise sqlite3.IntegrityError(
+                "NOT NULL constraint failed: documents.filename"
+            )
         formatted_docs.append(
             (
                 doc.get("filename"),
@@ -581,7 +650,7 @@ def update_document_tags(filename: str, tags: str) -> bool:
         with _connect() as conn:
             conn.execute(
                 "UPDATE documents SET tags = ? WHERE filename = ?",
-                (tags, filename)
+                (tags, filename),
             )
             return True
     except Exception as e:
@@ -701,7 +770,7 @@ def purge_stale_trash(days_in_trash: int = 30) -> int:
             SELECT filename FROM documents 
             WHERE is_deleted = 1 AND deleted_at < ?
             """,
-            (threshold_date,)
+            (threshold_date,),
         ).fetchall()
 
         filenames_to_purge = [row[0] for row in rows]
@@ -716,3 +785,15 @@ def purge_stale_trash(days_in_trash: int = 30) -> int:
             logger.error(f"Failed to purge stale trashed document {filename}: {e}")
 
     return deleted_count
+
+
+def get_total_document_count(include_deleted: bool = False) -> int:
+    """Return the total count of non-deleted (or all) indexed documents in the corpus database."""
+    with _connect() as conn:
+        if include_deleted:
+            row = conn.execute("SELECT COUNT(1) FROM documents").fetchone()
+        else:
+            row = conn.execute(
+                "SELECT COUNT(1) FROM documents WHERE is_deleted IS NULL OR is_deleted = 0"
+            ).fetchone()
+        return int(row[0]) if row else 0

@@ -161,21 +161,7 @@ def compress_pdf_buffer(pdf_buffer: BytesIO) -> BytesIO:
             out_buf.seek(0)
             return out_buf
         except ImportError:
-            try:
-                from PyPDF2 import PdfReader, PdfWriter
-
-                reader = PdfReader(BytesIO(pdf_bytes))
-                writer = PdfWriter()
-                for page in reader.pages:
-                    writer.add_page(page)
-                for page in writer.pages:
-                    page.compress_content_streams()
-                out_buf = BytesIO()
-                writer.write(out_buf)
-                out_buf.seek(0)
-                return out_buf
-            except ImportError:
-                pass
+            pass
 
         # If all compression attempts fail, return the original buffer
         pdf_buffer.seek(original_pos)

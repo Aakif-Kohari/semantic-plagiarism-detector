@@ -21,8 +21,10 @@ from typing import Any, Dict, List, Optional
 @dataclass
 class StageTiming:
     """Data class representing timing for a specific pipeline stage."""
+
     stage_name: str
     duration_seconds: float
+
 
 BYTES_PER_MB = 1024 * 1024
 BYTES_PER_KB = 1024
@@ -33,10 +35,11 @@ DEFAULT_SECONDS_PER_MB = 2.0
 # HIERARCHICAL EXECUTION PROFILER
 # ============================================================================
 
+
 class ProfilerSpan:
     """Represents a single measurable unit of work."""
-    
-    def __init__(self, name: str, parent: Optional['ProfilerSpan'] = None):
+
+    def __init__(self, name: str, parent: Optional["ProfilerSpan"] = None):
         self.name = name
         self.parent = parent
         self.children: List["ProfilerSpan"] = []
@@ -260,6 +263,25 @@ def estimate_processing_seconds(
 
     estimated = (byte_count / BYTES_PER_MB) * rate
     return max(1, math.ceil(estimated))
+
+
+def format_duration(seconds: float) -> str:
+    """
+    Format a floating-point execution time into a concise string.
+
+    Args:
+        seconds: The duration in seconds.
+
+    Returns:
+        str: A formatted string (e.g., "45.2s" or "2m 5s").
+    """
+    numeric = _validate_non_negative_number("seconds", seconds)
+
+    if numeric < 60.0:
+        return f"{numeric:.1f}s"
+
+    minutes, remaining_seconds = divmod(numeric, 60)
+    return f"{int(minutes)}m {int(remaining_seconds)}s"
 
 
 def uploaded_files_total_bytes(files: Iterable[Any]) -> int:

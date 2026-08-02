@@ -47,6 +47,7 @@ def test_plot_similarity_heatmap_large_dataframe():
 # Fixtures
 # ==============================================================================
 
+
 @pytest.fixture
 def empty_df() -> pd.DataFrame:
     return pd.DataFrame()
@@ -87,6 +88,7 @@ def masked_threshold_df() -> pd.DataFrame:
 # Static Heatmap (Matplotlib/Seaborn) Tests
 # ==============================================================================
 
+
 def test_plot_similarity_heatmap_empty(empty_df: pd.DataFrame) -> None:
     fig = plot_similarity_heatmap(empty_df, title="Empty Heatmap")
     assert hasattr(fig, "axes")
@@ -98,17 +100,21 @@ def test_plot_similarity_heatmap_single(single_doc_df: pd.DataFrame) -> None:
     """Verify Issue #839: 1x1 matrix returns an informative warning box."""
     fig = plot_similarity_heatmap(single_doc_df, title="Single Document Heatmap")
     assert isinstance(fig, Figure)
-    
+
     ax = fig.axes[0]
     texts = [t.get_text() for t in ax.texts]
     assert any("At least 2 documents are required" in text for text in texts)
-    
+
     plt.close(fig)
 
 
 def test_plot_similarity_heatmap_multi(multi_doc_df: pd.DataFrame) -> None:
-    fig = plot_similarity_heatmap(multi_doc_df, title="Multi Document Heatmap", annotate=True)
-    main_ax = next((ax for ax in fig.axes if ax.get_title() == "Multi Document Heatmap"), None)
+    fig = plot_similarity_heatmap(
+        multi_doc_df, title="Multi Document Heatmap", show_annotations=True
+    )
+    main_ax = next(
+        (ax for ax in fig.axes if ax.get_title() == "Multi Document Heatmap"), None
+    )
     assert main_ax is not None
     assert len(main_ax.texts) > 0
     assert main_ax.get_xlabel() == "Documents"
@@ -117,22 +123,26 @@ def test_plot_similarity_heatmap_multi(multi_doc_df: pd.DataFrame) -> None:
 
 
 def test_plot_similarity_heatmap_no_annotation(multi_doc_df: pd.DataFrame) -> None:
-    fig = plot_similarity_heatmap(multi_doc_df, title="No Annotation Heatmap", annotate=False)
-    main_ax = next((ax for ax in fig.axes if ax.get_title() == "No Annotation Heatmap"), None)
+    fig = plot_similarity_heatmap(
+        multi_doc_df, title="No Annotation Heatmap", show_annotations=False
+    )
+    main_ax = next(
+        (ax for ax in fig.axes if ax.get_title() == "No Annotation Heatmap"), None
+    )
     assert main_ax is not None
     assert len(main_ax.texts) == 0
     plt.close(fig)
 
 
-def test_plot_similarity_heatmap_with_mask_threshold(masked_threshold_df: pd.DataFrame) -> None:
+def test_plot_similarity_heatmap_with_mask_threshold(
+    masked_threshold_df: pd.DataFrame,
+) -> None:
     fig = plot_similarity_heatmap(
-        masked_threshold_df, 
-        title="Masked Heatmap", 
-        mask_threshold=0.5
+        masked_threshold_df, title="Masked Heatmap", mask_threshold=0.5
     )
     main_ax = next((ax for ax in fig.axes if ax.get_title() == "Masked Heatmap"), None)
     assert main_ax is not None
-    
+
     texts = [t.get_text() for t in main_ax.texts if t.get_text()]
     assert "1.00" in texts
     assert "0.40" not in texts
@@ -142,6 +152,7 @@ def test_plot_similarity_heatmap_with_mask_threshold(masked_threshold_df: pd.Dat
 # ==============================================================================
 # Interactive Heatmap (Plotly) Tests
 # ==============================================================================
+
 
 def test_plot_similarity_heatmap_plotly_empty(empty_df: pd.DataFrame) -> None:
     fig = plot_similarity_heatmap_plotly(empty_df, title="Empty Plotly Heatmap")
@@ -154,24 +165,26 @@ def test_plot_similarity_heatmap_plotly_single(single_doc_df: pd.DataFrame) -> N
     fig = plot_similarity_heatmap_plotly(single_doc_df, title="Single Plotly Heatmap")
     assert hasattr(fig, "layout")
     plotly_annotations = [a.text for a in fig.layout.annotations]
-    assert any("At least 2 documents are required" in text for text in plotly_annotations)
+    assert any(
+        "At least 2 documents are required" in text for text in plotly_annotations
+    )
 
 
-def test_plot_similarity_heatmap_plotly_no_annotation(multi_doc_df: pd.DataFrame) -> None:
+def test_plot_similarity_heatmap_plotly_no_annotation(
+    multi_doc_df: pd.DataFrame,
+) -> None:
     fig = plot_similarity_heatmap_plotly(
-        multi_doc_df, 
-        title="No Annotation Plotly Heatmap", 
-        annotate=False
+        multi_doc_df, title="No Annotation Plotly Heatmap", show_annotations=False
     )
     assert hasattr(fig, "layout")
     assert len(fig.layout.annotations) == 0
 
 
-def test_plot_similarity_heatmap_plotly_with_mask_threshold(masked_threshold_df: pd.DataFrame) -> None:
+def test_plot_similarity_heatmap_plotly_with_mask_threshold(
+    masked_threshold_df: pd.DataFrame,
+) -> None:
     fig = plot_similarity_heatmap_plotly(
-        masked_threshold_df, 
-        title="Masked Plotly", 
-        mask_threshold=0.5
+        masked_threshold_df, title="Masked Plotly", mask_threshold=0.5
     )
     heatmap = next(trace for trace in fig.data if trace.type == "heatmap")
     z_values = heatmap.z
@@ -184,15 +197,18 @@ def test_plot_similarity_heatmap_plotly_with_mask_threshold(masked_threshold_df:
 # Export Generation Tests
 # ==============================================================================
 
-def test_plot_similarity_heatmap_png_export_valid_bytes(multi_doc_df: pd.DataFrame) -> None:
+
+def test_plot_similarity_heatmap_png_export_valid_bytes(
+    multi_doc_df: pd.DataFrame,
+) -> None:
     fig = plot_similarity_heatmap(multi_doc_df, title="Export Test", dpi=150)
     buf = io.BytesIO()
     fig.savefig(buf, format="png", bbox_inches="tight")
     png_bytes = buf.getvalue()
-    
+
     assert png_bytes.startswith(b"\x89PNG\r\n\x1a\n")
     assert len(png_bytes) > 2000
-    
+
     plt.close(fig)
     buf.close()
 
@@ -207,25 +223,24 @@ def test_plot_similarity_heatmap_png_export_empty_df(empty_df: pd.DataFrame) -> 
     buf.close()
 
 
-def test_plot_similarity_heatmap_png_export_custom_theme(multi_doc_df: pd.DataFrame) -> None:
+def test_plot_similarity_heatmap_png_export_custom_theme(
+    multi_doc_df: pd.DataFrame,
+) -> None:
     custom_theme = {
         "background": "#1E293B",
         "surface": "#0F172A",
         "ink": "#F8FAFC",
         "border": "#334155",
     }
-    
+
     fig = plot_similarity_heatmap(
-        multi_doc_df, 
-        title="Themed Export Test", 
-        theme_colors=custom_theme,
-        dpi=150
+        multi_doc_df, title="Themed Export Test", theme_colors=custom_theme, dpi=150
     )
-    
+
     buf = io.BytesIO()
     fig.savefig(buf, format="png")
     png_bytes = buf.getvalue()
-    
+
     assert png_bytes.startswith(b"\x89PNG\r\n\x1a\n")
     assert len(png_bytes) > 2000
     plt.close(fig)
@@ -344,9 +359,11 @@ def test_plot_similarity_heatmap_dim_diagonal(multi_doc_df: pd.DataFrame) -> Non
         dim_diagonal=True,
     )
     assert hasattr(fig, "axes")
-    main_ax = next((ax for ax in fig.axes if ax.get_title() == "Dim Diagonal Heatmap"), None)
+    main_ax = next(
+        (ax for ax in fig.axes if ax.get_title() == "Dim Diagonal Heatmap"), None
+    )
     assert main_ax is not None
-    
+
     buf = io.BytesIO()
     fig.savefig(buf, format="png")
     png_bytes = buf.getvalue()
@@ -355,7 +372,9 @@ def test_plot_similarity_heatmap_dim_diagonal(multi_doc_df: pd.DataFrame) -> Non
     buf.close()
 
 
-def test_plot_similarity_heatmap_plotly_dim_diagonal(multi_doc_df: pd.DataFrame) -> None:
+def test_plot_similarity_heatmap_plotly_dim_diagonal(
+    multi_doc_df: pd.DataFrame,
+) -> None:
     fig = plot_similarity_heatmap_plotly(
         multi_doc_df,
         title="Plotly Dim Diagonal",
@@ -370,18 +389,47 @@ def test_plot_similarity_heatmap_plotly_dim_diagonal(multi_doc_df: pd.DataFrame)
     assert z_values[0][1] == 0.85
 
 
-def test_plot_similarity_heatmap_dim_diagonal_single_doc(single_doc_df: pd.DataFrame) -> None:
-    fig = plot_similarity_heatmap(single_doc_df, title="Single Dim Diagonal", dim_diagonal=True)
+def test_plot_similarity_heatmap_uses_cividis_colormap(
+    multi_doc_df: pd.DataFrame,
+) -> None:
+    fig = plot_similarity_heatmap(
+        multi_doc_df,
+        title="Cividis Heatmap",
+        colormap_name="Cividis",
+    )
+
+    main_ax = next(
+        (ax for ax in fig.axes if ax.get_title() == "Cividis Heatmap"),
+        None,
+    )
+
+    assert main_ax is not None
+
+    mesh = main_ax.collections[0]
+    assert mesh.cmap.name == "cividis"
+
+    plt.close(fig)
+
+
+def test_plot_similarity_heatmap_dim_diagonal_single_doc(
+    single_doc_df: pd.DataFrame,
+) -> None:
+    fig = plot_similarity_heatmap(
+        single_doc_df, title="Single Dim Diagonal", dim_diagonal=True
+    )
     assert hasattr(fig, "axes")
     plt.close(fig)
 
-    fig_plotly = plot_similarity_heatmap_plotly(single_doc_df, title="Plotly Single Dim Diagonal", dim_diagonal=True)
+    fig_plotly = plot_similarity_heatmap_plotly(
+        single_doc_df, title="Plotly Single Dim Diagonal", dim_diagonal=True
+    )
     assert hasattr(fig_plotly, "layout")
 
 
 # ==============================================================================
 # CSV Export Tests
 # ==============================================================================
+
 
 def test_export_heatmap_matrix_csv_valid_output():
     df = pd.DataFrame(
@@ -407,4 +455,3 @@ def test_export_heatmap_matrix_csv_empty_dataframe():
     df = pd.DataFrame()
     csv_bytes = export_heatmap_matrix_csv(df)
     assert isinstance(csv_bytes, bytes)
-    

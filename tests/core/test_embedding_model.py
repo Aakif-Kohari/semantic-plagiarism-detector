@@ -133,3 +133,45 @@ def test_embedding_model_manager_fallback(caplog, monkeypatch):
             for record in caplog.records
         )
 
+
+def test_embedding_model_device_logging(caplog, monkeypatch):
+    """Test that EmbeddingModelManager logs device selection when initializing the model."""
+    import logging
+
+    monkeypatch.setattr(embedding_model, "_model", None)
+    monkeypatch.setattr(EmbeddingModelManager, "_instance", None)
+
+    mock_model_obj = MagicMock()
+    mock_model_obj.device = "cpu"
+
+    monkeypatch.setattr(
+        embedding_model, "SentenceTransformer", MagicMock(return_value=mock_model_obj)
+    )
+
+    with caplog.at_level(logging.INFO):
+        manager = EmbeddingModelManager.get_instance()
+        model = manager.get_model()
+
+        assert model is mock_model_obj
+        expected_log = "Initializing SentenceTransformer model [paraphrase-multilingual-MiniLM-L12-v2] on device [cpu]"
+        assert any(
+            expected_log in record.message for record in caplog.records
+        ), f"Expected device log message not found in: {[r.message for r in caplog.records]}"
+
+
+def test_detect_device_helper():
+    """Test _detect_device helper logic for string device, typed device, and fallback."""
+    mock_obj = MagicMock()
+    mock_obj.device = "cuda"
+    assert embedding_model._detect_device(mock_obj) == "cuda"
+
+    mock_obj_device_type = MagicMock()
+    mock_dev = MagicMock()
+    mock_dev.type = "mps"
+    mock_obj_device_type.device = mock_dev
+    assert embedding_model._detect_device(mock_obj_device_type) == "mps"
+
+    assert embedding_model._detect_device(None) in ("cpu", "cuda", "mps")
+
+
+

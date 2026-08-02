@@ -5,6 +5,7 @@ import os
 import psutil
 import numpy as np
 
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status, Request
 from typing import Dict
 from fastapi import Request
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
@@ -118,6 +119,16 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 app.add_exception_handler(RateLimitExceeded, custom_rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
+
+def validate_content_type(request: Request) -> None:
+    """Ensure the request is multipart/form-data before parsing."""
+    content_type = request.headers.get("content-type", "")
+    if "multipart/form-data" not in content_type:
+        raise HTTPException(
+            status_code=415,
+            detail="Unsupported Media Type: Request must be multipart/form-data"
+        )
+
 
 # ── Database Helpers ───────────────────────────────────────────────────────────
 
@@ -259,6 +270,22 @@ def get_rate_limit():
     }
 
 
+@app.get(
+    "/api/v1/version",
+    tags=["System Administration"],
+    summary="Get API version",
+    status_code=status.HTTP_200_OK,
+)
+def get_version(request: Request):
+    """
+    Return the lightweight API version.
+    """
+    return {
+        "version": request.app.version,
+        "status": "active",
+    }
+
+
 @app.post(
     "/api/v1/scan",
     tags=["Plagiarism Detection"],
@@ -286,6 +313,8 @@ async def scan_document(
         le=10,
         description="Number of top matching paragraph pairs to include per matched document",
     ),
+    _token: str = Depends(verify_bearer_token),
+    _content_type: None = Depends(validate_content_type),
 ):
     """Scan an uploaded document against the indexed corpus database for plagiarism."""
     if not file.filename:
@@ -299,8 +328,8 @@ async def scan_document(
 
     if len(file_bytes) == 0:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Uploaded file is empty",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file is empty (0 bytes)",
         )
 
     # Extract text from uploaded document

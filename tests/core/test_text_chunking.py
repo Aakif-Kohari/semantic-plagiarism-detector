@@ -27,6 +27,14 @@ def test_chunk_documents_passes_parameters():
     assert len(chunked["doc1.txt"]) > 0
 
 
+def test_chunk_text_respects_max_chunks_limit():
+    # Build text large enough to produce far more than 5 chunks at this chunk_size
+    huge_text = "Word " * 5000
+
+    chunks = chunk_text(huge_text, chunk_size=50, chunk_overlap=5, max_chunks=5)
+
+    assert len(chunks) <= 5
+
 # ── Edge Case Tests (#849) ───────────────────────────────────────────────────
 
 
@@ -160,7 +168,7 @@ def test_chunk_by_sentences_produces_multiple_chunks_for_long_text():
     sentences = ["The algorithm processes the input data efficiently." for _ in range(40)]
     text = " ".join(sentences)
 
-chunks = chunk_by_sentences(text, max_chunk_size=150)
+    chunks = chunk_by_sentences(text, max_chunk_size=150)
     assert len(chunks) > 1
 
 

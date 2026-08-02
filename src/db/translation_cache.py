@@ -20,6 +20,10 @@ logger = logging.getLogger(__name__)
 # importing ``src.db.translation_cache.DB_PATH`` continue to work.
 DB_PATH = str(CORPUS_DB_PATH)
 
+# In-memory counters for lookup hits and misses
+_cache_hits = 0
+_cache_misses = 0
+
 
 def _init_db() -> None:
     """
@@ -38,27 +42,30 @@ def _init_db() -> None:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         conn = sqlite3.connect(path)
 
-    with conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS translation_cache (
-                text_hash TEXT PRIMARY KEY,
-                foreign_text TEXT NOT NULL,
-                translated_text TEXT NOT NULL,
-                source_lang TEXT,
-                target_lang TEXT DEFAULT 'en',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS translation_cache (
+                    text_hash TEXT PRIMARY KEY,
+                    foreign_text TEXT NOT NULL,
+                    translated_text TEXT NOT NULL,
+                    source_lang TEXT,
+                    target_lang TEXT DEFAULT 'en',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
             )
-            """
-        )
-        cursor.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_translation_cache_created_at
-            ON translation_cache(created_at)
-            """
-        )
-        conn.commit()
+            cursor.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_translation_cache_created_at
+                ON translation_cache(created_at)
+                """
+            )
+            conn.commit()
+    finally:
+        conn.close()
 
 
 def _hash_text(text: str, source_lang: str = "auto", target_lang: str = "en") -> str:
@@ -103,7 +110,13 @@ def get_cached_translation(
             (text_hash,),
         )
         row = cursor.fetchone()
-        return row[0] if row else None
+        global _cache_hits, _cache_misses
+        if row:
+            _cache_hits += 1
+            return row[0]
+        else:
+            _cache_misses += 1
+            return None
 
 
 def cache_translation(
@@ -206,3 +219,21 @@ def get_translation_cache_stats() -> dict:
     except sqlite3.Error as e:
         logger.error(f"Failed to get translation cache stats: {e}")
         return {"total_entries": 0, "oldest_entry_days": 0}
+
+
+def get_translation_cache_hit_rate() -> float:
+    """Returns the translation cache hit rate (hits / (hits + misses)).
+
+    If there have been no cache lookups, returns 0.0.
+    """
+    total = _cache_hits + _cache_misses
+    if total == 0:
+        return 0.0
+    return _cache_hits / total
+
+
+def reset_translation_cache_counters() -> None:
+    """Reset the cache hits and misses counters to zero."""
+    global _cache_hits, _cache_misses
+    _cache_hits = 0
+    _cache_misses = 0

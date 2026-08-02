@@ -5,7 +5,7 @@ import json
 import os
 from datetime import datetime
 from io import BytesIO
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 
 import pytest
 
@@ -369,11 +369,9 @@ def test_compress_pdf_buffer_all_fail(monkeypatch):
 
     monkeypatch.setattr(fitz, "open", mock_fitz_open)
 
-    # Disable pypdf and PyPDF2 locally to test full fallback safety
+    # Disable pypdf locally to test full fallback safety
     original_pypdf = sys.modules.get("pypdf")
-    original_PyPDF2 = sys.modules.get("PyPDF2")
     sys.modules["pypdf"] = None
-    sys.modules["PyPDF2"] = None
 
     try:
         # Generate plagiarism report where all compression libraries are unavailable/fail
@@ -398,11 +396,6 @@ def test_compress_pdf_buffer_all_fail(monkeypatch):
             sys.modules["pypdf"] = original_pypdf
         else:
             sys.modules.pop("pypdf", None)
-
-        if original_PyPDF2 is not None:
-            sys.modules["PyPDF2"] = original_PyPDF2
-        else:
-            sys.modules.pop("PyPDF2", None)
 
 
 # ── Snapshot / Golden Fixture Tests ────────────────────────────────────────

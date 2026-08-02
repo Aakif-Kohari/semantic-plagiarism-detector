@@ -78,6 +78,7 @@ from unittest.mock import Mock, patch
 
 
 from src.utils.google_drive import (bulk_download_drive_folder,
+                                    check_folder_access,
                                     download_file_bytes, extract_folder_id,
                                     get_drive_service, list_files_in_folder)
 
@@ -383,3 +384,47 @@ def test_bulk_download_drive_folder_handles_list_error(
             "https://drive.google.com/drive/folders/folder123",
             api_key="key",
         )
+
+
+@patch("src.utils.google_drive.requests.head")
+def test_check_folder_access_accessible(mock_head):
+    mock_response = Mock()
+    mock_response.status_code = 200
+    mock_head.return_value = mock_response
+
+    result = check_folder_access("valid-folder-id")
+
+    assert result is True
+    mock_head.assert_called_once_with(
+        "https://drive.google.com/drive/folders/valid-folder-id",
+        allow_redirects=False,
+        timeout=10,
+    )
+
+
+@patch("src.utils.google_drive.requests.head")
+def test_check_folder_access_not_accessible(mock_head):
+    mock_response = Mock()
+    mock_response.status_code = 302
+    mock_head.return_value = mock_response
+
+    result = check_folder_access("private-folder-id")
+    assert result is False
+
+    mock_response.status_code = 404
+    result = check_folder_access("nonexistent-folder-id")
+    assert result is False
+
+
+@patch("src.utils.google_drive.requests.head")
+def test_check_folder_access_request_exception(mock_head):
+    from requests import RequestException
+    mock_head.side_effect = RequestException("Timeout")
+
+    result = check_folder_access("error-folder-id")
+    assert result is False
+
+
+def test_check_folder_access_invalid_folder_id():
+    assert check_folder_access("") is False
+    assert check_folder_access("folder/with/slashes") is False

@@ -107,13 +107,23 @@ def document_similarity_matrix(
 def compute_similarity_matrix(
     embeddings: Union[Dict[str, np.ndarray], np.ndarray, List[np.ndarray]],
     batch_size: Optional[int] = None,
+    min_similarity_threshold: float = 0.0,
 ) -> Union[pd.DataFrame, np.ndarray]:
     """
     Direct alias/wrapper for document_similarity_matrix to maintain backwards compatibility
     with app/streamlit_app.py and external modules.
-    """
-    return document_similarity_matrix(embeddings, batch_size=batch_size)
 
+    Any pairwise score below min_similarity_threshold is replaced with 0.0.
+    """
+    matrix = document_similarity_matrix(embeddings, batch_size=batch_size)
+
+    if min_similarity_threshold > 0.0:
+        if isinstance(matrix, pd.DataFrame):
+            matrix = matrix.mask(matrix < min_similarity_threshold, 0.0)
+        else:
+            matrix = np.where(matrix < min_similarity_threshold, 0.0, matrix)
+
+    return matrix
 
 # ── Hybrid similarity (lexical + semantic) ─────────────────────────────────────
 
