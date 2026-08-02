@@ -488,11 +488,22 @@ def _ocr_pdf_page(
                 (pixmap.width, pixmap.height),
                 pixmap.samples,
             )
-            return pytesseract.image_to_string(
-                image,
-                lang=language,
-                config="--oem 3 --psm 3",
-            ).strip()
+            try:
+                return pytesseract.image_to_string(
+                    image,
+                    lang=language,
+                    config="--oem 3 --psm 3",
+                ).strip()
+            except (MemoryError, Exception) as exc:
+                if isinstance(exc, MemoryError):
+                    logger.warning(
+                        f"[document_parser] OCR page {page_index} failed due to memory exhaustion: {exc}"
+                    )
+                else:
+                    logger.warning(
+                        f"[document_parser] OCR page {page_index} failed: {exc}"
+                    )
+                return f"[OCR extraction failed for page {page_index}]"
     except pytesseract.TesseractNotFoundError as exc:
         from src.errors import OCR_TESSERACT_NOT_FOUND
 
@@ -1276,11 +1287,22 @@ def extract_text_from_image(
     file_bytes = _read_pdf_bytes(file)
     try:
         image = Image.open(io.BytesIO(file_bytes))
-        return pytesseract.image_to_string(
-            image,
-            lang=ocr_language,
-            config="--oem 3 --psm 3",
-        ).strip()
+        try:
+            return pytesseract.image_to_string(
+                image,
+                lang=ocr_language,
+                config="--oem 3 --psm 3",
+            ).strip()
+        except (MemoryError, Exception) as exc:
+            if isinstance(exc, MemoryError):
+                logger.warning(
+                    f"[document_parser] OCR image extraction failed due to memory exhaustion: {exc}"
+                )
+            else:
+                logger.warning(
+                    f"[document_parser] OCR image extraction failed: {exc}"
+                )
+            return "[OCR extraction failed for the file]"
     except pytesseract.TesseractNotFoundError as exc:
         from src.errors import OCR_TESSERACT_NOT_FOUND
         raise OCRDependencyError(OCR_TESSERACT_NOT_FOUND) from exc
