@@ -812,6 +812,13 @@ def clear_all_dialog():
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### ⚙️ Settings")
+
+    lang_options = list(_SUPPORTED_LANGUAGES.values())
+    st.selectbox(
+        "🌐 Language",
+        options=lang_options,
+        key="lang_selector",
+    )
     selected_lang_name = st.session_state.get("lang_selector", "English")
     _lang_reverse = {v: k for k, v in _SUPPORTED_LANGUAGES.items()}
     lang_code = _lang_reverse.get(selected_lang_name, "en")
