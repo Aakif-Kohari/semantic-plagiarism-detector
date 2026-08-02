@@ -1,23 +1,27 @@
 import csv
 import io
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from src.db.incidents import (
-    init_incident_db,
     build_incident_id,
-    sync_flagged_incidents,
-    get_all_incidents,
-    update_review_status,
-    incidents_to_csv,
     export_current_flags_csv,
+    get_all_incidents,
+    get_incident_by_id,
+    get_incidents_by_severity,
+    get_incidents_count_by_date,
+    incidents_to_csv,
+    purge_old_incidents,
+    sync_flagged_incidents,
+    update_review_status,
 )
 
 
-@pytest.fixture
-def test_db(tmp_path):
-    db_path = tmp_path / "incidents.db"
-    init_incident_db(db_path)
-    return db_path
+@pytest.fixture(autouse=True)
+def test_db(mock_db):
+    # Backward compatibility for tests expecting test_db fixture returning the path
+    return mock_db
 
 
 def test_build_incident_id_is_deterministic():
@@ -104,9 +108,14 @@ def test_get_all_incidents_returns_all(test_db):
 
     sync_flagged_incidents(flags, test_db)
 
+    from src.db.schemas import MatchResult
+
     incidents = get_all_incidents(test_db)
 
     assert len(incidents) == 2
+    assert all(isinstance(inc, MatchResult) for inc in incidents)
+    assert incidents[0].document_a == "a.pdf"
+    assert incidents[0]["document_a"] == "a.pdf"
 
 
 def test_update_review_status_success(test_db):
@@ -203,3 +212,259 @@ def test_export_current_flags_csv_exports_incidents(test_db):
 
     assert "doc1.pdf" in text
     assert "doc2.pdf" in text
+
+
+def test_get_incidents_by_severity(test_db):
+    """Verify incidents can be filtered by severity."""
+    flags = [
+        {
+            "doc_a": "high_doc1.pdf",
+            "doc_b": "high_doc2.pdf",
+            "similarity": 0.95,
+        },
+        {
+            "doc_a": "low_doc1.pdf",
+            "doc_b": "low_doc2.pdf",
+            "similarity": 0.20,
+        },
+    ]
+
+    sync_flagged_incidents(flags, test_db)
+
+results = get_incidents_by_severity("High", test_db)
+
+    assert len(results) == 1
+    assert results[0]["severity_rank"] == "High"
+    assert results[0]["document_a"] == "high_doc1.pdf"
+
+
+
+def test_get_incidents_by_severity_orders_by_timestamp_desc(test_db):
+    """Verify same-severity incidents are returned newest first."""
+    flags = [
+        {
+            "doc_a": "high_doc_older_a.pdf",
+            "doc_b": "high_doc_older_b.pdf",
+            "similarity": 0.91,
+        },
+    ]
+    sync_flagged_incidents(flags, test_db, now="2024-01-01T00:00:00+00:00")
+
+    flags_newer = [
+        {
+            "doc_a": "high_doc_newer_a.pdf",
+            "doc_b": "high_doc_newer_b.pdf",
+            "similarity": 0.92,
+        },
+    ]
+    sync_flagged_incidents(flags_newer, test_db, now="2024-06-01T00:00:00+00:00")
+
+    results = get_incidents_by_severity("High", test_db)
+
+    assert len(results) == 2
+    assert results[0]["document_a"] == "high_doc_newer_a.pdf"
+    assert results[1]["document_a"] == "high_doc_older_a.pdf"
+
+def test_purge_old_incidents_deletes_resolved_older_than_days(test_db):
+    """Test that purge_old_incidents deletes resolved incidents older than specified days."""
+    # Create a recent resolved incident
+    recent_flags = [
+        {"doc_a": "recent1.pdf", "doc_b": "recent2.pdf", "similarity": 0.90}
+    ]
+    sync_flagged_incidents(recent_flags, test_db)
+
+    # Manually update to Resolved and set an old date (100 days ago)
+    import sqlite3
+
+    old_date = (datetime.now(timezone.utc) - timedelta(days=100)).isoformat()
+    with sqlite3.connect(test_db) as conn:
+        conn.execute(
+            "UPDATE plagiarism_incidents SET review_status = 'Resolved', date_flagged = ? WHERE document_a = 'recent1.pdf'",
+            (old_date,),
+        )
+        conn.commit()
+
+    # Create a pending incident with an old date (should NOT be deleted)
+    with sqlite3.connect(test_db) as conn:
+        conn.execute(
+            "INSERT INTO plagiarism_incidents (incident_id, document_a, document_b, similarity_score, severity_rank, review_status, date_flagged, last_seen, threshold_at_time_of_flag) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "INC-OLDPENDING",
+                "old_pending1.pdf",
+                "old_pending2.pdf",
+                0.85,
+                "Medium",
+                "Pending",
+                old_date,
+                old_date,
+                0.59,
+            ),
+        )
+        conn.commit()
+
+    # Create a recent resolved incident (should NOT be deleted)
+    recent_resolved_flags = [
+        {"doc_a": "recent_res1.pdf", "doc_b": "recent_res2.pdf", "similarity": 0.92}
+    ]
+    sync_flagged_incidents(recent_resolved_flags, test_db)
+    with sqlite3.connect(test_db) as conn:
+        conn.execute(
+            "UPDATE plagiarism_incidents SET review_status = 'Resolved' WHERE document_a = 'recent_res1.pdf'"
+        )
+        conn.commit()
+
+    # Verify initial count
+    assert len(get_all_incidents(test_db)) == 3
+
+    # Purge old resolved incidents (90 days)
+    deleted_count = purge_old_incidents(days_old=90, status="Resolved", db_path=test_db)
+
+    assert deleted_count == 1
+
+    # Verify only the old pending and recent resolved remain
+    remaining = get_all_incidents(test_db)
+    assert len(remaining) == 2
+    remaining_docs = {inc["document_a"] for inc in remaining}
+    assert "old_pending1.pdf" in remaining_docs
+    assert "recent_res1.pdf" in remaining_docs
+    assert "recent1.pdf" not in remaining_docs
+
+
+def test_get_incident_by_id_found(test_db):
+    flags = [
+        {
+            "doc_a": "file1.pdf",
+            "doc_b": "file2.pdf",
+            "similarity": 0.88,
+        }
+    ]
+    incidents = sync_flagged_incidents(flags, test_db)
+    target_id = incidents[0]["incident_id"]
+
+    result = get_incident_by_id(target_id, test_db)
+
+    assert result is not None
+    assert isinstance(result, dict)
+    assert result["incident_id"] == target_id
+    assert result["document_a"] == "file1.pdf"
+    assert result["document_b"] == "file2.pdf"
+    assert result["similarity_score"] == 0.88
+    assert result["severity_rank"] == "Medium"
+    assert result["review_status"] == "Pending"
+
+
+def test_get_incident_by_id_not_found(test_db):
+    result = get_incident_by_id("INC-NONEXISTENT", test_db)
+    assert result is None
+
+
+def test_get_incident_by_id_integer(test_db):
+    import sqlite3
+
+    with sqlite3.connect(test_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO plagiarism_incidents (
+                incident_id, document_a, document_b, similarity_score,
+                severity_rank, review_status, date_flagged, last_seen,
+                threshold_at_time_of_flag
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1046,
+                "int_doc_a.pdf",
+                "int_doc_b.pdf",
+                0.75,
+                "Medium",
+                "Pending",
+                "2026-07-31T00:00:00Z",
+                "2026-07-31T00:00:00Z",
+                0.50,
+            ),
+        )
+        conn.commit()
+
+    result = get_incident_by_id(1046, test_db)
+    assert result is not None
+    assert isinstance(result, dict)
+    assert result["document_a"] == "int_doc_a.pdf"
+    assert result["document_b"] == "int_doc_b.pdf"
+
+
+def test_get_incidents_count_by_date(test_db):
+    """Verify daily counts of incidents are aggregated correctly."""
+    import sqlite3
+
+    # Insert mock incidents across multiple dates
+    incidents_data = [
+        (
+            "INC-1",
+            "docA.pdf",
+            "docB.pdf",
+            0.90,
+            "High",
+            "Pending",
+            "2026-08-01T10:00:00Z",
+            "2026-08-01T10:00:00Z",
+            0.50,
+        ),
+        (
+            "INC-2",
+            "docC.pdf",
+            "docD.pdf",
+            0.85,
+            "Medium",
+            "Pending",
+            "2026-08-01T15:30:00Z",
+            "2026-08-01T15:30:00Z",
+            0.50,
+        ),
+        (
+            "INC-3",
+            "docE.pdf",
+            "docF.pdf",
+            0.70,
+            "Medium",
+            "Pending",
+            "2026-08-02T08:00:00Z",
+            "2026-08-02T08:00:00Z",
+            0.50,
+        ),
+        (
+            "INC-4",
+            "docG.pdf",
+            "docH.pdf",
+            0.95,
+            "High",
+            "Pending",
+            "2026-08-05T12:00:00Z",
+            "2026-08-05T12:00:00Z",
+            0.50,
+        ),
+    ]
+
+    with sqlite3.connect(test_db) as conn:
+        conn.executemany(
+            """
+            INSERT INTO plagiarism_incidents (
+                incident_id, document_a, document_b, similarity_score,
+                severity_rank, review_status, date_flagged, last_seen,
+                threshold_at_time_of_flag
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            incidents_data,
+        )
+        conn.commit()
+
+    results = get_incidents_count_by_date(test_db)
+
+    # We expect:
+    # 2026-08-01: 2 counts
+    # 2026-08-02: 1 count
+    # 2026-08-05: 1 count
+    expected = [
+        {"date": "2026-08-01", "count": 2},
+        {"date": "2026-08-02", "count": 1},
+        {"date": "2026-08-05", "count": 1},
+    ]
+    assert results == expected

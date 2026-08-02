@@ -1,27 +1,18 @@
-import pytest
 import numpy as np
 import pandas as pd
-from src.core.similarity import (
-    document_similarity_matrix,
-    chunk_max_similarity,
-    chunk_similarity_matrix,
-    flag_plagiarism,
-    find_most_similar_chunks,
-    hybrid_similarity_matrix,
-)
-from src.core.lexical_similarity import lexical_similarity_matrix
+import pytest
 
-
-@pytest.fixture
-def dummy_embeddings():
-    # 3 docs, 384-dim embeddings
-    # Doc A and B are very similar, Doc C is completely different
-    emb_a = np.array([[1.0, 0.0, 0.0], [0.8, 0.6, 0.0]])  # 2 chunks (dummy dim)
-    emb_b = np.array([[0.9, 0.1, 0.0], [0.8, 0.5, 0.0]])  # 2 chunks
-    emb_c = np.array([[0.0, 0.0, 1.0]])  # 1 chunk
-
-    return {"doc_A": emb_a, "doc_B": emb_b, "doc_C": emb_c}
-
+from src.core.lexical_similarity import (STOPWORDS,  # noqa: E402
+                                         jaccard_similarity,
+                                         lexical_similarity_matrix,
+                                         remove_stopwords, tokenize)
+from src.core.similarity import (calculate_paragraph_similarity_breakdown,
+                                 chunk_max_similarity, chunk_similarity_matrix,
+                                 compute_similarity_matrix,
+                                 document_similarity_matrix,
+                                 find_exact_matches,
+                                 find_most_similar_chunks, flag_plagiarism,
+                                 hybrid_similarity_matrix)
 
 def test_chunk_max_similarity(dummy_embeddings):
     emb_a = dummy_embeddings["doc_A"]
@@ -64,6 +55,21 @@ def test_document_similarity_matrix(dummy_embeddings):
     assert df.shape == (3, 3)
     assert list(df.columns) == ["doc_A", "doc_B", "doc_C"]
 
+
+def test_compute_similarity_matrix_applies_min_threshold(dummy_embeddings):
+    unfiltered = compute_similarity_matrix(dummy_embeddings)
+    filtered = compute_similarity_matrix(
+        dummy_embeddings, min_similarity_threshold=0.5
+    )
+
+    # doc_A and doc_C are dissimilar, so their unfiltered score is low
+    assert unfiltered.loc["doc_A", "doc_C"] < 0.5
+    # after filtering, any score below 0.5 must become exactly 0.0
+    assert filtered.loc["doc_A", "doc_C"] == 0.0
+
+    # scores that were already >= threshold should stay unchanged
+    above_threshold_mask = unfiltered >= 0.5
+    assert (filtered[above_threshold_mask] == unfiltered[above_threshold_mask]).all().all()
 
 def test_document_similarity_matrix_accepts_batch_size_basic(dummy_embeddings):
     df = document_similarity_matrix(dummy_embeddings, batch_size=2)
@@ -360,3 +366,220 @@ def test_hybrid_similarity_matrix_index_mismatch():
         match="Semantic and lexical matrices must have the same index and columns",
     ):
         hybrid_similarity_matrix(semantic_df, lexical_df)
+
+
+# ── Stop-word filtering (issue #222) ──────────────────────────────────────────
+# Common function words (the, and, is, …) must not inflate lexical similarity.
+# These tests exercise both the TF-IDF path and the standalone Jaccard helper.
+
+
+def test_remove_stopwords_strips_common_function_words():
+    """The high-frequency words named in the issue are filtered out."""
+    text = "the cat and the dog are playing in the garden"
+    filtered = remove_stopwords(text)
+    # "the", "and", "are", "in" are stop-words and must be gone;
+    # content words remain.
+    assert "the" not in filtered.split()
+    assert "and" not in filtered.split()
+    assert "are" not in filtered.split()
+    assert "in" not in filtered.split()
+    for content_word in ("cat", "dog", "playing", "garden"):
+        assert content_word in filtered.split()
+
+
+def test_remove_stopwords_handles_empty_and_all_stopwords():
+    assert remove_stopwords("") == ""
+    assert remove_stopwords("the and is a of") == ""
+
+
+def test_remove_stopwords_preserves_content_words_only():
+    assert remove_stopwords("Machine learning is awesome") == "machine learning awesome"
+
+
+def test_tokenize_returns_stopword_free_set():
+    tokens = tokenize("The quick brown fox jumps over the lazy dog")
+    assert isinstance(tokens, set)
+    assert "the" not in tokens
+    # Content words are kept; "over" may or may not be a stop-word
+    # depending on whether NLTK is available, so only assert on the
+    # unambiguous content tokens.
+    assert {"quick", "brown", "fox", "jumps", "lazy", "dog"} <= tokens
+
+
+def test_jaccard_similarity_identical_content():
+    text = "machine learning models predict outcomes"
+    assert jaccard_similarity(text, text) == 1.0
+
+
+def test_jaccard_similarity_unrelated_content_is_low():
+    """Two essays that share only stop-words must score ~0, not ~1."""
+    essay_a = "the history of ancient rome and its emperors"
+    essay_b = "the fundamentals of quantum mechanics and particles"
+    score = jaccard_similarity(essay_a, essay_b)
+    # After stop-word removal the only shared token is "of" if it slips
+    # through, but "of" is in the fallback list too — so overlap is ~0.
+    assert score <= 0.2, f"expected low similarity, got {score}"
+
+
+def test_jaccard_similarity_partial_overlap_is_between_zero_and_one():
+    a = "neural networks for image classification"
+    b = "neural networks for sequence prediction"
+    score = jaccard_similarity(a, b)
+    assert 0.0 < score < 1.0
+
+
+def test_jaccard_similarity_empty_inputs_return_zero():
+    assert jaccard_similarity("", "") == 0.0
+    assert jaccard_similarity("the and is", "the and is") == 0.0
+
+
+def test_lexical_similarity_matrix_filters_stopwords():
+    """Two documents that differ only in stop-words should be near-identical
+    after filtering (they carry the same content), while a document that
+    shares ONLY stop-words with another should have low similarity.
+
+    This is the core regression guard for issue #222.
+    """
+    # Same content words, different stop-words → should still be very similar
+    # because stop-words are now filtered out before TF-IDF.
+    docs = {
+        "doc1": "the cat sat on the mat",
+        "doc2": "a cat is on a mat",
+        "doc3": "dogs run in the park",
+    }
+    df = lexical_similarity_matrix(docs, use_cache=False)
+
+    # doc1 vs doc2: identical content words (cat, sat/on, mat) → high
+    assert df.loc["doc1", "doc2"] > 0.5
+
+    # doc1 vs doc3: no content-word overlap → low (this is the bug #222 fix)
+    assert df.loc["doc1", "doc3"] < 0.3
+
+
+def test_stopwords_set_is_nonempty_and_contains_core_words():
+    """The module-level STOPWORDS set must be populated and contain at least
+    the words explicitly called out in the issue description."""
+    assert len(STOPWORDS) > 0
+    for word in ("the", "and", "is"):
+        assert word in STOPWORDS
+
+
+# ── Per-Paragraph Similarity Breakdown Tests ──────────────────────────────────
+
+
+def test_calculate_paragraph_similarity_breakdown_matches_highest_pairs():
+    """Each paragraph in Doc A must map to the highest-matching paragraph in Doc B."""
+    # emb_a: 3 paragraphs in a 3-dim space (identity-like rows)
+    emb_a = np.array([
+        [1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ])
+    # emb_b: 3 paragraphs – para 0 matches A[1], para 1 matches A[0], para 2 matches A[2]
+    emb_b = np.array([
+        [0.0, 1.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ])
+
+    breakdown = calculate_paragraph_similarity_breakdown(emb_a, emb_b)
+
+    # Must return one tuple per paragraph in Doc A
+    assert len(breakdown) == 3
+
+    # Each result must be (paragraph_a_idx, paragraph_b_idx, score)
+    for item in breakdown:
+        assert len(item) == 3
+        idx_a, idx_b, score = item
+        assert isinstance(idx_a, int)
+        assert isinstance(idx_b, int)
+        assert 0.0 <= score <= 1.0
+
+    # Build a lookup: paragraph_a_idx → (paragraph_b_idx, score)
+    lookup = {idx_a: (idx_b, score) for idx_a, idx_b, score in breakdown}
+
+    # A[0] = [1,0,0] → best match is B[1] = [1,0,0] (score ~1.0)
+    assert lookup[0][0] == 1
+    assert np.isclose(lookup[0][1], 1.0, atol=1e-5)
+
+    # A[1] = [0,1,0] → best match is B[0] = [0,1,0] (score ~1.0)
+    assert lookup[1][0] == 0
+    assert np.isclose(lookup[1][1], 1.0, atol=1e-5)
+
+    # A[2] = [0,0,1] → best match is B[2] = [0,0,1] (score ~1.0)
+    assert lookup[2][0] == 2
+    assert np.isclose(lookup[2][1], 1.0, atol=1e-5)
+
+    # Sorted by descending score
+    scores = [s for _, _, s in breakdown]
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_calculate_paragraph_similarity_breakdown_empty_embeddings():
+    """Returns empty list when either embedding matrix is empty."""
+    emb_a = np.array([[1.0, 0.0, 0.0]])
+    emb_empty = np.array([])
+
+    assert calculate_paragraph_similarity_breakdown(emb_empty, emb_a) == []
+    assert calculate_paragraph_similarity_breakdown(emb_a, emb_empty) == []
+    assert calculate_paragraph_similarity_breakdown(emb_empty, emb_empty) == []
+
+
+def test_calculate_paragraph_similarity_breakdown_single_paragraph_1d():
+    """Handles 1-D (single paragraph) embeddings for both documents."""
+    emb_a = np.array([1.0, 0.0, 0.0])   # 1-D – single paragraph
+    emb_b = np.array([1.0, 0.0, 0.0])   # identical paragraph
+
+    breakdown = calculate_paragraph_similarity_breakdown(emb_a, emb_b)
+
+    assert len(breakdown) == 1
+    idx_a, idx_b, score = breakdown[0]
+    assert idx_a == 0
+    assert idx_b == 0
+    assert np.isclose(score, 1.0, atol=1e-5)
+
+
+def test_calculate_paragraph_similarity_breakdown_asymmetric_doc_sizes():
+    """Doc A may have a different number of paragraphs than Doc B."""
+    # 2 paragraphs in A, 4 paragraphs in B
+    emb_a = np.array([
+        [1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ])
+    emb_b = np.array([
+        [0.0, 1.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 0.5, 0.5],
+        [0.0, 0.0, 1.0],
+    ])
+
+    breakdown = calculate_paragraph_similarity_breakdown(emb_a, emb_b)
+
+    # One result per paragraph in Doc A (= 2)
+    assert len(breakdown) == 2
+    para_a_indices = {t[0] for t in breakdown}
+    assert para_a_indices == {0, 1}
+
+    # All para_b_idx values must be valid indices into emb_b
+    for _, idx_b, _ in breakdown:
+        assert 0 <= idx_b < emb_b.shape[0]
+
+
+def test_find_exact_matches():
+    """Verify that find_exact_matches correctly handles case sensitivity options."""
+    text_a = "HELLO WORLD. This is a Test."
+    text_b = "hello world. this is a test."
+
+    # Default/Explicit case_sensitive=False: should match everything
+    matches_insensitive = find_exact_matches(text_a, text_b, case_sensitive=False)
+    assert "HELLO WORLD" in matches_insensitive
+    assert "This is a Test" in matches_insensitive
+
+    # case_sensitive=True: should match nothing because of casing difference
+    matches_sensitive = find_exact_matches(text_a, text_b, case_sensitive=True)
+    assert not matches_sensitive
+
+    # Matching with identical casing should work in both modes
+    text_c = "HELLO WORLD. This is a Test."
+    assert find_exact_matches(text_a, text_c, case_sensitive=True) == ["HELLO WORLD", "This is a Test"]
+
