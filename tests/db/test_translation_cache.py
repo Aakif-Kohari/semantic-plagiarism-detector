@@ -198,3 +198,17 @@ class TestTranslationCacheTTL:
         # 5. Reset and check
         reset_translation_cache_counters()
         assert get_translation_cache_hit_rate() == 0.0
+
+
+def test_init_db_closes_connection():
+    """Verify that _init_db() explicitly closes the database connection."""
+    from unittest.mock import MagicMock
+    with patch("sqlite3.connect") as mock_connect:
+        mock_conn = MagicMock()
+        mock_connect.return_value = mock_conn
+
+        translation_cache._init_db()
+
+        # Verify close() was called on mock_conn
+        mock_conn.close.assert_called()
+
