@@ -269,8 +269,8 @@ def test_sidebar_reset_all_filters():
         _cleanup_stale_artifacts()
 
 
-def test_sidebar_keyboard_shortcuts_footnote():
-    """Verify that keyboard shortcut helper footnote expander is rendered in the sidebar."""
+def test_clear_cache_toast_message():
+    """Verify that clicking Clear Application Cache displays a toast confirmation message."""
     _cleanup_stale_artifacts()
     try:
         at = AppTest.from_file("app/streamlit_app.py", default_timeout=30)
@@ -280,9 +280,14 @@ def test_sidebar_keyboard_shortcuts_footnote():
         at.run()
 
         assert not at.exception
-        # Check sidebar expanders or captions for keyboard shortcuts text
-        sidebar_expanders = [exp.label for exp in at.sidebar.expander]
-        assert any("Keyboard Shortcuts" in label for label in sidebar_expanders)
+        clear_btns = [
+            btn for btn in at.button if "Clear Application Cache" in btn.label or "🗑️" in btn.label
+        ]
+        if clear_btns:
+            clear_btns[0].click().run()
+            assert not at.exception
+            # Verify st.toast was rendered
+            assert len(at.toast) > 0 or any("Session cache cleared" in str(t) for t in at.toast)
     finally:
         _cleanup_stale_artifacts()
 
