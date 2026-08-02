@@ -26,10 +26,12 @@ def test_fresh_corpus_database_reaches_latest_version(tmp_path):
         assert table_exists(connection, "chunks")
         assert table_exists(connection, "plagiarism_incidents")
         assert column_exists(connection, "documents", "detected_language")
+        assert column_exists(connection, "documents", "created_at")
         assert index_exists(connection, "idx_documents_upload_date")
         assert index_exists(connection, "idx_documents_class_section")
         assert index_exists(connection, "idx_chunks_filename")
         assert index_exists(connection, "idx_incidents_status")
+        assert index_exists(connection, "idx_documents_created_at")
 
 
 def test_fresh_auth_database_reaches_latest_version(tmp_path):

@@ -110,7 +110,8 @@ def init_corpus_db() -> None:
                 detected_language TEXT,
                 owner TEXT,
                 is_deleted INTEGER DEFAULT 0,
-                deleted_at TEXT
+                deleted_at TEXT,
+                created_at TEXT
             )
             """
         )
@@ -195,6 +196,12 @@ def init_corpus_db() -> None:
             )
         if "deleted_at" not in columns:
             conn.execute("ALTER TABLE documents ADD COLUMN deleted_at TEXT")
+        if "created_at" not in columns:
+            conn.execute("ALTER TABLE documents ADD COLUMN created_at TEXT")
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at)"
+        )
 
         try:
             os.chmod(_DB_PATH, 0o600)
