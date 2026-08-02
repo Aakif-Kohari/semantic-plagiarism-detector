@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 text_stats.py
 -------------
@@ -188,7 +190,6 @@ def format_stats_for_pdf(stats: Dict[str, float]) -> List[List[str]]:
         ["Unique Words", str(stats["unique_word_count"])],
         ["Unique Word Ratio", f"{stats['unique_word_ratio']:.2%}"],
     ]
-
 
 
 logger = logging.getLogger(__name__)
