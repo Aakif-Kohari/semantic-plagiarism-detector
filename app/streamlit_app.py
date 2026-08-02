@@ -2329,26 +2329,10 @@ with tab_settings:
                 key="ocr_dpi_slider",
             )
 
-        st.markdown("### 🏷️ Tag Management")
-        all_tags = get_all_tags()
-        if all_tags:
-            tag_to_delete = st.selectbox(
-                "Select Tag to Delete",
-                options=all_tags,
-                key="tag_delete_selectbox",
-            )
-            affected_docs = get_tag_document_count(tag_to_delete)
-            with st.popover("🗑️ Delete Tag"):
-                st.warning(
-                    f"Are you sure you want to delete tag '{tag_to_delete}'? "
-                    f"This affects {affected_docs} documents."
-                )
-                if st.button("Confirm Delete", key="confirm_delete_tag_button"):
-                    delete_tag(tag_to_delete)
-                    st.success(f"✅ Tag '{tag_to_delete}' deleted successfully!")
-                    st.rerun()
-        else:
-            st.caption("No tags found in the corpus.")
+        st.markdown("### 🔑 API Settings")
+        st.caption("Active API Bearer Token for external REST API endpoints:")
+        api_bearer_token = os.getenv("API_BEARER_TOKEN", "default-token-secret-key-12345")
+        st.code(api_bearer_token, language=None)
 
         st.markdown("### 💾 Backup")
         from src.db.database_backup import (

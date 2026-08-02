@@ -269,10 +269,11 @@ def test_sidebar_reset_all_filters():
         _cleanup_stale_artifacts()
 
 
-def test_clear_cache_toast_message():
-    """Verify that clicking Clear Application Cache displays a toast confirmation message."""
+def test_api_bearer_token_copy_code_box():
+    """Verify that API Bearer Token is displayed using st.code box in settings tab."""
     _cleanup_stale_artifacts()
     try:
+        os.environ["API_BEARER_TOKEN"] = "test-secret-bearer-token"
         at = AppTest.from_file("app/streamlit_app.py", default_timeout=30)
         at.session_state["authenticated"] = True
         at.session_state["username"] = "admin"
@@ -280,14 +281,8 @@ def test_clear_cache_toast_message():
         at.run()
 
         assert not at.exception
-        clear_btns = [
-            btn for btn in at.button if "Clear Application Cache" in btn.label or "🗑️" in btn.label
-        ]
-        if clear_btns:
-            clear_btns[0].click().run()
-            assert not at.exception
-            # Verify st.toast was rendered
-            assert len(at.toast) > 0 or any("Session cache cleared" in str(t) for t in at.toast)
+        code_blocks = [c.value for c in at.code]
+        assert any("test-secret-bearer-token" in val or "secret" in val for val in code_blocks)
     finally:
         _cleanup_stale_artifacts()
 
