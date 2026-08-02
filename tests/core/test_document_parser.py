@@ -19,6 +19,7 @@ from src.core.document_parser import (
     extract_texts,
     parallel_extract_texts,
     strip_bibliography,
+    normalize_unicode_spaces,
 )
 
 import time
@@ -752,3 +753,10 @@ def test_get_supported_file_extensions():
         ".txt",
     ]
     
+    
+def test_normalize_unicode_spaces():
+    text = "Hello\u00A0World\u00AD！\u2009Python，Testing。"
+
+    normalized = normalize_unicode_spaces(text)
+
+    assert normalized == "Hello World! Python,Testing."    
