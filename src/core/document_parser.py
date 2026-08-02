@@ -94,7 +94,59 @@ def sanitize_zero_width_characters(text: str, filename: Optional[str] = None) ->
         return ZERO_WIDTH_CHARS_PATTERN.sub("", text)
     return text
 
+UNICODE_SPACE_TRANSLATION = str.maketrans({
+    "\u00A0": " ",   # Non-breaking space
+    "\u2000": " ",
+    "\u2001": " ",
+    "\u2002": " ",
+    "\u2003": " ",
+    "\u2004": " ",
+    "\u2005": " ",
+    "\u2006": " ",
+    "\u2007": " ",
+    "\u2008": " ",
+    "\u2009": " ",   # Thin space
+    "\u200A": " ",
+    "\u202F": " ",
+    "\u205F": " ",
+    "\u3000": " ",   # Ideographic space
+})
 
+FULLWIDTH_TRANSLATION = str.maketrans({
+    "，": ",",
+    "。": ".",
+    "：": ":",
+    "；": ";",
+    "！": "!",
+    "？": "?",
+    "（": "(",
+    "）": ")",
+    "【": "[",
+    "】": "]",
+    "［": "[",
+    "］": "]",
+    "｛": "{",
+    "｝": "}",
+})
+
+
+def normalize_unicode_spaces(text: str) -> str:
+    """
+    Normalize Unicode spacing and punctuation so visually identical
+    documents compare consistently.
+    """
+    if not text:
+        return text
+
+    text = text.translate(UNICODE_SPACE_TRANSLATION)
+
+    # Remove soft hyphens
+    text = text.replace("\u00AD", "")
+
+    # Normalize full-width punctuation
+    text = text.translate(FULLWIDTH_TRANSLATION)
+
+    return text
 def check_batch_rate_limit(file_count: int, session_id: Optional[str] = None) -> None:
     """
     Validates batch file collection size against session rate limits.
@@ -223,7 +275,7 @@ def clean_text(raw_text: str) -> str:
             }
         )
     )
-
+  
     text = re.sub(r"\n\s*\n\s*\n", "\n\n", text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"[\u00a0\u200b]", " ", text)
@@ -1353,6 +1405,7 @@ def extract_text(
         raw = extract_text_from_txt(file)
 
     raw = strip_bibliography(raw)
+    raw = normalize_unicode_spaces(raw)
     raw = sanitize_zero_width_characters(raw, filename=filename)
     lang_code = detect_text_language(raw)
 
