@@ -60,6 +60,11 @@ def _safe_extension(filename: str) -> str:
     return cleaned
 
 
+def get_file_sha256_hash(file_bytes: bytes) -> str:
+    """Return the SHA-256 hex digest for file bytes."""
+    return hashlib.sha256(file_bytes).hexdigest()
+
+
 def sanitize_filename(
     filename: object,
     *,
@@ -112,7 +117,9 @@ def sanitize_filename(
         if allowed_stem > 0:
             truncated_stem = stem[:allowed_stem].rstrip(" ._-")
             if not truncated_stem:
-                truncated_stem = safe_fallback[:allowed_stem] or DEFAULT_FILENAME[:allowed_stem]
+                truncated_stem = (
+                    safe_fallback[:allowed_stem] or DEFAULT_FILENAME[:allowed_stem]
+                )
             stem = f"{truncated_stem}{hash_suffix}"
         else:
             stem = hash_prefix[:maximum_stem_length]
