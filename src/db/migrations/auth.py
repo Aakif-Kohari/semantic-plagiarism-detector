@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 
 from .common import column_exists, run_migrations
-AUTH_SCHEMA_VERSION = 9
+AUTH_SCHEMA_VERSION = 10
 
 def migration_001_create_users(
     connection: sqlite3.Connection,
@@ -135,6 +135,24 @@ def migration_009_add_last_login_at(
         )
 
 
+
+def migration_010_add_password_changed_at(
+    connection: sqlite3.Connection,
+) -> None:
+    """Add password age tracking to authentication records."""
+    if not column_exists(
+        connection,
+        "users",
+        "password_changed_at",
+    ):
+        connection.execute(
+            """
+            ALTER TABLE users
+            ADD COLUMN password_changed_at TEXT DEFAULT NULL
+            """
+        )
+
+
 AUTH_MIGRATIONS = {
     1: migration_001_create_users,
     2: migration_002_add_onboarding_state,
@@ -145,6 +163,7 @@ AUTH_MIGRATIONS = {
     7: migration_007_add_theme_preference,
     8: migration_008_create_security_audit_log,
     9: migration_009_add_last_login_at,
+    10: migration_010_add_password_changed_at,
 }
 
 
