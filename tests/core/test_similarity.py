@@ -8,11 +8,11 @@ from src.core.lexical_similarity import (STOPWORDS,  # noqa: E402
                                          remove_stopwords, tokenize)
 from src.core.similarity import (calculate_paragraph_similarity_breakdown,
                                  chunk_max_similarity, chunk_similarity_matrix,
+                                 compute_similarity_matrix,
                                  document_similarity_matrix,
                                  find_exact_matches,
                                  find_most_similar_chunks, flag_plagiarism,
                                  hybrid_similarity_matrix)
-
 
 def test_chunk_max_similarity(dummy_embeddings):
     emb_a = dummy_embeddings["doc_A"]
@@ -55,6 +55,21 @@ def test_document_similarity_matrix(dummy_embeddings):
     assert df.shape == (3, 3)
     assert list(df.columns) == ["doc_A", "doc_B", "doc_C"]
 
+
+def test_compute_similarity_matrix_applies_min_threshold(dummy_embeddings):
+    unfiltered = compute_similarity_matrix(dummy_embeddings)
+    filtered = compute_similarity_matrix(
+        dummy_embeddings, min_similarity_threshold=0.5
+    )
+
+    # doc_A and doc_C are dissimilar, so their unfiltered score is low
+    assert unfiltered.loc["doc_A", "doc_C"] < 0.5
+    # after filtering, any score below 0.5 must become exactly 0.0
+    assert filtered.loc["doc_A", "doc_C"] == 0.0
+
+    # scores that were already >= threshold should stay unchanged
+    above_threshold_mask = unfiltered >= 0.5
+    assert (filtered[above_threshold_mask] == unfiltered[above_threshold_mask]).all().all()
 
 def test_document_similarity_matrix_accepts_batch_size_basic(dummy_embeddings):
     df = document_similarity_matrix(dummy_embeddings, batch_size=2)
