@@ -10,6 +10,7 @@ from src.utils.processing_time import (
     ProcessingTimer,
     calculate_processing_throughput,
     estimate_processing_seconds,
+    format_duration,
     format_processing_duration,
     format_throughput_human_readable,
     processing_eta_text,
@@ -20,6 +21,7 @@ from src.utils.processing_time import (
 # ============================================================================
 # ProcessingTimer Tests
 # ============================================================================
+
 
 def test_timer_initialization():
     timer = ProcessingTimer()
@@ -116,27 +118,32 @@ def test_nested_timers_with_inner_exception(monkeypatch):
 # Throughput Tests
 # ============================================================================
 
+
 class TestProcessingThroughput:
     """Test suite for throughput calculation and formatting."""
 
     @pytest.mark.parametrize(
         ("total_bytes", "elapsed_seconds", "expected_throughput"),
         [
-            (1024, 1.0, 1.0),          # Exactly 1 KB in 1 second
-            (2048, 2.0, 1.0),          # 2 KB in 2 seconds
-            (1048576, 1.0, 1024.0),    # 1 MB in 1 second -> 1024 KB/s
-            (512, 0.5, 1.0),           # 0.5 KB in 0.5 seconds
-            (10240, 3.33, 3.08),       # 10 KB in 3.33 seconds (rounded)
-            (0, 5.0, 0.0),             # 0 bytes processed
+            (1024, 1.0, 1.0),  # Exactly 1 KB in 1 second
+            (2048, 2.0, 1.0),  # 2 KB in 2 seconds
+            (1048576, 1.0, 1024.0),  # 1 MB in 1 second -> 1024 KB/s
+            (512, 0.5, 1.0),  # 0.5 KB in 0.5 seconds
+            (10240, 3.33, 3.08),  # 10 KB in 3.33 seconds (rounded)
+            (0, 5.0, 0.0),  # 0 bytes processed
         ],
     )
-    def test_calculate_processing_throughput_valid(self, total_bytes, elapsed_seconds, expected_throughput):
+    def test_calculate_processing_throughput_valid(
+        self, total_bytes, elapsed_seconds, expected_throughput
+    ):
         """Test throughput calculation with valid inputs."""
         result = calculate_processing_throughput(total_bytes, elapsed_seconds)
         assert result == pytest.approx(expected_throughput, rel=1e-2)
 
     @pytest.mark.parametrize("elapsed_seconds", [0.0, -1.0, -0.001])
-    def test_calculate_processing_throughput_zero_or_negative_time(self, elapsed_seconds):
+    def test_calculate_processing_throughput_zero_or_negative_time(
+        self, elapsed_seconds
+    ):
         """Test that throughput returns 0.0 when elapsed_seconds <= 0."""
         result = calculate_processing_throughput(1024, elapsed_seconds)
         assert result == 0.0
@@ -163,6 +170,7 @@ class TestProcessingThroughput:
 # Duration and Helper Function Tests
 # ============================================================================
 
+
 class TestProcessingDurationHelpers:
     """Test suite for duration estimation and formatting."""
 
@@ -170,12 +178,14 @@ class TestProcessingDurationHelpers:
         ("total_bytes", "seconds_per_mb", "expected_seconds"),
         [
             (0, 2.0, 0),
-            (100, 2.0, 1),      # Minimum 1 second
+            (100, 2.0, 1),  # Minimum 1 second
             (1048576, 2.0, 2),  # 1 MB at 2 sec/MB
             (5242880, 1.5, 8),  # 5 MB at 1.5 sec/MB
         ],
     )
-    def test_estimate_processing_seconds(self, total_bytes, seconds_per_mb, expected_seconds):
+    def test_estimate_processing_seconds(
+        self, total_bytes, seconds_per_mb, expected_seconds
+    ):
         """Test processing time estimation."""
         result = estimate_processing_seconds(total_bytes, seconds_per_mb=seconds_per_mb)
         assert result == expected_seconds
@@ -207,6 +217,31 @@ class TestProcessingDurationHelpers:
         with pytest.raises(ValueError):
             format_processing_duration(-10)
 
+    @pytest.mark.parametrize(
+        ("seconds", "expected_string"),
+        [
+            (0.0, "0.0s"),
+            (45.2, "45.2s"),
+            (59.9, "59.9s"),
+            (60.0, "1m 0s"),
+            (125.0, "2m 5s"),
+        ],
+    )
+    def test_format_duration(self, seconds, expected_string):
+        """Test concise float duration formatting."""
+        result = format_duration(seconds)
+        assert result == expected_string
+
+    def test_format_duration_invalid_type(self):
+        """Test that invalid types raise TypeError."""
+        with pytest.raises(TypeError):
+            format_duration("not a number")
+
+    def test_format_duration_negative(self):
+        """Test that negative values raise ValueError."""
+        with pytest.raises(ValueError):
+            format_duration(-1.5)
+
 
 @pytest.mark.parametrize(
     ("total_bytes", "expected"),
@@ -224,10 +259,13 @@ def test_estimate_processing_seconds_default_rate(total_bytes, expected):
 
 
 def test_custom_rate_is_supported():
-    assert estimate_processing_seconds(
-        5 * BYTES_PER_MB,
-        seconds_per_mb=3.0,
-    ) == 15
+    assert (
+        estimate_processing_seconds(
+            5 * BYTES_PER_MB,
+            seconds_per_mb=3.0,
+        )
+        == 15
+    )
 
 
 @pytest.mark.parametrize(
@@ -259,6 +297,7 @@ def test_format_processing_duration_cases(seconds, expected):
 # ============================================================================
 # File Upload Helpers Tests
 # ============================================================================
+
 
 class UploadedWithSize:
     def __init__(self, size):
