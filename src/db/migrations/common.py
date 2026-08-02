@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import time
 from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from pathlib import Path
@@ -273,7 +274,16 @@ def run_migrations(
 
     with migration_transaction(connection):
         for version in range(current + 1, target + 1):
-            migrations[version](connection)
+            migration_fn = migrations[version]
+            migration_name = getattr(migration_fn, "__name__", f"v{version}")
+            start_time = time.perf_counter()
+            migration_fn(connection)
+            elapsed_sec = time.perf_counter() - start_time
+            logger.info(
+                "Migration [%s] executed in %.3f seconds.",
+                migration_name,
+                elapsed_sec,
+            )
         set_user_version(connection, target)
 
     # Issue #1051: log successful migration completion so manual
