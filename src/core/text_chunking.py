@@ -12,6 +12,7 @@ Two strategies are available:
   is split mid-word or mid-clause.
 """
 
+from __future__ import annotations
 import logging
 import re
 from typing import Dict, List
@@ -19,6 +20,7 @@ from typing import Dict, List
 logger = logging.getLogger(__name__)
 
 # ── Sentence splitting helper ─────────────────────────────────────────────────
+
 
 def _split_into_sentences(text: str) -> List[str]:
     """Return a list of sentences from *text*.
@@ -28,9 +30,11 @@ def _split_into_sentences(text: str) -> List[str]:
     (e.g. CI containers without the punkt corpus downloaded).
     """
     try:
-        import nltk # type: ignore
+        import nltk  # type: ignore
+
         try:
-            from nltk.tokenize import sent_tokenize # type: ignore
+            from nltk.tokenize import sent_tokenize  # type: ignore
+
             sentences = sent_tokenize(text)
             if sentences:
                 return sentences
@@ -38,7 +42,8 @@ def _split_into_sentences(text: str) -> List[str]:
             # punkt_tab / punkt corpus not downloaded – trigger download once
             try:
                 nltk.download("punkt_tab", quiet=True)
-                from nltk.tokenize import sent_tokenize # type: ignore
+                from nltk.tokenize import sent_tokenize  # type: ignore
+
                 return sent_tokenize(text)
             except Exception:
                 pass
@@ -110,7 +115,8 @@ def chunk_text(
 
     Returns:
         List of chunk strings.
-    """    if not text or not text.strip():
+    """
+    if not text or not text.strip():
         return []
 
     if overlap_percentage is not None:
@@ -130,10 +136,13 @@ def chunk_text(
             metadata = {}
             if word_headings:
                 first_word_idx = current_chunk_with_indices[0][1]
-                if first_word_idx < len(word_headings) and word_headings[first_word_idx] is not None:
+                if (
+                    first_word_idx < len(word_headings)
+                    and word_headings[first_word_idx] is not None
+                ):
                     metadata["section_title"] = word_headings[first_word_idx]
 
-if len(chunk_str.split()) >= min_words:
+            if len(chunk_str.split()) >= min_words:
                 chunks.append(ChunkString(chunk_str, metadata=metadata))
 
             if len(chunks) >= max_chunks:
@@ -143,7 +152,8 @@ if len(chunk_str.split()) >= min_words:
                 )
                 return chunks
 
-            # Retain overlap words from the end of the previous chunk            overlap_words = []
+            # Retain overlap words from the end of the previous chunk
+            overlap_words = []
             overlap_len = 0
             for w, idx in reversed(current_chunk_with_indices):
                 if overlap_len + len(w) + 1 <= chunk_overlap:
@@ -162,7 +172,10 @@ if len(chunk_str.split()) >= min_words:
         metadata = {}
         if word_headings:
             first_word_idx = current_chunk_with_indices[0][1]
-            if first_word_idx < len(word_headings) and word_headings[first_word_idx] is not None:
+            if (
+                first_word_idx < len(word_headings)
+                and word_headings[first_word_idx] is not None
+            ):
                 metadata["section_title"] = word_headings[first_word_idx]
         if len(chunk_str.split()) >= min_words:
             chunks.append(ChunkString(chunk_str, metadata=metadata))
@@ -232,7 +245,10 @@ def chunk_by_sentences(
         if current_sentences and current_length + added_length > max_chunk_size:
             # Flush the current block if it meets the minimum sentence count
             block = " ".join(current_sentences)
-            if len(current_sentences) >= min_sentences and len(block.split()) >= min_words:
+            if (
+                len(current_sentences) >= min_sentences
+                and len(block.split()) >= min_words
+            ):
                 chunks.append(ChunkString(block))
             elif current_sentences:
                 # Below min_sentences threshold – still emit to avoid data loss
