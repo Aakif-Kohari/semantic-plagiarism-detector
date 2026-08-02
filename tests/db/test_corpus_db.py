@@ -18,6 +18,7 @@ from src.db.corpus_db import (
     get_document_count_by_user,
     get_document_word_counts,
     get_documents_by_class,
+    get_total_document_count,
     get_unique_class_sections,
     purge_stale_trash,
     restore_document,
@@ -431,18 +432,14 @@ def test_get_document_count_by_user_returns_int(mock_db):
     result = get_document_count_by_user("alice")
     assert isinstance(result, int)
     assert result == 1
-    
-def test_get_documents_by_extension():
-    """Verify get_documents_by_extension retrieves active documents with specified file extensions."""
-    from src.db.corpus_db import get_documents_by_extension
 
-    # Test with standard dot notation and raw extension
-    pdf_docs = get_documents_by_extension(".pdf")
-    docx_docs = get_documents_by_extension("docx")
 
-    assert isinstance(pdf_docs, list)
-    assert isinstance(docx_docs, list)
+def test_get_total_document_count(mock_db):
+    assert get_total_document_count() == 0
+    add_document("doc1.pdf", "hash_doc1")
+    add_document("doc2.pdf", "hash_doc2")
+    assert get_total_document_count() == 2
+    soft_delete_document("doc1.pdf")
+    assert get_total_document_count() == 1
+    assert get_total_document_count(include_deleted=True) == 2
 
-    # Test invalid / empty edge cases
-    assert get_documents_by_extension("") == []
-    assert get_documents_by_extension(None) == []

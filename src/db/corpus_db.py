@@ -718,33 +718,16 @@ def purge_stale_trash(days_in_trash: int = 30) -> int:
             logger.error(f"Failed to purge stale trashed document {filename}: {e}")
 
     return deleted_count
-def get_documents_by_extension(ext: str) -> list[dict]:
-    """
-    Fetch all active document records matching a specific file extension (e.g. '.pdf' or 'pdf').
 
-    Args:
-        ext: File extension to filter by (with or without leading dot).
 
-    Returns:
-        list[dict]: List of document dictionaries matching the extension.
-    """
-    if not ext or not isinstance(ext, str):
-        return []
+def get_total_document_count(include_deleted: bool = False) -> int:
+    """Return the total count of non-deleted (or all) indexed documents in the corpus database."""
+    with _connect() as conn:
+        if include_deleted:
+            row = conn.execute("SELECT COUNT(1) FROM documents").fetchone()
+        else:
+            row = conn.execute(
+                "SELECT COUNT(1) FROM documents WHERE is_deleted IS NULL OR is_deleted = 0"
+            ).fetchone()
+        return int(row[0]) if row else 0
 
-    clean_ext = ext.strip().lstrip(".").lower()
-    if not clean_ext:
-        return []
-
-    pattern = f"%.{clean_ext}"
-
-    try:
-        with _connect() as conn:
-            cursor = conn.execute(
-                "SELECT * FROM documents WHERE filename LIKE ? AND is_deleted = 0",
-                (pattern,),
-            )
-            columns = [column[0] for column in cursor.description]
-            return [dict(zip(columns, row)) for row in cursor.fetchall()]
-    except Exception as exc:
-        logger.error(f"[corpus_db] Failed to fetch documents by extension '{ext}': {exc}")
-        return []

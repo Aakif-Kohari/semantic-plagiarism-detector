@@ -200,14 +200,7 @@ from src.utils.badge_generator import (
     generate_badge_png,
     generate_badge_pdf,
 )
-from src.db.corpus_db import (
-    delete_tag,
-    get_all_documents,
-    get_all_tags,
-    get_document_tags,
-    get_tag_document_count,
-    init_corpus_db,
-)
+from src.db.corpus_db import get_document_tags, get_total_document_count, init_corpus_db
 from src.db.incidents import (
     get_all_incidents_above_threshold_for_export,
     get_high_severity_trends,
@@ -1643,9 +1636,10 @@ doc_names = list(raw_texts.keys())
 n_docs = len(doc_names)
 total_pairs = n_docs * (n_docs - 1) // 2 if n_docs > 1 else 0
 n_flagged = len(flags)
+total_doc_count = max(n_docs, get_total_document_count())
 
 col1, col2, col3, col4, col5 = st.columns(5)
-col1.metric("Documents", n_docs)
+col1.metric("Total Documents", total_doc_count)
 col2.metric("Pairs Evaluated", total_pairs)
 col3.metric("Flagged Pairs", n_flagged)
 col4.metric("FAISS Vectors", faiss_index.ntotal if faiss_index is not None else 0)
