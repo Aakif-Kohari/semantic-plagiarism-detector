@@ -352,3 +352,86 @@ def plot_document_sizes(word_counts: dict[str, int], show_grid: bool = True) -> 
 
     return fig
 
+
+def plot_similarity_percentiles(
+    similarity_scores: list[float],
+    show_grid: bool = True,
+) -> go.Figure:
+    """Create a horizontal bar chart of the similarity score percentile breakdown.
+
+    Computes the 25th, 50th (median), 75th, and 90th percentiles of the given
+    similarity scores with np.percentile() to summarise the overall similarity
+    distribution. Non-numeric values are ignored.
+
+    Args:
+        similarity_scores: List of similarity scores (0.0–1.0).
+        show_grid: Whether to show chart gridlines.
+
+    Returns:
+        Plotly Figure object with one horizontal bar per percentile.
+    """
+    scores: list[float] = []
+    for value in similarity_scores:
+        try:
+            scores.append(float(value))
+        except (TypeError, ValueError):
+            continue
+
+    if not scores:
+        # Return empty chart with message
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No similarity scores available to compute percentiles",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
+            font=dict(size=16, color="gray"),
+        )
+        fig.update_layout(
+            title="Similarity Score Percentile Breakdown",
+            xaxis_title="Similarity Score",
+            yaxis_title="Percentile",
+            height=400,
+            autosize=True,
+        )
+        fig.update_xaxes(showgrid=show_grid)
+        fig.update_yaxes(showgrid=show_grid)
+        return fig
+
+    percentile_values = np.percentile(scores, [25, 50, 75, 90])
+    percentile_labels = ["25th", "50th (Median)", "75th", "90th"]
+
+    fig = px.bar(
+        x=percentile_values,
+        y=percentile_labels,
+        orientation="h",
+        title="Similarity Score Percentile Breakdown",
+        labels={
+            "x": "Similarity Score",
+            "y": "Percentile",
+        },
+        range_x=[0.0, 1.0],
+    )
+
+    fig.update_layout(
+        xaxis_title="Similarity Score",
+        yaxis_title="Percentile",
+        height=400,
+        showlegend=False,
+        autosize=True,
+    )
+
+    fig.update_xaxes(showgrid=show_grid)
+    fig.update_yaxes(showgrid=show_grid)
+
+    fig.update_traces(
+        marker_color="#636efa",
+        marker_line_color="#4a4dba",
+        marker_line_width=1,
+        hovertemplate="<b>%{y}</b><br>Similarity Score: %{x:.2f}<extra></extra>",
+    )
+
+    return fig
+
