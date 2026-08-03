@@ -433,6 +433,17 @@ try:
 except ImportError:
     Tour = None
 
+# ── Auto-refresh component for the Live Incident Stream (Issue #1384) ───────
+try:
+    from streamlit_autorefresh import st_autorefresh
+except ImportError:
+    st_autorefresh = None
+    logger.warning(
+        "streamlit-autorefresh is not installed; the auto-refresh toggle "
+        "on the Live Incident Stream tab will be disabled."
+    )
+
+
 try:
     from src.utils.google_drive import bulk_download_drive_folder
 except Exception:
@@ -1932,6 +1943,50 @@ with tab_warnings:
     update_page_title("Warnings")
     st.subheader(get_text("tab_warnings", lang=lang_code))
 
+    # ── Issue #1384: Auto-refresh toggle for the Live Incident Stream ───
+    # When enabled, the dashboard re-runs every 30 seconds so newly
+    # flagged plagiarism incidents appear without a manual page reload.
+    # When disabled, no autorefresh timer is scheduled and the page
+    # behaves as a normal static dashboard.
+    auto_refresh_enabled = st.toggle(
+        "Auto-refresh live feed (30s)",
+        value=False,
+        key="auto_refresh_incident_stream",
+        help=(
+            "When enabled, the incident feed re-runs every 30 seconds "
+            "to surface newly flagged submissions automatically."
+        ),
+    )
+
+    # Schedule the autorefresh timer ONLY when the toggle is on.
+    # st_autorefresh is called as a top-level statement inside the tab
+    # so it can register the rerun hook with Streamlit's script runner.
+    if auto_refresh_enabled and st_autorefresh is not None:
+        st_autorefresh(
+            interval=30 * 1000,           # 30 seconds in milliseconds
+            key="incident_stream_autorefresh",
+        )
+
+    # Persist the toggle state across reruns (already implicit via the
+    # `key=` argument, but we mirror it here for downstream consumers).
+    st.session_state["incident_stream_auto_refresh"] = auto_refresh_enabled
+
+    # Status indicator shown next to the toggle so the instructor can
+    # tell at a glance whether live refresh is active.
+    if auto_refresh_enabled:
+        if st_autorefresh is None:
+            st.warning(
+                "Auto-refresh is enabled, but the `streamlit-autorefresh` "
+                "package is not installed. Install it via "
+                "`pip install streamlit-autorefresh`."
+            )
+        else:
+            st.caption("🔴 Live — refreshing every 30 seconds.")
+    else:
+        st.caption("⚪ Live feed paused — toggle on to auto-refresh.")
+
+    st.divider()
+
     # Initialize expand/collapse state
     if "warnings_expand_all" not in st.session_state:
         st.session_state.warnings_expand_all = False
@@ -1948,9 +2003,8 @@ with tab_warnings:
 
     start_date, end_date = get_date_range_preset(date_preset)
     st.caption(
-        f"Filtering incidents from **{start_date.strftime('%Y-%m-%d')}** to **{end_date.strftime('%Y-%m-%d')}**"
-        f"Filtering incidents from **{start_date.strftime('%Y-%m-%d')}** "
-        f"to **{end_date.strftime('%Y-%m-%d')}**"
+        f"Filtering incidents from **{start_date.strftime('%Y-%m-%d')}** to "
+        f"**{end_date.strftime('%Y-%m-%d')}**"
     )
 
     # Note: The actual filtering logic would be applied to the incidents dataframe
@@ -1961,6 +2015,7 @@ with tab_warnings:
     elif render_warning_controls is not None:
         render_warning_controls(
             flags, threshold=threshold, ai_probabilities=ai_probabilities
+        )
 
         # Master Expand/Collapse button
         button_label = (
@@ -1981,7 +2036,7 @@ with tab_warnings:
             ai_probabilities=ai_probabilities,
             expanded=st.session_state.warnings_expand_all,   # <-- pass state
         )
-
+        
 # ══ TAB 2: FAISS ══════════════════════════════════════════════════════════
 with tab_faiss:
     update_page_title("FAISS")
