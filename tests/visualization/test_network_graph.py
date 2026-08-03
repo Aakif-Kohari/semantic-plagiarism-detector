@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import networkx as nx
 import pandas as pd
+import plotly.graph_objects as go
 import pytest
 
 from src.visualization.network_graph import export_network_adjacency_csv
@@ -49,7 +50,8 @@ def test_build_network_data_structure():
     }
     df = pd.DataFrame(data, index=["doc1", "doc2", "doc3"])
 
-    net_data = build_network_data(df, threshold=0.75)
+    # show_isolated=True keeps doc3 (isolated node) in the graph for structure checks
+    net_data = build_network_data(df, threshold=0.75, show_isolated=True)
 
     assert "shapes" in net_data
     assert "edge_hover_trace" in net_data
@@ -418,5 +420,79 @@ def test_build_network_data_node_scale_custom():
 
     for d, s in zip(default_sizes, scaled_sizes):
         assert s == pytest.approx(d * 2.0)
+
+
+# ==============================================================================
+# Isolated Nodes Visibility Toggle Tests (Issue #1399)
+# ==============================================================================
+
+
+def _three_doc_matrix():
+    """Return a matrix where doc3 has no similarity >= threshold (isolated)."""
+    data = {
+        "doc1": [1.0, 0.85, 0.20],
+        "doc2": [0.85, 1.0, 0.10],
+        "doc3": [0.20, 0.10, 1.0],
+    }
+    return pd.DataFrame(data, index=["doc1", "doc2", "doc3"])
+
+
+def test_build_network_data_filters_isolated_nodes_by_default():
+    """Verify isolated nodes (degree 0) are removed when show_isolated=False (default)."""
+    df = _three_doc_matrix()
+
+    net_data = build_network_data(df, threshold=0.75)
+
+    assert set(net_data["graph"].nodes()) == {"doc1", "doc2"}
+    assert list(net_data["node_trace"].customdata) == ["doc1", "doc2"]
+
+
+def test_build_network_data_keeps_isolated_nodes_when_show_isolated():
+    """Verify all nodes remain when show_isolated=True."""
+    df = _three_doc_matrix()
+
+    net_data = build_network_data(df, threshold=0.75, show_isolated=True)
+
+    assert set(net_data["graph"].nodes()) == {"doc1", "doc2", "doc3"}
+    assert set(net_data["node_trace"].customdata) == {"doc1", "doc2", "doc3"}
+
+
+def test_plot_similarity_network_filters_isolated_nodes():
+    """Verify plot_similarity_network excludes isolated nodes by default."""
+    df = _three_doc_matrix()
+
+    fig = plot_similarity_network(df, threshold=0.75)
+
+    assert len(fig.layout.shapes) == 1
+    node_trace = fig.data[1]
+    assert list(node_trace.customdata) == ["doc1", "doc2"]
+
+
+def test_plot_similarity_network_show_isolated_keeps_all_nodes():
+    """Verify plot_similarity_network keeps isolated nodes when show_isolated=True."""
+    df = _three_doc_matrix()
+
+    fig = plot_similarity_network(df, threshold=0.75, show_isolated=True)
+
+    assert len(fig.layout.shapes) == 1
+    node_trace = fig.data[1]
+    assert set(node_trace.customdata) == {"doc1", "doc2", "doc3"}
+
+
+def test_build_network_data_all_nodes_isolated():
+    """Verify an all-isolated graph still builds a valid figure without nodes."""
+    data = {
+        "doc1": [1.0, 0.10],
+        "doc2": [0.10, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2"])
+
+    net_data = build_network_data(df, threshold=0.75)
+
+    assert set(net_data["graph"].nodes()) == set()
+    assert list(net_data["node_trace"].customdata) == []
+
+    fig = render_network_plotly(net_data, title="Empty")
+    assert isinstance(fig, go.Figure)
 
 
