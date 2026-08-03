@@ -2,13 +2,12 @@
 
 import logging
 import os
+from datetime import datetime, timezone
 import psutil
 import numpy as np
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status, Request, Security
 from typing import Dict
-from fastapi import Request
-from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
 from fastapi.exceptions import RequestValidationError
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -25,6 +24,7 @@ from src.api.schemas import (
     HealthzResponse,
     LoginResponse,
     SimilarityCheckResponse,
+    StatusResponse,
 )
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -194,6 +194,27 @@ def health_check():
         "status": "healthy",
         "service": "Semantic Plagiarism Detector API",
         "version": "1.0.0",
+    }
+
+
+@app.get(
+    "/api/v1/status",
+    tags=["Health"],
+    summary="Get service status, API version, and server UTC time",
+    response_model=StatusResponse,
+    status_code=status.HTTP_200_OK,
+)
+def get_service_status(request: Request):
+    """Public status endpoint returning service info, API version, and server UTC time.
+
+    Returns a standardized JSON payload with the current service status, the API
+    version, and the server timestamp in ISO 8601 UTC format so external clients
+    can quickly confirm the service is online.
+    """
+    return {
+        "status": "online",
+        "version": request.app.version,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
