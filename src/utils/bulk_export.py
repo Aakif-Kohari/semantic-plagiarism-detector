@@ -1,7 +1,26 @@
+"""
+src/utils/bulk_export.py
+-------------------------
+Bulk export utilities for generating ZIP archives containing per-pair
+plagiarism reports (PDF, CSV, JSON) and incident CSV streams.
+
+Provides functions to:
+- Stream incident data into CSV format with UTF-8-SIG encoding
+- Generate multi-format ZIP archives with plagiarism reports
+- Normalize CSV column headers to standardized formats
+
+Recent Additions (Issue #1253):
+- Added `normalize_csv_headers` function that strips whitespace and
+  replaces invalid symbols with underscores in CSV column headers,
+  ensuring standardized snake_case or Title Case formatting without
+  trailing spaces.
+"""
+
 import csv
 import io
 import json
 import logging
+import re
 import zipfile
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -24,6 +43,106 @@ _CSV_HEADERS = [
     "Status",
     "Date",
 ]
+
+# Regular expression pattern matching characters that are invalid
+# or problematic in CSV column headers. These include special symbols,
+# punctuation marks, whitespace, and other non-alphanumeric characters
+# (except underscores and hyphens which are preserved).
+_INVALID_HEADER_CHARS_PATTERN = re.compile(r"[^\w\s\-]")
+
+# Pattern to match multiple consecutive underscores for collapsing
+_MULTIPLE_UNDERSCORES_PATTERN = re.compile(r"_{2,}")
+
+# Pattern to match leading and trailing underscores or whitespace
+_LEADING_TRAILING_PATTERN = re.compile(r"^[\s_]+|[\s_]+$")
+
+
+def normalize_csv_headers(headers: list[str]) -> list[str]:
+    """Normalize CSV column headers to a standardized, clean format.
+
+    Processes each header string by stripping leading/trailing whitespace,
+    replacing invalid symbols and spaces with underscores, collapsing
+    consecutive underscores, and removing leading/trailing underscores.
+    The result is a list of standardized snake_case-style headers that are
+    safe for use in CSV files, databases, and data processing pipelines.
+
+    The normalization rules applied to each header:
+    1. Strip leading and trailing whitespace
+    2. Replace spaces and invalid symbols (anything not alphanumeric,
+       underscore, or hyphen) with underscores
+    3. Collapse multiple consecutive underscores into a single underscore
+    4. Strip leading and trailing underscores from the result
+    5. If the result is empty after normalization, use 'column_N' where
+       N is the 0-based index of the header
+
+    Args:
+        headers: A list of header strings to normalize. May contain
+            whitespace, special symbols, punctuation, or mixed case.
+
+    Returns:
+        A new list of normalized header strings. Each header is
+        stripped of whitespace, has invalid symbols replaced with
+        underscores, and consecutive underscores collapsed.
+
+    Examples:
+        >>> normalize_csv_headers(["  Incident ID ", "Doc A!", "similarity_score"])
+        ['Incident_ID', 'Doc_A', 'similarity_score']
+
+        >>> normalize_csv_headers(["First Name", "Last Name!!!", "  Age  "])
+        ['First_Name', 'Last_Name', 'Age']
+
+        >>> normalize_csv_headers(["", "   ", "valid_header"])
+        ['column_0', 'column_1', 'valid_header']
+
+        >>> normalize_csv_headers(["Hello World", "Test@#$%Header", "foo__bar"])
+        ['Hello_World', 'Test_Header', 'foo_bar']
+    """
+    if not headers or not isinstance(headers, list):
+        logger.debug("normalize_csv_headers: empty or invalid input, returning empty list")
+        return []
+
+    normalized: list[str] = []
+
+    for index, header in enumerate(headers):
+        # Handle non-string headers by converting to string first
+        if not isinstance(header, str):
+            header = str(header)
+
+        # Step 1: Strip leading and trailing whitespace
+        cleaned = header.strip()
+
+        # Step 2: Replace invalid characters (anything not alphanumeric,
+        # underscore, or hyphen) with underscores
+        cleaned = _INVALID_HEADER_CHARS_PATTERN.sub("_", cleaned)
+
+        # Step 3: Replace spaces with underscores
+        cleaned = cleaned.replace(" ", "_")
+
+        # Step 4: Collapse multiple consecutive underscores into one
+        cleaned = _MULTIPLE_UNDERSCORES_PATTERN.sub("_", cleaned)
+
+        # Step 5: Strip leading and trailing underscores
+        cleaned = _LEADING_TRAILING_PATTERN.sub("", cleaned)
+
+        # Step 6: If the header is empty after cleaning, use a fallback name
+        if not cleaned:
+            cleaned = f"column_{index}"
+            logger.debug(
+                "normalize_csv_headers: header at index %d was empty after "
+                "normalization, using fallback name '%s'.",
+                index,
+                cleaned,
+            )
+
+        normalized.append(cleaned)
+
+    logger.debug(
+        "normalize_csv_headers: normalized %d header(s): %s",
+        len(normalized),
+        normalized,
+    )
+
+    return normalized
 
 
 def export_incidents_csv_stream(incidents_list: List[Dict]) -> bytes:
@@ -196,20 +315,20 @@ def generate_bulk_reports_zip(
                     logger.error(
                         "Failed to generate PDF for %s ↔ %s: %s", doc_a, doc_b, exc
                     )
-                    # Fallback JSON per‑pair if PDF generation fails
-                    safe_a = _sanitise_filename(doc_a)
-                    safe_b = _sanitise_filename(doc_b)
-                    fallback = {
-                        "generated_at": datetime.now().isoformat(),
-                        "document_a": doc_a,
-                        "document_b": doc_b,
-                        "similarity_score": score,
-                        "threshold": threshold,
-                        "note": "PDF generation failed; JSON fallback provided.",
-                    }
-                    zf.writestr(
-                        f"report_{safe_a}_{safe_b}.json", json.dumps(fallback, indent=2)
-                    )
+            # Fallback JSON per‑pair if PDF generation fails
+            safe_a = _sanitise_filename(doc_a)
+            safe_b = _sanitise_filename(doc_b)
+            fallback = {
+                "generated_at": datetime.now().isoformat(),
+                "document_a": doc_a,
+                "document_b": doc_b,
+                "similarity_score": score,
+                "threshold": threshold,
+                "note": "PDF generation failed; JSON fallback provided.",
+            }
+            zf.writestr(
+                f"report_{safe_a}_{safe_b}.json", json.dumps(fallback, indent=2)
+            )
 
         # Optional CSV summary
         if include_csv:
