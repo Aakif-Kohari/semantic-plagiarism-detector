@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.core.ai_detector import (
+    categorize_ai_probability,
     detect_ai_generated_text,
     detect_ai_probability,
     detect_ai_probability_batch,
@@ -17,6 +18,10 @@ from src.core.ai_detector import (
 )
 
 
+def test_categorize_ai_probability_boundaries():
+    assert categorize_ai_probability(0.85) == "High Probability"
+    assert categorize_ai_probability(0.65) == "Moderate Probability"
+    assert categorize_ai_probability(0.20) == "Low Probability"
 
 @pytest.fixture(autouse=True)
 def mock_transformers_pipeline():

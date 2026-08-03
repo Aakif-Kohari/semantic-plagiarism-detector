@@ -21,9 +21,11 @@ set_tour_completed(username, completed)-> None
 from __future__ import annotations
 
 import datetime
+import json
 import os
 import re
 import sqlite3
+from datetime import datetime, timezone
 
 import bcrypt
 from argon2 import PasswordHasher
@@ -60,7 +62,7 @@ def configure_db_path(db_path: str | os.PathLike) -> None:
 
 
 def _connect() -> sqlite3.Connection:
-    return sqlite3.connect(_DB_PATH, check_same_thread=False)
+    return sqlite3.connect(_DB_PATH, timeout=15.0, check_same_thread=False)
 
 
 def log_security_event(
@@ -334,8 +336,12 @@ def delete_user(username: str) -> None:
         raise sqlite3.Error(f"Failed to delete user: {e}") from e
 
 
-def update_password(username: str, new_password: str) -> None:
+def update_password(username: str, new_password: str, current_user: str | None = None) -> None:
     """Update a user's password with a new Argon2 hash."""
+    if current_user and current_user != username:
+        if get_user_role(current_user) != "admin":
+            raise PermissionError("Unauthorized password modifications for foreign user_ids")
+
     try:
         username = _validate_username(username)
         new_password = _validate_password(new_password)
@@ -349,10 +355,24 @@ def update_password(username: str, new_password: str) -> None:
                 raise ValueError("User not found.")
 
             hashed = _hash_password(new_password)
-            conn.execute(
-                "UPDATE users SET password = ? WHERE username = ?",
-                (hashed, username),
+            password_changed_at = datetime.now(
+                timezone.utc
+            ).isoformat()
+            cursor = conn.execute(
+                """
+                UPDATE users
+                SET password = ?,
+                    password_changed_at = ?
+                WHERE username = ?
+                """,
+                (
+                    hashed,
+                    password_changed_at,
+                    username,
+                ),
             )
+            if cursor.rowcount != 1:
+                raise ValueError("User not found.")
             conn.commit()
 
         log_security_event(
@@ -614,32 +634,54 @@ def get_user_count() -> int:
         row = cursor.fetchone()
         return row[0] if row else 0
 
-def get_notification_preferences(username: str) -> dict:
+
+def format_user_created_date(iso_str: str) -> str:
+    """Format an ISO date string as a human-readable date (e.g. "Jul 28, 2026").
+
+    Acceptance criteria (issue #1049):
+        - Parse ISO string and return formatted date string.
+        - Handle empty/invalid inputs gracefully.
+
+    Args:
+        iso_str: An ISO 8601 date/datetime string (e.g.
+            ``"2026-07-28T14:30:00Z"``, ``"2026-07-28"``,
+            ``"2026-07-28 14:30:00"``).
+
+    Returns:
+        A formatted date string like ``"Jul 28, 2026"`` on success,
+        or ``"Unknown"`` if the input is empty, ``None``, or cannot be
+        parsed.
     """
-    Retrieve notification preferences (email & webhook) for a given user.
-    """
-    user_prefs = get_user_preferences(username)
-    return {
-        "email_notifications": user_prefs.get("email_notifications", True),
-        "webhook_notifications": user_prefs.get("webhook_notifications", True),
-    }
+    if not iso_str or not isinstance(iso_str, str):
+        return "Unknown"
 
-def get_notification_preferences(username: str) -> dict:
-    """Retrieve notification preferences (email & webhook) for a given user."""
-    user_prefs = get_user_preferences(username)
-    return {
-        "email_notifications": user_prefs.get("email_notifications", True),
-        "webhook_notifications": user_prefs.get("webhook_notifications", True),
-    }
+    iso_str = iso_str.strip()
+    if not iso_str:
+        return "Unknown"
 
+    # Try dateutil.parser first — it handles virtually any ISO format.
+    try:
+        from dateutil import parser as dateutil_parser
 
-def update_notification_preferences(
-    username: str, email_notifications: bool, webhook_notifications: bool
-) -> dict:
-    """Update notification preferences for a given user."""
-    prefs = {
-        "email_notifications": email_notifications,
-        "webhook_notifications": webhook_notifications,
-    }
-    update_user_preferences(username, prefs)
-    return prefs
+        dt = dateutil_parser.parse(iso_str)
+        return dt.strftime("%b %d, %Y")
+    except Exception:
+        pass
+
+    # Fallback: try Python's datetime.fromisoformat (3.7+).
+    # Strip trailing 'Z' which fromisoformat doesn't accept in 3.9–3.10.
+    cleaned = iso_str.rstrip("Z")
+    for parser_fn in (
+        datetime.datetime.fromisoformat,
+        lambda s: datetime.datetime.strptime(s, "%Y-%m-%d"),
+        lambda s: datetime.datetime.strptime(s, "%Y-%m-%d %H:%M:%S"),
+        lambda s: datetime.datetime.strptime(s, "%Y-%m-%dT%H:%M:%S"),
+    ):
+        try:
+            dt = parser_fn(cleaned)
+            return dt.strftime("%b %d, %Y")
+        except Exception:
+            continue
+
+    return "Unknown"
+    

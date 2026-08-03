@@ -5,7 +5,7 @@ import json
 import os
 from datetime import datetime
 from io import BytesIO
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 
 import pytest
 
@@ -369,11 +369,9 @@ def test_compress_pdf_buffer_all_fail(monkeypatch):
 
     monkeypatch.setattr(fitz, "open", mock_fitz_open)
 
-    # Disable pypdf and PyPDF2 locally to test full fallback safety
+    # Disable pypdf locally to test full fallback safety
     original_pypdf = sys.modules.get("pypdf")
-    original_PyPDF2 = sys.modules.get("PyPDF2")
     sys.modules["pypdf"] = None
-    sys.modules["PyPDF2"] = None
 
     try:
         # Generate plagiarism report where all compression libraries are unavailable/fail
@@ -398,11 +396,6 @@ def test_compress_pdf_buffer_all_fail(monkeypatch):
             sys.modules["pypdf"] = original_pypdf
         else:
             sys.modules.pop("pypdf", None)
-
-        if original_PyPDF2 is not None:
-            sys.modules["PyPDF2"] = original_PyPDF2
-        else:
-            sys.modules.pop("PyPDF2", None)
 
 
 # ── Snapshot / Golden Fixture Tests ────────────────────────────────────────
@@ -504,7 +497,7 @@ def test_generate_plagiarism_report_dark_mode():
 def test_load_branding_logo_returns_bytes_for_valid_path(tmp_path):
     """load_branding_logo returns bytes when logo_path points to a real file."""
     import json
-    from src.utils.pdf_report import load_branding_logo, _BRANDING_CONFIG_PATH
+    from src.utils.pdf_report import load_branding_logo
 
     logo_file = tmp_path / "logo.png"
     logo_file.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)  # minimal PNG header
@@ -633,3 +626,38 @@ def test_generate_plagiarism_report_auto_detect_dark_mode():
     pdf_bytes = pdf_buffer.getvalue()
     assert pdf_bytes.startswith(b"%PDF")
     st.session_state.theme = "Light"
+
+
+# ── i18n / language header tests ──────────────────────────────────────────
+
+
+def test_pdf_report_headers_spanish():
+    """PDF table headers are translated to Spanish when language='es'."""
+    pdf_buffer = generate_plagiarism_report(
+        doc_a="alumno_a.pdf",
+        doc_b="alumno_b.pdf",
+        overall_similarity=0.80,
+        threshold=0.59,
+        top_pairs=[("Párrafo A.", "Párrafo B.", 0.82)],
+        language="es",
+    )
+    text = _read_text(pdf_buffer.getvalue())
+    assert "Nombre del Documento" in text
+    assert "Puntuación de Similitud" in text or "Puntuaci" in text
+    assert "Umbral de Detección" in text or "Umbral de Detecci" in text
+
+
+def test_pdf_report_headers_french():
+    """PDF table headers are translated to French when language='fr'."""
+    pdf_buffer = generate_plagiarism_report(
+        doc_a="etudiant_a.pdf",
+        doc_b="etudiant_b.pdf",
+        overall_similarity=0.80,
+        threshold=0.59,
+        top_pairs=[("Paragraphe A.", "Paragraphe B.", 0.82)],
+        language="fr",
+    )
+    text = _read_text(pdf_buffer.getvalue())
+    assert "Nom du Document" in text
+    assert "Score de Similarit" in text
+    assert "Seuil de D" in text

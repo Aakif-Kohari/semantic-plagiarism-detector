@@ -26,8 +26,9 @@ _CSV_HEADERS = [
 ]
 
 
-def export_incidents_csv_stream(incidents_list: List[Dict]) -> io.StringIO:
-    """Stream a list of incident dicts into a CSV-formatted :class:`io.StringIO`.
+def export_incidents_csv_stream(incidents_list: List[Dict]) -> bytes:
+    """Stream a list of incident dicts into a CSV-formatted byte stream
+    encoded with **utf-8-sig** (UTF-8 with BOM) for Excel compatibility.
 
     The function writes the following columns in order:
 
@@ -47,14 +48,15 @@ def export_incidents_csv_stream(incidents_list: List[Dict]) -> io.StringIO:
 
     Returns
     -------
-    io.StringIO
-        A seeked-to-position-0 ``StringIO`` buffer ready for reading or
-        passing directly to a Streamlit download button.
+    bytes
+        UTF-8-SIG encoded CSV byte stream (includes UTF-8 BOM) ready for
+        direct use with Streamlit download buttons or file writing, ensuring
+        Excel on Windows opens the file with correct character encoding.
 
     Examples
     --------
-    >>> buf = export_incidents_csv_stream(incidents)
-    >>> csv_text = buf.read()
+    >>> csv_bytes = export_incidents_csv_stream(incidents)
+    >>> assert csv_bytes.startswith(b"\\xef\\xbb\\xbf")  # UTF-8 BOM
     """
     output = io.StringIO()
     writer = csv.DictWriter(
@@ -84,13 +86,15 @@ def export_incidents_csv_stream(incidents_list: List[Dict]) -> io.StringIO:
             }
         )
 
-    output.seek(0)
-    return output
+    csv_text = output.getvalue()
+    return csv_text.encode("utf-8-sig")
 
 
 def _sanitise_filename(name: str) -> str:
     """Strip non-alphanumeric characters (except ``-``, ``_``) for safe filenames."""
-    return "".join(c for c in name if c.isalnum() or c in ("-", "_")) .rstrip() or "unnamed"
+    return (
+        "".join(c for c in name if c.isalnum() or c in ("-", "_")).rstrip() or "unnamed"
+    )
 
 
 def generate_bulk_reports_zip(
@@ -138,16 +142,23 @@ def generate_bulk_reports_zip(
             threshold = float(flag.get("threshold_at_time_of_flag", 0.5))
 
             # Gather CSV row data early
-            csv_rows.append({
-                "doc_a": doc_a,
-                "doc_b": doc_b,
-                "similarity_score": score,
-                "threshold_at_time_of_flag": threshold,
-            })
+            csv_rows.append(
+                {
+                    "doc_a": doc_a,
+                    "doc_b": doc_b,
+                    "similarity_score": score,
+                    "threshold_at_time_of_flag": threshold,
+                }
+            )
 
             # Attempt to enrich the report with top matching chunk pairs
             top_pairs = []
-            if chunked_docs and embeddings and doc_a in chunked_docs and doc_b in chunked_docs:
+            if (
+                chunked_docs
+                and embeddings
+                and doc_a in chunked_docs
+                and doc_b in chunked_docs
+            ):
                 try:
                     emb_a = embeddings[doc_a]
                     emb_b = embeddings[doc_b]
@@ -182,7 +193,9 @@ def generate_bulk_reports_zip(
                     pdf_filename = f"report_{safe_a}_{safe_b}.pdf"
                     zf.writestr(pdf_filename, pdf_buffer.getvalue())
                 except Exception as exc:
-                    logger.error("Failed to generate PDF for %s ↔ %s: %s", doc_a, doc_b, exc)
+                    logger.error(
+                        "Failed to generate PDF for %s ↔ %s: %s", doc_a, doc_b, exc
+                    )
                     # Fallback JSON per‑pair if PDF generation fails
                     safe_a = _sanitise_filename(doc_a)
                     safe_b = _sanitise_filename(doc_b)
@@ -194,7 +207,9 @@ def generate_bulk_reports_zip(
                         "threshold": threshold,
                         "note": "PDF generation failed; JSON fallback provided.",
                     }
-                    zf.writestr(f"report_{safe_a}_{safe_b}.json", json.dumps(fallback, indent=2))
+                    zf.writestr(
+                        f"report_{safe_a}_{safe_b}.json", json.dumps(fallback, indent=2)
+                    )
 
         # Optional CSV summary
         if include_csv:

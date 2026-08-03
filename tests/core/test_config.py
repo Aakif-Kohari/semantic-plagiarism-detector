@@ -1,5 +1,4 @@
 import os
-import sys
 import json
 import tempfile
 import importlib.util
@@ -8,6 +7,8 @@ import importlib.util
 config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'core', 'config.py')
 spec = importlib.util.spec_from_file_location("config_module", config_path)
 config_module = importlib.util.module_from_spec(spec)
+import sys
+sys.modules["config_module"] = config_module
 spec.loader.exec_module(config_module)
 
 BrandingConfig = config_module.BrandingConfig
@@ -155,3 +156,25 @@ def test_to_dict():
     
     assert data["brand_color"] == "#ff0000"
     assert data["logo_path"] == "/path/to/logo.png"
+
+
+def test_get_allowed_webhook_domains(monkeypatch):
+    """Test get_allowed_webhook_domains under various environment configurations."""
+    from src.core.app_config import get_allowed_webhook_domains
+
+    # Unset env -> returns empty list
+    monkeypatch.delenv("ALLOWED_WEBHOOK_DOMAINS", raising=False)
+    assert get_allowed_webhook_domains() == []
+
+    # Whitespace or empty -> returns empty list
+    monkeypatch.setenv("ALLOWED_WEBHOOK_DOMAINS", "   ")
+    assert get_allowed_webhook_domains() == []
+
+    # Single domain
+    monkeypatch.setenv("ALLOWED_WEBHOOK_DOMAINS", "hooks.slack.com")
+    assert get_allowed_webhook_domains() == ["hooks.slack.com"]
+
+    # Multiple domains with spaces and mixed case
+    monkeypatch.setenv("ALLOWED_WEBHOOK_DOMAINS", " hooks.slack.com, Discord.com , EXAMPLE.org ")
+    assert get_allowed_webhook_domains() == ["hooks.slack.com", "discord.com", "example.org"]
+

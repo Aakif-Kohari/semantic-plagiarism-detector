@@ -9,8 +9,10 @@ from src.core.lexical_similarity import (STOPWORDS,  # noqa: E402
 from src.core.similarity import (calculate_paragraph_similarity_breakdown,
                                  chunk_max_similarity, chunk_similarity_matrix,
                                  document_similarity_matrix,
+                                 find_exact_matches,
                                  find_most_similar_chunks, flag_plagiarism,
-                                 hybrid_similarity_matrix)
+                                 hybrid_similarity_matrix,
+                                 manhattan_similarity)
 
 
 def test_chunk_max_similarity(dummy_embeddings):
@@ -547,3 +549,173 @@ def test_calculate_paragraph_similarity_breakdown_asymmetric_doc_sizes():
     # All para_b_idx values must be valid indices into emb_b
     for _, idx_b, _ in breakdown:
         assert 0 <= idx_b < emb_b.shape[0]
+
+
+def test_find_exact_matches():
+    """Verify that find_exact_matches correctly handles case sensitivity options."""
+    text_a = "HELLO WORLD. This is a Test."
+    text_b = "hello world. this is a test."
+
+    # Default/Explicit case_sensitive=False: should match everything
+    matches_insensitive = find_exact_matches(text_a, text_b, case_sensitive=False)
+    assert "HELLO WORLD" in matches_insensitive
+    assert "This is a Test" in matches_insensitive
+
+    # case_sensitive=True: should match nothing because of casing difference
+    matches_sensitive = find_exact_matches(text_a, text_b, case_sensitive=True)
+    assert not matches_sensitive
+
+    # Matching with identical casing should work in both modes
+    text_c = "HELLO WORLD. This is a Test."
+    assert find_exact_matches(text_a, text_c, case_sensitive=True) == ["HELLO WORLD", "This is a Test"]
+
+
+
+
+def test_manhattan_similarity_identical_vectors():
+    vector = np.array([1.0, 2.0, 3.0])
+
+    assert manhattan_similarity(vector, vector) == pytest.approx(1.0)
+
+
+def test_manhattan_similarity_uses_normalized_l1_distance():
+    vector_a = np.array([0.0, 0.0])
+    vector_b = np.array([1.0, 2.0])
+
+    # L1 distance = 3, so normalized similarity = 1 / (1 + 3).
+    assert manhattan_similarity(
+        vector_a,
+        vector_b,
+    ) == pytest.approx(0.25)
+
+
+def test_manhattan_similarity_is_symmetric():
+    vector_a = np.array([-1.0, 2.5, 7.0])
+    vector_b = np.array([3.0, 0.5, -2.0])
+
+    assert manhattan_similarity(
+        vector_a,
+        vector_b,
+    ) == pytest.approx(
+        manhattan_similarity(vector_b, vector_a)
+    )
+
+
+@pytest.mark.parametrize(
+    ("vector_b", "expected_order"),
+    [
+        (np.array([0.1, 0.0]), "near"),
+        (np.array([10.0, 10.0]), "far"),
+    ],
+)
+def test_manhattan_similarity_remains_bounded(
+    vector_b,
+    expected_order,
+):
+    similarity = manhattan_similarity(
+        np.array([0.0, 0.0]),
+        vector_b,
+    )
+
+    assert 0.0 <= similarity <= 1.0
+    if expected_order == "near":
+        assert similarity > 0.5
+    else:
+        assert similarity < 0.1
+
+
+def test_manhattan_similarity_decreases_as_distance_grows():
+    origin = np.array([0.0, 0.0])
+
+    near = manhattan_similarity(
+        origin,
+        np.array([1.0, 0.0]),
+    )
+    far = manhattan_similarity(
+        origin,
+        np.array([5.0, 0.0]),
+    )
+
+    assert near > far
+
+
+def test_manhattan_similarity_supports_multidimensional_arrays():
+    array_a = np.array([[0.0, 1.0], [2.0, 3.0]])
+    array_b = np.array([[0.0, 2.0], [4.0, 3.0]])
+
+    # Flattened L1 distance is 3.
+    assert manhattan_similarity(
+        array_a,
+        array_b,
+    ) == pytest.approx(0.25)
+
+
+def test_manhattan_similarity_does_not_mutate_inputs():
+    vector_a = np.array([1.0, 2.0, 3.0])
+    vector_b = np.array([3.0, 2.0, 1.0])
+    original_a = vector_a.copy()
+    original_b = vector_b.copy()
+
+    manhattan_similarity(vector_a, vector_b)
+
+    assert np.array_equal(vector_a, original_a)
+    assert np.array_equal(vector_b, original_b)
+
+
+def test_manhattan_similarity_rejects_shape_mismatch():
+    with pytest.raises(
+        ValueError,
+        match="matching shapes",
+    ):
+        manhattan_similarity(
+            np.array([1.0, 2.0]),
+            np.array([[1.0, 2.0]]),
+        )
+
+
+def test_manhattan_similarity_rejects_empty_arrays():
+    with pytest.raises(
+        ValueError,
+        match="non-empty",
+    ):
+        manhattan_similarity(
+            np.array([]),
+            np.array([]),
+        )
+
+
+@pytest.mark.parametrize(
+    "invalid_value",
+    [np.nan, np.inf, -np.inf],
+)
+def test_manhattan_similarity_rejects_non_finite_values(
+    invalid_value,
+):
+    with pytest.raises(
+        ValueError,
+        match="finite numeric values",
+    ):
+        manhattan_similarity(
+            np.array([0.0, invalid_value]),
+            np.array([0.0, 1.0]),
+        )
+
+
+def test_manhattan_similarity_rejects_non_numeric_input():
+    with pytest.raises(
+        TypeError,
+        match="numeric array inputs",
+    ):
+        manhattan_similarity(
+            np.array(["hello"]),
+            np.array(["world"]),
+        )
+
+
+def test_manhattan_similarity_returns_python_float():
+    result = manhattan_similarity(
+        np.array([0, 1], dtype=np.int32),
+        np.array([1, 1], dtype=np.int32),
+    )
+
+    assert isinstance(result, float)

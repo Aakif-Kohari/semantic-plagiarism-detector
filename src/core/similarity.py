@@ -10,13 +10,18 @@ cosine similarity reduces to the dot product, making this very fast.
 """
 
 from typing import Dict, List, Optional, Set, Tuple, Union
+
 import faiss  # type: ignore
 import numpy as np
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 
-from src.core.config import (DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD,
-                             is_plagiarism, severity_from_score)
+from src.core.config import (
+    DEFAULT_THRESHOLDS,
+    PLAGIARISM_THRESHOLD,
+    is_plagiarism,
+    severity_from_score,
+)
 
 # ── Validation helpers ─────────────────────────────────────────────────────────
 
@@ -38,6 +43,64 @@ def _validated_batch_size(batch_size: Optional[int]) -> Optional[int]:
     except (TypeError, ValueError) as exc:
         raise ValueError(SIM_BATCH_SIZE_INVALID) from exc
     return size if size > 0 else None
+
+
+# ── Distance-based similarity ──────────────────────────────────────────────────
+
+
+def manhattan_similarity(
+    vec_a: np.ndarray,
+    vec_b: np.ndarray,
+) -> float:
+    """Return normalized Manhattan similarity for equally shaped arrays.
+
+    The Manhattan (L1) distance is converted to similarity using
+    ``1 / (1 + distance)``. Identical inputs therefore return ``1.0``;
+    larger distances approach ``0.0`` without ever producing a value outside
+    the inclusive ``[0.0, 1.0]`` range.
+
+    Args:
+        vec_a: First numeric vector or array.
+        vec_b: Second numeric vector or array.
+
+    Returns:
+        A finite Python ``float`` between ``0.0`` and ``1.0``.
+
+    Raises:
+        TypeError: If either input cannot be converted to a numeric array.
+        ValueError: If shapes differ, either input is empty, or either input
+            contains NaN or infinity.
+    """
+    try:
+        array_a = np.asarray(vec_a, dtype=np.float64)
+        array_b = np.asarray(vec_b, dtype=np.float64)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(
+            "Manhattan similarity requires numeric array inputs."
+        ) from exc
+
+    if array_a.shape != array_b.shape:
+        raise ValueError(
+            "Manhattan similarity requires arrays with matching shapes."
+        )
+
+    if array_a.size == 0:
+        raise ValueError(
+            "Manhattan similarity requires non-empty arrays."
+        )
+
+    if not np.all(np.isfinite(array_a)) or not np.all(
+        np.isfinite(array_b)
+    ):
+        raise ValueError(
+            "Manhattan similarity requires finite numeric values."
+        )
+
+    distance = float(np.sum(np.abs(array_a - array_b), dtype=np.float64))
+    similarity = 1.0 / (1.0 + distance)
+
+    # Protect the public contract from tiny floating-point excursions.
+    return float(np.clip(similarity, 0.0, 1.0))
 
 
 # ── Document-level similarity ──────────────────────────────────────────────────
@@ -120,9 +183,9 @@ def hybrid_similarity_matrix(
     Combine semantic and lexical similarity matrices using a weighted formula.
     """
     if not (0.0 <= w <= 1.0):
-        from src.errors import SIM_WEIGHT_OUT_OF_RANGE
+        from src.errors import sim_weight_out_of_range
 
-        raise ValueError(SIM_WEIGHT_OUT_OF_RANGE.format(w=w))
+        raise ValueError(sim_weight_out_of_range(w))
 
     if semantic_df.shape != lexical_df.shape:
         from src.errors import SIM_SHAPE_MISMATCH
@@ -292,9 +355,7 @@ def flag_plagiarism(
 
             if chunked_docs is not None and embeddings is not None:
                 sim_matrix = cosine_similarity(embeddings[doc_a], embeddings[doc_b])
-                idx_a, idx_b = np.unravel_index(
-                    np.argmax(sim_matrix), sim_matrix.shape
-                )
+                idx_a, idx_b = np.unravel_index(np.argmax(sim_matrix), sim_matrix.shape)
                 chunk_text = chunked_docs[doc_a][idx_a]
                 matched_length = len(chunk_text.split())
 
@@ -387,4 +448,44 @@ def calculate_paragraph_similarity_breakdown(
 
     breakdown.sort(key=lambda t: t[2], reverse=True)
     return breakdown
+
+
+def find_exact_matches(
+    text_a: str,
+    text_b: str,
+    case_sensitive: bool = False,
+) -> List[str]:
+    """
+    Find exact matching sentences/segments from text_a that exist in text_b.
+
+    Args:
+        text_a: Source text containing potential matches.
+        text_b: Reference text to search within.
+        case_sensitive: If True, performs strict case-sensitive matching.
+
+    Returns:
+        List of matching segments.
+    """
+    if not text_a or not text_b:
+        return []
+
+    # Lowercase both text buffers before comparison when case_sensitive=False
+    if not case_sensitive:
+        norm_a = text_a.lower()
+        norm_b = text_b.lower()
+    else:
+        norm_a = text_a
+        norm_b = text_b
+
+    import re
+    segments = [s.strip() for s in re.split(r'[\n\.]', text_a) if s.strip()]
+    segments_norm = [s.strip() for s in re.split(r'[\n\.]', norm_a) if s.strip()]
+
+    matches = []
+    for orig, norm in zip(segments, segments_norm):
+        if norm in norm_b:
+            if orig not in matches:
+                matches.append(orig)
+
+    return matches
 

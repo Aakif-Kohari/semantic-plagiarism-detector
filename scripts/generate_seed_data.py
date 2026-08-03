@@ -35,6 +35,7 @@ MOCK_NAMES = [
 class SeedConfig:
     target_similarity: float
     verbose: bool
+    seed_dir: str = SEED_DIR
 
 
 def parse_target_similarity(value: str) -> float:
@@ -72,6 +73,15 @@ def build_argument_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--seed-dir",
+        default=SEED_DIR,
+        metavar="PATH",
+        help=(
+            "Directory where users.db, corpus.db, and corpus.index are "
+            "generated (default: tests/dummy_data)."
+        ),
+    )
+    parser.add_argument(
         "--verbose", "-v", action="store_true", help="Print detailed similarity validation output."
     )
     return parser
@@ -79,7 +89,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
 
 def parse_args(argv: list[str] | None = None) -> SeedConfig:
     namespace = build_argument_parser().parse_args(argv)
-    return SeedConfig(target_similarity=namespace.target_similarity, verbose=namespace.verbose)
+    return SeedConfig(
+        target_similarity=namespace.target_similarity,
+        verbose=namespace.verbose,
+        seed_dir=os.path.abspath(os.path.expanduser(namespace.seed_dir)),
+    )
 
 
 def generate_similar_vector(
@@ -121,9 +135,11 @@ def validate_target_similarity(
     return actual_similarity
 
 
-def _clean_seed_files() -> None:
+def _clean_seed_files(seed_dir: str = SEED_DIR) -> None:
+    """Remove prior generated seed artifacts from ``seed_dir``."""
+    os.makedirs(seed_dir, exist_ok=True)
     for filename in ("users.db", "corpus.db", "corpus.index"):
-        path = os.path.join(SEED_DIR, filename)
+        path = os.path.join(seed_dir, filename)
         if not os.path.exists(path):
             continue
         try:
@@ -135,7 +151,6 @@ def _clean_seed_files() -> None:
 
 def main(argv: list[str] | None = None) -> None:
     import importlib
-    import types
 
     _init_py = os.path.join(ROOT_DIR, "src", "__init__.py")
     with open(_init_py, "r", encoding="utf-8") as _f:
@@ -162,15 +177,18 @@ def main(argv: list[str] | None = None) -> None:
             add_document,
             init_corpus_db,
         )
-        from src.db.incidents import DEFAULT_DB_PATH, sync_flagged_incidents  # noqa: F811
+        from src.db.incidents import sync_flagged_incidents  # noqa: F811
 
         config = parse_args(argv)
 
-        auth_db_path = os.path.join(SEED_DIR, "users.db")
-        corpus_db_path = os.path.join(SEED_DIR, "corpus.db")
+        seed_dir = config.seed_dir
+        os.makedirs(seed_dir, exist_ok=True)
+
+        auth_db_path = os.path.join(seed_dir, "users.db")
+        corpus_db_path = os.path.join(seed_dir, "corpus.db")
         configure_auth_db_path(auth_db_path)
         configure_corpus_db_path(corpus_db_path)
-        _clean_seed_files()
+        _clean_seed_files(seed_dir)
 
         print("Initializing databases...")
         init_auth_db()
@@ -263,12 +281,12 @@ def main(argv: list[str] | None = None) -> None:
         print("Building and saving FAISS index...")
         matrix = np.vstack([alice_vector, bob_vector, charlie_vector])
         index = build_index_from_matrix(matrix)
-        save_index(index, os.path.join(SEED_DIR, "corpus.index"))
+        save_index(index, os.path.join(seed_dir, "corpus.index"))
 
         print(
             "Seed data successfully generated with target "
             f"similarity {actual_target_similarity:.1%} and stored "
-            "in tests/dummy_data/!"
+            f"in {seed_dir}!"
         )
     finally:
         with open(_init_py, "w", encoding="utf-8") as _f:

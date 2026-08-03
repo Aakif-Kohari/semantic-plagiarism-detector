@@ -9,8 +9,28 @@ from unittest.mock import patch
 import networkx as nx
 import pandas as pd
 import plotly.graph_objects as go
-from src.visualization.network_graph import plot_similarity_network
+import pytest
 
+from src.visualization.network_graph import export_network_adjacency_csv
+
+
+def test_export_network_adjacency_csv():
+    graph = nx.Graph()
+
+    graph.add_edge("Doc A", "Doc B", weight=0.95)
+    graph.add_edge("Doc B", "Doc C", weight=0.82)
+
+    csv_output = export_network_adjacency_csv(graph)
+
+    assert "Source,Target,Weight" in csv_output
+    assert "Doc A,Doc B,0.95" in csv_output
+    assert "Doc B,Doc C,0.82" in csv_output
+def test_export_network_adjacency_csv_empty_graph():
+    graph = nx.Graph()
+
+    csv_output = export_network_adjacency_csv(graph)
+
+    assert csv_output.strip() == "Source,Target,Weight"
 from src.visualization.network_graph import (
     build_network_data,
     export_graph_to_csv,
@@ -30,7 +50,8 @@ def test_build_network_data_structure():
     }
     df = pd.DataFrame(data, index=["doc1", "doc2", "doc3"])
 
-    net_data = build_network_data(df, threshold=0.75)
+    # show_isolated=True keeps doc3 (isolated node) in the graph for structure checks
+    net_data = build_network_data(df, threshold=0.75, show_isolated=True)
 
     assert "shapes" in net_data
     assert "edge_hover_trace" in net_data
@@ -364,5 +385,114 @@ def test_plot_similarity_network_json_serialization_with_highlighted_node():
     json_str = fig.to_json()
     assert json_str is not None
     assert len(json_str) > 0
+
+
+# ==============================================================================
+# Node Scale Factor Tests (Issue #1062)
+# ==============================================================================
+
+
+def test_build_network_data_node_scale_default():
+    """Verify default node_scale=1.0 produces expected base node sizes."""
+    data = {
+        "doc1": [1.0, 0.85],
+        "doc2": [0.85, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2"])
+    net_data = build_network_data(df, threshold=0.75)
+    sizes = net_data["node_trace"].marker.size
+    # doc1 degree=1 -> base_size = (20 + 1*6) * 1.0 = 26
+    assert sizes[0] == 26.0 or sizes[0] == 26
+
+
+def test_build_network_data_node_scale_custom():
+    """Verify node_scale=2.0 doubles the base node sizes compared to default."""
+    data = {
+        "doc1": [1.0, 0.85],
+        "doc2": [0.85, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2"])
+    net_data_default = build_network_data(df, threshold=0.75)
+    net_data_scaled = build_network_data(df, threshold=0.75, node_scale=2.0)
+
+    default_sizes = net_data_default["node_trace"].marker.size
+    scaled_sizes = net_data_scaled["node_trace"].marker.size
+
+    for d, s in zip(default_sizes, scaled_sizes):
+        assert s == pytest.approx(d * 2.0)
+
+
+# ==============================================================================
+# Isolated Nodes Visibility Toggle Tests (Issue #1399)
+# ==============================================================================
+
+
+def _three_doc_matrix():
+    """Return a matrix where doc3 has no similarity >= threshold (isolated)."""
+    data = {
+        "doc1": [1.0, 0.85, 0.20],
+        "doc2": [0.85, 1.0, 0.10],
+        "doc3": [0.20, 0.10, 1.0],
+    }
+    return pd.DataFrame(data, index=["doc1", "doc2", "doc3"])
+
+
+def test_build_network_data_filters_isolated_nodes_by_default():
+    """Verify isolated nodes (degree 0) are removed when show_isolated=False (default)."""
+    df = _three_doc_matrix()
+
+    net_data = build_network_data(df, threshold=0.75)
+
+    assert set(net_data["graph"].nodes()) == {"doc1", "doc2"}
+    assert list(net_data["node_trace"].customdata) == ["doc1", "doc2"]
+
+
+def test_build_network_data_keeps_isolated_nodes_when_show_isolated():
+    """Verify all nodes remain when show_isolated=True."""
+    df = _three_doc_matrix()
+
+    net_data = build_network_data(df, threshold=0.75, show_isolated=True)
+
+    assert set(net_data["graph"].nodes()) == {"doc1", "doc2", "doc3"}
+    assert set(net_data["node_trace"].customdata) == {"doc1", "doc2", "doc3"}
+
+
+def test_plot_similarity_network_filters_isolated_nodes():
+    """Verify plot_similarity_network excludes isolated nodes by default."""
+    df = _three_doc_matrix()
+
+    fig = plot_similarity_network(df, threshold=0.75)
+
+    assert len(fig.layout.shapes) == 1
+    node_trace = fig.data[1]
+    assert list(node_trace.customdata) == ["doc1", "doc2"]
+
+
+def test_plot_similarity_network_show_isolated_keeps_all_nodes():
+    """Verify plot_similarity_network keeps isolated nodes when show_isolated=True."""
+    df = _three_doc_matrix()
+
+    fig = plot_similarity_network(df, threshold=0.75, show_isolated=True)
+
+    assert len(fig.layout.shapes) == 1
+    node_trace = fig.data[1]
+    assert set(node_trace.customdata) == {"doc1", "doc2", "doc3"}
+
+
+def test_build_network_data_all_nodes_isolated():
+    """Verify an all-isolated graph still builds a valid figure without nodes."""
+    data = {
+        "doc1": [1.0, 0.10],
+        "doc2": [0.10, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2"])
+
+    net_data = build_network_data(df, threshold=0.75)
+
+    assert set(net_data["graph"].nodes()) == set()
+    assert list(net_data["node_trace"].customdata) == []
+
+    fig = render_network_plotly(net_data, title="Empty")
+    assert isinstance(fig, go.Figure)
 
 

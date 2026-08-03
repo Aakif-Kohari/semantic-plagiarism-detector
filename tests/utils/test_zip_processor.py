@@ -128,28 +128,39 @@ def test_process_zip_duplicate_name_collision_fallback():
     assert result["a_b_1.txt"] == b"Second content"
 
 
-def test_process_zip_path_traversal():
-    """Verify path traversal attempts are safely skipped."""
-    zip_data = create_in_memory_zip(
-        {
-            "doc.pdf": b"Safe file",
-            "../traversal.pdf": b"Traversal payload",
-            "folder/../../traversal2.txt": b"Traversal payload 2",
-            "/absolute.pdf": b"Absolute traversal payload",
-        }
-    )
+@pytest.mark.parametrize(
+    "malicious_path",
+    [
+        "../evil.py",
+        "/etc/passwd",
+        "..\\evil.py",
+    ],
+)
+def test_rejects_path_traversal_entries(malicious_path):
+    """Ensure ZIP archives containing path traversal filenames are rejected."""
+    zip_buffer = io.BytesIO()
 
-    result = process_zip_file(zip_data)
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(malicious_path, "print('malicious')")
 
-    assert "doc.pdf" in result
-    assert result["doc.pdf"] == b"Safe file"
+    zip_buffer.seek(0)
 
-    # Traversal files must be ignored/skipped
-    assert "traversal.pdf" not in result
-    assert "folder_../../traversal2.txt" not in result
-    assert "../traversal.pdf" not in result
-    assert "absolute.pdf" not in result
-    assert "/absolute.pdf" not in result
+    with pytest.raises(
+        ValueError, match="Malicious path traversal detected in ZIP archive entry"
+    ):
+        process_zip_file(zip_buffer.read())
+
+
+def test_accepts_valid_nested_directories():
+    """Ensure ZIP archives containing valid nested directories are accepted."""
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("folder/subfolder/file.pdf", b"PDF text content")
+
+    zip_buffer.seek(0)
+    result = process_zip_file(zip_buffer.read())
+
+    assert "file.pdf" in result
 
 
 def test_process_zip_bomb_safety_total_size():

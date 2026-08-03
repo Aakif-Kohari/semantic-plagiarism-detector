@@ -9,6 +9,7 @@ from src.db.auth import (
     disable_2fa,
     enable_2fa,
     get_2fa_status,
+    get_active_users_count,
     get_user_active_status,
     get_user_role,
     get_user_theme,
@@ -18,6 +19,7 @@ from src.db.auth import (
     set_user_active_status,
     set_user_theme,
     update_password,
+    get_security_audit_logs,
     verify_user,
 )
 
@@ -71,6 +73,62 @@ def test_update_password():
 
 
 def test_delete_user():
+    delete_user("hnsdf9")
+    assert get_user_role("hnsdf9") is None
+
+
+import unittest.mock as mock
+
+@pytest.fixture
+def mock_audit_db():
+    conn = sqlite3.connect(":memory:")
+    conn.execute("""
+        CREATE TABLE security_audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT,
+            action TEXT,
+            timestamp DATETIME
+        )
+    """)
+    conn.execute("INSERT INTO security_audit_log (username, action, timestamp) VALUES ('alice', 'login', '2023-01-01 10:00:00')")
+    conn.execute("INSERT INTO security_audit_log (username, action, timestamp) VALUES ('bob', 'login', '2023-01-02 10:00:00')")
+    conn.execute("INSERT INTO security_audit_log (username, action, timestamp) VALUES ('alice', 'logout', '2023-01-03 10:00:00')")
+    conn.commit()
+    
+    with mock.patch("src.db.auth._connect", return_value=conn):
+        yield conn
+    conn.close()
+
+def test_get_security_audit_logs_default(mock_audit_db):
+    logs = get_security_audit_logs()
+    assert len(logs) == 3
+    # Order by timestamp DESC
+    assert logs[0]["username"] == "alice"
+    assert logs[0]["action"] == "logout"
+    assert logs[2]["username"] == "alice"
+    assert logs[2]["action"] == "login"
+
+def test_get_security_audit_logs_pagination(mock_audit_db):
+    logs = get_security_audit_logs(limit=1, offset=1)
+    assert len(logs) == 1
+    # 2nd in desc order is bob
+    assert logs[0]["username"] == "bob"
+
+def test_get_security_audit_logs_username_filter(mock_audit_db):
+    logs = get_security_audit_logs(username="alice")
+    assert len(logs) == 2
+    assert logs[0]["action"] == "logout"
+    assert logs[1]["action"] == "login"
+    
+def test_get_security_audit_logs_empty(mock_audit_db):
+    logs = get_security_audit_logs(username="charlie")
+    assert len(logs) == 0
+
+def test_get_security_audit_logs_invalid_limit_offset(mock_audit_db):
+    with pytest.raises(ValueError):
+        get_security_audit_logs(limit=-1)
+    with pytest.raises(ValueError):
+        get_security_audit_logs(offset=-1)
     user = f"user_{uuid.uuid4().hex[:8]}"
     add_user(user, "password123")
     delete_user(user)
@@ -244,4 +302,106 @@ def test_delete_user_removes_matching_session_and_authorization_rows(mock_db):
     assert other_session_count == 1
     assert other_token_count == 1
 
+# ──────────────────────────────────────────────────────────────────────────────
+# format_user_created_date — issue #1049
+# ──────────────────────────────────────────────────────────────────────────────
+
+def test_connect_uses_fifteen_second_timeout():
+    """Verify that _connect helper sets sqlite3 timeout to 15.0 seconds."""
+    from unittest.mock import patch
+    from src.db.auth import _connect
+
+    with patch("sqlite3.connect") as mock_connect:
+        _connect()
+        mock_connect.assert_called_once()
+        kwargs = mock_connect.call_args[1]
+        assert kwargs.get("timeout") == 15.0
+
+
+class TestFormatUserCreatedDate:
+    """Tests for the format_user_created_date helper (issue #1049)."""
+
+    def test_valid_iso_datetime_with_z(self):
+        """Full ISO datetime with Z suffix must format correctly."""
+        result = format_user_created_date("2026-07-28T14:30:00Z")
+        assert result == "Jul 28, 2026"
+
+    def test_valid_iso_datetime_without_z(self):
+        """ISO datetime without Z suffix must format correctly."""
+        result = format_user_created_date("2026-07-28T14:30:00")
+        assert result == "Jul 28, 2026"
+
+    def test_valid_date_only(self):
+        """Date-only ISO string must format correctly."""
+        result = format_user_created_date("2026-07-28")
+        assert result == "Jul 28, 2026"
+
+    def test_valid_space_separated(self):
+        """Space-separated datetime (SQLite default) must format correctly."""
+        result = format_user_created_date("2026-07-28 14:30:00")
+        assert result == "Jul 28, 2026"
+
+    def test_different_date(self):
+        """Verify month and day mapping for a different date."""
+        result = format_user_created_date("2025-01-05")
+        assert result == "Jan 05, 2025"
+
+    def test_empty_string_returns_unknown(self):
+        """Empty string must return 'Unknown'."""
+        assert format_user_created_date("") == "Unknown"
+
+    def test_none_returns_unknown(self):
+        """None input must return 'Unknown'."""
+        assert format_user_created_date(None) == "Unknown"  # type: ignore[arg-type]
+
+    def test_whitespace_only_returns_unknown(self):
+        """Whitespace-only string must return 'Unknown'."""
+        assert format_user_created_date("   ") == "Unknown"
+
+    def test_invalid_string_returns_unknown(self):
+        """Garbage input must return 'Unknown', not raise."""
+        assert format_user_created_date("not-a-date") == "Unknown"
+
+    def test_partial_invalid_returns_unknown(self):
+        """Partially valid input must return 'Unknown'."""
+        assert format_user_created_date("2026-13-45") == "Unknown"
+
+    def test_returns_str_type(self):
+        """Return type must always be str."""
+        result = format_user_created_date("2026-07-28")
+        assert isinstance(result, str)
+
+    def test_non_string_input_returns_unknown(self):
+        """Non-string input (int, list) must return 'Unknown'."""
+        assert format_user_created_date(12345) == "Unknown"  # type: ignore[arg-type]
+        assert format_user_created_date([]) == "Unknown"  # type: ignore[arg-type]
+
+
+def test_get_active_users_count():
+    """Verify get_active_users_count counts only active users."""
+    # 1. Starting count should be 1 (the default seeded 'admin' is active)
+    initial_count = get_active_users_count()
+    assert initial_count == 1
+
+    # 2. Add an active user
+    user1 = f"active_{uuid.uuid4().hex[:8]}"
+    add_user(user1, "SecurePass123!")
+    assert get_active_users_count() == 2
+
+    # 3. Add another user and suspend them
+    user2 = f"suspended_{uuid.uuid4().hex[:8]}"
+    add_user(user2, "SecurePass123!")
+    set_user_active_status(user2, False)
+    # The count should still be 2 because user2 is inactive
+    assert get_active_users_count() == 2
+
+    # 4. Reactivate user2
+    set_user_active_status(user2, True)
+    assert get_active_users_count() == 3
+
+    # 5. Delete user1
+    delete_user(user1)
+    assert get_active_users_count() == 2
+
+    delete_user(user2)
 

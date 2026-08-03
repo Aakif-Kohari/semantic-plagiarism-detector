@@ -1,10 +1,12 @@
 import io
 import shutil
+from pathlib import Path
 
 import zipfile
 from unittest.mock import MagicMock, patch
 
 import docx
+import fitz  # PyMuPDF
 import pytest
 
 from src.core.document_parser import (
@@ -15,19 +17,16 @@ from src.core.document_parser import (
     extract_text_from_txt,
     extract_text_from_zip,
     extract_texts,
+    parallel_extract_texts,
     strip_bibliography,
+    normalize_unicode_spaces,
 )
 
 import time
 
 
-from src.core.document_parser import (clean_text, extract_text,
-                                      extract_text_from_docx,
-                                      extract_text_from_odt,
-                                      extract_text_from_pdf,
-                                      extract_text_from_txt, extract_texts,
-                                      remove_ignore_phrases,
-                                      strip_bibliography)
+from src.core.document_parser import (clean_text, extract_text_from_odt,
+                                     remove_ignore_phrases)
 
 # Skip OCR tests when Tesseract binary is not present on this machine
 TESSERACT_AVAILABLE = shutil.which("tesseract") is not None
@@ -45,6 +44,20 @@ def _make_pdf_bytes(text: str) -> bytes:
     c.showPage()
     c.save()
     return buf.getvalue()
+
+
+def _make_encrypted_pdf_bytes(text: str = "Confidential Content", password: str = "secret123") -> bytes:
+    """Create an in-memory password-protected (encrypted) PDF using PyMuPDF (fitz)."""
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((50, 50), text)
+    pdf_bytes = doc.tobytes(
+        encryption=fitz.PDF_ENCRYPT_AES_256,
+        user_pw=password,
+        owner_pw="owner_pass",
+    )
+    doc.close()
+    return pdf_bytes
 
 
 def _make_docx_bytes(text: str) -> bytes:
@@ -165,6 +178,28 @@ def test_extract_from_pdf_filters_repeated_headers_page_numbers_and_whitespace()
     assert "\n\n\n" not in result
 
 
+class TestEncryptedPDFHandling:
+    """Test suite verifying encrypted/password-protected PDF detection in document_parser.py (#828)."""
+
+    def test_extract_text_from_encrypted_pdf_handles_gracefully(self):
+        """Encrypted PDF should handle gracefully without unhandled crashes."""
+        encrypted_pdf_bytes = _make_encrypted_pdf_bytes(
+            text="Protected Student Assignment Content", password="secret_password"
+        )
+        # Should cleanly return empty string or handled error signal without crashing
+        result = extract_text_from_pdf(encrypted_pdf_bytes)
+        assert isinstance(result, str)
+        assert "Protected Student Assignment Content" not in result
+
+    def test_extract_text_routing_encrypted_pdf(self):
+        """Routing encrypted PDF through extract_text should return empty/handled text safely."""
+        encrypted_pdf_bytes = _make_encrypted_pdf_bytes(
+            text="Protected Content", password="pass"
+        )
+        result = extract_text(encrypted_pdf_bytes, "encrypted_submission.pdf")
+        assert isinstance(result, str)
+
+
 def test_extract_from_docx_bytes():
     docx_bytes = _make_docx_bytes("Hello DOCX")
     result = extract_text_from_docx(docx_bytes)
@@ -229,7 +264,6 @@ def test_extract_from_txt_bytes():
     assert result == "Hello TXT"
 
 
-
 # ---------------------------------------------------------------------------
 # Corrupted Zip Submission Tests (#580)
 # ---------------------------------------------------------------------------
@@ -250,7 +284,7 @@ class TestCorruptedZipHandling:
         assert "corrupted" in str(exc_info.value).lower()
 
     def test_routing_corrupted_zip_via_extract_text(self):
-        corrupted_bytes = b"INVALID_ZIP_STREAM"
+        corrupted_bytes = b"PK\x03\x04_corrupted_zip_header_data"
         with pytest.raises(CorruptedArchiveError):
             extract_text(corrupted_bytes, "submission_batch.zip")
 
@@ -292,6 +326,28 @@ def test_extract_texts_mixed():
 
     assert results["doc1.docx"] == "Parsed doc1.docx"
     assert results["doc2.txt"] == "Parsed doc2.txt"
+
+
+def test_parallel_extract_texts_matches_sequential(tmp_path):
+    """Verify that parallel_extract_texts produces identical results to sequential extraction."""
+    file1 = tmp_path / "doc1.txt"
+    file2 = tmp_path / "doc2.txt"
+
+    file1.write_text("Text content of document one.", encoding="utf-8")
+    file2.write_text("Text content of document two.", encoding="utf-8")
+
+    file_paths = [file1, file2]
+
+    # Sequential extraction
+    sequential_results = {
+        path.name: extract_text(path.read_bytes(), path.name)
+        for path in file_paths
+    }
+
+    # Parallel extraction
+    parallel_results = parallel_extract_texts(file_paths, max_workers=2)
+
+    assert parallel_results == sequential_results
 
 
 # ---------------------------------------------------------------------------
@@ -375,9 +431,6 @@ class TestStripBibliography:
         result = extract_text(docx_bytes, "test.docx")
         assert "Bibliography" not in result
         assert "Body content" in result
-
-        
-
 
 
 # ---------------------------------------------------------------------------
@@ -483,7 +536,7 @@ class TestCleanText:
         assert result == "Hello World !"
 
     def test_removes_spaces_before_newline(self):
-        text = "Hello   \nWorld"
+        text = "Hello    \nWorld"
         result = clean_text(text)
         assert result == "Hello\nWorld"
 
@@ -515,6 +568,46 @@ class TestCleanText:
     def test_only_whitespace_returns_empty(self):
         text = "   \n\t\n  "
         result = clean_text(text)
+        assert result == ""
+    
+    def test_removes_stopwords_when_enabled(self):
+        text = "The quick brown fox jumps over the lazy dog."
+        result = clean_text(text, remove_stopwords=True)
+        # "The", "the", "over", "the" should be removed
+        assert "quick" in result
+        assert "brown" in result
+        assert "fox" in result
+        assert "jumps" in result
+        assert "lazy" in result
+        assert "dog" in result
+        assert "the" not in result.lower()
+        assert "over" not in result.lower()
+
+    def test_preserves_text_when_stopwords_disabled(self):
+        text = "The quick brown fox jumps over the lazy dog."
+        result = clean_text(text, remove_stopwords=False)
+        assert result == "The quick brown fox jumps over the lazy dog."
+
+    def test_stopword_removal_handles_punctuation(self):
+        text = "Hello, world! This is a test."
+        result = clean_text(text, remove_stopwords=True)
+        # "This", "is", "a" should be removed (case-insensitive matching);
+        # punctuation remains attached to words
+        assert "Hello," in result
+        assert "world!" in result
+        assert "This" not in result
+        assert "test." in result
+        assert " is " not in result
+        assert " a " not in result
+
+    def test_stopword_removal_empty_string(self):
+        text = ""
+        result = clean_text(text, remove_stopwords=True)
+        assert result == ""
+
+    def test_stopword_removal_all_stopwords(self):
+        text = "is are was were be been being"
+        result = clean_text(text, remove_stopwords=True)
         assert result == ""
 
 
@@ -642,9 +735,29 @@ def test_extract_text_routing_txt_latin1(tmp_path):
     result = extract_text(str(file_path), "latin1_test.txt")
     assert result == original_text
 
+
 def test_get_supported_file_extensions():
     """get_supported_file_extensions should return the expected sorted list."""
     from src.core.document_parser import get_supported_file_extensions
 
     extensions = get_supported_file_extensions()
-    assert extensions == [".csv", ".docx", ".epub", ".html", ".pdf", ".rtf", ".txt"]
+    assert extensions == [
+        ".csv",
+        ".docx",
+        ".epub",
+        ".html",
+        ".markdown",
+        ".md",
+        ".mdown",
+        ".pdf",
+        ".rtf",
+        ".txt",
+    ]
+    
+    
+def test_normalize_unicode_spaces():
+    text = "Hello\u00A0World\u00AD！\u2009Python，Testing。"
+
+    normalized = normalize_unicode_spaces(text)
+
+    assert normalized == "Hello World! Python,Testing."    

@@ -6,12 +6,9 @@ import io
 import logging
 import os
 import re
-
 import zipfile
-
 import shutil
 import subprocess
-import zipfile
 import xml.etree.ElementTree
 import tempfile
 from collections import Counter
@@ -37,6 +34,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 from src.core.translator import translate_text
+import string
 
 # OCR dependencies are imported lazily so TXT/DOCX and normal text PDFs still
 # work even when Tesseract is not installed on the machine.
@@ -58,8 +56,25 @@ DEFAULT_OCR_LANGUAGE = "eng"
 MAX_BATCH_SIZE = 50
 
 # File extensions supported by the extraction pipeline, exposed for UI display
-ALLOWED_EXTENSIONS = {".pdf", ".docx", ".csv", ".epub", ".html", ".rtf", ".txt"}
+ALLOWED_EXTENSIONS = {".pdf", ".docx", ".csv", ".epub", ".html", ".md", ".markdown", ".mdown", ".rtf", ".txt"}
 ZERO_WIDTH_CHARS_PATTERN = re.compile(r"[\u200B\u200C\u200D\uFEFF\u2060\u200E\u200F]")
+
+# Standard English stopwords for lexical analysis noise reduction
+ENGLISH_STOPWORDS = frozenset({
+    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
+    "of", "with", "by", "is", "are", "was", "were", "be", "been", "being",
+    "over",
+    "have", "has", "had", "do", "does", "did", "will", "would", "shall",
+    "should", "can", "could", "may", "might", "must", "i", "me", "my",
+    "myself", "we", "our", "ours", "ourselves", "you", "your", "yours",
+    "yourself", "yourselves", "he", "him", "his", "himself", "she", "her",
+    "hers", "herself", "it", "its", "itself", "they", "them", "their",
+    "theirs", "themselves", "what", "which", "who", "whom", "this", "that",
+    "these", "those", "am", "as", "if", "then", "than", "too", "very", "s",
+    "t", "just", "don", "now", "d", "ll", "m", "o", "re", "ve", "y", "ain",
+    "aren", "couldn", "didn", "doesn", "hadn", "hasn", "haven", "isn", "ma",
+    "mightn", "mustn", "needn", "shan", "shouldn", "wasn", "weren", "won", "wouldn"
+})
 
 
 def sanitize_zero_width_characters(text: str, filename: Optional[str] = None) -> str:
@@ -80,8 +95,59 @@ def sanitize_zero_width_characters(text: str, filename: Optional[str] = None) ->
         return ZERO_WIDTH_CHARS_PATTERN.sub("", text)
     return text
 
+UNICODE_SPACE_TRANSLATION = str.maketrans({
+    "\u00A0": " ",   # Non-breaking space
+    "\u2000": " ",
+    "\u2001": " ",
+    "\u2002": " ",
+    "\u2003": " ",
+    "\u2004": " ",
+    "\u2005": " ",
+    "\u2006": " ",
+    "\u2007": " ",
+    "\u2008": " ",
+    "\u2009": " ",   # Thin space
+    "\u200A": " ",
+    "\u202F": " ",
+    "\u205F": " ",
+    "\u3000": " ",   # Ideographic space
+})
+
+FULLWIDTH_TRANSLATION = str.maketrans({
+    "，": ",",
+    "。": ".",
+    "：": ":",
+    "；": ";",
+    "！": "!",
+    "？": "?",
+    "（": "(",
+    "）": ")",
+    "【": "[",
+    "】": "]",
+    "［": "[",
+    "］": "]",
+    "｛": "{",
+    "｝": "}",
+})
 
 
+def normalize_unicode_spaces(text: str) -> str:
+    """
+    Normalize Unicode spacing and punctuation so visually identical
+    documents compare consistently.
+    """
+    if not text:
+        return text
+
+    text = text.translate(UNICODE_SPACE_TRANSLATION)
+
+    # Remove soft hyphens
+    text = text.replace("\u00AD", "")
+
+    # Normalize full-width punctuation
+    text = text.translate(FULLWIDTH_TRANSLATION)
+
+    return text
 def check_batch_rate_limit(file_count: int, session_id: Optional[str] = None) -> None:
     """
     Validates batch file collection size against session rate limits.
@@ -101,7 +167,6 @@ def check_batch_rate_limit(file_count: int, session_id: Optional[str] = None) ->
 
 # More values may be added later without changing the extraction API.
 from src.core.app_config import SUPPORTED_OCR_LANGUAGES
-
 
 
 class CorruptedArchiveError(ValueError):
@@ -195,9 +260,13 @@ def strip_bibliography(text: str) -> str:
     return text
 
 
+def clean_text(raw_text: str, remove_stopwords: bool = False) -> str:
+    """Normalize whitespace and remove unwanted Unicode characters.
 
-def clean_text(raw_text: str) -> str:
-    """Normalize whitespace and remove unwanted Unicode characters."""
+    Args:
+        raw_text: The text to clean.
+        remove_stopwords: When True, filters out English stopwords.
+    """
     text = raw_text
 
     text = text.translate(
@@ -212,13 +281,22 @@ def clean_text(raw_text: str) -> str:
             }
         )
     )
-
+  
     text = re.sub(r"\n\s*\n\s*\n", "\n\n", text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"[\u00a0\u200b]", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = re.sub(r"[ \t]+\n", "\n", text)
     text = re.sub(r"\n[ \t]+", "\n", text)
+
+    if remove_stopwords:
+        # Tokenize, filter, and rejoin while preserving basic structure
+        words = text.split()
+        filtered_words = [
+            word for word in words
+            if word.lower().strip(string.punctuation) not in ENGLISH_STOPWORDS
+        ]
+        text = " ".join(filtered_words)
 
     return text.strip()
 
@@ -468,11 +546,22 @@ def _ocr_pdf_page(
                 (pixmap.width, pixmap.height),
                 pixmap.samples,
             )
-            return pytesseract.image_to_string(
-                image,
-                lang=language,
-                config="--oem 3 --psm 3",
-            ).strip()
+            try:
+                return pytesseract.image_to_string(
+                    image,
+                    lang=language,
+                    config="--oem 3 --psm 3",
+                ).strip()
+            except (MemoryError, Exception) as exc:
+                if isinstance(exc, MemoryError):
+                    logger.warning(
+                        f"[document_parser] OCR page {page_index} failed due to memory exhaustion: {exc}"
+                    )
+                else:
+                    logger.warning(
+                        f"[document_parser] OCR page {page_index} failed: {exc}"
+                    )
+                return f"[OCR extraction failed for page {page_index}]"
     except pytesseract.TesseractNotFoundError as exc:
         from src.errors import OCR_TESSERACT_NOT_FOUND
 
@@ -712,39 +801,52 @@ def count_pdf_images(pdf_bytes: bytes) -> int:
 
 
 def extract_pdf_metadata(file: PDFInput) -> Dict[str, str]:
-    """Extract PDF metadata (Author, Creation Date, Title) using PyMuPDF.
+    """Extract PDF metadata (Author, Title, Creation Date, Creator, Producer) using PyMuPDF.
 
     Returns:
-        Dictionary with keys 'author', 'creation_date', 'title'.
+        Dictionary with keys 'author', 'title', 'creation_date', 'creator', 'producer'.
         Values are None if metadata is not available.
     """
     pdf_bytes = _read_pdf_bytes(file)
-    metadata = {"author": None, "creation_date": None, "title": None}
+
+    metadata = {
+        "author": None,
+        "title": None,
+        "creation_date": None,
+        "creator": None,
+        "producer": None,
+    }
 
     try:
         import fitz  # PyMuPDF
 
         with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
-            doc_metadata = doc.metadata
+            doc_metadata = doc.metadata or {}
+
             metadata["author"] = doc_metadata.get("author")
-            metadata["creation_date"] = doc_metadata.get("creationDate")
             metadata["title"] = doc_metadata.get("title")
+            metadata["creation_date"] = doc_metadata.get("creationDate")
+            metadata["creator"] = doc_metadata.get("creator")
+            metadata["producer"] = doc_metadata.get("producer")
+
     except (ValueError, RuntimeError, OSError, TypeError) as exc:
         print(f"[document_parser] Error extracting PDF metadata: {exc}")
+
     except Exception as exc:
         logger.error(f"[document_parser] Error extracting PDF metadata: {exc}")
 
     image_count = count_pdf_images(pdf_bytes)
+
     if image_count:
         logger.info(
             "[document_parser] PDF contains %d embedded image(s): %s",
             image_count,
             metadata.get("title") or "unknown",
         )
+
     metadata["image_count"] = image_count
 
     return metadata
-
 
 def extract_text_from_pdf(
     file: PDFInput,
@@ -879,7 +981,6 @@ def extract_text_from_docx(file: PDFInput) -> str:
     return ""
 
 
-
 def extract_text_from_txt(file: PDFInput) -> str:
     """Extract text from a TXT file with encoding fallback."""
     text = ""
@@ -944,7 +1045,6 @@ def extract_text_from_rtf(file: PDFInput) -> str:
     return text.strip()
 
 
-
 def extract_text_from_zip(
     file: PDFInput,
     *,
@@ -991,6 +1091,7 @@ def extract_text_from_zip(
         raise CorruptedArchiveError(f"Uploaded ZIP submission is corrupted: {exc}") from exc
 
     return "\n\n".join(extracted_texts).strip()
+
 
 def extract_text_from_doc(file: PDFInput) -> str:
     """Extract plain text from a legacy Word Document (.doc) using antiword."""
@@ -1106,7 +1207,7 @@ def extract_text_from_url(url: str) -> str:
         raise Exception(f"Failed to parse webpage content: {exc}") from exc
 
 
-# --- Markdown (.md) support -------------------------------------------------
+# --- Markdown (.md, .markdown, .mdown) support -------------------------------------------------
 
 _MD_FENCE = re.compile(r"^\s*(```|~~~)")
 _MD_ATX_HEADER = re.compile(r"^\s{0,3}#{1,6}\s+")
@@ -1170,12 +1271,11 @@ def strip_markdown_syntax(raw_text: str) -> str:
     return text.strip()
 
 
-
 def extract_text_from_epub(file: PDFInput) -> str:
     """Extract plain text from an EPUB file."""
     try:
         from bs4 import BeautifulSoup
-        from ebooklib import epub
+        from ebooklib import epub # type: ignore
 
         epub_file = io.BytesIO(file) if isinstance(file, bytes) else file
 
@@ -1201,9 +1301,8 @@ def extract_text_from_epub(file: PDFInput) -> str:
         return ""
 
 
-
 def extract_text_from_md(file: PDFInput) -> str:
-    """Extract plain text from a Markdown (.md) file."""
+    """Extract plain text from a Markdown (.md, .markdown, .mdown) file."""
     raw_text = extract_text_from_txt(file)
     if not raw_text:
         return ""
@@ -1259,11 +1358,22 @@ def extract_text_from_image(
     file_bytes = _read_pdf_bytes(file)
     try:
         image = Image.open(io.BytesIO(file_bytes))
-        return pytesseract.image_to_string(
-            image,
-            lang=ocr_language,
-            config="--oem 3 --psm 3",
-        ).strip()
+        try:
+            return pytesseract.image_to_string(
+                image,
+                lang=ocr_language,
+                config="--oem 3 --psm 3",
+            ).strip()
+        except (MemoryError, Exception) as exc:
+            if isinstance(exc, MemoryError):
+                logger.warning(
+                    f"[document_parser] OCR image extraction failed due to memory exhaustion: {exc}"
+                )
+            else:
+                logger.warning(
+                    f"[document_parser] OCR image extraction failed: {exc}"
+                )
+            return "[OCR extraction failed for the file]"
     except pytesseract.TesseractNotFoundError as exc:
         from src.errors import OCR_TESSERACT_NOT_FOUND
         raise OCRDependencyError(OCR_TESSERACT_NOT_FOUND) from exc
@@ -1304,12 +1414,11 @@ def extract_text(
         raw = extract_text_from_docx(file)
     elif extension == "doc":
         raw = extract_text_from_doc(file)
-    elif extension == "md":
+    elif extension in ("md", "markdown", "mdown"):
         raw = extract_text_from_md(file)
 
     elif extension in ("zip", "7z", "tar", "gz"):
         raw = extract_text_from_zip(file, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
-
 
     elif extension == "rtf":
         raw = extract_text_from_rtf(file)
@@ -1324,6 +1433,7 @@ def extract_text(
         raw = extract_text_from_txt(file)
 
     raw = strip_bibliography(raw)
+    raw = normalize_unicode_spaces(raw)
     raw = sanitize_zero_width_characters(raw, filename=filename)
     lang_code = detect_text_language(raw)
 
@@ -1333,14 +1443,89 @@ def extract_text(
     return raw
 
 
+ALLOWED_EXTENSIONS = {
+    ".pdf",
+    ".docx",
+    ".csv",
+    ".epub",
+    ".html",
+    ".md",
+    ".markdown",
+    ".mdown",
+    ".rtf",
+    ".txt",
+}
+
+
 def get_supported_file_extensions() -> list[str]:
-    """Return a sorted list of file extensions supported for upload/display."""
     return sorted(ALLOWED_EXTENSIONS)
 
 
 def extract_texts_from_pdfs(files: list, session_id: Optional[str] = None) -> Dict[str, str]:
     """Legacy compatibility wrapper."""
     return extract_texts(files, session_id=session_id)
+
+
+def _extract_text_from_file_path(file_path: Path) -> tuple[str, str]:
+    """Helper worker to extract text from a Path object in a process worker."""
+    file_path = Path(file_path)
+    filename = file_path.name
+    try:
+        content_bytes = file_path.read_bytes()
+        extracted = extract_text(content_bytes, filename)
+        return filename, extracted
+    except Exception as exc:
+        logger.error(f"[document_parser] Error extracting text from path {file_path}: {exc}")
+        return filename, ""
+
+
+def parallel_extract_texts(
+    file_paths: list[Path], max_workers: int = 4
+) -> dict[str, str]:
+    """
+    Extract text from multiple file paths concurrently using a ProcessPoolExecutor.
+
+    Args:
+        file_paths: List of file Path objects to extract text from.
+        max_workers: Maximum process workers to spawn (default: 4).
+
+    Returns:
+        dict[str, str]: Mapping of filename to extracted text string.
+    """
+    if not file_paths:
+        return {}
+
+    paths = [Path(p) for p in file_paths]
+
+    if len(paths) == 1 or not _should_use_parallel():
+        results = {}
+        for path in paths:
+            filename, text = _extract_text_from_file_path(path)
+            results[filename] = text
+        return results
+
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
+    results = {}
+    try:
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            future_to_path = {
+                executor.submit(_extract_text_from_file_path, path): path
+                for path in paths
+            }
+            for future in as_completed(future_to_path):
+                filename, text = future.result()
+                results[filename] = text
+    except (RuntimeError, OSError) as exc:
+        logger.warning(
+            f"[document_parser] ProcessPoolExecutor failed ({exc}), falling back to sequential extraction."
+        )
+        results = {}
+        for path in paths:
+            filename, text = _extract_text_from_file_path(path)
+            results[filename] = text
+
+    return results
 
 
 def extract_texts(files: list, session_id: Optional[str] = None) -> Dict[str, str]:

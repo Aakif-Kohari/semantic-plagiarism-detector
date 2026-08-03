@@ -37,7 +37,13 @@ class ChunkRecord:
 
     __slots__ = ("doc_name", "chunk_index", "chunk_text", "metadata")
 
-    def __init__(self, doc_name: str, chunk_index: int, chunk_text: str, metadata: Optional[dict] = None):
+    def __init__(
+        self,
+        doc_name: str,
+        chunk_index: int,
+        chunk_text: str,
+        metadata: Optional[dict] = None,
+    ):
         self.doc_name = doc_name
         self.chunk_index = chunk_index
         self.chunk_text = chunk_text
@@ -88,6 +94,10 @@ def build_index(
         return faiss.IndexFlatIP(dim), registry
 
     matrix = np.vstack(all_vectors)
+    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    norms = np.where(norms == 0, 1.0, norms)
+    matrix = matrix / norms
+
     n_vectors = matrix.shape[0]
 
     # ── Resolve index type ────────────────────────────────────────────────────
@@ -269,6 +279,10 @@ def add_to_index(
         return index, registry
 
     matrix = np.vstack(new_vectors)
+    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    norms = np.where(norms == 0, 1.0, norms)
+    matrix = matrix / norms
+
     offset = len(registry)
     ids = np.arange(offset, offset + len(new_vectors), dtype=np.int64)
 
@@ -396,6 +410,9 @@ def build_index_from_matrix(
 
     n_vectors = matrix.shape[0]
     mat = matrix.astype("float32")
+    norms = np.linalg.norm(mat, axis=1, keepdims=True)
+    norms = np.where(norms == 0, 1.0, norms)
+    mat = mat / norms
 
     # Resolve index type
     if index_type == "auto":
@@ -460,11 +477,9 @@ def load_or_rebuild_index(filepath: str) -> Tuple[faiss.Index, List[ChunkRecord]
     n_registry = len(registry)
 
     if n_matrix != n_registry:
-        from src.errors import FAISS_EMB_REGISTRY_MISMATCH
+        from src.errors import faiss_emb_registry_mismatch
 
-        raise ValueError(
-            FAISS_EMB_REGISTRY_MISMATCH.format(emb_count=n_matrix, reg_count=n_registry)
-        )
+        raise ValueError(faiss_emb_registry_mismatch(n_matrix, n_registry))
 
     if os.path.exists(filepath):
         try:

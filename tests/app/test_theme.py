@@ -14,7 +14,7 @@ from app.theme import (
 )
 from unittest.mock import patch
 
-from app.theme import badge_html, get_colors, inject_css, sanitize_hex_color
+from app.theme import get_colors, inject_css, sanitize_hex_color
 
 
 def test_get_colors_returns_valid_theme_colors():
@@ -24,8 +24,6 @@ def test_get_colors_returns_valid_theme_colors():
     assert colors
     assert "background" in colors
     assert "accent" in colors
-from app.theme import (COLORS, severity_tier, tier_color,
-                       tier_from_severity_label)
 
 
 def test_themes_have_expected_keys():
@@ -165,7 +163,6 @@ def test_badge_html_returns_valid_html():
 
 
 import streamlit as st
-from unittest.mock import patch
 from app.theme import initialize_theme, set_theme
 
 def test_initialize_theme_loads_dark_from_query_params():
@@ -281,19 +278,10 @@ def test_set_theme_updates_query_params():
         set_theme("Dark")
     assert mock_query_params["theme"] == "dark"
     assert st.session_state.theme == "Dark"
-from unittest.mock import patch
 
 import matplotlib as mpl
 from app.theme import (
-    COLORS,
     apply_matplotlib_theme,
-    badge_html,
-    get_colors,
-    inject_css,
-    sanitize_hex_color,
-    severity_tier,
-    tier_color,
-    tier_from_severity_label,
 )
 
 
@@ -328,90 +316,6 @@ def test_tier_from_severity_label():
     assert tier_from_severity_label("Warning") == "medium"
     assert tier_from_severity_label("Low") == "low"
     assert tier_from_severity_label("unknown") == "low"
-
-
-def test_tier_color():
-    assert tier_color("high") == COLORS["danger"]
-    assert tier_color("medium") == COLORS["warning"]
-    assert tier_color("low") == COLORS["success"]
-    assert tier_color("unknown") == COLORS["neutral_soft"]
-
-
-def test_badge_html_default():
-    html = badge_html("high")
-    assert "background-color: " + COLORS["danger_soft"] in html
-    assert "color: " + COLORS["danger"] in html
-    assert "🔴 High" in html
-
-
-def test_inject_css_generates_css_without_errors_duplicate():
-    with patch("app.theme.st.markdown") as mock_markdown:
-        inject_css()
-
-    assert mock_markdown.call_count == 2
-
-    css = mock_markdown.call_args_list[0].args[0]
-
-    assert isinstance(css, str)
-    assert len(css.strip()) > 0
-    assert "block-container" in css
-    assert "stAlert" in css
-
-
-
-
-def test_sanitize_hex_color_valid_and_invalid():
-    """Verify regex validation for hex colors."""
-    # Valid hex colors (3 and 6 digits)
-    assert sanitize_hex_color("#FFF") == "#FFF"
-    assert sanitize_hex_color("#123456") == "#123456"
-    assert sanitize_hex_color("#aBcDeF") == "#aBcDeF"
-
-    # Invalid hex colors / injection attempts
-    assert sanitize_hex_color("red", fallback="#000000") == "#000000"
-    assert sanitize_hex_color("#12345", fallback="#000000") == "#000000"
-    assert sanitize_hex_color("#1234567", fallback="#000000") == "#000000"
-    assert sanitize_hex_color("url('http://evil')", fallback="#000000") == "#000000"
-    assert sanitize_hex_color("; background: red;", fallback="#000000") == "#000000"
-
-
-def test_badge_html_returns_valid_html():
-    html = badge_html("high")
-
-    assert isinstance(html, str)
-    assert len(html.strip()) > 0
-    assert "badge" in html
-
-
-import streamlit as st
-from unittest.mock import patch
-from app.theme import initialize_theme, set_theme
-
-def test_initialize_theme_loads_dark_from_query_params():
-    st.session_state.clear()
-    with patch("app.theme.st.query_params", {"theme": "dark"}):
-        initialize_theme()
-    assert st.session_state.theme == "Dark"
-
-def test_initialize_theme_loads_light_from_query_params():
-    st.session_state.clear()
-    with patch("app.theme.st.query_params", {"theme": "light"}):
-        initialize_theme()
-    assert st.session_state.theme == "Light"
-
-def test_initialize_theme_invalid_query_params_fallback():
-    st.session_state.clear()
-    with patch("app.theme.st.query_params", {"theme": "invalid_value"}):
-        initialize_theme()
-    assert st.session_state.theme == "Light"
-
-def test_set_theme_updates_query_params():
-    mock_query_params = {}
-    st.session_state.clear()
-    with patch("app.theme.st.query_params", mock_query_params):
-        set_theme("Dark")
-    assert mock_query_params["theme"] == "dark"
-    assert st.session_state.theme == "Dark"
 
 
 def test_apply_matplotlib_theme():
@@ -480,3 +384,151 @@ def test_back_to_top_html_includes_csp_nonce():
         nonce = get_csp_nonce()
         html = back_to_top_html()
         assert f'<script nonce="{nonce}">' in html
+
+
+def test_inject_css_contains_active_sidebar_tab_selector():
+    """inject_css() must output CSS rules for active sidebar button tabs."""
+    with patch("app.theme.st.markdown") as mock_md:
+        inject_css()
+
+    style_html = mock_md.call_args_list[0].args[0]
+    assert '.stButton button[data-selected="true"]' in style_html
+    assert 'section[data-testid="stSidebar"]' in style_html
+
+
+def test_inject_css_contains_accent_border_left():
+    """inject_css() must specify border-left: 4px solid #4f46e5 for active state (Issue #1028)."""
+    with patch("app.theme.st.markdown") as mock_md:
+        inject_css()
+
+    style_html = mock_md.call_args_list[0].args[0]
+    assert "border-left: 4px solid #4f46e5" in style_html
+
+
+def test_active_tab_border_style_default():
+    from app.theme import active_tab_border_style
+
+    css_decl = active_tab_border_style()
+    assert css_decl == "border-left: 4px solid #4f46e5;"
+
+
+def test_active_tab_border_style_custom_color_and_width():
+    from app.theme import active_tab_border_style
+
+    css_decl = active_tab_border_style(color="#0D9488", width=6)
+    assert css_decl == "border-left: 6px solid #0D9488;"
+
+
+def test_active_tab_border_style_invalid_color_fallback():
+    from app.theme import active_tab_border_style
+
+    css_decl = active_tab_border_style(color="invalid-color-value")
+    assert css_decl == "border-left: 4px solid #4f46e5;"
+
+
+def test_get_active_sidebar_tab_css():
+    from app.theme import get_active_sidebar_tab_css
+
+    css_block = get_active_sidebar_tab_css("#4f46e5")
+    assert isinstance(css_block, str)
+    assert 'border-left: 4px solid #4f46e5' in css_block
+    assert 'button[data-selected="true"]' in css_block
+
+
+def test_get_sidebar_tab_style_selected():
+    from app.theme import get_sidebar_tab_style
+
+    selected_style = get_sidebar_tab_style(is_selected=True, accent_border_color="#4f46e5")
+    assert selected_style["border-left"] == "4px solid #4f46e5"
+    assert selected_style["font-weight"] == "700"
+
+
+def test_get_sidebar_tab_style_unselected():
+    from app.theme import get_sidebar_tab_style
+
+    unselected_style = get_sidebar_tab_style(is_selected=False)
+    assert unselected_style["border-left"] == "4px solid transparent"
+    assert unselected_style["font-weight"] == "400"
+
+
+def test_get_theme_accent_color():
+    from app.theme import get_theme_accent_color
+
+    assert get_theme_accent_color("Indigo") == "#4f46e5"
+    assert get_theme_accent_color("Teal") == "#0d9488"
+    assert get_theme_accent_color("Light") == "#0D9488"
+    assert get_theme_accent_color("Dark") == "#2DD4BF"
+
+
+def test_build_active_tab_custom_css():
+    from app.theme import build_active_tab_custom_css
+
+    css = build_active_tab_custom_css(accent_hex="#4f46e5", border_width=4)
+    assert "border-left: 4px solid #4f46e5 !important" in css
+    assert 'button[data-selected="true"]' in css
+
+
+def test_generate_active_tab_theme_tokens():
+    from app.theme import generate_active_tab_theme_tokens
+
+    tokens = generate_active_tab_theme_tokens("Light")
+    assert isinstance(tokens, dict)
+    assert tokens["active_border_color"] == "#4f46e5"
+    assert tokens["active_border_width"] == "4px"
+    assert tokens["active_font_weight"] == "700"
+
+
+def test_get_sidebar_navigation_config():
+    from app.theme import get_sidebar_navigation_config
+
+    config = get_sidebar_navigation_config()
+    assert isinstance(config, dict)
+    assert config["accent_border_color"] == "#4f46e5"
+    assert config["accent_border_width_px"] == 4
+    assert len(config["supported_selectors"]) >= 4
+
+
+def test_render_active_tab_badge_html():
+    from app.theme import render_active_tab_badge_html
+
+    active_html = render_active_tab_badge_html("Dashboard", is_active=True)
+    assert "border-left: 4px solid #4f46e5" in active_html
+    assert "Dashboard" in active_html
+
+    inactive_html = render_active_tab_badge_html("Settings", is_active=False)
+    assert "border-left: 4px solid transparent" in inactive_html
+    assert "Settings" in inactive_html
+
+
+def test_generate_sidebar_theme_stylesheet():
+    from app.theme import generate_sidebar_theme_stylesheet
+
+    stylesheet = generate_sidebar_theme_stylesheet("Modern", "#4f46e5")
+    assert "border-left: 4px solid #4f46e5" in stylesheet
+    assert 'button[data-selected="true"]' in stylesheet
+
+
+def test_get_active_tab_accessibility_attributes():
+    from app.theme import get_active_tab_accessibility_attributes
+
+    active_attrs = get_active_tab_accessibility_attributes(is_active=True)
+    assert active_attrs["aria-selected"] == "true"
+    assert active_attrs["data-selected"] == "true"
+    assert active_attrs["role"] == "tab"
+
+    inactive_attrs = get_active_tab_accessibility_attributes(is_active=False)
+    assert inactive_attrs["aria-selected"] == "false"
+    assert inactive_attrs["data-selected"] == "false"
+
+
+def test_render_sidebar_navigation_menu():
+    from app.theme import render_sidebar_navigation_menu
+
+    tabs = [("home", "Home"), ("dashboard", "Dashboard"), ("settings", "Settings")]
+    menu_html = render_sidebar_navigation_menu(tabs, active_tab_id="dashboard")
+    assert 'class="sidebar-nav-menu"' in menu_html
+    assert 'data-tab-id="dashboard"' in menu_html
+    assert "border-left: 4px solid #4f46e5" in menu_html
+
+
+

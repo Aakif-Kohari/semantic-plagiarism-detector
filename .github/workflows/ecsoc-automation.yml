@@ -1,4 +1,4 @@
-name: ECSoC Automation
+name: "ECSoC Automation"
 
 on:
   issue_comment:
@@ -11,7 +11,7 @@ on:
     types: [opened, closed]
 
   schedule:
-    - cron: '0 0 * * *'
+    - cron: '0 */8 * * *'
 
   workflow_dispatch:
 
@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+      - uses: actions/github-script@v7
         with:
           script: |
             const issue = context.payload.issue;
@@ -178,7 +178,7 @@ jobs:
     if: github.event_name == 'issues' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+      - uses: actions/github-script@v7
         with:
           script: |
             const labelRules = [
@@ -274,24 +274,30 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+      - uses: actions/github-script@v7
         with:
           script: |
             const pr = context.payload.pull_request;
-            const author = pr.user.login;
+            if (!pr) {
+              console.log("No pull_request in context payload. Skipping.");
+              return;
+            }
+            const author = pr.user ? pr.user.login : null;
             const action = context.payload.action;
 
             if (action === 'opened') {
-              // Assign PR author (if user is a collaborator)
-              try {
-                await github.rest.issues.addAssignees({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: pr.number,
-                  assignees: [author]
-                });
-              } catch (err) {
-                console.log(`Could not assign ${author} (user might not be a collaborator):`, err.message);
+              if (author) {
+                // Assign PR author (if user is a collaborator)
+                try {
+                  await github.rest.issues.addAssignees({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: pr.number,
+                    assignees: [author]
+                  });
+                } catch (err) {
+                  console.log(`Could not assign ${author} (user might not be a collaborator):`, err.message);
+                }
               }
 
               // Auto-label PR with ECSoC26
@@ -307,107 +313,26 @@ jobs:
               }
 
               // Welcome comment for PR
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: pr.number,
-                body: `🎉 Thanks @${author} for opening this Pull Request for **ECSoC26**! A maintainer will review it soon.`
-              });
-
-              // AI PR Reviewer
+              if (author) {
+                try {
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: pr.number,
+                    body: `🎉 Thanks @${author} for opening this Pull Request for **ECSoC26**! A maintainer will review it soon.`
+                  });
+                } catch (err) {
+                  console.log("Could not post welcome comment:", err.message);
+                }
+              }
+            } else if (action === 'closed' && pr.merged) {
+              // Merge thank you comment for PR
               try {
-                const files = await github.paginate(github.rest.pulls.listFiles, {
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: pr.number,
-                  per_page: 100
-                });
-
-                const issuesFound = [];
-                let pythonFilesModified = false;
-                let requirementsModified = false;
-                let testsModified = false;
-                let coreSrcModified = false;
-
-                for (const file of files) {
-                  const filename = file.filename;
-                  const patch = file.patch || '';
-                  const addedLines = patch.split('\n').filter(line => line.startsWith('+') && !line.startsWith('+++'));
-                  const addedText = addedLines.join('\n');
-
-                  if (filename.endsWith('.py')) pythonFilesModified = true;
-                  if (filename.includes('requirements') || filename.includes('pyproject.toml')) requirementsModified = true;
-                  if (filename.startsWith('tests/') || filename.includes('test_')) testsModified = true;
-                  if (filename.startsWith('src/')) coreSrcModified = true;
-
-                  // Defensive / Null check warning
-                  if (/(?:req|res|data|user|config|payload|item|obj)\.[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+/.test(addedText) &&
-                      !/(?:if|optional|\?\.|get\(|hasattr|in\s)/.test(addedText)) {
-                    if (!issuesFound.some(i => i.includes('Missing null check'))) {
-                      issuesFound.push('Missing null check');
-                    }
-                  }
-
-                  // Leftover debug statement warning
-                  if (/(?:print\(|console\.log\(|debugger|breakpoint\(\)|import\s+pdb|pdb\.set_trace\(\))/.test(addedText)) {
-                    if (!issuesFound.some(i => i.includes('Variable never used') || i.includes('Leftover debug'))) {
-                      issuesFound.push('Variable never used or leftover debug statement');
-                    }
-                  }
-
-                  // Large block warning (duplicate logic risk)
-                  if (addedLines.length > 50) {
-                    if (!issuesFound.some(i => i.includes('Duplicate logic'))) {
-                      issuesFound.push(`Duplicate logic in ${filename}`);
-                    }
-                  }
-                }
-
-                if (pythonFilesModified && !requirementsModified) {
-                  let hasNewImport = false;
-                  for (const file of files) {
-                    if (file.filename.endsWith('.py') && file.patch) {
-                      const added = file.patch.split('\n').filter(l => l.startsWith('+') && !l.startsWith('+++')).join('\n');
-                      if (/(?:^\+|\s)(?:import|from)\s+[a-zA-Z0-9_]+/.test(added)) {
-                        hasNewImport = true;
-                        break;
-                      }
-                    }
-                  }
-                  if (hasNewImport) {
-                    issuesFound.push('requirements.txt not updated');
-                  }
-                }
-
-                if (coreSrcModified && !testsModified) {
-                  if (!issuesFound.some(i => i.includes('tests'))) {
-                    issuesFound.push('tests not updated for core changes');
-                  }
-                }
-
-                let reviewBody = '🤖 **AI PR Reviewer**\n\n';
-                if (issuesFound.length > 0) {
-                  reviewBody += 'Potential issues:\n\n' + issuesFound.map(i => `- ${i}`).join('\n');
-                } else {
-                  reviewBody += 'Looks good.';
-                }
-
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number: pr.number,
-                  body: reviewBody
-                });
-              } catch (reviewErr) {
-                console.log("Error performing AI PR review:", reviewErr.message);
-              }
-            } else if (action === 'closed' && pr.merged) {
-              // Merge thank you comment for PR
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: pr.number,
-                body: `🎉 Hey @${author}!
+                  body: `🎉 Hey @${author || 'contributor'}!
 
                 Your PR has been merged successfully! 🚀
 
@@ -422,19 +347,23 @@ jobs:
                 • 💡 Suggest new ideas in Discussions
                 • 📢 Share your contribution with others
 
-                Hope to see you back soon. Happy coding! ❤️`
-              });
+                Hope to see you back soon. Happy coding! ❤️`.replace(/^[ \t]+/gm, '')
+                });
+              } catch (err) {
+                console.log("Could not post PR merge comment:", err.message);
+              }
             }
 
   auto-unassign-stale:
     permissions:
       issues: write
+      pull-requests: write
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
     steps:
       - name: Cleanup Excess Claims (> 5 open issues)
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        uses: actions/github-script@v7
         with:
           script: |
             const maxAllowed = 5;
@@ -531,7 +460,7 @@ jobs:
             }
 
       - name: Progressive Inactivity Reminders & Unassign (Day 2, Day 3, Day 4)
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        uses: actions/github-script@v7
         with:
           script: |
             const twoDaysMs = 2 * 24 * 60 * 60 * 1000;
@@ -655,5 +584,156 @@ jobs:
                     });
                   }
                 }
+              }
+            }
+
+      - name: Auto-close Stale PRs (Open for 72+ hours)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const seventyTwoHoursMs = 72 * 60 * 60 * 1000;
+            const now = new Date();
+            console.log("Checking for PRs open for 72 hours or more...");
+
+            const openPRs = await github.paginate(github.rest.pulls.list, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100
+            });
+
+            for (const pr of openPRs) {
+              const createdAt = new Date(pr.created_at);
+              const ageMs = now - createdAt;
+
+              if (ageMs >= seventyTwoHoursMs) {
+                const author = pr.user ? pr.user.login : 'contributor';
+                console.log(`Closing PR #${pr.number} (open for ${Math.round(ageMs / (1000 * 60 * 60))} hours)...`);
+
+                try {
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: pr.number,
+                    body: `⏰ @${author}, this Pull Request has been open for 72 hours or more without being merged. It has been automatically closed due to inactivity, and the task is unassigned and open for anyone to claim!`
+                  });
+                } catch (e) {
+                  console.log(`Error posting comment on PR #${pr.number}:`, e.message);
+                }
+
+                try {
+                  await github.rest.pulls.update({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    pull_number: pr.number,
+                    state: 'closed'
+                  });
+                } catch (e) {
+                  console.log(`Error closing PR #${pr.number}:`, e.message);
+                }
+              }
+            }
+
+  pr-conflict-reminder:
+    permissions:
+      issues: write
+      pull-requests: write
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const isBotComment = (c) => c.user && (c.user.type === 'Bot' || (c.user.login && c.user.login.endsWith('[bot]')));
+            const eightHoursMs = 7.5 * 60 * 60 * 1000; // Buffer for 8-hour cron schedule jitter
+            const now = new Date();
+
+            let prs = [];
+            if (context.eventName === 'pull_request_target') {
+              if (context.payload.pull_request) {
+                prs = [context.payload.pull_request];
+              }
+            } else {
+              prs = await github.paginate(github.rest.pulls.list, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'open',
+                per_page: 100
+              });
+            }
+
+            for (const pr of prs) {
+              if (pr.state !== 'open') continue;
+
+              // Fetch detailed PR object to get mergeable status
+              let prDetail;
+              try {
+                prDetail = await github.rest.pulls.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: pr.number
+                });
+
+                // GitHub calculates mergeability asynchronously; retry up to 3 times if null
+                let retries = 0;
+                while (prDetail.data.mergeable === null && retries < 3) {
+                  await new Promise(resolve => setTimeout(resolve, 2000));
+                  prDetail = await github.rest.pulls.get({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    pull_number: pr.number
+                  });
+                  retries++;
+                }
+              } catch (err) {
+                console.log(`Error fetching details for PR #${pr.number}:`, err.message);
+                continue;
+              }
+
+              // Check if PR has merge conflicts
+              const hasConflict = prDetail.data.mergeable === false || prDetail.data.mergeable_state === 'dirty';
+              if (!hasConflict) {
+                console.log(`PR #${pr.number} does not have merge conflicts.`);
+                continue;
+              }
+
+              const author = pr.user ? pr.user.login : null;
+
+              // Check existing comments on the PR to enforce 6-hour reminder interval
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                per_page: 100
+              });
+
+              const conflictBotComments = comments.filter(c =>
+                isBotComment(c) && c.body && (
+                  c.body.includes("merge conflicts") ||
+                  c.body.includes("resolve them")
+                )
+              );
+
+              if (conflictBotComments.length > 0) {
+                const lastComment = conflictBotComments[conflictBotComments.length - 1];
+                const lastCommentTime = new Date(lastComment.created_at);
+                if ((now - lastCommentTime) < eightHoursMs) {
+                  console.log(`Skipping PR #${pr.number}: Merge conflict reminder already posted within the last 8 hours.`);
+                  continue;
+                }
+              }
+
+              // Post reminder comment
+              console.log(`Posting merge conflict reminder on PR #${pr.number}...`);
+              try {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr.number,
+                  body: `⚠️ ${author ? `@${author}` : 'Contributor'}, this Pull Request has **merge conflicts** that need to be resolved before it can be merged. Please resolve the conflicts with the target branch!`
+                });
+              } catch (err) {
+                console.log(`Failed to post comment on PR #${pr.number}:`, err.message);
               }
             }
