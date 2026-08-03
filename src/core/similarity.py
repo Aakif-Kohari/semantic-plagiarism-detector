@@ -9,7 +9,7 @@ Uses cosine similarity. Since embeddings are L2-normalised in embedding_model.py
 cosine similarity reduces to the dot product, making this very fast.
 """
 
-from typing import Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import faiss  # type: ignore
 import numpy as np
@@ -488,3 +488,170 @@ def find_exact_matches(
                 matches.append(orig)
 
     return matches
+
+
+# ── Cross-Encoder Rescoring Stage (#1355) ──────────────────────────────────────
+
+_CROSS_ENCODER_MODELS: Dict[str, Any] = {}
+_CROSS_ENCODER_FAILED_MODELS: Set[str] = set()
+
+
+def clear_cross_encoder_cache() -> None:
+    """Clear the cached CrossEncoder model instances and failure history."""
+    global _CROSS_ENCODER_MODELS, _CROSS_ENCODER_FAILED_MODELS
+    _CROSS_ENCODER_MODELS.clear()
+    _CROSS_ENCODER_FAILED_MODELS.clear()
+
+
+def get_cross_encoder_info(model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2") -> dict:
+    """
+    Return diagnostic status information for the specified CrossEncoder model.
+
+    Returns:
+        Dict containing model_name, is_loaded, and is_failed status flags.
+    """
+    global _CROSS_ENCODER_MODELS, _CROSS_ENCODER_FAILED_MODELS
+    return {
+        "model_name": model_name,
+        "is_loaded": model_name in _CROSS_ENCODER_MODELS and _CROSS_ENCODER_MODELS[model_name] is not None,
+        "is_failed": model_name in _CROSS_ENCODER_FAILED_MODELS,
+    }
+
+
+def _get_cross_encoder(model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2") -> Optional[Any]:
+    """
+    Safely load and cache a SentenceTransformers CrossEncoder model.
+
+    If loading fails (e.g. model not found, offline network, or missing dependency),
+    logs a warning and returns None to trigger bi-encoder fallback.
+
+    Args:
+        model_name: HuggingFace model path or identifier.
+
+    Returns:
+        CrossEncoder model instance or None if load failed.
+    """
+    global _CROSS_ENCODER_MODELS, _CROSS_ENCODER_FAILED_MODELS
+
+    if model_name in _CROSS_ENCODER_FAILED_MODELS:
+        return None
+
+    if model_name in _CROSS_ENCODER_MODELS:
+        return _CROSS_ENCODER_MODELS[model_name]
+
+    try:
+        from sentence_transformers import CrossEncoder
+
+        model = CrossEncoder(model_name)
+        _CROSS_ENCODER_MODELS[model_name] = model
+        return model
+    except Exception as exc:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            f"[similarity] Cross-Encoder model '{model_name}' load failed: {exc}. "
+            "Falling back to initial bi-encoder vector similarity scores."
+        )
+        _CROSS_ENCODER_FAILED_MODELS.add(model_name)
+        return None
+
+
+def rerank_candidates_with_cross_encoder(
+    pairs: list[tuple],
+    model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
+    top_k: Optional[int] = None,
+    batch_size: int = 32,
+    apply_sigmoid: bool = True,
+) -> list[tuple]:
+    """
+    Re-scores and re-ranks top candidate text pairs using a joint Cross-Encoder model.
+
+    Bi-encoder vector embeddings (SentenceTransformers) are fast for top-K candidate
+    retrieval, but approximate. This Cross-Encoder stage performs full attention
+    between both text inputs to refine candidate similarity scores with high precision.
+
+    Acceptance Criteria:
+    - Add rerank_candidates_with_cross_encoder(pairs: list[tuple], model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2") -> list[tuple]
+    - Re-score candidate pairs using Cross-Encoder joint sentence evaluation.
+    - Fall back to bi-encoder scores if cross-encoder model load fails.
+
+    Args:
+        pairs: List of candidate tuples. Each item should be a tuple containing at least
+               two string elements: (text_a, text_b, [optional_initial_score, ...]).
+        model_name: HuggingFace model name for SentenceTransformers CrossEncoder.
+                    Defaults to 'cross-encoder/ms-marco-MiniLM-L-6-v2'.
+        top_k: Optional maximum number of candidate pairs to re-score and return.
+        batch_size: Batch size passed to CrossEncoder evaluation.
+        apply_sigmoid: Whether to apply a logistic sigmoid function to normalize
+                       raw logits to [0.0, 1.0].
+
+    Returns:
+        List of re-scored candidate tuples sorted in descending order of similarity score.
+        If model loading or evaluation fails, falls back gracefully to the original input pairs.
+    """
+    if not pairs:
+        return []
+
+    # Limit candidate pairs to top_k if specified
+    candidates = pairs[:top_k] if top_k is not None and top_k > 0 else pairs
+
+    model = _get_cross_encoder(model_name=model_name)
+    if model is None:
+        # Fall back gracefully to original pairs with bi-encoder scores preserved
+        return candidates
+
+    try:
+        # Extract text pairs for joint encoding
+        sentence_pairs = []
+        for p in candidates:
+            if not isinstance(p, (tuple, list)) or len(p) < 2:
+                continue
+            text_a = str(p[0])
+            text_b = str(p[1])
+            sentence_pairs.append((text_a, text_b))
+
+        if not sentence_pairs:
+            return candidates
+
+        raw_scores = model.predict(sentence_pairs, batch_size=batch_size)
+
+        # Normalize raw scores using sigmoid if enabled
+        rescored_pairs = []
+        for idx, orig_tuple in enumerate(candidates):
+            if idx >= len(raw_scores):
+                rescored_pairs.append(orig_tuple)
+                continue
+
+            raw_s = float(raw_scores[idx])
+            if apply_sigmoid:
+                # Logistic sigmoid: 1 / (1 + exp(-x))
+                score = float(1.0 / (1.0 + np.exp(-raw_s)))
+            else:
+                score = float(np.clip(raw_s, 0.0, 1.0))
+
+            score = round(float(np.clip(score, 0.0, 1.0)), 4)
+
+            # Build updated tuple preserving extra metadata if present
+            if len(orig_tuple) > 2:
+                updated_tuple = (orig_tuple[0], orig_tuple[1], score) + orig_tuple[3:]
+            else:
+                updated_tuple = (orig_tuple[0], orig_tuple[1], score)
+
+            rescored_pairs.append(updated_tuple)
+
+        # Sort candidate pairs descending by cross-encoder score
+        rescored_pairs.sort(
+            key=lambda item: item[2] if len(item) > 2 and isinstance(item[2], (int, float)) else 0.0,
+            reverse=True,
+        )
+        return rescored_pairs
+
+    except Exception as exc:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            f"[similarity] Cross-Encoder rescoring execution failed: {exc}. "
+            "Falling back to bi-encoder vector scores."
+        )
+        return candidates
+
