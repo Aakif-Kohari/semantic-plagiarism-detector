@@ -352,3 +352,95 @@ def plot_document_sizes(word_counts: dict[str, int], show_grid: bool = True) -> 
 
     return fig
 
+
+def plot_similarity_boxplot(
+    incidents: list[dict[str, Any]],
+    show_grid: bool = True,
+) -> go.Figure:
+    """Create a box plot showing similarity score distributions per assignment.
+
+    Renders one box (whiskers, median, quartiles, and statistical outliers)
+    for every assignment title found in the incidents. Incidents without an
+    assignment title or with a non-numeric similarity score are ignored.
+
+    Args:
+        incidents: List of dicts with 'assignment_title' and 'similarity_score'
+            keys. A bare 'title'/'similarity' fallback is also accepted.
+        show_grid: Whether to show chart gridlines.
+
+    Returns:
+        Plotly Figure object with one box trace per assignment title.
+    """
+    rows: list[dict[str, Any]] = []
+    for incident in incidents:
+        title = incident.get("assignment_title") or incident.get("title")
+        score = incident.get("similarity_score")
+        if score is None:
+            score = incident.get("similarity")
+        if title is None or score is None:
+            continue
+        try:
+            score = float(score)
+        except (TypeError, ValueError):
+            continue
+        rows.append({"assignment_title": str(title), "similarity_score": score})
+
+    if not rows:
+        # Return empty chart with message
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No similarity scores recorded for the selected incidents",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
+            font=dict(size=16, color="gray"),
+        )
+        fig.update_layout(
+            title="Similarity Score Distribution by Assignment",
+            xaxis_title="Assignment Title",
+            yaxis_title="Similarity Score",
+            height=400,
+            autosize=True,
+        )
+        fig.update_xaxes(showgrid=show_grid)
+        fig.update_yaxes(showgrid=show_grid)
+        return fig
+
+    grouped: dict[str, list[float]] = {}
+    for row in rows:
+        grouped.setdefault(row["assignment_title"], []).append(
+            row["similarity_score"]
+        )
+
+    fig = go.Figure()
+    for title, scores in grouped.items():
+        fig.add_trace(
+            go.Box(
+                y=scores,
+                name=title,
+                boxpoints="outliers",
+                marker_color="#636efa",
+                line_color="#4a4dba",
+                hovertemplate=(
+                    "<b>%{name}</b><br>"
+                    "Similarity Score: %{y:.2f}<extra></extra>"
+                ),
+            )
+        )
+
+    fig.update_layout(
+        title="Similarity Score Distribution by Assignment",
+        xaxis_title="Assignment Title",
+        yaxis_title="Similarity Score",
+        height=400,
+        showlegend=False,
+        autosize=True,
+    )
+
+    fig.update_xaxes(showgrid=show_grid)
+    fig.update_yaxes(showgrid=show_grid, range=[0.0, 1.0])
+
+    return fig
+

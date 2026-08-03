@@ -246,7 +246,7 @@ def detect_ai_generated_text(text: str) -> Dict[str, Any]:
     # Perplexity estimation: higher for human (low probability), lower for AI (high probability)
     perplexity_score = float(150.0 - 110.0 * ai_probability)
 
-return {
+    return {
         "ai_probability": ai_probability,
         "confidence_tier": confidence_tier,
         "perplexity_score": perplexity_score,

@@ -140,8 +140,8 @@ def test_detect_language_high_confidence():
 
     with patch("src.core.cross_lingual.detect_langs") as mock_detect_langs:
         mock_detect_langs.return_value = [Language("fr", 0.9)]
-        lang, confident = detect_language("some text in french")
-        
+        lang, confident = detect_language("some text in the french language")
+
         assert lang == "fr"
         assert confident is True
 
