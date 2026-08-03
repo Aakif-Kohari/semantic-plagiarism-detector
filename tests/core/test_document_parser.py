@@ -569,7 +569,7 @@ class TestCleanText:
         text = "   \n\t\n  "
         result = clean_text(text)
         assert result == ""
-    
+
     def test_removes_stopwords_when_enabled(self):
         text = "The quick brown fox jumps over the lazy dog."
         result = clean_text(text, remove_stopwords=True)
@@ -684,7 +684,7 @@ def test_large_pdf_parsing_performance_benchmark():
     """Benchmark test asserting parsing of a 200-page text PDF completes under 3 seconds."""
     import time
     from reportlab.pdfgen import canvas
-    
+
     # 1. Create a 200-page synthetic PDF in-memory using reportlab
     buf = io.BytesIO()
     c = canvas.Canvas(buf)
@@ -694,12 +694,12 @@ def test_large_pdf_parsing_performance_benchmark():
         c.showPage()
     c.save()
     pdf_bytes = buf.getvalue()
-    
+
     # 2. Time the parsing of the 200-page PDF
     start_time = time.perf_counter()
     parsed_text = extract_text_from_pdf(pdf_bytes)
     duration = time.perf_counter() - start_time
-    
+
     # 3. Assert duration and basic content checks
     assert len(parsed_text) > 0
     assert "Page 199" in parsed_text
@@ -726,11 +726,11 @@ def test_extract_text_routing_txt_latin1(tmp_path):
     """Test that extract_text successfully routes and decodes a Latin-1 file."""
     original_text = "Café and naïve text."
     latin1_bytes = original_text.encode("latin-1")
-    
+
     # Write the bytes to a temp file
     file_path = tmp_path / "latin1_test.txt"
     file_path.write_bytes(latin1_bytes)
-    
+
     # Verify routing and decoding
     result = extract_text(str(file_path), "latin1_test.txt")
     assert result == original_text
@@ -753,11 +753,11 @@ def test_get_supported_file_extensions():
         ".rtf",
         ".txt",
     ]
-    
-    
+
+
 def test_normalize_unicode_spaces():
     text = "Hello\u00A0World\u00AD！\u2009Python，Testing。"
 
     normalized = normalize_unicode_spaces(text)
 
-    assert normalized == "Hello World! Python,Testing."    
+    assert normalized == "Hello World! Python,Testing."

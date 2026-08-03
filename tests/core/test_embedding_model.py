@@ -172,6 +172,3 @@ def test_detect_device_helper():
     assert embedding_model._detect_device(mock_obj_device_type) == "mps"
 
     assert embedding_model._detect_device(None) in ("cpu", "cuda", "mps")
-
-
-

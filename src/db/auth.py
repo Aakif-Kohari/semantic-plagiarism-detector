@@ -684,4 +684,3 @@ def format_user_created_date(iso_str: str) -> str:
             continue
 
     return "Unknown"
-    

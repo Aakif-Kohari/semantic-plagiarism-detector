@@ -195,4 +195,3 @@ def test_faiss_normalization_benchmark():
     print(f"[Benchmark] Speedup factor: {loop_time / vec_time:.2f}x")
 
     assert vec_time < loop_time
-

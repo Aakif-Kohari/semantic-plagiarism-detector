@@ -1,6 +1,6 @@
 # Automated Release Generation Workflow
 #
-# This workflow is triggered automatically whenever a semantic version tag 
+# This workflow is triggered automatically whenever a semantic version tag
 # (e.g., v1.2.0, v2.0.1-beta) is pushed to the repository. It performs a checkout,
 # extracts release notes based on the git commit history, and leverages the
 # softprops/action-gh-release action to create a GitHub Release draft.
@@ -25,7 +25,7 @@ jobs:
   create-draft-release:
     name: Create GitHub Draft Release
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

@@ -435,11 +435,11 @@ def generate_plagiarism_report(
     if doc_a_text is not None or doc_b_text is not None:
         story.append(Paragraph("Document Statistics", heading_style))
         story.append(Spacer(1, 0.1 * inch))
-        
+
         # Compute statistics for each document
         doc_a_stats = compute_text_stats(doc_a_text) if doc_a_text else None
         doc_b_stats = compute_text_stats(doc_b_text) if doc_b_text else None
-        
+
         # Create statistics table
         stats_data = [
             ['', doc_a, doc_b],
@@ -448,10 +448,10 @@ def generate_plagiarism_report(
             ['Unique Words', str(doc_a_stats['unique_word_count']) if doc_a_stats else 'N/A', str(doc_b_stats['unique_word_count']) if doc_b_stats else 'N/A'],
             ['Unique Word Ratio', f"{doc_a_stats['unique_word_ratio']:.2%}" if doc_a_stats else 'N/A', f"{doc_b_stats['unique_word_ratio']:.2%}" if doc_b_stats else 'N/A'],
         ]
-        
+
         # Calculate column widths - give more space to document names
         col_widths = [1.5 * inch, 2.25 * inch, 2.25 * inch]
-        
+
         stats_table = Table(stats_data, colWidths=col_widths, hAlign=TA_LEFT)
         stats_table.setStyle(
             TableStyle(

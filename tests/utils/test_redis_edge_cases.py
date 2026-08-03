@@ -126,4 +126,3 @@ def test_redis_configurable_timeout():
 
     # Reload the module once more with environment cleared to restore defaults
     importlib.reload(src.utils.redis_cache)
-

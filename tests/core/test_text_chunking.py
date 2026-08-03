@@ -291,4 +291,3 @@ def test_chunk_text_no_truncation_warning_for_empty_text(caplog):
         if "exceeded chunk capacity limit" in record.getMessage()
     ]
     assert len(truncation_warnings) == 0
-            

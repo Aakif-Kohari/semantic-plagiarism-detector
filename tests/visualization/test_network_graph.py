@@ -494,5 +494,3 @@ def test_build_network_data_all_nodes_isolated():
 
     fig = render_network_plotly(net_data, title="Empty")
     assert isinstance(fig, go.Figure)
-
-

@@ -86,4 +86,3 @@ def test_get_text_stats():
     assert stats["words"] == 0
     assert stats["reading_ease"] == 0.0
     assert stats["grade_level"] == 0.0
-

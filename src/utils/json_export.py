@@ -423,4 +423,3 @@ def build_export_schema_definition() -> Dict[str, Any]:
             },
         },
     }
-

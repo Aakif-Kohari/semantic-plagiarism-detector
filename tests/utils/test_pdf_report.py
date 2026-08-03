@@ -221,7 +221,7 @@ def test_compute_text_stats():
     """Test comprehensive text statistics computation."""
     text = "Hello world. Hello there. The world is beautiful."
     stats = compute_text_stats(text)
-    
+
     assert stats['word_count'] > 0
     assert stats['sentence_count'] > 0
     assert stats['unique_word_count'] > 0
@@ -236,9 +236,9 @@ def test_format_stats_for_pdf():
         'unique_word_count': 100,
         'unique_word_ratio': 0.67,
     }
-    
+
     rows = format_stats_for_pdf(stats)
-    
+
     assert len(rows) == 4
     assert rows[0] == ['Word Count', '150']
     assert rows[1] == ['Sentence Count', '12']
@@ -250,24 +250,24 @@ def test_generate_plagiarism_report_with_text_stats():
     """Test PDF generation with text statistics included."""
     sample_text_a = "This is the first document with some text. It has multiple sentences and words. The content is designed to test the text statistics feature in the PDF report generation."
     sample_text_b = "This is the second document with different content. It has some similar words but mostly unique text. The purpose is to compare with the first document for plagiarism detection purposes."
-    
+
     pdf_buffer = generate_plagiarism_report(
         doc_a="student_a.pdf",
         doc_b="student_b.pdf",
         overall_similarity=0.934,
         threshold=0.59,
         top_pairs=[
-            ("First matching paragraph from document A.", 
+            ("First matching paragraph from document A.",
              "First matching paragraph from document B.", 0.96),
         ],
         doc_a_text=sample_text_a,
         doc_b_text=sample_text_b,
     )
-    
+
     pdf_bytes = pdf_buffer.getvalue()
     assert pdf_bytes.startswith(b"%PDF")
     assert len(pdf_bytes) > 1000
-    
+
     # Verify statistics are in the PDF
     text = _read_text(pdf_bytes)
     assert "Document Statistics" in text
@@ -287,11 +287,11 @@ def test_generate_plagiarism_report_without_text_stats():
             ("First matching paragraph.", "Second matching paragraph.", 0.96),
         ],
     )
-    
+
     pdf_bytes = pdf_buffer.getvalue()
     assert pdf_bytes.startswith(b"%PDF")
     assert len(pdf_bytes) > 1000
-    
+
     # Statistics section should not be present when text not provided
     text = _read_text(pdf_bytes)
     assert "Document Statistics" not in text

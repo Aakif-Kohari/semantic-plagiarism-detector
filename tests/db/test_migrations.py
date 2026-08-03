@@ -386,4 +386,3 @@ def test_migration_duration_logging(tmp_path, caplog):
         ), f"Expected duration log message not found in: {[r.message for r in caplog.records]}"
     finally:
         connection.close()
-

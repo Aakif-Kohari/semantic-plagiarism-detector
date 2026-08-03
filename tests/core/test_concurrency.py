@@ -18,11 +18,11 @@ def test_faiss_lock_acquisition_and_release(tmp_path):
     """
     lock_file = tmp_path / "test.lock"
     lock = FAISSLock(lock_file=str(lock_file), timeout=5)
-    
+
     # Acquire
     lock.acquire()
     assert os.path.exists(lock_file)
-    
+
     # Release
     lock.release()
     assert not os.path.exists(lock_file)
@@ -32,18 +32,18 @@ def test_faiss_lock_timeout(tmp_path):
     Test that a locked file causes another instance to raise ConcurrencyTimeoutError.
     """
     lock_file = tmp_path / "test_timeout.lock"
-    
+
     # Lock it manually
     fd = os.open(str(lock_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     os.write(fd, b"locked")
     os.close(fd)
-    
+
     lock = FAISSLock(lock_file=str(lock_file), timeout=1)
-    
+
     start_time = time.time()
     with pytest.raises(ConcurrencyTimeoutError):
         lock.acquire()
-    
+
     assert time.time() - start_time >= 1.0
 
 def test_faiss_write_lock_context_manager(tmp_path):
@@ -51,10 +51,10 @@ def test_faiss_write_lock_context_manager(tmp_path):
     Test the context manager properly acquires and automatically releases.
     """
     lock_file = tmp_path / "context.lock"
-    
+
     with faiss_write_lock(lock_path=str(lock_file), timeout=2):
         assert os.path.exists(lock_file)
-        
+
     assert not os.path.exists(lock_file)
 
 # ---------------------------------------------------------------------------
@@ -84,18 +84,18 @@ def test_concurrent_faiss_rebuild_sequencing(tmp_path):
     """
     lock_file = str(tmp_path / "concurrent.lock")
     shared_resource = []
-    
+
     num_threads = 10
-    
+
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
         futures = []
         for i in range(num_threads):
             futures.append(executor.submit(mock_rebuild_task, lock_file, shared_resource, i))
-            
+
         # Wait for all to finish
         for f in futures:
             f.result()
-            
+
     # Verification
     assert len(shared_resource) == num_threads
     assert -1 not in shared_resource # No timeouts occurred

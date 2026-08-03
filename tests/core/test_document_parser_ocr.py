@@ -130,4 +130,3 @@ def test_extract_text_from_image_oom(mock_image_open, mock_image_to_string):
 
     res = extract_text_from_image(b"fake image bytes")
     assert "[OCR extraction failed for the file]" in res
-
