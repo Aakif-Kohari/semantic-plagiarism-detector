@@ -87,8 +87,23 @@ def test_document_similarity_matrix_rejects_invalid_batch_size(dummy_embeddings)
         document_similarity_matrix(dummy_embeddings, batch_size=0.5)
 
 
-def test_chunk_similarity_matrix(dummy_embeddings):
-    df = chunk_similarity_matrix(dummy_embeddings)
+def test_document_similarity_matrix_min_percentile_filters_low_scores(dummy_embeddings):
+    df = document_similarity_matrix(dummy_embeddings, min_percentile=90.0)
+
+    assert isinstance(df, pd.DataFrame)
+    # doc_C is dissimilar to doc_A/doc_B, so those pairs should be zeroed out
+    assert df.loc["doc_A", "doc_C"] == 0.0
+    assert df.loc["doc_C", "doc_A"] == 0.0
+    # doc_A and doc_B are highly similar, so that pair should survive filtering
+    assert df.loc["doc_A", "doc_B"] > 0.0
+
+
+def test_document_similarity_matrix_rejects_invalid_percentile(dummy_embeddings):
+    with pytest.raises(ValueError, match="min_percentile must be between 0 and 100"):
+        document_similarity_matrix(dummy_embeddings, min_percentile=150.0)
+
+
+def test_chunk_similarity_matrix(dummy_embeddings):    df = chunk_similarity_matrix(dummy_embeddings)
 
     assert isinstance(df, pd.DataFrame)
     assert df.shape == (3, 3)
