@@ -232,3 +232,45 @@ def test_token_bucket_per_ip_isolation():
     res2 = client.get("/api/v1/resource", headers={"X-Forwarded-For": "192.168.1.20"})
     assert res2.status_code == 200
 
+
+# ── Standardized Health Status Endpoint (#1273) ─────────────────────────────
+
+from datetime import datetime
+
+from fastapi.testclient import TestClient
+
+from src.api.app import app
+
+_status_client = TestClient(app)
+
+
+def test_api_v1_status_returns_online_payload():
+    """Verify GET /api/v1/status returns the standardized status payload."""
+    response = _status_client.get("/api/v1/status")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "online"
+    assert data["version"] == "1.0.0"
+
+
+def test_api_v1_status_timestamp_is_iso_utc():
+    """Verify the timestamp is a parseable ISO 8601 string in UTC."""
+    response = _status_client.get("/api/v1/status")
+    data = response.json()
+
+    parsed = datetime.fromisoformat(data["timestamp"])
+    assert parsed.tzinfo is not None
+    assert parsed.utcoffset().total_seconds() == 0
+
+
+def test_api_v1_status_is_public_without_token():
+    """Verify /api/v1/status is reachable without a bearer token."""
+    response = _status_client.get(
+        "/api/v1/status",
+        headers={},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "online"
+
