@@ -91,12 +91,13 @@ class EmbeddingModelManager:
         if _model is None:
             primary = _get_model_name()
             fallback = "all-MiniLM-L6-v2"
-cache_dir = _get_cache_dir()
-            logger.info(f"[embedding_model] Loading model: {primary} …")
+            cache_dir = _get_cache_dir()
+            logger.info(f"[embedding_model] Loading model: {primary} ...")
             logger.info(f"[embedding_model] Model cache target: {cache_dir or 'default (~/.cache/huggingface)'}")
             try:
                 _model = SentenceTransformer(primary, cache_folder=cache_dir)
-                device = _detect_device(_model)                logger.info(
+                device = _detect_device(_model)
+                logger.info(
                     "Initializing SentenceTransformer model [%s] on device [%s]",
                     primary,
                     device,
@@ -108,8 +109,9 @@ cache_dir = _get_cache_dir()
                     primary,
                     fallback,
                 )
-_model = SentenceTransformer(fallback, cache_folder=cache_dir)
-                device = _detect_device(_model)                logger.info(
+                _model = SentenceTransformer(fallback, cache_folder=cache_dir)
+                device = _detect_device(_model)
+                logger.info(
                     "Initializing SentenceTransformer model [%s] on device [%s]",
                     fallback,
                     device,
