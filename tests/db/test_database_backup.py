@@ -31,6 +31,7 @@ from src.db.database_backup import (
     get_database_table_stats,
     optimize_database,
     restore,
+    checkpoint_wal_log,
 )
 
 
@@ -535,3 +536,44 @@ class TestGetDatabaseTableStats:
 
         assert stats["_table_count"] == 1
         assert stats["test"] == 1
+
+
+class TestCheckpointWalLog:
+    """Tests for the checkpoint_wal_log function."""
+
+    def test_checkpoint_wal_log_success(self, tmp_path):
+        """Verify that checkpoint_wal_log successfully checkpoints a database in WAL mode."""
+        db_path = tmp_path / "wal_test.db"
+
+        # 1. Create a database and enable WAL mode
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("CREATE TABLE test (id INTEGER PRIMARY KEY, val TEXT)")
+        conn.execute("INSERT INTO test (val) VALUES ('test')")
+        conn.commit()
+        conn.close()
+
+        # Check WAL file exists
+        wal_path = Path(f"{db_path}-wal")
+        assert wal_path.exists()
+
+        # 2. Run checkpoint and mock the logger to verify output
+        with patch("src.db.database_backup.logger") as mock_logger:
+            res = checkpoint_wal_log(db_path)
+            assert res is True
+
+            # Verify that logger.info was called with size updates
+            log_calls = [call[0][0] for call in mock_logger.info.call_args_list]
+            assert any("WAL file size before checkpoint" in log for log in log_calls)
+            assert any("WAL file size after checkpoint" in log for log in log_calls)
+
+    def test_checkpoint_wal_log_file_not_found(self):
+        """Verify checkpoint fails for non-existent database paths."""
+        res = checkpoint_wal_log("/nonexistent/path/to/db.db")
+        assert res is False
+
+    def test_checkpoint_wal_log_is_a_directory(self, tmp_path):
+        """Verify checkpoint fails if the database path is a directory."""
+        res = checkpoint_wal_log(tmp_path)
+        assert res is False
+
