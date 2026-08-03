@@ -597,6 +597,277 @@ def plot_similarity_heatmap_plotly(
     return fig
 
 
+# ── Differential / Delta Heatmap Visualization (#1369) ─────────────────────────
+
+
+def plot_differential_heatmap(
+    matrix_a: pd.DataFrame,
+    matrix_b: pd.DataFrame,
+    title: str = "Similarity Matrix Delta (Algorithm A - Algorithm B)",
+    label_a: str = "Algorithm A",
+    label_b: str = "Algorithm B",
+    theme_colors: Optional[Dict[str, str]] = None,
+    colorscale: str = "RdBu",
+    show_annotations: bool = True,
+    class_tag: Optional[str] = None,
+    doc_class_map: Optional[dict] = None,
+):
+    """Render a differential (delta) Plotly heatmap comparing score variance between two algorithms.
+
+    Parameters
+    ----------
+    matrix_a : pd.DataFrame
+        First square similarity matrix.
+    matrix_b : pd.DataFrame
+        Second square similarity matrix.
+    title : str, default="Similarity Matrix Delta (Algorithm A - Algorithm B)"
+        Plot title text.
+    label_a : str, default="Algorithm A"
+        Label for the first algorithm or model.
+    label_b : str, default="Algorithm B"
+        Label for the second algorithm or model.
+    theme_colors : Optional[Dict[str, str]], default=None
+        Theme palette dictionary.
+    colorscale : str, default="RdBu"
+        Diverging color scale name for Plotly (e.g. 'RdBu', 'Coolwarm', 'PuOr').
+    show_annotations : bool, default=True
+        Whether to display signed numeric delta values inside cells.
+    class_tag : Optional[str], default=None
+        Class section tag filter string.
+    doc_class_map : Optional[dict], default=None
+        Document to class section mapping.
+
+    Returns
+    -------
+    go.Figure
+        Plotly Figure showing the diverging differential heatmap matrix.
+    """
+    import plotly.graph_objects as go
+
+    if class_tag and class_tag != "All Classes":
+        matrix_a = filter_heatmap_by_class_tag(matrix_a, class_tag=class_tag, doc_class_map=doc_class_map)
+        matrix_b = filter_heatmap_by_class_tag(matrix_b, class_tag=class_tag, doc_class_map=doc_class_map)
+
+    try:
+        safe_title = TitleSanitizer.sanitize(title)
+    except MatplotlibInjectionError:
+        safe_title = "Similarity Matrix Delta"
+
+    bg_color = _get_theme_color(theme_colors, "background", "#FFFFFF")
+    ink_color = _get_theme_color(theme_colors, "ink", "#0F172A")
+
+    if matrix_a is None or matrix_b is None or matrix_a.empty or matrix_b.empty:
+        fig = go.Figure()
+        fig.update_layout(
+            title=safe_title,
+            paper_bgcolor=bg_color,
+            plot_bgcolor=bg_color,
+            font=dict(color=ink_color),
+            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+        )
+        fig.add_annotation(
+            text="Similarity matrices are empty or could not be loaded",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
+            font=dict(size=14, color=ink_color),
+        )
+        return fig
+
+    # Align matrix_a and matrix_b on common document names
+    common_docs = [doc for doc in matrix_a.index if doc in matrix_b.index]
+    if len(common_docs) < 2:
+        if len(matrix_a.index) >= 2 and len(matrix_a.index) == len(matrix_b.index):
+            common_docs = list(matrix_a.index)
+        else:
+            fig = go.Figure()
+            fig.update_layout(
+                title=safe_title,
+                paper_bgcolor=bg_color,
+                plot_bgcolor=bg_color,
+                font=dict(color=ink_color),
+                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+            )
+            fig.add_annotation(
+                text="At least 2 matching document pairs are required for differential heatmap",
+                xref="paper",
+                yref="paper",
+                x=0.5,
+                y=0.5,
+                showarrow=False,
+                font=dict(size=14, color=ink_color),
+            )
+            return fig
+
+    aligned_a = matrix_a.loc[common_docs, common_docs].fillna(0.0)
+    aligned_b = matrix_b.loc[common_docs, common_docs].fillna(0.0)
+
+    # Compute delta matrix: (matrix_a - matrix_b)
+    delta_df = aligned_a - aligned_b
+    delta_matrix = delta_df.values
+
+    # Determine symmetric color scale bounds around 0
+    max_abs_delta = float(np.max(np.abs(delta_matrix))) if delta_matrix.size > 0 else 1.0
+    if max_abs_delta < 1e-4:
+        max_abs_delta = 1.0
+
+    n = len(common_docs)
+    hover_text = []
+    cell_text = []
+
+    for i, doc_y in enumerate(common_docs):
+        hover_row = []
+        text_row = []
+        for j, doc_x in enumerate(common_docs):
+            val_a = float(aligned_a.iloc[i, j])
+            val_b = float(aligned_b.iloc[i, j])
+            delta = float(delta_matrix[i, j])
+
+            sign_str = f"+{delta:.2f}" if delta > 0 else f"{delta:.2f}"
+            hover_row.append(
+                f"<b>Pair:</b> {doc_y} ↔ {doc_x}<br>"
+                f"<b>{label_a}:</b> {val_a:.2f}<br>"
+                f"<b>{label_b}:</b> {val_b:.2f}<br>"
+                f"<b>Delta ({label_a} - {label_b}):</b> {sign_str}"
+            )
+            text_row.append(sign_str)
+        hover_text.append(hover_row)
+        cell_text.append(text_row)
+
+    valid_colorscales = {
+        "RdBu": "RdBu",
+        "Coolwarm": "RdBu_r",
+        "Diverging": "RdBu_r",
+        "Spectral": "Spectral",
+        "PuOr": "PuOr",
+        "PiYG": "PiYG",
+        "PRGn": "PRGn",
+    }
+    plotly_colorscale = valid_colorscales.get(colorscale, "RdBu")
+
+    heatmap_trace = go.Heatmap(
+        z=delta_matrix,
+        x=common_docs,
+        y=common_docs,
+        hoverinfo="text",
+        hovertext=hover_text,
+        text=cell_text,
+        colorscale=plotly_colorscale,
+        zmin=-max_abs_delta,
+        zmax=max_abs_delta,
+        zmid=0.0,
+        colorbar=dict(
+            title=dict(text=f"Delta<br>({label_a} - {label_b})", font=dict(size=12)),
+            ticks="outside",
+            tickformat="+.2f",
+        ),
+        texttemplate="%{text}" if (show_annotations and n <= 20) else None,
+        textfont=dict(size=max(8, 12 - n // 2), color=ink_color),
+    )
+
+    fig = go.Figure(data=[heatmap_trace])
+    fig.update_layout(
+        title=dict(
+            text=safe_title,
+            font=dict(size=16, family="Arial Black", color=ink_color),
+        ),
+        xaxis=dict(
+            title="Documents",
+            tickangle=-30,
+            tickfont=dict(size=max(8, 11 - n // 3), color=ink_color),
+        ),
+        yaxis=dict(
+            title="Documents",
+            autorange="reversed",
+            tickfont=dict(size=max(8, 11 - n // 3), color=ink_color),
+        ),
+        paper_bgcolor=bg_color,
+        plot_bgcolor=bg_color,
+        font=dict(color=ink_color),
+        margin=dict(l=60, r=60, t=60, b=60),
+    )
+
+    return fig
+
+
+def plot_differential_heatmap_matplotlib(
+    matrix_a: pd.DataFrame,
+    matrix_b: pd.DataFrame,
+    title: str = "Similarity Matrix Delta (Algorithm A - Algorithm B)",
+    label_a: str = "Algorithm A",
+    label_b: str = "Algorithm B",
+    figsize: Optional[tuple] = None,
+    dpi: int = 150,
+    theme_colors: Optional[Dict[str, str]] = None,
+    colormap_name: str = "coolwarm",
+) -> Figure:
+    """Render a static Matplotlib differential heatmap comparing score variance between two algorithms."""
+    try:
+        safe_title = TitleSanitizer.sanitize(title)
+    except MatplotlibInjectionError:
+        safe_title = "Similarity Matrix Delta"
+
+    if matrix_a.empty or matrix_b.empty or len(matrix_a) < 2:
+        with matplotlib_figure(figsize=figsize or (6, 4), dpi=dpi) as (fig, ax):
+            ax.set_title(safe_title, fontsize=12, fontweight="bold", pad=12)
+            ax.text(
+                0.5,
+                0.5,
+                "At least 2 matching documents are required for differential heatmap",
+                horizontalalignment="center",
+                verticalalignment="center",
+                transform=ax.transAxes,
+                fontsize=10,
+                color="#666666",
+            )
+            ax.axis("off")
+            fig.tight_layout()
+            return fig
+
+    common_docs = [doc for doc in matrix_a.index if doc in matrix_b.index]
+    if len(common_docs) < 2:
+        common_docs = list(matrix_a.index)
+
+    aligned_a = matrix_a.loc[common_docs, common_docs].fillna(0.0)
+    aligned_b = matrix_b.loc[common_docs, common_docs].fillna(0.0)
+    delta_df = aligned_a - aligned_b
+
+    n = len(common_docs)
+    if figsize is None:
+        cell_size = max(1.2, 6 / n)
+        figsize = (max(6.0, n * cell_size + 2.0), max(5.0, n * cell_size + 1.5))
+
+    max_abs_delta = float(np.max(np.abs(delta_df.values))) if delta_df.size > 0 else 1.0
+    if max_abs_delta < 1e-4:
+        max_abs_delta = 1.0
+
+    apply_matplotlib_theme(theme_colors)
+    with matplotlib_figure(figsize=figsize, dpi=dpi) as (fig, ax):
+        sns.heatmap(
+            delta_df,
+            ax=ax,
+            annot=True,
+            fmt="+.2f",
+            cmap=colormap_name,
+            vmin=-max_abs_delta,
+            vmax=max_abs_delta,
+            center=0.0,
+            linewidths=0.6,
+            linecolor="#cccccc",
+            square=True,
+            cbar_kws={"label": f"Delta ({label_a} - {label_b})", "shrink": 0.8},
+        )
+        ax.set_title(safe_title, fontsize=14, fontweight="bold", pad=14)
+        ax.set_xlabel("Documents", fontsize=11)
+        ax.set_ylabel("Documents", fontsize=11)
+        fig.tight_layout()
+        return fig
+
+
 # ── Granular Analysis (Chunk-Level Heatmap) ────────────────────────────────────
 
 
