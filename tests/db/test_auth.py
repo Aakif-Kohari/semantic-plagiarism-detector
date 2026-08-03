@@ -21,7 +21,10 @@ from src.db.auth import (
     update_password,
     get_security_audit_logs,
     verify_user,
+    update_user_profile,
+    get_all_users,
 )
+from src.errors import StaleDataException
 
 
 @pytest.fixture(autouse=True)
@@ -94,7 +97,7 @@ def mock_audit_db():
     conn.execute("INSERT INTO security_audit_log (username, action, timestamp) VALUES ('bob', 'login', '2023-01-02 10:00:00')")
     conn.execute("INSERT INTO security_audit_log (username, action, timestamp) VALUES ('alice', 'logout', '2023-01-03 10:00:00')")
     conn.commit()
-    
+
     with mock.patch("src.db.auth._connect", return_value=conn):
         yield conn
     conn.close()
@@ -119,7 +122,7 @@ def test_get_security_audit_logs_username_filter(mock_audit_db):
     assert len(logs) == 2
     assert logs[0]["action"] == "logout"
     assert logs[1]["action"] == "login"
-    
+
 def test_get_security_audit_logs_empty(mock_audit_db):
     logs = get_security_audit_logs(username="charlie")
     assert len(logs) == 0
@@ -404,4 +407,57 @@ def test_get_active_users_count():
     assert get_active_users_count() == 2
 
     delete_user(user2)
+
+
+def test_update_user_profile_success():
+    """Verify update_user_profile successfully updates role/active status and increments version."""
+    user = f"profile_user_{uuid.uuid4().hex[:8]}"
+    add_user(user, "SecurePass123!", "teacher")
+
+    # Get initial version
+    users = get_all_users()
+    user_data = next(u for u in users if u["username"] == user)
+    assert user_data["version"] == 1
+    assert user_data["role"] == "teacher"
+    assert user_data["is_active"] is True
+
+    # Update profile
+    update_user_profile(user, role="admin", is_active=False, expected_version=1)
+
+    # Verify updates and version increment
+    users = get_all_users()
+    user_data = next(u for u in users if u["username"] == user)
+    assert user_data["version"] == 2
+    assert user_data["role"] == "admin"
+    assert user_data["is_active"] is False
+
+
+def test_update_user_profile_stale_version():
+    """Verify update_user_profile raises StaleDataException on version mismatch."""
+    user = f"profile_user_{uuid.uuid4().hex[:8]}"
+    add_user(user, "SecurePass123!", "teacher")
+
+    # Update profile with incorrect version
+    with pytest.raises(StaleDataException) as exc_info:
+        update_user_profile(user, role="admin", is_active=True, expected_version=2)
+    assert "Conflict detected" in str(exc_info.value) or "Expected version" in str(exc_info.value)
+
+    # Verify that the role remains 'teacher'
+    assert get_user_role(user) == "teacher"
+
+
+def test_update_user_profile_non_existent():
+    """Verify update_user_profile raises ValueError for non-existent user."""
+    with pytest.raises(ValueError, match="User not found."):
+        update_user_profile("non_existent_username_xyz", role="teacher", is_active=True, expected_version=1)
+
+
+def test_update_user_profile_admin_suspension_prevented():
+    """Verify update_user_profile prevents suspending the admin account."""
+    users = get_all_users()
+    admin_data = next(u for u in users if u["username"] == "admin")
+    admin_ver = admin_data["version"]
+
+    with pytest.raises(ValueError, match="The admin account cannot be suspended."):
+        update_user_profile("admin", role="admin", is_active=False, expected_version=admin_ver)
 

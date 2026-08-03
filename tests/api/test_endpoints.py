@@ -9,7 +9,7 @@ def test_healthz_endpoint():
     """Verify that GET /healthz returns 200 OK and status 'ok'."""
     response = client.get("/healthz")
     assert response.status_code == 200
-    
+
     data = response.json()
     assert data["status"] == "ok"
     assert "db_size_bytes" in data
@@ -34,7 +34,7 @@ def test_metrics_prometheus_endpoint():
     response = client.get("/metrics")
     assert response.status_code == 200
     assert "text/plain" in response.headers.get("content-type", "")
-    
+
     content = response.text
     # Standard prometheus client metric outputs contain python_info or other telemetry
     assert len(content) > 0
@@ -45,6 +45,6 @@ def test_metrics_json_endpoint():
     response = client.get("/metrics/json")
     assert response.status_code == 200
     assert "application/json" in response.headers.get("content-type", "")
-    
+
     data = response.json()
     assert isinstance(data, dict)

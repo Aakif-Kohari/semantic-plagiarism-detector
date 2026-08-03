@@ -2,13 +2,12 @@
 
 import logging
 import os
+from datetime import datetime, timezone
 import psutil
 import numpy as np
 
-from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status, Request
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status, Request, Security
 from typing import Dict
-from fastapi import Request
-from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
 from fastapi.exceptions import RequestValidationError
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -17,7 +16,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, JSONResponse
 
-from src.api.middleware import verify_bearer_token
+from src.api.middleware import verify_bearer_token, get_current_user
 from src.api.schemas import (
     ClearDataResponse,
     ErrorResponse,
@@ -25,6 +24,7 @@ from src.api.schemas import (
     HealthzResponse,
     LoginResponse,
     SimilarityCheckResponse,
+    StatusResponse,
 )
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -197,6 +197,27 @@ def health_check():
     }
 
 
+@app.get(
+    "/api/v1/status",
+    tags=["Health"],
+    summary="Get service status, API version, and server UTC time",
+    response_model=StatusResponse,
+    status_code=status.HTTP_200_OK,
+)
+def get_service_status(request: Request):
+    """Public status endpoint returning service info, API version, and server UTC time.
+
+    Returns a standardized JSON payload with the current service status, the API
+    version, and the server timestamp in ISO 8601 UTC format so external clients
+    can quickly confirm the service is online.
+    """
+    return {
+        "status": "online",
+        "version": request.app.version,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 # ``HEALTHZ_DB_PATHS`` is centralized in app_config.  Keep a local alias as a
 # tuple of str for backward compatibility with the original implementation
 # (and so any code doing string comparison on these paths keeps working).
@@ -224,6 +245,11 @@ def metrics_json():
     tags=["Health"],
     response_model=HealthzResponse,
 )
+@app.get(
+    "/api/v1/healthz",
+    tags=["Health"],
+    response_model=HealthzResponse,
+)
 def healthz():
     """Health endpoint for container orchestration."""
 
@@ -236,10 +262,22 @@ def healthz():
         if memory.available <= 0:
             raise RuntimeError("Low memory")
 
+        from src.core.app_config import CORPUS_DB_PATH
+        db_size_bytes = 0
+        db_size_mb = 0.0
+        if os.path.exists(CORPUS_DB_PATH):
+            try:
+                db_size_bytes = os.path.getsize(CORPUS_DB_PATH)
+                db_size_mb = round(db_size_bytes / (1024 * 1024), 2)
+            except OSError:
+                pass
+
         return {
             "status": "ok",
             "db": "connected",
             "memory": "ok",
+            "db_size_bytes": db_size_bytes,
+            "db_size_mb": db_size_mb,
         }
 
     except Exception:
@@ -249,7 +287,50 @@ def healthz():
                 "status": "degraded",
                 "db": "disconnected",
                 "memory": "unavailable",
+                "db_size_bytes": 0,
+                "db_size_mb": 0.0,
             },
+        )
+
+
+@app.get(
+    "/api/v1/incidents",
+    tags=["Plagiarism Detection"],
+    summary="Get recorded plagiarism incidents",
+    status_code=status.HTTP_200_OK,
+)
+def get_incidents(
+    limit: int = Query(default=50, ge=1, le=500, description="Max number of incidents to return"),
+    offset: int = Query(default=0, ge=0, description="Number of incidents to skip"),
+    _token: str = Depends(verify_bearer_token),
+):
+    """Retrieve recorded plagiarism incidents from the database."""
+    from src.db.incidents import get_all_incidents
+
+    try:
+        incidents = get_all_incidents(limit=limit, offset=offset)
+        return {
+            "incidents": [
+                {
+                    "incident_id": inc.incident_id,
+                    "document_a": inc.document_a,
+                    "document_b": inc.document_b,
+                    "similarity_score": inc.similarity_score,
+                    "severity_rank": inc.severity_rank,
+                    "review_status": inc.review_status,
+                    "date_flagged": inc.date_flagged,
+                    "threshold_at_time_of_flag": inc.threshold_at_time_of_flag,
+                }
+                for inc in incidents
+            ],
+            "limit": limit,
+            "offset": offset,
+            "count": len(incidents),
+        }
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch incidents: {str(exc)}",
         )
 
 
@@ -259,7 +340,7 @@ def healthz():
     summary="Get current API rate limit status",
     status_code=status.HTTP_200_OK,
 )
-def get_rate_limit():
+def get_rate_limit(_user: dict = Security(get_current_user, scopes=["read"])):
     """
     Return the current API rate limit information.
     """
@@ -313,7 +394,7 @@ async def scan_document(
         le=10,
         description="Number of top matching paragraph pairs to include per matched document",
     ),
-    _token: str = Depends(verify_bearer_token),
+    _user: dict = Security(get_current_user, scopes=["write"]),
     _content_type: None = Depends(validate_content_type),
 ):
     """Scan an uploaded document against the indexed corpus database for plagiarism."""
@@ -464,6 +545,7 @@ async def clear_all_documents(
     username: str = Query(
         ..., description="Username of the administrator executing the operation"
     ),
+    _user: dict = Security(get_current_user, scopes=["admin"]),
 ):
     """
     Remove all documents, text chunks, and plagiarism incidents from the SQLite database,

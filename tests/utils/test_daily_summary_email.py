@@ -124,7 +124,7 @@ def test_format_daily_summary_with_incidents(mock_incidents):
     html = format_daily_summary(mock_incidents)
 
     assert "Daily Plagiarism Summary" in html
-    assert "Total new incidents: 3" in html
+    assert "<strong>Total new incidents:</strong> 3" in html
     assert "High: 1" in html
     assert "Medium: 1" in html
     assert "Low: 1" in html
@@ -214,7 +214,7 @@ def test_send_daily_summary(mock_get_incidents, mock_get_emails, mock_send_email
     assert result is True
     mock_send_email.assert_called_once()
     call_args = mock_send_email.call_args
-    assert call_args[0][1].startswith("[Plagiarism Alert] Daily Plagiarism Summary")  # subject
+    assert call_args[0][1].startswith("[Plagiarism Alert] Daily Plagiarism Summary")
 
 
 @patch("src.utils.daily_summary_email.send_email")
@@ -232,7 +232,6 @@ def test_send_daily_summary_custom_prefix(mock_get_incidents, mock_get_emails, m
     mock_send_email.assert_called_once()
     call_args = mock_send_email.call_args
     assert call_args[0][1].startswith("[Custom Alert Prefix] Daily Plagiarism Summary")
-
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +259,6 @@ def test_send_email_ssl_port_465(mock_smtp_ssl):
 
     assert result is True
     mock_smtp_ssl.assert_called_once_with("smtp.example.com", 465)
-    # SMTP_SSL does NOT call starttls
     mock_server.starttls.assert_not_called()
     mock_server.login.assert_called_once_with("test@example.com", "password")
     mock_server.send_message.assert_called_once()
@@ -296,7 +294,6 @@ def test_send_email_starttls_custom_port_2525(mock_smtp):
     "os.environ",
     {
         "SMTP_SERVER": "smtp.example.com",
-        # SMTP_PORT intentionally omitted – should default to 587
         "SMTP_USERNAME": "test@example.com",
         "SMTP_PASSWORD": "password",
         "FROM_EMAIL": "test@example.com",
@@ -352,11 +349,25 @@ class TestEmailTemplateHelpers:
         ]
         html = build_email_html_body(incidents_data=incidents, total_scans=100)
 
-        assert "Total new incidents: 2" in html
+        assert "<strong>Total new incidents:</strong> 2" in html
         assert "High Severity Incidents (1)" in html
         assert "Low Severity Incidents (1)" in html
         assert "Doc1" in html
         assert "85.00%" in html
+
+    def test_build_email_html_body_with_custom_footer_note(self):
+        """Test that custom footer note is included in HTML output (#1252)."""
+        note = "Please complete all pending reviews before Friday 5 PM."
+        html = build_email_html_body(incidents_data=[], total_scans=10, footer_note=note)
+
+        assert "Note from Administrator:" in html
+        assert note in html
+
+    def test_build_email_html_body_without_custom_footer_note(self):
+        """Test that footer note section is omitted when footer_note is None (#1252)."""
+        html = build_email_html_body(incidents_data=[], total_scans=10, footer_note=None)
+
+        assert "Note from Administrator:" not in html
 
     def test_build_severity_section_html_empty(self):
         """Test severity section generation with no incidents."""
@@ -387,21 +398,20 @@ class TestEmailTemplateHelpers:
         html = build_incident_row_html(inc)
 
         assert "OnlyDocA" in html
-        assert "Unknown" in html  # Fallback for missing doc_b
-        assert "0.00%" in html  # Fallback for missing similarity
+        assert "Unknown" in html
+        assert "0.00%" in html
 
     def test_format_daily_summary_backward_compatibility(self):
         """Test that the legacy wrapper still functions correctly."""
         incidents = [{"severity_rank": "Low"}]
         html = format_daily_summary(incidents)
         assert "Daily Plagiarism Summary" in html
-        assert "Total scans processed: <strong>0</strong>" in html
+        assert "<strong>Total scans processed:</strong> 0" in html
 
     def test_build_email_html_body_inline_css_compatibility(self):
         """Test that critical inline CSS properties are present for email clients."""
         html = build_email_html_body(incidents_data=[], total_scans=0)
 
-        # Check for common email client compatible inline styles
         assert "max-width: 600px" in html
         assert "background-color: #f9f9f9" in html
         assert "border-radius: 8px" in html

@@ -1,6 +1,5 @@
 import io
 import shutil
-from pathlib import Path
 
 import zipfile
 from unittest.mock import MagicMock, patch
@@ -569,7 +568,7 @@ class TestCleanText:
         text = "   \n\t\n  "
         result = clean_text(text)
         assert result == ""
-    
+
     def test_removes_stopwords_when_enabled(self):
         text = "The quick brown fox jumps over the lazy dog."
         result = clean_text(text, remove_stopwords=True)
@@ -610,6 +609,17 @@ class TestCleanText:
         result = clean_text(text, remove_stopwords=True)
         assert result == ""
 
+    def test_removes_custom_stopwords_from_file(self, tmp_path, monkeypatch):
+        stopwords_file = tmp_path / "custom_stopwords.txt"
+        stopwords_file.write_text("foobar\nbazqux\n")
+        monkeypatch.setenv("STOPWORDS_FILE", str(stopwords_file))
+
+        text = "foobar is a bazqux example"
+        result = clean_text(text, remove_stopwords=True)
+
+        assert "foobar" not in result
+        assert "bazqux" not in result
+        assert "example" in result
 
 def test_extract_empty_pdf_gracefully(caplog):
     """Assert that passing an empty/blank PDF returns an empty string gracefully without crashing."""
@@ -684,7 +694,7 @@ def test_large_pdf_parsing_performance_benchmark():
     """Benchmark test asserting parsing of a 200-page text PDF completes under 3 seconds."""
     import time
     from reportlab.pdfgen import canvas
-    
+
     # 1. Create a 200-page synthetic PDF in-memory using reportlab
     buf = io.BytesIO()
     c = canvas.Canvas(buf)
@@ -694,12 +704,12 @@ def test_large_pdf_parsing_performance_benchmark():
         c.showPage()
     c.save()
     pdf_bytes = buf.getvalue()
-    
+
     # 2. Time the parsing of the 200-page PDF
     start_time = time.perf_counter()
     parsed_text = extract_text_from_pdf(pdf_bytes)
     duration = time.perf_counter() - start_time
-    
+
     # 3. Assert duration and basic content checks
     assert len(parsed_text) > 0
     assert "Page 199" in parsed_text
@@ -726,11 +736,11 @@ def test_extract_text_routing_txt_latin1(tmp_path):
     """Test that extract_text successfully routes and decodes a Latin-1 file."""
     original_text = "Café and naïve text."
     latin1_bytes = original_text.encode("latin-1")
-    
+
     # Write the bytes to a temp file
     file_path = tmp_path / "latin1_test.txt"
     file_path.write_bytes(latin1_bytes)
-    
+
     # Verify routing and decoding
     result = extract_text(str(file_path), "latin1_test.txt")
     assert result == original_text
@@ -753,11 +763,34 @@ def test_get_supported_file_extensions():
         ".rtf",
         ".txt",
     ]
-    
-    
+
+
 def test_normalize_unicode_spaces():
     text = "Hello\u00A0World\u00AD！\u2009Python，Testing。"
 
     normalized = normalize_unicode_spaces(text)
 
-    assert normalized == "Hello World! Python,Testing."    
+    assert normalized == "Hello World! Python,Testing."
+
+
+class TestCleanWhitespaceOption:
+    """Unit tests for clean_whitespace option in extract_text."""
+
+    def test_clean_whitespace_enabled_default(self, tmp_path):
+        """clean_whitespace=True by default removes trailing spaces and collapses >2 blank lines to a single newline."""
+        content = "Line 1   \n\n\n\nLine 2  \n\n\nLine 3"
+        file_path = tmp_path / "test_clean.txt"
+        file_path.write_bytes(content.encode("utf-8"))
+
+        result = extract_text(str(file_path), "test_clean.txt")
+        assert result.replace("\r\n", "\n") == "Line 1\n\nLine 2\n\nLine 3"
+
+    def test_clean_whitespace_disabled(self, tmp_path):
+        """clean_whitespace=False preserves raw whitespace and multiple blank lines."""
+        content = "Line 1   \n\n\n\nLine 2  \n\n\nLine 3"
+        file_path = tmp_path / "test_raw.txt"
+        file_path.write_bytes(content.encode("utf-8"))
+
+        result = extract_text(str(file_path), "test_raw.txt", clean_whitespace=False)
+        assert result.replace("\r\n", "\n") == "Line 1   \n\n\n\nLine 2  \n\n\nLine 3"
+

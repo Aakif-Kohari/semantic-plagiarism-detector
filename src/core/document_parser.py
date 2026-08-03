@@ -77,6 +77,38 @@ ENGLISH_STOPWORDS = frozenset({
 })
 
 
+def load_custom_stopwords(file_path: Optional[str] = None) -> frozenset:
+    """
+    Load custom stopwords from a file (one word per line).
+
+    Args:
+        file_path: Path to the custom stopwords file. If None, the path is
+            read from the STOPWORDS_FILE environment variable.
+
+    Returns:
+        A frozenset of lowercase custom stopwords. Empty if no file is
+        configured or the file cannot be read.
+    """
+    path = file_path if file_path is not None else os.environ.get("STOPWORDS_FILE")
+
+    if not path:
+        return frozenset()
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return frozenset(line.strip().lower() for line in f if line.strip())
+    except OSError as exc:
+        logger.warning(
+            f"[document_parser] Could not read custom stopwords file '{path}': {exc}"
+        )
+        return frozenset()
+
+
+def get_stopwords() -> frozenset:
+    """Return the combined set of standard and custom (domain-specific) stopwords."""
+    return ENGLISH_STOPWORDS | load_custom_stopwords()
+
+
 def sanitize_zero_width_characters(text: str, filename: Optional[str] = None) -> str:
     """
     Strips zero-width unicode characters (e.g. \u200B) often used to bypass plagiarism checkers.
@@ -281,7 +313,7 @@ def clean_text(raw_text: str, remove_stopwords: bool = False) -> str:
             }
         )
     )
-  
+
     text = re.sub(r"\n\s*\n\s*\n", "\n\n", text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"[\u00a0\u200b]", " ", text)
@@ -292,12 +324,12 @@ def clean_text(raw_text: str, remove_stopwords: bool = False) -> str:
     if remove_stopwords:
         # Tokenize, filter, and rejoin while preserving basic structure
         words = text.split()
+        stopwords = get_stopwords()
         filtered_words = [
             word for word in words
-            if word.lower().strip(string.punctuation) not in ENGLISH_STOPWORDS
+            if word.lower().strip(string.punctuation) not in stopwords
         ]
         text = " ".join(filtered_words)
-
     return text.strip()
 
 
@@ -1388,6 +1420,7 @@ def extract_text(
     *,
     ocr_language: str = DEFAULT_OCR_LANGUAGE,
     ocr_dpi: int = DEFAULT_OCR_DPI,
+    clean_whitespace: bool = True,
 ) -> str:
     """Route extraction according to a filename extension."""
     ocr_language, ocr_dpi = normalize_ocr_settings(
@@ -1435,6 +1468,12 @@ def extract_text(
     raw = strip_bibliography(raw)
     raw = normalize_unicode_spaces(raw)
     raw = sanitize_zero_width_characters(raw, filename=filename)
+
+    if clean_whitespace and raw:
+        lines = [line.rstrip() for line in raw.splitlines()]
+        cleaned_text = "\n".join(lines)
+        raw = re.sub(r"\n{3,}", "\n\n", cleaned_text)
+
     lang_code = detect_text_language(raw)
 
     logger.info(

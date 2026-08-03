@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 corpus_db.py
 ------------
@@ -7,22 +5,24 @@ SQLite database manager to persist document metadata, chunk text, and embeddings
 Enables incremental updates and index rebuilding without re-embedding.
 """
 
-import sqlite3
+from __future__ import annotations
+
 import logging
 import os
-import psutil
+import sqlite3
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
-
 import numpy as np
+import psutil
 
 from src.core.app_config import CORPUS_DB_PATH, FALLBACK_CORPUS_DB_PATH
-from src.db.migrations import delete_all_if_table_exists
+from src.db.migrations.common import column_exists, delete_all_if_table_exists
 from src.utils.filename import sanitize_filename
+
+logger = logging.getLogger(__name__)
 
 # Seed the corpus DB path from the centralized app_config.
 _DB_PATH = os.path.abspath(str(CORPUS_DB_PATH))
@@ -169,35 +169,24 @@ def init_corpus_db() -> None:
         )
 
         # 2. RUN SCHEMA MIGRATIONS / ALTER TABLES AFTER CREATION
-        cursor = conn.execute("PRAGMA table_info(documents)")
-        columns = [row[1] for row in cursor.fetchall()]
-        if "class_section" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN class_section TEXT")
-        if "student_name" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN student_name TEXT")
-        if "assignment_title" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN assignment_title TEXT")
-        conn.commit()
-        if "pdf_author" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN pdf_author TEXT")
-        if "pdf_creation_date" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN pdf_creation_date TEXT")
-        if "pdf_title" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN pdf_title TEXT")
-        if "tags" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN tags TEXT")
-        if "detected_language" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN detected_language TEXT")
-        if "owner" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN owner TEXT")
-        if "is_deleted" not in columns:
-            conn.execute(
-                "ALTER TABLE documents ADD COLUMN is_deleted INTEGER DEFAULT 0"
-            )
-        if "deleted_at" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN deleted_at TEXT")
-        if "created_at" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN created_at TEXT")
+        columns_to_ensure = [
+            ("class_section", "TEXT"),
+            ("student_name", "TEXT"),
+            ("assignment_title", "TEXT"),
+            ("pdf_author", "TEXT"),
+            ("pdf_creation_date", "TEXT"),
+            ("pdf_title", "TEXT"),
+            ("tags", "TEXT"),
+            ("detected_language", "TEXT"),
+            ("owner", "TEXT"),
+            ("is_deleted", "INTEGER DEFAULT 0"),
+            ("deleted_at", "TEXT"),
+            ("created_at", "TEXT"),
+        ]
+
+        for col_name, col_type in columns_to_ensure:
+            if not column_exists(conn, "documents", col_name):
+                conn.execute(f"ALTER TABLE documents ADD COLUMN {col_name} {col_type}")
 
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at)"
@@ -469,7 +458,7 @@ def batch_soft_delete_documents(doc_ids: list[int]) -> int:
         )
         conn.execute(
             f"""
-            DELETE FROM chunks 
+            DELETE FROM chunks
             WHERE filename IN (SELECT filename FROM documents WHERE id IN ({placeholders}))
             """,
             tuple(doc_ids),
@@ -522,6 +511,18 @@ def get_document_word_counts() -> dict[str, int]:
         words = len(re.findall(r"\b\w+\b", chunk_text or ""))
         word_counts[filename] = word_counts.get(filename, 0) + words
     return word_counts
+
+
+def get_document_char_counts() -> dict[str, int]:
+    """Calculate and return the total character count for each document currently in the database."""
+    with _connect() as conn:
+        rows = conn.execute("SELECT filename, chunk_text FROM chunks").fetchall()
+
+    char_counts = {}
+    for filename, chunk_text in rows:
+        chars = len(chunk_text or "")
+        char_counts[filename] = char_counts.get(filename, 0) + chars
+    return char_counts
 
 
 def clear_all_data() -> None:
@@ -767,7 +768,7 @@ def purge_stale_trash(days_in_trash: int = 30) -> int:
     with _connect() as conn:
         rows = conn.execute(
             """
-            SELECT filename FROM documents 
+            SELECT filename FROM documents
             WHERE is_deleted = 1 AND deleted_at < ?
             """,
             (threshold_date,),
@@ -797,3 +798,13 @@ def get_total_document_count(include_deleted: bool = False) -> int:
                 "SELECT COUNT(1) FROM documents WHERE is_deleted IS NULL OR is_deleted = 0"
             ).fetchone()
         return int(row[0]) if row else 0
+
+
+def get_deleted_documents_count() -> int:
+    """Return the count of documents currently sitting in trash (is_deleted = 1)."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(1) FROM documents WHERE is_deleted = 1"
+        ).fetchone()
+        return int(row[0]) if row else 0
+

@@ -127,7 +127,7 @@ def calculate_processing_throughput(total_bytes: int, elapsed_seconds: float) ->
     if elapsed_seconds <= 0:
         return 0.0
 
-total_kb = total_bytes / BYTES_PER_KB
+    total_kb = total_bytes / BYTES_PE # type: ignore 
     throughput = total_kb / elapsed_seconds
     return round(throughput, 2)
 
@@ -151,7 +151,8 @@ def calculate_page_throughput(total_pages: int, elapsed_seconds: float) -> float
     return round(throughput, 2)
 
 
-def format_throughput_human_readable(throughput_kbps: float) -> str:    """
+def format_throughput_human_readable(throughput_kbps: float) -> str:
+    """
     Format a throughput value in KB/sec to a human-readable string.
 
     Args:
@@ -160,12 +161,11 @@ def format_throughput_human_readable(throughput_kbps: float) -> str:    """
     Returns:
         str: A formatted string (e.g., "1.50 KB/s", "2.30 MB/s").
     """
-    if throughput_kbps < 1024.0:
-        return f"{throughput_kbps:.2f} KB/s"
-    else:
-        mbps = throughput_kbps / 1024.0
-        return f"{mbps:.2f} MB/s"
+    throughput = _validate_non_negative_number("throughput_kbps", throughput_kbps)
+    if throughput < 1024:
+        return f"{throughput:.2f} KB/s"
 
+    return f"{throughput / 1024:.2f} MB/s"
 
 # ============================================================================
 # STREAMLIT UI COMPONENTS

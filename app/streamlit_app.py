@@ -66,7 +66,7 @@ from src.utils.filename import (
 from typing import Any
 
 try:
-    from streamlit_plotly_events import plotly_events
+    from streamlit_plotly_events import plotly_events # type: ignore
 except ImportError:  # pragma: no cover - optional dependency
     plotly_events = None
 
@@ -440,7 +440,7 @@ except ImportError:
 
 # ── Auto-refresh component for the Live Incident Stream (Issue #1384) ───────
 try:
-    from streamlit_autorefresh import st_autorefresh
+    from streamlit_autorefresh import st_autorefresh # type: ignore
 except ImportError:
     st_autorefresh = None
     logger.warning(
@@ -736,7 +736,7 @@ if "lang" not in st.session_state:
 
 if "model_load_time" not in st.session_state:
     from src.core.embedding_model import EmbeddingModelManager
-    
+
     with st.spinner("Initializing Vector Embedding Model..."):
         _start_time = time.perf_counter()
         EmbeddingModelManager.get_instance().get_model()
@@ -871,7 +871,7 @@ if not st.session_state.get("authenticated", False):
                 username = st.session_state.get("pending_username")
                 enabled, otp_secret = get_2fa_status(username)
                 if enabled and otp_secret:
-                    import pyotp
+                    import pyotp # type: ignore
 
                     totp = pyotp.TOTP(otp_secret)
                     if totp.verify(otp_code.strip()):
@@ -975,25 +975,66 @@ def logout_dialog():
             st.rerun()
 
 
-@st.dialog("⚠️ Confirm Bulk Clear")
-def clear_all_dialog():
-    st.markdown(
-        "**WARNING:** This action is destructive and cannot be undone. "
-        "This will permanently delete all student documents, paragraph chunks, "
-        "and plagiarism incidents from the database, and reset the FAISS index."
-    )
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Cancel", use_container_width=True):
-            st.rerun()
-    with col2:
-        if st.button("Confirm Delete", type="primary", use_container_width=True):
-            clear_all_data()
-            if os.path.exists(_INDEX_PATH):
-                os.remove(_INDEX_PATH)
-            st.success("All corpus data has been deleted.")
-            st.rerun()
+# ── Corpus Overview Header & Quick Actions (#1242) ───────────────────────────
+header_col, action_col1, action_col2 = st.columns([0.5, 0.25, 0.25])
 
+with header_col:
+    st.subheader("📚 Corpus Overview")
+
+with action_col1:
+    if st.button("🔄 Refresh Corpus Data", key="refresh_corpus_btn", use_container_width=True):
+        # Clear document list session state and pipeline caches
+        keys_to_clear = [
+            "analysis_results",
+            "analysis_file_signature",
+            "drive_files_dict",
+            "failed_documents",
+            "warning_page",
+        ]
+        for key in keys_to_clear:
+            if key in st.session_state:
+                del st.session_state[key]
+
+        # Clear Streamlit cache data
+        st.cache_data.clear()
+
+        # Display success toast and rerun
+        st.toast("Corpus dataset refreshed.", icon="✅")
+        st.rerun()
+
+with action_col2:
+    if st.button("🗑️ Clear All Data", key="open_clear_dialog_btn", type="secondary", use_container_width=True):
+        clear_all_dialog() # type: ignore
+# ── Corpus Overview Header & Quick Actions (#1242) ───────────────────────────
+header_col, action_col1, action_col2 = st.columns([0.5, 0.25, 0.25])
+
+with header_col:
+    st.subheader("📚 Corpus Overview")
+
+with action_col1:
+    if st.button("🔄 Refresh Corpus Data", key="refresh_corpus_btn", use_container_width=True):
+        # Clear document list session state and pipeline caches
+        keys_to_clear = [
+            "analysis_results",
+            "analysis_file_signature",
+            "drive_files_dict",
+            "failed_documents",
+            "warning_page",
+        ]
+        for key in keys_to_clear:
+            if key in st.session_state:
+                del st.session_state[key]
+
+        # Clear Streamlit cache data
+        st.cache_data.clear()
+
+        # Display success toast and rerun
+        st.toast("Corpus dataset refreshed.", icon="✅")
+        st.rerun()
+
+with action_col2:
+    if st.button("🗑️ Clear All Data", key="open_clear_dialog_btn", type="secondary", use_container_width=True):
+        clear_all_dialog() # type: ignore
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -1154,14 +1195,127 @@ if not selected_classes:
         st.success("✅ Filters reset to defaults!")
         st.rerun()
 
+    # Keyboard shortcuts
     with st.expander("⌨️ Keyboard Shortcuts"):
         st.caption("• **R**: Rerun app")
         st.caption("• **C**: Clear cache")
         st.caption("• **Tab**: Navigate focus")
 
+    # Model load time
     if "model_load_time" in st.session_state:
         st.divider()
         st.caption(f"⚡ Vector Model Loaded in {st.session_state.model_load_time:.2f} seconds")
+
+    # ── System Health Widget (Issue #1246) ──────────────────────────────────────
+    # Collapsible sidebar expander showing RAM usage, disk space, and DB status
+    # for administrators monitoring the application health at a glance.
+    with st.expander("🖥️ System Health", expanded=False):
+        try:
+            # System RAM usage percentage via psutil
+            memory_info = psutil.virtual_memory()
+            ram_usage_percent = memory_info.percent
+            ram_total_gb = memory_info.total / (1024 ** 3)
+            ram_available_gb = memory_info.available / (1024 ** 3)
+
+            # Choose indicator color based on RAM usage severity
+            if ram_usage_percent >= 90:
+                ram_indicator = "🔴"
+                ram_status_text = "Critical"
+            elif ram_usage_percent >= 70:
+                ram_indicator = "🟡"
+                ram_status_text = "Warning"
+            else:
+                ram_indicator = "🟢"
+                ram_status_text = "Healthy"
+
+            st.markdown(
+                f"**💾 RAM Usage:** {ram_indicator} {ram_usage_percent:.1f}% "
+                f"({ram_status_text})"
+            )
+            st.caption(
+                f"Total: {ram_total_gb:.1f} GB · "
+                f"Available: {ram_available_gb:.1f} GB"
+            )
+
+            # Free disk space on the partition containing the project root
+            disk_usage = psutil.disk_usage(str(ROOT_DIR))
+            free_disk_gb = disk_usage.free / (1024 ** 3)
+            total_disk_gb = disk_usage.total / (1024 ** 3)
+            disk_usage_percent = disk_usage.percent
+
+            if disk_usage_percent >= 90:
+                disk_indicator = "🔴"
+            elif disk_usage_percent >= 75:
+                disk_indicator = "🟡"
+            else:
+                disk_indicator = "🟢"
+
+            st.markdown(
+                f"**💿 Disk Space:** {disk_indicator} {disk_usage_percent:.1f}% used"
+            )
+            st.caption(
+                f"Free: {free_disk_gb:.1f} GB · "
+                f"Total: {total_disk_gb:.1f} GB"
+            )
+
+            st.divider()
+
+            # Database connection status indicators
+            st.markdown("**🗄️ Database Status**")
+
+            # Check Corpus DB connection
+            try:
+                from src.core.app_config import CORPUS_DB_PATH, AUTH_DB_PATH
+
+                corpus_db_exists = CORPUS_DB_PATH.exists()
+                if corpus_db_exists:
+                    st.markdown("• **Corpus DB:** 🟢 Connected")
+                    corpus_size_kb = CORPUS_DB_PATH.stat().st_size / 1024
+                    st.caption(f"  Size: {corpus_size_kb:.1f} KB")
+                else:
+                    st.markdown("• **Corpus DB:** 🟡 Not initialized")
+                    st.caption("  Will be created on first data upload.")
+
+            except Exception as db_err:
+                st.markdown(f"• **Corpus DB:** 🔴 Error")
+                st.caption(f"  {db_err}")
+
+            # Check Auth DB connection
+            try:
+                auth_db_exists = AUTH_DB_PATH.exists()
+                if auth_db_exists:
+                    st.markdown("• **Auth DB:** 🟢 Connected")
+                    auth_size_kb = AUTH_DB_PATH.stat().st_size / 1024
+                    st.caption(f"  Size: {auth_size_kb:.1f} KB")
+                else:
+                    st.markdown("• **Auth DB:** 🟡 Not initialized")
+                    st.caption("  Will be created on first login.")
+
+            except Exception as db_err:
+                st.markdown(f"• **Auth DB:** 🔴 Error")
+                st.caption(f"  {db_err}")
+
+            # CPU load indicator (1-minute average)
+            st.divider()
+            cpu_percent = psutil.cpu_percent(interval=0.1)
+            cpu_count = psutil.cpu_count(logical=True)
+
+            if cpu_percent >= 90:
+                cpu_indicator = "🔴"
+            elif cpu_percent >= 70:
+                cpu_indicator = "🟡"
+            else:
+                cpu_indicator = "🟢"
+
+            st.markdown(
+                f"**⚡ CPU Load:** {cpu_indicator} {cpu_percent:.1f}% "
+                f"({cpu_count} cores)"
+            )
+
+        except ImportError:
+            st.warning("⚠️ psutil not available. System health data unavailable.")
+        except Exception as health_err:
+            st.error(f"Failed to load system health data: {health_err}")
 
 # ── Main UI ───────────────────────────────────────────────────────────────────
 st.title("🔍 Semantic Plagiarism Detection System")
@@ -1393,12 +1547,12 @@ if user_role == "admin":
             const timeoutLimit = {TIMEOUT_LIMIT};
             const lastInteraction = {safe_last_interaction};
             const display = document.getElementById('timer-display');
-            
+
             function updateTimer() {{
                 const now = Math.floor(Date.now() / 1000);
                 const elapsed = now - lastInteraction;
                 const remaining = Math.max(0, timeoutLimit - elapsed);
-                
+
                 if (remaining <= 0) {{
                     display.textContent = "00:00";
                     display.parentElement.style.borderColor = "#ff4b4b";
@@ -1407,17 +1561,17 @@ if user_role == "admin":
                     setTimeout(() => window.location.reload(), 2000);
                     return;
                 }}
-                
+
                 const minutes = Math.floor(remaining / 60);
                 const seconds = remaining % 60;
                 display.textContent = `${{minutes.toString().padStart(2, '0')}}:${{seconds.toString().padStart(2, '0')}}`;
-                
+
                 if (remaining < 60) {{
                     display.parentElement.style.borderColor = "#ff4b4b";
                     display.parentElement.style.color = "#ff4b4b";
                 }}
             }}
-            
+
             updateTimer();
             setInterval(updateTimer, 1000);
         }})();
@@ -1442,6 +1596,22 @@ if user_role == "admin":
         existing_docs = get_all_documents()
         if existing_docs:
             st.write(f"**{len(existing_docs)}** documents in database")
+            
+            import pandas as pd
+            from src.db.corpus_db import get_document_word_counts, get_document_char_counts
+            word_counts = get_document_word_counts()
+            char_counts = get_document_char_counts()
+            
+            df = pd.DataFrame([{"filename": doc["filename"]} for doc in existing_docs])
+            df["word_count"] = df["filename"].map(word_counts).fillna(0).astype(int)
+            df["char_count"] = df["filename"].map(char_counts).fillna(0).astype(int)
+            
+            styled_df = df.style.format({
+                "word_count": "{:,} words",
+                "char_count": "{:,} chars"
+            })
+            st.dataframe(styled_df, use_container_width=True)
+
             for doc in existing_docs:
                 col1, col2 = st.columns([3, 1])
                 with col1:
@@ -1464,7 +1634,7 @@ if user_role == "admin":
             key="clear_all_documents_button",
             use_container_width=True,
         ):
-            clear_all_dialog()
+            clear_all_dialog() # type: ignore
         st.markdown("<br>", unsafe_allow_html=True)
 
         st.markdown("---")
@@ -2096,28 +2266,28 @@ with tab_heatmap:
                 help="Render similarity text labels inside heatmap cells.",
             )
 
-            with drill_tab_analysis:
+            with drill_tab_analysis: # type: ignore
                 top_pairs = find_most_similar_chunks(
-                    chunks_a, chunks_b, embeddings[doc_a], embeddings[doc_b], top_k=5, threshold=threshold
+                    chunks_a, chunks_b, embeddings[doc_a], embeddings[doc_b], top_k=5, threshold=threshold # type: ignore
                 )
                 for rank, (ca, cb, sim) in enumerate(top_pairs, 1):
                     with st.expander(f"#{rank} — Similarity: {sim:.1%}"):
-                        st.write(f"**{doc_a}:** {ca}")
-                        st.write(f"**{doc_b}:** {cb}")
+                        st.write(f"**{doc_a}:** {ca}") # type: ignore
+                        st.write(f"**{doc_b}:** {cb}") # type: ignore
 
             # --- In-App PDF Preview with Highlighted Matches (#145) ---
-            with drill_tab_viewer:
+            with drill_tab_viewer: # type: ignore
                 st.subheader("📄 In-App PDF Preview with Highlighted Matches")
                 selected_view_doc = st.radio(
                     "Select Document to Preview:",
-                    options=[doc_a, doc_b],
+                    options=[doc_a, doc_b], # type: ignore
                     horizontal=True,
                     key="doc_viewer_select",
                 )
 
                 # Retrieve file bytes directly from uploaded files dict
                 doc_source = file_bytes_dict.get(selected_view_doc)
-                matching_chunks_to_highlight = chunks_a if selected_view_doc == doc_a else chunks_b
+                matching_chunks_to_highlight = chunks_a if selected_view_doc == doc_a else chunks_b # type: ignore
 
                 if doc_source and str(selected_view_doc).lower().endswith(".pdf"):
                     with st.spinner("Generating highlighted PDF preview..."):
@@ -2394,10 +2564,17 @@ with tab_heatmap:
             st.markdown("### ⚙️ Thresholds")
             threshold = st.slider(
                 get_text("threshold", lang=lang_code),
-=======
+                min_value=0.0,
+                max_value=1.0,
+                value=0.0,
+                step=0.05,
+                format="%.2f",
+                key="heatmap_threshold",
+                help="Set the minimum similarity threshold for displaying document pairs.",
+            )
             mask_threshold = st.slider(
                 "Minimum Similarity to Display",
->>>>>>> upstream/main
+
                 min_value=0.0,
                 max_value=1.0,
                 value=0.0,

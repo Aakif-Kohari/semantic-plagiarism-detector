@@ -9,6 +9,7 @@ import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional
 
@@ -253,6 +254,7 @@ def sync_flagged_incidents(
                     bulk_records,
                 )
                 conn.commit()
+                get_recent_incidents.cache_clear()
 
             rows = conn.execute(
                 """
@@ -400,13 +402,45 @@ def get_incidents_by_severity(
             WHERE severity_rank = ?
             ORDER BY date_flagged DESC, incident_id ASC
             """,
-            (norm_severity,),
+(norm_severity,),
         ).fetchall()
         return [dict(row) for row in rows]
 
 
-def get_all_incidents_above_threshold_for_export(
-    threshold: float,
+def get_incidents_by_date_range(
+    start_date: str,
+    end_date: str,
+    db_path: str | Path = DEFAULT_DB_PATH,
+) -> list[dict[str, Any]]:
+    """Return incidents flagged between two explicit ISO dates (inclusive).
+
+    Args:
+        start_date: ISO-formatted start date/timestamp (inclusive).
+        end_date: ISO-formatted end date/timestamp (inclusive).
+        db_path: Path to the SQLite corpus database.
+
+    Returns:
+        A list of incident dicts ordered by ``date_flagged`` descending.
+    """
+    init_incident_db(db_path)
+    with closing(_get_connection(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT incident_id, document_a, document_b,
+                   similarity_score, severity_rank,
+                   review_status, date_flagged, last_seen,
+                   threshold_at_time_of_flag
+            FROM plagiarism_incidents
+            WHERE date_flagged >= ? AND date_flagged <= ?
+            ORDER BY date_flagged DESC
+            """,
+            (start_date, end_date),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def get_all_incidents_above_threshold_for_export(    threshold: float,
     db_path: str | Path = DEFAULT_DB_PATH,
 ) -> list[MatchResult]:
     from src.db.schemas import MatchResult
@@ -810,3 +844,35 @@ def purge_old_incidents(
         )
         conn.commit()
         return cursor.rowcount
+
+
+@lru_cache(maxsize=128)
+def get_recent_incidents(
+    limit: int = 5,
+    db_path: str | Path = DEFAULT_DB_PATH,
+) -> list[MatchResult]:
+    """Fetch recent visible plagiarism incidents, cached for performance."""
+    return get_all_incidents(db_path=db_path, limit=limit, offset=0)
+
+
+def log_incident(
+    flag: Mapping[str, Any],
+    db_path: str | Path = DEFAULT_DB_PATH,
+    *,
+    now: str | None = None,
+    threshold: float | None = None,
+) -> MatchResult:
+    """Log a single plagiarism incident and clear get_recent_incidents cache.
+
+    Args:
+        flag: Dict with 'doc_a', 'doc_b', 'similarity', and optionally 'severity'.
+        db_path: Path to the SQLite corpus database.
+
+    Returns:
+        The created MatchResult.
+    """
+    results = sync_flagged_incidents([flag], db_path, now=now, threshold=threshold)
+    if not results:
+        raise ValueError("Failed to log incident: Invalid input.")
+    get_recent_incidents.cache_clear()
+    return results[0]

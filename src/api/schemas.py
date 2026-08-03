@@ -27,6 +27,16 @@ class HealthzResponse(BaseModel):
     status: str = Field(..., description="Overall service status")
     db: str = Field(..., description="Database connectivity status")
     memory: str = Field(..., description="Memory status")
+    db_size_bytes: int = Field(default=0, description="Corpus database file size in bytes")
+    db_size_mb: float = Field(default=0.0, description="Corpus database file size in megabytes")
+
+
+class StatusResponse(BaseModel):
+    """Response schema for the public service status endpoint."""
+
+    status: str = Field(..., description="Service status indicator")
+    version: str = Field(..., description="API version string")
+    timestamp: str = Field(..., description="Server UTC timestamp in ISO 8601 format")
 
 
 class FlaggedChunkMatch(BaseModel):

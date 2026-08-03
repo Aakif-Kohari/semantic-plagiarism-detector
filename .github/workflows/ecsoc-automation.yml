@@ -75,7 +75,7 @@ jobs:
               per_page: 100
             });
 
-            const botComments = comments.filter(c => 
+            const botComments = comments.filter(c =>
               isBotComment(c) && c.body && (
                 c.body.includes("thanks for your interest in contributing under *ECSoC'26*") ||
                 c.body.includes("open for anyone to claim")
@@ -111,7 +111,7 @@ jobs:
                   per_page: 100
                 });
 
-                const issBotComments = issComments.filter(c => 
+                const issBotComments = issComments.filter(c =>
                   isBotComment(c) && c.body && (
                     c.body.includes("thanks for your interest in contributing under *ECSoC'26*") ||
                     c.body.includes("open for anyone to claim")
@@ -391,7 +391,7 @@ jobs:
                 per_page: 100
               });
 
-              const botComments = comments.filter(c => 
+              const botComments = comments.filter(c =>
                 isBotComment(c) && c.body && (
                   c.body.includes("thanks for your interest in contributing under *ECSoC'26*") ||
                   c.body.includes("open for anyone to claim")
@@ -488,7 +488,7 @@ jobs:
                 per_page: 100
               });
 
-              const botComments = comments.filter(c => 
+              const botComments = comments.filter(c =>
                 isBotComment(c) && c.body && (
                   c.body.includes("thanks for your interest in contributing under *ECSoC'26*") ||
                   c.body.includes("open for anyone to claim")
@@ -530,7 +530,7 @@ jobs:
                       per_page: 100
                     });
 
-                    prLinked = events.some(e => 
+                    prLinked = events.some(e =>
                       e.event === 'cross-referenced' && e.source && e.source.issue && e.source.issue.pull_request
                     );
                   } catch (e) {

@@ -28,9 +28,11 @@ from src.db.database_backup import (
     create_password_protected_backup,
     create_sqlite_snapshot,
     get_database_size_bytes,
+    get_database_table_stats,
     optimize_database,
     restore,
     run_incremental_vacuum,
+    checkpoint_wal_log,
 )
 
 
@@ -399,3 +401,219 @@ class TestGetDatabaseSizeBytes:
         size = get_database_size_bytes("~/home_db.db")
 
         assert size == db_path.stat().st_size
+
+class TestGetDatabaseTableStats:
+    """Tests for the get_database_table_stats helper (issue #1156)."""
+
+    def test_returns_empty_stats_for_nonexistent_file(self, tmp_path):
+        """A missing database file must return {'_table_count': 0}."""
+        missing_db = tmp_path / "does_not_exist.db"
+
+        stats = get_database_table_stats(missing_db)
+
+        assert isinstance(stats, dict)
+        assert stats["_table_count"] == 0
+        # Should only contain the special key, no table entries
+        assert len(stats) == 1
+
+    def test_returns_empty_stats_for_nonexistent_file_string_path(self, tmp_path):
+        """The function must accept str paths as well as Path objects."""
+        missing_db = str(tmp_path / "does_not_exist.db")
+
+        stats = get_database_table_stats(missing_db)
+
+        assert stats["_table_count"] == 0
+
+    def test_returns_stats_for_database_with_tables(self, tmp_path):
+        """Verify stats dictionary contains correct table names and row counts."""
+        db_path = tmp_path / "test_stats.db"
+
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)"
+        )
+        conn.execute(
+            "CREATE TABLE documents (id INTEGER PRIMARY KEY, title TEXT)"
+        )
+        conn.execute(
+            "CREATE TABLE incidents (id INTEGER PRIMARY KEY, severity TEXT)"
+        )
+        conn.executemany(
+            "INSERT INTO users (name) VALUES (?)",
+            [("Alice",), ("Bob",), ("Charlie",)],
+        )
+        conn.executemany(
+            "INSERT INTO documents (title) VALUES (?)",
+            [("Doc1",), ("Doc2",)],
+        )
+        conn.executemany(
+            "INSERT INTO incidents (severity) VALUES (?)",
+            [("High",), ("Medium",), ("Low",), ("Critical",)],
+        )
+        conn.commit()
+        conn.close()
+
+        stats = get_database_table_stats(db_path)
+
+        # Verify _table_count special key
+        assert stats["_table_count"] == 3
+
+        # Verify individual table row counts
+        assert stats["users"] == 3
+        assert stats["documents"] == 2
+        assert stats["incidents"] == 4
+
+    def test_returns_zero_for_empty_table(self, tmp_path):
+        """A table with no rows should report 0 as its row count."""
+        db_path = tmp_path / "empty_table.db"
+
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE empty_table (id INTEGER PRIMARY KEY, data TEXT)")
+        conn.commit()
+        conn.close()
+
+        stats = get_database_table_stats(db_path)
+
+        assert stats["_table_count"] == 1
+        assert stats["empty_table"] == 0
+
+    def test_excludes_sqlite_internal_tables(self, tmp_path):
+        """Internal SQLite tables (sqlite_*) must be excluded from stats."""
+        db_path = tmp_path / "internal_tables.db"
+
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE user_data (id INTEGER PRIMARY KEY)")
+        conn.execute("INSERT INTO user_data (id) VALUES (1)")
+        # SQLite auto-creates sqlite_sequence for AUTOINCREMENT tables
+        conn.commit()
+        conn.close()
+
+        stats = get_database_table_stats(db_path)
+
+        # Only user_data should appear, not sqlite_sequence
+        table_names = [k for k in stats.keys() if k != "_table_count"]
+        assert "user_data" in table_names
+        assert not any(name.startswith("sqlite_") for name in table_names)
+
+    def test_excludes_views_from_stats(self, tmp_path):
+        """Views should be excluded from table stats."""
+        db_path = tmp_path / "views.db"
+
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE base_table (id INTEGER PRIMARY KEY, val TEXT)")
+        conn.execute("INSERT INTO base_table (val) VALUES ('test')")
+        conn.execute(
+            "CREATE VIEW test_view AS SELECT * FROM base_table WHERE val = 'test'"
+        )
+        conn.commit()
+        conn.close()
+
+        stats = get_database_table_stats(db_path)
+
+        # Only base_table should appear, not test_view
+        assert stats["_table_count"] == 1
+        assert "base_table" in stats
+        assert "test_view" not in stats
+
+    def test_handles_directory_path(self, tmp_path):
+        """A directory path must return empty stats, not raise."""
+        stats = get_database_table_stats(tmp_path)
+
+        assert stats["_table_count"] == 0
+
+    def test_accepts_path_and_str_equivalently(self, tmp_path):
+        """Both Path and str inputs must resolve to the same stats."""
+        db_path = tmp_path / "type_test.db"
+
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE items (id INTEGER PRIMARY KEY)")
+        conn.execute("INSERT INTO items (id) VALUES (1)")
+        conn.commit()
+        conn.close()
+
+        stats_from_path = get_database_table_stats(db_path)
+        stats_from_str = get_database_table_stats(str(db_path))
+
+        assert stats_from_path == stats_from_str
+
+    def test_stats_with_multiple_tables(self, tmp_path):
+        """Verify correct stats for a database with many tables."""
+        db_path = tmp_path / "multi_table.db"
+
+        conn = sqlite3.connect(str(db_path))
+        # Create 5 tables with varying row counts
+        for i in range(5):
+            conn.execute(
+                f"CREATE TABLE table_{i} (id INTEGER PRIMARY KEY, data TEXT)"
+            )
+            for j in range(i + 1):
+                conn.execute(
+                    f"INSERT INTO table_{i} (data) VALUES (?)",
+                    (f"row_{j}",),
+                )
+        conn.commit()
+        conn.close()
+
+        stats = get_database_table_stats(db_path)
+
+        assert stats["_table_count"] == 5
+        for i in range(5):
+            assert stats[f"table_{i}"] == i + 1
+
+    def test_expands_user_home(self, monkeypatch, tmp_path):
+        """A leading ``~`` must be expanded against the home directory."""
+        db_path = tmp_path / "home_stats.db"
+
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE test (id INTEGER PRIMARY KEY)")
+        conn.execute("INSERT INTO test (id) VALUES (1)")
+        conn.commit()
+        conn.close()
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+
+        stats = get_database_table_stats("~/home_stats.db")
+
+        assert stats["_table_count"] == 1
+        assert stats["test"] == 1
+
+
+class TestCheckpointWalLog:
+    """Tests for the checkpoint_wal_log function."""
+
+    def test_checkpoint_wal_log_success(self, tmp_path):
+        """Verify that checkpoint_wal_log successfully checkpoints a database in WAL mode."""
+        db_path = tmp_path / "wal_test.db"
+
+        # 1. Create a database and enable WAL mode
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("CREATE TABLE test (id INTEGER PRIMARY KEY, val TEXT)")
+        conn.execute("INSERT INTO test (val) VALUES ('test')")
+        conn.commit()
+        conn.close()
+
+        # Check WAL file exists
+        wal_path = Path(f"{db_path}-wal")
+        assert wal_path.exists()
+
+        # 2. Run checkpoint and mock the logger to verify output
+        with patch("src.db.database_backup.logger") as mock_logger:
+            res = checkpoint_wal_log(db_path)
+            assert res is True
+
+            # Verify that logger.info was called with size updates
+            log_calls = [call[0][0] for call in mock_logger.info.call_args_list]
+            assert any("WAL file size before checkpoint" in log for log in log_calls)
+            assert any("WAL file size after checkpoint" in log for log in log_calls)
+
+    def test_checkpoint_wal_log_file_not_found(self):
+        """Verify checkpoint fails for non-existent database paths."""
+        res = checkpoint_wal_log("/nonexistent/path/to/db.db")
+        assert res is False
+
+    def test_checkpoint_wal_log_is_a_directory(self, tmp_path):
+        """Verify checkpoint fails if the database path is a directory."""
+        res = checkpoint_wal_log(tmp_path)
+        assert res is False
+

@@ -85,4 +85,3 @@ To protect cache data, session states, and FAISS indices from unauthorized acces
   user spd_app on >StrongPassword ~spd:v1:* +@all -@dangerous
   ```
 - **Disable Unused Commands:** Block high-risk commands such as `FLUSHALL`, `FLUSHDB`, `KEYS`, `CONFIG`, and `SHUTDOWN` for the application user.
-

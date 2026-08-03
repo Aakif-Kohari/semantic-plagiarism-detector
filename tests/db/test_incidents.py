@@ -9,14 +9,16 @@ from src.db.incidents import (
     export_current_flags_csv,
     get_all_incidents,
     get_incident_by_id,
+    get_incidents_by_date_range,
     get_incidents_by_severity,
     get_incidents_count_by_date,
+    get_recent_incidents,
     incidents_to_csv,
+    log_incident,
     purge_old_incidents,
     sync_flagged_incidents,
     update_review_status,
 )
-
 
 @pytest.fixture(autouse=True)
 def test_db(mock_db):
@@ -37,6 +39,50 @@ def test_build_incident_id_same_pair_different_order():
     id2 = build_incident_id("doc2.pdf", "doc1.pdf")
 
     assert id1 == id2
+
+
+def test_get_incidents_by_date_range_filters_correctly(test_db):
+    sync_flagged_incidents(
+        [{"doc_a": "old1.pdf", "doc_b": "old2.pdf", "similarity": 0.9}],
+        test_db,
+        now="2026-01-01T00:00:00+00:00",
+    )
+    sync_flagged_incidents(
+        [{"doc_a": "mid1.pdf", "doc_b": "mid2.pdf", "similarity": 0.9}],
+        test_db,
+        now="2026-03-15T00:00:00+00:00",
+    )
+    sync_flagged_incidents(
+        [{"doc_a": "new1.pdf", "doc_b": "new2.pdf", "similarity": 0.9}],
+        test_db,
+        now="2026-06-01T00:00:00+00:00",
+    )
+
+    results = get_incidents_by_date_range(
+        "2026-02-01T00:00:00+00:00", "2026-04-01T00:00:00+00:00"
+    )
+
+    assert len(results) == 1
+    assert results[0]["document_a"] == "mid1.pdf"
+
+
+def test_get_incidents_by_date_range_orders_descending(test_db):
+    sync_flagged_incidents(
+        [{"doc_a": "a1.pdf", "doc_b": "a2.pdf", "similarity": 0.9}],
+        test_db,
+        now="2026-01-01T00:00:00+00:00",
+    )
+    sync_flagged_incidents(
+        [{"doc_a": "b1.pdf", "doc_b": "b2.pdf", "similarity": 0.9}],
+        test_db,
+        now="2026-01-05T00:00:00+00:00",
+    )
+
+    results = get_incidents_by_date_range(
+        "2026-01-01T00:00:00+00:00", "2026-01-10T00:00:00+00:00"
+    )
+
+    assert [r["document_a"] for r in results] == ["b1.pdf", "a1.pdf"]
 
 
 def test_sync_flagged_incidents_adds_incident(test_db):
@@ -231,7 +277,7 @@ def test_get_incidents_by_severity(test_db):
 
     sync_flagged_incidents(flags, test_db)
 
-results = get_incidents_by_severity("High", test_db)
+    results = get_incidents_by_severity("High", test_db)
 
     assert len(results) == 1
     assert results[0]["severity_rank"] == "High"
@@ -468,3 +514,38 @@ def test_get_incidents_count_by_date(test_db):
         {"date": "2026-08-05", "count": 1},
     ]
     assert results == expected
+
+
+def test_get_recent_incidents_caching_and_invalidation(test_db):
+    """Verify that get_recent_incidents caches queries and log_incident/sync_flagged_incidents invalidate it."""
+    from unittest.mock import patch
+
+    # 1. Clear any prior cache state
+    get_recent_incidents.cache_clear()
+
+    # 2. Insert initial incidents via sync
+    flags = [
+        {"doc_a": "doc1.pdf", "doc_b": "doc2.pdf", "similarity": 0.85}
+    ]
+    sync_flagged_incidents(flags, test_db)
+
+    # 3. Call get_recent_incidents for the first time (should hit DB)
+    incidents_1 = get_recent_incidents(limit=5, db_path=test_db)
+    assert len(incidents_1) == 1
+
+    # 4. Repeated call with same args should hit cache
+    with patch("src.db.incidents._get_connection") as mock_conn:
+        incidents_2 = get_recent_incidents(limit=5, db_path=test_db)
+        assert len(incidents_2) == 1
+        # Since cache is hit, database connection shouldn't be opened
+        mock_conn.assert_not_called()
+
+    # 5. Log a new incident using log_incident, which should invalidate the cache
+    new_flag = {"doc_a": "doc3.pdf", "doc_b": "doc4.pdf", "similarity": 0.92}
+    logged = log_incident(new_flag, test_db)
+    assert logged.document_a == "doc3.pdf"
+
+    # 6. Call get_recent_incidents again (should hit DB because cache was invalidated)
+    incidents_3 = get_recent_incidents(limit=5, db_path=test_db)
+    assert len(incidents_3) == 2
+

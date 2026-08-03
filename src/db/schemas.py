@@ -29,6 +29,8 @@ class User(DictLikeModel):
     username: str
     role: str
     is_active: bool = True
+    version: int = 1
+
 
 
 class Document(DictLikeModel):

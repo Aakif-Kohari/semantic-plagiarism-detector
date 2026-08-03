@@ -89,8 +89,11 @@ def build_network_data(
     document_tags: Optional[dict] = None,
     doc_metadata: Optional[dict] = None,
     show_isolated: bool = False,
+    spring_k: float = 0.15,
+    iterations: int = 50,
+    repulsion: float = 1.0,
 ) -> dict:
-    """Processes similarity matrix data, constructs NetworkX graph layout, and formats node and edge traces.
+    """Processes similarity matrix data, constructs NetworkX graph layout with force-directed physics, and formats traces.
 
     Args:
         similarity_df: Square N×N DataFrame of similarity scores.
@@ -101,6 +104,9 @@ def build_network_data(
         document_tags: Optional dictionary mapping document names to tags.
         doc_metadata: Optional dictionary mapping document names to metadata (word_count, upload_date, etc.).
         show_isolated: Whether to keep nodes with degree 0 (no similarity connections).
+        spring_k: Optimal node spacing spring constant for force-directed layout (default 0.15).
+        iterations: Number of force-directed spring layout simulation iterations (default 50).
+        repulsion: Repulsion force multiplier factor for node positioning.
 
     Returns:
         Dictionary containing shapes, edge_hover_trace, node_trace, graph, pos coordinates,
@@ -126,22 +132,41 @@ def build_network_data(
                 G.add_edge(doc_names[i], doc_names[j])
                 edge_similarities[(doc_names[i], doc_names[j])] = score
 
-                edge_similarities[(doc_names[i], doc_names[j])] = score
-
     # Hide isolated nodes (degree 0) by default to declutter the graph
     if not show_isolated:
         G.remove_nodes_from(
             [node for node, degree in dict(G.degree()).items() if degree == 0]
         )
 
-    # Compute layout coordinates    # Seed layout for reproducibility
+    # Compute force-directed layout coordinates with physics customization
     num_nodes = len(G.nodes())
-    layout_iterations = 50
+    if spring_k is None or not isinstance(spring_k, (int, float)) or spring_k <= 0:
+        k_val = 1.0 / np.sqrt(max(1, num_nodes))
+    else:
+        k_val = float(spring_k)
+
+    try:
+        iter_val = int(iterations)
+        if iter_val <= 0:
+            iter_val = 50
+    except (TypeError, ValueError):
+        iter_val = 50
+
+    try:
+        rep_val = float(repulsion)
+        if rep_val <= 0:
+            rep_val = 1.0
+    except (TypeError, ValueError):
+        rep_val = 1.0
+
+    if rep_val != 1.0:
+        k_val = k_val * rep_val
+
     pos = nx.spring_layout(
         G,
         seed=42,
-        k=1.0 / np.sqrt(max(1, num_nodes)),
-        iterations=layout_iterations,
+        k=k_val,
+        iterations=iter_val,
     )
 
     # If document_tags is None, attempt to fetch from DB if available
@@ -476,6 +501,64 @@ def render_network_plotly(
     return fig
 
 
+def calculate_force_directed_layout(
+    graph: nx.Graph,
+    spring_k: float = 0.15,
+    iterations: int = 50,
+    repulsion: float = 1.0,
+    seed: int = 42,
+) -> dict[str, np.ndarray]:
+    """Calculate 2D node coordinates using custom force-directed spring layout physics.
+
+    Parameters
+    ----------
+    graph : nx.Graph
+        NetworkX graph instance.
+    spring_k : float, default=0.15
+        Optimal node separation distance constant (k).
+    iterations : int, default=50
+        Number of force simulation iterations.
+    repulsion : float, default=1.0
+        Repulsion multiplier factor.
+    seed : int, default=42
+        Random seed for layout reproducibility.
+
+    Returns
+    -------
+    dict[str, np.ndarray]
+        Mapping from node identifier strings to (x, y) coordinate arrays.
+    """
+    num_nodes = len(graph.nodes())
+    if spring_k is None or not isinstance(spring_k, (int, float)) or spring_k <= 0:
+        k_val = 1.0 / np.sqrt(max(1, num_nodes))
+    else:
+        k_val = float(spring_k)
+
+    try:
+        iter_val = int(iterations)
+        if iter_val <= 0:
+            iter_val = 50
+    except (TypeError, ValueError):
+        iter_val = 50
+
+    try:
+        rep_val = float(repulsion)
+        if rep_val <= 0:
+            rep_val = 1.0
+    except (TypeError, ValueError):
+        rep_val = 1.0
+
+    if rep_val != 1.0:
+        k_val = k_val * rep_val
+
+    return nx.spring_layout(
+        graph,
+        seed=seed,
+        k=k_val,
+        iterations=iter_val,
+    )
+
+
 def plot_similarity_network(
     similarity_df: pd.DataFrame,
     threshold: float = 0.59,
@@ -485,17 +568,24 @@ def plot_similarity_network(
     theme_colors: Optional[dict] = None,
     selected_node: Optional[str] = None,
     show_isolated: bool = False,
+    spring_k: float = 0.15,
+    iterations: int = 50,
+    repulsion: float = 1.0,
 ) -> go.Figure:
-    """Builds a networkx graph from the similarity matrix and returns an interactive Plotly figure.
+    """Builds a NetworkX graph from the similarity matrix and returns an interactive Plotly figure.
 
     Args:
         similarity_df: Square N×N DataFrame of similarity scores.
         threshold: Edge threshold; pairs with similarity >= threshold are connected.
         min_degree: Minimum degree threshold; nodes with degree < min_degree are filtered out.
         title: Title of the graph.
+        node_scale: Scaling multiplier for node rendering sizes.
         theme_colors: Optional dictionary containing theme colors.
-        highlighted_doc: Optional document name to search/highlight with larger size and bright yellow color.
+        selected_node: Optional document name to search/highlight with larger size and bright yellow color.
         show_isolated: Whether to keep nodes with degree 0 (no similarity connections).
+        spring_k: Optimal node spacing spring constant for force-directed layout (default 0.15).
+        iterations: Number of force-directed spring layout simulation iterations (default 50).
+        repulsion: Repulsion force multiplier factor for node positioning.
 
     Returns:
         Plotly Graph Objects Figure.
@@ -510,11 +600,74 @@ def plot_similarity_network(
         document_tags=None,
         doc_metadata=None,
         show_isolated=show_isolated,
+        spring_k=spring_k,
+        iterations=iterations,
+        repulsion=repulsion,
     )
     return render_network_plotly(
         network_data=network_data,
         title=title,
         theme_colors=theme_colors,
+    )
+
+
+def plot_plagiarism_network_graph(
+    similarity_df: pd.DataFrame,
+    threshold: float = 0.59,
+    min_degree: int = 0,
+    title: str = "Document Plagiarism Network",
+    node_scale: float = 1.0,
+    theme_colors: Optional[dict] = None,
+    selected_node: Optional[str] = None,
+    show_isolated: bool = False,
+    spring_k: float = 0.15,
+    iterations: int = 50,
+    repulsion: float = 1.0,
+) -> go.Figure:
+    """Renders an interactive force-directed plagiarism network graph with custom physics controls.
+
+    Parameters
+    ----------
+    similarity_df : pd.DataFrame
+        Square N×N similarity matrix.
+    threshold : float, default=0.59
+        Minimum similarity score to construct network edges.
+    min_degree : int, default=0
+        Minimum node degree filtering threshold.
+    title : str, default="Document Plagiarism Network"
+        Graph plot title.
+    node_scale : float, default=1.0
+        Scaling multiplier for node rendering sizes.
+    theme_colors : Optional[dict], default=None
+        Theme palette dictionary.
+    selected_node : Optional[str], default=None
+        Node identifier to highlight.
+    show_isolated : bool, default=False
+        Whether to retain isolated (degree 0) document nodes.
+    spring_k : float, default=0.15
+        Optimal node spacing spring constant for force-directed layout.
+    iterations : int, default=50
+        Number of force-directed spring layout simulation iterations.
+    repulsion : float, default=1.0
+        Repulsion factor for node separation.
+
+    Returns
+    -------
+    go.Figure
+        Interactive Plotly graph figure.
+    """
+    return plot_similarity_network(
+        similarity_df=similarity_df,
+        threshold=threshold,
+        min_degree=min_degree,
+        title=title,
+        node_scale=node_scale,
+        theme_colors=theme_colors,
+        selected_node=selected_node,
+        show_isolated=show_isolated,
+        spring_k=spring_k,
+        iterations=iterations,
+        repulsion=repulsion,
     )
 
 
@@ -669,6 +822,3 @@ def export_network_to_csv_bytes(
     G = network_data["graph"]
     csv_str = export_graph_to_csv(G, similarity_df=similarity_df)
     return csv_str.encode("utf-8")
-
-
-

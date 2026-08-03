@@ -124,4 +124,3 @@ class TestFileMimeCategory:
     def test_is_extension_supported(self, filename, allowed_categories, expected_result):
         """Test extension support validation against allowed categories."""
         assert is_extension_supported(filename, allowed_categories) == expected_result
-        

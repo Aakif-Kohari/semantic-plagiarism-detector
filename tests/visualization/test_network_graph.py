@@ -33,9 +33,11 @@ def test_export_network_adjacency_csv_empty_graph():
     assert csv_output.strip() == "Source,Target,Weight"
 from src.visualization.network_graph import (
     build_network_data,
+    calculate_force_directed_layout,
     export_graph_to_csv,
     export_network_to_csv_bytes,
     export_network_to_gexf_bytes,
+    plot_plagiarism_network_graph,
     plot_similarity_network,
     render_network_plotly,
 )
@@ -495,4 +497,98 @@ def test_build_network_data_all_nodes_isolated():
     fig = render_network_plotly(net_data, title="Empty")
     assert isinstance(fig, go.Figure)
 
+
+# ==============================================================================
+# Force-Directed Graph Physics Customization Tests (Issue #1368)
+# ==============================================================================
+
+
+def test_build_network_data_physics_defaults():
+    """Verify default physics parameters spring_k=0.15 and iterations=50."""
+    df = _three_doc_matrix()
+    net_data = build_network_data(df, threshold=0.75, show_isolated=True)
+
+    pos = net_data["pos"]
+    assert isinstance(pos, dict)
+    assert len(pos) == 3
+    for node in ["doc1", "doc2", "doc3"]:
+        assert node in pos
+        assert len(pos[node]) == 2
+
+
+def test_build_network_data_spring_k_customization():
+    """Verify modifying spring_k recalculates node layout positions."""
+    df = _three_doc_matrix()
+
+    net_data_default = build_network_data(df, threshold=0.75, show_isolated=True, spring_k=0.15)
+    net_data_tight = build_network_data(df, threshold=0.75, show_isolated=True, spring_k=0.05)
+    net_data_spread = build_network_data(df, threshold=0.75, show_isolated=True, spring_k=0.85)
+
+    pos_default = net_data_default["pos"]
+    pos_tight = net_data_tight["pos"]
+    pos_spread = net_data_spread["pos"]
+
+    # Positions should change when spring constant k changes
+    assert pos_default["doc1"][0] != pos_tight["doc1"][0] or pos_default["doc1"][1] != pos_tight["doc1"][1]
+    assert pos_default["doc1"][0] != pos_spread["doc1"][0] or pos_default["doc1"][1] != pos_spread["doc1"][1]
+
+
+def test_build_network_data_iterations_customization():
+    """Verify modifying iteration count affects layout convergence."""
+    df = _three_doc_matrix()
+
+    net_data_few = build_network_data(df, threshold=0.75, show_isolated=True, iterations=5)
+    net_data_many = build_network_data(df, threshold=0.75, show_isolated=True, iterations=200)
+
+    pos_few = net_data_few["pos"]
+    pos_many = net_data_many["pos"]
+
+    assert pos_few["doc1"][0] != pos_many["doc1"][0] or pos_few["doc1"][1] != pos_many["doc1"][1]
+
+
+def test_build_network_data_repulsion_customization():
+    """Verify repulsion parameter alters force-directed node positioning."""
+    df = _three_doc_matrix()
+
+    net_data_base = build_network_data(df, threshold=0.75, show_isolated=True, repulsion=1.0)
+    net_data_repelled = build_network_data(df, threshold=0.75, show_isolated=True, repulsion=3.5)
+
+    pos_base = net_data_base["pos"]
+    pos_repelled = net_data_repelled["pos"]
+
+    assert pos_base["doc1"][0] != pos_repelled["doc1"][0] or pos_base["doc1"][1] != pos_repelled["doc1"][1]
+
+
+def test_plot_plagiarism_network_graph_acceptance_criteria():
+    """Verify plot_plagiarism_network_graph function accepts spring_k=0.15 and iterations=50."""
+    df = _three_doc_matrix()
+
+    fig = plot_plagiarism_network_graph(
+        similarity_df=df,
+        threshold=0.75,
+        spring_k=0.15,
+        iterations=50,
+        repulsion=1.2,
+        show_isolated=True,
+    )
+
+    assert isinstance(fig, go.Figure)
+    assert len(fig.data) == 2
+    assert fig.layout.shapes is not None
+
+
+def test_calculate_force_directed_layout_utility():
+    """Verify calculate_force_directed_layout computes 2D coordinates for a NetworkX graph."""
+    graph = nx.Graph()
+    graph.add_edge("A", "B")
+    graph.add_edge("B", "C")
+    graph.add_edge("C", "A")
+
+    pos = calculate_force_directed_layout(graph, spring_k=0.25, iterations=75, repulsion=1.5)
+
+    assert isinstance(pos, dict)
+    assert set(pos.keys()) == {"A", "B", "C"}
+    for node in ["A", "B", "C"]:
+        assert len(pos[node]) == 2
+        assert isinstance(pos[node][0], (float, int, numpy.number) if 'numpy' in globals() else float)
 

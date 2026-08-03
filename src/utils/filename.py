@@ -260,10 +260,8 @@ def get_final_extension(filename: object) -> str:
     raw = html.unescape(str(filename or ""))
     raw = unicodedata.normalize("NFKC", raw)
     raw = _CONTROL_RE.sub("", raw)
-    raw = _HTML_TAG_RE.sub("", raw)
     basename = _basename(raw).strip()
-
-_stem, extension = os.path.splitext(basename)
+    _stem, extension = os.path.splitext(basename)
     return extension.casefold()
 
 
