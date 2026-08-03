@@ -272,3 +272,69 @@ def plot_document_sizes(word_counts: dict[str, int]) -> go.Figure:
     )
 
     return fig
+
+
+def plot_severity_donut_chart(incidents: list[dict[str, Any]]) -> go.Figure:
+    """
+    Create a donut chart showing the distribution of plagiarism incident severities.
+
+    Args:
+        incidents: List of dicts, each representing an incident, expected to contain a 'severity' key.
+
+    Returns:
+        Plotly Figure object
+    """
+    if not incidents:
+        # Return empty chart with message
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No plagiarism incidents recorded",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
+            font=dict(size=16, color="gray"),
+        )
+        fig.update_layout(
+            title="Plagiarism Incident Severity Distribution",
+            height=400,
+        )
+        return fig
+
+    df = pd.DataFrame(incidents)
+    
+    # If no severity column exists, create it with a default value to prevent errors
+    if "severity" not in df.columns:
+        df["severity"] = "Unknown"
+
+    # Count frequencies of each severity
+    counts = df["severity"].value_counts().reset_index()
+    counts.columns = ["severity", "count"]
+
+    # Define the custom colors
+    color_map = {
+        "High": "#ef4444",
+        "Medium": "#f59e0b",
+        "Low": "#10b981"
+    }
+
+    # Map the colors ensuring that the order matches the plotted categories
+    colors = [color_map.get(sev, "#cccccc") for sev in counts["severity"]]
+
+    fig = go.Figure(data=[go.Pie(
+        labels=counts["severity"],
+        values=counts["count"],
+        hole=0.4,
+        marker=dict(colors=colors),
+        textinfo="label+percent",
+        hovertemplate="<b>Severity: %{label}</b><br>Incidents: %{value}<extra></extra>"
+    )])
+
+    fig.update_layout(
+        title="Plagiarism Incident Severity Distribution",
+        height=400,
+        showlegend=True,
+    )
+
+    return fig
