@@ -88,6 +88,7 @@ def build_network_data(
     selected_node: Optional[str] = None,
     document_tags: Optional[dict] = None,
     doc_metadata: Optional[dict] = None,
+    show_isolated: bool = False,
 ) -> dict:
     """Processes similarity matrix data, constructs NetworkX graph layout, and formats node and edge traces.
 
@@ -99,6 +100,7 @@ def build_network_data(
         selected_node: Optional document name to highlight.
         document_tags: Optional dictionary mapping document names to tags.
         doc_metadata: Optional dictionary mapping document names to metadata (word_count, upload_date, etc.).
+        show_isolated: Whether to keep nodes with degree 0 (no similarity connections).
 
     Returns:
         Dictionary containing shapes, edge_hover_trace, node_trace, graph, pos coordinates,
@@ -126,9 +128,11 @@ def build_network_data(
 
                 edge_similarities[(doc_names[i], doc_names[j])] = score
 
-    # Nodes directly connected to the clicked node — used below to
-    # highlight them and dim everything else.
-    neighbor_nodes = set(G.neighbors(selected_node)) if selected_node in G else set()
+    # Hide isolated nodes (degree 0) by default to declutter the graph
+    if not show_isolated:
+        G.remove_nodes_from(
+            [node for node, degree in dict(G.degree()).items() if degree == 0]
+        )
 
     # Compute layout coordinates    # Seed layout for reproducibility
     num_nodes = len(G.nodes())
@@ -480,6 +484,7 @@ def plot_similarity_network(
     node_scale: float = 1.0,
     theme_colors: Optional[dict] = None,
     selected_node: Optional[str] = None,
+    show_isolated: bool = False,
 ) -> go.Figure:
     """Builds a networkx graph from the similarity matrix and returns an interactive Plotly figure.
 
@@ -490,6 +495,7 @@ def plot_similarity_network(
         title: Title of the graph.
         theme_colors: Optional dictionary containing theme colors.
         highlighted_doc: Optional document name to search/highlight with larger size and bright yellow color.
+        show_isolated: Whether to keep nodes with degree 0 (no similarity connections).
 
     Returns:
         Plotly Graph Objects Figure.
@@ -503,6 +509,7 @@ def plot_similarity_network(
         selected_node=selected_node,
         document_tags=None,
         doc_metadata=None,
+        show_isolated=show_isolated,
     )
     return render_network_plotly(
         network_data=network_data,
@@ -555,6 +562,7 @@ def export_network_to_gexf_bytes(
         min_degree=min_degree,
         document_tags=None,
         doc_metadata=None,
+        show_isolated=True,
     )
     G = network_data["graph"]
 
@@ -656,6 +664,7 @@ def export_network_to_csv_bytes(
         min_degree=min_degree,
         document_tags=None,
         doc_metadata=None,
+        show_isolated=True,
     )
     G = network_data["graph"]
     csv_str = export_graph_to_csv(G, similarity_df=similarity_df)

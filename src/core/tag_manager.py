@@ -166,11 +166,59 @@ class TagManager:
             current_tags_str = get_document_tags(doc_id)
             if not current_tags_str:
                 continue
-                
             individual_tags = [t.strip() for t in current_tags_str.split(",") if t.strip()]
             if normalized_tag not in individual_tags:
                 continue
-                
+
             updated_tags = [t for t in individual_tags if t != normalized_tag]
             new_tags_str = ",".join(sorted(set(updated_tags))) if updated_tags else ""
             update_document_tags(doc_id, new_tags_str)
+
+    @staticmethod
+    def sanitize_tag_name(tag: str) -> str:
+        """
+        Sanitizes a tag name string by removing HTML tags, slashes, and whitespace.
+        Limits the output length to a maximum of 30 characters.
+        Rejects empty or whitespace-only tags by raising a ValueError.
+
+        Args:
+            tag (str): The raw tag name string to sanitize.
+
+        Returns:
+            str: Cleaned tag name string (up to 30 characters).
+
+        Raises:
+            ValueError: If the input tag is invalid, empty, or whitespace-only.
+        """
+        return sanitize_tag_name(tag)
+
+
+def sanitize_tag_name(tag: str) -> str:
+    """
+    Sanitizes a tag name string by removing HTML tags, slashes, and whitespace.
+    Limits the output length to a maximum of 30 characters.
+    Rejects empty or whitespace-only tags by raising a ValueError.
+
+    Args:
+        tag (str): The raw tag name string to sanitize.
+
+    Returns:
+        str: Cleaned tag name string (up to 30 characters).
+
+    Raises:
+        ValueError: If the input tag is invalid, empty, or whitespace-only.
+    """
+    if tag is None or not isinstance(tag, str) or not tag.strip():
+        raise ValueError("Tag name cannot be empty or whitespace-only.")
+
+    # Remove HTML tags (e.g. <script>, <b>, etc.)
+    cleaned = re.sub(r'<[^>]*>', '', tag)
+
+    # Remove slashes (/ and \) and all whitespace characters
+    cleaned = re.sub(r'[/\\\s]', '', cleaned)
+
+    if not cleaned:
+        raise ValueError("Tag name cannot be empty or whitespace-only.")
+
+    return cleaned[:30]
+

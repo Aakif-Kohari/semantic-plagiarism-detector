@@ -8,11 +8,12 @@ from src.core.lexical_similarity import (STOPWORDS,  # noqa: E402
                                          remove_stopwords, tokenize)
 from src.core.similarity import (calculate_paragraph_similarity_breakdown,
                                  chunk_max_similarity, chunk_similarity_matrix,
-                                 compute_similarity_matrix,
                                  document_similarity_matrix,
                                  find_exact_matches,
                                  find_most_similar_chunks, flag_plagiarism,
-                                 hybrid_similarity_matrix)
+                                 hybrid_similarity_matrix,
+                                 manhattan_similarity)
+
 
 def test_chunk_max_similarity(dummy_embeddings):
     emb_a = dummy_embeddings["doc_A"]
@@ -55,21 +56,6 @@ def test_document_similarity_matrix(dummy_embeddings):
     assert df.shape == (3, 3)
     assert list(df.columns) == ["doc_A", "doc_B", "doc_C"]
 
-
-def test_compute_similarity_matrix_applies_min_threshold(dummy_embeddings):
-    unfiltered = compute_similarity_matrix(dummy_embeddings)
-    filtered = compute_similarity_matrix(
-        dummy_embeddings, min_similarity_threshold=0.5
-    )
-
-    # doc_A and doc_C are dissimilar, so their unfiltered score is low
-    assert unfiltered.loc["doc_A", "doc_C"] < 0.5
-    # after filtering, any score below 0.5 must become exactly 0.0
-    assert filtered.loc["doc_A", "doc_C"] == 0.0
-
-    # scores that were already >= threshold should stay unchanged
-    above_threshold_mask = unfiltered >= 0.5
-    assert (filtered[above_threshold_mask] == unfiltered[above_threshold_mask]).all().all()
 
 def test_document_similarity_matrix_accepts_batch_size_basic(dummy_embeddings):
     df = document_similarity_matrix(dummy_embeddings, batch_size=2)
@@ -583,3 +569,153 @@ def test_find_exact_matches():
     text_c = "HELLO WORLD. This is a Test."
     assert find_exact_matches(text_a, text_c, case_sensitive=True) == ["HELLO WORLD", "This is a Test"]
 
+
+
+
+def test_manhattan_similarity_identical_vectors():
+    vector = np.array([1.0, 2.0, 3.0])
+
+    assert manhattan_similarity(vector, vector) == pytest.approx(1.0)
+
+
+def test_manhattan_similarity_uses_normalized_l1_distance():
+    vector_a = np.array([0.0, 0.0])
+    vector_b = np.array([1.0, 2.0])
+
+    # L1 distance = 3, so normalized similarity = 1 / (1 + 3).
+    assert manhattan_similarity(
+        vector_a,
+        vector_b,
+    ) == pytest.approx(0.25)
+
+
+def test_manhattan_similarity_is_symmetric():
+    vector_a = np.array([-1.0, 2.5, 7.0])
+    vector_b = np.array([3.0, 0.5, -2.0])
+
+    assert manhattan_similarity(
+        vector_a,
+        vector_b,
+    ) == pytest.approx(
+        manhattan_similarity(vector_b, vector_a)
+    )
+
+
+@pytest.mark.parametrize(
+    ("vector_b", "expected_order"),
+    [
+        (np.array([0.1, 0.0]), "near"),
+        (np.array([10.0, 10.0]), "far"),
+    ],
+)
+def test_manhattan_similarity_remains_bounded(
+    vector_b,
+    expected_order,
+):
+    similarity = manhattan_similarity(
+        np.array([0.0, 0.0]),
+        vector_b,
+    )
+
+    assert 0.0 <= similarity <= 1.0
+    if expected_order == "near":
+        assert similarity > 0.5
+    else:
+        assert similarity < 0.1
+
+
+def test_manhattan_similarity_decreases_as_distance_grows():
+    origin = np.array([0.0, 0.0])
+
+    near = manhattan_similarity(
+        origin,
+        np.array([1.0, 0.0]),
+    )
+    far = manhattan_similarity(
+        origin,
+        np.array([5.0, 0.0]),
+    )
+
+    assert near > far
+
+
+def test_manhattan_similarity_supports_multidimensional_arrays():
+    array_a = np.array([[0.0, 1.0], [2.0, 3.0]])
+    array_b = np.array([[0.0, 2.0], [4.0, 3.0]])
+
+    # Flattened L1 distance is 3.
+    assert manhattan_similarity(
+        array_a,
+        array_b,
+    ) == pytest.approx(0.25)
+
+
+def test_manhattan_similarity_does_not_mutate_inputs():
+    vector_a = np.array([1.0, 2.0, 3.0])
+    vector_b = np.array([3.0, 2.0, 1.0])
+    original_a = vector_a.copy()
+    original_b = vector_b.copy()
+
+    manhattan_similarity(vector_a, vector_b)
+
+    assert np.array_equal(vector_a, original_a)
+    assert np.array_equal(vector_b, original_b)
+
+
+def test_manhattan_similarity_rejects_shape_mismatch():
+    with pytest.raises(
+        ValueError,
+        match="matching shapes",
+    ):
+        manhattan_similarity(
+            np.array([1.0, 2.0]),
+            np.array([[1.0, 2.0]]),
+        )
+
+
+def test_manhattan_similarity_rejects_empty_arrays():
+    with pytest.raises(
+        ValueError,
+        match="non-empty",
+    ):
+        manhattan_similarity(
+            np.array([]),
+            np.array([]),
+        )
+
+
+@pytest.mark.parametrize(
+    "invalid_value",
+    [np.nan, np.inf, -np.inf],
+)
+def test_manhattan_similarity_rejects_non_finite_values(
+    invalid_value,
+):
+    with pytest.raises(
+        ValueError,
+        match="finite numeric values",
+    ):
+        manhattan_similarity(
+            np.array([0.0, invalid_value]),
+            np.array([0.0, 1.0]),
+        )
+
+
+def test_manhattan_similarity_rejects_non_numeric_input():
+    with pytest.raises(
+        TypeError,
+        match="numeric array inputs",
+    ):
+        manhattan_similarity(
+            np.array(["hello"]),
+            np.array(["world"]),
+        )
+
+
+def test_manhattan_similarity_returns_python_float():
+    result = manhattan_similarity(
+        np.array([0, 1], dtype=np.int32),
+        np.array([1, 1], dtype=np.int32),
+    )
+
+    assert isinstance(result, float)

@@ -1,5 +1,4 @@
 import json
-import pytest
 from datetime import datetime
 from src.utils.json_export import export_to_json
 
@@ -53,21 +52,17 @@ Tests cover:
 - Data serialization edge cases: NumPy types, NaNs, infinities, Timestamps, and Unicode text.
 """
 
-from datetime import datetime, timezone
-import json
-import math
+from datetime import timezone
 import re
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from src.utils.json_export import (
     _json_default_serializer,
     export_incidents_to_json,
     export_report_to_json,
     export_similarity_matrix_to_json,
-    export_to_json,
     get_export_timestamp,
     parse_export_json,
     validate_json_export_schema,

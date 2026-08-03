@@ -1,4 +1,3 @@
-import pytest
 
 from src.core.tag_manager import TagManager
 
@@ -71,7 +70,7 @@ def test_has_matching_tag_spaces():
 
 def test_apply_tag_bulk(mocker):
     mocker.patch('src.core.tag_manager.TagManager.parse_tags', return_value="#newtag")
-    get_mock = mocker.patch('src.db.corpus_db.get_document_tags', side_effect=["#oldtag", "#newtag", ""])
+    mocker.patch('src.db.corpus_db.get_document_tags', side_effect=["#oldtag", "#newtag", ""])
     update_mock = mocker.patch('src.db.corpus_db.update_document_tags')
     
     from src.core.tag_manager import TagManager
@@ -83,7 +82,7 @@ def test_apply_tag_bulk(mocker):
 
 def test_remove_tag_bulk(mocker):
     mocker.patch('src.core.tag_manager.TagManager.parse_tags', return_value="#badtag")
-    get_mock = mocker.patch('src.db.corpus_db.get_document_tags', side_effect=["#badtag,#goodtag", "#goodtag", ""])
+    mocker.patch('src.db.corpus_db.get_document_tags', side_effect=["#badtag,#goodtag", "#goodtag", ""])
     update_mock = mocker.patch('src.db.corpus_db.update_document_tags')
     
     from src.core.tag_manager import TagManager
