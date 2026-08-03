@@ -372,7 +372,12 @@ from src.utils.filename import (
     validate_document_extension,
 )
 from src.utils.json_export import export_similarity_matrix_to_json
-from src.utils.pdf_report import generate_plagiarism_report
+from src.utils.pdf_report import (
+    generate_audit_summary_html,
+    generate_audit_summary_pdf,
+    generate_audit_summary_report,
+    generate_plagiarism_report,
+)
 from src.utils.redis_cache import (
     cache_analysis_results,
     cache_faiss_index,
@@ -432,6 +437,17 @@ try:
     from streamlit_tour import Tour
 except ImportError:
     Tour = None
+
+# ── Auto-refresh component for the Live Incident Stream (Issue #1384) ───────
+try:
+    from streamlit_autorefresh import st_autorefresh
+except ImportError:
+    st_autorefresh = None
+    logger.warning(
+        "streamlit-autorefresh is not installed; the auto-refresh toggle "
+        "on the Live Incident Stream tab will be disabled."
+    )
+
 
 try:
     from src.utils.google_drive import bulk_download_drive_folder
@@ -1932,6 +1948,50 @@ with tab_warnings:
     update_page_title("Warnings")
     st.subheader(get_text("tab_warnings", lang=lang_code))
 
+    # ── Issue #1384: Auto-refresh toggle for the Live Incident Stream ───
+    # When enabled, the dashboard re-runs every 30 seconds so newly
+    # flagged plagiarism incidents appear without a manual page reload.
+    # When disabled, no autorefresh timer is scheduled and the page
+    # behaves as a normal static dashboard.
+    auto_refresh_enabled = st.toggle(
+        "Auto-refresh live feed (30s)",
+        value=False,
+        key="auto_refresh_incident_stream",
+        help=(
+            "When enabled, the incident feed re-runs every 30 seconds "
+            "to surface newly flagged submissions automatically."
+        ),
+    )
+
+    # Schedule the autorefresh timer ONLY when the toggle is on.
+    # st_autorefresh is called as a top-level statement inside the tab
+    # so it can register the rerun hook with Streamlit's script runner.
+    if auto_refresh_enabled and st_autorefresh is not None:
+        st_autorefresh(
+            interval=30 * 1000,           # 30 seconds in milliseconds
+            key="incident_stream_autorefresh",
+        )
+
+    # Persist the toggle state across reruns (already implicit via the
+    # `key=` argument, but we mirror it here for downstream consumers).
+    st.session_state["incident_stream_auto_refresh"] = auto_refresh_enabled
+
+    # Status indicator shown next to the toggle so the instructor can
+    # tell at a glance whether live refresh is active.
+    if auto_refresh_enabled:
+        if st_autorefresh is None:
+            st.warning(
+                "Auto-refresh is enabled, but the `streamlit-autorefresh` "
+                "package is not installed. Install it via "
+                "`pip install streamlit-autorefresh`."
+            )
+        else:
+            st.caption("🔴 Live — refreshing every 30 seconds.")
+    else:
+        st.caption("⚪ Live feed paused — toggle on to auto-refresh.")
+
+    st.divider()
+
     # Initialize expand/collapse state
     if "warnings_expand_all" not in st.session_state:
         st.session_state.warnings_expand_all = False
@@ -1948,9 +2008,8 @@ with tab_warnings:
 
     start_date, end_date = get_date_range_preset(date_preset)
     st.caption(
-        f"Filtering incidents from **{start_date.strftime('%Y-%m-%d')}** to **{end_date.strftime('%Y-%m-%d')}**"
-        f"Filtering incidents from **{start_date.strftime('%Y-%m-%d')}** "
-        f"to **{end_date.strftime('%Y-%m-%d')}**"
+        f"Filtering incidents from **{start_date.strftime('%Y-%m-%d')}** to "
+        f"**{end_date.strftime('%Y-%m-%d')}**"
     )
 
     # Note: The actual filtering logic would be applied to the incidents dataframe
@@ -1961,6 +2020,7 @@ with tab_warnings:
     elif render_warning_controls is not None:
         render_warning_controls(
             flags, threshold=threshold, ai_probabilities=ai_probabilities
+        )
 
         # Master Expand/Collapse button
         button_label = (
@@ -1981,7 +2041,7 @@ with tab_warnings:
             ai_probabilities=ai_probabilities,
             expanded=st.session_state.warnings_expand_all,   # <-- pass state
         )
-
+        
 # ══ TAB 2: FAISS ══════════════════════════════════════════════════════════
 with tab_faiss:
     update_page_title("FAISS")
@@ -2036,8 +2096,308 @@ with tab_heatmap:
                 help="Render similarity text labels inside heatmap cells.",
             )
 
+            with drill_tab_analysis:
+                top_pairs = find_most_similar_chunks(
+                    chunks_a, chunks_b, embeddings[doc_a], embeddings[doc_b], top_k=5, threshold=threshold
+                )
+                for rank, (ca, cb, sim) in enumerate(top_pairs, 1):
+                    with st.expander(f"#{rank} — Similarity: {sim:.1%}"):
+                        st.write(f"**{doc_a}:** {ca}")
+                        st.write(f"**{doc_b}:** {cb}")
+
+            # --- In-App PDF Preview with Highlighted Matches (#145) ---
+            with drill_tab_viewer:
+                st.subheader("📄 In-App PDF Preview with Highlighted Matches")
+                selected_view_doc = st.radio(
+                    "Select Document to Preview:",
+                    options=[doc_a, doc_b],
+                    horizontal=True,
+                    key="doc_viewer_select",
+                )
+
+                # Retrieve file bytes directly from uploaded files dict
+                doc_source = file_bytes_dict.get(selected_view_doc)
+                matching_chunks_to_highlight = chunks_a if selected_view_doc == doc_a else chunks_b
+
+                if doc_source and str(selected_view_doc).lower().endswith(".pdf"):
+                    with st.spinner("Generating highlighted PDF preview..."):
+                        try:
+                            highlighted_pdf_bytes = highlight_pdf_matches(
+                                pdf_source=doc_source,
+                                matching_chunks=matching_chunks_to_highlight,
+                            )
+
+                            base64_pdf = base64.b64encode(highlighted_pdf_bytes).decode("utf-8")
+                            pdf_display = f"""
+                                <iframe 
+                                    src="data:application/pdf;base64,{base64_pdf}" 
+                                    width="100%" 
+                                    height="850px" 
+                                    type="application/pdf">
+                                </iframe>
+                            """
+                            st.markdown(pdf_display, unsafe_allow_html=True)
+                        except Exception as err:
+                            st.error(f"Unable to render PDF preview: {str(err)}")
+                else:
+                    st.info(f"PDF Preview is only available for uploaded `.pdf` files.")
+        if active_sim_df is not None and len(doc_names) >= 2:
+            c1, c2 = st.columns(2)
+            with c1:
+                da = st.selectbox("Document A", doc_names, key="da")
+            with c2:
+                db = st.selectbox("Document B", [d for d in doc_names if d != da], key="db")
+            sim_val = float(active_sim_df.loc[da, db])
+            st.write(f"Overall Similarity: `{sim_val:.1%}`")
+            
+            pair_flags = [
+                f for f in flags 
+                if (f["doc_a"] == da and f["doc_b"] == db) or (f["doc_a"] == db and f["doc_b"] == da)
+            ]
+            
+            if pair_flags:
+                st.markdown("### 📝 Flagged Snippets")
+                for rank, flag in enumerate(pair_flags, 1):
+                    ca = str(flag.get("snippet_a", ""))
+                    cb = str(flag.get("snippet_b", ""))
+                    
+                    if flag["doc_a"] == db:
+                        ca, cb = cb, ca
+                        
+                    highlighted_ca, highlighted_cb = highlight_overlap(ca, cb)
+                    
+                    with st.expander(f"Incident #{rank} - Similarity: {flag.get('similarity', 0.0):.1%}", expanded=(rank == 1)):
+                        c_a, c_b = st.columns(2)
+                        with c_a:
+                            st.markdown(f"**{da}**")
+                            st.markdown(highlighted_ca, unsafe_allow_html=True)
+                            if render_copy_button:
+                                render_copy_button(text_to_copy=ca, button_id=f"copy_ca_{rank}", copy_label="📋 Copy Snippet")
+                        with c_b:
+                            st.markdown(f"**{db}**")
+                            st.markdown(highlighted_cb, unsafe_allow_html=True)
+                            if render_copy_button:
+                                render_copy_button(text_to_copy=cb, button_id=f"copy_cb_{rank}", copy_label="📋 Copy Snippet")
+
+
+    # ══ TAB 6: ANALYTICS ══════════════════════════════════════════════════════
+    with tab_analytics:
+        update_page_title("Analytics")
+        st.subheader("📊 Class-wide Plagiarism Analytics & Audit Summary")
+        st.caption("Inspect class-wide plagiarism trends, incident distribution, and export executive audit reports.")
+
+        # Gather dataset metrics for executive analytics
+        all_incidents = get_all_incidents() if get_all_incidents else []
+        db_docs = get_all_documents() if get_all_documents else []
+        
+        active_class_name = st.session_state.get("class_filter_selectbox", "All Classes")
+        current_thresh = float(st.session_state.get("threshold_slider", PLAGIARISM_THRESHOLD))
+
+        # Build top flagged list
+        top_flagged_list = []
+        if flags:
+            for f in flags:
+                top_flagged_list.append(
+                    {
+                        "doc_a": f.get("doc_a", ""),
+                        "doc_b": f.get("doc_b", ""),
+                        "similarity": float(f.get("similarity", 0.0)),
+                    }
+                )
+        elif all_incidents:
+            for inc in all_incidents:
+                top_flagged_list.append(
+                    {
+                        "doc_a": inc.get("document_a", ""),
+                        "doc_b": inc.get("document_b", ""),
+                        "similarity": float(inc.get("similarity_score", 0.0)),
+                    }
+                )
+
+        # Sort descending by similarity
+        top_flagged_list = sorted(top_flagged_list, key=lambda x: x.get("similarity", 0.0), reverse=True)
+
+        n_docs_total = len(raw_texts) if raw_texts else len(db_docs)
+        n_pairs_total = (n_docs_total * (n_docs_total - 1)) // 2 if n_docs_total > 1 else 0
+        n_flagged_total = len(top_flagged_list)
+        n_high_sev = sum(1 for p in top_flagged_list if p.get("similarity", 0.0) >= 0.90)
+        n_med_sev = sum(1 for p in top_flagged_list if 0.75 <= p.get("similarity", 0.0) < 0.90)
+        n_low_sev = sum(1 for p in top_flagged_list if p.get("similarity", 0.0) < 0.75)
+
+        # Executive Metrics Header Cards
+        m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+        m_col1.metric("Indexed Documents", n_docs_total)
+        m_col2.metric("Evaluated Document Pairs", n_pairs_total)
+        m_col3.metric("Flagged Incidents", n_flagged_total)
+        m_col4.metric("High Severity (≥90%)", n_high_sev)
+
+        st.divider()
+
+        # Visual Analytics Charts (Lazy Loaded)
+        c_left, c_right = st.columns(2)
+        with c_left:
+            st.markdown("### 📈 High Severity Incident Trends")
+            if plot_high_severity_trends and all_incidents:
+                try:
+                    trend_fig = plot_high_severity_trends(all_incidents)
+                    if trend_fig:
+                        st.plotly_chart(trend_fig, use_container_width=True)
+                    else:
+                        st.info("No timeline trend data available.")
+                except Exception as err:
+                    st.info(f"Trend chart unavailable: {err}")
+            else:
+                st.info("Trend analytics will populate as incidents are recorded.")
+
+        with c_right:
+            st.markdown("### 📄 Most Plagiarized Documents")
+            if plot_most_plagiarized_documents and all_incidents:
+                try:
+                    most_fig = plot_most_plagiarized_documents(all_incidents)
+                    if most_fig:
+                        st.plotly_chart(most_fig, use_container_width=True)
+                    else:
+                        st.info("No frequent document data available.")
+                except Exception as err:
+                    st.info(f"Document ranking chart unavailable: {err}")
+            else:
+                st.info("Document ranking analytics ready.")
+
+        st.divider()
+
+        # Audit Summary Exporter Card (#1370 Action)
+        st.markdown("### 📄 Executive Audit Summary Report Exporter")
+        st.markdown(
+            "Instructors can compile a consolidated executive summary report containing class-wide "
+            "statistics, severity distributions, and top flagged assignment pairs."
+        )
+
+        audit_metrics_payload = {
+            "total_documents": n_docs_total,
+            "evaluated_pairs": n_pairs_total,
+            "flagged_incidents": n_flagged_total,
+            "high_severity_count": n_high_sev,
+            "medium_severity_count": n_med_sev,
+            "low_severity_count": n_low_sev,
+            "threshold": current_thresh,
+            "class_section": active_class_name,
+        }
+
+        exp_col1, exp_col2 = st.columns([2, 1])
+
+        with exp_col1:
+            report_format = st.radio(
+                "Export Format:",
+                options=["PDF Report (.pdf)", "HTML Report (.html)"],
+                index=0,
+                horizontal=True,
+                key="audit_report_format_radio",
+            )
+            top_pairs_limit = st.slider(
+                "Include Top Flagged Document Pairs:",
+                min_value=5,
+                max_value=50,
+                value=20,
+                step=5,
+                key="audit_pairs_limit_slider",
+            )
+
+        with exp_col2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            generate_report_click = st.button(
+                "⚡ Generate Audit Summary Report",
+                key="generate_audit_summary_report_btn",
+                type="primary",
+                use_container_width=True,
+            )
+
+        if generate_report_click or st.session_state.get("audit_report_generated", False):
+            st.session_state["audit_report_generated"] = True
+            selected_pairs = top_flagged_list[:top_pairs_limit]
+
+            st.success("✅ Consolidated Audit Summary Report compiled successfully!")
+            
+            dl_col1, dl_col2 = st.columns(2)
+
+            # Generate PDF data
+            pdf_bytes = generate_audit_summary_report(
+                metrics=audit_metrics_payload,
+                top_flagged_pairs=selected_pairs,
+                output_format="pdf",
+                class_section=active_class_name,
+            )
+            with dl_col1:
+                st.download_button(
+                    label="⬇️ Download Audit Summary Report (PDF)",
+                    data=pdf_bytes,
+                    file_name=f"plagiarism_audit_summary_{active_class_name.lower().replace(' ', '_')}.pdf",
+                    mime="application/pdf",
+                    key="download_audit_pdf_btn",
+                    use_container_width=True,
+                )
+
+            # Generate HTML data
+            html_str = generate_audit_summary_report(
+                metrics=audit_metrics_payload,
+                top_flagged_pairs=selected_pairs,
+                output_format="html",
+                class_section=active_class_name,
+            )
+            with dl_col2:
+                st.download_button(
+                    label="🌐 Download Audit Summary Report (HTML)",
+                    data=html_str.encode("utf-8") if isinstance(html_str, str) else html_str,
+                    file_name=f"plagiarism_audit_summary_{active_class_name.lower().replace(' ', '_')}.html",
+                    mime="text/html",
+                    key="download_audit_html_btn",
+                    use_container_width=True,
+                )
+
+
+    # ══ TAB 7: USERS ══════════════════════════════════════════════════════════
+    with tab_users:
+        update_page_title("Users")
+        st.subheader("👥 User Management")
+        users = get_all_users()
+        for u in users:
+            st.write(f"User: **{u['username']}** | Role: `{u['role']}`")
+
+    # ══ TAB 8: SETTINGS ═══════════════════════════════════════════════════════
+    with tab_settings:
+        update_page_title("Settings")
+        st.subheader("⚙️ System Configuration")
+        if user_role == "admin":
+            st.markdown("### ⚙️ Advanced Configuration")
+
+            st.markdown("### 🧪 Seed Data")
+            if st.button(
+                "📥 Load Demo Database",
+                key="load_seed_data_button",
+                use_container_width=True,
+                help="Populate the database with sample documents for testing and demonstration.",
+            ):
+                with st.spinner("Generating seed data..."):
+                    import subprocess
+                    import sys
+                    seed_script = os.path.join(ROOT_DIR, "scripts", "generate_seed_data.py")
+                    result = subprocess.run(
+                        [sys.executable, seed_script],
+                        capture_output=True, text=True, timeout=120,
+                    )
+                    if result.returncode == 0:
+                        st.success("✅ Demo database loaded successfully!")
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Seed data generation failed:\n{result.stderr}")
+
+            st.markdown("### ⚙️ Thresholds")
+            threshold = st.slider(
+                get_text("threshold", lang=lang_code),
+=======
             mask_threshold = st.slider(
                 "Minimum Similarity to Display",
+>>>>>>> upstream/main
                 min_value=0.0,
                 max_value=1.0,
                 value=0.0,
