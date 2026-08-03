@@ -4,7 +4,7 @@ Unit tests for src.db.migrations.common helpers.
 
 import sqlite3
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from src.db.migrations.common import (
     enable_wal_mode,

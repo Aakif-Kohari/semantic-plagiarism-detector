@@ -76,7 +76,6 @@ def test_get_supported_file_extensions():
 import os
 from unittest.mock import Mock, patch
 
-import pytest
 
 from src.utils.google_drive import (bulk_download_drive_folder,
                                     check_folder_access,

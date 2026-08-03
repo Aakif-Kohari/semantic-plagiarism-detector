@@ -8,7 +8,6 @@ from src.db.auth import (
     delete_user,
     disable_2fa,
     enable_2fa,
-    format_user_created_date,
     get_2fa_status,
     get_active_users_count,
     get_user_active_status,
