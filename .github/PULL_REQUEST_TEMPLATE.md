@@ -33,9 +33,9 @@ Please select all that apply:
 
 <!-- List the major changes introduced in this pull request. -->
 
-- 
-- 
-- 
+-
+-
+-
 
 ---
 

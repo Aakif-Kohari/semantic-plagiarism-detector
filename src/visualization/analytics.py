@@ -353,6 +353,164 @@ def plot_document_sizes(word_counts: dict[str, int], show_grid: bool = True) -> 
     return fig
 
 
+def plot_similarity_boxplot(
+    incidents: list[dict[str, Any]],
+    show_grid: bool = True,
+) -> go.Figure:
+    """Create a box plot showing similarity score distributions per assignment.
+
+    Renders one box (whiskers, median, quartiles, and statistical outliers)
+    for every assignment title found in the incidents. Incidents without an
+    assignment title or with a non-numeric similarity score are ignored.
+
+    Args:
+        incidents: List of dicts with 'assignment_title' and 'similarity_score'
+            keys. A bare 'title'/'similarity' fallback is also accepted.
+        show_grid: Whether to show chart gridlines.
+
+    Returns:
+        Plotly Figure object with one box trace per assignment title.
+    """
+    rows: list[dict[str, Any]] = []
+    for incident in incidents:
+        title = incident.get("assignment_title") or incident.get("title")
+        score = incident.get("similarity_score")
+        if score is None:
+            score = incident.get("similarity")
+        if title is None or score is None:
+            continue
+        try:
+            score = float(score)
+        except (TypeError, ValueError):
+            continue
+        rows.append({"assignment_title": str(title), "similarity_score": score})
+
+    if not rows:
+        # Return empty chart with message
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No similarity scores recorded for the selected incidents",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
+            font=dict(size=16, color="gray"),
+        )
+        fig.update_layout(
+            title="Similarity Score Distribution by Assignment",
+            xaxis_title="Assignment Title",
+            yaxis_title="Similarity Score",
+            height=400,
+            autosize=True,
+        )
+        fig.update_xaxes(showgrid=show_grid)
+        fig.update_yaxes(showgrid=show_grid)
+        return fig
+
+    grouped: dict[str, list[float]] = {}
+    for row in rows:
+        grouped.setdefault(row["assignment_title"], []).append(
+            row["similarity_score"]
+        )
+
+    fig = go.Figure()
+    for title, scores in grouped.items():
+        fig.add_trace(
+            go.Box(
+                y=scores,
+                name=title,
+                boxpoints="outliers",
+                marker_color="#636efa",
+                line_color="#4a4dba",
+                hovertemplate=(
+                    "<b>%{name}</b><br>"
+                    "Similarity Score: %{y:.2f}<extra></extra>"
+                ),
+            )
+        )
+
+    fig.update_layout(
+        title="Similarity Score Distribution by Assignment",
+        xaxis_title="Assignment Title",
+        yaxis_title="Similarity Score",
+        height=400,
+        showlegend=False,
+        autosize=True,
+    )
+
+    fig.update_xaxes(showgrid=show_grid)
+    fig.update_yaxes(showgrid=show_grid, range=[0.0, 1.0])
+
+    return fig
+
+
+def plot_severity_donut_chart(incidents: list[dict[str, Any]]) -> go.Figure:
+    """
+    Create a donut chart showing the distribution of plagiarism incident severities.
+
+    Args:
+        incidents: List of dicts, each representing an incident, expected to contain a 'severity' key.
+
+    Returns:
+        Plotly Figure object
+    """
+    if not incidents:
+        # Return empty chart with message
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No plagiarism incidents recorded",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
+            font=dict(size=16, color="gray"),
+        )
+        fig.update_layout(
+            title="Plagiarism Incident Severity Distribution",
+            height=400,
+        )
+        return fig
+
+    df = pd.DataFrame(incidents)
+    
+    # If no severity column exists, create it with a default value to prevent errors
+    if "severity" not in df.columns:
+        df["severity"] = "Unknown"
+
+    # Count frequencies of each severity
+    counts = df["severity"].value_counts().reset_index()
+    counts.columns = ["severity", "count"]
+
+    # Define the custom colors
+    color_map = {
+        "High": "#ef4444",
+        "Medium": "#f59e0b",
+        "Low": "#10b981"
+    }
+
+    # Map the colors ensuring that the order matches the plotted categories
+    colors = [color_map.get(sev, "#cccccc") for sev in counts["severity"]]
+
+    fig = go.Figure(data=[go.Pie(
+        labels=counts["severity"],
+        values=counts["count"],
+        hole=0.4,
+        marker=dict(colors=colors),
+        textinfo="label+percent",
+        hovertemplate="<b>Severity: %{label}</b><br>Incidents: %{value}<extra></extra>"
+    )])
+
+    fig.update_layout(
+        title="Plagiarism Incident Severity Distribution",
+        height=400,
+        showlegend=True,
+    )
+
+    return fig
+
+
 def plot_similarity_percentiles(
     similarity_scores: list[float],
     show_grid: bool = True,
@@ -434,4 +592,3 @@ def plot_similarity_percentiles(
     )
 
     return fig
-

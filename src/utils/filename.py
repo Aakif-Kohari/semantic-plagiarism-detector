@@ -60,6 +60,11 @@ def _safe_extension(filename: str) -> str:
     return cleaned
 
 
+def get_file_sha256_hash(file_bytes: bytes) -> str:
+    """Return the SHA-256 hex digest for file bytes."""
+    return hashlib.sha256(file_bytes).hexdigest()
+
+
 def sanitize_filename(
     filename: object,
     *,
@@ -112,7 +117,9 @@ def sanitize_filename(
         if allowed_stem > 0:
             truncated_stem = stem[:allowed_stem].rstrip(" ._-")
             if not truncated_stem:
-                truncated_stem = safe_fallback[:allowed_stem] or DEFAULT_FILENAME[:allowed_stem]
+                truncated_stem = (
+                    safe_fallback[:allowed_stem] or DEFAULT_FILENAME[:allowed_stem]
+                )
             stem = f"{truncated_stem}{hash_suffix}"
         else:
             stem = hash_prefix[:maximum_stem_length]
@@ -253,15 +260,22 @@ def get_final_extension(filename: object) -> str:
     raw = html.unescape(str(filename or ""))
     raw = unicodedata.normalize("NFKC", raw)
     raw = _CONTROL_RE.sub("", raw)
-    raw = _HTML_TAG_RE.sub("", raw)
     basename = _basename(raw).strip()
-
     _stem, extension = os.path.splitext(basename)
     return extension.casefold()
 
 
-def validate_document_extension(
-    filename: object,
+def get_file_extension_sanitized(filename: str) -> str:
+    """Return the lower-case file extension, starting with a dot.
+
+    Returns an empty string if the filename has no extension.
+    """
+    basename = _basename(str(filename or ""))
+    _stem, extension = os.path.splitext(basename)
+    return extension.lower()
+
+
+def validate_document_extension(    filename: object,
     *,
     allowed_extensions: Collection[str] = DEFAULT_ALLOWED_DOCUMENT_EXTENSIONS,
     require_extension: bool = True,

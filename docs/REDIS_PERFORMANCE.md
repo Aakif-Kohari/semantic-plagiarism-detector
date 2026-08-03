@@ -1,6 +1,6 @@
 # Redis Performance Tuning Guide
 
-This guide provides comprehensive instructions and best practices for configuring, optimizing, and maintaining Redis as a high-performance caching layer in a production environment. 
+This guide provides comprehensive instructions and best practices for configuring, optimizing, and maintaining Redis as a high-performance caching layer in a production environment.
 
 In the **Semantic Plagiarism Detector**, Redis acts as a critical speed-up mechanism and state manager. It handles:
 * **Session Caching**: Serialized user session states (`spd:v1:session:<id>:<key>`) with a short Time-To-Live (TTL) of 15 minutes.
@@ -19,7 +19,7 @@ Redis holds its entire dataset in RAM to deliver sub-millisecond response times.
 ### 1.1 Memory Limit (`maxmemory`)
 By default, on 64-bit systems, Redis has no memory limit and will continue consuming RAM until the host system runs out of memory. This triggers the operating system's OOM Killer to terminate processes (often Redis itself).
 
-In production, you should set a strict upper bound using the `maxmemory` setting. 
+In production, you should set a strict upper bound using the `maxmemory` setting.
 
 #### Recommended Allocation Rules:
 * **Dedicated Redis Host**: Allocate **60% to 70%** of total system RAM to Redis, leaving the rest for the operating system, network buffers, and persistence overhead (such as process forking).
@@ -85,7 +85,7 @@ AOF logs every write operation received by the server to a disk-based log file (
 ### 3.3 Hybrid (RDB + AOF)
 You can enable both persistence methods simultaneously. When Redis restarts, it will load the AOF file because it is guaranteed to be the most complete.
 
-* **How it works**: RDB snapshots are taken regularly for backup/restores, while AOF logs modifications to provide durability. 
+* **How it works**: RDB snapshots are taken regularly for backup/restores, while AOF logs modifications to provide durability.
 * **Modern Hybrid (since Redis 4.0)**: Redis can write an AOF file that starts with an RDB-format preamble, combining the fast loading of RDB with the step-by-step logging of AOF.
 
 ### 3.4 Persistence Selection Matrix
@@ -180,7 +180,7 @@ Run these commands using the `redis-cli`:
   ```bash
   redis-cli INFO memory | grep fragmentation
   ```
-  *Key metric to monitor:* `mem_fragmentation_ratio`. 
+  *Key metric to monitor:* `mem_fragmentation_ratio`.
   * If the ratio is **> 1.5**, your system has significant memory fragmentation. Enabling `activedefrag yes` will clean this up online.
   * If the ratio is **< 1.0**, the host operating system has run out of physical memory and has started swapping to disk, causing severe latency spikes. Increase VM memory immediately.
 
@@ -213,7 +213,7 @@ To maximize Redis efficiency in the **Semantic Plagiarism Detector** environment
 
 1. **Avoid Staging Huge Payloads in Session Caches**:
    The FAISS indices can exceed several hundred megabytes depending on document corpus size. Ensure that raw FAISS indices are parsed and written as binary bytes directly, rather than serialized within bulky Python dictionaries. Keep session variables lightweight.
-   
+
 2. **Implement Connection Pooling**:
    Always reuse connections instead of opening a new socket connection for every request. The Python code uses a singleton pattern `_cache = RedisCache()` with internal socket pooling which prevents socket exhaustion.
 

@@ -16,7 +16,7 @@ TensorFlow / Keras installation. The embedding_model tests mock _get_model()
 directly, so no real model is loaded.
 
 Recent Additions (Issue #566):
-- Added `sample_document_files` parameterized fixture supplying valid synthetic 
+- Added `sample_document_files` parameterized fixture supplying valid synthetic
   file buffers for PDF, DOCX, and TXT formats for comprehensive parser testing.
 """
 
@@ -129,9 +129,9 @@ def clean_test_env():
                 os.remove(path)
             except Exception:
                 pass
-                
+
     yield
-    
+
     try:
         from src.db.corpus_db import clear_all_data
         clear_all_data()
@@ -141,7 +141,7 @@ def clean_test_env():
             close_connections()
         except Exception:
             pass
-            
+
     for path in [index_path, db_path, users_db_path]:
         if os.path.exists(path):
             try:
@@ -220,22 +220,22 @@ def mock_db(tmp_path):
 def sample_document_files(request):
     """
     Parameterized fixture supplying valid synthetic file buffers for PDF, DOCX, and TXT.
-    
-    This fixture is essential for testing the document parsing pipeline 
+
+    This fixture is essential for testing the document parsing pipeline
     (`src.core.document_parser`) without relying on external, static test files.
     It generates minimal, structurally valid file formats in memory.
-    
+
     Yields:
         tuple: (io.BytesIO buffer, str filename)
     """
     file_type = request.param
-    
+
     if file_type == "txt":
         # Standard plain text file
         content = b"This is a sample text document for testing purposes.\nIt contains multiple lines to verify line-by-line parsing.\n"
         filename = "sample_test.txt"
         yield io.BytesIO(content), filename
-        
+
     elif file_type == "pdf":
         # Minimal valid PDF 1.4 structure
         # Contains Catalog, Pages, and a single Page object to satisfy basic parsers
@@ -249,7 +249,7 @@ def sample_document_files(request):
         )
         filename = "sample_test.pdf"
         yield io.BytesIO(pdf_content), filename
-        
+
     elif file_type == "docx":
         # Minimal valid DOCX structure (ZIP archive with required Office Open XML files)
         zip_buffer = io.BytesIO()

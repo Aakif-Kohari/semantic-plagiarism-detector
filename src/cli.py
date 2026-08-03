@@ -390,7 +390,7 @@ def main() -> None:
         except Exception as e:
             sys.stderr.write(f"Error during synchronization: {e}\n")
             return 1
-          
+
     elif args.command == "db-status":
         exit_code = run_db_status(
             args.database,

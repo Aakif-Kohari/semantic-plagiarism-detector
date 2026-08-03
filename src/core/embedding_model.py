@@ -64,6 +64,10 @@ def _get_model_name() -> str:
     return os.getenv("SEMANTIC_PLAGIARISM_MODEL", _DEFAULT_MODEL_NAME)
 
 
+def _get_cache_dir() -> str | None:
+    """Return the configured HuggingFace model cache directory, if any."""
+    return os.getenv("HF_HUB_CACHE") or os.getenv("TRANSFORMERS_CACHE")
+
 def get_embedding_model_info() -> tuple[str, int]:
     """
     Return the active embedding model name and embedding dimension.
@@ -87,9 +91,11 @@ class EmbeddingModelManager:
         if _model is None:
             primary = _get_model_name()
             fallback = "all-MiniLM-L6-v2"
-            logger.info(f"[embedding_model] Loading model: {primary} …")
+            cache_dir = _get_cache_dir()
+            logger.info(f"[embedding_model] Loading model: {primary} ...")
+            logger.info(f"[embedding_model] Model cache target: {cache_dir or 'default (~/.cache/huggingface)'}")
             try:
-                _model = SentenceTransformer(primary)
+                _model = SentenceTransformer(primary, cache_folder=cache_dir)
                 device = _detect_device(_model)
                 logger.info(
                     "Initializing SentenceTransformer model [%s] on device [%s]",
@@ -103,7 +109,7 @@ class EmbeddingModelManager:
                     primary,
                     fallback,
                 )
-                _model = SentenceTransformer(fallback)
+                _model = SentenceTransformer(fallback, cache_folder=cache_dir)
                 device = _detect_device(_model)
                 logger.info(
                     "Initializing SentenceTransformer model [%s] on device [%s]",

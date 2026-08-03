@@ -74,4 +74,3 @@ PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # Streamlit App Limits
 STREAMLIT_SERVER_MAX_UPLOAD_SIZE=200
 ```
-

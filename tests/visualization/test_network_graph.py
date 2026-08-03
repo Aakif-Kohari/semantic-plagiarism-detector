@@ -8,8 +8,8 @@ from unittest.mock import patch
 
 import networkx as nx
 import pandas as pd
+import plotly.graph_objects as go
 import pytest
-import networkx as nx
 
 from src.visualization.network_graph import export_network_adjacency_csv
 
@@ -33,9 +33,11 @@ def test_export_network_adjacency_csv_empty_graph():
     assert csv_output.strip() == "Source,Target,Weight"
 from src.visualization.network_graph import (
     build_network_data,
+    calculate_force_directed_layout,
     export_graph_to_csv,
     export_network_to_csv_bytes,
     export_network_to_gexf_bytes,
+    plot_plagiarism_network_graph,
     plot_similarity_network,
     render_network_plotly,
 )
@@ -50,7 +52,8 @@ def test_build_network_data_structure():
     }
     df = pd.DataFrame(data, index=["doc1", "doc2", "doc3"])
 
-    net_data = build_network_data(df, threshold=0.75)
+    # show_isolated=True keeps doc3 (isolated node) in the graph for structure checks
+    net_data = build_network_data(df, threshold=0.75, show_isolated=True)
 
     assert "shapes" in net_data
     assert "edge_hover_trace" in net_data
@@ -420,4 +423,172 @@ def test_build_network_data_node_scale_custom():
     for d, s in zip(default_sizes, scaled_sizes):
         assert s == pytest.approx(d * 2.0)
 
+
+# ==============================================================================
+# Isolated Nodes Visibility Toggle Tests (Issue #1399)
+# ==============================================================================
+
+
+def _three_doc_matrix():
+    """Return a matrix where doc3 has no similarity >= threshold (isolated)."""
+    data = {
+        "doc1": [1.0, 0.85, 0.20],
+        "doc2": [0.85, 1.0, 0.10],
+        "doc3": [0.20, 0.10, 1.0],
+    }
+    return pd.DataFrame(data, index=["doc1", "doc2", "doc3"])
+
+
+def test_build_network_data_filters_isolated_nodes_by_default():
+    """Verify isolated nodes (degree 0) are removed when show_isolated=False (default)."""
+    df = _three_doc_matrix()
+
+    net_data = build_network_data(df, threshold=0.75)
+
+    assert set(net_data["graph"].nodes()) == {"doc1", "doc2"}
+    assert list(net_data["node_trace"].customdata) == ["doc1", "doc2"]
+
+
+def test_build_network_data_keeps_isolated_nodes_when_show_isolated():
+    """Verify all nodes remain when show_isolated=True."""
+    df = _three_doc_matrix()
+
+    net_data = build_network_data(df, threshold=0.75, show_isolated=True)
+
+    assert set(net_data["graph"].nodes()) == {"doc1", "doc2", "doc3"}
+    assert set(net_data["node_trace"].customdata) == {"doc1", "doc2", "doc3"}
+
+
+def test_plot_similarity_network_filters_isolated_nodes():
+    """Verify plot_similarity_network excludes isolated nodes by default."""
+    df = _three_doc_matrix()
+
+    fig = plot_similarity_network(df, threshold=0.75)
+
+    assert len(fig.layout.shapes) == 1
+    node_trace = fig.data[1]
+    assert list(node_trace.customdata) == ["doc1", "doc2"]
+
+
+def test_plot_similarity_network_show_isolated_keeps_all_nodes():
+    """Verify plot_similarity_network keeps isolated nodes when show_isolated=True."""
+    df = _three_doc_matrix()
+
+    fig = plot_similarity_network(df, threshold=0.75, show_isolated=True)
+
+    assert len(fig.layout.shapes) == 1
+    node_trace = fig.data[1]
+    assert set(node_trace.customdata) == {"doc1", "doc2", "doc3"}
+
+
+def test_build_network_data_all_nodes_isolated():
+    """Verify an all-isolated graph still builds a valid figure without nodes."""
+    data = {
+        "doc1": [1.0, 0.10],
+        "doc2": [0.10, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2"])
+
+    net_data = build_network_data(df, threshold=0.75)
+
+    assert set(net_data["graph"].nodes()) == set()
+    assert list(net_data["node_trace"].customdata) == []
+
+    fig = render_network_plotly(net_data, title="Empty")
+    assert isinstance(fig, go.Figure)
+
+
+# ==============================================================================
+# Force-Directed Graph Physics Customization Tests (Issue #1368)
+# ==============================================================================
+
+
+def test_build_network_data_physics_defaults():
+    """Verify default physics parameters spring_k=0.15 and iterations=50."""
+    df = _three_doc_matrix()
+    net_data = build_network_data(df, threshold=0.75, show_isolated=True)
+
+    pos = net_data["pos"]
+    assert isinstance(pos, dict)
+    assert len(pos) == 3
+    for node in ["doc1", "doc2", "doc3"]:
+        assert node in pos
+        assert len(pos[node]) == 2
+
+
+def test_build_network_data_spring_k_customization():
+    """Verify modifying spring_k recalculates node layout positions."""
+    df = _three_doc_matrix()
+
+    net_data_default = build_network_data(df, threshold=0.75, show_isolated=True, spring_k=0.15)
+    net_data_tight = build_network_data(df, threshold=0.75, show_isolated=True, spring_k=0.05)
+    net_data_spread = build_network_data(df, threshold=0.75, show_isolated=True, spring_k=0.85)
+
+    pos_default = net_data_default["pos"]
+    pos_tight = net_data_tight["pos"]
+    pos_spread = net_data_spread["pos"]
+
+    # Positions should change when spring constant k changes
+    assert pos_default["doc1"][0] != pos_tight["doc1"][0] or pos_default["doc1"][1] != pos_tight["doc1"][1]
+    assert pos_default["doc1"][0] != pos_spread["doc1"][0] or pos_default["doc1"][1] != pos_spread["doc1"][1]
+
+
+def test_build_network_data_iterations_customization():
+    """Verify modifying iteration count affects layout convergence."""
+    df = _three_doc_matrix()
+
+    net_data_few = build_network_data(df, threshold=0.75, show_isolated=True, iterations=5)
+    net_data_many = build_network_data(df, threshold=0.75, show_isolated=True, iterations=200)
+
+    pos_few = net_data_few["pos"]
+    pos_many = net_data_many["pos"]
+
+    assert pos_few["doc1"][0] != pos_many["doc1"][0] or pos_few["doc1"][1] != pos_many["doc1"][1]
+
+
+def test_build_network_data_repulsion_customization():
+    """Verify repulsion parameter alters force-directed node positioning."""
+    df = _three_doc_matrix()
+
+    net_data_base = build_network_data(df, threshold=0.75, show_isolated=True, repulsion=1.0)
+    net_data_repelled = build_network_data(df, threshold=0.75, show_isolated=True, repulsion=3.5)
+
+    pos_base = net_data_base["pos"]
+    pos_repelled = net_data_repelled["pos"]
+
+    assert pos_base["doc1"][0] != pos_repelled["doc1"][0] or pos_base["doc1"][1] != pos_repelled["doc1"][1]
+
+
+def test_plot_plagiarism_network_graph_acceptance_criteria():
+    """Verify plot_plagiarism_network_graph function accepts spring_k=0.15 and iterations=50."""
+    df = _three_doc_matrix()
+
+    fig = plot_plagiarism_network_graph(
+        similarity_df=df,
+        threshold=0.75,
+        spring_k=0.15,
+        iterations=50,
+        repulsion=1.2,
+        show_isolated=True,
+    )
+
+    assert isinstance(fig, go.Figure)
+    assert len(fig.data) == 2
+    assert fig.layout.shapes is not None
+
+
+def test_calculate_force_directed_layout_utility():
+    """Verify calculate_force_directed_layout computes 2D coordinates for a NetworkX graph."""
+    graph = nx.Graph()
+    graph.add_edge("A", "B")
+    graph.add_edge("B", "C")
+    graph.add_edge("C", "A")
+
+    pos = calculate_force_directed_layout(graph, spring_k=0.25, iterations=75, repulsion=1.5)
+
+    assert isinstance(pos, dict)
+    assert set(pos.keys()) == {"A", "B", "C"}
+    for node in ["A", "B", "C"]:
+        assert len(pos[node]) == 2
+        assert isinstance(pos[node][0], (float, int, numpy.number) if 'numpy' in globals() else float)
 

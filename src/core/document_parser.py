@@ -63,6 +63,7 @@ ZERO_WIDTH_CHARS_PATTERN = re.compile(r"[\u200B\u200C\u200D\uFEFF\u2060\u200E\u2
 ENGLISH_STOPWORDS = frozenset({
     "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
     "of", "with", "by", "is", "are", "was", "were", "be", "been", "being",
+    "over",
     "have", "has", "had", "do", "does", "did", "will", "would", "shall",
     "should", "can", "could", "may", "might", "must", "i", "me", "my",
     "myself", "we", "our", "ours", "ourselves", "you", "your", "yours",
@@ -259,8 +260,13 @@ def strip_bibliography(text: str) -> str:
     return text
 
 
-def clean_text(raw_text: str) -> str:
-    """Normalize whitespace and remove unwanted Unicode characters."""
+def clean_text(raw_text: str, remove_stopwords: bool = False) -> str:
+    """Normalize whitespace and remove unwanted Unicode characters.
+
+    Args:
+        raw_text: The text to clean.
+        remove_stopwords: When True, filters out English stopwords.
+    """
     text = raw_text
 
     text = text.translate(
@@ -275,7 +281,7 @@ def clean_text(raw_text: str) -> str:
             }
         )
     )
-  
+
     text = re.sub(r"\n\s*\n\s*\n", "\n\n", text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"[\u00a0\u200b]", " ", text)
@@ -1382,6 +1388,7 @@ def extract_text(
     *,
     ocr_language: str = DEFAULT_OCR_LANGUAGE,
     ocr_dpi: int = DEFAULT_OCR_DPI,
+    clean_whitespace: bool = True,
 ) -> str:
     """Route extraction according to a filename extension."""
     ocr_language, ocr_dpi = normalize_ocr_settings(
@@ -1429,6 +1436,12 @@ def extract_text(
     raw = strip_bibliography(raw)
     raw = normalize_unicode_spaces(raw)
     raw = sanitize_zero_width_characters(raw, filename=filename)
+
+    if clean_whitespace and raw:
+        lines = [line.rstrip() for line in raw.splitlines()]
+        cleaned_text = "\n".join(lines)
+        raw = re.sub(r"\n{3,}", "\n\n", cleaned_text)
+
     lang_code = detect_text_language(raw)
 
     logger.info(

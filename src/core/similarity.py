@@ -9,7 +9,7 @@ Uses cosine similarity. Since embeddings are L2-normalised in embedding_model.py
 cosine similarity reduces to the dot product, making this very fast.
 """
 
-from typing import Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import faiss  # type: ignore
 import numpy as np
@@ -43,6 +43,64 @@ def _validated_batch_size(batch_size: Optional[int]) -> Optional[int]:
     except (TypeError, ValueError) as exc:
         raise ValueError(SIM_BATCH_SIZE_INVALID) from exc
     return size if size > 0 else None
+
+
+# ── Distance-based similarity ──────────────────────────────────────────────────
+
+
+def manhattan_similarity(
+    vec_a: np.ndarray,
+    vec_b: np.ndarray,
+) -> float:
+    """Return normalized Manhattan similarity for equally shaped arrays.
+
+    The Manhattan (L1) distance is converted to similarity using
+    ``1 / (1 + distance)``. Identical inputs therefore return ``1.0``;
+    larger distances approach ``0.0`` without ever producing a value outside
+    the inclusive ``[0.0, 1.0]`` range.
+
+    Args:
+        vec_a: First numeric vector or array.
+        vec_b: Second numeric vector or array.
+
+    Returns:
+        A finite Python ``float`` between ``0.0`` and ``1.0``.
+
+    Raises:
+        TypeError: If either input cannot be converted to a numeric array.
+        ValueError: If shapes differ, either input is empty, or either input
+            contains NaN or infinity.
+    """
+    try:
+        array_a = np.asarray(vec_a, dtype=np.float64)
+        array_b = np.asarray(vec_b, dtype=np.float64)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(
+            "Manhattan similarity requires numeric array inputs."
+        ) from exc
+
+    if array_a.shape != array_b.shape:
+        raise ValueError(
+            "Manhattan similarity requires arrays with matching shapes."
+        )
+
+    if array_a.size == 0:
+        raise ValueError(
+            "Manhattan similarity requires non-empty arrays."
+        )
+
+    if not np.all(np.isfinite(array_a)) or not np.all(
+        np.isfinite(array_b)
+    ):
+        raise ValueError(
+            "Manhattan similarity requires finite numeric values."
+        )
+
+    distance = float(np.sum(np.abs(array_a - array_b), dtype=np.float64))
+    similarity = 1.0 / (1.0 + distance)
+
+    # Protect the public contract from tiny floating-point excursions.
+    return float(np.clip(similarity, 0.0, 1.0))
 
 
 # ── Document-level similarity ──────────────────────────────────────────────────
@@ -107,23 +165,13 @@ def document_similarity_matrix(
 def compute_similarity_matrix(
     embeddings: Union[Dict[str, np.ndarray], np.ndarray, List[np.ndarray]],
     batch_size: Optional[int] = None,
-    min_similarity_threshold: float = 0.0,
 ) -> Union[pd.DataFrame, np.ndarray]:
     """
     Direct alias/wrapper for document_similarity_matrix to maintain backwards compatibility
     with app/streamlit_app.py and external modules.
-
-    Any pairwise score below min_similarity_threshold is replaced with 0.0.
     """
-    matrix = document_similarity_matrix(embeddings, batch_size=batch_size)
+    return document_similarity_matrix(embeddings, batch_size=batch_size)
 
-    if min_similarity_threshold > 0.0:
-        if isinstance(matrix, pd.DataFrame):
-            matrix = matrix.mask(matrix < min_similarity_threshold, 0.0)
-        else:
-            matrix = np.where(matrix < min_similarity_threshold, 0.0, matrix)
-
-    return matrix
 
 # ── Hybrid similarity (lexical + semantic) ─────────────────────────────────────
 
@@ -440,4 +488,170 @@ def find_exact_matches(
                 matches.append(orig)
 
     return matches
+
+
+# ── Cross-Encoder Rescoring Stage (#1355) ──────────────────────────────────────
+
+_CROSS_ENCODER_MODELS: Dict[str, Any] = {}
+_CROSS_ENCODER_FAILED_MODELS: Set[str] = set()
+
+
+def clear_cross_encoder_cache() -> None:
+    """Clear the cached CrossEncoder model instances and failure history."""
+    global _CROSS_ENCODER_MODELS, _CROSS_ENCODER_FAILED_MODELS
+    _CROSS_ENCODER_MODELS.clear()
+    _CROSS_ENCODER_FAILED_MODELS.clear()
+
+
+def get_cross_encoder_info(model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2") -> dict:
+    """
+    Return diagnostic status information for the specified CrossEncoder model.
+
+    Returns:
+        Dict containing model_name, is_loaded, and is_failed status flags.
+    """
+    global _CROSS_ENCODER_MODELS, _CROSS_ENCODER_FAILED_MODELS
+    return {
+        "model_name": model_name,
+        "is_loaded": model_name in _CROSS_ENCODER_MODELS and _CROSS_ENCODER_MODELS[model_name] is not None,
+        "is_failed": model_name in _CROSS_ENCODER_FAILED_MODELS,
+    }
+
+
+def _get_cross_encoder(model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2") -> Optional[Any]:
+    """
+    Safely load and cache a SentenceTransformers CrossEncoder model.
+
+    If loading fails (e.g. model not found, offline network, or missing dependency),
+    logs a warning and returns None to trigger bi-encoder fallback.
+
+    Args:
+        model_name: HuggingFace model path or identifier.
+
+    Returns:
+        CrossEncoder model instance or None if load failed.
+    """
+    global _CROSS_ENCODER_MODELS, _CROSS_ENCODER_FAILED_MODELS
+
+    if model_name in _CROSS_ENCODER_FAILED_MODELS:
+        return None
+
+    if model_name in _CROSS_ENCODER_MODELS:
+        return _CROSS_ENCODER_MODELS[model_name]
+
+    try:
+        from sentence_transformers import CrossEncoder
+
+        model = CrossEncoder(model_name)
+        _CROSS_ENCODER_MODELS[model_name] = model
+        return model
+    except Exception as exc:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            f"[similarity] Cross-Encoder model '{model_name}' load failed: {exc}. "
+            "Falling back to initial bi-encoder vector similarity scores."
+        )
+        _CROSS_ENCODER_FAILED_MODELS.add(model_name)
+        return None
+
+
+def rerank_candidates_with_cross_encoder(
+    pairs: list[tuple],
+    model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
+    top_k: Optional[int] = None,
+    batch_size: int = 32,
+    apply_sigmoid: bool = True,
+) -> list[tuple]:
+    """
+    Re-scores and re-ranks top candidate text pairs using a joint Cross-Encoder model.
+
+    Bi-encoder vector embeddings (SentenceTransformers) are fast for top-K candidate
+    retrieval, but approximate. This Cross-Encoder stage performs full attention
+    between both text inputs to refine candidate similarity scores with high precision.
+
+    Acceptance Criteria:
+    - Add rerank_candidates_with_cross_encoder(pairs: list[tuple], model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2") -> list[tuple]
+    - Re-score candidate pairs using Cross-Encoder joint sentence evaluation.
+    - Fall back to bi-encoder scores if cross-encoder model load fails.
+
+    Args:
+        pairs: List of candidate tuples. Each item should be a tuple containing at least
+               two string elements: (text_a, text_b, [optional_initial_score, ...]).
+        model_name: HuggingFace model name for SentenceTransformers CrossEncoder.
+                    Defaults to 'cross-encoder/ms-marco-MiniLM-L-6-v2'.
+        top_k: Optional maximum number of candidate pairs to re-score and return.
+        batch_size: Batch size passed to CrossEncoder evaluation.
+        apply_sigmoid: Whether to apply a logistic sigmoid function to normalize
+                       raw logits to [0.0, 1.0].
+
+    Returns:
+        List of re-scored candidate tuples sorted in descending order of similarity score.
+        If model loading or evaluation fails, falls back gracefully to the original input pairs.
+    """
+    if not pairs:
+        return []
+
+    # Limit candidate pairs to top_k if specified
+    candidates = pairs[:top_k] if top_k is not None and top_k > 0 else pairs
+
+    model = _get_cross_encoder(model_name=model_name)
+    if model is None:
+        # Fall back gracefully to original pairs with bi-encoder scores preserved
+        return candidates
+
+    try:
+        # Extract text pairs for joint encoding
+        sentence_pairs = []
+        for p in candidates:
+            if not isinstance(p, (tuple, list)) or len(p) < 2:
+                continue
+            text_a = str(p[0])
+            text_b = str(p[1])
+            sentence_pairs.append((text_a, text_b))
+
+        if not sentence_pairs:
+            return candidates
+
+        raw_scores = model.predict(sentence_pairs, batch_size=batch_size)
+
+        # Normalize raw scores using sigmoid if enabled
+        rescored_pairs = []
+        for idx, orig_tuple in enumerate(candidates):
+            if idx >= len(raw_scores):
+                rescored_pairs.append(orig_tuple)
+                continue
+
+            raw_s = float(raw_scores[idx])
+            if apply_sigmoid:
+                # Logistic sigmoid: 1 / (1 + exp(-x))
+                score = float(1.0 / (1.0 + np.exp(-raw_s)))
+            else:
+                score = float(np.clip(raw_s, 0.0, 1.0))
+
+            score = round(float(np.clip(score, 0.0, 1.0)), 4)
+
+            # Build updated tuple preserving extra metadata if present
+            if len(orig_tuple) > 2:
+                updated_tuple = (orig_tuple[0], orig_tuple[1], score) + orig_tuple[3:]
+            else:
+                updated_tuple = (orig_tuple[0], orig_tuple[1], score)
+
+            rescored_pairs.append(updated_tuple)
+
+        # Sort candidate pairs descending by cross-encoder score
+        rescored_pairs.sort(
+            key=lambda item: item[2] if len(item) > 2 and isinstance(item[2], (int, float)) else 0.0,
+            reverse=True,
+        )
+        return rescored_pairs
+
+    except Exception as exc:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            f"[similarity] Cross-Encoder rescoring execution failed: {exc}. "
+            "Falling back to bi-encoder vector scores."
+        )
+        return candidates
 

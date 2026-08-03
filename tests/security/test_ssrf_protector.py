@@ -5,7 +5,6 @@ import pytest
 
 from src.security.ssrf_protector import SSRFProtector, SSRFSecurityException
 
-from src.security.ssrf_protector import SSRFProtector
 
 
 def test_whitelisted_private_subnet(monkeypatch):
@@ -18,10 +17,6 @@ def test_whitelisted_private_subnet(monkeypatch):
     )
 
 
-from src.security.ssrf_protector import (
-    SSRFSecurityException,
-    SSRFProtector,
-)
 
 
 def test_private_subnet_blocked(monkeypatch, caplog):
@@ -245,4 +240,3 @@ def test_validate_webhook_url_allowed_webhook_domains(mock_getaddrinfo, monkeypa
         SSRFProtector.validate_webhook_url("https://unallowed-domain.org/webhook")
 
     mock_getaddrinfo.assert_not_called()
-

@@ -24,9 +24,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Benchmark memory footprint of PDF parsing")
     parser.add_argument("pdf_path", help="Path to the PDF file to benchmark")
     args = parser.parse_args()
-    
+
     if not os.path.exists(args.pdf_path):
         print(f"File not found: {args.pdf_path}", file=sys.stderr)
         sys.exit(1)
-        
+
     benchmark_memory(args.pdf_path)

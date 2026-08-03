@@ -8,9 +8,9 @@ import pytest
 from src.utils.processing_time import (
     BYTES_PER_MB,
     ProcessingTimer,
+    calculate_page_throughput,
     calculate_processing_throughput,
-    estimate_processing_seconds,
-    format_duration,
+    estimate_processing_seconds,    format_duration,
     format_processing_duration,
     format_throughput_human_readable,
     processing_eta_text,
@@ -19,9 +19,27 @@ from src.utils.processing_time import (
 
 
 # ============================================================================
-# ProcessingTimer Tests
+# Page Throughput Tests
 # ============================================================================
 
+
+@pytest.mark.parametrize(
+    ("total_pages", "elapsed_seconds", "expected"),
+    [
+        (100, 10.0, 10.0),
+        (50, 4.0, 12.5),
+        (0, 5.0, 0.0),
+        (100, 0.0, 0.0),
+        (100, -1.0, 0.0),
+    ],
+)
+def test_calculate_page_throughput(total_pages, elapsed_seconds, expected):
+    assert calculate_page_throughput(total_pages, elapsed_seconds) == expected
+
+
+# ============================================================================
+# ProcessingTimer Tests
+# ============================================================================
 
 def test_timer_initialization():
     timer = ProcessingTimer()

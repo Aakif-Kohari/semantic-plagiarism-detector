@@ -508,4 +508,3 @@ def test_documents_created_at_index_exists(mock_db):
         assert "idx_documents_created_at" in indexes
     finally:
         conn.close()
-

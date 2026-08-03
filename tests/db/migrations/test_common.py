@@ -4,7 +4,7 @@ Unit tests for src.db.migrations.common helpers.
 
 import sqlite3
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from src.db.migrations.common import (
     enable_wal_mode,
@@ -33,7 +33,7 @@ class TestWalModeHelpers:
         """Test that enable_wal_mode successfully sets WAL and NORMAL synchronous."""
         result = enable_wal_mode(in_memory_db)
         assert result.lower() == "wal"
-        
+
         # Verify synchronous mode
         cursor = in_memory_db.cursor()
         cursor.execute("PRAGMA synchronous;")

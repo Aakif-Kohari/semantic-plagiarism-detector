@@ -3,12 +3,12 @@ database_backup.py
 ------------------
 Consistent SQLite database download helpers and retention management.
 
-This module provides utilities for creating transactionally consistent 
-snapshots of SQLite databases and managing the lifecycle of backup files 
+This module provides utilities for creating transactionally consistent
+snapshots of SQLite databases and managing the lifecycle of backup files
 to prevent disk space exhaustion.
 
 Recent Additions (Issue #465):
-- Added `cleanup_old_backups` function to enforce retention policies 
+- Added `cleanup_old_backups` function to enforce retention policies
   (max backups count and max age in days).
 
 Recent Additions (Issue #468):
@@ -24,6 +24,10 @@ Recent Additions (Issue #1047):
 - Added `get_total_database_size_bytes` convenience that sums the size of
   every path in `src.core.app_config.HEALTHZ_DB_PATHS` (corpus.db +
   users.db).
+
+Recent Additions (Issue #1156):
+- Added `get_database_table_stats` function returning a dictionary mapping
+  each table name to its row count, plus a special '_table_count' key.
 """
 
 from __future__ import annotations
@@ -62,13 +66,13 @@ def create_sqlite_snapshot(database_path: str | Path) -> bytes:
     SQLite's online backup API is used instead of reading a live database
     file directly. This includes committed pages correctly even when the
     source database uses WAL journaling.
-    
+
     Args:
         database_path: Path to the source SQLite database.
-        
+
     Returns:
         bytes: The raw bytes of the SQLite snapshot.
-        
+
     Raises:
         FileNotFoundError: If the source database does not exist.
         IsADirectoryError: If the source path is a directory.
@@ -118,19 +122,19 @@ def get_database_size_bytes(db_path: str | Path) -> int:
     """Return the size of a SQLite database file in bytes.
 
     Acceptance criteria (issue #1047):
-        - Returns the on-disk file size in bytes for an existing database.
-        - Returns ``0`` when the database file does not exist.
+    - Returns the on-disk file size in bytes for an existing database.
+    - Returns ``0`` when the database file does not exist.
 
     The function resolves the path with :meth:`Path.expanduser` /
     :meth:`Path.resolve` so ``~`` and relative paths behave predictably.
     It intentionally does **not** raise for missing files — admin dashboards
     and ``/healthz``-style probes need a numeric value they can render
-    without try/except noise.  A non-existent DB simply contributes ``0``
+    without try/except noise. A non-existent DB simply contributes ``0``
     to any aggregate total.
 
     Args:
         db_path: Path to the SQLite database file (``corpus.db`` or
-            ``users.db``).  Accepts ``str`` or :class:`~pathlib.Path`.
+            ``users.db``). Accepts ``str`` or :class:`~pathlib.Path`.
 
     Returns:
         File size in bytes, or ``0`` if the file does not exist.
@@ -138,7 +142,7 @@ def get_database_size_bytes(db_path: str | Path) -> int:
     Raises:
         OSError: Propagated only for genuine filesystem errors that are
             *not* "file not found" (e.g. permission denied on a parent
-            directory).  ``FileNotFoundError`` is swallowed and mapped to
+            directory). ``FileNotFoundError`` is swallowed and mapped to
             ``0``.
 
     Example:
@@ -164,7 +168,7 @@ def get_total_database_size_bytes() -> int:
 
     Sums the file sizes of every path in
     :data:`src.core.app_config.HEALTHZ_DB_PATHS` (currently ``corpus.db``
-    and ``users.db``) using :func:`get_database_size_bytes`.  Missing
+    and ``users.db``) using :func:`get_database_size_bytes`. Missing
     files contribute ``0``, so this never raises for an unprovisioned
     environment.
 
@@ -176,6 +180,134 @@ def get_total_database_size_bytes() -> int:
     return sum(get_database_size_bytes(path) for path in HEALTHZ_DB_PATHS)
 
 
+def get_database_table_stats(db_path: str | Path) -> dict[str, int]:
+    """Return a dictionary mapping each table name to its row count.
+
+    Inspects the SQLite database at the given path, queries
+    ``sqlite_master`` for all user-defined table names, then counts the
+    rows in each table. The result is useful for health reporting and
+    monitoring database utilization across deployments.
+
+    Args:
+        db_path: Path to the SQLite database file. Accepts ``str`` or
+            :class:`~pathlib.Path`. Relative paths and ``~`` are
+            expanded automatically.
+
+    Returns:
+        A dictionary where:
+        - Each key is a table name (string) and its value is the row
+          count (int) for that table.
+        - The special key ``'_table_count'`` holds the total number of
+          user-defined tables found in the database.
+        - If the database does not exist or cannot be read, returns
+          ``{'_table_count': 0}``.
+
+    Examples:
+        >>> stats = get_database_table_stats("data/corpus.db")
+        >>> print(stats["_table_count"])
+        4
+        >>> print(stats["documents"])
+        42
+
+        >>> get_database_table_stats("/nonexistent.db")
+        {'_table_count': 0}
+    """
+    resolved_path = Path(db_path).expanduser().resolve()
+
+    # If the database file does not exist, return an empty stats dictionary
+    # with the special _table_count key set to 0.
+    if not resolved_path.exists():
+        logger.debug(
+            "get_database_table_stats: database does not exist at %s, "
+            "returning empty stats.",
+            resolved_path,
+        )
+        return {"_table_count": 0}
+
+    if not resolved_path.is_file():
+        logger.warning(
+            "get_database_table_stats: path is not a file: %s, "
+            "returning empty stats.",
+            resolved_path,
+        )
+        return {"_table_count": 0}
+
+    stats: dict[str, int] = {}
+
+    try:
+        with closing(
+            sqlite3.connect(
+                str(resolved_path),
+                check_same_thread=False,
+            )
+        ) as connection:
+            # Query sqlite_master for all user-defined tables.
+            # We exclude internal SQLite tables (those starting with 'sqlite_')
+            # and views (type='view') to focus on actual data tables.
+            cursor = connection.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name NOT LIKE 'sqlite_%' "
+                "ORDER BY name"
+            )
+            table_names = [row[0] for row in cursor.fetchall()]
+
+            # Count rows in each table using SELECT COUNT(*)
+            for table_name in table_names:
+                try:
+                    # Use parameterized quoting for table names is not possible
+                    # in SQLite, so we validate the table name comes from
+                    # sqlite_master (which is safe against injection).
+                    count_cursor = connection.execute(
+                        f'SELECT COUNT(*) FROM "{table_name}"'
+                    )
+                    row = count_cursor.fetchone()
+                    row_count = int(row[0]) if row else 0
+                    stats[table_name] = row_count
+
+                except sqlite3.Error as exc:
+                    # If counting rows fails for a specific table (e.g.,
+                    # corrupted page), log the error and report 0 rows
+                    # for that table rather than aborting the entire scan.
+                    logger.warning(
+                        "get_database_table_stats: failed to count rows "
+                        "for table '%s': %s",
+                        table_name,
+                        exc,
+                    )
+                    stats[table_name] = 0
+
+    except sqlite3.Error as exc:
+        # If we cannot open or connect to the database at all, return
+        # empty stats. This handles corrupted databases or permission
+        # issues gracefully.
+        logger.error(
+            "get_database_table_stats: failed to open database at %s: %s",
+            resolved_path,
+            exc,
+        )
+        return {"_table_count": 0}
+
+    except OSError as exc:
+        # Handle filesystem errors (permission denied, etc.)
+        logger.error(
+            "get_database_table_stats: filesystem error reading %s: %s",
+            resolved_path,
+            exc,
+        )
+        return {"_table_count": 0}
+
+    # Add the special _table_count key with the total number of tables
+    stats["_table_count"] = len(table_names)
+
+    logger.debug(
+        "get_database_table_stats: found %d table(s) in %s",
+        len(table_names),
+        resolved_path,
+    )
+
+    return stats
+
+
 def create_password_protected_backup(
     snapshot_bytes: bytes,
     password: Optional[str] = None,
@@ -185,12 +317,12 @@ def create_password_protected_backup(
     """Wrap snapshot bytes in a ZIP archive, optionally AES-256-encrypted.
 
     When *password* is provided the archive uses AES-256 encryption via
-    ``pyzipper``.  Without a password a standard (unencrypted) ZIP is
+    ``pyzipper``. Without a password a standard (unencrypted) ZIP is
     created with ``zipfile``.
 
     Args:
         snapshot_bytes: Raw bytes of the SQLite snapshot.
-        password: Optional encryption password.  ``None`` or empty string
+        password: Optional encryption password. ``None`` or empty string
             produces an unencrypted ZIP.
         archive_name: Filename used for the entry inside the ZIP.
 
@@ -475,7 +607,7 @@ def optimize_database(db_path: str | Path) -> bool:
     """Reclaim unused SQLite pages and refresh query-planner statistics.
 
     A dedicated autocommit connection is opened for the maintenance task and
-    always closed before this function returns.  ``VACUUM`` cannot run inside
+    always closed before this function returns. ``VACUUM`` cannot run inside
     an active transaction, so autocommit mode is used and the WAL is
     checkpointed before optimisation where possible.
 
@@ -582,6 +714,7 @@ def optimize_database(db_path: str | Path) -> bool:
             reduction_percentage,
         )
         return True
+
     except sqlite3.Error as exc:
         logger.error(
             "SQLite optimization failed for %s: %s",
@@ -596,4 +729,3 @@ def optimize_database(db_path: str | Path) -> bool:
             exc,
         )
         return False
-

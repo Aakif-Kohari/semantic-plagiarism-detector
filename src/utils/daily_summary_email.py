@@ -191,23 +191,23 @@ def build_email_html_body(
         <p style="color: #666666; font-size: 14px; text-align: right;">
             Report generated on: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}
         </p>
-        
+
         <div style="background-color: #ffffff; padding: 20px; border-radius: 8px; margin-top: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
             <p style="font-size: 16px; color: #333333; margin-bottom: 20px;">
                 <strong>Total new incidents:</strong> {len(incidents_data)}<br>
                 <strong>Total scans processed:</strong> {total_scans}
             </p>
-            
+
             <p style="font-size: 14px; color: #666666; margin-bottom: 20px;">
                 <strong>Severity Breakdown:</strong><br>
                 🔴 High: {len(high_severity)} | 🟡 Medium: {len(medium_severity)} | 🟢 Low: {len(low_severity)}
             </p>
-            
+
             {build_severity_section_html("High", high_severity)}
             {build_severity_section_html("Medium", medium_severity)}
             {build_severity_section_html("Low", low_severity)}
         </div>
-        
+
         <p style="color: #888888; text-align: center; font-size: 14px; margin-top: 30px;">
             <a href="{os.getenv('APP_BASE_URL', 'http://localhost:8501')}" style="color: #007bff; text-decoration: none;">Review all incidents in the dashboard</a>
         </p>
