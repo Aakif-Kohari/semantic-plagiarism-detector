@@ -786,4 +786,13 @@ def get_total_document_count(include_deleted: bool = False) -> int:
                 "SELECT COUNT(1) FROM documents WHERE is_deleted IS NULL OR is_deleted = 0"
             ).fetchone()
         return int(row[0]) if row else 0
-    
+
+
+def get_deleted_documents_count() -> int:
+    """Return the count of documents currently sitting in trash (is_deleted = 1)."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(1) FROM documents WHERE is_deleted = 1"
+        ).fetchone()
+        return int(row[0]) if row else 0
+
