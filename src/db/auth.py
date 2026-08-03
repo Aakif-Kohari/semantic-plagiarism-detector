@@ -22,7 +22,8 @@ from argon2.exceptions import VerificationError, VerifyMismatchError
 
 from src.core.app_config import AUTH_DB_PATH
 from src.db.migrations import migrate_auth_database
-from src.db.migrations.common import table_exists
+from src.errors import StaleDataException
+import logging
 
 logger = logging.getLogger(__name__)
 
@@ -315,7 +316,7 @@ def get_all_users() -> list:
     try:
         with _connect() as conn:
             rows = conn.execute(
-                "SELECT id, username, role, is_active FROM users ORDER BY id"
+                "SELECT id, username, role, is_active, version FROM users ORDER BY id"
             ).fetchall()
             return [
                 {
@@ -323,6 +324,7 @@ def get_all_users() -> list:
                     "username": r[1],
                     "role": r[2],
                     "is_active": bool(r[3]),
+                    "version": r[4],
                 }
                 for r in rows
             ]
@@ -623,6 +625,67 @@ def set_user_active_status(username: str, is_active: bool) -> None:
             conn.commit()
     except sqlite3.Error as e:
         raise sqlite3.Error(f"Failed to update user active status: {e}") from e
+
+
+def update_user_profile(
+    username: str,
+    role: str,
+    is_active: bool,
+    expected_version: int,
+) -> None:
+    """Update a user's role and active status with optimistic locking.
+
+    Args:
+        username: The user to update.
+        role: The new role.
+        is_active: Active status.
+        expected_version: Expected database version.
+
+    Raises:
+        StaleDataException: If database version != expected_version.
+        ValueError: If user not found or suspension check fails.
+    """
+    username = _validate_username(username)
+    role = _validate_role(role)
+    is_active_val = 1 if is_active else 0
+
+    if username == "admin" and not is_active:
+        raise ValueError("The admin account cannot be suspended.")
+
+    try:
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT version FROM users WHERE username = ?",
+                (username,),
+            ).fetchone()
+
+            if not row:
+                raise ValueError("User not found.")
+
+            current_version = row[0]
+            if current_version != expected_version:
+                raise StaleDataException(
+                    f"Conflict detected: User profile updated by another process. "
+                    f"Expected version {expected_version}, but database has version {current_version}."
+                )
+
+            cursor = conn.execute(
+                """
+                UPDATE users
+                SET role = ?,
+                    is_active = ?,
+                    version = version + 1
+                WHERE username = ? AND version = ?
+                """,
+                (role, is_active_val, username, expected_version),
+            )
+            if cursor.rowcount == 0:
+                raise StaleDataException(
+                    "Conflict detected: User profile was updated concurrently."
+                )
+            conn.commit()
+    except sqlite3.Error as e:
+        raise sqlite3.Error(f"Failed to update user profile: {e}") from e
 
 
 def is_user_active(username: str) -> bool:
