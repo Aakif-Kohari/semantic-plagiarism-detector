@@ -1388,6 +1388,7 @@ def extract_text(
     *,
     ocr_language: str = DEFAULT_OCR_LANGUAGE,
     ocr_dpi: int = DEFAULT_OCR_DPI,
+    clean_whitespace: bool = True,
 ) -> str:
     """Route extraction according to a filename extension."""
     ocr_language, ocr_dpi = normalize_ocr_settings(
@@ -1435,6 +1436,12 @@ def extract_text(
     raw = strip_bibliography(raw)
     raw = normalize_unicode_spaces(raw)
     raw = sanitize_zero_width_characters(raw, filename=filename)
+
+    if clean_whitespace and raw:
+        lines = [line.rstrip() for line in raw.splitlines()]
+        cleaned_text = "\n".join(lines)
+        raw = re.sub(r"\n{3,}", "\n\n", cleaned_text)
+
     lang_code = detect_text_language(raw)
 
     logger.info(
