@@ -1414,6 +1414,68 @@ def extract_text_from_image(
         return ""
 
 
+_DATE_PATTERNS = [
+    re.compile(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b"),
+    re.compile(r"\b\d{4}-\d{2}-\d{2}\b"),
+    re.compile(r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}\b", re.IGNORECASE),
+    re.compile(r"\b\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?),?\s+\d{4}\b", re.IGNORECASE),
+]
+
+_ORG_PATTERNS = [
+    re.compile(r"\b(?:University|College|Institute|Department|Corp|Corporation|Inc|Incorporated|Ltd|Limited|LLC|Society|Foundation|Academy|School)\b(?:\s+[A-Z][a-zA-Z]+)*"),
+    re.compile(r"\b(?:[A-Z][a-zA-Z]+\s+)+(?:University|College|Institute|Department|Corp|Corporation|Inc|Incorporated|Ltd|Limited|LLC|Society|Foundation|Academy|School)\b"),
+    re.compile(r"\bDepartment\s+of\s+[A-Z][a-zA-Z\s]+\b"),
+]
+
+_PERSON_PATTERNS = [
+    re.compile(r"\b(?:Mr|Mrs|Ms|Dr|Prof|Professor|Sir|Lady)\.?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b"),
+]
+
+
+def mask_named_entities_in_text(text: str) -> str:
+    """Replace recognized PERSON, ORGANIZATION, and DATE entities with [ENTITY_MASKED].
+
+    Args:
+        text: Input text string.
+
+    Returns:
+        Text string with named entities replaced by [ENTITY_MASKED].
+    """
+    if not text:
+        return text
+
+    masked = text
+
+    try:
+        import nltk
+
+        try:
+            tokens = nltk.word_tokenize(masked)
+            pos_tags = nltk.pos_tag(tokens)
+            chunks = nltk.ne_chunk(pos_tags)
+            entities = []
+            for chunk in chunks:
+                if hasattr(chunk, "label") and chunk.label() in ("PERSON", "ORGANIZATION", "ORGANISATION", "GPE", "DATE"):
+                    entity_str = " ".join(c[0] for c in chunk)
+                    entities.append(entity_str)
+            for ent in sorted(entities, key=len, reverse=True):
+                if len(ent) > 1:
+                    masked = masked.replace(ent, "[ENTITY_MASKED]")
+        except Exception:
+            pass
+    except ImportError:
+        pass
+
+    for pat in _DATE_PATTERNS:
+        masked = pat.sub("[ENTITY_MASKED]", masked)
+    for pat in _ORG_PATTERNS:
+        masked = pat.sub("[ENTITY_MASKED]", masked)
+    for pat in _PERSON_PATTERNS:
+        masked = pat.sub("[ENTITY_MASKED]", masked)
+
+    return masked
+
+
 def extract_text(
     file: PDFInput,
     filename: str,
@@ -1421,6 +1483,7 @@ def extract_text(
     ocr_language: str = DEFAULT_OCR_LANGUAGE,
     ocr_dpi: int = DEFAULT_OCR_DPI,
     clean_whitespace: bool = True,
+    mask_named_entities: bool = False,
 ) -> str:
     """Route extraction according to a filename extension."""
     ocr_language, ocr_dpi = normalize_ocr_settings(
@@ -1474,12 +1537,16 @@ def extract_text(
         cleaned_text = "\n".join(lines)
         raw = re.sub(r"\n{3,}", "\n\n", cleaned_text)
 
+    if mask_named_entities and raw:
+        raw = mask_named_entities_in_text(raw)
+
     lang_code = detect_text_language(raw)
 
     logger.info(
         f"[document_parser] Detected language for document '{filename}': {lang_code}"
     )
     return raw
+
 
 
 ALLOWED_EXTENSIONS = {
