@@ -669,6 +669,3 @@ def export_network_to_csv_bytes(
     G = network_data["graph"]
     csv_str = export_graph_to_csv(G, similarity_df=similarity_df)
     return csv_str.encode("utf-8")
-
-
-

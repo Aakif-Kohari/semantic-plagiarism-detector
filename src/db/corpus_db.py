@@ -469,7 +469,7 @@ def batch_soft_delete_documents(doc_ids: list[int]) -> int:
         )
         conn.execute(
             f"""
-            DELETE FROM chunks 
+            DELETE FROM chunks
             WHERE filename IN (SELECT filename FROM documents WHERE id IN ({placeholders}))
             """,
             tuple(doc_ids),
@@ -767,7 +767,7 @@ def purge_stale_trash(days_in_trash: int = 30) -> int:
     with _connect() as conn:
         rows = conn.execute(
             """
-            SELECT filename FROM documents 
+            SELECT filename FROM documents
             WHERE is_deleted = 1 AND deleted_at < ?
             """,
             (threshold_date,),

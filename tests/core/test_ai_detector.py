@@ -125,5 +125,3 @@ def test_detect_ai_generated_text_tiers():
         assert res["ai_probability"] == 0.25
         assert res["confidence_tier"] == "low"
         assert res["perplexity_score"] == float(150.0 - 110.0 * 0.25)
-
-    

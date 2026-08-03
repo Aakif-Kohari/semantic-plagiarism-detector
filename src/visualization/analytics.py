@@ -443,4 +443,3 @@ def plot_similarity_boxplot(
     fig.update_yaxes(showgrid=show_grid, range=[0.0, 1.0])
 
     return fig
-

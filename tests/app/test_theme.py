@@ -529,6 +529,3 @@ def test_render_sidebar_navigation_menu():
     assert 'class="sidebar-nav-menu"' in menu_html
     assert 'data-tab-id="dashboard"' in menu_html
     assert "border-left: 4px solid #4f46e5" in menu_html
-
-
-

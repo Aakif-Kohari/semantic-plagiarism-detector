@@ -162,4 +162,3 @@ def test_app_smoke(mock_embed, mock_model_info, mock_webhook, mock_ai_detector):
 
     finally:
         _cleanup_stale_artifacts()
-        

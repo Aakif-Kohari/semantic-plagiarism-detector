@@ -414,4 +414,3 @@ def get_common_translation_pairs() -> list[tuple[str, str]]:
         ("pt", "en"),
         ("it", "en"),
     ]
-

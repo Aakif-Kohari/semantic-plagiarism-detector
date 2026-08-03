@@ -29,12 +29,12 @@ theme.py
 --------
 Centralized theme management and CSS injection for the Semantic Plagiarism Detector.
 
-This module defines the color palettes for Light and Dark modes, provides 
-utilities for sanitizing hex colors, and injects global CSS to ensure a 
+This module defines the color palettes for Light and Dark modes, provides
+utilities for sanitizing hex colors, and injects global CSS to ensure a
 cohesive, theme-aware user experience across all Streamlit components.
 
 Recent Additions (Issue #572):
-- Added comprehensive CSS rules targeting Streamlit's `.stFileUploader` 
+- Added comprehensive CSS rules targeting Streamlit's `.stFileUploader`
   dropzone borders, background, and hover states to match the active theme tokens.
 """
 
@@ -866,8 +866,8 @@ def inject_css() -> None:
             clip: rect(0, 0, 0, 0);
             white-space: nowrap;
             border: 0;
-        }}           
-        
+        }}
+
         #back-to-top-btn {{
             position: fixed;
             bottom: max(2rem, env(safe-area-inset-bottom, 2rem));
@@ -955,18 +955,18 @@ def inject_css() -> None:
         transition: all 0.2s ease-in-out !important;
         padding: 1.5rem !important;
     }}
-    
+
     .stFileUploader [data-testid="stFileUploaderDropzone"]:hover {{
         border-color: {colors['accent']} !important;
         background-color: {colors['neutral_soft']} !important;
         cursor: pointer !important;
     }}
-    
+
     .stFileUploader [data-testid="stFileUploaderDropzone"] [data-testid="stFileUploaderInstruction"] {{
         color: {colors['muted']} !important;
         font-weight: 500 !important;
     }}
-    
+
     .stFileUploader [data-testid="stFileUploaderDropzone"] [data-testid="stFileUploaderBrowseFiles"] {{
         background-color: {colors['accent']} !important;
         color: #FFFFFF !important;
@@ -974,7 +974,7 @@ def inject_css() -> None:
         font-weight: 600 !important;
         transition: background-color 0.2s ease !important;
     }}
-    
+
     .stFileUploader [data-testid="stFileUploaderDropzone"] [data-testid="stFileUploaderBrowseFiles"]:hover {{
         background-color: {colors['ink']} !important;
     }}
@@ -1016,21 +1016,21 @@ def inject_css() -> None:
         background-color: {colors['background']} !important;
         color: {colors['ink']} !important;
     }}
-    
+
     .block-container {{
         padding-top: 2rem !important;
     }}
-    
+
     .stAlert {{
         border-radius: 8px !important;
     }}
-    
+
     .stCard {{
         background-color: {colors['card']} !important;
         border: 1px solid {colors['border']} !important;
         border-radius: 8px !important;
     }}
-    
+
     /* Empty State Styling */
     .{CLASS_EMPTY_STATE} {{
         text-align: center;
@@ -1039,25 +1039,25 @@ def inject_css() -> None:
         border-radius: 8px;
         border: 1px dashed {colors['border']};
     }}
-    
+
     .{CLASS_EMPTY_ICON} {{
         font-size: 3rem;
         margin-bottom: 1rem;
         color: {colors['muted']};
     }}
-    
+
     .{CLASS_EMPTY_TITLE} {{
         font-size: 1.25rem;
         font-weight: 600;
         color: {colors['ink']};
         margin-bottom: 0.5rem;
     }}
-    
+
     .{CLASS_EMPTY_DESC} {{
         color: {colors['muted']};
         font-size: 0.95rem;
     }}
-    
+
     /* Pipeline Progress Styling */
     .{CLASS_PIPELINE_STEPS} {{
         display: flex;
@@ -1065,34 +1065,34 @@ def inject_css() -> None:
         justify-content: space-between;
         margin: 1.5rem 0;
     }}
-    
+
     .{CLASS_PIPELINE_STEP} {{
         color: {colors['muted']};
         font-weight: 500;
         font-size: 0.9rem;
     }}
-    
+
     .{CLASS_PIPELINE_ACTIVE} {{
         color: {colors['accent']};
         font-weight: 700;
     }}
-    
+
     .{CLASS_PIPELINE_DONE} {{
         color: {colors['success']};
     }}
-    
+
     .{CLASS_PIPELINE_ARROW} {{
         color: {colors['border']};
         margin: 0 0.5rem;
     }}
-    
+
     .{CLASS_PIPELINE_ETA} {{
         font-size: 0.8rem;
         color: {colors['muted']};
         margin-top: 0.5rem;
         font-style: italic;
     }}
-    
+
     /* Sidebar User Badge */
     .{CLASS_SIDEBAR_USER_BADGE} {{
         display: flex;
@@ -1103,7 +1103,7 @@ def inject_css() -> None:
         border: 1px solid {colors['border']};
         margin-bottom: 1rem;
     }}
-    
+
     .{CLASS_AVATAR} {{
         width: 32px;
         height: 32px;
@@ -1116,7 +1116,7 @@ def inject_css() -> None:
         font-weight: 700;
         margin-right: 0.75rem;
     }}
-    
+
     /* Severity Badges */
     .{CLASS_BADGE} {{
         display: inline-flex;
@@ -1126,7 +1126,7 @@ def inject_css() -> None:
         font-size: 0.8rem;
         font-weight: 600;
     }}
-    
+
     .{CLASS_SIM_PILL} {{
         display: inline-block;
         padding: 0.25rem 0.5rem;
@@ -1134,7 +1134,7 @@ def inject_css() -> None:
         font-size: 0.85rem;
         font-weight: 600;
     }}
-    
+
     .{CLASS_WELCOME_BANNER} {{
         background: linear-gradient(135deg, {colors['accent']} 0%, {colors['success']} 100%);
         color: #FFFFFF;

@@ -31,4 +31,3 @@ __all__ = [
     "plot_high_severity_trends",
     "plot_most_plagiarized_documents",
 ]
-

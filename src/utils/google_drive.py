@@ -42,7 +42,7 @@ def extract_google_drive_folder_id(url_or_id: str) -> str | None:
     """
     if not isinstance(url_or_id, str):
         return None
-        
+
     cleaned = url_or_id.strip()
     if not cleaned:
         return None

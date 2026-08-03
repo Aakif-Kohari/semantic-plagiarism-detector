@@ -211,4 +211,3 @@ def test_init_db_closes_connection():
 
         # Verify close() was called on mock_conn
         mock_conn.close.assert_called()
-

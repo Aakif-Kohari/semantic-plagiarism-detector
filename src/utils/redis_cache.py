@@ -80,37 +80,37 @@ class PayloadCompressor:
     Handles robust compression and decompression of serialized cache payloads.
     Uses zlib (standard library) to drastically reduce memory usage of large matrices.
     """
-    
+
     # Threshold above which data is compressed (e.g., 512KB)
     COMPRESSION_THRESHOLD_BYTES = 512 * 1024
-    
+
     # Magic header bytes to distinguish compressed vs uncompressed payloads in Redis
     MAGIC_HEADER = b"ZLIB_COMPRESSED_V1::"
-    
+
     @classmethod
     def compress(cls, data: bytes) -> bytes:
         """
         Compresses bytes if they exceed the threshold. Appends magic header.
-        
+
         Args:
             data (bytes): Raw serialized bytes.
-            
+
         Returns:
             bytes: Compressed bytes with header, or original bytes if too small.
         """
         if len(data) < cls.COMPRESSION_THRESHOLD_BYTES:
             return data
-            
+
         try:
             start_time = time.perf_counter()
             compressed_data = zlib.compress(data, level=zlib.Z_BEST_SPEED)
             compression_ratio = len(data) / max(1, len(compressed_data))
-            
+
             logger.debug(
                 f"[CacheCompression] Compressed payload from {len(data)}B to {len(compressed_data)}B. "
                 f"Ratio: {compression_ratio:.2f}x. Time: {(time.perf_counter()-start_time)*1000:.2f}ms"
             )
-            
+
             return cls.MAGIC_HEADER + compressed_data
         except zlib.error as e:
             logger.error(f"[CacheCompression] zlib compression failed: {e}. Falling back to uncompressed.")
@@ -120,22 +120,22 @@ class PayloadCompressor:
     def decompress(cls, data: bytes) -> bytes:
         """
         Decompresses bytes if they contain the magic header.
-        
+
         Args:
             data (bytes): Stored bytes retrieved from cache.
-            
+
         Returns:
             bytes: Decompressed raw bytes.
         """
         if not isinstance(data, bytes):
             return data
-            
+
         if data.startswith(cls.MAGIC_HEADER):
             try:
                 start_time = time.perf_counter()
                 payload = data[len(cls.MAGIC_HEADER):]
                 decompressed_data = zlib.decompress(payload)
-                
+
                 logger.debug(
                     f"[CacheCompression] Decompressed payload. "
                     f"Time: {(time.perf_counter()-start_time)*1000:.2f}ms"
@@ -144,7 +144,7 @@ class PayloadCompressor:
             except zlib.error as e:
                 logger.error(f"[CacheCompression] zlib decompression failed: {e}. Corrupted payload?")
                 raise e
-        
+
         return data
 
 
@@ -316,7 +316,7 @@ class RedisCache:
                 serialized = pickle.dumps(value)
                 # 2. Compress large payloads
                 processed_bytes = PayloadCompressor.compress(serialized)
-                
+
                 # 3. Store
                 if ttl:
                     self._client.setex(key, ttl, processed_bytes)
@@ -377,7 +377,7 @@ class RedisCache:
             try:
                 serialized = json.dumps(value).encode('utf-8')
                 processed_bytes = PayloadCompressor.compress(serialized)
-                
+
                 if ttl:
                     self._client.setex(key, ttl, processed_bytes)
                 else:
