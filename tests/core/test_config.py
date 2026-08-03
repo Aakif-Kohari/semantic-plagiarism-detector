@@ -25,7 +25,7 @@ def test_validate_hex_color():
     assert validate_hex_color("#ABC") is True
     assert validate_hex_color("#123456") is True
     assert validate_hex_color("#abcdef") is True
-    
+
     # Invalid colors
     assert validate_hex_color("1e3a8a") is False
     assert validate_hex_color("#1234567") is False
@@ -71,11 +71,11 @@ def test_load_valid_config():
         "brand_color": "#2ecc71",
         "logo_path": "/custom/logo.png"
     }
-    
+
     with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
         json.dump(valid_config, f)
         temp_path = f.name
-    
+
     try:
         config = load_branding_config(temp_path)
         assert config.brand_color == "#2ecc71"
@@ -89,7 +89,7 @@ def test_load_invalid_json():
     with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
         f.write("{ invalid json }")
         temp_path = f.name
-    
+
     try:
         config = load_branding_config(temp_path)
         assert config.brand_color == DEFAULT_BRAND_COLOR
@@ -104,11 +104,11 @@ def test_load_invalid_schema():
         "brand_color": "not-a-color",
         "logo_path": 12345
     }
-    
+
     with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
         json.dump(invalid_schema_config, f)
         temp_path = f.name
-    
+
     try:
         config = load_branding_config(temp_path)
         assert config.brand_color == DEFAULT_BRAND_COLOR
@@ -129,7 +129,7 @@ def test_load_empty_json():
     with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
         json.dump({}, f)
         temp_path = f.name
-    
+
     try:
         config = load_branding_config(temp_path)
         assert config.brand_color == DEFAULT_BRAND_COLOR
@@ -141,7 +141,7 @@ def test_load_empty_json():
 def test_actual_branding_config():
     """Test loading the actual branding_config.json from the project."""
     config_path = os.path.join(os.path.dirname(__file__), "..", "..", "branding_config.json")
-    
+
     if os.path.exists(config_path):
         config = load_branding_config(config_path)
         # Verify it loads without error and has valid structure
@@ -153,7 +153,7 @@ def test_to_dict():
     """Test BrandingConfig to_dict conversion."""
     config = BrandingConfig(brand_color="#ff0000", logo_path="/path/to/logo.png")
     data = config.to_dict()
-    
+
     assert data["brand_color"] == "#ff0000"
     assert data["logo_path"] == "/path/to/logo.png"
 
@@ -177,4 +177,3 @@ def test_get_allowed_webhook_domains(monkeypatch):
     # Multiple domains with spaces and mixed case
     monkeypatch.setenv("ALLOWED_WEBHOOK_DOMAINS", " hooks.slack.com, Discord.com , EXAMPLE.org ")
     assert get_allowed_webhook_domains() == ["hooks.slack.com", "discord.com", "example.org"]
-

@@ -247,4 +247,3 @@ def test_send_plagiarism_alert_with_domain_whitelist(
     assert success is False
     assert attempts == 0
     mock_post.assert_not_called()
-

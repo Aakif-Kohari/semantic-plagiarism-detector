@@ -54,7 +54,7 @@ def test_content_length_limit_middleware_over_limit():
         middleware=[Middleware(ContentLengthLimitMiddleware)],
     )
     client = TestClient(app)
-    
+
     # Exceed limit using custom env var or default
     os.environ["MAX_REQUEST_BYTES"] = "10"
     try:
@@ -83,4 +83,3 @@ def test_content_length_limit_middleware_invalid_env_fallback():
         assert response.status_code == 200
     finally:
         del os.environ["MAX_REQUEST_BYTES"]
-

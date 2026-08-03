@@ -254,12 +254,12 @@ def test_sidebar_reset_all_filters():
             btn for btn in at.sidebar.button if "Reset All Filters" in btn.label or "🔄" in btn.label
         ]
         assert len(reset_btns) > 0
-        
+
         # Click the reset button and run
         reset_btns[0].click().run()
 
         assert not at.exception
-        
+
         # Keys should be deleted from session_state (or reset to their widget defaults)
         assert at.session_state.get("threshold_slider") != 0.85
         assert at.session_state.get("class_filter_selectbox") != "Class A"
@@ -285,4 +285,3 @@ def test_api_bearer_token_copy_code_box():
         assert any("test-secret-bearer-token" in val or "secret" in val for val in code_blocks)
     finally:
         _cleanup_stale_artifacts()
-

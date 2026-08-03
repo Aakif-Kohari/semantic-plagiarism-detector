@@ -38,10 +38,10 @@ def test_add_documents_bulk_success():
             "assignment_title": "HW1"
         }
     ]
-    
+
     success_count = add_documents_bulk(docs)
     assert success_count == 3
-    
+
     all_docs = get_all_documents()
     assert len(all_docs) == 3
     filenames = [d["filename"] for d in all_docs]
@@ -64,7 +64,7 @@ def test_add_documents_bulk_duplicate_ignore():
         {"filename": "dup_2.pdf", "file_hash": "hash_dup_2"}
     ]
     assert add_documents_bulk(docs) == 2
-    
+
     # Try inserting same docs plus one new
     docs_with_dups = [
         {"filename": "dup_1.pdf", "file_hash": "hash_dup_1"},
@@ -73,7 +73,7 @@ def test_add_documents_bulk_duplicate_ignore():
     # Because of INSERT OR IGNORE, dup_1 is skipped, dup_3 is inserted.
     success_count = add_documents_bulk(docs_with_dups)
     assert success_count == 1
-    
+
     all_docs = get_all_documents()
     assert len(all_docs) == 3
 
@@ -86,7 +86,7 @@ def test_add_documents_bulk_missing_fields():
     docs = [
         {"file_hash": "hash123"} # filename is missing, triggers IntegrityError on PRIMARY KEY which is swallowed by INSERT OR IGNORE
     ]
-    
+
     success_count = add_documents_bulk(docs)
     assert success_count == 0
     assert len(get_all_documents()) == 0

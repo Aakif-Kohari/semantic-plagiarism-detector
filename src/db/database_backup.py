@@ -3,12 +3,12 @@ database_backup.py
 ------------------
 Consistent SQLite database download helpers and retention management.
 
-This module provides utilities for creating transactionally consistent 
-snapshots of SQLite databases and managing the lifecycle of backup files 
+This module provides utilities for creating transactionally consistent
+snapshots of SQLite databases and managing the lifecycle of backup files
 to prevent disk space exhaustion.
 
 Recent Additions (Issue #465):
-- Added `cleanup_old_backups` function to enforce retention policies 
+- Added `cleanup_old_backups` function to enforce retention policies
   (max backups count and max age in days).
 
 Recent Additions (Issue #468):
@@ -62,13 +62,13 @@ def create_sqlite_snapshot(database_path: str | Path) -> bytes:
     SQLite's online backup API is used instead of reading a live database
     file directly. This includes committed pages correctly even when the
     source database uses WAL journaling.
-    
+
     Args:
         database_path: Path to the source SQLite database.
-        
+
     Returns:
         bytes: The raw bytes of the SQLite snapshot.
-        
+
     Raises:
         FileNotFoundError: If the source database does not exist.
         IsADirectoryError: If the source path is a directory.
@@ -596,4 +596,3 @@ def optimize_database(db_path: str | Path) -> bool:
             exc,
         )
         return False
-

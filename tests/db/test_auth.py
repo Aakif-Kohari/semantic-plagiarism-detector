@@ -94,7 +94,7 @@ def mock_audit_db():
     conn.execute("INSERT INTO security_audit_log (username, action, timestamp) VALUES ('bob', 'login', '2023-01-02 10:00:00')")
     conn.execute("INSERT INTO security_audit_log (username, action, timestamp) VALUES ('alice', 'logout', '2023-01-03 10:00:00')")
     conn.commit()
-    
+
     with mock.patch("src.db.auth._connect", return_value=conn):
         yield conn
     conn.close()
@@ -119,7 +119,7 @@ def test_get_security_audit_logs_username_filter(mock_audit_db):
     assert len(logs) == 2
     assert logs[0]["action"] == "logout"
     assert logs[1]["action"] == "login"
-    
+
 def test_get_security_audit_logs_empty(mock_audit_db):
     logs = get_security_audit_logs(username="charlie")
     assert len(logs) == 0
@@ -404,4 +404,3 @@ def test_get_active_users_count():
     assert get_active_users_count() == 2
 
     delete_user(user2)
-

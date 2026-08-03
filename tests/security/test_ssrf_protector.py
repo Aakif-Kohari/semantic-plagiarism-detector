@@ -240,4 +240,3 @@ def test_validate_webhook_url_allowed_webhook_domains(mock_getaddrinfo, monkeypa
         SSRFProtector.validate_webhook_url("https://unallowed-domain.org/webhook")
 
     mock_getaddrinfo.assert_not_called()
-

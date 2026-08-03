@@ -33,7 +33,7 @@ class TestWalModeHelpers:
         """Test that enable_wal_mode successfully sets WAL and NORMAL synchronous."""
         result = enable_wal_mode(in_memory_db)
         assert result.lower() == "wal"
-        
+
         # Verify synchronous mode
         cursor = in_memory_db.cursor()
         cursor.execute("PRAGMA synchronous;")

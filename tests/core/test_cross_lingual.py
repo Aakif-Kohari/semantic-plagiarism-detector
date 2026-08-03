@@ -124,10 +124,10 @@ def test_detect_language_low_confidence(caplog):
 
     with patch("src.core.cross_lingual.detect_langs") as mock_detect_langs:
         mock_detect_langs.return_value = [Language("fr", 0.5)]
-        
+
         with caplog.at_level(logging.WARNING):
             lang, confident = detect_language("some text in french but low confidence")
-            
+
         assert lang == "en"
         assert confident is False
         assert any("Low-confidence language detection" in record.message for record in caplog.records)

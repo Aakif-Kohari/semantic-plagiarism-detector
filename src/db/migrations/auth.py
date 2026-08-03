@@ -176,4 +176,3 @@ def migrate_auth_database(
         migrations=AUTH_MIGRATIONS,
         target_version=AUTH_SCHEMA_VERSION,
     )
-

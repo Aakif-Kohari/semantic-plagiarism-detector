@@ -7,7 +7,7 @@ def test_copy_controls_rendered():
     app_source = APP_PATH.read_text(encoding="utf-8")
     assert "render_copy_button(" in app_source
     assert 'copy_label="📋 Copy Snippet"' in app_source
-    
+
 def test_component_keys_are_unique():
     app_source = APP_PATH.read_text(encoding="utf-8")
     # Verify that different button_ids are generated, one for ca and one for cb

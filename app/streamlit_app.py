@@ -736,7 +736,7 @@ if "lang" not in st.session_state:
 
 if "model_load_time" not in st.session_state:
     from src.core.embedding_model import EmbeddingModelManager
-    
+
     with st.spinner("Initializing Vector Embedding Model..."):
         _start_time = time.perf_counter()
         EmbeddingModelManager.get_instance().get_model()
@@ -1393,12 +1393,12 @@ if user_role == "admin":
             const timeoutLimit = {TIMEOUT_LIMIT};
             const lastInteraction = {safe_last_interaction};
             const display = document.getElementById('timer-display');
-            
+
             function updateTimer() {{
                 const now = Math.floor(Date.now() / 1000);
                 const elapsed = now - lastInteraction;
                 const remaining = Math.max(0, timeoutLimit - elapsed);
-                
+
                 if (remaining <= 0) {{
                     display.textContent = "00:00";
                     display.parentElement.style.borderColor = "#ff4b4b";
@@ -1407,17 +1407,17 @@ if user_role == "admin":
                     setTimeout(() => window.location.reload(), 2000);
                     return;
                 }}
-                
+
                 const minutes = Math.floor(remaining / 60);
                 const seconds = remaining % 60;
                 display.textContent = `${{minutes.toString().padStart(2, '0')}}:${{seconds.toString().padStart(2, '0')}}`;
-                
+
                 if (remaining < 60) {{
                     display.parentElement.style.borderColor = "#ff4b4b";
                     display.parentElement.style.color = "#ff4b4b";
                 }}
             }}
-            
+
             updateTimer();
             setInterval(updateTimer, 1000);
         }})();

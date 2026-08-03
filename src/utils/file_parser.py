@@ -35,7 +35,7 @@ def get_file_size_formatted(num_bytes: int) -> str:
                 return f"{int(size)} {unit}"
             return f"{size:.2f} {unit}"
         size /= 1024
-        
+
     return f"{size:.2f} {units[-1]}"
 
 
@@ -76,8 +76,8 @@ def extract_text_from_pdf(file_bytes: bytes, password: Optional[str] = None) -> 
 def get_file_mime_category(filename: str) -> str:
     """
     Categorize an uploaded file into a high-level MIME group based on its extension.
-    
-    This helper simplifies routing and validation logic by grouping specific 
+
+    This helper simplifies routing and validation logic by grouping specific
     file extensions into broader, semantic categories.
 
     Args:
@@ -88,9 +88,9 @@ def get_file_mime_category(filename: str) -> str:
     """
     if not filename or not isinstance(filename, str):
         return "unknown"
-        
+
     ext = filename.split('.')[-1].lower() if '.' in filename else ""
-    
+
     mime_mapping = {
         'pdf': 'pdf',
         'doc': 'word_document',
@@ -114,14 +114,14 @@ def get_file_mime_category(filename: str) -> str:
         'gz': 'archive',
         '7z': 'archive',
     }
-    
+
     return mime_mapping.get(ext, 'unknown')
 
 
 def get_supported_mime_categories() -> List[str]:
     """
     Retrieve a list of all supported high-level MIME categories.
-    
+
     Returns:
         List[str]: A list of unique category names.
     """
@@ -133,16 +133,16 @@ def get_supported_mime_categories() -> List[str]:
 def is_extension_supported(filename: str, allowed_categories: Optional[List[str]] = None) -> bool:
     """
     Check if a file's extension belongs to an allowed list of MIME categories.
-    
+
     Args:
         filename: The name of the file to check.
         allowed_categories: List of allowed categories. Defaults to all known categories except 'unknown'.
-        
+
     Returns:
         bool: True if the file's category is in the allowed list, False otherwise.
     """
     if allowed_categories is None:
         allowed_categories = ['pdf', 'word_document', 'text', 'code', 'archive']
-        
+
     category = get_file_mime_category(filename)
     return category in allowed_categories
