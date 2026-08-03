@@ -193,7 +193,12 @@ from src.utils.filename import (
     validate_document_extension,
 )
 from src.utils.json_export import export_similarity_matrix_to_json
-from src.utils.pdf_report import generate_plagiarism_report
+from src.utils.pdf_report import (
+    generate_audit_summary_html,
+    generate_audit_summary_pdf,
+    generate_audit_summary_report,
+    generate_plagiarism_report,
+)
 from src.utils.redis_cache import (
     cache_analysis_results,
     cache_faiss_index,
@@ -1815,8 +1820,176 @@ else:
     # ══ TAB 6: ANALYTICS ══════════════════════════════════════════════════════
     with tab_analytics:
         update_page_title("Analytics")
-        st.subheader("📊 Analytics Dashboard")
-        st.info("Analytics metrics summary loaded.")
+        st.subheader("📊 Class-wide Plagiarism Analytics & Audit Summary")
+        st.caption("Inspect class-wide plagiarism trends, incident distribution, and export executive audit reports.")
+
+        # Gather dataset metrics for executive analytics
+        all_incidents = get_all_incidents() if get_all_incidents else []
+        db_docs = get_all_documents() if get_all_documents else []
+        
+        active_class_name = st.session_state.get("class_filter_selectbox", "All Classes")
+        current_thresh = float(st.session_state.get("threshold_slider", PLAGIARISM_THRESHOLD))
+
+        # Build top flagged list
+        top_flagged_list = []
+        if flags:
+            for f in flags:
+                top_flagged_list.append(
+                    {
+                        "doc_a": f.get("doc_a", ""),
+                        "doc_b": f.get("doc_b", ""),
+                        "similarity": float(f.get("similarity", 0.0)),
+                    }
+                )
+        elif all_incidents:
+            for inc in all_incidents:
+                top_flagged_list.append(
+                    {
+                        "doc_a": inc.get("document_a", ""),
+                        "doc_b": inc.get("document_b", ""),
+                        "similarity": float(inc.get("similarity_score", 0.0)),
+                    }
+                )
+
+        # Sort descending by similarity
+        top_flagged_list = sorted(top_flagged_list, key=lambda x: x.get("similarity", 0.0), reverse=True)
+
+        n_docs_total = len(raw_texts) if raw_texts else len(db_docs)
+        n_pairs_total = (n_docs_total * (n_docs_total - 1)) // 2 if n_docs_total > 1 else 0
+        n_flagged_total = len(top_flagged_list)
+        n_high_sev = sum(1 for p in top_flagged_list if p.get("similarity", 0.0) >= 0.90)
+        n_med_sev = sum(1 for p in top_flagged_list if 0.75 <= p.get("similarity", 0.0) < 0.90)
+        n_low_sev = sum(1 for p in top_flagged_list if p.get("similarity", 0.0) < 0.75)
+
+        # Executive Metrics Header Cards
+        m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+        m_col1.metric("Indexed Documents", n_docs_total)
+        m_col2.metric("Evaluated Document Pairs", n_pairs_total)
+        m_col3.metric("Flagged Incidents", n_flagged_total)
+        m_col4.metric("High Severity (≥90%)", n_high_sev)
+
+        st.divider()
+
+        # Visual Analytics Charts (Lazy Loaded)
+        c_left, c_right = st.columns(2)
+        with c_left:
+            st.markdown("### 📈 High Severity Incident Trends")
+            if plot_high_severity_trends and all_incidents:
+                try:
+                    trend_fig = plot_high_severity_trends(all_incidents)
+                    if trend_fig:
+                        st.plotly_chart(trend_fig, use_container_width=True)
+                    else:
+                        st.info("No timeline trend data available.")
+                except Exception as err:
+                    st.info(f"Trend chart unavailable: {err}")
+            else:
+                st.info("Trend analytics will populate as incidents are recorded.")
+
+        with c_right:
+            st.markdown("### 📄 Most Plagiarized Documents")
+            if plot_most_plagiarized_documents and all_incidents:
+                try:
+                    most_fig = plot_most_plagiarized_documents(all_incidents)
+                    if most_fig:
+                        st.plotly_chart(most_fig, use_container_width=True)
+                    else:
+                        st.info("No frequent document data available.")
+                except Exception as err:
+                    st.info(f"Document ranking chart unavailable: {err}")
+            else:
+                st.info("Document ranking analytics ready.")
+
+        st.divider()
+
+        # Audit Summary Exporter Card (#1370 Action)
+        st.markdown("### 📄 Executive Audit Summary Report Exporter")
+        st.markdown(
+            "Instructors can compile a consolidated executive summary report containing class-wide "
+            "statistics, severity distributions, and top flagged assignment pairs."
+        )
+
+        audit_metrics_payload = {
+            "total_documents": n_docs_total,
+            "evaluated_pairs": n_pairs_total,
+            "flagged_incidents": n_flagged_total,
+            "high_severity_count": n_high_sev,
+            "medium_severity_count": n_med_sev,
+            "low_severity_count": n_low_sev,
+            "threshold": current_thresh,
+            "class_section": active_class_name,
+        }
+
+        exp_col1, exp_col2 = st.columns([2, 1])
+
+        with exp_col1:
+            report_format = st.radio(
+                "Export Format:",
+                options=["PDF Report (.pdf)", "HTML Report (.html)"],
+                index=0,
+                horizontal=True,
+                key="audit_report_format_radio",
+            )
+            top_pairs_limit = st.slider(
+                "Include Top Flagged Document Pairs:",
+                min_value=5,
+                max_value=50,
+                value=20,
+                step=5,
+                key="audit_pairs_limit_slider",
+            )
+
+        with exp_col2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            generate_report_click = st.button(
+                "⚡ Generate Audit Summary Report",
+                key="generate_audit_summary_report_btn",
+                type="primary",
+                use_container_width=True,
+            )
+
+        if generate_report_click or st.session_state.get("audit_report_generated", False):
+            st.session_state["audit_report_generated"] = True
+            selected_pairs = top_flagged_list[:top_pairs_limit]
+
+            st.success("✅ Consolidated Audit Summary Report compiled successfully!")
+            
+            dl_col1, dl_col2 = st.columns(2)
+
+            # Generate PDF data
+            pdf_bytes = generate_audit_summary_report(
+                metrics=audit_metrics_payload,
+                top_flagged_pairs=selected_pairs,
+                output_format="pdf",
+                class_section=active_class_name,
+            )
+            with dl_col1:
+                st.download_button(
+                    label="⬇️ Download Audit Summary Report (PDF)",
+                    data=pdf_bytes,
+                    file_name=f"plagiarism_audit_summary_{active_class_name.lower().replace(' ', '_')}.pdf",
+                    mime="application/pdf",
+                    key="download_audit_pdf_btn",
+                    use_container_width=True,
+                )
+
+            # Generate HTML data
+            html_str = generate_audit_summary_report(
+                metrics=audit_metrics_payload,
+                top_flagged_pairs=selected_pairs,
+                output_format="html",
+                class_section=active_class_name,
+            )
+            with dl_col2:
+                st.download_button(
+                    label="🌐 Download Audit Summary Report (HTML)",
+                    data=html_str.encode("utf-8") if isinstance(html_str, str) else html_str,
+                    file_name=f"plagiarism_audit_summary_{active_class_name.lower().replace(' ', '_')}.html",
+                    mime="text/html",
+                    key="download_audit_html_btn",
+                    use_container_width=True,
+                )
+
 
     # ══ TAB 7: USERS ══════════════════════════════════════════════════════════
     with tab_users:
