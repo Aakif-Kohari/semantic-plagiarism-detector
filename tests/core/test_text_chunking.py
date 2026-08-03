@@ -185,4 +185,110 @@ def test_chunk_text_percentage_overlap():
 
     assert len(percentage_chunks) == len(absolute_chunks)
     assert percentage_chunks == absolute_chunks
+
+
+# ── Truncation Warning Tests (Issue #1390) ───────────────────────────────────
+
+
+def test_chunk_text_logs_truncation_warning(caplog):
+    """Issue #1390: A WARNING must be logged when input text exceeds chunk capacity.
+
+    When the raw input text length exceeds max_chunks * chunk_size, the
+    resulting chunk stream is truncated to fit within max_chunks.  This
+    silent data loss must be surfaced via a logger.warning() call whose
+    message includes the truncated character count.
+    """
+    import logging
+
+    # Build text large enough to exceed max_chunks * chunk_size capacity.
+    # With chunk_size=10, max_chunks=3 → capacity = 30 chars.
+    # 50 words × 5 chars (incl. trailing space) ≈ 250 chars, well over capacity.
+    huge_text = "Word " * 50
+
+    with caplog.at_level(logging.WARNING, logger="src.core.text_chunking"):
+        chunks = chunk_text(huge_text, chunk_size=10, chunk_overlap=0, max_chunks=3)
+
+    # Filter to the specific truncation warning we added
+    truncation_warnings = [
+        record for record in caplog.records
+        if "exceeded chunk capacity limit" in record.getMessage()
+    ]
+
+    # Exactly one warning is expected, emitted before chunking begins
+    assert len(truncation_warnings) == 1
+
+    record = truncation_warnings[0]
+    assert record.levelno == logging.WARNING
+    assert record.name == "src.core.text_chunking"
+
+    # Message must include the truncated character count verbatim
+    message = record.getMessage()
+    assert "text was truncated" in message
+    assert str(len(huge_text)) in message
+
+    # Sanity check: chunks were actually truncated to the max_chunks limit
+    assert len(chunks) <= 3
+
+
+def test_chunk_text_truncation_warning_includes_char_count(caplog):
+    """Issue #1390: The truncation warning must contain the original char count.
+
+    The exact substring ``Text length (%d chars) exceeded chunk capacity limit;
+    text was truncated`` is required by the acceptance criteria, with ``%d``
+    substituted by ``len(raw_text)``.
+    """
+    import logging
+    import re
+
+    raw_text = "A" * 1234  # known length so we can assert the exact digit appears
+
+    with caplog.at_level(logging.WARNING, logger="src.core.text_chunking"):
+        chunk_text(raw_text, chunk_size=10, chunk_overlap=0, max_chunks=5)
+
+    # Find the warning and verify the message format
+    truncation_records = [
+        r for r in caplog.records
+        if "exceeded chunk capacity limit" in r.getMessage()
+    ]
+    assert truncation_records, "Expected a truncation warning to be logged"
+
+    message = truncation_records[0].getMessage()
+    # Verify the message matches the format required by the issue
+    assert re.search(
+        r"^Text length \(\d+ chars\) exceeded chunk capacity limit; text was truncated$",
+        message,
+    ), f"Unexpected truncation warning message format: {message!r}"
+    # Verify the substituted count matches the input length
+    assert "1234" in message
+
+
+def test_chunk_text_no_truncation_warning_for_small_text(caplog):
+    """Issue #1390: No truncation warning when text fits within capacity."""
+    import logging
+
+    small_text = "Word " * 5  # 25 chars, well under capacity of 30
+
+    with caplog.at_level(logging.WARNING, logger="src.core.text_chunking"):
+        chunk_text(small_text, chunk_size=10, chunk_overlap=0, max_chunks=3)
+
+    truncation_warnings = [
+        record for record in caplog.records
+        if "exceeded chunk capacity limit" in record.getMessage()
+    ]
+    assert len(truncation_warnings) == 0
+
+
+def test_chunk_text_no_truncation_warning_for_empty_text(caplog):
+    """Issue #1390: Empty/whitespace text must not trigger a truncation warning."""
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="src.core.text_chunking"):
+        chunk_text("", chunk_size=10, chunk_overlap=0, max_chunks=3)
+        chunk_text("   \n\t  ", chunk_size=10, chunk_overlap=0, max_chunks=3)
+
+    truncation_warnings = [
+        record for record in caplog.records
+        if "exceeded chunk capacity limit" in record.getMessage()
+    ]
+    assert len(truncation_warnings) == 0
             
