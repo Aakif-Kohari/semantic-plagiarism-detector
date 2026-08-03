@@ -11,7 +11,7 @@ import smtplib
 from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 
@@ -62,10 +62,8 @@ def get_admin_emails() -> List[str]:
 
     for user in users:
         if user.get("role") == "admin":
-            # For now, use username as email. In production, you'd want an email field in the users table
             admin_emails.append(f"{user['username']}@localhost")
 
-    # Fallback to environment variable if no admins found
     if not admin_emails:
         env_email = os.getenv("ADMIN_EMAIL")
         if env_email:
@@ -148,22 +146,31 @@ def build_severity_section_html(severity: str, incidents: List[Dict[str, Any]]) 
 
 
 def build_email_html_body(
-    incidents_data: List[Dict[str, Any]], total_scans: int
+    incidents_data: List[Dict[str, Any]],
+    total_scans: int,
+    footer_note: Optional[str] = None,
 ) -> str:
     """
     Build a clean, inline-CSS styled HTML email body for the daily summary.
 
-    This function extracts the template logic to improve email customization
-    and ensure compatibility with various email clients (Gmail, Outlook, etc.)
-    by using inline CSS styling.
+    Issue #1252: Adds optional footer_note parameter to append administrator notes.
 
     Args:
         incidents_data: List of incident dictionaries.
         total_scans: Total number of scans performed in the period.
+        footer_note: Optional custom administrator note to display above the signature/footer.
 
     Returns:
         str: The fully formatted HTML email body.
     """
+    footer_note_html = ""
+    if footer_note:
+        footer_note_html = f"""
+        <div style="margin-top: 20px; padding: 12px; background-color: #eef6ff; border-left: 4px solid #007bff; color: #333333; font-size: 14px; border-radius: 4px;">
+            <strong>Note from Administrator:</strong><br>{footer_note}
+        </div>
+        """
+
     if not incidents_data:
         return f"""
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9; border-radius: 8px;">
@@ -171,6 +178,7 @@ def build_email_html_body(
             <p style="color: #666666; text-align: center; font-size: 16px;">
                 No new plagiarism incidents detected in the last 24 hours.
             </p>
+            {footer_note_html}
             <p style="color: #888888; text-align: center; font-size: 14px; margin-top: 40px;">
                 Total scans processed: <strong>{total_scans}</strong>
             </p>
@@ -208,6 +216,8 @@ def build_email_html_body(
             {build_severity_section_html("Low", low_severity)}
         </div>
 
+        {footer_note_html}
+
         <p style="color: #888888; text-align: center; font-size: 14px; margin-top: 30px;">
             <a href="{os.getenv('APP_BASE_URL', 'http://localhost:8501')}" style="color: #007bff; text-decoration: none;">Review all incidents in the dashboard</a>
         </p>
@@ -216,23 +226,19 @@ def build_email_html_body(
     return html
 
 
-def format_daily_summary(incidents: List[Dict[str, Any]]) -> str:
+def format_daily_summary(
+    incidents: List[Dict[str, Any]], footer_note: Optional[str] = None
+) -> str:
     """
     Legacy wrapper for backward compatibility.
     Delegates to the new build_email_html_body function.
     """
-    return build_email_html_body(incidents_data=incidents, total_scans=0)
+    return build_email_html_body(incidents_data=incidents, total_scans=0, footer_note=footer_note)
 
 
 def send_email(to_emails: List[str], subject: str, html_body: str) -> bool:
     """
     Send an email using SMTP.
-
-    The connection method is chosen automatically based on ``SMTP_PORT``:
-
-    * **Port 465** – uses :class:`smtplib.SMTP_SSL` (implicit SSL).
-    * **Any other port** (default: 587) – uses :class:`smtplib.SMTP` with
-      ``STARTTLS`` upgrade.
 
     Args:
         to_emails: List of recipient email addresses
@@ -267,7 +273,6 @@ def send_email(to_emails: List[str], subject: str, html_body: str) -> bool:
         html_part = MIMEText(html_body, "html")
         msg.attach(html_part)
 
-        # Port 465 uses implicit SSL; all other ports use STARTTLS.
         if smtp_port == 465:
             logger.debug("Using SMTP_SSL (implicit SSL) on port %d", smtp_port)
             with smtplib.SMTP_SSL(smtp_server, smtp_port) as server:
@@ -290,30 +295,30 @@ def send_email(to_emails: List[str], subject: str, html_body: str) -> bool:
         return False
 
 
-def send_daily_summary(subject_prefix: str = "[Plagiarism Alert]") -> bool:
+def send_daily_summary(
+    subject_prefix: str = "[Plagiarism Alert]",
+    footer_note: Optional[str] = None,
+) -> bool:
     """
     Main function to aggregate daily incidents and send summary email.
 
     Args:
         subject_prefix: Prefix to prepend to the email subject line
+        footer_note: Optional custom administrator note to append to the email body
 
     Returns:
         True if email sent successfully, False otherwise
     """
     logger.info("Starting daily summary email generation...")
 
-    # Get incidents from last 24 hours
     incidents = get_incidents_last_24h()
     logger.info(f"Found {len(incidents)} incidents in the last 24 hours")
 
-    # Get admin email addresses
     admin_emails = get_admin_emails()
     logger.info(f"Sending to {len(admin_emails)} admin recipients")
 
-    # Format the summary using the new inline HTML builder
-    html_body = build_email_html_body(incidents_data=incidents, total_scans=100)
+    html_body = build_email_html_body(incidents_data=incidents, total_scans=100, footer_note=footer_note)
 
-    # Send the email
     prefix = f"{subject_prefix} " if subject_prefix else ""
     subject = f"{prefix}Daily Plagiarism Summary - {datetime.now().strftime('%Y-%m-%d')}"
     success = send_email(admin_emails, subject, html_body)
@@ -324,3 +329,4 @@ def send_daily_summary(subject_prefix: str = "[Plagiarism Alert]") -> bool:
 if __name__ == "__main__":
     success = send_daily_summary()
     exit(0 if success else 1)
+    
