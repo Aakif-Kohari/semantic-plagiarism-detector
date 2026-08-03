@@ -7,6 +7,7 @@ policies can be enforced before a request reaches application code.
 from __future__ import annotations
 
 import os
+import uuid
 from collections.abc import Iterable
 
 import streamlit as st
@@ -155,9 +156,50 @@ class JSONContentTypeMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    """Attach a unique ``X-Request-ID`` to every request/response cycle.
+
+    If the incoming request already carries an ``X-Request-ID`` header
+    its value is reused (after a length sanity check) so upstream
+    services can propagate a correlation id they generated. Otherwise a
+    fresh RFC 4122 v4 UUID is produced.
+
+    The resolved identifier is:
+
+    * exposed to downstream handlers via ``request.state.request_id``
+      so application code and loggers can include it in structured logs;
+    * attached to the outgoing response under the ``X-Request-ID``
+      header so clients can quote it when reporting issues.
+    """
+
+    HEADER_NAME = "X-Request-ID"
+    # Guards against malicious oversized incoming headers; a UUID4 hex
+    # string is 32 chars, but callers may pass longer trace IDs.
+    MAX_INCOMING_LENGTH = 128
+
+    @staticmethod
+    def _is_valid_incoming(value: str) -> bool:
+        return bool(value) and len(value) <= RequestIDMiddleware.MAX_INCOMING_LENGTH
+
+    async def dispatch(self, request, call_next):
+        incoming = request.headers.get(self.HEADER_NAME, "").strip()
+        if self._is_valid_incoming(incoming):
+            request_id = incoming
+        else:
+            request_id = uuid.uuid4().hex
+
+        # Make the id available to downstream handlers / loggers.
+        request.state.request_id = request_id
+
+        response = await call_next(request)
+        response.headers[self.HEADER_NAME] = request_id
+        return response
+
+
 app = st.App(
     "app/streamlit_app.py",
     middleware=[
+        Middleware(RequestIDMiddleware),
         Middleware(SecurityHeadersMiddleware),
         Middleware(ContentLengthLimitMiddleware),
         Middleware(JSONContentTypeMiddleware),
