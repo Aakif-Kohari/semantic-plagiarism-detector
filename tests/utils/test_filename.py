@@ -1,6 +1,11 @@
 import pytest
 from unittest.mock import patch
 
+
+from src.utils.filename import (_safe_extension, get_file_extension_sanitized,
+                                sanitize_filename, sanitize_filename_mapping,
+                                unique_filename)
+
 from src.utils.filename import (
     _safe_extension,
     get_file_sha256_hash,
@@ -8,6 +13,7 @@ from src.utils.filename import (
     sanitize_filename_mapping,
     unique_filename,
 )
+
 
 
 @pytest.mark.parametrize(
@@ -29,8 +35,29 @@ def test_sanitize_filename_security_cases(untrusted, expected):
     assert sanitize_filename(untrusted) == expected
 
 
+
+@pytest.mark.parametrize(
+    ("filename", "expected"),
+    [
+        ("report.PDF", ".pdf"),
+        ("essay.Docx", ".docx"),
+        ("notes.txt", ".txt"),
+        ("archive.TAR.GZ", ".gz"),
+        ("no_extension", ""),
+        ("", ""),
+    ],
+)
+def test_get_file_extension_sanitized(filename, expected):
+    assert get_file_extension_sanitized(filename) == expected
+
+
+def test_sanitized_filename_contains_no_html_or_path_separators():    result = sanitize_filename(
+        '<svg/onload=alert(1)>../../evil "file".pdf'
+    )
+
 def test_sanitized_filename_contains_no_html_or_path_separators():
     result = sanitize_filename('<svg/onload=alert(1)>../../evil "file".pdf')
+
 
     assert "<" not in result
     assert ">" not in result

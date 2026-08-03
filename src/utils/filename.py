@@ -263,12 +263,21 @@ def get_final_extension(filename: object) -> str:
     raw = _HTML_TAG_RE.sub("", raw)
     basename = _basename(raw).strip()
 
-    _stem, extension = os.path.splitext(basename)
+_stem, extension = os.path.splitext(basename)
     return extension.casefold()
 
 
-def validate_document_extension(
-    filename: object,
+def get_file_extension_sanitized(filename: str) -> str:
+    """Return the lower-case file extension, starting with a dot.
+
+    Returns an empty string if the filename has no extension.
+    """
+    basename = _basename(str(filename or ""))
+    _stem, extension = os.path.splitext(basename)
+    return extension.lower()
+
+
+def validate_document_extension(    filename: object,
     *,
     allowed_extensions: Collection[str] = DEFAULT_ALLOWED_DOCUMENT_EXTENSIONS,
     require_extension: bool = True,
