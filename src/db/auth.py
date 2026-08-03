@@ -749,3 +749,20 @@ def format_user_created_date(iso_str: str) -> str:
             continue
 
     return "Unknown"
+def get_upload_count(username: str | None = None) -> int:
+    """Return total number of uploads for a user or system-wide."""
+    try:
+        with _connect() as conn:
+            if username:
+                cursor = conn.execute(
+                    "SELECT COUNT(*) FROM security_audit_log WHERE username = ? AND event_type = 'file_upload'",
+                    (username.lower(),),
+                )
+            else:
+                cursor = conn.execute(
+                    "SELECT COUNT(*) FROM security_audit_log WHERE event_type = 'file_upload'"
+                )
+            row = cursor.fetchone()
+            return row[0] if row else 0
+    except sqlite3.Error:
+        return 0
