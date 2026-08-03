@@ -8,7 +8,7 @@ client = TestClient(app)
 def test_validation_error_format():
     response = client.post(
         "/api/v1/scan",
-        headers={"Authorization": "Bearer dummy-token"},
+        headers={"Authorization": "Bearer dummy-token", "Content-Type": "multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW"},
     )
 
     assert response.status_code == 422

@@ -27,6 +27,8 @@ class HealthzResponse(BaseModel):
     status: str = Field(..., description="Overall service status")
     db: str = Field(..., description="Database connectivity status")
     memory: str = Field(..., description="Memory status")
+    db_size_bytes: int = Field(default=0, description="Corpus database file size in bytes")
+    db_size_mb: float = Field(default=0.0, description="Corpus database file size in megabytes")
 
 
 class FlaggedChunkMatch(BaseModel):
