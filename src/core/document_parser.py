@@ -77,8 +77,39 @@ ENGLISH_STOPWORDS = frozenset({
 })
 
 
-def sanitize_zero_width_characters(text: str, filename: Optional[str] = None) -> str:
+def load_custom_stopwords(file_path: Optional[str] = None) -> frozenset:
     """
+    Load custom stopwords from a file (one word per line).
+
+    Args:
+        file_path: Path to the custom stopwords file. If None, the path is
+            read from the STOPWORDS_FILE environment variable.
+
+    Returns:
+        A frozenset of lowercase custom stopwords. Empty if no file is
+        configured or the file cannot be read.
+    """
+    path = file_path if file_path is not None else os.environ.get("STOPWORDS_FILE")
+
+    if not path:
+        return frozenset()
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return frozenset(line.strip().lower() for line in f if line.strip())
+    except OSError as exc:
+        logger.warning(
+            f"[document_parser] Could not read custom stopwords file '{path}': {exc}"
+        )
+        return frozenset()
+
+
+def get_stopwords() -> frozenset:
+    """Return the combined set of standard and custom (domain-specific) stopwords."""
+    return ENGLISH_STOPWORDS | load_custom_stopwords()
+
+
+def sanitize_zero_width_characters(text: str, filename: Optional[str] = None) -> str:    """
     Strips zero-width unicode characters (e.g. \u200B) often used to bypass plagiarism checkers.
     Logs a security warning if any zero-width characters are found.
     """
@@ -289,15 +320,15 @@ def clean_text(raw_text: str, remove_stopwords: bool = False) -> str:
     text = re.sub(r"[ \t]+\n", "\n", text)
     text = re.sub(r"\n[ \t]+", "\n", text)
 
-    if remove_stopwords:
+if remove_stopwords:
         # Tokenize, filter, and rejoin while preserving basic structure
         words = text.split()
+        stopwords = get_stopwords()
         filtered_words = [
             word for word in words
-            if word.lower().strip(string.punctuation) not in ENGLISH_STOPWORDS
+            if word.lower().strip(string.punctuation) not in stopwords
         ]
         text = " ".join(filtered_words)
-
     return text.strip()
 
 
