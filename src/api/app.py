@@ -224,6 +224,11 @@ def metrics_json():
     tags=["Health"],
     response_model=HealthzResponse,
 )
+@app.get(
+    "/api/v1/healthz",
+    tags=["Health"],
+    response_model=HealthzResponse,
+)
 def healthz():
     """Health endpoint for container orchestration."""
 
@@ -236,10 +241,22 @@ def healthz():
         if memory.available <= 0:
             raise RuntimeError("Low memory")
 
+        from src.core.app_config import CORPUS_DB_PATH
+        db_size_bytes = 0
+        db_size_mb = 0.0
+        if os.path.exists(CORPUS_DB_PATH):
+            try:
+                db_size_bytes = os.path.getsize(CORPUS_DB_PATH)
+                db_size_mb = round(db_size_bytes / (1024 * 1024), 2)
+            except OSError:
+                pass
+
         return {
             "status": "ok",
             "db": "connected",
             "memory": "ok",
+            "db_size_bytes": db_size_bytes,
+            "db_size_mb": db_size_mb,
         }
 
     except Exception:
@@ -249,7 +266,50 @@ def healthz():
                 "status": "degraded",
                 "db": "disconnected",
                 "memory": "unavailable",
+                "db_size_bytes": 0,
+                "db_size_mb": 0.0,
             },
+        )
+
+
+@app.get(
+    "/api/v1/incidents",
+    tags=["Plagiarism Detection"],
+    summary="Get recorded plagiarism incidents",
+    status_code=status.HTTP_200_OK,
+)
+def get_incidents(
+    limit: int = Query(default=50, ge=1, le=500, description="Max number of incidents to return"),
+    offset: int = Query(default=0, ge=0, description="Number of incidents to skip"),
+    _token: str = Depends(verify_bearer_token),
+):
+    """Retrieve recorded plagiarism incidents from the database."""
+    from src.db.incidents import get_all_incidents
+
+    try:
+        incidents = get_all_incidents(limit=limit, offset=offset)
+        return {
+            "incidents": [
+                {
+                    "incident_id": inc.incident_id,
+                    "document_a": inc.document_a,
+                    "document_b": inc.document_b,
+                    "similarity_score": inc.similarity_score,
+                    "severity_rank": inc.severity_rank,
+                    "review_status": inc.review_status,
+                    "date_flagged": inc.date_flagged,
+                    "threshold_at_time_of_flag": inc.threshold_at_time_of_flag,
+                }
+                for inc in incidents
+            ],
+            "limit": limit,
+            "offset": offset,
+            "count": len(incidents),
+        }
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch incidents: {str(exc)}",
         )
 
 
