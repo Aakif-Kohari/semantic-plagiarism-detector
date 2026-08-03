@@ -122,6 +122,19 @@ def chunk_text(
     if overlap_percentage is not None:
         chunk_overlap = int(chunk_size * overlap_percentage)
 
+    # ── Issue #1390 ───────────────────────────────────────────────────────
+    # If the raw input text exceeds the total chunking capacity (max_chunks
+    # multiplied by chunk_size), the resulting chunk stream is truncated to
+    # fit within max_chunks.  Surface this as a WARNING so operators can
+    # detect silent data loss in logs and structured telemetry.  The
+    # truncated character count is included verbatim in the message.
+    max_chunk_capacity = max_chunks * chunk_size
+    if len(text) > max_chunk_capacity:
+        logger.warning(
+            "Text length (%d chars) exceeded chunk capacity limit; text was truncated",
+            len(text),
+        )
+
     word_headings = getattr(text, "word_headings", None)
     words = text.split()
     chunks = []
