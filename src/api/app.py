@@ -5,7 +5,7 @@ import os
 import psutil
 import numpy as np
 
-from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status, Request
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status, Request, Security
 from typing import Dict
 from fastapi import Request
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
@@ -17,7 +17,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, JSONResponse
 
-from src.api.middleware import verify_bearer_token
+from src.api.middleware import verify_bearer_token, get_current_user
 from src.api.schemas import (
     ClearDataResponse,
     ErrorResponse,
@@ -259,7 +259,7 @@ def healthz():
     summary="Get current API rate limit status",
     status_code=status.HTTP_200_OK,
 )
-def get_rate_limit():
+def get_rate_limit(_user: dict = Security(get_current_user, scopes=["read"])):
     """
     Return the current API rate limit information.
     """
@@ -313,7 +313,7 @@ async def scan_document(
         le=10,
         description="Number of top matching paragraph pairs to include per matched document",
     ),
-    _token: str = Depends(verify_bearer_token),
+    _user: dict = Security(get_current_user, scopes=["write"]),
     _content_type: None = Depends(validate_content_type),
 ):
     """Scan an uploaded document against the indexed corpus database for plagiarism."""
@@ -464,6 +464,7 @@ async def clear_all_documents(
     username: str = Query(
         ..., description="Username of the administrator executing the operation"
     ),
+    _user: dict = Security(get_current_user, scopes=["admin"]),
 ):
     """
     Remove all documents, text chunks, and plagiarism incidents from the SQLite database,
