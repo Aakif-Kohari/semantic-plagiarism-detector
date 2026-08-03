@@ -274,3 +274,52 @@ def test_api_v1_status_is_public_without_token():
     assert response.status_code == 200
     assert response.json()["status"] == "online"
 
+
+def test_scope_enforcement_rate_limit_endpoint():
+    """Verify scope enforcement on /api/v1/rate_limit (requires 'read')."""
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+
+    client = TestClient(app)
+
+    # 1. No credentials -> 401
+    res = client.get("/api/v1/rate_limit")
+    assert res.status_code == 401
+
+    # 2. Token with 'read' scope -> 200
+    res = client.get(
+        "/api/v1/rate_limit",
+        headers={"Authorization": "Bearer test-read-token"}
+    )
+    assert res.status_code == 200
+
+    # 3. Token with no scopes -> 403
+    res = client.get(
+        "/api/v1/rate_limit",
+        headers={"Authorization": "Bearer test-no-scope-token"}
+    )
+    assert res.status_code == 403
+    assert "Forbidden" in res.json()["detail"]
+
+
+def test_scope_enforcement_clear_endpoint():
+    """Verify scope enforcement on /api/v1/clear (requires 'admin')."""
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+
+    client = TestClient(app)
+
+    # 1. Token with 'admin' scope -> success (either 200 or 500 depending on actual database operations but not 401/403)
+    res = client.post(
+        "/api/v1/clear?username=admin",
+        headers={"Authorization": "Bearer test-admin-token"}
+    )
+    assert res.status_code in (200, 500)
+
+    # 2. Token with 'write' but no 'admin' -> 403
+    res = client.post(
+        "/api/v1/clear?username=admin",
+        headers={"Authorization": "Bearer test-write-token"}
+    )
+    assert res.status_code == 403
+

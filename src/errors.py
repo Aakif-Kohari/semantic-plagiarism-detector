@@ -183,3 +183,9 @@ class OCRFileBatchError(Exception):
         self.failed_files = failed_files
         self.failure_details = failure_details
         super().__init__(f"OCR failed for files: {failed_files}")
+
+
+class StaleDataException(Exception):
+    """Raised when an update fails because the version has changed (optimistic locking)."""
+    pass
+

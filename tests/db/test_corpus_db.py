@@ -19,6 +19,7 @@ from src.db.corpus_db import (
     get_document_word_counts,
     get_documents_by_class,
     get_total_document_count,
+    get_deleted_documents_count,
     get_unique_class_sections,
     purge_stale_trash,
     restore_document,
@@ -508,3 +509,17 @@ def test_documents_created_at_index_exists(mock_db):
         assert "idx_documents_created_at" in indexes
     finally:
         conn.close()
+
+
+def test_get_deleted_documents_count(mock_db):
+    assert get_deleted_documents_count() == 0
+    add_document("doc1.pdf", "hash_doc1")
+    add_document("doc2.pdf", "hash_doc2")
+    assert get_deleted_documents_count() == 0
+    soft_delete_document("doc1.pdf")
+    assert get_deleted_documents_count() == 1
+    soft_delete_document("doc2.pdf")
+    assert get_deleted_documents_count() == 2
+    restore_document("doc1.pdf")
+    assert get_deleted_documents_count() == 1
+

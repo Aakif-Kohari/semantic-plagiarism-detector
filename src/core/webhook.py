@@ -197,3 +197,7 @@ def send_plagiarism_alert(
         attempts,
     )
     return True, attempts
+# Alias or main function for dispatching plagiarism alerts
+def dispatch_plagiarism_alert(doc_a: str, doc_b: str, similarity: float, webhook_url: str | None = None) -> bool:
+    """Dispatch a plagiarism alert payload to the configured webhook endpoint."""
+    return send_plagiarism_alert(doc_a=doc_a, doc_b=doc_b, similarity=similarity, webhook_url=webhook_url)
