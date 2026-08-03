@@ -127,13 +127,31 @@ def calculate_processing_throughput(total_bytes: int, elapsed_seconds: float) ->
     if elapsed_seconds <= 0:
         return 0.0
 
-    total_kb = total_bytes / BYTES_PER_KB
+total_kb = total_bytes / BYTES_PER_KB
     throughput = total_kb / elapsed_seconds
     return round(throughput, 2)
 
 
-def format_throughput_human_readable(throughput_kbps: float) -> str:
+def calculate_page_throughput(total_pages: int, elapsed_seconds: float) -> float:
     """
+    Calculate the processing throughput in pages per second.
+
+    Args:
+        total_pages: The total number of pages processed.
+        elapsed_seconds: The total time elapsed in seconds.
+
+    Returns:
+        float: The throughput in pages/sec, rounded to 2 decimal places.
+            Returns 0.0 if elapsed_seconds <= 0.
+    """
+    if elapsed_seconds <= 0:
+        return 0.0
+
+    throughput = total_pages / elapsed_seconds
+    return round(throughput, 2)
+
+
+def format_throughput_human_readable(throughput_kbps: float) -> str:    """
     Format a throughput value in KB/sec to a human-readable string.
 
     Args:
