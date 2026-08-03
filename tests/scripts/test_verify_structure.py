@@ -1,7 +1,4 @@
-import pytest
-import sys
 from unittest.mock import patch
-from pathlib import Path
 from scripts.verify_structure import main
 
 def test_verify_structure_success(tmp_path):

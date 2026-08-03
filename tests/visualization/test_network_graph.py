@@ -9,7 +9,6 @@ from unittest.mock import patch
 import networkx as nx
 import pandas as pd
 import pytest
-import networkx as nx
 
 from src.visualization.network_graph import export_network_adjacency_csv
 

@@ -1,5 +1,4 @@
 import importlib
-import os
 from fastapi.testclient import TestClient
 
 def test_cors_headers(monkeypatch):

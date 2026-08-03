@@ -18,7 +18,7 @@ from __future__ import annotations
 import functools
 import hashlib
 import re
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 import numpy as np
 import pandas as pd
