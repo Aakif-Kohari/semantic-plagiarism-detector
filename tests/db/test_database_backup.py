@@ -30,6 +30,7 @@ from src.db.database_backup import (
     get_database_size_bytes,
     optimize_database,
     restore,
+    run_incremental_vacuum,
 )
 
 
@@ -48,7 +49,9 @@ class TestCreateSqliteSnapshot:
 
         snapshot = create_sqlite_snapshot(db_path)
 
-        assert snapshot.startswith(SQLITE_HEADER), "Snapshot must start with valid SQLite header"
+        assert snapshot.startswith(
+            SQLITE_HEADER
+        ), "Snapshot must start with valid SQLite header"
         assert len(snapshot) > 1000, "Snapshot should have reasonable size"
 
     def test_create_snapshot_file_not_found(self):
@@ -58,7 +61,9 @@ class TestCreateSqliteSnapshot:
 
     def test_create_snapshot_is_a_directory(self, tmp_path):
         """Verify that an IsADirectoryError is raised if path is a directory."""
-        with pytest.raises(IsADirectoryError, match="SQLite database path is not a file"):
+        with pytest.raises(
+            IsADirectoryError, match="SQLite database path is not a file"
+        ):
             create_sqlite_snapshot(tmp_path)
 
 
@@ -73,11 +78,15 @@ class TestCorpusSnapshotAndBackup:
         conn = sqlite3.connect(str(db_file))
         cursor = conn.cursor()
         cursor.execute("CREATE TABLE test_table (id INTEGER PRIMARY KEY, name TEXT)")
-        cursor.execute("INSERT INTO test_table (name) VALUES ('test1'), ('test2'), ('test3')")
+        cursor.execute(
+            "INSERT INTO test_table (name) VALUES ('test1'), ('test2'), ('test3')"
+        )
 
         # Insert and delete data to create fragmentation for VACUUM to clean
         for i in range(100):
-            cursor.execute("INSERT INTO test_table (name) VALUES (?)", (f"temp_data_{i}",))
+            cursor.execute(
+                "INSERT INTO test_table (name) VALUES (?)", (f"temp_data_{i}",)
+            )
 
         cursor.execute("DELETE FROM test_table WHERE name LIKE 'temp_data_%'")
         conn.commit()
@@ -121,10 +130,14 @@ class TestOptimizeDatabase:
         conn = sqlite3.connect(str(db_file))
         cursor = conn.cursor()
         cursor.execute("CREATE TABLE test_table (id INTEGER PRIMARY KEY, name TEXT)")
-        cursor.execute("INSERT INTO test_table (name) VALUES ('test1'), ('test2'), ('test3')")
+        cursor.execute(
+            "INSERT INTO test_table (name) VALUES ('test1'), ('test2'), ('test3')"
+        )
 
         for i in range(100):
-            cursor.execute("INSERT INTO test_table (name) VALUES (?)", (f"temp_data_{i}",))
+            cursor.execute(
+                "INSERT INTO test_table (name) VALUES (?)", (f"temp_data_{i}",)
+            )
 
         cursor.execute("DELETE FROM test_table WHERE name LIKE 'temp_data_%'")
         conn.commit()
@@ -165,6 +178,14 @@ class TestOptimizeDatabase:
         assert "Executing ANALYZE" in caplog.text
         assert "Database optimization completed successfully" in caplog.text
         assert "Space reclaimed:" in caplog.text
+
+    def test_run_incremental_vacuum(self, temp_db_path):
+        """Verify incremental vacuum executes successfully."""
+        conn = sqlite3.connect(temp_db_path)
+        try:
+            assert run_incremental_vacuum(conn) is True
+        finally:
+            conn.close()
 
 
 class TestRestoreDatabase:
@@ -207,8 +228,15 @@ class TestRestoreDatabase:
         outside_file = tmp_path / "outside.db"
         outside_file.write_bytes(SQLITE_HEADER + b"data")
 
-        with pytest.raises(BackupRestoreSecurityError, match="must be inside the designated backup directory"):
-            restore(source="../outside.db", backup_dir=backup_dir, destination=tmp_path / "target.db")
+        with pytest.raises(
+            BackupRestoreSecurityError,
+            match="must be inside the designated backup directory",
+        ):
+            restore(
+                source="../outside.db",
+                backup_dir=backup_dir,
+                destination=tmp_path / "target.db",
+            )
 
 
 class TestCleanupOldBackups:
@@ -234,15 +262,21 @@ class TestCleanupOldBackups:
             old_time = time.time() - (15 - i)
             os.utime(file_path, (old_time, old_time))
 
-        result = cleanup_old_backups(backup_dir=tmp_path, max_backups=10, max_age_days=365)
+        result = cleanup_old_backups(
+            backup_dir=tmp_path, max_backups=10, max_age_days=365
+        )
 
-        assert result["files_deleted"] == 5, "Should delete 5 files to respect max_backups=10"
+        assert (
+            result["files_deleted"] == 5
+        ), "Should delete 5 files to respect max_backups=10"
         assert result["bytes_freed"] > 0, "Should report freed bytes"
 
         remaining_files = list(tmp_path.glob("*.db"))
         assert len(remaining_files) == 10
         for f in remaining_files:
-            assert int(f.stem.split("_")[1]) >= 5, "Oldest 5 files should have been deleted"
+            assert (
+                int(f.stem.split("_")[1]) >= 5
+            ), "Oldest 5 files should have been deleted"
 
     def test_cleanup_respects_max_age_days(self, tmp_path):
         """Verify that files older than `max_age_days` are deleted regardless of count."""
@@ -254,7 +288,9 @@ class TestCleanupOldBackups:
         new_file = tmp_path / "new_backup.db"
         new_file.write_bytes(SQLITE_HEADER + b"new data")
 
-        result = cleanup_old_backups(backup_dir=tmp_path, max_backups=10, max_age_days=30)
+        result = cleanup_old_backups(
+            backup_dir=tmp_path, max_backups=10, max_age_days=30
+        )
 
         assert result["files_deleted"] == 1, "Should delete the file older than 30 days"
         assert (tmp_path / "new_backup.db").exists(), "New file should be retained"
@@ -266,10 +302,14 @@ class TestCleanupOldBackups:
         file_path.write_bytes(SQLITE_HEADER + b"locked data")
 
         with patch.object(Path, "unlink", side_effect=OSError("Permission denied")):
-            result = cleanup_old_backups(backup_dir=tmp_path, max_backups=1, max_age_days=30)
+            result = cleanup_old_backups(
+                backup_dir=tmp_path, max_backups=1, max_age_days=30
+            )
 
             assert result["files_deleted"] == 0, "Should not count failed deletions"
-            assert result["bytes_freed"] == 0, "Should not count freed bytes for failed deletions"
+            assert (
+                result["bytes_freed"] == 0
+            ), "Should not count freed bytes for failed deletions"
 
 
 class TestGetDatabaseSizeBytes:
