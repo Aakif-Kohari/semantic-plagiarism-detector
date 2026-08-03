@@ -34,6 +34,8 @@ from .core import (
     get_branding_config,
     reload_branding_config,
     load_branding_config,
+    TagManager,
+    sanitize_tag_name,
 )
 
 from .db import (
@@ -150,4 +152,6 @@ __all__ = [
     "reload_branding_config",
     "load_branding_config",
     "sanitize_zero_width_characters",
+    "TagManager",
+    "sanitize_tag_name",
 ]

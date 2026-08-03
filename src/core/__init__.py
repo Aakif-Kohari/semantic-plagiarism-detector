@@ -19,6 +19,7 @@ from .config import (
     reload_branding_config,
     load_branding_config,
 )
+from .tag_manager import TagManager, sanitize_tag_name
 
 
 __all__ = [
@@ -53,4 +54,6 @@ __all__ = [
     "load_branding_config",
     "dispatch_plagiarism_alert",
     "sanitize_zero_width_characters",
+    "TagManager",
+    "sanitize_tag_name",
 ]
