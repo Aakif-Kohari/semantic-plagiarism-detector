@@ -513,6 +513,18 @@ def get_document_word_counts() -> dict[str, int]:
     return word_counts
 
 
+def get_document_char_counts() -> dict[str, int]:
+    """Calculate and return the total character count for each document currently in the database."""
+    with _connect() as conn:
+        rows = conn.execute("SELECT filename, chunk_text FROM chunks").fetchall()
+
+    char_counts = {}
+    for filename, chunk_text in rows:
+        chars = len(chunk_text or "")
+        char_counts[filename] = char_counts.get(filename, 0) + chars
+    return char_counts
+
+
 def clear_all_data() -> None:
     """Clear known corpus tables while tolerating partial schemas."""
     with _connect() as conn:
