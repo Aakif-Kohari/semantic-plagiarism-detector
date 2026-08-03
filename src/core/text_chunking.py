@@ -282,7 +282,81 @@ def chunk_by_sentences(
     return chunks
 
 
+# ── Sliding Window Chunk Overlap Optimizer (Issue #1352) ─────────────────────
+
+
+def chunk_text_dynamic(
+    text: str,
+    target_size: int = 500,
+    min_overlap: int = 50,
+) -> List[str]:
+    """Dynamically split text into sliding window chunks while preserving sentence boundaries.
+
+    Window boundaries are shifted to the nearest sentence end punctuation ('.', '!', '?')
+    when a punctuation mark occurs within 20% of target_size.
+
+    Args:
+        text: Raw document text to chunk.
+        target_size: Target character length per chunk (default: 500).
+        min_overlap: Minimum character overlap between consecutive chunks (default: 50).
+
+    Returns:
+        List of ChunkString objects representing sentence-boundary-optimized text chunks.
+    """
+    if not text or not text.strip():
+        return []
+
+    clean_src = text.strip()
+    n_total = len(clean_src)
+
+    if n_total <= target_size:
+        return [ChunkString(clean_src)]
+
+    margin = int(target_size * 0.20)
+    chunks: List[str] = []
+    start = 0
+
+    sentence_punct = {".", "!", "?"}
+
+    while start < n_total:
+        target_end = min(n_total, start + target_size)
+
+        if target_end >= n_total:
+            actual_end = n_total
+        else:
+            # Search for sentence ending punctuation within [target_end - margin, target_end + margin]
+            min_search = max(start + min_overlap, target_end - margin)
+            max_search = min(n_total, target_end + margin)
+
+            candidate_indices = [
+                idx for idx in range(min_search, max_search)
+                if clean_src[idx] in sentence_punct
+            ]
+
+            if candidate_indices:
+                # Pick sentence ending punctuation closest to target_end
+                best_idx = min(candidate_indices, key=lambda idx: abs((idx + 1) - target_end))
+                actual_end = best_idx + 1
+            else:
+                actual_end = target_end
+
+        chunk_content = clean_src[start:actual_end].strip()
+        if chunk_content:
+            chunks.append(ChunkString(chunk_content))
+
+        if actual_end >= n_total:
+            break
+
+        next_start = actual_end - min_overlap
+        if next_start <= start:
+            next_start = start + max(1, target_size - min_overlap)
+        start = next_start
+
+    return chunks
+
+
 # ── Multi-document helpers ────────────────────────────────────────────────────
+
 
 
 def chunk_documents(

@@ -4,7 +4,7 @@ tests/core/test_text_chunking.py
 Unit tests for customizable chunk size and overlap parameters, including edge cases.
 """
 
-from src.core.text_chunking import chunk_by_sentences, chunk_documents, chunk_text
+from src.core.text_chunking import chunk_by_sentences, chunk_documents, chunk_text, chunk_text_dynamic
 
 
 def test_chunk_text_custom_parameters():
@@ -291,3 +291,37 @@ def test_chunk_text_no_truncation_warning_for_empty_text(caplog):
         if "exceeded chunk capacity limit" in record.getMessage()
     ]
     assert len(truncation_warnings) == 0
+
+
+# ── Sliding Window Chunk Overlap Optimizer Tests (#1352) ─────────────────────
+
+
+def test_chunk_text_dynamic_preserves_sentences_intact():
+    """Verify sentences are preserved intact across chunk boundaries."""
+    text = (
+        "First sentence provides initial context. "
+        "Second sentence elaborates further details on the topic. "
+        "Third sentence completes the paragraph argument. "
+        "Fourth sentence begins the new discussion topic!"
+    )
+    chunks = chunk_text_dynamic(text, target_size=80, min_overlap=20)
+
+    assert len(chunks) >= 2
+    sentence_endings = (".", "!", "?")
+    for chunk in chunks:
+        stripped = chunk.strip()
+        assert len(stripped) > 0
+        # Check that non-final boundary chunks end at sentence punctuation
+        assert stripped[-1] in sentence_endings or stripped == text.strip()
+
+
+def test_chunk_text_dynamic_empty_and_short():
+    """Verify empty text returns empty list and short text returns single chunk."""
+    assert chunk_text_dynamic("") == []
+    assert chunk_text_dynamic("   ") == []
+
+    short = "Short single sentence."
+    chunks = chunk_text_dynamic(short, target_size=500)
+    assert len(chunks) == 1
+    assert chunks[0] == short
+
