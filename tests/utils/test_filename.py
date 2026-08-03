@@ -1,8 +1,13 @@
 import pytest
 from unittest.mock import patch
 
-from src.utils.filename import (_safe_extension, sanitize_filename,
-                                sanitize_filename_mapping, unique_filename)
+from src.utils.filename import (
+    _safe_extension,
+    get_file_sha256_hash,
+    sanitize_filename,
+    sanitize_filename_mapping,
+    unique_filename,
+)
 
 
 @pytest.mark.parametrize(
@@ -25,9 +30,7 @@ def test_sanitize_filename_security_cases(untrusted, expected):
 
 
 def test_sanitized_filename_contains_no_html_or_path_separators():
-    result = sanitize_filename(
-        '<svg/onload=alert(1)>../../evil "file".pdf'
-    )
+    result = sanitize_filename('<svg/onload=alert(1)>../../evil "file".pdf')
 
     assert "<" not in result
     assert ">" not in result
@@ -118,6 +121,7 @@ def test_invalid_max_length_type_is_rejected(value):
 # Cross-platform path separator compatibility tests  (#870)
 # ---------------------------------------------------------------------------
 
+
 @patch("src.utils.filename.os.name", "nt")
 @patch("src.utils.filename.os.path.sep", "\\")
 def test_sanitize_filename_windows_style_path_under_nt_mock():
@@ -184,3 +188,19 @@ def test_unique_filename_no_separator_in_output_under_posix_mock():
     assert "/" not in result
     assert "\\" not in result
     assert result == "report_1.pdf"
+
+
+def test_get_file_sha256_hash_returns_expected_digest():
+    file_bytes = b"hello world"
+
+    assert (
+        get_file_sha256_hash(file_bytes)
+        == "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+    )
+
+
+def test_get_file_sha256_hash_returns_64_character_hex_digest():
+    digest = get_file_sha256_hash(b"test")
+
+    assert len(digest) == 64
+    assert digest == digest.lower()
