@@ -323,3 +323,37 @@ def test_scope_enforcement_clear_endpoint():
     )
     assert res.status_code == 403
 
+import asyncio
+import json
+from unittest.mock import Mock
+
+from src.api.app import global_exception_handler
+
+
+def test_global_exception_handler_returns_standard_payload(monkeypatch):
+    """Verify Issue #1500: unhandled exceptions return the standardized JSON payload."""
+    monkeypatch.setenv("APP_ENVIRONMENT", "development")
+    mock_request = Mock()
+
+    response = asyncio.run(global_exception_handler(mock_request, ValueError("boom")))
+    body = json.loads(response.body)
+
+    assert response.status_code == 500
+    assert body["error"] is True
+    assert body["code"] == 500
+    assert body["message"] == "boom"
+    assert "timestamp" in body
+
+
+def test_global_exception_handler_masks_details_in_production(monkeypatch):
+    """Verify Issue #1500: internal exception details are masked in production."""
+    monkeypatch.setenv("APP_ENVIRONMENT", "production")
+    mock_request = Mock()
+
+    response = asyncio.run(
+        global_exception_handler(mock_request, ValueError("sensitive internal detail"))
+    )
+    body = json.loads(response.body)
+
+    assert body["message"] == "An internal server error occurred."
+    assert "sensitive internal detail" not in body["message"]
