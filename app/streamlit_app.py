@@ -1596,6 +1596,22 @@ if user_role == "admin":
         existing_docs = get_all_documents()
         if existing_docs:
             st.write(f"**{len(existing_docs)}** documents in database")
+            
+            import pandas as pd
+            from src.db.corpus_db import get_document_word_counts, get_document_char_counts
+            word_counts = get_document_word_counts()
+            char_counts = get_document_char_counts()
+            
+            df = pd.DataFrame([{"filename": doc["filename"]} for doc in existing_docs])
+            df["word_count"] = df["filename"].map(word_counts).fillna(0).astype(int)
+            df["char_count"] = df["filename"].map(char_counts).fillna(0).astype(int)
+            
+            styled_df = df.style.format({
+                "word_count": "{:,} words",
+                "char_count": "{:,} chars"
+            })
+            st.dataframe(styled_df, use_container_width=True)
+
             for doc in existing_docs:
                 col1, col2 = st.columns([3, 1])
                 with col1:
