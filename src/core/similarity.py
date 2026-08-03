@@ -42,7 +42,7 @@ def _validated_batch_size(batch_size: Optional[int]) -> Optional[int]:
         size = int(batch_size)
     except (TypeError, ValueError) as exc:
         raise ValueError(SIM_BATCH_SIZE_INVALID) from exc
-return size if size > 0 else None
+    return size if size > 0 else None
 
 
 def _apply_min_percentile_filter(
@@ -146,7 +146,8 @@ def document_similarity_matrix(
     doc_embeddings: Union[Dict[str, np.ndarray], np.ndarray, List[np.ndarray]],
     batch_size: Optional[int] = None,
     min_percentile: Optional[float] = None,
-) -> Union[pd.DataFrame, np.ndarray]:    """
+) -> Union[pd.DataFrame, np.ndarray]:
+    """
     Build an N×N cosine similarity matrix between all document pairs.
 
     Args:
@@ -160,7 +161,7 @@ def document_similarity_matrix(
         stacked = np.array(doc_embeddings)
         if stacked.ndim == 1 or stacked.size == 0:
             return np.array([[]])
-sim = np.clip(cosine_similarity(stacked), 0.0, 1.0)
+        sim = np.clip(cosine_similarity(stacked), 0.0, 1.0)
         return _apply_min_percentile_filter(sim, min_percentile)
     doc_names = list(doc_embeddings.keys())
     n = len(doc_names)
@@ -193,7 +194,7 @@ sim = np.clip(cosine_similarity(stacked), 0.0, 1.0)
                 sim = cosine_similarity(stacked[start:end], stacked)
                 matrix[start:end] = np.clip(sim, 0.0, 1.0)
 
-df = pd.DataFrame(matrix, index=doc_names, columns=doc_names)
+    df = pd.DataFrame(matrix, index=doc_names, columns=doc_names)
     return _apply_min_percentile_filter(df, min_percentile)
 
 def compute_similarity_matrix(

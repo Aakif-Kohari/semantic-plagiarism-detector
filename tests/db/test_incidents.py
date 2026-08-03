@@ -12,7 +12,9 @@ from src.db.incidents import (
     get_incidents_by_date_range,
     get_incidents_by_severity,
     get_incidents_count_by_date,
+    get_recent_incidents,
     incidents_to_csv,
+    log_incident,
     purge_old_incidents,
     sync_flagged_incidents,
     update_review_status,
@@ -83,7 +85,8 @@ def test_get_incidents_by_date_range_orders_descending(test_db):
     assert [r["document_a"] for r in results] == ["b1.pdf", "a1.pdf"]
 
 
-def test_sync_flagged_incidents_adds_incident(test_db):    flags = [
+def test_sync_flagged_incidents_adds_incident(test_db):
+    flags = [
         {
             "doc_a": "doc1.pdf",
             "doc_b": "doc2.pdf",
@@ -274,7 +277,7 @@ def test_get_incidents_by_severity(test_db):
 
     sync_flagged_incidents(flags, test_db)
 
-results = get_incidents_by_severity("High", test_db)
+    results = get_incidents_by_severity("High", test_db)
 
     assert len(results) == 1
     assert results[0]["severity_rank"] == "High"

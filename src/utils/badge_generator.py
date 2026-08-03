@@ -7,7 +7,8 @@ Supports both PNG and PDF output formats for gamification and academic integrity
 
 import html
 import re
-from datetime import datetimefrom io import BytesIO
+from datetime import datetime
+from io import BytesIO
 from typing import Optional
 try:
     from PIL import Image, ImageDraw, ImageFont
@@ -34,7 +35,7 @@ def validate_hex_color(color: Optional[str]) -> str:
     if not color:
         return DEFAULT_BADGE_COLOR
     candidate = color if color.startswith("#") else f"#{color}"
-if HEX_COLOR_PATTERN.match(candidate):
+    if HEX_COLOR_PATTERN.match(candidate):
         return candidate
     return DEFAULT_BADGE_COLOR
 

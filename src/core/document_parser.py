@@ -109,7 +109,8 @@ def get_stopwords() -> frozenset:
     return ENGLISH_STOPWORDS | load_custom_stopwords()
 
 
-def sanitize_zero_width_characters(text: str, filename: Optional[str] = None) -> str:    """
+def sanitize_zero_width_characters(text: str, filename: Optional[str] = None) -> str:
+    """
     Strips zero-width unicode characters (e.g. \u200B) often used to bypass plagiarism checkers.
     Logs a security warning if any zero-width characters are found.
     """
@@ -320,7 +321,7 @@ def clean_text(raw_text: str, remove_stopwords: bool = False) -> str:
     text = re.sub(r"[ \t]+\n", "\n", text)
     text = re.sub(r"\n[ \t]+", "\n", text)
 
-if remove_stopwords:
+    if remove_stopwords:
         # Tokenize, filter, and rejoin while preserving basic structure
         words = text.split()
         stopwords = get_stopwords()
