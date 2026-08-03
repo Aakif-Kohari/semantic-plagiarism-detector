@@ -65,6 +65,8 @@ from .db import (
     update_password,
     update_user_profile,
     verify_user,
+    get_recent_incidents,
+    log_incident,
 )
 try:
     from .visualization import (
@@ -137,6 +139,8 @@ __all__ = [
     "set_user_active_status",
     "is_user_active",
     "update_user_profile",
+    "get_recent_incidents",
+    "log_incident",
     "init_corpus_db",
     "add_document",
     "get_document_by_hash",
