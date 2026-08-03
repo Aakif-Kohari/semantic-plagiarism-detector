@@ -761,3 +761,26 @@ def test_normalize_unicode_spaces():
     normalized = normalize_unicode_spaces(text)
 
     assert normalized == "Hello World! Python,Testing."
+
+
+class TestCleanWhitespaceOption:
+    """Unit tests for clean_whitespace option in extract_text."""
+
+    def test_clean_whitespace_enabled_default(self, tmp_path):
+        """clean_whitespace=True by default removes trailing spaces and collapses >2 blank lines to a single newline."""
+        content = "Line 1   \n\n\n\nLine 2  \n\n\nLine 3"
+        file_path = tmp_path / "test_clean.txt"
+        file_path.write_bytes(content.encode("utf-8"))
+
+        result = extract_text(str(file_path), "test_clean.txt")
+        assert result.replace("\r\n", "\n") == "Line 1\n\nLine 2\n\nLine 3"
+
+    def test_clean_whitespace_disabled(self, tmp_path):
+        """clean_whitespace=False preserves raw whitespace and multiple blank lines."""
+        content = "Line 1   \n\n\n\nLine 2  \n\n\nLine 3"
+        file_path = tmp_path / "test_raw.txt"
+        file_path.write_bytes(content.encode("utf-8"))
+
+        result = extract_text(str(file_path), "test_raw.txt", clean_whitespace=False)
+        assert result.replace("\r\n", "\n") == "Line 1   \n\n\n\nLine 2  \n\n\nLine 3"
+
