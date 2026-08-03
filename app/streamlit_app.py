@@ -1154,14 +1154,127 @@ if not selected_classes:
         st.success("✅ Filters reset to defaults!")
         st.rerun()
 
+    # Keyboard shortcuts
     with st.expander("⌨️ Keyboard Shortcuts"):
         st.caption("• **R**: Rerun app")
         st.caption("• **C**: Clear cache")
         st.caption("• **Tab**: Navigate focus")
 
+    # Model load time
     if "model_load_time" in st.session_state:
         st.divider()
         st.caption(f"⚡ Vector Model Loaded in {st.session_state.model_load_time:.2f} seconds")
+
+    # ── System Health Widget (Issue #1246) ──────────────────────────────────────
+    # Collapsible sidebar expander showing RAM usage, disk space, and DB status
+    # for administrators monitoring the application health at a glance.
+    with st.expander("🖥️ System Health", expanded=False):
+        try:
+            # System RAM usage percentage via psutil
+            memory_info = psutil.virtual_memory()
+            ram_usage_percent = memory_info.percent
+            ram_total_gb = memory_info.total / (1024 ** 3)
+            ram_available_gb = memory_info.available / (1024 ** 3)
+
+            # Choose indicator color based on RAM usage severity
+            if ram_usage_percent >= 90:
+                ram_indicator = "🔴"
+                ram_status_text = "Critical"
+            elif ram_usage_percent >= 70:
+                ram_indicator = "🟡"
+                ram_status_text = "Warning"
+            else:
+                ram_indicator = "🟢"
+                ram_status_text = "Healthy"
+
+            st.markdown(
+                f"**💾 RAM Usage:** {ram_indicator} {ram_usage_percent:.1f}% "
+                f"({ram_status_text})"
+            )
+            st.caption(
+                f"Total: {ram_total_gb:.1f} GB · "
+                f"Available: {ram_available_gb:.1f} GB"
+            )
+
+            # Free disk space on the partition containing the project root
+            disk_usage = psutil.disk_usage(str(ROOT_DIR))
+            free_disk_gb = disk_usage.free / (1024 ** 3)
+            total_disk_gb = disk_usage.total / (1024 ** 3)
+            disk_usage_percent = disk_usage.percent
+
+            if disk_usage_percent >= 90:
+                disk_indicator = "🔴"
+            elif disk_usage_percent >= 75:
+                disk_indicator = "🟡"
+            else:
+                disk_indicator = "🟢"
+
+            st.markdown(
+                f"**💿 Disk Space:** {disk_indicator} {disk_usage_percent:.1f}% used"
+            )
+            st.caption(
+                f"Free: {free_disk_gb:.1f} GB · "
+                f"Total: {total_disk_gb:.1f} GB"
+            )
+
+            st.divider()
+
+            # Database connection status indicators
+            st.markdown("**🗄️ Database Status**")
+
+            # Check Corpus DB connection
+            try:
+                from src.core.app_config import CORPUS_DB_PATH, AUTH_DB_PATH
+
+                corpus_db_exists = CORPUS_DB_PATH.exists()
+                if corpus_db_exists:
+                    st.markdown("• **Corpus DB:** 🟢 Connected")
+                    corpus_size_kb = CORPUS_DB_PATH.stat().st_size / 1024
+                    st.caption(f"  Size: {corpus_size_kb:.1f} KB")
+                else:
+                    st.markdown("• **Corpus DB:** 🟡 Not initialized")
+                    st.caption("  Will be created on first data upload.")
+
+            except Exception as db_err:
+                st.markdown(f"• **Corpus DB:** 🔴 Error")
+                st.caption(f"  {db_err}")
+
+            # Check Auth DB connection
+            try:
+                auth_db_exists = AUTH_DB_PATH.exists()
+                if auth_db_exists:
+                    st.markdown("• **Auth DB:** 🟢 Connected")
+                    auth_size_kb = AUTH_DB_PATH.stat().st_size / 1024
+                    st.caption(f"  Size: {auth_size_kb:.1f} KB")
+                else:
+                    st.markdown("• **Auth DB:** 🟡 Not initialized")
+                    st.caption("  Will be created on first login.")
+
+            except Exception as db_err:
+                st.markdown(f"• **Auth DB:** 🔴 Error")
+                st.caption(f"  {db_err}")
+
+            # CPU load indicator (1-minute average)
+            st.divider()
+            cpu_percent = psutil.cpu_percent(interval=0.1)
+            cpu_count = psutil.cpu_count(logical=True)
+
+            if cpu_percent >= 90:
+                cpu_indicator = "🔴"
+            elif cpu_percent >= 70:
+                cpu_indicator = "🟡"
+            else:
+                cpu_indicator = "🟢"
+
+            st.markdown(
+                f"**⚡ CPU Load:** {cpu_indicator} {cpu_percent:.1f}% "
+                f"({cpu_count} cores)"
+            )
+
+        except ImportError:
+            st.warning("⚠️ psutil not available. System health data unavailable.")
+        except Exception as health_err:
+            st.error(f"Failed to load system health data: {health_err}")
 
 # ── Main UI ───────────────────────────────────────────────────────────────────
 st.title("🔍 Semantic Plagiarism Detection System")
