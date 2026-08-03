@@ -4,7 +4,7 @@ import pytest
 
 from src.core.faiss_index import (ChunkRecord, build_index,
                                   find_plagiarised_chunks, load_index,
-                                  save_index, search_similar_chunks)
+                                  optimize_faiss_index, save_index, search_similar_chunks)
 
 
 def _unit_vecs(n, dim=384):
@@ -192,6 +192,56 @@ def test_faiss_normalization_benchmark():
     # Print results and assert speedup (vectorized should be much faster than loop)
     print(f"\n[Benchmark] Loop-based L2 normalization: {loop_time:.6f}s")
     print(f"[Benchmark] Vectorized NumPy L2 normalization: {vec_time:.6f}s")
-    print(f"[Benchmark] Speedup factor: {loop_time / vec_time:.2f}x")
-
     assert vec_time < loop_time
+
+
+# ── FAISS Index Optimization Tests (#1354) ───────────────────────────────────
+
+
+def test_optimize_faiss_index_below_threshold(caplog):
+    """Below 5000 threshold, logs vector count and returns True without error."""
+    import logging
+
+    dim = 384
+    index = faiss.IndexFlatIP(dim)
+    vecs = _unit_vecs(10, dim=dim)
+    index.add(vecs)
+
+    class IndexManager:
+        def __init__(self, idx):
+            self.index = idx
+
+    manager = IndexManager(index)
+
+    with caplog.at_level(logging.INFO, logger="src.core.faiss_index"):
+        result = optimize_faiss_index(manager, nlist=10)
+
+    assert result is True
+    assert manager.index.ntotal == 10
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("Vector count before index optimization: 10" in m for m in messages)
+    assert any("Vector count after index optimization: 10" in m for m in messages)
+
+
+def test_optimize_faiss_index_converts_above_threshold(caplog, monkeypatch):
+    """Above 5000 threshold, converts flat index to IVF index and logs count."""
+    import logging
+    import src.core.faiss_index as faiss_mod
+
+    # Lower threshold temporarily for unit test speed
+    monkeypatch.setattr(faiss_mod, "_IVF_THRESHOLD", 5)
+
+    dim = 384
+    index = faiss.IndexFlatIP(dim)
+    vecs = _unit_vecs(10, dim=dim)
+    index.add(vecs)
+
+    manager = {"index": index}
+
+    with caplog.at_level(logging.INFO, logger="src.core.faiss_index"):
+        result = optimize_faiss_index(manager, nlist=4)
+
+    assert result is True
+    assert manager["index"].ntotal == 10
+    assert isinstance(manager["index"], (faiss.IndexIVFFlat, faiss.IndexIDMap))
+
