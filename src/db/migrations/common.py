@@ -25,18 +25,7 @@ Migration: TypeAlias = Callable[[sqlite3.Connection], None]
 
 
 def quote_identifier(identifier: str) -> str:
-    """
-    Return a safely quoted SQLite identifier to prevent SQL injection.
-
-    Args:
-        identifier: The database object name (table, column, index).
-
-    Returns:
-        str: The safely quoted identifier.
-
-    Raises:
-        ValueError: If the identifier is empty or contains NUL bytes.
-    """
+    """Return a safely quoted SQLite identifier to prevent SQL injection."""
     value = str(identifier)
     if not value or "\x00" in value:
         raise ValueError("SQLite identifier must be non-empty and contain no NUL.")
@@ -44,16 +33,7 @@ def quote_identifier(identifier: str) -> str:
 
 
 def table_exists(connection: sqlite3.Connection, table_name: str) -> bool:
-    """
-    Return whether a table exists in the current database.
-
-    Args:
-        connection: An active sqlite3.Connection object.
-        table_name: The name of the table to check.
-
-    Returns:
-        bool: True if the table exists, False otherwise.
-    """
+    """Return whether a table exists in the current database."""
     row = connection.execute(
         """
         SELECT 1
@@ -71,17 +51,7 @@ def column_exists(
     table_name: str,
     column_name: str,
 ) -> bool:
-    """
-    Return whether a column exists on a specific table.
-
-    Args:
-        connection: An active sqlite3.Connection object.
-        table_name: The name of the table.
-        column_name: The name of the column to check.
-
-    Returns:
-        bool: True if the column exists, False otherwise.
-    """
+    """Return whether a column exists on a specific table."""
     if not table_exists(connection, table_name):
         return False
 
@@ -91,16 +61,7 @@ def column_exists(
 
 
 def index_exists(connection: sqlite3.Connection, index_name: str) -> bool:
-    """
-    Return whether an index exists in the current database.
-
-    Args:
-        connection: An active sqlite3.Connection object.
-        index_name: The name of the index to check.
-
-    Returns:
-        bool: True if the index exists, False otherwise.
-    """
+    """Return whether an index exists in the current database."""
     row = connection.execute(
         """
         SELECT 1
@@ -114,43 +75,24 @@ def index_exists(connection: sqlite3.Connection, index_name: str) -> bool:
 
 
 def get_user_version(connection: sqlite3.Connection) -> int:
-    """
-    Return the current SQLite PRAGMA user_version.
-
-    Args:
-        connection: An active sqlite3.Connection object.
-
-    Returns:
-        int: The current schema version.
-    """
+    """Return the current SQLite PRAGMA user_version."""
     row = connection.execute("PRAGMA user_version").fetchone()
     return int(row[0]) if row else 0
 
+
+def set_user_version(connection: sqlite3.Connection, version: int) -> None:
+    """Set the SQLite PRAGMA user_version using a trusted integer."""
+    value = int(version)
+    if value < 0:
+        raise ValueError("Schema version cannot be negative.")
+    connection.execute(f"PRAGMA user_version = {value}")
 
 
 def get_migration_status(
     db_path: str | Path,
     migrations_dict: Mapping[int, Migration],
 ) -> dict[str, int | list[int]]:
-    """Inspect migration status without modifying the database.
-
-    Args:
-        db_path: Existing SQLite database file.
-        migrations_dict: Mapping of migration version to callable.
-
-    Returns:
-        Dictionary containing ``current_version``, ``target_version``, and
-        ordered ``pending_migrations``.
-
-    Raises:
-        FileNotFoundError: If ``db_path`` does not exist.
-        IsADirectoryError: If ``db_path`` is not a regular file.
-        ValueError: If migration versions are invalid or incomplete.
-        RuntimeError: If the database schema is newer than supported.
-        sqlite3.DatabaseError: If the file is not a readable SQLite database.
-    """
-    from pathlib import Path
-
+    """Inspect migration status without modifying the database."""
     path = Path(db_path).expanduser()
     if not path.exists():
         raise FileNotFoundError(f"Database file does not exist: {path}")
@@ -173,7 +115,6 @@ def get_migration_status(
     database_uri = f"{path.resolve().as_uri()}?mode=ro"
     with sqlite3.connect(database_uri, uri=True) as connection:
         current_version = get_user_version(connection)
-        connection.execute("PRAGMA schema_version").fetchone()
 
     if current_version > target_version:
         raise RuntimeError(
@@ -192,34 +133,10 @@ def get_migration_status(
         "pending_migrations": pending,
     }
 
-def set_user_version(connection: sqlite3.Connection, version: int) -> None:
-    """
-    Set the SQLite PRAGMA user_version using a trusted integer.
-
-    Args:
-        connection: An active sqlite3.Connection object.
-        version: The new schema version to set.
-
-    Raises:
-        ValueError: If the version is negative.
-    """
-    value = int(version)
-    if value < 0:
-        raise ValueError("Schema version cannot be negative.")
-    connection.execute(f"PRAGMA user_version = {value}")
-
 
 @contextmanager
 def migration_transaction(connection: sqlite3.Connection):
-    """
-    Execute migrations inside a rollback-safe SQLite savepoint.
-
-    This ensures that if any migration step fails, all schema and data
-    changes, as well as the PRAGMA user_version update, are rolled back.
-
-    Args:
-        connection: An active sqlite3.Connection object.
-    """
+    """Execute migrations inside a rollback-safe SQLite savepoint."""
     savepoint = "schema_migration"
     connection.execute(f"SAVEPOINT {savepoint}")
     try:
@@ -237,28 +154,13 @@ def run_migrations(
     migrations: Mapping[int, Migration],
     target_version: int,
 ) -> int:
-    """
-    Apply every missing migration sequentially and atomically.
-
-    Args:
-        connection: An active sqlite3.Connection object.
-        migrations: A mapping of version numbers to migration callables.
-        target_version: The desired final schema version.
-
-    Returns:
-        int: The final schema version after successful migration.
-
-    Raises:
-        RuntimeError: If the database is newer than the target, or if
-                      migration definitions are missing.
-    """
+    """Apply every missing migration sequentially and atomically."""
     target = int(target_version)
     current = get_user_version(connection)
 
     if current > target:
         raise RuntimeError(
-            f"Database schema version {current} is newer than supported "
-            f"version {target}."
+            f"Database schema version {current} is newer than supported version {target}."
         )
 
     expected_versions = set(range(1, target + 1))
@@ -286,9 +188,6 @@ def run_migrations(
             )
         set_user_version(connection, target)
 
-    # Issue #1051: log successful migration completion so manual
-    # troubleshooting isn't silent. This fires once per database (corpus
-    # and auth each call run_migrations independently).
     logger.info(
         "Database migration from version %d to %d completed successfully.",
         current,
@@ -302,16 +201,7 @@ def delete_all_if_table_exists(
     connection: sqlite3.Connection,
     table_name: str,
 ) -> bool:
-    """
-    Delete every row when the optional table exists.
-
-    Args:
-        connection: An active sqlite3.Connection object.
-        table_name: The name of the table to clear.
-
-    Returns:
-        bool: True if rows were deleted, False if the table did not exist.
-    """
+    """Delete every row when the optional table exists."""
     if not table_exists(connection, table_name):
         return False
 
@@ -321,21 +211,7 @@ def delete_all_if_table_exists(
 
 
 def enable_wal_mode(conn: sqlite3.Connection) -> str:
-    """
-    Enable Write-Ahead Logging (WAL) mode and NORMAL synchronous mode.
-
-    This improves concurrent read/write performance by allowing readers
-    to proceed without blocking writers, and vice versa.
-
-    Args:
-        conn: An active sqlite3.Connection object.
-
-    Returns:
-        str: The resulting journal mode (should be 'wal').
-
-    Raises:
-        sqlite3.Error: If the PRAGMA commands fail to execute.
-    """
+    """Enable Write-Ahead Logging (WAL) mode and NORMAL synchronous mode."""
     cursor = conn.cursor()
     try:
         cursor.execute("PRAGMA journal_mode=WAL;")
@@ -352,15 +228,7 @@ def enable_wal_mode(conn: sqlite3.Connection) -> str:
 
 
 def get_journal_mode(conn: sqlite3.Connection) -> str:
-    """
-    Retrieve the current SQLite journal mode.
-
-    Args:
-        conn: An active sqlite3.Connection object.
-
-    Returns:
-        str: The current journal mode (e.g., 'delete', 'wal', 'memory').
-    """
+    """Retrieve the current SQLite journal mode."""
     cursor = conn.cursor()
     try:
         cursor.execute("PRAGMA journal_mode;")
@@ -372,20 +240,7 @@ def get_journal_mode(conn: sqlite3.Connection) -> str:
 
 
 def perform_wal_checkpoint(conn: sqlite3.Connection, mode: str = "PASSIVE") -> dict:
-    """
-    Perform a Write-Ahead Log (WAL) checkpoint.
-
-    Args:
-        conn: An active sqlite3.Connection object.
-        mode: Checkpoint mode ('PASSIVE', 'FULL', 'RESTART', 'TRUNCATE').
-
-    Returns:
-        dict: A dictionary containing the mode and the result tuple from SQLite.
-
-    Raises:
-        ValueError: If an invalid checkpoint mode is provided.
-        sqlite3.Error: If the checkpoint fails to execute.
-    """
+    """Perform a Write-Ahead Log (WAL) checkpoint."""
     valid_modes = {"PASSIVE", "FULL", "RESTART", "TRUNCATE"}
     if mode.upper() not in valid_modes:
         raise ValueError(f"Invalid checkpoint mode. Must be one of {valid_modes}")
@@ -399,3 +254,4 @@ def perform_wal_checkpoint(conn: sqlite3.Connection, mode: str = "PASSIVE") -> d
     except sqlite3.Error as e:
         logger.error(f"Failed to perform WAL checkpoint: {e}")
         raise
+    
