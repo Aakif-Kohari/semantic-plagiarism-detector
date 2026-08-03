@@ -81,6 +81,7 @@ for mod_name in [
     "sklearn.feature_extraction", "sklearn.feature_extraction.text",
     "requests",
     "streamlit", "streamlit.components", "streamlit.components.v1",
+    "transformers",
 ]:
     if mod_name not in sys.modules:
         try:
