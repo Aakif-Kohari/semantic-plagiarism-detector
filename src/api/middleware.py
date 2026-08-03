@@ -16,6 +16,8 @@ PUBLIC_PATHS = {
     "/metrics/json",
     "/api/v1/auth/login",
     "/api/v1/version",
+    "/api/v1/healthz",
+    "/api/v1/rate_limit",
     "/docs",
     "/redoc",
     "/openapi.json"

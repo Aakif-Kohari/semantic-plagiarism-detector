@@ -9,6 +9,7 @@ from src.core.lexical_similarity import (
     n_gram_overlap,
     overlap_coefficient,
     remove_stopwords,
+    scale_lexical_score,
     tokenize,
 )
 
@@ -109,3 +110,21 @@ def test_overlap_coefficient():
     text2 = "semantic plagiarism detection and automated document verification"
     score = overlap_coefficient(text1, text2)
     assert score == pytest.approx(1.0)
+
+
+# ── Soft-Max Normalization Tests (#924) ────────────────────────────────────────
+
+
+def test_scale_lexical_score_boundaries():
+    """Test boundary inputs 0.0, 0.5, 1.0 for scale_lexical_score."""
+    assert scale_lexical_score(0.0) == 0.0
+    assert scale_lexical_score(0.5) == pytest.approx(0.5, abs=1e-6)
+    assert scale_lexical_score(1.0) == 1.0
+
+
+def test_scale_lexical_score_range_bounds():
+    """Verify output is strictly bounded between 0.0 and 1.0 for arbitrary inputs."""
+    for val in [-1.0, 0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0, 2.0]:
+        res = scale_lexical_score(val)
+        assert 0.0 <= res <= 1.0
+

@@ -6,13 +6,20 @@ from src.core.lexical_similarity import (STOPWORDS,  # noqa: E402
                                          jaccard_similarity,
                                          lexical_similarity_matrix,
                                          remove_stopwords, tokenize)
-from src.core.similarity import (calculate_paragraph_similarity_breakdown,
-                                 chunk_max_similarity, chunk_similarity_matrix,
-                                 document_similarity_matrix,
-                                 find_exact_matches,
-                                 find_most_similar_chunks, flag_plagiarism,
-                                 hybrid_similarity_matrix,
-                                 manhattan_similarity)
+from src.core.similarity import (
+    calculate_paragraph_similarity_breakdown,
+    clear_cross_encoder_cache,
+    chunk_max_similarity,
+    chunk_similarity_matrix,
+    document_similarity_matrix,
+    find_exact_matches,
+    find_most_similar_chunks,
+    flag_plagiarism,
+    get_cross_encoder_info,
+    hybrid_similarity_matrix,
+    manhattan_similarity,
+    rerank_candidates_with_cross_encoder,
+)
 
 
 def test_chunk_max_similarity(dummy_embeddings):
@@ -719,3 +726,101 @@ def test_manhattan_similarity_returns_python_float():
     )
 
     assert isinstance(result, float)
+
+
+# ── Cross-Encoder Rescoring Tests (#1355) ──────────────────────────────────────
+
+
+def test_rerank_candidates_with_cross_encoder_empty_input():
+    """Returns empty list when input pairs list is empty."""
+    clear_cross_encoder_cache()
+    res = rerank_candidates_with_cross_encoder([])
+    assert res == []
+
+
+def test_rerank_candidates_with_cross_encoder_fallback_on_model_load_failure(monkeypatch):
+    """Falls back to original bi-encoder candidates when CrossEncoder fails to load."""
+    clear_cross_encoder_cache()
+
+    pairs = [
+        ("The quick brown fox", "A fast brown fox", 0.85),
+        ("Artificial intelligence", "Machine learning algorithms", 0.60),
+    ]
+
+    # Force model load failure
+    import src.core.similarity as sim_mod
+
+    def mock_get_cross_encoder(model_name):
+        return None
+
+    monkeypatch.setattr(sim_mod, "_get_cross_encoder", mock_get_cross_encoder)
+
+    rescored = rerank_candidates_with_cross_encoder(pairs)
+
+    # Should safely return original pairs
+    assert rescored == pairs
+    assert len(rescored) == 2
+    assert rescored[0][2] == 0.85
+
+
+def test_rerank_candidates_with_cross_encoder_rescores_and_sorts():
+    """Re-scores candidate pairs and returns them sorted by Cross-Encoder score."""
+    clear_cross_encoder_cache()
+
+    pairs = [
+        ("Document text A", "Document text B", 0.50),
+        ("Identical content snippet X", "Identical content snippet X", 0.90),
+        ("Unrelated topic text 1", "Unrelated topic text 2", 0.70),
+    ]
+
+    class DummyCrossEncoder:
+        def predict(self, sentence_pairs, batch_size=32):
+            # Return raw logits: higher for pair 1, lower for pair 0 and 2
+            return np.array([-1.0, 4.0, -3.0])
+
+    import src.core.similarity as sim_mod
+
+    sim_mod._CROSS_ENCODER_MODELS["cross-encoder/ms-marco-MiniLM-L-6-v2"] = DummyCrossEncoder()
+
+    rescored = rerank_candidates_with_cross_encoder(
+        pairs, model_name="cross-encoder/ms-marco-MiniLM-L-6-v2"
+    )
+
+    assert len(rescored) == 3
+    # Top pair should be the second item ("Identical content snippet X")
+    assert rescored[0][0] == "Identical content snippet X"
+    assert rescored[0][2] > rescored[1][2]
+    assert rescored[1][2] > rescored[2][2]
+
+
+def test_rerank_candidates_with_cross_encoder_top_k_limiting():
+    """Respects top_k limits when passed."""
+    clear_cross_encoder_cache()
+
+    pairs = [
+        ("Text A", "Text B", 0.80),
+        ("Text C", "Text D", 0.70),
+        ("Text E", "Text F", 0.60),
+    ]
+
+    class DummyCrossEncoder:
+        def predict(self, sentence_pairs, batch_size=32):
+            return np.array([2.0, 1.0])
+
+    import src.core.similarity as sim_mod
+
+    sim_mod._CROSS_ENCODER_MODELS["dummy-model"] = DummyCrossEncoder()
+
+    rescored = rerank_candidates_with_cross_encoder(pairs, model_name="dummy-model", top_k=2)
+
+    assert len(rescored) == 2
+
+
+def test_get_cross_encoder_info():
+    """Diagnostic helper returns correct model load status."""
+    clear_cross_encoder_cache()
+    info = get_cross_encoder_info("test-model")
+    assert info["model_name"] == "test-model"
+    assert info["is_loaded"] is False
+    assert info["is_failed"] is False
+
