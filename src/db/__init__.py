@@ -29,6 +29,10 @@ from .corpus_db import (
     get_unique_class_sections,
     init_corpus_db,
 )
+from .incidents import (
+    get_recent_incidents,
+    log_incident,
+)
 
 __all__ = [
     "init_db",
@@ -58,6 +62,8 @@ __all__ = [
     "get_unique_class_sections",
     "get_documents_by_class",
     "get_total_document_count",
+    "get_recent_incidents",
+    "log_incident",
 ]
 
 

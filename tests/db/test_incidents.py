@@ -15,6 +15,8 @@ from src.db.incidents import (
     purge_old_incidents,
     sync_flagged_incidents,
     update_review_status,
+    get_recent_incidents,
+    log_incident,
 )
 
 
@@ -468,3 +470,38 @@ def test_get_incidents_count_by_date(test_db):
         {"date": "2026-08-05", "count": 1},
     ]
     assert results == expected
+
+
+def test_get_recent_incidents_caching_and_invalidation(test_db):
+    """Verify that get_recent_incidents caches queries and log_incident/sync_flagged_incidents invalidate it."""
+    from unittest.mock import patch
+
+    # 1. Clear any prior cache state
+    get_recent_incidents.cache_clear()
+
+    # 2. Insert initial incidents via sync
+    flags = [
+        {"doc_a": "doc1.pdf", "doc_b": "doc2.pdf", "similarity": 0.85}
+    ]
+    sync_flagged_incidents(flags, test_db)
+
+    # 3. Call get_recent_incidents for the first time (should hit DB)
+    incidents_1 = get_recent_incidents(limit=5, db_path=test_db)
+    assert len(incidents_1) == 1
+
+    # 4. Repeated call with same args should hit cache
+    with patch("src.db.incidents._get_connection") as mock_conn:
+        incidents_2 = get_recent_incidents(limit=5, db_path=test_db)
+        assert len(incidents_2) == 1
+        # Since cache is hit, database connection shouldn't be opened
+        mock_conn.assert_not_called()
+
+    # 5. Log a new incident using log_incident, which should invalidate the cache
+    new_flag = {"doc_a": "doc3.pdf", "doc_b": "doc4.pdf", "similarity": 0.92}
+    logged = log_incident(new_flag, test_db)
+    assert logged.document_a == "doc3.pdf"
+
+    # 6. Call get_recent_incidents again (should hit DB because cache was invalidated)
+    incidents_3 = get_recent_incidents(limit=5, db_path=test_db)
+    assert len(incidents_3) == 2
+
