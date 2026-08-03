@@ -729,3 +729,69 @@ def optimize_database(db_path: str | Path) -> bool:
             exc,
         )
         return False
+
+
+def checkpoint_wal_log(db_path: str | Path) -> bool:
+    """
+    Execute PRAGMA wal_checkpoint(TRUNCATE) on the database connection and log WAL file size.
+
+    Args:
+        db_path: Path to the SQLite database.
+
+    Returns:
+        bool: True if checkpoint was successful, False otherwise.
+    """
+    target_path = Path(db_path).expanduser().resolve()
+    if not target_path.exists():
+        logger.error("Cannot checkpoint: database does not exist: %s", target_path)
+        return False
+    if not target_path.is_file():
+        logger.error("Cannot checkpoint: database path is not a file: %s", target_path)
+        return False
+
+    wal_path = Path(f"{target_path}-wal")
+
+    # Log WAL size before checkpoint
+    wal_size_before = wal_path.stat().st_size if wal_path.exists() else 0
+    logger.info(
+        "WAL file size before checkpoint for %s: %.2f KB (%d bytes)",
+        target_path.name,
+        wal_size_before / 1024.0,
+        wal_size_before,
+    )
+
+    try:
+        with closing(
+            sqlite3.connect(
+                str(target_path),
+                timeout=10.0,
+                isolation_level=None,
+            )
+        ) as connection:
+            connection.execute("PRAGMA busy_timeout = 5000")
+            connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+
+        # Log WAL size after checkpoint
+        wal_size_after = wal_path.stat().st_size if wal_path.exists() else 0
+        logger.info(
+            "WAL file size after checkpoint for %s: %.2f KB (%d bytes)",
+            target_path.name,
+            wal_size_after / 1024.0,
+            wal_size_after,
+        )
+        return True
+    except sqlite3.Error as exc:
+        logger.error(
+            "SQLite WAL checkpoint failed for %s: %s",
+            target_path,
+            exc,
+        )
+        return False
+    except OSError as exc:
+        logger.error(
+            "File-system error during WAL checkpoint of %s: %s",
+            target_path,
+            exc,
+        )
+        return False
+
