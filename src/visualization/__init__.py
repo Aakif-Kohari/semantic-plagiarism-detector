@@ -2,6 +2,8 @@ from .analytics import plot_high_severity_trends, plot_most_plagiarized_document
 from .heatmap import (
     filter_heatmap_by_class_tag,
     plot_chunk_similarity_comparison,
+    plot_differential_heatmap,
+    plot_differential_heatmap_matplotlib,
     plot_similarity_heatmap,
     plot_similarity_heatmap_plotly,
 )
@@ -20,6 +22,8 @@ __all__ = [
     "filter_heatmap_by_class_tag",
     "plot_similarity_heatmap",
     "plot_similarity_heatmap_plotly",
+    "plot_differential_heatmap",
+    "plot_differential_heatmap_matplotlib",
     "plot_chunk_similarity_comparison",
     "build_network_data",
     "export_graph_to_csv",
