@@ -103,7 +103,8 @@ def test_document_similarity_matrix_rejects_invalid_percentile(dummy_embeddings)
         document_similarity_matrix(dummy_embeddings, min_percentile=150.0)
 
 
-def test_chunk_similarity_matrix(dummy_embeddings):    df = chunk_similarity_matrix(dummy_embeddings)
+def test_chunk_similarity_matrix(dummy_embeddings):
+    df = chunk_similarity_matrix(dummy_embeddings)
 
     assert isinstance(df, pd.DataFrame)
     assert df.shape == (3, 3)

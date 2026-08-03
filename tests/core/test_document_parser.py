@@ -1,6 +1,5 @@
 import io
 import shutil
-from pathlib import Path
 
 import zipfile
 from unittest.mock import MagicMock, patch
@@ -605,7 +604,7 @@ class TestCleanText:
         result = clean_text(text, remove_stopwords=True)
         assert result == ""
 
-def test_stopword_removal_all_stopwords(self):
+    def test_stopword_removal_all_stopwords(self):
         text = "is are was were be been being"
         result = clean_text(text, remove_stopwords=True)
         assert result == ""
