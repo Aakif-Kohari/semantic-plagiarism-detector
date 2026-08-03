@@ -63,6 +63,7 @@ ZERO_WIDTH_CHARS_PATTERN = re.compile(r"[\u200B\u200C\u200D\uFEFF\u2060\u200E\u2
 ENGLISH_STOPWORDS = frozenset({
     "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
     "of", "with", "by", "is", "are", "was", "were", "be", "been", "being",
+    "over",
     "have", "has", "had", "do", "does", "did", "will", "would", "shall",
     "should", "can", "could", "may", "might", "must", "i", "me", "my",
     "myself", "we", "our", "ours", "ourselves", "you", "your", "yours",
@@ -259,8 +260,13 @@ def strip_bibliography(text: str) -> str:
     return text
 
 
-def clean_text(raw_text: str) -> str:
-    """Normalize whitespace and remove unwanted Unicode characters."""
+def clean_text(raw_text: str, remove_stopwords: bool = False) -> str:
+    """Normalize whitespace and remove unwanted Unicode characters.
+
+    Args:
+        raw_text: The text to clean.
+        remove_stopwords: When True, filters out English stopwords.
+    """
     text = raw_text
 
     text = text.translate(

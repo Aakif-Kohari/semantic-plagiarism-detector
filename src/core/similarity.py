@@ -45,6 +45,64 @@ def _validated_batch_size(batch_size: Optional[int]) -> Optional[int]:
     return size if size > 0 else None
 
 
+# ── Distance-based similarity ──────────────────────────────────────────────────
+
+
+def manhattan_similarity(
+    vec_a: np.ndarray,
+    vec_b: np.ndarray,
+) -> float:
+    """Return normalized Manhattan similarity for equally shaped arrays.
+
+    The Manhattan (L1) distance is converted to similarity using
+    ``1 / (1 + distance)``. Identical inputs therefore return ``1.0``;
+    larger distances approach ``0.0`` without ever producing a value outside
+    the inclusive ``[0.0, 1.0]`` range.
+
+    Args:
+        vec_a: First numeric vector or array.
+        vec_b: Second numeric vector or array.
+
+    Returns:
+        A finite Python ``float`` between ``0.0`` and ``1.0``.
+
+    Raises:
+        TypeError: If either input cannot be converted to a numeric array.
+        ValueError: If shapes differ, either input is empty, or either input
+            contains NaN or infinity.
+    """
+    try:
+        array_a = np.asarray(vec_a, dtype=np.float64)
+        array_b = np.asarray(vec_b, dtype=np.float64)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(
+            "Manhattan similarity requires numeric array inputs."
+        ) from exc
+
+    if array_a.shape != array_b.shape:
+        raise ValueError(
+            "Manhattan similarity requires arrays with matching shapes."
+        )
+
+    if array_a.size == 0:
+        raise ValueError(
+            "Manhattan similarity requires non-empty arrays."
+        )
+
+    if not np.all(np.isfinite(array_a)) or not np.all(
+        np.isfinite(array_b)
+    ):
+        raise ValueError(
+            "Manhattan similarity requires finite numeric values."
+        )
+
+    distance = float(np.sum(np.abs(array_a - array_b), dtype=np.float64))
+    similarity = 1.0 / (1.0 + distance)
+
+    # Protect the public contract from tiny floating-point excursions.
+    return float(np.clip(similarity, 0.0, 1.0))
+
+
 # ── Document-level similarity ──────────────────────────────────────────────────
 
 
@@ -107,23 +165,13 @@ def document_similarity_matrix(
 def compute_similarity_matrix(
     embeddings: Union[Dict[str, np.ndarray], np.ndarray, List[np.ndarray]],
     batch_size: Optional[int] = None,
-    min_similarity_threshold: float = 0.0,
 ) -> Union[pd.DataFrame, np.ndarray]:
     """
     Direct alias/wrapper for document_similarity_matrix to maintain backwards compatibility
     with app/streamlit_app.py and external modules.
-
-    Any pairwise score below min_similarity_threshold is replaced with 0.0.
     """
-    matrix = document_similarity_matrix(embeddings, batch_size=batch_size)
+    return document_similarity_matrix(embeddings, batch_size=batch_size)
 
-    if min_similarity_threshold > 0.0:
-        if isinstance(matrix, pd.DataFrame):
-            matrix = matrix.mask(matrix < min_similarity_threshold, 0.0)
-        else:
-            matrix = np.where(matrix < min_similarity_threshold, 0.0, matrix)
-
-    return matrix
 
 # ── Hybrid similarity (lexical + semantic) ─────────────────────────────────────
 
