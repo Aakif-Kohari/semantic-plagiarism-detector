@@ -591,10 +591,11 @@ class TestCleanText:
     def test_stopword_removal_handles_punctuation(self):
         text = "Hello, world! This is a test."
         result = clean_text(text, remove_stopwords=True)
-        # "is", "a" should be removed, punctuation remains attached to words
+        # "This", "is", "a" should be removed (case-insensitive matching);
+        # punctuation remains attached to words
         assert "Hello," in result
         assert "world!" in result
-        assert "This" in result
+        assert "This" not in result
         assert "test." in result
         assert " is " not in result
         assert " a " not in result
