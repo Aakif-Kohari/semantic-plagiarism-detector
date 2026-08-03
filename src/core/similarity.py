@@ -42,11 +42,47 @@ def _validated_batch_size(batch_size: Optional[int]) -> Optional[int]:
         size = int(batch_size)
     except (TypeError, ValueError) as exc:
         raise ValueError(SIM_BATCH_SIZE_INVALID) from exc
-    return size if size > 0 else None
+return size if size > 0 else None
+
+
+def _apply_min_percentile_filter(
+    matrix: Union[pd.DataFrame, np.ndarray],
+    min_percentile: Optional[float],
+) -> Union[pd.DataFrame, np.ndarray]:
+    """Zero out similarity scores below the given percentile threshold.
+
+    The percentile is computed over the off-diagonal scores only, so a
+    document's similarity with itself (always 1.0) doesn't skew the cutoff.
+    """
+    if min_percentile is None:
+        return matrix
+
+    if not (0.0 <= min_percentile <= 100.0):
+        raise ValueError(
+            f"min_percentile must be between 0 and 100, got {min_percentile}."
+        )
+
+    values = matrix.values if isinstance(matrix, pd.DataFrame) else np.asarray(matrix)
+    if values.size == 0:
+        return matrix
+
+    if values.ndim == 2 and values.shape[0] == values.shape[1]:
+        off_diagonal = values[~np.eye(values.shape[0], dtype=bool)]
+    else:
+        off_diagonal = values.flatten()
+
+    if off_diagonal.size == 0:
+        return matrix
+
+    threshold = np.percentile(off_diagonal, min_percentile)
+    filtered = np.where(values >= threshold, values, 0.0)
+
+    if isinstance(matrix, pd.DataFrame):
+        return pd.DataFrame(filtered, index=matrix.index, columns=matrix.columns)
+    return filtered
 
 
 # ── Distance-based similarity ──────────────────────────────────────────────────
-
 
 def manhattan_similarity(
     vec_a: np.ndarray,
@@ -109,8 +145,8 @@ def manhattan_similarity(
 def document_similarity_matrix(
     doc_embeddings: Union[Dict[str, np.ndarray], np.ndarray, List[np.ndarray]],
     batch_size: Optional[int] = None,
-) -> Union[pd.DataFrame, np.ndarray]:
-    """
+    min_percentile: Optional[float] = None,
+) -> Union[pd.DataFrame, np.ndarray]:    """
     Build an N×N cosine similarity matrix between all document pairs.
 
     Args:
@@ -124,9 +160,8 @@ def document_similarity_matrix(
         stacked = np.array(doc_embeddings)
         if stacked.ndim == 1 or stacked.size == 0:
             return np.array([[]])
-        sim = cosine_similarity(stacked)
-        return np.clip(sim, 0.0, 1.0)
-
+sim = np.clip(cosine_similarity(stacked), 0.0, 1.0)
+        return _apply_min_percentile_filter(sim, min_percentile)
     doc_names = list(doc_embeddings.keys())
     n = len(doc_names)
 
@@ -158,20 +193,21 @@ def document_similarity_matrix(
                 sim = cosine_similarity(stacked[start:end], stacked)
                 matrix[start:end] = np.clip(sim, 0.0, 1.0)
 
-    df = pd.DataFrame(matrix, index=doc_names, columns=doc_names)
-    return df
-
+df = pd.DataFrame(matrix, index=doc_names, columns=doc_names)
+    return _apply_min_percentile_filter(df, min_percentile)
 
 def compute_similarity_matrix(
     embeddings: Union[Dict[str, np.ndarray], np.ndarray, List[np.ndarray]],
     batch_size: Optional[int] = None,
+    min_percentile: Optional[float] = None,
 ) -> Union[pd.DataFrame, np.ndarray]:
     """
     Direct alias/wrapper for document_similarity_matrix to maintain backwards compatibility
     with app/streamlit_app.py and external modules.
     """
-    return document_similarity_matrix(embeddings, batch_size=batch_size)
-
+    return document_similarity_matrix(
+        embeddings, batch_size=batch_size, min_percentile=min_percentile
+    )
 
 # ── Hybrid similarity (lexical + semantic) ─────────────────────────────────────
 
