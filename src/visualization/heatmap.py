@@ -410,8 +410,8 @@ def plot_similarity_heatmap_plotly(
     threshold: float = PLAGIARISM_THRESHOLD,
     theme_colors: Optional[Dict[str, str]] = None,
     colormap_name: str = DEFAULT_UI_COLORMAP,
-    show_annotations: bool = True,
-    mask_threshold: Optional[float] = None,
+    colorscale: str = "Viridis",
+    show_annotations: bool = True,    mask_threshold: Optional[float] = None,
     log_scale: bool = False,
     class_tag: Optional[str] = None,
     doc_class_map: Optional[dict] = None,
@@ -490,15 +490,14 @@ def plot_similarity_heatmap_plotly(
         for i in range(n)
     ]
 
-    fig = go.Figure(
+fig = go.Figure(
         data=go.Heatmap(
             z=z_matrix,
             x=names,
             y=names,
             text=hover_text,
             hovertemplate="%{text}",
-            colorscale=cmap,
-            zmin=0.0,
+            colorscale=colorscale,            zmin=0.0,
             zmax=1.0,
             colorbar=dict(title="Cosine Similarity", thickness=15, tickformat=".0%"),
             xgap=2,
