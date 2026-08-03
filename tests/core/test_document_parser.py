@@ -605,11 +605,22 @@ class TestCleanText:
         result = clean_text(text, remove_stopwords=True)
         assert result == ""
 
-    def test_stopword_removal_all_stopwords(self):
+def test_stopword_removal_all_stopwords(self):
         text = "is are was were be been being"
         result = clean_text(text, remove_stopwords=True)
         assert result == ""
 
+    def test_removes_custom_stopwords_from_file(self, tmp_path, monkeypatch):
+        stopwords_file = tmp_path / "custom_stopwords.txt"
+        stopwords_file.write_text("foobar\nbazqux\n")
+        monkeypatch.setenv("STOPWORDS_FILE", str(stopwords_file))
+
+        text = "foobar is a bazqux example"
+        result = clean_text(text, remove_stopwords=True)
+
+        assert "foobar" not in result
+        assert "bazqux" not in result
+        assert "example" in result
 
 def test_extract_empty_pdf_gracefully(caplog):
     """Assert that passing an empty/blank PDF returns an empty string gracefully without crashing."""
