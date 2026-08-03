@@ -1,48 +1,176 @@
 """Document text extraction with OCR fallback for scanned PDF pages."""
 
 from __future__ import annotations
-
+import defusedxml
 import io
 import logging
 import os
 import re
+import zipfile
 import shutil
 import subprocess
+import xml.etree.ElementTree
 import tempfile
 from collections import Counter
 from pathlib import Path
-from typing import BinaryIO, Dict, List, Union
+from typing import BinaryIO, Dict, List, Optional, Union
+
+try:
+    import defusedxml.lxml
+    defusedxml.lxml.monkey_patch()
+except (AttributeError, ImportError):
+    pass
 from urllib.parse import urlparse
 
-import defusedxml.lxml
-
-defusedxml.lxml.monkey_patch()
-
 import docx
+
 import pdfplumber
 from langdetect import LangDetectException, detect
-from striprtf.striprtf import rtf_to_text
+try:
+    from striprtf.striprtf import rtf_to_text
+except ImportError:
+    def rtf_to_text(rtf_text: str) -> str:
+        return rtf_text
 
 logger = logging.getLogger(__name__)
 from src.core.translator import translate_text
+import string
 
 # OCR dependencies are imported lazily so TXT/DOCX and normal text PDFs still
 # work even when Tesseract is not installed on the machine.
 PDFInput = Union[str, bytes, io.BytesIO, BinaryIO]
+
+
+class ParsedDocxText(str):
+    def __new__(cls, value, word_headings=None):
+        obj = super().__new__(cls, value)
+        obj.word_headings = word_headings or []
+        return obj
+
 
 MIN_NATIVE_WORDS_PER_PAGE = 8
 DEFAULT_OCR_DPI = 250
 MIN_OCR_DPI = 150
 MAX_OCR_DPI = 400
 DEFAULT_OCR_LANGUAGE = "eng"
+MAX_BATCH_SIZE = 50
+
+# File extensions supported by the extraction pipeline, exposed for UI display
+ALLOWED_EXTENSIONS = {".pdf", ".docx", ".csv", ".epub", ".html", ".md", ".markdown", ".mdown", ".rtf", ".txt"}
+ZERO_WIDTH_CHARS_PATTERN = re.compile(r"[\u200B\u200C\u200D\uFEFF\u2060\u200E\u200F]")
+
+# Standard English stopwords for lexical analysis noise reduction
+ENGLISH_STOPWORDS = frozenset({
+    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
+    "of", "with", "by", "is", "are", "was", "were", "be", "been", "being",
+    "over",
+    "have", "has", "had", "do", "does", "did", "will", "would", "shall",
+    "should", "can", "could", "may", "might", "must", "i", "me", "my",
+    "myself", "we", "our", "ours", "ourselves", "you", "your", "yours",
+    "yourself", "yourselves", "he", "him", "his", "himself", "she", "her",
+    "hers", "herself", "it", "its", "itself", "they", "them", "their",
+    "theirs", "themselves", "what", "which", "who", "whom", "this", "that",
+    "these", "those", "am", "as", "if", "then", "than", "too", "very", "s",
+    "t", "just", "don", "now", "d", "ll", "m", "o", "re", "ve", "y", "ain",
+    "aren", "couldn", "didn", "doesn", "hadn", "hasn", "haven", "isn", "ma",
+    "mightn", "mustn", "needn", "shan", "shouldn", "wasn", "weren", "won", "wouldn"
+})
+
+
+def sanitize_zero_width_characters(text: str, filename: Optional[str] = None) -> str:
+    """
+    Strips zero-width unicode characters (e.g. \u200B) often used to bypass plagiarism checkers.
+    Logs a security warning if any zero-width characters are found.
+    """
+    if not text:
+        return text
+
+    matches = ZERO_WIDTH_CHARS_PATTERN.findall(text)
+    if matches:
+        count = len(matches)
+        target = f"in file '{filename}'" if filename else "in document text"
+        logger.warning(
+            f"[document_parser] Security warning: Found and stripped {count} zero-width unicode character(s) {target}."
+        )
+        return ZERO_WIDTH_CHARS_PATTERN.sub("", text)
+    return text
+
+UNICODE_SPACE_TRANSLATION = str.maketrans({
+    "\u00A0": " ",   # Non-breaking space
+    "\u2000": " ",
+    "\u2001": " ",
+    "\u2002": " ",
+    "\u2003": " ",
+    "\u2004": " ",
+    "\u2005": " ",
+    "\u2006": " ",
+    "\u2007": " ",
+    "\u2008": " ",
+    "\u2009": " ",   # Thin space
+    "\u200A": " ",
+    "\u202F": " ",
+    "\u205F": " ",
+    "\u3000": " ",   # Ideographic space
+})
+
+FULLWIDTH_TRANSLATION = str.maketrans({
+    "，": ",",
+    "。": ".",
+    "：": ":",
+    "；": ";",
+    "！": "!",
+    "？": "?",
+    "（": "(",
+    "）": ")",
+    "【": "[",
+    "】": "]",
+    "［": "[",
+    "］": "]",
+    "｛": "{",
+    "｝": "}",
+})
+
+
+def normalize_unicode_spaces(text: str) -> str:
+    """
+    Normalize Unicode spacing and punctuation so visually identical
+    documents compare consistently.
+    """
+    if not text:
+        return text
+
+    text = text.translate(UNICODE_SPACE_TRANSLATION)
+
+    # Remove soft hyphens
+    text = text.replace("\u00AD", "")
+
+    # Normalize full-width punctuation
+    text = text.translate(FULLWIDTH_TRANSLATION)
+
+    return text
+def check_batch_rate_limit(file_count: int, session_id: Optional[str] = None) -> None:
+    """
+    Validates batch file collection size against session rate limits.
+
+    Raises:
+        ValueError: If file count exceeds MAX_BATCH_SIZE (50 documents).
+    """
+    if file_count > MAX_BATCH_SIZE:
+        from src.errors import PARSER_BATCH_LIMIT_EXCEEDED
+
+        raise ValueError(
+            PARSER_BATCH_LIMIT_EXCEEDED.format(limit=MAX_BATCH_SIZE)
+        )
+
 
 # Tesseract language packs intentionally exposed by the administrator UI.
+
 # More values may be added later without changing the extraction API.
-SUPPORTED_OCR_LANGUAGES = {
-    "eng": "English",
-    "spa": "Spanish",
-    "fra": "French",
-}
+from src.core.app_config import SUPPORTED_OCR_LANGUAGES
+
+
+class CorruptedArchiveError(ValueError):
+    """Raised when an uploaded zip file or inner archived document is corrupted."""
 
 
 def validate_ocr_dpi(value: int) -> int:
@@ -124,19 +252,51 @@ def strip_bibliography(text: str) -> str:
     """
     match = _BIBLIOGRAPHY_HEADERS.search(text)
     if match:
-        return text[: match.start()].rstrip()
+        sliced_text = text[: match.start()].rstrip()
+        if hasattr(text, "word_headings"):
+            words_in_sliced = len(sliced_text.split())
+            return ParsedDocxText(sliced_text, word_headings=text.word_headings[:words_in_sliced])
+        return sliced_text
     return text
 
 
-def clean_text(raw_text: str) -> str:
-    """Normalize whitespace and remove unwanted Unicode characters."""
+def clean_text(raw_text: str, remove_stopwords: bool = False) -> str:
+    """Normalize whitespace and remove unwanted Unicode characters.
+
+    Args:
+        raw_text: The text to clean.
+        remove_stopwords: When True, filters out English stopwords.
+    """
     text = raw_text
+
+    text = text.translate(
+        str.maketrans(
+            {
+                "“": '"',
+                "”": '"',
+                "‘": "'",
+                "’": "'",
+                "—": "-",
+                "–": "-",
+            }
+        )
+    )
+
     text = re.sub(r"\n\s*\n\s*\n", "\n\n", text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"[\u00a0\u200b]", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = re.sub(r"[ \t]+\n", "\n", text)
     text = re.sub(r"\n[ \t]+", "\n", text)
+
+    if remove_stopwords:
+        # Tokenize, filter, and rejoin while preserving basic structure
+        words = text.split()
+        filtered_words = [
+            word for word in words
+            if word.lower().strip(string.punctuation) not in ENGLISH_STOPWORDS
+        ]
+        text = " ".join(filtered_words)
 
     return text.strip()
 
@@ -310,6 +470,50 @@ def _configure_tesseract(pytesseract_module) -> None:
         pytesseract_module.pytesseract.tesseract_cmd = configured_path
 
 
+def _is_blank_scanned_page(
+    pdf_bytes: bytes,
+    page_index: int,
+    *,
+    dpi: int = DEFAULT_OCR_DPI,
+    variance_threshold: float = 5.0,
+) -> bool:
+    """Return True if a rendered page looks blank (very low pixel variance)."""
+    try:
+        import fitz  # PyMuPDF
+        from PIL import Image
+    except ImportError:
+        return False
+
+    try:
+        with fitz.open(stream=pdf_bytes, filetype="pdf") as document:
+            page = document.load_page(page_index)
+            scale = dpi / 72
+            pixmap = page.get_pixmap(
+                matrix=fitz.Matrix(scale, scale),
+                alpha=False,
+            )
+            image = Image.frombytes(
+                "RGB",
+                (pixmap.width, pixmap.height),
+                pixmap.samples,
+            ).convert("L")
+
+        histogram = image.histogram()
+        pixel_count = image.width * image.height
+        if pixel_count == 0:
+            return True
+
+        mean = sum(i * count for i, count in enumerate(histogram)) / pixel_count
+        variance = (
+            sum(count * ((i - mean) ** 2) for i, count in enumerate(histogram))
+            / pixel_count
+        )
+        return variance < variance_threshold
+    except Exception as exc:
+        logger.error(f"[document_parser] Error checking blank page {page_index}: {exc}")
+        return False
+
+
 def _ocr_pdf_page(
     pdf_bytes: bytes,
     page_index: int,
@@ -342,11 +546,22 @@ def _ocr_pdf_page(
                 (pixmap.width, pixmap.height),
                 pixmap.samples,
             )
-            return pytesseract.image_to_string(
-                image,
-                lang=language,
-                config="--oem 3 --psm 3",
-            ).strip()
+            try:
+                return pytesseract.image_to_string(
+                    image,
+                    lang=language,
+                    config="--oem 3 --psm 3",
+                ).strip()
+            except (MemoryError, Exception) as exc:
+                if isinstance(exc, MemoryError):
+                    logger.warning(
+                        f"[document_parser] OCR page {page_index} failed due to memory exhaustion: {exc}"
+                    )
+                else:
+                    logger.warning(
+                        f"[document_parser] OCR page {page_index} failed: {exc}"
+                    )
+                return f"[OCR extraction failed for page {page_index}]"
     except pytesseract.TesseractNotFoundError as exc:
         from src.errors import OCR_TESSERACT_NOT_FOUND
 
@@ -377,6 +592,20 @@ def _should_use_parallel() -> bool:
     return True
 
 
+def _format_table_as_text(table: List[List[Optional[str]]]) -> str:
+    """Format a pdfplumber-extracted table into clean, readable text.
+
+    Each row's cells are joined with ' | ' so the structure stays
+    readable instead of being merged into one chaotic string.
+    """
+    lines: List[str] = []
+    for row in table:
+        cells = [str(cell).strip() if cell is not None else "" for cell in row]
+        if any(cells):
+            lines.append(" | ".join(cells))
+    return "\n".join(lines)
+
+
 def _parse_pdf_page(
     pdf_bytes: bytes,
     page_index: int,
@@ -391,10 +620,36 @@ def _parse_pdf_page(
     try:
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
             page = pdf.pages[page_index]
-            native_text = (page.extract_text() or "").strip()
-            selected_text = native_text
+
+            tables = page.find_tables()
+
+            # Pull normal text, but exclude the regions covered by tables
+            # so table cells don't also show up mashed together in the
+            # regular text (which is what caused the chaotic strings).
+            text_page = page
+            for table in tables:
+                text_page = text_page.outside_bbox(table.bbox)
+            native_text = (text_page.extract_text() or "").strip()
 
             if not _has_meaningful_text(native_text):
+                if _is_blank_scanned_page(pdf_bytes, page_index, dpi=ocr_dpi):
+                    return []
+
+            table_texts = []
+            for table in tables:
+                extracted_rows = table.extract()
+                if extracted_rows:
+                    formatted = _format_table_as_text(extracted_rows)
+                    if formatted:
+                        table_texts.append(formatted)
+
+            combined_text = native_text
+            if table_texts:
+                combined_text = "\n\n".join([combined_text, *table_texts]).strip()
+
+            selected_text = combined_text
+
+            if not _has_meaningful_text(selected_text):
                 selected_text = _ocr_pdf_page(
                     pdf_bytes,
                     page_index,
@@ -405,7 +660,6 @@ def _parse_pdf_page(
             return _clean_page_text(selected_text)
     except OCRDependencyError:
         raise
-    # Requires generic catch because pdfplumber/pdfminer raise various deeply nested exceptions (e.g. PdfminerException, PDFPasswordIncorrect) for encrypted/malformed PDFs
     except Exception as exc:
         logger.error(f"[document_parser] Error parsing page {page_index}: {exc}")
         return []
@@ -426,6 +680,7 @@ def extract_texts_parallel(
     *,
     ocr_language: str = DEFAULT_OCR_LANGUAGE,
     ocr_dpi: int = DEFAULT_OCR_DPI,
+    session_id: Optional[str] = None,
 ) -> tuple[Dict[str, str], Dict[str, Exception]]:
     """
     Extract text from multiple files in parallel using ProcessPoolExecutor.
@@ -433,6 +688,8 @@ def extract_texts_parallel(
     Returns:
         tuple of (results_dict, errors_dict)
     """
+    check_batch_rate_limit(len(files_dict) if files_dict else 0, session_id=session_id)
+
     ocr_language, ocr_dpi = normalize_ocr_settings(
         language=ocr_language,
         dpi=ocr_dpi,
@@ -517,31 +774,79 @@ def extract_texts_parallel(
         return results, errors
 
 
+def count_pdf_images(pdf_bytes: bytes) -> int:
+    """Count embedded images in a PDF by inspecting page image lists.
+
+    Uses PyMuPDF (fitz) to retrieve the total number of image streams
+    across all pages. Returns 0 when PyMuPDF is unavailable or the PDF
+    cannot be read.
+
+    Parameters
+    ----------
+    pdf_bytes:
+        Raw PDF file bytes.
+
+    Returns
+    -------
+    int
+        Total number of image objects embedded in the PDF.
+    """
+    try:
+        import fitz  # PyMuPDF
+
+        with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+            return sum(len(page.get_images()) for page in doc)
+    except Exception:
+        return 0
+
+
 def extract_pdf_metadata(file: PDFInput) -> Dict[str, str]:
-    """Extract PDF metadata (Author, Creation Date, Title) using PyMuPDF.
+    """Extract PDF metadata (Author, Title, Creation Date, Creator, Producer) using PyMuPDF.
 
     Returns:
-        Dictionary with keys 'author', 'creation_date', 'title'.
+        Dictionary with keys 'author', 'title', 'creation_date', 'creator', 'producer'.
         Values are None if metadata is not available.
     """
     pdf_bytes = _read_pdf_bytes(file)
-    metadata = {"author": None, "creation_date": None, "title": None}
+
+    metadata = {
+        "author": None,
+        "title": None,
+        "creation_date": None,
+        "creator": None,
+        "producer": None,
+    }
 
     try:
         import fitz  # PyMuPDF
 
         with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
-            doc_metadata = doc.metadata
+            doc_metadata = doc.metadata or {}
+
             metadata["author"] = doc_metadata.get("author")
-            metadata["creation_date"] = doc_metadata.get("creationDate")
             metadata["title"] = doc_metadata.get("title")
+            metadata["creation_date"] = doc_metadata.get("creationDate")
+            metadata["creator"] = doc_metadata.get("creator")
+            metadata["producer"] = doc_metadata.get("producer")
+
     except (ValueError, RuntimeError, OSError, TypeError) as exc:
         print(f"[document_parser] Error extracting PDF metadata: {exc}")
+
     except Exception as exc:
         logger.error(f"[document_parser] Error extracting PDF metadata: {exc}")
 
-    return metadata
+    image_count = count_pdf_images(pdf_bytes)
 
+    if image_count:
+        logger.info(
+            "[document_parser] PDF contains %d embedded image(s): %s",
+            image_count,
+            metadata.get("title") or "unknown",
+        )
+
+    metadata["image_count"] = image_count
+
+    return metadata
 
 def extract_text_from_pdf(
     file: PDFInput,
@@ -549,12 +854,7 @@ def extract_text_from_pdf(
     ocr_language: str = DEFAULT_OCR_LANGUAGE,
     ocr_dpi: int = DEFAULT_OCR_DPI,
 ) -> str:
-    """Extract PDF text and OCR only pages with insufficient native text.
-
-    Text-based PDFs continue to use pdfplumber. Fully scanned and mixed PDFs
-    are handled page by page, allowing OCR results to enter the unchanged
-    chunking, embedding and FAISS pipeline.
-    """
+    """Extract PDF text and OCR only pages with insufficient native text."""
     ocr_language, ocr_dpi = normalize_ocr_settings(
         language=ocr_language,
         dpi=ocr_dpi,
@@ -580,64 +880,67 @@ def extract_text_from_pdf(
             )
             return ""
 
-    page_lines: List[List[str]] = []
-
     try:
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
             num_pages = len(pdf.pages)
-    # Requires generic catch because pdfplumber/pdfminer raise various deeply nested exceptions (e.g. PdfminerException, PDFPasswordIncorrect) for encrypted/malformed PDFs
+            if num_pages == 0:
+                return ""
+
+            if _should_use_parallel() and num_pages > 1:
+                from concurrent.futures import ProcessPoolExecutor
+
+                page_lines = [[] for _ in range(num_pages)]
+                try:
+                    with ProcessPoolExecutor() as executor:
+                        futures = [
+                            executor.submit(
+                                _parse_pdf_page,
+                                pdf_bytes,
+                                page_index,
+                                ocr_dpi,
+                                ocr_language,
+                            )
+                            for page_index in range(num_pages)
+                        ]
+                        for page_index, future in enumerate(futures):
+                            page_lines[page_index] = future.result()
+                except OCRDependencyError:
+                    raise
+                except (RuntimeError, OSError) as exc:
+                    logger.warning(
+                        f"[document_parser] ProcessPoolExecutor failed ({exc}), falling back to sequential page parsing..."
+                    )
+                    page_lines = []
+                    for page_index in range(num_pages):
+                        page = pdf.pages[page_index]
+                        native_text = (page.extract_text() or "").strip()
+                        selected_text = native_text
+                        if not _has_meaningful_text(native_text):
+                            selected_text = _ocr_pdf_page(
+                                pdf_bytes,
+                                page_index,
+                                dpi=ocr_dpi,
+                                language=ocr_language,
+                            )
+                        page_lines.append(_clean_page_text(selected_text))
+            else:
+                page_lines = []
+                for page_index in range(num_pages):
+                    page = pdf.pages[page_index]
+                    native_text = (page.extract_text() or "").strip()
+                    selected_text = native_text
+                    if not _has_meaningful_text(native_text):
+                        selected_text = _ocr_pdf_page(
+                            pdf_bytes,
+                            page_index,
+                            dpi=ocr_dpi,
+                            language=ocr_language,
+                        )
+                    page_lines.append(_clean_page_text(selected_text))
+    except OCRDependencyError:
+        raise
     except Exception as exc:
         logger.error(f"[document_parser] Error reading PDF: {exc}")
-        return ""
-
-    if num_pages == 0:
-        return ""
-
-    if _should_use_parallel() and num_pages > 1:
-        from concurrent.futures import ProcessPoolExecutor
-
-        page_lines = [[] for _ in range(num_pages)]
-        try:
-            with ProcessPoolExecutor() as executor:
-                futures = [
-                    executor.submit(
-                        _parse_pdf_page,
-                        pdf_bytes,
-                        page_index,
-                        ocr_dpi,
-                        ocr_language,
-                    )
-                    for page_index in range(num_pages)
-                ]
-                for page_index, future in enumerate(futures):
-                    page_lines[page_index] = future.result()
-        except OCRDependencyError:
-            raise
-        except (RuntimeError, OSError) as exc:
-            logger.warning(
-                f"[document_parser] ProcessPoolExecutor failed ({exc}), falling back to sequential page parsing..."
-            )
-            page_lines = [
-                _parse_pdf_page(
-                    pdf_bytes,
-                    page_index,
-                    ocr_dpi,
-                    ocr_language,
-                )
-                for page_index in range(num_pages)
-            ]
-    else:
-        page_lines = [
-            _parse_pdf_page(
-                pdf_bytes,
-                page_index,
-                ocr_dpi,
-                ocr_language,
-            )
-            for page_index in range(num_pages)
-        ]
-
-    if not page_lines:
         return ""
 
     cleaned_pages = _remove_repeated_boundary_lines(page_lines)
@@ -645,35 +948,72 @@ def extract_text_from_pdf(
 
 
 def extract_text_from_docx(file: PDFInput) -> str:
-    """Extract text from a DOCX file."""
-    text = ""
+    """Extract text from a DOCX file, prefixing headings with Markdown # markers."""
     try:
         doc_file = io.BytesIO(file) if isinstance(file, bytes) else file
         document = docx.Document(doc_file)
-        text = "\n\n".join(paragraph.text for paragraph in document.paragraphs)
+
+        current_heading = None
+        word_headings = []
+        paragraphs_text = []
+
+        for paragraph in document.paragraphs:
+            p_text = paragraph.text
+            style_name = paragraph.style.name if paragraph.style else ""
+
+            heading_match = re.match(r"^Heading\s+(\d+)$", style_name or "")
+            if heading_match:
+                level = int(heading_match.group(1))
+                prefix = "#" * level + " "
+                p_text = prefix + p_text
+                current_heading = p_text.strip()
+
+            paragraphs_text.append(p_text)
+            p_words = p_text.split()
+            word_headings.extend([current_heading] * len(p_words))
+
+        full_text = "\n\n".join(paragraphs_text)
+        return ParsedDocxText(full_text.strip(), word_headings=word_headings)
     except (ValueError, KeyError, OSError) as exc:
         print(f"[document_parser] Error reading DOCX: {exc}")
     except Exception as exc:
         logger.error(f"[document_parser] Error reading DOCX: {exc}")
-    return text.strip()
+    return ""
 
 
 def extract_text_from_txt(file: PDFInput) -> str:
-    """Extract text from a TXT file with UTF-8 fallback."""
+    """Extract text from a TXT file with encoding fallback."""
     text = ""
     try:
+        data = b""
         if isinstance(file, str):
-            with open(file, "r", encoding="utf-8", errors="ignore") as handle:
-                text = handle.read()
+            with open(file, "rb") as handle:
+                data = handle.read()
         elif isinstance(file, bytes):
-            text = file.decode("utf-8", errors="ignore")
+            data = file
         else:
-            data = file.read()
-            text = (
-                data.decode("utf-8", errors="ignore")
-                if isinstance(data, bytes)
-                else data
-            )
+            read_data = file.read()
+            if isinstance(read_data, bytes):
+                data = read_data
+            else:
+                text = read_data
+
+        if data:
+            # Construct candidate encodings. Prioritize UTF-16 only if we detect a BOM.
+            encodings = ["utf-8"]
+            if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+                encodings.insert(0, "utf-16")
+            else:
+                encodings.extend(["latin-1", "utf-16"])
+
+            for encoding in encodings:
+                try:
+                    text = data.decode(encoding)
+                    break
+                except UnicodeDecodeError:
+                    continue
+            else:
+                text = data.decode("utf-8", errors="ignore")
     except (OSError, UnicodeDecodeError, AttributeError, TypeError) as exc:
         print(f"[document_parser] Error reading TXT: {exc}")
     except Exception as exc:
@@ -703,6 +1043,54 @@ def extract_text_from_rtf(file: PDFInput) -> str:
     except Exception as exc:
         print(f"[document_parser] Error reading RTF: {exc}")
     return text.strip()
+
+
+def extract_text_from_zip(
+    file: PDFInput,
+    *,
+    ocr_language: str = DEFAULT_OCR_LANGUAGE,
+    ocr_dpi: int = DEFAULT_OCR_DPI,
+) -> str:
+    """Extract and aggregate text from all valid documents inside a ZIP archive.
+
+    Catches zipfile.BadZipFile and reports corrupted zip files or damaged inner entries.
+    """
+    raw_data = _read_pdf_bytes(file)
+    zip_stream = io.BytesIO(raw_data)
+
+    if not zipfile.is_zipfile(zip_stream):
+        raise CorruptedArchiveError("Uploaded ZIP file is corrupted or not a valid ZIP archive.")
+
+    zip_stream.seek(0)
+    extracted_texts: List[str] = []
+    corrupted_files: List[str] = []
+
+    try:
+        with zipfile.ZipFile(zip_stream, "r") as archive:
+            for member_name in archive.namelist():
+                # Skip directories and macOS metadata files
+                if member_name.endswith("/") or member_name.startswith("__MACOSX"):
+                    continue
+
+                try:
+                    file_bytes = archive.read(member_name)
+                    parsed = extract_text(file_bytes, member_name, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
+                    if parsed:
+                        extracted_texts.append(parsed)
+                except Exception as exc:
+                    corrupted_files.append(f"{member_name} ({exc})")
+
+            if corrupted_files:
+                bad_list = ", ".join(corrupted_files)
+                print(f"[document_parser] Warning: Corrupted inner files in zip: {bad_list}")
+
+            if not extracted_texts and corrupted_files:
+                raise CorruptedArchiveError(f"ZIP archive contains corrupted files: {', '.join(corrupted_files)}")
+
+    except zipfile.BadZipFile as exc:
+        raise CorruptedArchiveError(f"Uploaded ZIP submission is corrupted: {exc}") from exc
+
+    return "\n\n".join(extracted_texts).strip()
 
 
 def extract_text_from_doc(file: PDFInput) -> str:
@@ -819,7 +1207,7 @@ def extract_text_from_url(url: str) -> str:
         raise Exception(f"Failed to parse webpage content: {exc}") from exc
 
 
-# --- Markdown (.md) support -------------------------------------------------
+# --- Markdown (.md, .markdown, .mdown) support -------------------------------------------------
 
 _MD_FENCE = re.compile(r"^\s*(```|~~~)")
 _MD_ATX_HEADER = re.compile(r"^\s{0,3}#{1,6}\s+")
@@ -850,12 +1238,7 @@ def _strip_inline_markdown(line: str) -> str:
 
 
 def strip_markdown_syntax(raw_text: str) -> str:
-    """Convert raw Markdown source into plain readable text.
-
-    Fenced code block contents are preserved as-is (fence markers removed);
-    headers, lists, blockquotes, horizontal rules, links, images, and
-    emphasis markers are stripped down to their underlying text.
-    """
+    """Convert raw Markdown source into plain readable text."""
     lines = raw_text.splitlines()
     output: List[str] = []
     in_code_block = False
@@ -892,7 +1275,7 @@ def extract_text_from_epub(file: PDFInput) -> str:
     """Extract plain text from an EPUB file."""
     try:
         from bs4 import BeautifulSoup
-        from ebooklib import epub
+        from ebooklib import epub # type: ignore
 
         epub_file = io.BytesIO(file) if isinstance(file, bytes) else file
 
@@ -919,11 +1302,84 @@ def extract_text_from_epub(file: PDFInput) -> str:
 
 
 def extract_text_from_md(file: PDFInput) -> str:
-    """Extract plain text from a Markdown (.md) file."""
+    """Extract plain text from a Markdown (.md, .markdown, .mdown) file."""
     raw_text = extract_text_from_txt(file)
     if not raw_text:
         return ""
     return strip_markdown_syntax(raw_text)
+
+
+def extract_text_from_odt(file: PDFInput) -> str:
+    """Extract plain text from an ODT (OpenDocument Text) file.
+    ODT files are ZIP archives containing content.xml with ODF XML.
+    """
+    try:
+        raw_data = _read_pdf_bytes(file)
+        text_parts: List[str] = []
+
+        with zipfile.ZipFile(io.BytesIO(raw_data), "r") as archive:
+            with archive.open("content.xml") as xml_file:
+                tree = xml.etree.ElementTree.parse(xml_file)
+
+        ns = {
+            "text": "urn:oasis:names:tc:opendocument:xmlns:text:1.0",
+            "office": "urn:oasis:names:tc:opendocument:xmlns:office:1.0",
+        }
+
+        body = tree.find(".//office:body", ns)
+        if body is not None:
+            office_text = body.find("office:text", ns)
+            if office_text is not None:
+                for p in office_text.iter("{urn:oasis:names:tc:opendocument:xmlns:text:1.0}p"):
+                    text_parts.append("".join(p.itertext()))
+
+        return "\n\n".join(text_parts).strip()
+
+    except (KeyError, ValueError, zipfile.BadZipFile, xml.etree.ElementTree.ParseError) as exc:
+        print(f"[document_parser] Error reading ODT: {exc}")
+    except Exception as exc:
+        logger.error(f"[document_parser] Error reading ODT: {exc}")
+    return ""
+
+
+def extract_text_from_image(
+    file: PDFInput, *, ocr_language: str = DEFAULT_OCR_LANGUAGE
+) -> str:
+    """Extract text from an image (PNG, JPG) using Tesseract OCR."""
+    try:
+        import pytesseract
+        from PIL import Image
+    except ImportError as exc:
+        from src.errors import OCR_DEPENDENCIES_MISSING
+        raise OCRDependencyError(OCR_DEPENDENCIES_MISSING) from exc
+
+    _configure_tesseract(pytesseract)
+
+    file_bytes = _read_pdf_bytes(file)
+    try:
+        image = Image.open(io.BytesIO(file_bytes))
+        try:
+            return pytesseract.image_to_string(
+                image,
+                lang=ocr_language,
+                config="--oem 3 --psm 3",
+            ).strip()
+        except (MemoryError, Exception) as exc:
+            if isinstance(exc, MemoryError):
+                logger.warning(
+                    f"[document_parser] OCR image extraction failed due to memory exhaustion: {exc}"
+                )
+            else:
+                logger.warning(
+                    f"[document_parser] OCR image extraction failed: {exc}"
+                )
+            return "[OCR extraction failed for the file]"
+    except pytesseract.TesseractNotFoundError as exc:
+        from src.errors import OCR_TESSERACT_NOT_FOUND
+        raise OCRDependencyError(OCR_TESSERACT_NOT_FOUND) from exc
+    except Exception as exc:
+        logger.error(f"[document_parser] Error reading image: {exc}")
+        return ""
 
 
 def extract_text(
@@ -932,12 +1388,24 @@ def extract_text(
     *,
     ocr_language: str = DEFAULT_OCR_LANGUAGE,
     ocr_dpi: int = DEFAULT_OCR_DPI,
+    clean_whitespace: bool = True,
 ) -> str:
     """Route extraction according to a filename extension."""
     ocr_language, ocr_dpi = normalize_ocr_settings(
         language=ocr_language,
         dpi=ocr_dpi,
     )
+
+    # Validate file type magic bytes first to prevent malicious file uploads
+    file_bytes = _read_pdf_bytes(file)
+    from src.security.mime_validator import validate_mime_type
+    if not validate_mime_type(file_bytes, filename):
+        logger.warning(
+            f"[document_parser] Security warning: Rejected file '{filename}' "
+            f"because its MIME type / magic bytes do not match its file extension."
+        )
+        return ""
+    file = file_bytes
 
     extension = filename.rsplit(".", 1)[-1].lower()
 
@@ -947,27 +1415,130 @@ def extract_text(
         raw = extract_text_from_docx(file)
     elif extension == "doc":
         raw = extract_text_from_doc(file)
-    elif extension == "md":
+    elif extension in ("md", "markdown", "mdown"):
         raw = extract_text_from_md(file)
+
+    elif extension in ("zip", "7z", "tar", "gz"):
+        raw = extract_text_from_zip(file, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
 
     elif extension == "rtf":
         raw = extract_text_from_rtf(file)
 
     elif extension == "epub":
         raw = extract_text_from_epub(file)
+    elif extension in ("png", "jpg", "jpeg"):
+        raw = extract_text_from_image(file, ocr_language=ocr_language)
+    elif extension == "odt":
+        raw = extract_text_from_odt(file)
     else:
         raw = extract_text_from_txt(file)
 
-    return strip_bibliography(raw)
+    raw = strip_bibliography(raw)
+    raw = normalize_unicode_spaces(raw)
+    raw = sanitize_zero_width_characters(raw, filename=filename)
+
+    if clean_whitespace and raw:
+        lines = [line.rstrip() for line in raw.splitlines()]
+        cleaned_text = "\n".join(lines)
+        raw = re.sub(r"\n{3,}", "\n\n", cleaned_text)
+
+    lang_code = detect_text_language(raw)
+
+    logger.info(
+        f"[document_parser] Detected language for document '{filename}': {lang_code}"
+    )
+    return raw
 
 
-def extract_texts_from_pdfs(files: list) -> Dict[str, str]:
+ALLOWED_EXTENSIONS = {
+    ".pdf",
+    ".docx",
+    ".csv",
+    ".epub",
+    ".html",
+    ".md",
+    ".markdown",
+    ".mdown",
+    ".rtf",
+    ".txt",
+}
+
+
+def get_supported_file_extensions() -> list[str]:
+    return sorted(ALLOWED_EXTENSIONS)
+
+
+def extract_texts_from_pdfs(files: list, session_id: Optional[str] = None) -> Dict[str, str]:
     """Legacy compatibility wrapper."""
-    return extract_texts(files)
+    return extract_texts(files, session_id=session_id)
 
 
-def extract_texts(files: list) -> Dict[str, str]:
+def _extract_text_from_file_path(file_path: Path) -> tuple[str, str]:
+    """Helper worker to extract text from a Path object in a process worker."""
+    file_path = Path(file_path)
+    filename = file_path.name
+    try:
+        content_bytes = file_path.read_bytes()
+        extracted = extract_text(content_bytes, filename)
+        return filename, extracted
+    except Exception as exc:
+        logger.error(f"[document_parser] Error extracting text from path {file_path}: {exc}")
+        return filename, ""
+
+
+def parallel_extract_texts(
+    file_paths: list[Path], max_workers: int = 4
+) -> dict[str, str]:
+    """
+    Extract text from multiple file paths concurrently using a ProcessPoolExecutor.
+
+    Args:
+        file_paths: List of file Path objects to extract text from.
+        max_workers: Maximum process workers to spawn (default: 4).
+
+    Returns:
+        dict[str, str]: Mapping of filename to extracted text string.
+    """
+    if not file_paths:
+        return {}
+
+    paths = [Path(p) for p in file_paths]
+
+    if len(paths) == 1 or not _should_use_parallel():
+        results = {}
+        for path in paths:
+            filename, text = _extract_text_from_file_path(path)
+            results[filename] = text
+        return results
+
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
+    results = {}
+    try:
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            future_to_path = {
+                executor.submit(_extract_text_from_file_path, path): path
+                for path in paths
+            }
+            for future in as_completed(future_to_path):
+                filename, text = future.result()
+                results[filename] = text
+    except (RuntimeError, OSError) as exc:
+        logger.warning(
+            f"[document_parser] ProcessPoolExecutor failed ({exc}), falling back to sequential extraction."
+        )
+        results = {}
+        for path in paths:
+            filename, text = _extract_text_from_file_path(path)
+            results[filename] = text
+
+    return results
+
+
+def extract_texts(files: list, session_id: Optional[str] = None) -> Dict[str, str]:
     """Extract text from multiple uploaded files."""
+    check_batch_rate_limit(len(files) if files else 0, session_id=session_id)
+
     files_dict = {}
     for idx, file in enumerate(files):
         if hasattr(file, "name"):
@@ -985,7 +1556,7 @@ def extract_texts(files: list) -> Dict[str, str]:
             logger.error(f"[document_parser] Error reading file data for {name}: {exc}")
             files_dict[name] = b""
 
-    raw_texts, errors = extract_texts_parallel(files_dict)
+    raw_texts, errors = extract_texts_parallel(files_dict, session_id=session_id)
     if errors:
         raise next(iter(errors.values()))
 

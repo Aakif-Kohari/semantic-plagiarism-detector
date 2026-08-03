@@ -18,15 +18,13 @@ from .corpus_db import (
     add_document,
     clear_all_data,
     delete_document,
-    delete_tag,
     get_all_documents,
     get_all_embeddings,
-    get_all_tags,
     get_chunk_registry,
     get_document_by_hash,
     get_document_chunks_count,
-    get_document_word_counts,
     get_documents_by_class,
+    get_total_document_count,
     get_unique_class_sections,
     init_corpus_db,
 )
@@ -53,13 +51,11 @@ __all__ = [
     "get_chunk_registry",
     "get_all_embeddings",
     "delete_document",
-    "delete_tag",
     "clear_all_data",
     "get_document_chunks_count",
-    "get_all_tags",
     "get_unique_class_sections",
     "get_documents_by_class",
-    "get_document_word_counts",
+    "get_total_document_count",
 ]
 
 

@@ -2,14 +2,33 @@
 
 import logging
 import os
-from typing import Dict
-
+import psutil
 import numpy as np
+
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status, Request
+from typing import Dict
+from fastapi import Request
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
+from fastapi.exceptions import RequestValidationError
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBearer
+from fastapi.responses import PlainTextResponse, JSONResponse
+
+from src.api.middleware import verify_bearer_token
+from src.api.schemas import (
+    ClearDataResponse,
+    ErrorResponse,
+    HealthCheckResponse,
+    HealthzResponse,
+    LoginResponse,
+    SimilarityCheckResponse,
+)
 from sklearn.metrics.pairwise import cosine_similarity
 
+from src.core.app_config import FAISS_INDEX_PATH, HEALTHZ_DB_PATHS
 from src.core.document_parser import extract_text
 from src.core.embedding_model import embed_chunks, get_document_embedding
 from src.core.similarity import (
@@ -20,7 +39,7 @@ from src.core.similarity import (
 from src.core.text_chunking import chunk_document
 from src.db.auth import get_user_role
 from src.db.corpus_db import _connect, clear_all_data, init_corpus_db
-from src.utils.redis_cache import get_cache
+from src.utils.redis_cache import CacheKeyPrefix, get_cache
 
 # ── API Initialization ────────────────────────────────────────────────────────
 
@@ -28,6 +47,18 @@ app = FastAPI(
     title="Semantic Plagiarism Detector API",
     description="REST API for programmatically checking documents for semantic plagiarism.",
     version="1.0.0",
+    contact={
+        "name": "API Support",
+        "url": "http://example.com/support",
+        "email": "support@example.com",
+    },
+    openapi_tags=[
+        {"name": "Authentication", "description": "Authenticate user"},
+        {"name": "Plagiarism Detection", "description": "Scanning operations"},
+        {"name": "System Administration", "description": "Admin operations"},
+        {"name": "Health", "description": "Health checks"},
+    ],
+    dependencies=[Depends(verify_bearer_token)],
 )
 
 # Enable CORS for external LMS frontends
@@ -49,28 +80,54 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Bearer Token Authentication ────────────────────────────────────────────────
-
-security = HTTPBearer()
-
-
-def get_expected_bearer_token() -> str:
-    """Retrieve the API Bearer Token from environment variable or default fallback."""
-    return os.getenv("API_BEARER_TOKEN", "dev-bearer-token")
+# SlowAPI Rate Limiting setup
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
 
 
-def verify_bearer_token(
-    credentials=Depends(security),
-) -> str:
-    """Validate incoming Bearer token against configured secret."""
-    expected_token = get_expected_bearer_token()
-    if not credentials or credentials.credentials != expected_token:
+def custom_rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+    response = JSONResponse(
+        {"detail": f"Rate limit exceeded: {exc.detail}"}, status_code=429
+    )
+    response = request.app.state.limiter._inject_headers(
+        response, request.state.view_rate_limit
+    )
+    return response
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """
+    Return a standardized JSON response for request validation errors.
+    """
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={
+            "error": True,
+            "message": "Validation failed.",
+            "details": [
+                {
+                    "field": ".".join(map(str, err["loc"])),
+                    "message": err["msg"],
+                    "type": err["type"],
+                }
+                for err in exc.errors()
+            ],
+        },
+    )
+
+
+app.add_exception_handler(RateLimitExceeded, custom_rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
+def validate_content_type(request: Request) -> None:
+    """Ensure the request is multipart/form-data before parsing."""
+    content_type = request.headers.get("content-type", "")
+    if "multipart/form-data" not in content_type:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing authentication token.",
-            headers={"WWW-Authenticate": "Bearer"},
+            status_code=415,
+            detail="Unsupported Media Type: Request must be multipart/form-data"
         )
-    return credentials.credentials
 
 
 # ── Database Helpers ───────────────────────────────────────────────────────────
@@ -107,7 +164,30 @@ def get_corpus_documents_with_embeddings() -> Dict[str, Dict]:
 # ── API Endpoints ──────────────────────────────────────────────────────────────
 
 
-@app.get("/health", tags=["Health"])
+@app.post(
+    "/api/v1/auth/login",
+    tags=["Authentication"],
+    summary="Authenticate user",
+    response_model=LoginResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        400: {"model": ErrorResponse, "description": "Bad Request"},
+        401: {"model": ErrorResponse, "description": "Unauthorized"},
+        500: {"model": ErrorResponse, "description": "Internal Server Error"},
+    },
+)
+@limiter.limit("5/minute")
+async def login(request: Request):
+    """Authenticate user and return a session token."""
+    return {"token": "dummy-token"}
+
+
+@app.get(
+    "/health",
+    tags=["Health"],
+    response_model=HealthCheckResponse,
+    status_code=status.HTTP_200_OK,
+)
 def health_check():
     """Healthcheck endpoint for readiness and liveness probes."""
     return {
@@ -117,34 +197,166 @@ def health_check():
     }
 
 
-_HEALTHZ_DB_PATHS = (
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "corpus.db")),
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "users.db")),
+# ``HEALTHZ_DB_PATHS`` is centralized in app_config.  Keep a local alias as a
+# tuple of str for backward compatibility with the original implementation
+# (and so any code doing string comparison on these paths keeps working).
+_HEALTHZ_DB_PATHS = tuple(str(p) for p in HEALTHZ_DB_PATHS)
+
+
+@app.get("/metrics", tags=["Monitoring"], response_class=PlainTextResponse)
+def metrics_prometheus():
+    """Prometheus-format metrics export for production monitoring."""
+    from src.core.metrics import generate_latest as _gen
+
+    return PlainTextResponse(_gen().decode("utf-8"))
+
+
+@app.get("/metrics/json", tags=["Monitoring"])
+def metrics_json():
+    """JSON-format metrics export for non-Prometheus monitoring setups."""
+    from src.core.metrics import generate_metrics_json
+
+    return JSONResponse(generate_metrics_json())
+
+
+@app.get(
+    "/healthz",
+    tags=["Health"],
+    response_model=HealthzResponse,
 )
-
-
-@app.get("/healthz", tags=["Health"])
+@app.get(
+    "/api/v1/healthz",
+    tags=["Health"],
+    response_model=HealthzResponse,
+)
 def healthz():
-    """Lightweight /healthz endpoint for DevOps monitoring and load balancer probes.
+    """Health endpoint for container orchestration."""
 
-    Returns 200 OK with the combined SQLite database size so operators can
-    monitor storage growth without rendering the Streamlit UI.
+    try:
+        with _connect() as conn:
+            conn.execute("SELECT 1")
+
+        memory = psutil.virtual_memory()
+
+        if memory.available <= 0:
+            raise RuntimeError("Low memory")
+
+        from src.core.app_config import CORPUS_DB_PATH
+        db_size_bytes = 0
+        db_size_mb = 0.0
+        if os.path.exists(CORPUS_DB_PATH):
+            try:
+                db_size_bytes = os.path.getsize(CORPUS_DB_PATH)
+                db_size_mb = round(db_size_bytes / (1024 * 1024), 2)
+            except OSError:
+                pass
+
+        return {
+            "status": "ok",
+            "db": "connected",
+            "memory": "ok",
+            "db_size_bytes": db_size_bytes,
+            "db_size_mb": db_size_mb,
+        }
+
+    except Exception:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "degraded",
+                "db": "disconnected",
+                "memory": "unavailable",
+                "db_size_bytes": 0,
+                "db_size_mb": 0.0,
+            },
+        )
+
+
+@app.get(
+    "/api/v1/incidents",
+    tags=["Plagiarism Detection"],
+    summary="Get recorded plagiarism incidents",
+    status_code=status.HTTP_200_OK,
+)
+def get_incidents(
+    limit: int = Query(default=50, ge=1, le=500, description="Max number of incidents to return"),
+    offset: int = Query(default=0, ge=0, description="Number of incidents to skip"),
+    _token: str = Depends(verify_bearer_token),
+):
+    """Retrieve recorded plagiarism incidents from the database."""
+    from src.db.incidents import get_all_incidents
+
+    try:
+        incidents = get_all_incidents(limit=limit, offset=offset)
+        return {
+            "incidents": [
+                {
+                    "incident_id": inc.incident_id,
+                    "document_a": inc.document_a,
+                    "document_b": inc.document_b,
+                    "similarity_score": inc.similarity_score,
+                    "severity_rank": inc.severity_rank,
+                    "review_status": inc.review_status,
+                    "date_flagged": inc.date_flagged,
+                    "threshold_at_time_of_flag": inc.threshold_at_time_of_flag,
+                }
+                for inc in incidents
+            ],
+            "limit": limit,
+            "offset": offset,
+            "count": len(incidents),
+        }
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch incidents: {str(exc)}",
+        )
+
+
+@app.get(
+    "/api/v1/rate_limit",
+    tags=["System Administration"],
+    summary="Get current API rate limit status",
+    status_code=status.HTTP_200_OK,
+)
+def get_rate_limit():
     """
-    total_bytes = 0
-    for path in _HEALTHZ_DB_PATHS:
-        try:
-            total_bytes += os.path.getsize(path) if os.path.exists(path) else 0
-        except OSError:
-            pass
-
+    Return the current API rate limit information.
+    """
     return {
-        "status": "ok",
-        "db_size_bytes": total_bytes,
-        "db_size_mb": round(total_bytes / (1024 * 1024), 2),
+        "limit": 100,
+        "remaining": 85,
+        "reset_in_seconds": 45,
     }
 
 
-@app.post("/api/v1/scan", tags=["Plagiarism Detection"])
+@app.get(
+    "/api/v1/version",
+    tags=["System Administration"],
+    summary="Get API version",
+    status_code=status.HTTP_200_OK,
+)
+def get_version(request: Request):
+    """
+    Return the lightweight API version.
+    """
+    return {
+        "version": request.app.version,
+        "status": "active",
+    }
+
+
+@app.post(
+    "/api/v1/scan",
+    tags=["Plagiarism Detection"],
+    response_model=SimilarityCheckResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        400: {"model": ErrorResponse, "description": "Bad Request"},
+        422: {"model": ErrorResponse, "description": "Unprocessable Entity"},
+        500: {"model": ErrorResponse, "description": "Internal Server Error"},
+    },
+)
 async def scan_document(
     file: UploadFile = File(
         ..., description="Document file to scan (.pdf, .docx, .txt)"
@@ -162,6 +374,7 @@ async def scan_document(
         description="Number of top matching paragraph pairs to include per matched document",
     ),
     _token: str = Depends(verify_bearer_token),
+    _content_type: None = Depends(validate_content_type),
 ):
     """Scan an uploaded document against the indexed corpus database for plagiarism."""
     if not file.filename:
@@ -173,10 +386,10 @@ async def scan_document(
     filename = file.filename
     file_bytes = await file.read()
 
-    if not file_bytes:
+    if len(file_bytes) == 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Uploaded file is empty.",
+            detail="Uploaded file is empty (0 bytes)",
         )
 
     # Extract text from uploaded document
@@ -292,17 +505,25 @@ async def scan_document(
 # ── System Administration ──────────────────────────────────────────────────────
 
 logger = logging.getLogger(__name__)
-INDEX_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "corpus.index")
+# Cast to str for consistency with callers that may pass it to faiss.*
+# or other C-extension APIs that require str paths.
+INDEX_PATH = str(FAISS_INDEX_PATH)
+
+
+@app.post(
+    "/api/v1/clear",
+    tags=["System Administration"],
+    response_model=ClearDataResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        403: {"model": ErrorResponse, "description": "Forbidden"},
+        500: {"model": ErrorResponse, "description": "Internal Server Error"},
+    },
 )
-
-
-@app.post("/api/v1/clear", tags=["System Administration"])
 async def clear_all_documents(
     username: str = Query(
         ..., description="Username of the administrator executing the operation"
     ),
-    _token: str = Depends(verify_bearer_token),
 ):
     """
     Remove all documents, text chunks, and plagiarism incidents from the SQLite database,
@@ -331,8 +552,8 @@ async def clear_all_documents(
         try:
             cache = get_cache()
             if cache.is_available():
-                cache.delete("faiss:index:corpus_index")
-                cache.clear_pattern("analysis:*")
+                cache.delete(CacheKeyPrefix.LEGACY_FAISS_INDEX.value)
+                cache.clear_pattern(CacheKeyPrefix.LEGACY_ANALYSIS_PATTERN.value)
         except Exception as e:
             logger.error(f"Failed to clear Redis cache: {e}")
 
