@@ -126,7 +126,10 @@ semantic_plagiarism_detector/
 
 ## 🚀 Setup & Running
 
+For a detailed local setup guide detailing virtual environment creation, native C dependencies (Tesseract and Poppler) installation, and running pytest, refer to the [Developer Setup Guide](docs/DEVELOPMENT.md).
+
 ### 1. Clone / download the project
+
 
 ```bash
 git clone https://github.com/your-org/semantic-plagiarism-detector.git
