@@ -233,6 +233,48 @@ def test_token_bucket_per_ip_isolation():
     assert res2.status_code == 200
 
 
+# ── Standardized Health Status Endpoint (#1273) ─────────────────────────────
+
+from datetime import datetime
+
+from fastapi.testclient import TestClient
+
+from src.api.app import app
+
+_status_client = TestClient(app)
+
+
+def test_api_v1_status_returns_online_payload():
+    """Verify GET /api/v1/status returns the standardized status payload."""
+    response = _status_client.get("/api/v1/status")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "online"
+    assert data["version"] == "1.0.0"
+
+
+def test_api_v1_status_timestamp_is_iso_utc():
+    """Verify the timestamp is a parseable ISO 8601 string in UTC."""
+    response = _status_client.get("/api/v1/status")
+    data = response.json()
+
+    parsed = datetime.fromisoformat(data["timestamp"])
+    assert parsed.tzinfo is not None
+    assert parsed.utcoffset().total_seconds() == 0
+
+
+def test_api_v1_status_is_public_without_token():
+    """Verify /api/v1/status is reachable without a bearer token."""
+    response = _status_client.get(
+        "/api/v1/status",
+        headers={},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "online"
+
+
 def test_scope_enforcement_rate_limit_endpoint():
     """Verify scope enforcement on /api/v1/rate_limit (requires 'read')."""
     from fastapi.testclient import TestClient
@@ -281,4 +323,136 @@ def test_scope_enforcement_clear_endpoint():
     )
     assert res.status_code == 403
 
+# ── Asynchronous Background Scan Job Queue Tests (#1372) ─────────────────────
+
+def test_async_scan_returns_202_accepted_with_job_id():
+    """Verify POST /api/v1/scan/async accepts upload and returns 202 with job_id."""
+    client = TestClient(app)
+
+    files = {"file": ("async_doc.txt", b"This is a test document for async scanning.")}
+    headers = {"Authorization": "Bearer test-write-token"}
+
+    response = client.post("/api/v1/scan/async", files=files, headers=headers)
+
+    assert response.status_code == 202
+    data = response.json()
+    assert "job_id" in data
+    assert data["status"] == "queued"
+    assert data["status_url"] == f"/api/v1/scan/status/{data['job_id']}"
+    assert "message" in data
+
+
+def test_async_scan_status_progression():
+    """Verify background job executes and GET /api/v1/scan/status/{job_id} returns completed results."""
+    client = TestClient(app)
+
+    files = {"file": ("sample_async.txt", b"Artificial intelligence and machine learning enable automated analysis.")}
+    headers_write = {"Authorization": "Bearer test-write-token"}
+    headers_read = {"Authorization": "Bearer test-read-token"}
+
+    # 1. Enqueue job
+    post_res = client.post("/api/v1/scan/async", files=files, headers=headers_write)
+    assert post_res.status_code == 202
+    job_id = post_res.json()["job_id"]
+
+    # 2. Check status (BackgroundTasks runs during TestClient request cycle)
+    status_res = client.get(f"/api/v1/scan/status/{job_id}", headers=headers_read)
+    assert status_res.status_code == 200
+
+    status_data = status_res.json()
+    assert status_data["job_id"] == job_id
+    assert status_data["status"] in ("queued", "processing", "completed")
+    assert status_data["filename"] == "sample_async.txt"
+
+    if status_data["status"] == "completed":
+        assert status_data["result"] is not None
+        assert status_data["result"]["filename"] == "sample_async.txt"
+        assert "plagiarism_flagged" in status_data["result"]
+
+
+def test_async_scan_status_invalid_job_id_returns_404():
+    """Verify GET /api/v1/scan/status/{job_id} returns 404 for unknown job IDs."""
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer test-read-token"}
+
+    response = client.get("/api/v1/scan/status/invalid_job_99999", headers=headers)
+
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"].lower()
+
+
+def test_async_scan_empty_file_returns_400():
+    """Verify POST /api/v1/scan/async rejects empty files with HTTP 400."""
+    client = TestClient(app)
+    files = {"file": ("empty.txt", b"")}
+    headers = {"Authorization": "Bearer test-write-token"}
+
+    response = client.post("/api/v1/scan/async", files=files, headers=headers)
+
+    assert response.status_code == 400
+    assert "empty" in response.json()["detail"].lower()
+
+
+# ── Global Exception Handler Tests (#1500) ────────────────────────────────────
+
+import asyncio
+import json
+from unittest.mock import Mock
+
+from src.api.app import global_exception_handler
+
+
+def test_global_exception_handler_returns_standard_payload(monkeypatch):
+    """Verify Issue #1500: unhandled exceptions return the standardized JSON payload."""
+    monkeypatch.setenv("APP_ENVIRONMENT", "development")
+    mock_request = Mock()
+
+    response = asyncio.run(global_exception_handler(mock_request, ValueError("boom")))
+    body = json.loads(response.body)
+
+    assert response.status_code == 500
+    assert body["error"] is True
+    assert body["code"] == 500
+    assert body["message"] == "boom"
+    assert "timestamp" in body
+
+
+def test_global_exception_handler_masks_details_in_production(monkeypatch):
+    """Verify Issue #1500: internal exception details are masked in production."""
+    monkeypatch.setenv("APP_ENVIRONMENT", "production")
+    mock_request = Mock()
+
+    response = asyncio.run(
+        global_exception_handler(mock_request, ValueError("sensitive internal detail"))
+    )
+    body = json.loads(response.body)
+
+    assert body["message"] == "An internal server error occurred."
+    assert "sensitive internal detail" not in body["message"]
+
+
+# ── CORS Preflight Cache Duration Test (#1501) ────────────────────────────────
+
+import importlib
+
+
+def test_cors_preflight_max_age_header():
+    """Verify OPTIONS preflight responses include Access-Control-Max-Age: 3600."""
+    import sys
+    import src.api.app
+    importlib.reload(sys.modules["src.api.app"])
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+
+    client = TestClient(app)
+
+    response = client.options(
+        "/api/v1/version",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+
+    assert response.headers["access-control-max-age"] == "3600"
 

@@ -30,10 +30,10 @@ def strip_exif_metadata(
         return file_bytes
 
 
-def strip_pdf_javascript(pdf_bytes: bytes) -> bytes:
+def _strip_pdf_metadata(pdf_bytes: bytes) -> bytes:
     """Uses PyMuPDF (fitz) to remove PDF Info dict and XMP metadata."""
     try:
-        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
 
         # 1. Remove XML/XMP Metadata
         if doc.is_pdf:
@@ -58,12 +58,12 @@ def strip_pdf_javascript(pdf_bytes: bytes) -> bytes:
         out_bytes = doc.write(garbage=4, clean=True)
         doc.close()
 
-        return strip_pdf_javascript(out_bytes)
+        return out_bytes
     except Exception as e:
         logger.error(f"Failed to strip PDF metadata: {e}")
         # If scrubbing fails, fail-safe is to return the original (or raise? Security context says strip or drop)
         # To be safe against crashes, we log and return the original, though returning empty might be safer in strict environments.
-        return file_bytes
+        return pdf_bytes
 
 
 def strip_pdf_javascript(pdf_bytes: bytes) -> bytes:
@@ -130,14 +130,23 @@ def _strip_image_metadata(file_bytes: bytes) -> bytes:
             if width > MAX_DIMENSION or height > MAX_DIMENSION:
                 raise ValueError("Image dimensions exceed 10,000px safety limit")
 
+            # Save format defaults to JPEG if original was JPEG, PNG for PNG, etc.
+            # Capture it before any mode conversion (convert() drops the format).
+            save_format = image.format if image.format else "JPEG"
+
+            # Palette-based images (P mode) carry their colors in a palette
+            # (color map) rather than the pixel channels. Copying the palette
+            # indices into a fresh image drops that palette and corrupts the
+            # color channels, so convert to RGBA first to preserve them.
+            if image.mode == "P":
+                image = image.convert("RGBA")
+
             # We extract only the image data, discarding info/exif
             data = list(image.getdata())
             image_without_exif = Image.new(image.mode, image.size)
             image_without_exif.putdata(data)
 
             out_io = io.BytesIO()
-            # Save format defaults to JPEG if original was JPEG, PNG for PNG, etc.
-            save_format = image.format if image.format else "JPEG"
             image_without_exif.save(out_io, format=save_format)
 
             return out_io.getvalue()

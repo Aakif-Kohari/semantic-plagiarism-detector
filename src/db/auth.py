@@ -4,34 +4,22 @@ src/db/auth.py
 SQLite-backed authentication with Argon2 password hashing (via argon2-cffi),
 automatic transparent migration from legacy bcrypt hashes, user login tracking,
 and strong password complexity policies.
-
-Public API
-----------
-init_db()                              -> create tables + seed default admin
-verify_user(username, password)        -> bool
-get_user_role(username)                -> str | None
-add_user(username, password, role)     -> None
-get_all_users()                        -> list[dict]
-delete_user(username)                  -> None
-update_password(username, password)    -> None
-get_tour_completed(username)           -> bool
-set_tour_completed(username, completed)-> None
 """
 
 from __future__ import annotations
 
 import datetime
 import json
+import logging
 import os
 import re
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime as dt, timezone
 
 import bcrypt
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError, VerifyMismatchError
 
-# Database setup
 from src.core.app_config import AUTH_DB_PATH
 from src.db.migrations import migrate_auth_database
 from src.errors import StaleDataException
@@ -39,12 +27,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Seed the auth DB path from the centralized app_config.  ``_DB_PATH`` is
-# intentionally kept as a module-level string so that:
-#   1. tests monkey-patching ``src.db.auth._DB_PATH`` continue to work
-#      (tests/conftest.py, tests/infrastructure/test_fixtures.py), and
-#   2. ``configure_db_path()`` below can still mutate it at runtime for
-#      test/seed isolation (scripts/generate_seed_data.py).
 _DB_PATH = os.path.abspath(str(AUTH_DB_PATH))
 
 VALID_ROLES = {"admin", "teacher"}
@@ -72,7 +54,7 @@ def log_security_event(
     details: str | None = None,
 ) -> None:
     """Record a security-relevant event in the security_audit_log table."""
-    timestamp = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    timestamp = datetime.datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
         with _connect() as conn:
             conn.execute(
@@ -83,13 +65,60 @@ def log_security_event(
                 (event_type, username, timestamp, details),
             )
             conn.commit()
-    except Exception as exc:  # pragma: no cover – best-effort logging
+    except Exception as exc:
         logger.warning(
             "Failed to write security audit log entry [%s, %s]: %s",
             event_type,
             username,
             exc,
         )
+
+
+def get_security_audit_logs(
+    username: str | None = None,
+    event_type: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict]:
+    """Retrieve security audit log entries with limit, offset, and optional filters."""
+    if limit < 0 or offset < 0:
+        raise ValueError("Limit and offset must be non-negative integers.")
+
+    query = (
+        "SELECT id, event_type, username, timestamp, details FROM security_audit_log"
+    )
+    params: list = []
+    conditions: list[str] = []
+
+    if username:
+        conditions.append("username = ?")
+        params.append(username.lower())
+    if event_type:
+        conditions.append("event_type = ?")
+        params.append(event_type)
+
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+
+    query += " ORDER BY id DESC LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
+
+    try:
+        with _connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+            return [
+                {
+                    "id": r[0],
+                    "event_type": r[1],
+                    "username": r[2],
+                    "timestamp": r[3],
+                    "details": r[4],
+                }
+                for r in rows
+            ]
+    except sqlite3.Error as e:
+        logger.error(f"Failed to query security audit logs: {e}")
+        return []
 
 
 def _hash_password(password: str) -> str:
@@ -147,7 +176,7 @@ def _record_login_timestamp(username: str) -> None:
 
 
 def init_db() -> None:
-    """Create or upgrade users.db and seed the default administrator."""
+    """Create or upgrade users.db and seed default administrator accounts."""
     try:
         with _connect() as conn:
             migrate_auth_database(conn)
@@ -159,7 +188,7 @@ def init_db() -> None:
             exists = bool(row and row[0])
 
             if not exists:
-                hashed = _hash_password("admin12345")
+                hashed = _hash_password("Admin123!")
                 conn.execute(
                     """
                     INSERT INTO users (username, password, role)
@@ -178,11 +207,7 @@ def init_db() -> None:
 
 
 def verify_user(username: str, password: str) -> bool:
-    """
-    Return True if username exists, account is active, and password matches.
-    Supports Argon2 hashes (current standard) and legacy bcrypt hashes,
-    automatically migrating bcrypt hashes to Argon2 upon successful login.
-    """
+    """Return True if username exists, account is active, and password matches."""
     try:
         username = _validate_username(username)
         password = _validate_password(password)
@@ -236,7 +261,6 @@ def verify_user(username: str, password: str) -> bool:
     return False
 
 
-# Alias for compatibility
 authenticate_user = verify_user
 
 
@@ -287,8 +311,6 @@ def add_user(username: str, password: str, role: str = "teacher") -> None:
         raise ValueError(f"Username '{username}' already exists.") from e
     except sqlite3.Error as e:
         raise sqlite3.Error(f"Failed to add user: {e}") from e
-    finally:
-        password = "REDACTED"
 
 
 def get_all_users() -> list:
@@ -323,11 +345,7 @@ def delete_user(username: str) -> None:
             )
 
             for table_name in ("user_sessions", "authorization_tokens"):
-                table_exists = conn.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?",
-                    (table_name,),
-                ).fetchone()
-                if table_exists:
+                if table_exists(conn, table_name):
                     conn.execute(
                         f"DELETE FROM {table_name} WHERE username = ?",
                         (username,),
@@ -338,11 +356,15 @@ def delete_user(username: str) -> None:
         raise sqlite3.Error(f"Failed to delete user: {e}") from e
 
 
-def update_password(username: str, new_password: str, current_user: str | None = None) -> None:
+def update_password(
+    username: str, new_password: str, current_user: str | None = None
+) -> None:
     """Update a user's password with a new Argon2 hash."""
     if current_user and current_user != username:
         if get_user_role(current_user) != "admin":
-            raise PermissionError("Unauthorized password modifications for foreign user_ids")
+            raise PermissionError(
+                "Unauthorized password modifications for foreign user_ids"
+            )
 
     try:
         username = _validate_username(username)
@@ -357,9 +379,7 @@ def update_password(username: str, new_password: str, current_user: str | None =
                 raise ValueError("User not found.")
 
             hashed = _hash_password(new_password)
-            password_changed_at = datetime.now(
-                timezone.utc
-            ).isoformat()
+            password_changed_at = dt.now(timezone.utc).isoformat()
             cursor = conn.execute(
                 """
                 UPDATE users
@@ -384,8 +404,6 @@ def update_password(username: str, new_password: str, current_user: str | None =
         )
     except sqlite3.Error as e:
         raise sqlite3.Error(f"Failed to update password: {e}") from e
-    finally:
-        new_password = "REDACTED"
 
 
 def get_tour_completed(username: str) -> bool:
@@ -698,23 +716,16 @@ def get_user_count() -> int:
         return row[0] if row else 0
 
 
+def get_active_users_count() -> int:
+    """Return the total number of active users in the database."""
+    with _connect() as conn:
+        cursor = conn.execute("SELECT COUNT(*) FROM users WHERE is_active = 1")
+        row = cursor.fetchone()
+        return row[0] if row else 0
+
+
 def format_user_created_date(iso_str: str) -> str:
-    """Format an ISO date string as a human-readable date (e.g. "Jul 28, 2026").
-
-    Acceptance criteria (issue #1049):
-        - Parse ISO string and return formatted date string.
-        - Handle empty/invalid inputs gracefully.
-
-    Args:
-        iso_str: An ISO 8601 date/datetime string (e.g.
-            ``"2026-07-28T14:30:00Z"``, ``"2026-07-28"``,
-            ``"2026-07-28 14:30:00"``).
-
-    Returns:
-        A formatted date string like ``"Jul 28, 2026"`` on success,
-        or ``"Unknown"`` if the input is empty, ``None``, or cannot be
-        parsed.
-    """
+    """Format an ISO date string as a human-readable date (e.g. "Jul 28, 2026")."""
     if not iso_str or not isinstance(iso_str, str):
         return "Unknown"
 
@@ -722,28 +733,48 @@ def format_user_created_date(iso_str: str) -> str:
     if not iso_str:
         return "Unknown"
 
-    # Try dateutil.parser first — it handles virtually any ISO format.
     try:
         from dateutil import parser as dateutil_parser
 
-        dt = dateutil_parser.parse(iso_str)
-        return dt.strftime("%b %d, %Y")
+        dt_obj = dateutil_parser.parse(iso_str)
+        return dt_obj.strftime("%b %d, %Y")
     except Exception:
         pass
 
-    # Fallback: try Python's datetime.fromisoformat (3.7+).
-    # Strip trailing 'Z' which fromisoformat doesn't accept in 3.9–3.10.
     cleaned = iso_str.rstrip("Z")
     for parser_fn in (
-        datetime.datetime.fromisoformat,
-        lambda s: datetime.datetime.strptime(s, "%Y-%m-%d"),
-        lambda s: datetime.datetime.strptime(s, "%Y-%m-%d %H:%M:%S"),
-        lambda s: datetime.datetime.strptime(s, "%Y-%m-%dT%H:%M:%S"),
+        dt.fromisoformat,
+        lambda s: dt.strptime(s, "%Y-%m-%d"),
+        lambda s: dt.strptime(s, "%Y-%m-%d %H:%M:%S"),
+        lambda s: dt.strptime(s, "%Y-%m-%dT%H:%M:%S"),
     ):
         try:
-            dt = parser_fn(cleaned)
-            return dt.strftime("%b %d, %Y")
+            dt_obj = parser_fn(cleaned)
+            return dt_obj.strftime("%b %d, %Y")
         except Exception:
             continue
 
     return "Unknown"
+
+
+def get_upload_count(username: str | None = None) -> int:
+    """Return total number of uploads for a user or system-wide."""
+    try:
+        with _connect() as conn:
+            if username:
+                cursor = conn.execute(
+                    "SELECT COUNT(*) FROM security_audit_log WHERE username = ? AND event_type = 'file_upload'",
+                    (username.lower(),),
+                )
+            else:
+                cursor = conn.execute(
+                    "SELECT COUNT(*) FROM security_audit_log WHERE event_type = 'file_upload'"
+                )
+    except sqlite3.Error:
+        return 0
+
+
+from src.utils.redis_cache import (
+    increment_upload_count,
+    is_upload_rate_limited,
+)

@@ -1,6 +1,5 @@
 import io
 import shutil
-from pathlib import Path
 
 import zipfile
 from unittest.mock import MagicMock, patch
@@ -17,6 +16,7 @@ from src.core.document_parser import (
     extract_text_from_txt,
     extract_text_from_zip,
     extract_texts,
+    mask_named_entities_in_text,
     parallel_extract_texts,
     strip_bibliography,
     normalize_unicode_spaces,
@@ -610,6 +610,17 @@ class TestCleanText:
         result = clean_text(text, remove_stopwords=True)
         assert result == ""
 
+    def test_removes_custom_stopwords_from_file(self, tmp_path, monkeypatch):
+        stopwords_file = tmp_path / "custom_stopwords.txt"
+        stopwords_file.write_text("foobar\nbazqux\n")
+        monkeypatch.setenv("STOPWORDS_FILE", str(stopwords_file))
+
+        text = "foobar is a bazqux example"
+        result = clean_text(text, remove_stopwords=True)
+
+        assert "foobar" not in result
+        assert "bazqux" not in result
+        assert "example" in result
 
 def test_extract_empty_pdf_gracefully(caplog):
     """Assert that passing an empty/blank PDF returns an empty string gracefully without crashing."""
@@ -783,4 +794,26 @@ class TestCleanWhitespaceOption:
 
         result = extract_text(str(file_path), "test_raw.txt", clean_whitespace=False)
         assert result.replace("\r\n", "\n") == "Line 1   \n\n\n\nLine 2  \n\n\nLine 3"
+
+
+class TestMaskNamedEntities:
+    """Unit tests for mask_named_entities pre-processor option (#1353)."""
+
+    def test_mask_named_entities_in_text(self):
+        sample_text = "Submitted to Oxford University by Dr. John Doe on 2026-08-03."
+        masked = mask_named_entities_in_text(sample_text)
+        assert "[ENTITY_MASKED]" in masked
+        assert "2026-08-03" not in masked
+
+    def test_extract_text_with_mask_named_entities(self, tmp_path):
+        content = "Assignment submitted to Harvard University on January 15, 2025 by Prof. Smith."
+        file_path = tmp_path / "assignment.txt"
+        file_path.write_bytes(content.encode("utf-8"))
+
+        extracted_unmasked = extract_text(str(file_path), "assignment.txt", mask_named_entities=False)
+        assert "Harvard University" in extracted_unmasked
+
+        extracted_masked = extract_text(str(file_path), "assignment.txt", mask_named_entities=True)
+        assert "[ENTITY_MASKED]" in extracted_masked
+
 

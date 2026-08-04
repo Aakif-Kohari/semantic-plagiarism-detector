@@ -13,6 +13,8 @@ from matplotlib.figure import Figure
 from src.visualization.heatmap import (
     export_heatmap_matrix_csv,
     filter_heatmap_by_class_tag,
+    plot_differential_heatmap,
+    plot_differential_heatmap_matplotlib,
     plot_similarity_heatmap,
     plot_similarity_heatmap_plotly,
 )
@@ -455,3 +457,122 @@ def test_export_heatmap_matrix_csv_empty_dataframe():
     df = pd.DataFrame()
     csv_bytes = export_heatmap_matrix_csv(df)
     assert isinstance(csv_bytes, bytes)
+
+
+# ==============================================================================
+# Differential Heatmap Visualizer Tests (#1369)
+# ==============================================================================
+
+
+def test_plot_differential_heatmap_basic():
+    """Verify plot_differential_heatmap computes delta matrix and returns Plotly figure."""
+    import plotly.graph_objects as go
+
+    matrix_a = pd.DataFrame(
+        [
+            [1.00, 0.85, 0.40],
+            [0.85, 1.00, 0.70],
+            [0.40, 0.70, 1.00],
+        ],
+        index=["doc1", "doc2", "doc3"],
+        columns=["doc1", "doc2", "doc3"],
+    )
+    matrix_b = pd.DataFrame(
+        [
+            [1.00, 0.60, 0.50],
+            [0.60, 1.00, 0.40],
+            [0.50, 0.40, 1.00],
+        ],
+        index=["doc1", "doc2", "doc3"],
+        columns=["doc1", "doc2", "doc3"],
+    )
+
+    fig = plot_differential_heatmap(
+        matrix_a, matrix_b, title="Lexical vs Vector Similarity Delta"
+    )
+
+    assert isinstance(fig, go.Figure)
+    assert fig.layout.title.text == "Lexical vs Vector Similarity Delta"
+    assert len(fig.data) == 1
+    heatmap_trace = fig.data[0]
+
+    # Verify z values equal matrix_a - matrix_b
+    # doc1-doc2 delta = 0.85 - 0.60 = +0.25
+    # doc1-doc3 delta = 0.40 - 0.50 = -0.10
+    assert heatmap_trace.z[0][1] == pytest.approx(0.25, abs=1e-5)
+    assert heatmap_trace.z[0][2] == pytest.approx(-0.10, abs=1e-5)
+
+
+def test_plot_differential_heatmap_diverging_colorscale():
+    """Verify diverging colormap bounds zmin=-max_abs, zmax=max_abs around 0."""
+    matrix_a = pd.DataFrame(
+        [[1.0, 0.9], [0.9, 1.0]],
+        index=["docA", "docB"],
+        columns=["docA", "docB"],
+    )
+    matrix_b = pd.DataFrame(
+        [[1.0, 0.4], [0.4, 1.0]],
+        index=["docA", "docB"],
+        columns=["docA", "docB"],
+    )
+
+    fig = plot_differential_heatmap(matrix_a, matrix_b, colorscale="Coolwarm")
+    trace = fig.data[0]
+
+    # delta is +0.50
+    assert trace.zmax == pytest.approx(0.50, abs=1e-5)
+    assert trace.zmin == pytest.approx(-0.50, abs=1e-5)
+    assert trace.zmid == 0.0
+
+
+def test_plot_differential_heatmap_empty_matrices():
+    """Verify graceful handling when input matrices are empty."""
+    import plotly.graph_objects as go
+
+    empty_df = pd.DataFrame()
+    fig = plot_differential_heatmap(empty_df, empty_df, title="Empty Delta")
+
+    assert isinstance(fig, go.Figure)
+    annotations = [a.text for a in fig.layout.annotations]
+    assert any("empty" in text.lower() for text in annotations)
+
+
+def test_plot_differential_heatmap_single_document():
+    """Verify graceful handling for 1x1 matrix (< 2 documents)."""
+    df_a = pd.DataFrame([[1.0]], index=["doc1"], columns=["doc1"])
+    df_b = pd.DataFrame([[1.0]], index=["doc1"], columns=["doc1"])
+
+    fig = plot_differential_heatmap(df_a, df_b)
+    annotations = [a.text for a in fig.layout.annotations]
+    assert any("At least 2" in text for text in annotations)
+
+
+def test_plot_differential_heatmap_matplotlib():
+    """Verify static Matplotlib differential heatmap generator."""
+    matrix_a = pd.DataFrame(
+        [[1.0, 0.8], [0.8, 1.0]],
+        index=["doc1", "doc2"],
+        columns=["doc1", "doc2"],
+    )
+    matrix_b = pd.DataFrame(
+        [[1.0, 0.5], [0.5, 1.0]],
+        index=["doc1", "doc2"],
+        columns=["doc1", "doc2"],
+    )
+
+    fig = plot_differential_heatmap_matplotlib(matrix_a, matrix_b)
+    assert isinstance(fig, Figure)
+    plt.close(fig)
+def test_plot_similarity_heatmap_plotly_custom_colorscale(
+    multi_doc_df: pd.DataFrame,
+) -> None:
+    """Verify Issue #1397: a custom Plotly colorscale string is applied to the trace."""
+    fig = plot_similarity_heatmap_plotly(
+        multi_doc_df, title="Custom Colorscale", colorscale="Plasma"
+    )
+    heatmap = next(trace for trace in fig.data if trace.type == "heatmap")
+    assert heatmap.colorscale is not None
+
+    fig_default = plot_similarity_heatmap_plotly(multi_doc_df, title="Default Colorscale")
+    heatmap_default = next(trace for trace in fig_default.data if trace.type == "heatmap")
+    assert heatmap_default.colorscale != heatmap.colorscale

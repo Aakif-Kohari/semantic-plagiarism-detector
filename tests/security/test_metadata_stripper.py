@@ -98,3 +98,24 @@ def test_strip_image_metadata_dimension_exactly_at_limit():
     result = strip_exif_metadata(img_bytes.getvalue(), "test.png")
     assert isinstance(result, bytes)
     assert len(result) > 0
+
+
+def test_strip_palette_image_preserves_colors():
+    # A palette-based (P mode) image: pixels store palette indices, not channels
+    palette_image = Image.new("P", (10, 10))
+    palette_colors = []
+    for i in range(256):
+        palette_colors.extend((i, 0, 255 - i))
+    palette_image.putpalette(palette_colors)
+    # Index 7 maps to RGB (7, 0, 248)
+    palette_image.putdata([7] * 100)
+    img_bytes = io.BytesIO()
+    palette_image.save(img_bytes, format="PNG")
+
+    result = strip_exif_metadata(img_bytes.getvalue(), "test.png")
+
+    with Image.open(io.BytesIO(result)) as out_image:
+        # P mode must be converted to RGBA before saving so channels survive
+        assert out_image.mode == "RGBA"
+        pixel = out_image.getpixel((5, 5))
+    assert pixel == (7, 0, 248, 255)

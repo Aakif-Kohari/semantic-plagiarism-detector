@@ -66,7 +66,7 @@ from src.utils.filename import (
 from typing import Any
 
 try:
-    from streamlit_plotly_events import plotly_events
+    from streamlit_plotly_events import plotly_events # type: ignore
 except ImportError:  # pragma: no cover - optional dependency
     plotly_events = None
 
@@ -440,7 +440,7 @@ except ImportError:
 
 # ── Auto-refresh component for the Live Incident Stream (Issue #1384) ───────
 try:
-    from streamlit_autorefresh import st_autorefresh
+    from streamlit_autorefresh import st_autorefresh # type: ignore
 except ImportError:
     st_autorefresh = None
     logger.warning(
@@ -871,7 +871,7 @@ if not st.session_state.get("authenticated", False):
                 username = st.session_state.get("pending_username")
                 enabled, otp_secret = get_2fa_status(username)
                 if enabled and otp_secret:
-                    import pyotp
+                    import pyotp # type: ignore
 
                     totp = pyotp.TOTP(otp_secret)
                     if totp.verify(otp_code.strip()):
@@ -975,25 +975,66 @@ def logout_dialog():
             st.rerun()
 
 
-@st.dialog("⚠️ Confirm Bulk Clear")
-def clear_all_dialog():
-    st.markdown(
-        "**WARNING:** This action is destructive and cannot be undone. "
-        "This will permanently delete all student documents, paragraph chunks, "
-        "and plagiarism incidents from the database, and reset the FAISS index."
-    )
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Cancel", use_container_width=True):
-            st.rerun()
-    with col2:
-        if st.button("Confirm Delete", type="primary", use_container_width=True):
-            clear_all_data()
-            if os.path.exists(_INDEX_PATH):
-                os.remove(_INDEX_PATH)
-            st.success("All corpus data has been deleted.")
-            st.rerun()
+# ── Corpus Overview Header & Quick Actions (#1242) ───────────────────────────
+header_col, action_col1, action_col2 = st.columns([0.5, 0.25, 0.25])
 
+with header_col:
+    st.subheader("📚 Corpus Overview")
+
+with action_col1:
+    if st.button("🔄 Refresh Corpus Data", key="refresh_corpus_btn", use_container_width=True):
+        # Clear document list session state and pipeline caches
+        keys_to_clear = [
+            "analysis_results",
+            "analysis_file_signature",
+            "drive_files_dict",
+            "failed_documents",
+            "warning_page",
+        ]
+        for key in keys_to_clear:
+            if key in st.session_state:
+                del st.session_state[key]
+
+        # Clear Streamlit cache data
+        st.cache_data.clear()
+
+        # Display success toast and rerun
+        st.toast("Corpus dataset refreshed.", icon="✅")
+        st.rerun()
+
+with action_col2:
+    if st.button("🗑️ Clear All Data", key="open_clear_dialog_btn", type="secondary", use_container_width=True):
+        clear_all_dialog() # type: ignore
+# ── Corpus Overview Header & Quick Actions (#1242) ───────────────────────────
+header_col, action_col1, action_col2 = st.columns([0.5, 0.25, 0.25])
+
+with header_col:
+    st.subheader("📚 Corpus Overview")
+
+with action_col1:
+    if st.button("🔄 Refresh Corpus Data", key="refresh_corpus_btn", use_container_width=True):
+        # Clear document list session state and pipeline caches
+        keys_to_clear = [
+            "analysis_results",
+            "analysis_file_signature",
+            "drive_files_dict",
+            "failed_documents",
+            "warning_page",
+        ]
+        for key in keys_to_clear:
+            if key in st.session_state:
+                del st.session_state[key]
+
+        # Clear Streamlit cache data
+        st.cache_data.clear()
+
+        # Display success toast and rerun
+        st.toast("Corpus dataset refreshed.", icon="✅")
+        st.rerun()
+
+with action_col2:
+    if st.button("🗑️ Clear All Data", key="open_clear_dialog_btn", type="secondary", use_container_width=True):
+        clear_all_dialog() # type: ignore
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -1555,6 +1596,22 @@ if user_role == "admin":
         existing_docs = get_all_documents()
         if existing_docs:
             st.write(f"**{len(existing_docs)}** documents in database")
+            
+            import pandas as pd
+            from src.db.corpus_db import get_document_word_counts, get_document_char_counts
+            word_counts = get_document_word_counts()
+            char_counts = get_document_char_counts()
+            
+            df = pd.DataFrame([{"filename": doc["filename"]} for doc in existing_docs])
+            df["word_count"] = df["filename"].map(word_counts).fillna(0).astype(int)
+            df["char_count"] = df["filename"].map(char_counts).fillna(0).astype(int)
+            
+            styled_df = df.style.format({
+                "word_count": "{:,} words",
+                "char_count": "{:,} chars"
+            })
+            st.dataframe(styled_df, use_container_width=True)
+
             for doc in existing_docs:
                 col1, col2 = st.columns([3, 1])
                 with col1:
@@ -1577,7 +1634,7 @@ if user_role == "admin":
             key="clear_all_documents_button",
             use_container_width=True,
         ):
-            clear_all_dialog()
+            clear_all_dialog() # type: ignore
         st.markdown("<br>", unsafe_allow_html=True)
 
         st.markdown("---")
@@ -2209,28 +2266,28 @@ with tab_heatmap:
                 help="Render similarity text labels inside heatmap cells.",
             )
 
-            with drill_tab_analysis:
+            with drill_tab_analysis: # type: ignore
                 top_pairs = find_most_similar_chunks(
-                    chunks_a, chunks_b, embeddings[doc_a], embeddings[doc_b], top_k=5, threshold=threshold
+                    chunks_a, chunks_b, embeddings[doc_a], embeddings[doc_b], top_k=5, threshold=threshold # type: ignore
                 )
                 for rank, (ca, cb, sim) in enumerate(top_pairs, 1):
                     with st.expander(f"#{rank} — Similarity: {sim:.1%}"):
-                        st.write(f"**{doc_a}:** {ca}")
-                        st.write(f"**{doc_b}:** {cb}")
+                        st.write(f"**{doc_a}:** {ca}") # type: ignore
+                        st.write(f"**{doc_b}:** {cb}") # type: ignore
 
             # --- In-App PDF Preview with Highlighted Matches (#145) ---
-            with drill_tab_viewer:
+            with drill_tab_viewer: # type: ignore
                 st.subheader("📄 In-App PDF Preview with Highlighted Matches")
                 selected_view_doc = st.radio(
                     "Select Document to Preview:",
-                    options=[doc_a, doc_b],
+                    options=[doc_a, doc_b], # type: ignore
                     horizontal=True,
                     key="doc_viewer_select",
                 )
 
                 # Retrieve file bytes directly from uploaded files dict
                 doc_source = file_bytes_dict.get(selected_view_doc)
-                matching_chunks_to_highlight = chunks_a if selected_view_doc == doc_a else chunks_b
+                matching_chunks_to_highlight = chunks_a if selected_view_doc == doc_a else chunks_b # type: ignore
 
                 if doc_source and str(selected_view_doc).lower().endswith(".pdf"):
                     with st.spinner("Generating highlighted PDF preview..."):
@@ -2507,10 +2564,17 @@ with tab_heatmap:
             st.markdown("### ⚙️ Thresholds")
             threshold = st.slider(
                 get_text("threshold", lang=lang_code),
-=======
+                min_value=0.0,
+                max_value=1.0,
+                value=0.0,
+                step=0.05,
+                format="%.2f",
+                key="heatmap_threshold",
+                help="Set the minimum similarity threshold for displaying document pairs.",
+            )
             mask_threshold = st.slider(
                 "Minimum Similarity to Display",
->>>>>>> upstream/main
+
                 min_value=0.0,
                 max_value=1.0,
                 value=0.0,

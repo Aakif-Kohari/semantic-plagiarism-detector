@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 corpus_db.py
 ------------
@@ -7,22 +5,24 @@ SQLite database manager to persist document metadata, chunk text, and embeddings
 Enables incremental updates and index rebuilding without re-embedding.
 """
 
-import sqlite3
+from __future__ import annotations
+
 import logging
 import os
-import psutil
+import sqlite3
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
-
 import numpy as np
+import psutil
 
 from src.core.app_config import CORPUS_DB_PATH, FALLBACK_CORPUS_DB_PATH
-from src.db.migrations import delete_all_if_table_exists
+from src.db.migrations.common import column_exists, delete_all_if_table_exists
 from src.utils.filename import sanitize_filename
+
+logger = logging.getLogger(__name__)
 
 # Seed the corpus DB path from the centralized app_config.
 _DB_PATH = os.path.abspath(str(CORPUS_DB_PATH))
@@ -169,39 +169,75 @@ def init_corpus_db() -> None:
         )
 
         # 2. RUN SCHEMA MIGRATIONS / ALTER TABLES AFTER CREATION
-        cursor = conn.execute("PRAGMA table_info(documents)")
-        columns = [row[1] for row in cursor.fetchall()]
-        if "class_section" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN class_section TEXT")
-        if "student_name" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN student_name TEXT")
-        if "assignment_title" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN assignment_title TEXT")
-        conn.commit()
-        if "pdf_author" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN pdf_author TEXT")
-        if "pdf_creation_date" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN pdf_creation_date TEXT")
-        if "pdf_title" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN pdf_title TEXT")
-        if "tags" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN tags TEXT")
-        if "detected_language" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN detected_language TEXT")
-        if "owner" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN owner TEXT")
-        if "is_deleted" not in columns:
-            conn.execute(
-                "ALTER TABLE documents ADD COLUMN is_deleted INTEGER DEFAULT 0"
-            )
-        if "deleted_at" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN deleted_at TEXT")
-        if "created_at" not in columns:
-            conn.execute("ALTER TABLE documents ADD COLUMN created_at TEXT")
+        columns_to_ensure = [
+            ("class_section", "TEXT"),
+            ("student_name", "TEXT"),
+            ("assignment_title", "TEXT"),
+            ("pdf_author", "TEXT"),
+            ("pdf_creation_date", "TEXT"),
+            ("pdf_title", "TEXT"),
+            ("tags", "TEXT"),
+            ("detected_language", "TEXT"),
+            ("owner", "TEXT"),
+            ("is_deleted", "INTEGER DEFAULT 0"),
+            ("deleted_at", "TEXT"),
+            ("created_at", "TEXT"),
+        ]
+
+        for col_name, col_type in columns_to_ensure:
+            if not column_exists(conn, "documents", col_name):
+                conn.execute(f"ALTER TABLE documents ADD COLUMN {col_name} {col_type}")
 
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at)"
         )
+
+                # Issue #1359: Create FTS5 virtual table + sync triggers for full-text
+        # search. Also created by migration_012, but we create it here too
+        # so that ``init_corpus_db()`` (which doesn't call
+        # ``migrate_corpus_database()``) still sets up FTS.
+        conn.execute(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
+                filename,
+                student_name,
+                assignment_title,
+                content='documents',
+                content_rowid='id'
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS documents_ai AFTER INSERT ON documents BEGIN
+                INSERT INTO documents_fts(rowid, filename, student_name, assignment_title)
+                VALUES (new.id, new.filename, new.student_name, new.assignment_title);
+            END
+            """
+        )
+        conn.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS documents_ad AFTER DELETE ON documents BEGIN
+                INSERT INTO documents_fts(documents_fts, rowid, filename, student_name, assignment_title)
+                VALUES ('delete', old.id, old.filename, old.student_name, old.assignment_title);
+            END
+            """
+        )
+        conn.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
+                INSERT INTO documents_fts(documents_fts, rowid, filename, student_name, assignment_title)
+                VALUES ('delete', old.id, old.filename, old.student_name, old.assignment_title);
+                INSERT INTO documents_fts(rowid, filename, student_name, assignment_title)
+                VALUES (new.id, new.filename, new.student_name, new.assignment_title);
+            END
+            """
+        )
+        # Backfill any existing rows into the FTS index
+        try:
+            conn.execute("INSERT INTO documents_fts(documents_fts) VALUES ('rebuild')")
+        except sqlite3.OperationalError:
+            pass  # Table might be empty or already synced
 
         try:
             os.chmod(_DB_PATH, 0o600)
@@ -524,6 +560,18 @@ def get_document_word_counts() -> dict[str, int]:
     return word_counts
 
 
+def get_document_char_counts() -> dict[str, int]:
+    """Calculate and return the total character count for each document currently in the database."""
+    with _connect() as conn:
+        rows = conn.execute("SELECT filename, chunk_text FROM chunks").fetchall()
+
+    char_counts = {}
+    for filename, chunk_text in rows:
+        chars = len(chunk_text or "")
+        char_counts[filename] = char_counts.get(filename, 0) + chars
+    return char_counts
+
+
 def clear_all_data() -> None:
     """Clear known corpus tables while tolerating partial schemas."""
     with _connect() as conn:
@@ -806,4 +854,72 @@ def get_deleted_documents_count() -> int:
             "SELECT COUNT(1) FROM documents WHERE is_deleted = 1"
         ).fetchone()
         return int(row[0]) if row else 0
+def search_documents_fts(query_text: str) -> list[dict]:
+    """Search the document corpus using the FTS5 full-text index (issue #1359).
+
+    Replaces slow ``LIKE '%query%'`` full table scans with a fast FTS5
+    MATCH query against the ``documents_fts`` virtual table. Searches
+    across ``filename``, ``student_name``, and ``assignment_title`` columns.
+
+    Args:
+        query_text: The search query string. Must be a non-empty string.
+                    FTS5 query syntax is supported (e.g., ``"machine learning"``
+                    for phrase search, ``machine OR learning`` for boolean).
+
+    Returns:
+        A list of dicts, each containing:
+        - ``id`` (int): Document row ID.
+        - ``filename`` (str): Document filename.
+        - ``student_name`` (str|None): Student name if set.
+        - ``assignment_title`` (str|None): Assignment title if set.
+        - ``upload_date`` (str): ISO timestamp of upload.
+        - ``snippet`` (str): FTS5-generated snippet with matched terms highlighted.
+
+        Returns an empty list if the query is empty or no matches are found.
+    """
+    if not query_text or not query_text.strip():
+        return []
+
+    # Sanitize the query for FTS5: wrap in double quotes to prevent
+    # FTS5 syntax errors from special characters (e.g., *, :, OR).
+    # This treats the query as a phrase match which is the safest
+    # default for user-supplied search terms.
+    sanitized = query_text.strip().replace('"', '""')
+    fts_query = f'"{sanitized}"'
+
+    try:
+        with _connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    d.id,
+                    d.filename,
+                    d.student_name,
+                    d.assignment_title,
+                    d.upload_date,
+                    snippet(documents_fts, 0, '<mark>', '</mark>', '...', 32) as snippet
+                FROM documents_fts
+                JOIN documents d ON d.id = documents_fts.rowid
+                WHERE documents_fts MATCH ?
+                  AND (d.is_deleted IS NULL OR d.is_deleted = 0)
+                ORDER BY rank
+                """,
+                (fts_query,),
+            ).fetchall()
+
+            return [
+                {
+                    "id": r[0],
+                    "filename": r[1],
+                    "student_name": r[2],
+                    "assignment_title": r[3],
+                    "upload_date": r[4],
+                    "snippet": r[5],
+                }
+                for r in rows
+            ]
+    except sqlite3.OperationalError as e:
+        logger.warning("FTS5 search failed: %s. Returning empty list.", e)
+        return []
+
 
