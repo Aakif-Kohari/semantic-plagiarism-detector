@@ -396,6 +396,49 @@ def calculate_lexical_similarity(
         return 0.0
 
 
+def compute_tfidf_lexical_similarity(
+    doc_a: str,
+    doc_b: str,
+    corpus: list[str],
+) -> float:
+    """Compute TF-IDF weighted lexical similarity between doc_a and doc_b across corpus vocabulary.
+
+    Parameters
+    ----------
+    doc_a : str
+        First document text string.
+    doc_b : str
+        Second document text string.
+    corpus : list[str]
+        Corpus document texts used to compute term frequencies and inverse document frequencies.
+
+    Returns
+    -------
+    float
+        Normalized similarity score bounded strictly between 0.0 and 1.0.
+    """
+    if not doc_a or not doc_b or not isinstance(doc_a, str) or not isinstance(doc_b, str):
+        return 0.0
+    if not doc_a.strip() or not doc_b.strip():
+        return 0.0
+
+    combined_corpus = list(corpus) if corpus else []
+    if doc_a not in combined_corpus:
+        combined_corpus.append(doc_a)
+    if doc_b not in combined_corpus:
+        combined_corpus.append(doc_b)
+
+    try:
+        vectorizer = TfidfVectorizer(stop_words=list(STOPWORDS))
+        vectorizer.fit(combined_corpus)
+        matrix = vectorizer.transform([doc_a, doc_b])
+        sim = cosine_similarity(matrix[0:1], matrix[1:2])[0][0]
+        return float(np.clip(sim, 0.0, 1.0))
+    except ValueError:
+        return 0.0
+
+
+
 def _make_documents_hash(
     documents: Dict[str, str],
     custom_stopwords: Optional[Set[str]] = None,
