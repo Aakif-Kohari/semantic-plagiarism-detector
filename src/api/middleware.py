@@ -15,18 +15,21 @@ PUBLIC_PATHS = {
     "/metrics",
     "/metrics/json",
     "/api/v1/auth/login",
+    "/api/v1/auth/revoke",
     "/api/v1/version",
     "/api/v1/healthz",
     "/api/v1/rate_limit",
     "/api/v1/status",
     "/docs",
     "/redoc",
-    "/openapi.json"
+    "/openapi.json",
 }
+
 
 def get_expected_bearer_token() -> str:
     """Retrieve the API Bearer Token from environment variable or default fallback."""
     return os.getenv("API_BEARER_TOKEN", "dev-bearer-token")
+
 
 def get_valid_tokens() -> dict[str, list[str]]:
     """Retrieve all valid tokens and their associated scopes."""
@@ -50,6 +53,7 @@ def get_valid_tokens() -> dict[str, list[str]]:
 
     return tokens
 
+
 async def verify_bearer_token(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
@@ -71,7 +75,18 @@ async def verify_bearer_token(
             detail="Invalid or missing authentication token.",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    from src.db.auth import is_token_revoked
+
+    if is_token_revoked(credentials.credentials):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has been revoked.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     return credentials.credentials
+
 
 async def get_current_user(
     security_scopes: SecurityScopes,
@@ -94,4 +109,3 @@ async def get_current_user(
                     detail="Forbidden: Insufficient privileges/missing required scope.",
                 )
     return {"token": token, "scopes": token_scopes}
-

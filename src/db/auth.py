@@ -21,9 +21,8 @@ from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError, VerifyMismatchError
 
 from src.core.app_config import AUTH_DB_PATH
-from src.db.migrations import migrate_auth_database
+from src.db.migrations import migrate_auth_database, table_exists
 from src.errors import StaleDataException
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -757,6 +756,92 @@ def format_user_created_date(iso_str: str) -> str:
     return "Unknown"
 
 
+def _get_token_signature(token: str) -> str:
+    """Return a SHA-256 hex digest signature for a token."""
+    import hashlib
+
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def revoke_token(token: str, details: str | None = None) -> None:
+    """Revoke an active Bearer token by storing its signature in revoked_tokens table."""
+    if not token or not isinstance(token, str):
+        raise ValueError("Token must be a non-empty string.")
+
+    token = token.strip()
+    if not token:
+        raise ValueError("Token cannot be empty.")
+
+    signature = _get_token_signature(token)
+    revoked_at = datetime.datetime.now(timezone.utc).isoformat()
+
+    try:
+        with _connect() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS revoked_tokens (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    token_signature TEXT UNIQUE NOT NULL,
+                    revoked_at TEXT NOT NULL,
+                    details    TEXT DEFAULT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO revoked_tokens (token_signature, revoked_at, details)
+                VALUES (?, ?, ?)
+                """,
+                (signature, revoked_at, details),
+            )
+            if signature != token:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO revoked_tokens (token_signature, revoked_at, details)
+                    VALUES (?, ?, ?)
+                    """,
+                    (token, revoked_at, details),
+                )
+            conn.commit()
+            log_security_event(
+                event_type="token_revocation",
+                username="system",
+                details=details or f"Token signature {signature[:12]}... revoked",
+            )
+    except sqlite3.Error as e:
+        logger.error(f"Failed to revoke token: {e}")
+        raise sqlite3.Error(f"Failed to revoke token: {e}") from e
+
+
+def is_token_revoked(token: str) -> bool:
+    """Return True if the token or its SHA-256 signature exists in revoked_tokens."""
+    if not token or not isinstance(token, str):
+        return False
+
+    token = token.strip()
+    if not token:
+        return False
+
+    signature = _get_token_signature(token)
+
+    try:
+        with _connect() as conn:
+            cursor = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='revoked_tokens'"
+            )
+            if not cursor.fetchone():
+                return False
+
+            row = conn.execute(
+                "SELECT 1 FROM revoked_tokens WHERE token_signature = ? OR token_signature = ? LIMIT 1",
+                (signature, token),
+            ).fetchone()
+            return bool(row)
+    except sqlite3.Error as e:
+        logger.error(f"Failed to check token revocation status: {e}")
+        return False
+
+
 def get_upload_count(username: str | None = None) -> int:
     """Return total number of uploads for a user or system-wide."""
     try:
@@ -770,11 +855,7 @@ def get_upload_count(username: str | None = None) -> int:
                 cursor = conn.execute(
                     "SELECT COUNT(*) FROM security_audit_log WHERE event_type = 'file_upload'"
                 )
+            row = cursor.fetchone()
+            return row[0] if row else 0
     except sqlite3.Error:
         return 0
-
-
-from src.utils.redis_cache import (
-    increment_upload_count,
-    is_upload_rate_limited,
-)
