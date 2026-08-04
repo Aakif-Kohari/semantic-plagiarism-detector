@@ -105,11 +105,14 @@ def normalize_csv_headers(headers: list[str]) -> list[str]:
 
     for index, header in enumerate(headers):
         # Handle non-string headers by converting to string first
-        if not isinstance(header, str):
-            header = str(header)
+        if header is None:
+            cleaned = ""
+        else:
+            if not isinstance(header, str):
+                header = str(header)
+            # Step 1: Strip leading and trailing whitespace
+            cleaned = header.strip()
 
-        # Step 1: Strip leading and trailing whitespace
-        cleaned = header.strip()
 
         # Step 2: Replace invalid characters (anything not alphanumeric,
         # underscore, or hyphen) with underscores
@@ -351,3 +354,85 @@ def generate_bulk_reports_zip(
                 logger.warning("Failed to generate JSON metadata: %s", exc)
 
     return memory_file.getvalue()
+
+
+def create_batch_incident_zip_archive(incidents: list[dict]) -> bytes:
+    """Generate in-memory ZIP byte buffer containing incidents_summary.csv, metadata.json, and PDF reports.
+
+    Args:
+        incidents: A list of incident dictionaries.
+
+    Returns:
+        bytes: The in-memory ZIP file content.
+    """
+    memory_file = io.BytesIO()
+
+    with zipfile.ZipFile(memory_file, "w", zipfile.ZIP_DEFLATED) as zf:
+        # 1. Generate and write incidents_summary.csv
+        try:
+            csv_bytes = export_incidents_csv_stream(incidents)
+            zf.writestr("incidents_summary.csv", csv_bytes)
+        except Exception as exc:
+            logger.error("Failed to generate incidents_summary.csv in bulk export zip: %s", exc)
+
+        # 2. Generate and write metadata.json
+        try:
+            metadata = {
+                "generated_at": datetime.now().isoformat(),
+                "total_incidents": len(incidents),
+                "incidents": incidents,
+            }
+            metadata_bytes = json.dumps(metadata, indent=2).encode("utf-8")
+            zf.writestr("metadata.json", metadata_bytes)
+        except Exception as exc:
+            logger.error("Failed to generate metadata.json in bulk export zip: %s", exc)
+
+        # 3. Generate and write PDF report for each incident
+        for idx, incident in enumerate(incidents):
+            doc_a = incident.get("document_a") or incident.get("doc_a", "")
+            doc_b = incident.get("document_b") or incident.get("doc_b", "")
+
+            if not doc_a or not doc_b:
+                logger.warning("Skipping PDF generation for incident at index %d: missing doc_a or doc_b", idx)
+                continue
+
+            raw_score = incident.get("similarity_score") or incident.get("similarity", 0.0)
+            try:
+                score = float(raw_score)
+            except (TypeError, ValueError):
+                score = 0.0
+
+            raw_threshold = incident.get("threshold_at_time_of_flag") or incident.get("threshold", 0.59)
+            try:
+                threshold = float(raw_threshold)
+            except (TypeError, ValueError):
+                threshold = 0.59
+
+            incident_id = incident.get("incident_id")
+            if not incident_id:
+                # generate a fallback incident ID
+                try:
+                    from src.db.incidents import build_incident_id
+                    incident_id = build_incident_id(doc_a, doc_b)
+                except Exception:
+                    incident_id = f"unknown_{idx}"
+
+            safe_a = _sanitise_filename(doc_a)
+            safe_b = _sanitise_filename(doc_b)
+            pdf_filename = f"report_{incident_id}_{safe_a}_{safe_b}.pdf"
+
+            try:
+                pdf_buffer = generate_plagiarism_report(
+                    doc_a=doc_a,
+                    doc_b=doc_b,
+                    overall_similarity=score,
+                    threshold=threshold,
+                    top_pairs=[],
+                    report_title=f"Plagiarism Report: {doc_a} vs {doc_b}",
+                )
+                zf.writestr(pdf_filename, pdf_buffer.getvalue())
+            except Exception as exc:
+                logger.error("Failed to generate PDF for incident %s (%s ↔ %s): %s", incident_id, doc_a, doc_b, exc)
+
+    return memory_file.getvalue()
+
