@@ -90,19 +90,20 @@ def mock_audit_db():
     conn.execute("""
         CREATE TABLE security_audit_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type TEXT,
             username TEXT,
-            action TEXT,
-            timestamp DATETIME
+            timestamp DATETIME,
+            details TEXT
         )
     """)
     conn.execute(
-        "INSERT INTO security_audit_log (username, action, timestamp) VALUES ('alice', 'login', '2023-01-01 10:00:00')"
+        "INSERT INTO security_audit_log (event_type, username, timestamp) VALUES ('login', 'alice', '2023-01-01 10:00:00')"
     )
     conn.execute(
-        "INSERT INTO security_audit_log (username, action, timestamp) VALUES ('bob', 'login', '2023-01-02 10:00:00')"
+        "INSERT INTO security_audit_log (event_type, username, timestamp) VALUES ('login', 'bob', '2023-01-02 10:00:00')"
     )
     conn.execute(
-        "INSERT INTO security_audit_log (username, action, timestamp) VALUES ('alice', 'logout', '2023-01-03 10:00:00')"
+        "INSERT INTO security_audit_log (event_type, username, timestamp) VALUES ('logout', 'alice', '2023-01-03 10:00:00')"
     )
     conn.commit()
 
@@ -116,9 +117,9 @@ def test_get_security_audit_logs_default(mock_audit_db):
     assert len(logs) == 3
     # Order by timestamp DESC
     assert logs[0]["username"] == "alice"
-    assert logs[0]["action"] == "logout"
+    assert logs[0]["event_type"] == "logout"
     assert logs[2]["username"] == "alice"
-    assert logs[2]["action"] == "login"
+    assert logs[2]["event_type"] == "login"
 
 
 def test_get_security_audit_logs_pagination(mock_audit_db):
@@ -131,8 +132,8 @@ def test_get_security_audit_logs_pagination(mock_audit_db):
 def test_get_security_audit_logs_username_filter(mock_audit_db):
     logs = get_security_audit_logs(username="alice")
     assert len(logs) == 2
-    assert logs[0]["action"] == "logout"
-    assert logs[1]["action"] == "login"
+    assert logs[0]["event_type"] == "logout"
+    assert logs[1]["event_type"] == "login"
 
 
 def test_get_security_audit_logs_empty(mock_audit_db):
@@ -145,10 +146,6 @@ def test_get_security_audit_logs_invalid_limit_offset(mock_audit_db):
         get_security_audit_logs(limit=-1)
     with pytest.raises(ValueError):
         get_security_audit_logs(offset=-1)
-    user = f"user_{uuid.uuid4().hex[:8]}"
-    add_user(user, "password123")
-    delete_user(user)
-    assert get_user_role(user) is None
 
 
 def test_2fa_flow():
@@ -202,8 +199,10 @@ def test_suspend_account():
 
 def test_sqlite_file_lock_exception(mock_db):
     """Test that acquiring an exclusive lock on SQLite database triggers a clean sqlite3.Error when attempting add_user."""
-    conn = sqlite3.connect(mock_db)
+    import src.db.auth
+    conn = sqlite3.connect(src.db.auth._DB_PATH, timeout=0.1)
     conn.execute("BEGIN EXCLUSIVE TRANSACTION")
+    conn.execute("INSERT INTO users (username, password) VALUES ('lock_dummy', 'pass')")
     try:
         with pytest.raises(sqlite3.Error) as exc_info:
             add_user("locked_user", "password123!")
@@ -230,6 +229,7 @@ def test_user_theme(mock_db):
 
 def test_delete_user_removes_user_row_and_audit_log(mock_db):
     """delete_user() must remove the user row and associated security_audit_log entries."""
+    import src.db.auth
     user = f"user_{uuid.uuid4().hex[:8]}"
     add_user(user, "password123")
 
@@ -237,7 +237,7 @@ def test_delete_user_removes_user_row_and_audit_log(mock_db):
     log_security_event("password_change", user, "test entry")
 
     # Confirm the audit entry exists before deletion
-    with sqlite3.connect(mock_db) as conn:
+    with sqlite3.connect(src.db.auth._DB_PATH) as conn:
         audit_before = conn.execute(
             "SELECT COUNT(*) FROM security_audit_log WHERE username = ?", (user,)
         ).fetchone()[0]
@@ -249,7 +249,7 @@ def test_delete_user_removes_user_row_and_audit_log(mock_db):
     assert get_user_role(user) is None
 
     # Audit log entries for the deleted user must also be removed
-    with sqlite3.connect(mock_db) as conn:
+    with sqlite3.connect(src.db.auth._DB_PATH) as conn:
         audit_after = conn.execute(
             "SELECT COUNT(*) FROM security_audit_log WHERE username = ?", (user,)
         ).fetchone()[0]
@@ -258,10 +258,11 @@ def test_delete_user_removes_user_row_and_audit_log(mock_db):
 
 def test_delete_user_removes_matching_session_and_authorization_rows(mock_db):
     """delete_user() should remove matching session and authorization rows for the deleted user."""
+    import src.db.auth
     user = f"user_{uuid.uuid4().hex[:8]}"
     add_user(user, "password123")
 
-    with sqlite3.connect(mock_db) as conn:
+    with sqlite3.connect(src.db.auth._DB_PATH) as conn:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS user_sessions (
@@ -300,7 +301,7 @@ def test_delete_user_removes_matching_session_and_authorization_rows(mock_db):
 
     delete_user(user)
 
-    with sqlite3.connect(mock_db) as conn:
+    with sqlite3.connect(src.db.auth._DB_PATH) as conn:
         user_session_count = conn.execute(
             "SELECT COUNT(*) FROM user_sessions WHERE username = ?", (user,)
         ).fetchone()[0]

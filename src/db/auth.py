@@ -21,6 +21,7 @@ from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError, VerifyMismatchError
 
 from src.core.app_config import AUTH_DB_PATH
+from src.db.common import with_sqlite_retry
 from src.db.migrations import migrate_auth_database, table_exists
 from src.errors import StaleDataException
 
@@ -163,6 +164,7 @@ def _validate_role(role: str) -> str:
     return role
 
 
+@with_sqlite_retry
 def _record_login_timestamp(username: str) -> None:
     """Update last_login_at timestamp for a given user."""
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -293,6 +295,7 @@ def get_user_roles(user_ids: list[int]) -> dict[int, str]:
         raise sqlite3.Error(f"Failed to batch query user roles: {e}") from e
 
 
+@with_sqlite_retry
 def add_user(username: str, password: str, role: str = "teacher") -> None:
     """Insert a user and preserve SQLite duplicate-user semantics."""
     try:
@@ -333,6 +336,7 @@ def get_all_users() -> list:
         raise sqlite3.Error(f"Failed to retrieve users: {e}") from e
 
 
+@with_sqlite_retry
 def delete_user(username: str) -> None:
     """Delete a user and their associated authorization records by username."""
     try:
@@ -355,6 +359,7 @@ def delete_user(username: str) -> None:
         raise sqlite3.Error(f"Failed to delete user: {e}") from e
 
 
+@with_sqlite_retry
 def update_password(
     username: str, new_password: str, current_user: str | None = None
 ) -> None:
@@ -419,6 +424,7 @@ def get_tour_completed(username: str) -> bool:
         raise sqlite3.Error(f"Failed to retrieve tour status: {e}") from e
 
 
+@with_sqlite_retry
 def set_tour_completed(username: str, completed: bool = True) -> None:
     """Mark a user as having completed the onboarding tour."""
     try:
@@ -445,6 +451,7 @@ def get_2fa_status(username: str) -> tuple[bool, str | None]:
     return bool(row[0]), row[1]
 
 
+@with_sqlite_retry
 def enable_2fa(username: str, secret: str) -> None:
     """Enable 2FA for a user and store their OTP secret."""
     with _connect() as conn:
@@ -455,6 +462,7 @@ def enable_2fa(username: str, secret: str) -> None:
         conn.commit()
 
 
+@with_sqlite_retry
 def disable_2fa(username: str) -> None:
     """Disable 2FA for a user and clear their OTP secret."""
     with _connect() as conn:
@@ -479,6 +487,7 @@ def check_login_rate_limit(username: str) -> tuple[bool, str | None]:
     return True, None
 
 
+@with_sqlite_retry
 def record_failed_login(username: str) -> None:
     """Record a failed login attempt for rate limiting."""
     from src.utils.redis_cache import increment_login_attempts
@@ -486,6 +495,7 @@ def record_failed_login(username: str) -> None:
     increment_login_attempts(username.lower())
 
 
+@with_sqlite_retry
 def clear_login_attempts(username: str) -> None:
     """Clear failed login attempts after successful login."""
     from src.utils.redis_cache import clear_login_attempts as redis_clear_login_attempts
@@ -509,6 +519,7 @@ def get_user_preferences(username: str) -> dict:
     return {}
 
 
+@with_sqlite_retry
 def update_user_preferences(username: str, preferences: dict) -> None:
     """Serialize and update user preferences in the database."""
     username = username.lower()
@@ -539,6 +550,7 @@ def get_notification_preferences(username: str) -> dict:
     }
 
 
+@with_sqlite_retry
 def update_notification_preferences(
     username: str,
     email_notifications: bool = True,
@@ -569,6 +581,7 @@ def get_user_theme(username: str) -> str:
         return row[0] if row else "light"
 
 
+@with_sqlite_retry
 def set_user_theme(username: str, theme: str) -> None:
     """Update the user's theme preference."""
     username = username.lower()
@@ -582,6 +595,7 @@ def set_user_theme(username: str, theme: str) -> None:
         conn.commit()
 
 
+@with_sqlite_retry
 def get_or_create_sso_user(email: str, default_role: str = "teacher") -> str:
     """Finds a user by email (as username) or creates a new one for SSO."""
     username = _validate_username(email)
@@ -616,6 +630,7 @@ def get_user_active_status(username: str) -> bool:
         raise sqlite3.Error(f"Failed to retrieve user active status: {e}") from e
 
 
+@with_sqlite_retry
 def set_user_active_status(username: str, is_active: bool) -> None:
     """Set whether a user account is active (suspended or active)."""
     try:
@@ -632,6 +647,7 @@ def set_user_active_status(username: str, is_active: bool) -> None:
         raise sqlite3.Error(f"Failed to update user active status: {e}") from e
 
 
+@with_sqlite_retry
 def update_user_profile(
     username: str,
     role: str,
@@ -763,6 +779,7 @@ def _get_token_signature(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+@with_sqlite_retry
 def revoke_token(token: str, details: str | None = None) -> None:
     """Revoke an active Bearer token by storing its signature in revoked_tokens table."""
     if not token or not isinstance(token, str):

@@ -3,6 +3,8 @@ import os
 import time
 from contextlib import contextmanager
 
+from src.db.common import with_sqlite_retry
+
 logger = logging.getLogger(__name__)
 
 class ConcurrencyTimeoutError(Exception):
