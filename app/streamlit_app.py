@@ -20,14 +20,14 @@ import plotly.io as pio
 import psutil
 import streamlit as st
 
-# Import centralized session state keys
-from app.session_keys import SessionKeys
-
-# Fix Streamlit import paths by pointing to project root
+# 1. Fix Streamlit import paths FIRST so 'app' can be found
 FILE_PATH = Path(__file__).resolve()
 ROOT_DIR = FILE_PATH.parent.parent  # Points to semantic-plagiarism-detector/
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
+
+# 2. Now import centralized session state keys safely
+from app.session_keys import SessionKeys
 
 # Silence harmless Windows asyncio Proactor connection lost bugs
 if sys.platform == "win32":
@@ -316,7 +316,6 @@ from src.db import (
 from src.db.auth import (
     add_user,
     authenticate_user,
-    check_login_rate_limit,
     clear_login_attempts,
     delete_user,
     disable_2fa,
@@ -328,9 +327,7 @@ from src.db.auth import (
     get_upload_count,
     get_user_preferences,
     get_user_role,
-    increment_upload_count,
     init_db,
-    is_upload_rate_limited,
     is_user_active,
     record_failed_login,
     set_tour_completed,

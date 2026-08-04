@@ -1211,7 +1211,7 @@ def inject_css() -> None:
 
     st.markdown(css_html, unsafe_allow_html=True)
     st.markdown(hotkey_js, unsafe_allow_html=True)
-
+    st.markdown(back_to_top_html(), unsafe_allow_html=True)
 
 # ── Severity Helpers ───────────────────────────────────────────────────────────
 try:
@@ -1704,7 +1704,7 @@ def generate_active_tab_theme_tokens(theme_name: str | None = None) -> dict[str,
     }
 
 
-def get_sidebar_navigation_config() -> dict[str, Any]:
+def get_sidebar_navigation_config() -> dict[str, Any]: # type: ignore
     """Return central configuration parameters for sidebar active tab rendering.
 
     Returns:
