@@ -4,7 +4,14 @@ tests/core/test_text_chunking.py
 Unit tests for customizable chunk size and overlap parameters, including edge cases.
 """
 
-from src.core.text_chunking import chunk_by_sentences, chunk_documents, chunk_text, chunk_text_dynamic
+import pytest
+
+from src.core.text_chunking import (
+    chunk_by_sentences,
+    chunk_documents,
+    chunk_text,
+    chunk_text_dynamic,
+)
 
 
 def test_chunk_text_custom_parameters():
@@ -34,6 +41,7 @@ def test_chunk_text_respects_max_chunks_limit():
     chunks = chunk_text(huge_text, chunk_size=50, chunk_overlap=5, max_chunks=5)
 
     assert len(chunks) <= 5
+
 
 # ── Edge Case Tests (#849) ───────────────────────────────────────────────────
 
@@ -116,7 +124,9 @@ def test_chunk_by_sentences_preserves_full_sentences():
 
 def test_chunk_by_sentences_respects_max_chunk_size():
     """Chunks should not exceed max_chunk_size unless a single sentence is longer."""
-    sentences = [f"This is sentence number {i} in the test document." for i in range(20)]
+    sentences = [
+        f"This is sentence number {i} in the test document." for i in range(20)
+    ]
     text = " ".join(sentences)
     max_size = 100
 
@@ -127,8 +137,8 @@ def test_chunk_by_sentences_respects_max_chunk_size():
         # A single overlong sentence is allowed to exceed the limit; all
         # multi-sentence blocks must respect it.
         words = chunk.split()
-        if len(words) > 15:   # heuristic: definitely more than one sentence
-            assert len(chunk) <= max_size + 60   # soft tolerance for joining space
+        if len(words) > 15:  # heuristic: definitely more than one sentence
+            assert len(chunk) <= max_size + 60  # soft tolerance for joining space
 
 
 def test_chunk_by_sentences_empty_and_whitespace():
@@ -165,7 +175,9 @@ def test_chunk_by_sentences_no_sentence_is_split_mid_word():
 
 def test_chunk_by_sentences_produces_multiple_chunks_for_long_text():
     """Long multi-sentence text must be split into more than one chunk."""
-    sentences = ["The algorithm processes the input data efficiently." for _ in range(40)]
+    sentences = [
+        "The algorithm processes the input data efficiently." for _ in range(40)
+    ]
     text = " ".join(sentences)
 
     chunks = chunk_by_sentences(text, max_chunk_size=150)
@@ -210,7 +222,8 @@ def test_chunk_text_logs_truncation_warning(caplog):
 
     # Filter to the specific truncation warning we added
     truncation_warnings = [
-        record for record in caplog.records
+        record
+        for record in caplog.records
         if "exceeded chunk capacity limit" in record.getMessage()
     ]
 
@@ -247,8 +260,7 @@ def test_chunk_text_truncation_warning_includes_char_count(caplog):
 
     # Find the warning and verify the message format
     truncation_records = [
-        r for r in caplog.records
-        if "exceeded chunk capacity limit" in r.getMessage()
+        r for r in caplog.records if "exceeded chunk capacity limit" in r.getMessage()
     ]
     assert truncation_records, "Expected a truncation warning to be logged"
 
@@ -272,7 +284,8 @@ def test_chunk_text_no_truncation_warning_for_small_text(caplog):
         chunk_text(small_text, chunk_size=10, chunk_overlap=0, max_chunks=3)
 
     truncation_warnings = [
-        record for record in caplog.records
+        record
+        for record in caplog.records
         if "exceeded chunk capacity limit" in record.getMessage()
     ]
     assert len(truncation_warnings) == 0
@@ -287,7 +300,8 @@ def test_chunk_text_no_truncation_warning_for_empty_text(caplog):
         chunk_text("   \n\t  ", chunk_size=10, chunk_overlap=0, max_chunks=3)
 
     truncation_warnings = [
-        record for record in caplog.records
+        record
+        for record in caplog.records
         if "exceeded chunk capacity limit" in record.getMessage()
     ]
     assert len(truncation_warnings) == 0
@@ -325,3 +339,30 @@ def test_chunk_text_dynamic_empty_and_short():
     assert len(chunks) == 1
     assert chunks[0] == short
 
+
+def test_chunk_text_raises_value_error_for_invalid_overlap():
+    """Verify chunk_text raises ValueError when chunk_overlap >= chunk_size (Issue #1041)."""
+    with pytest.raises(
+        ValueError, match="chunk_overlap must be strictly smaller than chunk_size"
+    ):
+        chunk_text(
+            "Sample text content for testing chunking.", chunk_size=50, chunk_overlap=50
+        )
+
+    with pytest.raises(
+        ValueError, match="chunk_overlap must be strictly smaller than chunk_size"
+    ):
+        chunk_text(
+            "Sample text content for testing chunking.",
+            chunk_size=50,
+            chunk_overlap=100,
+        )
+
+    with pytest.raises(
+        ValueError, match="chunk_overlap must be strictly smaller than chunk_size"
+    ):
+        chunk_text(
+            "Sample text content for testing chunking.",
+            chunk_size=100,
+            overlap_percentage=1.0,
+        )

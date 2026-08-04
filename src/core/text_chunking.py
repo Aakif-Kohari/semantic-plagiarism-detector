@@ -116,11 +116,14 @@ def chunk_text(
     Returns:
         List of chunk strings.
     """
-    if not text or not text.strip():
-        return []
-
     if overlap_percentage is not None:
         chunk_overlap = int(chunk_size * overlap_percentage)
+
+    if chunk_overlap >= chunk_size:
+        raise ValueError("chunk_overlap must be strictly smaller than chunk_size")
+
+    if not text or not text.strip():
+        return []
 
     # ── Issue #1390 ───────────────────────────────────────────────────────
     # If the raw input text exceeds the total chunking capacity (max_chunks
@@ -224,7 +227,7 @@ def chunk_by_sentences(
 
     Args:
         text: Raw document text to chunk.
-        max_chunk_size: Maximum number of characters per chunk (soft limit –
+        max_chunk_size: Maximum number of characters per chunk (soft limit -
             a single long sentence may exceed it rather than be discarded).
         min_sentences: Minimum number of sentences required before a block is
             emitted.  Trailing sentences that do not satisfy this minimum are
@@ -329,13 +332,16 @@ def chunk_text_dynamic(
             max_search = min(n_total, target_end + margin)
 
             candidate_indices = [
-                idx for idx in range(min_search, max_search)
+                idx
+                for idx in range(min_search, max_search)
                 if clean_src[idx] in sentence_punct
             ]
 
             if candidate_indices:
                 # Pick sentence ending punctuation closest to target_end
-                best_idx = min(candidate_indices, key=lambda idx: abs((idx + 1) - target_end))
+                best_idx = min(
+                    candidate_indices, key=lambda idx: abs((idx + 1) - target_end)
+                )
                 actual_end = best_idx + 1
             else:
                 actual_end = target_end
@@ -356,7 +362,6 @@ def chunk_text_dynamic(
 
 
 # ── Multi-document helpers ────────────────────────────────────────────────────
-
 
 
 def chunk_documents(
