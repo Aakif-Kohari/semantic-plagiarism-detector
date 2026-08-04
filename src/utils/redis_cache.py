@@ -10,6 +10,7 @@ import os
 import pickle
 from enum import Enum
 from typing import Any, Optional
+import threading
 
 try:
     import redis
@@ -71,15 +72,17 @@ class RedisCache:
 
     _instance: Optional["RedisCache"] = None
     _client: Optional[Any] = None
+    _lock: threading.Lock = threading.Lock()
 
     def __new__(cls) -> "RedisCache":
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._fallback_cache = {}
-            cls._instance._hits = 0
-            cls._instance._misses = 0
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._fallback_cache = {}
+                    cls._instance._hits = 0
+                    cls._instance._misses = 0
         return cls._instance
-
     def __init__(self):
         if not hasattr(self, "_fallback_cache") or self._fallback_cache is None:
             self._fallback_cache = {}
@@ -233,6 +236,16 @@ class RedisCache:
             "total_items": total_items,
         }
 
+    def get_hit_rate(self) -> float:
+        """Return cache hit rate as a percentage (0-100)."""
+        with self._lock:
+            hits, misses = self._hits, self._misses
+        total = hits + misses
+        if total == 0:
+            return 0.0
+        return (hits / total) * 100
+    
+
     def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
         """Store a value in Redis with optional TTL. Falls back to in-memory on failure."""
         if self._client is None:
@@ -264,7 +277,8 @@ class RedisCache:
             try:
                 data = self._client.get(key)
                 if data is not None:
-                    self._hits += 1
+                    with self._lock:
+                        self._hits += 1
                     return pickle.loads(data)
             except (
                 RedisError,
@@ -279,12 +293,14 @@ class RedisCache:
 
         val = self._fallback_get(key)
         if val is not None:
-            self._hits += 1
+            with self._lock:
+                self._hits += 1
             return val
 
-        self._misses += 1
+        with self._lock:
+            self._misses += 1
         return None
-
+    
     def delete(self, key: str) -> bool:
         """Delete a key from Redis. Falls back to in-memory on failure."""
         if self._client is None:
@@ -336,7 +352,8 @@ class RedisCache:
             try:
                 data = self._client.get(key)
                 if data is not None:
-                    self._hits += 1
+                    with self._lock:
+                        self._hits += 1
                     return json.loads(data)
             except (
                 RedisError,
@@ -351,10 +368,12 @@ class RedisCache:
 
         val = self._fallback_get_json(key)
         if val is not None:
-            self._hits += 1
+            with self._lock:
+                self._hits += 1
             return val
 
-        self._misses += 1
+        with self._lock:
+            self._misses += 1
         return None
 
     def exists(self, key: str) -> bool:
