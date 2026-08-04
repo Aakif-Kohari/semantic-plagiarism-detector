@@ -1319,6 +1319,41 @@ if not selected_classes:
 
 # ── Main UI ───────────────────────────────────────────────────────────────────
 st.title("🔍 Semantic Plagiarism Detection System")
+
+# ── Live Scan Statistics Metrics Header (#1508) ───────────────────────────────
+try:
+    from src.db.auth import get_upload_count
+    from src.db.corpus_db import get_total_document_count
+    from src.db.incidents import get_all_incidents, get_total_incidents_count
+    
+    total_scans = get_upload_count()
+    corpus_size = get_total_document_count()
+    flagged_incidents = get_total_incidents_count()
+    
+    _incidents = get_all_incidents(limit=10000)
+    if _incidents:
+        avg_sim = sum(inc.get("similarity_score", 0.0) for inc in _incidents) / len(_incidents)
+    else:
+        avg_sim = 0.0
+except Exception as e:
+    logger.error(f"Failed to load dashboard metrics: {e}")
+    total_scans = 0
+    corpus_size = 0
+    flagged_incidents = 0
+    avg_sim = 0.0
+
+col1, col2, col3, col4 = st.columns(4)
+with col1:
+    st.metric("Total Scans", f"{total_scans:,}")
+with col2:
+    st.metric("Avg Similarity %", f"{avg_sim * 100:.1f}%")
+with col3:
+    st.metric("Flagged Incidents", f"{flagged_incidents:,}")
+with col4:
+    st.metric("Corpus Size", f"{corpus_size:,}")
+
+st.markdown("---")
+
 with st.expander("ℹ️ How Semantic Plagiarism Detection Works"):
     st.markdown("""
         - **1. Upload files** — Upload the documents you want to compare.
