@@ -226,10 +226,10 @@ def test_clear_all_data_clears_incidents(mock_db):
     with _connect() as conn:
         conn.execute(
             """
-            INSERT INTO plagiarism_incidents (document_a, document_b, similarity, severity, timestamp)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO plagiarism_incidents (incident_id, document_a, document_b, similarity_score, severity_rank, date_flagged, last_seen)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            ("doc1.pdf", "doc2.pdf", 0.85, "High", "2026-01-01T00:00:00"),
+            ("INC-1", "doc1.pdf", "doc2.pdf", 0.85, "High", "2026-01-01T00:00:00", "2026-01-01T00:00:00"),
         )
 
     # Verify incident exists
