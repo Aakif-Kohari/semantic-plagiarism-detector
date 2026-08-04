@@ -502,7 +502,7 @@ def plot_severity_donut_chart(incidents: list[dict[str, Any]]) -> go.Figure:
         hovertemplate="<b>Severity: %{label}</b><br>Incidents: %{value}<extra></extra>"
     )])
 
-fig.update_layout(
+    fig.update_layout(
         title="Plagiarism Incident Severity Distribution",
         height=400,
         showlegend=True,

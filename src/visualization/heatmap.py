@@ -490,14 +490,15 @@ def plot_similarity_heatmap_plotly(
         for i in range(n)
     ]
 
-fig = go.Figure(
+    fig = go.Figure(
         data=go.Heatmap(
             z=z_matrix,
             x=names,
             y=names,
             text=hover_text,
             hovertemplate="%{text}",
-            colorscale=colorscale,            zmin=0.0,
+            colorscale=colorscale,
+            zmin=0.0,
             zmax=1.0,
             colorbar=dict(title="Cosine Similarity", thickness=15, tickformat=".0%"),
             xgap=2,

@@ -323,6 +323,78 @@ def test_scope_enforcement_clear_endpoint():
     )
     assert res.status_code == 403
 
+# ── Asynchronous Background Scan Job Queue Tests (#1372) ─────────────────────
+
+def test_async_scan_returns_202_accepted_with_job_id():
+    """Verify POST /api/v1/scan/async accepts upload and returns 202 with job_id."""
+    client = TestClient(app)
+
+    files = {"file": ("async_doc.txt", b"This is a test document for async scanning.")}
+    headers = {"Authorization": "Bearer test-write-token"}
+
+    response = client.post("/api/v1/scan/async", files=files, headers=headers)
+
+    assert response.status_code == 202
+    data = response.json()
+    assert "job_id" in data
+    assert data["status"] == "queued"
+    assert data["status_url"] == f"/api/v1/scan/status/{data['job_id']}"
+    assert "message" in data
+
+
+def test_async_scan_status_progression():
+    """Verify background job executes and GET /api/v1/scan/status/{job_id} returns completed results."""
+    client = TestClient(app)
+
+    files = {"file": ("sample_async.txt", b"Artificial intelligence and machine learning enable automated analysis.")}
+    headers_write = {"Authorization": "Bearer test-write-token"}
+    headers_read = {"Authorization": "Bearer test-read-token"}
+
+    # 1. Enqueue job
+    post_res = client.post("/api/v1/scan/async", files=files, headers=headers_write)
+    assert post_res.status_code == 202
+    job_id = post_res.json()["job_id"]
+
+    # 2. Check status (BackgroundTasks runs during TestClient request cycle)
+    status_res = client.get(f"/api/v1/scan/status/{job_id}", headers=headers_read)
+    assert status_res.status_code == 200
+
+    status_data = status_res.json()
+    assert status_data["job_id"] == job_id
+    assert status_data["status"] in ("queued", "processing", "completed")
+    assert status_data["filename"] == "sample_async.txt"
+
+    if status_data["status"] == "completed":
+        assert status_data["result"] is not None
+        assert status_data["result"]["filename"] == "sample_async.txt"
+        assert "plagiarism_flagged" in status_data["result"]
+
+
+def test_async_scan_status_invalid_job_id_returns_404():
+    """Verify GET /api/v1/scan/status/{job_id} returns 404 for unknown job IDs."""
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer test-read-token"}
+
+    response = client.get("/api/v1/scan/status/invalid_job_99999", headers=headers)
+
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"].lower()
+
+
+def test_async_scan_empty_file_returns_400():
+    """Verify POST /api/v1/scan/async rejects empty files with HTTP 400."""
+    client = TestClient(app)
+    files = {"file": ("empty.txt", b"")}
+    headers = {"Authorization": "Bearer test-write-token"}
+
+    response = client.post("/api/v1/scan/async", files=files, headers=headers)
+
+    assert response.status_code == 400
+    assert "empty" in response.json()["detail"].lower()
+
+
+# ── Global Exception Handler Tests (#1500) ────────────────────────────────────
+
 import asyncio
 import json
 from unittest.mock import Mock
@@ -357,15 +429,18 @@ def test_global_exception_handler_masks_details_in_production(monkeypatch):
 
     assert body["message"] == "An internal server error occurred."
     assert "sensitive internal detail" not in body["message"]
-    # ── CORS Preflight Cache Duration Test (#1501) ────────────────────────────────
+
+
+# ── CORS Preflight Cache Duration Test (#1501) ────────────────────────────────
 
 import importlib
 
 
 def test_cors_preflight_max_age_header():
     """Verify OPTIONS preflight responses include Access-Control-Max-Age: 3600."""
+    import sys
     import src.api.app
-    importlib.reload(src.api.app)
+    importlib.reload(sys.modules["src.api.app"])
     from fastapi.testclient import TestClient
     from src.api.app import app
 
@@ -380,3 +455,4 @@ def test_cors_preflight_max_age_header():
     )
 
     assert response.headers["access-control-max-age"] == "3600"
+
