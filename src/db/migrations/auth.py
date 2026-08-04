@@ -5,7 +5,9 @@ from __future__ import annotations
 import sqlite3
 
 from .common import column_exists, run_migrations
-AUTH_SCHEMA_VERSION = 9
+
+AUTH_SCHEMA_VERSION = 12
+
 
 def migration_001_create_users(
     connection: sqlite3.Connection,
@@ -80,6 +82,7 @@ def migration_006_add_active_flag(
             """
         )
 
+
 def migration_007_add_theme_preference(
     connection: sqlite3.Connection,
 ) -> None:
@@ -135,6 +138,58 @@ def migration_009_add_last_login_at(
         )
 
 
+def migration_010_add_password_changed_at(
+    connection: sqlite3.Connection,
+) -> None:
+    """Add password age tracking to authentication records."""
+    if not column_exists(
+        connection,
+        "users",
+        "password_changed_at",
+    ):
+        connection.execute(
+            """
+            ALTER TABLE users
+            ADD COLUMN password_changed_at TEXT DEFAULT NULL
+            """
+        )
+
+
+def migration_011_add_version_column(
+    connection: sqlite3.Connection,
+) -> None:
+    """Add version column for optimistic locking."""
+    if not column_exists(connection, "users", "version"):
+        connection.execute(
+            """
+            ALTER TABLE users
+            ADD COLUMN version INTEGER DEFAULT 1
+            """
+        )
+
+
+def migration_012_create_revoked_tokens_table(
+    connection: sqlite3.Connection,
+) -> None:
+    """Create revoked_tokens table for tracking invalidated tokens."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS revoked_tokens (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            token_signature TEXT UNIQUE NOT NULL,
+            revoked_at TEXT NOT NULL,
+            details    TEXT DEFAULT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_revoked_tokens_signature
+        ON revoked_tokens(token_signature)
+        """
+    )
+
+
 AUTH_MIGRATIONS = {
     1: migration_001_create_users,
     2: migration_002_add_onboarding_state,
@@ -145,6 +200,9 @@ AUTH_MIGRATIONS = {
     7: migration_007_add_theme_preference,
     8: migration_008_create_security_audit_log,
     9: migration_009_add_last_login_at,
+    10: migration_010_add_password_changed_at,
+    11: migration_011_add_version_column,
+    12: migration_012_create_revoked_tokens_table,
 }
 
 
@@ -157,4 +215,3 @@ def migrate_auth_database(
         migrations=AUTH_MIGRATIONS,
         target_version=AUTH_SCHEMA_VERSION,
     )
-

@@ -113,6 +113,7 @@ def test_redis_configurable_timeout():
         importlib.reload(src.utils.redis_cache)
 
         assert src.utils.redis_cache.REDIS_TIMEOUT_SECONDS == 4.5
+        mock_from_url.reset_mock()
 
         # Instantiate cache and verify mock connection parameters
         cache = src.utils.redis_cache.RedisCache.__new__(src.utils.redis_cache.RedisCache)
@@ -125,4 +126,3 @@ def test_redis_configurable_timeout():
 
     # Reload the module once more with environment cleared to restore defaults
     importlib.reload(src.utils.redis_cache)
-

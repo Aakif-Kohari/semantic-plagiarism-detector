@@ -1,5 +1,7 @@
 # 🔍 Semantic Plagiarism Detection System
 
+![Semantic Plagiarism Detector Banner](assets/hero_banner.png)
+
 > **[▶ Live Demo](https://semantic-plagiarism-detector.streamlit.app/)**
 
 A production-ready NLP application that detects **semantic plagiarism** in student
@@ -94,6 +96,7 @@ semantic_plagiarism_detector/
 │   ├── components/           # Incident export and UI helper components
 │   ├── streamlit_app.py      # Main Streamlit dashboard entrypoint
 │   └── theme.py              # Visual design system and CSS injection
+├── assets/                   # Project visual assets & AI header graphics
 ├── src/                      # Core backend source package
 │   ├── core/                 # Parsing, chunking, embedding, FAISS & similarity
 │   ├── db/                   # SQLite authentication, corpus & incident databases
@@ -123,7 +126,10 @@ semantic_plagiarism_detector/
 
 ## 🚀 Setup & Running
 
+For a detailed local setup guide detailing virtual environment creation, native C dependencies (Tesseract and Poppler) installation, and running pytest, refer to the [Developer Setup Guide](docs/DEVELOPMENT.md).
+
 ### 1. Clone / download the project
+
 
 ```bash
 git clone https://github.com/your-org/semantic-plagiarism-detector.git
@@ -515,6 +521,8 @@ service.
 
 ## 🧠 How It Works
 
+![Semantic Vector Search & AI NLP Architecture](assets/vector_search_concept.png)
+
 ### Step 1 – Text Extraction
 PyPDF2 reads each PDF page and concatenates the text.
 
@@ -747,6 +755,21 @@ Each upgrade:
 5. preserves existing users, documents, chunks, embeddings, and incidents.
 
 Existing database files should not be deleted during an application upgrade.
+
+---
+
+## Documentation
+
+- [Architecture](docs/ARCHITECTURE.md)
+- [API Reference](docs/API.md)
+- [Document Parsing & Formats](docs/PARSING.md)
+- [NLP Architecture & Similarity Algorithm Guide](docs/ALGORITHMS.md)
+
+
+- [Bulk Export Formats & Data Fields](docs/EXPORTS.md)
+
+- [UI Customization and Theme Guide](docs/THEMING.md)
+
 
 ---
 

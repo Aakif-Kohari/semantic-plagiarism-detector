@@ -10,6 +10,19 @@ Thank you for contributing! Please complete the sections below before requesting
 
 ---
 
+## 🏷️ Type of Change
+
+Please select all that apply:
+
+- [ ] Bug fix
+- [ ] New feature
+- [ ] Documentation update
+- [ ] Performance improvement
+- [ ] Refactoring
+- [ ] Test improvement
+- [ ] CI/CD or build change
+- [ ] Other (please describe)
+
 ## 🔗 Related Issue
 
 <!-- Link the related issue (e.g., Closes #123, Fixes #123) -->
@@ -20,9 +33,9 @@ Thank you for contributing! Please complete the sections below before requesting
 
 <!-- List the major changes introduced in this pull request. -->
 
-- 
-- 
-- 
+-
+-
+-
 
 ---
 
@@ -63,6 +76,15 @@ Please confirm the following before submitting your pull request:
 - [ ] This pull request is ready for review.
 
 ---
+## 🔒 Security Assessment
+
+Please confirm the following:
+
+- [ ] No secrets, API keys, or credentials have been committed.
+- [ ] User input is validated where applicable.
+- [ ] New dependencies are trusted and necessary.
+- [ ] No known security vulnerabilities are introduced.
+- [ ] Sensitive data is handled appropriately.
 
 ## 📎 Additional Notes
 

@@ -51,13 +51,22 @@ BADGE_PIL_REQUIRED = "PIL/Pillow is required for PNG badge generation"
 
 # Similarity & FAISS Errors
 SIM_BATCH_SIZE_INVALID = "batch_size must be an integer"
-SIM_WEIGHT_OUT_OF_RANGE = "Weight w must be between 0.0 and 1.0, got {w}"
+
+
+def sim_weight_out_of_range(w):
+    return f"Weight w must be between 0.0 and 1.0, got {w}"
+
+
 SIM_SHAPE_MISMATCH = "Semantic and lexical matrices must have the same shape"
 SIM_INDEX_MISMATCH = (
     "Semantic and lexical matrices must have the same index and columns"
 )
 FAISS_STORED_EMB_DIM_INVALID = "Stored embeddings must be two-dimensional."
-FAISS_EMB_REGISTRY_MISMATCH = "Corpus embedding count does not match chunk registry count: {emb_count} != {reg_count}"
+
+
+def faiss_emb_registry_mismatch(emb_count, reg_count):
+    return f"Corpus embedding count does not match chunk registry count: {emb_count} != {reg_count}"
+
 
 # Incident Database Errors
 INCIDENT_DB_INIT_FAILED = "Failed to initialize incident database: {error}"
@@ -65,6 +74,21 @@ INCIDENT_SYNC_FAILED = "Failed to synchronize incidents: {error}"
 INCIDENT_INVALID_REVIEW_STATUS = "review_status must be one of {valid_statuses}"
 INCIDENT_UPDATE_STATUS_FAILED = "Failed to update review status: {error}"
 
+# SSRF / Webhook Security Errors
+SSRF_WEBHOOK_URL_EMPTY = "Webhook URL cannot be empty."
+SSRF_INSECURE_SCHEME = "Insecure scheme '{scheme}'. Webhooks must use 'https'."
+SSRF_MISSING_HOSTNAME = "Invalid URL: missing hostname."
+SSRF_INVALID_IP_FORMAT = "Resolved invalid IP address format: {error}"
+SSRF_BLOCKED_PRIVATE_SUBNET = "Blocked private IPv4 subnet IP: {ip} ({subnet})"
+SSRF_BLOCKED_LOOPBACK = "Blocked loopback IP: {ip}"
+SSRF_BLOCKED_PRIVATE_NETWORK = "Blocked private network IP: {ip}"
+SSRF_BLOCKED_LINK_LOCAL = "Blocked link-local IP: {ip}"
+SSRF_BLOCKED_MULTICAST = "Blocked multicast IP: {ip}"
+SSRF_BLOCKED_UNSPECIFIED = "Blocked unspecified IP: {ip}"
+SSRF_DNS_NO_ADDRESSES = "No addresses found for hostname '{hostname}'"
+SSRF_DNS_RESOLUTION_FAILED = "DNS resolution failed for hostname '{hostname}': {error}"
+SSRF_DOMAIN_NOT_ALLOWED = "Webhook domain '{hostname}' is not in ALLOWED_WEBHOOK_DOMAINS."
+SSRF_MAX_REDIRECTS_EXCEEDED = "Maximum HTTP redirect depth exceeded"
 # API Errors
 API_UNAUTHORIZED = "Invalid or missing authentication token."
 API_FILENAME_MISSING = "Filename must be provided."
@@ -113,8 +137,32 @@ CLI_THRESHOLD_INVALID = "Error: Threshold must be a float between 0.0 and 1.0.\n
 CLI_INVALID_COMMAND = "Error: Invalid command '{command}'.\n"
 
 
+# SSRF Protection Errors
+SSRF_EMPTY_URL = "Webhook URL cannot be empty."
+SSRF_INSECURE_SCHEME = "Insecure scheme '{scheme}'. Webhooks must use 'https'."
+SSRF_MISSING_HOSTNAME = "Invalid URL: missing hostname."
+SSRF_NO_ADDRESSES = "No addresses found for hostname '{hostname}'"
+SSRF_DNS_RESOLUTION_FAILED = "DNS resolution failed for hostname '{hostname}': {error}"
+SSRF_INVALID_IP = "Resolved invalid IP address format: {error}"
+SSRF_BLOCKED_LOOPBACK = "Blocked loopback IP: {ip}"
+SSRF_BLOCKED_PRIVATE = "Blocked private network IP: {ip}"
+SSRF_BLOCKED_LINK_LOCAL = "Blocked link-local IP: {ip}"
+SSRF_BLOCKED_MULTICAST = "Blocked multicast IP: {ip}"
+SSRF_BLOCKED_UNSPECIFIED = "Blocked unspecified IP: {ip}"
+
+
 class ExportFailedError(RuntimeError):
     """Raised when an export cannot be generated or written safely."""
+
+
+class OCRFileBatchError(Exception):
+    """Raised when OCR extraction fails on one or more files in a batch."""
+
+    def __init__(self, failed_files: list, failure_details: list) -> None:
+        self.failed_files = failed_files
+        self.failure_details = failure_details
+        joined = "; ".join(failure_details) if failure_details else ", ".join(failed_files)
+        super().__init__(f"OCR extraction failed for {len(failed_files)} file(s): {joined}")
 
 
 EXPORT_WRITE_FAILED = (
@@ -126,3 +174,18 @@ EXPORT_GENERATION_IO_FAILED = (
     "Unable to generate the {format_name} export because an I/O operation failed. "
     "Please try again."
 )
+
+
+class OCRFileBatchError(Exception):
+    """Exception raised when OCR extraction fails on one or more files in a batch."""
+
+    def __init__(self, failed_files: list[str], failure_details: list[str]):
+        self.failed_files = failed_files
+        self.failure_details = failure_details
+        super().__init__(f"OCR failed for files: {failed_files}")
+
+
+class StaleDataException(Exception):
+    """Raised when an update fails because the version has changed (optimistic locking)."""
+    pass
+

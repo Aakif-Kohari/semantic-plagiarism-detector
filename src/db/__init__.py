@@ -1,18 +1,43 @@
-from .auth import (add_user, delete_user, disable_2fa, enable_2fa,
-                   get_2fa_status, get_all_users, get_user_active_status,
-                   get_user_role, init_db, is_user_active,
-                   set_user_active_status, update_password, verify_user)
-from .corpus_db import (add_chunks, add_document, clear_all_data,
-                        delete_document, delete_tag, get_all_documents,
-                        get_all_embeddings, get_all_tags, get_chunk_registry,
-                        get_document_by_hash, get_document_chunks_count,
-                        get_document_word_counts, get_documents_by_class,
-                        get_unique_class_sections, init_corpus_db,
-                        get_deleted_documents, soft_delete_document,
-                        restore_document, permanently_delete_document,
-                        empty_trash)
+from .auth import (
+    add_user,
+    delete_user,
+    disable_2fa,
+    enable_2fa,
+    get_2fa_status,
+    get_all_users,
+    get_user_active_status,
+    get_user_role,
+    init_db,
+    is_user_active,
+    set_user_active_status,
+    update_password,
+    update_user_profile,
+    verify_user,
+)
+from .corpus_db import (
+    add_chunks,
+    add_document,
+    clear_all_data,
+    delete_document,
+    get_all_documents,
+    get_all_embeddings,
+    get_chunk_registry,
+    get_document_by_hash,
+    get_document_chunks_count,
+    get_documents_by_class,
+    get_total_document_count,
+    get_deleted_documents_count,
+    get_unique_class_sections,
+    init_corpus_db,
+)
+from .incidents import (
+    get_recent_incidents,
+    log_incident,
+)
+from .common import with_sqlite_retry
 
 __all__ = [
+    "with_sqlite_retry",
     "init_db",
     "verify_user",
     "get_user_role",
@@ -26,6 +51,7 @@ __all__ = [
     "get_user_active_status",
     "set_user_active_status",
     "is_user_active",
+    "update_user_profile",
     "init_corpus_db",
     "add_document",
     "get_document_by_hash",
@@ -34,23 +60,18 @@ __all__ = [
     "get_chunk_registry",
     "get_all_embeddings",
     "delete_document",
-    "delete_tag",
     "clear_all_data",
     "get_document_chunks_count",
-    "get_all_tags",
     "get_unique_class_sections",
     "get_documents_by_class",
-    "get_document_word_counts",
-    "get_deleted_documents",
-    "soft_delete_document",
-    "restore_document",
-    "permanently_delete_document",
-    "empty_trash",
+    "get_total_document_count",
+    "get_deleted_documents_count",
+    "get_recent_incidents",
+    "log_incident",
 ]
 
 
-from .migrations import \
-    AUTH_SCHEMA_VERSION as AUTH_SCHEMA_VERSION  # noqa: F401
+from .migrations import AUTH_SCHEMA_VERSION as AUTH_SCHEMA_VERSION  # noqa: F401
 from .migrations import CORPUS_SCHEMA_VERSION as CORPUS_SCHEMA_VERSION
 from .migrations import column_exists as column_exists
 from .migrations import get_user_version as get_user_version

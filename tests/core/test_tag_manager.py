@@ -44,15 +44,15 @@ def test_extract_unique_tags_empty():
 
 def test_has_matching_tag():
     doc_tags = "#draft,#hw1"
-    
+
     assert TagManager.has_matching_tag(doc_tags, "#hw1") is True
     assert TagManager.has_matching_tag(doc_tags, "#draft") is True
     assert TagManager.has_matching_tag(doc_tags, "#final") is False
-    
+
     # "All Tags" or empty should pass
     assert TagManager.has_matching_tag(doc_tags, "All Tags") is True
     assert TagManager.has_matching_tag(doc_tags, "") is True
-    
+
     # Invalid document tags string
     assert TagManager.has_matching_tag("", "#hw1") is False
     assert TagManager.has_matching_tag(None, "#hw1") is False
@@ -90,3 +90,52 @@ def test_remove_tag_bulk():
         TagManager.remove_tag(["doc1.pdf", "doc2.pdf", "doc3.pdf"], "#badtag")
         assert update_mock.call_count == 1
         update_mock.assert_called_once_with("doc1.pdf", "#goodtag")
+
+
+# ── sanitize_tag_name tests (#936) ───────────────────────────────────────────
+
+import pytest
+from src.core.tag_manager import sanitize_tag_name
+
+
+def test_sanitize_tag_name_removes_html_tags():
+    assert sanitize_tag_name("<b>#hw1</b>") == "#hw1"
+    assert sanitize_tag_name("<script>alert('xss')</script>#tag") == "alert('xss')#tag"
+
+
+def test_sanitize_tag_name_removes_slashes_and_whitespace():
+    assert sanitize_tag_name(" #class / section \\ test ") == "#classsectiontest"
+    assert sanitize_tag_name("tag/name\\1") == "tagname1"
+
+
+def test_sanitize_tag_name_truncates_to_30_chars():
+    long_tag = "a" * 50
+    result = sanitize_tag_name(long_tag)
+    assert len(result) == 30
+    assert result == "a" * 30
+
+
+def test_sanitize_tag_name_rejects_empty_and_whitespace():
+    with pytest.raises(ValueError, match="empty or whitespace-only"):
+        sanitize_tag_name("")
+
+    with pytest.raises(ValueError, match="empty or whitespace-only"):
+        sanitize_tag_name("   ")
+
+    with pytest.raises(ValueError, match="empty or whitespace-only"):
+        sanitize_tag_name("\t\n ")
+
+    with pytest.raises(ValueError, match="empty or whitespace-only"):
+        sanitize_tag_name(None)
+
+
+def test_sanitize_tag_name_rejects_empty_after_sanitization():
+    with pytest.raises(ValueError, match="empty or whitespace-only"):
+        sanitize_tag_name("<script></script>")
+
+    with pytest.raises(ValueError, match="empty or whitespace-only"):
+        sanitize_tag_name(" // \\  ")
+
+
+def test_tag_manager_static_sanitize_tag_name():
+    assert TagManager.sanitize_tag_name("<b>#valid_tag</b>") == "#valid_tag"

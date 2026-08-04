@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import html
 import os
 import re
@@ -12,7 +13,7 @@ from typing import TypeVar
 
 
 DEFAULT_FILENAME = "document"
-MAX_FILENAME_LENGTH = 255
+MAX_FILENAME_LENGTH = 150
 
 _HTML_TAG_RE = re.compile(r"<[^>]*>")
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
@@ -57,6 +58,11 @@ def _safe_extension(filename: str) -> str:
     if cleaned == "." or len(cleaned) > 16:
         return ""
     return cleaned
+
+
+def get_file_sha256_hash(file_bytes: bytes) -> str:
+    """Return the SHA-256 hex digest for file bytes."""
+    return hashlib.sha256(file_bytes).hexdigest()
 
 
 def sanitize_filename(
@@ -104,9 +110,23 @@ def sanitize_filename(
         stem = f"_{stem}"
 
     maximum_stem_length = max_length - len(extension)
-    stem = stem[:maximum_stem_length].rstrip(" ._-")
-    if not stem:
-        stem = safe_fallback[:maximum_stem_length] or DEFAULT_FILENAME
+    if len(stem) > maximum_stem_length:
+        hash_prefix = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:4]
+        hash_suffix = f"_{hash_prefix}"
+        allowed_stem = maximum_stem_length - len(hash_suffix)
+        if allowed_stem > 0:
+            truncated_stem = stem[:allowed_stem].rstrip(" ._-")
+            if not truncated_stem:
+                truncated_stem = (
+                    safe_fallback[:allowed_stem] or DEFAULT_FILENAME[:allowed_stem]
+                )
+            stem = f"{truncated_stem}{hash_suffix}"
+        else:
+            stem = hash_prefix[:maximum_stem_length]
+    else:
+        stem = stem[:maximum_stem_length].rstrip(" ._-")
+        if not stem:
+            stem = safe_fallback[:maximum_stem_length] or DEFAULT_FILENAME
 
     return f"{stem}{extension}"
 
@@ -240,15 +260,22 @@ def get_final_extension(filename: object) -> str:
     raw = html.unescape(str(filename or ""))
     raw = unicodedata.normalize("NFKC", raw)
     raw = _CONTROL_RE.sub("", raw)
-    raw = _HTML_TAG_RE.sub("", raw)
     basename = _basename(raw).strip()
-
     _stem, extension = os.path.splitext(basename)
     return extension.casefold()
 
 
-def validate_document_extension(
-    filename: object,
+def get_file_extension_sanitized(filename: str) -> str:
+    """Return the lower-case file extension, starting with a dot.
+
+    Returns an empty string if the filename has no extension.
+    """
+    basename = _basename(str(filename or ""))
+    _stem, extension = os.path.splitext(basename)
+    return extension.lower()
+
+
+def validate_document_extension(    filename: object,
     *,
     allowed_extensions: Collection[str] = DEFAULT_ALLOWED_DOCUMENT_EXTENSIONS,
     require_extension: bool = True,

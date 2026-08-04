@@ -1,9 +1,10 @@
+"""Pytest configuration for visualization tests."""
+
 import sys
-import importlib
 from unittest.mock import MagicMock
 
-# Stub out broken/heavy modules so heatmap tests can collect without errors
-for mod in [
+# Stub out broken/heavy modules so tests can collect without errors.
+MOCK_MODULES = [
     "src.db",
     "src.db.auth",
     "src.db.corpus_db",
@@ -11,14 +12,14 @@ for mod in [
     "src.core.embedding_model",
     "src.core.faiss_index",
     "src.core.translator",
+    "src.core.webhook",
     "striprtf",
     "striprtf.striprtf",
     "pdfplumber",
     "defusedxml",
     "defusedxml.lxml",
-]:
+]
+
+for mod in MOCK_MODULES:
     if mod not in sys.modules:
-        try:
-            importlib.import_module(mod)
-        except Exception:
-            sys.modules[mod] = MagicMock()
+        sys.modules[mod] = MagicMock()

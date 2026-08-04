@@ -6,10 +6,11 @@ This guide explains how to use the headless command-line interface (`cli.py`) fo
 
 # Overview
 
-The CLI provides two commands:
+The CLI provides three commands:
 
 - `scan` – Scan a folder of documents and generate a plagiarism report.
 - `sync-index` – Verify and repair synchronization between the FAISS index and the SQLite database.
+- `prewarm` – Pre-compute embeddings and populate Redis cache before user logins.
 
 ---
 
@@ -55,6 +56,34 @@ Verifies that the FAISS index and SQLite database are synchronized and repairs i
 
 ```bash
 python cli.py sync-index
+```
+
+---
+
+## prewarm
+
+Pre-computes document chunk embeddings, similarity matrices, and populates Redis cache and telemetry before user logins.
+
+### Syntax
+
+```bash
+python cli.py prewarm [--folder <path>]
+```
+
+### Options
+
+| Option | Default | Description |
+|---------|---------|-------------|
+| `--folder` | `None` | Optional path to a directory containing documents to prewarm. If omitted, uses indexed database documents. |
+
+---
+
+# Examples
+
+## Prewarm cache for documents in a folder
+
+```bash
+python cli.py prewarm --folder ./assignments
 ```
 
 ---
@@ -195,3 +224,27 @@ The CLI is covered by automated tests that verify:
 - Output is written to standard output (stdout) as formatted JSON.
 - Errors and warnings are written to standard error (stderr).
 - Reports can be redirected to a file using standard shell redirection.
+
+## Database migration status
+
+Inspect schema migrations without modifying the database:
+
+```powershell
+python -m src.cli db-status corpus.db --db-type corpus
+```
+
+The issue-requested flag form is also supported:
+
+```powershell
+python -m src.cli --db-status users.db --db-type auth
+```
+
+JSON output:
+
+```powershell
+python -m src.cli db-status corpus.db --db-type corpus --output-format json
+```
+
+The command reports the current schema version, supported target version, and
+ordered pending migration versions. It opens the database read-only and never
+applies migrations.
