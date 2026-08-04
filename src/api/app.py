@@ -7,7 +7,18 @@ from datetime import datetime, timezone
 
 import psutil
 import numpy as np
-from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Query, UploadFile, status, Request, Security
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    File,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+    Request,
+    Security,
+)
 from typing import Dict, Any
 from fastapi.exceptions import RequestValidationError
 from slowapi import Limiter
@@ -26,6 +37,8 @@ from src.api.schemas import (
     HealthCheckResponse,
     HealthzResponse,
     LoginResponse,
+    RevokeRequest,
+    RevokeResponse,
     SimilarityCheckResponse,
     StatusResponse,
 )
@@ -70,9 +83,7 @@ if origins.strip() == "*":
     allowed_origins = ["*"]
 else:
     allowed_origins = [
-        origin.strip()
-        for origin in origins.split(",")
-        if origin.strip()
+        origin.strip() for origin in origins.split(",") if origin.strip()
     ]
 
 app.add_middleware(
@@ -130,7 +141,9 @@ async def global_exception_handler(request: Request, exc: Exception):
     status_code = getattr(exc, "status_code", status.HTTP_500_INTERNAL_SERVER_ERROR)
     is_production = os.getenv("APP_ENVIRONMENT", "production").lower() == "production"
 
-    logging.getLogger(__name__).error(f"Unhandled exception: {exc}", exc_info=not is_production)
+    logging.getLogger(__name__).error(
+        f"Unhandled exception: {exc}", exc_info=not is_production
+    )
 
     message = "An internal server error occurred." if is_production else str(exc)
 
@@ -147,13 +160,15 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 app.add_exception_handler(RateLimitExceeded, custom_rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
+
+
 def validate_content_type(request: Request) -> None:
     """Ensure the request is multipart/form-data before parsing."""
     content_type = request.headers.get("content-type", "")
     if "multipart/form-data" not in content_type:
         raise HTTPException(
             status_code=415,
-            detail="Unsupported Media Type: Request must be multipart/form-data"
+            detail="Unsupported Media Type: Request must be multipart/form-data",
         )
 
 
@@ -207,6 +222,63 @@ def get_corpus_documents_with_embeddings() -> Dict[str, Dict]:
 async def login(request: Request):
     """Authenticate user and return a session token."""
     return {"token": "dummy-token"}
+
+
+@app.post(
+    "/api/v1/auth/revoke",
+    tags=["Authentication"],
+    summary="Revoke API Bearer token",
+    response_model=RevokeResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        400: {"model": ErrorResponse, "description": "Bad Request"},
+        401: {"model": ErrorResponse, "description": "Unauthorized"},
+        500: {"model": ErrorResponse, "description": "Internal Server Error"},
+    },
+)
+async def revoke_token_endpoint(
+    request: Request,
+    payload: RevokeRequest | None = None,
+):
+    """Revoke an active API Bearer token immediately."""
+    token_to_revoke = None
+
+    if payload and payload.token:
+        token_to_revoke = payload.token
+    else:
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                token_to_revoke = body.get("token") or body.get("token_signature")
+        except Exception:
+            pass
+
+    if not token_to_revoke:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token_to_revoke = auth_header[7:].strip()
+
+    if not token_to_revoke:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Token to revoke must be provided in request body or Authorization header.",
+        )
+
+    try:
+        from src.db.auth import revoke_token
+
+        revoke_token(
+            token_to_revoke, details="Revoked via API endpoint /api/v1/auth/revoke"
+        )
+        return {
+            "status": "success",
+            "message": "Token revoked successfully.",
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to revoke token: {str(e)}",
+        )
 
 
 @app.get(
@@ -290,6 +362,7 @@ def healthz():
             raise RuntimeError("Low memory")
 
         from src.core.app_config import CORPUS_DB_PATH
+
         db_size_bytes = 0
         db_size_mb = 0.0
         if os.path.exists(CORPUS_DB_PATH):
@@ -327,7 +400,9 @@ def healthz():
     status_code=status.HTTP_200_OK,
 )
 def get_incidents(
-    limit: int = Query(default=50, ge=1, le=500, description="Max number of incidents to return"),
+    limit: int = Query(
+        default=50, ge=1, le=500, description="Max number of incidents to return"
+    ),
     offset: int = Query(default=0, ge=0, description="Number of incidents to skip"),
     _token: str = Depends(verify_bearer_token),
 ):
@@ -571,7 +646,9 @@ def _process_scan_job(
         extracted_text = extract_text(file_bytes, filename)
         if not extracted_text.strip():
             scan_jobs[job_id]["status"] = "failed"
-            scan_jobs[job_id]["error"] = "Failed to extract readable text from the uploaded file."
+            scan_jobs[job_id]["error"] = (
+                "Failed to extract readable text from the uploaded file."
+            )
             return
 
         words = extracted_text.split()
@@ -646,7 +723,9 @@ def _process_scan_job(
                     }
                 )
 
-        matched_documents.sort(key=lambda x: x["max_chunk_similarity_score"], reverse=True)
+        matched_documents.sort(
+            key=lambda x: x["max_chunk_similarity_score"], reverse=True
+        )
         is_flagged = len(matched_documents) > 0 or max_chunk_overall_score >= threshold
 
         scan_jobs[job_id]["status"] = "completed"

@@ -80,9 +80,7 @@ def test_json_middleware_rejects_non_json_post_payload():
 
     assert response.status_code == 415
     assert response.json() == {
-        "detail": (
-            "Unsupported Media Type: Request must be application/json"
-        )
+        "detail": ("Unsupported Media Type: Request must be application/json")
     }
 
 
@@ -116,11 +114,7 @@ def test_json_middleware_does_not_restrict_get_requests():
 def test_json_middleware_excludes_multipart_scan_endpoint():
     response = _json_middleware_client().post(
         "/api/v1/scan",
-        headers={
-            "Content-Type": (
-                "multipart/form-data; boundary=example"
-            )
-        },
+        headers={"Content-Type": ("multipart/form-data; boundary=example")},
         content=b"--example--",
     )
 
@@ -143,7 +137,9 @@ import time
 from src.asgi_app import TokenBucketRateLimiter
 
 
-def _rate_limiter_client(rate_limit_per_minute=60, burst_capacity=10, api_prefix="/api/"):
+def _rate_limiter_client(
+    rate_limit_per_minute=60, burst_capacity=10, api_prefix="/api/"
+):
     test_app = Starlette(
         routes=[
             Route(
@@ -225,7 +221,9 @@ def test_token_bucket_per_ip_isolation():
     res1 = client.get("/api/v1/resource", headers={"X-Forwarded-For": "192.168.1.10"})
     assert res1.status_code == 200
 
-    res1_blocked = client.get("/api/v1/resource", headers={"X-Forwarded-For": "192.168.1.10"})
+    res1_blocked = client.get(
+        "/api/v1/resource", headers={"X-Forwarded-For": "192.168.1.10"}
+    )
     assert res1_blocked.status_code == 429
 
     # IP 2 still has its token
@@ -288,15 +286,13 @@ def test_scope_enforcement_rate_limit_endpoint():
 
     # 2. Token with 'read' scope -> 200
     res = client.get(
-        "/api/v1/rate_limit",
-        headers={"Authorization": "Bearer test-read-token"}
+        "/api/v1/rate_limit", headers={"Authorization": "Bearer test-read-token"}
     )
     assert res.status_code == 200
 
     # 3. Token with no scopes -> 403
     res = client.get(
-        "/api/v1/rate_limit",
-        headers={"Authorization": "Bearer test-no-scope-token"}
+        "/api/v1/rate_limit", headers={"Authorization": "Bearer test-no-scope-token"}
     )
     assert res.status_code == 403
     assert "Forbidden" in res.json()["detail"]
@@ -312,18 +308,20 @@ def test_scope_enforcement_clear_endpoint():
     # 1. Token with 'admin' scope -> success (either 200 or 500 depending on actual database operations but not 401/403)
     res = client.post(
         "/api/v1/clear?username=admin",
-        headers={"Authorization": "Bearer test-admin-token"}
+        headers={"Authorization": "Bearer test-admin-token"},
     )
     assert res.status_code in (200, 500)
 
     # 2. Token with 'write' but no 'admin' -> 403
     res = client.post(
         "/api/v1/clear?username=admin",
-        headers={"Authorization": "Bearer test-write-token"}
+        headers={"Authorization": "Bearer test-write-token"},
     )
     assert res.status_code == 403
 
+
 # ── Asynchronous Background Scan Job Queue Tests (#1372) ─────────────────────
+
 
 def test_async_scan_returns_202_accepted_with_job_id():
     """Verify POST /api/v1/scan/async accepts upload and returns 202 with job_id."""
@@ -346,7 +344,12 @@ def test_async_scan_status_progression():
     """Verify background job executes and GET /api/v1/scan/status/{job_id} returns completed results."""
     client = TestClient(app)
 
-    files = {"file": ("sample_async.txt", b"Artificial intelligence and machine learning enable automated analysis.")}
+    files = {
+        "file": (
+            "sample_async.txt",
+            b"Artificial intelligence and machine learning enable automated analysis.",
+        )
+    }
     headers_write = {"Authorization": "Bearer test-write-token"}
     headers_read = {"Authorization": "Bearer test-read-token"}
 
@@ -439,7 +442,7 @@ import importlib
 def test_cors_preflight_max_age_header():
     """Verify OPTIONS preflight responses include Access-Control-Max-Age: 3600."""
     import sys
-    import src.api.app
+
     importlib.reload(sys.modules["src.api.app"])
     from fastapi.testclient import TestClient
     from src.api.app import app
@@ -456,3 +459,77 @@ def test_cors_preflight_max_age_header():
 
     assert response.headers["access-control-max-age"] == "3600"
 
+
+# ── Token Revocation Endpoint Tests (#1499) ───────────────────────────────────
+
+
+def test_token_revocation_endpoint_revokes_token_and_rejects_subsequent_requests(
+    tmp_path, monkeypatch
+):
+    """Verify POST /api/v1/auth/revoke invalidates token and subsequent calls return 401."""
+    from src.db.auth import configure_db_path, init_db, is_token_revoked
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+
+    db_file = tmp_path / "test_auth_revoke.db"
+    configure_db_path(db_file)
+    init_db()
+
+    client = TestClient(app)
+    target_token = "test-read-token"
+
+    # 1. Verify token works initially before revocation on protected route
+    res_before = client.get(
+        "/api/v1/incidents", headers={"Authorization": f"Bearer {target_token}"}
+    )
+    assert res_before.status_code == 200
+
+    # 2. Revoke token via POST /api/v1/auth/revoke
+    revoke_res = client.post("/api/v1/auth/revoke", json={"token": target_token})
+    assert revoke_res.status_code == 200
+    assert revoke_res.json()["status"] == "success"
+    assert is_token_revoked(target_token) is True
+
+    # 3. Subsequent request with revoked token fails with 401 Unauthorized
+    res_after = client.get(
+        "/api/v1/incidents", headers={"Authorization": f"Bearer {target_token}"}
+    )
+    assert res_after.status_code == 401
+    assert "revoked" in res_after.json()["detail"].lower()
+
+
+def test_token_revocation_via_authorization_header(tmp_path):
+    """Verify token can be revoked via Authorization header when body is omitted."""
+    from src.db.auth import configure_db_path, init_db, is_token_revoked
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+
+    db_file = tmp_path / "test_auth_revoke_header.db"
+    configure_db_path(db_file)
+    init_db()
+
+    client = TestClient(app)
+    target_token = "test-write-token"
+
+    revoke_res = client.post(
+        "/api/v1/auth/revoke", headers={"Authorization": f"Bearer {target_token}"}
+    )
+    assert revoke_res.status_code == 200
+    assert is_token_revoked(target_token) is True
+
+
+def test_token_revocation_missing_token_returns_400(tmp_path):
+    """Verify POST /api/v1/auth/revoke returns 400 Bad Request if no token provided."""
+    from src.db.auth import configure_db_path, init_db
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+
+    db_file = tmp_path / "test_auth_revoke_missing.db"
+    configure_db_path(db_file)
+    init_db()
+
+    client = TestClient(app)
+
+    response = client.post("/api/v1/auth/revoke", json={})
+    assert response.status_code == 400
+    assert "token to revoke must be provided" in response.json()["detail"].lower()

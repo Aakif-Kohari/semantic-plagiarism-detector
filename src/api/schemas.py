@@ -13,6 +13,21 @@ class LoginResponse(BaseModel):
     token: str = Field(..., description="Authentication session token")
 
 
+class RevokeRequest(BaseModel):
+    """Request schema for token revocation."""
+
+    token: str | None = Field(default=None, description="API Bearer token to revoke")
+
+
+class RevokeResponse(BaseModel):
+    """Response schema for token revocation."""
+
+    status: str = Field(..., description="Revocation status indicator")
+    message: str = Field(
+        ..., description="Summary message describing revocation result"
+    )
+
+
 class HealthCheckResponse(BaseModel):
     """Response schema for application readiness and liveness probes."""
 
@@ -27,8 +42,12 @@ class HealthzResponse(BaseModel):
     status: str = Field(..., description="Overall service status")
     db: str = Field(..., description="Database connectivity status")
     memory: str = Field(..., description="Memory status")
-    db_size_bytes: int = Field(default=0, description="Corpus database file size in bytes")
-    db_size_mb: float = Field(default=0.0, description="Corpus database file size in megabytes")
+    db_size_bytes: int = Field(
+        default=0, description="Corpus database file size in bytes"
+    )
+    db_size_mb: float = Field(
+        default=0.0, description="Corpus database file size in megabytes"
+    )
 
 
 class StatusResponse(BaseModel):
@@ -127,7 +146,9 @@ class AsyncScanJobResponse(BaseModel):
 
     job_id: str = Field(..., description="Unique background scan job identifier")
     status: str = Field(..., description="Initial job status (queued)")
-    status_url: str = Field(..., description="Relative endpoint URL to poll for job status")
+    status_url: str = Field(
+        ..., description="Relative endpoint URL to poll for job status"
+    )
     message: str = Field(..., description="Status description message")
 
 
@@ -135,10 +156,21 @@ class AsyncScanStatusResponse(BaseModel):
     """Response schema for checking the status of an asynchronous scan job."""
 
     job_id: str = Field(..., description="Unique background scan job identifier")
-    status: str = Field(..., description="Current job status: queued, processing, completed, or failed")
-    filename: str = Field(..., description="Filename of uploaded document being scanned")
-    created_at: str = Field(..., description="ISO 8601 UTC timestamp when job was created")
-    completed_at: str | None = Field(default=None, description="ISO 8601 UTC timestamp when job finished")
-    result: SimilarityCheckResponse | None = Field(default=None, description="Detailed scan results when completed")
-    error: str | None = Field(default=None, description="Error message if scan job failed")
-
+    status: str = Field(
+        ..., description="Current job status: queued, processing, completed, or failed"
+    )
+    filename: str = Field(
+        ..., description="Filename of uploaded document being scanned"
+    )
+    created_at: str = Field(
+        ..., description="ISO 8601 UTC timestamp when job was created"
+    )
+    completed_at: str | None = Field(
+        default=None, description="ISO 8601 UTC timestamp when job finished"
+    )
+    result: SimilarityCheckResponse | None = Field(
+        default=None, description="Detailed scan results when completed"
+    )
+    error: str | None = Field(
+        default=None, description="Error message if scan job failed"
+    )

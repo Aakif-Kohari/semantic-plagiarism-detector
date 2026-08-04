@@ -5,7 +5,9 @@ from __future__ import annotations
 import sqlite3
 
 from .common import column_exists, run_migrations
-AUTH_SCHEMA_VERSION = 11
+
+AUTH_SCHEMA_VERSION = 12
+
 
 def migration_001_create_users(
     connection: sqlite3.Connection,
@@ -80,6 +82,7 @@ def migration_006_add_active_flag(
             """
         )
 
+
 def migration_007_add_theme_preference(
     connection: sqlite3.Connection,
 ) -> None:
@@ -135,7 +138,6 @@ def migration_009_add_last_login_at(
         )
 
 
-
 def migration_010_add_password_changed_at(
     connection: sqlite3.Connection,
 ) -> None:
@@ -166,6 +168,28 @@ def migration_011_add_version_column(
         )
 
 
+def migration_012_create_revoked_tokens_table(
+    connection: sqlite3.Connection,
+) -> None:
+    """Create revoked_tokens table for tracking invalidated tokens."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS revoked_tokens (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            token_signature TEXT UNIQUE NOT NULL,
+            revoked_at TEXT NOT NULL,
+            details    TEXT DEFAULT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_revoked_tokens_signature
+        ON revoked_tokens(token_signature)
+        """
+    )
+
+
 AUTH_MIGRATIONS = {
     1: migration_001_create_users,
     2: migration_002_add_onboarding_state,
@@ -178,6 +202,7 @@ AUTH_MIGRATIONS = {
     9: migration_009_add_last_login_at,
     10: migration_010_add_password_changed_at,
     11: migration_011_add_version_column,
+    12: migration_012_create_revoked_tokens_table,
 }
 
 
