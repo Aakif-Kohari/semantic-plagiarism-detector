@@ -173,3 +173,32 @@ def test_plot_similarity_boxplot_fallback_keys():
 
     assert len(fig.data) == 1
     assert list(fig.data[0].y) == [0.9, 0.5]
+import plotly.graph_objects as go
+
+from src.visualization.analytics import plot_similarity_histogram
+
+
+def test_plot_similarity_histogram_returns_figure():
+    scores = [0.1, 0.2, 0.35, 0.5, 0.55, 0.9]
+    fig = plot_similarity_histogram(scores, n_bins=10)
+
+    assert isinstance(fig, go.Figure)
+    bar_trace = fig.data[0]
+    assert sum(bar_trace.y) == len(scores)
+
+
+def test_plot_similarity_histogram_uses_color_gradient():
+    scores = [0.1, 0.1, 0.1, 0.8]
+    fig = plot_similarity_histogram(scores, n_bins=10)
+
+    bar_trace = fig.data[0]
+    assert list(bar_trace.marker.color) == list(bar_trace.y)
+    assert bar_trace.marker.colorscale is not None
+
+
+def test_plot_similarity_histogram_empty_scores():
+    fig = plot_similarity_histogram([])
+
+    assert isinstance(fig, go.Figure)
+    assert len(fig.data) == 0
+    assert len(fig.layout.annotations) == 1
