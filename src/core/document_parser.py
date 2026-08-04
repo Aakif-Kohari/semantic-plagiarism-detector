@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import os
 import re
+import zipfile
 from collections import Counter
 from pathlib import Path
 from typing import BinaryIO, Dict, List, Union
@@ -31,6 +32,10 @@ SUPPORTED_OCR_LANGUAGES = {
     "spa": "Spanish",
     "fra": "French",
 }
+
+
+class CorruptedArchiveError(ValueError):
+    """Raised when an uploaded ZIP file or inner archived document is corrupted."""
 
 
 def validate_ocr_dpi(value: int) -> int:
@@ -638,6 +643,55 @@ def extract_text_from_md(file: PDFInput) -> str:
     return strip_markdown_syntax(raw_text)
 
 
+def extract_text_from_zip(
+    file: PDFInput,
+    *,
+    ocr_language: str = DEFAULT_OCR_LANGUAGE,
+    ocr_dpi: int = DEFAULT_OCR_DPI,
+) -> str:
+    """Extract and aggregate text from all valid documents inside a ZIP archive.
+
+    Catches zipfile.BadZipFile and reports corrupted zip files or damaged inner entries.
+    Returns empty string if the ZIP is corrupted or contains no valid documents.
+    """
+    raw_data = _read_pdf_bytes(file)
+    zip_stream = io.BytesIO(raw_data)
+
+    if not zipfile.is_zipfile(zip_stream):
+        raise CorruptedArchiveError("Uploaded ZIP file is corrupted or not a valid ZIP archive.")
+
+    zip_stream.seek(0)
+    extracted_texts: List[str] = []
+    corrupted_files: List[str] = []
+
+    try:
+        with zipfile.ZipFile(zip_stream, "r") as archive:
+            for member_name in archive.namelist():
+                # Skip directories and macOS metadata files
+                if member_name.endswith("/") or member_name.startswith("__MACOSX"):
+                    continue
+
+                try:
+                    file_bytes = archive.read(member_name)
+                    parsed = extract_text(file_bytes, member_name, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
+                    if parsed:
+                        extracted_texts.append(parsed)
+                except Exception as exc:
+                    corrupted_files.append(f"{member_name} ({exc})")
+
+            if corrupted_files:
+                bad_list = ", ".join(corrupted_files)
+                print(f"[document_parser] Warning: Corrupted inner files in zip: {bad_list}")
+
+            if not extracted_texts and corrupted_files:
+                raise CorruptedArchiveError(f"ZIP archive contains corrupted files: {', '.join(corrupted_files)}")
+
+    except zipfile.BadZipFile as exc:
+        raise CorruptedArchiveError(f"Uploaded ZIP submission is corrupted: {exc}") from exc
+
+    return "\n\n".join(extracted_texts).strip()
+
+
 def extract_text(
     file: PDFInput,
     filename: str,
@@ -659,6 +713,8 @@ def extract_text(
         raw = extract_text_from_docx(file)
     elif extension == "md":
         raw = extract_text_from_md(file)
+    elif extension == "zip":
+        raw = extract_text_from_zip(file, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
     else:
         raw = extract_text_from_txt(file)
 
