@@ -35,6 +35,12 @@ from src.db.database_backup import (
     checkpoint_wal_log,
 )
 
+try:
+    import pyzipper
+    HAS_PYZIPPER = True
+except ImportError:
+    HAS_PYZIPPER = False
+
 
 class TestCreateSqliteSnapshot:
     """Tests for the create_sqlite_snapshot function."""
@@ -110,16 +116,42 @@ class TestCorpusSnapshotAndBackup:
         with pytest.raises(FileNotFoundError, match="SQLite database does not exist"):
             create_sqlite_snapshot(missing_db)
 
+    @pytest.mark.skipif(not HAS_PYZIPPER, reason="pyzipper is not installed")
     def test_create_password_protected_backup(self, temp_db_path):
         """Test creation of a password-protected ZIP backup."""
         snapshot = create_sqlite_snapshot(temp_db_path)
         password = "secure_password_123"
 
-        zip_data = create_password_protected_backup(snapshot, password, "corpus.db")
+        zip_data = create_password_protected_backup(snapshot, password, archive_name="corpus.db")
+
 
         assert isinstance(zip_data, bytes)
         assert len(zip_data) > 0
         assert zip_data[:4] == b"PK\x03\x04"
+
+    def test_create_and_verify_backup(self, temp_db_path, tmp_path):
+        """Verify database backup creation, size, and integrity."""
+        # 1. Create database backup
+        snapshot = create_sqlite_snapshot(temp_db_path)
+        backup_file = tmp_path / "test_backup.db"
+        backup_file.write_bytes(snapshot)
+
+        # 2. Verify backup file exists
+        assert backup_file.exists()
+
+        # 3. Verify size matches source
+        source_size = os.path.getsize(temp_db_path)
+        backup_size = backup_file.stat().st_size
+        assert backup_size == source_size
+
+        # 4. Verify integrity check on backup file returns True
+        conn = sqlite3.connect(str(backup_file))
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA integrity_check;")
+        res = cursor.fetchone()
+        conn.close()
+        assert res[0] == "ok"
+
 
 
 class TestOptimizeDatabase:
@@ -395,8 +427,9 @@ class TestGetDatabaseSizeBytes:
         """A leading ``~`` must be expanded against the home directory."""
         db_path = tmp_path / "home_db.db"
         db_path.write_bytes(b"not-a-real-sqlite-db-but-size-still-works")
-        # Path.expanduser() reads $HOME (not Path.home()), so patch the env var.
+        # Path.expanduser() reads $HOME or $USERPROFILE, so patch both env vars.
         monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
 
         size = get_database_size_bytes("~/home_db.db")
 
@@ -571,6 +604,7 @@ class TestGetDatabaseTableStats:
         conn.close()
 
         monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
 
         stats = get_database_table_stats("~/home_stats.db")
 
@@ -591,9 +625,8 @@ class TestCheckpointWalLog:
         conn.execute("CREATE TABLE test (id INTEGER PRIMARY KEY, val TEXT)")
         conn.execute("INSERT INTO test (val) VALUES ('test')")
         conn.commit()
-        conn.close()
 
-        # Check WAL file exists
+        # Check WAL file exists (it is preserved on close when other connections are active, or since we keep conn open)
         wal_path = Path(f"{db_path}-wal")
         assert wal_path.exists()
 
@@ -606,6 +639,9 @@ class TestCheckpointWalLog:
             log_calls = [call[0][0] for call in mock_logger.info.call_args_list]
             assert any("WAL file size before checkpoint" in log for log in log_calls)
             assert any("WAL file size after checkpoint" in log for log in log_calls)
+
+        conn.close()
+
 
     def test_checkpoint_wal_log_file_not_found(self):
         """Verify checkpoint fails for non-existent database paths."""

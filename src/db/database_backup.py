@@ -383,12 +383,13 @@ def _resolve_authorized_backup(
     if not stat.S_ISREG(source_stat.st_mode):
         raise BackupRestoreSecurityError("Backup source must be a regular file.")
 
-    if source_stat.st_mode & stat.S_IWOTH:
+    if os.name != "nt" and (source_stat.st_mode & stat.S_IWOTH):
         raise BackupRestoreSecurityError(
             "Refusing to restore a world-writable backup file."
         )
 
     return resolved_source
+
 
 
 def _validate_sqlite_backup(source: Path) -> None:
@@ -475,8 +476,9 @@ def restore(
         shutil.copyfile(source_path, temporary_path)
         _validate_sqlite_backup(temporary_path)
 
-        with temporary_path.open("rb") as restored_file:
+        with temporary_path.open("r+b") as restored_file:
             os.fsync(restored_file.fileno())
+
 
         os.replace(temporary_path, destination_path)
         temporary_path = None
