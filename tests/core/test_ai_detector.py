@@ -120,6 +120,9 @@ def test_detect_ai_generated_text_empty():
     assert res["ai_probability"] == 0.0
     assert res["confidence_tier"] == "low"
     assert res["perplexity_score"] == 150.0
+    assert res["burstiness_score"] == 0.0
+    assert res["ngram_repetitiveness"] == 0.0
+    assert res["classification_tier"] == "low"
 
 
 def test_detect_ai_generated_text_whitespace():
@@ -128,31 +131,167 @@ def test_detect_ai_generated_text_whitespace():
     assert res["ai_probability"] == 0.0
     assert res["confidence_tier"] == "low"
     assert res["perplexity_score"] == 150.0
+    assert res["burstiness_score"] == 0.0
+    assert res["ngram_repetitiveness"] == 0.0
 
 
 def test_detect_ai_generated_text_tiers():
-    """Verify that confidence categorizations partition correctly."""
-    with patch("src.core.ai_detector.detect_ai_probability") as mock_prob:
+    """Verify that confidence categorizations partition correctly with multi-metric scores."""
+    with patch("src.core.ai_detector.detect_ai_probability") as mock_prob, \
+         patch("src.core.ai_detector.calculate_text_perplexity") as mock_perp, \
+         patch("src.core.ai_detector._calculate_burstiness") as mock_burst, \
+         patch("src.core.ai_detector._calculate_ngram_repetitiveness") as mock_ngram:
+
+        mock_perp.return_value = 50.0
+        mock_burst.return_value = 0.3
+        mock_ngram.return_value = 0.2
+
         # High confidence AI (>= 0.75)
         mock_prob.return_value = 0.85
         res = detect_ai_generated_text("Test AI text")
         assert res["ai_probability"] == 0.85
         assert res["confidence_tier"] == "high"
-        assert res["perplexity_score"] == float(150.0 - 110.0 * 0.85)
+        assert res["classification_tier"] == "high"
+        assert res["perplexity_score"] == 50.0
+        assert res["burstiness_score"] == 0.3
+        assert res["ngram_repetitiveness"] == 0.2
 
         # Medium confidence (0.40 <= prob < 0.75)
         mock_prob.return_value = 0.55
         res = detect_ai_generated_text("Test medium text")
         assert res["ai_probability"] == 0.55
         assert res["confidence_tier"] == "medium"
-        assert res["perplexity_score"] == float(150.0 - 110.0 * 0.55)
+        assert res["classification_tier"] == "medium"
 
         # Low confidence (< 0.40)
         mock_prob.return_value = 0.25
         res = detect_ai_generated_text("Test human text")
         assert res["ai_probability"] == 0.25
         assert res["confidence_tier"] == "low"
-        assert res["perplexity_score"] == float(150.0 - 110.0 * 0.25)
+        assert res["classification_tier"] == "low"
+
+
+# ─── Tests for multi-metric classifier (Issue #1356) ─────────────────────────
+
+
+HUMAN_TEXT = (
+    "The autumn leaves danced in the wind. A sudden chill crept through the valley, "
+    "reminding everyone that winter was coming. The old man sighed, pulling his coat "
+    "tighter. 'Another year gone,' he muttered to no one in particular. The children "
+    "playing in the distance didn't notice. They were too busy building a fort out of "
+    "branches and old blankets. Meanwhile, the baker across the street was already "
+    "preparing for the morning rush. The smell of fresh bread wafted through the air. "
+    "Life went on, as it always does, indifferent to the changing seasons."
+)
+
+AI_TEXT = (
+    "In today's rapidly evolving technological landscape, artificial intelligence has "
+    "become an integral part of our daily lives. From smartphones to smart homes, AI "
+    "technology is everywhere. Moreover, the impact of artificial intelligence extends "
+    "far beyond consumer applications. In the business world, companies are leveraging "
+    "AI to streamline operations and improve efficiency. Furthermore, the healthcare "
+    "industry has also embraced artificial intelligence for diagnostic purposes. In "
+    "conclusion, artificial intelligence will continue to shape our future in profound ways."
+)
+
+
+def test_multi_classifier_returns_all_metrics():
+    """detect_ai_generated_text must return all four metric fields."""
+    with patch("src.core.ai_detector.detect_ai_probability", return_value=0.7), \
+         patch("src.core.ai_detector.calculate_text_perplexity", return_value=42.0), \
+         patch("src.core.ai_detector._calculate_burstiness", return_value=0.5), \
+         patch("src.core.ai_detector._calculate_ngram_repetitiveness", return_value=0.3):
+        result = detect_ai_generated_text("Some test text for analysis.")
+
+    assert "ai_probability" in result
+    assert "perplexity_score" in result
+    assert "burstiness_score" in result
+    assert "ngram_repetitiveness" in result
+    assert "classification_tier" in result
+    assert "confidence_tier" in result
+
+
+def test_multi_classifier_synthetic_human_text():
+    """Human-like text (low AI prob, high burstiness) should classify as 'low'."""
+    with patch("src.core.ai_detector.detect_ai_probability", return_value=0.15), \
+         patch("src.core.ai_detector.calculate_text_perplexity", return_value=180.0), \
+         patch("src.core.ai_detector._calculate_burstiness", return_value=0.75), \
+         patch("src.core.ai_detector._calculate_ngram_repetitiveness", return_value=0.1):
+        result = detect_ai_generated_text(HUMAN_TEXT)
+
+    assert result["ai_probability"] < 0.4
+    assert result["confidence_tier"] == "low"
+    assert result["classification_tier"] == "low"
+    assert result["burstiness_score"] > 0.5  # human text is bursty
+    assert result["ngram_repetitiveness"] < 0.3  # human text is less repetitive
+
+
+def test_multi_classifier_synthetic_ai_text():
+    """AI-like text (high AI prob, low burstiness, high repetition) should classify as 'high'."""
+    with patch("src.core.ai_detector.detect_ai_probability", return_value=0.88), \
+         patch("src.core.ai_detector.calculate_text_perplexity", return_value=25.0), \
+         patch("src.core.ai_detector._calculate_burstiness", return_value=0.15), \
+         patch("src.core.ai_detector._calculate_ngram_repetitiveness", return_value=0.6):
+        result = detect_ai_generated_text(AI_TEXT)
+
+    assert result["ai_probability"] >= 0.75
+    assert result["confidence_tier"] == "high"
+    assert result["classification_tier"] == "high"
+    assert result["burstiness_score"] < 0.5  # AI text is uniform
+    assert result["ngram_repetitiveness"] > 0.3  # AI text is more repetitive
+
+
+def test_burstiness_empty_text():
+    """Burstiness of empty text must be 0.0."""
+    from src.core.ai_detector import _calculate_burstiness
+    assert _calculate_burstiness("") == 0.0
+    assert _calculate_burstiness(None) == 0.0
+    assert _calculate_burstiness("   ") == 0.0
+
+
+def test_burstiness_single_sentence():
+    """Burstiness of a single sentence must be 0.0 (no variation)."""
+    from src.core.ai_detector import _calculate_burstiness
+    assert _calculate_burstiness("Only one sentence here.") == 0.0
+
+
+def test_burstiness_varied_sentence_lengths():
+    """Burstiness should be higher for text with varied sentence lengths."""
+    from src.core.ai_detector import _calculate_burstiness
+    varied = "Short. This is a much longer sentence with many words. Medium one here."
+    uniform = "This is a sentence. This is a sentence. This is a sentence."
+    assert _calculate_burstiness(varied) > _calculate_burstiness(uniform)
+
+
+def test_ngram_repetitiveness_empty_text():
+    """N-gram repetitiveness of empty text must be 0.0."""
+    from src.core.ai_detector import _calculate_ngram_repetitiveness
+    assert _calculate_ngram_repetitiveness("") == 0.0
+    assert _calculate_ngram_repetitiveness(None) == 0.0
+    assert _calculate_ngram_repetitiveness("   ") == 0.0
+
+
+def test_ngram_repetitiveness_short_text():
+    """N-gram repetitiveness of text shorter than n must be 0.0."""
+    from src.core.ai_detector import _calculate_ngram_repetitiveness
+    assert _calculate_ngram_repetitiveness("hi") == 0.0
+    assert _calculate_ngram_repetitiveness("one two") == 0.0
+
+
+def test_ngram_repetitiveness_no_repeats():
+    """Text with no repeated n-grams should return ~0.0."""
+    from src.core.ai_detector import _calculate_ngram_repetitiveness
+    unique = "the quick brown fox jumps over lazy dog runs fast today"
+    result = _calculate_ngram_repetitiveness(unique, n=3)
+    assert result < 0.1
+
+
+def test_ngram_repetitiveness_high_repetition():
+    """Text with repeated n-grams should return a high score."""
+    from src.core.ai_detector import _calculate_ngram_repetitiveness
+    repetitive = "the the the the the the the the the the"
+    result = _calculate_ngram_repetitiveness(repetitive, n=2)
+    assert result > 0.5
 
 
 # ─── Tests for calculate_text_perplexity (Issue #1154) ──────────────────────────
