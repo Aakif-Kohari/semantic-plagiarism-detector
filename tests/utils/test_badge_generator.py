@@ -32,3 +32,13 @@ def test_generate_badge_svg_uses_validated_color():
 def test_generate_badge_svg_escapes_student_name():
     svg = generate_badge_svg(student_name="<script>alert(1)</script>")
     assert "<script>" not in svg
+
+
+def test_generate_badge_svg_default_font_family():
+    svg = generate_badge_svg(student_name="Alex")
+    assert 'font-family="Verdana, Geneva, sans-serif"' in svg
+
+
+def test_generate_badge_svg_custom_font_family():
+    svg = generate_badge_svg(student_name="Alex", font_family="Arial, sans-serif")
+    assert 'font-family="Arial, sans-serif"' in svg
