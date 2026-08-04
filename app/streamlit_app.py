@@ -2224,11 +2224,9 @@ with tab_faiss:
             results = search_similar_chunks(
                 q_vec, faiss_index, registry, top_k=faiss_top_k, threshold=threshold
             )
-            for rec, score in results:
-                st.markdown(
-                    f"**{rec.doc_name}** (Chunk #{rec.chunk_index}) — `{score:.1%}`"
-                )
-                st.caption(rec.chunk_text)
+            from app.components.faiss_results import render_faiss_results_ui
+            render_faiss_results_ui(results, faiss_query.strip())
+
 
 # ══ TAB 3: MATRIX ═════════════════════════════════════════════════════════
 with tab_matrix:
