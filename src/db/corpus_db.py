@@ -192,6 +192,53 @@ def init_corpus_db() -> None:
             "CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at)"
         )
 
+                # Issue #1359: Create FTS5 virtual table + sync triggers for full-text
+        # search. Also created by migration_012, but we create it here too
+        # so that ``init_corpus_db()`` (which doesn't call
+        # ``migrate_corpus_database()``) still sets up FTS.
+        conn.execute(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
+                filename,
+                student_name,
+                assignment_title,
+                content='documents',
+                content_rowid='id'
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS documents_ai AFTER INSERT ON documents BEGIN
+                INSERT INTO documents_fts(rowid, filename, student_name, assignment_title)
+                VALUES (new.id, new.filename, new.student_name, new.assignment_title);
+            END
+            """
+        )
+        conn.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS documents_ad AFTER DELETE ON documents BEGIN
+                INSERT INTO documents_fts(documents_fts, rowid, filename, student_name, assignment_title)
+                VALUES ('delete', old.id, old.filename, old.student_name, old.assignment_title);
+            END
+            """
+        )
+        conn.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
+                INSERT INTO documents_fts(documents_fts, rowid, filename, student_name, assignment_title)
+                VALUES ('delete', old.id, old.filename, old.student_name, old.assignment_title);
+                INSERT INTO documents_fts(rowid, filename, student_name, assignment_title)
+                VALUES (new.id, new.filename, new.student_name, new.assignment_title);
+            END
+            """
+        )
+        # Backfill any existing rows into the FTS index
+        try:
+            conn.execute("INSERT INTO documents_fts(documents_fts) VALUES ('rebuild')")
+        except sqlite3.OperationalError:
+            pass  # Table might be empty or already synced
+
         try:
             os.chmod(_DB_PATH, 0o600)
         except OSError:
@@ -807,4 +854,72 @@ def get_deleted_documents_count() -> int:
             "SELECT COUNT(1) FROM documents WHERE is_deleted = 1"
         ).fetchone()
         return int(row[0]) if row else 0
+def search_documents_fts(query_text: str) -> list[dict]:
+    """Search the document corpus using the FTS5 full-text index (issue #1359).
+
+    Replaces slow ``LIKE '%query%'`` full table scans with a fast FTS5
+    MATCH query against the ``documents_fts`` virtual table. Searches
+    across ``filename``, ``student_name``, and ``assignment_title`` columns.
+
+    Args:
+        query_text: The search query string. Must be a non-empty string.
+                    FTS5 query syntax is supported (e.g., ``"machine learning"``
+                    for phrase search, ``machine OR learning`` for boolean).
+
+    Returns:
+        A list of dicts, each containing:
+        - ``id`` (int): Document row ID.
+        - ``filename`` (str): Document filename.
+        - ``student_name`` (str|None): Student name if set.
+        - ``assignment_title`` (str|None): Assignment title if set.
+        - ``upload_date`` (str): ISO timestamp of upload.
+        - ``snippet`` (str): FTS5-generated snippet with matched terms highlighted.
+
+        Returns an empty list if the query is empty or no matches are found.
+    """
+    if not query_text or not query_text.strip():
+        return []
+
+    # Sanitize the query for FTS5: wrap in double quotes to prevent
+    # FTS5 syntax errors from special characters (e.g., *, :, OR).
+    # This treats the query as a phrase match which is the safest
+    # default for user-supplied search terms.
+    sanitized = query_text.strip().replace('"', '""')
+    fts_query = f'"{sanitized}"'
+
+    try:
+        with _connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    d.id,
+                    d.filename,
+                    d.student_name,
+                    d.assignment_title,
+                    d.upload_date,
+                    snippet(documents_fts, 0, '<mark>', '</mark>', '...', 32) as snippet
+                FROM documents_fts
+                JOIN documents d ON d.id = documents_fts.rowid
+                WHERE documents_fts MATCH ?
+                  AND (d.is_deleted IS NULL OR d.is_deleted = 0)
+                ORDER BY rank
+                """,
+                (fts_query,),
+            ).fetchall()
+
+            return [
+                {
+                    "id": r[0],
+                    "filename": r[1],
+                    "student_name": r[2],
+                    "assignment_title": r[3],
+                    "upload_date": r[4],
+                    "snippet": r[5],
+                }
+                for r in rows
+            ]
+    except sqlite3.OperationalError as e:
+        logger.warning("FTS5 search failed: %s. Returning empty list.", e)
+        return []
+
 
