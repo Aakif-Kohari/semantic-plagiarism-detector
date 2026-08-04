@@ -78,8 +78,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    max_age=3600,
 )
-
 # SlowAPI Rate Limiting setup
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
