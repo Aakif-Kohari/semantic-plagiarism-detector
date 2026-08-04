@@ -84,7 +84,9 @@ def get_security_audit_logs(
     if limit < 0 or offset < 0:
         raise ValueError("Limit and offset must be non-negative integers.")
 
-    query = "SELECT id, event_type, username, timestamp, details FROM security_audit_log"
+    query = (
+        "SELECT id, event_type, username, timestamp, details FROM security_audit_log"
+    )
     params: list = []
     conditions: list[str] = []
 
@@ -354,11 +356,15 @@ def delete_user(username: str) -> None:
         raise sqlite3.Error(f"Failed to delete user: {e}") from e
 
 
-def update_password(username: str, new_password: str, current_user: str | None = None) -> None:
+def update_password(
+    username: str, new_password: str, current_user: str | None = None
+) -> None:
     """Update a user's password with a new Argon2 hash."""
     if current_user and current_user != username:
         if get_user_role(current_user) != "admin":
-            raise PermissionError("Unauthorized password modifications for foreign user_ids")
+            raise PermissionError(
+                "Unauthorized password modifications for foreign user_ids"
+            )
 
     try:
         username = _validate_username(username)
@@ -749,6 +755,8 @@ def format_user_created_date(iso_str: str) -> str:
             continue
 
     return "Unknown"
+
+
 def get_upload_count(username: str | None = None) -> int:
     """Return total number of uploads for a user or system-wide."""
     try:
@@ -762,7 +770,11 @@ def get_upload_count(username: str | None = None) -> int:
                 cursor = conn.execute(
                     "SELECT COUNT(*) FROM security_audit_log WHERE event_type = 'file_upload'"
                 )
-            row = cursor.fetchone()
-            return row[0] if row else 0
     except sqlite3.Error:
         return 0
+
+
+from src.utils.redis_cache import (
+    increment_upload_count,
+    is_upload_rate_limited,
+)
