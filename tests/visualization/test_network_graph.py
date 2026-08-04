@@ -592,3 +592,63 @@ def test_calculate_force_directed_layout_utility():
         assert len(pos[node]) == 2
         assert isinstance(pos[node][0], (float, int, numpy.number) if 'numpy' in globals() else float)
 
+# ==============================================================================
+# Community Clustering Tests (Issue #1503)
+# ==============================================================================
+
+def test_build_network_data_community_clustering():
+    """Verify nodes in the same community receive the same color, and different communities get different colors."""
+    # Create a graph that clearly has two separate communities.
+    # doc1, doc2, doc3 form one clique
+    # doc4, doc5, doc6 form another clique
+    # One connecting edge to make it a single connected component might be needed for some algos, 
+    # but Louvain and greedy modularity can handle disconnected components too.
+    data = {
+        "doc1": [1.0, 0.9, 0.9, 0.0, 0.0, 0.0],
+        "doc2": [0.9, 1.0, 0.9, 0.0, 0.0, 0.0],
+        "doc3": [0.9, 0.9, 1.0, 0.0, 0.0, 0.0],
+        "doc4": [0.0, 0.0, 0.0, 1.0, 0.9, 0.9],
+        "doc5": [0.0, 0.0, 0.0, 0.9, 1.0, 0.9],
+        "doc6": [0.0, 0.0, 0.0, 0.9, 0.9, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2", "doc3", "doc4", "doc5", "doc6"])
+    
+    net_data = build_network_data(df, threshold=0.5, show_isolated=True)
+    
+    node_trace = net_data["node_trace"]
+    colors = node_trace.marker.color
+    customdata = node_trace.customdata
+    
+    assert len(colors) == 6
+    assert len(customdata) == 6
+    
+    color_map = dict(zip(customdata, colors))
+    
+    # doc1, doc2, doc3 should have same color
+    assert color_map["doc1"] == color_map["doc2"] == color_map["doc3"]
+    
+    # doc4, doc5, doc6 should have same color
+    assert color_map["doc4"] == color_map["doc5"] == color_map["doc6"]
+    
+    # The two communities should have different colors
+    assert color_map["doc1"] != color_map["doc4"]
+
+def test_build_network_data_single_node_clustering():
+    """Verify single-node graphs don't crash and get a community color."""
+    data = {"doc1": [1.0]}
+    df = pd.DataFrame(data, index=["doc1"])
+    net_data = build_network_data(df, threshold=0.5, show_isolated=True)
+    
+    node_trace = net_data["node_trace"]
+    assert len(node_trace.marker.color) == 1
+    assert node_trace.marker.color[0] is not None
+
+def test_build_network_data_empty_clustering():
+    """Verify empty graphs don't crash during community clustering."""
+    df = pd.DataFrame()
+    net_data = build_network_data(df, threshold=0.5)
+    
+    assert len(net_data["graph"].nodes()) == 0
+    # No nodes, so no colors should be added
+    assert len(net_data["node_trace"].marker.color) == 0
+
