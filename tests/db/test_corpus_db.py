@@ -522,4 +522,133 @@ def test_get_deleted_documents_count(mock_db):
     assert get_deleted_documents_count() == 2
     restore_document("doc1.pdf")
     assert get_deleted_documents_count() == 1
+# ---------------------------------------------------------------------------
+# Issue #1359 — FTS5 Full-Text Search tests
+# ---------------------------------------------------------------------------
 
+
+def test_search_documents_fts_empty_query():
+    """Empty query must return an empty list."""
+    from src.db.corpus_db import search_documents_fts
+    assert search_documents_fts("") == []
+    assert search_documents_fts("   ") == []
+    assert search_documents_fts(None) == []
+
+
+def test_search_documents_fts_no_matches():
+    """A query that matches nothing must return an empty list."""
+    from src.db.corpus_db import search_documents_fts
+    add_document("test_fts_doc.pdf", "hash_fts_001")
+    results = search_documents_fts("nonexistent_term_xyz")
+    assert results == []
+
+
+def test_search_documents_fts_finds_by_filename():
+    """FTS search should find documents by filename."""
+    from src.db.corpus_db import search_documents_fts
+    add_document("machine_learning_essay.pdf", "hash_fts_002", student_name="Alice")
+    results = search_documents_fts("machine")
+    assert len(results) == 1
+    assert results[0]["filename"] == "machine_learning_essay.pdf"
+    assert results[0]["student_name"] == "Alice"
+
+
+def test_search_documents_fts_finds_by_student_name():
+    """FTS search should find documents by student name."""
+    from src.db.corpus_db import search_documents_fts
+    add_document("essay1.pdf", "hash_fts_003", student_name="Bob Smith")
+    results = search_documents_fts("Bob")
+    assert len(results) == 1
+    assert results[0]["student_name"] == "Bob Smith"
+
+
+def test_search_documents_fts_finds_by_assignment_title():
+    """FTS search should find documents by assignment title."""
+    from src.db.corpus_db import search_documents_fts
+    add_document("lab_report.pdf", "hash_fts_004", assignment_title="Final Lab Report")
+    results = search_documents_fts("Final")
+    assert len(results) == 1
+    assert results[0]["assignment_title"] == "Final Lab Report"
+
+
+def test_search_documents_fts_returns_correct_fields():
+    """The result dict must contain all expected fields."""
+    from src.db.corpus_db import search_documents_fts
+    add_document("data_science.pdf", "hash_fts_005", student_name="Carol", assignment_title="ML Project")
+    results = search_documents_fts("data")
+    assert len(results) == 1
+    result = results[0]
+    assert "id" in result
+    assert "filename" in result
+    assert "student_name" in result
+    assert "assignment_title" in result
+    assert "upload_date" in result
+    assert "snippet" in result
+
+
+def test_search_documents_fts_excludes_deleted():
+    """Soft-deleted documents must not appear in FTS results."""
+    from src.db.corpus_db import search_documents_fts, soft_delete_document
+    add_document("active_doc.pdf", "hash_fts_006", student_name="Active User")
+    add_document("deleted_doc.pdf", "hash_fts_007", student_name="Deleted User")
+    soft_delete_document("deleted_doc.pdf")
+    results = search_documents_fts("User")
+    # Only the non-deleted doc should appear
+    filenames = [r["filename"] for r in results]
+    assert "active_doc.pdf" in filenames
+    assert "deleted_doc.pdf" not in filenames
+
+
+def test_search_documents_fts_multiple_results():
+    """FTS search should return all matching documents, ranked by relevance."""
+    from src.db.corpus_db import search_documents_fts
+    add_document("plagiarism_detection.pdf", "hash_fts_008", student_name="Alice")
+    add_document("plagiarism_essay.pdf", "hash_fts_009", student_name="Bob")
+    add_document("unrelated_topic.pdf", "hash_fts_010", student_name="Carol")
+    results = search_documents_fts("plagiarism")
+    assert len(results) == 2
+    filenames = {r["filename"] for r in results}
+    assert "plagiarism_detection.pdf" in filenames
+    assert "plagiarism_essay.pdf" in filenames
+
+
+def test_search_documents_fts_trigger_sync_on_delete():
+    """Hard-deleting a document must remove it from the FTS index."""
+    from src.db.corpus_db import search_documents_fts, delete_document
+    add_document("to_delete.pdf", "hash_fts_011", student_name="Delete Me")
+    results_before = search_documents_fts("Delete")
+    assert len(results_before) == 1
+    delete_document("to_delete.pdf")
+    results_after = search_documents_fts("Delete")
+    assert len(results_after) == 0
+
+
+def test_fts5_virtual_table_exists():
+    """The documents_fts virtual table must exist after migration."""
+    from src.db.corpus_db import get_corpus_db_path
+    import sqlite3
+    conn = sqlite3.connect(str(get_corpus_db_path()))
+    try:
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='documents_fts'"
+        )
+        assert cursor.fetchone() is not None
+    finally:
+        conn.close()
+
+
+def test_fts5_triggers_exist():
+    """The FTS sync triggers must exist after migration."""
+    from src.db.corpus_db import get_corpus_db_path
+    import sqlite3
+    conn = sqlite3.connect(str(get_corpus_db_path()))
+    try:
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='trigger' AND name IN ('documents_ai', 'documents_ad', 'documents_au')"
+        )
+        trigger_names = {row[0] for row in cursor.fetchall()}
+        assert "documents_ai" in trigger_names
+        assert "documents_ad" in trigger_names
+        assert "documents_au" in trigger_names
+    finally:
+        conn.close()
