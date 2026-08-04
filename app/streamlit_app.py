@@ -1209,34 +1209,36 @@ if not selected_classes:
     # ── System Health Widget (Issue #1246) ──────────────────────────────────────
     # Collapsible sidebar expander showing RAM usage, disk space, and DB status
     # for administrators monitoring the application health at a glance.
-    with st.expander("🖥️ System Health", expanded=False):
+    # ── Real-Time Memory Consumption Monitor (Issue #1371) ──────────────────────
+    with st.expander("🖥️ System Health & Memory", expanded=False):
         try:
-            # System RAM usage percentage via psutil
-            memory_info = psutil.virtual_memory()
-            ram_usage_percent = memory_info.percent
-            ram_total_gb = memory_info.total / (1024 ** 3)
-            ram_available_gb = memory_info.available / (1024 ** 3)
+            import os
+            process = psutil.Process(os.getpid())
+            mem_info = process.memory_info()
+            rss_mb = mem_info.rss / (1024 * 1024)
+            
+            # Host limit estimation or default shared host limit (e.g., 2048 MB)
+            host_limit_mb = 2048.0
+            try:
+                from src.core.app_config import get_host_memory_limit_mb
+                host_limit_mb = float(get_host_memory_limit_mb())
+            except Exception:
+                pass
 
-            # Choose indicator color based on RAM usage severity
-            if ram_usage_percent >= 90:
-                ram_indicator = "🔴"
-                ram_status_text = "Critical"
-            elif ram_usage_percent >= 70:
-                ram_indicator = "🟡"
-                ram_status_text = "Warning"
+            ram_usage_percent = min(rss_mb / host_limit_mb, 1.0)
+            ram_percent_val = (rss_mb / host_limit_mb) * 100
+
+            # Determine warning state (>80% amber warning)
+            if ram_percent_val >= 80:
+                st.warning(f"⚠️ High RAM Usage: {rss_mb:.1f} MB / {host_limit_mb:.0f} MB ({ram_percent_val:.0f}%)")
             else:
-                ram_indicator = "🟢"
-                ram_status_text = "Healthy"
+                st.markdown(f"**RAM Usage:** {rss_mb:.1f} MB / {host_limit_mb:.0f} MB ({ram_percent_val:.0f}%)")
 
-            st.markdown(
-                f"**💾 RAM Usage:** {ram_indicator} {ram_usage_percent:.1f}% "
-                f"({ram_status_text})"
-            )
-            st.caption(
-                f"Total: {ram_total_gb:.1f} GB · "
-                f"Available: {ram_available_gb:.1f} GB"
-            )
+            st.progress(ram_usage_percent)
 
+        except Exception as mem_err:
+            st.error(f"Failed to measure process memory: {mem_err}")
+            
             # Free disk space on the partition containing the project root
             disk_usage = psutil.disk_usage(str(ROOT_DIR))
             free_disk_gb = disk_usage.free / (1024 ** 3)
