@@ -2,12 +2,13 @@
 
 import logging
 import os
+import uuid
 from datetime import datetime, timezone
 import psutil
 import numpy as np
 
-from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status, Request, Security
-from typing import Dict
+from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Query, UploadFile, status, Request, Security
+from typing import Dict, Any
 from fastapi.exceptions import RequestValidationError
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -18,6 +19,8 @@ from fastapi.responses import PlainTextResponse, JSONResponse
 
 from src.api.middleware import verify_bearer_token, get_current_user
 from src.api.schemas import (
+    AsyncScanJobResponse,
+    AsyncScanStatusResponse,
     ClearDataResponse,
     ErrorResponse,
     HealthCheckResponse,
@@ -520,6 +523,233 @@ async def scan_document(
         "max_chunk_similarity": round(max_chunk_overall_score, 4),
         "matched_documents_count": len(matched_documents),
         "matched_documents": matched_documents,
+    }
+
+
+# ── Asynchronous Background Scan Job Queue (#1372) ───────────────────────────
+
+scan_jobs: Dict[str, Dict[str, Any]] = {}
+
+
+def _process_scan_job(
+    job_id: str,
+    file_bytes: bytes,
+    filename: str,
+    threshold: float,
+    top_k: int,
+) -> None:
+    if job_id not in scan_jobs:
+        return
+
+    scan_jobs[job_id]["status"] = "processing"
+
+    try:
+        extracted_text = extract_text(file_bytes, filename)
+        if not extracted_text.strip():
+            scan_jobs[job_id]["status"] = "failed"
+            scan_jobs[job_id]["error"] = "Failed to extract readable text from the uploaded file."
+            return
+
+        words = extracted_text.split()
+        word_count = len(words)
+
+        chunks = chunk_document(extracted_text)
+        if not chunks:
+            chunks = [extracted_text[:1000]]
+
+        uploaded_embeddings = embed_chunks(chunks)
+        doc_embedding = get_document_embedding(uploaded_embeddings)
+        corpus_docs = get_corpus_documents_with_embeddings()
+
+        matched_documents = []
+        max_overall_score = 0.0
+        max_chunk_overall_score = 0.0
+
+        for corpus_filename, corpus_data in corpus_docs.items():
+            if corpus_filename == filename:
+                continue
+
+            c_embeddings = corpus_data["embeddings"]
+            c_chunks = corpus_data["chunks"]
+
+            if c_embeddings.size == 0:
+                continue
+
+            c_doc_embedding = get_document_embedding(c_embeddings)
+            sim_doc = float(
+                np.clip(
+                    cosine_similarity(
+                        doc_embedding.reshape(1, -1), c_doc_embedding.reshape(1, -1)
+                    )[0, 0],
+                    0.0,
+                    1.0,
+                )
+            )
+            sim_chunk = chunk_max_similarity(uploaded_embeddings, c_embeddings)
+
+            combined_score = max(sim_doc, sim_chunk)
+            max_overall_score = max(max_overall_score, sim_doc)
+            max_chunk_overall_score = max(max_chunk_overall_score, sim_chunk)
+
+            if combined_score >= threshold:
+                severity = "🔴 High" if combined_score >= 0.90 else "🟡 Medium"
+
+                similar_chunks = find_most_similar_chunks(
+                    chunks_a=chunks,
+                    chunks_b=c_chunks,
+                    emb_a=uploaded_embeddings,
+                    emb_b=c_embeddings,
+                    top_k=top_k,
+                    threshold=threshold,
+                )
+
+                flagged_chunks = [
+                    {
+                        "uploaded_chunk": pair[0],
+                        "matched_chunk": pair[1],
+                        "similarity_score": round(float(pair[2]), 4),
+                    }
+                    for pair in similar_chunks
+                ]
+
+                matched_documents.append(
+                    {
+                        "filename": corpus_filename,
+                        "document_similarity_score": round(sim_doc, 4),
+                        "max_chunk_similarity_score": round(sim_chunk, 4),
+                        "severity": severity,
+                        "flagged_chunks": flagged_chunks,
+                    }
+                )
+
+        matched_documents.sort(key=lambda x: x["max_chunk_similarity_score"], reverse=True)
+        is_flagged = len(matched_documents) > 0 or max_chunk_overall_score >= threshold
+
+        scan_jobs[job_id]["status"] = "completed"
+        scan_jobs[job_id]["completed_at"] = datetime.now(timezone.utc).isoformat()
+        scan_jobs[job_id]["result"] = {
+            "filename": filename,
+            "word_count": word_count,
+            "chunk_count": len(chunks),
+            "plagiarism_flagged": is_flagged,
+            "threshold_used": threshold,
+            "overall_document_similarity": round(max_overall_score, 4),
+            "max_chunk_similarity": round(max_chunk_overall_score, 4),
+            "matched_documents_count": len(matched_documents),
+            "matched_documents": matched_documents,
+        }
+    except Exception as exc:
+        scan_jobs[job_id]["status"] = "failed"
+        scan_jobs[job_id]["error"] = str(exc)
+
+
+@app.post(
+    "/api/v1/scan/async",
+    tags=["Plagiarism Detection"],
+    response_model=AsyncScanJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        400: {"model": ErrorResponse, "description": "Bad Request"},
+        415: {"model": ErrorResponse, "description": "Unsupported Media Type"},
+        422: {"model": ErrorResponse, "description": "Unprocessable Entity"},
+        500: {"model": ErrorResponse, "description": "Internal Server Error"},
+    },
+)
+async def scan_document_async(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(
+        ..., description="Document file to scan (.pdf, .docx, .txt)"
+    ),
+    threshold: float = Query(
+        default=PLAGIARISM_THRESHOLD,
+        ge=0.0,
+        le=1.0,
+        description="Similarity threshold for flagging plagiarism (default: 0.59)",
+    ),
+    top_k: int = Query(
+        default=3,
+        ge=1,
+        le=10,
+        description="Number of top matching paragraph pairs to include per matched document",
+    ),
+    _user: dict = Security(get_current_user, scopes=["write"]),
+    _content_type: None = Depends(validate_content_type),
+):
+    """Enqueue a document scanning job for asynchronous background processing."""
+    if not file.filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Filename must be provided.",
+        )
+
+    filename = file.filename
+    file_bytes = await file.read()
+
+    if len(file_bytes) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Uploaded file is empty (0 bytes)",
+        )
+
+    job_id = f"job_{uuid.uuid4().hex[:12]}"
+    status_url = f"/api/v1/scan/status/{job_id}"
+
+    scan_jobs[job_id] = {
+        "job_id": job_id,
+        "status": "queued",
+        "filename": filename,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "completed_at": None,
+        "result": None,
+        "error": None,
+    }
+
+    background_tasks.add_task(
+        _process_scan_job,
+        job_id,
+        file_bytes,
+        filename,
+        threshold,
+        top_k,
+    )
+
+    return {
+        "job_id": job_id,
+        "status": "queued",
+        "status_url": status_url,
+        "message": "Scan job successfully queued for asynchronous processing.",
+    }
+
+
+@app.get(
+    "/api/v1/scan/status/{job_id}",
+    tags=["Plagiarism Detection"],
+    response_model=AsyncScanStatusResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        404: {"model": ErrorResponse, "description": "Not Found"},
+    },
+)
+def get_async_scan_status(
+    job_id: str,
+    _user: dict = Security(get_current_user, scopes=["read"]),
+):
+    """Retrieve the status and results of an asynchronous scan job."""
+    if job_id not in scan_jobs:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Scan job '{job_id}' not found.",
+        )
+
+    job = scan_jobs[job_id]
+    return {
+        "job_id": job["job_id"],
+        "status": job["status"],
+        "filename": job["filename"],
+        "created_at": job["created_at"],
+        "completed_at": job.get("completed_at"),
+        "result": job.get("result"),
+        "error": job.get("error"),
     }
 
 
