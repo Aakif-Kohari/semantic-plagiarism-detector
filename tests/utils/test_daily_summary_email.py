@@ -416,3 +416,65 @@ class TestEmailTemplateHelpers:
         assert "background-color: #f9f9f9" in html
         assert "border-radius: 8px" in html
         assert "font-family: Arial, sans-serif" in html
+
+
+def test_send_email_status_callback_success():
+    """Test status_callback invocation on successful email delivery (#1514)."""
+    callback = MagicMock()
+    with patch("smtplib.SMTP") as mock_smtp, patch.dict(
+        "os.environ",
+        {
+            "SMTP_SERVER": "smtp.example.com",
+            "SMTP_PORT": "587",
+            "SMTP_USERNAME": "test@example.com",
+            "SMTP_PASSWORD": "password",
+            "FROM_EMAIL": "test@example.com",
+        },
+    ):
+        mock_server = MagicMock()
+        mock_smtp.return_value.__enter__.return_value = mock_server
+
+        result = send_email(
+            ["recipient@example.com"],
+            "Test Subject",
+            "<p>Body</p>",
+            status_callback=callback,
+        )
+
+        assert result is True
+        callback.assert_called_once()
+        success, message = callback.call_args[0]
+        assert success is True
+        assert "sent successfully" in message
+
+
+def test_send_email_status_callback_failure():
+    """Test status_callback invocation on email delivery failure (#1514)."""
+    callback = MagicMock()
+    with patch("smtplib.SMTP") as mock_smtp, patch.dict(
+        "os.environ",
+        {
+            "SMTP_SERVER": "smtp.example.com",
+            "SMTP_PORT": "587",
+            "SMTP_USERNAME": "test@example.com",
+            "SMTP_PASSWORD": "password",
+            "FROM_EMAIL": "test@example.com",
+        },
+    ):
+        mock_server = MagicMock()
+        mock_server.send_message.side_effect = Exception("SMTP Connection Failed")
+        mock_smtp.return_value.__enter__.return_value = mock_server
+
+        result = send_email(
+            ["recipient@example.com"],
+            "Test Subject",
+            "<p>Body</p>",
+            status_callback=callback,
+        )
+
+        assert result is False
+        callback.assert_called_once()
+        success, message = callback.call_args[0]
+        assert success is False
+        assert "SMTP Connection Failed" in message
+

@@ -240,3 +240,21 @@ def test_validate_webhook_url_allowed_webhook_domains(mock_getaddrinfo, monkeypa
         SSRFProtector.validate_webhook_url("https://unallowed-domain.org/webhook")
 
     mock_getaddrinfo.assert_not_called()
+
+@patch("src.security.ssrf_protector.requests.head")
+def test_validate_webhook_url_max_redirects_exceeded(mock_head, monkeypatch):
+    monkeypatch.setattr(
+        SSRFProtector,
+        "_resolve_hostname",
+        classmethod(lambda cls, hostname: "93.184.216.34"),
+    )
+
+    redirect_response = type(
+        "MockResponse",
+        (),
+        {"status_code": 302, "headers": {"Location": "https://example.com/next"}},
+    )()
+    mock_head.return_value = redirect_response
+
+    with pytest.raises(SSRFSecurityException, match="Maximum HTTP redirect depth exceeded"):
+        SSRFProtector.validate_webhook_url("https://example.com/start")

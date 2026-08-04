@@ -511,6 +511,65 @@ def plot_severity_donut_chart(incidents: list[dict[str, Any]]) -> go.Figure:
     return fig
 
 
+def plot_similarity_histogram(scores: list[float], n_bins: int = 20) -> go.Figure:
+    """
+    Create an interactive histogram of pairwise similarity scores, with bars
+    colored on a gradient based on how many pairs fall into each bin.
+
+    Args:
+        scores: List of pairwise similarity scores (0.0-1.0).
+        n_bins: Number of histogram bins to split the 0.0-1.0 range into.
+
+    Returns:
+        Plotly Figure object with a gradient-colored bar histogram.
+    """
+    if not scores:
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No similarity scores available to plot",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
+            font=dict(size=16, color="gray"),
+        )
+        fig.update_layout(
+            title="Similarity Score Distribution",
+            height=400,
+            autosize=True,
+        )
+        return fig
+
+    counts, bin_edges = np.histogram(scores, bins=n_bins, range=(0.0, 1.0))
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+
+    fig = go.Figure(
+        data=go.Bar(
+            x=bin_centers,
+            y=counts,
+            marker=dict(
+                color=counts,
+                colorscale="Viridis",
+                colorbar=dict(title="Pair Count"),
+                line=dict(color="#4a4dba", width=1),
+            ),
+            hovertemplate="Score: %{x:.2f}<br>Pairs: %{y}<extra></extra>",
+        )
+    )
+
+    fig.update_layout(
+        title="Similarity Score Distribution",
+        xaxis_title="Similarity Score",
+        yaxis_title="Number of Document Pairs",
+        bargap=0.05,
+        height=400,
+        showlegend=False,
+        autosize=True,
+    )
+
+    return fig
+
 def plot_similarity_percentiles(
     similarity_scores: list[float],
     show_grid: bool = True,

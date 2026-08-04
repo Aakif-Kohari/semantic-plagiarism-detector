@@ -323,7 +323,6 @@ def test_scope_enforcement_clear_endpoint():
     )
     assert res.status_code == 403
 
-
 # ── Asynchronous Background Scan Job Queue Tests (#1372) ─────────────────────
 
 def test_async_scan_returns_202_accepted_with_job_id():
@@ -393,4 +392,67 @@ def test_async_scan_empty_file_returns_400():
     assert response.status_code == 400
     assert "empty" in response.json()["detail"].lower()
 
+
+# ── Global Exception Handler Tests (#1500) ────────────────────────────────────
+
+import asyncio
+import json
+from unittest.mock import Mock
+
+from src.api.app import global_exception_handler
+
+
+def test_global_exception_handler_returns_standard_payload(monkeypatch):
+    """Verify Issue #1500: unhandled exceptions return the standardized JSON payload."""
+    monkeypatch.setenv("APP_ENVIRONMENT", "development")
+    mock_request = Mock()
+
+    response = asyncio.run(global_exception_handler(mock_request, ValueError("boom")))
+    body = json.loads(response.body)
+
+    assert response.status_code == 500
+    assert body["error"] is True
+    assert body["code"] == 500
+    assert body["message"] == "boom"
+    assert "timestamp" in body
+
+
+def test_global_exception_handler_masks_details_in_production(monkeypatch):
+    """Verify Issue #1500: internal exception details are masked in production."""
+    monkeypatch.setenv("APP_ENVIRONMENT", "production")
+    mock_request = Mock()
+
+    response = asyncio.run(
+        global_exception_handler(mock_request, ValueError("sensitive internal detail"))
+    )
+    body = json.loads(response.body)
+
+    assert body["message"] == "An internal server error occurred."
+    assert "sensitive internal detail" not in body["message"]
+
+
+# ── CORS Preflight Cache Duration Test (#1501) ────────────────────────────────
+
+import importlib
+
+
+def test_cors_preflight_max_age_header():
+    """Verify OPTIONS preflight responses include Access-Control-Max-Age: 3600."""
+    import sys
+    import src.api.app
+    importlib.reload(sys.modules["src.api.app"])
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+
+    client = TestClient(app)
+
+    response = client.options(
+        "/api/v1/version",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+
+    assert response.headers["access-control-max-age"] == "3600"
 

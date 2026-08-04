@@ -563,3 +563,16 @@ def test_plot_differential_heatmap_matplotlib():
     fig = plot_differential_heatmap_matplotlib(matrix_a, matrix_b)
     assert isinstance(fig, Figure)
     plt.close(fig)
+def test_plot_similarity_heatmap_plotly_custom_colorscale(
+    multi_doc_df: pd.DataFrame,
+) -> None:
+    """Verify Issue #1397: a custom Plotly colorscale string is applied to the trace."""
+    fig = plot_similarity_heatmap_plotly(
+        multi_doc_df, title="Custom Colorscale", colorscale="Plasma"
+    )
+    heatmap = next(trace for trace in fig.data if trace.type == "heatmap")
+    assert heatmap.colorscale is not None
+
+    fig_default = plot_similarity_heatmap_plotly(multi_doc_df, title="Default Colorscale")
+    heatmap_default = next(trace for trace in fig_default.data if trace.type == "heatmap")
+    assert heatmap_default.colorscale != heatmap.colorscale

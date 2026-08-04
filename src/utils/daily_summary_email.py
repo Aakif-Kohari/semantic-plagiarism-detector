@@ -11,7 +11,7 @@ import smtplib
 from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from dotenv import load_dotenv
 
@@ -236,7 +236,12 @@ def format_daily_summary(
     return build_email_html_body(incidents_data=incidents, total_scans=0, footer_note=footer_note)
 
 
-def send_email(to_emails: List[str], subject: str, html_body: str) -> bool:
+def send_email(
+    to_emails: List[str],
+    subject: str,
+    html_body: str,
+    status_callback: Optional[Callable[[bool, str], None]] = None,
+) -> bool:
     """
     Send an email using SMTP.
 
@@ -244,6 +249,7 @@ def send_email(to_emails: List[str], subject: str, html_body: str) -> bool:
         to_emails: List of recipient email addresses
         subject: Email subject line
         html_body: HTML formatted email body
+        status_callback: Optional callback receiving (success: bool, message: str)
 
     Returns:
         True if email sent successfully, False otherwise
@@ -255,49 +261,58 @@ def send_email(to_emails: List[str], subject: str, html_body: str) -> bool:
     from_email = os.getenv("FROM_EMAIL", smtp_username)
 
     if not all([smtp_server, smtp_username, smtp_password]):
-        logger.error(
-            "SMTP configuration incomplete. Please set SMTP_SERVER, SMTP_USERNAME, and SMTP_PASSWORD."
-        )
+        msg = "SMTP configuration incomplete. Please set SMTP_SERVER, SMTP_USERNAME, and SMTP_PASSWORD."
+        logger.error(msg)
+        if status_callback:
+            status_callback(False, msg)
         return False
 
     if not to_emails:
-        logger.warning("No recipients configured for daily summary email.")
+        msg = "No recipients configured for daily summary email."
+        logger.warning(msg)
+        if status_callback:
+            status_callback(False, msg)
         return False
 
     try:
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"] = from_email
-        msg["To"] = ", ".join(to_emails)
+        msg_obj = MIMEMultipart("alternative")
+        msg_obj["Subject"] = subject
+        msg_obj["From"] = from_email
+        msg_obj["To"] = ", ".join(to_emails)
 
         html_part = MIMEText(html_body, "html")
-        msg.attach(html_part)
+        msg_obj.attach(html_part)
 
         if smtp_port == 465:
             logger.debug("Using SMTP_SSL (implicit SSL) on port %d", smtp_port)
             with smtplib.SMTP_SSL(smtp_server, smtp_port) as server:
                 server.login(smtp_username, smtp_password)
-                server.send_message(msg)
+                server.send_message(msg_obj)
         else:
             logger.debug("Using SMTP with STARTTLS on port %d", smtp_port)
             with smtplib.SMTP(smtp_server, smtp_port) as server:
                 server.starttls()
                 server.login(smtp_username, smtp_password)
-                server.send_message(msg)
+                server.send_message(msg_obj)
 
-        logger.info(
-            "Daily summary email sent successfully to %d recipients", len(to_emails)
-        )
+        success_msg = f"Daily summary email sent successfully to {len(to_emails)} recipients."
+        logger.info(success_msg)
+        if status_callback:
+            status_callback(True, success_msg)
         return True
 
     except Exception as e:
-        logger.error(f"Failed to send daily summary email: {e}")
+        error_msg = f"Failed to send daily summary email: {e}"
+        logger.error(error_msg)
+        if status_callback:
+            status_callback(False, error_msg)
         return False
 
 
 def send_daily_summary(
     subject_prefix: str = "[Plagiarism Alert]",
     footer_note: Optional[str] = None,
+    status_callback: Optional[Callable[[bool, str], None]] = None,
 ) -> bool:
     """
     Main function to aggregate daily incidents and send summary email.
@@ -305,6 +320,7 @@ def send_daily_summary(
     Args:
         subject_prefix: Prefix to prepend to the email subject line
         footer_note: Optional custom administrator note to append to the email body
+        status_callback: Optional callback receiving (success: bool, message: str)
 
     Returns:
         True if email sent successfully, False otherwise
@@ -321,7 +337,7 @@ def send_daily_summary(
 
     prefix = f"{subject_prefix} " if subject_prefix else ""
     subject = f"{prefix}Daily Plagiarism Summary - {datetime.now().strftime('%Y-%m-%d')}"
-    success = send_email(admin_emails, subject, html_body)
+    success = send_email(admin_emails, subject, html_body, status_callback=status_callback)
 
     return success
 

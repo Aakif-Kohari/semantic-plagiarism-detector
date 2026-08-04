@@ -4,9 +4,9 @@ import logging
 import os
 import uuid
 from datetime import datetime, timezone
+
 import psutil
 import numpy as np
-
 from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Query, UploadFile, status, Request, Security
 from typing import Dict, Any
 from fastapi.exceptions import RequestValidationError
@@ -81,8 +81,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    max_age=3600,
 )
-
 # SlowAPI Rate Limiting setup
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
@@ -120,9 +120,33 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """
+    Catch-all handler that returns a standardized JSON error payload for
+    any unhandled exception. Internal details (like the raw exception
+    message) are masked when APP_ENVIRONMENT is "production".
+    """
+    status_code = getattr(exc, "status_code", status.HTTP_500_INTERNAL_SERVER_ERROR)
+    is_production = os.getenv("APP_ENVIRONMENT", "production").lower() == "production"
+
+    logging.getLogger(__name__).error(f"Unhandled exception: {exc}", exc_info=not is_production)
+
+    message = "An internal server error occurred." if is_production else str(exc)
+
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": True,
+            "code": status_code,
+            "message": message,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
+
 app.add_exception_handler(RateLimitExceeded, custom_rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
-
 def validate_content_type(request: Request) -> None:
     """Ensure the request is multipart/form-data before parsing."""
     content_type = request.headers.get("content-type", "")
