@@ -256,7 +256,13 @@ def plot_similarity_distribution(sim_matrix: pd.DataFrame, title: str = "Distrib
             showarrow=False,
             font=dict(size=16, color="gray"),
         )
-        fig.update_layout(title=title, height=400, autosize=True)
+        fig.update_layout(
+            title=title,
+            xaxis_title="Similarity Score Range (%)",
+            yaxis_title="Number of Document Pairs",
+            height=400,
+            autosize=True,
+        )
         fig.update_xaxes(showgrid=show_grid)
         fig.update_yaxes(showgrid=show_grid)
         return fig
@@ -268,12 +274,12 @@ def plot_similarity_distribution(sim_matrix: pd.DataFrame, title: str = "Distrib
         scores,
         nbins=30,
         title=title,
-        labels={"value": "Similarity Score", "count": "Number of Pairs"},
+        labels={"value": "Similarity Score Range (%)", "count": "Number of Document Pairs"},
         range_x=[0.0, 1.0],
     )
 
     fig.update_layout(
-        xaxis_title="Similarity Score",
+        xaxis_title="Similarity Score Range (%)",
         yaxis_title="Number of Document Pairs",
         bargap=0.05,
         height=400,
