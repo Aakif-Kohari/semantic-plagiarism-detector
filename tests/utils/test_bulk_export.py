@@ -341,3 +341,60 @@ class TestNormalizeCsvHeaders:
             # No leading/trailing underscores
             assert not header.startswith("_")
             assert not header.endswith("_")
+
+
+def test_create_batch_incident_zip_archive():
+    """Verify that create_batch_incident_zip_archive generates a ZIP file with CSV, JSON, and PDF reports."""
+    from src.utils.bulk_export import create_batch_incident_zip_archive
+
+    incidents = [
+        {
+            "incident_id": "INC-001",
+            "document_a": "alice.pdf",
+            "document_b": "bob.pdf",
+            "similarity_score": 0.95,
+            "severity_rank": "High",
+            "review_status": "Pending",
+            "date_flagged": "2024-01-15T10:00:00+00:00",
+        },
+        {
+            "incident_id": "INC-002",
+            "document_a": "charlie.docx",
+            "document_b": "dave.docx",
+            "similarity_score": 0.72,
+            "severity_rank": "Medium",
+            "review_status": "Reviewed",
+            "date_flagged": "2024-01-16T08:30:00+00:00",
+        },
+    ]
+
+    zip_bytes = create_batch_incident_zip_archive(incidents)
+    assert isinstance(zip_bytes, bytes)
+
+    with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
+        names = zf.namelist()
+
+        # Check for files
+        assert "incidents_summary.csv" in names
+        assert "metadata.json" in names
+
+        # Check for PDF reports
+        pdf_names = [n for n in names if n.lower().endswith(".pdf")]
+        assert len(pdf_names) == 2
+        assert "report_INC-001_alicepdf_bobpdf.pdf" in pdf_names
+        assert "report_INC-002_charliedocx_davedocx.pdf" in pdf_names
+
+        # Verify metadata JSON content
+        meta_content = zf.read("metadata.json").decode("utf-8")
+        meta = json.loads(meta_content)
+        assert "generated_at" in meta
+        assert meta["total_incidents"] == 2
+        assert meta["incidents"][0]["incident_id"] == "INC-001"
+
+        # Verify CSV summary
+        csv_content = zf.read("incidents_summary.csv").decode("utf-8-sig")
+        assert "INC-001" in csv_content
+        assert "INC-002" in csv_content
+        assert "95.00%" in csv_content
+        assert "72.00%" in csv_content
+
