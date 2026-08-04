@@ -11,6 +11,7 @@ from src.core.similarity import (
     clear_cross_encoder_cache,
     chunk_max_similarity,
     chunk_similarity_matrix,
+    compute_hybrid_similarity,
     document_similarity_matrix,
     find_exact_matches,
     find_most_similar_chunks,
@@ -839,4 +840,34 @@ def test_get_cross_encoder_info():
     assert info["model_name"] == "test-model"
     assert info["is_loaded"] is False
     assert info["is_failed"] is False
+
+
+# ── BM25 Hybrid Lexical-Semantic Search Scoring Tests (#1477) ─────────────────
+
+
+def test_compute_hybrid_similarity_basic():
+    doc_a = "Deep neural networks for image classification and computer vision."
+    doc_b = "Convolutional neural networks for image classification tasks."
+    vector_sim = 0.85
+    hybrid_score = compute_hybrid_similarity(vector_sim, doc_a, doc_b, alpha=0.7)
+    assert 0.0 <= hybrid_score <= 1.0
+    assert hybrid_score > 0.5
+
+
+def test_compute_hybrid_similarity_alpha_bounds():
+    doc_a = "Natural language processing algorithms and models."
+    doc_b = "Language processing and transformer models."
+    vector_sim = 0.80
+
+    # alpha=1.0 returns pure vector similarity
+    assert compute_hybrid_similarity(vector_sim, doc_a, doc_b, alpha=1.0) == pytest.approx(vector_sim)
+
+    # alpha=0.0 returns pure BM25 similarity
+    bm25_only = compute_hybrid_similarity(vector_sim, doc_a, doc_b, alpha=0.0)
+    assert 0.0 <= bm25_only <= 1.0
+
+    # Invalid alpha raises ValueError
+    with pytest.raises(ValueError):
+        compute_hybrid_similarity(vector_sim, doc_a, doc_b, alpha=1.5)
+
 
