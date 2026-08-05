@@ -347,9 +347,66 @@ def detect_documents_ai_probability(
     return results
 
 
+def _calculate_burstiness(text: str) -> float:
+    """Calculate the burstiness score of a text.
+
+    Burstiness measures the variation in sentence lengths. Human text tends
+    to have higher burstiness (more varied sentence lengths), while AI text
+    tends to be more uniform.
+
+    Returns a float between 0.0 (uniform) and 1.0 (highly varied).
+    """
+    if not text or not isinstance(text, str) or not text.strip():
+        return 0.0
+
+    # Split into sentences using a simple regex
+    sentences = re.split(r'[.!?]+', text.strip())
+    sentence_lengths = [len(s.split()) for s in sentences if s.strip()]
+
+    if len(sentence_lengths) < 2:
+        return 0.0
+
+    mean_len = np.mean(sentence_lengths)
+    if mean_len == 0:
+        return 0.0
+
+    # Coefficient of variation = std / mean
+    cv = float(np.std(sentence_lengths) / mean_len)
+    # Normalize to [0, 1] — typical CV for human text is 0.3-0.8
+    return min(cv / 1.0, 1.0)
+
+
+def _calculate_ngram_repetitiveness(text: str, n: int = 3) -> float:
+    """Calculate n-gram repetitiveness score.
+
+    AI text often repeats certain n-gram patterns more than human text.
+    Returns a float between 0.0 (no repetition) and 1.0 (highly repetitive).
+    """
+    if not text or not isinstance(text, str) or not text.strip():
+        return 0.0
+
+    words = text.lower().split()
+    if len(words) < n:
+        return 0.0
+
+    ngrams = [' '.join(words[i:i+n]) for i in range(len(words) - n + 1)]
+    if not ngrams:
+        return 0.0
+
+    unique_ngrams = set(ngrams)
+    repetition_ratio = 1.0 - (len(unique_ngrams) / len(ngrams))
+    return float(repetition_ratio)
+
 def detect_ai_generated_text(text: str) -> Dict[str, Any]:
     """
-    Detect the likelihood that a given text was AI-generated.
+    Detect the likelihood that a given text was AI-generated using a
+    multi-metric classifier (issue #1356).
+
+    Combines three signals:
+    1. Transformer-based AI probability (detect_ai_probability)
+    2. Perplexity score (calculate_text_perplexity)
+    3. Burstiness score (sentence-length variation)
+    4. N-gram repetitiveness
 
     Confidence threshold tiers:
     - 'high': ai_probability >= 0.75
@@ -364,15 +421,24 @@ def detect_ai_generated_text(text: str) -> Dict[str, Any]:
         - ai_probability (float): Probability score between 0.0 and 1.0.
         - confidence_tier (str): Categorized tier ('high', 'medium', 'low').
         - perplexity_score (float): Estimated perplexity score.
+        - burstiness_score (float): Sentence-length variation score (0-1).
+        - ngram_repetitiveness (float): N-gram repetition ratio (0-1).
+        - classification_tier (str): Same as confidence_tier (for API compat).
     """
     if not text or not text.strip():
         return {
             "ai_probability": 0.0,
             "confidence_tier": "low",
+            "classification_tier": "low",
             "perplexity_score": 150.0,
+            "burstiness_score": 0.0,
+            "ngram_repetitiveness": 0.0,
         }
 
     ai_probability = detect_ai_probability(text)
+    perplexity_score = calculate_text_perplexity(text)
+    burstiness_score = _calculate_burstiness(text)
+    ngram_repetitiveness = _calculate_ngram_repetitiveness(text)
 
     if ai_probability >= 0.75:
         confidence_tier = "high"
@@ -381,15 +447,14 @@ def detect_ai_generated_text(text: str) -> Dict[str, Any]:
     else:
         confidence_tier = "low"
 
-    # Perplexity estimation: higher for human (low probability), lower for AI (high probability)
-    perplexity_score = float(150.0 - 110.0 * ai_probability)
-
     return {
         "ai_probability": ai_probability,
         "confidence_tier": confidence_tier,
+        "classification_tier": confidence_tier,
         "perplexity_score": perplexity_score,
+        "burstiness_score": burstiness_score,
+        "ngram_repetitiveness": ngram_repetitiveness,
     }
-
 
 def categorize_ai_probability(score: float) -> str:
     """

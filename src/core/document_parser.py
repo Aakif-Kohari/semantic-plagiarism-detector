@@ -109,7 +109,8 @@ def get_stopwords() -> frozenset:
     return ENGLISH_STOPWORDS | load_custom_stopwords()
 
 
-def sanitize_zero_width_characters(text: str, filename: Optional[str] = None) -> str:    """
+def sanitize_zero_width_characters(text: str, filename: Optional[str] = None) -> str:
+    """
     Strips zero-width unicode characters (e.g. \u200B) often used to bypass plagiarism checkers.
     Logs a security warning if any zero-width characters are found.
     """
@@ -202,6 +203,10 @@ from src.core.app_config import SUPPORTED_OCR_LANGUAGES
 
 class CorruptedArchiveError(ValueError):
     """Raised when an uploaded zip file or inner archived document is corrupted."""
+
+
+class CorruptedArchiveError(ValueError):
+    """Raised when an uploaded ZIP file or inner archived document is corrupted."""
 
 
 def validate_ocr_dpi(value: int) -> int:
@@ -320,7 +325,7 @@ def clean_text(raw_text: str, remove_stopwords: bool = False) -> str:
     text = re.sub(r"[ \t]+\n", "\n", text)
     text = re.sub(r"\n[ \t]+", "\n", text)
 
-if remove_stopwords:
+    if remove_stopwords:
         # Tokenize, filter, and rejoin while preserving basic structure
         words = text.split()
         stopwords = get_stopwords()
@@ -1340,6 +1345,53 @@ def extract_text_from_md(file: PDFInput) -> str:
     return strip_markdown_syntax(raw_text)
 
 
+def extract_text_from_zip(
+    file: PDFInput,
+    *,
+    ocr_language: str = DEFAULT_OCR_LANGUAGE,
+    ocr_dpi: int = DEFAULT_OCR_DPI,
+) -> str:
+    """Extract and aggregate text from all valid documents inside a ZIP archive.
+
+    Catches zipfile.BadZipFile and reports corrupted zip files or damaged inner entries.
+    Returns empty string if the ZIP is corrupted or contains no valid documents.
+    """
+    raw_data = _read_pdf_bytes(file)
+    zip_stream = io.BytesIO(raw_data)
+
+    if not zipfile.is_zipfile(zip_stream):
+        raise CorruptedArchiveError("Uploaded ZIP file is corrupted or not a valid ZIP archive.")
+
+    zip_stream.seek(0)
+    extracted_texts: List[str] = []
+    corrupted_files: List[str] = []
+
+    try:
+        with zipfile.ZipFile(zip_stream, "r") as archive:
+            for member_name in archive.namelist():
+                # Skip directories and macOS metadata files
+                if member_name.endswith("/") or member_name.startswith("__MACOSX"):
+                    continue
+
+                try:
+                    file_bytes = archive.read(member_name)
+                    parsed = extract_text(file_bytes, member_name, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
+                    if parsed:
+                        extracted_texts.append(parsed)
+                except Exception as exc:
+                    corrupted_files.append(f"{member_name} ({exc})")
+
+            if corrupted_files:
+                bad_list = ", ".join(corrupted_files)
+                print(f"[document_parser] Warning: Corrupted inner files in zip: {bad_list}")
+
+            if not extracted_texts and corrupted_files:
+                raise CorruptedArchiveError(f"ZIP archive contains corrupted files: {', '.join(corrupted_files)}")
+
+    except zipfile.BadZipFile as exc:
+        raise CorruptedArchiveError(f"Uploaded ZIP submission is corrupted: {exc}") from exc
+
+    return "\n\n".join(extracted_texts).strip()
 def extract_text_from_odt(file: PDFInput) -> str:
     """Extract plain text from an ODT (OpenDocument Text) file.
     ODT files are ZIP archives containing content.xml with ODF XML.
@@ -1413,6 +1465,68 @@ def extract_text_from_image(
         return ""
 
 
+_DATE_PATTERNS = [
+    re.compile(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b"),
+    re.compile(r"\b\d{4}-\d{2}-\d{2}\b"),
+    re.compile(r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}\b", re.IGNORECASE),
+    re.compile(r"\b\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?),?\s+\d{4}\b", re.IGNORECASE),
+]
+
+_ORG_PATTERNS = [
+    re.compile(r"\b(?:University|College|Institute|Department|Corp|Corporation|Inc|Incorporated|Ltd|Limited|LLC|Society|Foundation|Academy|School)\b(?:\s+[A-Z][a-zA-Z]+)*"),
+    re.compile(r"\b(?:[A-Z][a-zA-Z]+\s+)+(?:University|College|Institute|Department|Corp|Corporation|Inc|Incorporated|Ltd|Limited|LLC|Society|Foundation|Academy|School)\b"),
+    re.compile(r"\bDepartment\s+of\s+[A-Z][a-zA-Z\s]+\b"),
+]
+
+_PERSON_PATTERNS = [
+    re.compile(r"\b(?:Mr|Mrs|Ms|Dr|Prof|Professor|Sir|Lady)\.?\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b"),
+]
+
+
+def mask_named_entities_in_text(text: str) -> str:
+    """Replace recognized PERSON, ORGANIZATION, and DATE entities with [ENTITY_MASKED].
+
+    Args:
+        text: Input text string.
+
+    Returns:
+        Text string with named entities replaced by [ENTITY_MASKED].
+    """
+    if not text:
+        return text
+
+    masked = text
+
+    try:
+        import nltk
+
+        try:
+            tokens = nltk.word_tokenize(masked)
+            pos_tags = nltk.pos_tag(tokens)
+            chunks = nltk.ne_chunk(pos_tags)
+            entities = []
+            for chunk in chunks:
+                if hasattr(chunk, "label") and chunk.label() in ("PERSON", "ORGANIZATION", "ORGANISATION", "GPE", "DATE"):
+                    entity_str = " ".join(c[0] for c in chunk)
+                    entities.append(entity_str)
+            for ent in sorted(entities, key=len, reverse=True):
+                if len(ent) > 1:
+                    masked = masked.replace(ent, "[ENTITY_MASKED]")
+        except Exception:
+            pass
+    except ImportError:
+        pass
+
+    for pat in _DATE_PATTERNS:
+        masked = pat.sub("[ENTITY_MASKED]", masked)
+    for pat in _ORG_PATTERNS:
+        masked = pat.sub("[ENTITY_MASKED]", masked)
+    for pat in _PERSON_PATTERNS:
+        masked = pat.sub("[ENTITY_MASKED]", masked)
+
+    return masked
+
+
 def extract_text(
     file: PDFInput,
     filename: str,
@@ -1420,6 +1534,7 @@ def extract_text(
     ocr_language: str = DEFAULT_OCR_LANGUAGE,
     ocr_dpi: int = DEFAULT_OCR_DPI,
     clean_whitespace: bool = True,
+    mask_named_entities: bool = False,
 ) -> str:
     """Route extraction according to a filename extension."""
     ocr_language, ocr_dpi = normalize_ocr_settings(
@@ -1448,6 +1563,8 @@ def extract_text(
         raw = extract_text_from_doc(file)
     elif extension in ("md", "markdown", "mdown"):
         raw = extract_text_from_md(file)
+    elif extension == "zip":
+        raw = extract_text_from_zip(file, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
 
     elif extension in ("zip", "7z", "tar", "gz"):
         raw = extract_text_from_zip(file, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
@@ -1473,12 +1590,16 @@ def extract_text(
         cleaned_text = "\n".join(lines)
         raw = re.sub(r"\n{3,}", "\n\n", cleaned_text)
 
+    if mask_named_entities and raw:
+        raw = mask_named_entities_in_text(raw)
+
     lang_code = detect_text_language(raw)
 
     logger.info(
         f"[document_parser] Detected language for document '{filename}': {lang_code}"
     )
     return raw
+
 
 
 ALLOWED_EXTENSIONS = {

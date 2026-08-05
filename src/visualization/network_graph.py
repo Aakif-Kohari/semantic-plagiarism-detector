@@ -283,6 +283,22 @@ def build_network_data(
         name="Connections",
     )
 
+    # ── Community Clustering ───────────────────────────────────────────────────
+    community_map = {}
+    if len(G.nodes()) > 0:
+        try:
+            from networkx.algorithms import community as nx_community
+            if hasattr(nx_community, "louvain_communities"):
+                communities = nx_community.louvain_communities(G, seed=42)
+            else:
+                communities = nx_community.greedy_modularity_communities(G)
+        except Exception:
+            communities = [set(G.nodes())]
+            
+        for i, comm in enumerate(communities):
+            for node in comm:
+                community_map[node] = i
+
     # ── Draw Nodes ─────────────────────────────────────────────────────────────
 
     node_x = []
@@ -327,25 +343,9 @@ def build_network_data(
             node_color.append("#FFFF00")  # Bright yellow for highlighted node
         else:
             node_size.append(base_size)
-            # Color based on maximum similarity score (plagiarism severity tier) instead of degree
-            if max_score >= 0.90:
-                node_color.append(
-                    theme_colors.get("danger", "#c62828")
-                    if theme_colors
-                    else "#c62828"
-                )
-            elif max_score >= 0.75:
-                node_color.append(
-                    theme_colors.get("warning", "#f9a825")
-                    if theme_colors
-                    else "#f9a825"
-                )
-            else:
-                node_color.append(
-                    theme_colors.get("success", "#2e7d32")
-                    if theme_colors
-                    else "#2e7d32"
-                )
+            # Color based on community cluster
+            comm_idx = community_map.get(node, 0)
+            node_color.append(DEFAULT_TAG_COLORS[comm_idx % len(DEFAULT_TAG_COLORS)])
 
         meta = doc_metadata.get(node, {}) if doc_metadata and node in doc_metadata else {}
         word_count = meta.get("word_count", "N/A")

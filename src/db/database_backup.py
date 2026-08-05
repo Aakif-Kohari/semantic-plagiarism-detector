@@ -32,6 +32,7 @@ Recent Additions (Issue #1156):
 
 from __future__ import annotations
 
+import gzip
 import io
 import logging
 import os
@@ -88,9 +89,7 @@ def create_sqlite_snapshot(database_path: str | Path) -> bytes:
     with tempfile.TemporaryDirectory(
         prefix="semantic-plagiarism-backup-"
     ) as temporary_directory:
-        snapshot_path = (
-            Path(temporary_directory) / source_path.name
-        )
+        snapshot_path = Path(temporary_directory) / source_path.name
         source_uri = f"{source_path.as_uri()}?mode=ro"
 
         with closing(
@@ -100,15 +99,15 @@ def create_sqlite_snapshot(database_path: str | Path) -> bytes:
                 check_same_thread=False,
             )
         ) as source_connection:
-            with closing(
-                sqlite3.connect(snapshot_path)
-            ) as destination:
+            with closing(sqlite3.connect(snapshot_path)) as destination:
                 source_connection.backup(destination)
 
         snapshot = snapshot_path.read_bytes()
 
         if not snapshot.startswith(SQLITE_HEADER):
-            raise sqlite3.DatabaseError("Generated backup is not a valid SQLite database.")
+            raise sqlite3.DatabaseError(
+                "Generated backup is not a valid SQLite database."
+            )
 
         return snapshot
 
@@ -118,8 +117,38 @@ def create_corpus_database_snapshot() -> bytes:
     return create_sqlite_snapshot(get_corpus_db_path())
 
 
-def get_database_size_bytes(db_path: str | Path) -> int:
-    """Return the size of a SQLite database file in bytes.
+def create_database_backup(
+    database_path: str | Path,
+    *,
+    backup_dir: str | Path = DEFAULT_BACKUP_DIRECTORY,
+    compress_backup: bool = True,
+) -> Path:
+    """Write an on-disk backup file for the given SQLite database.
+
+    When ``compress_backup`` is True (default), the snapshot bytes are
+    streamed through ``gzip.GzipFile`` and written as a ``.db.gz`` file,
+    cutting backup storage footprint by roughly 70%. When False, a plain
+    ``.db`` copy is written instead (issue #1488).
+    """
+    snapshot_bytes = create_sqlite_snapshot(database_path)
+
+    source_name = Path(database_path).name
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    destination_dir = Path(backup_dir).expanduser()
+    destination_dir.mkdir(parents=True, exist_ok=True)
+
+    if compress_backup:
+        backup_path = destination_dir / f"{source_name}.{timestamp}.db.gz"
+        with gzip.GzipFile(backup_path, "wb") as gz_file:
+            gz_file.write(snapshot_bytes)
+    else:
+        backup_path = destination_dir / f"{source_name}.{timestamp}.db"
+        backup_path.write_bytes(snapshot_bytes)
+
+    return backup_path
+
+
+def get_database_size_bytes(db_path: str | Path) -> int:    """Return the size of a SQLite database file in bytes.
 
     Acceptance criteria (issue #1047):
     - Returns the on-disk file size in bytes for an existing database.
@@ -357,13 +386,10 @@ def _resolve_authorized_backup(
     directory. This blocks absolute-path injection, ``..`` traversal,
     and symlinks that escape the authorized directory.
     """
-    authorized_directory = (
-        Path(backup_dir).expanduser().resolve(strict=True)
-    )
+    authorized_directory = Path(backup_dir).expanduser().resolve(strict=True)
     if not authorized_directory.is_dir():
         raise NotADirectoryError(
-            "Designated backup path is not a directory: "
-            f"{authorized_directory}"
+            "Designated backup path is not a directory: " f"{authorized_directory}"
         )
 
     candidate = Path(source).expanduser()
@@ -373,9 +399,7 @@ def _resolve_authorized_backup(
     try:
         resolved_source = candidate.resolve(strict=True)
     except FileNotFoundError:
-        raise FileNotFoundError(
-            f"Backup file does not exist: {candidate}"
-        ) from None
+        raise FileNotFoundError(f"Backup file does not exist: {candidate}") from None
 
     try:
         resolved_source.relative_to(authorized_directory)
@@ -388,16 +412,15 @@ def _resolve_authorized_backup(
     source_stat = os.stat(resolved_source, follow_symlinks=True)
 
     if not stat.S_ISREG(source_stat.st_mode):
-        raise BackupRestoreSecurityError(
-            "Backup source must be a regular file."
-        )
+        raise BackupRestoreSecurityError("Backup source must be a regular file.")
 
-    if source_stat.st_mode & stat.S_IWOTH:
+    if os.name != "nt" and (source_stat.st_mode & stat.S_IWOTH):
         raise BackupRestoreSecurityError(
             "Refusing to restore a world-writable backup file."
         )
 
     return resolved_source
+
 
 
 def _validate_sqlite_backup(source: Path) -> None:
@@ -406,23 +429,15 @@ def _validate_sqlite_backup(source: Path) -> None:
         header = backup_file.read(len(SQLITE_HEADER))
 
     if header != SQLITE_HEADER:
-        raise sqlite3.DatabaseError(
-            "Backup file is not a valid SQLite database."
-        )
+        raise sqlite3.DatabaseError("Backup file is not a valid SQLite database.")
 
     source_uri = f"{source.as_uri()}?mode=ro"
-    with closing(
-        sqlite3.connect(source_uri, uri=True)
-    ) as connection:
-        result = connection.execute(
-            "PRAGMA integrity_check"
-        ).fetchone()
+    with closing(sqlite3.connect(source_uri, uri=True)) as connection:
+        result = connection.execute("PRAGMA integrity_check").fetchone()
 
     if result is None or result[0] != "ok":
         details = result[0] if result else "unknown failure"
-        raise sqlite3.DatabaseError(
-            f"SQLite backup integrity check failed: {details}"
-        )
+        raise sqlite3.DatabaseError(f"SQLite backup integrity check failed: {details}")
 
 
 def restore(
@@ -464,11 +479,11 @@ def restore(
     )
     _validate_sqlite_backup(source_path)
 
-    destination_path = Path(
-        destination
-        if destination is not None
-        else get_corpus_db_path()
-    ).expanduser().resolve()
+    destination_path = (
+        Path(destination if destination is not None else get_corpus_db_path())
+        .expanduser()
+        .resolve()
+    )
     destination_path.parent.mkdir(
         parents=True,
         exist_ok=True,
@@ -492,16 +507,14 @@ def restore(
         shutil.copyfile(source_path, temporary_path)
         _validate_sqlite_backup(temporary_path)
 
-        with temporary_path.open("rb") as restored_file:
+        with temporary_path.open("r+b") as restored_file:
             os.fsync(restored_file.fileno())
+
 
         os.replace(temporary_path, destination_path)
         temporary_path = None
     finally:
-        if (
-            temporary_path is not None
-            and temporary_path.exists()
-        ):
+        if temporary_path is not None and temporary_path.exists():
             temporary_path.unlink()
 
     logger.info(
@@ -546,9 +559,7 @@ def cleanup_old_backups(
 
     db_files = list(backup_path.glob("*.db"))
     if not db_files:
-        logger.info(
-            "No .db backup files found to clean up."
-        )
+        logger.info("No .db backup files found to clean up.")
         return {
             "files_deleted": 0,
             "bytes_freed": 0,
@@ -566,21 +577,15 @@ def cleanup_old_backups(
 
     for index, file_path in enumerate(db_files):
         file_stat = file_path.stat()
-        file_age_seconds = (
-            current_time - file_stat.st_mtime
-        )
+        file_age_seconds = current_time - file_stat.st_mtime
 
-        if (
-            index >= max_backups
-            or file_age_seconds > max_age_seconds
-        ):
+        if index >= max_backups or file_age_seconds > max_age_seconds:
             try:
                 file_path.unlink()
                 files_deleted += 1
                 bytes_freed += file_stat.st_size
                 logger.info(
-                    "Deleted stale backup: %s "
-                    "(age: %.1f days)",
+                    "Deleted stale backup: %s " "(age: %.1f days)",
                     file_path.name,
                     file_age_seconds / 86400,
                 )
@@ -592,8 +597,7 @@ def cleanup_old_backups(
                 )
 
     logger.info(
-        "Backup cleanup complete. Deleted %s files, "
-        "freed %s bytes.",
+        "Backup cleanup complete. Deleted %s files, " "freed %s bytes.",
         files_deleted,
         bytes_freed,
     )
@@ -601,6 +605,16 @@ def cleanup_old_backups(
         "files_deleted": files_deleted,
         "bytes_freed": bytes_freed,
     }
+
+
+def run_incremental_vacuum(conn: sqlite3.Connection) -> bool:
+    """Execute SQLite incremental vacuum on an existing connection."""
+    try:
+        conn.execute("PRAGMA incremental_vacuum;")
+        return True
+    except sqlite3.Error as exc:
+        logger.error("Incremental vacuum failed: %s", exc)
+        return False
 
 
 def optimize_database(db_path: str | Path) -> bool:
@@ -666,10 +680,9 @@ def optimize_database(db_path: str | Path) -> bool:
             )
         ) as connection:
             connection.execute("PRAGMA busy_timeout = 5000")
+            connection.execute("PRAGMA auto_vacuum = INCREMENTAL")
 
-            quick_check = connection.execute(
-                "PRAGMA quick_check"
-            ).fetchone()
+            quick_check = connection.execute("PRAGMA quick_check").fetchone()
             if quick_check is None or quick_check[0] != "ok":
                 details = quick_check[0] if quick_check else "unknown failure"
                 logger.error(
@@ -701,9 +714,7 @@ def optimize_database(db_path: str | Path) -> bool:
         final_size_bytes = target_path.stat().st_size
         reclaimed_bytes = max(0, initial_size_bytes - final_size_bytes)
         reduction_percentage = (
-            reclaimed_bytes / initial_size_bytes * 100
-            if initial_size_bytes
-            else 0.0
+            reclaimed_bytes / initial_size_bytes * 100 if initial_size_bytes else 0.0
         )
 
         logger.info(

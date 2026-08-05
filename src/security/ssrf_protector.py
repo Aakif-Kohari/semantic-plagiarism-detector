@@ -5,6 +5,7 @@ import time
 import urllib.parse
 from typing import Dict
 
+import requests
 
 from src.errors import (
     SSRF_BLOCKED_LINK_LOCAL,
@@ -15,7 +16,8 @@ from src.errors import (
     SSRF_DNS_NO_ADDRESSES,
     SSRF_DNS_RESOLUTION_FAILED,
     SSRF_DOMAIN_NOT_ALLOWED,
-    SSRF_WEBHOOK_URL_EMPTY,
+SSRF_CIRCULAR_REDIRECT_LOOP,
+    SSRF_MAX_REDIRECTS_EXCEEDED,    SSRF_WEBHOOK_URL_EMPTY,
     SSRF_INSECURE_SCHEME,
     SSRF_INVALID_IP_FORMAT,
     SSRF_MISSING_HOSTNAME,
@@ -78,11 +80,36 @@ class SSRFProtector:
                 SSRF_DNS_RESOLUTION_FAILED.format(hostname=hostname, error=e)
             )
 
+@classmethod
+    def _check_redirect_depth(cls, url: str, max_redirects: int = 3) -> None:
+        """
+        Follows HTTP redirects (301/302/303/307/308) one hop at a time,
+        raising if the chain goes deeper than max_redirects or if a URL
+        repeats in the chain (a circular redirect loop, issue #1496).
+        """
+        current_url = url
+        visited_urls = {current_url}
+        redirect_count = 0
+        while True:
+            response = requests.head(current_url, allow_redirects=False, timeout=5)
+            if response.status_code not in (301, 302, 303, 307, 308):
+                return
+            redirect_count += 1
+            if redirect_count > max_redirects:
+                raise SSRFSecurityException(SSRF_MAX_REDIRECTS_EXCEEDED)
+            location = response.headers.get("Location")
+            if not location:
+                return
+            current_url = urllib.parse.urljoin(current_url, location)
+            if current_url in visited_urls:
+                raise SSRFSecurityException(SSRF_CIRCULAR_REDIRECT_LOOP)
+            visited_urls.add(current_url)
     @classmethod
     def validate_webhook_url(
         cls,
         url: str,
         allowed_domains: list[str] | None = None,
+        max_redirects: int = 3,
     ) -> bool:
         """
         Validates that a provided webhook URL is safe to dispatch.
@@ -116,6 +143,7 @@ class SSRFProtector:
         # Domain whitelist validation
         if allowed_domains is None:
             from src.core.app_config import get_allowed_webhook_domains
+
             allowed_domains = get_allowed_webhook_domains()
 
         if allowed_domains:
@@ -169,19 +197,22 @@ class SSRFProtector:
             logger.warning("Blocked SSRF attempt to target URL: %s", url)
             raise SSRFSecurityException(SSRF_BLOCKED_PRIVATE.format(ip=ip_str))
 
+        # Guard against redirect loops/deep redirect chains before declaring safe
+        cls._check_redirect_depth(url, max_redirects)
+
         # If it passed all checks, it's considered safe (public routable IP)
-        logger.debug(f"SSRF Check passed for {url} -> {ip_str}")
         return True
-@classmethod
-def configure_allowed_cidrs(
-    cls,
-    allowed_cidrs: list[str] | None = None,
-) -> None:
-    """
-    Configure CIDR ranges that are allowed even if they are private.
-    """
-    cls.ALLOWED_CIDRS = (
-        tuple(ipaddress.ip_network(cidr) for cidr in allowed_cidrs)
-        if allowed_cidrs
-        else ()
-    )
+
+    @classmethod
+    def configure_allowed_cidrs(
+        cls,
+        allowed_cidrs: list[str] | None = None,
+    ) -> None:
+        """
+        Configure CIDR ranges that are allowed even if they are private.
+        """
+        cls.ALLOWED_CIDRS = (
+            tuple(ipaddress.ip_network(cidr) for cidr in allowed_cidrs)
+            if allowed_cidrs
+            else ()
+        )

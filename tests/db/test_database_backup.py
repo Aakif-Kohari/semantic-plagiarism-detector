@@ -12,11 +12,11 @@ This module validates:
 - Database file size inspection (issue #1047).
 """
 
+import gzip
 import logging
 import os
 import sqlite3
-import time
-from pathlib import Path
+import timefrom pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -25,14 +25,21 @@ from src.db.database_backup import (
     SQLITE_HEADER,
     BackupRestoreSecurityError,
     cleanup_old_backups,
+    create_database_backup,
     create_password_protected_backup,
-    create_sqlite_snapshot,
-    get_database_size_bytes,
+    create_sqlite_snapshot,    get_database_size_bytes,
     get_database_table_stats,
     optimize_database,
     restore,
+    run_incremental_vacuum,
     checkpoint_wal_log,
 )
+
+try:
+    import pyzipper
+    HAS_PYZIPPER = True
+except ImportError:
+    HAS_PYZIPPER = False
 
 
 class TestCreateSqliteSnapshot:
@@ -50,7 +57,9 @@ class TestCreateSqliteSnapshot:
 
         snapshot = create_sqlite_snapshot(db_path)
 
-        assert snapshot.startswith(SQLITE_HEADER), "Snapshot must start with valid SQLite header"
+        assert snapshot.startswith(
+            SQLITE_HEADER
+        ), "Snapshot must start with valid SQLite header"
         assert len(snapshot) > 1000, "Snapshot should have reasonable size"
 
     def test_create_snapshot_file_not_found(self):
@@ -60,7 +69,9 @@ class TestCreateSqliteSnapshot:
 
     def test_create_snapshot_is_a_directory(self, tmp_path):
         """Verify that an IsADirectoryError is raised if path is a directory."""
-        with pytest.raises(IsADirectoryError, match="SQLite database path is not a file"):
+        with pytest.raises(
+            IsADirectoryError, match="SQLite database path is not a file"
+        ):
             create_sqlite_snapshot(tmp_path)
 
 
@@ -75,11 +86,15 @@ class TestCorpusSnapshotAndBackup:
         conn = sqlite3.connect(str(db_file))
         cursor = conn.cursor()
         cursor.execute("CREATE TABLE test_table (id INTEGER PRIMARY KEY, name TEXT)")
-        cursor.execute("INSERT INTO test_table (name) VALUES ('test1'), ('test2'), ('test3')")
+        cursor.execute(
+            "INSERT INTO test_table (name) VALUES ('test1'), ('test2'), ('test3')"
+        )
 
         # Insert and delete data to create fragmentation for VACUUM to clean
         for i in range(100):
-            cursor.execute("INSERT INTO test_table (name) VALUES (?)", (f"temp_data_{i}",))
+            cursor.execute(
+                "INSERT INTO test_table (name) VALUES (?)", (f"temp_data_{i}",)
+            )
 
         cursor.execute("DELETE FROM test_table WHERE name LIKE 'temp_data_%'")
         conn.commit()
@@ -101,16 +116,42 @@ class TestCorpusSnapshotAndBackup:
         with pytest.raises(FileNotFoundError, match="SQLite database does not exist"):
             create_sqlite_snapshot(missing_db)
 
+    @pytest.mark.skipif(not HAS_PYZIPPER, reason="pyzipper is not installed")
     def test_create_password_protected_backup(self, temp_db_path):
         """Test creation of a password-protected ZIP backup."""
         snapshot = create_sqlite_snapshot(temp_db_path)
         password = "secure_password_123"
 
-        zip_data = create_password_protected_backup(snapshot, password, "corpus.db")
+        zip_data = create_password_protected_backup(snapshot, password, archive_name="corpus.db")
+
 
         assert isinstance(zip_data, bytes)
         assert len(zip_data) > 0
         assert zip_data[:4] == b"PK\x03\x04"
+
+    def test_create_and_verify_backup(self, temp_db_path, tmp_path):
+        """Verify database backup creation, size, and integrity."""
+        # 1. Create database backup
+        snapshot = create_sqlite_snapshot(temp_db_path)
+        backup_file = tmp_path / "test_backup.db"
+        backup_file.write_bytes(snapshot)
+
+        # 2. Verify backup file exists
+        assert backup_file.exists()
+
+        # 3. Verify size matches source
+        source_size = os.path.getsize(temp_db_path)
+        backup_size = backup_file.stat().st_size
+        assert backup_size == source_size
+
+        # 4. Verify integrity check on backup file returns True
+        conn = sqlite3.connect(str(backup_file))
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA integrity_check;")
+        res = cursor.fetchone()
+        conn.close()
+        assert res[0] == "ok"
+
 
 
 class TestOptimizeDatabase:
@@ -123,10 +164,14 @@ class TestOptimizeDatabase:
         conn = sqlite3.connect(str(db_file))
         cursor = conn.cursor()
         cursor.execute("CREATE TABLE test_table (id INTEGER PRIMARY KEY, name TEXT)")
-        cursor.execute("INSERT INTO test_table (name) VALUES ('test1'), ('test2'), ('test3')")
+        cursor.execute(
+            "INSERT INTO test_table (name) VALUES ('test1'), ('test2'), ('test3')"
+        )
 
         for i in range(100):
-            cursor.execute("INSERT INTO test_table (name) VALUES (?)", (f"temp_data_{i}",))
+            cursor.execute(
+                "INSERT INTO test_table (name) VALUES (?)", (f"temp_data_{i}",)
+            )
 
         cursor.execute("DELETE FROM test_table WHERE name LIKE 'temp_data_%'")
         conn.commit()
@@ -167,6 +212,14 @@ class TestOptimizeDatabase:
         assert "Executing ANALYZE" in caplog.text
         assert "Database optimization completed successfully" in caplog.text
         assert "Space reclaimed:" in caplog.text
+
+    def test_run_incremental_vacuum(self, temp_db_path):
+        """Verify incremental vacuum executes successfully."""
+        conn = sqlite3.connect(temp_db_path)
+        try:
+            assert run_incremental_vacuum(conn) is True
+        finally:
+            conn.close()
 
 
 class TestRestoreDatabase:
@@ -209,8 +262,15 @@ class TestRestoreDatabase:
         outside_file = tmp_path / "outside.db"
         outside_file.write_bytes(SQLITE_HEADER + b"data")
 
-        with pytest.raises(BackupRestoreSecurityError, match="must be inside the designated backup directory"):
-            restore(source="../outside.db", backup_dir=backup_dir, destination=tmp_path / "target.db")
+        with pytest.raises(
+            BackupRestoreSecurityError,
+            match="must be inside the designated backup directory",
+        ):
+            restore(
+                source="../outside.db",
+                backup_dir=backup_dir,
+                destination=tmp_path / "target.db",
+            )
 
 
 class TestCleanupOldBackups:
@@ -236,15 +296,21 @@ class TestCleanupOldBackups:
             old_time = time.time() - (15 - i)
             os.utime(file_path, (old_time, old_time))
 
-        result = cleanup_old_backups(backup_dir=tmp_path, max_backups=10, max_age_days=365)
+        result = cleanup_old_backups(
+            backup_dir=tmp_path, max_backups=10, max_age_days=365
+        )
 
-        assert result["files_deleted"] == 5, "Should delete 5 files to respect max_backups=10"
+        assert (
+            result["files_deleted"] == 5
+        ), "Should delete 5 files to respect max_backups=10"
         assert result["bytes_freed"] > 0, "Should report freed bytes"
 
         remaining_files = list(tmp_path.glob("*.db"))
         assert len(remaining_files) == 10
         for f in remaining_files:
-            assert int(f.stem.split("_")[1]) >= 5, "Oldest 5 files should have been deleted"
+            assert (
+                int(f.stem.split("_")[1]) >= 5
+            ), "Oldest 5 files should have been deleted"
 
     def test_cleanup_respects_max_age_days(self, tmp_path):
         """Verify that files older than `max_age_days` are deleted regardless of count."""
@@ -256,7 +322,9 @@ class TestCleanupOldBackups:
         new_file = tmp_path / "new_backup.db"
         new_file.write_bytes(SQLITE_HEADER + b"new data")
 
-        result = cleanup_old_backups(backup_dir=tmp_path, max_backups=10, max_age_days=30)
+        result = cleanup_old_backups(
+            backup_dir=tmp_path, max_backups=10, max_age_days=30
+        )
 
         assert result["files_deleted"] == 1, "Should delete the file older than 30 days"
         assert (tmp_path / "new_backup.db").exists(), "New file should be retained"
@@ -268,10 +336,14 @@ class TestCleanupOldBackups:
         file_path.write_bytes(SQLITE_HEADER + b"locked data")
 
         with patch.object(Path, "unlink", side_effect=OSError("Permission denied")):
-            result = cleanup_old_backups(backup_dir=tmp_path, max_backups=1, max_age_days=30)
+            result = cleanup_old_backups(
+                backup_dir=tmp_path, max_backups=1, max_age_days=30
+            )
 
             assert result["files_deleted"] == 0, "Should not count failed deletions"
-            assert result["bytes_freed"] == 0, "Should not count freed bytes for failed deletions"
+            assert (
+                result["bytes_freed"] == 0
+            ), "Should not count freed bytes for failed deletions"
 
 
 class TestGetDatabaseSizeBytes:
@@ -355,8 +427,9 @@ class TestGetDatabaseSizeBytes:
         """A leading ``~`` must be expanded against the home directory."""
         db_path = tmp_path / "home_db.db"
         db_path.write_bytes(b"not-a-real-sqlite-db-but-size-still-works")
-        # Path.expanduser() reads $HOME (not Path.home()), so patch the env var.
+        # Path.expanduser() reads $HOME or $USERPROFILE, so patch both env vars.
         monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
 
         size = get_database_size_bytes("~/home_db.db")
 
@@ -531,6 +604,7 @@ class TestGetDatabaseTableStats:
         conn.close()
 
         monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
 
         stats = get_database_table_stats("~/home_stats.db")
 
@@ -551,9 +625,8 @@ class TestCheckpointWalLog:
         conn.execute("CREATE TABLE test (id INTEGER PRIMARY KEY, val TEXT)")
         conn.execute("INSERT INTO test (val) VALUES ('test')")
         conn.commit()
-        conn.close()
 
-        # Check WAL file exists
+        # Check WAL file exists (it is preserved on close when other connections are active, or since we keep conn open)
         wal_path = Path(f"{db_path}-wal")
         assert wal_path.exists()
 
@@ -567,6 +640,9 @@ class TestCheckpointWalLog:
             assert any("WAL file size before checkpoint" in log for log in log_calls)
             assert any("WAL file size after checkpoint" in log for log in log_calls)
 
+        conn.close()
+
+
     def test_checkpoint_wal_log_file_not_found(self):
         """Verify checkpoint fails for non-existent database paths."""
         res = checkpoint_wal_log("/nonexistent/path/to/db.db")
@@ -577,3 +653,38 @@ class TestCheckpointWalLog:
         res = checkpoint_wal_log(tmp_path)
         assert res is False
 
+class TestCreateDatabaseBackup:
+    """Tests for the create_database_backup function (issue #1488)."""
+
+    def _make_sample_db(self, db_path):
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)")
+        conn.execute("INSERT INTO test (name) VALUES ('sample')")
+        conn.commit()
+        conn.close()
+
+    def test_creates_compressed_backup_by_default(self, tmp_path):
+        db_path = tmp_path / "source.db"
+        self._make_sample_db(db_path)
+
+        backup_path = create_database_backup(db_path, backup_dir=tmp_path / "backups")
+
+        assert backup_path.exists()
+        assert backup_path.name.endswith(".db.gz")
+
+        with gzip.open(backup_path, "rb") as gz_file:
+            decompressed = gz_file.read()
+        assert decompressed.startswith(SQLITE_HEADER)
+
+    def test_creates_uncompressed_backup_when_disabled(self, tmp_path):
+        db_path = tmp_path / "source.db"
+        self._make_sample_db(db_path)
+
+        backup_path = create_database_backup(
+            db_path, backup_dir=tmp_path / "backups", compress_backup=False
+        )
+
+        assert backup_path.exists()
+        assert backup_path.name.endswith(".db")
+        assert not backup_path.name.endswith(".db.gz")
+        assert backup_path.read_bytes().startswith(SQLITE_HEADER)

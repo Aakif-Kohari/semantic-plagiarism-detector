@@ -6,8 +6,7 @@ import sqlite3
 
 from .common import column_exists, run_migrations
 
-CORPUS_SCHEMA_VERSION = 11
-
+CORPUS_SCHEMA_VERSION = 13
 
 def migration_001_create_base_schema(
     connection: sqlite3.Connection,
@@ -201,9 +200,112 @@ def migration_011_add_documents_created_at_index(
         """
     )
 
+def migration_012_add_fts5_index(
+    connection: sqlite3.Connection,
+) -> None:
+    """Create FTS5 virtual table and sync triggers for full-text search (issue #1359).
 
-CORPUS_MIGRATIONS = {
-    1: migration_001_create_base_schema,
+    The FTS5 table ``documents_fts`` mirrors the ``filename``,
+    ``student_name``, and ``assignment_title`` columns from ``documents``
+    so users can keyword-search across the corpus without
+    ``LIKE '%query%'`` full table scans.
+
+    Three triggers keep the FTS index in sync:
+      - ``documents_ai`` — after INSERT, insert into FTS
+      - ``documents_ad`` — after DELETE, delete from FTS
+      - ``documents_au`` — after UPDATE, delete+insert in FTS
+    """
+    # Create the FTS5 virtual table (external content table pointing at documents)
+    connection.execute(
+        """
+        CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
+            filename,
+            student_name,
+            assignment_title,
+            content='documents',
+            content_rowid='id'
+        )
+        """
+    )
+
+    # Trigger: after INSERT into documents, insert into FTS
+    connection.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS documents_ai AFTER INSERT ON documents BEGIN
+            INSERT INTO documents_fts(rowid, filename, student_name, assignment_title)
+            VALUES (new.id, new.filename, new.student_name, new.assignment_title);
+        END
+        """
+    )
+
+    # Trigger: after DELETE from documents, delete from FTS
+    connection.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS documents_ad AFTER DELETE ON documents BEGIN
+            INSERT INTO documents_fts(documents_fts, rowid, filename, student_name, assignment_title)
+            VALUES ('delete', old.id, old.filename, old.student_name, old.assignment_title);
+        END
+        """
+    )
+
+    # Trigger: after UPDATE on documents, update FTS (delete old + insert new)
+    connection.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
+            INSERT INTO documents_fts(documents_fts, rowid, filename, student_name, assignment_title)
+            VALUES ('delete', old.id, old.filename, old.student_name, old.assignment_title);
+            INSERT INTO documents_fts(rowid, filename, student_name, assignment_title)
+            VALUES (new.id, new.filename, new.student_name, new.assignment_title);
+        END
+        """
+    )
+
+    # Backfill existing rows into the FTS index (for databases that already
+    # have documents before this migration runs).
+    connection.execute(
+        """
+        INSERT INTO documents_fts(documents_fts)
+        VALUES ('rebuild')
+        """
+    )
+
+def migration_013_add_incident_severity_idx(
+    connection: sqlite3.Connection,
+) -> None:
+    """Add index on severity_rank and date_flagged to speed up
+    severity-filtered incident analytics queries (issue #1487)."""
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_incidents_severity_time
+        ON plagiarism_incidents(severity_rank, date_flagged DESC)
+        """
+    )
+
+
+def migration_013_add_incident_archive_table(
+    connection: sqlite3.Connection,
+) -> None:
+    """Create incidents_archive table for archived plagiarism incidents
+    (issue #1492)."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS incidents_archive (
+            incident_id TEXT PRIMARY KEY,
+            document_a TEXT NOT NULL,
+            document_b TEXT NOT NULL,
+            similarity_score REAL NOT NULL,
+            severity_rank TEXT NOT NULL,
+            review_status TEXT NOT NULL,
+            date_flagged TEXT NOT NULL,
+            last_seen TEXT NOT NULL,
+            threshold_at_time_of_flag REAL NOT NULL DEFAULT 0.0,
+            archived_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+
+CORPUS_MIGRATIONS = {   1: migration_001_create_base_schema,
     2: migration_002_add_document_metadata,
     3: migration_003_add_required_indexes,
     4: migration_004_add_plagiarism_incidents,
@@ -214,8 +316,9 @@ CORPUS_MIGRATIONS = {
     9: migration_009_add_file_hash_index,
     10: migration_010_add_document_owner,
     11: migration_011_add_documents_created_at_index,
+12: migration_012_add_fts5_index,
+    13: migration_013_add_incident_archive_table,    13: migration_013_add_incident_severity_idx,
 }
-
 
 def migrate_corpus_database(
     connection: sqlite3.Connection,

@@ -2,12 +2,24 @@
 
 import logging
 import os
+import uuid
 from datetime import datetime, timezone
+
 import psutil
 import numpy as np
-
-from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status, Request, Security
-from typing import Dict
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    File,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+    Request,
+    Security,
+)
+from typing import Dict, Any
 from fastapi.exceptions import RequestValidationError
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -18,13 +30,19 @@ from fastapi.responses import PlainTextResponse, JSONResponse
 
 from src.api.middleware import verify_bearer_token, get_current_user
 from src.api.schemas import (
+    AsyncScanJobResponse,
+    AsyncScanStatusResponse,
     ClearDataResponse,
     ErrorResponse,
     HealthCheckResponse,
     HealthzResponse,
     LoginResponse,
+    RefreshRequest,
+    RevokeRequest,
+    RevokeResponse,
     SimilarityCheckResponse,
     StatusResponse,
+    TokenResponse,
 )
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -39,6 +57,7 @@ from src.core.similarity import (
 from src.core.text_chunking import chunk_document
 from src.db.auth import get_user_role
 from src.db.corpus_db import _connect, clear_all_data, init_corpus_db
+from src.utils.file_streaming import stream_upload_file_to_disk
 from src.utils.redis_cache import CacheKeyPrefix, get_cache
 
 # ── API Initialization ────────────────────────────────────────────────────────
@@ -67,9 +86,7 @@ if origins.strip() == "*":
     allowed_origins = ["*"]
 else:
     allowed_origins = [
-        origin.strip()
-        for origin in origins.split(",")
-        if origin.strip()
+        origin.strip() for origin in origins.split(",") if origin.strip()
     ]
 
 app.add_middleware(
@@ -78,8 +95,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    max_age=3600,
 )
-
 # SlowAPI Rate Limiting setup
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
@@ -117,8 +134,36 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """
+    Catch-all handler that returns a standardized JSON error payload for
+    any unhandled exception. Internal details (like the raw exception
+    message) are masked when APP_ENVIRONMENT is "production".
+    """
+    status_code = getattr(exc, "status_code", status.HTTP_500_INTERNAL_SERVER_ERROR)
+    is_production = os.getenv("APP_ENVIRONMENT", "production").lower() == "production"
+
+    logging.getLogger(__name__).error(
+        f"Unhandled exception: {exc}", exc_info=not is_production
+    )
+
+    message = "An internal server error occurred." if is_production else str(exc)
+
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": True,
+            "code": status_code,
+            "message": message,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
+
 app.add_exception_handler(RateLimitExceeded, custom_rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
+
 
 def validate_content_type(request: Request) -> None:
     """Ensure the request is multipart/form-data before parsing."""
@@ -126,7 +171,7 @@ def validate_content_type(request: Request) -> None:
     if "multipart/form-data" not in content_type:
         raise HTTPException(
             status_code=415,
-            detail="Unsupported Media Type: Request must be multipart/form-data"
+            detail="Unsupported Media Type: Request must be multipart/form-data",
         )
 
 
@@ -180,6 +225,137 @@ def get_corpus_documents_with_embeddings() -> Dict[str, Dict]:
 async def login(request: Request):
     """Authenticate user and return a session token."""
     return {"token": "dummy-token"}
+
+
+@app.post(
+    "/api/v1/auth/refresh",
+    tags=["Authentication"],
+    summary="Refresh OAuth2 Bearer Token",
+    response_model=TokenResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        400: {"model": ErrorResponse, "description": "Bad Request"},
+        401: {"model": ErrorResponse, "description": "Unauthorized / Invalid Refresh Token"},
+        500: {"model": ErrorResponse, "description": "Internal Server Error"},
+    },
+)
+async def refresh_token_endpoint(
+    request: Request,
+    payload: RefreshRequest | None = None,
+):
+    """
+    Acquire a new access token using a valid, unexpired refresh token.
+    Accepts refresh token in JSON request body or Authorization header.
+    """
+    refresh_token = None
+
+    if payload and payload.refresh_token:
+        refresh_token = payload.refresh_token
+    else:
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                refresh_token = body.get("refresh_token") or body.get("token")
+        except Exception:
+            pass
+
+    if not refresh_token:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            refresh_token = auth_header[7:].strip()
+
+    if not refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Refresh token must be provided in request body or Authorization header.",
+        )
+
+    from src.db.auth import is_token_revoked
+
+    if is_token_revoked(refresh_token):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token has been revoked.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    from src.security.jwt_utils import create_access_token, verify_refresh_token
+
+    try:
+        token_payload = verify_refresh_token(refresh_token)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(exc),
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    sub = token_payload.get("sub", "user")
+    scopes = token_payload.get("scopes", ["read", "write"])
+    new_access_token = create_access_token(sub=sub, scopes=scopes, expires_in=3600)
+
+    return {
+        "access_token": new_access_token,
+        "token_type": "bearer",
+        "expires_in": 3600,
+    }
+
+
+@app.post(
+    "/api/v1/auth/revoke",
+    tags=["Authentication"],
+    summary="Revoke API Bearer token",
+    response_model=RevokeResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        400: {"model": ErrorResponse, "description": "Bad Request"},
+        401: {"model": ErrorResponse, "description": "Unauthorized"},
+        500: {"model": ErrorResponse, "description": "Internal Server Error"},
+    },
+)
+async def revoke_token_endpoint(
+    request: Request,
+    payload: RevokeRequest | None = None,
+):
+    """Revoke an active API Bearer token immediately."""
+    token_to_revoke = None
+
+    if payload and payload.token:
+        token_to_revoke = payload.token
+    else:
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                token_to_revoke = body.get("token") or body.get("token_signature")
+        except Exception:
+            pass
+
+    if not token_to_revoke:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token_to_revoke = auth_header[7:].strip()
+
+    if not token_to_revoke:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Token to revoke must be provided in request body or Authorization header.",
+        )
+
+    try:
+        from src.db.auth import revoke_token
+
+        revoke_token(
+            token_to_revoke, details="Revoked via API endpoint /api/v1/auth/revoke"
+        )
+        return {
+            "status": "success",
+            "message": "Token revoked successfully.",
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to revoke token: {str(e)}",
+        )
 
 
 @app.get(
@@ -263,6 +439,7 @@ def healthz():
             raise RuntimeError("Low memory")
 
         from src.core.app_config import CORPUS_DB_PATH
+
         db_size_bytes = 0
         db_size_mb = 0.0
         if os.path.exists(CORPUS_DB_PATH):
@@ -300,7 +477,9 @@ def healthz():
     status_code=status.HTTP_200_OK,
 )
 def get_incidents(
-    limit: int = Query(default=50, ge=1, le=500, description="Max number of incidents to return"),
+    limit: int = Query(
+        default=50, ge=1, le=500, description="Max number of incidents to return"
+    ),
     offset: int = Query(default=0, ge=0, description="Number of incidents to skip"),
     _token: str = Depends(verify_bearer_token),
 ):
@@ -405,121 +584,358 @@ async def scan_document(
         )
 
     filename = file.filename
-    file_bytes = await file.read()
+    temp_path = await stream_upload_file_to_disk(file)
 
-    if len(file_bytes) == 0:
+    try:
+        # Extract text from uploaded document streamed to disk
+        extracted_text = extract_text(temp_path, filename)
+        if not extracted_text.strip():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Failed to extract readable text from the uploaded file.",
+            )
+
+        words = extracted_text.split()
+        word_count = len(words)
+
+        # Split document into paragraph-level chunks
+        chunks = chunk_document(extracted_text)
+        if not chunks:
+            # Fallback if text is shorter than MIN_CHUNK_WORDS
+            chunks = [extracted_text[:1000]]
+
+        # Generate chunk embeddings
+        uploaded_embeddings = embed_chunks(chunks)
+
+        # Compute overall single document embedding
+        doc_embedding = get_document_embedding(uploaded_embeddings)
+
+        # Query corpus from SQLite database
+        corpus_docs = get_corpus_documents_with_embeddings()
+
+        matched_documents = []
+        max_overall_score = 0.0
+        max_chunk_overall_score = 0.0
+
+        for corpus_filename, corpus_data in corpus_docs.items():
+            # Avoid self-comparison if the same document is in the corpus
+            if corpus_filename == filename:
+                continue
+
+            c_embeddings = corpus_data["embeddings"]
+            c_chunks = corpus_data["chunks"]
+
+            if c_embeddings.size == 0:
+                continue
+
+            # Document-level mean similarity
+            c_doc_embedding = get_document_embedding(c_embeddings)
+            sim_doc = float(
+                np.clip(
+                    cosine_similarity(
+                        doc_embedding.reshape(1, -1), c_doc_embedding.reshape(1, -1)
+                    )[0, 0],
+                    0.0,
+                    1.0,
+                )
+            )
+
+            # Chunk-level max similarity
+            sim_chunk = chunk_max_similarity(uploaded_embeddings, c_embeddings)
+
+            combined_score = max(sim_doc, sim_chunk)
+            max_overall_score = max(max_overall_score, sim_doc)
+            max_chunk_overall_score = max(max_chunk_overall_score, sim_chunk)
+
+            if combined_score >= threshold:
+                severity = "🔴 High" if combined_score >= 0.90 else "🟡 Medium"
+
+                # Find top matching chunk pairs
+                similar_chunks = find_most_similar_chunks(
+                    chunks_a=chunks,
+                    chunks_b=c_chunks,
+                    emb_a=uploaded_embeddings,
+                    emb_b=c_embeddings,
+                    top_k=top_k,
+                    threshold=threshold,
+                )
+
+                flagged_chunks = [
+                    {
+                        "uploaded_chunk": pair[0],
+                        "matched_chunk": pair[1],
+                        "similarity_score": round(float(pair[2]), 4),
+                    }
+                    for pair in similar_chunks
+                ]
+
+                matched_documents.append(
+                    {
+                        "filename": corpus_filename,
+                        "document_similarity_score": round(sim_doc, 4),
+                        "max_chunk_similarity_score": round(sim_chunk, 4),
+                        "severity": severity,
+                        "flagged_chunks": flagged_chunks,
+                    }
+                )
+
+        # Sort matches by max chunk similarity descending
+        matched_documents.sort(key=lambda x: x["max_chunk_similarity_score"], reverse=True)
+
+        is_flagged = len(matched_documents) > 0 or max_chunk_overall_score >= threshold
+
+        return {
+            "filename": filename,
+            "word_count": word_count,
+            "chunk_count": len(chunks),
+            "plagiarism_flagged": is_flagged,
+            "threshold_used": threshold,
+            "overall_document_similarity": round(max_overall_score, 4),
+            "max_chunk_similarity": round(max_chunk_overall_score, 4),
+            "matched_documents_count": len(matched_documents),
+            "matched_documents": matched_documents,
+        }
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except Exception:
+                pass
+
+
+# ── Asynchronous Background Scan Job Queue (#1372) ───────────────────────────
+
+scan_jobs: Dict[str, Dict[str, Any]] = {}
+
+
+def _process_scan_job(
+    job_id: str,
+    file_input: Any,
+    filename: str,
+    threshold: float,
+    top_k: int,
+) -> None:
+    if job_id not in scan_jobs:
+        if isinstance(file_input, (str, os.PathLike)) and os.path.exists(file_input):
+            try:
+                os.unlink(file_input)
+            except Exception:
+                pass
+        return
+
+    scan_jobs[job_id]["status"] = "processing"
+
+    try:
+        extracted_text = extract_text(file_input, filename)
+        if not extracted_text.strip():
+            scan_jobs[job_id]["status"] = "failed"
+            scan_jobs[job_id]["error"] = (
+                "Failed to extract readable text from the uploaded file."
+            )
+            return
+
+        words = extracted_text.split()
+        word_count = len(words)
+
+        chunks = chunk_document(extracted_text)
+        if not chunks:
+            chunks = [extracted_text[:1000]]
+
+        uploaded_embeddings = embed_chunks(chunks)
+        doc_embedding = get_document_embedding(uploaded_embeddings)
+        corpus_docs = get_corpus_documents_with_embeddings()
+
+        matched_documents = []
+        max_overall_score = 0.0
+        max_chunk_overall_score = 0.0
+
+        for corpus_filename, corpus_data in corpus_docs.items():
+            if corpus_filename == filename:
+                continue
+
+            c_embeddings = corpus_data["embeddings"]
+            c_chunks = corpus_data["chunks"]
+
+            if c_embeddings.size == 0:
+                continue
+
+            c_doc_embedding = get_document_embedding(c_embeddings)
+            sim_doc = float(
+                np.clip(
+                    cosine_similarity(
+                        doc_embedding.reshape(1, -1), c_doc_embedding.reshape(1, -1)
+                    )[0, 0],
+                    0.0,
+                    1.0,
+                )
+            )
+            sim_chunk = chunk_max_similarity(uploaded_embeddings, c_embeddings)
+
+            combined_score = max(sim_doc, sim_chunk)
+            max_overall_score = max(max_overall_score, sim_doc)
+            max_chunk_overall_score = max(max_chunk_overall_score, sim_chunk)
+
+            if combined_score >= threshold:
+                severity = "🔴 High" if combined_score >= 0.90 else "🟡 Medium"
+
+                similar_chunks = find_most_similar_chunks(
+                    chunks_a=chunks,
+                    chunks_b=c_chunks,
+                    emb_a=uploaded_embeddings,
+                    emb_b=c_embeddings,
+                    top_k=top_k,
+                    threshold=threshold,
+                )
+
+                flagged_chunks = [
+                    {
+                        "uploaded_chunk": pair[0],
+                        "matched_chunk": pair[1],
+                        "similarity_score": round(float(pair[2]), 4),
+                    }
+                    for pair in similar_chunks
+                ]
+
+                matched_documents.append(
+                    {
+                        "filename": corpus_filename,
+                        "document_similarity_score": round(sim_doc, 4),
+                        "max_chunk_similarity_score": round(sim_chunk, 4),
+                        "severity": severity,
+                        "flagged_chunks": flagged_chunks,
+                    }
+                )
+
+        matched_documents.sort(
+            key=lambda x: x["max_chunk_similarity_score"], reverse=True
+        )
+        is_flagged = len(matched_documents) > 0 or max_chunk_overall_score >= threshold
+
+        scan_jobs[job_id]["status"] = "completed"
+        scan_jobs[job_id]["completed_at"] = datetime.now(timezone.utc).isoformat()
+        scan_jobs[job_id]["result"] = {
+            "filename": filename,
+            "word_count": word_count,
+            "chunk_count": len(chunks),
+            "plagiarism_flagged": is_flagged,
+            "threshold_used": threshold,
+            "overall_document_similarity": round(max_overall_score, 4),
+            "max_chunk_similarity": round(max_chunk_overall_score, 4),
+            "matched_documents_count": len(matched_documents),
+            "matched_documents": matched_documents,
+        }
+    except Exception as exc:
+        scan_jobs[job_id]["status"] = "failed"
+        scan_jobs[job_id]["error"] = str(exc)
+    finally:
+        if isinstance(file_input, (str, os.PathLike)) and os.path.exists(file_input):
+            try:
+                os.unlink(file_input)
+            except Exception:
+                pass
+
+
+@app.post(
+    "/api/v1/scan/async",
+    tags=["Plagiarism Detection"],
+    response_model=AsyncScanJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={
+        400: {"model": ErrorResponse, "description": "Bad Request"},
+        415: {"model": ErrorResponse, "description": "Unsupported Media Type"},
+        422: {"model": ErrorResponse, "description": "Unprocessable Entity"},
+        500: {"model": ErrorResponse, "description": "Internal Server Error"},
+    },
+)
+async def scan_document_async(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(
+        ..., description="Document file to scan (.pdf, .docx, .txt)"
+    ),
+    threshold: float = Query(
+        default=PLAGIARISM_THRESHOLD,
+        ge=0.0,
+        le=1.0,
+        description="Similarity threshold for flagging plagiarism (default: 0.59)",
+    ),
+    top_k: int = Query(
+        default=3,
+        ge=1,
+        le=10,
+        description="Number of top matching paragraph pairs to include per matched document",
+    ),
+    _user: dict = Security(get_current_user, scopes=["write"]),
+    _content_type: None = Depends(validate_content_type),
+):
+    """Enqueue a document scanning job for asynchronous background processing."""
+    if not file.filename:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Uploaded file is empty (0 bytes)",
+            detail="Filename must be provided.",
         )
 
-    # Extract text from uploaded document
-    extracted_text = extract_text(file_bytes, filename)
-    if not extracted_text.strip():
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Failed to extract readable text from the uploaded file.",
-        )
+    filename = file.filename
+    temp_path = await stream_upload_file_to_disk(file)
 
-    words = extracted_text.split()
-    word_count = len(words)
+    job_id = f"job_{uuid.uuid4().hex[:12]}"
+    status_url = f"/api/v1/scan/status/{job_id}"
 
-    # Split document into paragraph-level chunks
-    chunks = chunk_document(extracted_text)
-    if not chunks:
-        # Fallback if text is shorter than MIN_CHUNK_WORDS
-        chunks = [extracted_text[:1000]]
+    scan_jobs[job_id] = {
+        "job_id": job_id,
+        "status": "queued",
+        "filename": filename,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "completed_at": None,
+        "result": None,
+        "error": None,
+    }
 
-    # Generate chunk embeddings
-    uploaded_embeddings = embed_chunks(chunks)
-
-    # Compute overall single document embedding
-    doc_embedding = get_document_embedding(uploaded_embeddings)
-
-    # Query corpus from SQLite database
-    corpus_docs = get_corpus_documents_with_embeddings()
-
-    matched_documents = []
-    max_overall_score = 0.0
-    max_chunk_overall_score = 0.0
-
-    for corpus_filename, corpus_data in corpus_docs.items():
-        # Avoid self-comparison if the same document is in the corpus
-        if corpus_filename == filename:
-            continue
-
-        c_embeddings = corpus_data["embeddings"]
-        c_chunks = corpus_data["chunks"]
-
-        if c_embeddings.size == 0:
-            continue
-
-        # Document-level mean similarity
-        c_doc_embedding = get_document_embedding(c_embeddings)
-        sim_doc = float(
-            np.clip(
-                cosine_similarity(
-                    doc_embedding.reshape(1, -1), c_doc_embedding.reshape(1, -1)
-                )[0, 0],
-                0.0,
-                1.0,
-            )
-        )
-
-        # Chunk-level max similarity
-        sim_chunk = chunk_max_similarity(uploaded_embeddings, c_embeddings)
-
-        combined_score = max(sim_doc, sim_chunk)
-        max_overall_score = max(max_overall_score, sim_doc)
-        max_chunk_overall_score = max(max_chunk_overall_score, sim_chunk)
-
-        if combined_score >= threshold:
-            severity = "🔴 High" if combined_score >= 0.90 else "🟡 Medium"
-
-            # Find top matching chunk pairs
-            similar_chunks = find_most_similar_chunks(
-                chunks_a=chunks,
-                chunks_b=c_chunks,
-                emb_a=uploaded_embeddings,
-                emb_b=c_embeddings,
-                top_k=top_k,
-                threshold=threshold,
-            )
-
-            flagged_chunks = [
-                {
-                    "uploaded_chunk": pair[0],
-                    "matched_chunk": pair[1],
-                    "similarity_score": round(float(pair[2]), 4),
-                }
-                for pair in similar_chunks
-            ]
-
-            matched_documents.append(
-                {
-                    "filename": corpus_filename,
-                    "document_similarity_score": round(sim_doc, 4),
-                    "max_chunk_similarity_score": round(sim_chunk, 4),
-                    "severity": severity,
-                    "flagged_chunks": flagged_chunks,
-                }
-            )
-
-    # Sort matches by max chunk similarity descending
-    matched_documents.sort(key=lambda x: x["max_chunk_similarity_score"], reverse=True)
-
-    is_flagged = len(matched_documents) > 0 or max_chunk_overall_score >= threshold
+    background_tasks.add_task(
+        _process_scan_job,
+        job_id,
+        temp_path,
+        filename,
+        threshold,
+        top_k,
+    )
 
     return {
-        "filename": filename,
-        "word_count": word_count,
-        "chunk_count": len(chunks),
-        "plagiarism_flagged": is_flagged,
-        "threshold_used": threshold,
-        "overall_document_similarity": round(max_overall_score, 4),
-        "max_chunk_similarity": round(max_chunk_overall_score, 4),
-        "matched_documents_count": len(matched_documents),
-        "matched_documents": matched_documents,
+        "job_id": job_id,
+        "status": "queued",
+        "status_url": status_url,
+        "message": "Scan job successfully queued for asynchronous processing.",
+    }
+
+
+@app.get(
+    "/api/v1/scan/status/{job_id}",
+    tags=["Plagiarism Detection"],
+    response_model=AsyncScanStatusResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        404: {"model": ErrorResponse, "description": "Not Found"},
+    },
+)
+def get_async_scan_status(
+    job_id: str,
+    _user: dict = Security(get_current_user, scopes=["read"]),
+):
+    """Retrieve the status and results of an asynchronous scan job."""
+    if job_id not in scan_jobs:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Scan job '{job_id}' not found.",
+        )
+
+    job = scan_jobs[job_id]
+    return {
+        "job_id": job["job_id"],
+        "status": job["status"],
+        "filename": job["filename"],
+        "created_at": job["created_at"],
+        "completed_at": job.get("completed_at"),
+        "result": job.get("result"),
+        "error": job.get("error"),
     }
 
 

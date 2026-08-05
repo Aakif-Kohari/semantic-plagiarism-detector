@@ -19,6 +19,7 @@ import numpy as np
 import psutil
 
 from src.core.app_config import CORPUS_DB_PATH, FALLBACK_CORPUS_DB_PATH
+from src.db.common import with_sqlite_retry
 from src.db.migrations.common import column_exists, delete_all_if_table_exists
 from src.utils.filename import sanitize_filename
 
@@ -146,13 +147,16 @@ def init_corpus_db() -> None:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS plagiarism_incidents (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                incident_id TEXT UNIQUE,
+                incident_id TEXT PRIMARY KEY,
                 document_a TEXT NOT NULL,
                 document_b TEXT NOT NULL,
-                similarity REAL NOT NULL,
-                severity TEXT NOT NULL,
-                timestamp TEXT NOT NULL
+                similarity_score REAL NOT NULL,
+                severity_rank TEXT NOT NULL,
+                review_status TEXT NOT NULL DEFAULT 'Pending'
+                    CHECK (review_status IN ('Pending', 'Resolved')),
+                date_flagged TEXT NOT NULL,
+                last_seen TEXT NOT NULL,
+                threshold_at_time_of_flag REAL DEFAULT 0.0
             )
             """
         )
@@ -160,10 +164,10 @@ def init_corpus_db() -> None:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS false_positives (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                document_a TEXT NOT NULL,
-                document_b TEXT NOT NULL,
-                timestamp TEXT NOT NULL
+                document_a TEXT,
+                document_b TEXT,
+                date_dismissed TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (document_a, document_b)
             )
             """
         )
@@ -192,12 +196,60 @@ def init_corpus_db() -> None:
             "CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at)"
         )
 
+                # Issue #1359: Create FTS5 virtual table + sync triggers for full-text
+        # search. Also created by migration_012, but we create it here too
+        # so that ``init_corpus_db()`` (which doesn't call
+        # ``migrate_corpus_database()``) still sets up FTS.
+        conn.execute(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
+                filename,
+                student_name,
+                assignment_title,
+                content='documents',
+                content_rowid='id'
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS documents_ai AFTER INSERT ON documents BEGIN
+                INSERT INTO documents_fts(rowid, filename, student_name, assignment_title)
+                VALUES (new.id, new.filename, new.student_name, new.assignment_title);
+            END
+            """
+        )
+        conn.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS documents_ad AFTER DELETE ON documents BEGIN
+                INSERT INTO documents_fts(documents_fts, rowid, filename, student_name, assignment_title)
+                VALUES ('delete', old.id, old.filename, old.student_name, old.assignment_title);
+            END
+            """
+        )
+        conn.execute(
+            """
+            CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
+                INSERT INTO documents_fts(documents_fts, rowid, filename, student_name, assignment_title)
+                VALUES ('delete', old.id, old.filename, old.student_name, old.assignment_title);
+                INSERT INTO documents_fts(rowid, filename, student_name, assignment_title)
+                VALUES (new.id, new.filename, new.student_name, new.assignment_title);
+            END
+            """
+        )
+        # Backfill any existing rows into the FTS index
+        try:
+            conn.execute("INSERT INTO documents_fts(documents_fts) VALUES ('rebuild')")
+        except sqlite3.OperationalError:
+            pass  # Table might be empty or already synced
+
         try:
             os.chmod(_DB_PATH, 0o600)
         except OSError:
             pass
 
 
+@with_sqlite_retry
 def add_document(
     filename: str,
     file_hash: str,
@@ -279,6 +331,7 @@ def get_all_documents(include_deleted: bool = False) -> list:
         ]
 
 
+@with_sqlite_retry
 def add_chunks(chunks_to_add: list) -> None:
     """Insert a batch of chunks with their raw text and embedded BLOBs."""
     process = psutil.Process()
@@ -325,6 +378,7 @@ def get_all_embeddings() -> np.ndarray:
     return np.vstack(embeddings)
 
 
+@with_sqlite_retry
 def delete_document(filename: str) -> None:
     """Delete a document and all its associated chunks (cascade)."""
     with _connect() as conn:
@@ -340,6 +394,7 @@ def delete_document(filename: str) -> None:
         _compact_vector_ids()
 
 
+@with_sqlite_retry
 def soft_delete_document(filename: str) -> None:
     """Soft delete a document by setting is_deleted=1 and moving chunks to deleted_chunks."""
     with _connect() as conn:
@@ -385,6 +440,7 @@ def get_deleted_documents() -> list:
         ]
 
 
+@with_sqlite_retry
 def restore_document(filename: str) -> None:
     """Restore a soft-deleted document by setting is_deleted=0 and moving chunks back."""
     with _connect() as conn:
@@ -409,11 +465,13 @@ def restore_document(filename: str) -> None:
         _compact_vector_ids()
 
 
+@with_sqlite_retry
 def permanently_delete_document(filename: str) -> None:
     """Permanently delete a document (alias to delete_document)."""
     delete_document(filename)
 
 
+@with_sqlite_retry
 def empty_trash() -> None:
     """Permanently delete all soft-deleted documents."""
     with _connect() as conn:
@@ -435,6 +493,7 @@ def empty_trash() -> None:
         conn.execute("DELETE FROM documents WHERE is_deleted = 1")
 
 
+@with_sqlite_retry
 def batch_soft_delete_documents(doc_ids: list[int]) -> int:
     """
     Batch soft delete documents by updating their is_deleted flag and moving chunks to deleted_chunks.
@@ -473,6 +532,7 @@ def batch_soft_delete_documents(doc_ids: list[int]) -> int:
     return rowcount
 
 
+@with_sqlite_retry
 def _compact_vector_ids() -> None:
     """Re-index the vector_id column to remove any gaps left by deleted documents."""
     with _connect() as conn:
@@ -513,6 +573,19 @@ def get_document_word_counts() -> dict[str, int]:
     return word_counts
 
 
+def get_document_char_counts() -> dict[str, int]:
+    """Calculate and return the total character count for each document currently in the database."""
+    with _connect() as conn:
+        rows = conn.execute("SELECT filename, chunk_text FROM chunks").fetchall()
+
+    char_counts = {}
+    for filename, chunk_text in rows:
+        chars = len(chunk_text or "")
+        char_counts[filename] = char_counts.get(filename, 0) + chars
+    return char_counts
+
+
+@with_sqlite_retry
 def clear_all_data() -> None:
     """Clear known corpus tables while tolerating partial schemas."""
     with _connect() as conn:
@@ -559,6 +632,7 @@ def get_document_count_by_user(owner_username: str) -> int:
         return int(row[0]) if row else 0
 
 
+@with_sqlite_retry
 def add_documents_bulk(documents: list) -> int:
     """Insert a batch of new documents in a single transaction using executemany."""
     formatted_docs = []
@@ -633,6 +707,7 @@ def get_document_tags(filename: str) -> str:
         return ""
 
 
+@with_sqlite_retry
 def update_document_tags(filename: str, tags: str) -> bool:
     """Updates the tags for a specific document."""
     try:
@@ -670,6 +745,7 @@ def get_tag_document_count(tag: str) -> int:
     return count
 
 
+@with_sqlite_retry
 def delete_tag(tag: str) -> int:
     """Removes a specific tag from ALL documents in the database."""
     if not tag or not isinstance(tag, str):
@@ -717,6 +793,7 @@ def check_database_integrity() -> list[str]:
         return [f"Error: {e}"]
 
 
+@with_sqlite_retry
 def optimize_database() -> dict[str, any]:
     """Executes SQLite VACUUM to reclaim database storage space."""
     path = get_corpus_db_path()
@@ -749,6 +826,7 @@ def optimize_database() -> dict[str, any]:
         }
 
 
+@with_sqlite_retry
 def purge_stale_trash(days_in_trash: int = 30) -> int:
     """Automatically purge documents that have been soft-deleted for over a specified number of days."""
     threshold_date = (datetime.now() - timedelta(days=days_in_trash)).isoformat()
@@ -795,4 +873,72 @@ def get_deleted_documents_count() -> int:
             "SELECT COUNT(1) FROM documents WHERE is_deleted = 1"
         ).fetchone()
         return int(row[0]) if row else 0
+def search_documents_fts(query_text: str) -> list[dict]:
+    """Search the document corpus using the FTS5 full-text index (issue #1359).
+
+    Replaces slow ``LIKE '%query%'`` full table scans with a fast FTS5
+    MATCH query against the ``documents_fts`` virtual table. Searches
+    across ``filename``, ``student_name``, and ``assignment_title`` columns.
+
+    Args:
+        query_text: The search query string. Must be a non-empty string.
+                    FTS5 query syntax is supported (e.g., ``"machine learning"``
+                    for phrase search, ``machine OR learning`` for boolean).
+
+    Returns:
+        A list of dicts, each containing:
+        - ``id`` (int): Document row ID.
+        - ``filename`` (str): Document filename.
+        - ``student_name`` (str|None): Student name if set.
+        - ``assignment_title`` (str|None): Assignment title if set.
+        - ``upload_date`` (str): ISO timestamp of upload.
+        - ``snippet`` (str): FTS5-generated snippet with matched terms highlighted.
+
+        Returns an empty list if the query is empty or no matches are found.
+    """
+    if not query_text or not query_text.strip():
+        return []
+
+    # Sanitize the query for FTS5: wrap in double quotes to prevent
+    # FTS5 syntax errors from special characters (e.g., *, :, OR).
+    # This treats the query as a phrase match which is the safest
+    # default for user-supplied search terms.
+    sanitized = query_text.strip().replace('"', '""')
+    fts_query = f'"{sanitized}"'
+
+    try:
+        with _connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    d.id,
+                    d.filename,
+                    d.student_name,
+                    d.assignment_title,
+                    d.upload_date,
+                    snippet(documents_fts, 0, '<mark>', '</mark>', '...', 32) as snippet
+                FROM documents_fts
+                JOIN documents d ON d.id = documents_fts.rowid
+                WHERE documents_fts MATCH ?
+                  AND (d.is_deleted IS NULL OR d.is_deleted = 0)
+                ORDER BY rank
+                """,
+                (fts_query,),
+            ).fetchall()
+
+            return [
+                {
+                    "id": r[0],
+                    "filename": r[1],
+                    "student_name": r[2],
+                    "assignment_title": r[3],
+                    "upload_date": r[4],
+                    "snippet": r[5],
+                }
+                for r in rows
+            ]
+    except sqlite3.OperationalError as e:
+        logger.warning("FTS5 search failed: %s. Returning empty list.", e)
+        return []
+
 

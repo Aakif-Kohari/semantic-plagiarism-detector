@@ -34,8 +34,10 @@ from .incidents import (
     get_recent_incidents,
     log_incident,
 )
+from .common import with_sqlite_retry
 
 __all__ = [
+    "with_sqlite_retry",
     "init_db",
     "verify_user",
     "get_user_role",

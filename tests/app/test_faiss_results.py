@@ -1,6 +1,11 @@
+import streamlit as st
+# Mock st.dialog to be a no-op decorator before faiss_results is imported
+st.dialog = lambda *args, **kwargs: lambda f: f
+
 import numpy as np
 import pandas as pd
 from app.components.faiss_results import faiss_results_dataframe, RESULT_COLUMNS
+
 
 
 class MockRecord:
@@ -103,3 +108,37 @@ def test_faiss_results_dataframe_missing_attributes():
     assert len(df) == 1
     assert df.iloc[0]["Target Document"] == "Unknown document"
     assert df.iloc[0]["Chunk"] == 1  # chunk_index (default 0) + 1
+
+
+def test_inspect_diff_dialog():
+    """Verify inspect_diff_dialog calls streamlit elements to render comparison."""
+    from unittest.mock import patch, MagicMock
+    from app.components.faiss_results import inspect_diff_dialog
+
+    with patch("app.components.faiss_results.st") as mock_st:
+        col1, col2 = MagicMock(), MagicMock()
+        mock_st.columns.return_value = (col1, col2)
+
+        inspect_diff_dialog("query text sample", "matched text sample", "test_doc.pdf", 0.85)
+
+        mock_st.markdown.assert_any_call("### Match Similarity: **85.0%**")
+        mock_st.columns.assert_called_once_with(2)
+
+
+def test_render_faiss_results_ui():
+    """Verify render_faiss_results_ui renders list of results and handles click."""
+    from unittest.mock import patch
+    from app.components.faiss_results import render_faiss_results_ui
+
+    results = [
+        (MockRecord("doc_a.pdf", 2, "Matched text here"), 0.88),
+    ]
+    with patch("app.components.faiss_results.st") as mock_st, \
+         patch("app.components.faiss_results.inspect_diff_dialog") as mock_dialog:
+        mock_st.button.return_value = True
+
+        render_faiss_results_ui(results, "query text")
+
+        mock_st.button.assert_called_once()
+        mock_dialog.assert_called_once_with("query text", "Matched text here", "doc_a.pdf", 0.88)
+

@@ -21,9 +21,11 @@ from .config import (
     load_branding_config,
 )
 from .tag_manager import TagManager, sanitize_tag_name
+from .concurrency import with_sqlite_retry
 
 
 __all__ = [
+    "with_sqlite_retry",
     "manhattan_similarity",
     "extract_text_from_pdf",
     "extract_texts_from_pdfs",

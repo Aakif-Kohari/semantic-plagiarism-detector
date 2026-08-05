@@ -1,8 +1,12 @@
 import io
 import pytest
+from unittest.mock import MagicMock, patch
 from PIL import Image
-from src.security.metadata_stripper import strip_exif_metadata, strip_pdf_javascript
-
+from src.security.metadata_stripper import (
+    strip_exif_metadata,
+    strip_pdf_javascript,
+    inspect_pdf_fonts,
+)
 
 def test_strip_pdf_javascript_removes_open_action():
     from pypdf import PdfReader, PdfWriter
@@ -98,3 +102,51 @@ def test_strip_image_metadata_dimension_exactly_at_limit():
     result = strip_exif_metadata(img_bytes.getvalue(), "test.png")
     assert isinstance(result, bytes)
     assert len(result) > 0
+
+
+def test_strip_palette_image_preserves_colors():
+    # A palette-based (P mode) image: pixels store palette indices, not channels
+    palette_image = Image.new("P", (10, 10))
+    palette_colors = []
+    for i in range(256):
+        palette_colors.extend((i, 0, 255 - i))
+    palette_image.putpalette(palette_colors)
+    # Index 7 maps to RGB (7, 0, 248)
+    palette_image.putdata([7] * 100)
+    img_bytes = io.BytesIO()
+    palette_image.save(img_bytes, format="PNG")
+
+    result = strip_exif_metadata(img_bytes.getvalue(), "test.png")
+
+    with Image.open(io.BytesIO(result)) as out_image:
+        # P mode must be converted to RGBA before saving so channels survive
+        assert out_image.mode == "RGBA"
+        pixel = out_image.getpixel((5, 5))
+    assert pixel == (7, 0, 248, 255)
+@patch("src.security.metadata_stripper.fitz.open")
+def test_inspect_pdf_fonts_exceeds_limit(mock_fitz_open):
+    mock_page = MagicMock()
+    mock_page.get_fonts.return_value = [(7, 0, "Type1", "F1", "Arial", "")]
+
+    mock_doc = MagicMock()
+    mock_doc.__iter__.return_value = iter([mock_page])
+    mock_doc.extract_font.return_value = ("Arial", "ttf", "Type1", b"0" * 10_000_001)
+    mock_fitz_open.return_value = mock_doc
+
+    with pytest.raises(ValueError) as excinfo:
+        inspect_pdf_fonts(b"dummy pdf bytes", max_font_bytes=10_000_000)
+    assert "Embedded PDF font stream exceeds safety limit" in str(excinfo.value)
+
+
+@patch("src.security.metadata_stripper.fitz.open")
+def test_inspect_pdf_fonts_within_limit(mock_fitz_open):
+    mock_page = MagicMock()
+    mock_page.get_fonts.return_value = [(7, 0, "Type1", "F1", "Arial", "")]
+
+    mock_doc = MagicMock()
+    mock_doc.__iter__.return_value = iter([mock_page])
+    mock_doc.extract_font.return_value = ("Arial", "ttf", "Type1", b"0" * 100)
+    mock_fitz_open.return_value = mock_doc
+
+    result = inspect_pdf_fonts(b"dummy pdf bytes")
+    assert result is True

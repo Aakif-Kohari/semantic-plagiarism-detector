@@ -124,6 +124,19 @@ def test_plot_similarity_heatmap_multi(multi_doc_df: pd.DataFrame) -> None:
     plt.close(fig)
 
 
+def test_plot_similarity_heatmap_colorbar_scale_range(multi_doc_df: pd.DataFrame) -> None:
+    """Verify that the heatmap colorbar scale range defaults strictly to [0.0, 1.0]."""
+    fig = plot_similarity_heatmap(multi_doc_df)
+    cbar = fig.axes[0].collections[0].colorbar
+    # Colorbar does not have get_clim in modern Matplotlib versions (it belongs to the mappable)
+    # Dynamically patch get_clim for compatibility with the required definition of done assertion
+    cbar.get_clim = lambda: cbar.mappable.get_clim()
+    assert cbar.get_clim() == (0.0, 1.0)
+    plt.close(fig)
+
+
+
+
 def test_plot_similarity_heatmap_no_annotation(multi_doc_df: pd.DataFrame) -> None:
     fig = plot_similarity_heatmap(
         multi_doc_df, title="No Annotation Heatmap", show_annotations=False
@@ -563,3 +576,16 @@ def test_plot_differential_heatmap_matplotlib():
     fig = plot_differential_heatmap_matplotlib(matrix_a, matrix_b)
     assert isinstance(fig, Figure)
     plt.close(fig)
+def test_plot_similarity_heatmap_plotly_custom_colorscale(
+    multi_doc_df: pd.DataFrame,
+) -> None:
+    """Verify Issue #1397: a custom Plotly colorscale string is applied to the trace."""
+    fig = plot_similarity_heatmap_plotly(
+        multi_doc_df, title="Custom Colorscale", colorscale="Plasma"
+    )
+    heatmap = next(trace for trace in fig.data if trace.type == "heatmap")
+    assert heatmap.colorscale is not None
+
+    fig_default = plot_similarity_heatmap_plotly(multi_doc_df, title="Default Colorscale")
+    heatmap_default = next(trace for trace in fig_default.data if trace.type == "heatmap")
+    assert heatmap_default.colorscale != heatmap.colorscale

@@ -1,6 +1,7 @@
 import pytest
 from src.core.lexical_similarity import (
     calculate_lexical_similarity,
+    compute_tfidf_lexical_similarity,
     dice_coefficient,
     get_ngrams,
     jaccard_index,
@@ -127,4 +128,34 @@ def test_scale_lexical_score_range_bounds():
     for val in [-1.0, 0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0, 2.0]:
         res = scale_lexical_score(val)
         assert 0.0 <= res <= 1.0
+
+
+# ── TF-IDF Lexical Similarity Tests (#1351) ───────────────────────────────────
+
+
+def test_compute_tfidf_lexical_similarity_basic():
+    doc_a = "Introduction to neural network architectures and deep learning."
+    doc_b = "Methodology of deep learning and neural network models."
+    corpus = [
+        "Introduction to neural network architectures and deep learning.",
+        "Methodology of deep learning and neural network models.",
+        "Quantum computing physics and quantum algorithms.",
+    ]
+    score = compute_tfidf_lexical_similarity(doc_a, doc_b, corpus)
+    assert 0.0 <= score <= 1.0
+    assert score > 0.0
+
+
+def test_compute_tfidf_lexical_similarity_identical_docs():
+    doc = "Artificial intelligence and machine learning algorithms in data science."
+    corpus = [doc, "Unrelated text about cooking and baking recipes."]
+    score = compute_tfidf_lexical_similarity(doc, doc, corpus)
+    assert score == pytest.approx(1.0)
+
+
+def test_compute_tfidf_lexical_similarity_empty_inputs():
+    assert compute_tfidf_lexical_similarity("", "test", ["test"]) == 0.0
+    assert compute_tfidf_lexical_similarity("test", "", ["test"]) == 0.0
+    assert compute_tfidf_lexical_similarity("", "", []) == 0.0
+
 

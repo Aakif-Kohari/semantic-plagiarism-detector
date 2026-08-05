@@ -42,7 +42,7 @@ def _validated_batch_size(batch_size: Optional[int]) -> Optional[int]:
         size = int(batch_size)
     except (TypeError, ValueError) as exc:
         raise ValueError(SIM_BATCH_SIZE_INVALID) from exc
-return size if size > 0 else None
+    return size if size > 0 else None
 
 
 def _apply_min_percentile_filter(
@@ -146,7 +146,8 @@ def document_similarity_matrix(
     doc_embeddings: Union[Dict[str, np.ndarray], np.ndarray, List[np.ndarray]],
     batch_size: Optional[int] = None,
     min_percentile: Optional[float] = None,
-) -> Union[pd.DataFrame, np.ndarray]:    """
+) -> Union[pd.DataFrame, np.ndarray]:
+    """
     Build an N×N cosine similarity matrix between all document pairs.
 
     Args:
@@ -160,7 +161,7 @@ def document_similarity_matrix(
         stacked = np.array(doc_embeddings)
         if stacked.ndim == 1 or stacked.size == 0:
             return np.array([[]])
-sim = np.clip(cosine_similarity(stacked), 0.0, 1.0)
+        sim = np.clip(cosine_similarity(stacked), 0.0, 1.0)
         return _apply_min_percentile_filter(sim, min_percentile)
     doc_names = list(doc_embeddings.keys())
     n = len(doc_names)
@@ -193,7 +194,7 @@ sim = np.clip(cosine_similarity(stacked), 0.0, 1.0)
                 sim = cosine_similarity(stacked[start:end], stacked)
                 matrix[start:end] = np.clip(sim, 0.0, 1.0)
 
-df = pd.DataFrame(matrix, index=doc_names, columns=doc_names)
+    df = pd.DataFrame(matrix, index=doc_names, columns=doc_names)
     return _apply_min_percentile_filter(df, min_percentile)
 
 def compute_similarity_matrix(
@@ -238,7 +239,87 @@ def hybrid_similarity_matrix(
     return hybrid_df
 
 
+def _compute_bm25_similarity(
+    doc_a: str,
+    doc_b: str,
+    k1: float = 1.5,
+    b: float = 0.75,
+) -> float:
+    """Calculate BM25 relevance score between document pairs, normalized in [0.0, 1.0]."""
+    if not doc_a or not doc_b or not isinstance(doc_a, str) or not isinstance(doc_b, str):
+        return 0.0
+
+    import math
+    import re
+    from collections import Counter
+
+    tokens_a = [t.lower() for t in re.findall(r"\w+", doc_a)]
+    tokens_b = [t.lower() for t in re.findall(r"\w+", doc_b)]
+
+    if not tokens_a or not tokens_b:
+        return 0.0
+
+    freq_a = Counter(tokens_a)
+    freq_b = Counter(tokens_b)
+    common_terms = set(freq_a.keys()) & set(freq_b.keys())
+
+    if not common_terms:
+        return 0.0
+
+    len_a = len(tokens_a)
+    len_b = len(tokens_b)
+    avg_len = (len_a + len_b) / 2.0
+
+    idf = math.log((2 - 2 + 0.5) / (2 + 0.5) + 1.0)
+
+    score_a = sum(
+        idf * (freq_b[t] * (k1 + 1.0)) / (freq_b[t] + k1 * (1.0 - b + b * (len_b / avg_len)))
+        for t in common_terms
+    )
+    score_max_a = sum(
+        idf * (freq_a[t] * (k1 + 1.0)) / (freq_a[t] + k1 * (1.0 - b + b * (len_a / avg_len)))
+        for t in common_terms
+    )
+
+    if score_max_a == 0:
+        return 0.0
+
+    bm25 = score_a / score_max_a
+    return float(np.clip(bm25, 0.0, 1.0))
+
+
+def compute_hybrid_similarity(
+    vector_sim: float,
+    doc_a: str,
+    doc_b: str,
+    alpha: float = 0.7,
+) -> float:
+    """Compute hybrid similarity combining dense vector cosine similarity and BM25 lexical relevance.
+
+    Formula:
+        hybrid_score = alpha * vector_sim + (1 - alpha) * bm25_score
+
+    Args:
+        vector_sim: Dense vector cosine similarity score.
+        doc_a: First document text string.
+        doc_b: Second document text string.
+        alpha: Weight factor for dense vector similarity (default: 0.7).
+
+    Returns:
+        float: Hybrid similarity score strictly bounded in [0.0, 1.0].
+    """
+    if not (0.0 <= alpha <= 1.0):
+        from src.errors import sim_weight_out_of_range
+
+        raise ValueError(sim_weight_out_of_range(alpha))
+
+    bm25_score = _compute_bm25_similarity(doc_a, doc_b)
+    hybrid_score = alpha * vector_sim + (1.0 - alpha) * bm25_score
+    return float(np.clip(hybrid_score, 0.0, 1.0))
+
+
 # ── Chunk-level similarity (local plagiarism detection) ────────────────────────
+
 
 
 def chunk_max_similarity(
