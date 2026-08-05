@@ -154,6 +154,48 @@ class TestTranslationCacheTTL:
 
             assert deleted_count == 0
 
+    def test_purge_translation_cache_older_than_default_days(self, temp_db_path):
+        """Test purging with the default 30 days threshold."""
+        conn = sqlite3.connect(temp_db_path)
+        # Ensure schema initialization on temp DB
+        translation_cache.get_cached_translation("init")
+        # Seed: 2 entries at 15 days (should stay), 2 entries at 45 days (should be purged)
+        self._seed_cache_with_dates(conn, [15, 15, 45, 45])
+
+        deleted_count = translation_cache.purge_translation_cache_older_than()
+
+        assert deleted_count == 2
+        conn.execute("SELECT COUNT(*) FROM translation_cache")
+        assert conn.fetchone()[0] == 2
+
+    def test_purge_translation_cache_older_than_custom_days(self, temp_db_path):
+        """Test purging with a custom days threshold."""
+        conn = sqlite3.connect(temp_db_path)
+        translation_cache.get_cached_translation("init")
+        # Seed: 1 entry at 10 days, 1 entry at 20 days, 1 entry at 30 days
+        self._seed_cache_with_dates(conn, [10, 20, 30])
+
+        deleted_count = translation_cache.purge_translation_cache_older_than(days=15)
+
+        assert deleted_count == 2  # 20 and 30 days old are purged
+        conn.execute("SELECT COUNT(*) FROM translation_cache")
+        assert conn.fetchone()[0] == 1  # Only the 10-day-old entry remains
+
+    def test_purge_translation_cache_older_than_negative_days_raises_error(self):
+        """Test that negative days raises a ValueError."""
+        with pytest.raises(ValueError, match="days must be a non-negative integer"):
+            translation_cache.purge_translation_cache_older_than(days=-5)
+
+    def test_purge_translation_cache_older_than_handles_db_error(self, temp_db_path):
+        """Test that database errors during purge are logged and return 0."""
+        with patch("sqlite3.connect") as mock_connect:
+            mock_conn = mock_connect.return_value.__enter__.return_value
+            mock_conn.cursor.return_value.execute.side_effect = sqlite3.Error("DB locked")
+
+            deleted_count = translation_cache.purge_translation_cache_older_than()
+
+            assert deleted_count == 0
+
     def test_get_translation_cache_stats(self, temp_db_path):
         """Test retrieving accurate cache statistics."""
         conn = sqlite3.connect(temp_db_path)

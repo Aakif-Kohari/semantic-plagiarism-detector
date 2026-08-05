@@ -16,7 +16,8 @@ import gzip
 import logging
 import os
 import sqlite3
-import timefrom pathlib import Path
+import time
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -27,8 +28,10 @@ from src.db.database_backup import (
     cleanup_old_backups,
     create_database_backup,
     create_password_protected_backup,
-    create_sqlite_snapshot,    get_database_size_bytes,
+    create_sqlite_snapshot,
+    get_database_size_bytes,
     get_database_table_stats,
+    get_table_schema_info,
     optimize_database,
     restore,
     run_incremental_vacuum,
@@ -36,7 +39,7 @@ from src.db.database_backup import (
 )
 
 try:
-    import pyzipper
+    import pyzipper  # noqa: F401
     HAS_PYZIPPER = True
 except ImportError:
     HAS_PYZIPPER = False
@@ -610,6 +613,104 @@ class TestGetDatabaseTableStats:
 
         assert stats["_table_count"] == 1
         assert stats["test"] == 1
+
+
+class TestGetTableSchemaInfo:
+    """Tests for the get_table_schema_info helper (issue #1586)."""
+
+    def _make_db(self, tmp_path) -> Path:
+        """Create a temporary SQLite database with a documents table."""
+        db_path = tmp_path / "schema_test.db"
+
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            """
+            CREATE TABLE documents (
+                id INTEGER PRIMARY KEY,
+                filename TEXT NOT NULL,
+                tags TEXT DEFAULT 'untagged',
+                size REAL
+            )
+            """
+        )
+        conn.commit()
+        conn.close()
+
+        return db_path
+
+    def test_returns_column_metadata_for_table(self, tmp_path):
+        """Verify PRAGMA table_info output is returned as column dictionaries."""
+        db_path = self._make_db(tmp_path)
+
+        schema = get_table_schema_info(db_path, "documents")
+
+        assert len(schema) == 4
+        assert schema[0] == {
+            "name": "id",
+            "type": "INTEGER",
+            "notnull": 0,
+            "dflt_value": None,
+            "pk": 1,
+        }
+        assert schema[1] == {
+            "name": "filename",
+            "type": "TEXT",
+            "notnull": 1,
+            "dflt_value": None,
+            "pk": 0,
+        }
+        # TEXT defaults are reported with surrounding quotes by SQLite
+        assert schema[2]["name"] == "tags"
+        assert schema[2]["type"] == "TEXT"
+        assert schema[2]["dflt_value"] == "'untagged'"
+        assert schema[3] == {
+            "name": "size",
+            "type": "REAL",
+            "notnull": 0,
+            "dflt_value": None,
+            "pk": 0,
+        }
+
+    def test_returns_empty_list_for_nonexistent_table(self, tmp_path):
+        """An unknown table must return an empty list, not raise."""
+        db_path = self._make_db(tmp_path)
+
+        schema = get_table_schema_info(db_path, "missing_table")
+
+        assert schema == []
+
+    def test_returns_empty_list_for_nonexistent_db(self, tmp_path):
+        """A missing database file must return an empty list."""
+        missing_db = tmp_path / "does_not_exist.db"
+
+        schema = get_table_schema_info(missing_db, "documents")
+
+        assert schema == []
+
+    def test_returns_empty_list_for_directory_path(self, tmp_path):
+        """A directory path must return an empty list, not raise."""
+        schema = get_table_schema_info(tmp_path, "documents")
+
+        assert schema == []
+
+    def test_rejects_unsafe_table_name(self, tmp_path):
+        """Table names that are not plain identifiers must be refused."""
+        db_path = self._make_db(tmp_path)
+
+        schema = get_table_schema_info(
+            db_path, "documents; DROP TABLE documents; --"
+        )
+
+        assert schema == []
+
+    def test_accepts_path_and_str_equivalently(self, tmp_path):
+        """Both Path and str inputs must return identical metadata."""
+        db_path = self._make_db(tmp_path)
+
+        schema_from_path = get_table_schema_info(db_path, "documents")
+        schema_from_str = get_table_schema_info(str(db_path), "documents")
+
+        assert schema_from_path == schema_from_str
 
 
 class TestCheckpointWalLog:

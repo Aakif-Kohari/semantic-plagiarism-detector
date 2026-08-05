@@ -709,3 +709,32 @@ def test_refresh_token_revoked_returns_401(tmp_path):
     )
     assert res.status_code == 401
     assert "revoked" in res.json()["detail"].lower()
+
+
+def test_api_usage_endpoint():
+    """Verify that GET /api/v1/usage returns the correct schema and increments total_scans."""
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+    import src.api.app as api_app
+
+    client = TestClient(app)
+
+    # Initial request
+    response = client.get("/api/v1/usage")
+    assert response.status_code == 200
+    data = response.json()
+    assert "total_scans" in data
+    assert "uptime_seconds" in data
+    assert isinstance(data["total_scans"], int)
+    assert isinstance(data["uptime_seconds"], float)
+    assert data["uptime_seconds"] >= 0.0
+
+    # Test the counter increment reflection
+    initial_scans = data["total_scans"]
+    api_app.total_scans += 1
+
+    response = client.get("/api/v1/usage")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total_scans"] == initial_scans + 1
+

@@ -68,6 +68,7 @@ from .db import (
     get_recent_incidents,
     log_incident,
     get_deleted_documents_count,
+    get_incidents_by_assignment,
 )
 try:
     from .visualization import (
@@ -143,6 +144,7 @@ __all__ = [
     "get_recent_incidents",
     "log_incident",
     "get_deleted_documents_count",
+    "get_incidents_by_assignment",
     "init_corpus_db",
     "add_document",
     "get_document_by_hash",

@@ -7,7 +7,7 @@ import pytest
 from src.db.migrations import (AUTH_SCHEMA_VERSION, CORPUS_SCHEMA_VERSION,
                                column_exists, get_user_version, index_exists,
                                migrate_auth_database, migrate_corpus_database,
-                               run_migrations, table_exists)
+                               run_migrations, table_exists, check_table_exists)
 
 
 def connect(path) -> sqlite3.Connection:
@@ -391,3 +391,14 @@ def test_migration_013_adds_incident_severity_index(tmp_path):
         migrate_corpus_database(connection)
 
         assert index_exists(connection, "idx_incidents_severity_time")
+
+
+def test_check_table_exists():
+    """Verify check_table_exists checks table existence by querying sqlite_master."""
+    connection = sqlite3.connect(":memory:")
+    try:
+        assert check_table_exists(connection, "test_table") is False
+        connection.execute("CREATE TABLE test_table (id INTEGER)")
+        assert check_table_exists(connection, "test_table") is True
+    finally:
+        connection.close()
