@@ -37,10 +37,12 @@ from src.api.schemas import (
     HealthCheckResponse,
     HealthzResponse,
     LoginResponse,
+    RefreshRequest,
     RevokeRequest,
     RevokeResponse,
     SimilarityCheckResponse,
     StatusResponse,
+    TokenResponse,
 )
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -223,6 +225,80 @@ def get_corpus_documents_with_embeddings() -> Dict[str, Dict]:
 async def login(request: Request):
     """Authenticate user and return a session token."""
     return {"token": "dummy-token"}
+
+
+@app.post(
+    "/api/v1/auth/refresh",
+    tags=["Authentication"],
+    summary="Refresh OAuth2 Bearer Token",
+    response_model=TokenResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        400: {"model": ErrorResponse, "description": "Bad Request"},
+        401: {"model": ErrorResponse, "description": "Unauthorized / Invalid Refresh Token"},
+        500: {"model": ErrorResponse, "description": "Internal Server Error"},
+    },
+)
+async def refresh_token_endpoint(
+    request: Request,
+    payload: RefreshRequest | None = None,
+):
+    """
+    Acquire a new access token using a valid, unexpired refresh token.
+    Accepts refresh token in JSON request body or Authorization header.
+    """
+    refresh_token = None
+
+    if payload and payload.refresh_token:
+        refresh_token = payload.refresh_token
+    else:
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                refresh_token = body.get("refresh_token") or body.get("token")
+        except Exception:
+            pass
+
+    if not refresh_token:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            refresh_token = auth_header[7:].strip()
+
+    if not refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Refresh token must be provided in request body or Authorization header.",
+        )
+
+    from src.db.auth import is_token_revoked
+
+    if is_token_revoked(refresh_token):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token has been revoked.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    from src.security.jwt_utils import create_access_token, verify_refresh_token
+
+    try:
+        token_payload = verify_refresh_token(refresh_token)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(exc),
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    sub = token_payload.get("sub", "user")
+    scopes = token_payload.get("scopes", ["read", "write"])
+    new_access_token = create_access_token(sub=sub, scopes=scopes, expires_in=3600)
+
+    return {
+        "access_token": new_access_token,
+        "token_type": "bearer",
+        "expires_in": 3600,
+    }
 
 
 @app.post(

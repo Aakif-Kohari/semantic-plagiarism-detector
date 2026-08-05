@@ -49,6 +49,7 @@ from src.utils.filename import (
 )
 
 
+from typing import Any
 try:
     from streamlit_plotly_events import plotly_events  # type: ignore
 except ImportError:  # pragma: no cover - optional dependency
@@ -301,8 +302,19 @@ from src.db.incidents import (
     get_all_incidents,
     sync_flagged_incidents,
 )
-from src.utils.pdf_report import highlight_pdf_matches
-from src.db.corpus_db import get_total_document_count, init_corpus_db
+from src.utils.bulk_export import create_documents_bulk_zip_archive
+from src.utils.pdf_report import generate_plagiarism_report, highlight_pdf_matches
+from src.utils.badge_generator import (
+    generate_badge_png,
+    generate_badge_pdf,
+)
+from src.db.corpus_db import get_document_tags, get_total_document_count, init_corpus_db
+from src.db.incidents import (
+    get_all_incidents_above_threshold_for_export,
+    get_high_severity_trends,
+    get_most_plagiarized_documents,
+    sync_flagged_incidents,
+)
 from src.i18n.translator import _SUPPORTED_LANGUAGES, get_text
 from src.utils.processing_time import (
     estimate_processing_seconds,
@@ -1480,36 +1492,116 @@ if user_role == "admin":
         )
 
         st.markdown("---")
-        st.markdown("### 📁 Document Management")
+        st.markdown("### 📁 Document Management & Bulk Export")
         existing_docs = get_all_documents()
         if existing_docs:
             st.write(f"**{len(existing_docs)}** documents in database")
 
             import pandas as pd
             from src.db.corpus_db import (
-                get_document_word_counts,
                 get_document_char_counts,
+                get_document_word_counts,
             )
 
             word_counts = get_document_word_counts()
             char_counts = get_document_char_counts()
 
-            df = pd.DataFrame([{"filename": doc["filename"]} for doc in existing_docs])
-            df["word_count"] = df["filename"].map(word_counts).fillna(0).astype(int)
-            df["char_count"] = df["filename"].map(char_counts).fillna(0).astype(int)
-
-            styled_df = df.style.format(
-                {"word_count": "{:,} words", "char_count": "{:,} chars"}
-            )
-            st.dataframe(styled_df, use_container_width=True)
-
+            doc_rows = []
             for doc in existing_docs:
+                fn = (
+                    doc.filename
+                    if hasattr(doc, "filename")
+                    else (doc.get("filename") if isinstance(doc, dict) else str(doc))
+                )
+                doc_rows.append(
+                    {
+                        "Select": False,
+                        "Filename": fn,
+                        "Word Count": word_counts.get(fn, 0),
+                        "Char Count": char_counts.get(fn, 0),
+                    }
+                )
+
+            corpus_df = pd.DataFrame(doc_rows)
+
+            sel_col1, sel_col2 = st.columns(2)
+            with sel_col1:
+                if st.button(
+                    "☑️ Select All",
+                    key="sidebar_select_all_corpus_btn",
+                    use_container_width=True,
+                ):
+                    st.session_state["corpus_select_all_toggle"] = True
+                    st.rerun()
+            with sel_col2:
+                if st.button(
+                    "⬜ Clear",
+                    key="sidebar_clear_corpus_btn",
+                    use_container_width=True,
+                ):
+                    st.session_state["corpus_select_all_toggle"] = False
+                    st.rerun()
+
+            if st.session_state.get("corpus_select_all_toggle", False):
+                corpus_df["Select"] = True
+
+            edited_df = st.data_editor(
+                corpus_df,
+                column_config={
+                    "Select": st.column_config.CheckboxColumn(
+                        "Select",
+                        default=False,
+                        help="Select for bulk ZIP export",
+                    ),
+                    "Filename": st.column_config.TextColumn("Filename", disabled=True),
+                    "Word Count": st.column_config.NumberColumn(
+                        "Word Count", format="%d words", disabled=True
+                    ),
+                    "Char Count": st.column_config.NumberColumn(
+                        "Char Count", format="%d chars", disabled=True
+                    ),
+                },
+                disabled=["Filename", "Word Count", "Char Count"],
+                hide_index=True,
+                key="sidebar_corpus_data_editor",
+                use_container_width=True,
+            )
+
+            selected_rows = edited_df[edited_df["Select"]]
+            selected_filenames = selected_rows["Filename"].tolist()
+
+            if selected_filenames:
+                zip_data = create_documents_bulk_zip_archive(selected_filenames)
+                st.download_button(
+                    label=f"📦 Export Selected as ZIP ({len(selected_filenames)})",
+                    data=zip_data,
+                    file_name=f"corpus_export_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.zip",
+                    mime="application/zip",
+                    key="sidebar_export_selected_zip_btn",
+                    use_container_width=True,
+                    type="primary",
+                )
+            else:
+                st.button(
+                    "📦 Export Selected as ZIP (0)",
+                    disabled=True,
+                    key="sidebar_export_zip_disabled_btn",
+                    use_container_width=True,
+                )
+
+            st.markdown("---")
+            for doc in existing_docs:
+                fn = (
+                    doc.filename
+                    if hasattr(doc, "filename")
+                    else (doc.get("filename") if isinstance(doc, dict) else str(doc))
+                )
                 col1, col2 = st.columns([3, 1])
                 with col1:
-                    st.text(f"📄 {doc['filename']}")
+                    st.text(f"📄 {fn}")
                 with col2:
-                    if st.button("🗑️", key=f"del_{doc['filename']}"):
-                        delete_document(doc["filename"])
+                    if st.button("🗑️", key=f"del_{fn}"):
+                        delete_document(fn)
                         embeddings_matrix = get_all_embeddings()
                         if embeddings_matrix.size > 0:
                             new_index = build_index_from_matrix(embeddings_matrix)

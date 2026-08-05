@@ -69,7 +69,20 @@ async def verify_bearer_token(
         return None
 
     valid_tokens = get_valid_tokens()
-    if not credentials or credentials.credentials not in valid_tokens:
+    is_valid = False
+
+    if credentials and credentials.credentials in valid_tokens:
+        is_valid = True
+    elif credentials and credentials.credentials:
+        from src.security.jwt_utils import verify_access_token
+
+        try:
+            verify_access_token(credentials.credentials)
+            is_valid = True
+        except Exception:
+            is_valid = False
+
+    if not credentials or not is_valid:
         if request.url.path in PUBLIC_PATHS:
             return None
         raise HTTPException(
@@ -101,7 +114,16 @@ async def get_current_user(
         return {"token": None, "scopes": []}
 
     valid_tokens = get_valid_tokens()
-    token_scopes = valid_tokens.get(token, [])
+    if token in valid_tokens:
+        token_scopes = valid_tokens[token]
+    else:
+        from src.security.jwt_utils import verify_access_token
+
+        try:
+            payload = verify_access_token(token)
+            token_scopes = payload.get("scopes", ["read", "write"])
+        except Exception:
+            token_scopes = []
 
     if security_scopes.scopes:
         for scope in security_scopes.scopes:
