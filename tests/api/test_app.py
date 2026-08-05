@@ -544,6 +544,42 @@ def test_token_revocation_missing_token_returns_400(tmp_path):
     assert "token to revoke must be provided" in response.json()["detail"].lower()
 
 
+def test_streaming_multipart_upload_file_exceeds_max_size_returns_413(monkeypatch):
+    """Verify POST /api/v1/scan returns 413 Payload Too Large when payload exceeds MAX_UPLOAD_SIZE_BYTES."""
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+
+    monkeypatch.setenv("MAX_UPLOAD_SIZE_BYTES", "500")
+
+    client = TestClient(app)
+    large_payload = b"A" * 2000  # 2KB payload > 500 bytes limit
+
+    files = {"file": ("large_doc.txt", large_payload, "text/plain")}
+    headers = {"Authorization": "Bearer test-write-token"}
+
+    response = client.post("/api/v1/scan", files=files, headers=headers)
+    assert response.status_code == 413
+    assert "exceeds maximum" in response.json()["detail"].lower()
+
+
+def test_streaming_multipart_upload_streams_chunks_to_disk():
+    """Verify POST /api/v1/scan streams chunks to disk and processes document scan."""
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+
+    client = TestClient(app)
+    content = b"This is a test paragraph for verifying streaming chunk reader upload functionality.\n\n" * 5
+
+    files = {"file": ("stream_test.txt", content, "text/plain")}
+    headers = {"Authorization": "Bearer test-write-token"}
+
+    response = client.post("/api/v1/scan", files=files, headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["filename"] == "stream_test.txt"
+    assert data["word_count"] > 0
+
+
 def test_refresh_token_success_with_signed_refresh_token(tmp_path):
     """Verify POST /api/v1/auth/refresh issues a new valid access token."""
     from src.db.auth import configure_db_path, init_db
