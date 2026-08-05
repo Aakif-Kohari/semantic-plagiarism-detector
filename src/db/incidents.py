@@ -452,6 +452,41 @@ def get_incidents_by_date_range(
         return [dict(row) for row in rows]
 
 
+def get_incidents_by_assignment(
+    assignment_title: str,
+    db_path: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    """Return list of plagiarism incidents matching specified assignment title.
+
+    Args:
+        assignment_title: The target assignment title.
+        db_path: Path to the SQLite corpus database.
+
+    Returns:
+        A list of incident dicts.
+    """
+    if db_path is None:
+        db_path = DEFAULT_DB_PATH
+    init_incident_db(db_path)
+    with closing(_get_connection(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT DISTINCT i.incident_id, i.document_a, i.document_b,
+                            i.similarity_score, i.severity_rank,
+                            i.review_status, i.date_flagged, i.last_seen,
+                            i.threshold_at_time_of_flag
+            FROM plagiarism_incidents i
+            LEFT JOIN documents da ON i.document_a = da.filename
+            LEFT JOIN documents db ON i.document_b = db.filename
+            WHERE da.assignment_title = ? OR db.assignment_title = ?
+            ORDER BY i.date_flagged DESC, i.incident_id ASC
+            """,
+            (assignment_title, assignment_title),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
 def get_all_incidents_above_threshold_for_export(    threshold: float,
     db_path: str | Path = DEFAULT_DB_PATH,
 ) -> list[MatchResult]:

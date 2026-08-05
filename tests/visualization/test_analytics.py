@@ -11,6 +11,7 @@ import pytest
 from src.visualization.analytics import (
     plot_severity_donut_chart,
     plot_similarity_boxplot,
+    plot_similarity_histogram,
     plot_similarity_percentiles,
 )
 

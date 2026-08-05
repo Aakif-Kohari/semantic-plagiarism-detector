@@ -115,7 +115,7 @@ def plot_high_severity_trends(
             x=0.5,
             y=0.5,
             showarrow=False,
-            font=dict(size=16, color="gray"),
+            font=dict(size=16, color=_annotation_color(theme_colors)),
         )
         fig.update_layout(
             title="High Severity Plagiarism Trends (Last 30 Days)",
@@ -172,7 +172,7 @@ def plot_most_plagiarized_documents(
             x=0.5,
             y=0.5,
             showarrow=False,
-            font=dict(size=16, color="gray"),
+            font=dict(size=16, color=_annotation_color(theme_colors)),
         )
         fig.update_layout(
             title="Most Frequently Plagiarized Documents",
@@ -242,7 +242,7 @@ def plot_similarity_distribution(
             x=0.5,
             y=0.5,
             showarrow=False,
-            font=dict(size=16, color="gray"),
+            font=dict(size=16, color=_annotation_color(theme_colors)),
         )
         fig.update_layout(
             title=title,
@@ -301,7 +301,7 @@ def plot_document_sizes(
             x=0.5,
             y=0.5,
             showarrow=False,
-            font=dict(size=16, color="gray"),
+            font=dict(size=16, color=_annotation_color(theme_colors)),
         )
         fig.update_layout(title="Document Word Counts", height=400, autosize=True)
         fig.update_xaxes(showgrid=show_grid)
@@ -369,7 +369,7 @@ def plot_similarity_boxplot(
             x=0.5,
             y=0.5,
             showarrow=False,
-            font=dict(size=16, color="gray"),
+            font=dict(size=16, color=_annotation_color(theme_colors)),
         )
         fig.update_layout(
             title="Similarity Score Distribution by Assignment",
@@ -431,7 +431,7 @@ def plot_severity_donut_chart(
             x=0.5,
             y=0.5,
             showarrow=False,
-            font=dict(size=16, color="gray"),
+            font=dict(size=16, color=_annotation_color(theme_colors)),
         )
         fig.update_layout(
             title="Plagiarism Incident Severity Distribution",
@@ -489,7 +489,7 @@ def plot_similarity_histogram(
             x=0.5,
             y=0.5,
             showarrow=False,
-            font=dict(size=16, color="gray"),
+            font=dict(size=16, color=_annotation_color(theme_colors)),
         )
         fig.update_layout(
             title="Similarity Score Distribution",
@@ -549,7 +549,7 @@ def plot_similarity_percentiles(
             x=0.5,
             y=0.5,
             showarrow=False,
-            font=dict(size=16, color="gray"),
+            font=dict(size=16, color=_annotation_color(theme_colors)),
         )
         fig.update_layout(
             title="Similarity Score Percentile Breakdown",
