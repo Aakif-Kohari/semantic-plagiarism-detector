@@ -391,10 +391,96 @@ def test_create_batch_incident_zip_archive():
         assert meta["total_incidents"] == 2
         assert meta["incidents"][0]["incident_id"] == "INC-001"
 
-        # Verify CSV summary
         csv_content = zf.read("incidents_summary.csv").decode("utf-8-sig")
         assert "INC-001" in csv_content
         assert "INC-002" in csv_content
         assert "95.00%" in csv_content
         assert "72.00%" in csv_content
+
+
+# ---------------------------------------------------------------------------
+# Tests for stream_incidents_csv_chunks (Issue #1511)
+# ---------------------------------------------------------------------------
+
+from src.utils.bulk_export import stream_incidents_csv_chunks
+
+def test_stream_incidents_csv_chunks_default_batch():
+    """Verify default batch size and incremental query calls."""
+    calls = []
+    
+    def mock_query(limit, offset):
+        calls.append((limit, offset))
+        if offset >= 2500:
+            return []
+        
+        size = min(limit, 2500 - offset)
+        return [{"incident_id": f"INC-{offset+i}"} for i in range(size)]
+        
+    chunks = list(stream_incidents_csv_chunks(mock_query))
+    
+    assert len(chunks) == 4
+    
+    header = chunks[0]
+    assert "Incident ID" in header
+    assert "Doc A" in header
+    
+    assert calls == [(1000, 0), (1000, 1000), (1000, 2000)]
+    
+def test_stream_incidents_csv_chunks_custom_batch():
+    """Verify custom batch size works."""
+    calls = []
+    
+    def mock_query(limit, offset):
+        calls.append((limit, offset))
+        if offset >= 10:
+            return []
+        size = min(limit, 10 - offset)
+        return [{"incident_id": f"INC-{offset+i}"} for i in range(size)]
+        
+    chunks = list(stream_incidents_csv_chunks(mock_query, batch_size=3))
+    
+    assert calls == [(3, 0), (3, 3), (3, 6), (3, 9)]
+    assert len(chunks) == 5
+    
+def test_stream_incidents_csv_chunks_empty_results():
+    def mock_query(limit, offset):
+        return []
+        
+    chunks = list(stream_incidents_csv_chunks(mock_query))
+    assert len(chunks) == 1
+    assert "Incident ID" in chunks[0]
+
+def test_stream_incidents_csv_chunks_memory_efficient():
+    """Verify that entire dataset is not accumulated in memory."""
+    def mock_query(limit, offset):
+        if offset >= 50:
+            return []
+        return [{"incident_id": f"INC-{offset+i}"} for i in range(min(limit, 50 - offset))]
+        
+    stream = stream_incidents_csv_chunks(mock_query, batch_size=10)
+    
+    header = next(stream)
+    assert "Incident ID" in header
+    
+    first_batch = next(stream)
+    assert "INC-0" in first_batch
+    assert "INC-9" in first_batch
+    assert "INC-10" not in first_batch
+
+def test_stream_incidents_csv_chunks_escaping():
+    def mock_query(limit, offset):
+        if offset > 0:
+            return []
+        return [{
+            "incident_id": "INC-1",
+            "document_a": "comma, in name.pdf",
+            "document_b": 'quote" in name.pdf',
+            "similarity_score": 0.5
+        }]
+        
+    chunks = list(stream_incidents_csv_chunks(mock_query))
+    assert len(chunks) == 2
+    data = chunks[1]
+    assert '"comma, in name.pdf"' in data
+    assert 'quote"" in name.pdf' in data
 
