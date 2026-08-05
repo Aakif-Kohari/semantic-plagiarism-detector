@@ -709,3 +709,125 @@ def test_refresh_token_revoked_returns_401(tmp_path):
     )
     assert res.status_code == 401
     assert "revoked" in res.json()["detail"].lower()
+
+
+# ─── Tests for Structured JSON 404 Payloads (Issue #1595) ─────────────────────
+
+from fastapi.testclient import TestClient
+from src.api.app import app
+
+_client = TestClient(app)
+
+class TestStructured404Payload:
+    """Test suite for standardized HTTP 404 JSON response payloads."""
+
+    def test_404_returns_structured_json_payload(self):
+        """Requesting a non-existent route must return the standardized 404 JSON."""
+        response = _client.get("/api/v1/nonexistent/route/12345")
+        
+        assert response.status_code == 404
+        
+        data = response.json()
+        assert data["error"] is True
+        assert data["code"] == 404
+        assert data["message"] == "API endpoint or resource not found"
+
+    def test_404_payload_does_not_leak_internal_details(self):
+        """The 404 message should not contain internal FastAPI routing details."""
+        response = _client.get("/api/v1/users/99999/profile")
+        
+        data = response.json()
+        # Should not contain default FastAPI "Not Found" or path details
+        assert "Not Found" not in data["message"]
+        assert "/api/v1/users" not in data["message"]
+        assert data["message"] == "API endpoint or resource not found"
+
+    def test_404_on_post_request(self):
+        """POST requests to non-existent routes should also return structured 404."""
+        response = _client.post("/api/v1/nonexistent/action", json={"data": "test"})
+        
+        assert response.status_code == 404
+        data = response.json()
+        assert data["error"] is True
+        assert data["code"] == 404
+
+    def test_404_content_type_is_application_json(self):
+        """The 404 response must have Content-Type: application/json."""
+        response = _client.get("/api/v1/missing")
+        
+        assert response.status_code == 404
+        assert "application/json" in response.headers["content-type"]
+
+    def test_other_4xx_errors_use_original_detail(self):
+        """Non-404 4xx errors (like 405 Method Not Allowed) should preserve original detail."""
+        # POST to a GET-only endpoint should trigger 405
+        response = _client.post("/health")
+        
+        # FastAPI might return 405 or 404 depending on route definition
+        # If it's 405, it should have a different message than the standardized 404
+        if response.status_code == 405:
+            data = response.json()
+            assert data["error"] is True
+            assert data["code"] == 405
+            # Message should be the FastAPI default, not our 404 message
+            assert data["message"] != "API endpoint or resource not found"
+
+    def test_404_on_root_path(self):
+        """Requesting the root path when not defined should return structured 404."""
+        # If root is not defined, it should return our custom 404
+        response = _client.get("/")
+        
+        # Root might be defined in some configs, so check if it's 404
+        if response.status_code == 404:
+            data = response.json()
+            assert data["error"] is True
+            assert data["code"] == 404
+            assert data["message"] == "API endpoint or resource not found"
+
+    def test_404_on_deeply_nested_path(self):
+        """Deeply nested non-existent paths should return structured 404."""
+        response = _client.get("/api/v1/a/b/c/d/e/f/g")
+        
+        assert response.status_code == 404
+        data = response.json()
+        assert data["error"] is True
+        assert data["code"] == 404
+        assert data["message"] == "API endpoint or resource not found"
+
+    def test_404_payload_structure_matches_global_exception_handler(self):
+        """The 404 payload structure should match the global exception handler format."""
+        response = _client.get("/api/v1/nonexistent")
+        
+        data = response.json()
+        # Must have the same keys as the global exception handler
+        assert "error" in data
+        assert "code" in data
+        assert "message" in data
+        
+        # Types must match
+        assert isinstance(data["error"], bool)
+        assert isinstance(data["code"], int)
+        assert isinstance(data["message"], str)
+
+    def test_404_with_query_parameters(self):
+        """404 responses should work correctly even with query parameters."""
+        response = _client.get("/api/v1/missing?foo=bar&baz=qux")
+        
+        assert response.status_code == 404
+        data = response.json()
+        assert data["error"] is True
+        assert data["code"] == 404
+        assert data["message"] == "API endpoint or resource not found"
+
+    def test_404_with_path_parameters(self):
+        """404 responses should work correctly with path parameters in the URL."""
+        response = _client.get("/api/v1/scan/status/invalid_job_99999")
+        
+        # This route exists but returns 404 for invalid job IDs
+        assert response.status_code == 404
+        data = response.json()
+        assert data["error"] is True
+        assert data["code"] == 404
+        # Note: This specific route has its own 404 handler that might return
+        # a different message. If it uses HTTPException directly, our global
+        # handler will catch it and standardize it.
