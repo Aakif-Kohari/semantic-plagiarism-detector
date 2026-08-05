@@ -20,6 +20,8 @@ from src.db.auth import (
     set_user_theme,
     update_password,
     get_security_audit_logs,
+    get_security_audit_log_count,
+    get_distinct_audit_event_types,
     verify_user,
     update_user_profile,
     get_all_users,
@@ -148,6 +150,25 @@ def test_get_security_audit_logs_invalid_limit_offset(mock_audit_db):
         get_security_audit_logs(offset=-1)
 
 
+def test_get_security_audit_logs_date_filter(mock_audit_db):
+    logs = get_security_audit_logs(
+        start_date="2023-01-02 00:00:00", end_date="2023-01-02 23:59:59"
+    )
+    assert len(logs) == 1
+    assert logs[0]["username"] == "bob"
+
+
+def test_get_security_audit_log_count(mock_audit_db):
+    assert get_security_audit_log_count() == 3
+    assert get_security_audit_log_count(username="alice") == 2
+    assert get_security_audit_log_count(event_type="logout") == 1
+
+
+def test_get_distinct_audit_event_types(mock_audit_db):
+    events = get_distinct_audit_event_types()
+    assert set(events) == {"login", "logout"}
+
+
 def test_2fa_flow():
     username = f"user2fa_{uuid.uuid4().hex[:8]}"
     add_user(username, "pass1234567!")
@@ -200,6 +221,7 @@ def test_suspend_account():
 def test_sqlite_file_lock_exception(mock_db):
     """Test that acquiring an exclusive lock on SQLite database triggers a clean sqlite3.Error when attempting add_user."""
     import src.db.auth
+
     conn = sqlite3.connect(src.db.auth._DB_PATH, timeout=0.1)
     conn.execute("BEGIN EXCLUSIVE TRANSACTION")
     conn.execute("INSERT INTO users (username, password) VALUES ('lock_dummy', 'pass')")
@@ -230,6 +252,7 @@ def test_user_theme(mock_db):
 def test_delete_user_removes_user_row_and_audit_log(mock_db):
     """delete_user() must remove the user row and associated security_audit_log entries."""
     import src.db.auth
+
     user = f"user_{uuid.uuid4().hex[:8]}"
     add_user(user, "password123")
 
@@ -259,6 +282,7 @@ def test_delete_user_removes_user_row_and_audit_log(mock_db):
 def test_delete_user_removes_matching_session_and_authorization_rows(mock_db):
     """delete_user() should remove matching session and authorization rows for the deleted user."""
     import src.db.auth
+
     user = f"user_{uuid.uuid4().hex[:8]}"
     add_user(user, "password123")
 
