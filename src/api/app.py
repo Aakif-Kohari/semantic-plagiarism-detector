@@ -160,6 +160,58 @@ async def global_exception_handler(request: Request, exc: Exception):
         },
     )
 
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+@app.exception_handler(StarletteHTTPException)
+async def custom_http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Custom exception handler for HTTP errors to return standardized JSON payloads.
+
+    FastAPI's default 404 handler returns a plain text response or a simple
+    {"detail": "Not Found"} JSON. This handler intercepts all HTTP exceptions
+    and returns a structured JSON payload that matches the overall API response
+    formatting used by other endpoints and the global exception handler.
+
+    For 404 Not Found errors specifically, it returns a standardized message
+    to prevent information leakage about internal routing structures.
+
+    Args:
+        request: The incoming Starlette Request object.
+        exc: The raised StarletteHTTPException containing status code and detail.
+
+    Returns:
+        A JSONResponse with the standardized error payload format.
+    """
+    # Determine the appropriate status code
+    status_code = exc.status_code
+    
+    # For 404 errors, use a standardized message to prevent route enumeration
+    if status_code == 404:
+        message = "API endpoint or resource not found"
+    else:
+        # For other HTTP errors, use the detail provided by FastAPI/Starlette
+        message = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+
+    # Log the error for monitoring and debugging purposes
+    # Use WARNING level for 4xx client errors, ERROR for 5xx server errors
+    log_level = logging.WARNING if 400 <= status_code < 500 else logging.ERROR
+    logger.log(
+        log_level,
+        "HTTP %d error on %s %s: %s",
+        status_code,
+        request.method,
+        request.url.path,
+        message,
+    )
+
+    # Return the standardized JSON error payload
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": True,
+            "code": status_code,
+            "message": message,
+        },
+    )
 
 app.add_exception_handler(RateLimitExceeded, custom_rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
