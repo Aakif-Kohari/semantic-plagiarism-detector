@@ -46,6 +46,20 @@ def table_exists(connection: sqlite3.Connection, table_name: str) -> bool:
     return row is not None
 
 
+def check_table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    """Verify that a target table exists by querying sqlite_master."""
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table' AND name = ?
+        LIMIT 1
+        """,
+        (str(table_name),),
+    ).fetchone()
+    return row is not None
+
+
 def column_exists(
     connection: sqlite3.Connection,
     table_name: str,
