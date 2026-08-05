@@ -5,6 +5,8 @@ import fitz  # PyMuPDF
 from PIL import Image
 from pypdf import PdfReader, PdfWriter
 
+Image.MAX_IMAGE_PIXELS = 50_000_000
+
 logger = logging.getLogger(__name__)
 
 
@@ -181,6 +183,8 @@ def _strip_image_metadata(file_bytes: bytes) -> bytes:    """
             image_without_exif.save(out_io, format=save_format)
 
             return out_io.getvalue()
+    except Image.DecompressionBombError:
+        raise ValueError("Image dimensions exceed security safety limits.")
     except ValueError:
         # Re-raise ValueError to ensure safety limits are strictly enforced
         raise
