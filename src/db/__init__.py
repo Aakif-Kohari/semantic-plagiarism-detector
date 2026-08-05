@@ -33,6 +33,7 @@ from .corpus_db import (
 from .incidents import (
     get_recent_incidents,
     log_incident,
+    get_incidents_by_assignment,
 )
 from .common import with_sqlite_retry
 
@@ -68,6 +69,7 @@ __all__ = [
     "get_deleted_documents_count",
     "get_recent_incidents",
     "log_incident",
+    "get_incidents_by_assignment",
 ]
 
 
