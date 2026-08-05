@@ -652,3 +652,65 @@ def test_fts5_triggers_exist():
         assert "documents_au" in trigger_names
     finally:
         conn.close()
+
+
+def test_corpus_soft_delete_lifecycle():
+    """Verify document soft-deletion and soft-delete recovery workflows."""
+    filename = "lifecycle_test.pdf"
+    file_hash = "lifecycle_hash_999"
+
+    # 1. Add document and chunks
+    added = add_document(
+        filename=filename,
+        file_hash=file_hash,
+        student_name="Lifecycle Tester",
+        class_section="CS 101",
+        assignment_title="Lifecycle Assignment",
+    )
+    assert added is True
+
+    dummy_embedding = np.random.rand(384).astype(np.float32)
+    add_chunks([(1000, filename, 0, "Initial paragraph content", dummy_embedding)])
+
+    # Verify present in active queries initially
+    active_docs = get_all_documents(include_deleted=False)
+    assert len(active_docs) == 1
+    assert active_docs[0]["filename"] == filename
+
+    active_chunks = get_chunk_registry()
+    assert len(active_chunks) == 1
+    assert active_chunks[0].doc_name == filename
+
+    assert get_total_document_count() == 1
+    assert get_deleted_documents_count() == 0
+
+    # 2. Soft delete the document
+    soft_delete_document(filename)
+
+    # Verify excluded from active queries
+    assert len(get_all_documents(include_deleted=False)) == 0
+    assert len(get_chunk_registry()) == 0
+    assert get_total_document_count() == 0
+    assert get_deleted_documents_count() == 1
+
+    # Verify present in get_deleted_documents
+    deleted_docs = get_deleted_documents()
+    assert len(deleted_docs) == 1
+    assert deleted_docs[0]["filename"] == filename
+
+    # 3. Restore the document
+    restore_document(filename)
+
+    # Verify included in active queries again
+    active_docs_after = get_all_documents(include_deleted=False)
+    assert len(active_docs_after) == 1
+    assert active_docs_after[0]["filename"] == filename
+
+    active_chunks_after = get_chunk_registry()
+    assert len(active_chunks_after) == 1
+    assert active_chunks_after[0].doc_name == filename
+    assert active_chunks_after[0].chunk_text == "Initial paragraph content"
+
+    assert get_total_document_count() == 1
+    assert get_deleted_documents_count() == 0
+
