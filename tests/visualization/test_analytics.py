@@ -173,7 +173,7 @@ def test_plot_similarity_boxplot_fallback_keys():
 
     assert len(fig.data) == 1
     assert list(fig.data[0].y) == [0.9, 0.5]
-import plotly.graph_objects as go
+
 
 from src.visualization.analytics import plot_similarity_histogram
 
@@ -199,6 +199,29 @@ def test_plot_similarity_histogram_uses_color_gradient():
 def test_plot_similarity_histogram_empty_scores():
     fig = plot_similarity_histogram([])
 
+    assert isinstance(fig, go.Figure)
+    assert len(fig.data) == 0
+    assert len(fig.layout.annotations) == 1
+
+
+def test_plot_processing_time_breakdown_with_data():
+    from src.visualization.analytics import plot_processing_time_breakdown
+
+    timings = [
+        {"stage_name": "Text Parsing", "duration_seconds": 0.45},
+        {"stage_name": "Embedding Generation", "duration_seconds": 1.20},
+        {"stage_name": "FAISS Search", "duration_seconds": 0.15},
+    ]
+    fig = plot_processing_time_breakdown(timings)
+    assert isinstance(fig, go.Figure)
+    assert len(fig.data) == 1
+    assert list(fig.data[0].x) == ["Text Parsing", "Embedding Generation", "FAISS Search"]
+
+
+def test_plot_processing_time_breakdown_empty():
+    from src.visualization.analytics import plot_processing_time_breakdown
+
+    fig = plot_processing_time_breakdown(None)
     assert isinstance(fig, go.Figure)
     assert len(fig.data) == 0
     assert len(fig.layout.annotations) == 1
