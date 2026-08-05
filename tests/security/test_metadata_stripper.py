@@ -119,3 +119,17 @@ def test_strip_palette_image_preserves_colors():
         assert out_image.mode == "RGBA"
         pixel = out_image.getpixel((5, 5))
     assert pixel == (7, 0, 248, 255)
+
+
+def test_strip_image_metadata_decompression_bomb(monkeypatch):
+    # Mock Image.open to raise DecompressionBombError
+    def mock_open(*args, **kwargs):
+        raise Image.DecompressionBombError("Image size exceeds limit")
+    
+    monkeypatch.setattr(Image, "open", mock_open)
+    
+    img_bytes = b"fake image bytes"
+    with pytest.raises(ValueError) as excinfo:
+        strip_exif_metadata(img_bytes, "test.jpg")
+    
+    assert str(excinfo.value) == "Image dimensions exceed security safety limits."
