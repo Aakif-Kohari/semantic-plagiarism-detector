@@ -9,6 +9,7 @@ import hashlib
 import logging
 import os
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from src.core.app_config import CORPUS_DB_PATH, FALLBACK_CORPUS_DB_PATH
@@ -189,6 +190,43 @@ def purge_expired_translation_cache(days_old: int = 60) -> int:
             return deleted_count
     except sqlite3.Error as e:
         logger.error(f"Failed to purge expired translation cache: {e}")
+        return 0
+
+
+def purge_translation_cache_older_than(days: int = 30) -> int:
+    """
+    Purge translation cache entries older than the specified number of days.
+
+    Args:
+        days: The age in days after which a cache entry is considered expired.
+              Defaults to 30 days.
+
+    Returns:
+        int: The number of rows successfully deleted from the cache.
+    """
+    _init_db()
+    if days < 0:
+        raise ValueError("days must be a non-negative integer.")
+
+    cutoff_dt = datetime.now(timezone.utc) - timedelta(days=days)
+    # SQLite CURRENT_TIMESTAMP defaults to UTC string format YYYY-MM-DD HH:MM:SS
+    cutoff_str = cutoff_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM translation_cache WHERE created_at < ?",
+                (cutoff_str,),
+            )
+            deleted_count = cursor.rowcount
+            conn.commit()
+            logger.info(
+                f"Purged {deleted_count} translation cache entries older than {days} days."
+            )
+            return deleted_count
+    except sqlite3.Error as e:
+        logger.error(f"Failed to purge translation cache: {e}")
         return 0
 
 
