@@ -20,7 +20,7 @@ from src.core.config import (
     severity_from_score,
 )
 from src.db.common import with_sqlite_retry
-from src.db.migrations import migrate_corpus_database
+from src.db.migrations import migrate_corpus_database, table_exists
 from src.db.schemas import MatchResult
 
 # Seed the incidents default DB path from the centralized app_config.
@@ -470,6 +470,17 @@ def get_incidents_by_assignment(
     init_incident_db(db_path)
     with closing(_get_connection(db_path)) as conn:
         conn.row_factory = sqlite3.Row
+        if table_exists(conn, "incidents"):
+            rows = conn.execute(
+                """
+                SELECT * FROM incidents
+                WHERE assignment_title = ?
+                ORDER BY timestamp DESC
+                """,
+                (assignment_title,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
         rows = conn.execute(
             """
             SELECT DISTINCT i.incident_id, i.document_a, i.document_b,
@@ -900,7 +911,7 @@ def purge_old_incidents(
             """,
             (status, days_old),
         )
-conn.commit()
+        conn.commit()
         return cursor.rowcount
 
 

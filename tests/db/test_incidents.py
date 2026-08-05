@@ -586,13 +586,27 @@ def test_archive_old_incidents_moves_rows_to_archive_table(test_db):
 
 def test_get_incidents_by_assignment(test_db):
     """Verify that get_incidents_by_assignment filters incidents by assignment title."""
-    from src.db.corpus_db import add_document
+    import sqlite3
 
     # 1. Add mock documents with matching and non-matching assignment titles
-    add_document("doc1.pdf", "hash1", assignment_title="CS 101 Homework 1", db_path=test_db)
-    add_document("doc2.pdf", "hash2", assignment_title="CS 101 Homework 1", db_path=test_db)
-    add_document("doc3.pdf", "hash3", assignment_title="CS 101 Homework 2", db_path=test_db)
-    add_document("doc4.pdf", "hash4", assignment_title="CS 101 Homework 2", db_path=test_db)
+    with sqlite3.connect(test_db) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO documents (filename, file_hash, upload_date, assignment_title) VALUES (?, ?, ?, ?)",
+            ("doc1.pdf", "hash1", "2026-01-01T00:00:00Z", "CS 101 Homework 1"),
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO documents (filename, file_hash, upload_date, assignment_title) VALUES (?, ?, ?, ?)",
+            ("doc2.pdf", "hash2", "2026-01-01T00:00:00Z", "CS 101 Homework 1"),
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO documents (filename, file_hash, upload_date, assignment_title) VALUES (?, ?, ?, ?)",
+            ("doc3.pdf", "hash3", "2026-01-01T00:00:00Z", "CS 101 Homework 2"),
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO documents (filename, file_hash, upload_date, assignment_title) VALUES (?, ?, ?, ?)",
+            ("doc4.pdf", "hash4", "2026-01-01T00:00:00Z", "CS 101 Homework 2"),
+        )
+        conn.commit()
 
     # 2. Sync mock incidents
     # Incident matching assignment "CS 101 Homework 1"
@@ -620,4 +634,39 @@ def test_get_incidents_by_assignment(test_db):
 
     # 5. Query non-existent assignment
     results_none = get_incidents_by_assignment("CS 101 Homework 3", db_path=test_db)
-    assert len(results_none) == 0
+    assert len(results_none) == 0
+
+
+def test_get_incidents_by_assignment_direct_table(tmp_path):
+    """Verify get_incidents_by_assignment queries 'incidents' table directly when it exists."""
+    import sqlite3
+    db_file = tmp_path / "custom_incidents.db"
+    with sqlite3.connect(db_file) as conn:
+        conn.execute(
+            """
+            CREATE TABLE incidents (
+                id INTEGER PRIMARY KEY,
+                assignment_title TEXT,
+                timestamp TEXT,
+                details TEXT
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO incidents (assignment_title, timestamp, details) VALUES (?, ?, ?)",
+            ("Essay 1", "2026-05-01T10:00:00Z", "Incident A"),
+        )
+        conn.execute(
+            "INSERT INTO incidents (assignment_title, timestamp, details) VALUES (?, ?, ?)",
+            ("Essay 1", "2026-05-02T10:00:00Z", "Incident B"),
+        )
+        conn.execute(
+            "INSERT INTO incidents (assignment_title, timestamp, details) VALUES (?, ?, ?)",
+            ("Essay 2", "2026-05-03T10:00:00Z", "Incident C"),
+        )
+        conn.commit()
+
+    res = get_incidents_by_assignment("Essay 1", db_path=db_file)
+    assert len(res) == 2
+    assert res[0]["details"] == "Incident B"
+    assert res[1]["details"] == "Incident A"
