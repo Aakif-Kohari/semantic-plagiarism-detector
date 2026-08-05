@@ -65,11 +65,10 @@ from src.utils.filename import (
 )
 
 
-
 from typing import Any
 
 try:
-    from streamlit_plotly_events import plotly_events # type: ignore
+    from streamlit_plotly_events import plotly_events  # type: ignore
 except ImportError:  # pragma: no cover - optional dependency
     plotly_events = None
 
@@ -178,7 +177,9 @@ def run_pipeline(file_bytes_dict, ocr_language, ocr_dpi, chunk_size, chunk_overl
             if isinstance(chunk_vectors, np.ndarray):
                 doc_embeddings.append(np.mean(chunk_vectors, axis=0))
             else:
-                doc_embeddings.append(np.mean(np.asarray(chunk_vectors, dtype=float), axis=0))
+                doc_embeddings.append(
+                    np.mean(np.asarray(chunk_vectors, dtype=float), axis=0)
+                )
 
         if doc_embeddings:
             doc_matrix = np.asarray(doc_embeddings, dtype=float)
@@ -342,6 +343,7 @@ from src.db.incidents import (
     get_all_incidents,
     sync_flagged_incidents,
 )
+from src.utils.bulk_export import create_documents_bulk_zip_archive
 from src.utils.pdf_report import generate_plagiarism_report, highlight_pdf_matches
 from src.utils.badge_generator import (
     generate_badge_png,
@@ -440,7 +442,7 @@ except ImportError:
 
 # ── Auto-refresh component for the Live Incident Stream (Issue #1384) ───────
 try:
-    from streamlit_autorefresh import st_autorefresh # type: ignore
+    from streamlit_autorefresh import st_autorefresh  # type: ignore
 except ImportError:
     st_autorefresh = None
     logger.warning(
@@ -724,7 +726,9 @@ if SessionKeys.MODEL_LOAD_TIME not in st.session_state:
     with st.spinner("Initializing Vector Embedding Model..."):
         _start_time = time.perf_counter()
         EmbeddingModelManager.get_instance().get_model()
-        st.session_state[SessionKeys.MODEL_LOAD_TIME] = time.perf_counter() - _start_time
+        st.session_state[SessionKeys.MODEL_LOAD_TIME] = (
+            time.perf_counter() - _start_time
+        )
 
 st.markdown(back_to_top_html(), unsafe_allow_html=True)
 inject_css()
@@ -732,9 +736,13 @@ inject_css()
 
 def save_preferences_callback():
     """Persist settings to user DB profile when modified."""
-    if st.session_state.get(SessionKeys.AUTHENTICATED) and st.session_state.get(SessionKeys.USERNAME):
+    if st.session_state.get(SessionKeys.AUTHENTICATED) and st.session_state.get(
+        SessionKeys.USERNAME
+    ):
         prefs = {
-            "threshold": st.session_state.get(SessionKeys.THRESHOLD_SLIDER, PLAGIARISM_THRESHOLD),
+            "threshold": st.session_state.get(
+                SessionKeys.THRESHOLD_SLIDER, PLAGIARISM_THRESHOLD
+            ),
             "theme": st.session_state.get("theme_selector", "Light"),
         }
         update_user_preferences(st.session_state[SessionKeys.USERNAME], prefs)
@@ -779,7 +787,12 @@ else:
 if last_interaction and st.session_state.get(SessionKeys.AUTHENTICATED, False):
     elapsed_time = time.time() - last_interaction
     if elapsed_time > TIMEOUT_LIMIT:
-        for key in [SessionKeys.AUTHENTICATED, SessionKeys.USERNAME, SessionKeys.ROLE, SessionKeys.LAST_INTERACTION]:
+        for key in [
+            SessionKeys.AUTHENTICATED,
+            SessionKeys.USERNAME,
+            SessionKeys.ROLE,
+            SessionKeys.LAST_INTERACTION,
+        ]:
             if key in st.session_state:
                 del st.session_state[key]
         clear_session(SESSION_ID)
@@ -819,7 +832,9 @@ if not st.session_state.get(SessionKeys.AUTHENTICATED, False):
                 cache_session_state(SESSION_ID, SessionKeys.AUTHENTICATED, True)
                 cache_session_state(SESSION_ID, SessionKeys.USERNAME, _email)
                 cache_session_state(SESSION_ID, SessionKeys.ROLE, _role)
-                cache_session_state(SESSION_ID, SessionKeys.LAST_INTERACTION, time.time())
+                cache_session_state(
+                    SESSION_ID, SessionKeys.LAST_INTERACTION, time.time()
+                )
                 st.query_params.clear()
                 st.rerun()
         else:
@@ -849,7 +864,7 @@ if not st.session_state.get(SessionKeys.AUTHENTICATED, False):
                 username = st.session_state.get(SessionKeys.PENDING_USERNAME)
                 enabled, otp_secret = get_2fa_status(username)
                 if enabled and otp_secret:
-                    import pyotp # type: ignore
+                    import pyotp  # type: ignore
 
                     totp = pyotp.TOTP(otp_secret)
                     if totp.verify(otp_code.strip()):
@@ -862,7 +877,9 @@ if not st.session_state.get(SessionKeys.AUTHENTICATED, False):
                         cache_session_state(SESSION_ID, SessionKeys.AUTHENTICATED, True)
                         cache_session_state(SESSION_ID, SessionKeys.USERNAME, username)
                         cache_session_state(SESSION_ID, SessionKeys.ROLE, role)
-                        cache_session_state(SESSION_ID, SessionKeys.LAST_INTERACTION, time.time())
+                        cache_session_state(
+                            SESSION_ID, SessionKeys.LAST_INTERACTION, time.time()
+                        )
                         prefs = get_user_preferences(username)
                         st.session_state.threshold = prefs.get(
                             "threshold", DEFAULT_THRESHOLDS.plagiarism
@@ -909,7 +926,9 @@ if not st.session_state.get(SessionKeys.AUTHENTICATED, False):
                 cache_session_state(SESSION_ID, SessionKeys.AUTHENTICATED, True)
                 cache_session_state(SESSION_ID, SessionKeys.USERNAME, username_input)
                 cache_session_state(SESSION_ID, SessionKeys.ROLE, role)
-                cache_session_state(SESSION_ID, SessionKeys.LAST_INTERACTION, time.time())
+                cache_session_state(
+                    SESSION_ID, SessionKeys.LAST_INTERACTION, time.time()
+                )
                 st.rerun()
         else:
             st.error("Invalid username or password.")
@@ -946,7 +965,11 @@ def logout_dialog():
             timestamp = datetime.now(timezone.utc).isoformat()
             logger.info("User '%s' logged out at %s", username, timestamp)
 
-            for key in [SessionKeys.AUTHENTICATED, SessionKeys.USERNAME, SessionKeys.ROLE]:
+            for key in [
+                SessionKeys.AUTHENTICATED,
+                SessionKeys.USERNAME,
+                SessionKeys.ROLE,
+            ]:
                 if key in st.session_state:
                     del st.session_state[key]
             clear_session(SESSION_ID)
@@ -960,7 +983,9 @@ with header_col:
     st.subheader("📚 Corpus Overview")
 
 with action_col1:
-    if st.button("🔄 Refresh Corpus Data", key="refresh_corpus_btn", use_container_width=True):
+    if st.button(
+        "🔄 Refresh Corpus Data", key="refresh_corpus_btn", use_container_width=True
+    ):
         keys_to_clear = [
             SessionKeys.ANALYSIS_RESULTS,
             SessionKeys.ANALYSIS_FILE_SIGNATURE,
@@ -977,8 +1002,13 @@ with action_col1:
         st.rerun()
 
 with action_col2:
-    if st.button("🗑️ Clear All Data", key="open_clear_dialog_btn", type="secondary", use_container_width=True):
-        clear_all_dialog() # type: ignore
+    if st.button(
+        "🗑️ Clear All Data",
+        key="open_clear_dialog_btn",
+        type="secondary",
+        use_container_width=True,
+    ):
+        clear_all_dialog()  # type: ignore
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -1148,15 +1178,17 @@ if not selected_classes:
     # Model load time
     if SessionKeys.MODEL_LOAD_TIME in st.session_state:
         st.divider()
-        st.caption(f"⚡ Vector Model Loaded in {st.session_state[SessionKeys.MODEL_LOAD_TIME]:.2f} seconds")
+        st.caption(
+            f"⚡ Vector Model Loaded in {st.session_state[SessionKeys.MODEL_LOAD_TIME]:.2f} seconds"
+        )
 
     # System Health Widget
     with st.expander("🖥️ System Health", expanded=False):
         try:
             memory_info = psutil.virtual_memory()
             ram_usage_percent = memory_info.percent
-            ram_total_gb = memory_info.total / (1024 ** 3)
-            ram_available_gb = memory_info.available / (1024 ** 3)
+            ram_total_gb = memory_info.total / (1024**3)
+            ram_available_gb = memory_info.available / (1024**3)
 
             if ram_usage_percent >= 90:
                 ram_indicator = "🔴"
@@ -1173,13 +1205,12 @@ if not selected_classes:
                 f"({ram_status_text})"
             )
             st.caption(
-                f"Total: {ram_total_gb:.1f} GB · "
-                f"Available: {ram_available_gb:.1f} GB"
+                f"Total: {ram_total_gb:.1f} GB · Available: {ram_available_gb:.1f} GB"
             )
 
             disk_usage = psutil.disk_usage(str(ROOT_DIR))
-            free_disk_gb = disk_usage.free / (1024 ** 3)
-            total_disk_gb = disk_usage.total / (1024 ** 3)
+            free_disk_gb = disk_usage.free / (1024**3)
+            total_disk_gb = disk_usage.total / (1024**3)
             disk_usage_percent = disk_usage.percent
 
             if disk_usage_percent >= 90:
@@ -1192,10 +1223,7 @@ if not selected_classes:
             st.markdown(
                 f"**💿 Disk Space:** {disk_indicator} {disk_usage_percent:.1f}% used"
             )
-            st.caption(
-                f"Free: {free_disk_gb:.1f} GB · "
-                f"Total: {total_disk_gb:.1f} GB"
-            )
+            st.caption(f"Free: {free_disk_gb:.1f} GB · Total: {total_disk_gb:.1f} GB")
 
             st.divider()
             st.markdown("**🗄️ Database Status**")
@@ -1259,14 +1287,16 @@ try:
     from src.db.auth import get_upload_count
     from src.db.corpus_db import get_total_document_count
     from src.db.incidents import get_all_incidents, get_total_incidents_count
-    
+
     total_scans = get_upload_count()
     corpus_size = get_total_document_count()
     flagged_incidents = get_total_incidents_count()
-    
+
     _incidents = get_all_incidents(limit=10000)
     if _incidents:
-        avg_sim = sum(inc.get("similarity_score", 0.0) for inc in _incidents) / len(_incidents)
+        avg_sim = sum(inc.get("similarity_score", 0.0) for inc in _incidents) / len(
+            _incidents
+        )
     else:
         avg_sim = 0.0
 except Exception as e:
@@ -1372,7 +1402,7 @@ if user_role != "admin":
                             color = "#ff4b4b" if score >= 0.90 else "#ffa500"
 
                             with st.expander(
-                                f"#{rank} · {anon_doc_name} (chunk #{record.chunk_index+1}) "
+                                f"#{rank} · {anon_doc_name} (chunk #{record.chunk_index + 1}) "
                                 f"— {score:.1%}",
                                 expanded=(rank == 1),
                             ):
@@ -1390,7 +1420,7 @@ if user_role != "admin":
                                     f"<div style='text-align:right;'>"
                                     f"<span style='background:{color};color:white;padding:3px 12px;"
                                     f"border-radius:10px;font-size:0.85rem;font-weight:700;'>"
-                                    f"Similarity: {score*100:.1f}%</span></div>",
+                                    f"Similarity: {score * 100:.1f}%</span></div>",
                                     unsafe_allow_html=True,
                                 )
 
@@ -1421,7 +1451,7 @@ else:
             st.info(f"📂 Loaded existing FAISS index with {faiss_index.ntotal} vectors")
     else:
         st.markdown(
-            "<span style='color:#999;font-size:0.85rem;'>" "○ No index loaded</span>",
+            "<span style='color:#999;font-size:0.85rem;'>○ No index loaded</span>",
             unsafe_allow_html=True,
         )
     st.markdown("---")
@@ -1547,33 +1577,115 @@ if user_role == "admin":
         )
 
         st.markdown("---")
-        st.markdown("### 📁 Document Management")
+        st.markdown("### 📁 Document Management & Bulk Export")
         existing_docs = get_all_documents()
         if existing_docs:
             st.write(f"**{len(existing_docs)}** documents in database")
-            
-            import pandas as pd
-            from src.db.corpus_db import get_document_word_counts, get_document_char_counts
+
+            from src.db.corpus_db import (
+                get_document_char_counts,
+                get_document_word_counts,
+            )
+
             word_counts = get_document_word_counts()
             char_counts = get_document_char_counts()
-            
-            df = pd.DataFrame([{"filename": doc["filename"]} for doc in existing_docs])
-            df["word_count"] = df["filename"].map(word_counts).fillna(0).astype(int)
-            df["char_count"] = df["filename"].map(char_counts).fillna(0).astype(int)
-            
-            styled_df = df.style.format({
-                "word_count": "{:,} words",
-                "char_count": "{:,} chars"
-            })
-            st.dataframe(styled_df, use_container_width=True)
 
+            doc_rows = []
             for doc in existing_docs:
+                fn = (
+                    doc.filename
+                    if hasattr(doc, "filename")
+                    else (doc.get("filename") if isinstance(doc, dict) else str(doc))
+                )
+                doc_rows.append(
+                    {
+                        "Select": False,
+                        "Filename": fn,
+                        "Word Count": word_counts.get(fn, 0),
+                        "Char Count": char_counts.get(fn, 0),
+                    }
+                )
+
+            corpus_df = pd.DataFrame(doc_rows)
+
+            sel_col1, sel_col2 = st.columns(2)
+            with sel_col1:
+                if st.button(
+                    "☑️ Select All",
+                    key="sidebar_select_all_corpus_btn",
+                    use_container_width=True,
+                ):
+                    st.session_state["corpus_select_all_toggle"] = True
+                    st.rerun()
+            with sel_col2:
+                if st.button(
+                    "⬜ Clear",
+                    key="sidebar_clear_corpus_btn",
+                    use_container_width=True,
+                ):
+                    st.session_state["corpus_select_all_toggle"] = False
+                    st.rerun()
+
+            if st.session_state.get("corpus_select_all_toggle", False):
+                corpus_df["Select"] = True
+
+            edited_df = st.data_editor(
+                corpus_df,
+                column_config={
+                    "Select": st.column_config.CheckboxColumn(
+                        "Select",
+                        default=False,
+                        help="Select for bulk ZIP export",
+                    ),
+                    "Filename": st.column_config.TextColumn("Filename", disabled=True),
+                    "Word Count": st.column_config.NumberColumn(
+                        "Word Count", format="%d words", disabled=True
+                    ),
+                    "Char Count": st.column_config.NumberColumn(
+                        "Char Count", format="%d chars", disabled=True
+                    ),
+                },
+                disabled=["Filename", "Word Count", "Char Count"],
+                hide_index=True,
+                key="sidebar_corpus_data_editor",
+                use_container_width=True,
+            )
+
+            selected_rows = edited_df[edited_df["Select"]]
+            selected_filenames = selected_rows["Filename"].tolist()
+
+            if selected_filenames:
+                zip_data = create_documents_bulk_zip_archive(selected_filenames)
+                st.download_button(
+                    label=f"📦 Export Selected as ZIP ({len(selected_filenames)})",
+                    data=zip_data,
+                    file_name=f"corpus_export_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.zip",
+                    mime="application/zip",
+                    key="sidebar_export_selected_zip_btn",
+                    use_container_width=True,
+                    type="primary",
+                )
+            else:
+                st.button(
+                    "📦 Export Selected as ZIP (0)",
+                    disabled=True,
+                    key="sidebar_export_zip_disabled_btn",
+                    use_container_width=True,
+                )
+
+            st.markdown("---")
+            for doc in existing_docs:
+                fn = (
+                    doc.filename
+                    if hasattr(doc, "filename")
+                    else (doc.get("filename") if isinstance(doc, dict) else str(doc))
+                )
                 col1, col2 = st.columns([3, 1])
                 with col1:
-                    st.text(f"📄 {doc['filename']}")
+                    st.text(f"📄 {fn}")
                 with col2:
-                    if st.button("🗑️", key=f"del_{doc['filename']}"):
-                        delete_document(doc["filename"])
+                    if st.button("🗑️", key=f"del_{fn}"):
+                        delete_document(fn)
                         embeddings_matrix = get_all_embeddings()
                         if embeddings_matrix.size > 0:
                             new_index = build_index_from_matrix(embeddings_matrix)
@@ -1589,7 +1701,7 @@ if user_role == "admin":
             key="clear_all_documents_button",
             use_container_width=True,
         ):
-            clear_all_dialog() # type: ignore
+            clear_all_dialog()  # type: ignore
         st.markdown("<br>", unsafe_allow_html=True)
 
         st.markdown("---")
@@ -1696,7 +1808,7 @@ if user_role != "admin":
                             color = "#ff4b4b" if score >= 0.90 else "#ffa500"
 
                             with st.expander(
-                                f"#{rank} · {anon_doc_name} (chunk #{record.chunk_index+1}) — {score:.1%}",
+                                f"#{rank} · {anon_doc_name} (chunk #{record.chunk_index + 1}) — {score:.1%}",
                                 expanded=(rank == 1),
                             ):
                                 cq, cm = st.columns(2)
@@ -1711,7 +1823,7 @@ if user_role != "admin":
 
                                 st.markdown(
                                     f"<div style='background:{color};color:white;padding:8px;border-radius:4px;text-align:center;'>"
-                                    f"Similarity: {score*100:.1f}%"
+                                    f"Similarity: {score * 100:.1f}%"
                                     f"</div>",
                                     unsafe_allow_html=True,
                                 )
@@ -2111,9 +2223,9 @@ with tab_warnings:
         )
 
         if st.button(button_label, key="toggle_warning_accordions"):
-            st.session_state[SessionKeys.WARNINGS_EXPAND_ALL] = (
-                not st.session_state[SessionKeys.WARNINGS_EXPAND_ALL]
-            )
+            st.session_state[SessionKeys.WARNINGS_EXPAND_ALL] = not st.session_state[
+                SessionKeys.WARNINGS_EXPAND_ALL
+            ]
             st.rerun()
 
         render_warning_controls(
@@ -2136,6 +2248,7 @@ with tab_faiss:
                 q_vec, faiss_index, registry, top_k=faiss_top_k, threshold=threshold
             )
             from app.components.faiss_results import render_faiss_results_ui
+
             render_faiss_results_ui(results, faiss_query.strip())
 
 
@@ -2155,7 +2268,11 @@ with tab_heatmap:
             plot_similarity_heatmap
         )(active_sim_df, threshold=threshold, theme_colors=get_colors())
 
-    doc_select_options = ["None"] + list(active_sim_df.columns) if active_sim_df is not None else ["None"]
+    doc_select_options = (
+        ["None"] + list(active_sim_df.columns)
+        if active_sim_df is not None
+        else ["None"]
+    )
     selected_highlight_doc = st.selectbox(
         "Highlight Document Node",
         options=doc_select_options,
@@ -2354,7 +2471,9 @@ with tab_settings:
 
         st.markdown("### 🔑 API Settings")
         st.caption("Active API Bearer Token for external REST API endpoints:")
-        api_bearer_token = os.getenv("API_BEARER_TOKEN", "default-token-secret-key-12345")
+        api_bearer_token = os.getenv(
+            "API_BEARER_TOKEN", "default-token-secret-key-12345"
+        )
         st.code(api_bearer_token, language=None)
 
         st.markdown("### 💾 Backup")
@@ -2396,14 +2515,24 @@ with tab_settings:
             data=json.dumps(
                 {
                     "theme": st.session_state.get("theme", "Light"),
-                    "threshold": st.session_state.get(SessionKeys.THRESHOLD_SLIDER, 0.75),
-                    "class_filter": st.session_state.get(SessionKeys.CLASS_FILTER_SELECTBOX, ""),
+                    "threshold": st.session_state.get(
+                        SessionKeys.THRESHOLD_SLIDER, 0.75
+                    ),
+                    "class_filter": st.session_state.get(
+                        SessionKeys.CLASS_FILTER_SELECTBOX, ""
+                    ),
                     "use_chunk_matrix": st.session_state.get(
                         SessionKeys.CHUNK_MATRIX_CHECKBOX, False
                     ),
-                    "faiss_top_k": st.session_state.get(SessionKeys.FAISS_TOP_K_SLIDER, 5),
-                    "chunk_size": st.session_state.get(SessionKeys.CHUNK_SIZE_SLIDER, 500),
-                    "chunk_overlap": st.session_state.get(SessionKeys.CHUNK_OVERLAP_SLIDER, 50),
+                    "faiss_top_k": st.session_state.get(
+                        SessionKeys.FAISS_TOP_K_SLIDER, 5
+                    ),
+                    "chunk_size": st.session_state.get(
+                        SessionKeys.CHUNK_SIZE_SLIDER, 500
+                    ),
+                    "chunk_overlap": st.session_state.get(
+                        SessionKeys.CHUNK_OVERLAP_SLIDER, 50
+                    ),
                     "ocr_language": st.session_state.get(
                         SessionKeys.OCR_LANGUAGE_SELECTOR, "eng"
                     ),
@@ -2502,4 +2631,3 @@ with _footer_col2:
         )
     else:
         st.caption("✅ Up to date")
-        
