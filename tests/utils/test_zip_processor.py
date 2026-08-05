@@ -2,12 +2,10 @@
 
 import io
 import zipfile
+
 import pytest
 
-from src.core.document_parser import (
-    CorruptedArchiveError,
-    extract_text_from_zip,
-)
+from src.core.document_parser import CorruptedArchiveError, extract_text_from_zip
 
 
 def _make_valid_zip_bytes(files: dict) -> bytes:
@@ -21,10 +19,12 @@ def _make_valid_zip_bytes(files: dict) -> bytes:
 
 def test_extract_zip_returns_text_from_valid_archive():
     """Verify valid ZIP with text documents extracts correctly."""
-    valid_zip = _make_valid_zip_bytes({
-        "doc1.txt": "This is document one content.",
-        "doc2.txt": "This is document two content.",
-    })
+    valid_zip = _make_valid_zip_bytes(
+        {
+            "doc1.txt": "This is document one content.",
+            "doc2.txt": "This is document two content.",
+        }
+    )
     result = extract_text_from_zip(valid_zip)
     assert "document one" in result
     assert "document two" in result
@@ -33,7 +33,7 @@ def test_extract_zip_returns_text_from_valid_archive():
 def test_extract_zip_handles_empty_archive():
     """Verify empty ZIP returns empty string."""
     buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as zf:
+    with zipfile.ZipFile(buf, "w"):
         pass
     result = extract_text_from_zip(buf.getvalue())
     assert result == ""
@@ -91,12 +91,13 @@ def test_extract_zip_handles_corrupted_inner_files():
     # This will still be a valid ZIP but the corrupted.txt may fail
     result = extract_text_from_zip(zip_bytes)
     assert "valid" in result
-import io
-import zipfile
 
-import pytest
 
-from src.utils.zip_processor import MAX_SINGLE_FILE_SIZE, process_zip_file
+from src.utils.zip_processor import (
+    MAX_SINGLE_FILE_SIZE,
+    MAX_TOTAL_DECOMPRESSED_SIZE,
+    process_zip_file,
+)
 
 
 def create_in_memory_zip(
@@ -257,21 +258,24 @@ def test_accepts_valid_nested_directories():
 
 
 def test_process_zip_bomb_safety_total_size():
-    """Verify that a ZIP file exceeding total decompressed safety limit is rejected."""
+    """Verify that a ZIP file exceeding the total decompressed safety limit is rejected."""
     from unittest.mock import patch
 
     info1 = zipfile.ZipInfo("file1.txt")
-    info1.file_size = 80 * 1024 * 1024
+    info1.file_size = MAX_TOTAL_DECOMPRESSED_SIZE // 2
+
     info2 = zipfile.ZipInfo("file2.txt")
-    info2.file_size = 80 * 1024 * 1024
+    info2.file_size = MAX_TOTAL_DECOMPRESSED_SIZE // 2
+
     info3 = zipfile.ZipInfo("file3.txt")
-    info3.file_size = 80 * 1024 * 1024
+    info3.file_size = 1  # Pushes total over the limit
 
     zip_bytes = create_in_memory_zip({"doc.txt": b"some content"})
 
     with patch("zipfile.ZipFile.infolist", return_value=[info1, info2, info3]):
         with pytest.raises(
-            ValueError, match="ZIP archive total decompressed size exceeds safety limit"
+            ValueError,
+            match="ZIP archive total decompressed size exceeds safety limit",
         ):
             process_zip_file(zip_bytes)
 
