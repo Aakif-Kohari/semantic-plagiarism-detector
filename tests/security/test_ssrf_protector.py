@@ -292,3 +292,46 @@ def test_validate_webhook_url_circular_redirect_loop_detected(mock_head, monkeyp
         SSRFSecurityException, match="Circular HTTP redirect loop detected"
     ):
         SSRFProtector.validate_webhook_url("https://example.com/a")
+@patch("src.security.ssrf_protector.socket.getaddrinfo")
+def test_validate_webhook_url_hexadecimal_localhost(mock_getaddrinfo, caplog):
+    """
+    Hexadecimal representation of localhost (0x7f000001) should resolve
+    to 127.0.0.1 and be blocked.
+    """
+    mock_getaddrinfo.return_value = [
+        (2, 1, 6, "", ("127.0.0.1", 443))
+    ]
+
+    with pytest.raises(
+        SSRFSecurityException,
+        match="Blocked loopback IP: 127.0.0.1",
+    ):
+        SSRFProtector.validate_webhook_url(
+            "https://0x7f000001/webhook"
+        )
+
+    assert (
+        "Blocked SSRF attempt to target URL: https://0x7f000001/webhook"
+        in caplog.text
+    )
+@patch("src.security.ssrf_protector.socket.getaddrinfo")
+def test_validate_webhook_url_ipv6_loopback_literal(mock_getaddrinfo, caplog):
+    """
+    IPv6 loopback literal (::1) should always be blocked.
+    """
+    mock_getaddrinfo.return_value = [
+        (10, 1, 6, "", ("::1", 443, 0, 0))
+    ]
+
+    with pytest.raises(
+        SSRFSecurityException,
+        match="Blocked loopback IP: ::1",
+    ):
+        SSRFProtector.validate_webhook_url(
+            "https://[::1]/webhook"
+        )
+
+    assert (
+        "Blocked SSRF attempt to target URL: https://[::1]/webhook"
+        in caplog.text
+    )
