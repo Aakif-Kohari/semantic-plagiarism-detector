@@ -1,22 +1,16 @@
 import asyncio
-import base64
-import hashlib
-import html
 import io as _io
 import logging
 import os
 import traceback
 import functools
 from pathlib import Path
-import sqlite3
 import sys
 import time
 from datetime import datetime, timezone
-from typing import Any
 
 import numpy as np
 import pandas as pd
-import plotly.io as pio
 import psutil
 import streamlit as st
 
@@ -33,8 +27,6 @@ from app.session_keys import SessionKeys
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-import base64
-import html
 import json
 
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -42,19 +34,11 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 # Standard / Third-party imports
-import time
-from src.utils.processing_time import ProcessingTimer, StageTiming
 from src.utils.temp_manager import purge_expired_temp_files
 
-import _io
-import psutil
 from dotenv import load_dotenv
-from datetime import datetime
 
 load_dotenv()
-import numpy as np
-import pandas as pd
-import streamlit as st
 
 from src.security.metadata_stripper import strip_exif_metadata
 from src.utils.filename import (
@@ -65,15 +49,11 @@ from src.utils.filename import (
 )
 
 
-
-from typing import Any
-
 try:
-    from streamlit_plotly_events import plotly_events # type: ignore
+    from streamlit_plotly_events import plotly_events  # type: ignore
 except ImportError:  # pragma: no cover - optional dependency
     plotly_events = None
 
-import logging
 from src.core.logging_config import setup_logging
 
 setup_logging()
@@ -178,7 +158,9 @@ def run_pipeline(file_bytes_dict, ocr_language, ocr_dpi, chunk_size, chunk_overl
             if isinstance(chunk_vectors, np.ndarray):
                 doc_embeddings.append(np.mean(chunk_vectors, axis=0))
             else:
-                doc_embeddings.append(np.mean(np.asarray(chunk_vectors, dtype=float), axis=0))
+                doc_embeddings.append(
+                    np.mean(np.asarray(chunk_vectors, dtype=float), axis=0)
+                )
 
         if doc_embeddings:
             doc_matrix = np.asarray(doc_embeddings, dtype=float)
@@ -258,31 +240,25 @@ if missing_env_vars:
 # ── Project Core & Utils Imports ──────────────────────────────────────────────
 from app.theme import (
     back_to_top_html,
-    empty_state_html,
     get_colors,
     get_theme_name,
     inject_css,
     set_theme,
-    sidebar_user_badge_html,
     version_check_widget_html,
 )
 from src.core.ai_detector import detect_documents_ai_probability
-from src.core.config import DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD, severity_key
+from src.core.config import DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD
 from src.core.document_parser import (
     DEFAULT_OCR_DPI,
     DEFAULT_OCR_LANGUAGE,
     SUPPORTED_OCR_LANGUAGES,
-    OCRDependencyError,
     extract_text,
     prepare_text_for_embedding,
-    remove_ignore_phrases,
 )
 from src.core.embedding_model import embed_chunks, embed_documents
-from src.core.export_engine import LMSExportEngine
 from src.core.faiss_index import (
     build_index,
     build_index_from_matrix,
-    find_plagiarised_chunks,
     load_index,
     load_or_rebuild_index,
     save_index,
@@ -291,96 +267,49 @@ from src.core.faiss_index import (
 from src.core.similarity import (
     cosine_similarity,
     document_similarity_matrix,
-    find_most_similar_chunks,
     flag_plagiarism,
 )
 from src.visualization.network_graph import (
-    NETWORK_GRAPH_CONFIG,
-    export_network_to_csv_bytes,
-    export_network_to_gexf_bytes,
     plot_similarity_network,
 )
-from src.core.tag_manager import TagManager
-from src.core.telemetry import TelemetryService
 from src.core.text_chunking import chunk_documents
-from src.core.webhook import send_plagiarism_alert
 from src.db import (
-    clear_all_data,
     delete_document,
     get_all_documents,
     get_all_embeddings,
     get_chunk_registry,
-    get_documents_by_class,
     get_unique_class_sections,
 )
 from src.db.auth import (
-    add_user,
     authenticate_user,
-    clear_login_attempts,
-    delete_user,
-    disable_2fa,
-    enable_2fa,
     get_2fa_status,
     get_all_users,
-    get_notification_preferences,
+    get_distinct_audit_event_types,
+    get_security_audit_log_count,
+    get_security_audit_logs,
     get_tour_completed,
     get_upload_count,
     get_user_preferences,
     get_user_role,
     init_db,
     is_user_active,
-    record_failed_login,
     set_tour_completed,
-    set_user_active_status,
-    update_notification_preferences,
-    update_password,
     update_user_preferences,
-    verify_user,
 )
 from src.db.incidents import (
     init_incident_db,
     get_all_incidents,
     sync_flagged_incidents,
 )
-from src.utils.pdf_report import generate_plagiarism_report, highlight_pdf_matches
-from src.utils.badge_generator import (
-    generate_badge_png,
-    generate_badge_pdf,
-)
-from src.db.corpus_db import get_document_tags, get_total_document_count, init_corpus_db
-from src.db.incidents import (
-    get_all_incidents_above_threshold_for_export,
-    get_high_severity_trends,
-    get_most_plagiarized_documents,
-    sync_flagged_incidents,
-)
+from src.utils.pdf_report import highlight_pdf_matches
+from src.db.corpus_db import get_total_document_count, init_corpus_db
 from src.i18n.translator import _SUPPORTED_LANGUAGES, get_text
-from src.security.metadata_stripper import strip_exif_metadata
 from src.utils.processing_time import (
     estimate_processing_seconds,
     format_processing_duration,
-    processing_eta_text,
-    uploaded_files_total_bytes,
 )
-from src.utils.badge_generator import generate_badge_pdf, generate_badge_png
 from src.utils.diff_highlighter import highlight_overlap
-from src.utils.excel_export import export_similarity_matrix_to_excel
-from src.utils.filename import (
-    InvalidFileExtensionError,
-    sanitize_filename,
-    unique_filename,
-    validate_document_extension,
-)
-from src.utils.json_export import export_similarity_matrix_to_json
-from src.utils.pdf_report import (
-    generate_audit_summary_html,
-    generate_audit_summary_pdf,
-    generate_audit_summary_report,
-    generate_plagiarism_report,
-)
 from src.utils.redis_cache import (
-    cache_analysis_results,
-    cache_faiss_index,
     cache_session_state,
     clear_session,
     get_analysis_results,
@@ -389,30 +318,9 @@ from src.utils.redis_cache import (
 )
 from src.utils.storage_metrics import calculate_storage_usage
 from src.visualization.heatmap import (
-    plot_chunk_similarity_comparison,
     plot_similarity_heatmap,
 )
-from src.core.document_parser import (
-    DEFAULT_OCR_DPI,
-    DEFAULT_OCR_LANGUAGE,
-    OCRDependencyError,
-    SUPPORTED_OCR_LANGUAGES,
-    extract_text,
-    prepare_text_for_embedding,
-)
-from src.db.auth import (
-    init_db,
-    verify_user,
-    get_user_role,
-    add_user,
-    get_all_users,
-    delete_user,
-    update_password,
-    get_tour_completed,
-    set_tour_completed,
-)
 from src.core.config import get_branding_config
-from src.visualization.network_graph import plot_similarity_network
 
 try:
     from src.utils.warning_list import render_warning_controls, render_copy_button
@@ -440,7 +348,7 @@ except ImportError:
 
 # ── Auto-refresh component for the Live Incident Stream (Issue #1384) ───────
 try:
-    from streamlit_autorefresh import st_autorefresh # type: ignore
+    from streamlit_autorefresh import st_autorefresh  # type: ignore
 except ImportError:
     st_autorefresh = None
     logger.warning(
@@ -454,7 +362,6 @@ try:
 except Exception:
     bulk_download_drive_folder = None
 
-from src.errors import OCRFileBatchError
 
 # Initialize databases
 init_corpus_db()
@@ -464,8 +371,6 @@ init_db()
 purge_expired_temp_files()
 # Start lightweight REST API server for /healthz endpoint in background
 import threading
-import time
-import datetime
 import uvicorn
 
 from src.api.app import app as fastapi_app
@@ -724,7 +629,9 @@ if SessionKeys.MODEL_LOAD_TIME not in st.session_state:
     with st.spinner("Initializing Vector Embedding Model..."):
         _start_time = time.perf_counter()
         EmbeddingModelManager.get_instance().get_model()
-        st.session_state[SessionKeys.MODEL_LOAD_TIME] = time.perf_counter() - _start_time
+        st.session_state[SessionKeys.MODEL_LOAD_TIME] = (
+            time.perf_counter() - _start_time
+        )
 
 st.markdown(back_to_top_html(), unsafe_allow_html=True)
 inject_css()
@@ -732,9 +639,13 @@ inject_css()
 
 def save_preferences_callback():
     """Persist settings to user DB profile when modified."""
-    if st.session_state.get(SessionKeys.AUTHENTICATED) and st.session_state.get(SessionKeys.USERNAME):
+    if st.session_state.get(SessionKeys.AUTHENTICATED) and st.session_state.get(
+        SessionKeys.USERNAME
+    ):
         prefs = {
-            "threshold": st.session_state.get(SessionKeys.THRESHOLD_SLIDER, PLAGIARISM_THRESHOLD),
+            "threshold": st.session_state.get(
+                SessionKeys.THRESHOLD_SLIDER, PLAGIARISM_THRESHOLD
+            ),
             "theme": st.session_state.get("theme_selector", "Light"),
         }
         update_user_preferences(st.session_state[SessionKeys.USERNAME], prefs)
@@ -779,7 +690,12 @@ else:
 if last_interaction and st.session_state.get(SessionKeys.AUTHENTICATED, False):
     elapsed_time = time.time() - last_interaction
     if elapsed_time > TIMEOUT_LIMIT:
-        for key in [SessionKeys.AUTHENTICATED, SessionKeys.USERNAME, SessionKeys.ROLE, SessionKeys.LAST_INTERACTION]:
+        for key in [
+            SessionKeys.AUTHENTICATED,
+            SessionKeys.USERNAME,
+            SessionKeys.ROLE,
+            SessionKeys.LAST_INTERACTION,
+        ]:
             if key in st.session_state:
                 del st.session_state[key]
         clear_session(SESSION_ID)
@@ -819,7 +735,9 @@ if not st.session_state.get(SessionKeys.AUTHENTICATED, False):
                 cache_session_state(SESSION_ID, SessionKeys.AUTHENTICATED, True)
                 cache_session_state(SESSION_ID, SessionKeys.USERNAME, _email)
                 cache_session_state(SESSION_ID, SessionKeys.ROLE, _role)
-                cache_session_state(SESSION_ID, SessionKeys.LAST_INTERACTION, time.time())
+                cache_session_state(
+                    SESSION_ID, SessionKeys.LAST_INTERACTION, time.time()
+                )
                 st.query_params.clear()
                 st.rerun()
         else:
@@ -849,7 +767,7 @@ if not st.session_state.get(SessionKeys.AUTHENTICATED, False):
                 username = st.session_state.get(SessionKeys.PENDING_USERNAME)
                 enabled, otp_secret = get_2fa_status(username)
                 if enabled and otp_secret:
-                    import pyotp # type: ignore
+                    import pyotp  # type: ignore
 
                     totp = pyotp.TOTP(otp_secret)
                     if totp.verify(otp_code.strip()):
@@ -862,7 +780,9 @@ if not st.session_state.get(SessionKeys.AUTHENTICATED, False):
                         cache_session_state(SESSION_ID, SessionKeys.AUTHENTICATED, True)
                         cache_session_state(SESSION_ID, SessionKeys.USERNAME, username)
                         cache_session_state(SESSION_ID, SessionKeys.ROLE, role)
-                        cache_session_state(SESSION_ID, SessionKeys.LAST_INTERACTION, time.time())
+                        cache_session_state(
+                            SESSION_ID, SessionKeys.LAST_INTERACTION, time.time()
+                        )
                         prefs = get_user_preferences(username)
                         st.session_state.threshold = prefs.get(
                             "threshold", DEFAULT_THRESHOLDS.plagiarism
@@ -909,7 +829,9 @@ if not st.session_state.get(SessionKeys.AUTHENTICATED, False):
                 cache_session_state(SESSION_ID, SessionKeys.AUTHENTICATED, True)
                 cache_session_state(SESSION_ID, SessionKeys.USERNAME, username_input)
                 cache_session_state(SESSION_ID, SessionKeys.ROLE, role)
-                cache_session_state(SESSION_ID, SessionKeys.LAST_INTERACTION, time.time())
+                cache_session_state(
+                    SESSION_ID, SessionKeys.LAST_INTERACTION, time.time()
+                )
                 st.rerun()
         else:
             st.error("Invalid username or password.")
@@ -946,7 +868,11 @@ def logout_dialog():
             timestamp = datetime.now(timezone.utc).isoformat()
             logger.info("User '%s' logged out at %s", username, timestamp)
 
-            for key in [SessionKeys.AUTHENTICATED, SessionKeys.USERNAME, SessionKeys.ROLE]:
+            for key in [
+                SessionKeys.AUTHENTICATED,
+                SessionKeys.USERNAME,
+                SessionKeys.ROLE,
+            ]:
                 if key in st.session_state:
                     del st.session_state[key]
             clear_session(SESSION_ID)
@@ -960,7 +886,9 @@ with header_col:
     st.subheader("📚 Corpus Overview")
 
 with action_col1:
-    if st.button("🔄 Refresh Corpus Data", key="refresh_corpus_btn", use_container_width=True):
+    if st.button(
+        "🔄 Refresh Corpus Data", key="refresh_corpus_btn", use_container_width=True
+    ):
         keys_to_clear = [
             SessionKeys.ANALYSIS_RESULTS,
             SessionKeys.ANALYSIS_FILE_SIGNATURE,
@@ -977,8 +905,13 @@ with action_col1:
         st.rerun()
 
 with action_col2:
-    if st.button("🗑️ Clear All Data", key="open_clear_dialog_btn", type="secondary", use_container_width=True):
-        clear_all_dialog() # type: ignore
+    if st.button(
+        "🗑️ Clear All Data",
+        key="open_clear_dialog_btn",
+        type="secondary",
+        use_container_width=True,
+    ):
+        clear_all_dialog()  # type: ignore
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -1148,15 +1081,17 @@ if not selected_classes:
     # Model load time
     if SessionKeys.MODEL_LOAD_TIME in st.session_state:
         st.divider()
-        st.caption(f"⚡ Vector Model Loaded in {st.session_state[SessionKeys.MODEL_LOAD_TIME]:.2f} seconds")
+        st.caption(
+            f"⚡ Vector Model Loaded in {st.session_state[SessionKeys.MODEL_LOAD_TIME]:.2f} seconds"
+        )
 
     # System Health Widget
     with st.expander("🖥️ System Health", expanded=False):
         try:
             memory_info = psutil.virtual_memory()
             ram_usage_percent = memory_info.percent
-            ram_total_gb = memory_info.total / (1024 ** 3)
-            ram_available_gb = memory_info.available / (1024 ** 3)
+            ram_total_gb = memory_info.total / (1024**3)
+            ram_available_gb = memory_info.available / (1024**3)
 
             if ram_usage_percent >= 90:
                 ram_indicator = "🔴"
@@ -1173,13 +1108,12 @@ if not selected_classes:
                 f"({ram_status_text})"
             )
             st.caption(
-                f"Total: {ram_total_gb:.1f} GB · "
-                f"Available: {ram_available_gb:.1f} GB"
+                f"Total: {ram_total_gb:.1f} GB · Available: {ram_available_gb:.1f} GB"
             )
 
             disk_usage = psutil.disk_usage(str(ROOT_DIR))
-            free_disk_gb = disk_usage.free / (1024 ** 3)
-            total_disk_gb = disk_usage.total / (1024 ** 3)
+            free_disk_gb = disk_usage.free / (1024**3)
+            total_disk_gb = disk_usage.total / (1024**3)
             disk_usage_percent = disk_usage.percent
 
             if disk_usage_percent >= 90:
@@ -1192,10 +1126,7 @@ if not selected_classes:
             st.markdown(
                 f"**💿 Disk Space:** {disk_indicator} {disk_usage_percent:.1f}% used"
             )
-            st.caption(
-                f"Free: {free_disk_gb:.1f} GB · "
-                f"Total: {total_disk_gb:.1f} GB"
-            )
+            st.caption(f"Free: {free_disk_gb:.1f} GB · Total: {total_disk_gb:.1f} GB")
 
             st.divider()
             st.markdown("**🗄️ Database Status**")
@@ -1213,7 +1144,7 @@ if not selected_classes:
                     st.caption("  Will be created on first data upload.")
 
             except Exception as db_err:
-                st.markdown(f"• **Corpus DB:** 🔴 Error")
+                st.markdown("• **Corpus DB:** 🔴 Error")
                 st.caption(f"  {db_err}")
 
             try:
@@ -1227,7 +1158,7 @@ if not selected_classes:
                     st.caption("  Will be created on first login.")
 
             except Exception as db_err:
-                st.markdown(f"• **Auth DB:** 🔴 Error")
+                st.markdown("• **Auth DB:** 🔴 Error")
                 st.caption(f"  {db_err}")
 
             st.divider()
@@ -1259,14 +1190,16 @@ try:
     from src.db.auth import get_upload_count
     from src.db.corpus_db import get_total_document_count
     from src.db.incidents import get_all_incidents, get_total_incidents_count
-    
+
     total_scans = get_upload_count()
     corpus_size = get_total_document_count()
     flagged_incidents = get_total_incidents_count()
-    
+
     _incidents = get_all_incidents(limit=10000)
     if _incidents:
-        avg_sim = sum(inc.get("similarity_score", 0.0) for inc in _incidents) / len(_incidents)
+        avg_sim = sum(inc.get("similarity_score", 0.0) for inc in _incidents) / len(
+            _incidents
+        )
     else:
         avg_sim = 0.0
 except Exception as e:
@@ -1372,7 +1305,7 @@ if user_role != "admin":
                             color = "#ff4b4b" if score >= 0.90 else "#ffa500"
 
                             with st.expander(
-                                f"#{rank} · {anon_doc_name} (chunk #{record.chunk_index+1}) "
+                                f"#{rank} · {anon_doc_name} (chunk #{record.chunk_index + 1}) "
                                 f"— {score:.1%}",
                                 expanded=(rank == 1),
                             ):
@@ -1390,7 +1323,7 @@ if user_role != "admin":
                                     f"<div style='text-align:right;'>"
                                     f"<span style='background:{color};color:white;padding:3px 12px;"
                                     f"border-radius:10px;font-size:0.85rem;font-weight:700;'>"
-                                    f"Similarity: {score*100:.1f}%</span></div>",
+                                    f"Similarity: {score * 100:.1f}%</span></div>",
                                     unsafe_allow_html=True,
                                 )
 
@@ -1421,7 +1354,7 @@ else:
             st.info(f"📂 Loaded existing FAISS index with {faiss_index.ntotal} vectors")
     else:
         st.markdown(
-            "<span style='color:#999;font-size:0.85rem;'>" "○ No index loaded</span>",
+            "<span style='color:#999;font-size:0.85rem;'>○ No index loaded</span>",
             unsafe_allow_html=True,
         )
     st.markdown("---")
@@ -1551,20 +1484,23 @@ if user_role == "admin":
         existing_docs = get_all_documents()
         if existing_docs:
             st.write(f"**{len(existing_docs)}** documents in database")
-            
+
             import pandas as pd
-            from src.db.corpus_db import get_document_word_counts, get_document_char_counts
+            from src.db.corpus_db import (
+                get_document_word_counts,
+                get_document_char_counts,
+            )
+
             word_counts = get_document_word_counts()
             char_counts = get_document_char_counts()
-            
+
             df = pd.DataFrame([{"filename": doc["filename"]} for doc in existing_docs])
             df["word_count"] = df["filename"].map(word_counts).fillna(0).astype(int)
             df["char_count"] = df["filename"].map(char_counts).fillna(0).astype(int)
-            
-            styled_df = df.style.format({
-                "word_count": "{:,} words",
-                "char_count": "{:,} chars"
-            })
+
+            styled_df = df.style.format(
+                {"word_count": "{:,} words", "char_count": "{:,} chars"}
+            )
             st.dataframe(styled_df, use_container_width=True)
 
             for doc in existing_docs:
@@ -1589,7 +1525,7 @@ if user_role == "admin":
             key="clear_all_documents_button",
             use_container_width=True,
         ):
-            clear_all_dialog() # type: ignore
+            clear_all_dialog()  # type: ignore
         st.markdown("<br>", unsafe_allow_html=True)
 
         st.markdown("---")
@@ -1696,7 +1632,7 @@ if user_role != "admin":
                             color = "#ff4b4b" if score >= 0.90 else "#ffa500"
 
                             with st.expander(
-                                f"#{rank} · {anon_doc_name} (chunk #{record.chunk_index+1}) — {score:.1%}",
+                                f"#{rank} · {anon_doc_name} (chunk #{record.chunk_index + 1}) — {score:.1%}",
                                 expanded=(rank == 1),
                             ):
                                 cq, cm = st.columns(2)
@@ -1711,7 +1647,7 @@ if user_role != "admin":
 
                                 st.markdown(
                                     f"<div style='background:{color};color:white;padding:8px;border-radius:4px;text-align:center;'>"
-                                    f"Similarity: {score*100:.1f}%"
+                                    f"Similarity: {score * 100:.1f}%"
                                     f"</div>",
                                     unsafe_allow_html=True,
                                 )
@@ -2028,6 +1964,7 @@ st.divider()
     tab_analytics,
     tab_users,
     tab_settings,
+    tab_audit,
 ) = st.tabs(
     [
         get_text("tab_warnings", lang=lang_code),
@@ -2038,6 +1975,7 @@ st.divider()
         get_text("tab_analytics", lang=lang_code),
         get_text("tab_users", lang=lang_code),
         get_text("tab_settings", lang=lang_code),
+        get_text("tab_audit_logs", lang=lang_code),
     ],
     key="main_tabs",
 )
@@ -2111,9 +2049,9 @@ with tab_warnings:
         )
 
         if st.button(button_label, key="toggle_warning_accordions"):
-            st.session_state[SessionKeys.WARNINGS_EXPAND_ALL] = (
-                not st.session_state[SessionKeys.WARNINGS_EXPAND_ALL]
-            )
+            st.session_state[SessionKeys.WARNINGS_EXPAND_ALL] = not st.session_state[
+                SessionKeys.WARNINGS_EXPAND_ALL
+            ]
             st.rerun()
 
         render_warning_controls(
@@ -2136,6 +2074,7 @@ with tab_faiss:
                 q_vec, faiss_index, registry, top_k=faiss_top_k, threshold=threshold
             )
             from app.components.faiss_results import render_faiss_results_ui
+
             render_faiss_results_ui(results, faiss_query.strip())
 
 
@@ -2155,7 +2094,11 @@ with tab_heatmap:
             plot_similarity_heatmap
         )(active_sim_df, threshold=threshold, theme_colors=get_colors())
 
-    doc_select_options = ["None"] + list(active_sim_df.columns) if active_sim_df is not None else ["None"]
+    doc_select_options = (
+        ["None"] + list(active_sim_df.columns)
+        if active_sim_df is not None
+        else ["None"]
+    )
     selected_highlight_doc = st.selectbox(
         "Highlight Document Node",
         options=doc_select_options,
@@ -2354,7 +2297,9 @@ with tab_settings:
 
         st.markdown("### 🔑 API Settings")
         st.caption("Active API Bearer Token for external REST API endpoints:")
-        api_bearer_token = os.getenv("API_BEARER_TOKEN", "default-token-secret-key-12345")
+        api_bearer_token = os.getenv(
+            "API_BEARER_TOKEN", "default-token-secret-key-12345"
+        )
         st.code(api_bearer_token, language=None)
 
         st.markdown("### 💾 Backup")
@@ -2396,14 +2341,24 @@ with tab_settings:
             data=json.dumps(
                 {
                     "theme": st.session_state.get("theme", "Light"),
-                    "threshold": st.session_state.get(SessionKeys.THRESHOLD_SLIDER, 0.75),
-                    "class_filter": st.session_state.get(SessionKeys.CLASS_FILTER_SELECTBOX, ""),
+                    "threshold": st.session_state.get(
+                        SessionKeys.THRESHOLD_SLIDER, 0.75
+                    ),
+                    "class_filter": st.session_state.get(
+                        SessionKeys.CLASS_FILTER_SELECTBOX, ""
+                    ),
                     "use_chunk_matrix": st.session_state.get(
                         SessionKeys.CHUNK_MATRIX_CHECKBOX, False
                     ),
-                    "faiss_top_k": st.session_state.get(SessionKeys.FAISS_TOP_K_SLIDER, 5),
-                    "chunk_size": st.session_state.get(SessionKeys.CHUNK_SIZE_SLIDER, 500),
-                    "chunk_overlap": st.session_state.get(SessionKeys.CHUNK_OVERLAP_SLIDER, 50),
+                    "faiss_top_k": st.session_state.get(
+                        SessionKeys.FAISS_TOP_K_SLIDER, 5
+                    ),
+                    "chunk_size": st.session_state.get(
+                        SessionKeys.CHUNK_SIZE_SLIDER, 500
+                    ),
+                    "chunk_overlap": st.session_state.get(
+                        SessionKeys.CHUNK_OVERLAP_SLIDER, 50
+                    ),
                     "ocr_language": st.session_state.get(
                         SessionKeys.OCR_LANGUAGE_SELECTOR, "eng"
                     ),
@@ -2474,7 +2429,209 @@ with tab_settings:
                 st.success(f"✅ Connected ({latency} ms ping)")
             else:
                 st.error("🚨 Disconnected")
-            st.rerun()
+# ══ TAB 9: SECURITY AUDIT LOGS ═════════════════════════════════════════════
+with tab_audit:
+    update_page_title("Security Audit Logs")
+    st.subheader(get_text("tab_audit_logs", lang=lang_code))
+
+    if user_role != "admin":
+        st.error(
+            "🔒 Access Denied: Administrator privileges required to view security audit logs."
+        )
+    else:
+        st.markdown("### 📜 System Security Audit Trail")
+
+        # Filters section
+        filter_col1, filter_col2, filter_col3, filter_col4 = st.columns(4)
+
+        with filter_col1:
+            date_range = st.date_input(
+                "📅 Date Range Filter",
+                value=(),
+                key="audit_date_range_picker",
+                help="Filter audit log records by date range.",
+            )
+
+        start_date_str = None
+        end_date_str = None
+        if isinstance(date_range, (list, tuple)) and len(date_range) > 0:
+            if len(date_range) == 1:
+                start_date_str = date_range[0].strftime("%Y-%m-%d") + "T00:00:00Z"
+                end_date_str = date_range[0].strftime("%Y-%m-%d") + "T23:59:59Z"
+            elif len(date_range) == 2:
+                start_date_str = date_range[0].strftime("%Y-%m-%d") + "T00:00:00Z"
+                end_date_str = date_range[1].strftime("%Y-%m-%d") + "T23:59:59Z"
+
+        with filter_col2:
+            distinct_events = get_distinct_audit_event_types()
+            event_type_options = ["All Event Types"] + distinct_events
+            selected_event_type = st.selectbox(
+                "🏷️ Event Type",
+                options=event_type_options,
+                key="audit_event_type_filter",
+            )
+            event_type_filter = (
+                None
+                if selected_event_type == "All Event Types"
+                else selected_event_type
+            )
+
+        with filter_col3:
+            username_filter_input = st.text_input(
+                "👤 Filter by Username",
+                value="",
+                placeholder="Enter username...",
+                key="audit_username_filter",
+            ).strip()
+            username_filter = username_filter_input if username_filter_input else None
+
+        with filter_col4:
+            per_page = st.selectbox(
+                "📄 Rows Per Page",
+                options=[10, 25, 50, 100],
+                index=1,  # Default 25
+                key="audit_per_page_select",
+            )
+
+        # Count total matching records
+        total_records = get_security_audit_log_count(
+            username=username_filter,
+            event_type=event_type_filter,
+            start_date=start_date_str,
+            end_date=end_date_str,
+        )
+
+        total_pages = max(1, (total_records + per_page - 1) // per_page)
+
+        current_page = st.session_state.get(SessionKeys.AUDIT_LOG_PAGE, 1)
+        if current_page > total_pages:
+            current_page = total_pages
+            st.session_state[SessionKeys.AUDIT_LOG_PAGE] = current_page
+        if current_page < 1:
+            current_page = 1
+            st.session_state[SessionKeys.AUDIT_LOG_PAGE] = current_page
+
+        offset = (current_page - 1) * per_page
+
+        # Fetch records for current page
+        logs = get_security_audit_logs(
+            username=username_filter,
+            event_type=event_type_filter,
+            start_date=start_date_str,
+            end_date=end_date_str,
+            limit=per_page,
+            offset=offset,
+        )
+
+        # Summary Metrics
+        m1, m2, m3 = st.columns(3)
+        m1.metric("📋 Total Log Entries", total_records)
+        m2.metric("🏷️ Active Filter", selected_event_type)
+        m3.metric("📑 Page", f"{current_page} / {total_pages}")
+
+        st.divider()
+
+        # Display Data Table
+        if logs:
+            df = pd.DataFrame(logs)
+            display_df = df[
+                ["id", "timestamp", "event_type", "username", "details"]
+            ].rename(
+                columns={
+                    "id": "ID",
+                    "timestamp": "Timestamp (UTC)",
+                    "event_type": "Event Type",
+                    "username": "Username",
+                    "details": "Details / Payload",
+                }
+            )
+
+            st.dataframe(
+                display_df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "ID": st.column_config.NumberColumn("ID", width="small"),
+                    "Timestamp (UTC)": st.column_config.TextColumn(
+                        "Timestamp (UTC)", width="medium"
+                    ),
+                    "Event Type": st.column_config.TextColumn(
+                        "Event Type", width="medium"
+                    ),
+                    "Username": st.column_config.TextColumn("Username", width="medium"),
+                    "Details / Payload": st.column_config.TextColumn(
+                        "Details / Payload", width="large"
+                    ),
+                },
+            )
+
+            # Pagination Controls
+            nav_col1, nav_col2, nav_col3, nav_col4 = st.columns([1, 2, 2, 1])
+            with nav_col1:
+                if st.button(
+                    "← Previous",
+                    disabled=(current_page <= 1),
+                    key="audit_prev_page",
+                ):
+                    st.session_state[SessionKeys.AUDIT_LOG_PAGE] = current_page - 1
+                    st.rerun()
+
+            with nav_col2:
+                end_range = min(offset + per_page, total_records)
+                start_range = offset + 1 if total_records > 0 else 0
+                st.caption(
+                    f"Showing {start_range} - {end_range} of {total_records} logs"
+                )
+
+            with nav_col3:
+                page_select = st.number_input(
+                    "Go to Page",
+                    min_value=1,
+                    max_value=total_pages,
+                    value=current_page,
+                    step=1,
+                    key="audit_page_num_input",
+                )
+                if page_select != current_page:
+                    st.session_state[SessionKeys.AUDIT_LOG_PAGE] = page_select
+                    st.rerun()
+
+            with nav_col4:
+                if st.button(
+                    "Next →",
+                    disabled=(current_page >= total_pages),
+                    key="audit_next_page",
+                ):
+                    st.session_state[SessionKeys.AUDIT_LOG_PAGE] = current_page + 1
+                    st.rerun()
+
+            st.divider()
+
+            # CSV Export Functionality
+            export_all_logs = get_security_audit_logs(
+                username=username_filter,
+                event_type=event_type_filter,
+                start_date=start_date_str,
+                end_date=end_date_str,
+                limit=10000,
+                offset=0,
+            )
+            export_df = pd.DataFrame(export_all_logs)
+            csv_bytes = export_df.to_csv(index=False).encode("utf-8")
+
+            st.download_button(
+                label="⬇️ Download Audit Logs (CSV)",
+                data=csv_bytes,
+                file_name=f"security_audit_logs_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                key="download_audit_logs_csv",
+                use_container_width=True,
+                type="primary",
+            )
+        else:
+            st.info(
+                "ℹ️ No security audit log records found matching the specified filters."
+            )
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.divider()
@@ -2502,4 +2659,3 @@ with _footer_col2:
         )
     else:
         st.caption("✅ Up to date")
-        
