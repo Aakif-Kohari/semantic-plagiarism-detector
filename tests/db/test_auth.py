@@ -514,6 +514,33 @@ def test_update_user_profile_admin_suspension_prevented():
         )
 
 
+def test_get_all_users_filters_by_role():
+    """Verify get_all_users filters users by role when specified."""
+    admin_user = f"admin_{uuid.uuid4().hex[:8]}"
+    teacher_user = f"teacher_{uuid.uuid4().hex[:8]}"
+    add_user(admin_user, "SecurePass123!", "admin")
+    add_user(teacher_user, "SecurePass123!", "teacher")
+
+    all_users = get_all_users()
+    assert any(u["username"] == admin_user for u in all_users)
+    assert any(u["username"] == teacher_user for u in all_users)
+
+    admin_users = get_all_users(role="admin")
+    assert all(u["role"] == "admin" for u in admin_users)
+    assert any(u["username"] == admin_user for u in admin_users)
+    assert not any(u["username"] == teacher_user for u in admin_users)
+
+    teacher_users = get_all_users(role="teacher")
+    assert all(u["role"] == "teacher" for u in teacher_users)
+    assert any(u["username"] == teacher_user for u in teacher_users)
+    assert not any(u["username"] == admin_user for u in teacher_users)
+
+
+def test_get_all_users_role_no_matches():
+    """Verify get_all_users returns an empty list when no user matches the role."""
+    assert get_all_users(role="nonexistent_role") == []
+
+
 def test_revoke_token_and_is_token_revoked():
     """Verify revoke_token stores token signature and is_token_revoked checks it correctly."""
     from src.db.auth import is_token_revoked, revoke_token

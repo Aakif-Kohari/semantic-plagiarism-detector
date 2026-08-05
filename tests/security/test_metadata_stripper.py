@@ -123,6 +123,22 @@ def test_strip_palette_image_preserves_colors():
         assert out_image.mode == "RGBA"
         pixel = out_image.getpixel((5, 5))
     assert pixel == (7, 0, 248, 255)
+ fix/image-bomb-protection-1620
+
+
+def test_strip_image_metadata_decompression_bomb(monkeypatch):
+    # Mock Image.open to raise DecompressionBombError
+    def mock_open(*args, **kwargs):
+        raise Image.DecompressionBombError("Image size exceeds limit")
+    
+    monkeypatch.setattr(Image, "open", mock_open)
+    
+    img_bytes = b"fake image bytes"
+    with pytest.raises(ValueError) as excinfo:
+        strip_exif_metadata(img_bytes, "test.jpg")
+    
+    assert str(excinfo.value) == "Image dimensions exceed security safety limits."
+
 @patch("src.security.metadata_stripper.fitz.open")
 def test_inspect_pdf_fonts_exceeds_limit(mock_fitz_open):
     mock_page = MagicMock()
@@ -150,3 +166,4 @@ def test_inspect_pdf_fonts_within_limit(mock_fitz_open):
 
     result = inspect_pdf_fonts(b"dummy pdf bytes")
     assert result is True
+ main
