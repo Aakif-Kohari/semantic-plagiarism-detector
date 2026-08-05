@@ -370,10 +370,11 @@ def plot_similarity_heatmap(
         ax.set_ylabel("Documents", fontsize=11, labelpad=10)
 
         safe_labels = [TitleSanitizer.sanitize(str(lbl)) for lbl in clean_df.columns]
+        tick_fontsize = max(6, 12 - n // 10)
         ax.set_xticklabels(
-            safe_labels, rotation=30, ha="right", fontsize=max(8, 11 - n // 3)
+            safe_labels, rotation=30, ha="right", fontsize=tick_fontsize
         )
-        ax.set_yticklabels(safe_labels, rotation=0, fontsize=max(8, 11 - n // 3))
+        ax.set_yticklabels(safe_labels, rotation=0, fontsize=tick_fontsize)
 
         red_patch = mpatches.Patch(
             edgecolor="#d62728",
