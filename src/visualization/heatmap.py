@@ -83,6 +83,10 @@ except ImportError:
     def apply_matplotlib_theme(theme_colors=None):
         return None
 
+    # Default Plotly font family
+    DEFAULT_FONT_FAMILY: str = "Inter, sans-serif"
+
+
 
 # ── Security & Sanitization ────────────────────────────────────────────────────
 class MatplotlibInjectionError(ValueError):
@@ -534,7 +538,7 @@ def plot_similarity_heatmap_plotly(
                         font=dict(
                             size=max(9, 14 - n),
                             color=font_color,
-                            family="Arial, sans-serif",
+                            family=DEFAULT_FONT_FAMILY,
                         ),
                     )
                 )
@@ -567,7 +571,7 @@ def plot_similarity_heatmap_plotly(
     fig.update_layout(
         title=dict(
             text=safe_title,
-            font=dict(size=18, family="Arial, sans-serif", color=ink_color),
+            font=dict(size=18, family=DEFAULT_FONT_FAMILY, color=ink_color),
         ),
         height=max(500, n * cell_px + 150),
         autosize=True,
@@ -590,7 +594,7 @@ def plot_similarity_heatmap_plotly(
         hoverlabel=dict(
             bgcolor=_get_theme_color(theme_colors, "surface", "white"),
             font_size=14,
-            font_family="Arial",
+            font_family=DEFAULT_FONT_FAMILY,
         ),
     )
 
@@ -773,7 +777,7 @@ def plot_differential_heatmap(
     fig.update_layout(
         title=dict(
             text=safe_title,
-            font=dict(size=16, family="Arial Black", color=ink_color),
+            font=dict(size=16, family=DEFAULT_FONT_FAMILY, color=ink_color),
         ),
         xaxis=dict(
             title="Documents",
