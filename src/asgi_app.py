@@ -30,7 +30,7 @@ NON_JSON_API_PATHS = frozenset(
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Add anti-clickjacking headers to every HTTP response."""
+    """Add anti-clickjacking and security headers to every HTTP response."""
 
     async def dispatch(self, request, call_next):
         response = await call_next(request)
@@ -38,6 +38,16 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Content-Security-Policy"] = (
             "frame-ancestors 'none'; default-src 'self';"
         )
+        enable_hsts = os.getenv("ENABLE_HSTS", "").strip().lower() in (
+            "true",
+            "1",
+            "yes",
+            "on",
+        )
+        if enable_hsts:
+            response.headers["Strict-Transport-Security"] = (
+                "max-age=31536000; includeSubDomains"
+            )
         return response
 
 
