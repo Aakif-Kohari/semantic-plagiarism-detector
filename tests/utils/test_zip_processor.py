@@ -96,7 +96,6 @@ def test_extract_zip_handles_corrupted_inner_files():
 from src.utils.zip_processor import (
     MAX_SINGLE_FILE_SIZE,
     MAX_TOTAL_DECOMPRESSED_SIZE,
-    MAX_DECOMPRESSION_RATIO,
     MAX_ABSOLUTE_UNCOMPRESSED_SIZE,
     process_zip_file,
 )
@@ -231,6 +230,7 @@ def test_process_zip_duplicate_name_collision_fallback():
 @pytest.mark.parametrize(
     "malicious_path",
     [
+        "../../etc/passwd",
         "../evil.py",
         "/etc/passwd",
         "..\\evil.py",
