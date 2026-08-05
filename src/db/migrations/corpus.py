@@ -282,7 +282,30 @@ def migration_013_add_incident_severity_idx(
     )
 
 
-CORPUS_MIGRATIONS = {    1: migration_001_create_base_schema,
+def migration_013_add_incident_archive_table(
+    connection: sqlite3.Connection,
+) -> None:
+    """Create incidents_archive table for archived plagiarism incidents
+    (issue #1492)."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS incidents_archive (
+            incident_id TEXT PRIMARY KEY,
+            document_a TEXT NOT NULL,
+            document_b TEXT NOT NULL,
+            similarity_score REAL NOT NULL,
+            severity_rank TEXT NOT NULL,
+            review_status TEXT NOT NULL,
+            date_flagged TEXT NOT NULL,
+            last_seen TEXT NOT NULL,
+            threshold_at_time_of_flag REAL NOT NULL DEFAULT 0.0,
+            archived_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+
+CORPUS_MIGRATIONS = {   1: migration_001_create_base_schema,
     2: migration_002_add_document_metadata,
     3: migration_003_add_required_indexes,
     4: migration_004_add_plagiarism_incidents,
@@ -294,7 +317,7 @@ CORPUS_MIGRATIONS = {    1: migration_001_create_base_schema,
     10: migration_010_add_document_owner,
     11: migration_011_add_documents_created_at_index,
 12: migration_012_add_fts5_index,
-    13: migration_013_add_incident_severity_idx,
+    13: migration_013_add_incident_archive_table,    13: migration_013_add_incident_severity_idx,
 }
 
 def migrate_corpus_database(
