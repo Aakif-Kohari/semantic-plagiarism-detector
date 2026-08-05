@@ -2,11 +2,15 @@
 
 import logging
 import os
+import time
 import uuid
 from datetime import datetime, timezone
 
 import psutil
 import numpy as np
+
+START_TIME = time.time()
+total_scans = 0
 from fastapi import (
     BackgroundTasks,
     Depends,
@@ -446,6 +450,22 @@ def get_service_status(request: Request):
     }
 
 
+@app.get(
+    "/api/v1/usage",
+    tags=["Health"],
+    summary="Get current API request usage statistics and scan counts",
+    status_code=status.HTTP_200_OK,
+)
+def get_api_usage(request: Request):
+    """Public usage endpoint returning total scan count and system uptime."""
+    global total_scans
+    uptime = time.time() - START_TIME
+    return {
+        "total_scans": total_scans,
+        "uptime_seconds": float(uptime),
+    }
+
+
 # ``HEALTHZ_DB_PATHS`` is centralized in app_config.  Keep a local alias as a
 # tuple of str for backward compatibility with the original implementation
 # (and so any code doing string comparison on these paths keeps working).
@@ -629,6 +649,8 @@ async def scan_document(
     _content_type: None = Depends(validate_content_type),
 ):
     """Scan an uploaded document against the indexed corpus database for plagiarism."""
+    global total_scans
+    total_scans += 1
     if not file.filename:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -920,6 +942,8 @@ async def scan_document_async(
     _content_type: None = Depends(validate_content_type),
 ):
     """Enqueue a document scanning job for asynchronous background processing."""
+    global total_scans
+    total_scans += 1
     if not file.filename:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
