@@ -335,3 +335,63 @@ def test_validate_webhook_url_ipv6_loopback_literal(mock_getaddrinfo, caplog):
         "Blocked SSRF attempt to target URL: https://[::1]/webhook"
         in caplog.text
     )
+@patch("src.security.ssrf_protector.socket.getaddrinfo")
+def test_validate_url_safety_returns_pinned_ip(mock_getaddrinfo):
+    mock_getaddrinfo.return_value = [(2, 1, 6, "", ("142.250.190.46", 443))]
+    validated_url, pinned_ip = SSRFProtector.validate_url_safety(
+        "https://discord.com/api/webhooks/123/abc"
+    )
+    assert validated_url == "https://discord.com/api/webhooks/123/abc"
+    assert pinned_ip == "142.250.190.46"
+
+@patch("src.security.ssrf_protector.socket.getaddrinfo")
+def test_validate_url_safety_blocks_private_ip(mock_getaddrinfo):
+    mock_getaddrinfo.return_value = [(2, 1, 6, "", ("10.0.0.1", 443))]
+    with pytest.raises(SSRFSecurityException, match="Blocked private network IP"):
+        SSRFProtector.validate_url_safety("https://internal.example.com/webhook")
+
+@patch("src.security.ssrf_protector.socket.getaddrinfo")
+def test_validate_url_safety_uses_dns_cache(mock_getaddrinfo):
+    mock_getaddrinfo.return_value = [(2, 1, 6, "", ("142.250.190.46", 443))]
+    SSRFProtector.validate_url_safety("https://example.com/a")
+    SSRFProtector.validate_url_safety("https://example.com/b")
+    assert mock_getaddrinfo.call_count == 1
+
+@patch("src.security.ssrf_protector.requests.request")
+@patch("src.security.ssrf_protector.socket.getaddrinfo")
+def test_pinned_request_uses_ip_with_host_header(mock_getaddrinfo, mock_request):
+    mock_getaddrinfo.return_value = [(2, 1, 6, "", ("93.184.216.34", 443))]
+    mock_request.return_value = type("Response", (), {"status_code": 200})()
+    SSRFProtector.pinned_request(
+        "GET", "https://example.com/api/resource", "93.184.216.34", timeout=10,
+    )
+    call_args, call_kwargs = mock_request.call_args
+    assert "93.184.216.34" in call_args[1]
+    assert call_kwargs["headers"]["Host"] == "example.com"
+    assert call_kwargs["timeout"] == 10
+
+@patch("src.security.ssrf_protector.requests.request")
+@patch("src.security.ssrf_protector.socket.getaddrinfo")
+def test_pinned_request_preserves_path_and_query(mock_getaddrinfo, mock_request):
+    mock_getaddrinfo.return_value = [(2, 1, 6, "", ("93.184.216.34", 443))]
+    mock_request.return_value = type("Response", (), {"status_code": 200})()
+    SSRFProtector.pinned_request(
+        "POST", "https://example.com/api/v1/webhook?token=abc123", "93.184.216.34",
+        json={"key": "value"},
+    )
+    call_args, call_kwargs = mock_request.call_args
+    requested_url = call_args[1]
+    assert "/api/v1/webhook" in requested_url
+    assert "token=abc123" in requested_url
+    assert call_kwargs["headers"]["Host"] == "example.com"
+    assert call_kwargs["json"] == {"key": "value"}
+
+@patch("src.security.ssrf_protector.requests.request")
+@patch("src.security.ssrf_protector.socket.getaddrinfo")
+def test_pinned_request_ipv6_address(mock_getaddrinfo, mock_request):
+    mock_getaddrinfo.return_value = [(10, 1, 6, "", ("2606:2800:220:1:248:1893:25c8:1946", 443, 0, 0))]
+    mock_request.return_value = type("Response", (), {"status_code": 200})()
+    SSRFProtector.pinned_request("GET", "https://example.com/", "2606:2800:220:1:248:1893:25c8:1946")
+    call_args, call_kwargs = mock_request.call_args
+    assert "[2606:2800:220:1:248:1893:25c8:1946]" in call_args[1]
+    assert call_kwargs["headers"]["Host"] == "example.com"
