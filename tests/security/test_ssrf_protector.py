@@ -249,12 +249,46 @@ def test_validate_webhook_url_max_redirects_exceeded(mock_head, monkeypatch):
         classmethod(lambda cls, hostname: "93.184.216.34"),
     )
 
-    redirect_response = type(
-        "MockResponse",
-        (),
-        {"status_code": 302, "headers": {"Location": "https://example.com/next"}},
-    )()
-    mock_head.return_value = redirect_response
+    def make_redirect_response(hop_number):
+        return type(
+            "MockResponse",
+            (),
+            {
+                "status_code": 302,
+                "headers": {"Location": f"https://example.com/hop{hop_number}"},
+            },
+        )()
+
+    # Each hop redirects to a brand-new URL (no repeats), so this
+    # exercises the "too many redirects" path rather than the loop path.
+    mock_head.side_effect = [make_redirect_response(i) for i in range(1, 6)]
 
     with pytest.raises(SSRFSecurityException, match="Maximum HTTP redirect depth exceeded"):
         SSRFProtector.validate_webhook_url("https://example.com/start")
+
+
+@patch("src.security.ssrf_protector.requests.head")
+def test_validate_webhook_url_circular_redirect_loop_detected(mock_head, monkeypatch):
+    """A -> B -> A should be caught as a circular redirect loop (issue #1496)."""
+    monkeypatch.setattr(
+        SSRFProtector,
+        "_resolve_hostname",
+        classmethod(lambda cls, hostname: "93.184.216.34"),
+    )
+
+    response_a_to_b = type(
+        "MockResponse",
+        (),
+        {"status_code": 302, "headers": {"Location": "https://example.com/b"}},
+    )()
+    response_b_to_a = type(
+        "MockResponse",
+        (),
+        {"status_code": 302, "headers": {"Location": "https://example.com/a"}},
+    )()
+    mock_head.side_effect = [response_a_to_b, response_b_to_a]
+
+    with pytest.raises(
+        SSRFSecurityException, match="Circular HTTP redirect loop detected"
+    ):
+        SSRFProtector.validate_webhook_url("https://example.com/a")
