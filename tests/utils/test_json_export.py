@@ -147,6 +147,9 @@ def test_export_similarity_matrix_to_json_valid():
         "document_2": "docC",
         "similarity_score": 0.92,
     }
+    # Verify pretty-printing with indent=2 (#1614)
+    assert "\n" in json_str
+    assert '  "document_1"' in json_str
 
 
 def test_export_similarity_matrix_to_json_with_metadata():
