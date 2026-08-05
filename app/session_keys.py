@@ -1,5 +1,6 @@
 """Centralized Session State Keys for the Streamlit Application."""
 
+
 class SessionKeys:
     SESSION_ID = "session_id"
     AUTHENTICATED = "authenticated"
@@ -35,4 +36,4 @@ class SessionKeys:
     OCR_LANGUAGE_SELECTOR = "ocr_language_selector"
     OCR_DPI_SLIDER = "ocr_dpi_slider"
     CLASS_FILTER_SELECTBOX = "class_filter_selectbox"
-    
+    AUDIT_LOG_PAGE = "audit_log_page"
