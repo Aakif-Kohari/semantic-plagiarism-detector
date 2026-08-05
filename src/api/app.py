@@ -55,6 +55,7 @@ from src.core.similarity import (
 from src.core.text_chunking import chunk_document
 from src.db.auth import get_user_role
 from src.db.corpus_db import _connect, clear_all_data, init_corpus_db
+from src.utils.file_streaming import stream_upload_file_to_disk
 from src.utils.redis_cache import CacheKeyPrefix, get_cache
 
 # ── API Initialization ────────────────────────────────────────────────────────
@@ -507,122 +508,123 @@ async def scan_document(
         )
 
     filename = file.filename
-    file_bytes = await file.read()
+    temp_path = await stream_upload_file_to_disk(file)
 
-    if len(file_bytes) == 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Uploaded file is empty (0 bytes)",
-        )
-
-    # Extract text from uploaded document
-    extracted_text = extract_text(file_bytes, filename)
-    if not extracted_text.strip():
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Failed to extract readable text from the uploaded file.",
-        )
-
-    words = extracted_text.split()
-    word_count = len(words)
-
-    # Split document into paragraph-level chunks
-    chunks = chunk_document(extracted_text)
-    if not chunks:
-        # Fallback if text is shorter than MIN_CHUNK_WORDS
-        chunks = [extracted_text[:1000]]
-
-    # Generate chunk embeddings
-    uploaded_embeddings = embed_chunks(chunks)
-
-    # Compute overall single document embedding
-    doc_embedding = get_document_embedding(uploaded_embeddings)
-
-    # Query corpus from SQLite database
-    corpus_docs = get_corpus_documents_with_embeddings()
-
-    matched_documents = []
-    max_overall_score = 0.0
-    max_chunk_overall_score = 0.0
-
-    for corpus_filename, corpus_data in corpus_docs.items():
-        # Avoid self-comparison if the same document is in the corpus
-        if corpus_filename == filename:
-            continue
-
-        c_embeddings = corpus_data["embeddings"]
-        c_chunks = corpus_data["chunks"]
-
-        if c_embeddings.size == 0:
-            continue
-
-        # Document-level mean similarity
-        c_doc_embedding = get_document_embedding(c_embeddings)
-        sim_doc = float(
-            np.clip(
-                cosine_similarity(
-                    doc_embedding.reshape(1, -1), c_doc_embedding.reshape(1, -1)
-                )[0, 0],
-                0.0,
-                1.0,
-            )
-        )
-
-        # Chunk-level max similarity
-        sim_chunk = chunk_max_similarity(uploaded_embeddings, c_embeddings)
-
-        combined_score = max(sim_doc, sim_chunk)
-        max_overall_score = max(max_overall_score, sim_doc)
-        max_chunk_overall_score = max(max_chunk_overall_score, sim_chunk)
-
-        if combined_score >= threshold:
-            severity = "🔴 High" if combined_score >= 0.90 else "🟡 Medium"
-
-            # Find top matching chunk pairs
-            similar_chunks = find_most_similar_chunks(
-                chunks_a=chunks,
-                chunks_b=c_chunks,
-                emb_a=uploaded_embeddings,
-                emb_b=c_embeddings,
-                top_k=top_k,
-                threshold=threshold,
+    try:
+        # Extract text from uploaded document streamed to disk
+        extracted_text = extract_text(temp_path, filename)
+        if not extracted_text.strip():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Failed to extract readable text from the uploaded file.",
             )
 
-            flagged_chunks = [
-                {
-                    "uploaded_chunk": pair[0],
-                    "matched_chunk": pair[1],
-                    "similarity_score": round(float(pair[2]), 4),
-                }
-                for pair in similar_chunks
-            ]
+        words = extracted_text.split()
+        word_count = len(words)
 
-            matched_documents.append(
-                {
-                    "filename": corpus_filename,
-                    "document_similarity_score": round(sim_doc, 4),
-                    "max_chunk_similarity_score": round(sim_chunk, 4),
-                    "severity": severity,
-                    "flagged_chunks": flagged_chunks,
-                }
+        # Split document into paragraph-level chunks
+        chunks = chunk_document(extracted_text)
+        if not chunks:
+            # Fallback if text is shorter than MIN_CHUNK_WORDS
+            chunks = [extracted_text[:1000]]
+
+        # Generate chunk embeddings
+        uploaded_embeddings = embed_chunks(chunks)
+
+        # Compute overall single document embedding
+        doc_embedding = get_document_embedding(uploaded_embeddings)
+
+        # Query corpus from SQLite database
+        corpus_docs = get_corpus_documents_with_embeddings()
+
+        matched_documents = []
+        max_overall_score = 0.0
+        max_chunk_overall_score = 0.0
+
+        for corpus_filename, corpus_data in corpus_docs.items():
+            # Avoid self-comparison if the same document is in the corpus
+            if corpus_filename == filename:
+                continue
+
+            c_embeddings = corpus_data["embeddings"]
+            c_chunks = corpus_data["chunks"]
+
+            if c_embeddings.size == 0:
+                continue
+
+            # Document-level mean similarity
+            c_doc_embedding = get_document_embedding(c_embeddings)
+            sim_doc = float(
+                np.clip(
+                    cosine_similarity(
+                        doc_embedding.reshape(1, -1), c_doc_embedding.reshape(1, -1)
+                    )[0, 0],
+                    0.0,
+                    1.0,
+                )
             )
 
-    # Sort matches by max chunk similarity descending
-    matched_documents.sort(key=lambda x: x["max_chunk_similarity_score"], reverse=True)
+            # Chunk-level max similarity
+            sim_chunk = chunk_max_similarity(uploaded_embeddings, c_embeddings)
 
-    is_flagged = len(matched_documents) > 0 or max_chunk_overall_score >= threshold
+            combined_score = max(sim_doc, sim_chunk)
+            max_overall_score = max(max_overall_score, sim_doc)
+            max_chunk_overall_score = max(max_chunk_overall_score, sim_chunk)
 
-    return {
-        "filename": filename,
-        "word_count": word_count,
-        "chunk_count": len(chunks),
-        "plagiarism_flagged": is_flagged,
-        "threshold_used": threshold,
-        "overall_document_similarity": round(max_overall_score, 4),
-        "max_chunk_similarity": round(max_chunk_overall_score, 4),
-        "matched_documents_count": len(matched_documents),
-        "matched_documents": matched_documents,
-    }
+            if combined_score >= threshold:
+                severity = "🔴 High" if combined_score >= 0.90 else "🟡 Medium"
+
+                # Find top matching chunk pairs
+                similar_chunks = find_most_similar_chunks(
+                    chunks_a=chunks,
+                    chunks_b=c_chunks,
+                    emb_a=uploaded_embeddings,
+                    emb_b=c_embeddings,
+                    top_k=top_k,
+                    threshold=threshold,
+                )
+
+                flagged_chunks = [
+                    {
+                        "uploaded_chunk": pair[0],
+                        "matched_chunk": pair[1],
+                        "similarity_score": round(float(pair[2]), 4),
+                    }
+                    for pair in similar_chunks
+                ]
+
+                matched_documents.append(
+                    {
+                        "filename": corpus_filename,
+                        "document_similarity_score": round(sim_doc, 4),
+                        "max_chunk_similarity_score": round(sim_chunk, 4),
+                        "severity": severity,
+                        "flagged_chunks": flagged_chunks,
+                    }
+                )
+
+        # Sort matches by max chunk similarity descending
+        matched_documents.sort(key=lambda x: x["max_chunk_similarity_score"], reverse=True)
+
+        is_flagged = len(matched_documents) > 0 or max_chunk_overall_score >= threshold
+
+        return {
+            "filename": filename,
+            "word_count": word_count,
+            "chunk_count": len(chunks),
+            "plagiarism_flagged": is_flagged,
+            "threshold_used": threshold,
+            "overall_document_similarity": round(max_overall_score, 4),
+            "max_chunk_similarity": round(max_chunk_overall_score, 4),
+            "matched_documents_count": len(matched_documents),
+            "matched_documents": matched_documents,
+        }
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except Exception:
+                pass
 
 
 # ── Asynchronous Background Scan Job Queue (#1372) ───────────────────────────
@@ -632,18 +634,23 @@ scan_jobs: Dict[str, Dict[str, Any]] = {}
 
 def _process_scan_job(
     job_id: str,
-    file_bytes: bytes,
+    file_input: Any,
     filename: str,
     threshold: float,
     top_k: int,
 ) -> None:
     if job_id not in scan_jobs:
+        if isinstance(file_input, (str, os.PathLike)) and os.path.exists(file_input):
+            try:
+                os.unlink(file_input)
+            except Exception:
+                pass
         return
 
     scan_jobs[job_id]["status"] = "processing"
 
     try:
-        extracted_text = extract_text(file_bytes, filename)
+        extracted_text = extract_text(file_input, filename)
         if not extracted_text.strip():
             scan_jobs[job_id]["status"] = "failed"
             scan_jobs[job_id]["error"] = (
@@ -744,6 +751,12 @@ def _process_scan_job(
     except Exception as exc:
         scan_jobs[job_id]["status"] = "failed"
         scan_jobs[job_id]["error"] = str(exc)
+    finally:
+        if isinstance(file_input, (str, os.PathLike)) and os.path.exists(file_input):
+            try:
+                os.unlink(file_input)
+            except Exception:
+                pass
 
 
 @app.post(
@@ -786,13 +799,7 @@ async def scan_document_async(
         )
 
     filename = file.filename
-    file_bytes = await file.read()
-
-    if len(file_bytes) == 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Uploaded file is empty (0 bytes)",
-        )
+    temp_path = await stream_upload_file_to_disk(file)
 
     job_id = f"job_{uuid.uuid4().hex[:12]}"
     status_url = f"/api/v1/scan/status/{job_id}"
@@ -810,7 +817,7 @@ async def scan_document_async(
     background_tasks.add_task(
         _process_scan_job,
         job_id,
-        file_bytes,
+        temp_path,
         filename,
         threshold,
         top_k,
