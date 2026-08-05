@@ -23,7 +23,7 @@ import logging
 import re
 import zipfile
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Generator, Callable
 import numpy as np
 
 import pandas as pd
@@ -210,6 +210,68 @@ def export_incidents_csv_stream(incidents_list: List[Dict]) -> bytes:
 
     csv_text = output.getvalue()
     return csv_text.encode("utf-8-sig")
+
+
+def stream_incidents_csv_chunks(
+    query_func: Callable,
+    batch_size: int = 1000,
+) -> Generator[str, None, None]:
+    """
+    Stream incidents in chunks to a CSV-formatted string generator.
+    
+    This avoids loading all incidents into memory at once by fetching them in batches.
+    The first yielded string includes the CSV headers.
+    """
+    # Yield the header first
+    output = io.StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=_CSV_HEADERS,
+        extrasaction="ignore",
+        lineterminator="\r\n",
+    )
+    writer.writeheader()
+    yield output.getvalue()
+    
+    offset = 0
+    while True:
+        batch = query_func(limit=batch_size, offset=offset)
+        if not batch:
+            break
+            
+        output = io.StringIO()
+        writer = csv.DictWriter(
+            output,
+            fieldnames=_CSV_HEADERS,
+            extrasaction="ignore",
+            lineterminator="\r\n",
+        )
+        
+        for incident in batch:
+            raw_score = incident.get("similarity_score", 0.0)
+            try:
+                similarity_str = f"{float(raw_score):.2%}"
+            except (TypeError, ValueError):
+                similarity_str = str(raw_score)
+                
+            writer.writerow(
+                {
+                    "Incident ID": incident.get("incident_id", ""),
+                    "Doc A": incident.get("document_a", ""),
+                    "Doc B": incident.get("document_b", ""),
+                    "Similarity": similarity_str,
+                    "Severity": incident.get("severity_rank", ""),
+                    "Status": incident.get("review_status", ""),
+                    "Date": incident.get("date_flagged", ""),
+                }
+            )
+            
+        yield output.getvalue()
+        
+        offset += batch_size
+        if len(batch) < batch_size:
+            break
+
 
 
 def _sanitise_filename(name: str) -> str:
