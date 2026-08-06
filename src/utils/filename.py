@@ -11,7 +11,6 @@ from collections.abc import Collection, Mapping
 from pathlib import PurePath
 from typing import TypeVar
 
-
 DEFAULT_FILENAME = "document"
 MAX_FILENAME_LENGTH = 150
 
@@ -262,10 +261,8 @@ def get_final_extension(filename: object) -> str:
     raw = _CONTROL_RE.sub("", raw)
     raw = _HTML_TAG_RE.sub("", raw)
     basename = _basename(raw).strip()
-
-_stem, extension = os.path.splitext(basename)
+    stem, extension = os.path.splitext(basename)
     return extension.casefold()
-
 
 def get_file_extension_sanitized(filename: str) -> str:
     """Return the lower-case file extension, starting with a dot.
@@ -277,7 +274,8 @@ def get_file_extension_sanitized(filename: str) -> str:
     return extension.lower()
 
 
-def validate_document_extension(    filename: object,
+def validate_document_extension(
+    filename: object,
     *,
     allowed_extensions: Collection[str] = DEFAULT_ALLOWED_DOCUMENT_EXTENSIONS,
     require_extension: bool = True,
