@@ -5,7 +5,7 @@ Utilities for splitting raw extracted document text into processable chunks.
 
 Two strategies are available:
 
-* ``chunk_text``          – fixed character-count chunking with word-boundary
+* ``chunk_text``         – fixed character-count chunking with word-boundary
   awareness (original behaviour, preserved for backward compatibility).
 * ``chunk_by_sentences``  – sentence-boundary-aware chunking that groups whole
   sentences into blocks up to *max_chunk_size* characters, ensuring no sentence
@@ -116,6 +116,9 @@ def chunk_text(
     Returns:
         List of chunk strings.
     """
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be a positive integer > 0")
+
     if overlap_percentage is not None:
         chunk_overlap = int(chunk_size * overlap_percentage)
 
