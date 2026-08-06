@@ -738,3 +738,42 @@ def test_api_usage_endpoint():
     data = response.json()
     assert data["total_scans"] == initial_scans + 1
 
+
+def test_hsts_security_header_options():
+    """Verify HSTS Strict-Transport-Security header behavior when ENABLE_HSTS is configured."""
+    import os
+    from starlette.applications import Starlette
+    from starlette.middleware import Middleware
+    from starlette.responses import PlainTextResponse
+    from starlette.routing import Route
+    from starlette.testclient import TestClient
+    from src.asgi_app import SecurityHeadersMiddleware
+
+    def dummy_app(request):
+        return PlainTextResponse("OK")
+
+    # Disabled by default
+    app_disabled = Starlette(
+        routes=[Route("/", dummy_app)],
+        middleware=[Middleware(SecurityHeadersMiddleware)],
+    )
+    client_disabled = TestClient(app_disabled)
+    res_disabled = client_disabled.get("/")
+    assert "Strict-Transport-Security" not in res_disabled.headers
+
+    # Enabled via ENABLE_HSTS=true
+    os.environ["ENABLE_HSTS"] = "true"
+    try:
+        app_enabled = Starlette(
+            routes=[Route("/", dummy_app)],
+            middleware=[Middleware(SecurityHeadersMiddleware)],
+        )
+        client_enabled = TestClient(app_enabled)
+        res_enabled = client_enabled.get("/")
+        assert (
+            res_enabled.headers.get("Strict-Transport-Security")
+            == "max-age=31536000; includeSubDomains"
+        )
+    finally:
+        os.environ.pop("ENABLE_HSTS", None)
+

@@ -972,8 +972,6 @@ def log_incident(
     now: str | None = None,
     threshold: float | None = None,
 ) -> MatchResult:
-    if db_path is None:
-        db_path = DEFAULT_DB_PATH
     """Log a single plagiarism incident and clear get_recent_incidents cache.
 
     Args:
@@ -983,6 +981,8 @@ def log_incident(
     Returns:
         The created MatchResult.
     """
+    if db_path is None:
+        db_path = DEFAULT_DB_PATH
     results = sync_flagged_incidents([flag], db_path, now=now, threshold=threshold)
     if not results:
         raise ValueError("Failed to log incident: Invalid input.")
