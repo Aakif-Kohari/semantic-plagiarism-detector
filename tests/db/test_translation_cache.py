@@ -18,6 +18,7 @@ from src.db.translation_cache import (
     get_cached_translation,
     get_translation_cache_hit_rate,
     reset_translation_cache_counters,
+    get_cache_performance_summary,
 )
 
 
@@ -253,3 +254,30 @@ def test_init_db_closes_connection():
 
         # Verify close() was called on mock_conn
         mock_conn.close.assert_called()
+
+
+def test_get_cache_performance_summary():
+    """Test retrieving query cache performance summary telemetry."""
+    # 1. Reset counters
+    reset_translation_cache_counters()
+
+    # 2. Check summary with zero requests
+    summary = get_cache_performance_summary()
+    assert summary["total_requests"] == 0
+    assert summary["hits"] == 0
+    assert summary["misses"] == 0
+    assert summary["hit_ratio_percentage"] == 0.0
+
+    # 3. Cache and perform lookups to generate hits and misses
+    get_cached_translation("non-existent-text-xyz")  # Miss
+    cache_translation("Bonjour", "Hello", "fr", "en")
+    get_cached_translation("Bonjour", "fr", "en")  # Hit
+    get_cached_translation("Bonjour", "fr", "en")  # Hit
+
+    # 4. Check summary telemetry
+    summary = get_cache_performance_summary()
+    assert summary["total_requests"] == 3
+    assert summary["hits"] == 2
+    assert summary["misses"] == 1
+    assert abs(summary["hit_ratio_percentage"] - 66.6666666) < 0.1
+

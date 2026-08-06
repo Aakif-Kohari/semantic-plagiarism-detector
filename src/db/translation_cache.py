@@ -10,7 +10,7 @@ import logging
 import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from src.core.app_config import CORPUS_DB_PATH, FALLBACK_CORPUS_DB_PATH
 
@@ -275,3 +275,20 @@ def reset_translation_cache_counters() -> None:
     global _cache_hits, _cache_misses
     _cache_hits = 0
     _cache_misses = 0
+
+
+def get_cache_performance_summary() -> dict[str, Any]:
+    """Retrieves cache lookup telemetry, including total requests, hits, misses, and hit ratio percentage.
+
+    Returns:
+        dict[str, Any]: A dictionary summary of cache performance statistics.
+    """
+    total = _cache_hits + _cache_misses
+    ratio = (float(_cache_hits) / total * 100.0) if total > 0 else 0.0
+    return {
+        "total_requests": total,
+        "hits": _cache_hits,
+        "misses": _cache_misses,
+        "hit_ratio_percentage": ratio,
+    }
+
