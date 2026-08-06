@@ -269,6 +269,7 @@ from src.core.similarity import (
     document_similarity_matrix,
     flag_plagiarism,
 )
+from src.core.lexical_similarity import jaccard_similarity 
 from src.visualization.network_graph import (
     plot_similarity_network,
 )
@@ -604,17 +605,16 @@ configure_page_meta(title="Semantic Plagiarism Detector - Dashboard", icon="🔍
 
 
 def update_page_title(tab_name: str):
-    """
-    Update browser title based on active tab.
-    """
+    """Update browser title based on active tab."""
     st.markdown(
         f"""
         <script>
-            document.title = "{tab_name} | Semantic Plagiarism Detector";
+            window.parent.document.title = '{tab_name} | Semantic Plagiarism Detector';
         </script>
         """,
         unsafe_allow_html=True,
     )
+
 
 
 if SessionKeys.AUTHENTICATED not in st.session_state:
@@ -660,6 +660,78 @@ def build_visualization_lazily(is_enabled, build_fn):
         return build_fn()
     return None
 
+def build_visualization_lazily(is_enabled, build_fn):
+    """Utility to lazily load heavy chart visualizations when requested."""
+    if is_enabled:
+        return build_fn()
+    return None
+
+
+# ── Issue #1383: Cosine vs Lexical Similarity Comparison Table ─────────────────
+SEMANTIC_HIGH_THRESHOLD = 0.80  # vector (cosine) score considered "high"
+LEXICAL_LOW_THRESHOLD = 0.30    # lexical (jaccard) score considered "low"
+
+
+def render_cosine_vs_lexical_comparison_table(
+    sim_df,
+    raw_texts,
+    *,
+    semantic_threshold: float = SEMANTIC_HIGH_THRESHOLD,
+    lexical_threshold: float = LEXICAL_LOW_THRESHOLD,
+):
+    """Render a two-column score comparison table in the results / drill-down view.
+
+    Compares vector-embedding similarity (cosine semantic) against Jaccard
+    lexical similarity side-by-side for every unique document pair, and
+    highlights pairs where the cosine score is high (>= ``semantic_threshold``)
+    but the Jaccard score is low (<= ``lexical_threshold``). Such pairs are
+    strong indicators of paraphrasing / semantic plagiarism that pure lexical
+    matching would miss.
+
+    Parameters
+    ----------
+    sim_df : pandas.DataFrame
+        Square cosine similarity matrix indexed/columned by document names.
+    raw_texts : Dict[str, str]
+        Mapping of document name → extracted text. Used to compute Jaccard.
+    semantic_threshold : float, default 0.80
+        Cosine score at/above which a pair is considered semantically similar.
+    lexical_threshold : float, default 0.30
+        Jaccard score at/below which a pair is considered lexically dissimilar.
+
+    Returns
+    -------
+    pandas.DataFrame
+        The styled comparison DataFrame (also rendered to the UI).
+    """
+    import itertools
+
+    if sim_df is None or raw_texts is None or len(raw_texts) < 2:
+        st.info(
+            "Upload at least two documents to view the Cosine vs Lexical "
+            "Similarity comparison table."
+        )
+        return None
+
+    doc_names = list(sim_df.columns) if sim_df is not None else list(raw_texts.keys())
+    rows = []
+    for da, db in itertools.combinations(doc_names, 2):
+        # Cosine score from the (already-computed) semantic matrix.
+        try:
+            cosine_score = float(sim_df.loc[da, db])
+        except Exception:
+            cosine_score = 0.0
+
+        # Jaccard lexical score from the raw extracted texts.
+        text_a = raw_texts.get(da, "") or ""
+        text_b = raw_texts.get(db, "") or ""
+        try:
+            jaccard_score = float(jaccard_similarity(text_a, text_b))
+        except Exception:
+            jaccard_score = 0.0
+
+        is_semantic_only = (
+    return comp_df
 
 from datetime import date, timedelta
 
@@ -2214,6 +2286,17 @@ with tab_heatmap:
 with tab_drill:
     update_page_title("Drill Down")
     st.subheader("🔬 Pair Drill-Down")
+
+    # ── Issue #1383: Cosine vs Lexical side-by-side comparison table ──
+    render_cosine_vs_lexical_comparison_table(
+        active_sim_df,
+        raw_texts,
+        semantic_threshold=SEMANTIC_HIGH_THRESHOLD,
+        lexical_threshold=LEXICAL_LOW_THRESHOLD,
+    )
+
+    st.markdown("---")
+
     if active_sim_df is not None and len(doc_names) >= 2:
         c1, c2 = st.columns(2)
         with c1:
