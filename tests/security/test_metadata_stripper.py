@@ -123,7 +123,6 @@ def test_strip_palette_image_preserves_colors():
         assert out_image.mode == "RGBA"
         pixel = out_image.getpixel((5, 5))
     assert pixel == (7, 0, 248, 255)
- fix/image-bomb-protection-1620
 
 
 def test_strip_image_metadata_decompression_bomb(monkeypatch):
@@ -166,4 +165,3 @@ def test_inspect_pdf_fonts_within_limit(mock_fitz_open):
 
     result = inspect_pdf_fonts(b"dummy pdf bytes")
     assert result is True
- main

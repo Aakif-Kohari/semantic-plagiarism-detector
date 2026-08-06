@@ -11,8 +11,10 @@ Includes tests for:
 """
 
 import os
+import shutil
 import tempfile
-from unittest.mock import patch, MagicMock
+import logging
+from unittest.mock import patch
 
 from src.utils.temp_manager import (
     cleanup_registered_temp_paths,
@@ -365,7 +367,6 @@ def test_get_temp_directory_size_bytes_multiple_files():
 
 # ─── Tests for rotate_backup_files (Issue #1572) ──────────────────────────────
 
-from pathlib import Path
 import time
 from src.utils.temp_manager import rotate_backup_files
 import pytest

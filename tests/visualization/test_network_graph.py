@@ -7,6 +7,7 @@ Unit tests for plot_similarity_network edge cases.
 from unittest.mock import patch
 
 import networkx as nx
+import numpy
 import pandas as pd
 import plotly.graph_objects as go
 import pytest

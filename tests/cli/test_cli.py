@@ -354,7 +354,6 @@ def test_seed_data_database_matches_active_corpus_schema(tmp_path):
 # ─── Tests for Database Schema Verification (Issue #1494) ──────────────────────
 
 from pathlib import Path
-import sqlite3
 import pytest
 from src.db.migrations.common import verify_schema_integrity
 

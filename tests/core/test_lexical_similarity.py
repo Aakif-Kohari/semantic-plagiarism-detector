@@ -162,7 +162,6 @@ def test_compute_tfidf_lexical_similarity_empty_inputs():
 # ─── Tests for Character-Level N-Gram Similarity (Issue #1479) ─────────────────
 
 from src.core.lexical_similarity import compute_char_ngram_similarity
-import pytest
 
 class TestComputeCharNgramSimilarity:
     """Comprehensive test suite for character-level sliding n-gram Jaccard similarity."""

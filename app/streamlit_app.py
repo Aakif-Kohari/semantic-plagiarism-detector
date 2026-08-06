@@ -49,7 +49,6 @@ from src.utils.filename import (
 )
 
 
-from typing import Any
 try:
     from streamlit_plotly_events import plotly_events  # type: ignore
 except ImportError:  # pragma: no cover - optional dependency
@@ -303,18 +302,8 @@ from src.db.incidents import (
     sync_flagged_incidents,
 )
 from src.utils.bulk_export import create_documents_bulk_zip_archive
-from src.utils.pdf_report import generate_plagiarism_report, highlight_pdf_matches
-from src.utils.badge_generator import (
-    generate_badge_png,
-    generate_badge_pdf,
-)
-from src.db.corpus_db import get_document_tags, get_total_document_count, init_corpus_db
-from src.db.incidents import (
-    get_all_incidents_above_threshold_for_export,
-    get_high_severity_trends,
-    get_most_plagiarized_documents,
-    sync_flagged_incidents,
-)
+from src.utils.pdf_report import highlight_pdf_matches
+from src.db.corpus_db import get_total_document_count, init_corpus_db
 from src.i18n.translator import _SUPPORTED_LANGUAGES, get_text
 from src.utils.processing_time import (
     estimate_processing_seconds,

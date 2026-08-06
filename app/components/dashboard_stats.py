@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import logging
 import html
-from datetime import datetime
 from typing import Any, Dict, List
 import pandas as pd
 import plotly.graph_objects as go
