@@ -22,8 +22,8 @@ logger = logging.getLogger(__name__)
 DB_PATH = str(CORPUS_DB_PATH)
 
 # In-memory counters for lookup hits and misses
-_cache_hits = 0
-_cache_misses = 0
+cache_hits = 0
+cache_misses = 0
 
 
 def _init_db() -> None:
@@ -111,12 +111,12 @@ def get_cached_translation(
             (text_hash,),
         )
         row = cursor.fetchone()
-        global _cache_hits, _cache_misses
+        global cache_hits, cache_misses
         if row:
-            _cache_hits += 1
+            cache_hits += 1
             return row[0]
         else:
-            _cache_misses += 1
+            cache_misses += 1
             return None
 
 
@@ -259,19 +259,11 @@ def get_translation_cache_stats() -> dict:
         return {"total_entries": 0, "oldest_entry_days": 0}
 
 
-def get_translation_cache_hit_rate() -> float:
-    """Returns the translation cache hit rate (hits / (hits + misses)).
-
-    If there have been no cache lookups, returns 0.0.
+def get_translation_cache_hit_ratio() -> float:
     """
-    total = _cache_hits + _cache_misses
+    Computes the translation cache hit ratio.
+    """
+    total = cache_hits + cache_misses
     if total == 0:
         return 0.0
-    return _cache_hits / total
-
-
-def reset_translation_cache_counters() -> None:
-    """Reset the cache hits and misses counters to zero."""
-    global _cache_hits, _cache_misses
-    _cache_hits = 0
-    _cache_misses = 0
+    return cache_hits / total
