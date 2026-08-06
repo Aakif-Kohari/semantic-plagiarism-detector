@@ -1003,20 +1003,61 @@ with st.sidebar:
     lang_code = _lang_reverse.get(selected_lang_name, "en")
 
     if user_role == "admin":
+        # ── Threshold Presets (Issue #1674) ───────────────────────────────────────
+        st.markdown("### 🎯 Threshold Presets")
+        
+        # Define preset options with descriptions
+        preset_options = {
+            "Strict (0.80)": 0.80,
+            "Balanced (0.59)": 0.59,
+            "Lenient (0.45)": 0.45,
+            "Custom": None,
+        }
+        
+        # Determine current preset based on session state threshold
+        current_threshold = st.session_state.get("threshold_slider", PLAGIARISM_THRESHOLD)
+        current_preset = "Custom"
+        for label, value in preset_options.items():
+            if value is not None and abs(current_threshold - value) < 0.001:
+                current_preset = label
+                break
+        
+        selected_preset = st.radio(
+            "Select Evaluation Standard:",
+            options=list(preset_options.keys()),
+            index=list(preset_options.keys()).index(current_preset),
+            key="threshold_preset_radio",
+            horizontal=True,
+            help="Choose a predefined threshold standard or use the custom slider below.",
+        )
+        
+        # Sync preset selection with slider value
+        if selected_preset != "Custom" and preset_options[selected_preset] is not None:
+            st.session_state["threshold_slider"] = preset_options[selected_preset]
+            # Force rerun to update the slider widget if it changed via radio
+            if current_preset != selected_preset:
+                st.rerun()
+
         threshold = st.slider(
             "Plagiarism Threshold (Hybrid)",
-            0.50,
+            0.10,
             0.99,
-            value=PLAGIARISM_THRESHOLD,
+            value=st.session_state.get("threshold_slider", PLAGIARISM_THRESHOLD),
             step=0.01,
             help=(
                 "Combined Hybrid score threshold for flagging pair plagiarism. "
                 "Calculated from Lexical (exact phrase overlap) and Semantic (meaning alignment) scores. "
                 "Recommended Default: 0.59 (59%)."
             ),
-            key=SessionKeys.THRESHOLD_SLIDER,
+            key="threshold_slider",
             on_change=save_preferences_callback,
         )
+        
+        # If user manually changes slider, reset preset to "Custom"
+        if abs(threshold - preset_options.get(selected_preset, -1)) > 0.001:
+            if st.session_state.get("threshold_preset_radio") != "Custom":
+                st.session_state["threshold_preset_radio"] = "Custom"
+                st.rerun()
 
         lexical_threshold = st.slider(
             "Lexical Sensitivity Threshold",
