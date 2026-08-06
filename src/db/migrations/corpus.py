@@ -6,7 +6,7 @@ import sqlite3
 
 from .common import column_exists, run_migrations
 
-CORPUS_SCHEMA_VERSION = 13
+CORPUS_SCHEMA_VERSION = 14
 
 def migration_001_create_base_schema(
     connection: sqlite3.Connection,
@@ -317,7 +317,8 @@ CORPUS_MIGRATIONS = {   1: migration_001_create_base_schema,
     10: migration_010_add_document_owner,
     11: migration_011_add_documents_created_at_index,
 12: migration_012_add_fts5_index,
-    13: migration_013_add_incident_archive_table,    13: migration_013_add_incident_severity_idx,
+    13: migration_013_add_incident_archive_table,
+    14: migration_013_add_incident_severity_idx,
 }
 
 def migrate_corpus_database(
