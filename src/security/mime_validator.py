@@ -66,7 +66,7 @@ ALLOWED_MAGIC_HEADERS = {
     "zip": [b"PK\x03\x04"],
     "epub": [b"PK\x03\x04"],
     "odt": [b"PK\x03\x04"],
-    "doc": [b"\xd0\xcf\x11\xe0"],
+    "doc": [b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"],
     "rtf": [b"{\\rtf"],
     "png": [b"\x89PNG\r\n\x1a\n"],
     "jpg": [b"\xff\xd8\xff"],
@@ -376,6 +376,17 @@ def validate_mime_type(file_bytes: bytes, filename: str) -> bool:
             extension,
             filename,
         )
+
+    # Legacy Microsoft Word .doc files use the OLE Compound File signature.
+    # Validate the complete eight-byte header before trusting MIME detection.
+    if extension == "doc":
+        ole_header = ALLOWED_MAGIC_HEADERS["doc"][0]
+        if not file_bytes.startswith(ole_header):
+            logger.warning(
+                "[mime_validator] Invalid OLE Compound File header for '%s'.",
+                filename,
+            )
+            return False
 
     # PDF validation is intentionally strict even when libmagic is
     # permissive or unavailable.

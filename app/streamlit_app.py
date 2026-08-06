@@ -7,6 +7,7 @@ import functools
 from pathlib import Path
 import sys
 import time
+import hashlib
 from datetime import datetime, timezone
 
 import numpy as np
@@ -49,7 +50,6 @@ from src.utils.filename import (
 )
 
 
-from typing import Any
 try:
     from streamlit_plotly_events import plotly_events  # type: ignore
 except ImportError:  # pragma: no cover - optional dependency
@@ -270,6 +270,7 @@ from src.core.similarity import (
     document_similarity_matrix,
     flag_plagiarism,
 )
+from src.core.lexical_similarity import jaccard_similarity 
 from src.visualization.network_graph import (
     plot_similarity_network,
 )
@@ -303,18 +304,8 @@ from src.db.incidents import (
     sync_flagged_incidents,
 )
 from src.utils.bulk_export import create_documents_bulk_zip_archive
-from src.utils.pdf_report import generate_plagiarism_report, highlight_pdf_matches
-from src.utils.badge_generator import (
-    generate_badge_png,
-    generate_badge_pdf,
-)
-from src.db.corpus_db import get_document_tags, get_total_document_count, init_corpus_db
-from src.db.incidents import (
-    get_all_incidents_above_threshold_for_export,
-    get_high_severity_trends,
-    get_most_plagiarized_documents,
-    sync_flagged_incidents,
-)
+from src.utils.pdf_report import highlight_pdf_matches
+from src.db.corpus_db import get_total_document_count, init_corpus_db, get_document_by_hash
 from src.i18n.translator import _SUPPORTED_LANGUAGES, get_text
 from src.utils.processing_time import (
     estimate_processing_seconds,
@@ -339,6 +330,7 @@ try:
     from src.visualization.analytics import (
         plot_high_severity_trends,
         plot_most_plagiarized_documents,
+        plot_processing_time_breakdown,
         plot_similarity_distribution,
     )
 except ImportError:
@@ -346,6 +338,7 @@ except ImportError:
     render_copy_button = None
     plot_high_severity_trends = None
     plot_most_plagiarized_documents = None
+    plot_processing_time_breakdown = None
     plot_similarity_distribution = None
 
 try:
@@ -613,17 +606,16 @@ configure_page_meta(title="Semantic Plagiarism Detector - Dashboard", icon="🔍
 
 
 def update_page_title(tab_name: str):
-    """
-    Update browser title based on active tab.
-    """
+    """Update browser title based on active tab."""
     st.markdown(
         f"""
         <script>
-            document.title = "{tab_name} | Semantic Plagiarism Detector";
+            window.parent.document.title = '{tab_name} | Semantic Plagiarism Detector';
         </script>
         """,
         unsafe_allow_html=True,
     )
+
 
 
 if SessionKeys.AUTHENTICATED not in st.session_state:
@@ -669,6 +661,87 @@ def build_visualization_lazily(is_enabled, build_fn):
         return build_fn()
     return None
 
+
+
+# ── Issue #1383: Cosine vs Lexical Similarity Comparison Table ─────────────────
+SEMANTIC_HIGH_THRESHOLD = 0.80  # vector (cosine) score considered "high"
+LEXICAL_LOW_THRESHOLD = 0.30    # lexical (jaccard) score considered "low"
+
+
+def render_cosine_vs_lexical_comparison_table(
+    sim_df,
+    raw_texts,
+    *,
+    semantic_threshold: float = SEMANTIC_HIGH_THRESHOLD,
+    lexical_threshold: float = LEXICAL_LOW_THRESHOLD,
+):
+    """Render a two-column score comparison table in the results / drill-down view.
+
+    Compares vector-embedding similarity (cosine semantic) against Jaccard
+    lexical similarity side-by-side for every unique document pair, and
+    highlights pairs where the cosine score is high (>= ``semantic_threshold``)
+    but the Jaccard score is low (<= ``lexical_threshold``). Such pairs are
+    strong indicators of paraphrasing / semantic plagiarism that pure lexical
+    matching would miss.
+
+    Parameters
+    ----------
+    sim_df : pandas.DataFrame
+        Square cosine similarity matrix indexed/columned by document names.
+    raw_texts : Dict[str, str]
+        Mapping of document name → extracted text. Used to compute Jaccard.
+    semantic_threshold : float, default 0.80
+        Cosine score at/above which a pair is considered semantically similar.
+    lexical_threshold : float, default 0.30
+        Jaccard score at/below which a pair is considered lexically dissimilar.
+
+    Returns
+    -------
+    pandas.DataFrame
+        The styled comparison DataFrame (also rendered to the UI).
+    """
+    import itertools
+
+    if sim_df is None or raw_texts is None or len(raw_texts) < 2:
+        st.info(
+            "Upload at least two documents to view the Cosine vs Lexical "
+            "Similarity comparison table."
+        )
+        return None
+
+    doc_names = list(sim_df.columns) if sim_df is not None else list(raw_texts.keys())
+    rows = []
+    for da, db in itertools.combinations(doc_names, 2):
+        # Cosine score from the (already-computed) semantic matrix.
+        try:
+            cosine_score = float(sim_df.loc[da, db])
+        except Exception:
+            cosine_score = 0.0
+
+        # Jaccard lexical score from the raw extracted texts.
+        text_a = raw_texts.get(da, "") or ""
+        text_b = raw_texts.get(db, "") or ""
+        try:
+            jaccard_score = float(jaccard_similarity(text_a, text_b))
+        except Exception:
+            jaccard_score = 0.0
+
+        is_semantic_only = (
+            cosine_score >= semantic_threshold and jaccard_score <= lexical_threshold
+        )
+        rows.append(
+            {
+                "Document A": da,
+                "Document B": db,
+                "Cosine (Semantic)": cosine_score,
+                "Jaccard (Lexical)": jaccard_score,
+                "Semantic-Only Paraphrasing?": "🚨 Yes" if is_semantic_only else "No",
+            }
+        )
+
+    comp_df = pd.DataFrame(rows)
+    st.dataframe(comp_df)
+    return comp_df
 
 from datetime import date, timedelta
 
@@ -879,7 +952,6 @@ def logout_dialog():
             username = st.session_state.get(SessionKeys.USERNAME, "unknown")
             timestamp = datetime.now(timezone.utc).isoformat()
             logger.info("User '%s' logged out at %s", username, timestamp)
-
             for key in [
                 SessionKeys.AUTHENTICATED,
                 SessionKeys.USERNAME,
@@ -889,6 +961,24 @@ def logout_dialog():
                     del st.session_state[key]
             clear_session(SESSION_ID)
             st.rerun()
+
+@st.dialog("⚠️ Clear All Documents")
+def clear_all_dialog():
+    st.write("Are you sure you want to completely clear the local database?")
+    st.write("This action cannot be undone.")
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Cancel", use_container_width=True, key="cancel_clear_all"):
+            st.rerun()
+    with col2:
+        if st.button("Clear All", type="primary", use_container_width=True, key="confirm_clear_all"):
+            from src.db.corpus_db import clear_all_data
+            clear_all_data()
+            clear_session()
+            st.cache_data.clear()
+            st.rerun()
+
+
 
 
 # ── Corpus Overview Header & Quick Actions (#1242) ───────────────────────────
@@ -1097,32 +1187,40 @@ if not selected_classes:
             f"⚡ Vector Model Loaded in {st.session_state[SessionKeys.MODEL_LOAD_TIME]:.2f} seconds"
         )
 
-    # System Health Widget
-    with st.expander("🖥️ System Health", expanded=False):
+    # ── System Health Widget (Issue #1246) ──────────────────────────────────────
+    # Collapsible sidebar expander showing RAM usage, disk space, and DB status
+    # for administrators monitoring the application health at a glance.
+    # ── Real-Time Memory Consumption Monitor (Issue #1371) ──────────────────────
+    with st.expander("🖥️ System Health & Memory", expanded=False):
         try:
-            memory_info = psutil.virtual_memory()
-            ram_usage_percent = memory_info.percent
-            ram_total_gb = memory_info.total / (1024**3)
-            ram_available_gb = memory_info.available / (1024**3)
+            import os
+            process = psutil.Process(os.getpid())
+            mem_info = process.memory_info()
+            rss_mb = mem_info.rss / (1024 * 1024)
+            
+            # Host limit estimation or default shared host limit (e.g., 2048 MB)
+            host_limit_mb = 2048.0
+            try:
+                from src.core.app_config import get_host_memory_limit_mb
+                host_limit_mb = float(get_host_memory_limit_mb())
+            except Exception:
+                pass
 
-            if ram_usage_percent >= 90:
-                ram_indicator = "🔴"
-                ram_status_text = "Critical"
-            elif ram_usage_percent >= 70:
-                ram_indicator = "🟡"
-                ram_status_text = "Warning"
+            ram_usage_percent = min(rss_mb / host_limit_mb, 1.0)
+            ram_percent_val = (rss_mb / host_limit_mb) * 100
+
+            # Determine warning state (>80% amber warning)
+            if ram_percent_val >= 80:
+                st.warning(f"⚠️ High RAM Usage: {rss_mb:.1f} MB / {host_limit_mb:.0f} MB ({ram_percent_val:.0f}%)")
             else:
-                ram_indicator = "🟢"
-                ram_status_text = "Healthy"
+                st.markdown(f"**RAM Usage:** {rss_mb:.1f} MB / {host_limit_mb:.0f} MB ({ram_percent_val:.0f}%)")
 
-            st.markdown(
-                f"**💾 RAM Usage:** {ram_indicator} {ram_usage_percent:.1f}% "
-                f"({ram_status_text})"
-            )
-            st.caption(
-                f"Total: {ram_total_gb:.1f} GB · Available: {ram_available_gb:.1f} GB"
-            )
+            st.progress(ram_usage_percent)
 
+        except Exception as mem_err:
+            st.error(f"Failed to measure process memory: {mem_err}")
+            
+            # Free disk space on the partition containing the project root
             disk_usage = psutil.disk_usage(str(ROOT_DIR))
             free_disk_gb = disk_usage.free / (1024**3)
             total_disk_gb = disk_usage.total / (1024**3)
@@ -1917,8 +2015,23 @@ if user_role == "admin":
                 )
                 continue
 
+            file_bytes = uploaded_file.read()
+            file_hash = hashlib.sha256(file_bytes).hexdigest()
+            existing_doc = get_document_by_hash(file_hash)
+
+            if existing_doc:
+                st.warning(f"⚠️ File **'{original_name}'** is identical to **'{existing_doc}'** already in the database.")
+                action = st.radio(
+                    f"Action for duplicate file '{original_name}':",
+                    ["Skip", "Reprocess"],
+                    key=f"dup_{file_hash}_{original_name}",
+                    horizontal=True
+                )
+                if action == "Skip":
+                    continue
+
             file_bytes_dict[safe_name] = strip_exif_metadata(
-                uploaded_file.read(), safe_name
+                file_bytes, safe_name
             )
 
     for drive_name, drive_bytes in st.session_state.get(
@@ -2167,7 +2280,7 @@ with tab_faiss:
             )
             from app.components.faiss_results import render_faiss_results_ui
 
-            render_faiss_results_ui(results, faiss_query.strip())
+            render_faiss_results_ui(results, faiss_query.strip(), document_pdf_bytes=globals().get("file_bytes_dict"))
 
 
 # ══ TAB 3: MATRIX ═════════════════════════════════════════════════════════
@@ -2215,6 +2328,17 @@ with tab_heatmap:
 with tab_drill:
     update_page_title("Drill Down")
     st.subheader("🔬 Pair Drill-Down")
+
+    # ── Issue #1383: Cosine vs Lexical side-by-side comparison table ──
+    render_cosine_vs_lexical_comparison_table(
+        active_sim_df,
+        raw_texts,
+        semantic_threshold=SEMANTIC_HIGH_THRESHOLD,
+        lexical_threshold=LEXICAL_LOW_THRESHOLD,
+    )
+
+    st.markdown("---")
+
     if active_sim_df is not None and len(doc_names) >= 2:
         c1, c2 = st.columns(2)
         with c1:
@@ -2270,7 +2394,17 @@ with tab_drill:
 with tab_analytics:
     update_page_title("Analytics")
     st.subheader("📊 Analytics Dashboard")
-    st.info("Analytics metrics summary loaded.")
+    st.markdown("### ⏱️ Pipeline Processing Time Breakdown")
+    stage_timings = st.session_state.get("last_stage_timings") or st.session_state.get("stage_timings")
+    if plot_processing_time_breakdown:
+        active_theme_colors = get_colors() if callable(get_colors) else None
+        fig_time = plot_processing_time_breakdown(
+            stage_timings=stage_timings,
+            theme_colors=active_theme_colors,
+        )
+        st.plotly_chart(fig_time, use_container_width=True)
+    else:
+        st.info("Analytics metrics summary loaded.")
 
 # ══ TAB 7: USERS ══════════════════════════════════════════════════════════
 with tab_users:

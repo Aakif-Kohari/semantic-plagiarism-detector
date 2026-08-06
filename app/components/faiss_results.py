@@ -7,7 +7,8 @@ formatting, and displaying vector search results.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+import os
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 import pandas as pd
@@ -99,7 +100,13 @@ def faiss_results_dataframe(
 
 
 @st.dialog("🔍 Chunk Diff Inspector", width="large")
-def inspect_diff_dialog(query_text: str, matched_text: str, doc_name: str, score: float):
+def inspect_diff_dialog(
+    query_text: str,
+    matched_text: str,
+    doc_name: str,
+    score: float,
+    pdf_bytes: bytes | None = None,
+):
     """Render a side-by-side highlighted diff of query vs matched chunk inside a modal."""
     st.markdown(f"### Match Similarity: **{score:.1%}**")
 
@@ -120,14 +127,50 @@ def inspect_diff_dialog(query_text: str, matched_text: str, doc_name: str, score
             unsafe_allow_html=True
         )
 
+    if pdf_bytes:
+        st.divider()
+
+        try:
+            from src.utils.pdf_highlighter import highlight_pdf_matches
+        except Exception:
+            highlight_pdf_matches = None
+
+        if highlight_pdf_matches is None:
+            st.caption("⚠️ PDF highlighting is unavailable (PyMuPDF is not installed).")
+        else:
+            try:
+                annotated_pdf = highlight_pdf_matches(pdf_bytes, [matched_text])
+            except Exception as exc:
+                annotated_pdf = None
+                st.warning(f"Could not generate the highlighted PDF: {exc}")
+
+            if annotated_pdf:
+                base_name = os.path.splitext(doc_name)[0]
+                st.download_button(
+                    "⬇️ Download Highlighted PDF",
+                    data=annotated_pdf,
+                    file_name=f"highlighted_{base_name}.pdf",
+                    mime="application/pdf",
+                    key=f"download_highlighted_pdf_{doc_name}",
+                )
+
 
 def render_faiss_results_ui(
     results: Iterable[tuple[Any, float]],
     query_text: str,
+    document_pdf_bytes: Mapping[str, bytes] | None = None,
 ) -> None:
     """
     Render FAISS search results with a clean interface and an interactive 
     'Inspect Diff' modal dialog for side-by-side comparison.
+
+    Args:
+        results: An iterable of (record, score) tuples returned by the FAISS search.
+        query_text: The text the user searched with.
+        document_pdf_bytes: Optional mapping of doc_name -> original PDF bytes.
+            When the matched document is available here, the diff inspector
+            offers a "Download Highlighted PDF" button that annotates the
+            matched passage directly on the source PDF.
     """
 
 
@@ -153,7 +196,15 @@ def render_faiss_results_ui(
         st.caption(chunk_text[:300] + ("..." if len(chunk_text) > 300 else ""))
 
         if st.button("🔍 Inspect Diff", key=f"diff_btn_{i}_{doc_name}_{chunk_index}"):
-            inspect_diff_dialog(query_text, chunk_text, doc_name, score)
+            source_pdf_bytes = (
+                document_pdf_bytes.get(doc_name) if document_pdf_bytes else None
+            )
+            if source_pdf_bytes:
+                inspect_diff_dialog(
+                    query_text, chunk_text, doc_name, score, pdf_bytes=source_pdf_bytes
+                )
+            else:
+                inspect_diff_dialog(query_text, chunk_text, doc_name, score)
 
         st.markdown("<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
 

@@ -366,3 +366,13 @@ def test_chunk_text_raises_value_error_for_invalid_overlap():
             chunk_size=100,
             overlap_percentage=1.0,
         )
+
+
+def test_chunk_text_raises_value_error_for_non_positive_chunk_size():
+    """Verify chunk_text raises ValueError when chunk_size <= 0 (Issue #1579)."""
+    for invalid_size in [0, -1, -50]:
+        with pytest.raises(
+            ValueError, match="chunk_size must be a positive integer > 0"
+        ):
+            chunk_text("Sample text content for testing chunking.", chunk_size=invalid_size)
+            
