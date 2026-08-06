@@ -2177,7 +2177,7 @@ with tab_faiss:
             )
             from app.components.faiss_results import render_faiss_results_ui
 
-            render_faiss_results_ui(results, faiss_query.strip())
+            render_faiss_results_ui(results, faiss_query.strip(), document_pdf_bytes=globals().get("file_bytes_dict"))
 
 
 # ══ TAB 3: MATRIX ═════════════════════════════════════════════════════════
