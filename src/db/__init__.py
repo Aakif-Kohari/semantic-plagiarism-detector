@@ -6,6 +6,7 @@ from .auth import (
     enable_2fa,
     get_2fa_status,
     get_all_users,
+    get_recent_audit_events,
     get_user_active_status,
     get_user_role,
     init_db,
@@ -56,6 +57,12 @@ __all__ = [
     "get_document_chunks_count",
     "get_unique_class_sections",
     "get_documents_by_class",
+    "get_total_document_count",
+    "get_deleted_documents_count",
+    "get_recent_incidents",
+    "get_recent_audit_events",
+    "log_incident",
+    "get_incidents_by_assignment",
 ]
 
 
