@@ -2282,6 +2282,29 @@ with tab_heatmap:
             title="Interactive Document Plagiarism Network",
         )
 
+    # ── Plagiarism Cluster Detection Summary (Issue #1675) ───────────────────
+    if active_sim_df is not None and len(doc_names) >= 2:
+        from src.core.similarity import detect_plagiarism_clusters
+        
+        cluster_data = detect_plagiarism_clusters(active_sim_df, threshold=threshold)
+        suspicious_groups = cluster_data["suspicious_groups"]
+        
+        if suspicious_groups:
+            with st.expander(
+                f"🚨 Suspicious Collusion Rings Detected ({len(suspicious_groups)})",
+                expanded=True,
+            ):
+                st.warning(
+                    f"Found {len(suspicious_groups)} group(s) of 3+ highly similar documents. "
+                    "These may indicate collusion or shared source material."
+                )
+                
+                for group in suspicious_groups:
+                    st.markdown(f"**Cluster #{group['cluster_id']}** ({group['size']} documents):")
+                    for doc in group["documents"]:
+                        st.markdown(f"- 📄 `{doc}`")
+                    st.divider()
+
 # ══ TAB 5: PAIR DRILL-DOWN ════════════════════════════════════════════════
 with tab_drill:
     update_page_title("Drill Down")

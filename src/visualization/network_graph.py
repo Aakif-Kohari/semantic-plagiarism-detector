@@ -299,6 +299,15 @@ def build_network_data(
             for node in comm:
                 community_map[node] = i
 
+    # ── Plagiarism Cluster Detection (Issue #1675) ───────────────────────────────
+    # Use connected components to identify collusion rings
+    import networkx as nx
+    connected_components = list(nx.connected_components(G))
+    cluster_map = {}
+    for cluster_id, component in enumerate(connected_components):
+        for node in component:
+            cluster_map[node] = cluster_id
+    
     # ── Draw Nodes ─────────────────────────────────────────────────────────────
 
     node_x = []
@@ -347,12 +356,19 @@ def build_network_data(
             comm_idx = community_map.get(node, 0)
             node_color.append(DEFAULT_TAG_COLORS[comm_idx % len(DEFAULT_TAG_COLORS)])
 
+        # Determine cluster size for suspicion indicator
+        cluster_id = cluster_map.get(node, -1)
+        cluster_size = len([n for n, cid in cluster_map.items() if cid == cluster_id])
+        suspicion_badge = "🚨 COLLUSION RISK" if cluster_size >= 3 else "✅ Normal"
+        
         meta = doc_metadata.get(node, {}) if doc_metadata and node in doc_metadata else {}
         word_count = meta.get("word_count", "N/A")
         upload_date = meta.get("upload_date", meta.get("created_at", "N/A"))
 
         node_hover.append(
             f"<b>📄 Document Title:</b> {node}<br>"
+            f"<b>🔗 Cluster ID:</b> {cluster_id} ({cluster_size} docs)<br>"
+            f"<b>🚨 Status:</b> {suspicion_badge}<br>"
             f"<b>🚨 Flagged connections:</b> {deg} / {max(1, len(doc_names) - 1)}<br>"
             f"<b>📝 Word Count:</b> {word_count}<br>"
             f"<b>📅 Upload Date:</b> {upload_date}<br>"
@@ -412,6 +428,7 @@ def build_network_data(
         "pos": pos,
         "tag_color_map": tag_color_map,
         "document_tags": document_tags,
+        "cluster_map": cluster_map,
     }
 
 
