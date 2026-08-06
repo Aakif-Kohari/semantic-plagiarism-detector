@@ -589,3 +589,14 @@ def test_plot_similarity_heatmap_plotly_custom_colorscale(
     fig_default = plot_similarity_heatmap_plotly(multi_doc_df, title="Default Colorscale")
     heatmap_default = next(trace for trace in fig_default.data if trace.type == "heatmap")
     assert heatmap_default.colorscale != heatmap.colorscale
+
+
+def test_plot_similarity_heatmap_responsive_tick_fontsize(multi_doc_df: pd.DataFrame) -> None:
+    """Verify responsive font sizing calculation max(6, 12 - N // 10) on tick labels (#1617)."""
+    fig = plot_similarity_heatmap(multi_doc_df)
+    ax = fig.axes[0]
+    xticklabels = ax.get_xticklabels()
+    assert len(xticklabels) > 0
+    expected_fontsize = max(6, 12 - len(multi_doc_df) // 10)
+    assert xticklabels[0].get_fontsize() == expected_fontsize
+    plt.close(fig)
