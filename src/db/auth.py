@@ -177,6 +177,24 @@ def get_distinct_audit_event_types() -> list[str]:
         return []
 
 
+def get_recent_audit_events(limit: int = 20) -> list[dict]:
+    """Fetch the N most recent security audit events across all accounts."""
+    if limit < 0:
+        raise ValueError("Limit must be a non-negative integer.")
+
+    try:
+        with _connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM security_audit_log ORDER BY timestamp DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+    except sqlite3.Error as e:
+        logger.error(f"Failed to query recent security audit events: {e}")
+        return []
+
+
 def _hash_password(password: str) -> str:
     """Return an Argon2 hash for the given password."""
     return _ph.hash(password)

@@ -590,3 +590,33 @@ def test_password_history_validation_prevents_reuse_of_last_3_passwords(mock_db)
     # 6. Now pass1 is older than the last 3 passwords (which are pass4, pass3, pass2) -> updating to pass1 succeeds
     update_password(user, pass1)
     assert verify_user(user, pass1) is True
+
+
+def test_get_recent_audit_events(mock_db):
+    """Verify get_recent_audit_events returns recent audit entries ordered by timestamp DESC up to limit."""
+    from src.db.auth import get_recent_audit_events, log_security_event
+
+    log_security_event("login_success", "alice", "Alice logged in")
+    log_security_event("login_failure", "bob", "Bob failed login")
+    log_security_event("password_change", "charlie", "Charlie updated password")
+
+    events = get_recent_audit_events(limit=2)
+    assert len(events) == 2
+    assert isinstance(events, list)
+    assert isinstance(events[0], dict)
+
+    # Validate keys in dictionary
+    for event in events:
+        assert "id" in event
+        assert "event_type" in event
+        assert "username" in event
+        assert "timestamp" in event
+        assert "details" in event
+
+    # Default limit=20 returns all logged events
+    all_recent = get_recent_audit_events(limit=20)
+    assert len(all_recent) >= 3
+
+    # Negative limit raises ValueError
+    with pytest.raises(ValueError):
+        get_recent_audit_events(limit=-5)
