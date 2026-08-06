@@ -12,7 +12,17 @@ import pandas as pd
 import plotly.graph_objects as go
 import pytest
 
-from src.visualization.network_graph import export_network_adjacency_csv
+from src.visualization.network_graph import (
+    build_network_data,
+    calculate_force_directed_layout,
+    export_graph_to_csv,
+    export_network_adjacency_csv,
+    export_network_to_csv_bytes,
+    export_network_to_gexf_bytes,
+    plot_plagiarism_network_graph,
+    plot_similarity_network,
+    render_network_plotly,
+)
 
 
 def test_export_network_adjacency_csv():
@@ -26,22 +36,14 @@ def test_export_network_adjacency_csv():
     assert "Source,Target,Weight" in csv_output
     assert "Doc A,Doc B,0.95" in csv_output
     assert "Doc B,Doc C,0.82" in csv_output
+
+
 def test_export_network_adjacency_csv_empty_graph():
     graph = nx.Graph()
 
     csv_output = export_network_adjacency_csv(graph)
 
     assert csv_output.strip() == "Source,Target,Weight"
-from src.visualization.network_graph import (
-    build_network_data,
-    calculate_force_directed_layout,
-    export_graph_to_csv,
-    export_network_to_csv_bytes,
-    export_network_to_gexf_bytes,
-    plot_plagiarism_network_graph,
-    plot_similarity_network,
-    render_network_plotly,
-)
 
 
 def test_build_network_data_structure():
@@ -126,7 +128,6 @@ def test_build_network_data_node_color_severity():
     assert net_data["node_trace"].marker.color[2] == "#ffff00"
 
 
-
 def test_render_network_plotly_construction():
     """Verify render_network_plotly constructs a valid Plotly Figure from network data."""
     data = {
@@ -152,7 +153,6 @@ def test_render_network_plotly_construction():
 
 
 def test_plot_similarity_network_returns_plotly_figure():
-
     # Setup simple square similarity matrix
     data = {
         "doc1": [1.0, 0.85, 0.20],
@@ -304,7 +304,6 @@ def test_export_network_to_csv_bytes():
 
 def test_plot_similarity_network_json_serialization():
     """Verify network graph figures serialize to valid JSON without circular references."""
-    # Test with multiple documents and edges
     data = {
         "doc1": [1.0, 0.85, 0.20],
         "doc2": [0.85, 1.0, 0.10],
@@ -314,7 +313,6 @@ def test_plot_similarity_network_json_serialization():
 
     fig = plot_similarity_network(df, threshold=0.75)
 
-    # Verify fig.to_json() succeeds without raising an exception
     json_str = fig.to_json()
     assert json_str is not None
     assert len(json_str) > 0
@@ -337,7 +335,6 @@ def test_plot_similarity_network_json_serialization_with_theme():
 
     fig = plot_similarity_network(df, threshold=0.75, theme_colors=custom_theme)
 
-    # Verify fig.to_json() succeeds
     json_str = fig.to_json()
     assert json_str is not None
     assert len(json_str) > 0
@@ -350,7 +347,6 @@ def test_plot_similarity_network_json_serialization_single_doc():
 
     fig = plot_similarity_network(df, threshold=0.75)
 
-    # Verify fig.to_json() succeeds
     json_str = fig.to_json()
     assert json_str is not None
     assert len(json_str) > 0
@@ -367,7 +363,6 @@ def test_plot_similarity_network_json_serialization_no_edges():
 
     fig = plot_similarity_network(df, threshold=0.75)
 
-    # Verify fig.to_json() succeeds
     json_str = fig.to_json()
     assert json_str is not None
     assert len(json_str) > 0
@@ -384,7 +379,6 @@ def test_plot_similarity_network_json_serialization_with_highlighted_node():
 
     fig = plot_similarity_network(df, threshold=0.75, selected_node="doc1")
 
-    # Verify fig.to_json() succeeds
     json_str = fig.to_json()
     assert json_str is not None
     assert len(json_str) > 0
@@ -404,7 +398,6 @@ def test_build_network_data_node_scale_default():
     df = pd.DataFrame(data, index=["doc1", "doc2"])
     net_data = build_network_data(df, threshold=0.75)
     sizes = net_data["node_trace"].marker.size
-    # doc1 degree=1 -> base_size = (20 + 1*6) * 1.0 = 26
     assert sizes[0] == 26.0 or sizes[0] == 26
 
 
@@ -529,7 +522,6 @@ def test_build_network_data_spring_k_customization():
     pos_tight = net_data_tight["pos"]
     pos_spread = net_data_spread["pos"]
 
-    # Positions should change when spring constant k changes
     assert pos_default["doc1"][0] != pos_tight["doc1"][0] or pos_default["doc1"][1] != pos_tight["doc1"][1]
     assert pos_default["doc1"][0] != pos_spread["doc1"][0] or pos_default["doc1"][1] != pos_spread["doc1"][1]
 
@@ -593,17 +585,13 @@ def test_calculate_force_directed_layout_utility():
         assert len(pos[node]) == 2
         assert isinstance(pos[node][0], (float, int, numpy.number) if 'numpy' in globals() else float)
 
+
 # ==============================================================================
 # Community Clustering Tests (Issue #1503)
 # ==============================================================================
 
 def test_build_network_data_community_clustering():
     """Verify nodes in the same community receive the same color, and different communities get different colors."""
-    # Create a graph that clearly has two separate communities.
-    # doc1, doc2, doc3 form one clique
-    # doc4, doc5, doc6 form another clique
-    # One connecting edge to make it a single connected component might be needed for some algos, 
-    # but Louvain and greedy modularity can handle disconnected components too.
     data = {
         "doc1": [1.0, 0.9, 0.9, 0.0, 0.0, 0.0],
         "doc2": [0.9, 1.0, 0.9, 0.0, 0.0, 0.0],
@@ -625,14 +613,10 @@ def test_build_network_data_community_clustering():
     
     color_map = dict(zip(customdata, colors))
     
-    # doc1, doc2, doc3 should have same color
     assert color_map["doc1"] == color_map["doc2"] == color_map["doc3"]
-    
-    # doc4, doc5, doc6 should have same color
     assert color_map["doc4"] == color_map["doc5"] == color_map["doc6"]
-    
-    # The two communities should have different colors
     assert color_map["doc1"] != color_map["doc4"]
+
 
 def test_build_network_data_single_node_clustering():
     """Verify single-node graphs don't crash and get a community color."""
@@ -644,12 +628,48 @@ def test_build_network_data_single_node_clustering():
     assert len(node_trace.marker.color) == 1
     assert node_trace.marker.color[0] is not None
 
+
 def test_build_network_data_empty_clustering():
     """Verify empty graphs don't crash during community clustering."""
     df = pd.DataFrame()
     net_data = build_network_data(df, threshold=0.5)
     
     assert len(net_data["graph"].nodes()) == 0
-    # No nodes, so no colors should be added
     assert len(net_data["node_trace"].marker.color) == 0
 
+
+# ==============================================================================
+# Node Label Truncation Tests (Issue #1600)
+# ==============================================================================
+
+
+def test_plot_plagiarism_network_graph_label_truncation():
+    """Verify node labels are truncated correctly based on max_label_len and hover tooltips keep full titles."""
+    doc_names = ["very_long_document_title_one.txt", "short.txt", "another_extremely_long_document_name_here.txt"]
+    sim_data = [
+        [1.0, 0.8, 0.6],
+        [0.8, 1.0, 0.5],
+        [0.6, 0.5, 1.0]
+    ]
+    df = pd.DataFrame(sim_data, index=doc_names, columns=doc_names)
+
+    fig = plot_plagiarism_network_graph(df, threshold=0.4, show_isolated=True, max_label_len=10)
+    
+    node_trace = None
+    for trace in fig.data:
+        if trace.name == "Documents":
+            node_trace = trace
+            break
+            
+    assert node_trace is not None
+    
+    labels = node_trace.text
+    for label in labels:
+        assert len(label) <= 10
+        if "..." in label:
+            assert label.endswith("...")
+
+    hovertexts = node_trace.hovertext
+    for i, name in enumerate(doc_names):
+        assert name in hovertexts[i]
+        
