@@ -24,7 +24,7 @@ import sqlite3
 import sys
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
@@ -37,12 +37,10 @@ if str(ROOT_DIR) not in sys.path:
 # Import modules under test
 from src.utils.redis_cache import (
     RedisCache,
-    get_cache,
     RedisConnectionError,
     RedisTimeoutError,
 )
-from src.core.webhook import send_plagiarism_alert, _post_webhook
-from src.core.embedding_model import EmbeddingModelManager, _get_model
+from src.core.webhook import send_plagiarism_alert
 
 
 # ── Fixtures ───────────────────────────────────────────────────────────────────

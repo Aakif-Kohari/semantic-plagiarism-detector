@@ -20,7 +20,7 @@ from src.core.config import (
     severity_from_score,
 )
 from src.db.common import with_sqlite_retry
-from src.db.migrations import migrate_corpus_database
+from src.db.migrations import migrate_corpus_database, table_exists
 from src.db.schemas import MatchResult
 
 # Seed the incidents default DB path from the centralized app_config.
@@ -137,7 +137,7 @@ def _validate_incident(flag: Mapping[str, Any]) -> tuple[bool, str]:
 
 
 def _fetch_all_incidents(conn: sqlite3.Connection) -> list[MatchResult]:
-    from src.db.schemas import MatchResult
+    pass
 
 def _validate_pagination(limit: int, offset: int) -> tuple[int, int]:
     """Validate and normalize SQL pagination arguments."""
@@ -470,6 +470,17 @@ def get_incidents_by_assignment(
     init_incident_db(db_path)
     with closing(_get_connection(db_path)) as conn:
         conn.row_factory = sqlite3.Row
+        if table_exists(conn, "incidents"):
+            rows = conn.execute(
+                """
+                SELECT * FROM incidents
+                WHERE assignment_title = ?
+                ORDER BY timestamp DESC
+                """,
+                (assignment_title,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
         rows = conn.execute(
             """
             SELECT DISTINCT i.incident_id, i.document_a, i.document_b,
@@ -900,7 +911,7 @@ def purge_old_incidents(
             """,
             (status, days_old),
         )
-conn.commit()
+        conn.commit()
         return cursor.rowcount
 
 
@@ -972,8 +983,6 @@ def log_incident(
     now: str | None = None,
     threshold: float | None = None,
 ) -> MatchResult:
-    if db_path is None:
-        db_path = DEFAULT_DB_PATH
     """Log a single plagiarism incident and clear get_recent_incidents cache.
 
     Args:
@@ -983,6 +992,8 @@ def log_incident(
     Returns:
         The created MatchResult.
     """
+    if db_path is None:
+        db_path = DEFAULT_DB_PATH
     results = sync_flagged_incidents([flag], db_path, now=now, threshold=threshold)
     if not results:
         raise ValueError("Failed to log incident: Invalid input.")

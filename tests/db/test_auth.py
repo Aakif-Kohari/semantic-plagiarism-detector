@@ -556,3 +556,37 @@ def test_revoke_token_and_is_token_revoked():
     assert is_token_revoked(None) is False  # type: ignore[arg-type]
     with pytest.raises(ValueError):
         revoke_token("")
+
+
+def test_password_history_validation_prevents_reuse_of_last_3_passwords(mock_db):
+    """Verify update_password prevents reusing any of the last 3 passwords."""
+    user = f"hist_user_{uuid.uuid4().hex[:8]}"
+    pass1 = "Pass_111111!"
+    pass2 = "Pass_222222!"
+    pass3 = "Pass_333333!"
+    pass4 = "Pass_444444!"
+
+    # 1. Add user with pass1
+    add_user(user, pass1)
+
+    # 2. Update to pass2
+    update_password(user, pass2)
+    assert verify_user(user, pass2) is True
+
+    # 3. Update to pass3
+    update_password(user, pass3)
+    assert verify_user(user, pass3) is True
+
+    # 4. Attempting to reuse pass1, pass2, or pass3 must raise ValueError
+    for forbidden_pass in (pass1, pass2, pass3):
+        with pytest.raises(ValueError) as exc_info:
+            update_password(user, forbidden_pass)
+        assert "New password cannot be one of your last 3 passwords" in str(exc_info.value)
+
+    # 5. Update to pass4 (succeeds)
+    update_password(user, pass4)
+    assert verify_user(user, pass4) is True
+
+    # 6. Now pass1 is older than the last 3 passwords (which are pass4, pass3, pass2) -> updating to pass1 succeeds
+    update_password(user, pass1)
+    assert verify_user(user, pass1) is True

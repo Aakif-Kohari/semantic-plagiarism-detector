@@ -178,6 +178,9 @@ def test_plot_similarity_boxplot_fallback_keys():
 from src.visualization.analytics import plot_similarity_histogram
 
 
+from src.visualization.analytics import plot_similarity_histogram
+
+
 def test_plot_similarity_histogram_returns_figure():
     scores = [0.1, 0.2, 0.35, 0.5, 0.55, 0.9]
     fig = plot_similarity_histogram(scores, n_bins=10)
