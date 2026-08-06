@@ -661,11 +661,6 @@ def build_visualization_lazily(is_enabled, build_fn):
         return build_fn()
     return None
 
-def build_visualization_lazily(is_enabled, build_fn):
-    """Utility to lazily load heavy chart visualizations when requested."""
-    if is_enabled:
-        return build_fn()
-    return None
 
 
 # ── Issue #1383: Cosine vs Lexical Similarity Comparison Table ─────────────────
@@ -957,7 +952,6 @@ def logout_dialog():
             username = st.session_state.get(SessionKeys.USERNAME, "unknown")
             timestamp = datetime.now(timezone.utc).isoformat()
             logger.info("User '%s' logged out at %s", username, timestamp)
-
             for key in [
                 SessionKeys.AUTHENTICATED,
                 SessionKeys.USERNAME,
@@ -967,6 +961,24 @@ def logout_dialog():
                     del st.session_state[key]
             clear_session(SESSION_ID)
             st.rerun()
+
+@st.dialog("⚠️ Clear All Documents")
+def clear_all_dialog():
+    st.write("Are you sure you want to completely clear the local database?")
+    st.write("This action cannot be undone.")
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Cancel", use_container_width=True, key="cancel_clear_all"):
+            st.rerun()
+    with col2:
+        if st.button("Clear All", type="primary", use_container_width=True, key="confirm_clear_all"):
+            from src.db.corpus_db import clear_all_data
+            clear_all_data()
+            clear_session()
+            st.cache_data.clear()
+            st.rerun()
+
+
 
 
 # ── Corpus Overview Header & Quick Actions (#1242) ───────────────────────────
