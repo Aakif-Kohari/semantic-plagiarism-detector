@@ -12,7 +12,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import pytest
 
-from src.visualization.network_graph import export_network_adjacency_csv
+from src.visualization.network_graph import export_network_adjacency_csv, export_network_centrality_csv
 
 
 def test_export_network_adjacency_csv():
@@ -653,3 +653,22 @@ def test_build_network_data_empty_clustering():
     # No nodes, so no colors should be added
     assert len(net_data["node_trace"].marker.color) == 0
 
+def test_export_network_centrality_csv():
+    """Verify export_network_centrality_csv computes degree centrality and returns correct CSV format."""
+    graph = nx.Graph()
+    graph.add_edge("doc1", "doc2", similarity=0.9)
+    graph.add_edge("doc1", "doc3", similarity=0.8)
+
+    csv_str = export_network_centrality_csv(graph)
+
+    lines = csv_str.strip().splitlines()
+    assert lines[0] == "Document_Name,Degree,Centrality_Score"
+    assert len(lines) == 4  # Header + 3 nodes
+
+    # Parse CSV lines to verify content
+    rows = [line.split(",") for line in lines[1:]]
+    row_dict = {row[0]: (int(row[1]), float(row[2])) for row in rows}
+
+    assert "doc1" in row_dict
+    assert row_dict["doc1"][0] == 2  # Degree 2
+    assert row_dict["doc1"][1] == 1.0  # Centrality score for connected graph of 3 nodes: 2 / (3 - 1) = 1.0
