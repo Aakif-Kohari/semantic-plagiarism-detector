@@ -298,14 +298,23 @@ def test_scope_enforcement_rate_limit_endpoint():
     assert "Forbidden" in res.json()["detail"]
 
 
-def test_scope_enforcement_clear_endpoint():
+def test_scope_enforcement_clear_endpoint(tmp_path):
     """Verify scope enforcement on /api/v1/clear (requires 'admin')."""
+    from src.db.auth import configure_db_path, init_db, add_user
     from fastapi.testclient import TestClient
     from src.api.app import app
 
+    db_file = tmp_path / "test_clear_scope.db"
+    configure_db_path(db_file)
+    init_db()
+    try:
+        add_user("admin", "password123", role="admin")
+    except ValueError:
+        pass
+
     client = TestClient(app)
 
-    # 1. Token with 'admin' scope -> success (either 200 or 500 depending on actual database operations but not 401/403)
+    # 1. Token with 'admin' scope -> success
     res = client.post(
         "/api/v1/clear?username=admin",
         headers={"Authorization": "Bearer test-admin-token"},
@@ -533,3 +542,238 @@ def test_token_revocation_missing_token_returns_400(tmp_path):
     response = client.post("/api/v1/auth/revoke", json={})
     assert response.status_code == 400
     assert "token to revoke must be provided" in response.json()["detail"].lower()
+
+
+def test_streaming_multipart_upload_file_exceeds_max_size_returns_413(monkeypatch):
+    """Verify POST /api/v1/scan returns 413 Payload Too Large when payload exceeds MAX_UPLOAD_SIZE_BYTES."""
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+
+    monkeypatch.setenv("MAX_UPLOAD_SIZE_BYTES", "500")
+
+    client = TestClient(app)
+    large_payload = b"A" * 2000  # 2KB payload > 500 bytes limit
+
+    files = {"file": ("large_doc.txt", large_payload, "text/plain")}
+    headers = {"Authorization": "Bearer test-write-token"}
+
+    response = client.post("/api/v1/scan", files=files, headers=headers)
+    assert response.status_code == 413
+    assert "exceeds maximum" in response.json()["detail"].lower()
+
+
+def test_streaming_multipart_upload_streams_chunks_to_disk():
+    """Verify POST /api/v1/scan streams chunks to disk and processes document scan."""
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+
+    client = TestClient(app)
+    content = b"This is a test paragraph for verifying streaming chunk reader upload functionality.\n\n" * 5
+
+    files = {"file": ("stream_test.txt", content, "text/plain")}
+    headers = {"Authorization": "Bearer test-write-token"}
+
+    response = client.post("/api/v1/scan", files=files, headers=headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["filename"] == "stream_test.txt"
+    assert data["word_count"] > 0
+
+
+def test_refresh_token_success_with_signed_refresh_token(tmp_path):
+    """Verify POST /api/v1/auth/refresh issues a new valid access token."""
+    from src.db.auth import configure_db_path, init_db
+    from src.security.jwt_utils import create_refresh_token
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+
+    db_file = tmp_path / "test_refresh_success.db"
+    configure_db_path(db_file)
+    init_db()
+
+    client = TestClient(app)
+    refresh_token = create_refresh_token(sub="alice_user")
+
+    res = client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
+    assert res.status_code == 200
+    data = res.json()
+    assert "access_token" in data
+    assert data["token_type"] == "bearer"
+    assert data["expires_in"] == 3600
+
+    # Verify newly issued access token works on an authenticated endpoint
+    access_token = data["access_token"]
+    auth_res = client.get(
+        "/api/v1/rate_limit", headers={"Authorization": f"Bearer {access_token}"}
+    )
+    assert auth_res.status_code == 200
+
+
+def test_refresh_token_success_via_authorization_header(tmp_path):
+    """Verify POST /api/v1/auth/refresh works via Authorization header."""
+    from src.db.auth import configure_db_path, init_db
+    from src.security.jwt_utils import create_refresh_token
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+
+    db_file = tmp_path / "test_refresh_header.db"
+    configure_db_path(db_file)
+    init_db()
+
+    client = TestClient(app)
+    refresh_token = create_refresh_token(sub="bob_user")
+
+    res = client.post(
+        "/api/v1/auth/refresh", headers={"Authorization": f"Bearer {refresh_token}"}
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert "access_token" in data
+    assert data["token_type"] == "bearer"
+    assert data["expires_in"] == 3600
+
+
+def test_refresh_token_missing_token_returns_400(tmp_path):
+    """Verify POST /api/v1/auth/refresh returns 400 if refresh token is omitted."""
+    from src.db.auth import configure_db_path, init_db
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+
+    db_file = tmp_path / "test_refresh_missing.db"
+    configure_db_path(db_file)
+    init_db()
+
+    client = TestClient(app)
+    res = client.post("/api/v1/auth/refresh", json={})
+    assert res.status_code == 400
+    assert "refresh token must be provided" in res.json()["detail"].lower()
+
+
+def test_refresh_token_invalid_signature_returns_401(tmp_path):
+    """Verify POST /api/v1/auth/refresh returns 401 for invalid refresh token signature."""
+    from src.db.auth import configure_db_path, init_db
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+
+    db_file = tmp_path / "test_refresh_invalid.db"
+    configure_db_path(db_file)
+    init_db()
+
+    client = TestClient(app)
+    res = client.post(
+        "/api/v1/auth/refresh", json={"refresh_token": "invalid.jwt.signature"}
+    )
+    assert res.status_code == 401
+
+
+def test_refresh_token_expired_returns_401(tmp_path):
+    """Verify POST /api/v1/auth/refresh returns 401 for an expired refresh token."""
+    from src.db.auth import configure_db_path, init_db
+    from src.security.jwt_utils import create_jwt_token
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+
+    db_file = tmp_path / "test_refresh_expired.db"
+    configure_db_path(db_file)
+    init_db()
+
+    client = TestClient(app)
+    expired_token = create_jwt_token(
+        {"sub": "charlie", "type": "refresh"}, expires_in_seconds=-100
+    )
+
+    res = client.post(
+        "/api/v1/auth/refresh", json={"refresh_token": expired_token}
+    )
+    assert res.status_code == 401
+    assert "expired" in res.json()["detail"].lower()
+
+
+def test_refresh_token_revoked_returns_401(tmp_path):
+    """Verify POST /api/v1/auth/refresh returns 401 if refresh token has been revoked."""
+    from src.db.auth import configure_db_path, init_db, revoke_token
+    from src.security.jwt_utils import create_refresh_token
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+
+    db_file = tmp_path / "test_refresh_revoked.db"
+    configure_db_path(db_file)
+    init_db()
+
+    client = TestClient(app)
+    refresh_token = create_refresh_token(sub="dave")
+    revoke_token(refresh_token, details="Revoked for testing")
+
+    res = client.post(
+        "/api/v1/auth/refresh", json={"refresh_token": refresh_token}
+    )
+    assert res.status_code == 401
+    assert "revoked" in res.json()["detail"].lower()
+
+
+def test_api_usage_endpoint():
+    """Verify that GET /api/v1/usage returns the correct schema and increments total_scans."""
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+    import src.api.app as api_app
+
+    client = TestClient(app)
+
+    # Initial request
+    response = client.get("/api/v1/usage")
+    assert response.status_code == 200
+    data = response.json()
+    assert "total_scans" in data
+    assert "uptime_seconds" in data
+    assert isinstance(data["total_scans"], int)
+    assert isinstance(data["uptime_seconds"], float)
+    assert data["uptime_seconds"] >= 0.0
+
+    # Test the counter increment reflection
+    initial_scans = data["total_scans"]
+    api_app.total_scans += 1
+
+    response = client.get("/api/v1/usage")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total_scans"] == initial_scans + 1
+
+
+def test_hsts_security_header_options():
+    """Verify HSTS Strict-Transport-Security header behavior when ENABLE_HSTS is configured."""
+    import os
+    from starlette.applications import Starlette
+    from starlette.middleware import Middleware
+    from starlette.responses import PlainTextResponse
+    from starlette.routing import Route
+    from starlette.testclient import TestClient
+    from src.asgi_app import SecurityHeadersMiddleware
+
+    def dummy_app(request):
+        return PlainTextResponse("OK")
+
+    # Disabled by default
+    app_disabled = Starlette(
+        routes=[Route("/", dummy_app)],
+        middleware=[Middleware(SecurityHeadersMiddleware)],
+    )
+    client_disabled = TestClient(app_disabled)
+    res_disabled = client_disabled.get("/")
+    assert "Strict-Transport-Security" not in res_disabled.headers
+
+    # Enabled via ENABLE_HSTS=true
+    os.environ["ENABLE_HSTS"] = "true"
+    try:
+        app_enabled = Starlette(
+            routes=[Route("/", dummy_app)],
+            middleware=[Middleware(SecurityHeadersMiddleware)],
+        )
+        client_enabled = TestClient(app_enabled)
+        res_enabled = client_enabled.get("/")
+        assert (
+            res_enabled.headers.get("Strict-Transport-Security")
+            == "max-age=31536000; includeSubDomains"
+        )
+    finally:
+        os.environ.pop("ENABLE_HSTS", None)
+

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from src.db.incidents import (
+    archive_old_incidents,
     build_incident_id,
     export_current_flags_csv,
     get_all_incidents,
@@ -18,6 +19,7 @@ from src.db.incidents import (
     purge_old_incidents,
     sync_flagged_incidents,
     update_review_status,
+    get_incidents_by_assignment,
 )
 
 @pytest.fixture(autouse=True)
@@ -549,3 +551,122 @@ def test_get_recent_incidents_caching_and_invalidation(test_db):
     incidents_3 = get_recent_incidents(limit=5, db_path=test_db)
     assert len(incidents_3) == 2
 
+def test_archive_old_incidents_moves_rows_to_archive_table(test_db):
+    """Test that archive_old_incidents copies old rows and removes them."""
+    import sqlite3
+
+    old_date = (datetime.now(timezone.utc) - timedelta(days=200)).isoformat()
+    recent_date = datetime.now(timezone.utc).isoformat()
+
+    old_flags = [{"doc_a": "old1.pdf", "doc_b": "old2.pdf", "similarity": 0.90}]
+    sync_flagged_incidents(old_flags, test_db, now=old_date)
+
+    recent_flags = [{"doc_a": "new1.pdf", "doc_b": "new2.pdf", "similarity": 0.80}]
+    sync_flagged_incidents(recent_flags, test_db, now=recent_date)
+
+    assert len(get_all_incidents(test_db)) == 2
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=100)).isoformat()
+    archived_count = archive_old_incidents(cutoff, db_path=test_db)
+
+    assert archived_count == 1
+
+    remaining = get_all_incidents(test_db)
+    assert len(remaining) == 1
+    assert remaining[0]["document_a"] == "new1.pdf"
+
+    with sqlite3.connect(test_db) as conn:
+        row = conn.execute(
+            "SELECT document_a FROM incidents_archive WHERE incident_id = ?",
+            (build_incident_id("old1.pdf", "old2.pdf"),),
+        ).fetchone()
+        assert row is not None
+        assert row[0] == "old1.pdf"
+
+
+def test_get_incidents_by_assignment(test_db):
+    """Verify that get_incidents_by_assignment filters incidents by assignment title."""
+    import sqlite3
+
+    # 1. Add mock documents with matching and non-matching assignment titles
+    with sqlite3.connect(test_db) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO documents (filename, file_hash, upload_date, assignment_title) VALUES (?, ?, ?, ?)",
+            ("doc1.pdf", "hash1", "2026-01-01T00:00:00Z", "CS 101 Homework 1"),
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO documents (filename, file_hash, upload_date, assignment_title) VALUES (?, ?, ?, ?)",
+            ("doc2.pdf", "hash2", "2026-01-01T00:00:00Z", "CS 101 Homework 1"),
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO documents (filename, file_hash, upload_date, assignment_title) VALUES (?, ?, ?, ?)",
+            ("doc3.pdf", "hash3", "2026-01-01T00:00:00Z", "CS 101 Homework 2"),
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO documents (filename, file_hash, upload_date, assignment_title) VALUES (?, ?, ?, ?)",
+            ("doc4.pdf", "hash4", "2026-01-01T00:00:00Z", "CS 101 Homework 2"),
+        )
+        conn.commit()
+
+    # 2. Sync mock incidents
+    # Incident matching assignment "CS 101 Homework 1"
+    sync_flagged_incidents(
+        [{"doc_a": "doc1.pdf", "doc_b": "doc2.pdf", "similarity": 0.85}],
+        test_db,
+    )
+    # Incident matching assignment "CS 101 Homework 2"
+    sync_flagged_incidents(
+        [{"doc_a": "doc3.pdf", "doc_b": "doc4.pdf", "similarity": 0.90}],
+        test_db,
+    )
+
+    # 3. Query matching "CS 101 Homework 1"
+    results_hw1 = get_incidents_by_assignment("CS 101 Homework 1", db_path=test_db)
+    assert len(results_hw1) == 1
+    assert results_hw1[0]["document_a"] == "doc1.pdf"
+    assert results_hw1[0]["document_b"] == "doc2.pdf"
+
+    # 4. Query matching "CS 101 Homework 2"
+    results_hw2 = get_incidents_by_assignment("CS 101 Homework 2", db_path=test_db)
+    assert len(results_hw2) == 1
+    assert results_hw2[0]["document_a"] == "doc3.pdf"
+    assert results_hw2[0]["document_b"] == "doc4.pdf"
+
+    # 5. Query non-existent assignment
+    results_none = get_incidents_by_assignment("CS 101 Homework 3", db_path=test_db)
+    assert len(results_none) == 0
+
+
+def test_get_incidents_by_assignment_direct_table(tmp_path):
+    """Verify get_incidents_by_assignment queries 'incidents' table directly when it exists."""
+    import sqlite3
+    db_file = tmp_path / "custom_incidents.db"
+    with sqlite3.connect(db_file) as conn:
+        conn.execute(
+            """
+            CREATE TABLE incidents (
+                id INTEGER PRIMARY KEY,
+                assignment_title TEXT,
+                timestamp TEXT,
+                details TEXT
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO incidents (assignment_title, timestamp, details) VALUES (?, ?, ?)",
+            ("Essay 1", "2026-05-01T10:00:00Z", "Incident A"),
+        )
+        conn.execute(
+            "INSERT INTO incidents (assignment_title, timestamp, details) VALUES (?, ?, ?)",
+            ("Essay 1", "2026-05-02T10:00:00Z", "Incident B"),
+        )
+        conn.execute(
+            "INSERT INTO incidents (assignment_title, timestamp, details) VALUES (?, ?, ?)",
+            ("Essay 2", "2026-05-03T10:00:00Z", "Incident C"),
+        )
+        conn.commit()
+
+    res = get_incidents_by_assignment("Essay 1", db_path=db_file)
+    assert len(res) == 2
+    assert res[0]["details"] == "Incident B"
+    assert res[1]["details"] == "Incident A"

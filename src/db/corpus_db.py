@@ -533,6 +533,60 @@ def batch_soft_delete_documents(doc_ids: list[int]) -> int:
 
 
 @with_sqlite_retry
+def batch_permanently_delete_documents(doc_ids: list[int]) -> int:
+    """
+    Batch permanently delete multiple document records in a single transaction.
+
+    Hard-deletes the matching documents together with their chunks (removed via
+    the ``chunks.filename`` ON DELETE CASCADE), any soft-deleted chunks, and any
+    related plagiarism incident / false positive records.
+
+    Args:
+        doc_ids: List of document IDs to permanently delete.
+
+    Returns:
+        The total number of deleted document records.
+    """
+    if not doc_ids:
+        return 0
+
+    placeholders = ",".join(["?"] * len(doc_ids))
+    doc_id_tuple = tuple(doc_ids)
+
+    with _connect() as conn:
+        # Resolve affected filenames before the documents are removed so related
+        # records can be purged from tables without cascade constraints.
+        filenames = [
+            row[0]
+            for row in conn.execute(
+                f"SELECT filename FROM documents WHERE id IN ({placeholders})",
+                doc_id_tuple,
+            ).fetchall()
+        ]
+
+        for filename in filenames:
+            conn.execute(
+                "DELETE FROM plagiarism_incidents WHERE document_a = ? OR document_b = ?",
+                (filename, filename),
+            )
+            conn.execute(
+                "DELETE FROM false_positives WHERE document_a = ? OR document_b = ?",
+                (filename, filename),
+            )
+            conn.execute("DELETE FROM deleted_chunks WHERE filename = ?", (filename,))
+
+        cursor = conn.execute(
+            f"DELETE FROM documents WHERE id IN ({placeholders})",
+            doc_id_tuple,
+        )
+        rowcount = cursor.rowcount
+
+    if filenames:
+        _compact_vector_ids()
+    return rowcount
+
+
+@with_sqlite_retry
 def _compact_vector_ids() -> None:
     """Re-index the vector_id column to remove any gaps left by deleted documents."""
     with _connect() as conn:

@@ -8,6 +8,7 @@ import pytest
 from src.utils.processing_time import (
     BYTES_PER_MB,
     ProcessingTimer,
+    calculate_mb_per_minute,
     calculate_page_throughput,
     calculate_processing_throughput,
     estimate_processing_seconds,    format_duration,
@@ -15,6 +16,7 @@ from src.utils.processing_time import (
     format_throughput_human_readable,
     processing_eta_text,
     uploaded_files_total_bytes,
+    calculate_average_latency,
 )
 
 
@@ -347,3 +349,29 @@ def test_eta_text_uses_default_rate():
     assert processing_eta_text(2 * BYTES_PER_MB) == (
         "Estimated processing time: about 4 seconds"
     )
+ feat/average-processing-latency-1576
+
+
+def test_calculate_average_latency():
+    assert calculate_average_latency([1.0, 2.0, 3.0]) == 2.0
+
+
+def test_calculate_average_latency_rounds_to_three_decimals():
+    assert calculate_average_latency([1.111, 2.222, 3.334]) == 2.222
+
+
+def test_calculate_average_latency_empty_list():
+    assert calculate_average_latency([]) == 0.0
+
+def test_calculate_mb_per_minute():
+    # Test normal calculation: 10 MB in 60 seconds (1 minute) = 10.0 MB/min
+    ten_mb_in_bytes = 10 * 1024 * 1024
+    assert calculate_mb_per_minute(ten_mb_in_bytes, 60.0) == 10.0
+
+    # Test zero or negative elapsed time returns 0.0
+    assert calculate_mb_per_minute(ten_mb_in_bytes, 0.0) == 0.0
+    assert calculate_mb_per_minute(ten_mb_in_bytes, -5.0) == 0.0
+
+    # Test zero bytes processed
+    assert calculate_mb_per_minute(0, 60.0) == 0.0
+ main

@@ -20,6 +20,8 @@ from src.db.auth import (
     set_user_theme,
     update_password,
     get_security_audit_logs,
+    get_security_audit_log_count,
+    get_distinct_audit_event_types,
     verify_user,
     update_user_profile,
     get_all_users,
@@ -148,6 +150,25 @@ def test_get_security_audit_logs_invalid_limit_offset(mock_audit_db):
         get_security_audit_logs(offset=-1)
 
 
+def test_get_security_audit_logs_date_filter(mock_audit_db):
+    logs = get_security_audit_logs(
+        start_date="2023-01-02 00:00:00", end_date="2023-01-02 23:59:59"
+    )
+    assert len(logs) == 1
+    assert logs[0]["username"] == "bob"
+
+
+def test_get_security_audit_log_count(mock_audit_db):
+    assert get_security_audit_log_count() == 3
+    assert get_security_audit_log_count(username="alice") == 2
+    assert get_security_audit_log_count(event_type="logout") == 1
+
+
+def test_get_distinct_audit_event_types(mock_audit_db):
+    events = get_distinct_audit_event_types()
+    assert set(events) == {"login", "logout"}
+
+
 def test_2fa_flow():
     username = f"user2fa_{uuid.uuid4().hex[:8]}"
     add_user(username, "pass1234567!")
@@ -200,6 +221,7 @@ def test_suspend_account():
 def test_sqlite_file_lock_exception(mock_db):
     """Test that acquiring an exclusive lock on SQLite database triggers a clean sqlite3.Error when attempting add_user."""
     import src.db.auth
+
     conn = sqlite3.connect(src.db.auth._DB_PATH, timeout=0.1)
     conn.execute("BEGIN EXCLUSIVE TRANSACTION")
     conn.execute("INSERT INTO users (username, password) VALUES ('lock_dummy', 'pass')")
@@ -230,6 +252,7 @@ def test_user_theme(mock_db):
 def test_delete_user_removes_user_row_and_audit_log(mock_db):
     """delete_user() must remove the user row and associated security_audit_log entries."""
     import src.db.auth
+
     user = f"user_{uuid.uuid4().hex[:8]}"
     add_user(user, "password123")
 
@@ -259,6 +282,7 @@ def test_delete_user_removes_user_row_and_audit_log(mock_db):
 def test_delete_user_removes_matching_session_and_authorization_rows(mock_db):
     """delete_user() should remove matching session and authorization rows for the deleted user."""
     import src.db.auth
+
     user = f"user_{uuid.uuid4().hex[:8]}"
     add_user(user, "password123")
 
@@ -490,6 +514,33 @@ def test_update_user_profile_admin_suspension_prevented():
         )
 
 
+def test_get_all_users_filters_by_role():
+    """Verify get_all_users filters users by role when specified."""
+    admin_user = f"admin_{uuid.uuid4().hex[:8]}"
+    teacher_user = f"teacher_{uuid.uuid4().hex[:8]}"
+    add_user(admin_user, "SecurePass123!", "admin")
+    add_user(teacher_user, "SecurePass123!", "teacher")
+
+    all_users = get_all_users()
+    assert any(u["username"] == admin_user for u in all_users)
+    assert any(u["username"] == teacher_user for u in all_users)
+
+    admin_users = get_all_users(role="admin")
+    assert all(u["role"] == "admin" for u in admin_users)
+    assert any(u["username"] == admin_user for u in admin_users)
+    assert not any(u["username"] == teacher_user for u in admin_users)
+
+    teacher_users = get_all_users(role="teacher")
+    assert all(u["role"] == "teacher" for u in teacher_users)
+    assert any(u["username"] == teacher_user for u in teacher_users)
+    assert not any(u["username"] == admin_user for u in teacher_users)
+
+
+def test_get_all_users_role_no_matches():
+    """Verify get_all_users returns an empty list when no user matches the role."""
+    assert get_all_users(role="nonexistent_role") == []
+
+
 def test_revoke_token_and_is_token_revoked():
     """Verify revoke_token stores token signature and is_token_revoked checks it correctly."""
     from src.db.auth import is_token_revoked, revoke_token
@@ -505,3 +556,67 @@ def test_revoke_token_and_is_token_revoked():
     assert is_token_revoked(None) is False  # type: ignore[arg-type]
     with pytest.raises(ValueError):
         revoke_token("")
+
+
+def test_password_history_validation_prevents_reuse_of_last_3_passwords(mock_db):
+    """Verify update_password prevents reusing any of the last 3 passwords."""
+    user = f"hist_user_{uuid.uuid4().hex[:8]}"
+    pass1 = "Pass_111111!"
+    pass2 = "Pass_222222!"
+    pass3 = "Pass_333333!"
+    pass4 = "Pass_444444!"
+
+    # 1. Add user with pass1
+    add_user(user, pass1)
+
+    # 2. Update to pass2
+    update_password(user, pass2)
+    assert verify_user(user, pass2) is True
+
+    # 3. Update to pass3
+    update_password(user, pass3)
+    assert verify_user(user, pass3) is True
+
+    # 4. Attempting to reuse pass1, pass2, or pass3 must raise ValueError
+    for forbidden_pass in (pass1, pass2, pass3):
+        with pytest.raises(ValueError) as exc_info:
+            update_password(user, forbidden_pass)
+        assert "New password cannot be one of your last 3 passwords" in str(exc_info.value)
+
+    # 5. Update to pass4 (succeeds)
+    update_password(user, pass4)
+    assert verify_user(user, pass4) is True
+
+    # 6. Now pass1 is older than the last 3 passwords (which are pass4, pass3, pass2) -> updating to pass1 succeeds
+    update_password(user, pass1)
+    assert verify_user(user, pass1) is True
+
+
+def test_get_recent_audit_events(mock_db):
+    """Verify get_recent_audit_events returns recent audit entries ordered by timestamp DESC up to limit."""
+    from src.db.auth import get_recent_audit_events, log_security_event
+
+    log_security_event("login_success", "alice", "Alice logged in")
+    log_security_event("login_failure", "bob", "Bob failed login")
+    log_security_event("password_change", "charlie", "Charlie updated password")
+
+    events = get_recent_audit_events(limit=2)
+    assert len(events) == 2
+    assert isinstance(events, list)
+    assert isinstance(events[0], dict)
+
+    # Validate keys in dictionary
+    for event in events:
+        assert "id" in event
+        assert "event_type" in event
+        assert "username" in event
+        assert "timestamp" in event
+        assert "details" in event
+
+    # Default limit=20 returns all logged events
+    all_recent = get_recent_audit_events(limit=20)
+    assert len(all_recent) >= 3
+
+    # Negative limit raises ValueError
+    with pytest.raises(ValueError):
+        get_recent_audit_events(limit=-5)

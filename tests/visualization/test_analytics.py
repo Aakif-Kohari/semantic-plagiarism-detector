@@ -11,6 +11,7 @@ import pytest
 from src.visualization.analytics import (
     plot_severity_donut_chart,
     plot_similarity_boxplot,
+    plot_similarity_histogram,
     plot_similarity_percentiles,
 )
 
@@ -173,7 +174,9 @@ def test_plot_similarity_boxplot_fallback_keys():
 
     assert len(fig.data) == 1
     assert list(fig.data[0].y) == [0.9, 0.5]
-import plotly.graph_objects as go
+
+from src.visualization.analytics import plot_similarity_histogram
+
 
 from src.visualization.analytics import plot_similarity_histogram
 
@@ -202,3 +205,43 @@ def test_plot_similarity_histogram_empty_scores():
     assert isinstance(fig, go.Figure)
     assert len(fig.data) == 0
     assert len(fig.layout.annotations) == 1
+
+
+def test_plot_analytics_charts_dark_mode_theme_colors():
+    """Verify Issue #1619: theme_colors applies dark background and ink font color."""
+    dark_theme = {
+        "background": "#0F172A",
+        "surface": "#1E293B",
+        "ink": "#F8FAFC",
+        "border": "#334155",
+    }
+    from src.visualization.analytics import (
+        plot_high_severity_trends,
+        plot_most_plagiarized_documents,
+        plot_severity_donut_chart,
+        plot_similarity_percentiles,
+    )
+
+    fig1 = plot_high_severity_trends(
+        [{"date": "2026-08-01", "count": 3}], theme_colors=dark_theme
+    )
+    assert fig1.layout.paper_bgcolor == "#0F172A"
+    assert fig1.layout.plot_bgcolor == "#1E293B"
+    assert fig1.layout.font.color == "#F8FAFC"
+
+    fig2 = plot_most_plagiarized_documents(
+        [{"document_name": "essay.pdf", "incident_count": 5}], theme_colors=dark_theme
+    )
+    assert fig2.layout.paper_bgcolor == "#0F172A"
+    assert fig2.layout.plot_bgcolor == "#1E293B"
+
+    fig3 = plot_severity_donut_chart(
+        [{"severity": "High"}], theme_colors=dark_theme
+    )
+    assert fig3.layout.paper_bgcolor == "#0F172A"
+    assert fig3.layout.plot_bgcolor == "#1E293B"
+
+    fig4 = plot_similarity_percentiles(
+        [0.5, 0.8, 0.9], theme_colors=dark_theme
+    )
+    assert fig4.layout.paper_bgcolor == "#0F172A"

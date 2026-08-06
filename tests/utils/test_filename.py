@@ -7,11 +7,7 @@ from src.utils.filename import (_safe_extension, get_file_extension_sanitized,
                                 unique_filename)
 
 from src.utils.filename import (
-    _safe_extension,
     get_file_sha256_hash,
-    sanitize_filename,
-    sanitize_filename_mapping,
-    unique_filename,
 )
 
 
@@ -74,7 +70,7 @@ def test_extension_is_preserved_and_normalized():
 def test_long_filename_preserves_extension_and_limit():
     result = sanitize_filename("a" * 400 + ".pdf")
 
-    assert len(result) == 150
+    assert len(result) == 128
     assert result.endswith(".pdf")
 
 
@@ -85,8 +81,8 @@ def test_300_plus_character_filename_truncation_and_hash_uniqueness():
     sanitized1 = sanitize_filename(file1)
     sanitized2 = sanitize_filename(file2)
 
-    assert len(sanitized1) <= 150
-    assert len(sanitized2) <= 150
+    assert len(sanitized1) <= 128
+    assert len(sanitized2) <= 128
     assert sanitized1.endswith(".pdf")
     assert sanitized2.endswith(".pdf")
     assert sanitized1 != sanitized2
@@ -231,3 +227,10 @@ def test_get_file_sha256_hash_returns_64_character_hex_digest():
 
     assert len(digest) == 64
     assert digest == digest.lower()
+def test_200_character_filename_is_truncated_safely():
+    long_filename = "a" * 200 + ".pdf"
+
+    sanitized = sanitize_filename(long_filename)
+
+    assert len(sanitized) <= 128
+    assert sanitized.endswith(".pdf")
