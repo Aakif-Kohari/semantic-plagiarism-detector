@@ -1527,6 +1527,22 @@ def mask_named_entities_in_text(text: str) -> str:
     return masked
 
 
+def normalize_extended_punctuation(text: str) -> str:
+    """Replace curly quotes, em-dashes, and ellipsis with standard ASCII."""
+    if not text:
+        return text
+    
+    translation_table = str.maketrans({
+        "“": '"',
+        "”": '"',
+        "‘": "'",
+        "’": "'",
+        "—": "-",
+        "…": "..."
+    })
+    return text.translate(translation_table)
+
+
 def extract_text(
     file: PDFInput,
     filename: str,
@@ -1592,6 +1608,8 @@ def extract_text(
 
     if mask_named_entities and raw:
         raw = mask_named_entities_in_text(raw)
+
+    raw = normalize_extended_punctuation(raw)
 
     lang_code = detect_text_language(raw)
 

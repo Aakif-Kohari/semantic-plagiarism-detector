@@ -20,6 +20,7 @@ from src.core.document_parser import (
     parallel_extract_texts,
     strip_bibliography,
     normalize_unicode_spaces,
+    normalize_extended_punctuation,
 )
 
 import time
@@ -817,3 +818,21 @@ class TestMaskNamedEntities:
         assert "[ENTITY_MASKED]" in extracted_masked
 
 
+class TestNormalizeExtendedPunctuation:
+    """Unit tests for normalize_extended_punctuation (#1578)."""
+
+    def test_normalize_extended_punctuation(self):
+        assert normalize_extended_punctuation("“Hello”") == '"Hello"'
+        assert normalize_extended_punctuation("‘Hello’") == "'Hello'"
+        assert normalize_extended_punctuation("em—dash") == "em-dash"
+        assert normalize_extended_punctuation("ellipsis…") == "ellipsis..."
+        assert normalize_extended_punctuation('“Hello”—world…') == '"Hello"-world...'
+        assert normalize_extended_punctuation("Normal ASCII text") == "Normal ASCII text"
+
+    def test_extract_text_normalizes_punctuation(self, tmp_path):
+        content = "“Hello”—world…"
+        file_path = tmp_path / "punct.txt"
+        file_path.write_bytes(content.encode("utf-8"))
+
+        result = extract_text(str(file_path), "punct.txt")
+        assert result == '"Hello"-world...'
