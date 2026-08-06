@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import html
 import os
 import re
@@ -12,7 +13,7 @@ from typing import TypeVar
 
 
 DEFAULT_FILENAME = "document"
-MAX_FILENAME_LENGTH = 255
+MAX_FILENAME_LENGTH = 128
 
 _HTML_TAG_RE = re.compile(r"<[^>]*>")
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
@@ -57,6 +58,11 @@ def _safe_extension(filename: str) -> str:
     if cleaned == "." or len(cleaned) > 16:
         return ""
     return cleaned
+
+
+def get_file_sha256_hash(file_bytes: bytes) -> str:
+    """Return the SHA-256 hex digest for file bytes."""
+    return hashlib.sha256(file_bytes).hexdigest()
 
 
 def sanitize_filename(
@@ -104,9 +110,23 @@ def sanitize_filename(
         stem = f"_{stem}"
 
     maximum_stem_length = max_length - len(extension)
-    stem = stem[:maximum_stem_length].rstrip(" ._-")
-    if not stem:
-        stem = safe_fallback[:maximum_stem_length] or DEFAULT_FILENAME
+    if len(stem) > maximum_stem_length:
+        hash_prefix = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:4]
+        hash_suffix = f"_{hash_prefix}"
+        allowed_stem = maximum_stem_length - len(hash_suffix)
+        if allowed_stem > 0:
+            truncated_stem = stem[:allowed_stem].rstrip(" ._-")
+            if not truncated_stem:
+                truncated_stem = (
+                    safe_fallback[:allowed_stem] or DEFAULT_FILENAME[:allowed_stem]
+                )
+            stem = f"{truncated_stem}{hash_suffix}"
+        else:
+            stem = hash_prefix[:maximum_stem_length]
+    else:
+        stem = stem[:maximum_stem_length].rstrip(" ._-")
+        if not stem:
+            stem = safe_fallback[:maximum_stem_length] or DEFAULT_FILENAME
 
     return f"{stem}{extension}"
 
@@ -163,3 +183,165 @@ def sanitize_filename_mapping(
         sanitized[safe_name] = value
 
     return sanitized
+
+
+DEFAULT_ALLOWED_DOCUMENT_EXTENSIONS = frozenset(
+    {
+        ".csv",
+        ".docx",
+        ".epub",
+        ".pdf",
+        ".rtf",
+        ".txt",
+        ".zip",
+    }
+)
+
+DANGEROUS_EXECUTABLE_EXTENSIONS = frozenset(
+    {
+        ".app",
+        ".bat",
+        ".bin",
+        ".cmd",
+        ".com",
+        ".cpl",
+        ".dll",
+        ".dmg",
+        ".exe",
+        ".gadget",
+        ".hta",
+        ".inf",
+        ".ins",
+        ".iso",
+        ".jar",
+        ".js",
+        ".jse",
+        ".lnk",
+        ".msc",
+        ".msi",
+        ".msp",
+        ".mst",
+        ".pif",
+        ".ps1",
+        ".ps1xml",
+        ".ps2",
+        ".ps2xml",
+        ".psc1",
+        ".psc2",
+        ".reg",
+        ".scr",
+        ".sh",
+        ".sys",
+        ".vb",
+        ".vbe",
+        ".vbs",
+        ".vhd",
+        ".vhdx",
+        ".vmdk",
+        ".ws",
+        ".wsc",
+        ".wsf",
+        ".wsh",
+    }
+)
+
+
+class InvalidFileExtensionError(ValueError):
+    """Raised when an uploaded filename has a disallowed final extension."""
+
+
+def get_final_extension(filename: object) -> str:
+    """Return the lowercase absolute last extension for an untrusted name.
+
+    The filename is normalized to its final path component first, then split
+    at the final dot only. This prevents an earlier safe-looking extension
+    from hiding an executable payload, such as ``document.pdf.exe``.
+    """
+    raw = html.unescape(str(filename or ""))
+    raw = unicodedata.normalize("NFKC", raw)
+    raw = _CONTROL_RE.sub("", raw)
+    basename = _basename(raw).strip()
+    _stem, extension = os.path.splitext(basename)
+    return extension.casefold()
+
+
+def get_file_extension_sanitized(filename: str) -> str:
+    """Return the lower-case file extension, starting with a dot.
+
+    Returns an empty string if the filename has no extension.
+    """
+    basename = _basename(str(filename or ""))
+    _stem, extension = os.path.splitext(basename)
+    return extension.lower()
+
+
+def validate_document_extension(    filename: object,
+    *,
+    allowed_extensions: Collection[str] = DEFAULT_ALLOWED_DOCUMENT_EXTENSIONS,
+    require_extension: bool = True,
+) -> str:
+    """Validate the final suffix and return its normalized lowercase value.
+
+    Only the absolute last extension determines whether a file is acceptable.
+    The validation is case-insensitive and rejects executable/script suffixes
+    even when they follow a safe document extension.
+
+    Args:
+        filename: Untrusted filename supplied by a user or archive.
+        allowed_extensions: Explicit final extensions accepted by the caller.
+        require_extension: Whether extensionless filenames should be rejected.
+
+    Raises:
+        InvalidFileExtensionError: When the final suffix is missing, dangerous,
+            or not present in the allowed extension set.
+    """
+    normalized_allowed = {
+        (
+            extension.casefold()
+            if str(extension).startswith(".")
+            else f".{str(extension).casefold()}"
+        )
+        for extension in allowed_extensions
+    }
+    final_extension = get_final_extension(filename)
+
+    if not final_extension:
+        if require_extension:
+            raise InvalidFileExtensionError(
+                "The uploaded file must have a supported extension."
+            )
+        return ""
+
+    if final_extension in DANGEROUS_EXECUTABLE_EXTENSIONS:
+        raise InvalidFileExtensionError(
+            "Executable or script file extensions are not allowed: "
+            f"{final_extension}"
+        )
+
+    if final_extension not in normalized_allowed:
+        allowed_text = ", ".join(sorted(normalized_allowed))
+        raise InvalidFileExtensionError(
+            f"Unsupported final file extension {final_extension!r}. "
+            f"Allowed extensions: {allowed_text}"
+        )
+
+    return final_extension
+
+
+def sanitize_and_validate_filename(
+    filename: object,
+    *,
+    allowed_extensions: Collection[str] = DEFAULT_ALLOWED_DOCUMENT_EXTENSIONS,
+    fallback: str = DEFAULT_FILENAME,
+    max_length: int = MAX_FILENAME_LENGTH,
+) -> str:
+    """Validate an untrusted final suffix, then return a sanitized filename."""
+    validate_document_extension(
+        filename,
+        allowed_extensions=allowed_extensions,
+    )
+    return sanitize_filename(
+        filename,
+        fallback=fallback,
+        max_length=max_length,
+    )

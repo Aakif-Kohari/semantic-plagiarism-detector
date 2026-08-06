@@ -5,6 +5,7 @@ Builds and searches FAISS vector index for fast similarity lookup.
 """
 
 from typing import Dict, List, Tuple, Union
+
 import faiss
 import numpy as np
 
@@ -26,13 +27,13 @@ def build_index(
         embeddings_arr = np.array(doc_embeddings).astype("float32")
         if embeddings_arr.ndim == 1 or embeddings_arr.size == 0:
             return None, []
-        
+
         # Normalize for cosine similarity
         faiss.normalize_L2(embeddings_arr)
         dim = embeddings_arr.shape[1]
         index = faiss.IndexFlatIP(dim)
         index.add(embeddings_arr)
-        
+
         for i in range(len(embeddings_arr)):
             registry.append({"doc_id": i, "chunk_index": i})
         return index, registry
@@ -55,7 +56,7 @@ def build_index(
 
     vectors_arr = np.vstack(all_vectors).astype("float32")
     faiss.normalize_L2(vectors_arr)
-    
+
     dim = vectors_arr.shape[1]
     index = faiss.IndexFlatIP(dim)
     index.add(vectors_arr)

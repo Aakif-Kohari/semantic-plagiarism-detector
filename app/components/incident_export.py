@@ -7,13 +7,9 @@ from typing import Any, Mapping, Sequence
 import pandas as pd
 import streamlit as st
 
-from src.db.incidents import (
-    DEFAULT_DB_PATH,
-    get_all_incidents,
-    incidents_to_csv,
-    sync_flagged_incidents,
-    update_review_status,
-)
+from src.db.incidents import (DEFAULT_DB_PATH, get_all_incidents,
+                              incidents_to_csv, sync_flagged_incidents,
+                              update_review_status)
 
 
 def render_incident_export_panel(
@@ -76,6 +72,18 @@ def render_incident_export_panel(
         index=0 if current["review_status"] == "Pending" else 1,
         key="incident_review_status",
     )
+
+    # ── Copy Selected Incident Details (#1245) ───────────────────────────────
+    st.markdown("#### 📋 Copy Details")
+    sim_percent = f"{current['similarity_score'] * 100:.1f}%"
+    summary_text = (
+        f"Incident ID: #{current['incident_id']} | "
+        f"Similarity: {sim_percent} | "
+        f"Doc A: {current['document_a']} | "
+        f"Doc B: {current['document_b']}"
+    )
+    st.code(summary_text, language="text")
+
     if st.button("Save review status", type="primary"):
         update_review_status(incident_id, status, db_path)
         st.success(f"✅ {incident_id} marked as {status}.")
@@ -92,3 +100,4 @@ def render_incident_export_panel(
         mime="text/csv",
         use_container_width=True,
     )
+    
