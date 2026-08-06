@@ -987,13 +987,13 @@ def inject_css() -> None:
     """
 
     # Issue #1028: Active Sidebar Tab Accent Border Styling
-    sidebar_active_tab_css = f"""
+    sidebar_active_tab_css = """
     /* Active Sidebar Navigation Tab Highlight (Issue #1028) */
     section[data-testid="stSidebar"] .stButton button[data-selected="true"],
     section[data-testid="stSidebar"] [data-testid="stBaseButton-secondary"][aria-selected="true"],
     section[data-testid="stSidebar"] button[aria-selected="true"],
     section[data-testid="stSidebar"] .stButton button.st-active,
-    .stButton button[data-selected="true"] {{
+    .stButton button[data-selected="true"] {
         border-left: 4px solid #4f46e5 !important;
         background-color: var(--neutral-soft) !important;
         color: var(--accent-color) !important;
@@ -1002,18 +1002,18 @@ def inject_css() -> None:
         border-bottom-left-radius: 0 !important;
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
         transition: border-left-color 0.2s ease, background-color 0.2s ease, color 0.2s ease !important;
-    }}
+    }
 
     section[data-testid="stSidebar"] .stButton button[data-selected="true"]:hover,
-    .stButton button[data-selected="true"]:hover {{
+    .stButton button[data-selected="true"]:hover {
         border-left: 4px solid #4f46e5 !important;
         background-color: var(--secondary-bg) !important;
-    }}
+    }
 
-    section[data-testid="stSidebar"] .stButton button:hover {{
+    section[data-testid="stSidebar"] .stButton button:hover {
         border-left: 4px solid #4f46e5;
         transition: border-left 0.2s ease !important;
-    }}
+    }
     """
 
     base_css = f"""
