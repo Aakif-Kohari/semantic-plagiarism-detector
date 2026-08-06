@@ -7,6 +7,7 @@ import functools
 from pathlib import Path
 import sys
 import time
+import hashlib
 from datetime import datetime, timezone
 
 import numpy as np
@@ -304,7 +305,7 @@ from src.db.incidents import (
 )
 from src.utils.bulk_export import create_documents_bulk_zip_archive
 from src.utils.pdf_report import highlight_pdf_matches
-from src.db.corpus_db import get_total_document_count, init_corpus_db
+from src.db.corpus_db import get_total_document_count, init_corpus_db, get_document_by_hash
 from src.i18n.translator import _SUPPORTED_LANGUAGES, get_text
 from src.utils.processing_time import (
     estimate_processing_seconds,
@@ -731,6 +732,20 @@ def render_cosine_vs_lexical_comparison_table(
             jaccard_score = 0.0
 
         is_semantic_only = (
+            cosine_score >= semantic_threshold and jaccard_score <= lexical_threshold
+        )
+        rows.append(
+            {
+                "Document A": da,
+                "Document B": db,
+                "Cosine (Semantic)": cosine_score,
+                "Jaccard (Lexical)": jaccard_score,
+                "Semantic-Only Paraphrasing?": "🚨 Yes" if is_semantic_only else "No",
+            }
+        )
+
+    comp_df = pd.DataFrame(rows)
+    st.dataframe(comp_df)
     return comp_df
 
 from datetime import date, timedelta
@@ -1988,8 +2003,23 @@ if user_role == "admin":
                 )
                 continue
 
+            file_bytes = uploaded_file.read()
+            file_hash = hashlib.sha256(file_bytes).hexdigest()
+            existing_doc = get_document_by_hash(file_hash)
+
+            if existing_doc:
+                st.warning(f"⚠️ File **'{original_name}'** is identical to **'{existing_doc}'** already in the database.")
+                action = st.radio(
+                    f"Action for duplicate file '{original_name}':",
+                    ["Skip", "Reprocess"],
+                    key=f"dup_{file_hash}_{original_name}",
+                    horizontal=True
+                )
+                if action == "Skip":
+                    continue
+
             file_bytes_dict[safe_name] = strip_exif_metadata(
-                uploaded_file.read(), safe_name
+                file_bytes, safe_name
             )
 
     for drive_name, drive_bytes in st.session_state.get(
