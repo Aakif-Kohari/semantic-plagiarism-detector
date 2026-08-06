@@ -16,8 +16,7 @@ from src.db.translation_cache import (
     DB_PATH,
     cache_translation,
     get_cached_translation,
-    get_translation_cache_hit_rate,
-    reset_translation_cache_counters,
+    get_translation_cache_hit_ratio,
 )
 
 
@@ -213,34 +212,53 @@ class TestTranslationCacheTTL:
         assert stats["total_entries"] == 0
         assert stats["oldest_entry_days"] == 0
 
-    def test_translation_cache_hit_rate(self, temp_db_path):
-        """Test lookup hit rate calculation for translation cache."""
-        # 1. Reset counters
-        reset_translation_cache_counters()
+    def test_get_translation_cache_hit_ratio_initial(self):
+        translation_cache.cache_hits = 0
+        translation_cache.cache_misses = 0
+        assert get_translation_cache_hit_ratio() == 0.0
 
-        # 2. Check hit rate is 0.0 initially (division by zero handled)
-        assert get_translation_cache_hit_rate() == 0.0
+    def test_get_translation_cache_hit_ratio_all_hits(self):
+        translation_cache.cache_hits = 1
+        translation_cache.cache_misses = 0
+        assert get_translation_cache_hit_ratio() == 1.0
 
-        # 3. Perform a lookup that misses
-        get_cached_translation("non-existent-text-xyz")
-        assert get_translation_cache_hit_rate() == 0.0
+    def test_get_translation_cache_hit_ratio_all_misses(self):
+        translation_cache.cache_hits = 0
+        translation_cache.cache_misses = 1
+        assert get_translation_cache_hit_ratio() == 0.0
 
-        # 4. Cache a translation and perform lookups
-        cache_translation("Hola", "Hello", "es", "en")
+    def test_get_translation_cache_hit_ratio_mixed(self):
+        translation_cache.cache_hits = 3
+        translation_cache.cache_misses = 1
+        assert get_translation_cache_hit_ratio() == 0.75
 
-        # First hit
-        res = get_cached_translation("Hola", "es", "en")
-        assert res == "Hello"
-        assert get_translation_cache_hit_rate() == 0.5
+    def test_get_translation_cache_hit_ratio_accumulates(self, temp_db_path):
+        # Reset counters
+        translation_cache.cache_hits = 0
+        translation_cache.cache_misses = 0
 
-        # Second hit
-        get_cached_translation("Hola", "es", "en")
-        assert abs(get_translation_cache_hit_rate() - (2 / 3)) < 1e-6
+        # First lookup: not found -> 0 hits, 1 miss
+        get_cached_translation("hola")
+        assert translation_cache.cache_hits == 0
+        assert translation_cache.cache_misses == 1
+        assert get_translation_cache_hit_ratio() == 0.0
 
-        # 5. Reset and check
-        reset_translation_cache_counters()
-        assert get_translation_cache_hit_rate() == 0.0
+        # Insert a translation
+        cache_translation("hola", "hello")
 
+        # Second lookup: found -> 1 hit, 1 miss
+        res2 = get_cached_translation("hola")
+        assert res2 == "hello"
+        assert translation_cache.cache_hits == 1
+        assert translation_cache.cache_misses == 1
+        assert get_translation_cache_hit_ratio() == 0.5
+
+        # Third lookup: found -> 2 hits, 1 miss
+        res3 = get_cached_translation("hola")
+        assert res3 == "hello"
+        assert translation_cache.cache_hits == 2
+        assert translation_cache.cache_misses == 1
+        assert get_translation_cache_hit_ratio() == 2 / 3
 
 def test_init_db_closes_connection():
     """Verify that _init_db() explicitly closes the database connection."""

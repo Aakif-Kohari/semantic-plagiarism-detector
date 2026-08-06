@@ -84,6 +84,21 @@ def _apply_min_percentile_filter(
 
 # ── Distance-based similarity ──────────────────────────────────────────────────
 
+def cosine_distance_to_similarity(distance: float) -> float:
+    """Convert a cosine distance to a standardized cosine similarity score.
+
+    Formula:
+        similarity = max(0.0, min(1.0, 1.0 - distance))
+
+    Args:
+        distance: Cosine distance value (typically in [0.0, 2.0]).
+
+    Returns:
+        A float similarity score strictly bounded in [0.0, 1.0].
+    """
+    return float(max(0.0, min(1.0, 1.0 - distance)))
+
+
 def manhattan_similarity(
     vec_a: np.ndarray,
     vec_b: np.ndarray,
@@ -427,7 +442,7 @@ def find_candidate_pairs(
     return candidates
 
 
-# ── Plagiarism flagging ────────────────────────────────────────────────────────
+# ── Plagiarism flagging ────────────────────────────────────────────────--------
 
 
 def flag_plagiarism(
@@ -849,3 +864,4 @@ def detect_plagiarism_clusters(
         "total_clusters": len(clusters),
     }
 
+    
