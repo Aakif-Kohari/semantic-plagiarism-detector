@@ -765,3 +765,106 @@ def plot_similarity_percentiles(
     _apply_theme_colors(fig, theme_colors)
 
     return fig
+
+
+def plot_processing_time_breakdown(
+    stage_timings: list[Any] | dict[str, float] | None = None,
+    show_grid: bool = True,
+    theme_colors: dict[str, str] | None = None,
+) -> go.Figure:
+    """Create a Plotly bar chart displaying processing time breakdown by stage.
+
+    Metrics collected by processing_time.py (e.g., Text Parsing vs. Embedding Generation
+    vs. FAISS Search) are rendered as a horizontal or vertical bar breakdown.
+
+    Args:
+        stage_timings: List of StageTiming objects/dicts or a dictionary mapping
+            stage names to duration in seconds.
+        show_grid: Whether to show chart gridlines.
+        theme_colors: Optional theme colors dictionary for light/dark mode styling.
+
+    Returns:
+        Plotly Figure object displaying pipeline execution time breakdown.
+    """
+    names: list[str] = []
+    durations: list[float] = []
+
+    if stage_timings:
+        if isinstance(stage_timings, dict):
+            for k, v in stage_timings.items():
+                names.append(str(k))
+                try:
+                    durations.append(float(v))
+                except (TypeError, ValueError):
+                    durations.append(0.0)
+        elif isinstance(stage_timings, list):
+            for item in stage_timings:
+                if isinstance(item, dict):
+                    name = item.get("stage_name") or item.get("name") or "Unknown"
+                    duration = (
+                        item.get("duration_seconds")
+                        or item.get("duration")
+                        or item.get("duration_sec")
+                        or 0.0
+                    )
+                elif hasattr(item, "stage_name") and hasattr(item, "duration_seconds"):
+                    name = getattr(item, "stage_name")
+                    duration = getattr(item, "duration_seconds")
+                elif hasattr(item, "name") and hasattr(item, "duration"):
+                    name = getattr(item, "name")
+                    duration = getattr(item, "duration")
+                else:
+                    continue
+                names.append(str(name))
+                try:
+                    durations.append(float(duration))
+                except (TypeError, ValueError):
+                    durations.append(0.0)
+
+    if not names:
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No pipeline timing recorded yet – run document analysis first.",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
+            font=dict(size=15, color="gray"),
+        )
+        fig.update_layout(
+            title="Pipeline Execution Time Breakdown",
+            xaxis_title="Stage",
+            yaxis_title="Duration (seconds)",
+            height=400,
+            autosize=True,
+        )
+        fig.update_xaxes(showgrid=show_grid)
+        fig.update_yaxes(showgrid=show_grid)
+        return fig
+
+    fig = px.bar(
+        x=names,
+        y=durations,
+        title="Pipeline Execution Time Breakdown",
+        labels={"x": "Pipeline Stage", "y": "Duration (seconds)"},
+        text=[f"{v:.3f}s" for v in durations],
+    )
+    fig.update_traces(
+        marker_color="#636efa",
+        marker_line_color="#4a4dba",
+        marker_line_width=1.5,
+        textposition="auto",
+        hovertemplate="<b>%{x}</b><br>Duration: %{y:.3f}s<extra></extra>",
+    )
+    fig.update_layout(
+        xaxis_title="Pipeline Stage",
+        yaxis_title="Duration (seconds)",
+        height=400,
+        showlegend=False,
+        autosize=True,
+    )
+    fig.update_xaxes(showgrid=show_grid)
+    fig.update_yaxes(showgrid=show_grid)
+    return fig
+

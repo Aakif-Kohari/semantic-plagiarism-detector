@@ -339,6 +339,7 @@ try:
     from src.visualization.analytics import (
         plot_high_severity_trends,
         plot_most_plagiarized_documents,
+        plot_processing_time_breakdown,
         plot_similarity_distribution,
     )
 except ImportError:
@@ -346,6 +347,7 @@ except ImportError:
     render_copy_button = None
     plot_high_severity_trends = None
     plot_most_plagiarized_documents = None
+    plot_processing_time_breakdown = None
     plot_similarity_distribution = None
 
 try:
@@ -2278,7 +2280,17 @@ with tab_drill:
 with tab_analytics:
     update_page_title("Analytics")
     st.subheader("📊 Analytics Dashboard")
-    st.info("Analytics metrics summary loaded.")
+    st.markdown("### ⏱️ Pipeline Processing Time Breakdown")
+    stage_timings = st.session_state.get("last_stage_timings") or st.session_state.get("stage_timings")
+    if plot_processing_time_breakdown:
+        active_theme_colors = get_colors() if callable(get_colors) else None
+        fig_time = plot_processing_time_breakdown(
+            stage_timings=stage_timings,
+            theme_colors=active_theme_colors,
+        )
+        st.plotly_chart(fig_time, use_container_width=True)
+    else:
+        st.info("Analytics metrics summary loaded.")
 
 # ══ TAB 7: USERS ══════════════════════════════════════════════════════════
 with tab_users:

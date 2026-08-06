@@ -80,7 +80,7 @@ class SSRFProtector:
                 SSRF_DNS_RESOLUTION_FAILED.format(hostname=hostname, error=e)
             )
 
-@classmethod
+    @classmethod
     def _check_redirect_depth(cls, url: str, max_redirects: int = 3) -> None:
         """
         Follows HTTP redirects (301/302/303/307/308) one hop at a time,
