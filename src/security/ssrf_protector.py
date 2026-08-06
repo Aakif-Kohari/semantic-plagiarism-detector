@@ -216,3 +216,84 @@ class SSRFProtector:
             if allowed_cidrs
             else ()
         )
+
+    @classmethod
+    def validate_url_safety(
+        cls,
+        url: str,
+        allowed_domains: list[str] | None = None,
+        max_redirects: int = 3,
+    ) -> tuple[str, str]:
+        """
+        Validates that a provided URL is safe to dispatch and pins the DNS resolution.
+
+        Performs the same checks as validate_webhook_url but returns the
+        validated URL string alongside the pinned IP address to prevent
+        DNS rebinding attacks.
+
+        Args:
+            url: The URL string to validate.
+            allowed_domains: Optional whitelist of allowed hostnames.
+            max_redirects: Maximum redirect hops to follow.
+
+        Returns:
+            A tuple of (validated_url, pinned_ip_address).
+
+        Raises:
+            SSRFSecurityException: If the URL fails any security check.
+        """
+        cls.validate_webhook_url(url, allowed_domains, max_redirects)
+
+        parsed = urllib.parse.urlparse(url)
+        hostname = parsed.hostname
+        ip_str = cls._resolve_hostname(hostname)
+
+        return url, ip_str
+
+    @classmethod
+    def pinned_request(
+        cls,
+        method: str,
+        url: str,
+        pinned_ip: str,
+        **kwargs,
+    ) -> requests.Response:
+        """
+        Make an HTTP request directly to the pinned IP address with the
+        original Host header explicitly set.
+
+        This prevents DNS rebinding attacks where a malicious domain changes
+        its resolved IP between validation and the actual HTTP request.
+
+        Args:
+            method: HTTP method (GET, POST, etc.).
+            url: The original validated URL.
+            pinned_ip: The IP address returned by validate_url_safety().
+            **kwargs: Additional arguments passed to requests.request().
+
+        Returns:
+            requests.Response object.
+        """
+        parsed = urllib.parse.urlparse(url)
+        hostname = parsed.hostname
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+
+        if ":" in pinned_ip:
+            netloc = f"[{pinned_ip}]:{port}"
+        else:
+            netloc = f"{pinned_ip}:{port}"
+
+        pinned_url = urllib.parse.urlunparse((
+            parsed.scheme,
+            netloc,
+            parsed.path,
+            parsed.params,
+            parsed.query,
+            parsed.fragment,
+        ))
+
+        headers = dict(kwargs.pop("headers", {}))
+        headers["Host"] = hostname
+
+        return requests.request(method, pinned_url, headers=headers, **kwargs)
+
