@@ -293,7 +293,6 @@ def normalize_unicode_spaces(text: str) -> str:
     if not text:
         return text
 
-    text = text.translate(UNICODE_SPACE_TRANSLATION)
 
     # Remove soft hyphens
     text = text.replace("\u00ad", "")
@@ -323,12 +322,9 @@ def check_batch_rate_limit(file_count: int, session_id: Optional[str] = None) ->
 from src.core.app_config import SUPPORTED_OCR_LANGUAGES
 
 
+
 class CorruptedArchiveError(ValueError):
     """Raised when an uploaded zip file or inner archived document is corrupted."""
-
-
-class CorruptedArchiveError(ValueError):
-    """Raised when an uploaded ZIP file or inner archived document is corrupted."""
 
 
 def validate_ocr_dpi(value: int) -> int:
@@ -420,13 +416,9 @@ def strip_bibliography(text: str) -> str:
     return text
 
 
-def clean_text(raw_text: str, remove_stopwords: bool = False) -> str:
-    """Normalize whitespace and remove unwanted Unicode characters.
 
-    Args:
-        raw_text: The text to clean.
-        remove_stopwords: When True, filters out English stopwords.
-    """
+def clean_text(raw_text: str) -> str:
+    """Normalize whitespace and remove unwanted Unicode characters."""
     text = raw_text
 
     text = text.translate(
@@ -707,22 +699,11 @@ def _ocr_pdf_page(
                 (pixmap.width, pixmap.height),
                 pixmap.samples,
             )
-            try:
-                return pytesseract.image_to_string(
-                    image,
-                    lang=language,
-                    config="--oem 3 --psm 3",
-                ).strip()
-            except (MemoryError, Exception) as exc:
-                if isinstance(exc, MemoryError):
-                    logger.warning(
-                        f"[document_parser] OCR page {page_index} failed due to memory exhaustion: {exc}"
-                    )
-                else:
-                    logger.warning(
-                        f"[document_parser] OCR page {page_index} failed: {exc}"
-                    )
-                return f"[OCR extraction failed for page {page_index}]"
+            return pytesseract.image_to_string(
+                image,
+                lang=language,
+                config="--oem 3 --psm 3",
+            ).strip()
     except pytesseract.TesseractNotFoundError as exc:
         from src.errors import OCR_TESSERACT_NOT_FOUND
 
@@ -836,15 +817,58 @@ def _extract_single_file_helper(
     return extract_text(data, name, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
 
 
+
+
+def _resolve_process_pool_workers(
+    max_workers: int | None,
+    file_count: int,
+) -> int:
+    """Return a safe process-pool size for bulk extraction.
+
+    The requested worker limit is capped by both the available CPU count and
+    the number of files, preventing unnecessary processes and excessive memory
+    pressure on shared systems.
+    """
+    if isinstance(max_workers, bool) or (
+        max_workers is not None and not isinstance(max_workers, int)
+    ):
+        raise TypeError("max_workers must be an integer or None.")
+
+    if max_workers is not None and max_workers < 1:
+        raise ValueError("max_workers must be at least 1.")
+
+    available_cpus = os.cpu_count() or 1
+    requested_workers = (
+        available_cpus if max_workers is None else max_workers
+    )
+
+    return max(
+        1,
+        min(
+            requested_workers,
+            available_cpus,
+            max(file_count, 1),
+        ),
+    )
+
 def extract_texts_parallel(
     files_dict: Dict[str, bytes],
     *,
     ocr_language: str = DEFAULT_OCR_LANGUAGE,
     ocr_dpi: int = DEFAULT_OCR_DPI,
     session_id: Optional[str] = None,
+    max_workers: int | None = None,
 ) -> tuple[Dict[str, str], Dict[str, Exception]]:
     """
-    Extract text from multiple files in parallel using ProcessPoolExecutor.
+    Extract text from multiple files using a bounded process pool.
+
+    Args:
+        files_dict: Mapping of filename to raw file bytes.
+        ocr_language: Validated OCR language code.
+        ocr_dpi: Validated OCR rendering resolution.
+        session_id: Optional rate-limit session identifier.
+        max_workers: Requested process limit. ``None`` uses the available CPU
+            count. The final pool is capped by CPU count and file count.
 
     Returns:
         tuple of (results_dict, errors_dict)
@@ -862,7 +886,12 @@ def extract_texts_parallel(
     if not files_dict:
         return results, errors
 
-    if len(files_dict) == 1 or not _should_use_parallel():
+    worker_count = _resolve_process_pool_workers(
+        max_workers,
+        len(files_dict),
+    )
+
+    if worker_count == 1 or not _should_use_parallel():
         for name, data in files_dict.items():
             try:
                 results[name] = _extract_single_file_helper(
@@ -883,7 +912,9 @@ def extract_texts_parallel(
     try:
         from concurrent.futures import ProcessPoolExecutor
 
-        with ProcessPoolExecutor() as executor:
+        with ProcessPoolExecutor(
+            max_workers=worker_count,
+        ) as executor:
             futures = {
                 executor.submit(
                     _extract_single_file_helper,
@@ -962,49 +993,35 @@ def count_pdf_images(pdf_bytes: bytes) -> int:
 
 
 def extract_pdf_metadata(file: PDFInput) -> Dict[str, str]:
-    """Extract PDF metadata (Author, Title, Creation Date, Creator, Producer) using PyMuPDF.
+    """Extract PDF metadata (Author, Creation Date, Title) using PyMuPDF.
 
     Returns:
-        Dictionary with keys 'author', 'title', 'creation_date', 'creator', 'producer'.
+        Dictionary with keys 'author', 'creation_date', 'title'.
         Values are None if metadata is not available.
     """
     pdf_bytes = _read_pdf_bytes(file)
-
-    metadata = {
-        "author": None,
-        "title": None,
-        "creation_date": None,
-        "creator": None,
-        "producer": None,
-    }
+    metadata = {"author": None, "creation_date": None, "title": None}
 
     try:
         import fitz  # PyMuPDF
 
         with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
-            doc_metadata = doc.metadata or {}
-
+            doc_metadata = doc.metadata
             metadata["author"] = doc_metadata.get("author")
-            metadata["title"] = doc_metadata.get("title")
             metadata["creation_date"] = doc_metadata.get("creationDate")
-            metadata["creator"] = doc_metadata.get("creator")
-            metadata["producer"] = doc_metadata.get("producer")
-
+            metadata["title"] = doc_metadata.get("title")
     except (ValueError, RuntimeError, OSError, TypeError) as exc:
         print(f"[document_parser] Error extracting PDF metadata: {exc}")
-
     except Exception as exc:
         logger.error(f"[document_parser] Error extracting PDF metadata: {exc}")
 
     image_count = count_pdf_images(pdf_bytes)
-
     if image_count:
         logger.info(
             "[document_parser] PDF contains %d embedded image(s): %s",
             image_count,
             metadata.get("title") or "unknown",
         )
-
     metadata["image_count"] = image_count
 
     return metadata
@@ -1143,6 +1160,7 @@ def extract_text_from_docx(file: PDFInput) -> str:
     return ""
 
 
+
 def extract_text_from_txt(file: PDFInput) -> str:
     """Extract text from a TXT file with encoding fallback."""
     text = ""
@@ -1207,6 +1225,7 @@ def extract_text_from_rtf(file: PDFInput) -> str:
     return text.strip()
 
 
+
 def extract_text_from_zip(
     file: PDFInput,
     *,
@@ -1266,7 +1285,6 @@ def extract_text_from_zip(
         ) from exc
 
     return "\n\n".join(extracted_texts).strip()
-
 
 def extract_text_from_doc(file: PDFInput) -> str:
     """Extract plain text from a legacy Word Document (.doc) using antiword."""
@@ -1446,6 +1464,7 @@ def strip_markdown_syntax(raw_text: str) -> str:
     return text.strip()
 
 
+
 def extract_text_from_epub(file: PDFInput) -> str:
     """Extract plain text from an EPUB file."""
     try:
@@ -1474,6 +1493,7 @@ def extract_text_from_epub(file: PDFInput) -> str:
     except Exception as exc:
         logger.error(f"[document_parser] Error reading EPUB: {exc}")
         return ""
+
 
 
 def extract_text_from_md(file: PDFInput) -> str:
@@ -1617,6 +1637,11 @@ def extract_text_from_image(
             else:
                 logger.warning(f"[document_parser] OCR image extraction failed: {exc}")
             return "[OCR extraction failed for the file]"
+        return pytesseract.image_to_string(
+            image,
+            lang=ocr_language,
+            config="--oem 3 --psm 3",
+        ).strip()
     except pytesseract.TesseractNotFoundError as exc:
         from src.errors import OCR_TESSERACT_NOT_FOUND
 
@@ -1756,8 +1781,6 @@ def extract_text(
     *,
     ocr_language: str = DEFAULT_OCR_LANGUAGE,
     ocr_dpi: int = DEFAULT_OCR_DPI,
-    clean_whitespace: bool = True,
-    mask_named_entities: bool = False,
 ) -> str:
     """Route extraction according to a filename extension."""
     ocr_language, ocr_dpi = normalize_ocr_settings(
@@ -1787,11 +1810,10 @@ def extract_text(
         raw = extract_text_from_doc(file)
     elif extension in ("md", "markdown", "mdown"):
         raw = extract_text_from_md(file)
-    elif extension == "zip":
-        raw = extract_text_from_zip(file, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
 
     elif extension in ("zip", "7z", "tar", "gz"):
         raw = extract_text_from_zip(file, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
+
 
     elif extension == "rtf":
         raw = extract_text_from_rtf(file)
@@ -1812,17 +1834,6 @@ def extract_text(
     raw = normalize_unicode_nfc(raw)
 
     raw = sanitize_zero_width_characters(raw, filename=filename)
-
-    if clean_whitespace and raw:
-        lines = [line.rstrip() for line in raw.splitlines()]
-        cleaned_text = "\n".join(lines)
-        raw = re.sub(r"\n{3,}", "\n\n", cleaned_text)
-
-    if mask_named_entities and raw:
-        raw = mask_named_entities_in_text(raw)
-
-    raw = normalize_extended_punctuation(raw)
-
     lang_code = detect_text_language(raw)
 
     logger.info(
@@ -1918,9 +1929,23 @@ def parallel_extract_texts(
             results[filename] = text
 
     return results
+    files: list,
+    session_id: Optional[str] = None,
+    max_workers: int | None = None,
+) -> Dict[str, str]:
+    """Legacy compatibility wrapper."""
+    return extract_texts(
+        files,
+        session_id=session_id,
+        max_workers=max_workers,
+    )
 
 
-def extract_texts(files: list, session_id: Optional[str] = None) -> Dict[str, str]:
+def extract_texts(
+    files: list,
+    session_id: Optional[str] = None,
+    max_workers: int | None = None,
+) -> Dict[str, str]:
     """Extract text from multiple uploaded files."""
     check_batch_rate_limit(len(files) if files else 0, session_id=session_id)
 
@@ -1941,7 +1966,11 @@ def extract_texts(files: list, session_id: Optional[str] = None) -> Dict[str, st
             logger.error(f"[document_parser] Error reading file data for {name}: {exc}")
             files_dict[name] = b""
 
-    raw_texts, errors = extract_texts_parallel(files_dict, session_id=session_id)
+    raw_texts, errors = extract_texts_parallel(
+        files_dict,
+        session_id=session_id,
+        max_workers=max_workers,
+    )
     if errors:
         raise next(iter(errors.values()))
 

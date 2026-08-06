@@ -27,12 +27,51 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 import torch
 
+import torch
+import torch.quantization
+import logging
+import os
 
 logger = logging.getLogger(__name__)
 
 # ── Singleton model loader ─────────────────────────────────────────────────────
 _DEFAULT_MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
 _model: SentenceTransformer | None = None
+_quantized_model: SentenceTransformer | None = None
+
+def _apply_dynamic_quantization(model: SentenceTransformer) -> SentenceTransformer:
+    """Apply PyTorch dynamic INT8 quantization to the model's Linear layers.
+    
+    Dynamic quantization computes the quantization parameters (scale and zero-point)
+    for activations dynamically, just like static quantization, but the weights 
+    are quantized statically. This significantly reduces memory footprint and 
+    increases inference speed on CPU hosts without requiring a calibration dataset.
+    
+    Args:
+        model: The loaded SentenceTransformer model instance.
+        
+    Returns:
+        The quantized SentenceTransformer model.
+    """
+    logger.info("[embedding_model] Applying dynamic INT8 quantization to Linear layers...")
+    try:
+        # Quantize only the Linear layers within the transformer modules
+        # This preserves the embedding output dimensions while reducing memory
+        quantized_model = torch.quantization.quantize_dynamic(
+            model,
+            {torch.nn.Linear},
+            dtype=torch.qint8,
+            inplace=False, # Return a new instance to preserve the original float32 model
+        )
+        logger.info("[embedding_model] Dynamic quantization applied successfully.")
+        return quantized_model
+    except Exception as exc:
+        logger.warning(
+            "[embedding_model] Failed to apply dynamic quantization: %s. "
+            "Falling back to float32 model.",
+            exc,
+        )
+        return model
 
 
 def _detect_device(model: SentenceTransformer | None = None) -> str:
@@ -87,48 +126,63 @@ def get_embedding_model_info() -> tuple[str, int]:
 
 
 class EmbeddingModelManager:
-    """Manages the SentenceTransformer embedding model lifecycle and fallbacks."""
+    """Manages the SentenceTransformer embedding model lifecycle, fallbacks, and quantization."""
 
     _instance = None
 
+    def __init__(self, quantize_model: bool = False):
+        """Initialize the EmbeddingModelManager.
+        
+        Args:
+            quantize_model: If True, applies dynamic INT8 quantization to the 
+                            model's Linear layers to reduce RAM usage by ~50% on CPU.
+        """
+        self.quantize_model = quantize_model
+        self._model = None
+        self._quantized_model = None
+
     @classmethod
-    def get_instance(cls) -> EmbeddingModelManager:
+    def get_instance(cls, quantize_model: bool = False) -> "EmbeddingModelManager":
         if cls._instance is None:
-            cls._instance = cls()
+            cls._instance = cls(quantize_model=quantize_model)
+        elif quantize_model and not cls._instance.quantize_model:
+            # Update instance if quantization is requested but not yet applied
+            cls._instance.quantize_model = True
+            cls._instance._quantized_model = None # Force reload/quantize
         return cls._instance
 
     def get_model(self) -> SentenceTransformer:
-        global _model
-        if _model is None:
-            primary = _get_model_name()
-            fallback = "all-MiniLM-L6-v2"
-            cache_dir = _get_cache_dir()
-            logger.info(f"[embedding_model] Loading model: {primary} ...")
-            logger.info(
-                f"[embedding_model] Model cache target: {cache_dir or 'default (~/.cache/huggingface)'}"
-            )
-            try:
-                _model = SentenceTransformer(primary, cache_folder=cache_dir)
-                device = _detect_device(_model)
-                logger.info(
-                    "Initializing SentenceTransformer model [%s] on device [%s]",
-                    primary,
-                    device,
-                )
-                logger.info("[embedding_model] Model loaded successfully.")
-            except Exception:
-                logger.warning(
-                    "Primary embedding model %s unavailable. Falling back to %s",
-                    primary,
-                    fallback,
-                )
-                _model = SentenceTransformer(fallback, cache_folder=cache_dir)
-                device = _detect_device(_model)
-                logger.info(
-                    "Initializing SentenceTransformer model [%s] on device [%s]",
-                    fallback,
-                    device,
-                )
+        global _model, _quantized_model
+        
+        if self.quantize_model:
+            if _quantized_model is not None:
+                return _quantized_model
+        else:
+            if _model is not None:
+                return _model
+
+        primary = _get_model_name()
+        fallback = "all-MiniLM-L6-v2"
+        cache_dir = _get_cache_dir()
+        logger.info(f"[embedding_model] Loading model: {primary} ...")
+        logger.info(f"[embedding_model] Model cache target: {cache_dir or 'default (~/.cache/huggingface)'}")
+        
+        try:
+            loaded_model = SentenceTransformer(primary, cache_folder=cache_dir)
+            device = _detect_device(loaded_model)
+            logger.info("Initializing SentenceTransformer model [%s] on device [%s]", primary, device)
+            logger.info("[embedding_model] Model loaded successfully.")
+        except Exception:
+            logger.warning("Primary embedding model %s unavailable. Falling back to %s", primary, fallback)
+            loaded_model = SentenceTransformer(fallback, cache_folder=cache_dir)
+            device = _detect_device(loaded_model)
+            logger.info("Initializing SentenceTransformer model [%s] on device [%s]", fallback, device)
+
+        if self.quantize_model:
+            _quantized_model = _apply_dynamic_quantization(loaded_model)
+            return _quantized_model
+            
+        _model = loaded_model
         return _model
 
 

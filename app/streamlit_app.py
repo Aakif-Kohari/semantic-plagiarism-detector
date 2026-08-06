@@ -7,6 +7,7 @@ import functools
 from pathlib import Path
 import sys
 import time
+import hashlib
 from datetime import datetime, timezone
 
 import numpy as np
@@ -269,6 +270,7 @@ from src.core.similarity import (
     document_similarity_matrix,
     flag_plagiarism,
 )
+from src.core.lexical_similarity import jaccard_similarity 
 from src.visualization.network_graph import (
     plot_similarity_network,
 )
@@ -303,7 +305,7 @@ from src.db.incidents import (
 )
 from src.utils.bulk_export import create_documents_bulk_zip_archive
 from src.utils.pdf_report import highlight_pdf_matches
-from src.db.corpus_db import get_total_document_count, init_corpus_db
+from src.db.corpus_db import get_total_document_count, init_corpus_db, get_document_by_hash
 from src.i18n.translator import _SUPPORTED_LANGUAGES, get_text
 from src.utils.processing_time import (
     estimate_processing_seconds,
@@ -604,17 +606,16 @@ configure_page_meta(title="Semantic Plagiarism Detector - Dashboard", icon="🔍
 
 
 def update_page_title(tab_name: str):
-    """
-    Update browser title based on active tab.
-    """
+    """Update browser title based on active tab."""
     st.markdown(
         f"""
         <script>
-            document.title = "{tab_name} | Semantic Plagiarism Detector";
+            window.parent.document.title = '{tab_name} | Semantic Plagiarism Detector';
         </script>
         """,
         unsafe_allow_html=True,
     )
+
 
 
 if SessionKeys.AUTHENTICATED not in st.session_state:
@@ -660,6 +661,87 @@ def build_visualization_lazily(is_enabled, build_fn):
         return build_fn()
     return None
 
+
+
+# ── Issue #1383: Cosine vs Lexical Similarity Comparison Table ─────────────────
+SEMANTIC_HIGH_THRESHOLD = 0.80  # vector (cosine) score considered "high"
+LEXICAL_LOW_THRESHOLD = 0.30    # lexical (jaccard) score considered "low"
+
+
+def render_cosine_vs_lexical_comparison_table(
+    sim_df,
+    raw_texts,
+    *,
+    semantic_threshold: float = SEMANTIC_HIGH_THRESHOLD,
+    lexical_threshold: float = LEXICAL_LOW_THRESHOLD,
+):
+    """Render a two-column score comparison table in the results / drill-down view.
+
+    Compares vector-embedding similarity (cosine semantic) against Jaccard
+    lexical similarity side-by-side for every unique document pair, and
+    highlights pairs where the cosine score is high (>= ``semantic_threshold``)
+    but the Jaccard score is low (<= ``lexical_threshold``). Such pairs are
+    strong indicators of paraphrasing / semantic plagiarism that pure lexical
+    matching would miss.
+
+    Parameters
+    ----------
+    sim_df : pandas.DataFrame
+        Square cosine similarity matrix indexed/columned by document names.
+    raw_texts : Dict[str, str]
+        Mapping of document name → extracted text. Used to compute Jaccard.
+    semantic_threshold : float, default 0.80
+        Cosine score at/above which a pair is considered semantically similar.
+    lexical_threshold : float, default 0.30
+        Jaccard score at/below which a pair is considered lexically dissimilar.
+
+    Returns
+    -------
+    pandas.DataFrame
+        The styled comparison DataFrame (also rendered to the UI).
+    """
+    import itertools
+
+    if sim_df is None or raw_texts is None or len(raw_texts) < 2:
+        st.info(
+            "Upload at least two documents to view the Cosine vs Lexical "
+            "Similarity comparison table."
+        )
+        return None
+
+    doc_names = list(sim_df.columns) if sim_df is not None else list(raw_texts.keys())
+    rows = []
+    for da, db in itertools.combinations(doc_names, 2):
+        # Cosine score from the (already-computed) semantic matrix.
+        try:
+            cosine_score = float(sim_df.loc[da, db])
+        except Exception:
+            cosine_score = 0.0
+
+        # Jaccard lexical score from the raw extracted texts.
+        text_a = raw_texts.get(da, "") or ""
+        text_b = raw_texts.get(db, "") or ""
+        try:
+            jaccard_score = float(jaccard_similarity(text_a, text_b))
+        except Exception:
+            jaccard_score = 0.0
+
+        is_semantic_only = (
+            cosine_score >= semantic_threshold and jaccard_score <= lexical_threshold
+        )
+        rows.append(
+            {
+                "Document A": da,
+                "Document B": db,
+                "Cosine (Semantic)": cosine_score,
+                "Jaccard (Lexical)": jaccard_score,
+                "Semantic-Only Paraphrasing?": "🚨 Yes" if is_semantic_only else "No",
+            }
+        )
+
+    comp_df = pd.DataFrame(rows)
+    st.dataframe(comp_df)
+    return comp_df
 
 from datetime import date, timedelta
 
@@ -870,7 +952,6 @@ def logout_dialog():
             username = st.session_state.get(SessionKeys.USERNAME, "unknown")
             timestamp = datetime.now(timezone.utc).isoformat()
             logger.info("User '%s' logged out at %s", username, timestamp)
-
             for key in [
                 SessionKeys.AUTHENTICATED,
                 SessionKeys.USERNAME,
@@ -880,6 +961,24 @@ def logout_dialog():
                     del st.session_state[key]
             clear_session(SESSION_ID)
             st.rerun()
+
+@st.dialog("⚠️ Clear All Documents")
+def clear_all_dialog():
+    st.write("Are you sure you want to completely clear the local database?")
+    st.write("This action cannot be undone.")
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Cancel", use_container_width=True, key="cancel_clear_all"):
+            st.rerun()
+    with col2:
+        if st.button("Clear All", type="primary", use_container_width=True, key="confirm_clear_all"):
+            from src.db.corpus_db import clear_all_data
+            clear_all_data()
+            clear_session()
+            st.cache_data.clear()
+            st.rerun()
+
+
 
 
 # ── Corpus Overview Header & Quick Actions (#1242) ───────────────────────────
@@ -931,20 +1030,61 @@ with st.sidebar:
     lang_code = _lang_reverse.get(selected_lang_name, "en")
 
     if user_role == "admin":
+        # ── Threshold Presets (Issue #1674) ───────────────────────────────────────
+        st.markdown("### 🎯 Threshold Presets")
+        
+        # Define preset options with descriptions
+        preset_options = {
+            "Strict (0.80)": 0.80,
+            "Balanced (0.59)": 0.59,
+            "Lenient (0.45)": 0.45,
+            "Custom": None,
+        }
+        
+        # Determine current preset based on session state threshold
+        current_threshold = st.session_state.get("threshold_slider", PLAGIARISM_THRESHOLD)
+        current_preset = "Custom"
+        for label, value in preset_options.items():
+            if value is not None and abs(current_threshold - value) < 0.001:
+                current_preset = label
+                break
+        
+        selected_preset = st.radio(
+            "Select Evaluation Standard:",
+            options=list(preset_options.keys()),
+            index=list(preset_options.keys()).index(current_preset),
+            key="threshold_preset_radio",
+            horizontal=True,
+            help="Choose a predefined threshold standard or use the custom slider below.",
+        )
+        
+        # Sync preset selection with slider value
+        if selected_preset != "Custom" and preset_options[selected_preset] is not None:
+            st.session_state["threshold_slider"] = preset_options[selected_preset]
+            # Force rerun to update the slider widget if it changed via radio
+            if current_preset != selected_preset:
+                st.rerun()
+
         threshold = st.slider(
             "Plagiarism Threshold (Hybrid)",
-            0.50,
+            0.10,
             0.99,
-            value=PLAGIARISM_THRESHOLD,
+            value=st.session_state.get("threshold_slider", PLAGIARISM_THRESHOLD),
             step=0.01,
             help=(
                 "Combined Hybrid score threshold for flagging pair plagiarism. "
                 "Calculated from Lexical (exact phrase overlap) and Semantic (meaning alignment) scores. "
                 "Recommended Default: 0.59 (59%)."
             ),
-            key=SessionKeys.THRESHOLD_SLIDER,
+            key="threshold_slider",
             on_change=save_preferences_callback,
         )
+        
+        # If user manually changes slider, reset preset to "Custom"
+        if abs(threshold - preset_options.get(selected_preset, -1)) > 0.001:
+            if st.session_state.get("threshold_preset_radio") != "Custom":
+                st.session_state["threshold_preset_radio"] = "Custom"
+                st.rerun()
 
         lexical_threshold = st.slider(
             "Lexical Sensitivity Threshold",
@@ -1916,8 +2056,23 @@ if user_role == "admin":
                 )
                 continue
 
+            file_bytes = uploaded_file.read()
+            file_hash = hashlib.sha256(file_bytes).hexdigest()
+            existing_doc = get_document_by_hash(file_hash)
+
+            if existing_doc:
+                st.warning(f"⚠️ File **'{original_name}'** is identical to **'{existing_doc}'** already in the database.")
+                action = st.radio(
+                    f"Action for duplicate file '{original_name}':",
+                    ["Skip", "Reprocess"],
+                    key=f"dup_{file_hash}_{original_name}",
+                    horizontal=True
+                )
+                if action == "Skip":
+                    continue
+
             file_bytes_dict[safe_name] = strip_exif_metadata(
-                uploaded_file.read(), safe_name
+                file_bytes, safe_name
             )
 
     for drive_name, drive_bytes in st.session_state.get(
@@ -2214,6 +2369,17 @@ with tab_heatmap:
 with tab_drill:
     update_page_title("Drill Down")
     st.subheader("🔬 Pair Drill-Down")
+
+    # ── Issue #1383: Cosine vs Lexical side-by-side comparison table ──
+    render_cosine_vs_lexical_comparison_table(
+        active_sim_df,
+        raw_texts,
+        semantic_threshold=SEMANTIC_HIGH_THRESHOLD,
+        lexical_threshold=LEXICAL_LOW_THRESHOLD,
+    )
+
+    st.markdown("---")
+
     if active_sim_df is not None and len(doc_names) >= 2:
         c1, c2 = st.columns(2)
         with c1:
