@@ -6,7 +6,7 @@ import sqlite3
 
 from .common import column_exists, run_migrations
 
-AUTH_SCHEMA_VERSION = 12
+AUTH_SCHEMA_VERSION = 13
 
 
 def migration_001_create_users(
@@ -190,6 +190,28 @@ def migration_012_create_revoked_tokens_table(
     )
 
 
+def migration_013_create_password_history_table(
+    connection: sqlite3.Connection,
+) -> None:
+    """Create password_history table for tracking recent password hashes per user."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS password_history (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            username      TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at    TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_password_history_username
+        ON password_history(username)
+        """
+    )
+
+
 AUTH_MIGRATIONS = {
     1: migration_001_create_users,
     2: migration_002_add_onboarding_state,
@@ -203,6 +225,7 @@ AUTH_MIGRATIONS = {
     10: migration_010_add_password_changed_at,
     11: migration_011_add_version_column,
     12: migration_012_create_revoked_tokens_table,
+    13: migration_013_create_password_history_table,
 }
 
 
