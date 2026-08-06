@@ -127,3 +127,9 @@ def processing_eta_text(
     )
     duration = format_processing_duration(seconds)
     return f"Estimated processing time: about {duration}"
+
+
+def calculate_average_latency(durations: list[float]) -> float:
+    if not durations:
+        return 0.0
+    return round(sum(durations) / len(durations), 3)

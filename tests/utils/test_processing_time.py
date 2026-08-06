@@ -6,6 +6,7 @@ from src.utils.processing_time import (
     format_processing_duration,
     processing_eta_text,
     uploaded_files_total_bytes,
+    calculate_average_latency,
 )
 
 
@@ -87,3 +88,15 @@ def test_eta_text_uses_default_rate():
     assert processing_eta_text(2 * BYTES_PER_MB) == (
         "Estimated processing time: about 4 seconds"
     )
+
+
+def test_calculate_average_latency():
+    assert calculate_average_latency([1.0, 2.0, 3.0]) == 2.0
+
+
+def test_calculate_average_latency_rounds_to_three_decimals():
+    assert calculate_average_latency([1.111, 2.222, 3.334]) == 2.222
+
+
+def test_calculate_average_latency_empty_list():
+    assert calculate_average_latency([]) == 0.0
