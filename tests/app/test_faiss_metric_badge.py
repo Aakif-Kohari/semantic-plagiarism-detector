@@ -1,6 +1,7 @@
 """Unit tests for FAISS distance metric badge helper functions."""
 
 from unittest.mock import MagicMock, patch
+import faiss
 from app.components.faiss_results import get_faiss_metric_label, render_faiss_metric_badge
 
 
@@ -12,14 +13,14 @@ def test_get_faiss_metric_label_uninitialized():
 def test_get_faiss_metric_label_inner_product():
     """Verify detection of Inner Product metric."""
     mock_index = MagicMock()
-    mock_index.metric_type = 1
+    mock_index.metric_type = faiss.METRIC_INNER_PRODUCT
     assert get_faiss_metric_label(mock_index) == "Inner Product (Cosine)"
 
 
 def test_get_faiss_metric_label_l2():
     """Verify detection of L2 metric."""
     mock_index = MagicMock()
-    mock_index.metric_type = 0
+    mock_index.metric_type = faiss.METRIC_L2
     assert get_faiss_metric_label(mock_index) == "L2 (Euclidean)"
 
 

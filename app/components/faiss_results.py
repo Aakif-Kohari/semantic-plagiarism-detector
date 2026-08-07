@@ -235,9 +235,9 @@ def get_faiss_metric_label(faiss_index: Any = None) -> str:
         except ImportError:
             pass
 
-        if metric_type == 1:
+        if metric_type == 0:
             return "Inner Product (Cosine)"
-        elif metric_type == 0:
+        elif metric_type == 1:
             return "L2 (Euclidean)"
         elif type(faiss_index).__name__ in ("IndexFlatIP", "IndexIVFFlat"):
             return "Inner Product (Cosine)"
