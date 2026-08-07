@@ -43,6 +43,79 @@ def apply_plotly_theme(
 
     return fig
 
+def plot_similarity_boxplot_by_group(
+    scores_dict: dict[str, list[float]],
+    show_grid: bool = True,
+    theme_colors: dict[str, str] | None = None,
+) -> go.Figure:
+    """Create a box plot of similarity score quartiles, grouped by assignment.
+
+    Renders one box (25th/50th/75th percentile, whiskers, and outliers) per
+    key in ``scores_dict`` so distributions can be compared across groups.
+
+    Args:
+        scores_dict: Mapping of assignment/group name to its list of
+            similarity scores (0.0-1.0).
+        show_grid: Whether to show chart gridlines.
+        theme_colors: Optional theme palette for light/dark backgrounds.
+
+    Returns:
+        Plotly Figure object with one box trace per group.
+    """
+    if not scores_dict:
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No similarity scores available to plot",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
+            font=dict(size=16, color=_annotation_color(theme_colors)),
+        )
+        fig.update_layout(
+            title="Similarity Score Quartile Distribution",
+            xaxis_title="Assignment",
+            yaxis_title="Similarity Score",
+            height=400,
+            autosize=True,
+        )
+        fig.update_xaxes(showgrid=show_grid)
+        fig.update_yaxes(showgrid=show_grid)
+        _apply_theme_colors(fig, theme_colors)
+        return fig
+
+    fig = go.Figure()
+    for group_name, scores in scores_dict.items():
+        fig.add_trace(
+            go.Box(
+                y=scores,
+                name=str(group_name),
+                boxpoints="outliers",
+                marker_color="#636efa",
+                line_color="#4a4dba",
+                hovertemplate=(
+                    "<b>%{name}</b><br>Similarity Score: %{y:.2f}<extra></extra>"
+                ),
+            )
+        )
+
+    fig.update_layout(
+        title="Similarity Score Quartile Distribution",
+        xaxis_title="Assignment",
+        yaxis_title="Similarity Score",
+        height=400,
+        showlegend=False,
+        autosize=True,
+    )
+
+    fig.update_xaxes(showgrid=show_grid)
+    fig.update_yaxes(showgrid=show_grid, range=[0.0, 1.0])
+
+    _apply_theme_colors(fig, theme_colors)
+
+    return fig
+    
 def _annotation_color(theme_colors: dict[str, str] | None) -> str:
     """Pick a readable annotation color for the given theme.
 
