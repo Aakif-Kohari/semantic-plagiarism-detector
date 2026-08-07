@@ -2504,6 +2504,10 @@ with tab_users:
 with tab_settings:
     update_page_title("Settings")
     st.subheader("⚙️ System Configuration")
+
+    from app.components.storage_quota import render_storage_quota_progress
+    render_storage_quota_progress()
+
     if user_role == "admin":
         st.markdown("### ⚙️ Advanced Configuration")
 
