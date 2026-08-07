@@ -8,7 +8,6 @@ import pytest
 from src.utils.processing_time import (
     BYTES_PER_MB,
     ProcessingTimer,
-    calculate_mb_per_minute,
     calculate_page_throughput,
     calculate_processing_throughput,
     estimate_processing_seconds,    format_duration,
@@ -349,7 +348,6 @@ def test_eta_text_uses_default_rate():
     assert processing_eta_text(2 * BYTES_PER_MB) == (
         "Estimated processing time: about 4 seconds"
     )
- feat/average-processing-latency-1576
 
 
 def test_calculate_average_latency():
@@ -374,4 +372,3 @@ def test_calculate_mb_per_minute():
 
     # Test zero bytes processed
     assert calculate_mb_per_minute(0, 60.0) == 0.0
- main
