@@ -1126,6 +1126,8 @@ with st.sidebar:
             value=5,
             key=SessionKeys.FAISS_TOP_K_SLIDER,
         )
+        from app.components.faiss_results import render_faiss_metric_badge
+        render_faiss_metric_badge(st.session_state.get("faiss_index", None))
 
         st.markdown("### ✂️ Chunking Settings")
         chunk_size = st.slider(

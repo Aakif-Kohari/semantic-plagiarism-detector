@@ -208,3 +208,59 @@ def render_faiss_results_ui(
 
         st.markdown("<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
 
+
+def get_faiss_metric_label(faiss_index: Any = None) -> str:
+    """Read distance metric type from active FAISS index wrapper or object.
+
+    Args:
+        faiss_index: FAISS index instance or wrapper object.
+
+    Returns:
+        Formatted metric description string or 'Default' if uninitialized.
+    """
+    if faiss_index is None:
+        return "Default"
+
+    try:
+        metric_type = getattr(faiss_index, "metric_type", None)
+        if metric_type is None and hasattr(faiss_index, "index"):
+            metric_type = getattr(faiss_index.index, "metric_type", None)
+
+        try:
+            import faiss
+            if metric_type == faiss.METRIC_INNER_PRODUCT or isinstance(faiss_index, faiss.IndexFlatIP):
+                return "Inner Product (Cosine)"
+            elif metric_type == faiss.METRIC_L2 or isinstance(faiss_index, faiss.IndexFlatL2):
+                return "L2 (Euclidean)"
+        except ImportError:
+            pass
+
+        if metric_type == 1:
+            return "Inner Product (Cosine)"
+        elif metric_type == 0:
+            return "L2 (Euclidean)"
+        elif type(faiss_index).__name__ in ("IndexFlatIP", "IndexIVFFlat"):
+            return "Inner Product (Cosine)"
+        elif type(faiss_index).__name__ in ("IndexFlatL2",):
+            return "L2 (Euclidean)"
+    except Exception:
+        pass
+
+    return "Default"
+
+
+def render_faiss_metric_badge(faiss_index: Any = None) -> str:
+    """Render active FAISS vector distance metric badge in sidebar.
+
+    Args:
+        faiss_index: Active FAISS index instance.
+
+    Returns:
+        Rendered metric badge label string.
+    """
+    label = get_faiss_metric_label(faiss_index)
+    badge_text = f"Metric: {label}"
+    st.sidebar.caption(f"🎯 {badge_text}")
+    return badge_text
+
+
