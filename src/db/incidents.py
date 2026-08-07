@@ -19,7 +19,7 @@ from src.core.config import (
     normalize_severity_label,
     severity_from_score,
 )
-from src.db.common import with_sqlite_retry
+from src.core.concurrency import with_sqlite_retry
 from src.db.migrations import migrate_corpus_database, table_exists
 from src.db.schemas import MatchResult
 

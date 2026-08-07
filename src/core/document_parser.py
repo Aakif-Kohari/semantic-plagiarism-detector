@@ -1929,6 +1929,9 @@ def parallel_extract_texts(
             results[filename] = text
 
     return results
+
+
+def extract_texts_from_pdfs(
     files: list,
     session_id: Optional[str] = None,
     max_workers: int | None = None,
