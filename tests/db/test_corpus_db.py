@@ -820,3 +820,41 @@ def test_corpus_soft_delete_lifecycle():
     assert get_total_document_count() == 1
     assert get_deleted_documents_count() == 0
 
+
+def test_soft_delete_and_restore_document():
+    """Verify document soft-deletion and subsequent restoration flow (#1284)."""
+    filename = "delete_restore_test.pdf"
+    file_hash = "delete_restore_hash_123"
+
+    # Insert document
+    added = add_document(
+        filename=filename,
+        file_hash=file_hash,
+        student_name="Test Student",
+        class_section="Section A",
+        assignment_title="Test Assignment",
+    )
+    assert added is True
+
+    dummy_embedding = np.random.rand(384).astype(np.float32)
+    add_chunks([(999, filename, 0, "Test chunk content", dummy_embedding)])
+
+    # Verify visible initially
+    active_docs = get_all_documents(include_deleted=False)
+    assert any(doc["filename"] == filename for doc in active_docs)
+
+    # Call soft_delete_document()
+    soft_delete_document(filename)
+
+    # Verify hidden from queries
+    active_docs_after_delete = get_all_documents(include_deleted=False)
+    assert not any(doc["filename"] == filename for doc in active_docs_after_delete)
+
+    # Call restore_document()
+    restore_document(filename)
+
+    # Verify visible in queries again
+    active_docs_after_restore = get_all_documents(include_deleted=False)
+    assert any(doc["filename"] == filename for doc in active_docs_after_restore)
+
+
