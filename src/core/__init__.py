@@ -13,7 +13,7 @@ from .similarity import (
                          find_most_similar_chunks, flag_plagiarism)
 from .text_chunking import chunk_by_sentences, chunk_document, chunk_documents
 from .translator import translate_text
-from .webhook import send_plagiarism_alert
+from .webhook import dispatch_plagiarism_alert, send_plagiarism_alert
 from .config import (
     BrandingConfig,
     get_branding_config,
@@ -21,7 +21,7 @@ from .config import (
     load_branding_config,
 )
 from .tag_manager import TagManager, sanitize_tag_name
-from .concurrency import with_sqlite_retry
+from src.db.common import with_sqlite_retry
 
 
 __all__ = [
