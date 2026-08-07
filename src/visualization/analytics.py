@@ -476,6 +476,7 @@ def plot_severity_donut_chart(incidents: list[dict[str, Any]]) -> go.Figure:
         fig.update_layout(
             title="Plagiarism Incident Severity Distribution",
             height=400,
+            autosize=True,
         )
         return fig
 
@@ -512,6 +513,7 @@ def plot_severity_donut_chart(incidents: list[dict[str, Any]]) -> go.Figure:
         title="Plagiarism Incident Severity Distribution",
         height=400,
         showlegend=True,
+        autosize=True,
     )
 
     return fig
