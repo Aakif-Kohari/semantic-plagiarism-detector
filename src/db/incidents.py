@@ -9,16 +9,18 @@ import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional
 
 from src.core.app_config import CORPUS_DB_PATH, FALLBACK_DATA_DIR
+from src.core.concurrency import with_sqlite_retry
 from src.core.config import (
     normalize_score,
     normalize_severity_label,
     severity_from_score,
 )
-from src.db.migrations import migrate_corpus_database
+from src.db.migrations import migrate_corpus_database, table_exists
 from src.db.schemas import MatchResult
 
 # Seed the incidents default DB path from the centralized app_config.
@@ -94,9 +96,11 @@ def _get_connection(db_path: str | Path) -> sqlite3.Connection:
 
 
 def init_incident_db(
-    db_path: str | Path = DEFAULT_DB_PATH,
+    db_path: str | Path | None = None,
 ) -> None:
     """Create or upgrade the shared corpus/incident database."""
+    if db_path is None:
+        db_path = DEFAULT_DB_PATH
     with closing(_get_connection(db_path)) as conn:
         try:
             conn.execute("PRAGMA foreign_keys = ON")
@@ -133,7 +137,8 @@ def _validate_incident(flag: Mapping[str, Any]) -> tuple[bool, str]:
 
 
 def _fetch_all_incidents(conn: sqlite3.Connection) -> list[MatchResult]:
-    from src.db.schemas import MatchResult
+    pass
+
 
 def _validate_pagination(limit: int, offset: int) -> tuple[int, int]:
     """Validate and normalize SQL pagination arguments."""
@@ -186,23 +191,24 @@ def _fetch_all_incidents(
             review_status=row["review_status"],
             date_flagged=row["date_flagged"],
             last_seen=row["last_seen"],
-            threshold_at_time_of_flag=row[
-                "threshold_at_time_of_flag"
-            ],
+            threshold_at_time_of_flag=row["threshold_at_time_of_flag"],
         )
         for row in rows
     ]
 
 
+@with_sqlite_retry
 def sync_flagged_incidents(
     flags: Iterable[Mapping[str, Any]],
-    db_path: str | Path = DEFAULT_DB_PATH,
+    db_path: str | Path | None = None,
     *,
     now: str | None = None,
     threshold: float | None = None,
 ) -> list[MatchResult]:
     from src.db.schemas import MatchResult
 
+    if db_path is None:
+        db_path = DEFAULT_DB_PATH
     init_incident_db(db_path)
     timestamp = now or _utc_now_iso()
 
@@ -253,6 +259,7 @@ def sync_flagged_incidents(
                     bulk_records,
                 )
                 conn.commit()
+                get_recent_incidents.cache_clear()
 
             rows = conn.execute(
                 """
@@ -290,10 +297,12 @@ def sync_flagged_incidents(
 
 
 def get_all_incidents(
-    db_path: str | Path = DEFAULT_DB_PATH,
-    limit: int = 50,
+    db_path: str | Path | None = None,
+    limit: int = 100,
     offset: int = 0,
-) -> list[MatchResult]:
+) -> list[dict[str, Any]]:
+    if db_path is None:
+        db_path = DEFAULT_DB_PATH
     """Return one page of visible plagiarism incidents.
 
     Incidents are ordered by newest ``date_flagged`` first, with
@@ -343,9 +352,11 @@ def get_total_incidents_count(
 
 
 def get_incident_by_id(
-    incident_id: int | str,
-    db_path: str | Path = DEFAULT_DB_PATH,
+    incident_id: str | int,
+    db_path: str | Path | None = None,
 ) -> dict[str, Any] | None:
+    if db_path is None:
+        db_path = DEFAULT_DB_PATH
     """Fetch a single plagiarism incident record by its incident_id primary key.
 
     Args:
@@ -405,6 +416,87 @@ def get_incidents_by_severity(
         return [dict(row) for row in rows]
 
 
+def get_incidents_by_date_range(
+    start_date: str,
+    end_date: str,
+    db_path: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    if db_path is None:
+        db_path = DEFAULT_DB_PATH
+    """Return incidents flagged between two explicit ISO dates (inclusive).
+
+    Args:
+        start_date: ISO-formatted start date/timestamp (inclusive).
+        end_date: ISO-formatted end date/timestamp (inclusive).
+        db_path: Path to the SQLite corpus database.
+
+    Returns:
+        A list of incident dicts ordered by ``date_flagged`` descending.
+    """
+    init_incident_db(db_path)
+    with closing(_get_connection(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT incident_id, document_a, document_b,
+                   similarity_score, severity_rank,
+                   review_status, date_flagged, last_seen,
+                   threshold_at_time_of_flag
+            FROM plagiarism_incidents
+            WHERE date_flagged >= ? AND date_flagged <= ?
+            ORDER BY date_flagged DESC
+            """,
+            (start_date, end_date),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def get_incidents_by_assignment(
+    assignment_title: str,
+    db_path: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    """Return list of plagiarism incidents matching specified assignment title.
+
+    Args:
+        assignment_title: The target assignment title.
+        db_path: Path to the SQLite corpus database.
+
+    Returns:
+        A list of incident dicts.
+    """
+    if db_path is None:
+        db_path = DEFAULT_DB_PATH
+    init_incident_db(db_path)
+    with closing(_get_connection(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        if table_exists(conn, "incidents"):
+            rows = conn.execute(
+                """
+                SELECT * FROM incidents
+                WHERE assignment_title = ?
+                ORDER BY timestamp DESC
+                """,
+                (assignment_title,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+        rows = conn.execute(
+            """
+            SELECT DISTINCT i.incident_id, i.document_a, i.document_b,
+                            i.similarity_score, i.severity_rank,
+                            i.review_status, i.date_flagged, i.last_seen,
+                            i.threshold_at_time_of_flag
+            FROM plagiarism_incidents i
+            LEFT JOIN documents da ON i.document_a = da.filename
+            LEFT JOIN documents db ON i.document_b = db.filename
+            WHERE da.assignment_title = ? OR db.assignment_title = ?
+            ORDER BY i.date_flagged DESC, i.incident_id ASC
+            """,
+            (assignment_title, assignment_title),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
 def get_all_incidents_above_threshold_for_export(
     threshold: float,
     db_path: str | Path = DEFAULT_DB_PATH,
@@ -440,11 +532,14 @@ def get_all_incidents_above_threshold_for_export(
         ]
 
 
+@with_sqlite_retry
 def update_review_status(
     incident_id: str,
     review_status: str,
-    db_path: str | Path = DEFAULT_DB_PATH,
+    db_path: str | Path | None = None,
 ) -> bool:
+    if db_path is None:
+        db_path = DEFAULT_DB_PATH
     status = str(review_status).strip().title()
 
     if status not in VALID_REVIEW_STATUSES:
@@ -537,8 +632,10 @@ def get_high_severity_trends(
 
 
 def get_incidents_count_by_date(
-    db_path: str | Path = DEFAULT_DB_PATH,
+    db_path: str | Path | None = None,
 ) -> list[dict[str, Any]]:
+    if db_path is None:
+        db_path = DEFAULT_DB_PATH
     """Get the daily count of all plagiarism incidents.
 
     Incidents are grouped by calendar date and returned in ascending date order.
@@ -609,9 +706,12 @@ def get_most_plagiarized_documents(
         return [dict(row) for row in rows]
 
 
+@with_sqlite_retry
 def add_false_positive(
-    doc_a: str, doc_b: str, db_path: str | Path = DEFAULT_DB_PATH
+    doc_a: str, doc_b: str, db_path: str | Path | None = None
 ) -> None:
+    if db_path is None:
+        db_path = DEFAULT_DB_PATH
     """Inserts a dismissed pair into the false_positives table."""
     init_incident_db(db_path)
     norm_a, norm_b = _normalise_pair(doc_a, doc_b)
@@ -778,11 +878,14 @@ def query_incidents_paginated(
         )
 
 
+@with_sqlite_retry
 def purge_old_incidents(
     days_old: int = 90,
     status: str = "Resolved",
-    db_path: str | Path = DEFAULT_DB_PATH,
+    db_path: str | Path | None = None,
 ) -> int:
+    if db_path is None:
+        db_path = DEFAULT_DB_PATH
     """
     Purge old plagiarism incidents that match a specific review status.
 
@@ -810,3 +913,97 @@ def purge_old_incidents(
         )
         conn.commit()
         return cursor.rowcount
+
+
+def archive_old_incidents(
+    cutoff_date: str,
+    db_path: str | Path = DEFAULT_DB_PATH,
+) -> int:
+    """Move incidents flagged before cutoff_date into incidents_archive.
+
+    Copies matching rows from ``plagiarism_incidents`` into
+    ``incidents_archive`` and removes them from ``plagiarism_incidents``,
+    both inside a single transaction so the operation is atomic
+    (issue #1492).
+
+    Args:
+        cutoff_date: ISO-8601 date/datetime string. Incidents with a
+            ``date_flagged`` earlier than this value are archived.
+        db_path: Path to the SQLite corpus database.
+
+    Returns:
+        int: The number of incident records archived.
+    """
+    init_incident_db(db_path)
+    with closing(_get_connection(db_path)) as conn:
+        try:
+            conn.execute(
+                """
+                INSERT INTO incidents_archive (
+                    incident_id, document_a, document_b,
+                    similarity_score, severity_rank,
+                    review_status, date_flagged, last_seen,
+                    threshold_at_time_of_flag
+                )
+                SELECT incident_id, document_a, document_b,
+                       similarity_score, severity_rank,
+                       review_status, date_flagged, last_seen,
+                       threshold_at_time_of_flag
+                FROM plagiarism_incidents
+                WHERE date_flagged < ?
+                """,
+                (cutoff_date,),
+            )
+            cursor = conn.execute(
+                "DELETE FROM plagiarism_incidents WHERE date_flagged < ?",
+                (cutoff_date,),
+            )
+            conn.commit()
+            return cursor.rowcount
+        except sqlite3.Error as exc:
+            conn.rollback()
+            raise sqlite3.Error(f"Failed to archive incidents: {exc}") from exc
+
+
+@lru_cache(maxsize=128)
+def get_recent_incidents(
+    limit: int = 5,
+    db_path: str | Path | None = None,
+) -> list[MatchResult]:
+    """Fetch recent visible plagiarism incidents, cached for performance."""
+    if db_path is None:
+        db_path = DEFAULT_DB_PATH
+    return get_all_incidents(db_path=db_path, limit=limit, offset=0)
+
+
+@with_sqlite_retry
+def log_incident(
+    flag: Mapping[str, Any],
+    db_path: str | Path | None = None,
+    *,
+    now: str | None = None,
+    threshold: float | None = None,
+) -> MatchResult:
+    """Log a single plagiarism incident and clear get_recent_incidents cache.
+
+    Args:
+        flag: Dict with 'doc_a', 'doc_b', 'similarity', and optionally 'severity'.
+        db_path: Path to the SQLite corpus database.
+
+    Returns:
+        The created MatchResult.
+    """
+    if db_path is None:
+        db_path = DEFAULT_DB_PATH
+    results = sync_flagged_incidents([flag], db_path, now=now, threshold=threshold)
+    if not results:
+        raise ValueError("Failed to log incident: Invalid input.")
+    get_recent_incidents.cache_clear()
+    doc_a = str(flag.get("doc_a", "")).strip()
+    doc_b = str(flag.get("doc_b", "")).strip()
+    first, second = _normalise_pair(doc_a, doc_b)
+    target_id = build_incident_id(first, second)
+    for res in results:
+        if res.incident_id == target_id:
+            return res
+    return results[0]

@@ -20,7 +20,7 @@ inner product == cosine similarity.
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 # FAISS has no official type stubs; suppress Pylance false positives
 import faiss  # type: ignore
@@ -492,3 +492,74 @@ def load_or_rebuild_index(filepath: str) -> Tuple[faiss.Index, List[ChunkRecord]
     index = build_index_from_matrix(matrix)
     save_index(index, filepath)
     return index, registry, True
+
+
+# ── FAISS Index Optimization Helper (Issue #1354) ───────────────────────────
+
+
+def optimize_faiss_index(index_manager: Any, nlist: int = 100) -> bool:
+    """Optimize FAISS index structures by converting flat index to trained IVF quantizer.
+
+    When total vectors exceed 5,000, converts IndexFlatIP to IndexIVFFlat for scale.
+    Logs vector count before and after index optimization.
+
+    Args:
+        index_manager: FAISS index manager instance, dict containing 'index', or raw FAISS Index.
+        nlist: Number of Voronoi cells for IVF quantization (default: 100).
+
+    Returns:
+        bool: True if optimization was performed or index is valid; False otherwise.
+    """
+    index = None
+    manager_type = "direct"
+
+    if hasattr(index_manager, "index"):
+        index = getattr(index_manager, "index")
+        manager_type = "attr"
+    elif isinstance(index_manager, dict) and "index" in index_manager:
+        index = index_manager["index"]
+        manager_type = "dict"
+    elif hasattr(index_manager, "ntotal"):
+        index = index_manager
+        manager_type = "direct"
+
+    if index is None:
+        logger.warning("[faiss_index] Unable to resolve index object for optimization.")
+        return False
+
+    count_before = getattr(index, "ntotal", 0)
+    logger.info(f"[faiss_index] Vector count before index optimization: {count_before}")
+
+    if count_before > _IVF_THRESHOLD:
+        dim = getattr(index, "d", 384)
+        base_index = index.index if isinstance(index, faiss.IndexIDMap) else index
+
+        vectors = np.zeros((count_before, dim), dtype="float32")
+        for i in range(count_before):
+            vectors[i] = base_index.reconstruct(i)
+
+        nlist_actual = max(4, min(nlist, count_before))
+        quantizer = faiss.IndexFlatIP(dim)
+        ivf_index = faiss.IndexIVFFlat(quantizer, dim, nlist_actual, faiss.METRIC_INNER_PRODUCT)
+        ivf_index.train(vectors)
+
+        if isinstance(index, faiss.IndexIDMap):
+            new_index = faiss.IndexIDMap(ivf_index)
+            ids = np.arange(count_before, dtype=np.int64)
+            new_index.add_with_ids(vectors, ids)
+        else:
+            ivf_index.add(vectors)
+            new_index = ivf_index
+
+        if manager_type == "attr":
+            setattr(index_manager, "index", new_index)
+        elif manager_type == "dict":
+            index_manager["index"] = new_index
+
+        count_after = new_index.ntotal
+        logger.info(f"[faiss_index] Vector count after index optimization: {count_after}")
+        return True
+    else:
+        logger.info(f"[faiss_index] Vector count after index optimization: {count_before}")
+        return True
+

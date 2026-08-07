@@ -1,6 +1,7 @@
 import io
 import os
 import sys
+import numpy as np
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -162,4 +163,3 @@ def test_app_smoke(mock_embed, mock_model_info, mock_webhook, mock_ai_detector):
 
     finally:
         _cleanup_stale_artifacts()
-        

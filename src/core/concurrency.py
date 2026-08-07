@@ -1,5 +1,7 @@
+import functools
 import logging
 import os
+import sqlite3
 import time
 from contextlib import contextmanager
 
@@ -13,20 +15,20 @@ class FAISSLock:
     """
     A robust, multi-process safe file-locking mechanism to protect the FAISS index
     from race conditions during concurrent document uploads or deletions.
-    
+
     In a Streamlit environment, multiple sessions may attempt to write to the SQLite
     database and rebuild the FAISS index simultaneously. If two threads call save_index
     simultaneously, the .index file will corrupt.
     """
-    
+
     def __init__(self, lock_file: str = "faiss_rebuild.lock", timeout: int = None):
         if timeout is None:
             from src.core.app_config import get_lock_timeout
             timeout = get_lock_timeout()
-            
+
         self.lock_file = lock_file
         self.timeout = timeout
-        
+
     def _is_stale(self) -> bool:
         """
         Checks if an existing lock file is stale (older than the timeout threshold).
@@ -65,13 +67,13 @@ class FAISSLock:
             except FileExistsError:
                 if self._is_stale():
                     self._clear_stale_lock()
-                    continue # Retry acquisition immediately
-                    
+                    continue  # Retry acquisition immediately
+
                 if time.time() - start_time >= self.timeout:
                     logger.error(f"Timeout ({self.timeout}s) waiting for FAISS lock.")
                     raise ConcurrencyTimeoutError("Failed to acquire FAISS lock.")
-                time.sleep(0.1) # Spin wait
-                
+                time.sleep(0.1)  # Spin wait
+
     def release(self):
         """Releases the atomic file lock."""
         try:
@@ -85,7 +87,7 @@ class FAISSLock:
 def faiss_write_lock(lock_path: str = "corpus.index.lock", timeout: int = None):
     """
     Context manager for safely locking FAISS I/O operations.
-    
+
     Usage:
         with faiss_write_lock():
             build_index()
@@ -97,3 +99,25 @@ def faiss_write_lock(lock_path: str = "corpus.index.lock", timeout: int = None):
         yield
     finally:
         lock.release()
+
+def with_sqlite_retry(max_retries=5, initial_delay=0.1, backoff_factor=2.0):
+    """
+    Decorator to retry SQLite operations when the database is locked or busy.
+    """
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            delay = initial_delay
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except sqlite3.OperationalError as e:
+                    if ("database is locked" in str(e) or "database is busy" in str(e)) and attempt < max_retries - 1:
+                        logger.warning(f"SQLite database is locked/busy. Retrying in {delay}s (Attempt {attempt + 1}/{max_retries})...")
+                        time.sleep(delay)
+                        delay *= backoff_factor
+                    else:
+                        raise
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator

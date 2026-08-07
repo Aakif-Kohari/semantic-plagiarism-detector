@@ -20,7 +20,7 @@ def homepage(request):
 @pytest.mark.unit
 def test_security_headers_middleware():
     app = Starlette(
-        routes=[Route("/", homepage)],
+        routes=[Route("/", homepage, methods=["GET", "POST"])],
         middleware=[Middleware(SecurityHeadersMiddleware)],
     )
     client = TestClient(app)
@@ -32,12 +32,30 @@ def test_security_headers_middleware():
         response.headers["Content-Security-Policy"]
         == "frame-ancestors 'none'; default-src 'self';"
     )
+    assert "Strict-Transport-Security" not in response.headers
+
+
+@pytest.mark.unit
+def test_security_headers_middleware_hsts_enabled(monkeypatch):
+    monkeypatch.setenv("ENABLE_HSTS", "true")
+    app = Starlette(
+        routes=[Route("/", homepage, methods=["GET", "POST"])],
+        middleware=[Middleware(SecurityHeadersMiddleware)],
+    )
+    client = TestClient(app)
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert (
+        response.headers.get("Strict-Transport-Security")
+        == "max-age=31536000; includeSubDomains"
+    )
 
 
 @pytest.mark.unit
 def test_content_length_limit_middleware_under_limit():
     app = Starlette(
-        routes=[Route("/", homepage)],
+        routes=[Route("/", homepage, methods=["GET", "POST"])],
         middleware=[Middleware(ContentLengthLimitMiddleware)],
     )
     client = TestClient(app)
@@ -50,11 +68,11 @@ def test_content_length_limit_middleware_under_limit():
 @pytest.mark.unit
 def test_content_length_limit_middleware_over_limit():
     app = Starlette(
-        routes=[Route("/", homepage)],
+        routes=[Route("/", homepage, methods=["GET", "POST"])],
         middleware=[Middleware(ContentLengthLimitMiddleware)],
     )
     client = TestClient(app)
-    
+
     # Exceed limit using custom env var or default
     os.environ["MAX_REQUEST_BYTES"] = "10"
     try:
@@ -72,7 +90,7 @@ def test_content_length_limit_middleware_over_limit():
 @pytest.mark.unit
 def test_content_length_limit_middleware_invalid_env_fallback():
     app = Starlette(
-        routes=[Route("/", homepage)],
+        routes=[Route("/", homepage, methods=["GET", "POST"])],
         middleware=[Middleware(ContentLengthLimitMiddleware)],
     )
     client = TestClient(app)
@@ -83,4 +101,3 @@ def test_content_length_limit_middleware_invalid_env_fallback():
         assert response.status_code == 200
     finally:
         del os.environ["MAX_REQUEST_BYTES"]
-

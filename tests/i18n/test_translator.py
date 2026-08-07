@@ -304,6 +304,3 @@ def test_get_common_translation_pairs():
     assert len(pairs) >= 5
     assert ("es", "en") in pairs
     assert ("fr", "en") in pairs
-
-
-

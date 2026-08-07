@@ -58,3 +58,54 @@ def test_factory_exception_is_not_hidden():
         assert str(exc) == "render failed"
     else:
         raise AssertionError("Expected RuntimeError")
+
+# ---------------------------------------------------------------------------
+# Issue #1060 — Axis titles for plot_similarity_distribution
+# ---------------------------------------------------------------------------
+
+from src.visualization.analytics import plot_similarity_distribution
+
+
+def test_plot_similarity_distribution_axis_titles():
+    """Verify that the X and Y axis titles match the issue #1060 spec."""
+    sim_matrix = pd.DataFrame(
+        [
+            [1.0, 0.85, 0.40],
+            [0.85, 1.0, 0.60],
+            [0.40, 0.60, 1.0],
+        ],
+        columns=["Doc A", "Doc B", "Doc C"],
+        index=["Doc A", "Doc B", "Doc C"],
+    )
+
+    fig = plot_similarity_distribution(sim_matrix)
+
+    assert fig.layout.xaxis.title.text == "Similarity Score Range (%)"
+    assert fig.layout.yaxis.title.text == "Number of Document Pairs"
+
+
+def test_plot_similarity_distribution_empty_axis_titles():
+    """Verify that the empty-state chart also has the correct axis titles."""
+    empty_df = pd.DataFrame()
+    fig = plot_similarity_distribution(empty_df)
+
+    assert fig.layout.xaxis.title.text == "Similarity Score Range (%)"
+    assert fig.layout.yaxis.title.text == "Number of Document Pairs"
+
+
+def test_plot_similarity_distribution_custom_title():
+    """Verify that a custom title is still applied alongside the axis titles."""
+    sim_matrix = pd.DataFrame(
+        [
+            [1.0, 0.50],
+            [0.50, 1.0],
+        ],
+        columns=["Doc A", "Doc B"],
+        index=["Doc A", "Doc B"],
+    )
+
+    fig = plot_similarity_distribution(sim_matrix, title="My Custom Title")
+
+    assert fig.layout.title.text == "My Custom Title"
+    assert fig.layout.xaxis.title.text == "Similarity Score Range (%)"
+    assert fig.layout.yaxis.title.text == "Number of Document Pairs"

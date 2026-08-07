@@ -7,10 +7,13 @@ formatting, and displaying vector search results.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+import os
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 import pandas as pd
+import streamlit as st
+
 
 RESULT_COLUMNS: list[str] = [
     "Rank",
@@ -94,3 +97,114 @@ def faiss_results_dataframe(
     dataframe.insert(0, "Rank", range(1, len(dataframe) + 1))
 
     return dataframe[RESULT_COLUMNS]
+
+
+@st.dialog("🔍 Chunk Diff Inspector", width="large")
+def inspect_diff_dialog(
+    query_text: str,
+    matched_text: str,
+    doc_name: str,
+    score: float,
+    pdf_bytes: bytes | None = None,
+):
+    """Render a side-by-side highlighted diff of query vs matched chunk inside a modal."""
+    st.markdown(f"### Match Similarity: **{score:.1%}**")
+
+    from src.utils.diff_highlighter import highlight_overlap
+    highlighted_query, highlighted_match = highlight_overlap(query_text, matched_text)
+
+    col_q, col_m = st.columns(2)
+    with col_q:
+        st.markdown("### 📝 Query Text")
+        st.markdown(
+            f"<div style='border: 1px solid #cccccc; padding: 12px; border-radius: 6px; min-height: 150px; white-space: pre-wrap;'>{highlighted_query}</div>",
+            unsafe_allow_html=True
+        )
+    with col_m:
+        st.markdown(f"### 📄 Matched Chunk ({doc_name})")
+        st.markdown(
+            f"<div style='border: 1px solid #cccccc; padding: 12px; border-radius: 6px; min-height: 150px; white-space: pre-wrap;'>{highlighted_match}</div>",
+            unsafe_allow_html=True
+        )
+
+    if pdf_bytes:
+        st.divider()
+
+        try:
+            from src.utils.pdf_highlighter import highlight_pdf_matches
+        except Exception:
+            highlight_pdf_matches = None
+
+        if highlight_pdf_matches is None:
+            st.caption("⚠️ PDF highlighting is unavailable (PyMuPDF is not installed).")
+        else:
+            try:
+                annotated_pdf = highlight_pdf_matches(pdf_bytes, [matched_text])
+            except Exception as exc:
+                annotated_pdf = None
+                st.warning(f"Could not generate the highlighted PDF: {exc}")
+
+            if annotated_pdf:
+                base_name = os.path.splitext(doc_name)[0]
+                st.download_button(
+                    "⬇️ Download Highlighted PDF",
+                    data=annotated_pdf,
+                    file_name=f"highlighted_{base_name}.pdf",
+                    mime="application/pdf",
+                    key=f"download_highlighted_pdf_{doc_name}",
+                )
+
+
+def render_faiss_results_ui(
+    results: Iterable[tuple[Any, float]],
+    query_text: str,
+    document_pdf_bytes: Mapping[str, bytes] | None = None,
+) -> None:
+    """
+    Render FAISS search results with a clean interface and an interactive 
+    'Inspect Diff' modal dialog for side-by-side comparison.
+
+    Args:
+        results: An iterable of (record, score) tuples returned by the FAISS search.
+        query_text: The text the user searched with.
+        document_pdf_bytes: Optional mapping of doc_name -> original PDF bytes.
+            When the matched document is available here, the diff inspector
+            offers a "Download Highlighted PDF" button that annotates the
+            matched passage directly on the source PDF.
+    """
+
+
+
+    if not results:
+        st.info("No significant matches found above threshold.")
+        return
+
+    for i, (record, raw_score) in enumerate(results):
+        score = float(raw_score)
+        doc_name = str(_record_value(record, "doc_name", "Unknown document"))
+        chunk_index = int(_record_value(record, "chunk_index", 0))
+        chunk_text = str(_record_value(record, "chunk_text", ""))
+
+        st.markdown(
+            f"<div style='border: 1px solid #e2e8f0; padding: 12px; border-radius: 8px; margin-bottom: 12px;'>"
+            f"<strong>📄 {doc_name}</strong> (Chunk #{chunk_index + 1}) · "
+            f"<span style='color: #3b82f6; font-weight: bold;'>Similarity: {score:.1%}</span>"
+            f"</div>",
+            unsafe_allow_html=True
+        )
+
+        st.caption(chunk_text[:300] + ("..." if len(chunk_text) > 300 else ""))
+
+        if st.button("🔍 Inspect Diff", key=f"diff_btn_{i}_{doc_name}_{chunk_index}"):
+            source_pdf_bytes = (
+                document_pdf_bytes.get(doc_name) if document_pdf_bytes else None
+            )
+            if source_pdf_bytes:
+                inspect_diff_dialog(
+                    query_text, chunk_text, doc_name, score, pdf_bytes=source_pdf_bytes
+                )
+            else:
+                inspect_diff_dialog(query_text, chunk_text, doc_name, score)
+
+        st.markdown("<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
+

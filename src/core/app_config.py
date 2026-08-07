@@ -142,4 +142,3 @@ def get_allowed_webhook_domains() -> list[str]:
     if not raw:
         return []
     return [domain.strip().lower() for domain in raw.split(",") if domain.strip()]
-

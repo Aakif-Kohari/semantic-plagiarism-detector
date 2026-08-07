@@ -104,6 +104,13 @@ jobs:
           chmod +x scripts/run_tests.py
           python scripts/run_tests.py --parallel --coverage
 
+      - name: Enforce Coverage Threshold (≥85%)
+        # Resolves #1616 – fail the build if total coverage drops below 85 %.
+        # The previous step already ran pytest with --cov, which writes .coverage.
+        # This step reads that data and exits non-zero when the threshold is not met.
+        run: |
+          coverage report --fail-under=85
+
       - name: Upload Coverage to Action Artifacts
         uses: actions/upload-artifact@v4
         with:

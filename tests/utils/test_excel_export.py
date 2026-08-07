@@ -1,6 +1,5 @@
 import inspect
 import io
-from typing import Generator
 import pandas as pd
 from src.utils.excel_export import generate_csv_matrix_stream
 
@@ -34,4 +33,3 @@ def test_generate_csv_matrix_stream():
     full_csv = "".join(chunks)
     reconstructed_df = pd.read_csv(io.StringIO(full_csv), index_col=0)
     pd.testing.assert_frame_equal(df, reconstructed_df)
-    

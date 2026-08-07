@@ -10,6 +10,7 @@ import unicodedata
 from collections.abc import Collection, Mapping
 from pathlib import PurePath
 from typing import TypeVar
+from typing import IO, TypeVar
 
 DEFAULT_FILENAME = "document"
 MAX_FILENAME_LENGTH = 150
@@ -62,6 +63,23 @@ def _safe_extension(filename: str) -> str:
 def get_file_sha256_hash(file_bytes: bytes) -> str:
     """Return the SHA-256 hex digest for file bytes."""
     return hashlib.sha256(file_bytes).hexdigest()
+
+
+def compute_file_hash_stream(
+    file_stream: IO[bytes],
+    chunk_size: int = 65536,
+) -> str:
+    """Return the SHA-256 hex digest for a file-like object.
+
+    The stream is read incrementally in fixed-size chunks to avoid loading
+    the entire file into memory.
+    """
+    hasher = hashlib.sha256()
+
+    while chunk := file_stream.read(chunk_size):
+        hasher.update(chunk)
+
+    return hasher.hexdigest()
 
 
 def sanitize_filename(
@@ -345,3 +363,4 @@ def sanitize_and_validate_filename(
         fallback=fallback,
         max_length=max_length,
     )
+

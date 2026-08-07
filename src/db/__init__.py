@@ -5,14 +5,17 @@ from .auth import (
     enable_2fa,
     get_2fa_status,
     get_all_users,
+    get_recent_audit_events,
     get_user_active_status,
     get_user_role,
     init_db,
     is_user_active,
     set_user_active_status,
     update_password,
+    update_user_profile,
     verify_user,
 )
+from .common import get_read_connection
 from .corpus_db import (
     add_chunks,
     add_document,
@@ -21,15 +24,17 @@ from .corpus_db import (
     get_all_documents,
     get_all_embeddings,
     get_chunk_registry,
+    get_deleted_documents_count,
     get_document_by_hash,
     get_document_chunks_count,
     get_documents_by_class,
-    get_total_document_count,
     get_unique_class_sections,
     init_corpus_db,
 )
+from .incidents import get_incidents_by_assignment, get_recent_incidents, log_incident
 
 __all__ = [
+    "get_read_connection",
     "init_db",
     "verify_user",
     "get_user_role",
@@ -37,6 +42,7 @@ __all__ = [
     "add_user",
     "delete_user",
     "update_password",
+    "update_user_profile",
     "get_2fa_status",
     "enable_2fa",
     "disable_2fa",
@@ -56,6 +62,11 @@ __all__ = [
     "get_unique_class_sections",
     "get_documents_by_class",
     "get_total_document_count",
+    "get_deleted_documents_count",
+    "get_recent_incidents",
+    "get_recent_audit_events",
+    "log_incident",
+    "get_incidents_by_assignment",
 ]
 
 

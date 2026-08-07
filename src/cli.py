@@ -9,6 +9,7 @@ import json
 import os
 import sys
 from io import BytesIO
+from pathlib import Path
 
 from src.core.logging_config import setup_logging
 from src.core.app_config import FAISS_INDEX_PATH
@@ -19,6 +20,7 @@ from src.core.embedding_model import embed_documents
 from src.core.similarity import document_similarity_matrix, flag_plagiarism
 from src.core.synchronization import verify_and_repair_index
 from src.core.text_chunking import chunk_documents
+from src.db.database_backup import optimize_database
 
 
 def run_scan(folder_path: str, threshold: float, output_format: str = "text") -> int:
@@ -301,6 +303,16 @@ def run_db_status(
 
     return 0
 
+def run_database_optimization(db_path: str) -> int:
+    """Run SQLite maintenance for one database and return a CLI exit code."""
+    if optimize_database(db_path):
+        print(f"Database optimized successfully: {Path(db_path).expanduser()}")
+        return 0
+
+    sys.stderr.write(f"Error: Database optimization failed for '{db_path}'.\n")
+    return 1
+
+
 def main() -> None:
     setup_logging()
 
@@ -313,7 +325,24 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Headless CLI Version for Plagiarism Detection Automation"
     )
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    parser.add_argument(
+        "--optimize",
+        metavar="DB_PATH",
+        help=(
+            "Run PRAGMA optimize, VACUUM, and ANALYZE on the specified "
+            "SQLite database, then exit."
+        ),
+    )
+    parser.add_argument(
+        "--verify-schema",
+        metavar="DB_PATH",
+        help=(
+            "Verify that the active database schema matches expected table "
+            "definitions and exit. Returns 0 on success, 1 on failure."
+        ),
+    )
+
+    subparsers = parser.add_subparsers(dest="command")
 
     scan_parser = subparsers.add_parser("scan", help="Scan a folder of assignments")
     scan_parser.add_argument("folder", help="Path to folder containing documents")
@@ -368,6 +397,49 @@ def main() -> None:
 
     args = parser.parse_args(argv)
 
+    if args.verify_schema is not None:
+        if args.command is not None:
+            parser.error("--verify-schema cannot be combined with a subcommand")
+            
+        from pathlib import Path
+        from src.db.migrations.common import verify_schema_integrity
+        
+        # Define expected tables for the corpus database
+        # These should match the tables created in src/db/corpus_db.py
+        expected_corpus_tables = [
+            "documents",
+            "chunks",
+            "deleted_chunks",
+            "plagiarism_incidents",
+            "false_positives",
+        ]
+        
+        try:
+            is_valid = verify_schema_integrity(
+                Path(args.verify_schema), 
+                expected_corpus_tables
+            )
+            if is_valid:
+                print("✅ Schema verification PASSED.")
+                sys.exit(0)
+            else:
+                print("❌ Schema verification FAILED. Check logs for details.")
+                sys.exit(1)
+        except (FileNotFoundError, IsADirectoryError) as exc:
+            sys.stderr.write(f"Error: {exc}\n")
+            sys.exit(1)
+        except Exception as exc:
+            sys.stderr.write(f"Error during schema verification: {exc}\n")
+            sys.exit(1)
+
+    if args.optimize is not None:
+        if args.command is not None:
+            parser.error("--optimize cannot be combined with a subcommand")
+        sys.exit(run_database_optimization(args.optimize))
+
+    if args.command is None:
+        parser.error("a subcommand or --optimize is required")
+
     if args.command == "scan":
         if args.threshold < 0.0 or args.threshold > 1.0:
             sys.stderr.write("Error: Threshold must be a float between 0.0 and 1.0.\n")
@@ -390,7 +462,7 @@ def main() -> None:
         except Exception as e:
             sys.stderr.write(f"Error during synchronization: {e}\n")
             return 1
-          
+
     elif args.command == "db-status":
         exit_code = run_db_status(
             args.database,
