@@ -786,4 +786,82 @@ def rerank_candidates_with_cross_encoder(
             "Falling back to bi-encoder vector scores."
         )
         return candidates
+
+
+# ─── Plagiarism Cluster Detection (Issue #1675) ──────────────────────────────
+
+def detect_plagiarism_clusters(
+    similarity_df: pd.DataFrame,
+    threshold: float = PLAGIARISM_THRESHOLD,
+) -> dict:
+    """Detect groups (clusters) of highly related documents using connected components.
+    
+    Instead of only showing document pairs, this function builds a similarity graph
+    where edges exist between documents exceeding the threshold, then identifies
+    connected components to find groups of students who may be colluding or
+    sharing source material.
+    
+    Args:
+        similarity_df: Square N×N DataFrame of similarity scores.
+        threshold: Minimum similarity score to create an edge in the graph.
+        
+    Returns:
+        Dictionary containing:
+        - 'clusters': Dict mapping cluster_id (int) to list of document names.
+        - 'cluster_map': Dict mapping document name to its cluster_id.
+        - 'suspicious_groups': List of clusters with 3+ documents (potential collusion rings).
+    """
+    import networkx as nx
+    
+    doc_names = list(similarity_df.columns)
+    G = nx.Graph()
+    
+    # Add all documents as nodes
+    G.add_nodes_from(doc_names)
+    
+    # Add edges for pairs exceeding threshold
+    n = len(doc_names)
+    for i in range(n):
+        for j in range(i + 1, n):
+            score = float(similarity_df.iloc[i, j])
+            if score >= threshold:
+                G.add_edge(doc_names[i], doc_names[j], weight=score)
+    
+    # Detect connected components (clusters)
+    clusters = {}
+    cluster_map = {}
+    
+    for cluster_id, component in enumerate(nx.connected_components(G)):
+        cluster_list = sorted(list(component))
+        clusters[cluster_id] = cluster_list
+        for doc in cluster_list:
+            cluster_map[doc] = cluster_id
+            
+    # Identify suspicious groups (3+ documents in a cluster)
+    suspicious_groups = [
+        {
+            "cluster_id": cid,
+            "documents": docs,
+            "size": len(docs),
+        }
+        for cid, docs in clusters.items()
+        if len(docs) >= 3
+    ]
+    
+    # Sort suspicious groups by size descending
+    suspicious_groups.sort(key=lambda x: x["size"], reverse=True)
+    
+    logger.info(
+        "Detected %d plagiarism clusters, %d suspicious groups (3+ docs).",
+        len(clusters),
+        len(suspicious_groups),
+    )
+    
+    return {
+        "clusters": clusters,
+        "cluster_map": cluster_map,
+        "suspicious_groups": suspicious_groups,
+        "total_clusters": len(clusters),
+    }
+
     
