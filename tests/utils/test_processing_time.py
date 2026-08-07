@@ -3,21 +3,26 @@ Unit tests for src.utils.processing_time helpers and ProcessingTimer.
 """
 
 import time
+
 import pytest
 
 from src.utils.processing_time import (
     BYTES_PER_MB,
     ProcessingTimer,
+ feat/duplicate-upload-detection-1676
+
+    calculate_average_latency,
+    calculate_mb_per_minute,
+ main
     calculate_page_throughput,
     calculate_processing_throughput,
-    estimate_processing_seconds,    format_duration,
+    estimate_processing_seconds,
+    format_duration,
     format_processing_duration,
     format_throughput_human_readable,
     processing_eta_text,
     uploaded_files_total_bytes,
-    calculate_average_latency,
 )
-
 
 # ============================================================================
 # Page Throughput Tests
@@ -41,6 +46,7 @@ def test_calculate_page_throughput(total_pages, elapsed_seconds, expected):
 # ============================================================================
 # ProcessingTimer Tests
 # ============================================================================
+
 
 def test_timer_initialization():
     timer = ProcessingTimer()
@@ -360,6 +366,7 @@ def test_calculate_average_latency_rounds_to_three_decimals():
 
 def test_calculate_average_latency_empty_list():
     assert calculate_average_latency([]) == 0.0
+
 
 def test_calculate_mb_per_minute():
     # Test normal calculation: 10 MB in 60 seconds (1 minute) = 10.0 MB/min
