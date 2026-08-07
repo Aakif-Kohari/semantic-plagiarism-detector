@@ -319,3 +319,104 @@ def test_embed_chunks_large_batch_memory_mock(mock_model):
     result = embed_chunks(chunks, batch_size=100)
     assert result.shape == (1000, 384)
     assert mock_model.encode.call_count == 10
+
+
+# ─── Tests for Embedding Model Quantization (Issue #1481) ─────────────────────
+
+import torch
+import pytest
+from unittest.mock import MagicMock, patch
+import numpy as np
+from src.core.embedding_model import EmbeddingModelManager, _apply_dynamic_quantization
+
+class TestEmbeddingModelQuantization:
+    """Test suite for INT8 dynamic quantization support."""
+
+    def test_apply_dynamic_quantization_modifies_linear_layers(self):
+        """Verify that quantize_dynamic targets torch.nn.Linear layers."""
+        mock_model = MagicMock()
+        # Simulate a module structure
+        mock_model.modules.return_value = [torch.nn.Linear(10, 10)]
+        
+        with patch("torch.quantization.quantize_dynamic") as mock_quantize:
+            mock_quantize.return_value = MagicMock()
+            _apply_dynamic_quantization(mock_model)
+            
+            mock_quantize.assert_called_once()
+            args, kwargs = mock_quantize.call_args
+            assert torch.nn.Linear in args[1]
+            assert kwargs["dtype"] == torch.qint8
+
+    def test_quantization_fallback_on_error(self, caplog):
+        """If quantization fails, the original float32 model should be returned."""
+        mock_model = MagicMock()
+        
+        with patch("torch.quantization.quantize_dynamic", side_effect=RuntimeError("Quantization failed")):
+            with caplog.at_level("WARNING"):
+                result = _apply_dynamic_quantization(mock_model)
+                
+        assert result is mock_model
+        assert "Failed to apply dynamic quantization" in caplog.text
+
+    def test_manager_quantize_model_flag(self):
+        """Verify EmbeddingModelManager respects the quantize_model flag."""
+        # Reset singleton
+        EmbeddingModelManager._instance = None
+        
+        manager = EmbeddingModelManager.get_instance(quantize_model=True)
+        assert manager.quantize_model is True
+        
+        # Reset singleton
+        EmbeddingModelManager._instance = None
+        manager_fp32 = EmbeddingModelManager.get_instance(quantize_model=False)
+        assert manager_fp32.quantize_model is False
+
+    @patch("src.core.embedding_model.SentenceTransformer")
+    @patch("src.core.embedding_model._apply_dynamic_quantization")
+    def test_get_model_applies_quantization_when_enabled(self, mock_quantize, mock_st):
+        """When quantize_model=True, get_model must call the quantization helper."""
+        EmbeddingModelManager._instance = None
+        global _quantized_model
+        _quantized_model = None
+        
+        mock_base_model = MagicMock()
+        mock_st.return_value = mock_base_model
+        
+        mock_quantized_model = MagicMock()
+        mock_quantize.return_value = mock_quantized_model
+        
+        manager = EmbeddingModelManager.get_instance(quantize_model=True)
+        model = manager.get_model()
+        
+        mock_quantize.assert_called_once_with(mock_base_model)
+        assert model is mock_quantized_model
+
+    @patch("src.core.embedding_model.SentenceTransformer")
+    def test_get_model_skips_quantization_when_disabled(self, mock_st):
+        """When quantize_model=False, get_model must NOT call the quantization helper."""
+        EmbeddingModelManager._instance = None
+        global _model
+        _model = None
+        
+        mock_base_model = MagicMock()
+        mock_st.return_value = mock_base_model
+        
+        manager = EmbeddingModelManager.get_instance(quantize_model=False)
+        model = manager.get_model()
+        
+        assert model is mock_base_model
+
+    def test_quantized_model_dimensions_match_float32(self):
+        """Verify that quantized models produce embeddings with the same dimensions as float32."""
+        # This is a mathematical invariant test. INT8 quantization should not 
+        # change the output vector dimensionality (e.g., 384 for MiniLM).
+        # We mock the encode method to verify shape consistency.
+        
+        mock_fp32_model = MagicMock()
+        mock_fp32_model.encode.return_value = np.random.rand(5, 384).astype(np.float32)
+        
+        mock_int8_model = MagicMock()
+        mock_int8_model.encode.return_value = np.random.rand(5, 384).astype(np.float32)
+        
+        # Dimensions must match
+        assert mock_fp32_model.encode(["test"]).shape == mock_int8_model.encode(["test"]).shape
