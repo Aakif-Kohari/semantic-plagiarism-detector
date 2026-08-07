@@ -35,12 +35,15 @@ NETWORK_GRAPH_CONFIG = {
     },
 }
 
+
 def _parse_document_tags(tags_val: object) -> list[str]:
     """Extracts a list of normalized tag strings from string, list, set or tuple input."""
     if not tags_val:
         return []
     if isinstance(tags_val, str):
-        raw_list = [t.strip() for t in tags_val.replace(" ", ",").split(",") if t.strip()]
+        raw_list = [
+            t.strip() for t in tags_val.replace(" ", ",").split(",") if t.strip()
+        ]
     elif isinstance(tags_val, (list, set, tuple)):
         raw_list = [str(t).strip() for t in tags_val if str(t).strip()]
     else:
@@ -223,31 +226,22 @@ def build_network_data(
         line_width = max(1.5, score * 6.0)
 
         # Check if edge is connected to highlighted document
-        is_highlighted_edge = (
-            selected_node is not None
-            and (doc_a == selected_node or doc_b == selected_node)
+        is_highlighted_edge = selected_node is not None and (
+            doc_a == selected_node or doc_b == selected_node
         )
 
         if is_highlighted_edge:
             line_width = max(line_width * 1.8, 5.0)
             color = "#FFD700"
         elif score >= 0.90:
-            color = (
-                theme_colors.get("danger", "#ff4b4b")
-                if theme_colors
-                else "#ff4b4b"
-            )
+            color = theme_colors.get("danger", "#ff4b4b") if theme_colors else "#ff4b4b"
         elif score >= 0.75:
             color = (
-                theme_colors.get("warning", "#ffa500")
-                if theme_colors
-                else "#ffa500"
+                theme_colors.get("warning", "#ffa500") if theme_colors else "#ffa500"
             )
         else:
             color = (
-                theme_colors.get("success", "#21c55d")
-                if theme_colors
-                else "#21c55d"
+                theme_colors.get("success", "#21c55d") if theme_colors else "#21c55d"
             )
 
         shapes.append(
@@ -290,13 +284,14 @@ def build_network_data(
     if len(G.nodes()) > 0:
         try:
             from networkx.algorithms import community as nx_community
+
             if hasattr(nx_community, "louvain_communities"):
                 communities = nx_community.louvain_communities(G, seed=42)
             else:
                 communities = nx_community.greedy_modularity_communities(G)
         except Exception:
             communities = [set(G.nodes())]
-            
+
         for i, comm in enumerate(communities):
             for node in comm:
                 community_map[node] = i
@@ -304,12 +299,13 @@ def build_network_data(
     # ── Plagiarism Cluster Detection (Issue #1675) ───────────────────────────────
     # Use connected components to identify collusion rings
     import networkx as nx
+
     connected_components = list(nx.connected_components(G))
     cluster_map = {}
     for cluster_id, component in enumerate(connected_components):
         for node in component:
             cluster_map[node] = cluster_id
-    
+
     # ── Draw Nodes ─────────────────────────────────────────────────────────────
 
     node_x = []
@@ -366,8 +362,10 @@ def build_network_data(
         cluster_id = cluster_map.get(node, -1)
         cluster_size = len([n for n, cid in cluster_map.items() if cid == cluster_id])
         suspicion_badge = "🚨 COLLUSION RISK" if cluster_size >= 3 else "✅ Normal"
-        
-        meta = doc_metadata.get(node, {}) if doc_metadata and node in doc_metadata else {}
+
+        meta = (
+            doc_metadata.get(node, {}) if doc_metadata and node in doc_metadata else {}
+        )
         word_count = meta.get("word_count", "N/A")
         upload_date = meta.get("upload_date", meta.get("created_at", "N/A"))
 
@@ -712,6 +710,8 @@ def export_network_to_csv_bytes(
     G = network_data["graph"]
     csv_str = export_graph_to_csv(G, similarity_df=similarity_df)
     return csv_str.encode("utf-8")
+
+
 def export_network_centrality_csv(graph: nx.Graph) -> str:
     """
     Calculate node degree centrality using NetworkX and export as a CSV string
@@ -733,3 +733,75 @@ def export_network_centrality_csv(graph: nx.Graph) -> str:
         writer.writerow([node, deg, score])
 
     return output.getvalue()
+
+
+import networkx as nx
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def get_cluster_count(graph: nx.Graph) -> int:
+    """Calculate the total number of isolated clusters (connected components) in a plagiarism network.
+
+    In the context of plagiarism detection, a connected component represents
+    a group of documents that are linked by similarity edges exceeding the
+    configured threshold. A high number of isolated clusters might indicate
+    multiple independent collusion rings or distinct source materials being
+    shared among different student groups.
+
+    This helper function provides a quick integer summary of the network's
+    fragmentation, which is useful for dashboard metrics and automated alerts.
+
+    Args:
+        graph: A NetworkX Graph object representing the document similarity network.
+               Nodes should represent documents and edges represent similarity links.
+
+    Returns:
+        The integer count of connected components in the graph.
+        Returns 0 if the graph is None, invalid, or contains no nodes.
+
+    Examples:
+        >>> import networkx as nx
+        >>> G = nx.Graph()
+        >>> G.add_edges_from([("doc_A", "doc_B"), ("doc_C", "doc_D")])
+        >>> get_cluster_count(G)
+        2
+
+        >>> empty_G = nx.Graph()
+        >>> get_cluster_count(empty_G)
+        0
+    """
+    # Validate input type to prevent runtime crashes from malformed pipeline data
+    if graph is None or not isinstance(graph, nx.Graph):
+        logger.warning(
+            "get_cluster_count: Invalid or None graph provided. Expected nx.Graph."
+        )
+        return 0
+
+    # An empty graph has 0 connected components
+    if len(graph.nodes()) == 0:
+        logger.debug("get_cluster_count: Graph contains no nodes.")
+        return 0
+
+    try:
+        # nx.number_connected_components is highly optimized in C and runs in O(V+E)
+        component_count = nx.number_connected_components(graph)
+
+        logger.debug(
+            "get_cluster_count: Found %d connected components in graph with %d nodes.",
+            component_count,
+            len(graph.nodes()),
+        )
+
+        return int(component_count)
+
+    except Exception as exc:
+        # Catch any unexpected NetworkX errors (e.g., memory issues on massive graphs)
+        # and return 0 rather than crashing the dashboard rendering pipeline.
+        logger.error(
+            "get_cluster_count: Failed to compute connected components: %s",
+            exc,
+            exc_info=True,
+        )
+        return 0
