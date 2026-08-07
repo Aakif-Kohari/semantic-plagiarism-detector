@@ -113,8 +113,7 @@ def _validate_ooxml_archive(
             f"Unsupported OOXML extension: {extension}"
         )
 
-    if not file_bytes.startswith(b"PK"):
-        logger.warning(
+if not file_bytes.startswith(b"PK\x03\x04"):        logger.warning(
             "[mime_validator] Invalid ZIP signature for OOXML file "
             "'%s'.",
             filename,
