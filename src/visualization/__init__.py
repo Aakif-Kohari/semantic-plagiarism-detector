@@ -1,4 +1,8 @@
-from .analytics import plot_high_severity_trends, plot_most_plagiarized_documents
+from .analytics import (
+    plot_high_severity_trends,
+    plot_hierarchical_dendrogram,
+    plot_most_plagiarized_documents,
+)
 from .heatmap import (
     filter_heatmap_by_class_tag,
     plot_chunk_similarity_comparison,
@@ -40,4 +44,5 @@ __all__ = [
     "plot_plagiarism_network_graph",
     "plot_high_severity_trends",
     "plot_most_plagiarized_documents",
+    "plot_hierarchical_dendrogram",
 ]
