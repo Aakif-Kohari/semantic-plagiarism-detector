@@ -1639,6 +1639,37 @@ if user_role == "admin":
         st.markdown("### 📁 Document Management & Bulk Export")
         existing_docs = get_all_documents()
         if existing_docs:
+            raw_assignment_titles = sorted(
+                list(
+                    {
+                        (
+                            doc.assignment_title
+                            if hasattr(doc, "assignment_title")
+                            else (doc.get("assignment_title") if isinstance(doc, dict) else None)
+                        )
+                        for doc in existing_docs
+                    }
+                    - {None, ""}
+                )
+            )
+            assignment_titles = ["All Assignments"] + raw_assignment_titles
+            selected_assignment = st.selectbox(
+                "Filter by Assignment",
+                options=assignment_titles,
+                key="corpus_assignment_filter_selectbox",
+            )
+            if selected_assignment != "All Assignments":
+                existing_docs = [
+                    doc
+                    for doc in existing_docs
+                    if (
+                        doc.assignment_title
+                        if hasattr(doc, "assignment_title")
+                        else (doc.get("assignment_title") if isinstance(doc, dict) else None)
+                    )
+                    == selected_assignment
+                ]
+
             st.write(f"**{len(existing_docs)}** documents in database")
 
             import pandas as pd
