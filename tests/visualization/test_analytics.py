@@ -9,6 +9,7 @@ import plotly.graph_objects as go
 import pytest
 
 from src.visualization.analytics import (
+    calculate_severity_ratios,
     plot_severity_donut_chart,
     plot_similarity_boxplot,
     plot_similarity_boxplot_by_group,
@@ -470,3 +471,42 @@ def test_plot_hierarchical_dendrogram_uses_wards_method():
         )
 
 
+def test_plot_charts_default_to_light_template_without_theme_colors():
+    """Without theme_colors the layout must keep the Plotly defaults."""
+    fig = plot_similarity_percentiles([0.4, 0.6, 0.8])
+
+    assert fig.layout.paper_bgcolor is None
+    assert fig.layout.font.color is None
+
+
+def test_calculate_severity_ratios_percentage_breakdown():
+    """Test the exact percentage breakdown across High, Medium, and Low."""
+    incidents = [
+        {"similarity_score": 0.9},   # High
+        {"similarity_score": 0.85},  # High
+        {"similarity_score": 0.6},   # Medium
+        {"similarity_score": 0.3},   # Low
+    ]
+    ratios = calculate_severity_ratios(incidents)
+
+    assert ratios == {"High": 50.0, "Medium": 25.0, "Low": 25.0}
+
+
+def test_calculate_severity_ratios_ignores_invalid_scores():
+    """Incidents with missing or non-numeric scores should be skipped."""
+    incidents = [
+        {"similarity_score": 0.9},
+        {"similarity_score": None},
+        {"assignment_title": "no score field"},
+        {"similarity_score": "not-a-number"},
+    ]
+    ratios = calculate_severity_ratios(incidents)
+
+    assert ratios == {"High": 100.0, "Medium": 0.0, "Low": 0.0}
+
+
+def test_calculate_severity_ratios_empty_incidents():
+    """An empty incident list should return all-zero percentages, not error."""
+    ratios = calculate_severity_ratios([])
+
+    assert ratios == {"High": 0.0, "Medium": 0.0, "Low": 0.0}

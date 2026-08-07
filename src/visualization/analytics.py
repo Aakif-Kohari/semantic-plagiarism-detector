@@ -112,10 +112,58 @@ def plot_similarity_boxplot_by_group(
     fig.update_xaxes(showgrid=show_grid)
     fig.update_yaxes(showgrid=show_grid, range=[0.0, 1.0])
 
-    _apply_theme_colors(fig, theme_colors)
+_apply_theme_colors(fig, theme_colors)
 
     return fig
-    
+
+
+def calculate_severity_ratios(incidents: list[dict[str, Any]]) -> dict[str, float]:
+    """Calculate the percentage breakdown of High, Medium, and Low severity incidents.
+
+    Severity is derived from each incident's similarity score:
+        High:   score >= 0.80 (80%)
+        Medium: 0.50 <= score < 0.80 (50-79%)
+        Low:    score < 0.50
+
+    Incidents without a usable numeric score are ignored. Percentages are
+    calculated against the count of incidents that had a usable score.
+
+    Args:
+        incidents: List of dicts, each expected to contain a
+            'similarity_score' key (falls back to 'similarity').
+
+    Returns:
+        Dict with 'High', 'Medium', and 'Low' keys mapping to their
+        percentage share (0.0-100.0), rounded to 2 decimal places.
+        Returns all zeros if no usable scores are found.
+    """
+    counts = {"High": 0, "Medium": 0, "Low": 0}
+    total = 0
+
+    for incident in incidents:
+        score = incident.get("similarity_score")
+        if score is None:
+            score = incident.get("similarity")
+        try:
+            score = float(score)
+        except (TypeError, ValueError):
+            continue
+
+        total += 1
+        if score >= 0.80:
+            counts["High"] += 1
+        elif score >= 0.50:
+            counts["Medium"] += 1
+        else:
+            counts["Low"] += 1
+
+    if total == 0:
+        return {"High": 0.0, "Medium": 0.0, "Low": 0.0}
+
+    return {
+        label: round((count / total) * 100, 2)
+        for label, count in counts.items()
+    }    
 def _annotation_color(theme_colors: dict[str, str] | None) -> str:
     """Pick a readable annotation color for the given theme.
 
