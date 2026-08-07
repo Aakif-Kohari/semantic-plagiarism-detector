@@ -479,6 +479,29 @@ def test_plot_charts_default_to_light_template_without_theme_colors():
     assert fig.layout.font.color is None
 
 
+def test_theme_override_forces_light_template():
+    """theme_override='light' should force the plotly_white template."""
+    fig = plot_similarity_percentiles([0.4, 0.6, 0.8], theme_override="light")
+
+    assert fig.layout.template.layout.paper_bgcolor == "white"
+
+
+def test_theme_override_forces_dark_template():
+    """theme_override='dark' should force the plotly_dark template."""
+    fig = plot_similarity_percentiles([0.4, 0.6, 0.8], theme_override="dark")
+
+    assert fig.layout.template.layout.paper_bgcolor == "rgb(17,17,17)"
+
+
+def test_theme_override_none_leaves_default_template():
+    """Without theme_override, the default Plotly template should apply."""
+    fig = plot_similarity_percentiles([0.4, 0.6, 0.8])
+
+    assert fig.layout.template.layout.paper_bgcolor not in (
+        "white",
+        "rgb(17,17,17)",
+    )
+
 def test_calculate_severity_ratios_percentage_breakdown():
     """Test the exact percentage breakdown across High, Medium, and Low."""
     incidents = [

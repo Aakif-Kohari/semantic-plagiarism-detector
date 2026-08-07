@@ -82,8 +82,7 @@ def plot_similarity_boxplot_by_group(
         )
         fig.update_xaxes(showgrid=show_grid)
         fig.update_yaxes(showgrid=show_grid)
-        _apply_theme_colors(fig, theme_colors)
-        return fig
+_apply_theme_colors(fig, theme_colors, theme_override)        return fig
 
     fig = go.Figure()
     for group_name, scores in scores_dict.items():
@@ -112,10 +111,35 @@ def plot_similarity_boxplot_by_group(
     fig.update_xaxes(showgrid=show_grid)
     fig.update_yaxes(showgrid=show_grid, range=[0.0, 1.0])
 
-_apply_theme_colors(fig, theme_colors)
-
+_apply_theme_colors(fig, theme_colors, theme_override)
     return fig
 
+def _apply_theme_colors(
+    fig: go.Figure,
+    theme_colors: dict[str, str] | None,
+    theme_override: str | None = None,
+) -> None:
+    """Apply light/dark theme colors to a Plotly figure layout.
+
+    Matches the ``theme_colors`` palette produced by ``app.theme.get_colors()``
+    so charts render on dark backgrounds in Dark mode. When ``theme_colors``
+    is ``None`` the default Plotly template is left untouched.
+
+    Args:
+        fig: Plotly figure to style.
+        theme_colors: Optional dict with ``background``, ``surface``, ``ink``,
+            ``muted`` and ``border`` color keys.
+        theme_override: Optional explicit override ("light" or "dark") that
+            forces the ``plotly_white``/``plotly_dark`` template, bypassing
+            automatic theme detection.
+    """
+    if theme_override == "light":
+        fig.update_layout(template="plotly_white")
+    elif theme_override == "dark":
+        fig.update_layout(template="plotly_dark")
+
+    if not theme_colors:
+        return
 
 def calculate_severity_ratios(incidents: list[dict[str, Any]]) -> dict[str, float]:
     """Calculate the percentage breakdown of High, Medium, and Low severity incidents.
@@ -234,8 +258,8 @@ def plot_high_severity_trends(
     trend_data: list[dict[str, Any]],
     show_grid: bool = True,
     theme_colors: dict[str, str] | None = None,
-) -> go.Figure:
-    """Create an interactive line chart showing High severity plagiarism incidents over time."""
+    theme_override: str | None = None,
+) -> go.Figure:    """Create an interactive line chart showing High severity plagiarism incidents over time."""
     if not trend_data:
         fig = go.Figure()
         fig.add_annotation(
@@ -291,6 +315,7 @@ def plot_most_plagiarized_documents(
     doc_data: list[dict[str, Any]],
     show_grid: bool = True,
     theme_colors: dict[str, str] | None = None,
+    theme_override: str | None = None, 
 ) -> go.Figure:
     """Create a bar chart showing the most frequently plagiarized documents."""
     if not doc_data:
