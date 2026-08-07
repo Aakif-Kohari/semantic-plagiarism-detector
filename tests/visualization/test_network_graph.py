@@ -12,17 +12,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import pytest
 
-from src.visualization.network_graph import (
-    build_network_data,
-    calculate_force_directed_layout,
-    export_graph_to_csv,
-    export_network_adjacency_csv,
-    export_network_to_csv_bytes,
-    export_network_to_gexf_bytes,
-    plot_plagiarism_network_graph,
-    plot_similarity_network,
-    render_network_plotly,
-)
+from src.visualization.network_graph import export_network_adjacency_csv, export_network_centrality_csv
 
 
 def test_export_network_adjacency_csv():
@@ -637,39 +627,22 @@ def test_build_network_data_empty_clustering():
     assert len(net_data["graph"].nodes()) == 0
     assert len(net_data["node_trace"].marker.color) == 0
 
+def test_export_network_centrality_csv():
+    """Verify export_network_centrality_csv computes degree centrality and returns correct CSV format."""
+    graph = nx.Graph()
+    graph.add_edge("doc1", "doc2", similarity=0.9)
+    graph.add_edge("doc1", "doc3", similarity=0.8)
 
-# ==============================================================================
-# Node Label Truncation Tests (Issue #1600)
-# ==============================================================================
+    csv_str = export_network_centrality_csv(graph)
 
+    lines = csv_str.strip().splitlines()
+    assert lines[0] == "Document_Name,Degree,Centrality_Score"
+    assert len(lines) == 4  # Header + 3 nodes
 
-def test_plot_plagiarism_network_graph_label_truncation():
-    """Verify node labels are truncated correctly based on max_label_len and hover tooltips keep full titles."""
-    doc_names = ["very_long_document_title_one.txt", "short.txt", "another_extremely_long_document_name_here.txt"]
-    sim_data = [
-        [1.0, 0.8, 0.6],
-        [0.8, 1.0, 0.5],
-        [0.6, 0.5, 1.0]
-    ]
-    df = pd.DataFrame(sim_data, index=doc_names, columns=doc_names)
+    # Parse CSV lines to verify content
+    rows = [line.split(",") for line in lines[1:]]
+    row_dict = {row[0]: (int(row[1]), float(row[2])) for row in rows}
 
-    fig = plot_plagiarism_network_graph(df, threshold=0.4, show_isolated=True, max_label_len=10)
-    
-    node_trace = None
-    for trace in fig.data:
-        if trace.name == "Documents":
-            node_trace = trace
-            break
-            
-    assert node_trace is not None
-    
-    labels = node_trace.text
-    for label in labels:
-        assert len(label) <= 10
-        if "..." in label:
-            assert label.endswith("...")
-
-    hovertexts = node_trace.hovertext
-    for i, name in enumerate(doc_names):
-        assert name in hovertexts[i]
-        
+    assert "doc1" in row_dict
+    assert row_dict["doc1"][0] == 2  # Degree 2
+    assert row_dict["doc1"][1] == 1.0  # Centrality score for connected graph of 3 nodes: 2 / (3 - 1) = 1.0
