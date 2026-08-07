@@ -440,6 +440,15 @@ def get_deleted_documents() -> list:
         ]
 
 
+def get_deleted_documents_count() -> int:
+    """Return the count of documents currently in the trash."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(1) FROM documents WHERE is_deleted = 1"
+        ).fetchone()
+        return row[0] if row else 0
+
+
 @with_sqlite_retry
 def restore_document(filename: str) -> None:
     """Restore a soft-deleted document by setting is_deleted=0 and moving chunks back."""
