@@ -1392,6 +1392,10 @@ if not selected_classes:
         except Exception as health_err:
             st.error(f"Failed to load system health data: {health_err}")
 
+        st.divider()
+        from app.theme import render_timezone_footer
+        render_timezone_footer()
+
 # ── Main UI ───────────────────────────────────────────────────────────────────
 st.title("🔍 Semantic Plagiarism Detection System")
 

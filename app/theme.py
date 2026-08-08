@@ -30,6 +30,7 @@ Recent Additions (Issue #572):
 
 import re
 import secrets
+from datetime import datetime, timezone
 import streamlit as st
 
 
@@ -1805,3 +1806,17 @@ def render_sidebar_navigation_menu(
         html_items.append(f'<li data-tab-id="{tab_id}">{badge}</li>')
 
     return f'<ul class="sidebar-nav-menu" style="list-style: none; padding: 0; margin: 0;">{"".join(html_items)}</ul>'
+
+
+def render_timezone_footer() -> str:
+    """Render current UTC server time and timezone label caption in the dashboard sidebar footer.
+
+    Returns:
+        Formatted server timezone caption string.
+    """
+    now_utc = datetime.now(timezone.utc)
+    time_str = now_utc.strftime("%H:%M")
+    caption_text = f"Server Time: {time_str} UTC"
+    st.sidebar.caption(f"🕒 {caption_text}")
+    return caption_text
+
