@@ -292,6 +292,7 @@ from src.db.auth import (
     get_security_audit_logs,
     get_tour_completed,
     get_upload_count,
+    get_user_last_login,
     get_user_preferences,
     get_user_role,
     init_db,
@@ -1071,6 +1072,18 @@ with action_col2:
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
+    # ── Account Info (Issue: logged-in user details expander) ──────────────
+    if st.session_state.get(SessionKeys.AUTHENTICATED, False):
+        _current_username = st.session_state.get(SessionKeys.USERNAME) or "Unknown"
+        with st.sidebar.expander(f"👤 Logged in as: {_current_username}"):
+            st.markdown(f"**Username:** {_current_username}")
+            st.markdown(f"**Role:** {user_role.capitalize() if user_role else 'N/A'}")
+            try:
+                _last_login = get_user_last_login(_current_username)
+            except Exception:
+                _last_login = None
+            st.markdown(f"**Last Login:** {_last_login if _last_login else 'N/A'}")
+
     try:
         from src.db.auth import get_upload_count
         total_scans_sidebar = get_upload_count()

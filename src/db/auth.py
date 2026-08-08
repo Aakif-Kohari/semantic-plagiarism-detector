@@ -413,6 +413,20 @@ def get_user_role(username: str) -> str | None:
         raise sqlite3.Error(f"Failed to retrieve user role: {e}") from e
 
 
+def get_user_last_login(username: str) -> str | None:
+    """Return the last_login_at timestamp for a user, or None if not found/never logged in."""
+    try:
+        username = _validate_username(username)
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT last_login_at FROM users WHERE username = ?",
+                (username,),
+            ).fetchone()
+            return row[0] if row else None
+    except sqlite3.Error as e:
+        raise sqlite3.Error(f"Failed to retrieve user last login: {e}") from e
+
+
 def get_user_roles(user_ids: list[int]) -> dict[int, str]:
     """Return a mapping of user_id -> role for the given user IDs."""
     if not user_ids:

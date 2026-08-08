@@ -7,6 +7,7 @@ from .auth import (
     get_all_users,
     get_recent_audit_events,
     get_user_active_status,
+    get_user_last_login,
     get_user_role,
     init_db,
     is_user_active,
