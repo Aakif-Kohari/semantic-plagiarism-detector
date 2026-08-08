@@ -437,36 +437,44 @@ def render_network_plotly(
     network_data: dict,
     title: str = "Document Plagiarism Network",
     theme_colors: Optional[dict] = None,
+    font_scale: float = 1.0,  # <-- Added parameter
 ) -> go.Figure:
     """
     Renders an interactive Plotly figure layout using preformatted graph data.
+
+    Args:
+        network_data: Dictionary containing shapes, edge_hover_trace, and node_trace.
+        title: Title of the graph.
+        theme_colors: Optional dictionary containing theme colors.
+        font_scale: Global multiplier for all font sizes to support accessibility
+                    scaling. Defaults to 1.0. Minimum enforced value is 0.5.
+
+    Returns:
+        Plotly Graph Objects Figure.
     """
+    # Enforce minimum font scale to prevent unreadable text
+    scale = max(0.5, float(font_scale))
+
+    # Base font sizes before scaling
+    base_title_size = 16
+    base_node_text_size = 10
+    base_hover_size = 12
+
     shapes = network_data.get("shapes", [])
     edge_hover_trace = network_data.get("edge_hover_trace")
     node_trace = network_data.get("node_trace")
 
-    bg_color = (
-        theme_colors.get(
-            "background",
-            "#FFFFFF",
-        )
-        if theme_colors
-        else "#FFFFFF"
-    )
+    bg_color = theme_colors.get("background", "#FFFFFF") if theme_colors else "#FFFFFF"
 
-    ink_color = (
-        theme_colors.get(
-            "ink",
-            "#0F172A",
-        )
-        if theme_colors
-        else "#0F172A"
-    )
+    ink_color = theme_colors.get("ink", "#0F172A") if theme_colors else "#0F172A"
 
     traces = []
     if edge_hover_trace is not None:
         traces.append(edge_hover_trace)
     if node_trace is not None:
+        # Apply font scaling to node text
+        if hasattr(node_trace, "textfont") and node_trace.textfont:
+            node_trace.textfont.size = int(base_node_text_size * scale)
         traces.append(node_trace)
 
     fig = go.Figure(
@@ -475,7 +483,7 @@ def render_network_plotly(
             title=dict(
                 text=title,
                 font=dict(
-                    size=16,
+                    size=int(base_title_size * scale),
                     family="Arial Black",
                 ),
             ),
@@ -487,7 +495,7 @@ def render_network_plotly(
                 b=40,
                 l=40,
                 r=40,
-                t=50,
+                t=int(50 * scale),
             ),
             shapes=shapes,
             xaxis=dict(
@@ -504,11 +512,36 @@ def render_network_plotly(
             plot_bgcolor=bg_color,
             font=dict(
                 color=ink_color,
+                size=int(base_hover_size * scale),
             ),
         ),
     )
 
     return fig
+
+
+# Update plot_similarity_network to pass font_scale through
+def plot_similarity_network(
+    similarity_df: pd.DataFrame,
+    threshold: float = 0.59,
+    min_degree: int = 0,
+    title: str = "Document Plagiarism Network",
+    node_scale: float = 1.0,
+    theme_colors: Optional[dict] = None,
+    selected_node: Optional[str] = None,
+    show_isolated: bool = False,
+    spring_k: float = 0.15,
+    iterations: int = 50,
+    repulsion: float = 1.0,
+    font_scale: float = 1.0,  # <-- Added parameter
+) -> go.Figure:
+    # ... [existing build_network_data call] ...
+    return render_network_plotly(
+        network_data=network_data,
+        title=title,
+        theme_colors=theme_colors,
+        font_scale=font_scale,  # <-- Pass through
+    )
 
 
 def calculate_force_directed_layout(

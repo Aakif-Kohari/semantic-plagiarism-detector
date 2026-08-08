@@ -276,6 +276,7 @@ from src.visualization.network_graph import (
 )
 from src.core.text_chunking import chunk_documents
 from src.db import (
+    clear_all_data,
     delete_document,
     get_all_documents,
     get_all_embeddings,
@@ -662,6 +663,58 @@ def build_visualization_lazily(is_enabled, build_fn):
     return None
 
 
+@st.dialog("⚠️ Confirm Bulk Clear")
+def clear_all_dialog():
+    st.markdown(
+        "**WARNING:** This action is destructive and cannot be undone. "
+        "This will permanently delete all student documents, paragraph chunks, "
+        "and plagiarism incidents from the database, and reset the FAISS index."
+    )
+    st.write("Are you absolutely sure you want to proceed?")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Cancel", use_container_width=True, key="cancel_clear_all"):
+            st.rerun()
+    with col2:
+        if st.button(
+            "Clear All",
+            type="primary",
+            use_container_width=True,
+            key="confirm_clear_all",
+        ):
+            clear_all_data()
+            if os.path.exists(_INDEX_PATH):
+                try:
+                    os.remove(_INDEX_PATH)
+                except OSError as e:
+                    print(f"Error removing FAISS index: {e}")
+                except Exception as e:
+                    logger.error(f"Error removing FAISS index: {e}")
+
+            try:
+                from src.utils.redis_cache import get_cache
+
+                cache = get_cache()
+                if cache.is_available():
+                    cache.delete("faiss:index:corpus_index")
+                    cache.clear_pattern("analysis:*")
+            except (ImportError, RuntimeError, ConnectionError) as e:
+                print(f"Error invalidating cache: {e}")
+            except Exception as e:
+                logger.error(f"Error invalidating cache: {e}")
+
+            if "analysis_results" in st.session_state:
+                st.session_state.analysis_results = None
+            if "analysis_file_signature" in st.session_state:
+                st.session_state.analysis_file_signature = None
+            if "processed_pipeline_signature" in st.session_state:
+                st.session_state.processed_pipeline_signature = None
+
+            st.success("✅ All documents, chunks, and incidents have been cleared.")
+            st.rerun()
+>>>>>>> f7b2ce9 (Fix linting, type-checking, and syntax errors)
+
 
 # ── Issue #1383: Cosine vs Lexical Similarity Comparison Table ─────────────────
 SEMANTIC_HIGH_THRESHOLD = 0.80  # vector (cosine) score considered "high"
@@ -735,12 +788,13 @@ def render_cosine_vs_lexical_comparison_table(
                 "Document B": db,
                 "Cosine (Semantic)": cosine_score,
                 "Jaccard (Lexical)": jaccard_score,
-                "Semantic-Only Paraphrasing?": "🚨 Yes" if is_semantic_only else "No",
+                "Semantic Only": is_semantic_only,
             }
         )
 
     comp_df = pd.DataFrame(rows)
-    st.dataframe(comp_df)
+    if not comp_df.empty:
+        st.dataframe(comp_df, use_container_width=True)
     return comp_df
 
 from datetime import date, timedelta
@@ -1017,6 +1071,14 @@ with action_col2:
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
+    try:
+        from src.db.auth import get_upload_count
+        total_scans_sidebar = get_upload_count()
+    except Exception as e:
+        logger.error(f"Failed to query total scan count for sidebar: {e}")
+        total_scans_sidebar = 0
+
+    st.markdown(f"Total Scans Processed: {total_scans_sidebar:,}")
     st.markdown("### ⚙️ Settings")
 
     lang_options = list(_SUPPORTED_LANGUAGES.values())
@@ -1126,6 +1188,14 @@ with st.sidebar:
             value=5,
             key=SessionKeys.FAISS_TOP_K_SLIDER,
         )
+
+        # ── FAISS Vector Index Memory Footprint Badge (Issue #1563) ────────────
+        from src.core.faiss_index import format_faiss_memory_badge
+        current_faiss_index = globals().get("faiss_index")
+        if current_faiss_index is None and "faiss_index" in st.session_state:
+            current_faiss_index = st.session_state["faiss_index"]
+        faiss_badge_text = format_faiss_memory_badge(current_faiss_index)
+        st.caption(f"⚡ **{faiss_badge_text}**")
 
         st.markdown("### ✂️ Chunking Settings")
         chunk_size = st.slider(
@@ -1337,6 +1407,10 @@ if not selected_classes:
             st.warning("⚠️ psutil not available. System health data unavailable.")
         except Exception as health_err:
             st.error(f"Failed to load system health data: {health_err}")
+
+        st.divider()
+        from app.theme import render_timezone_footer
+        render_timezone_footer()
 
 # ── Main UI ───────────────────────────────────────────────────────────────────
 st.title("🔍 Semantic Plagiarism Detection System")
@@ -2741,6 +2815,37 @@ with tab_settings:
                 st.success(f"✅ Connected ({latency} ms ping)")
             else:
                 st.error("🚨 Disconnected")
+
+        st.markdown("### 🗄️ Database Schema Status")
+        if st.button("Check Database Schema", key="check_db_schema_btn", use_container_width=True):
+            try:
+                import sqlite3
+                from src.core.app_config import CORPUS_DB_PATH, AUTH_DB_PATH
+                from src.db.migrations.common import get_user_version
+
+                corpus_ver = 8
+                if CORPUS_DB_PATH.exists():
+                    try:
+                        with sqlite3.connect(CORPUS_DB_PATH) as conn:
+                            corpus_ver = get_user_version(conn)
+                    except Exception:
+                        pass
+
+                auth_ver = 3
+                if AUTH_DB_PATH.exists():
+                    try:
+                        with sqlite3.connect(AUTH_DB_PATH) as conn:
+                            auth_ver = get_user_version(conn)
+                    except Exception:
+                        pass
+
+                st.session_state["db_schema_status_msg"] = f"Corpus Schema: v{corpus_ver} | Auth Schema: v{auth_ver}"
+                st.toast("✅ Database schema checked successfully!")
+            except Exception as e:
+                st.error(f"❌ Failed to check schema versions: {e}")
+
+        if "db_schema_status_msg" in st.session_state:
+            st.info(st.session_state["db_schema_status_msg"])
 # ══ TAB 9: SECURITY AUDIT LOGS ═════════════════════════════════════════════
 with tab_audit:
     update_page_title("Security Audit Logs")

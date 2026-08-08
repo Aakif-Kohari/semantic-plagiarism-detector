@@ -13,16 +13,6 @@ Provides:
 """
 # -*- coding: utf-8 -*-
 
-from app.css_constants import (
-    BADGE,
-    EMPTY_STATE,
-    EMPTY_ICON,
-    EMPTY_TITLE,
-    EMPTY_DESC,
-    SIDEBAR_USER_BADGE,
-    AVATAR,
-    SIM_PILL,
-)
 
 """
 theme.py
@@ -40,6 +30,7 @@ Recent Additions (Issue #572):
 
 import re
 import secrets
+from datetime import datetime, timezone
 import streamlit as st
 
 
@@ -1220,6 +1211,7 @@ def inject_css() -> None:
     st.markdown(back_to_top_html(), unsafe_allow_html=True)
 
 # ── Severity Helpers ───────────────────────────────────────────────────────────
+from typing import Any
 try:
     from src.core.config import (
         DEFAULT_THRESHOLDS,
@@ -1305,10 +1297,6 @@ def badge_html(tier: str, label: str = None) -> str:
 
     display_label = label if label is not None else default_label
 
-    return f'<span class="{BADGE}" style="background-color: {bg_color}; color: {text_color}; border: 1px solid {text_color};">{display_label}</span>'
-    return f'<span class="{CLASS_BADGE}" style="background-color: {bg_color}; color: {text_color}; border: 1px solid {text_color};">{display_label}</span>'
-    return f'<span class="{CLASS_BADGE}" style="color: {text_color}; background-color: {bg_color};">{display_label}</span>'
-
     tooltip_map = {
         "high": "Similarity >= 80%",
         "medium": "Similarity between 50% and 79%",
@@ -1346,36 +1334,13 @@ def format_similarity_html(
         bg = colors["success"]
         text = "#FFFFFF"
 
-    return (
-        f'<span class="{SIM_PILL}" style="background:{bg};">'
-        f'<span class="{CLASS_SIM_PILL}" style="background:{bg};">'
-        f"Similarity: {score * 100:.1f}%</span>"
-    )
     return f'<span class="{CLASS_SIM_PILL}" style="background-color: {bg}; color: {text};">Similarity: {score * 100:.1f}%</span>'
-
-
-def empty_state_html(icon: str, title: str, description: str) -> str:
-    """Return styled empty-state HTML block."""
-    return (
-        f'<div class="{EMPTY_STATE}">'
-        f'<div class="{EMPTY_ICON}">{icon}</div>'
-        f'<div class="{EMPTY_TITLE}">{title}</div>'
-        f'<div class="{EMPTY_DESC}">{description}</div>'
-        f'<div class="{CLASS_EMPTY_STATE}">'
-        f'<div class="{CLASS_EMPTY_ICON}">{icon}</div>'
-        f'<div class="{CLASS_EMPTY_TITLE}">{title}</div>'
-        f'<div class="{CLASS_EMPTY_DESC}">{description}</div>'
-        f"</div>"
-    )
 
 
 def sidebar_user_badge_html(username: str, role: str) -> str:
     """Return the sidebar user badge with avatar circle."""
     initial = username[0].upper() if username else "?"
     return (
-        f'<div class="{SIDEBAR_USER_BADGE}">'
-        f'<div class="{AVATAR}">{initial}</div>'
-        f"<div><strong>{username}</strong><br>"
         f'<div class="{CLASS_SIDEBAR_USER_BADGE}">'
         f'<div class="{CLASS_AVATAR}">{initial}</div>'
         f"<div>"
@@ -1448,7 +1413,7 @@ title="Back to top">
         if (window.__backToTopInitialized) return;
         window.__backToTopInitialized = true;
 
-var SCROLL_THRESHOLD = {scroll_threshold};
+        var SCROLL_THRESHOLD = {scroll_threshold};
         /* Streamlit >= 1.28 scrolls inside the parent of
            [data-testid="block-container"], not the window. */
         var scrollContainer =
@@ -1467,7 +1432,7 @@ var SCROLL_THRESHOLD = {scroll_threshold};
 
         /* Re-query the button every scroll tick so the .visible class
            is always applied to the live element, not a detached one. */
-scrollContainer.addEventListener('scroll', function () {{
+        scrollContainer.addEventListener('scroll', function () {{
             var btn = document.getElementById('back-to-top-btn');
             var status = document.getElementById('back-to-top-status');
             if (!btn) return;
@@ -1513,44 +1478,6 @@ def version_check_widget_html(
         A self-contained HTML string ready for ``st.markdown``.
     """
 
-
-def version_check_widget_html(
-    local_version: str,
-    latest_tag: str,
-    repo_url: str = "https://github.com/Ganesh-403/semantic-plagiarism-detector/releases/latest",
-) -> str:
-    """Return an HTML snippet that renders an update-available notification banner."""
-    colors = get_colors()
-    warning_color = colors["warning"]
-    warning_soft = colors["warning_soft"]
-    ink = colors["ink"]
-
-    return f"""
-<div id="spd-update-banner" style="
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 16px;
-    margin-top: 8px;
-    background: {warning_soft};
-    border: 1px solid {warning_color};
-    border-radius: 8px;
-    font-family: 'Inter', sans-serif;
-    font-size: 0.85rem;
-    color: {ink};
-">
-    <span style="font-size: 1.1rem;">🔔</span>
-    <span>
-        <strong>Update available:</strong>
-        v{local_version} &rarr; <strong>{latest_tag}</strong>.
-        &nbsp;
-        <a href="{repo_url}" target="_blank" rel="noopener noreferrer"
-           style="color: {warning_color}; font-weight: 600; text-decoration: underline;">
-            View release &rarr;
-        </a>
-    </span>
-</div>
-"""
 
 
 def active_tab_border_style(color: str = "#4f46e5", width: int = 4) -> str:
@@ -1879,3 +1806,17 @@ def render_sidebar_navigation_menu(
         html_items.append(f'<li data-tab-id="{tab_id}">{badge}</li>')
 
     return f'<ul class="sidebar-nav-menu" style="list-style: none; padding: 0; margin: 0;">{"".join(html_items)}</ul>'
+
+
+def render_timezone_footer() -> str:
+    """Render current UTC server time and timezone label caption in the dashboard sidebar footer.
+
+    Returns:
+        Formatted server timezone caption string.
+    """
+    now_utc = datetime.now(timezone.utc)
+    time_str = now_utc.strftime("%H:%M")
+    caption_text = f"Server Time: {time_str} UTC"
+    st.sidebar.caption(f"🕒 {caption_text}")
+    return caption_text
+
