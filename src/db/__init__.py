@@ -1,4 +1,3 @@
-from .common import get_read_connection
 from .auth import (
     add_user,
     delete_user,
@@ -17,6 +16,7 @@ from .auth import (
     update_user_profile,
     verify_user,
 )
+from .common import get_read_connection
 from .corpus_db import (
     add_chunks,
     add_document,
@@ -33,9 +33,8 @@ from .corpus_db import (
     get_unique_class_sections,
     init_corpus_db,
 )
-from .incidents import (
-    get_incidents_by_assignment,
-)
+from .incidents import get_incidents_by_assignment, get_recent_incidents, log_incident
+
 
 __all__ = [
     "get_read_connection",
@@ -46,6 +45,7 @@ __all__ = [
     "add_user",
     "delete_user",
     "update_password",
+    "update_user_profile",
     "get_2fa_status",
     "enable_2fa",
     "disable_2fa",

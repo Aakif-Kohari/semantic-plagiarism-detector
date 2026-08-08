@@ -1179,6 +1179,11 @@ with st.sidebar:
         ocr_language = DEFAULT_OCR_LANGUAGE
         ocr_dpi = DEFAULT_OCR_DPI
 
+    # ── API Quota Usage Gauge (Issue #1566) ──────────────────────────────────
+    from app.components.api_quota_gauge import render_api_quota_gauge
+    render_api_quota_gauge()
+
+
 unique_classes = get_unique_class_sections()
 selected_classes = st.multiselect(
     "Select Class/Section(s)",

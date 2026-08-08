@@ -712,3 +712,24 @@ def export_network_to_csv_bytes(
     G = network_data["graph"]
     csv_str = export_graph_to_csv(G, similarity_df=similarity_df)
     return csv_str.encode("utf-8")
+def export_network_centrality_csv(graph: nx.Graph) -> str:
+    """
+    Calculate node degree centrality using NetworkX and export as a CSV string
+    formatted with headers: Document_Name,Degree,Centrality_Score.
+    """
+    import csv
+    import io
+
+    degrees = dict(graph.degree())
+    centralities = nx.degree_centrality(graph)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Document_Name", "Degree", "Centrality_Score"])
+
+    for node in graph.nodes():
+        deg = degrees.get(node, 0)
+        score = centralities.get(node, 0.0)
+        writer.writerow([node, deg, score])
+
+    return output.getvalue()
