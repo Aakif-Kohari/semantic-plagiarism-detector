@@ -303,7 +303,6 @@ def build_network_data(
 
     # ── Plagiarism Cluster Detection (Issue #1675) ───────────────────────────────
     # Use connected components to identify collusion rings
-    import networkx as nx
     connected_components = list(nx.connected_components(G))
     cluster_map = {}
     for cluster_id, component in enumerate(connected_components):

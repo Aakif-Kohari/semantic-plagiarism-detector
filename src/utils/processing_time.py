@@ -378,3 +378,9 @@ def calculate_mb_per_minute(total_bytes: int, elapsed_seconds: float) -> float:
     minutes = elapsed_seconds / 60.0
     
     return round(megabytes / minutes, 2)
+
+
+def calculate_average_latency(latencies: list[float]) -> float:
+    if not latencies:
+        return 0.0
+    return round(sum(latencies) / len(latencies), 3)

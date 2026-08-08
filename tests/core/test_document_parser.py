@@ -21,6 +21,7 @@ from src.core.document_parser import (
     strip_bibliography,
     normalize_unicode_spaces,
     normalize_extended_punctuation,
+    normalize_unicode_nfc,
 )
 
 import time
@@ -863,9 +864,6 @@ class TestNormalizeExtendedPunctuation:
 # ─── Tests for Unicode NFC Normalizer (Issue #1482) ───────────────────────────
 
 import unicodedata
-import pytest
-from src.core.document_parser import normalize_unicode_nfc, extract_text
-from unittest.mock import patch, MagicMock
 
 
 class TestNormalizeUnicodeNFC:

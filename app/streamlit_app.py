@@ -662,7 +662,7 @@ def build_visualization_lazily(is_enabled, build_fn):
         return build_fn()
     return None
 
- feat/deleted-documents-count
+
 @st.dialog("⚠️ Confirm Bulk Clear")
 def clear_all_dialog():
     st.markdown(
@@ -713,7 +713,7 @@ def clear_all_dialog():
 
             st.success("✅ All documents, chunks, and incidents have been cleared.")
             st.rerun()
- main
+
 
 
 # ── Issue #1383: Cosine vs Lexical Similarity Comparison Table ─────────────────
@@ -788,20 +788,13 @@ def render_cosine_vs_lexical_comparison_table(
                 "Document B": db,
                 "Cosine (Semantic)": cosine_score,
                 "Jaccard (Lexical)": jaccard_score,
- feat/deleted-documents-count
-                "Semantic Only": is_semantic_only,
-
-                "Semantic-Only Paraphrasing?": "🚨 Yes" if is_semantic_only else "No", main
+                "Semantic-Only Paraphrasing?": "🚨 Yes" if is_semantic_only else "No"
             }
         )
 
     comp_df = pd.DataFrame(rows)
- feat/deleted-documents-count
     if not comp_df.empty:
         st.dataframe(comp_df, use_container_width=True)
-
-    st.dataframe(comp_df)
- main
     return comp_df
 
 from datetime import date, timedelta
@@ -1023,21 +1016,7 @@ def logout_dialog():
             clear_session(SESSION_ID)
             st.rerun()
 
-@st.dialog("⚠️ Clear All Documents")
-def clear_all_dialog():
-    st.write("Are you sure you want to completely clear the local database?")
-    st.write("This action cannot be undone.")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Cancel", use_container_width=True, key="cancel_clear_all"):
-            st.rerun()
-    with col2:
-        if st.button("Clear All", type="primary", use_container_width=True, key="confirm_clear_all"):
-            from src.db.corpus_db import clear_all_data
-            clear_all_data()
-            clear_session()
-            st.cache_data.clear()
-            st.rerun()
+
 
 
 
@@ -2277,6 +2256,7 @@ st.divider()
     tab_users,
     tab_settings,
     tab_history,
+    tab_audit,
 ) = st.tabs(
     [
         get_text("tab_warnings", lang=lang_code),
@@ -2288,6 +2268,7 @@ st.divider()
         get_text("tab_users", lang=lang_code),
         get_text("tab_settings", lang=lang_code),
         "📊 History",
+        get_text("tab_audit_logs", lang=lang_code),
     ],
     key="main_tabs",
 )

@@ -6,6 +6,7 @@ Unit tests for the analytics visualization functions.
 
 import numpy as np
 import plotly.graph_objects as go
+import pandas as pd
 import pytest
 
 from src.visualization.analytics import (

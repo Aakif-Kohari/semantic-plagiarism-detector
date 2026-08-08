@@ -854,7 +854,7 @@ def test_corpus_soft_delete_lifecycle():
     assert get_deleted_documents_count() == 0
 
 
-feat/deleted-documents-count
+
 def test_get_deleted_documents_count_explicit():
     """Verify that get_deleted_documents_count correctly counts only soft-deleted documents."""
     # zero deleted documents returns 0
@@ -911,4 +911,3 @@ def test_soft_delete_and_restore_document():
     assert any(doc["filename"] == filename for doc in active_docs_after_restore)
 
 
- main
