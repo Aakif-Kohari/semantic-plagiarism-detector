@@ -1,7 +1,4 @@
-"""src/db/common.py
-------------------
-Common database utilities and concurrency handling for SQLite operations.
-"""
+"""Shared SQLite connection helpers."""
 
 from __future__ import annotations
 
@@ -10,9 +7,40 @@ import logging
 import os
 import sqlite3
 import time
-from typing import Any, Callable
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any, Callable, Generator
 
 logger = logging.getLogger(__name__)
+
+
+def get_read_connection(
+    db_path: Path,
+) -> sqlite3.Connection:
+    """Open an existing SQLite database in read-only mode."""
+    if not isinstance(db_path, Path):
+        raise TypeError("db_path must be a pathlib.Path.")
+
+    resolved_path = db_path.expanduser().resolve(strict=False)
+
+    if not resolved_path.exists():
+        raise FileNotFoundError(
+            f"SQLite database does not exist: {resolved_path}"
+        )
+    if not resolved_path.is_file():
+        raise IsADirectoryError(
+            f"SQLite database path is not a file: {resolved_path}"
+        )
+
+    database_uri = f"{resolved_path.as_uri()}?mode=ro"
+    connection = sqlite3.connect(
+        database_uri,
+        uri=True,
+        check_same_thread=False,
+    )
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
+    return connection
 
 
 def with_sqlite_retry(
@@ -22,21 +50,7 @@ def with_sqlite_retry(
     delay: float = 0.1,
     backoff: float = 2.0,
 ) -> Callable:
-    """
-    Decorator that retries SQLite operations when a sqlite3.OperationalError occurs
-    due to a locked or busy database ("database is locked" / "database is busy").
-
-    Applies exponential backoff on subsequent retry attempts.
-
-    Args:
-        fn (Callable, optional): Function being decorated when used as @with_sqlite_retry.
-        max_retries (int): Maximum number of retry attempts (default: 3).
-        delay (float): Initial delay in seconds before the first retry (default: 0.1).
-        backoff (float): Multiplier for exponential backoff (default: 2.0).
-
-    Returns:
-        Callable: Wrapped function with SQLite lock retry logic.
-    """
+    """Decorator that retries SQLite operations when a sqlite3.OperationalError occurs."""
     if fn is not None and callable(fn):
         return _make_wrapper(fn, max_retries=3, delay=0.1, backoff=2.0)
 
@@ -68,9 +82,6 @@ def _make_wrapper(func: Callable, max_retries: int, delay: float, backoff: float
                     raise
     return wrapper
 
-
-from contextlib import contextmanager
-from typing import Generator
 
 @contextmanager
 def managed_connection(db_path: str | os.PathLike) -> Generator[sqlite3.Connection, None, None]:
