@@ -1127,6 +1127,14 @@ with st.sidebar:
             key=SessionKeys.FAISS_TOP_K_SLIDER,
         )
 
+        # ── FAISS Vector Index Memory Footprint Badge (Issue #1563) ────────────
+        from src.core.faiss_index import format_faiss_memory_badge
+        current_faiss_index = globals().get("faiss_index")
+        if current_faiss_index is None and "faiss_index" in st.session_state:
+            current_faiss_index = st.session_state["faiss_index"]
+        faiss_badge_text = format_faiss_memory_badge(current_faiss_index)
+        st.caption(f"⚡ **{faiss_badge_text}**")
+
         st.markdown("### ✂️ Chunking Settings")
         chunk_size = st.slider(
             "Chunk Size (characters)",
