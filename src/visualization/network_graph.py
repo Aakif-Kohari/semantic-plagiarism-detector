@@ -766,3 +766,75 @@ def export_network_centrality_csv(graph: nx.Graph) -> str:
         writer.writerow([node, deg, score])
 
     return output.getvalue()
+
+
+import networkx as nx
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def get_cluster_count(graph: nx.Graph) -> int:
+    """Calculate the total number of isolated clusters (connected components) in a plagiarism network.
+
+    In the context of plagiarism detection, a connected component represents
+    a group of documents that are linked by similarity edges exceeding the
+    configured threshold. A high number of isolated clusters might indicate
+    multiple independent collusion rings or distinct source materials being
+    shared among different student groups.
+
+    This helper function provides a quick integer summary of the network's
+    fragmentation, which is useful for dashboard metrics and automated alerts.
+
+    Args:
+        graph: A NetworkX Graph object representing the document similarity network.
+               Nodes should represent documents and edges represent similarity links.
+
+    Returns:
+        The integer count of connected components in the graph.
+        Returns 0 if the graph is None, invalid, or contains no nodes.
+
+    Examples:
+        >>> import networkx as nx
+        >>> G = nx.Graph()
+        >>> G.add_edges_from([("doc_A", "doc_B"), ("doc_C", "doc_D")])
+        >>> get_cluster_count(G)
+        2
+
+        >>> empty_G = nx.Graph()
+        >>> get_cluster_count(empty_G)
+        0
+    """
+    # Validate input type to prevent runtime crashes from malformed pipeline data
+    if graph is None or not isinstance(graph, nx.Graph):
+        logger.warning(
+            "get_cluster_count: Invalid or None graph provided. Expected nx.Graph."
+        )
+        return 0
+
+    # An empty graph has 0 connected components
+    if len(graph.nodes()) == 0:
+        logger.debug("get_cluster_count: Graph contains no nodes.")
+        return 0
+
+    try:
+        # nx.number_connected_components is highly optimized in C and runs in O(V+E)
+        component_count = nx.number_connected_components(graph)
+
+        logger.debug(
+            "get_cluster_count: Found %d connected components in graph with %d nodes.",
+            component_count,
+            len(graph.nodes()),
+        )
+
+        return int(component_count)
+
+    except Exception as exc:
+        # Catch any unexpected NetworkX errors (e.g., memory issues on massive graphs)
+        # and return 0 rather than crashing the dashboard rendering pipeline.
+        logger.error(
+            "get_cluster_count: Failed to compute connected components: %s",
+            exc,
+            exc_info=True,
+        )
+        return 0
