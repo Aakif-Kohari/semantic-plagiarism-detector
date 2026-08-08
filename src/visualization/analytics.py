@@ -452,6 +452,7 @@ def plot_severity_donut_chart(
         fig.update_layout(
             title="Plagiarism Incident Severity Distribution",
             height=400,
+            autosize=True,
         )
         return apply_plotly_theme(fig, theme_colors, show_grid=False)
 
@@ -486,6 +487,7 @@ def plot_severity_donut_chart(
         title="Plagiarism Incident Severity Distribution",
         height=400,
         showlegend=True,
+        autosize=True,
     )
     return apply_plotly_theme(fig, theme_colors, show_grid=False)
 
@@ -837,3 +839,4 @@ def plot_hierarchical_dendrogram(
 
     return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)
 
+    return fig
