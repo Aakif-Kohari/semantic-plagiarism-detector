@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import os
 import sqlite3
 import time
 from typing import Any, Callable
@@ -66,3 +67,22 @@ def _make_wrapper(func: Callable, max_retries: int, delay: float, backoff: float
                 else:
                     raise
     return wrapper
+
+
+from contextlib import contextmanager
+from typing import Generator
+
+@contextmanager
+def managed_connection(db_path: str | os.PathLike) -> Generator[sqlite3.Connection, None, None]:
+    """
+    Context manager for SQLite connections that guarantees conn.close() on exit,
+    preventing unclosed connection handle leaks (Issue #1707).
+    """
+    conn = sqlite3.connect(db_path, timeout=15.0, check_same_thread=False)
+    try:
+        yield conn
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
