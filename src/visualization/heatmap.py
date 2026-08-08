@@ -83,6 +83,10 @@ except ImportError:
     def apply_matplotlib_theme(theme_colors=None):
         return None
 
+    # Default Plotly font family
+    DEFAULT_FONT_FAMILY: str = "Inter, sans-serif"
+
+
 
 # ── Security & Sanitization ────────────────────────────────────────────────────
 class MatplotlibInjectionError(ValueError):
@@ -370,10 +374,11 @@ def plot_similarity_heatmap(
         ax.set_ylabel("Documents", fontsize=11, labelpad=10)
 
         safe_labels = [TitleSanitizer.sanitize(str(lbl)) for lbl in clean_df.columns]
+        tick_fontsize = max(6, 12 - n // 10)
         ax.set_xticklabels(
-            safe_labels, rotation=30, ha="right", fontsize=max(8, 11 - n // 3)
+            safe_labels, rotation=30, ha="right", fontsize=tick_fontsize
         )
-        ax.set_yticklabels(safe_labels, rotation=0, fontsize=max(8, 11 - n // 3))
+        ax.set_yticklabels(safe_labels, rotation=0, fontsize=tick_fontsize)
 
         red_patch = mpatches.Patch(
             edgecolor="#d62728",
@@ -420,6 +425,28 @@ def plot_similarity_heatmap_plotly(
     """Interactive Plotly heatmap featuring dynamic hover values and custom threshold bounds."""
     import plotly.graph_objects as go
 
+    if similarity_df.empty or len(similarity_df) == 0:
+        fig = go.Figure()
+        try:
+            safe_title = TitleSanitizer.sanitize(title)
+        except Exception:
+            safe_title = "Semantic Similarity Matrix"
+        fig.update_layout(
+            title=safe_title,
+            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+        )
+        fig.add_annotation(
+            text="No document data available for heatmap visualization",
+            showarrow=False,
+            font=dict(size=14, color="#666666"),
+            bordercolor="#cccccc",
+            borderwidth=1,
+            borderpad=10,
+            bgcolor="#f8f9fa",
+        )
+        return fig
+
     if class_tag and class_tag != "All Classes":
         similarity_df = filter_heatmap_by_class_tag(
             similarity_df, class_tag=class_tag, doc_class_map=doc_class_map
@@ -439,7 +466,24 @@ def plot_similarity_heatmap_plotly(
         return go.Figure()
 
     # Issue #839: Handle empty or single document (< 2) input cleanly
-    if clean_df.empty or len(clean_df) < 2:
+    if clean_df.empty or len(clean_df) == 0:
+        fig = go.Figure()
+        fig.update_layout(
+            title=safe_title,
+            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+        )
+        fig.add_annotation(
+            text="No document data available for heatmap visualization",
+            showarrow=False,
+            font=dict(size=14, color="#666666"),
+            bordercolor="#cccccc",
+            borderwidth=1,
+            borderpad=10,
+            bgcolor="#f8f9fa",
+        )
+        return fig
+    elif len(clean_df) < 2:
         fig = go.Figure()
         fig.update_layout(
             title=safe_title,
@@ -534,7 +578,7 @@ def plot_similarity_heatmap_plotly(
                         font=dict(
                             size=max(9, 14 - n),
                             color=font_color,
-                            family="Arial, sans-serif",
+                            family=DEFAULT_FONT_FAMILY,
                         ),
                     )
                 )
@@ -567,7 +611,7 @@ def plot_similarity_heatmap_plotly(
     fig.update_layout(
         title=dict(
             text=safe_title,
-            font=dict(size=18, family="Arial, sans-serif", color=ink_color),
+            font=dict(size=18, family=DEFAULT_FONT_FAMILY, color=ink_color),
         ),
         height=max(500, n * cell_px + 150),
         autosize=True,
@@ -590,12 +634,73 @@ def plot_similarity_heatmap_plotly(
         hoverlabel=dict(
             bgcolor=_get_theme_color(theme_colors, "surface", "white"),
             font_size=14,
-            font_family="Arial",
+            font_family=DEFAULT_FONT_FAMILY,
         ),
     )
 
     return fig
 
+
+def plot_document_similarity_heatmap(
+    similarity_df: pd.DataFrame,
+    title: str = "Semantic Similarity Matrix",
+    threshold: float = PLAGIARISM_THRESHOLD,
+    theme_colors: Optional[Dict[str, str]] = None,
+    colormap_name: str = DEFAULT_UI_COLORMAP,
+    colorscale: str = "Viridis",
+    show_annotations: bool = True,
+    mask_threshold: Optional[float] = None,
+    log_scale: bool = False,
+    class_tag: Optional[str] = None,
+    doc_class_map: Optional[dict] = None,
+    dim_diagonal: bool = False,
+):
+    """Wrapper function for plot_similarity_heatmap_plotly with empty state handling."""
+    return plot_similarity_heatmap_plotly(
+        similarity_df=similarity_df,
+        title=title,
+        threshold=threshold,
+        theme_colors=theme_colors,
+        colormap_name=colormap_name,
+        colorscale=colorscale,
+        show_annotations=show_annotations,
+        mask_threshold=mask_threshold,
+        log_scale=log_scale,
+        class_tag=class_tag,
+        doc_class_map=doc_class_map,
+        dim_diagonal=dim_diagonal,
+    )
+
+
+def plot_similarity_minimap(
+    similarity_df: pd.DataFrame,
+    colormap_name: str = DEFAULT_UI_COLORMAP,
+):
+    import plotly.graph_objects as go
+
+    clean_df = validate_similarity_matrix(similarity_df)
+
+    fig = go.Figure(
+        data=go.Heatmap(
+            z=clean_df.values,
+            colorscale=PLOTLY_CMAP_MAPPING.get(colormap_name, "Viridis"),
+            showscale=False,
+            hoverinfo="skip",
+            xgap=0,
+            ygap=0,
+        )
+    )
+
+    fig.update_layout(
+        title="Minimap",
+        height=220,
+        width=220,
+        margin=dict(l=10, r=10, t=25, b=10),
+        xaxis=dict(showticklabels=False, fixedrange=True),
+        yaxis=dict(showticklabels=False, fixedrange=True, autorange="reversed"),
+    )
+
+    return fig
 
 # ── Differential / Delta Heatmap Visualization (#1369) ─────────────────────────
 
@@ -773,7 +878,7 @@ def plot_differential_heatmap(
     fig.update_layout(
         title=dict(
             text=safe_title,
-            font=dict(size=16, family="Arial Black", color=ink_color),
+            font=dict(size=16, family=DEFAULT_FONT_FAMILY, color=ink_color),
         ),
         xaxis=dict(
             title="Documents",
@@ -1066,4 +1171,15 @@ def render_heatmap_ui(
         fig.update_xaxes(autorange=True)
         fig.update_yaxes(autorange=True)
 
-    st.plotly_chart(fig, use_container_width=True)
+    main_col, mini_col = st.columns([5, 1])
+
+    with main_col:
+        st.plotly_chart(fig, use_container_width=True)
+
+    with mini_col:
+        mini_fig = plot_similarity_minimap(
+            clean_df,
+            colormap_name=colormap_name,
+        )
+        st.plotly_chart(mini_fig, use_container_width=True)
+        

@@ -7,11 +7,7 @@ from src.utils.filename import (_safe_extension, get_file_extension_sanitized,
                                 unique_filename)
 
 from src.utils.filename import (
-    _safe_extension,
     get_file_sha256_hash,
-    sanitize_filename,
-    sanitize_filename_mapping,
-    unique_filename,
 )
 
 
@@ -238,3 +234,20 @@ def test_200_character_filename_is_truncated_safely():
 
     assert len(sanitized) <= 128
     assert sanitized.endswith(".pdf")
+
+from io import BytesIO
+
+from src.utils.filename import (
+    compute_file_hash_stream,
+    get_file_sha256_hash,
+)
+
+
+def test_compute_file_hash_stream_matches_byte_hash():
+    data = b"Hello World" * 1000
+    stream = BytesIO(data)
+
+    assert (
+        compute_file_hash_stream(stream)
+        == get_file_sha256_hash(data)
+    )

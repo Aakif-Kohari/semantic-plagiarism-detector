@@ -35,13 +35,46 @@ def setup_test_db(mock_db):
 
 def test_add_document_metadata():
     res1 = add_document("test1.pdf", "hash_abc_123")
-    assert res1 is True
+    assert isinstance(res1, int)
 
     res2 = add_document("test2.pdf", "hash_abc_123")
-    assert res2 is False
+    assert res2 == res1
 
     res3 = add_document("test1.pdf", "different_hash")
-    assert res3 is False
+    assert res3 is None
+
+
+def test_add_document_returns_existing_id_for_duplicate_hash(caplog):
+    import logging
+    
+    hash_value = "abc1234_dup"
+    
+    with caplog.at_level(logging.INFO):
+        first_id = add_document(
+            filename="file1_dup.pdf",
+            file_hash=hash_value,
+        )
+
+        second_id = add_document(
+            filename="file2_dup.pdf",
+            file_hash=hash_value,
+        )
+
+    assert second_id == first_id
+    assert isinstance(first_id, int)
+
+    with _connect() as conn:
+        count = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM documents
+            WHERE file_hash = ?
+            """,
+            (hash_value,),
+        ).fetchone()[0]
+
+    assert count == 1
+    assert "already exists in corpus; skipping insertion." in caplog.text
 
 
 def test_get_document_by_hash():
@@ -115,7 +148,7 @@ def test_document_metadata_fields():
         assignment_title="Homework 1",
         detected_language="en",
     )
-    assert res is True
+    assert isinstance(res, int)
 
     from src.db.schemas import Document
 
@@ -215,9 +248,115 @@ def test_batch_soft_delete_documents():
     )  # SQLite UPDATE rowcount still returns matched rows even if value didn't change
 
 
-def test_clear_all_data_clears_incidents(mock_db):
-    from pathlib import Path
+def test_batch_permanently_delete_documents():
+    from src.db.corpus_db import batch_permanently_delete_documents, _connect
 
+    add_document("doc_perm1.pdf", "hash_p1")
+    add_document("doc_perm2.pdf", "hash_p2")
+    add_document("doc_perm3.pdf", "hash_p3")
+
+    with _connect() as conn:
+        rows = conn.execute("SELECT id, filename FROM documents ORDER BY id").fetchall()
+        doc_ids = {row[1]: row[0] for row in rows}
+
+    id1 = doc_ids["doc_perm1.pdf"]
+    id2 = doc_ids["doc_perm2.pdf"]
+    id3 = doc_ids["doc_perm3.pdf"]
+
+    # 1. Multiple valid IDs
+    count = batch_permanently_delete_documents([id1, id2])
+    assert count == 2
+
+    # The targeted documents are hard-deleted, the rest are kept
+    with _connect() as conn:
+        remaining = conn.execute(
+            "SELECT filename FROM documents WHERE id IN (?, ?)", (id1, id2)
+        ).fetchall()
+        assert remaining == []
+        kept = conn.execute(
+            "SELECT filename FROM documents WHERE id = ?", (id3,)
+        ).fetchone()
+        assert kept[0] == "doc_perm3.pdf"
+
+    # 2. Empty list
+    assert batch_permanently_delete_documents([]) == 0
+
+    # 3. Invalid/non-existing IDs
+    count = batch_permanently_delete_documents([9999, 10000])
+    assert count == 0
+
+
+def test_batch_permanently_delete_documents_purges_related_records():
+    from src.db.corpus_db import batch_permanently_delete_documents, _connect
+
+    add_document("doc_perm_soft.pdf", "hash_ps")
+    add_document("doc_perm_other.pdf", "hash_po")
+
+    dummy_emb = np.zeros(384, dtype=np.float32)
+    add_chunks([(1, "doc_perm_soft.pdf", 0, "Paragraph 1", dummy_emb)])
+
+    # Soft-delete moves chunks into deleted_chunks
+    soft_delete_document("doc_perm_soft.pdf")
+
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO plagiarism_incidents (incident_id, document_a, document_b, similarity_score, severity_rank, date_flagged, last_seen)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "INC-PERM",
+                "doc_perm_soft.pdf",
+                "doc_perm_other.pdf",
+                0.75,
+                "Medium",
+                "2026-01-01T00:00:00",
+                "2026-01-01T00:00:00",
+            ),
+        )
+        rows = conn.execute(
+            "SELECT id, filename FROM documents ORDER BY id"
+        ).fetchall()
+        doc_ids = {row[1]: row[0] for row in rows}
+
+    soft_id = doc_ids["doc_perm_soft.pdf"]
+
+    count = batch_permanently_delete_documents([soft_id])
+    assert count == 1
+
+    with _connect() as conn:
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM documents WHERE id = ?", (soft_id,)
+            ).fetchone()[0]
+            == 0
+        )
+        # deleted_chunks has no cascade constraint, so it must be purged manually
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM deleted_chunks WHERE filename = ?",
+                ("doc_perm_soft.pdf",),
+            ).fetchone()[0]
+            == 0
+        )
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM plagiarism_incidents WHERE incident_id = ?",
+                ("INC-PERM",),
+            ).fetchone()[0]
+            == 0
+        )
+        # The unrelated document is untouched
+        assert (
+            conn.execute(
+                "SELECT COUNT(*) FROM documents WHERE filename = ?",
+                ("doc_perm_other.pdf",),
+            ).fetchone()[0]
+            == 1
+        )
+
+
+def test_clear_all_data_clears_incidents(mock_db):
     # 1. Add mock documents
     add_document("doc1.pdf", "hash1")
     add_document("doc2.pdf", "hash2")
@@ -314,7 +453,7 @@ def test_soft_delete_document():
     inserted = add_document(
         filename=filename, file_hash=file_hash, student_name="Student A"
     )
-    assert inserted is True
+    assert isinstance(inserted, int)
 
     dummy_embedding = np.random.rand(384).astype(np.float32)
     add_chunks([(0, filename, 0, "Paragraph 1 text content.", dummy_embedding)])
@@ -652,3 +791,103 @@ def test_fts5_triggers_exist():
         assert "documents_au" in trigger_names
     finally:
         conn.close()
+
+
+def test_corpus_soft_delete_lifecycle():
+    """Verify document soft-deletion and soft-delete recovery workflows."""
+    filename = "lifecycle_test.pdf"
+    file_hash = "lifecycle_hash_999"
+
+    # 1. Add document and chunks
+    added = add_document(
+        filename=filename,
+        file_hash=file_hash,
+        student_name="Lifecycle Tester",
+        class_section="CS 101",
+        assignment_title="Lifecycle Assignment",
+    )
+    assert isinstance(added, int)
+
+    dummy_embedding = np.random.rand(384).astype(np.float32)
+    add_chunks([(1000, filename, 0, "Initial paragraph content", dummy_embedding)])
+
+    # Verify present in active queries initially
+    active_docs = get_all_documents(include_deleted=False)
+    assert len(active_docs) == 1
+    assert active_docs[0]["filename"] == filename
+
+    active_chunks = get_chunk_registry()
+    assert len(active_chunks) == 1
+    assert active_chunks[0].doc_name == filename
+
+    assert get_total_document_count() == 1
+    assert get_deleted_documents_count() == 0
+
+    # 2. Soft delete the document
+    soft_delete_document(filename)
+
+    # Verify excluded from active queries
+    assert len(get_all_documents(include_deleted=False)) == 0
+    assert len(get_chunk_registry()) == 0
+    assert get_total_document_count() == 0
+    assert get_deleted_documents_count() == 1
+
+    # Verify present in get_deleted_documents
+    deleted_docs = get_deleted_documents()
+    assert len(deleted_docs) == 1
+    assert deleted_docs[0]["filename"] == filename
+
+    # 3. Restore the document
+    restore_document(filename)
+
+    # Verify included in active queries again
+    active_docs_after = get_all_documents(include_deleted=False)
+    assert len(active_docs_after) == 1
+    assert active_docs_after[0]["filename"] == filename
+
+    active_chunks_after = get_chunk_registry()
+    assert len(active_chunks_after) == 1
+    assert active_chunks_after[0].doc_name == filename
+    assert active_chunks_after[0].chunk_text == "Initial paragraph content"
+
+    assert get_total_document_count() == 1
+    assert get_deleted_documents_count() == 0
+
+
+def test_soft_delete_and_restore_document():
+    """Verify document soft-deletion and subsequent restoration flow (#1284)."""
+    filename = "delete_restore_test.pdf"
+    file_hash = "delete_restore_hash_123"
+
+    # Insert document
+    added = add_document(
+        filename=filename,
+        file_hash=file_hash,
+        student_name="Test Student",
+        class_section="Section A",
+        assignment_title="Test Assignment",
+    )
+    assert added is True
+
+    dummy_embedding = np.random.rand(384).astype(np.float32)
+    add_chunks([(999, filename, 0, "Test chunk content", dummy_embedding)])
+
+    # Verify visible initially
+    active_docs = get_all_documents(include_deleted=False)
+    assert any(doc["filename"] == filename for doc in active_docs)
+
+    # Call soft_delete_document()
+    soft_delete_document(filename)
+
+    # Verify hidden from queries
+    active_docs_after_delete = get_all_documents(include_deleted=False)
+    assert not any(doc["filename"] == filename for doc in active_docs_after_delete)
+
+    # Call restore_document()
+    restore_document(filename)
+
+    # Verify visible in queries again
+    active_docs_after_restore = get_all_documents(include_deleted=False)
+    assert any(doc["filename"] == filename for doc in active_docs_after_restore)
+
+

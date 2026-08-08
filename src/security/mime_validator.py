@@ -12,53 +12,53 @@ from xml.etree import ElementTree
 logger = logging.getLogger(__name__)
 
 # Strict mapping of file extension to allowed MIME types/signatures.
-ALLOWED_MIME_TYPES = {
-    "pdf": {"application/pdf"},
-    "docx": {
+ALLOWED_MIME_TYPES: dict[str, list[str]] = {
+    "pdf": ["application/pdf"],
+    "docx": [
         "application/vnd.openxmlformats-officedocument."
         "wordprocessingml.document",
         "application/zip",
         "application/x-zip-compressed",
         "application/octet-stream",
-    },
-    "xlsx": {
+    ],
+    "xlsx": [
         "application/vnd.openxmlformats-officedocument."
         "spreadsheetml.sheet",
         "application/zip",
         "application/x-zip-compressed",
         "application/octet-stream",
-    },
-    "doc": {
+    ],
+    "doc": [
         "application/msword",
         "application/vnd.ms-office",
         "application/octet-stream",
-    },
-    "zip": {
+    ],
+    "zip": [
         "application/zip",
         "application/x-zip-compressed",
         "application/octet-stream",
-    },
-    "txt": {"text/plain", "text/x-python", "text/markdown"},
-    "csv": {"text/csv", "text/plain", "application/csv"},
-    "md": {
+    ],
+    "txt": ["text/plain", "text/x-python", "text/markdown"],
+    "csv": ["text/csv", "text/plain", "application/csv"],
+    "md": [
         "text/markdown",
         "text/plain",
         "application/octet-stream",
-    },
-    "rtf": {"application/rtf", "text/rtf", "text/plain"},
-    "epub": {
+    ],
+    "rtf": ["application/rtf", "text/rtf", "text/plain"],
+    "epub": [
         "application/epub+zip",
         "application/zip",
         "application/octet-stream",
-    },
-    "odt": {
+    ],
+    "odt": [
         "application/vnd.oasis.opendocument.text",
         "application/zip",
         "application/octet-stream",
-    },
-    "png": {"image/png"},
-    "jpg": {"image/jpeg"},
-    "jpeg": {"image/jpeg"},
+    ],
+    "png": ["image/png"],
+    "jpg": ["image/jpeg"],
+    "jpeg": ["image/jpeg"],
 }
 
 ALLOWED_MAGIC_HEADERS = {
@@ -66,7 +66,7 @@ ALLOWED_MAGIC_HEADERS = {
     "zip": [b"PK\x03\x04"],
     "epub": [b"PK\x03\x04"],
     "odt": [b"PK\x03\x04"],
-    "doc": [b"\xd0\xcf\x11\xe0"],
+    "doc": [b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"],
     "rtf": [b"{\\rtf"],
     "png": [b"\x89PNG\r\n\x1a\n"],
     "jpg": [b"\xff\xd8\xff"],
@@ -376,6 +376,17 @@ def validate_mime_type(file_bytes: bytes, filename: str) -> bool:
             extension,
             filename,
         )
+
+    # Legacy Microsoft Word .doc files use the OLE Compound File signature.
+    # Validate the complete eight-byte header before trusting MIME detection.
+    if extension == "doc":
+        ole_header = ALLOWED_MAGIC_HEADERS["doc"][0]
+        if not file_bytes.startswith(ole_header):
+            logger.warning(
+                "[mime_validator] Invalid OLE Compound File header for '%s'.",
+                filename,
+            )
+            return False
 
     # PDF validation is intentionally strict even when libmagic is
     # permissive or unavailable.
