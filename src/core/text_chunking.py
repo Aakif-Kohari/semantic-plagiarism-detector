@@ -11,6 +11,7 @@ def chunk_text(
     text: str,
     chunk_size: int = 500,
     chunk_overlap: int = 50,
+    min_words: int = 5,
 ) -> List[str]:
     """
     Splits text into chunks of a target character length with overlapping boundaries.
@@ -46,7 +47,7 @@ def chunk_text(
     if current_chunk:
         chunks.append(" ".join(current_chunk))
 
-    return chunks
+    return [c for c in chunks if len(c.split()) >= min_words]
 
 
 # Alias for backward compatibility with src/core/__init__.py
@@ -57,6 +58,7 @@ def chunk_documents(
     documents: Dict[str, str],
     chunk_size: int = 500,
     chunk_overlap: int = 50,
+    min_words: int = 5,
 ) -> Dict[str, List[str]]:
     """
     Splits a dictionary of document raw texts into chunks respecting customizable
@@ -68,5 +70,6 @@ def chunk_documents(
             text,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
+            min_words=min_words,
         )
     return chunked_docs
