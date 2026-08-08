@@ -5,6 +5,8 @@ import fitz  # PyMuPDF
 from PIL import Image
 from pypdf import PdfReader, PdfWriter
 
+Image.MAX_IMAGE_PIXELS = 50_000_000
+
 logger = logging.getLogger(__name__)
 
 
@@ -136,7 +138,8 @@ def inspect_pdf_fonts(pdf_bytes: bytes, max_font_bytes: int = 10_000_000) -> boo
         doc.close()
 
 
-def _strip_image_metadata(file_bytes: bytes) -> bytes:    """
+def _strip_image_metadata(file_bytes: bytes) -> bytes:
+    """
     Uses Pillow to read the image and save it without EXIF data.
     Includes safety checks to prevent decompression bombs or excessive memory usage
     by validating image dimensions before full decoding.
@@ -181,6 +184,8 @@ def _strip_image_metadata(file_bytes: bytes) -> bytes:    """
             image_without_exif.save(out_io, format=save_format)
 
             return out_io.getvalue()
+    except Image.DecompressionBombError:
+        raise ValueError("Image dimensions exceed security safety limits.")
     except ValueError:
         # Re-raise ValueError to ensure safety limits are strictly enforced
         raise

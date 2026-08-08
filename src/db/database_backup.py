@@ -36,6 +36,7 @@ import gzip
 import io
 import logging
 import os
+import re
 import shutil
 import sqlite3
 import stat
@@ -148,7 +149,8 @@ def create_database_backup(
     return backup_path
 
 
-def get_database_size_bytes(db_path: str | Path) -> int:    """Return the size of a SQLite database file in bytes.
+def get_database_size_bytes(db_path: str | Path) -> int:
+    """Return the size of a SQLite database file in bytes.
 
     Acceptance criteria (issue #1047):
     - Returns the on-disk file size in bytes for an existing database.
@@ -335,6 +337,75 @@ def get_database_table_stats(db_path: str | Path) -> dict[str, int]:
     )
 
     return stats
+
+
+def get_table_schema_info(db_path: str | Path, table_name: str) -> list[dict]:
+    """Return column metadata for the given table in a SQLite database.
+
+    Executes ``PRAGMA table_info([table_name])`` and returns one dictionary
+    per column with the keys ``name``, ``type``, ``notnull``, ``dflt_value``
+    and ``pk``. The ``notnull`` and ``pk`` values are ``0``/``1`` flags as
+    reported by SQLite.
+
+    Args:
+        db_path: Path to the SQLite database file. Accepts ``str`` or
+            :class:`~pathlib.Path`. Relative paths and ``~`` are expanded
+            automatically.
+        table_name: Name of the table to inspect. Must be a plain SQL
+            identifier (letters, digits and underscores) to prevent SQL
+            injection.
+
+    Returns:
+        A list of dictionaries describing each column of the table. Returns
+        an empty list when the database file does not exist, the path is not
+        a file, the table name is unsafe, or the table has no columns.
+
+    Example:
+        >>> from src.db.database_backup import get_table_schema_info
+        >>> get_table_schema_info("data/corpus.db", "documents")
+        [{'name': 'id', 'type': 'INTEGER', 'notnull': 0, 'dflt_value': None, 'pk': 1}]
+    """
+    if not re.fullmatch(r"[A-Za-z0-9_]+", table_name):
+        logger.warning(
+            "get_table_schema_info: refusing unsafe table name %r.",
+            table_name,
+        )
+        return []
+
+    resolved_path = Path(db_path).expanduser().resolve()
+
+    if not resolved_path.exists() or not resolved_path.is_file():
+        logger.debug(
+            "get_table_schema_info: database file not found at %s.",
+            resolved_path,
+        )
+        return []
+
+    try:
+        with closing(
+            sqlite3.connect(str(resolved_path), check_same_thread=False)
+        ) as connection:
+            cursor = connection.execute(f"PRAGMA table_info([{table_name}])")
+            rows = cursor.fetchall()
+    except sqlite3.Error as exc:
+        logger.error(
+            "get_table_schema_info: failed to inspect table %r in %s: %s",
+            table_name,
+            resolved_path,
+            exc,
+        )
+        return []
+
+    return [
+        {
+            "name": row[1],
+            "type": row[2],
+            "notnull": row[3],
+            "dflt_value": row[4],
+            "pk": row[5],
+        }
+        for row in rows
+    ]
 
 
 def create_password_protected_backup(

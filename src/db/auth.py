@@ -14,14 +14,15 @@ import logging
 import os
 import re
 import sqlite3
-from datetime import datetime as dt, timezone
+from datetime import datetime as dt
+from datetime import timezone
 
 import bcrypt
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError, VerifyMismatchError
 
 from src.core.app_config import AUTH_DB_PATH
-from src.db.common import with_sqlite_retry
+from src.core.concurrency import with_sqlite_retry
 from src.db.migrations import migrate_auth_database, table_exists
 from src.errors import StaleDataException
 
@@ -177,9 +178,45 @@ def get_distinct_audit_event_types() -> list[str]:
         return []
 
 
+def get_recent_audit_events(limit: int = 20) -> list[dict]:
+    """Fetch the N most recent security audit events across all accounts."""
+    if limit < 0:
+        raise ValueError("Limit must be a non-negative integer.")
+
+    try:
+        with _connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM security_audit_log ORDER BY timestamp DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+    except sqlite3.Error as e:
+        logger.error(f"Failed to query recent security audit events: {e}")
+        return []
+
+
 def _hash_password(password: str) -> str:
     """Return an Argon2 hash for the given password."""
     return _ph.hash(password)
+
+
+def _verify_password_hash(password: str, stored_hash: str) -> bool:
+    """Return True if password matches stored Argon2 or bcrypt hash."""
+    if not stored_hash:
+        return False
+    if stored_hash.startswith("$argon2"):
+        try:
+            _ph.verify(stored_hash, password)
+            return True
+        except (VerifyMismatchError, VerificationError):
+            return False
+    elif stored_hash.startswith(("$2a$", "$2b$", "$2y$")):
+        try:
+            return bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8"))
+        except Exception:
+            return False
+    return False
 
 
 def _validate_username(username: str) -> str:
@@ -359,10 +396,18 @@ def add_user(username: str, password: str, role: str = "teacher") -> None:
         password = _validate_password(password)
         role = _validate_role(role)
         hashed = _hash_password(password)
+        now_str = dt.now(timezone.utc).isoformat()
         with _connect() as conn:
             conn.execute(
                 "INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
                 (username, hashed, role),
+            )
+            conn.execute(
+                """
+                INSERT INTO password_history (username, password_hash, created_at)
+                VALUES (?, ?, ?)
+                """,
+                (username, hashed, now_str),
             )
             conn.commit()
     except sqlite3.IntegrityError as e:
@@ -371,13 +416,25 @@ def add_user(username: str, password: str, role: str = "teacher") -> None:
         raise sqlite3.Error(f"Failed to add user: {e}") from e
 
 
-def get_all_users() -> list:
-    """Return all users as a list of dicts (excludes password hashes)."""
+def get_all_users(role: str | None = None) -> list:
+    """Return all users as a list of dicts (excludes password hashes).
+
+    Args:
+        role: If provided, only return users with this role
+            (e.g. "admin" or "teacher").
+
+    Returns:
+        List of user dicts, optionally filtered by role.
+    """
     try:
+        query = "SELECT id, username, role, is_active, version FROM users"
+        params: list = []
+        if role is not None:
+            query += " WHERE role = ?"
+            params.append(role)
+        query += " ORDER BY id"
         with _connect() as conn:
-            rows = conn.execute(
-                "SELECT id, username, role, is_active, version FROM users ORDER BY id"
-            ).fetchall()
+            rows = conn.execute(query, params).fetchall()
             return [
                 {
                     "id": r[0],
@@ -402,6 +459,7 @@ def delete_user(username: str) -> None:
             conn.execute(
                 "DELETE FROM security_audit_log WHERE username = ?", (username,)
             )
+            conn.execute("DELETE FROM password_history WHERE username = ?", (username,))
 
             for table_name in ("user_sessions", "authorization_tokens"):
                 if table_exists(conn, table_name):
@@ -432,11 +490,34 @@ def update_password(
 
         with _connect() as conn:
             cursor = conn.execute(
-                "SELECT COUNT(1) FROM users WHERE username = ?",
+                "SELECT password FROM users WHERE username = ?",
                 (username,),
             )
-            if cursor.fetchone()[0] == 0:
+            row = cursor.fetchone()
+            if not row:
                 raise ValueError("User not found.")
+            current_hash = row[0]
+
+            history_rows = conn.execute(
+                """
+                SELECT password_hash FROM password_history
+                WHERE username = ?
+                ORDER BY id DESC LIMIT 3
+                """,
+                (username,),
+            ).fetchall()
+            recent_hashes = [r[0] for r in history_rows]
+
+            if current_hash and current_hash not in recent_hashes:
+                recent_hashes.append(current_hash)
+
+            recent_hashes = recent_hashes[:3]
+
+            for old_hash in recent_hashes:
+                if _verify_password_hash(new_password, old_hash):
+                    raise ValueError(
+                        "New password cannot be one of your last 3 passwords"
+                    )
 
             hashed = _hash_password(new_password)
             password_changed_at = dt.now(timezone.utc).isoformat()
@@ -455,6 +536,14 @@ def update_password(
             )
             if cursor.rowcount != 1:
                 raise ValueError("User not found.")
+
+            conn.execute(
+                """
+                INSERT INTO password_history (username, password_hash, created_at)
+                VALUES (?, ?, ?)
+                """,
+                (username, hashed, password_changed_at),
+            )
             conn.commit()
 
         log_security_event(
@@ -462,6 +551,8 @@ def update_password(
             username=username,
             details="Password updated successfully.",
         )
+    except (ValueError, PermissionError):
+        raise
     except sqlite3.Error as e:
         raise sqlite3.Error(f"Failed to update password: {e}") from e
 
@@ -595,9 +686,9 @@ def get_notification_preferences(username: str) -> dict:
     email_val = prefs.get("email_notifications", True)
     webhook_val = prefs.get("webhook_notifications", True)
 
-    if type(email_val) is not bool:
+    if not isinstance(email_val, bool):
         email_val = True
-    if type(webhook_val) is not bool:
+    if not isinstance(webhook_val, bool):
         webhook_val = True
 
     return {
@@ -613,9 +704,9 @@ def update_notification_preferences(
     webhook_notifications: bool = True,
 ) -> dict:
     """Update notification preferences for a user."""
-    if type(email_notifications) is not bool:
+    if not isinstance(email_notifications, bool):
         raise TypeError("email_notifications must be a boolean")
-    if type(webhook_notifications) is not bool:
+    if not isinstance(webhook_notifications, bool):
         raise TypeError("webhook_notifications must be a boolean")
 
     username = _validate_username(username)

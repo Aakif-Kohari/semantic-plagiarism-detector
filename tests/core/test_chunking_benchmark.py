@@ -1,5 +1,4 @@
 import time
-import pytest
 from src.core.text_chunking import chunk_documents
 
 def test_text_chunking_performance_benchmark():

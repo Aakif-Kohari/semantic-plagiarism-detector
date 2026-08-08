@@ -19,7 +19,7 @@ import numpy as np
 import psutil
 
 from src.core.app_config import CORPUS_DB_PATH, FALLBACK_CORPUS_DB_PATH
-from src.db.common import with_sqlite_retry
+from src.core.concurrency import with_sqlite_retry
 from src.db.migrations.common import column_exists, delete_all_if_table_exists
 from src.utils.filename import sanitize_filename
 
@@ -172,6 +172,20 @@ def init_corpus_db() -> None:
             """
         )
 
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS scan_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                document_count INTEGER NOT NULL,
+                avg_similarity REAL NOT NULL,
+                max_similarity REAL NOT NULL,
+                flagged_count INTEGER NOT NULL,
+                threshold_used REAL NOT NULL
+            )
+            """
+        )
+
         # 2. RUN SCHEMA MIGRATIONS / ALTER TABLES AFTER CREATION
         columns_to_ensure = [
             ("class_section", "TEXT"),
@@ -196,7 +210,7 @@ def init_corpus_db() -> None:
             "CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at)"
         )
 
-                # Issue #1359: Create FTS5 virtual table + sync triggers for full-text
+        # Issue #1359: Create FTS5 virtual table + sync triggers for full-text
         # search. Also created by migration_012, but we create it here too
         # so that ``init_corpus_db()`` (which doesn't call
         # ``migrate_corpus_database()``) still sets up FTS.
@@ -262,13 +276,30 @@ def add_document(
     tags: str = None,
     detected_language: str = None,
     owner: str = None,
-) -> bool:
+) -> int | None:
     """Insert a new document metadata row using parameterized execution."""
     filename = sanitize_filename(filename)
 
     try:
         with _connect() as conn:
-            conn.execute(
+            existing = conn.execute(
+                """
+                SELECT id
+                FROM documents
+                WHERE file_hash = ?
+                  AND (is_deleted IS NULL OR is_deleted = 0)
+                """,
+                (file_hash,),
+            ).fetchone()
+
+            if existing:
+                logger.info(
+                    "Document %s already exists in corpus; skipping insertion.",
+                    file_hash,
+                )
+                return existing[0]
+
+            cursor = conn.execute(
                 "INSERT INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, tags, detected_language, owner) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     filename,
@@ -285,9 +316,9 @@ def add_document(
                     owner,
                 ),
             )
-            return True
+            return cursor.lastrowid
     except sqlite3.IntegrityError:
-        return False
+        return None
 
 
 def get_document_by_hash(file_hash: str) -> str | None:
@@ -529,6 +560,60 @@ def batch_soft_delete_documents(doc_ids: list[int]) -> int:
         rowcount = cursor.rowcount
 
     _compact_vector_ids()
+    return rowcount
+
+
+@with_sqlite_retry
+def batch_permanently_delete_documents(doc_ids: list[int]) -> int:
+    """
+    Batch permanently delete multiple document records in a single transaction.
+
+    Hard-deletes the matching documents together with their chunks (removed via
+    the ``chunks.filename`` ON DELETE CASCADE), any soft-deleted chunks, and any
+    related plagiarism incident / false positive records.
+
+    Args:
+        doc_ids: List of document IDs to permanently delete.
+
+    Returns:
+        The total number of deleted document records.
+    """
+    if not doc_ids:
+        return 0
+
+    placeholders = ",".join(["?"] * len(doc_ids))
+    doc_id_tuple = tuple(doc_ids)
+
+    with _connect() as conn:
+        # Resolve affected filenames before the documents are removed so related
+        # records can be purged from tables without cascade constraints.
+        filenames = [
+            row[0]
+            for row in conn.execute(
+                f"SELECT filename FROM documents WHERE id IN ({placeholders})",
+                doc_id_tuple,
+            ).fetchall()
+        ]
+
+        for filename in filenames:
+            conn.execute(
+                "DELETE FROM plagiarism_incidents WHERE document_a = ? OR document_b = ?",
+                (filename, filename),
+            )
+            conn.execute(
+                "DELETE FROM false_positives WHERE document_a = ? OR document_b = ?",
+                (filename, filename),
+            )
+            conn.execute("DELETE FROM deleted_chunks WHERE filename = ?", (filename,))
+
+        cursor = conn.execute(
+            f"DELETE FROM documents WHERE id IN ({placeholders})",
+            doc_id_tuple,
+        )
+        rowcount = cursor.rowcount
+
+    if filenames:
+        _compact_vector_ids()
     return rowcount
 
 
@@ -873,6 +958,8 @@ def get_deleted_documents_count() -> int:
             "SELECT COUNT(1) FROM documents WHERE is_deleted = 1"
         ).fetchone()
         return int(row[0]) if row else 0
+
+
 def search_documents_fts(query_text: str) -> list[dict]:
     """Search the document corpus using the FTS5 full-text index (issue #1359).
 
@@ -942,3 +1029,87 @@ def search_documents_fts(query_text: str) -> list[dict]:
         return []
 
 
+def record_scan_summary(
+    document_count: int,
+    avg_similarity: float,
+    max_similarity: float,
+    flagged_count: int,
+    threshold_used: float,
+) -> bool:
+    """Record a scan session summary for historical trend analysis.
+
+    Args:
+        document_count: Number of documents processed in the scan.
+        avg_similarity: Average similarity score across all document pairs.
+        max_similarity: Highest similarity score detected in the scan.
+        flagged_count: Number of document pairs flagged as plagiarism.
+        threshold_used: The similarity threshold used for flagging.
+
+    Returns:
+        True if the record was successfully inserted, False otherwise.
+    """
+    try:
+        with _connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO scan_history
+                (timestamp, document_count, avg_similarity, max_similarity, flagged_count, threshold_used)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    datetime.now().isoformat(),
+                    int(document_count),
+                    float(avg_similarity),
+                    float(max_similarity),
+                    int(flagged_count),
+                    float(threshold_used),
+                ),
+            )
+        logger.info(
+            "Recorded scan summary: %d docs, %.2f avg sim, %d flagged.",
+            document_count,
+            avg_similarity,
+            flagged_count,
+        )
+        return True
+    except Exception as exc:
+        logger.error("Failed to record scan summary: %s", exc)
+        return False
+
+
+def get_scan_history(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    limit: int = 100,
+) -> list[dict]:
+    """Retrieve historical scan summaries with optional date filtering.
+
+    Args:
+        start_date: Optional ISO format start date string (YYYY-MM-DD).
+        end_date: Optional ISO format end date string (YYYY-MM-DD).
+        limit: Maximum number of records to return (default 100).
+
+    Returns:
+        List of dictionaries containing scan history records, ordered by timestamp descending.
+    """
+    query = "SELECT * FROM scan_history WHERE 1=1"
+    params = []
+
+    if start_date:
+        query += " AND timestamp >= ?"
+        params.append(f"{start_date}T00:00:00")
+    if end_date:
+        query += " AND timestamp <= ?"
+        params.append(f"{end_date}T23:59:59")
+
+    query += " ORDER BY timestamp DESC LIMIT ?"
+    params.append(int(limit))
+
+    try:
+        with _connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(query, params).fetchall()
+            return [dict(row) for row in rows]
+    except Exception as exc:
+        logger.error("Failed to retrieve scan history: %s", exc)
+        return []

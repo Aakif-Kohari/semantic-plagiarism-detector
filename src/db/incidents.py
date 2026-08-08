@@ -14,13 +14,13 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional
 
 from src.core.app_config import CORPUS_DB_PATH, FALLBACK_DATA_DIR
+from src.core.concurrency import with_sqlite_retry
 from src.core.config import (
     normalize_score,
     normalize_severity_label,
     severity_from_score,
 )
-from src.db.common import with_sqlite_retry
-from src.db.migrations import migrate_corpus_database
+from src.db.migrations import migrate_corpus_database, table_exists
 from src.db.schemas import MatchResult
 
 # Seed the incidents default DB path from the centralized app_config.
@@ -137,7 +137,8 @@ def _validate_incident(flag: Mapping[str, Any]) -> tuple[bool, str]:
 
 
 def _fetch_all_incidents(conn: sqlite3.Connection) -> list[MatchResult]:
-    from src.db.schemas import MatchResult
+    pass
+
 
 def _validate_pagination(limit: int, offset: int) -> tuple[int, int]:
     """Validate and normalize SQL pagination arguments."""
@@ -190,9 +191,7 @@ def _fetch_all_incidents(
             review_status=row["review_status"],
             date_flagged=row["date_flagged"],
             last_seen=row["last_seen"],
-            threshold_at_time_of_flag=row[
-                "threshold_at_time_of_flag"
-            ],
+            threshold_at_time_of_flag=row["threshold_at_time_of_flag"],
         )
         for row in rows
     ]
@@ -412,7 +411,7 @@ def get_incidents_by_severity(
             WHERE severity_rank = ?
             ORDER BY date_flagged DESC, incident_id ASC
             """,
-(norm_severity,),
+            (norm_severity,),
         ).fetchall()
         return [dict(row) for row in rows]
 
@@ -452,7 +451,54 @@ def get_incidents_by_date_range(
         return [dict(row) for row in rows]
 
 
-def get_all_incidents_above_threshold_for_export(    threshold: float,
+def get_incidents_by_assignment(
+    assignment_title: str,
+    db_path: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    """Return list of plagiarism incidents matching specified assignment title.
+
+    Args:
+        assignment_title: The target assignment title.
+        db_path: Path to the SQLite corpus database.
+
+    Returns:
+        A list of incident dicts.
+    """
+    if db_path is None:
+        db_path = DEFAULT_DB_PATH
+    init_incident_db(db_path)
+    with closing(_get_connection(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        if table_exists(conn, "incidents"):
+            rows = conn.execute(
+                """
+                SELECT * FROM incidents
+                WHERE assignment_title = ?
+                ORDER BY timestamp DESC
+                """,
+                (assignment_title,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+        rows = conn.execute(
+            """
+            SELECT DISTINCT i.incident_id, i.document_a, i.document_b,
+                            i.similarity_score, i.severity_rank,
+                            i.review_status, i.date_flagged, i.last_seen,
+                            i.threshold_at_time_of_flag
+            FROM plagiarism_incidents i
+            LEFT JOIN documents da ON i.document_a = da.filename
+            LEFT JOIN documents db ON i.document_b = db.filename
+            WHERE da.assignment_title = ? OR db.assignment_title = ?
+            ORDER BY i.date_flagged DESC, i.incident_id ASC
+            """,
+            (assignment_title, assignment_title),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def get_all_incidents_above_threshold_for_export(
+    threshold: float,
     db_path: str | Path = DEFAULT_DB_PATH,
 ) -> list[MatchResult]:
     from src.db.schemas import MatchResult
@@ -865,7 +911,7 @@ def purge_old_incidents(
             """,
             (status, days_old),
         )
-conn.commit()
+        conn.commit()
         return cursor.rowcount
 
 
@@ -920,7 +966,8 @@ def archive_old_incidents(
 
 
 @lru_cache(maxsize=128)
-def get_recent_incidents(    limit: int = 5,
+def get_recent_incidents(
+    limit: int = 5,
     db_path: str | Path | None = None,
 ) -> list[MatchResult]:
     """Fetch recent visible plagiarism incidents, cached for performance."""
@@ -937,8 +984,6 @@ def log_incident(
     now: str | None = None,
     threshold: float | None = None,
 ) -> MatchResult:
-    if db_path is None:
-        db_path = DEFAULT_DB_PATH
     """Log a single plagiarism incident and clear get_recent_incidents cache.
 
     Args:
@@ -948,6 +993,8 @@ def log_incident(
     Returns:
         The created MatchResult.
     """
+    if db_path is None:
+        db_path = DEFAULT_DB_PATH
     results = sync_flagged_incidents([flag], db_path, now=now, threshold=threshold)
     if not results:
         raise ValueError("Failed to log incident: Invalid input.")
