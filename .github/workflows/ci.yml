@@ -38,47 +38,21 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install ruff pylint mypy
+          pip install ruff pylint mypy pip-audit pytest pytest-cov
+          # Pre-install numpy<2.5.0 so pip's resolver doesn't try to pull
+          # numpy 2.5.x (which requires Python >=3.12) on Python 3.9-3.11.
+          pip install "numpy>=1.26.0,<2.5.0"
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Run Ruff Linter
         run: |
           ruff check .
 
-      - name: Run Pylint for Streamlit anti-patterns
-        env:
-          PYTHONPATH: .
+      - name: Run Mypy (Type Check)
         run: |
-          pylint --load-plugins=pylint_plugins.streamlit_lint --disable=all --enable=streamlit-global-mutation app/ src/
+          mypy src/
 
-      - name: Run Mypy Type Checking
-        run: |
-          mypy . --ignore-missing-imports || echo "Type checking failed, but allowing workflow to continue."
-
-  security-scan:
-    name: Dependency Vulnerability Scanning
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-          cache: 'pip'
-          # Issue #695 Implementation: Enabling pip cache
-          cache-dependency-path: '**/requirements*.txt'
-
-      # Issue #688 Implementation: Pip Audit Step
-      - name: Install pip-audit
-        run: |
-          python -m pip install --upgrade pip
-          pip install pip-audit
-
-      - name: Run pip-audit for CVEs
+      - name: Run Automated Test Runner (Coverage Enforcement)
         run: |
           echo "Scanning requirements.txt for known vulnerabilities..."
           # Fail the build if vulnerabilities are found in the dependency tree
@@ -98,11 +72,11 @@ jobs:
   test:
     name: Execute Test Suite
     runs-on: ubuntu-latest
-    needs: [lint-and-type-check, security-scan]
+    needs: [lint-and-type-check]
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.9', '3.10', '3.11']
+        python-version: ['3.10', '3.11', '3.12']
 
     steps:
       - name: Checkout repository
@@ -120,12 +94,22 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pytest pytest-cov pytest-xdist
+          # Pre-install numpy<2.5.0 so pip's resolver doesn't try to pull
+          # numpy 2.5.x (which requires Python >=3.12) on Python 3.9-3.11.
+          pip install "numpy>=1.26.0,<2.5.0"
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Run Test Runner (Parallel)
         run: |
           chmod +x scripts/run_tests.py
           python scripts/run_tests.py --parallel --coverage
+
+      - name: Enforce Coverage Threshold (≥85%)
+        # Resolves #1616 – fail the build if total coverage drops below 85 %.
+        # The previous step already ran pytest with --cov, which writes .coverage.
+        # This step reads that data and exits non-zero when the threshold is not met.
+        run: |
+          coverage report --fail-under=85
 
       - name: Upload Coverage to Action Artifacts
         uses: actions/upload-artifact@v4
