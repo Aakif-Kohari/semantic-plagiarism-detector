@@ -11,6 +11,7 @@ import numpy as np
 
 START_TIME = time.time()
 total_scans = 0
+logger = logging.getLogger(__name__)
 from fastapi import (
     BackgroundTasks,
     Depends,
@@ -444,6 +445,7 @@ def get_service_status(request: Request):
     version, and the server timestamp in ISO 8601 UTC format so external clients
     can quickly confirm the service is online.
     """
+    logger.debug("Service status requested")
     return {
         "status": "online",
         "version": request.app.version,
@@ -1060,7 +1062,6 @@ def get_async_scan_status(
 
 # ── System Administration ──────────────────────────────────────────────────────
 
-logger = logging.getLogger(__name__)
 # Cast to str for consistency with callers that may pass it to faiss.*
 # or other C-extension APIs that require str paths.
 INDEX_PATH = str(FAISS_INDEX_PATH)
