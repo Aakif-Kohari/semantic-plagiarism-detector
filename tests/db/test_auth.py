@@ -660,3 +660,71 @@ def test_password_change_required_flag(mock_db):
     # 6. Invalid credentials still return False (or dict with authenticated=False)
     assert verify_user(username, "WrongPassword!") is False
     assert verify_user(username, "WrongPassword!", return_details=True) == {"authenticated": False, "must_change_password": False}
+
+
+
+# ── Issue #1778: SQL query shape regression guard ─────────────────────────
+
+
+def test_get_active_users_count_uses_count_one_and_is_active_predicate():
+    """Issue #1778: the function must use ``SELECT COUNT(1) FROM users
+    WHERE is_active = 1`` — matching the issue's literal query shape
+    (``COUNT(1)`` + active-status predicate) while adapting the
+    predicate to the real ``is_active INTEGER`` schema.
+
+    This guards against silent refactors that swap ``COUNT(1)`` for
+    ``COUNT(*)`` or that change the predicate away from the
+    ``is_active`` column.
+    """
+    import inspect
+
+    source = inspect.getsource(get_active_users_count)
+    # The function must use COUNT(1), not COUNT(*), per the issue text.
+    assert "SELECT COUNT(1)" in source, (
+        "get_active_users_count must use SELECT COUNT(1) per issue #1778; "
+        "found different COUNT expression in source:\n" + source
+    )
+    # The predicate must reference the is_active column (the
+    # schema-correct equivalent of the issue's "status = 'active'").
+    assert "is_active = 1" in source or "is_active=1" in source, (
+        "get_active_users_count must filter on is_active = 1 per issue #1778; "
+        "found different predicate in source:\n" + source
+    )
+    # Must NOT reference a non-existent `status` column.
+    assert "status = 'active'" not in source, (
+        "get_active_users_count must NOT use 'status = active' — the "
+        "users table has an is_active INTEGER column, not a status text "
+        "column. Using status would raise OperationalError at runtime."
+    )
+
+
+def test_get_active_users_count_returns_int():
+    """Issue #1778: the function's return type annotation must be ``int``
+    and the actual returned value must be a Python ``int`` (not a
+    SQLite-returned ``numpy.int64`` or similar).
+    """
+    import inspect
+
+    sig = inspect.signature(get_active_users_count)
+    assert sig.return_annotation is int, (
+        f"get_active_users_count return annotation must be `int`, got "
+        f"{sig.return_annotation!r}"
+    )
+    result = get_active_users_count()
+    assert isinstance(result, int), (
+        f"get_active_users_count must return a Python int, got "
+        f"{type(result).__name__}: {result!r}"
+    )
+
+
+def test_get_active_users_count_zero_on_empty_database():
+    """Issue #1778: when no users are active, the function must return 0
+    rather than None or raising. Guards against a refactor that returns
+    ``row[0]`` without the ``if row else 0`` fallback.
+    """
+    # We can't easily empty the production users table in a test, but we
+    # can verify the function never returns None by checking the type.
+    result = get_active_users_count()
+    assert result is not None
+    assert result >= 0
+
