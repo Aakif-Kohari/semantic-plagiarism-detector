@@ -174,6 +174,13 @@ def _annotation_color(theme_colors: dict[str, str] | None) -> str:
         return theme_colors.get("ink", "#64748b")
     return "#64748b"
 
+def _annotation_color(theme_colors: dict[str, str] | None) -> str:
+    """Return the color for annotations based on the theme."""
+    if not theme_colors or not isinstance(theme_colors, dict):
+        return "#64748b"  # Default slate-500
+    return theme_colors.get("ink_muted", theme_colors.get("ink", "#64748b"))
+
+
 def build_visualization_lazily(
     enabled: bool,
     factory: Callable[[], FigureT],
@@ -566,6 +573,7 @@ def plot_severity_donut_chart(
         fig.update_layout(
             title="Plagiarism Incident Severity Distribution",
             height=400,
+            autosize=True,
         )
         return apply_plotly_theme(fig, theme_colors, show_grid=False)
 
@@ -600,6 +608,7 @@ def plot_severity_donut_chart(
         title="Plagiarism Incident Severity Distribution",
         height=400,
         showlegend=True,
+        autosize=True,
     )
     return apply_plotly_theme(fig, theme_colors, show_grid=False)
 
@@ -951,3 +960,4 @@ def plot_hierarchical_dendrogram(
 
     return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)
 
+    return fig

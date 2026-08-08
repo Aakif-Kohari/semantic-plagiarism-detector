@@ -18,6 +18,8 @@ from .faiss_index import (
     build_index,
     build_index_from_matrix,
     find_plagiarised_chunks,
+    format_faiss_memory_badge,
+    get_faiss_index_memory_bytes,
     load_index,
     save_index,
     search_similar_chunks,
@@ -35,6 +37,7 @@ from .tag_manager import TagManager, sanitize_tag_name
 from .text_chunking import chunk_by_sentences, chunk_document, chunk_documents
 from .translator import translate_text
 from .webhook import send_plagiarism_alert
+
 
 __all__ = [
     "with_sqlite_retry",
@@ -58,6 +61,8 @@ __all__ = [
     "build_index",
     "search_similar_chunks",
     "find_plagiarised_chunks",
+    "get_faiss_index_memory_bytes",
+    "format_faiss_memory_badge",
     "save_index",
     "load_index",
     "ChunkRecord",

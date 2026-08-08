@@ -288,20 +288,76 @@ FULLWIDTH_TRANSLATION = str.maketrans(
 
 
 def normalize_unicode_spaces(text: str) -> str:
+    """Normalize special Unicode whitespace, zero-width characters, and full-width punctuation.
+    
+    Documents extracted from PDFs, DOCX files, or web sources often contain
+    non-standard Unicode characters that break string matching, lexical
+    similarity calculations, and tokenization. This function acts as a
+    comprehensive fallback normalizer to ensure consistent text representation
+    across different operating systems and extraction libraries.
+    
+    Handled conversions:
+    - Non-breaking spaces (\u00A0) -> standard space
+    - Thin spaces (\u2009), hair spaces (\u200A) -> standard space
+    - Zero-width spaces (\u200B), zero-width joiners/non-joiners -> empty string
+    - Soft hyphens (\u00AD) -> empty string
+    - Byte Order Mark / Zero-width no-break space (\uFEFF) -> empty string
+    - Full-width punctuation and alphanumerics -> half-width (via NFKC normalization)
+    
+    Args:
+        text: The input text string to normalize.
+        
+    Returns:
+        The normalized text string with standard spaces and half-width characters.
+        Returns an empty string if the input is None, empty, or not a string.
+        
+    Examples:
+        >>> normalize_unicode_spaces("Hello\u00A0World")
+        'Hello World'
+        >>> normalize_unicode_spaces("soft\u00ADhyphen")
+        'softhyphen'
+        >>> normalize_unicode_spaces("Ｆｕｌｌ－ｗｉｄｔｈ")
+        'Full-width'
     """
-    Normalize Unicode spacing and punctuation so visually identical
-    documents compare consistently.
-    """
-    if not text:
-        return text
-
-    # Remove soft hyphens
-    text = text.replace("\u00ad", "")
-
-    # Normalize full-width punctuation
-    text = text.translate(FULLWIDTH_TRANSLATION)
-
-    return text
+    # Validate input type and handle empty/None gracefully
+    if not text or not isinstance(text, str):
+        return ""
+        
+    # Step 1: Apply NFKC normalization to convert full-width characters to half-width
+    # and compose compatibility characters. This handles Asian full-width punctuation
+    # and ensures mathematical symbols are standardized.
+    text = unicodedata.normalize("NFKC", text)
+    
+    # Step 2: Map specific problematic Unicode characters to standard equivalents
+    # using str.translate for O(1) performance per character lookup.
+    # This is significantly faster than chained .replace() calls.
+    unicode_mapping = {
+        0x00A0: " ",    # Non-breaking space (common in PDFs and web scrapes)
+        0x2009: " ",    # Thin space
+        0x200A: " ",    # Hair space
+        0x202F: " ",    # Narrow no-break space
+        0x205F: " ",    # Medium mathematical space
+        0x3000: " ",    # Ideographic space (full-width space used in CJK text)
+        0x00AD: "",     # Soft hyphen (invisible but breaks regex word boundaries)
+        0x200B: "",     # Zero-width space
+        0x200C: "",     # Zero-width non-joiner
+        0x200D: "",     # Zero-width joiner
+        0xFEFF: "",     # Zero-width no-break space / Byte Order Mark (BOM)
+        0x2060: "",     # Word joiner
+        0x2028: "\n",   # Line separator -> standard newline
+        0x2029: "\n\n", # Paragraph separator -> double newline
+    }
+    
+    text = text.translate(unicode_mapping)
+    
+    # Step 3: Collapse multiple consecutive standard spaces into a single space
+    # to prevent artificial inflation of lexical distance metrics and ensure
+    # consistent tokenization in downstream embedding models.
+    text = re.sub(r" {2,}", " ", text)
+    
+    # Step 4: Strip leading/trailing whitespace that may have been introduced
+    # by the normalization process.
+    return text.strip()
 
 
 def check_batch_rate_limit(file_count: int, session_id: Optional[str] = None) -> None:
