@@ -276,6 +276,7 @@ from src.visualization.network_graph import (
 )
 from src.core.text_chunking import chunk_documents
 from src.db import (
+    clear_all_data,
     delete_document,
     get_all_documents,
     get_all_embeddings,
@@ -662,6 +663,58 @@ def build_visualization_lazily(is_enabled, build_fn):
     return None
 
 
+@st.dialog("⚠️ Confirm Bulk Clear")
+def clear_all_dialog():
+    st.markdown(
+        "**WARNING:** This action is destructive and cannot be undone. "
+        "This will permanently delete all student documents, paragraph chunks, "
+        "and plagiarism incidents from the database, and reset the FAISS index."
+    )
+    st.write("Are you absolutely sure you want to proceed?")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Cancel", use_container_width=True, key="cancel_clear_all"):
+            st.rerun()
+    with col2:
+        if st.button(
+            "Clear All",
+            type="primary",
+            use_container_width=True,
+            key="confirm_clear_all",
+        ):
+            clear_all_data()
+            if os.path.exists(_INDEX_PATH):
+                try:
+                    os.remove(_INDEX_PATH)
+                except OSError as e:
+                    print(f"Error removing FAISS index: {e}")
+                except Exception as e:
+                    logger.error(f"Error removing FAISS index: {e}")
+
+            try:
+                from src.utils.redis_cache import get_cache
+
+                cache = get_cache()
+                if cache.is_available():
+                    cache.delete("faiss:index:corpus_index")
+                    cache.clear_pattern("analysis:*")
+            except (ImportError, RuntimeError, ConnectionError) as e:
+                print(f"Error invalidating cache: {e}")
+            except Exception as e:
+                logger.error(f"Error invalidating cache: {e}")
+
+            if "analysis_results" in st.session_state:
+                st.session_state.analysis_results = None
+            if "analysis_file_signature" in st.session_state:
+                st.session_state.analysis_file_signature = None
+            if "processed_pipeline_signature" in st.session_state:
+                st.session_state.processed_pipeline_signature = None
+
+            st.success("✅ All documents, chunks, and incidents have been cleared.")
+            st.rerun()
+>>>>>>> f7b2ce9 (Fix linting, type-checking, and syntax errors)
+
 
 # ── Issue #1383: Cosine vs Lexical Similarity Comparison Table ─────────────────
 SEMANTIC_HIGH_THRESHOLD = 0.80  # vector (cosine) score considered "high"
@@ -735,12 +788,13 @@ def render_cosine_vs_lexical_comparison_table(
                 "Document B": db,
                 "Cosine (Semantic)": cosine_score,
                 "Jaccard (Lexical)": jaccard_score,
-                "Semantic-Only Paraphrasing?": "🚨 Yes" if is_semantic_only else "No",
+                "Semantic Only": is_semantic_only,
             }
         )
 
     comp_df = pd.DataFrame(rows)
-    st.dataframe(comp_df)
+    if not comp_df.empty:
+        st.dataframe(comp_df, use_container_width=True)
     return comp_df
 
 from datetime import date, timedelta

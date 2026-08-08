@@ -53,6 +53,13 @@ def _annotation_color(theme_colors: dict[str, str] | None) -> str:
         return theme_colors.get("ink", "#64748b")
     return "#64748b"
 
+def _annotation_color(theme_colors: dict[str, str] | None) -> str:
+    """Return the color for annotations based on the theme."""
+    if not theme_colors or not isinstance(theme_colors, dict):
+        return "#64748b"  # Default slate-500
+    return theme_colors.get("ink_muted", theme_colors.get("ink", "#64748b"))
+
+
 def build_visualization_lazily(
     enabled: bool,
     factory: Callable[[], FigureT],
