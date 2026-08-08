@@ -201,6 +201,23 @@ def _hash_password(password: str) -> str:
     return _ph.hash(password)
 
 
+def set_password_change_required(username: str, required: bool) -> None:
+    """Set or clear the must_change_password flag for a user account.
+
+    When *required* is True the user will be forced to change their password
+    on their next successful login.
+    """
+    username = _validate_username(username)
+    with _connect() as conn:
+        result = conn.execute(
+            "UPDATE users SET must_change_password = ? WHERE username = ?",
+            (1 if required else 0, username),
+        )
+        conn.commit()
+    if result.rowcount == 0:
+        raise ValueError(f"User '{username}' not found.")
+
+
 def _verify_password_hash(password: str, stored_hash: str) -> bool:
     """Return True if password matches stored Argon2 or bcrypt hash."""
     if not stored_hash:
@@ -300,27 +317,43 @@ def init_db() -> None:
         pass
 
 
-def verify_user(username: str, password: str) -> bool:
-    """Return True if username exists, account is active, and password matches."""
+def verify_user(
+    username: str,
+    password: str,
+    return_details: bool = False,
+) -> bool | dict:
+    """Authenticate a user and return auth status.
+
+    If return_details is True, returns a dict
+    ``{"authenticated": bool, "must_change_password": bool}``.
+    Otherwise returns a boolean (True on success, False on failure).
+    """
     try:
         username = _validate_username(username)
         password = _validate_password(password)
     except ValueError:
+        if return_details:
+            return {"authenticated": False, "must_change_password": False}
         return False
 
     with _connect() as conn:
         row = conn.execute(
-            "SELECT password, is_active FROM users WHERE username = ?",
+            "SELECT password, is_active, must_change_password FROM users WHERE username = ?",
             (username,),
         ).fetchone()
 
     if not row:
+        if return_details:
+            return {"authenticated": False, "must_change_password": False}
         return False
 
-    stored_hash, is_active = row
+    stored_hash, is_active, must_change_password = row
     if not is_active:
+        if return_details:
+            return {"authenticated": False, "must_change_password": False}
         return False
 
+    authenticated = False
     if stored_hash.startswith("$argon2"):
         try:
             _ph.verify(stored_hash, password)
@@ -333,11 +366,11 @@ def verify_user(username: str, password: str) -> bool:
                     )
                     conn_rehash.commit()
             _record_login_timestamp(username)
-            return True
+            authenticated = True
         except (VerifyMismatchError, VerificationError):
-            return False
+            authenticated = False
 
-    if stored_hash.startswith(("$2a$", "$2b$", "$2y$")):
+    elif stored_hash.startswith(("$2a$", "$2b$", "$2y$")):
         try:
             if bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8")):
                 hashed = _hash_password(password)
@@ -348,11 +381,16 @@ def verify_user(username: str, password: str) -> bool:
                     )
                     conn_migrate.commit()
                 _record_login_timestamp(username)
-                return True
+                authenticated = True
         except ValueError:
-            return False
+            authenticated = False
 
-    return False
+    if return_details:
+        return {
+            "authenticated": authenticated,
+            "must_change_password": bool(must_change_password) if authenticated else False,
+        }
+    return authenticated
 
 
 authenticate_user = verify_user
