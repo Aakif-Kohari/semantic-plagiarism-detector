@@ -1769,6 +1769,7 @@ def extract_text(
     *,
     ocr_language: str = DEFAULT_OCR_LANGUAGE,
     ocr_dpi: int = DEFAULT_OCR_DPI,
+    to_lowercase: bool = False,
 ) -> str:
     """Route extraction according to a filename extension."""
     ocr_language, ocr_dpi = normalize_ocr_settings(
@@ -1822,6 +1823,9 @@ def extract_text(
 
     raw = sanitize_zero_width_characters(raw, filename=filename)
     lang_code = detect_text_language(raw)
+
+    if to_lowercase:
+        raw = raw.lower()
 
     logger.info(
         f"[document_parser] Detected language for document '{filename}': {lang_code}"

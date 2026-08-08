@@ -19,6 +19,8 @@ from src.core.document_parser import (
     strip_bibliography,
     normalize_unicode_spaces,
     normalize_extended_punctuation,
+    parallel_extract_texts,
+    mask_named_entities_in_text,
 )
 
 import time
@@ -863,8 +865,8 @@ class TestNormalizeExtendedPunctuation:
 
 import unicodedata
 import pytest
-from src.core.document_parser import normalize_unicode_nfc, extract_text
-from unittest.mock import patch, MagicMock
+from src.core.document_parser import normalize_unicode_nfc
+from unittest.mock import patch
 
 
 class TestNormalizeUnicodeNFC:
@@ -945,12 +947,39 @@ class TestNormalizeUnicodeNFC:
         assert result == "café résumé"
         assert unicodedata.is_normalized("NFC", result)
 
+    @patch("src.core.document_parser.extract_text_from_txt")
+    def test_extract_text_applies_lowercase(self, mock_extract_txt):
+        """Verify extract_text pipeline applies lowercase when requested."""
+        mock_extract_txt.return_value = "HELLO World!"
+
+        with patch(
+            "src.core.document_parser.strip_bibliography", side_effect=lambda x: x
+        ), patch(
+            "src.core.document_parser.normalize_unicode_spaces", side_effect=lambda x: x
+        ), patch(
+            "src.core.document_parser.sanitize_zero_width_characters",
+            side_effect=lambda x, **k: x,
+        ), patch(
+            "src.core.document_parser.normalize_extended_punctuation",
+            side_effect=lambda x: x,
+        ), patch(
+            "src.core.document_parser.detect_text_language", return_value="en"
+        ), patch(
+            "src.core.document_parser._read_pdf_bytes", side_effect=lambda x: x
+        ), patch(
+            "src.security.mime_validator.validate_mime_type", return_value=True
+        ):
+            # Without lowercase
+            result_default = extract_text(b"dummy", "test.txt")
+            assert result_default == "HELLO World!"
+
+            # With lowercase
+            result_lower = extract_text(b"dummy", "test.txt", to_lowercase=True)
+            assert result_lower == "hello world!"
 
 # ─── Tests for Unicode Fallback Normalization (Issue #921) ────────────────────
 
-import unicodedata
 import pytest
-from src.core.document_parser import normalize_unicode_spaces
 
 class TestNormalizeUnicodeSpaces:
     """Comprehensive test suite for special Unicode character normalization."""
