@@ -331,14 +331,13 @@ def inject_css() -> None:
     """
     colors = sanitize_theme_colors(get_colors())
 
-    css = f"""
-    <style>
+    main_css = f"""
         @import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;0,6..72,700;1,6..72,400&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
 
         :root {{
             --primary-bg: {colors["background"]};
             --secondary-bg: {colors["surface"]};
-            --text-color: var(--text-color);
+            --text-color: {colors["ink"]};
             --secondary-text-color: {colors["muted"]};
             --border-color: {colors["border"]};
             --accent-color: {colors["accent"]};
@@ -635,6 +634,13 @@ def inject_css() -> None:
 
         .warning-card-low {{
             border-left: 4px solid var(--success) !important;
+        }}
+
+        /* ── High severity row accent border (Issue #1569) ───────────── */
+
+        .high-severity-row {{
+            border-left: 4px solid #ef4444 !important;
+            background-color: rgba(239, 68, 68, 0.05) !important;
         }}
 
         /* ── Warning list container animation (#369) ─────────────────
@@ -1148,9 +1154,15 @@ def inject_css() -> None:
         border-radius: 8px;
         margin-bottom: 1.5rem;
     }}
+
+    /* High Severity Row Styling (Issue #1569) */
+    .high-severity-row {{
+        border-left: 4px solid #ef4444 !important;
+        background-color: rgba(239, 68, 68, 0.05) !important;
+    }}
     """
 
-    css = base_css + file_uploader_css + sidebar_active_tab_css
+    css = main_css + base_css + file_uploader_css + sidebar_active_tab_css
 
     if st.session_state.get("privacy_mode", False):
         css += """
