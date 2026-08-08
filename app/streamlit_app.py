@@ -1071,6 +1071,14 @@ with action_col2:
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
+    try:
+        from src.db.auth import get_upload_count
+        total_scans_sidebar = get_upload_count()
+    except Exception as e:
+        logger.error(f"Failed to query total scan count for sidebar: {e}")
+        total_scans_sidebar = 0
+
+    st.markdown(f"Total Scans Processed: {total_scans_sidebar:,}")
     st.markdown("### ⚙️ Settings")
 
     lang_options = list(_SUPPORTED_LANGUAGES.values())
