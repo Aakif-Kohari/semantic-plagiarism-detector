@@ -355,7 +355,9 @@ def test_delete_user_removes_matching_session_and_authorization_rows(mock_db):
 def test_connect_uses_fifteen_second_timeout():
     """Verify that _connect helper sets sqlite3 timeout to 15.0 seconds."""
     from unittest.mock import patch
-    from src.db.auth import _connect
+    from src.db.auth import _connect, SQLITE_TIMEOUT
+
+    assert SQLITE_TIMEOUT == 15.0
 
     with patch("sqlite3.connect") as mock_connect:
         _connect()

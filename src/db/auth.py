@@ -32,6 +32,8 @@ _DB_PATH = os.path.abspath(str(AUTH_DB_PATH))
 
 VALID_ROLES = {"admin", "teacher"}
 
+SQLITE_TIMEOUT: float = 15.0
+
 PASSWORD_COMPLEXITY_REGEX = re.compile(
     r"^(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\])[A-Za-z\d@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\]{8,}$"
 )
@@ -46,7 +48,8 @@ def configure_db_path(db_path: str | os.PathLike) -> None:
 
 
 def _connect() -> sqlite3.Connection:
-    return sqlite3.connect(_DB_PATH, timeout=15.0, check_same_thread=False)
+    """Establish a connection to the SQLite database with configured timeout."""
+    return sqlite3.connect(_DB_PATH, timeout=SQLITE_TIMEOUT, check_same_thread=False)
 
 
 def log_security_event(
