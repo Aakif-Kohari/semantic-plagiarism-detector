@@ -19,7 +19,7 @@ import numpy as np
 import psutil
 
 from src.core.app_config import CORPUS_DB_PATH, FALLBACK_CORPUS_DB_PATH
-from src.db.common import with_sqlite_retry
+from src.core.concurrency import with_sqlite_retry
 from src.db.migrations.common import column_exists, delete_all_if_table_exists
 from src.utils.filename import sanitize_filename
 
@@ -276,13 +276,30 @@ def add_document(
     tags: str = None,
     detected_language: str = None,
     owner: str = None,
-) -> bool:
+) -> int | None:
     """Insert a new document metadata row using parameterized execution."""
     filename = sanitize_filename(filename)
 
     try:
         with _connect() as conn:
-            conn.execute(
+            existing = conn.execute(
+                """
+                SELECT id
+                FROM documents
+                WHERE file_hash = ?
+                  AND (is_deleted IS NULL OR is_deleted = 0)
+                """,
+                (file_hash,),
+            ).fetchone()
+
+            if existing:
+                logger.info(
+                    "Document %s already exists in corpus; skipping insertion.",
+                    file_hash,
+                )
+                return existing[0]
+
+            cursor = conn.execute(
                 "INSERT INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, tags, detected_language, owner) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     filename,
@@ -299,9 +316,9 @@ def add_document(
                     owner,
                 ),
             )
-            return True
+            return cursor.lastrowid
     except sqlite3.IntegrityError:
-        return False
+        return None
 
 
 def get_document_by_hash(file_hash: str) -> str | None:
@@ -1035,7 +1052,7 @@ def record_scan_summary(
         with _connect() as conn:
             conn.execute(
                 """
-                INSERT INTO scan_history 
+                INSERT INTO scan_history
                 (timestamp, document_count, avg_similarity, max_similarity, flagged_count, threshold_used)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
