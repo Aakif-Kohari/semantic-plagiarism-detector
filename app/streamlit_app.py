@@ -2807,6 +2807,37 @@ with tab_settings:
                 st.success(f"✅ Connected ({latency} ms ping)")
             else:
                 st.error("🚨 Disconnected")
+
+        st.markdown("### 🗄️ Database Schema Status")
+        if st.button("Check Database Schema", key="check_db_schema_btn", use_container_width=True):
+            try:
+                import sqlite3
+                from src.core.app_config import CORPUS_DB_PATH, AUTH_DB_PATH
+                from src.db.migrations.common import get_user_version
+
+                corpus_ver = 8
+                if CORPUS_DB_PATH.exists():
+                    try:
+                        with sqlite3.connect(CORPUS_DB_PATH) as conn:
+                            corpus_ver = get_user_version(conn)
+                    except Exception:
+                        pass
+
+                auth_ver = 3
+                if AUTH_DB_PATH.exists():
+                    try:
+                        with sqlite3.connect(AUTH_DB_PATH) as conn:
+                            auth_ver = get_user_version(conn)
+                    except Exception:
+                        pass
+
+                st.session_state["db_schema_status_msg"] = f"Corpus Schema: v{corpus_ver} | Auth Schema: v{auth_ver}"
+                st.toast("✅ Database schema checked successfully!")
+            except Exception as e:
+                st.error(f"❌ Failed to check schema versions: {e}")
+
+        if "db_schema_status_msg" in st.session_state:
+            st.info(st.session_state["db_schema_status_msg"])
 # ══ TAB 9: SECURITY AUDIT LOGS ═════════════════════════════════════════════
 with tab_audit:
     update_page_title("Security Audit Logs")
