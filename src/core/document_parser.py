@@ -1817,6 +1817,7 @@ def extract_text(
 
     raw = strip_bibliography(raw)
     raw = normalize_unicode_spaces(raw)
+    raw = normalize_extended_punctuation(raw)
 
     # Apply NFC normalization to ensure consistent string matching across OSes (Issue #1482)
     raw = normalize_unicode_nfc(raw)
@@ -1830,6 +1831,8 @@ def extract_text(
     logger.info(
         f"[document_parser] Detected language for document '{filename}': {lang_code}"
     )
+    if to_lowercase:
+        raw = raw.lower()
     return raw
 
 
@@ -1874,14 +1877,14 @@ def _extract_text_from_file_path(file_path: Path) -> tuple[str, str]:
 
 
 def parallel_extract_texts(
-    file_paths: list[Path], max_workers: int = 4
+    file_paths: list[Path], max_workers: int | None = None
 ) -> dict[str, str]:
     """
     Extract text from multiple file paths concurrently using a ProcessPoolExecutor.
 
     Args:
         file_paths: List of file Path objects to extract text from.
-        max_workers: Maximum process workers to spawn (default: 4).
+        max_workers: Maximum process workers to spawn (default: min(max_workers, os.cpu_count())).
 
     Returns:
         dict[str, str]: Mapping of filename to extracted text string.
@@ -1900,9 +1903,12 @@ def parallel_extract_texts(
 
     from concurrent.futures import ProcessPoolExecutor, as_completed
 
+    cpu_count = os.cpu_count() or 1
+    safe_max_workers = min(max_workers, cpu_count) if max_workers is not None else cpu_count
+
     results = {}
     try:
-        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        with ProcessPoolExecutor(max_workers=safe_max_workers) as executor:
             future_to_path = {
                 executor.submit(_extract_text_from_file_path, path): path
                 for path in paths
