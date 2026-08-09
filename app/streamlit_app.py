@@ -1201,6 +1201,8 @@ with st.sidebar:
             value=5,
             key=SessionKeys.FAISS_TOP_K_SLIDER,
         )
+        from app.components.faiss_results import render_faiss_metric_badge
+        render_faiss_metric_badge(st.session_state.get("faiss_index", None))
 
         # ── FAISS Vector Index Memory Footprint Badge (Issue #1563) ────────────
         from src.core.faiss_index import format_faiss_memory_badge
