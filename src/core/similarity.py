@@ -12,6 +12,8 @@ cosine similarity reduces to the dot product, making this very fast.
 import logging
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
+logger = logging.getLogger(__name__)
+
 import faiss  # type: ignore
 import numpy as np
 import pandas as pd

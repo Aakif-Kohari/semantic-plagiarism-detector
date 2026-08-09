@@ -313,6 +313,26 @@ def get_colors() -> dict:
         return THEMES["Light"]
 
 
+def get_chart_colors() -> dict:
+    """Return the color palette Plotly chart builders should use.
+
+    Normally mirrors the app's active Light/Dark theme (via get_colors()).
+    If the user has enabled "Force Dark Mode Charts" in Settings, this
+    returns the Dark palette regardless of the app's overall theme, so
+    charts can be forced dark independently of the Streamlit UI theme.
+
+    Note: "force_dark_charts" must match SessionKeys.FORCE_DARK_CHARTS
+    (app/session_keys.py) — not imported directly here to avoid a
+    circular import between app.theme and app.session_keys.
+    """
+    try:
+        if st.session_state.get("force_dark_charts", False):
+            return THEMES["Dark"]
+    except Exception:
+        pass
+    return get_colors()
+
+
 def inject_css() -> None:
     """
     Inject CSS for the currently selected Light or Dark theme.
