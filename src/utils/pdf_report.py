@@ -1080,7 +1080,134 @@ def generate_audit_summary_pdf(
     buffer.seek(0)
     return buffer
 
+def generate_batch_plagiarism_report(
+    incidents: list[dict[str, Any]],
+    *,
+    report_title: str = "Batch Plagiarism Investigation Report",
+) -> BytesIO:
+    """Generate one consolidated PDF containing all flagged incidents."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import inch
+    from reportlab.platypus import (
+        SimpleDocTemplate,
+        Paragraph,
+        Spacer,
+        Table,
+        TableStyle,
+        PageBreak,
+    )
 
+    buffer = BytesIO()
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=40,
+        leftMargin=40,
+        topMargin=40,
+        bottomMargin=40,
+    )
+
+    styles = getSampleStyleSheet()
+    story = []
+
+    story.append(Paragraph(report_title, styles["Title"]))
+    story.append(Spacer(1, 12))
+
+    total_incidents = len(incidents)
+
+    severity_counts: dict[str, int] = {}
+    for incident in incidents:
+        severity = str(incident.get("severity_rank", "Unknown"))
+        severity_counts[severity] = severity_counts.get(severity, 0) + 1
+
+    story.append(Paragraph("Summary Statistics", styles["Heading2"]))
+    story.append(
+        Paragraph(
+            f"Total flagged incidents: {total_incidents}",
+            styles["BodyText"],
+        )
+    )
+    story.append(Spacer(1, 10))
+
+    severity_rows = [["Severity", "Count"]]
+    severity_rows.extend(
+        [severity, str(count)]
+        for severity, count in severity_counts.items()
+    )
+
+    severity_table = Table(severity_rows)
+    severity_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ("PADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+
+    story.append(severity_table)
+    story.append(PageBreak())
+
+    story.append(
+        Paragraph("Flagged Plagiarism Cases", styles["Heading2"])
+    )
+    story.append(Spacer(1, 10))
+
+    for index, incident in enumerate(incidents, start=1):
+        document_a = str(incident.get("document_a", "Unknown"))
+        document_b = str(incident.get("document_b", "Unknown"))
+        severity = str(incident.get("severity_rank", "Unknown"))
+
+        similarity = incident.get("similarity_score", 0)
+        try:
+            similarity_text = f"{float(similarity):.1%}"
+        except (TypeError, ValueError):
+            similarity_text = str(similarity)
+
+        story.append(
+            Paragraph(
+                f"Case {index}: {document_a} ↔ {document_b}",
+                styles["Heading3"],
+            )
+        )
+
+        case_rows = [
+            ["Field", "Value"],
+            ["Document A", document_a],
+            ["Document B", document_b],
+            ["Similarity", similarity_text],
+            ["Severity", severity],
+        ]
+
+        case_table = Table(
+            case_rows,
+            colWidths=[1.5 * inch, 4.5 * inch],
+        )
+        case_table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                    ("PADDING", (0, 0), (-1, -1), 6),
+                ]
+            )
+        )
+
+        story.append(case_table)
+        story.append(Spacer(1, 15))
+
+        if index < len(incidents):
+            story.append(PageBreak())
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
 def generate_audit_summary_report(
     metrics: dict[str, Any],
     top_flagged_pairs: list[dict[str, Any]],
