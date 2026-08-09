@@ -242,6 +242,11 @@ def get_database_table_stats(db_path: str | Path) -> dict[str, int]:
 
         >>> get_database_table_stats("/nonexistent.db")
         {'_table_count': 0}
+
+    Issue traceability:
+        Originally added under issue #1156. Issue #1773 requests the same
+        helper with the same acceptance criteria; regression tests in
+        ``TestGetDatabaseTableStatsIssue1773`` lock in the contract.
     """
     resolved_path = Path(db_path).expanduser().resolve()
 
