@@ -715,6 +715,7 @@ def clear_all_dialog():
             st.rerun()
 
 
+
 # ── Issue #1383: Cosine vs Lexical Similarity Comparison Table ─────────────────
 SEMANTIC_HIGH_THRESHOLD = 0.80  # vector (cosine) score considered "high"
 LEXICAL_LOW_THRESHOLD = 0.30    # lexical (jaccard) score considered "low"
@@ -1016,57 +1017,6 @@ def logout_dialog():
             clear_session(SESSION_ID)
             st.rerun()
 
-
-@st.dialog("⚠️ Confirm Bulk Clear")
-def clear_all_dialog():
-    st.markdown(
-        "**WARNING:** This action is destructive and cannot be undone. "
-        "This will permanently delete all student documents, paragraph chunks, "
-        "and plagiarism incidents from the database, and reset the FAISS index."
-    )
-    st.write("Are you absolutely sure you want to proceed?")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Cancel", use_container_width=True, key="cancel_clear_all"):
-            st.rerun()
-    with col2:
-        if st.button(
-            "Clear All",
-            type="primary",
-            use_container_width=True,
-            key="confirm_clear_all",
-        ):
-            clear_all_data()
-            if os.path.exists(_INDEX_PATH):
-                try:
-                    os.remove(_INDEX_PATH)
-                except OSError as e:
-                    print(f"Error removing FAISS index: {e}")
-                except Exception as e:
-                    logger.error(f"Error removing FAISS index: {e}")
-
-            try:
-                from src.utils.redis_cache import get_cache
-
-                cache = get_cache()
-                if cache.is_available():
-                    cache.delete("faiss:index:corpus_index")
-                    cache.clear_pattern("analysis:*")
-            except (ImportError, RuntimeError, ConnectionError) as e:
-                print(f"Error invalidating cache: {e}")
-            except Exception as e:
-                logger.error(f"Error invalidating cache: {e}")
-
-            if "analysis_results" in st.session_state:
-                st.session_state.analysis_results = None
-            if "analysis_file_signature" in st.session_state:
-                st.session_state.analysis_file_signature = None
-            if "processed_pipeline_signature" in st.session_state:
-                st.session_state.processed_pipeline_signature = None
-
-            st.success("✅ All documents, chunks, and incidents have been cleared.")
-            st.rerun()
 
 
 # ── Corpus Overview Header & Quick Actions (#1242) ───────────────────────────
@@ -2381,7 +2331,7 @@ st.divider()
         get_text("tab_users", lang=lang_code),
         get_text("tab_settings", lang=lang_code),
         "📊 History",
-        "🔒 Audit Logs",
+        get_text("tab_audit_logs", lang=lang_code),
     ],
     key="main_tabs",
 )
