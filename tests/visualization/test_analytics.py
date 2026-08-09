@@ -7,7 +7,6 @@ Unit tests for the analytics visualization functions.
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import pandas as pd
 import pytest
 
 from src.visualization.analytics import (
@@ -45,11 +44,6 @@ def test_plot_similarity_boxplot_by_group_returns_figure():
     box_names = [trace.name for trace in fig.data]
     assert box_names == ["Essay 1", "Essay 2"]
     assert list(fig.data[0].y) == scores_dict["Essay 1"]
-
-
-def test_plot_similarity_boxplot_by_group_empty_dict():
-    """An empty scores_dict should return a figure with a message, not error."""
-    fig = plot_similarity_boxplot_by_group({})
 
 
 def test_plot_similarity_boxplot_by_group_empty_dict():

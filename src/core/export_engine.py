@@ -14,9 +14,7 @@ import csv
 import io
 import json
 import logging
-from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
 
 from src.errors import (
     EXPORT_GENERATION_IO_FAILED,

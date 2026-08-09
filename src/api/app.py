@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.security import HTTPBearer
 import psutil
 import numpy as np
 
@@ -18,13 +17,6 @@ total_scans = 0
 logger = logging.getLogger(__name__)
 from fastapi import (
     BackgroundTasks,
-    Depends,
-    FastAPI,
-    File,
-    HTTPException,
-    Query,
-    UploadFile,
-    status,
     Request,
     Security,
 )
@@ -34,8 +26,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse, JSONResponse
+from fastapi.responses import PlainTextResponse
 
 from src.api.middleware import verify_bearer_token, get_current_user
 from src.api.schemas import (

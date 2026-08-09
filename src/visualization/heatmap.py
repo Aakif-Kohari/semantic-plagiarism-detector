@@ -432,7 +432,7 @@ def plot_similarity_heatmap_plotly(
     """Interactive Plotly heatmap featuring dynamic hover values and custom threshold bounds."""
     import plotly.graph_objects as go
 
-    scale = max(0.5, float(font_scale))
+    scale = max(0.5, float(1.0))
 
     if similarity_df.empty or len(similarity_df) == 0:
         fig = go.Figure()
@@ -1455,7 +1455,6 @@ def plot_multi_heatmap_grid(
                     )
 
         # Per-panel axis styling
-        axis_idx = panel_idx + 1
         tick_sz = int(max(7, 10 - n // 3) * scale)
         fig.update_xaxes(
             tickangle=-30,

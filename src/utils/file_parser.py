@@ -25,7 +25,6 @@ along with file categorization, validation helpers, and PDF metadata extraction.
 
 from typing import Any, List, Optional, Tuple
 
-import fitz  # PyMuPDF
 
 
 class EncryptedPDFError(Exception):

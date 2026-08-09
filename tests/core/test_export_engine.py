@@ -45,7 +45,6 @@ import csv
 import io
 import json
 
-from src.core.export_engine import LMSExportEngine
 
 
 def test_generate_incident_csv_empty():

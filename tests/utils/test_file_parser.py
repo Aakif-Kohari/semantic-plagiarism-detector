@@ -38,7 +38,6 @@ tests/utils/test_file_parser.py
 Includes tests for password-protected PDF parsing and MIME categorization.
 """
 
-import fitz
 import pytest
 
 from src.utils.file_parser import (
