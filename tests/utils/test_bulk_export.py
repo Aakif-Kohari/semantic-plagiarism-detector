@@ -608,3 +608,23 @@ def test_export_incidents_csv_delimiter_validation():
     assert "," in first_line_none
 
 
+def test_export_incidents_csv_quoting_style():
+    """Verify that export_incidents_csv respects custom quoting styles (#1739)."""
+    import csv
+
+    # Test QUOTE_ALL: all fields should be quoted
+    csv_bytes_all = export_incidents_csv(_SAMPLE_INCIDENTS, quoting_style=csv.QUOTE_ALL)
+    text_all = csv_bytes_all.decode("utf-8-sig")
+    first_line_all = text_all.splitlines()[0]
+    # Header fields must be quoted
+    assert '"Incident ID","Doc A","Doc B","Similarity","Severity","Status","Date"' in first_line_all
+
+    # Test QUOTE_MINIMAL: default minimal quoting (normal string without special characters is unquoted)
+    csv_bytes_min = export_incidents_csv(_SAMPLE_INCIDENTS, quoting_style=csv.QUOTE_MINIMAL)
+    text_min = csv_bytes_min.decode("utf-8-sig")
+    first_line_min = text_min.splitlines()[0]
+    # Header fields must not be quoted
+    assert "Incident ID,Doc A,Doc B,Similarity,Severity,Status,Date" in first_line_min
+
+
+
