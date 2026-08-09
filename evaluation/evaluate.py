@@ -24,9 +24,9 @@ import sys
 from pathlib import Path
 
 import matplotlib
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics import auc, precision_recall_curve, roc_curve
 from sklearn.metrics.pairwise import cosine_similarity as sklearn_cosine
@@ -72,7 +72,7 @@ def compute_semantic_similarities(pairs: list) -> np.ndarray:
     # Row-wise cosine similarity (not full N×N — just the diagonal pairs)
     similarities = np.array(
         [
-            float(sklearn_cosine(emb_a[i: i + 1], emb_b[i: i + 1])[0, 0])
+            float(sklearn_cosine(emb_a[i : i + 1], emb_b[i : i + 1])[0, 0])
             for i in range(len(pairs))
         ]
     )
