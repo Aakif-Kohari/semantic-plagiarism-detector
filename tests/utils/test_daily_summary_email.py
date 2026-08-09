@@ -7,6 +7,8 @@ Tests for daily summary email functionality and HTML template generation.
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
+
+
 import pytest
 
 from src.utils.daily_summary_email import (
@@ -411,11 +413,19 @@ class TestEmailTemplateHelpers:
     def test_build_email_html_body_inline_css_compatibility(self):
         """Test that critical inline CSS properties are present for email clients."""
         html = build_email_html_body(incidents_data=[], total_scans=0)
-
         assert "max-width: 600px" in html
         assert "background-color: #f9f9f9" in html
         assert "border-radius: 8px" in html
         assert "font-family: Arial, sans-serif" in html
+
+def test_send_email_invalid_recipient():
+    """Test that an invalid recipient email raises ValueError."""
+    with pytest.raises(ValueError):
+        send_email(
+            to_emails=["notanemail"],
+            subject="Test Subject",
+            html_body="<p>Test</p>",
+        )
 
 
 def test_send_email_status_callback_success():
@@ -478,3 +488,48 @@ def test_send_email_status_callback_failure():
         assert success is False
         assert "SMTP Connection Failed" in message
 
+
+def test_send_email_passes_timeout_parameter():
+    """Verify that timeout parameter is passed to smtplib.SMTP and SMTP_SSL (#1746)."""
+    with patch("smtplib.SMTP") as mock_smtp, patch.dict(
+        "os.environ",
+        {
+            "SMTP_SERVER": "smtp.example.com",
+            "SMTP_PORT": "587",
+            "SMTP_USERNAME": "test@example.com",
+            "SMTP_PASSWORD": "password",
+            "FROM_EMAIL": "test@example.com",
+        },
+    ):
+        mock_server = MagicMock()
+        mock_smtp.return_value.__enter__.return_value = mock_server
+
+        # Test passing custom timeout
+        send_email(
+            ["recipient@example.com"],
+            "Test Subject",
+            "<p>Body</p>",
+            timeout=15.5
+        )
+        mock_smtp.assert_called_once_with("smtp.example.com", 587, timeout=15.5)
+
+    with patch("smtplib.SMTP_SSL") as mock_smtp_ssl, patch.dict(
+        "os.environ",
+        {
+            "SMTP_SERVER": "smtp.example.com",
+            "SMTP_PORT": "465",
+            "SMTP_USERNAME": "test@example.com",
+            "SMTP_PASSWORD": "password",
+            "FROM_EMAIL": "test@example.com",
+        },
+    ):
+        mock_server_ssl = MagicMock()
+        mock_smtp_ssl.return_value.__enter__.return_value = mock_server_ssl
+
+        # Test default timeout
+        send_email(
+            ["recipient@example.com"],
+            "Test Subject",
+            "<p>Body</p>",
+        )
+        mock_smtp_ssl.assert_called_once_with("smtp.example.com", 465, timeout=10.0)
