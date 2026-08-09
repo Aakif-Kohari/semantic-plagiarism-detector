@@ -2,7 +2,6 @@ import sqlite3
 import tempfile
 import threading
 import pathlib
-import pytest
 
 def worker_insert(db_path, thread_id, iterations=50):
     """Worker function to execute concurrent insert transactions."""

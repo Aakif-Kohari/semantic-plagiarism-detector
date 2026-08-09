@@ -9,12 +9,18 @@ Uses cosine similarity. Since embeddings are L2-normalised in embedding_model.py
 cosine similarity reduces to the dot product, making this very fast.
 """
 
+import logging
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
+
+logger = logging.getLogger(__name__)
 
 import faiss  # type: ignore
 import numpy as np
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
+
+logger = logging.getLogger(__name__)
+
 
 from src.core.config import (
     DEFAULT_THRESHOLDS,
@@ -22,6 +28,14 @@ from src.core.config import (
     is_plagiarism,
     severity_from_score,
 )
+
+# ── Distance / similarity conversion ──────────────────────────────────────────
+
+
+def cosine_distance_to_similarity(distance: float) -> float:
+    """Convert a cosine distance (1 - similarity) back to a similarity score."""
+    return max(0.0, min(1.0, 1.0 - distance))
+
 
 # ── Validation helpers ─────────────────────────────────────────────────────────
 
@@ -84,6 +98,23 @@ def _apply_min_percentile_filter(
 
 # ── Distance-based similarity ──────────────────────────────────────────────────
 
+def cosine_distance_to_similarity(distance: float) -> float:
+    """Convert a cosine distance to a standardized cosine similarity score.
+
+    Formula:
+        similarity = max(0.0, min(1.0, 1.0 - distance))
+
+    Args:
+        distance: Cosine distance value (typically in [0.0, 2.0]).
+
+    Returns:
+        A float similarity score strictly bounded in [0.0, 1.0].
+    """
+    if isinstance(distance, np.ndarray):
+        return np.clip(1.0 - distance, 0.0, 1.0)
+    return float(max(0.0, min(1.0, 1.0 - distance)))
+
+
 def manhattan_similarity(
     vec_a: np.ndarray,
     vec_b: np.ndarray,
@@ -145,6 +176,7 @@ def manhattan_similarity(
 def document_similarity_matrix(
     doc_embeddings: Union[Dict[str, np.ndarray], np.ndarray, List[np.ndarray]],
     batch_size: Optional[int] = None,
+    min_threshold: float = 0.0,
     min_percentile: Optional[float] = None,
 ) -> Union[pd.DataFrame, np.ndarray]:
     """
@@ -153,6 +185,8 @@ def document_similarity_matrix(
     Args:
         doc_embeddings: Dict mapping doc name → embedding array, or direct array/list of embeddings.
         batch_size: Optional number of documents to compare per batch.
+        min_threshold: Minimum similarity score to keep; values below this will be 0.0.
+        min_percentile: Optional percentile threshold for filtering.
 
     Returns:
         Symmetric pandas DataFrame or numpy ndarray with similarity values.
@@ -162,6 +196,7 @@ def document_similarity_matrix(
         if stacked.ndim == 1 or stacked.size == 0:
             return np.array([[]])
         sim = np.clip(cosine_similarity(stacked), 0.0, 1.0)
+        sim = np.where(sim < min_threshold, 0.0, sim)
         return _apply_min_percentile_filter(sim, min_percentile)
     doc_names = list(doc_embeddings.keys())
     n = len(doc_names)
@@ -187,12 +222,14 @@ def document_similarity_matrix(
         safe_batch_size = _validated_batch_size(batch_size)
         if safe_batch_size is None:
             sim = cosine_similarity(stacked)
-            matrix = np.clip(sim, 0.0, 1.0)
+            sim = np.clip(sim, 0.0, 1.0)
+            matrix = np.where(sim < min_threshold, 0.0, sim)
         else:
             for start in range(0, n, safe_batch_size):
                 end = min(start + safe_batch_size, n)
                 sim = cosine_similarity(stacked[start:end], stacked)
-                matrix[start:end] = np.clip(sim, 0.0, 1.0)
+                sim = np.clip(sim, 0.0, 1.0)
+                matrix[start:end] = np.where(sim < min_threshold, 0.0, sim)
 
     df = pd.DataFrame(matrix, index=doc_names, columns=doc_names)
     return _apply_min_percentile_filter(df, min_percentile)
@@ -200,6 +237,7 @@ def document_similarity_matrix(
 def compute_similarity_matrix(
     embeddings: Union[Dict[str, np.ndarray], np.ndarray, List[np.ndarray]],
     batch_size: Optional[int] = None,
+    min_threshold: float = 0.0,
     min_percentile: Optional[float] = None,
 ) -> Union[pd.DataFrame, np.ndarray]:
     """
@@ -207,7 +245,7 @@ def compute_similarity_matrix(
     with app/streamlit_app.py and external modules.
     """
     return document_similarity_matrix(
-        embeddings, batch_size=batch_size, min_percentile=min_percentile
+        embeddings, batch_size=batch_size, min_threshold=min_threshold, min_percentile=min_percentile
     )
 
 # ── Hybrid similarity (lexical + semantic) ─────────────────────────────────────
@@ -427,7 +465,7 @@ def find_candidate_pairs(
     return candidates
 
 
-# ── Plagiarism flagging ────────────────────────────────────────────────────────
+# ── Plagiarism flagging ────────────────────────────────────────────────--------
 
 
 def flag_plagiarism(
@@ -772,3 +810,81 @@ def rerank_candidates_with_cross_encoder(
         )
         return candidates
 
+
+# ─── Plagiarism Cluster Detection (Issue #1675) ──────────────────────────────
+
+def detect_plagiarism_clusters(
+    similarity_df: pd.DataFrame,
+    threshold: float = PLAGIARISM_THRESHOLD,
+) -> dict:
+    """Detect groups (clusters) of highly related documents using connected components.
+    
+    Instead of only showing document pairs, this function builds a similarity graph
+    where edges exist between documents exceeding the threshold, then identifies
+    connected components to find groups of students who may be colluding or
+    sharing source material.
+    
+    Args:
+        similarity_df: Square N×N DataFrame of similarity scores.
+        threshold: Minimum similarity score to create an edge in the graph.
+        
+    Returns:
+        Dictionary containing:
+        - 'clusters': Dict mapping cluster_id (int) to list of document names.
+        - 'cluster_map': Dict mapping document name to its cluster_id.
+        - 'suspicious_groups': List of clusters with 3+ documents (potential collusion rings).
+    """
+    import networkx as nx
+    
+    doc_names = list(similarity_df.columns)
+    G = nx.Graph()
+    
+    # Add all documents as nodes
+    G.add_nodes_from(doc_names)
+    
+    # Add edges for pairs exceeding threshold
+    n = len(doc_names)
+    for i in range(n):
+        for j in range(i + 1, n):
+            score = float(similarity_df.iloc[i, j])
+            if score >= threshold:
+                G.add_edge(doc_names[i], doc_names[j], weight=score)
+    
+    # Detect connected components (clusters)
+    clusters = {}
+    cluster_map = {}
+    
+    for cluster_id, component in enumerate(nx.connected_components(G)):
+        cluster_list = sorted(list(component))
+        clusters[cluster_id] = cluster_list
+        for doc in cluster_list:
+            cluster_map[doc] = cluster_id
+            
+    # Identify suspicious groups (3+ documents in a cluster)
+    suspicious_groups = [
+        {
+            "cluster_id": cid,
+            "documents": docs,
+            "size": len(docs),
+        }
+        for cid, docs in clusters.items()
+        if len(docs) >= 3
+    ]
+    
+    # Sort suspicious groups by size descending
+    suspicious_groups.sort(key=lambda x: x["size"], reverse=True)
+    
+    logger.info(
+        "Detected %d plagiarism clusters, %d suspicious groups (3+ docs).",
+        len(clusters),
+        len(suspicious_groups),
+    )
+    
+    return {
+        "clusters": clusters,
+        "cluster_map": cluster_map,
+        "suspicious_groups": suspicious_groups,
+        "total_clusters": len(clusters),
+    }
+
+    

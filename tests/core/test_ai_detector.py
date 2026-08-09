@@ -8,6 +8,7 @@ Includes tests for:
 - Confidence tier categorization
 - Document-level AI detection statistics
 - Text perplexity scoring helper (Issue #1154)
+- Perplexity score normalization function (Issue #1584)
 """
 
 import math
@@ -22,6 +23,7 @@ from src.core.ai_detector import (
     detect_ai_probability_batch,
     detect_document_ai_probability,
     detect_documents_ai_probability,
+    normalize_perplexity,
 )
 
 
@@ -596,3 +598,39 @@ def test_calculate_text_perplexity_none_loss():
         finally:
             module._model = original_model
             module._tokenizer = original_tokenizer
+
+
+# ─── Tests for normalize_perplexity (Issue #1584) ─────────────────────────────
+
+
+def test_normalize_perplexity_basic():
+    """Test standard perplexity score normalization."""
+    # With scale_factor = 100.0: 100.0 -> 100 / (100 + 100) = 0.5
+    result = normalize_perplexity(100.0, scale_factor=100.0)
+    assert isinstance(result, float)
+    assert result == 0.5
+
+
+def test_normalize_perplexity_zero_and_negative():
+    """Zero or negative raw scores should map to 0.0."""
+    assert normalize_perplexity(0.0) == 0.0
+    assert normalize_perplexity(-10.0) == 0.0
+
+
+def test_normalize_perplexity_invalid_inputs():
+    """Non-numeric or None raw scores should return 0.0 safely."""
+    assert normalize_perplexity(None) == 0.0
+    assert normalize_perplexity("invalid") == 0.0  # type: ignore
+
+
+def test_normalize_perplexity_bounds():
+    """Normalized score must always be bounded between 0.0 and 1.0."""
+    assert 0.0 <= normalize_perplexity(1e6) <= 1.0
+    assert 0.0 <= normalize_perplexity(0.0) <= 1.0
+    
+def test_categorize_perplexity_score():
+    from src.core.ai_detector import categorize_perplexity_score
+    assert categorize_perplexity_score(25.0) == "Highly Predictable"
+    assert categorize_perplexity_score(50.0) == "Moderate"
+    assert categorize_perplexity_score(85.0) == "Unpredictable"
+    
