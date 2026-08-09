@@ -1511,3 +1511,23 @@ def plot_multi_heatmap_grid(
 
     return fig
 
+
++--- a/src/visualization/heatmap.py
++@@ -30,7 +30,7 @@
++     """
++     ax = sns.heatmap(data, cmap='viridis')
++     plt.title(title)
++-    plt.xlabel(xlabel)
+++    plt.xlabel(xlabel, rotation=axis_label_angle)
++     plt.ylabel(ylabel)
++     plt.show()
++
++--- a/src/visualization/heatmap.py
++@@ -45,7 +45,7 @@
++     """
++     ax = sns.heatmap(data, cmap='viridis', **kwargs)
++     plt.title(title)
++-    plt.xlabel(xlabel)
+++    plt.xlabel(xlabel, rotation=axis_label_angle)
++     plt.ylabel(ylabel)
++     plt.show()
