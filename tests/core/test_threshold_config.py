@@ -167,4 +167,3 @@ def test_severity_respects_plagiarism_boundary():
     # Higher severity boundaries remain unchanged.
     assert severity_from_score(0.75, thresholds) == "Medium"
     assert severity_from_score(0.90, thresholds) == "High"
-

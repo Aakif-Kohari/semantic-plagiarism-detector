@@ -4,12 +4,15 @@ src/utils/excel_export.py
 Utility for exporting similarity matrices into styled Excel (.xlsx) workbooks
 with conditional formatting matching the application's heatmap logic.
 Supports both in-memory generation and managed temporary disk-file creation with automatic exit cleanup.
+Also provides streaming CSV generation for memory-efficient exports of large datasets.
 """
 
 import atexit
+import csv
 import io
 import os
 import tempfile
+from typing import Generator
 
 import pandas as pd
 from openpyxl import Workbook
@@ -37,11 +40,11 @@ def _create_managed_temp_file(suffix: str = ".xlsx", prefix: str = "temp_") -> s
 def _truncate_title(title: str, max_length: int = 60) -> str:
     """
     Truncate a title to max_length characters, appending '...' if truncated.
-    
+
     Args:
         title: The title to truncate
         max_length: Maximum length before truncation (default: 60)
-        
+
     Returns:
         Truncated title with '...' suffix if original was longer
     """
@@ -73,7 +76,7 @@ def build_similarity_workbook(
         # Add full title as comment if truncated
         if len(index_label) > 60:
             cell.comment = Comment(index_label, "Excel Export")
-            
+
         for col_idx, val in enumerate(row, start=2):
             cell = ws.cell(row=row_idx, column=col_idx, value=float(val))
             cell.number_format = "0.0%"
@@ -143,7 +146,7 @@ def export_similarity_matrix_to_temp_file(
     """
     Exports the similarity matrix to a temporary .xlsx file on disk.
     The created file is automatically registered for cleanup on application exit via atexit.
-    
+
     Returns:
         str: Absolute path to the created temporary Excel file.
     """
@@ -151,3 +154,34 @@ def export_similarity_matrix_to_temp_file(
     temp_path = _create_managed_temp_file(suffix=".xlsx", prefix="similarity_matrix_")
     wb.save(temp_path)
     return temp_path
+
+
+def generate_csv_matrix_stream(matrix_df: pd.DataFrame) -> Generator[str, None, None]:
+    """
+    Yields CSV formatted lines line-by-line from a similarity matrix DataFrame.
+
+    Memory-efficient generator for exporting large result sets (>10,000 document pairs)
+    without materializing the entire formatted output string or Excel workbook in memory.
+
+    Args:
+        matrix_df (pd.DataFrame): Similarity matrix DataFrame with document labels as index and columns.
+
+    Yields:
+        str: CSV formatted string row (including newline character).
+    """
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+
+    # Yield header row
+    header = ["Document"] + list(matrix_df.columns)
+    writer.writerow(header)
+    yield buffer.getvalue()
+    buffer.seek(0)
+    buffer.truncate(0)
+
+    # Yield data rows line by line
+    for index, row in matrix_df.iterrows():
+        writer.writerow([index] + row.tolist())
+        yield buffer.getvalue()
+        buffer.seek(0)
+        buffer.truncate(0)
