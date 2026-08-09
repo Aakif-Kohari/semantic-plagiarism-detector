@@ -82,6 +82,7 @@ def plot_similarity_boxplot_by_group(
         )
         fig.update_xaxes(showgrid=show_grid)
         fig.update_yaxes(showgrid=show_grid)
+
 _apply_theme_colors(fig, theme_colors, theme_override)        return fig
 
         _apply_theme_colors(fig, theme_colors)
@@ -113,6 +114,11 @@ _apply_theme_colors(fig, theme_colors, theme_override)        return fig
 
     fig.update_xaxes(showgrid=show_grid)
     fig.update_yaxes(showgrid=show_grid, range=[0.0, 1.0])
+
+_apply_theme_colors(fig, theme_colors)
+
+    return fig
+
 
 _apply_theme_colors(fig, theme_colors, theme_override)
     return fig

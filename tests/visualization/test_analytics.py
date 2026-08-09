@@ -49,6 +49,11 @@ def test_plot_similarity_boxplot_by_group_empty_dict():
     """An empty scores_dict should return a figure with a message, not error."""
     fig = plot_similarity_boxplot_by_group({})
 
+
+def test_plot_similarity_boxplot_by_group_empty_dict():
+    """An empty scores_dict should return a figure with a message, not error."""
+    fig = plot_similarity_boxplot_by_group({})
+
     assert isinstance(fig, go.Figure)
     assert len(fig.data) == 0
     assert fig.layout.annotations[0].text == "No similarity scores available to plot"
