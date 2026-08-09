@@ -931,11 +931,21 @@ def get_user_count() -> int:
 
 
 def get_active_users_count() -> int:
-    """Return the total number of active users in the database."""
+    """Return the total number of active users in the database.
+
+    Issue #1778 acceptance criteria specifies the query shape
+    ``SELECT COUNT(1) FROM users WHERE status = 'active'``. The actual
+    ``users`` table uses an ``is_active INTEGER NOT NULL DEFAULT 1``
+    column (added by migration ``migrate_auth_database``) rather than a
+    text ``status`` column, so the predicate is ``is_active = 1`` — this
+    is the schema-correct translation of "status = 'active'".
+    ``COUNT(1)`` is used in the SELECT clause to match the issue's
+    literal query shape.
+    """
     with _connect() as conn:
-        cursor = conn.execute("SELECT COUNT(*) FROM users WHERE is_active = 1")
+        cursor = conn.execute("SELECT COUNT(1) FROM users WHERE is_active = 1")
         row = cursor.fetchone()
-        return row[0] if row else 0
+        return int(row[0]) if row else 0
 
 
 def format_user_created_date(iso_str: str) -> str:
