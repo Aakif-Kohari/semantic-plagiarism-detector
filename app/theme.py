@@ -30,6 +30,7 @@ Recent Additions (Issue #572):
 
 import re
 import secrets
+from datetime import datetime, timezone
 import streamlit as st
 
 
@@ -312,6 +313,26 @@ def get_colors() -> dict:
         return THEMES["Light"]
 
 
+def get_chart_colors() -> dict:
+    """Return the color palette Plotly chart builders should use.
+
+    Normally mirrors the app's active Light/Dark theme (via get_colors()).
+    If the user has enabled "Force Dark Mode Charts" in Settings, this
+    returns the Dark palette regardless of the app's overall theme, so
+    charts can be forced dark independently of the Streamlit UI theme.
+
+    Note: "force_dark_charts" must match SessionKeys.FORCE_DARK_CHARTS
+    (app/session_keys.py) — not imported directly here to avoid a
+    circular import between app.theme and app.session_keys.
+    """
+    try:
+        if st.session_state.get("force_dark_charts", False):
+            return THEMES["Dark"]
+    except Exception:
+        pass
+    return get_colors()
+
+
 def inject_css() -> None:
     """
     Inject CSS for the currently selected Light or Dark theme.
@@ -321,14 +342,13 @@ def inject_css() -> None:
     """
     colors = sanitize_theme_colors(get_colors())
 
-    css = f"""
-    <style>
+    main_css = f"""
         @import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;0,6..72,700;1,6..72,400&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
 
         :root {{
             --primary-bg: {colors["background"]};
             --secondary-bg: {colors["surface"]};
-            --text-color: var(--text-color);
+            --text-color: {colors["ink"]};
             --secondary-text-color: {colors["muted"]};
             --border-color: {colors["border"]};
             --accent-color: {colors["accent"]};
@@ -625,6 +645,13 @@ def inject_css() -> None:
 
         .warning-card-low {{
             border-left: 4px solid var(--success) !important;
+        }}
+
+        /* ── High severity row accent border (Issue #1569) ───────────── */
+
+        .high-severity-row {{
+            border-left: 4px solid #ef4444 !important;
+            background-color: rgba(239, 68, 68, 0.05) !important;
         }}
 
         /* ── Warning list container animation (#369) ─────────────────
@@ -1138,9 +1165,15 @@ def inject_css() -> None:
         border-radius: 8px;
         margin-bottom: 1.5rem;
     }}
+
+    /* High Severity Row Styling (Issue #1569) */
+    .high-severity-row {{
+        border-left: 4px solid #ef4444 !important;
+        background-color: rgba(239, 68, 68, 0.05) !important;
+    }}
     """
 
-    css = base_css + file_uploader_css + sidebar_active_tab_css
+    css = main_css + base_css + file_uploader_css + sidebar_active_tab_css
 
     if st.session_state.get("privacy_mode", False):
         css += """
@@ -1805,3 +1838,17 @@ def render_sidebar_navigation_menu(
         html_items.append(f'<li data-tab-id="{tab_id}">{badge}</li>')
 
     return f'<ul class="sidebar-nav-menu" style="list-style: none; padding: 0; margin: 0;">{"".join(html_items)}</ul>'
+
+
+def render_timezone_footer() -> str:
+    """Render current UTC server time and timezone label caption in the dashboard sidebar footer.
+
+    Returns:
+        Formatted server timezone caption string.
+    """
+    now_utc = datetime.now(timezone.utc)
+    time_str = now_utc.strftime("%H:%M")
+    caption_text = f"Server Time: {time_str} UTC"
+    st.sidebar.caption(f"🕒 {caption_text}")
+    return caption_text
+

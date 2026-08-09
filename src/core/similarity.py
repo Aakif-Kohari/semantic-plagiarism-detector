@@ -19,6 +19,9 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 
+logger = logging.getLogger(__name__)
+
+
 from src.core.config import (
     DEFAULT_THRESHOLDS,
     PLAGIARISM_THRESHOLD,
@@ -99,6 +102,8 @@ def cosine_distance_to_similarity(distance: float) -> float:
     Returns:
         A float similarity score strictly bounded in [0.0, 1.0].
     """
+    if isinstance(distance, np.ndarray):
+        return np.clip(1.0 - distance, 0.0, 1.0)
     return float(max(0.0, min(1.0, 1.0 - distance)))
 
 
@@ -163,6 +168,7 @@ def manhattan_similarity(
 def document_similarity_matrix(
     doc_embeddings: Union[Dict[str, np.ndarray], np.ndarray, List[np.ndarray]],
     batch_size: Optional[int] = None,
+    min_threshold: float = 0.0,
     min_percentile: Optional[float] = None,
 ) -> Union[pd.DataFrame, np.ndarray]:
     """
@@ -171,6 +177,8 @@ def document_similarity_matrix(
     Args:
         doc_embeddings: Dict mapping doc name → embedding array, or direct array/list of embeddings.
         batch_size: Optional number of documents to compare per batch.
+        min_threshold: Minimum similarity score to keep; values below this will be 0.0.
+        min_percentile: Optional percentile threshold for filtering.
 
     Returns:
         Symmetric pandas DataFrame or numpy ndarray with similarity values.
@@ -180,6 +188,7 @@ def document_similarity_matrix(
         if stacked.ndim == 1 or stacked.size == 0:
             return np.array([[]])
         sim = np.clip(cosine_similarity(stacked), 0.0, 1.0)
+        sim = np.where(sim < min_threshold, 0.0, sim)
         return _apply_min_percentile_filter(sim, min_percentile)
     doc_names = list(doc_embeddings.keys())
     n = len(doc_names)
@@ -205,12 +214,14 @@ def document_similarity_matrix(
         safe_batch_size = _validated_batch_size(batch_size)
         if safe_batch_size is None:
             sim = cosine_similarity(stacked)
-            matrix = np.clip(sim, 0.0, 1.0)
+            sim = np.clip(sim, 0.0, 1.0)
+            matrix = np.where(sim < min_threshold, 0.0, sim)
         else:
             for start in range(0, n, safe_batch_size):
                 end = min(start + safe_batch_size, n)
                 sim = cosine_similarity(stacked[start:end], stacked)
-                matrix[start:end] = np.clip(sim, 0.0, 1.0)
+                sim = np.clip(sim, 0.0, 1.0)
+                matrix[start:end] = np.where(sim < min_threshold, 0.0, sim)
 
     df = pd.DataFrame(matrix, index=doc_names, columns=doc_names)
     return _apply_min_percentile_filter(df, min_percentile)
@@ -218,6 +229,7 @@ def document_similarity_matrix(
 def compute_similarity_matrix(
     embeddings: Union[Dict[str, np.ndarray], np.ndarray, List[np.ndarray]],
     batch_size: Optional[int] = None,
+    min_threshold: float = 0.0,
     min_percentile: Optional[float] = None,
 ) -> Union[pd.DataFrame, np.ndarray]:
     """
@@ -225,7 +237,7 @@ def compute_similarity_matrix(
     with app/streamlit_app.py and external modules.
     """
     return document_similarity_matrix(
-        embeddings, batch_size=batch_size, min_percentile=min_percentile
+        embeddings, batch_size=batch_size, min_threshold=min_threshold, min_percentile=min_percentile
     )
 
 # ── Hybrid similarity (lexical + semantic) ─────────────────────────────────────
