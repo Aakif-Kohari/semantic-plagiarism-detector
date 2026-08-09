@@ -192,6 +192,9 @@ def export_incidents_csv_stream(
     >>> csv_bytes = export_incidents_csv_stream(incidents, delimiter=";")
     >>> assert b";" in csv_bytes
     """
+    if not isinstance(delimiter, str) or len(delimiter) != 1:
+        delimiter = ","
+
     output = io.StringIO()
     writer = csv.DictWriter(
         output,
@@ -223,6 +226,19 @@ def export_incidents_csv_stream(
 
     csv_text = output.getvalue()
     return csv_text.encode("utf-8-sig")
+
+
+def export_incidents_csv(
+    incidents_list: List[Dict], delimiter: str = ","
+) -> bytes:
+    """Export a list of incident dicts to a CSV-formatted byte stream.
+
+    Validates that the delimiter is a single character string, falling back to a
+    comma if an invalid delimiter is supplied.
+    """
+    if not isinstance(delimiter, str) or len(delimiter) != 1:
+        delimiter = ","
+    return export_incidents_csv_stream(incidents_list, delimiter=delimiter)
 
 
 def stream_incidents_csv_chunks(

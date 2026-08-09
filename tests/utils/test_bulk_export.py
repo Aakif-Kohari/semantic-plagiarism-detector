@@ -2,7 +2,11 @@ import io
 import json
 import zipfile
 
-from src.utils.bulk_export import export_incidents_csv_stream, generate_bulk_reports_zip
+from src.utils.bulk_export import (
+    export_incidents_csv_stream,
+    export_incidents_csv,
+    generate_bulk_reports_zip,
+)
 
 
 def test_generate_bulk_reports_zip():
@@ -582,4 +586,25 @@ def test_create_batch_incident_zip_archive_semicolon_delimiter():
         csv_text = zf.read("incidents_summary.csv").decode("utf-8-sig")
 
     assert "Incident ID;Doc A;Doc B" in csv_text
+
+
+def test_export_incidents_csv_delimiter_validation():
+    """Verify that export_incidents_csv validates delimiter and falls back to comma if invalid (#1735)."""
+    # 1. Test valid 1-character delimiter
+    csv_bytes = export_incidents_csv(_SAMPLE_INCIDENTS, delimiter=";")
+    first_line = csv_bytes.decode("utf-8-sig").splitlines()[0]
+    assert ";" in first_line
+    assert "," not in first_line
+
+    # 2. Test multi-character delimiter (invalid) -> should fall back to ","
+    csv_bytes_multi = export_incidents_csv(_SAMPLE_INCIDENTS, delimiter=";;")
+    first_line_multi = csv_bytes_multi.decode("utf-8-sig").splitlines()[0]
+    assert "," in first_line_multi
+    assert ";" not in first_line_multi
+
+    # 3. Test non-string delimiter (invalid) -> should fall back to ","
+    csv_bytes_none = export_incidents_csv(_SAMPLE_INCIDENTS, delimiter=None)
+    first_line_none = csv_bytes_none.decode("utf-8-sig").splitlines()[0]
+    assert "," in first_line_none
+
 
