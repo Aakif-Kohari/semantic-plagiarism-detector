@@ -2314,6 +2314,7 @@ st.divider()
     tab_matrix,
     tab_heatmap,
     tab_drill,
+    tab_compare,
     tab_analytics,
     tab_users,
     tab_settings,
@@ -2325,6 +2326,7 @@ st.divider()
         get_text("tab_matrix", lang=lang_code),
         get_text("tab_heatmap", lang=lang_code),
         get_text("tab_drill", lang=lang_code),
+        "🔬 Comparison",
         get_text("tab_analytics", lang=lang_code),
         get_text("tab_users", lang=lang_code),
         get_text("tab_settings", lang=lang_code),
@@ -2592,7 +2594,14 @@ with tab_drill:
                                 copy_label="📋 Copy Snippet",
                             )
 
-# ══ TAB 6: ANALYTICS ══════════════════════════════════════════════════════
+# ══ TAB 6: COMPARISON ══════════════════════════════════════════════════════
+with tab_compare:
+    update_page_title("Comparison")
+    from app.components.document_comparison import render_document_comparison
+    render_document_comparison()
+
+
+# ══ TAB 7: ANALYTICS ══════════════════════════════════════════════════════
 with tab_analytics:
     update_page_title("Analytics")
     st.subheader("📊 Analytics Dashboard")
