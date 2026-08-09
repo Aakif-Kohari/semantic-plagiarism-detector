@@ -2472,13 +2472,22 @@ with tab_matrix:
         st.dataframe(active_sim_df.style.format("{:.4f}"), use_container_width=True)
 
 # ══ TAB 4: HEATMAP ════════════════════════════════════════════════════════
+# ══ TAB 4: HEATMAP ════════════════════════════════════════════════════════
 with tab_heatmap:
     update_page_title("Heatmap")
     st.subheader("🗺️ Heatmap & Network")
+    heatmap_fig = None
     if active_sim_df is not None:
         heatmap_fig = ui_exception_handler("Similarity Heatmap")(
             plot_similarity_heatmap
         )(active_sim_df, threshold=threshold, theme_colors=get_colors())
+
+    if heatmap_fig is not None:
+        # plot_similarity_heatmap() returns a Matplotlib Figure, so it is
+        # rendered with st.pyplot(), not st.plotly_chart(). Passing
+        # use_container_width=True keeps it in sync with the container
+        # width (sidebar collapse/expand, mobile/tablet/desktop layouts).
+        st.pyplot(heatmap_fig, use_container_width=True)
 
     doc_select_options = (
         ["None"] + list(active_sim_df.columns)
@@ -2495,6 +2504,7 @@ with tab_heatmap:
         selected_highlight_doc if selected_highlight_doc != "None" else None
     )
 
+    network_fig = None
     if active_sim_df is not None:
         network_fig = ui_exception_handler("Plagiarism Network")(
             plot_similarity_network
@@ -2505,6 +2515,11 @@ with tab_heatmap:
             title="Interactive Document Plagiarism Network",
         )
 
+<<<<<<< HEAD
+    if network_fig is not None:
+        # plot_similarity_network() returns a Plotly go.Figure.
+        st.plotly_chart(network_fig, use_container_width=True)
+=======
     # ── Plagiarism Cluster Detection Summary (Issue #1675) ───────────────────
     if active_sim_df is not None and len(doc_names) >= 2:
         from src.core.similarity import detect_plagiarism_clusters
@@ -2527,6 +2542,7 @@ with tab_heatmap:
                     for doc in group["documents"]:
                         st.markdown(f"- 📄 `{doc}`")
                     st.divider()
+>>>>>>> 6fd8e0d43897198ba883ee60d9dea50d17446de8
 
 # ══ TAB 5: PAIR DRILL-DOWN ════════════════════════════════════════════════
 with tab_drill:
