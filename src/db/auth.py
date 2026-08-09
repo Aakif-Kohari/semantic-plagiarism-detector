@@ -47,9 +47,20 @@ def configure_db_path(db_path: str | os.PathLike) -> None:
     _DB_PATH = os.path.abspath(os.fspath(db_path))
 
 
-def _connect() -> sqlite3.Connection:
-    """Establish a connection to the SQLite database with configured timeout."""
-    return sqlite3.connect(_DB_PATH, timeout=SQLITE_TIMEOUT, check_same_thread=False)
+from contextlib import contextmanager
+from typing import Generator
+
+@contextmanager
+def _connect() -> Generator[sqlite3.Connection, None, None]:
+    """Establish a connection to the SQLite database with configured timeout and close on exit."""
+    conn = sqlite3.connect(_DB_PATH, timeout=SQLITE_TIMEOUT, check_same_thread=False)
+    try:
+        yield conn
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def log_security_event(
