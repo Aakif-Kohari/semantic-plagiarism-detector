@@ -241,7 +241,7 @@ if missing_env_vars:
 # ── Project Core & Utils Imports ──────────────────────────────────────────────
 from app.theme import (
     back_to_top_html,
-    get_colors,
+    get_chart_colors,
     get_theme_name,
     inject_css,
     set_theme,
@@ -2482,7 +2482,7 @@ with tab_heatmap:
     if active_sim_df is not None:
         heatmap_fig = ui_exception_handler("Similarity Heatmap")(
             plot_similarity_heatmap
-        )(active_sim_df, threshold=threshold, theme_colors=get_colors())
+        )(active_sim_df, threshold=threshold, theme_colors=get_chart_colors())
 
     if heatmap_fig is not None:
         # plot_similarity_heatmap() returns a Matplotlib Figure, so it is
@@ -2619,7 +2619,7 @@ with tab_analytics:
     st.markdown("### ⏱️ Pipeline Processing Time Breakdown")
     stage_timings = st.session_state.get("last_stage_timings") or st.session_state.get("stage_timings")
     if plot_processing_time_breakdown:
-        active_theme_colors = get_colors() if callable(get_colors) else None
+        active_theme_colors = get_chart_colors() if callable(get_chart_colors) else None
         fig_time = plot_processing_time_breakdown(
             stage_timings=stage_timings,
             theme_colors=active_theme_colors,
@@ -2643,6 +2643,14 @@ with tab_settings:
 
     from app.components.storage_quota import render_storage_quota_progress
     render_storage_quota_progress()
+
+    st.markdown("### 📊 Visualization")
+    st.toggle(
+        "Force Dark Mode Charts",
+        value=False,
+        key=SessionKeys.FORCE_DARK_CHARTS,
+        help="Render Plotly charts with dark styling regardless of the current Light/Dark app theme.",
+    )
 
     if user_role == "admin":
         st.markdown("### ⚙️ Advanced Configuration")
@@ -3151,13 +3159,13 @@ with tab_history:
         st.info("No scan history found for the selected date range. Run a scan to populate this dashboard.")
     else:
         # Similarity Trend Line Chart
-        trend_fig = plot_similarity_trend_line(history_data, theme_colors=get_colors())
+        trend_fig = plot_similarity_trend_line(history_data, theme_colors=get_chart_colors())
         st.plotly_chart(trend_fig, use_container_width=True)
         
         st.divider()
         
         # Flagged Documents Bar Chart
-        bar_fig = plot_flagged_documents_bar(history_data, theme_colors=get_colors())
+        bar_fig = plot_flagged_documents_bar(history_data, theme_colors=get_chart_colors())
         st.plotly_chart(bar_fig, use_container_width=True)
         
         st.divider()
