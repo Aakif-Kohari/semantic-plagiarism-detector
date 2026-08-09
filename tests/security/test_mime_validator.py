@@ -2,10 +2,8 @@ import io
 import zipfile
 from unittest.mock import patch
 
-import pytest
 
 from src.security.mime_validator import (
-    MAX_OOXML_ARCHIVE_ENTRIES,
     validate_mime_type,
 )
 
@@ -183,6 +181,13 @@ def test_truncated_zip_is_rejected():
     assert validate_mime_type(
         b"PK\x03\x04truncated",
         "report.docx",
+    ) is False
+
+
+def test_weak_pk_signature_without_full_magic_bytes_is_rejected():
+    assert validate_mime_type(
+        b"PK\x05\x06" + b"\x00" * 18,
+        "empty.docx",
     ) is False
 
 
