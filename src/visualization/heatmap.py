@@ -55,17 +55,21 @@ try:
     )
 except ImportError:
     UI_COLORMAP_OPTIONS = [
-        "Viridis",
-        "Cividis",
-        "Plasma",
-        "Coolwarm",
-        "YlOrRd",
-    ]
+    "Viridis",
+    "Cividis",
+    "Plasma",
+    "Blues",
+    "RdYlGn",
+    "Coolwarm",
+    "YlOrRd",
+]
 
     MATPLOTLIB_CMAP_MAPPING = {
         "Viridis": "viridis",
         "Cividis": "cividis",
         "Plasma": "plasma",
+        "Blues": "Blues",
+        "RdYlGn": "RdYlGn",
         "Coolwarm": "coolwarm",
         "YlOrRd": "YlOrRd",
     }
@@ -411,7 +415,28 @@ def plot_similarity_heatmap(
         fig.tight_layout()
         return fig
 
+@pytest.mark.parametrize(
+    ("colormap", "expected"),
+    [
+        ("Blues", "Blues"),
+        ("Plasma", "Plasma"),
+        ("RdYlGn", "RdYlGn"),
+    ],
+)
+def test_plot_similarity_heatmap_plotly_colormap_presets(
+    multi_doc_df: pd.DataFrame,
+    colormap: str,
+    expected: str,
+) -> None:
+    """Verify supported colormap presets configure the Plotly heatmap."""
+    fig = plot_similarity_heatmap_plotly(
+        multi_doc_df,
+        colormap_name=colormap,
+    )
 
+    heatmap = next(trace for trace in fig.data if trace.type == "heatmap")
+
+    assert heatmap.colorscale == expected
 # ── Interactive Visualization (Plotly) ─────────────────────────────────────────
 def plot_similarity_heatmap_plotly(
     similarity_df: pd.DataFrame,
@@ -419,6 +444,9 @@ def plot_similarity_heatmap_plotly(
     threshold: float = PLAGIARISM_THRESHOLD,
     theme_colors: Optional[Dict[str, str]] = None,
     colormap_name: str = DEFAULT_UI_COLORMAP,
+
+    colorscale: Optional[str] = None,
+    show_annotations: bool = True,    mask_threshold: Optional[float] = None,
     colorscale: str = "Viridis",
     show_annotations: bool = True,
     mask_threshold: Optional[float] = None,
@@ -467,7 +495,8 @@ def plot_similarity_heatmap_plotly(
         safe_title = "Semantic Similarity Matrix"
 
     cmap = PLOTLY_CMAP_MAPPING.get(colormap_name, "Viridis")
-
+    if colorscale is None:
+        colorscale = cmap
     try:
         clean_df = validate_similarity_matrix(similarity_df)
     except ValueError as error:
