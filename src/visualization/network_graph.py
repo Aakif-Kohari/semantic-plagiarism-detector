@@ -28,6 +28,7 @@ DEFAULT_TAG_COLORS = [
     "#14B8A6",  # Teal
 ]
 NETWORK_GRAPH_CONFIG = {
+    "scrollZoom": True,
     "toImageButtonOptions": {
         "format": "png",
         "filename": "plagiarism_network",

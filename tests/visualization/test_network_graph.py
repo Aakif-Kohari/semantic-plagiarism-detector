@@ -32,6 +32,7 @@ def test_export_network_adjacency_csv_empty_graph():
 
     assert csv_output.strip() == "Source,Target,Weight"
 from src.visualization.network_graph import (
+    NETWORK_GRAPH_CONFIG,
     build_network_data,
     calculate_force_directed_layout,
     export_graph_to_csv,
@@ -124,7 +125,9 @@ def test_build_network_data_node_color_severity():
     # doc_success has max_score=0.8 -> #ffff00
     assert net_data["node_trace"].marker.color[2] == "#ffff00"
 
-
+def test_network_graph_config_enables_scroll_zoom():
+    """Verify Plotly network graph configuration enables scroll zoom."""
+    assert NETWORK_GRAPH_CONFIG["scrollZoom"] is True
 
 def test_render_network_plotly_construction():
     """Verify render_network_plotly constructs a valid Plotly Figure from network data."""
