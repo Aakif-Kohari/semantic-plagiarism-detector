@@ -84,6 +84,9 @@ def plot_similarity_boxplot_by_group(
         fig.update_yaxes(showgrid=show_grid)
 _apply_theme_colors(fig, theme_colors, theme_override)        return fig
 
+        _apply_theme_colors(fig, theme_colors)
+        return fig
+
     fig = go.Figure()
     for group_name, scores in scores_dict.items():
         fig.add_trace(
@@ -188,6 +191,11 @@ def calculate_severity_ratios(incidents: list[dict[str, Any]]) -> dict[str, floa
         label: round((count / total) * 100, 2)
         for label, count in counts.items()
     }    
+
+    _apply_theme_colors(fig, theme_colors)
+
+    return fig
+    
 def _annotation_color(theme_colors: dict[str, str] | None) -> str:
     """Pick a readable annotation color for the given theme.
 

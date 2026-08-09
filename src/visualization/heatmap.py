@@ -429,11 +429,12 @@ def plot_similarity_heatmap_plotly(
     zmin: float = 0.0,
     zmax: float = 1.0,
 ):    """Interactive Plotly heatmap featuring dynamic hover values and custom threshold bounds."""
-<<<<<< feat/1603
     font_scale: float = 1.0,
 ):
     """Interactive Plotly heatmap featuring dynamic hover values and custom threshold bounds."""
 
+):
+    """Interactive Plotly heatmap featuring dynamic hover values and custom threshold bounds."""
     import plotly.graph_objects as go
 
     scale = max(0.5, float(font_scale))
@@ -547,7 +548,7 @@ def plot_similarity_heatmap_plotly(
         for i in range(n)
     ]
 
-fig = go.Figure(
+    fig = go.Figure(
         data=go.Heatmap(
             z=z_matrix,
             x=names,
