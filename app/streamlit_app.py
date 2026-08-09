@@ -292,6 +292,7 @@ from src.db.auth import (
     get_security_audit_logs,
     get_tour_completed,
     get_upload_count,
+    get_user_last_login,
     get_user_preferences,
     get_user_role,
     init_db,
@@ -1071,6 +1072,18 @@ with action_col2:
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
+    # ── Account Info (Issue: logged-in user details expander) ──────────────
+    if st.session_state.get(SessionKeys.AUTHENTICATED, False):
+        _current_username = st.session_state.get(SessionKeys.USERNAME) or "Unknown"
+        with st.sidebar.expander(f"👤 Logged in as: {_current_username}"):
+            st.markdown(f"**Username:** {_current_username}")
+            st.markdown(f"**Role:** {user_role.capitalize() if user_role else 'N/A'}")
+            try:
+                _last_login = get_user_last_login(_current_username)
+            except Exception:
+                _last_login = None
+            st.markdown(f"**Last Login:** {_last_login if _last_login else 'N/A'}")
+
     try:
         from src.db.auth import get_upload_count
         total_scans_sidebar = get_upload_count()
@@ -1188,6 +1201,8 @@ with st.sidebar:
             value=5,
             key=SessionKeys.FAISS_TOP_K_SLIDER,
         )
+        from app.components.faiss_results import render_faiss_metric_badge
+        render_faiss_metric_badge(st.session_state.get("faiss_index", None))
 
         # ── FAISS Vector Index Memory Footprint Badge (Issue #1563) ────────────
         from src.core.faiss_index import format_faiss_memory_badge
@@ -2459,13 +2474,22 @@ with tab_matrix:
         st.dataframe(active_sim_df.style.format("{:.4f}"), use_container_width=True)
 
 # ══ TAB 4: HEATMAP ════════════════════════════════════════════════════════
+# ══ TAB 4: HEATMAP ════════════════════════════════════════════════════════
 with tab_heatmap:
     update_page_title("Heatmap")
     st.subheader("🗺️ Heatmap & Network")
+    heatmap_fig = None
     if active_sim_df is not None:
         heatmap_fig = ui_exception_handler("Similarity Heatmap")(
             plot_similarity_heatmap
         )(active_sim_df, threshold=threshold, theme_colors=get_colors())
+
+    if heatmap_fig is not None:
+        # plot_similarity_heatmap() returns a Matplotlib Figure, so it is
+        # rendered with st.pyplot(), not st.plotly_chart(). Passing
+        # use_container_width=True keeps it in sync with the container
+        # width (sidebar collapse/expand, mobile/tablet/desktop layouts).
+        st.pyplot(heatmap_fig, use_container_width=True)
 
     doc_select_options = (
         ["None"] + list(active_sim_df.columns)
@@ -2482,6 +2506,7 @@ with tab_heatmap:
         selected_highlight_doc if selected_highlight_doc != "None" else None
     )
 
+    network_fig = None
     if active_sim_df is not None:
         network_fig = ui_exception_handler("Plagiarism Network")(
             plot_similarity_network
@@ -2492,6 +2517,11 @@ with tab_heatmap:
             title="Interactive Document Plagiarism Network",
         )
 
+<<<<<<< HEAD
+    if network_fig is not None:
+        # plot_similarity_network() returns a Plotly go.Figure.
+        st.plotly_chart(network_fig, use_container_width=True)
+=======
     # ── Plagiarism Cluster Detection Summary (Issue #1675) ───────────────────
     if active_sim_df is not None and len(doc_names) >= 2:
         from src.core.similarity import detect_plagiarism_clusters
@@ -2514,6 +2544,7 @@ with tab_heatmap:
                     for doc in group["documents"]:
                         st.markdown(f"- 📄 `{doc}`")
                     st.divider()
+>>>>>>> 6fd8e0d43897198ba883ee60d9dea50d17446de8
 
 # ══ TAB 5: PAIR DRILL-DOWN ════════════════════════════════════════════════
 with tab_drill:

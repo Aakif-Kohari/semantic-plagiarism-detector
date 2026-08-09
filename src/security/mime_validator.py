@@ -11,16 +11,6 @@ from xml.etree import ElementTree
 logger = logging.getLogger(__name__)
 
 # Strict mapping of file extension to allowed MIME types/signatures.
-ALLOWED_MIME_TYPES = {
-    "pdf": {"application/pdf"},
-    "docx": {
-        "application/vnd.openxmlformats-officedocument." "wordprocessingml.document",
-        "application/zip",
-        "application/x-zip-compressed",
-        "application/octet-stream",
-    },
-    "xlsx": {
-        "application/vnd.openxmlformats-officedocument." "spreadsheetml.sheet",
 ALLOWED_MIME_TYPES: dict[str, list[str]] = {
     "pdf": ["application/pdf"],
     "docx": [
@@ -130,6 +120,10 @@ def _validate_ooxml_archive(
 if not file_bytes.startswith(b"PK\x03\x04"):        logger.warning(
             "[mime_validator] Invalid ZIP signature for OOXML file "
             "'%s'.",
+
+    if not file_bytes.startswith(b"PK"):
+        logger.warning(
+            "[mime_validator] Invalid ZIP signature for OOXML file " "'%s'.",
             filename,
         )
         return False
