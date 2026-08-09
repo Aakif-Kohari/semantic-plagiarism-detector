@@ -11,7 +11,9 @@ import smtplib
 from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+
 from typing import Any, Callable, Dict, List, Optional
+import re
 
 from dotenv import load_dotenv
 
@@ -241,6 +243,7 @@ def send_email(
     subject: str,
     html_body: str,
     status_callback: Optional[Callable[[bool, str], None]] = None,
+    timeout: float = 10.0,
 ) -> bool:
     """
     Send an email using SMTP.
@@ -250,6 +253,7 @@ def send_email(
         subject: Email subject line
         html_body: HTML formatted email body
         status_callback: Optional callback receiving (success: bool, message: str)
+        timeout: Socket connection timeout in seconds (default 10.0)
 
     Returns:
         True if email sent successfully, False otherwise
@@ -266,13 +270,19 @@ def send_email(
         if status_callback:
             status_callback(False, msg)
         return False
-
+    
+    
     if not to_emails:
         msg = "No recipients configured for daily summary email."
         logger.warning(msg)
         if status_callback:
             status_callback(False, msg)
         return False
+
+    email_pattern = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    for email in to_emails:
+        if not email_pattern.match(email):
+            raise ValueError(f"Invalid recipient email address: {email}")
 
     try:
         msg_obj = MIMEMultipart("alternative")
@@ -284,13 +294,13 @@ def send_email(
         msg_obj.attach(html_part)
 
         if smtp_port == 465:
-            logger.debug("Using SMTP_SSL (implicit SSL) on port %d", smtp_port)
-            with smtplib.SMTP_SSL(smtp_server, smtp_port) as server:
+            logger.debug("Using SMTP_SSL (implicit SSL) on port %d with timeout %.1fs", smtp_port, timeout)
+            with smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=timeout) as server:
                 server.login(smtp_username, smtp_password)
                 server.send_message(msg_obj)
         else:
-            logger.debug("Using SMTP with STARTTLS on port %d", smtp_port)
-            with smtplib.SMTP(smtp_server, smtp_port) as server:
+            logger.debug("Using SMTP with STARTTLS on port %d with timeout %.1fs", smtp_port, timeout)
+            with smtplib.SMTP(smtp_server, smtp_port, timeout=timeout) as server:
                 server.starttls()
                 server.login(smtp_username, smtp_password)
                 server.send_message(msg_obj)

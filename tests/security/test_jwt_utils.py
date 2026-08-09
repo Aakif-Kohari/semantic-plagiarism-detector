@@ -4,7 +4,6 @@ test_jwt_utils.py
 Unit tests for JWT token generation, signature verification, and expiration in src/security/jwt_utils.py.
 """
 
-import time
 import pytest
 from src.security.jwt_utils import (
     create_access_token,

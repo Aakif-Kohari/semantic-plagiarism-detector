@@ -20,6 +20,7 @@ PUBLIC_PATHS = {
     "/api/v1/version",
     "/api/v1/healthz",
     "/api/v1/status",
+    "/api/v1/usage",
     "/docs",
     "/redoc",
     "/openapi.json",

@@ -65,9 +65,8 @@ from .db import (
     update_password,
     update_user_profile,
     verify_user,
-    get_recent_incidents,
-    log_incident,
     get_deleted_documents_count,
+    get_incidents_by_assignment,
 )
 try:
     from .visualization import (
@@ -77,6 +76,7 @@ try:
         plot_similarity_heatmap_plotly,
         plot_similarity_network,
         render_network_plotly,
+        plot_document_similarity_heatmap,
     )
 except ImportError:
     build_network_data = None
@@ -85,6 +85,7 @@ except ImportError:
     plot_similarity_heatmap_plotly = None
     plot_similarity_network = None
     render_network_plotly = None
+    plot_document_similarity_heatmap = None
 except ImportError:
     pass
 
@@ -108,6 +109,7 @@ __all__ = [
     "PLAGIARISM_THRESHOLD",
     "plot_similarity_heatmap",
     "plot_similarity_heatmap_plotly",
+    "plot_document_similarity_heatmap",
     "filter_heatmap_by_class_tag",
     "plot_chunk_similarity_comparison",
     "build_network_data",
@@ -140,9 +142,8 @@ __all__ = [
     "set_user_active_status",
     "is_user_active",
     "update_user_profile",
-    "get_recent_incidents",
-    "log_incident",
     "get_deleted_documents_count",
+    "get_incidents_by_assignment",
     "init_corpus_db",
     "add_document",
     "get_document_by_hash",
