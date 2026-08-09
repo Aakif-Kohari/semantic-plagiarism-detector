@@ -11,6 +11,7 @@ from src.db.auth import (
     get_2fa_status,
     get_active_users_count,
     get_user_active_status,
+    get_user_last_login,
     get_user_role,
     get_user_theme,
     init_db,
@@ -69,6 +70,30 @@ def test_get_user_role():
     add_user(user, "password123")
     assert get_user_role(user) is not None
     assert get_user_role("non_existent_user_999") is None
+
+
+def test_get_user_last_login_none_before_first_login():
+    """A newly created user who has never logged in has no last_login_at yet."""
+    user = f"user_{uuid.uuid4().hex[:8]}"
+    add_user(user, "SecurePass123!")
+    assert get_user_last_login(user) is None
+
+
+def test_get_user_last_login_none_for_unknown_user():
+    assert get_user_last_login("non_existent_user_999") is None
+
+
+def test_get_user_last_login_set_after_successful_login():
+    """verify_user() records last_login_at; get_user_last_login() should surface it."""
+    user = f"user_{uuid.uuid4().hex[:8]}"
+    add_user(user, "SecurePass123!")
+    assert get_user_last_login(user) is None
+
+    assert verify_user(user, "SecurePass123!") is True
+
+    last_login = get_user_last_login(user)
+    assert last_login is not None
+    assert isinstance(last_login, str)
 
 
 def test_update_password():
