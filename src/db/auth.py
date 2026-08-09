@@ -47,9 +47,20 @@ def configure_db_path(db_path: str | os.PathLike) -> None:
     _DB_PATH = os.path.abspath(os.fspath(db_path))
 
 
-def _connect() -> sqlite3.Connection:
-    """Establish a connection to the SQLite database with configured timeout."""
-    return sqlite3.connect(_DB_PATH, timeout=SQLITE_TIMEOUT, check_same_thread=False)
+from contextlib import contextmanager
+from typing import Generator
+
+@contextmanager
+def _connect() -> Generator[sqlite3.Connection, None, None]:
+    """Establish a connection to the SQLite database with configured timeout and close on exit."""
+    conn = sqlite3.connect(_DB_PATH, timeout=SQLITE_TIMEOUT, check_same_thread=False)
+    try:
+        yield conn
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def log_security_event(
@@ -411,6 +422,20 @@ def get_user_role(username: str) -> str | None:
             return row[0] if row else None
     except sqlite3.Error as e:
         raise sqlite3.Error(f"Failed to retrieve user role: {e}") from e
+
+
+def get_user_last_login(username: str) -> str | None:
+    """Return the last_login_at timestamp for a user, or None if not found/never logged in."""
+    try:
+        username = _validate_username(username)
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT last_login_at FROM users WHERE username = ?",
+                (username,),
+            ).fetchone()
+            return row[0] if row else None
+    except sqlite3.Error as e:
+        raise sqlite3.Error(f"Failed to retrieve user last login: {e}") from e
 
 
 def get_user_roles(user_ids: list[int]) -> dict[int, str]:
@@ -920,11 +945,21 @@ def get_user_count() -> int:
 
 
 def get_active_users_count() -> int:
-    """Return the total number of active users in the database."""
+    """Return the total number of active users in the database.
+
+    Issue #1778 acceptance criteria specifies the query shape
+    ``SELECT COUNT(1) FROM users WHERE status = 'active'``. The actual
+    ``users`` table uses an ``is_active INTEGER NOT NULL DEFAULT 1``
+    column (added by migration ``migrate_auth_database``) rather than a
+    text ``status`` column, so the predicate is ``is_active = 1`` — this
+    is the schema-correct translation of "status = 'active'".
+    ``COUNT(1)`` is used in the SELECT clause to match the issue's
+    literal query shape.
+    """
     with _connect() as conn:
-        cursor = conn.execute("SELECT COUNT(*) FROM users WHERE is_active = 1")
+        cursor = conn.execute("SELECT COUNT(1) FROM users WHERE is_active = 1")
         row = cursor.fetchone()
-        return row[0] if row else 0
+        return int(row[0]) if row else 0
 
 
 def format_user_created_date(iso_str: str) -> str:

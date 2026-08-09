@@ -1,3 +1,3 @@
-from app.components.storage_quota import render_storage_quota_progress
+from app.components.document_filter import render_document_filter
 
-__all__ = ["render_storage_quota_progress"]
+__all__ = ["render_document_filter"]
