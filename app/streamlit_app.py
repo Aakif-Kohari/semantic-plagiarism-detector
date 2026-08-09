@@ -628,6 +628,8 @@ if SessionKeys.PDF_PASSWORDS not in st.session_state:
     st.session_state[SessionKeys.PDF_PASSWORDS] = {}
 if SessionKeys.LANG not in st.session_state:
     st.session_state[SessionKeys.LANG] = "en"
+if SessionKeys.SESSION_START_TIME not in st.session_state:
+    st.session_state[SessionKeys.SESSION_START_TIME] = time.time()
 
 if SessionKeys.MODEL_LOAD_TIME not in st.session_state:
     from src.core.embedding_model import EmbeddingModelManager
@@ -3183,6 +3185,8 @@ with _footer_col1:
         f"🎓 Semantic Plagiarism Detection System · v{APP_VERSION} · Streamlit · "
         "🐛 Report Bug / Feedback"
     )
+    from app.theme import render_session_status_banner
+    render_session_status_banner()
 with _footer_col2:
     if _latest_tag:
         st.markdown(

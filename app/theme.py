@@ -1852,3 +1852,19 @@ def render_timezone_footer() -> str:
     st.sidebar.caption(f"🕒 {caption_text}")
     return caption_text
 
+
+def render_session_status_banner() -> None:
+    """Render caption banner in dashboard footer displaying active session runtime."""
+    import time
+    from app.session_keys import SessionKeys
+
+    if SessionKeys.SESSION_START_TIME not in st.session_state:
+        st.session_state[SessionKeys.SESSION_START_TIME] = time.time()
+
+    start_time = st.session_state[SessionKeys.SESSION_START_TIME]
+    elapsed_seconds = time.time() - start_time
+    elapsed_minutes = int(elapsed_seconds // 60)
+
+    st.caption(f"Active Session: {elapsed_minutes} mins")
+
+
