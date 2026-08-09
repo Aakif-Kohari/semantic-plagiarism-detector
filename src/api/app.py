@@ -5,9 +5,11 @@ from typing import Dict
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.core.document_parser import extract_text
 from src.core.embedding_model import embed_chunks, get_document_embedding
@@ -35,6 +37,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(404)
+async def not_found_handler(request, exc: StarletteHTTPException):
+    """Custom exception handler for HTTP 404 errors."""
+    return JSONResponse(
+        status_code=404,
+        content={
+            "error": True,
+            "code": 404,
+            "message": "API endpoint or resource not found",
+        },
+    )
 
 # ── Bearer Token Authentication ────────────────────────────────────────────────
 
