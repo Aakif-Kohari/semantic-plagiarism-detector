@@ -895,3 +895,12 @@ class TestCreateDatabaseBackup:
         assert backup_path.name.endswith(".db")
         assert not backup_path.name.endswith(".db.gz")
         assert backup_path.read_bytes().startswith(SQLITE_HEADER)
+
+    def test_create_database_backup_raises_file_not_found_when_missing(self):
+        """Verify FileNotFoundError is raised when source DB is missing (Issue #1885)."""
+        missing_db_path = "non_existent_database.sqlite3"
+        
+        expected_message = f"Source database file does not exist: {missing_db_path}"
+        with pytest.raises(FileNotFoundError, match=expected_message):
+            create_database_backup(missing_db_path)
+            
