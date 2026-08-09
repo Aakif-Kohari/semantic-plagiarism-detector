@@ -118,6 +118,7 @@ def plot_high_severity_trends(trend_data: list[dict[str, Any]], show_grid: bool 
 
     df = pd.DataFrame(trend_data)
     df["date"] = pd.to_datetime(df["date"])
+    df["cumulative"] = df["count"].cumsum()
 
     fig = px.line(
         df,
@@ -127,15 +128,29 @@ def plot_high_severity_trends(trend_data: list[dict[str, Any]], show_grid: bool 
         labels={"date": "Date", "count": "Number of High Severity Incidents"},
         markers=True,
     )
+    fig.add_trace(
+    go.Scatter(
+        x=df["date"],
+        y=df["cumulative"],
+        mode="lines+markers",
+        name="Cumulative Incidents",
+        yaxis="y2",
+    )
+)
 
     fig.update_layout(
-        xaxis_title="Date",
-        yaxis_title="Number of High Severity Incidents",
-        hovermode="x unified",
-        height=400,
-        showlegend=False,
-        autosize=True,
-    )
+    xaxis_title="Date",
+    yaxis_title="Number of High Severity Incidents",
+    yaxis2=dict(
+        title="Cumulative Incidents",
+        overlaying="y",
+        side="right",
+    ),
+    hovermode="x unified",
+    height=400,
+    showlegend=True,
+    autosize=True,
+)
 
     fig.update_xaxes(showgrid=show_grid)
     fig.update_yaxes(showgrid=show_grid)

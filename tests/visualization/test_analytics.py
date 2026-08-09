@@ -9,11 +9,29 @@ import plotly.graph_objects as go
 import pytest
 
 from src.visualization.analytics import (
+    plot_high_severity_trends,
     plot_severity_donut_chart,
     plot_similarity_boxplot,
     plot_similarity_percentiles,
 )
+def test_plot_high_severity_trends_cumulative_line():
+    """Verify cumulative incidents are plotted on a secondary Y-axis."""
+    trend_data = [
+        {"date": "2026-08-01", "count": 2},
+        {"date": "2026-08-02", "count": 3},
+        {"date": "2026-08-03", "count": 1},
+    ]
 
+    fig = plot_high_severity_trends(trend_data)
+
+    cumulative_trace = next(
+        trace for trace in fig.data
+        if trace.name == "Cumulative Incidents"
+    )
+
+    assert list(cumulative_trace.y) == [2, 5, 6]
+    assert cumulative_trace.yaxis == "y2"
+    assert fig.layout.yaxis2.title.text == "Cumulative Incidents"
 
 def test_plot_similarity_percentiles_calculation():
     """Verify the 25th, 50th, 75th, and 90th percentiles are plotted correctly."""
