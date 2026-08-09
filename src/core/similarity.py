@@ -18,6 +18,14 @@ from sklearn.metrics.pairwise import cosine_similarity
 from src.core.config import (DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD,
                              is_plagiarism, severity_from_score)
 
+# ── Distance / similarity conversion ──────────────────────────────────────────
+
+
+def cosine_distance_to_similarity(distance: float) -> float:
+    """Convert a cosine distance (1 - similarity) back to a similarity score."""
+    return max(0.0, min(1.0, 1.0 - distance))
+
+
 # ── Validation helpers ─────────────────────────────────────────────────────────
 
 

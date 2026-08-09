@@ -7,6 +7,7 @@ from src.core.lexical_similarity import (STOPWORDS,  # noqa: E402
                                          lexical_similarity_matrix,
                                          remove_stopwords, tokenize)
 from src.core.similarity import (chunk_max_similarity, chunk_similarity_matrix,
+                                 cosine_distance_to_similarity,
                                  document_similarity_matrix,
                                  find_most_similar_chunks, flag_plagiarism,
                                  hybrid_similarity_matrix)
@@ -445,3 +446,17 @@ def test_stopwords_set_is_nonempty_and_contains_core_words():
     assert len(STOPWORDS) > 0
     for word in ("the", "and", "is"):
         assert word in STOPWORDS
+
+
+# ── cosine_distance_to_similarity ─────────────────────────────────────────────
+
+
+def test_cosine_distance_to_similarity_typical():
+    assert cosine_distance_to_similarity(0.0) == 1.0
+    assert cosine_distance_to_similarity(1.0) == 0.0
+    assert abs(cosine_distance_to_similarity(0.4) - 0.6) < 1e-9
+
+
+def test_cosine_distance_to_similarity_clamps():
+    assert cosine_distance_to_similarity(-0.5) == 1.0
+    assert cosine_distance_to_similarity(1.5) == 0.0
