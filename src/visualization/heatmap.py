@@ -428,6 +428,11 @@ def plot_similarity_heatmap_plotly(
     dim_diagonal: bool = False,
     zmin: float = 0.0,
     zmax: float = 1.0,
+):    """Interactive Plotly heatmap featuring dynamic hover values and custom threshold bounds."""
+    font_scale: float = 1.0,
+):
+    """Interactive Plotly heatmap featuring dynamic hover values and custom threshold bounds."""
+
 ):
     """Interactive Plotly heatmap featuring dynamic hover values and custom threshold bounds."""
     import plotly.graph_objects as go
