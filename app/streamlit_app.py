@@ -664,59 +664,6 @@ def build_visualization_lazily(is_enabled, build_fn):
     return None
 
 
-@st.dialog("⚠️ Confirm Bulk Clear")
-def clear_all_dialog():
-    st.markdown(
-        "**WARNING:** This action is destructive and cannot be undone. "
-        "This will permanently delete all student documents, paragraph chunks, "
-        "and plagiarism incidents from the database, and reset the FAISS index."
-    )
-    st.write("Are you absolutely sure you want to proceed?")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Cancel", use_container_width=True, key="cancel_clear_all"):
-            st.rerun()
-    with col2:
-        if st.button(
-            "Clear All",
-            type="primary",
-            use_container_width=True,
-            key="confirm_clear_all",
-        ):
-            clear_all_data()
-            if os.path.exists(_INDEX_PATH):
-                try:
-                    os.remove(_INDEX_PATH)
-                except OSError as e:
-                    print(f"Error removing FAISS index: {e}")
-                except Exception as e:
-                    logger.error(f"Error removing FAISS index: {e}")
-
-            try:
-                from src.utils.redis_cache import get_cache
-
-                cache = get_cache()
-                if cache.is_available():
-                    cache.delete("faiss:index:corpus_index")
-                    cache.clear_pattern("analysis:*")
-            except (ImportError, RuntimeError, ConnectionError) as e:
-                print(f"Error invalidating cache: {e}")
-            except Exception as e:
-                logger.error(f"Error invalidating cache: {e}")
-
-            if "analysis_results" in st.session_state:
-                st.session_state.analysis_results = None
-            if "analysis_file_signature" in st.session_state:
-                st.session_state.analysis_file_signature = None
-            if "processed_pipeline_signature" in st.session_state:
-                st.session_state.processed_pipeline_signature = None
-
-            st.success("✅ All documents, chunks, and incidents have been cleared.")
-            st.rerun()
->>>>>>> f7b2ce9 (Fix linting, type-checking, and syntax errors)
-
-
 # ── Issue #1383: Cosine vs Lexical Similarity Comparison Table ─────────────────
 SEMANTIC_HIGH_THRESHOLD = 0.80  # vector (cosine) score considered "high"
 LEXICAL_LOW_THRESHOLD = 0.30    # lexical (jaccard) score considered "low"
@@ -1017,23 +964,56 @@ def logout_dialog():
             clear_session(SESSION_ID)
             st.rerun()
 
-@st.dialog("⚠️ Clear All Documents")
+@st.dialog("⚠️ Confirm Bulk Clear")
 def clear_all_dialog():
-    st.write("Are you sure you want to completely clear the local database?")
-    st.write("This action cannot be undone.")
+    st.markdown(
+        "**WARNING:** This action is destructive and cannot be undone. "
+        "This will permanently delete all student documents, paragraph chunks, "
+        "and plagiarism incidents from the database, and reset the FAISS index."
+    )
+    st.write("Are you absolutely sure you want to proceed?")
+
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Cancel", use_container_width=True, key="cancel_clear_all"):
             st.rerun()
     with col2:
-        if st.button("Clear All", type="primary", use_container_width=True, key="confirm_clear_all"):
-            from src.db.corpus_db import clear_all_data
+        if st.button(
+            "Clear All",
+            type="primary",
+            use_container_width=True,
+            key="confirm_clear_all",
+        ):
             clear_all_data()
-            clear_session()
-            st.cache_data.clear()
+            if os.path.exists(_INDEX_PATH):
+                try:
+                    os.remove(_INDEX_PATH)
+                except OSError as e:
+                    print(f"Error removing FAISS index: {e}")
+                except Exception as e:
+                    logger.error(f"Error removing FAISS index: {e}")
+
+            try:
+                from src.utils.redis_cache import get_cache
+
+                cache = get_cache()
+                if cache.is_available():
+                    cache.delete("faiss:index:corpus_index")
+                    cache.clear_pattern("analysis:*")
+            except (ImportError, RuntimeError, ConnectionError) as e:
+                print(f"Error invalidating cache: {e}")
+            except Exception as e:
+                logger.error(f"Error invalidating cache: {e}")
+
+            if "analysis_results" in st.session_state:
+                st.session_state.analysis_results = None
+            if "analysis_file_signature" in st.session_state:
+                st.session_state.analysis_file_signature = None
+            if "processed_pipeline_signature" in st.session_state:
+                st.session_state.processed_pipeline_signature = None
+
+            st.success("✅ All documents, chunks, and incidents have been cleared.")
             st.rerun()
-
-
 
 
 # ── Corpus Overview Header & Quick Actions (#1242) ───────────────────────────
@@ -2474,7 +2454,6 @@ with tab_matrix:
         st.dataframe(active_sim_df.style.format("{:.4f}"), use_container_width=True)
 
 # ══ TAB 4: HEATMAP ════════════════════════════════════════════════════════
-# ══ TAB 4: HEATMAP ════════════════════════════════════════════════════════
 with tab_heatmap:
     update_page_title("Heatmap")
     st.subheader("🗺️ Heatmap & Network")
@@ -2517,11 +2496,10 @@ with tab_heatmap:
             title="Interactive Document Plagiarism Network",
         )
 
-<<<<<<< HEAD
     if network_fig is not None:
         # plot_similarity_network() returns a Plotly go.Figure.
         st.plotly_chart(network_fig, use_container_width=True)
-=======
+
     # ── Plagiarism Cluster Detection Summary (Issue #1675) ───────────────────
     if active_sim_df is not None and len(doc_names) >= 2:
         from src.core.similarity import detect_plagiarism_clusters
@@ -2544,7 +2522,7 @@ with tab_heatmap:
                     for doc in group["documents"]:
                         st.markdown(f"- 📄 `{doc}`")
                     st.divider()
->>>>>>> 6fd8e0d43897198ba883ee60d9dea50d17446de8
+
 
 # ══ TAB 5: PAIR DRILL-DOWN ════════════════════════════════════════════════
 with tab_drill:
@@ -2912,6 +2890,7 @@ with tab_settings:
 
         if "db_schema_status_msg" in st.session_state:
             st.info(st.session_state["db_schema_status_msg"])
+            
 # ══ TAB 9: SECURITY AUDIT LOGS ═════════════════════════════════════════════
 with tab_audit:
     update_page_title("Security Audit Logs")
@@ -3202,3 +3181,4 @@ with _footer_col2:
         )
     else:
         st.caption("✅ Up to date")
+        
