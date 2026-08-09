@@ -422,9 +422,9 @@ def plot_similarity_heatmap_plotly(
     class_tag: Optional[str] = None,
     doc_class_map: Optional[dict] = None,
     dim_diagonal: bool = False,
-    font_scale: float = 1.0,
-):
-    """Interactive Plotly heatmap featuring dynamic hover values and custom threshold bounds."""
+    zmin: float = 0.0,
+    zmax: float = 1.0,
+):    """Interactive Plotly heatmap featuring dynamic hover values and custom threshold bounds."""
     import plotly.graph_objects as go
 
     scale = max(0.5, float(font_scale))
@@ -538,7 +538,7 @@ def plot_similarity_heatmap_plotly(
         for i in range(n)
     ]
 
-    fig = go.Figure(
+fig = go.Figure(
         data=go.Heatmap(
             z=z_matrix,
             x=names,
@@ -546,14 +546,13 @@ def plot_similarity_heatmap_plotly(
             text=hover_text,
             hovertemplate="%{text}",
             colorscale=colorscale,
-            zmin=0.0,
-            zmax=1.0,
+            zmin=zmin,
+            zmax=zmax,
             colorbar=dict(title="Cosine Similarity", thickness=15, tickformat=".0%"),
             xgap=2,
             ygap=2,
         )
     )
-
     annotations = []
     if show_annotations:
         for i in range(n):

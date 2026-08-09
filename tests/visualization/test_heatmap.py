@@ -581,10 +581,26 @@ def test_plot_similarity_heatmap_plotly_custom_colorscale(
     heatmap = next(trace for trace in fig.data if trace.type == "heatmap")
     assert heatmap.colorscale is not None
 
-    fig_default = plot_similarity_heatmap_plotly(multi_doc_df, title="Default Colorscale")
+fig_default = plot_similarity_heatmap_plotly(multi_doc_df, title="Default Colorscale")
     heatmap_default = next(trace for trace in fig_default.data if trace.type == "heatmap")
     assert heatmap_default.colorscale != heatmap.colorscale
 
+
+def test_plot_similarity_heatmap_plotly_custom_zmin_zmax(
+    multi_doc_df: pd.DataFrame,
+) -> None:
+    """Verify Issue #1598: custom zmin/zmax bounds are passed to go.Heatmap."""
+    fig = plot_similarity_heatmap_plotly(
+        multi_doc_df, title="Custom Range", zmin=0.2, zmax=0.8
+    )
+    heatmap = next(trace for trace in fig.data if trace.type == "heatmap")
+    assert heatmap.zmin == 0.2
+    assert heatmap.zmax == 0.8
+
+    fig_default = plot_similarity_heatmap_plotly(multi_doc_df, title="Default Range")
+    heatmap_default = next(trace for trace in fig_default.data if trace.type == "heatmap")
+    assert heatmap_default.zmin == 0.0
+    assert heatmap_default.zmax == 1.0
 
 def test_plot_document_similarity_heatmap_empty():
     """Verify plot_document_similarity_heatmap returns empty Plotly figure with centered annotation on empty input."""
