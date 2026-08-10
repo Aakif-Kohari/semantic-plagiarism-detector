@@ -428,6 +428,16 @@ def test_inject_css_contains_high_severity_row_styling():
     assert "background-color: rgba(239, 68, 68, 0.05)" in style_html
 
 
+def test_inject_css_contains_low_confidence_card_styling():
+    """inject_css() must output CSS rules for .low-confidence-card (Issue #1726)."""
+    with patch("app.theme.st.markdown") as mock_md:
+        inject_css()
+
+    style_html = mock_md.call_args_list[0].args[0]
+    assert ".low-confidence-card" in style_html
+    assert "border-left: 4px solid #f59e0b" in style_html
+
+
 def test_active_tab_border_style_default():
     from app.theme import active_tab_border_style
 

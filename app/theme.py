@@ -653,6 +653,12 @@ def inject_css() -> None:
             border-left: 4px solid var(--success) !important;
         }}
 
+        /* ── Low-confidence detection card amber accent border (Issue #1726) ─ */
+
+        .low-confidence-card {{
+            border-left: 4px solid #f59e0b !important;
+        }}
+
         /* ── High severity row accent border (Issue #1569) ───────────── */
 
         .high-severity-row {{
