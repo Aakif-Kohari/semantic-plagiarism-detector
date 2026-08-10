@@ -655,10 +655,23 @@ def inject_css() -> None:
 
         /* ── High severity row accent border (Issue #1569) ───────────── */
 
-        .high-severity-row {{
+        .high-severity-row {
             border-left: 4px solid #ef4444 !important;
             background-color: rgba(239, 68, 68, 0.05) !important;
-        }}
+        }
+
+        /* ── Soft-deleted document row styling (Issue #1732) ─────────── */
+
+        .trash-document-row {
+            opacity: 0.6 !important;
+            color: #6b7280 !important;
+        }
+
+        .trash-document-row .doc-title,
+        .trash-document-row title,
+        .trash-document-row .document-title {
+            text-decoration: line-through !important;
+        }
 
         /* ── Warning list container animation (#369) ─────────────────
            The threshold slider re-filters the warning list on every
