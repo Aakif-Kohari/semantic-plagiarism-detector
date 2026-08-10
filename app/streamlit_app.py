@@ -48,7 +48,21 @@ from src.utils.filename import (
     unique_filename,
     validate_document_extension,
 )
-
+# After existing imports, add:
+from app.components.advanced_analytics import (
+    AdvancedTextPreprocessor,
+    ContextPreservingChunker,
+    OptimizedBatchProcessor,
+    ComparisonHistoryManager,
+    PerformanceMonitor,
+    render_processing_status_widget,
+    render_document_analysis_widget,
+    render_advanced_features_sidebar,
+    initialize_advanced_features,
+    run_pipeline_with_tracking,
+    track_comparison,
+    ProcessingStatus,
+)
 
 try:
     from streamlit_plotly_events import plotly_events  # type: ignore
@@ -1596,13 +1610,13 @@ file_bytes_dict = (
 )
 
 with st.spinner("🧠 Processing files and building embeddings…"):
-    analysis_results = run_pipeline(
-        file_bytes_dict,
-        ocr_language,
-        ocr_dpi,
-        chunk_size,
-        chunk_overlap,
-    )
+    analysis_results = run_pipeline_with_tracking(
+    file_bytes_dict,
+    ocr_language,
+    ocr_dpi,
+    chunk_size,
+    chunk_overlap,
+)
 
 (
     raw_texts,
@@ -2005,6 +2019,7 @@ st.markdown(
 st.divider()
 
 if user_role == "admin":
+    initialize_advanced_features()
     cached_index_data = get_faiss_index("corpus_index")
 
     if cached_index_data is not None and os.path.exists(_INDEX_PATH):
