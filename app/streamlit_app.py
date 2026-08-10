@@ -241,7 +241,7 @@ if missing_env_vars:
 # ── Project Core & Utils Imports ──────────────────────────────────────────────
 from app.theme import (
     back_to_top_html,
-    get_colors,
+    get_chart_colors,
     get_theme_name,
     inject_css,
     set_theme,
@@ -321,6 +321,7 @@ from src.utils.redis_cache import (
     get_faiss_index,
     get_session_state,
 )
+from src.utils.file_parser import truncate_filename
 from src.utils.storage_metrics import calculate_storage_usage
 from src.visualization.heatmap import (
     plot_similarity_heatmap,
@@ -628,6 +629,8 @@ if SessionKeys.PDF_PASSWORDS not in st.session_state:
     st.session_state[SessionKeys.PDF_PASSWORDS] = {}
 if SessionKeys.LANG not in st.session_state:
     st.session_state[SessionKeys.LANG] = "en"
+if SessionKeys.SESSION_START_TIME not in st.session_state:
+    st.session_state[SessionKeys.SESSION_START_TIME] = time.time()
 
 if SessionKeys.MODEL_LOAD_TIME not in st.session_state:
     from src.core.embedding_model import EmbeddingModelManager
@@ -662,7 +665,6 @@ def build_visualization_lazily(is_enabled, build_fn):
     if is_enabled:
         return build_fn()
     return None
-
 
 @st.dialog("⚠️ Confirm Bulk Clear")
 def clear_all_dialog():
@@ -714,7 +716,7 @@ def clear_all_dialog():
 
             st.success("✅ All documents, chunks, and incidents have been cleared.")
             st.rerun()
->>>>>>> f7b2ce9 (Fix linting, type-checking, and syntax errors)
+
 
 
 # ── Issue #1383: Cosine vs Lexical Similarity Comparison Table ─────────────────
@@ -796,6 +798,7 @@ def render_cosine_vs_lexical_comparison_table(
     comp_df = pd.DataFrame(rows)
     if not comp_df.empty:
         st.dataframe(comp_df, use_container_width=True)
+
     return comp_df
 
 from datetime import date, timedelta
@@ -810,6 +813,8 @@ def get_date_range_preset(preset: str) -> tuple[date, date]:
         return today, today
     elif preset == "Last 7 Days":
         return today - timedelta(days=6), today
+    elif preset == "Last 14 Days":
+        return today - timedelta(days=14), today
     elif preset == "Last 30 Days":
         return today - timedelta(days=29), today
     else:  # "All Time"
@@ -1017,23 +1022,6 @@ def logout_dialog():
             clear_session(SESSION_ID)
             st.rerun()
 
-@st.dialog("⚠️ Clear All Documents")
-def clear_all_dialog():
-    st.write("Are you sure you want to completely clear the local database?")
-    st.write("This action cannot be undone.")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Cancel", use_container_width=True, key="cancel_clear_all"):
-            st.rerun()
-    with col2:
-        if st.button("Clear All", type="primary", use_container_width=True, key="confirm_clear_all"):
-            from src.db.corpus_db import clear_all_data
-            clear_all_data()
-            clear_session()
-            st.cache_data.clear()
-            st.rerun()
-
-
 
 
 # ── Corpus Overview Header & Quick Actions (#1242) ───────────────────────────
@@ -1146,6 +1134,7 @@ with st.sidebar:
             0.99,
             value=st.session_state.get("threshold_slider", PLAGIARISM_THRESHOLD),
             step=0.01,
+            help="Cosine similarity threshold for flagging.",
             help=(
                 "Combined Hybrid score threshold for flagging pair plagiarism. "
                 "Calculated from Lexical (exact phrase overlap) and Semantic (meaning alignment) scores. "
@@ -1634,6 +1623,15 @@ active_sim_df = chunk_sim_df if use_chunk_matrix else sim_df
 flags = flag_plagiarism(active_sim_df, threshold=threshold)
 
 st.subheader("📊 Analysis Summary")
+st.write(f"Processed **{len(raw_texts)}** documents with Chunk Size: `{chunk_size}` and Overlap: `{chunk_overlap}`.")
+
+selected_class = st.selectbox(
+    "Select Class/Section",
+    unique_classes,
+    index=0,
+    key="class_filter_selectbox",
+)
+
 st.write(
     f"Processed **{len(raw_texts)}** documents with Chunk Size: `{chunk_size}` and Overlap: `{chunk_overlap}`."
 )
@@ -1650,6 +1648,28 @@ st.markdown("""
 """)
 st.markdown("---")
 st.caption("Semantic Plagiarism Detector · FAISS edition")
+
+if user_role == "admin":
+    st.markdown("---")
+    st.markdown("### 📁 Document Management")
+    existing_docs = get_all_documents()
+    if existing_docs:
+        st.write(f"**{len(existing_docs)}** documents in database")
+        for doc in existing_docs:
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.text(f"📄 {doc['filename']}")
+            with col2:
+                if st.button("🗑️", key=f"del_{doc['filename']}"):
+                    delete_document(doc["filename"])
+                    embeddings_matrix = get_all_embeddings()
+                    if embeddings_matrix.size > 0:
+                        new_index = build_index_from_matrix(embeddings_matrix)
+                        save_index(new_index, _INDEX_PATH)
+                    else:
+                        if os.path.exists(_INDEX_PATH):
+                            os.remove(_INDEX_PATH)
+                    st.rerun()
 
 if user_role == "admin":
     st.markdown("---")
@@ -1884,6 +1904,20 @@ if user_role == "admin":
             clear_all_dialog()  # type: ignore
         st.markdown("<br>", unsafe_allow_html=True)
 
+
+st.markdown("---")
+if st.button("🚪 Log Out", use_container_width=True, key="logout_button"):
+    for key in ["authenticated", "username", "role", "last_interaction"]:
+        if key in st.session_state:
+            del st.session_state[key]
+    clear_session(SESSION_ID)
+    st.rerun()
+
+
+# ── Onboarding Tour for First-Time Admin Users ───────────────────────────────────
+if Tour is not None and user_role == "admin" and not get_tour_completed(st.session_state.username):
+    username = st.session_state.username
+    
         st.markdown("---")
         if st.button("🚪 Log Out", use_container_width=True, key="logout_button"):
             logout_dialog()
@@ -2029,6 +2063,7 @@ if user_role == "admin":
             index_buffer = _io.BytesIO(cached_index_data)
             faiss_index = faiss.deserialize_index(faiss.read_index(index_buffer))
             registry = get_chunk_registry()
+            st.info(f"📂 Loaded FAISS index from Redis cache with {faiss_index.ntotal} vectors")
             st.info(
                 f"📂 Loaded FAISS index from Redis cache with {faiss_index.ntotal} vectors"
             )
@@ -2050,6 +2085,11 @@ if user_role == "admin":
                         "initialized safely."
                     )
             else:
+                st.info(f"Loaded and validated the existing FAISS index with {faiss_index.ntotal} vectors.")
+
+    if "analysis_results" not in st.session_state:
+        st.session_state.analysis_results = None
+        # Try to load from Redis cache
                 st.info(
                     f"Loaded and validated the existing FAISS index with "
                     f"{faiss_index.ntotal} vectors."
@@ -2332,10 +2372,12 @@ st.divider()
     tab_matrix,
     tab_heatmap,
     tab_drill,
+    tab_compare,
     tab_analytics,
     tab_users,
     tab_settings,
     tab_history,
+    tab_audit,
 ) = st.tabs(
     [
         get_text("tab_warnings", lang=lang_code),
@@ -2343,10 +2385,12 @@ st.divider()
         get_text("tab_matrix", lang=lang_code),
         get_text("tab_heatmap", lang=lang_code),
         get_text("tab_drill", lang=lang_code),
+        "🔬 Comparison",
         get_text("tab_analytics", lang=lang_code),
         get_text("tab_users", lang=lang_code),
         get_text("tab_settings", lang=lang_code),
         "📊 History",
+        get_text("tab_audit_logs", lang=lang_code),
     ],
     key="main_tabs",
 )
@@ -2411,7 +2455,7 @@ with tab_warnings:
     st.markdown("### 📅 Incident Date Filter")
     date_preset = st.radio(
         "Select Date Range",
-        options=["Today", "Last 7 Days", "Last 30 Days", "All Time"],
+        options=["Today", "Last 7 Days", "Last 14 Days", "Last 30 Days", "All Time"],
         horizontal=True,
         key="incident_date_preset",
         help="Quickly filter the incident table by common date ranges.",
@@ -2436,6 +2480,40 @@ with tab_warnings:
             else "📁 Collapse All"
         )
 
+        faiss_query = st.text_input(
+            "Query FAISS Index:",
+            placeholder="Type a text snippet to search vector index...",
+            key="faiss_query_input",
+        )
+        if st.button("🔍 Run FAISS Search", key="run_faiss_search_btn"):
+            if faiss_query.strip() and faiss_index is not None:
+                from src.core.embedding_model import embed_chunks
+
+                q_vec = embed_chunks([faiss_query.strip()])[0]
+                q_results = search_similar_chunks(
+                    q_vec,
+                    faiss_index,
+                    registry,
+                    top_k=faiss_top_k,
+                    threshold=threshold,
+                )
+                if q_results:
+                    rows = []
+                    for rec, score in q_results:
+                        truncated_name = truncate_filename(rec.doc_name)
+                        rows.append({
+                            "Document": truncated_name,
+                            "Chunk Index": rec.chunk_index,
+                            "Similarity": f"{score:.1%}",
+                            "Content Preview": rec.chunk_text[:120] + "..." if len(rec.chunk_text) > 120 else rec.chunk_text
+                        })
+                    st.dataframe(pd.DataFrame(rows), use_container_width=True)
+                else:
+                    st.info("No matching vector chunks found above threshold.")
+
+    # ══ TAB 3: MATRIX ═════════════════════════════════════════════════════════
+    with tab_matrix:
+        st.subheader("📋 Similarity Matrix")
         if st.button(button_label, key="toggle_warning_accordions"):
             st.session_state[SessionKeys.WARNINGS_EXPAND_ALL] = not st.session_state[
                 SessionKeys.WARNINGS_EXPAND_ALL
@@ -2474,7 +2552,6 @@ with tab_matrix:
         st.dataframe(active_sim_df.style.format("{:.4f}"), use_container_width=True)
 
 # ══ TAB 4: HEATMAP ════════════════════════════════════════════════════════
-# ══ TAB 4: HEATMAP ════════════════════════════════════════════════════════
 with tab_heatmap:
     update_page_title("Heatmap")
     st.subheader("🗺️ Heatmap & Network")
@@ -2482,7 +2559,7 @@ with tab_heatmap:
     if active_sim_df is not None:
         heatmap_fig = ui_exception_handler("Similarity Heatmap")(
             plot_similarity_heatmap
-        )(active_sim_df, threshold=threshold, theme_colors=get_colors())
+        )(active_sim_df, threshold=threshold, theme_colors=get_chart_colors())
 
     if heatmap_fig is not None:
         # plot_similarity_heatmap() returns a Matplotlib Figure, so it is
@@ -2517,11 +2594,10 @@ with tab_heatmap:
             title="Interactive Document Plagiarism Network",
         )
 
-<<<<<<< HEAD
     if network_fig is not None:
         # plot_similarity_network() returns a Plotly go.Figure.
         st.plotly_chart(network_fig, use_container_width=True)
-=======
+
     # ── Plagiarism Cluster Detection Summary (Issue #1675) ───────────────────
     if active_sim_df is not None and len(doc_names) >= 2:
         from src.core.similarity import detect_plagiarism_clusters
@@ -2544,7 +2620,7 @@ with tab_heatmap:
                     for doc in group["documents"]:
                         st.markdown(f"- 📄 `{doc}`")
                     st.divider()
->>>>>>> 6fd8e0d43897198ba883ee60d9dea50d17446de8
+
 
 # ══ TAB 5: PAIR DRILL-DOWN ════════════════════════════════════════════════
 with tab_drill:
@@ -2612,14 +2688,21 @@ with tab_drill:
                                 copy_label="📋 Copy Snippet",
                             )
 
-# ══ TAB 6: ANALYTICS ══════════════════════════════════════════════════════
+# ══ TAB 6: COMPARISON ══════════════════════════════════════════════════════
+with tab_compare:
+    update_page_title("Comparison")
+    from app.components.document_comparison import render_document_comparison
+    render_document_comparison()
+
+
+# ══ TAB 7: ANALYTICS ══════════════════════════════════════════════════════
 with tab_analytics:
     update_page_title("Analytics")
     st.subheader("📊 Analytics Dashboard")
     st.markdown("### ⏱️ Pipeline Processing Time Breakdown")
     stage_timings = st.session_state.get("last_stage_timings") or st.session_state.get("stage_timings")
     if plot_processing_time_breakdown:
-        active_theme_colors = get_colors() if callable(get_colors) else None
+        active_theme_colors = get_chart_colors() if callable(get_chart_colors) else None
         fig_time = plot_processing_time_breakdown(
             stage_timings=stage_timings,
             theme_colors=active_theme_colors,
@@ -2643,6 +2726,14 @@ with tab_settings:
 
     from app.components.storage_quota import render_storage_quota_progress
     render_storage_quota_progress()
+
+    st.markdown("### 📊 Visualization")
+    st.toggle(
+        "Force Dark Mode Charts",
+        value=False,
+        key=SessionKeys.FORCE_DARK_CHARTS,
+        help="Render Plotly charts with dark styling regardless of the current Light/Dark app theme.",
+    )
 
     if user_role == "admin":
         st.markdown("### ⚙️ Advanced Configuration")
@@ -2912,6 +3003,7 @@ with tab_settings:
 
         if "db_schema_status_msg" in st.session_state:
             st.info(st.session_state["db_schema_status_msg"])
+            
 # ══ TAB 9: SECURITY AUDIT LOGS ═════════════════════════════════════════════
 with tab_audit:
     update_page_title("Security Audit Logs")
@@ -3151,13 +3243,13 @@ with tab_history:
         st.info("No scan history found for the selected date range. Run a scan to populate this dashboard.")
     else:
         # Similarity Trend Line Chart
-        trend_fig = plot_similarity_trend_line(history_data, theme_colors=get_colors())
+        trend_fig = plot_similarity_trend_line(history_data, theme_colors=get_chart_colors())
         st.plotly_chart(trend_fig, use_container_width=True)
         
         st.divider()
         
         # Flagged Documents Bar Chart
-        bar_fig = plot_flagged_documents_bar(history_data, theme_colors=get_colors())
+        bar_fig = plot_flagged_documents_bar(history_data, theme_colors=get_chart_colors())
         st.plotly_chart(bar_fig, use_container_width=True)
         
         st.divider()
@@ -3191,6 +3283,8 @@ with _footer_col1:
         f"🎓 Semantic Plagiarism Detection System · v{APP_VERSION} · Streamlit · "
         "🐛 Report Bug / Feedback"
     )
+    from app.theme import render_session_status_banner
+    render_session_status_banner()
 with _footer_col2:
     if _latest_tag:
         st.markdown(
@@ -3202,3 +3296,4 @@ with _footer_col2:
         )
     else:
         st.caption("✅ Up to date")
+        

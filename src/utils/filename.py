@@ -10,7 +10,7 @@ import unicodedata
 from collections.abc import Collection, Mapping
 from pathlib import PurePath
 from typing import TypeVar
-from typing import IO, TypeVar
+from typing import IO
 
 DEFAULT_FILENAME = "document"
 MAX_FILENAME_LENGTH = 150
@@ -82,8 +82,28 @@ def compute_file_hash_stream(
     return hasher.hexdigest()
 
 
-def sanitize_filename(
-    filename: object,
+_SHA256_HEX_RE = re.compile(r"[0-9a-fA-F]{64}")
+
+
+def normalize_sha256_hash(hash_str: str) -> str:
+    """Validate a SHA-256 hex digest and return it in lower-case form.
+
+    Args:
+        hash_str: A 64-character hexadecimal SHA-256 digest, in any case.
+
+    Returns:
+        str: The digest normalized to lower-case.
+
+    Raises:
+        ValueError: If the input is not a 64-character hexadecimal string.
+    """
+    if not isinstance(hash_str, str) or not _SHA256_HEX_RE.fullmatch(hash_str):
+        raise ValueError("Invalid SHA-256 hash: expected a 64-character hex string.")
+
+    return hash_str.lower()
+
+
+def sanitize_filename(    filename: object,
     *,
     fallback: str = DEFAULT_FILENAME,
     max_length: int = MAX_FILENAME_LENGTH,

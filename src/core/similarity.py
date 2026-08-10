@@ -12,6 +12,8 @@ cosine similarity reduces to the dot product, making this very fast.
 import logging
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
+logger = logging.getLogger(__name__)
+
 import faiss  # type: ignore
 import numpy as np
 import pandas as pd
@@ -26,6 +28,14 @@ from src.core.config import (
     is_plagiarism,
     severity_from_score,
 )
+
+# ── Distance / similarity conversion ──────────────────────────────────────────
+
+
+def cosine_distance_to_similarity(distance: float) -> float:
+    """Convert a cosine distance (1 - similarity) back to a similarity score."""
+    return max(0.0, min(1.0, 1.0 - distance))
+
 
 # ── Validation helpers ─────────────────────────────────────────────────────────
 

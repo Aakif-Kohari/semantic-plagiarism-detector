@@ -18,6 +18,7 @@ from unittest.mock import patch
 
 from src.utils.temp_manager import (
     cleanup_registered_temp_paths,
+    cleanup_temp_files,
     create_managed_temp_file,
     create_managed_temp_dir,
     get_temp_directory_size_bytes,
@@ -25,6 +26,7 @@ from src.utils.temp_manager import (
     register_temp_path,
     unregister_temp_path,
     verify_available_temp_space,
+    check_temp_disk_space,
     _REGISTERED_TEMP_PATHS,
 )
 
@@ -377,16 +379,7 @@ def test_get_temp_directory_size_bytes_multiple_files():
             except OSError:
                 pass
 
-def verify_available_temp_space(required_bytes: int) -> bool:
-    """Verify that the system temporary directory has enough free disk space."""
 
-    temp_dir = tempfile.gettempdir()
-    _, _, free = shutil.disk_usage(temp_dir)
-
-    if free < required_bytes:
-        raise OSError("Insufficient free disk space in temp directory")
-
-    return True
 
 # ─── Tests for rotate_backup_files (Issue #1572) ──────────────────────────────
 
@@ -564,3 +557,78 @@ class TestRotateBackupFiles:
         assert deleted == 1
         assert file_a.exists()  # Newest kept
         assert not file_b.exists()  # Oldest deleted
+
+
+def test_cleanup_temp_files_retention(tmp_path):
+    """Verify that cleanup_temp_files only deletes files/dirs older than retention_hours."""
+    import time
+
+    # 1. Create a "new" file and register it
+    new_file = tmp_path / "new_temp_file.txt"
+    new_file.write_text("fresh content")
+    register_temp_path(str(new_file))
+
+    # 2. Create an "old" file and register it
+    old_file = tmp_path / "old_temp_file.txt"
+    old_file.write_text("stale content")
+    register_temp_path(str(old_file))
+    # Modify mtime to be 2 hours ago
+    old_mtime = time.time() - (2 * 3600)
+    os.utime(old_file, (old_mtime, old_mtime))
+
+    # 3. Create a "new" directory and register it
+    new_dir = tmp_path / "new_temp_dir"
+    new_dir.mkdir()
+    register_temp_path(str(new_dir))
+
+    # 4. Create an "old" directory and register it
+    old_dir = tmp_path / "old_temp_dir"
+    old_dir.mkdir()
+    register_temp_path(str(old_dir))
+    # Modify mtime to be 2 hours ago
+    os.utime(old_dir, (old_mtime, old_mtime))
+
+    # Run cleanup with 1.0 hour retention
+    cleanup_temp_files(retention_hours=1.0)
+
+    # Assertions
+    # New file/dir should still exist and remain registered
+    assert new_file.exists()
+    assert str(new_file) in _REGISTERED_TEMP_PATHS
+    assert new_dir.exists()
+    assert str(new_dir) in _REGISTERED_TEMP_PATHS
+
+    # Old file/dir should be deleted and unregistered
+    assert not old_file.exists()
+    assert str(old_file) not in _REGISTERED_TEMP_PATHS
+    assert not old_dir.exists()
+    assert str(old_dir) not in _REGISTERED_TEMP_PATHS
+
+    # Cleanup remaining new items to prevent test leakage
+    cleanup_registered_temp_paths()
+
+
+def test_check_temp_disk_space_success():
+    """Verify that check_temp_disk_space returns True when free space is sufficient."""
+    with patch(
+        "src.utils.temp_manager.shutil.disk_usage",
+        return_value=(1000 * 1024 * 1024, 200 * 1024 * 1024, 800 * 1024 * 1024),
+    ):
+        # 800 MB is free, min required is 100 MB, should succeed
+        assert check_temp_disk_space(min_free_mb=100) is True
+
+
+def test_check_temp_disk_space_failure():
+    """Verify that check_temp_disk_space raises OSError when free space is below safety threshold."""
+    import pytest
+    with patch(
+        "src.utils.temp_manager.shutil.disk_usage",
+        return_value=(1000 * 1024 * 1024, 950 * 1024 * 1024, 50 * 1024 * 1024),
+    ):
+        # 50 MB is free, min required is 100 MB, should raise OSError
+        with pytest.raises(
+            OSError,
+            match="Disk space in temp directory below safety threshold",
+        ):
+            check_temp_disk_space(min_free_mb=100)
+

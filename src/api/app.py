@@ -6,6 +6,9 @@ import time
 import uuid
 from datetime import datetime, timezone
 
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 import psutil
 import numpy as np
 
@@ -14,13 +17,6 @@ total_scans = 0
 logger = logging.getLogger(__name__)
 from fastapi import (
     BackgroundTasks,
-    Depends,
-    FastAPI,
-    File,
-    HTTPException,
-    Query,
-    UploadFile,
-    status,
     Request,
     Security,
 )
@@ -30,8 +26,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse, JSONResponse
+from fastapi.responses import PlainTextResponse
 
 from src.api.middleware import verify_bearer_token, get_current_user
 from src.api.schemas import (
@@ -50,6 +45,7 @@ from src.api.schemas import (
     TokenResponse,
 )
 from sklearn.metrics.pairwise import cosine_similarity
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.core.app_config import FAISS_INDEX_PATH, HEALTHZ_DB_PATHS
 from src.core.document_parser import extract_text
@@ -62,6 +58,7 @@ from src.core.similarity import (
 from src.core.text_chunking import chunk_document
 from src.db.auth import get_user_role
 from src.db.corpus_db import _connect, clear_all_data, init_corpus_db, get_document_by_hash
+from src.security.mime_validator import is_executable_upload
 from src.utils.file_streaming import stream_upload_file_to_disk
 from src.utils.hash_util import calculate_file_sha256
 from src.utils.redis_cache import CacheKeyPrefix, get_cache
@@ -140,6 +137,20 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 
+
+@app.exception_handler(404)
+async def not_found_handler(request, exc: StarletteHTTPException):
+    """Custom exception handler for HTTP 404 errors."""
+    return JSONResponse(
+        status_code=404,
+        content={
+            "error": True,
+            "code": 404,
+            "message": "API endpoint or resource not found",
+        },
+    )
+
+# ── Bearer Token Authentication ────────────────────────────────────────────────
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """
@@ -665,6 +676,19 @@ async def scan_document(
         )
 
     filename = file.filename
+
+    # Reject executable/script uploads immediately, before any streaming,
+    # hashing, or text-extraction work — checks both the file extension
+    # (.exe, .sh, .bat, .dll, ...) and leading magic bytes (PE header "MZ",
+    # shell shebang "#!/bin/sh") so a renamed executable is still caught.
+    file_head = await file.read(64)
+    await file.seek(0)
+    if is_executable_upload(file_head, filename):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Unsupported Media Type: executable and script files are not allowed.",
+        )
+
     temp_path = await stream_upload_file_to_disk(file)
 
     try:

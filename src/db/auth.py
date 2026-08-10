@@ -842,7 +842,28 @@ def get_user_active_status(username: str) -> bool:
     except sqlite3.Error as e:
         raise sqlite3.Error(f"Failed to retrieve user active status: {e}") from e
 
+@with_sqlite_retry
+def set_user_status(username: str, status: str) -> None:
+    """Set a user's account status and synchronize the legacy is_active flag."""
+    try:
+        username = _validate_username(username)
 
+        with _connect() as conn:
+            if username == "admin" and status != "active":
+                raise ValueError("The admin account cannot be suspended.")
+
+            conn.execute(
+                """
+                UPDATE users
+                SET status = ?,
+                    is_active = ?
+                WHERE username = ?
+                """,
+                (status, 1 if status == "active" else 0, username),
+            )
+            conn.commit()
+    except sqlite3.Error as e:
+        raise sqlite3.Error(f"Failed to update user status: {e}") from e
 @with_sqlite_retry
 def set_user_active_status(username: str, is_active: bool) -> None:
     """Set whether a user account is active (suspended or active)."""
@@ -852,8 +873,17 @@ def set_user_active_status(username: str, is_active: bool) -> None:
             if username == "admin" and not is_active:
                 raise ValueError("The admin account cannot be suspended.")
             conn.execute(
-                "UPDATE users SET is_active = ? WHERE username = ?",
-                (1 if is_active else 0, username),
+                """
+                UPDATE users
+                SET is_active = ?,
+                    status = ?
+                WHERE username = ?
+                """,
+                (
+                    1 if is_active else 0,
+                    "active" if is_active else "suspended",
+                    username,
+                ),
             )
             conn.commit()
     except sqlite3.Error as e:
@@ -905,13 +935,21 @@ def update_user_profile(
 
             cursor = conn.execute(
                 """
-                UPDATE users
-                SET role = ?,
-                    is_active = ?,
-                    version = version + 1
+               UPDATE users
+SET role = ?,
+    is_active = ?,
+    status = ?,
+    version = version + 1
+
                 WHERE username = ? AND version = ?
                 """,
-                (role, is_active_val, username, expected_version),
+                (
+    role,
+    is_active_val,
+    "active" if is_active else "suspended",
+    username,
+    expected_version,
+)
             )
             if cursor.rowcount == 0:
                 raise StaleDataException(

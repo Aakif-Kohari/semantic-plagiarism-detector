@@ -2,7 +2,11 @@ import io
 import json
 import zipfile
 
-from src.utils.bulk_export import export_incidents_csv_stream, generate_bulk_reports_zip
+from src.utils.bulk_export import (
+    export_incidents_csv_stream,
+    export_incidents_csv,
+    generate_bulk_reports_zip,
+)
 
 
 def test_generate_bulk_reports_zip():
@@ -582,4 +586,93 @@ def test_create_batch_incident_zip_archive_semicolon_delimiter():
         csv_text = zf.read("incidents_summary.csv").decode("utf-8-sig")
 
     assert "Incident ID;Doc A;Doc B" in csv_text
+
+
+def test_export_incidents_csv_delimiter_validation():
+    """Verify that export_incidents_csv validates delimiter and falls back to comma if invalid (#1735)."""
+    # 1. Test valid 1-character delimiter
+    csv_bytes = export_incidents_csv(_SAMPLE_INCIDENTS, delimiter=";")
+    first_line = csv_bytes.decode("utf-8-sig").splitlines()[0]
+    assert ";" in first_line
+    assert "," not in first_line
+
+    # 2. Test multi-character delimiter (invalid) -> should fall back to ","
+    csv_bytes_multi = export_incidents_csv(_SAMPLE_INCIDENTS, delimiter=";;")
+    first_line_multi = csv_bytes_multi.decode("utf-8-sig").splitlines()[0]
+    assert "," in first_line_multi
+    assert ";" not in first_line_multi
+
+    # 3. Test non-string delimiter (invalid) -> should fall back to ","
+    csv_bytes_none = export_incidents_csv(_SAMPLE_INCIDENTS, delimiter=None)
+    first_line_none = csv_bytes_none.decode("utf-8-sig").splitlines()[0]
+    assert "," in first_line_none
+
+
+def test_export_incidents_csv_quoting_style():
+    """Verify that export_incidents_csv respects custom quoting styles (#1739)."""
+    import csv
+
+    # Test QUOTE_ALL: all fields should be quoted
+    csv_bytes_all = export_incidents_csv(_SAMPLE_INCIDENTS, quoting_style=csv.QUOTE_ALL)
+    text_all = csv_bytes_all.decode("utf-8-sig")
+    first_line_all = text_all.splitlines()[0]
+    # Header fields must be quoted
+    assert '"Incident ID","Doc A","Doc B","Similarity","Severity","Status","Date"' in first_line_all
+
+    # Test QUOTE_MINIMAL: default minimal quoting (normal string without special characters is unquoted)
+    csv_bytes_min = export_incidents_csv(_SAMPLE_INCIDENTS, quoting_style=csv.QUOTE_MINIMAL)
+    text_min = csv_bytes_min.decode("utf-8-sig")
+    first_line_min = text_min.splitlines()[0]
+    # Header fields must not be quoted
+    assert "Incident ID,Doc A,Doc B,Similarity,Severity,Status,Date" in first_line_min
+
+
+# ---------------------------------------------------------------------------
+# Tests for sanitize_csv_cell_value (Issue #1744)
+# ---------------------------------------------------------------------------
+
+from src.utils.bulk_export import sanitize_csv_cell_value
+
+
+class TestSanitizeCsvCellValue:
+    """Tests for CSV cell value sanitizer preventing formula injection (#1744)."""
+
+    def test_prepends_single_quote_for_formula_characters(self):
+        assert sanitize_csv_cell_value("=1+1") == "'=1+1"
+        assert sanitize_csv_cell_value("+100") == "'+100"
+        assert sanitize_csv_cell_value("-50") == "'-50"
+        assert sanitize_csv_cell_value("@SUM(A1:A10)") == "'@SUM(A1:A10)"
+
+    def test_safe_strings_unchanged(self):
+        assert sanitize_csv_cell_value("normal_text") == "normal_text"
+        assert sanitize_csv_cell_value("INC-100") == "INC-100"
+        assert sanitize_csv_cell_value("doc_a.pdf") == "doc_a.pdf"
+
+    def test_none_and_empty(self):
+        assert sanitize_csv_cell_value(None) == ""
+        assert sanitize_csv_cell_value("") == ""
+
+    def test_numeric_values(self):
+        assert sanitize_csv_cell_value(123) == "123"
+        assert sanitize_csv_cell_value(95.5) == "95.5"
+
+    def test_export_incidents_csv_stream_sanitizes_injection_triggers(self):
+        """Verify export_incidents_csv_stream sanitizes cell values starting with formula characters."""
+        incidents = [
+            {
+                "incident_id": "=CMD|' /C calc'!A0",
+                "document_a": "+malicious_doc.pdf",
+                "document_b": "-subtraction.docx",
+                "severity_rank": "@admin",
+            }
+        ]
+        csv_bytes = export_incidents_csv_stream(incidents)
+        text = csv_bytes.decode("utf-8-sig")
+        assert "'=CMD|' /C calc'!A0" in text
+        assert "'+malicious_doc.pdf" in text
+        assert "'-subtraction.docx" in text
+        assert "'@admin" in text
+
+
+
 

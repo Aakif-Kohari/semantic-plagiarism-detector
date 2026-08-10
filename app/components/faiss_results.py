@@ -78,7 +78,7 @@ def faiss_results_dataframe(
             {
                 "Target Document": document,
                 "Chunk": chunk_index + 1,
-                "Similarity Score": score,
+                "Similarity Score": round(score, 4),
                 "Matching Text": chunk_text,
                 "Stats": format_text_stats(chunk_text),
             }
@@ -106,9 +106,21 @@ def inspect_diff_dialog(
     doc_name: str,
     score: float,
     pdf_bytes: bytes | None = None,
+    chunk_id: str | None = None,
 ):
     """Render a side-by-side highlighted diff of query vs matched chunk inside a modal."""
-    st.markdown(f"### Match Similarity: **{score:.1%}**")
+    formatted_score = f"{score:.4f}"
+    st.markdown(f"### Match Similarity: **{formatted_score}** ({score:.1%})")
+
+    # Display quick copy buttons inside the inspector modal
+    col_score, col_chunk = st.columns(2)
+    with col_score:
+        st.caption("📋 Similarity Score")
+        st.code(formatted_score, language="text")
+    with col_chunk:
+        if chunk_id:
+            st.caption("📋 Vector Chunk ID")
+            st.code(chunk_id, language="text")
 
     from src.utils.diff_highlighter import highlight_overlap
     highlighted_query, highlighted_match = highlight_overlap(query_text, matched_text)
@@ -161,8 +173,8 @@ def render_faiss_results_ui(
     document_pdf_bytes: Mapping[str, bytes] | None = None,
 ) -> None:
     """
-    Render FAISS search results with a clean interface and an interactive 
-    'Inspect Diff' modal dialog for side-by-side comparison.
+    Render FAISS search results with a clean interface, quick-copy score and chunk IDs,
+    and an interactive 'Inspect Diff' modal dialog for side-by-side comparison.
 
     Args:
         results: An iterable of (record, score) tuples returned by the FAISS search.
@@ -172,28 +184,40 @@ def render_faiss_results_ui(
             offers a "Download Highlighted PDF" button that annotates the
             matched passage directly on the source PDF.
     """
-
-
-
     if not results:
         st.info("No significant matches found above threshold.")
         return
 
     for i, (record, raw_score) in enumerate(results):
         score = float(raw_score)
+        formatted_score = f"{score:.4f}"
         doc_name = str(_record_value(record, "doc_name", "Unknown document"))
         chunk_index = int(_record_value(record, "chunk_index", 0))
+        chunk_id = str(_record_value(record, "chunk_id", f"chunk_{chunk_index + 1}"))
         chunk_text = str(_record_value(record, "chunk_text", ""))
 
         st.markdown(
-            f"<div style='border: 1px solid #e2e8f0; padding: 12px; border-radius: 8px; margin-bottom: 12px;'>"
+            f"<div style='border: 1px solid #e2e8f0; padding: 12px; border-radius: 8px; margin-bottom: 8px;'>"
             f"<strong>📄 {doc_name}</strong> (Chunk #{chunk_index + 1}) · "
-            f"<span style='color: #3b82f6; font-weight: bold;'>Similarity: {score:.1%}</span>"
+            f"<span style='color: #3b82f6; font-weight: bold;'>Similarity: {formatted_score} ({score:.1%})</span>"
             f"</div>",
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
 
-        st.caption(chunk_text[:300] + ("..." if len(chunk_text) > 300 else ""))
+        # Quick-copy blocks for Similarity Score and Chunk ID using st.code()
+        col_score, col_chunk = st.columns(2)
+        with col_score:
+            st.caption("📋 Similarity Score")
+            st.code(formatted_score, language="text")
+        with col_chunk:
+            st.caption("📋 Vector Chunk ID")
+            st.code(chunk_id, language="text")
+
+        # Streamlit's code block includes a built-in one-click copy control.
+        # Render the complete matched chunk so reports can copy the exact
+        # sentence/passage instead of the previously truncated preview.
+        st.caption("📋 Matched Text")
+        st.code(chunk_text, language="text")
 
         if st.button("🔍 Inspect Diff", key=f"diff_btn_{i}_{doc_name}_{chunk_index}"):
             source_pdf_bytes = (
@@ -201,10 +225,21 @@ def render_faiss_results_ui(
             )
             if source_pdf_bytes:
                 inspect_diff_dialog(
-                    query_text, chunk_text, doc_name, score, pdf_bytes=source_pdf_bytes
+                    query_text,
+                    chunk_text,
+                    doc_name,
+                    score,
+                    pdf_bytes=source_pdf_bytes,
+                    chunk_id=chunk_id,
                 )
             else:
-                inspect_diff_dialog(query_text, chunk_text, doc_name, score)
+                inspect_diff_dialog(
+                    query_text,
+                    chunk_text,
+                    doc_name,
+                    score,
+                    chunk_id=chunk_id,
+                )
 
         st.markdown("<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
 
@@ -262,5 +297,3 @@ def render_faiss_metric_badge(faiss_index: Any = None) -> str:
     badge_text = f"Metric: {label}"
     st.sidebar.caption(f"🎯 {badge_text}")
     return badge_text
-
-

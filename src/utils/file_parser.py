@@ -1,3 +1,28 @@
+"""Utility functions for file handling and name formatting."""
+
+
+def truncate_filename(name: str, max_len: int = 35) -> str:
+    """Truncate filename with ellipsis if it exceeds max_len."""
+    if len(name) <= max_len:
+        return name
+    return name[: max_len - 3] + "..."
+"""Utility for parsing files and extracting metadata."""
+
+import fitz
+
+
+def get_pdf_page_count(file_bytes: bytes) -> int:
+    """Return the total page count of a PDF file from its bytes.
+
+    Returns 0 if the bytes are empty, invalid, or corrupted.
+    """
+    if not file_bytes:
+        return 0
+    try:
+        with fitz.open(stream=file_bytes, filetype="pdf") as doc:
+            return doc.page_count
+    except Exception:
+        return 0
 """
 src/utils/file_parser.py
 ------------------------
@@ -8,7 +33,6 @@ along with file categorization, validation helpers, and PDF metadata extraction.
 
 from typing import Any, List, Optional, Tuple
 
-import fitz  # PyMuPDF
 
 
 class EncryptedPDFError(Exception):
@@ -34,13 +58,39 @@ def get_file_size_formatted(num_bytes: int) -> str:
             if unit == "B":
                 return f"{int(size)} {unit}"
             return f"{size:.2f} {unit}"
-        size /= 1024
+size /= 1024
 
     return f"{size:.2f} {units[-1]}"
 
 
-def extract_text_from_pdf(file_bytes: bytes, password: Optional[str] = None) -> Tuple[str, bool]:
+def get_file_size_formatted_short(num_bytes: int) -> str:
     """
+    Convert a file size in bytes to a compact human-readable string.
+
+    Args:
+        num_bytes (int): File size in bytes.
+
+    Returns:
+        str: Compact file size using B, KB, MB, or GB with no spaces
+            and no trailing zeros (e.g. "1MB", "500KB", "12B").
+    """
+    units = ["B", "KB", "MB", "GB"]
+    size = float(num_bytes)
+
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(size)}{unit}"
+            rounded = round(size, 2)
+            if rounded == int(rounded):
+                return f"{int(rounded)}{unit}"
+            return f"{rounded:g}{unit}"
+        size /= 1024
+
+    return f"{size:g}{units[-1]}"
+
+
+def extract_text_from_pdf(file_bytes: bytes, password: Optional[str] = None) -> Tuple[str, bool]:    """
     Extracts text from PDF bytes.
 
     Args:

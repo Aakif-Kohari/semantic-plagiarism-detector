@@ -1,10 +1,43 @@
+import fitz
+from src.utils.file_parser import get_pdf_page_count
+
+
+def test_get_pdf_page_count_single_page():
+    """Verify that a valid single-page PDF returns 1."""
+    doc = fitz.open()
+    doc.new_page()
+    pdf_bytes = doc.write()
+    doc.close()
+
+    assert get_pdf_page_count(pdf_bytes) == 1
+
+
+def test_get_pdf_page_count_multi_page():
+    """Verify that a valid multi-page PDF returns the correct number of pages."""
+    doc = fitz.open()
+    doc.new_page()
+    doc.new_page()
+    doc.new_page()
+    pdf_bytes = doc.write()
+    doc.close()
+
+    assert get_pdf_page_count(pdf_bytes) == 3
+
+
+def test_get_pdf_page_count_corrupted():
+    """Verify that corrupted or invalid PDF bytes return 0."""
+    assert get_pdf_page_count(b"invalid pdf data") == 0
+
+
+def test_get_pdf_page_count_empty():
+    """Verify that empty bytes return 0."""
+    assert get_pdf_page_count(b"") == 0
 """
 tests/utils/test_file_parser.py
 --------------------------------
 Includes tests for password-protected PDF parsing and MIME categorization.
 """
 
-import fitz
 import pytest
 
 from src.utils.file_parser import (
@@ -12,11 +45,11 @@ from src.utils.file_parser import (
     extract_pdf_metadata,
     extract_text_from_pdf,
     get_file_size_formatted,
+    get_file_size_formatted_short,
     get_file_mime_category,
     get_supported_mime_categories,
     is_extension_supported,
 )
-
 
 class TestEncryptedPDFHandling:
     """Test suite for password-protected PDF parsing."""
@@ -64,12 +97,30 @@ class TestFileSizeFormatting:
     def test_get_file_size_formatted_gb(self):
         assert get_file_size_formatted(1024 * 1024 * 1024) == "1.00 GB"
 
-    def test_get_file_size_formatted_fractional(self):
+def test_get_file_size_formatted_fractional(self):
         assert get_file_size_formatted(1536) == "1.50 KB"
 
 
-class TestFileMimeCategory:
-    """Test suite for MIME categorization helpers."""
+class TestFileSizeFormattedShort:
+    """Test suite for the compact file size formatting utility."""
+
+    def test_get_file_size_formatted_short_bytes(self):
+        assert get_file_size_formatted_short(12) == "12B"
+
+    def test_get_file_size_formatted_short_kb(self):
+        assert get_file_size_formatted_short(500 * 1024) == "500KB"
+
+    def test_get_file_size_formatted_short_mb(self):
+        assert get_file_size_formatted_short(1024 * 1024) == "1MB"
+
+    def test_get_file_size_formatted_short_gb(self):
+        assert get_file_size_formatted_short(1024 * 1024 * 1024) == "1GB"
+
+    def test_get_file_size_formatted_short_fractional(self):
+        assert get_file_size_formatted_short(1536) == "1.5KB"
+
+
+class TestFileMimeCategory:    """Test suite for MIME categorization helpers."""
 
     @pytest.mark.parametrize(
         "filename, expected_category",

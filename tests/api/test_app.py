@@ -1,3 +1,18 @@
+from fastapi.testclient import TestClient
+from src.api.app import app
+
+client = TestClient(app)
+
+
+def test_http_404_not_found():
+    """Verify that a nonexistent route returns a standardized JSON 404 response payload."""
+    response = client.get("/api/v1/nonexistent-endpoint-xyz")
+    assert response.status_code == 404
+    assert response.json() == {
+        "error": True,
+        "code": 404,
+        "message": "API endpoint or resource not found",
+    }
 # JSONContentTypeMiddleware unit coverage for Issue #1394.
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
@@ -583,6 +598,78 @@ def test_streaming_multipart_upload_streams_chunks_to_disk():
     data = response.json()
     assert data["filename"] == "stream_test.txt"
     assert data["word_count"] > 0
+
+
+def test_scan_rejects_exe_upload_with_415():
+    """Verify POST /api/v1/scan rejects a Windows PE executable (.exe, MZ header) with 415."""
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+
+    client = TestClient(app)
+    # Minimal DOS/PE executable header ("MZ" magic bytes).
+    payload = b"MZ" + b"\x90\x00" * 30
+
+    files = {"file": ("malware.exe", payload, "application/octet-stream")}
+    headers = {"Authorization": "Bearer test-write-token"}
+
+    response = client.post("/api/v1/scan", files=files, headers=headers)
+    assert response.status_code == 415
+    assert "unsupported media type" in response.json()["message"].lower()
+
+
+def test_scan_rejects_shell_script_upload_with_415():
+    """Verify POST /api/v1/scan rejects a shell script (#!/bin/sh shebang) with 415."""
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+
+    client = TestClient(app)
+    payload = b"#!/bin/sh\necho 'hello'\n"
+
+    # Even with an unrelated/misleading extension, the shebang magic bytes
+    # alone must be enough to trigger the rejection.
+    files = {"file": ("notes.txt", payload, "text/plain")}
+    headers = {"Authorization": "Bearer test-write-token"}
+
+    response = client.post("/api/v1/scan", files=files, headers=headers)
+    assert response.status_code == 415
+
+
+def test_scan_rejects_bat_and_dll_extensions_with_415():
+    """Verify POST /api/v1/scan rejects .bat and .dll uploads by extension, with 415."""
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer test-write-token"}
+
+    for filename, payload in [
+        ("run.bat", b"@echo off\r\necho hi\r\n"),
+        ("library.dll", b"MZ" + b"\x00" * 30),
+    ]:
+        files = {"file": (filename, payload, "application/octet-stream")}
+        response = client.post("/api/v1/scan", files=files, headers=headers)
+        assert response.status_code == 415, f"{filename} was not rejected with 415"
+
+
+def test_scan_does_not_reject_ordinary_text_upload():
+    """Sanity check: a normal .txt upload must NOT be blocked by the executable check."""
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+    from src.db.corpus_db import init_corpus_db
+
+    # Ensure the corpus DB tables exist — scan_document() reaches the DB
+    # layer once a file clears the executable check, and table creation
+    # is otherwise only triggered lazily elsewhere in the app.
+    init_corpus_db()
+
+    client = TestClient(app)
+    payload = b"This is an ordinary plain-text document, not an executable.\n" * 3
+
+    files = {"file": ("essay.txt", payload, "text/plain")}
+    headers = {"Authorization": "Bearer test-write-token"}
+
+    response = client.post("/api/v1/scan", files=files, headers=headers)
+    assert response.status_code != 415
 
 
 def test_refresh_token_success_with_signed_refresh_token(tmp_path):

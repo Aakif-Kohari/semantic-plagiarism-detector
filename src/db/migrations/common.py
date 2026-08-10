@@ -171,15 +171,15 @@ def run_migrations(
     target_version: int,
 ) -> int:
     """Apply every missing migration sequentially and atomically."""
-    target = int(target_version)
-    current = get_user_version(connection)
+    new_ver = int(target_version)
+    old_ver = get_user_version(connection)
 
-    if current > target:
+    if old_ver > new_ver:
         raise RuntimeError(
-            f"Database schema version {current} is newer than supported version {target}."
+            f"Database schema version {old_ver} is newer than supported version {new_ver}."
         )
 
-    expected_versions = set(range(1, target + 1))
+    expected_versions = set(range(1, new_ver + 1))
     missing_definitions = sorted(expected_versions.difference(migrations))
     if missing_definitions:
         raise RuntimeError(
@@ -187,11 +187,11 @@ def run_migrations(
             + ", ".join(map(str, missing_definitions))
         )
 
-    if current == target:
-        return current
+    if old_ver == new_ver:
+        return old_ver
 
     with migration_transaction(connection):
-        for version in range(current + 1, target + 1):
+        for version in range(old_ver + 1, new_ver + 1):
             migration_fn = migrations[version]
             migration_name = getattr(migration_fn, "__name__", f"v{version}")
             start_time = time.perf_counter()
@@ -202,15 +202,94 @@ def run_migrations(
                 migration_name,
                 elapsed_sec,
             )
-        set_user_version(connection, target)
+        set_user_version(connection, new_ver)
 
     logger.info(
         "Database migration from version %d to %d completed successfully.",
-        current,
-        target,
+        old_ver,
+        new_ver,
     )
 
-    return target
+    return new_ver
+
+
+def rollback_migration(
+    conn: sqlite3.Connection,
+    target_version: int,
+    *,
+    down_migrations: Mapping[int, Migration],
+) -> int:
+    """Roll back the schema to ``target_version``.
+
+    Executes the registered down-migration DDL script for each schema
+    version being undone — from the current version down to
+    ``target_version`` — in reverse order, atomically, then restores the
+    schema version (SQLite's ``PRAGMA user_version``) to ``target_version``.
+
+    Mirrors :func:`run_migrations`'s design: callers supply a mapping of
+    version -> down-migration callable, where ``down_migrations[v]`` must
+    undo whatever forward migration ``v`` did (bringing the schema from
+    version ``v`` back to ``v - 1``).
+
+    Args:
+        conn: Open SQLite connection.
+        target_version: Schema version to roll back to. Must be less than
+            or equal to the database's current version.
+        down_migrations: Mapping of version -> down-migration callable.
+
+    Returns:
+        The schema version after rollback (equal to ``target_version``).
+
+    Raises:
+        ValueError: If ``target_version`` is negative.
+        RuntimeError: If ``target_version`` is greater than the database's
+            current version, or a required down-migration definition is
+            missing for one of the versions being undone.
+    """
+    new_ver = int(target_version)
+    if new_ver < 0:
+        raise ValueError("Schema version cannot be negative.")
+
+    old_ver = get_user_version(conn)
+
+    if new_ver > old_ver:
+        raise RuntimeError(
+            f"Cannot roll back to version {new_ver}: current schema version "
+            f"{old_ver} is already older than the requested target."
+        )
+
+    if old_ver == new_ver:
+        return old_ver
+
+    versions_to_undo = range(old_ver, new_ver, -1)
+    missing_definitions = sorted(v for v in versions_to_undo if v not in down_migrations)
+    if missing_definitions:
+        raise RuntimeError(
+            "Down-migration definitions are missing for versions: "
+            + ", ".join(map(str, missing_definitions))
+        )
+
+    with migration_transaction(conn):
+        for version in versions_to_undo:
+            down_fn = down_migrations[version]
+            migration_name = getattr(down_fn, "__name__", f"v{version}_down")
+            start_time = time.perf_counter()
+            down_fn(conn)
+            elapsed_sec = time.perf_counter() - start_time
+            logger.info(
+                "Rollback migration [%s] executed in %.3f seconds.",
+                migration_name,
+                elapsed_sec,
+            )
+        set_user_version(conn, new_ver)
+
+    logger.info(
+        "Database schema rolled back from version %d to %d successfully.",
+        old_ver,
+        new_ver,
+    )
+
+    return new_ver
 
 
 def delete_all_if_table_exists(

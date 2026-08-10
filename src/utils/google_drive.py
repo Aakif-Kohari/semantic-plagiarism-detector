@@ -70,15 +70,42 @@ def extract_google_drive_folder_id(url_or_id: str) -> str | None:
     if _DRIVE_ID_RE.match(cleaned):
         return cleaned
 
-    match = _DRIVE_URL_RE.search(cleaned)
+match = _DRIVE_URL_RE.search(cleaned)
     if match:
         return match.group(1)
 
     return None
 
 
-def get_drive_service(
-    api_key: Optional[str] = None, service_account_info: Optional[dict] = None
+_FOLDER_ID_PATTERN = re.compile(r"[\w-]{25,}")
+
+
+def extract_folder_id(url_or_id: str) -> str | None:
+    """
+    Extracts a Google Drive folder ID from a full Drive URL or raw ID string.
+
+    Uses a permissive regex to match any run of word characters and hyphens
+    that is at least 25 characters long, so it accepts both full folder
+    URLs (e.g. "https://drive.google.com/drive/folders/1A2B3C...") and a
+    bare folder ID pasted on its own.
+
+    Args:
+        url_or_id: A Google Drive folder URL or a raw folder ID string.
+
+    Returns:
+        The extracted folder ID string, or None if no valid ID is found.
+    """
+    if not isinstance(url_or_id, str):
+        return None
+
+    match = _FOLDER_ID_PATTERN.search(url_or_id)
+    if match:
+        return match.group(0)
+
+    return None
+
+
+def get_drive_service(    api_key: Optional[str] = None, service_account_info: Optional[dict] = None
 ):
     """
     Builds and returns a Google Drive API service instance using an API key or Service Account.
