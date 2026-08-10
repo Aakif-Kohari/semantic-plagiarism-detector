@@ -48,6 +48,13 @@ from src.utils.filename import (
     unique_filename,
     validate_document_extension,
 )
+# Add with other imports (around line 200-250)
+from app.components.report_generator import (
+    render_report_generator_ui,
+    render_scheduled_reports_ui,
+    initialize_report_generator,
+    PlagiarismReportGenerator,
+)
 # After existing imports, add:
 from app.components.advanced_analytics import (
     AdvancedTextPreprocessor,
@@ -1113,6 +1120,7 @@ with st.sidebar:
 
     if user_role == "admin":
         initialize_enhanced_dashboard()
+        initialize_report_generator()
         # ── Threshold Presets (Issue #1674) ───────────────────────────────────────
         st.markdown("### 🎯 Threshold Presets")
         
