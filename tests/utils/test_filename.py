@@ -246,3 +246,27 @@ def test_compute_file_hash_stream_matches_byte_hash():
         compute_file_hash_stream(stream)
         == get_file_sha256_hash(data)
     )
+
+    from src.utils.filename import (
+    normalize_sha256_hash,
+)
+
+
+def test_normalize_sha256_hash_lowercases_mixed_case():
+    mixed_case = "A" * 32 + "b" * 32
+    assert normalize_sha256_hash(mixed_case) == mixed_case.lower()
+
+
+def test_normalize_sha256_hash_accepts_already_lowercase():
+    lower_hash = "a" * 64
+    assert normalize_sha256_hash(lower_hash) == lower_hash
+
+
+def test_normalize_sha256_hash_invalid_length_raises():
+    with pytest.raises(ValueError):
+        normalize_sha256_hash("abc123")
+
+
+def test_normalize_sha256_hash_invalid_characters_raises():
+    with pytest.raises(ValueError):
+        normalize_sha256_hash("z" * 64)

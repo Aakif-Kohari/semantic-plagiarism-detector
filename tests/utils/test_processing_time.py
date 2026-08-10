@@ -10,6 +10,7 @@ from src.utils.processing_time import (
     BYTES_PER_MB,
     ProcessingTimer,
     calculate_average_latency,
+    calculate_docs_per_minute,
     calculate_mb_per_minute,
     calculate_kb_per_second,
     calculate_page_throughput,
@@ -20,9 +21,7 @@ from src.utils.processing_time import (
     format_throughput_human_readable,
     processing_eta_text,
     uploaded_files_total_bytes,
-)
-
-# ============================================================================
+)# ============================================================================
 # Page Throughput Tests
 # ============================================================================
 

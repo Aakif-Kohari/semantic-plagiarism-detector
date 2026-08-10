@@ -53,6 +53,19 @@ def test_export_network_adjacency_csv_empty_graph():
 
     assert csv_output.strip() == "Source,Target,Weight"
 
+from src.visualization.network_graph import (
+    NETWORK_GRAPH_CONFIG,
+    build_network_data,
+    calculate_force_directed_layout,
+    export_graph_to_csv,
+    export_network_to_csv_bytes,
+    export_network_to_gexf_bytes,
+    plot_plagiarism_network_graph,
+    plot_similarity_network,
+    render_network_plotly,
+)
+
+
 
 def test_build_network_data_structure():
     """Verify build_network_data returns expected keys, NetworkX graph, and Plotly traces."""
@@ -134,6 +147,10 @@ def test_build_network_data_node_color_severity():
     assert net_data["node_trace"].marker.color[1] == "#ff0000"
     # doc_success has max_score=0.8 -> #ffff00
     assert net_data["node_trace"].marker.color[2] == "#ffff00"
+
+def test_network_graph_config_enables_scroll_zoom():
+    """Verify Plotly network graph configuration enables scroll zoom."""
+    assert NETWORK_GRAPH_CONFIG["scrollZoom"] is True
 
 
 def test_render_network_plotly_construction():
@@ -698,6 +715,66 @@ def test_export_network_centrality_csv():
     assert (
         row_dict["doc1"][1] == 1.0
     )  # Centrality score for connected graph of 3 nodes: 2 / (3 - 1) = 1.0
+
+
+# ==============================================================================
+# Max Connected Nodes Filter (Issue #1797)
+# ==============================================================================
+
+
+def _star_similarity_matrix(n: int = 6) -> pd.DataFrame:
+    """Star graph: center doc0 linked to all others; a few leaf-leaf edges raise mid-tier degrees."""
+    labels = [f"doc{i}" for i in range(n)]
+    matrix = numpy.eye(n, dtype=float)
+    for i in range(1, n):
+        matrix[0, i] = matrix[i, 0] = 0.9
+    matrix[1, 2] = matrix[2, 1] = 0.85
+    matrix[1, 3] = matrix[3, 1] = 0.85
+    return pd.DataFrame(matrix, index=labels, columns=labels)
+
+
+def test_build_network_data_keeps_top_max_nodes_by_degree():
+    """When node count exceeds max_nodes, retain only the highest-degree documents."""
+    df = _star_similarity_matrix(6)
+
+    net_data = build_network_data(
+        df, threshold=0.75, show_isolated=True, max_nodes=3
+    )
+
+    assert len(net_data["graph"].nodes()) == 3
+    assert net_data["hidden_nodes"] == 3
+    # doc0 (deg 5) and doc1 (deg 3) must be kept; third slot is the next-highest degree
+    assert "doc0" in net_data["graph"].nodes()
+    assert "doc1" in net_data["graph"].nodes()
+
+
+def test_build_network_data_no_filter_when_under_max_nodes():
+    """Graphs at or below max_nodes keep every node and report zero hidden."""
+    df = _three_doc_matrix()
+
+    net_data = build_network_data(
+        df, threshold=0.75, show_isolated=True, max_nodes=50
+    )
+
+    assert len(net_data["graph"].nodes()) == 3
+    assert net_data["hidden_nodes"] == 0
+
+
+def test_plot_plagiarism_network_graph_max_nodes_caption():
+    """plot_plagiarism_network_graph accepts max_nodes and captions hidden node count."""
+    df = _star_similarity_matrix(6)
+
+    fig = plot_plagiarism_network_graph(
+        similarity_df=df,
+        threshold=0.75,
+        show_isolated=True,
+        max_nodes=3,
+    )
+
+    assert isinstance(fig, go.Figure)
+    assert len(fig.data[1].customdata) == 3
+    caption_texts = [ann.text for ann in (fig.layout.annotations or [])]
+    assert "3 nodes hidden" in caption_texts
 
 
 # ─── Tests for get_cluster_count (Issue #1793) ────────────────────────────────
