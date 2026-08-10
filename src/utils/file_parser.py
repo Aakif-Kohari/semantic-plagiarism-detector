@@ -50,13 +50,39 @@ def get_file_size_formatted(num_bytes: int) -> str:
             if unit == "B":
                 return f"{int(size)} {unit}"
             return f"{size:.2f} {unit}"
-        size /= 1024
+size /= 1024
 
     return f"{size:.2f} {units[-1]}"
 
 
-def extract_text_from_pdf(file_bytes: bytes, password: Optional[str] = None) -> Tuple[str, bool]:
+def get_file_size_formatted_short(num_bytes: int) -> str:
     """
+    Convert a file size in bytes to a compact human-readable string.
+
+    Args:
+        num_bytes (int): File size in bytes.
+
+    Returns:
+        str: Compact file size using B, KB, MB, or GB with no spaces
+            and no trailing zeros (e.g. "1MB", "500KB", "12B").
+    """
+    units = ["B", "KB", "MB", "GB"]
+    size = float(num_bytes)
+
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(size)}{unit}"
+            rounded = round(size, 2)
+            if rounded == int(rounded):
+                return f"{int(rounded)}{unit}"
+            return f"{rounded:g}{unit}"
+        size /= 1024
+
+    return f"{size:g}{units[-1]}"
+
+
+def extract_text_from_pdf(file_bytes: bytes, password: Optional[str] = None) -> Tuple[str, bool]:    """
     Extracts text from PDF bytes.
 
     Args:
