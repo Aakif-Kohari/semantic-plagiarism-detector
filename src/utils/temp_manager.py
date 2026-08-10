@@ -275,6 +275,27 @@ def verify_available_temp_space(required_bytes: int) -> bool:
 
     return True
 
+def check_temp_disk_space(min_free_mb: int = 100) -> bool:
+    """
+    Verify that available disk space in the system temporary directory exceeds the minimum safety threshold.
+
+    Args:
+        min_free_mb: Minimum free space required in megabytes. Defaults to 100.
+
+    Returns:
+        True if the free space is equal to or greater than the threshold.
+
+    Raises:
+        OSError: If the free space is below the threshold.
+    """
+    temp_dir = tempfile.gettempdir()
+    _, _, free = shutil.disk_usage(temp_dir)
+    
+    if free < min_free_mb * 1024 * 1024:
+        raise OSError("Disk space in temp directory below safety threshold")
+        
+    return True
+
 def rotate_backup_files(backup_dir: Path, keep_count: int = 5) -> int:
     """Enforce retention policies on backup directories by keeping only the N most recent files.
 

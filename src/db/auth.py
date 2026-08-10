@@ -349,74 +349,67 @@ def verify_user(
         if return_details:
             return {"authenticated": False, "must_change_password": False}
         return False
+    try:
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT password, status, is_active, must_change_password FROM users WHERE username = ?",
+                (username,),
+            ).fetchone()
 
-    with _connect() as conn:
+        if not row:
+            if return_details:
+                return {"authenticated": False, "must_change_password": False}
+            return False
 
-       row = conn.execute(
-    "SELECT password, status FROM users WHERE username = ?",
-    (username,),
-).fetchone()
+        stored_hash, status, is_active, must_change_password = row
+        if status == "suspended" or not is_active:
+            if return_details:
+                return {"authenticated": False, "must_change_password": False}
+            return False
 
-if not row:
-    return False
-
-stored_hash, status = row
-if status == "suspended":
-    return False
-        row = conn.execute(
-            "SELECT password, is_active, must_change_password FROM users WHERE username = ?",
-            (username,),
-        ).fetchone()
-
-    if not row:
-        if return_details:
-            return {"authenticated": False, "must_change_password": False}
-        return False
-
-    stored_hash, is_active, must_change_password = row
-    if not is_active:
-        if return_details:
-            return {"authenticated": False, "must_change_password": False}
-        return False
-
-    authenticated = False
-    if stored_hash.startswith("$argon2"):
-        try:
-            _ph.verify(stored_hash, password)
-            if _ph.check_needs_rehash(stored_hash):
-                hashed = _hash_password(password)
-                with _connect() as conn_rehash:
-                    conn_rehash.execute(
-                        "UPDATE users SET password = ? WHERE username = ?",
-                        (hashed, username),
-                    )
-                    conn_rehash.commit()
-            _record_login_timestamp(username)
-            authenticated = True
-        except (VerifyMismatchError, VerificationError):
-            authenticated = False
-
-    elif stored_hash.startswith(("$2a$", "$2b$", "$2y$")):
-        try:
-            if bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8")):
-                hashed = _hash_password(password)
-                with _connect() as conn_migrate:
-                    conn_migrate.execute(
-                        "UPDATE users SET password = ? WHERE username = ?",
-                        (hashed, username),
-                    )
-                    conn_migrate.commit()
+        authenticated = False
+        if stored_hash and stored_hash.startswith("$argon2"):
+            try:
+                _ph.verify(stored_hash, password)
+                if _ph.check_needs_rehash(stored_hash):
+                    hashed = _hash_password(password)
+                    with _connect() as conn_rehash:
+                        conn_rehash.execute(
+                            "UPDATE users SET password = ? WHERE username = ?",
+                            (hashed, username),
+                        )
+                        conn_rehash.commit()
                 _record_login_timestamp(username)
                 authenticated = True
-        except ValueError:
-            authenticated = False
+            except (VerifyMismatchError, VerificationError):
+                authenticated = False
 
-    if return_details:
-        return {
-            "authenticated": authenticated,
-            "must_change_password": bool(must_change_password) if authenticated else False,
-        }
-    return authenticated
+        elif stored_hash and stored_hash.startswith(("$2a$", "$2b$", "$2y$")):
+            try:
+                if bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8")):
+                    hashed = _hash_password(password)
+                    with _connect() as conn_migrate:
+                        conn_migrate.execute(
+                            "UPDATE users SET password = ? WHERE username = ?",
+                            (hashed, username),
+                        )
+                        conn_migrate.commit()
+                    _record_login_timestamp(username)
+                    authenticated = True
+            except Exception:
+                authenticated = False
+
+        if return_details:
+            return {
+                "authenticated": authenticated,
+                "must_change_password": bool(must_change_password) if authenticated else False,
+            }
+        return authenticated
+    except sqlite3.Error as e:
+        logger.error(f"Failed to verify user: {e}")
+        if return_details:
+            return {"authenticated": False, "must_change_password": False}
+        return False
 
 
 authenticate_user = verify_user
@@ -555,7 +548,7 @@ def delete_user(username: str) -> None:
 def update_password(
     username: str, new_password: str, current_user: str | None = None
 ) -> None:
-    """Update a user's password with a new Argon2 hash."""
+    """Update a user's password with a new Argon2 hash and record password_changed_at timestamp."""
     if current_user and current_user != username:
         if get_user_role(current_user) != "admin":
             raise PermissionError(
@@ -584,11 +577,10 @@ def update_password(
                 """,
                 (username,),
             ).fetchall()
-            recent_hashes = [r[0] for r in history_rows]
 
+            recent_hashes = [r[0] for r in history_rows]
             if current_hash and current_hash not in recent_hashes:
                 recent_hashes.append(current_hash)
-
             recent_hashes = recent_hashes[:3]
 
             for old_hash in recent_hashes:
@@ -602,15 +594,10 @@ def update_password(
             cursor = conn.execute(
                 """
                 UPDATE users
-                SET password = ?,
-                    password_changed_at = ?
+                SET password = ?, password_changed_at = ?
                 WHERE username = ?
                 """,
-                (
-                    hashed,
-                    password_changed_at,
-                    username,
-                ),
+                (hashed, password_changed_at, username),
             )
             if cursor.rowcount != 1:
                 raise ValueError("User not found.")
@@ -620,7 +607,7 @@ def update_password(
                 INSERT INTO password_history (username, password_hash, created_at)
                 VALUES (?, ?, ?)
                 """,
-                (username, hashed, password_changed_at),
+                (username, current_hash, password_changed_at),
             )
             conn.commit()
 
@@ -633,6 +620,9 @@ def update_password(
         raise
     except sqlite3.Error as e:
         raise sqlite3.Error(f"Failed to update password: {e}") from e
+    except Exception as e:
+        logger.error("Failed to update password for user %s: %s", username, e)
+        raise
 
 
 def get_tour_completed(username: str) -> bool:
@@ -885,20 +875,17 @@ def set_user_active_status(username: str, is_active: bool) -> None:
             if username == "admin" and not is_active:
                 raise ValueError("The admin account cannot be suspended.")
             conn.execute(
-                conn.execute(
-    """
-    UPDATE users
-    SET is_active = ?,
-        status = ?
-    WHERE username = ?
-    """,
-    (
-        1 if is_active else 0,
-        "active" if is_active else "suspended",
-        username,
-    ),
-)" WHERE username = ?",
-                (1 if is_active else 0, username),
+                """
+                UPDATE users
+                SET is_active = ?,
+                    status = ?
+                WHERE username = ?
+                """,
+                (
+                    1 if is_active else 0,
+                    "active" if is_active else "suspended",
+                    username,
+                ),
             )
             conn.commit()
     except sqlite3.Error as e:
