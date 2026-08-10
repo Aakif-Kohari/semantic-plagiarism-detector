@@ -70,6 +70,13 @@ from app.components.advanced_analytics import (
     track_comparison,
     ProcessingStatus,
 )
+# Add with other imports (around line 200-250)
+from app.components.real_time_monitor import (
+    render_real_time_monitor,
+    initialize_monitoring,
+    MonitoringEngine,
+    HealthChecker,
+)
 
 try:
     from streamlit_plotly_events import plotly_events  # type: ignore
