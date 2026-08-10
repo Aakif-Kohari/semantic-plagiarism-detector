@@ -534,3 +534,94 @@ def test_send_email_passes_timeout_parameter():
             "<p>Body</p>",
         )
         mock_smtp_ssl.assert_called_once_with("smtp.example.com", 465, timeout=10.0)
+
+
+# ---------------------------------------------------------------------------
+# Tests for custom Reply-To Header Option (#1737)
+# ---------------------------------------------------------------------------
+
+
+@patch("smtplib.SMTP")
+@patch.dict(
+    "os.environ",
+    {
+        "SMTP_SERVER": "smtp.example.com",
+        "SMTP_PORT": "587",
+        "SMTP_USERNAME": "test@example.com",
+        "SMTP_PASSWORD": "password",
+        "FROM_EMAIL": "test@example.com",
+    },
+)
+def test_send_email_with_reply_to_header(mock_smtp):
+    """Test that Reply-To header is correctly attached when provided (#1737)."""
+    mock_server = MagicMock()
+    mock_smtp.return_value.__enter__.return_value = mock_server
+
+    result = send_email(
+        ["recipient@example.com"],
+        "Test Subject",
+        "<p>Body</p>",
+        reply_to="support@example.com"
+    )
+
+    assert result is True
+    mock_server.send_message.assert_called_once()
+    sent_msg = mock_server.send_message.call_args[0][0]
+    assert sent_msg["Reply-To"] == "support@example.com"
+
+
+@patch("smtplib.SMTP")
+@patch.dict(
+    "os.environ",
+    {
+        "SMTP_SERVER": "smtp.example.com",
+        "SMTP_PORT": "587",
+        "SMTP_USERNAME": "test@example.com",
+        "SMTP_PASSWORD": "password",
+        "FROM_EMAIL": "test@example.com",
+    },
+)
+def test_send_email_without_reply_to_header(mock_smtp):
+    """Test that Reply-To header is omitted when reply_to is None (#1737)."""
+    mock_server = MagicMock()
+    mock_smtp.return_value.__enter__.return_value = mock_server
+
+    result = send_email(
+        ["recipient@example.com"],
+        "Test Subject",
+        "<p>Body</p>",
+        reply_to=None
+    )
+
+    assert result is True
+    sent_msg = mock_server.send_message.call_args[0][0]
+    assert "Reply-To" not in sent_msg
+
+
+def test_send_email_invalid_reply_to_format():
+    """Test that an invalid reply_to email format raises ValueError (#1737)."""
+    with pytest.raises(ValueError, match="Invalid reply-to email address"):
+        send_email(
+            to_emails=["recipient@example.com"],
+            subject="Test Subject",
+            html_body="<p>Test</p>",
+            reply_to="invalid-reply-to-format",
+        )
+
+
+@patch("src.utils.daily_summary_email.send_email")
+@patch("src.utils.daily_summary_email.get_admin_emails")
+@patch("src.utils.daily_summary_email.get_incidents_last_24h")
+def test_send_daily_summary_passes_reply_to(mock_get_incidents, mock_get_emails, mock_send_email):
+    """Test that send_daily_summary forwards reply_to parameter to send_email (#1737)."""
+    mock_get_incidents.return_value = []
+    mock_get_emails.return_value = ["admin@example.com"]
+    mock_send_email.return_value = True
+
+    result = send_daily_summary(reply_to="support@example.com")
+
+    assert result is True
+    mock_send_email.assert_called_once()
+    _, kwargs = mock_send_email.call_args
+    assert kwargs.get("reply_to") == "support@example.com"
+    

@@ -48,7 +48,21 @@ from src.utils.filename import (
     unique_filename,
     validate_document_extension,
 )
-
+# After existing imports, add:
+from app.components.advanced_analytics import (
+    AdvancedTextPreprocessor,
+    ContextPreservingChunker,
+    OptimizedBatchProcessor,
+    ComparisonHistoryManager,
+    PerformanceMonitor,
+    render_processing_status_widget,
+    render_document_analysis_widget,
+    render_advanced_features_sidebar,
+    initialize_advanced_features,
+    run_pipeline_with_tracking,
+    track_comparison,
+    ProcessingStatus,
+)
 
 try:
     from streamlit_plotly_events import plotly_events  # type: ignore
@@ -321,6 +335,7 @@ from src.utils.redis_cache import (
     get_faiss_index,
     get_session_state,
 )
+from src.utils.file_parser import truncate_filename
 from src.utils.storage_metrics import calculate_storage_usage
 from src.visualization.heatmap import (
     plot_similarity_heatmap,
@@ -812,6 +827,8 @@ def get_date_range_preset(preset: str) -> tuple[date, date]:
         return today, today
     elif preset == "Last 7 Days":
         return today - timedelta(days=6), today
+    elif preset == "Last 14 Days":
+        return today - timedelta(days=14), today
     elif preset == "Last 30 Days":
         return today - timedelta(days=29), today
     else:  # "All Time"
@@ -1147,6 +1164,7 @@ with st.sidebar:
             0.99,
             value=st.session_state.get("threshold_slider", PLAGIARISM_THRESHOLD),
             step=0.01,
+            help="Cosine similarity threshold for flagging.",
             help=(
                 "Combined Hybrid score threshold for flagging pair plagiarism. "
                 "Calculated from Lexical (exact phrase overlap) and Semantic (meaning alignment) scores. "
@@ -1188,6 +1206,18 @@ with st.sidebar:
                 "Recommended Default: 0.65 (65%)."
             ),
             key=SessionKeys.SEMANTIC_THRESHOLD_SLIDER,
+        )
+
+        # Cross-Lingual Detection Toggle (Issue #1956)
+        cross_lingual_mode = st.toggle(
+            "🌐 Cross-Lingual Detection (Beta)",
+            value=False,
+            key="cross_lingual_mode_toggle",
+            help=(
+                "Enable back-translation to detect translated plagiarism. "
+                "Chunks in foreign languages will be translated to English "
+                "before similarity matching. May increase processing time."
+            ),
         )
 
         use_chunk_matrix = st.checkbox(
@@ -1618,13 +1648,13 @@ file_bytes_dict = (
 )
 
 with st.spinner("🧠 Processing files and building embeddings…"):
-    analysis_results = run_pipeline(
-        file_bytes_dict,
-        ocr_language,
-        ocr_dpi,
-        chunk_size,
-        chunk_overlap,
-    )
+    analysis_results = run_pipeline_with_tracking(
+    file_bytes_dict,
+    ocr_language,
+    ocr_dpi,
+    chunk_size,
+    chunk_overlap,
+)
 
 (
     raw_texts,
@@ -1641,6 +1671,15 @@ active_sim_df = chunk_sim_df if use_chunk_matrix else sim_df
 flags = flag_plagiarism(active_sim_df, threshold=threshold)
 
 st.subheader("📊 Analysis Summary")
+st.write(f"Processed **{len(raw_texts)}** documents with Chunk Size: `{chunk_size}` and Overlap: `{chunk_overlap}`.")
+
+selected_class = st.selectbox(
+    "Select Class/Section",
+    unique_classes,
+    index=0,
+    key="class_filter_selectbox",
+)
+
 st.write(
     f"Processed **{len(raw_texts)}** documents with Chunk Size: `{chunk_size}` and Overlap: `{chunk_overlap}`."
 )
@@ -1657,6 +1696,28 @@ st.markdown("""
 """)
 st.markdown("---")
 st.caption("Semantic Plagiarism Detector · FAISS edition")
+
+if user_role == "admin":
+    st.markdown("---")
+    st.markdown("### 📁 Document Management")
+    existing_docs = get_all_documents()
+    if existing_docs:
+        st.write(f"**{len(existing_docs)}** documents in database")
+        for doc in existing_docs:
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.text(f"📄 {doc['filename']}")
+            with col2:
+                if st.button("🗑️", key=f"del_{doc['filename']}"):
+                    delete_document(doc["filename"])
+                    embeddings_matrix = get_all_embeddings()
+                    if embeddings_matrix.size > 0:
+                        new_index = build_index_from_matrix(embeddings_matrix)
+                        save_index(new_index, _INDEX_PATH)
+                    else:
+                        if os.path.exists(_INDEX_PATH):
+                            os.remove(_INDEX_PATH)
+                    st.rerun()
 
 if user_role == "admin":
     st.markdown("---")
@@ -1891,6 +1952,20 @@ if user_role == "admin":
             clear_all_dialog()  # type: ignore
         st.markdown("<br>", unsafe_allow_html=True)
 
+
+st.markdown("---")
+if st.button("🚪 Log Out", use_container_width=True, key="logout_button"):
+    for key in ["authenticated", "username", "role", "last_interaction"]:
+        if key in st.session_state:
+            del st.session_state[key]
+    clear_session(SESSION_ID)
+    st.rerun()
+
+
+# ── Onboarding Tour for First-Time Admin Users ───────────────────────────────────
+if Tour is not None and user_role == "admin" and not get_tour_completed(st.session_state.username):
+    username = st.session_state.username
+    
         st.markdown("---")
         if st.button("🚪 Log Out", use_container_width=True, key="logout_button"):
             logout_dialog()
@@ -2027,6 +2102,7 @@ st.markdown(
 st.divider()
 
 if user_role == "admin":
+    initialize_advanced_features()
     cached_index_data = get_faiss_index("corpus_index")
 
     if cached_index_data is not None and os.path.exists(_INDEX_PATH):
@@ -2036,6 +2112,7 @@ if user_role == "admin":
             index_buffer = _io.BytesIO(cached_index_data)
             faiss_index = faiss.deserialize_index(faiss.read_index(index_buffer))
             registry = get_chunk_registry()
+            st.info(f"📂 Loaded FAISS index from Redis cache with {faiss_index.ntotal} vectors")
             st.info(
                 f"📂 Loaded FAISS index from Redis cache with {faiss_index.ntotal} vectors"
             )
@@ -2057,6 +2134,11 @@ if user_role == "admin":
                         "initialized safely."
                     )
             else:
+                st.info(f"Loaded and validated the existing FAISS index with {faiss_index.ntotal} vectors.")
+
+    if "analysis_results" not in st.session_state:
+        st.session_state.analysis_results = None
+        # Try to load from Redis cache
                 st.info(
                     f"Loaded and validated the existing FAISS index with "
                     f"{faiss_index.ntotal} vectors."
@@ -2428,7 +2510,7 @@ with tab_warnings:
     st.markdown("### 📅 Incident Date Filter")
     date_preset = st.radio(
         "Select Date Range",
-        options=["Today", "Last 7 Days", "Last 30 Days", "All Time"],
+        options=["Today", "Last 7 Days", "Last 14 Days", "Last 30 Days", "All Time"],
         horizontal=True,
         key="incident_date_preset",
         help="Quickly filter the incident table by common date ranges.",
@@ -2453,6 +2535,40 @@ with tab_warnings:
             else "📁 Collapse All"
         )
 
+        faiss_query = st.text_input(
+            "Query FAISS Index:",
+            placeholder="Type a text snippet to search vector index...",
+            key="faiss_query_input",
+        )
+        if st.button("🔍 Run FAISS Search", key="run_faiss_search_btn"):
+            if faiss_query.strip() and faiss_index is not None:
+                from src.core.embedding_model import embed_chunks
+
+                q_vec = embed_chunks([faiss_query.strip()])[0]
+                q_results = search_similar_chunks(
+                    q_vec,
+                    faiss_index,
+                    registry,
+                    top_k=faiss_top_k,
+                    threshold=threshold,
+                )
+                if q_results:
+                    rows = []
+                    for rec, score in q_results:
+                        truncated_name = truncate_filename(rec.doc_name)
+                        rows.append({
+                            "Document": truncated_name,
+                            "Chunk Index": rec.chunk_index,
+                            "Similarity": f"{score:.1%}",
+                            "Content Preview": rec.chunk_text[:120] + "..." if len(rec.chunk_text) > 120 else rec.chunk_text
+                        })
+                    st.dataframe(pd.DataFrame(rows), use_container_width=True)
+                else:
+                    st.info("No matching vector chunks found above threshold.")
+
+    # ══ TAB 3: MATRIX ═════════════════════════════════════════════════════════
+    with tab_matrix:
+        st.subheader("📋 Similarity Matrix")
         if st.button(button_label, key="toggle_warning_accordions"):
             st.session_state[SessionKeys.WARNINGS_EXPAND_ALL] = not st.session_state[
                 SessionKeys.WARNINGS_EXPAND_ALL
@@ -2607,6 +2723,15 @@ with tab_drill:
                     f"Incident #{rank} - Similarity: {flag.get('similarity', 0.0):.1%}",
                     expanded=(rank == 1),
                 ):
+                    # Display Translation Match badge if applicable (Issue #1956)
+                    if st.session_state.get("cross_lingual_mode_toggle", False):
+                        st.markdown(
+                            '<span style="background-color: #3B82F6; color: white; '
+                            'padding: 2px 8px; border-radius: 4px; font-size: 0.8em;">'
+                            '🌐 Translation Match</span>',
+                            unsafe_allow_html=True
+                        )
+
                     c_a, c_b = st.columns(2)
                     with c_a:
                         st.markdown(f"**{da}**")
@@ -2626,6 +2751,71 @@ with tab_drill:
                                 button_id=f"copy_cb_{rank}",
                                 copy_label="📋 Copy Snippet",
                             )
+
+        # ── Semantic Diff Viewer (Issue #1957) ────────────────────────────────────
+        if pair_flags and len(doc_names) >= 2:
+            with st.expander("🔬 Semantic Diff Viewer (Paraphrase Detection)", expanded=False):
+                st.caption(
+                    "This viewer uses Dynamic Programming on sentence embeddings to align "
+                    "sequences and detect structural reordering or synonym swapping that "
+                    "standard lexical diffs miss."
+                )
+                
+                # Resolve chunks and embeddings for the selected document pair
+                try:
+                    from src.core.semantic_alignment import align_semantic_sequences
+                    from src.utils.diff_renderer import render_semantic_diff_html
+                    import streamlit.components.v1 as components
+                    
+                    # Extract chunks for the selected pair from chunked_docs
+                    chunks_a = chunked_docs.get(da, [])
+                    chunks_b = chunked_docs.get(db, [])
+                    
+                    # Get embeddings for the selected pair
+                    emb_a = embeddings.get(da, np.array([]))
+                    emb_b = embeddings.get(db, np.array([]))
+                    
+                    if not chunks_a or not chunks_b:
+                        st.warning(
+                            "Cannot generate semantic diff: chunk data is unavailable "
+                            "for the selected document pair. Try re-running the analysis."
+                        )
+                    elif emb_a.size == 0 or emb_b.size == 0:
+                        st.warning(
+                            "Cannot generate semantic diff: embedding vectors are unavailable "
+                            "for the selected document pair."
+                        )
+                    else:
+                        # Get current theme for rendering
+                        current_theme = get_theme_name()
+                        
+                        # Compute alignment using DP on sentence embeddings
+                        alignment_map = align_semantic_sequences(
+                            chunks_a=chunks_a,
+                            chunks_b=chunks_b,
+                            embeddings_a=emb_a,
+                            embeddings_b=emb_b,
+                        )
+                        
+                        # Render HTML diff
+                        diff_html = render_semantic_diff_html(
+                            alignment_map=alignment_map,
+                            theme=current_theme
+                        )
+                        
+                        # Inject into Streamlit
+                        components.html(diff_html, height=600, scrolling=True)
+                        
+                        # Export button
+                        st.download_button(
+                            label="⬇️ Download Diff Report (HTML)",
+                            data=diff_html,
+                            file_name=f"semantic_diff_{da}_vs_{db}.html",
+                            mime="text/html",
+                            key=f"download_diff_{da}_{db}",
+                        )
+                except Exception as diff_err:
+                    st.error(f"Failed to generate semantic diff: {diff_err}")
 
 # ══ TAB 6: COMPARISON ══════════════════════════════════════════════════════
 with tab_compare:
