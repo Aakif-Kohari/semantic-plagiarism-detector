@@ -181,6 +181,41 @@ def search_similar_chunks(
     return results
 
 
+def search_batch_vectors(
+    query_matrix: np.ndarray,
+    index: faiss.Index,
+    top_k: int = 5,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Search the FAISS index for a batch of query vectors.
+
+    Supports flexible parameter ordering for convenience: (query_matrix, index)
+    or (index, query_matrix).
+
+    Args:
+        query_matrix: 2D numpy array of shape (N, dim) containing query vectors.
+        index:        FAISS index built by build_index().
+        top_k:        Number of nearest neighbors to retrieve. Defaults to 5.
+
+    Returns:
+        (distances, indices) - Distance matrix and index ID matrix of shape (N, top_k).
+    """
+    if isinstance(query_matrix, faiss.Index) or (not isinstance(query_matrix, np.ndarray) and hasattr(query_matrix, "search")):
+        index, query_matrix = query_matrix, index
+
+    if not isinstance(query_matrix, np.ndarray):
+        raise TypeError("query_matrix must be a numpy.ndarray")
+    if index is None or not hasattr(index, "search"):
+        raise ValueError("index must be a valid FAISS index")
+
+    queries = query_matrix.astype("float32")
+    if queries.ndim == 1:
+        queries = queries.reshape(1, -1)
+
+    distances, indices = index.search(queries, top_k)  # type: ignore[call-arg]
+    return distances, indices
+
+
 def find_plagiarised_chunks(
     embeddings: Dict[str, np.ndarray],
     chunked_docs: Dict[str, List[str]],
