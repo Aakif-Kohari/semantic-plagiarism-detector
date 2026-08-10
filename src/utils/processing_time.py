@@ -382,10 +382,10 @@ def calculate_mb_per_minute(total_bytes: int, elapsed_seconds: float) -> float:
     """
     if elapsed_seconds <= 0 or total_bytes <= 0:
         return 0.0
-    
-megabytes = total_bytes / (1024 * 1024)
+
+    megabytes = total_bytes / (1024 * 1024)
     minutes = elapsed_seconds / 60.0
-    
+
     return round(megabytes / minutes, 2)
 
 
