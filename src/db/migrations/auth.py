@@ -241,13 +241,11 @@ AUTH_MIGRATIONS = {
     10: migration_010_add_password_changed_at,
     11: migration_011_add_version_column,
     12: migration_012_create_revoked_tokens_table,
-
-    13: migration_013_add_user_status
-
-    14: migration_013_create_password_history_table,
+    13: migration_013_add_user_status, # type: ignore
+    14: migration_013_create_password_history_table, # type: ignore
     15: migration_014_add_must_change_password,
-
 }
+
 def migration_013_add_user_status(
     connection: sqlite3.Connection,
 ) -> None:
