@@ -327,6 +327,14 @@ from src.utils.processing_time import (
     estimate_processing_seconds,
     format_processing_duration,
 )
+# Add after existing imports
+from app.components.enhanced_dashboard import (
+    render_enhanced_analytics_tab,
+    render_enhanced_document_analysis,
+    initialize_enhanced_dashboard,
+    PlagiarismPatternAnalyzer,
+    DocumentTrendAnalyzer,
+)
 from src.utils.diff_highlighter import highlight_overlap
 from src.utils.redis_cache import (
     cache_session_state,
@@ -1123,6 +1131,7 @@ with st.sidebar:
     lang_code = _lang_reverse.get(selected_lang_name, "en")
 
     if user_role == "admin":
+        initialize_enhanced_dashboard()
         # ── Threshold Presets (Issue #1674) ───────────────────────────────────────
         st.markdown("### 🎯 Threshold Presets")
         
@@ -2828,17 +2837,29 @@ with tab_compare:
 with tab_analytics:
     update_page_title("Analytics")
     st.subheader("📊 Analytics Dashboard")
-    st.markdown("### ⏱️ Pipeline Processing Time Breakdown")
-    stage_timings = st.session_state.get("last_stage_timings") or st.session_state.get("stage_timings")
-    if plot_processing_time_breakdown:
-        active_theme_colors = get_chart_colors() if callable(get_chart_colors) else None
-        fig_time = plot_processing_time_breakdown(
-            stage_timings=stage_timings,
-            theme_colors=active_theme_colors,
+    
+    # Get data for enhanced analytics
+    history_data = []
+    try:
+        from src.db.corpus_db import get_scan_history
+        from datetime import datetime, timedelta
+        
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=30)
+        history_data = get_scan_history(
+            start_date=start_date.strftime("%Y-%m-%d"),
+            end_date=end_date.strftime("%Y-%m-%d"),
+            limit=100
         )
-        st.plotly_chart(fig_time, use_container_width=True)
-    else:
-        st.info("Analytics metrics summary loaded.")
+    except Exception as e:
+        logger.error(f"Failed to load history data: {e}")
+    
+    # Render enhanced analytics
+    render_enhanced_analytics_tab(
+        sim_matrix=active_sim_df if active_sim_df is not None else pd.DataFrame(),
+        history_data=history_data,
+        timings=st.session_state.get("last_stage_timings", {})
+    )
 
 # ══ TAB 7: USERS ══════════════════════════════════════════════════════════
 with tab_users:
