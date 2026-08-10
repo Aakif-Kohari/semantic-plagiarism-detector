@@ -154,6 +154,7 @@ def _strip_image_metadata(file_bytes: bytes) -> bytes:
         ValueError: If the image dimensions exceed the 10,000px safety limit.
     """
     MAX_DIMENSION = 10000
+    MAX_DECOMPRESSED_BYTES = 100 * 1024 * 1024  # 100 MB safety limit
 
     try:
         # Open image to inspect dimensions without fully decoding pixel data
@@ -163,6 +164,15 @@ def _strip_image_metadata(file_bytes: bytes) -> bytes:
             # Safety check: prevent decompression bombs or excessive memory allocation
             if width > MAX_DIMENSION or height > MAX_DIMENSION:
                 raise ValueError("Image dimensions exceed 10,000px safety limit")
+
+            # Calculate decompressed memory footprint estimate
+            bytes_per_pixel = len(image.getbands()) if image.getbands() else 4
+            decompressed_bytes = width * height * bytes_per_pixel
+
+            if decompressed_bytes > MAX_DECOMPRESSED_BYTES:
+                raise ValueError(
+                    "Decompressed image memory footprint exceeds 100 MB safety limit"
+                )
 
             # Save format defaults to JPEG if original was JPEG, PNG for PNG, etc.
             # Capture it before any mode conversion (convert() drops the format).

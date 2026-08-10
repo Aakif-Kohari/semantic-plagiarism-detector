@@ -93,8 +93,8 @@ def test_strip_image_metadata_dimension_safety_limit_height():
 
 
 def test_strip_image_metadata_dimension_exactly_at_limit():
-    # Create a dummy image exactly at the 10,000px limit (should pass)
-    img = Image.new("RGB", (10000, 10000), color="green")
+    # Create a dummy image at 10,000px height and 5,000px width in L mode (50 MB <= 100 MB limit)
+    img = Image.new("L", (5000, 10000), color=128)
     img_bytes = io.BytesIO()
     img.save(img_bytes, format="PNG")
 
@@ -102,6 +102,17 @@ def test_strip_image_metadata_dimension_exactly_at_limit():
     result = strip_exif_metadata(img_bytes.getvalue(), "test.png")
     assert isinstance(result, bytes)
     assert len(result) > 0
+
+
+def test_strip_image_metadata_memory_footprint_exceeds_limit():
+    # 6000 x 6000 RGBA image (4 bytes/pixel) = 144 MB > 100 MB safety limit
+    img = Image.new("RGBA", (6000, 6000), color=(255, 0, 0, 255))
+    img_bytes = io.BytesIO()
+    img.save(img_bytes, format="PNG")
+
+    with pytest.raises(ValueError) as excinfo:
+        strip_exif_metadata(img_bytes.getvalue(), "test.png")
+    assert "Decompressed image memory footprint exceeds 100 MB safety limit" in str(excinfo.value)
 
 
 def test_strip_palette_image_preserves_colors():
