@@ -379,7 +379,6 @@ def verify_user(
                             (hashed, username),
                         )
                         conn_rehash.commit()
->>>>>>> origin/main
                 _record_login_timestamp(username)
                 authenticated = True
             except (VerifyMismatchError, VerificationError):
