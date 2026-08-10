@@ -1,23 +1,41 @@
 """
 src/core/text_chunking.py
 -------------------------
-Utilities for splitting raw extracted document text into processable chunks.
+Utilities for splitting documents into overlapping text chunks optimized
+for semantic embedding models.
 
 Two strategies are available:
 
 * ``chunk_text``         – fixed character-count chunking with word-boundary
-  awareness (original behaviour, preserved for backward compatibility).
+  awareness and optional sentence-aware padding (Issue #1480).
 * ``chunk_by_sentences``  – sentence-boundary-aware chunking that groups whole
   sentences into blocks up to *max_chunk_size* characters, ensuring no sentence
   is split mid-word or mid-clause.
+
+Recent Additions (Issue #1480):
+- Added sentence-aware padding to chunk_text() and chunk_documents().
+- Chunks now extend to the nearest sentence boundary to prevent cutting
+  off semantic context mid-sentence, improving embedding quality.
 """
 
 from __future__ import annotations
+
 import logging
 import re
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# Default chunking parameters
+DEFAULT_CHUNK_SIZE = 500
+DEFAULT_CHUNK_OVERLAP = 50
+MIN_CHUNK_SIZE = 50
+
+# Regex pattern to identify sentence boundaries.
+# Matches '.', '!', or '?' followed by a space and an uppercase letter,
+# or followed by the end of the string.
+_SENTENCE_BOUNDARY_PATTERN = re.compile(r"([.!?])\s+(?=[A-Z])|([.!?])$")
+
 
 # ── Sentence splitting helper ─────────────────────────────────────────────────
 
@@ -89,19 +107,72 @@ def _character_fallback_chunking(
     return chunks
 
 
-# ── Fixed-size word-boundary chunking (original) ─────────────────────────────
+# ── Sentence boundary search helper (Issue #1480) ────────────────────────────
+
+
+def _find_sentence_boundary(
+    text: str,
+    index: int,
+    direction: str = "backward",
+    max_search: int = 150,
+) -> int:
+    """Find the nearest sentence boundary relative to the given index.
+
+    Args:
+        text: The full document text.
+        index: The starting index to search from.
+        direction: 'backward' to search left, 'forward' to search right.
+        max_search: Maximum number of characters to search before giving up.
+
+    Returns:
+        The index of the nearest sentence boundary, or the original index
+        if no boundary is found within max_search.
+    """
+    if not text or index < 0 or index >= len(text):
+        return index
+
+    if direction == "backward":
+        start_idx = max(0, index - max_search)
+        search_space = text[start_idx:index]
+
+        # Find the last occurrence of a sentence boundary in the search space
+        matches = list(_SENTENCE_BOUNDARY_PATTERN.finditer(search_space))
+        if matches:
+            last_match = matches[-1]
+            # Return the index immediately after the punctuation
+            return start_idx + last_match.end()
+
+    elif direction == "forward":
+        end_idx = min(len(text), index + max_search)
+        search_space = text[index:end_idx]
+
+        matches = list(_SENTENCE_BOUNDARY_PATTERN.finditer(search_space))
+        if matches:
+            first_match = matches[0]
+            # Return the index immediately after the punctuation
+            return index + first_match.end()
+
+    # Fallback to original index if no boundary found
+    return index
+
+
+# ── Fixed-size chunking with sentence-aware padding (Issue #1480) ────────────
 
 
 def chunk_text(
     text: str,
-    chunk_size: int = 500,
-    chunk_overlap: int = 50,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+    chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
     min_words: int = 5,
     overlap_percentage: float | None = None,
     max_chunks: int = 1000,
+    sentence_padding: bool = True,
 ) -> List[str]:
-    """
-    Splits text into chunks of a target character length with overlapping boundaries.
+    """Split text into chunks of a target character length with overlapping boundaries.
+
+    When *sentence_padding* is enabled (default), chunk start and end boundaries
+    are extended to the nearest sentence terminator to preserve semantic context.
+    This prevents embeddings from being computed over truncated sentences.
 
     Args:
         text: The input text to chunk.
@@ -109,9 +180,13 @@ def chunk_text(
         chunk_overlap: Number of characters to overlap between chunks.
         min_words: Minimum word count for a chunk to be included. Chunks with
             fewer words are filtered out to reduce noise from headers/page numbers.
+        overlap_percentage: If provided, overrides *chunk_overlap* as a fraction
+            of *chunk_size*.
         max_chunks: Maximum number of chunks to generate. Chunking stops once
             this limit is reached, and a warning is logged, to avoid memory
             spikes on extremely large documents.
+        sentence_padding: If True, extends chunk boundaries to the nearest
+            sentence terminator to preserve semantic context (Issue #1480).
 
     Returns:
         List of chunk strings.
@@ -128,12 +203,16 @@ def chunk_text(
     if not text or not text.strip():
         return []
 
+    # Enforce minimum chunk size to prevent infinite loops
+    if chunk_size < MIN_CHUNK_SIZE:
+        logger.warning(
+            "chunk_size %d is too small. Forcing to %d.",
+            chunk_size,
+            MIN_CHUNK_SIZE,
+        )
+        chunk_size = MIN_CHUNK_SIZE
+
     # ── Issue #1390 ───────────────────────────────────────────────────────
-    # If the raw input text exceeds the total chunking capacity (max_chunks
-    # multiplied by chunk_size), the resulting chunk stream is truncated to
-    # fit within max_chunks.  Surface this as a WARNING so operators can
-    # detect silent data loss in logs and structured telemetry.  The
-    # truncated character count is included verbatim in the message.
     max_chunk_capacity = max_chunks * chunk_size
     if len(text) > max_chunk_capacity:
         logger.warning(
@@ -141,6 +220,63 @@ def chunk_text(
             len(text),
         )
 
+    # ── Sentence-padding path (Issue #1480) ──────────────────────────────
+    if sentence_padding:
+        text = text.strip()
+        text_len = len(text)
+        chunks: List[str] = []
+        start = 0
+
+        while start < text_len:
+            end = min(start + chunk_size, text_len)
+
+            # Adjust end to the nearest forward sentence boundary
+            if end < text_len:
+                end = _find_sentence_boundary(
+                    text, end, direction="forward", max_search=100
+                )
+                # Hard cap to prevent chunks from growing too large for embedding models
+                max_allowed_end = min(start + (chunk_size * 2), text_len)
+                if end > max_allowed_end:
+                    end = max_allowed_end
+
+            chunk = text[start:end].strip()
+            if chunk and len(chunk.split()) >= min_words:
+                chunks.append(ChunkString(chunk))
+
+            if len(chunks) >= max_chunks:
+                logger.warning(
+                    "[text_chunking] Document exceeded max_chunks limit "
+                    "(%d); truncating remaining chunks.",
+                    max_chunks,
+                )
+                return chunks
+
+            if end >= text_len:
+                break
+
+            # Calculate next start position with overlap
+            next_start = end - chunk_overlap
+
+            # Apply sentence padding to the start of the next chunk
+            if next_start > 0:
+                next_start = _find_sentence_boundary(
+                    text, next_start, direction="backward", max_search=50
+                )
+
+            # Prevent infinite loops if sentence padding doesn't advance the pointer
+            if next_start <= start:
+                next_start = start + chunk_size - chunk_overlap
+
+            start = next_start
+
+        # Fallback to character-based chunking if no valid chunks were formed
+        if not chunks:
+            chunks = _character_fallback_chunking(text, chunk_size, chunk_overlap)
+
+        return [c for c in chunks if len(c.split()) >= min_words]
+
+    # ── Original word-boundary path (sentence_padding=False) ─────────────
     word_headings = getattr(text, "word_headings", None)
     words = text.split()
     chunks = []
@@ -166,8 +302,9 @@ def chunk_text(
 
             if len(chunks) >= max_chunks:
                 logger.warning(
-                    f"[text_chunking] Document exceeded max_chunks limit "
-                    f"({max_chunks}); truncating remaining chunks."
+                    "[text_chunking] Document exceeded max_chunks limit "
+                    "(%d); truncating remaining chunks.",
+                    max_chunks,
                 )
                 return chunks
 
@@ -200,7 +337,6 @@ def chunk_text(
             chunks.append(ChunkString(chunk_str, metadata=metadata))
 
     # Fallback to character-based chunking if no valid word chunks were formed
-    # (e.g. single long words, CJK text without spaces, or emoji sequences)
     if not chunks:
         chunks = _character_fallback_chunking(text, chunk_size, chunk_overlap)
 
@@ -369,12 +505,24 @@ def chunk_text_dynamic(
 
 def chunk_documents(
     documents: Dict[str, str],
-    chunk_size: int = 500,
-    chunk_overlap: int = 50,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+    chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
     min_words: int = 5,
+    sentence_padding: bool = True,
 ) -> Dict[str, List[str]]:
     """Splits a dictionary of document raw texts into chunks respecting customizable
     chunk size and overlap parameters.
+
+    Args:
+        documents: Dictionary mapping document name to raw text.
+        chunk_size: Target chunk size in characters.
+        chunk_overlap: Number of overlapping characters between consecutive chunks.
+        min_words: Minimum word count for a chunk to be included.
+        sentence_padding: If True, extends chunk boundaries to the nearest
+            sentence terminator to preserve semantic context (Issue #1480).
+
+    Returns:
+        Dictionary mapping document name to list of chunks.
     """
     chunked_docs = {}
     for doc_name, text in documents.items():
@@ -383,5 +531,6 @@ def chunk_documents(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             min_words=min_words,
+            sentence_padding=sentence_padding,
         )
     return chunked_docs
