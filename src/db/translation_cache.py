@@ -230,33 +230,27 @@ def purge_translation_cache_older_than(days: int = 30) -> int:
         return 0
 
 
-def get_translation_cache_stats() -> dict:
+def get_translation_cache_stats() -> dict[str, int]:
     """
     Get statistics about the current translation cache.
 
     Returns:
-        dict: A dictionary containing total entries and oldest entry age in days.
+        dict[str, int]: A dictionary containing total entries count.
     """
     _init_db()
     try:
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT COUNT(*) FROM translation_cache")
-            total_count = cursor.fetchone()[0]
-
-            cursor.execute(
-                "SELECT CAST(JULIANDAY('now') - JULIANDAY(MIN(created_at)) AS INTEGER) "
-                "FROM translation_cache"
-            )
-            oldest_days = cursor.fetchone()[0]
+            row = cursor.fetchone()
+            total_count = row[0] if row else 0
 
             return {
-                "total_entries": total_count,
-                "oldest_entry_days": oldest_days if oldest_days else 0,
+                "total_entries": int(total_count),
             }
     except sqlite3.Error as e:
         logger.error(f"Failed to get translation cache stats: {e}")
-        return {"total_entries": 0, "oldest_entry_days": 0}
+        return {"total_entries": 0}
 
 
 def get_translation_cache_hit_ratio() -> float:
@@ -266,14 +260,14 @@ def get_translation_cache_hit_ratio() -> float:
     total = cache_hits + cache_misses
     if total == 0:
         return 0.0
-    return _cache_hits / total
+    return cache_hits / total
 
 
 def reset_translation_cache_counters() -> None:
     """Reset the cache hits and misses counters to zero."""
-    global _cache_hits, _cache_misses
-    _cache_hits = 0
-    _cache_misses = 0
+    global cache_hits, cache_misses
+    cache_hits = 0
+    cache_misses = 0
 
 
 def get_cache_performance_summary() -> dict[str, Any]:
@@ -282,12 +276,11 @@ def get_cache_performance_summary() -> dict[str, Any]:
     Returns:
         dict[str, Any]: A dictionary summary of cache performance statistics.
     """
-    total = _cache_hits + _cache_misses
-    ratio = (float(_cache_hits) / total * 100.0) if total > 0 else 0.0
+    total = cache_hits + cache_misses
+    ratio = (float(cache_hits) / total * 100.0) if total > 0 else 0.0
     return {
         "total_requests": total,
-        "hits": _cache_hits,
-        "misses": _cache_misses,
+        "hits": cache_hits,
+        "misses": cache_misses,
         "hit_ratio_percentage": ratio,
     }
-
