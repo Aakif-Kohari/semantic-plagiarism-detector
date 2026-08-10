@@ -7,6 +7,7 @@ import pytest
 from src.db.migrations import (AUTH_SCHEMA_VERSION, CORPUS_SCHEMA_VERSION,
                                column_exists, get_user_version, index_exists,
                                migrate_auth_database, migrate_corpus_database,
+                               rollback_migration,
                                run_migrations, table_exists, check_table_exists)
 
 
@@ -401,4 +402,121 @@ def test_check_table_exists():
         connection.execute("CREATE TABLE test_table (id INTEGER)")
         assert check_table_exists(connection, "test_table") is True
     finally:
-        connection.close()
+        connection.close()
+
+
+# ---------------------------------------------------------------------------
+# Tests for rollback_migration (Issue: automated migration rollback / step_down)
+# ---------------------------------------------------------------------------
+
+
+def _test_up_v1(connection: sqlite3.Connection) -> None:
+    connection.execute("CREATE TABLE widgets (id INTEGER PRIMARY KEY)")
+
+
+def _test_up_v2(connection: sqlite3.Connection) -> None:
+    connection.execute("CREATE TABLE sprockets (id INTEGER PRIMARY KEY)")
+
+
+def _test_down_v1(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP TABLE widgets")
+
+
+def _test_down_v2(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP TABLE sprockets")
+
+
+_TEST_UP_MIGRATIONS = {1: _test_up_v1, 2: _test_up_v2}
+_TEST_DOWN_MIGRATIONS = {1: _test_down_v1, 2: _test_down_v2}
+
+
+def test_rollback_migration_restores_schema_and_version(tmp_path):
+    """A partial rollback undoes only the versions above the target, restores
+    PRAGMA user_version, and leaves earlier schema changes intact."""
+    with connect(tmp_path / "rollback-partial.db") as connection:
+        run_migrations(connection, migrations=_TEST_UP_MIGRATIONS, target_version=2)
+        assert get_user_version(connection) == 2
+        assert table_exists(connection, "widgets")
+        assert table_exists(connection, "sprockets")
+
+        result = rollback_migration(connection, 1, down_migrations=_TEST_DOWN_MIGRATIONS)
+
+        assert result == 1
+        assert get_user_version(connection) == 1
+        assert table_exists(connection, "widgets")
+        assert not table_exists(connection, "sprockets")
+
+
+def test_rollback_migration_to_zero_undoes_everything(tmp_path):
+    """Rolling back to version 0 undoes every registered migration."""
+    with connect(tmp_path / "rollback-full.db") as connection:
+        run_migrations(connection, migrations=_TEST_UP_MIGRATIONS, target_version=2)
+
+        result = rollback_migration(connection, 0, down_migrations=_TEST_DOWN_MIGRATIONS)
+
+        assert result == 0
+        assert get_user_version(connection) == 0
+        assert not table_exists(connection, "widgets")
+        assert not table_exists(connection, "sprockets")
+
+
+def test_rollback_migration_is_noop_when_already_at_target(tmp_path):
+    """Rolling back to the current version is a no-op, not an error."""
+    with connect(tmp_path / "rollback-noop.db") as connection:
+        run_migrations(connection, migrations=_TEST_UP_MIGRATIONS, target_version=1)
+
+        result = rollback_migration(connection, 1, down_migrations=_TEST_DOWN_MIGRATIONS)
+
+        assert result == 1
+        assert get_user_version(connection) == 1
+        assert table_exists(connection, "widgets")
+
+
+def test_rollback_migration_rejects_target_newer_than_current(tmp_path):
+    """Rolling back to a version newer than the current one must raise."""
+    with connect(tmp_path / "rollback-invalid-target.db") as connection:
+        run_migrations(connection, migrations=_TEST_UP_MIGRATIONS, target_version=1)
+
+        with pytest.raises(RuntimeError):
+            rollback_migration(connection, 2, down_migrations=_TEST_DOWN_MIGRATIONS)
+
+
+def test_rollback_migration_rejects_missing_down_definition(tmp_path):
+    """Rolling back must raise if a required down-migration isn't registered."""
+    with connect(tmp_path / "rollback-missing-def.db") as connection:
+        run_migrations(connection, migrations=_TEST_UP_MIGRATIONS, target_version=2)
+
+        with pytest.raises(RuntimeError):
+            # Only version 2's down-migration is supplied; version 1's is missing.
+            rollback_migration(connection, 0, down_migrations={2: _test_down_v2})
+
+
+def test_rollback_migration_rejects_negative_target(tmp_path):
+    """A negative target_version must be rejected outright."""
+    with connect(tmp_path / "rollback-negative.db") as connection:
+        run_migrations(connection, migrations=_TEST_UP_MIGRATIONS, target_version=1)
+
+        with pytest.raises(ValueError):
+            rollback_migration(connection, -1, down_migrations=_TEST_DOWN_MIGRATIONS)
+
+
+def test_rollback_migration_is_atomic_on_failure(tmp_path):
+    """If a down-migration raises partway through, the whole rollback is
+    reverted (schema and PRAGMA user_version both stay at the pre-rollback
+    state), matching run_migrations' atomicity guarantee."""
+    def _failing_down_v2(connection: sqlite3.Connection) -> None:
+        connection.execute("DROP TABLE sprockets")
+        raise RuntimeError("simulated failure mid-rollback")
+
+    with connect(tmp_path / "rollback-atomic.db") as connection:
+        run_migrations(connection, migrations=_TEST_UP_MIGRATIONS, target_version=2)
+
+        broken_down_migrations = {1: _test_down_v1, 2: _failing_down_v2}
+
+        with pytest.raises(RuntimeError, match="simulated failure"):
+            rollback_migration(connection, 0, down_migrations=broken_down_migrations)
+
+        # Nothing should have been undone — the failed transaction rolled back.
+        assert get_user_version(connection) == 2
+        assert table_exists(connection, "sprockets")
+        assert table_exists(connection, "widgets")
