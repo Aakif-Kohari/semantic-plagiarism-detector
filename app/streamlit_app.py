@@ -2599,6 +2599,71 @@ with tab_drill:
                                 copy_label="📋 Copy Snippet",
                             )
 
+        # ── Semantic Diff Viewer (Issue #1957) ────────────────────────────────────
+        if pair_flags and len(doc_names) >= 2:
+            with st.expander("🔬 Semantic Diff Viewer (Paraphrase Detection)", expanded=False):
+                st.caption(
+                    "This viewer uses Dynamic Programming on sentence embeddings to align "
+                    "sequences and detect structural reordering or synonym swapping that "
+                    "standard lexical diffs miss."
+                )
+                
+                # Resolve chunks and embeddings for the selected document pair
+                try:
+                    from src.core.semantic_alignment import align_semantic_sequences
+                    from src.utils.diff_renderer import render_semantic_diff_html
+                    import streamlit.components.v1 as components
+                    
+                    # Extract chunks for the selected pair from chunked_docs
+                    chunks_a = chunked_docs.get(da, [])
+                    chunks_b = chunked_docs.get(db, [])
+                    
+                    # Get embeddings for the selected pair
+                    emb_a = embeddings.get(da, np.array([]))
+                    emb_b = embeddings.get(db, np.array([]))
+                    
+                    if not chunks_a or not chunks_b:
+                        st.warning(
+                            "Cannot generate semantic diff: chunk data is unavailable "
+                            "for the selected document pair. Try re-running the analysis."
+                        )
+                    elif emb_a.size == 0 or emb_b.size == 0:
+                        st.warning(
+                            "Cannot generate semantic diff: embedding vectors are unavailable "
+                            "for the selected document pair."
+                        )
+                    else:
+                        # Get current theme for rendering
+                        current_theme = get_theme_name()
+                        
+                        # Compute alignment using DP on sentence embeddings
+                        alignment_map = align_semantic_sequences(
+                            chunks_a=chunks_a,
+                            chunks_b=chunks_b,
+                            embeddings_a=emb_a,
+                            embeddings_b=emb_b,
+                        )
+                        
+                        # Render HTML diff
+                        diff_html = render_semantic_diff_html(
+                            alignment_map=alignment_map,
+                            theme=current_theme
+                        )
+                        
+                        # Inject into Streamlit
+                        components.html(diff_html, height=600, scrolling=True)
+                        
+                        # Export button
+                        st.download_button(
+                            label="⬇️ Download Diff Report (HTML)",
+                            data=diff_html,
+                            file_name=f"semantic_diff_{da}_vs_{db}.html",
+                            mime="text/html",
+                            key=f"download_diff_{da}_{db}",
+                        )
+                except Exception as diff_err:
+                    st.error(f"Failed to generate semantic diff: {diff_err}")
+
 # ══ TAB 6: COMPARISON ══════════════════════════════════════════════════════
 with tab_compare:
     update_page_title("Comparison")
