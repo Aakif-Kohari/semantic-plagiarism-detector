@@ -244,6 +244,7 @@ def send_email(
     html_body: str,
     status_callback: Optional[Callable[[bool, str], None]] = None,
     timeout: float = 10.0,
+    reply_to: Optional[str] = None,
 ) -> bool:
     """
     Send an email using SMTP.
@@ -254,6 +255,7 @@ def send_email(
         html_body: HTML formatted email body
         status_callback: Optional callback receiving (success: bool, message: str)
         timeout: Socket connection timeout in seconds (default 10.0)
+        reply_to: Optional Reply-To email address header
 
     Returns:
         True if email sent successfully, False otherwise
@@ -271,7 +273,6 @@ def send_email(
             status_callback(False, msg)
         return False
     
-    
     if not to_emails:
         msg = "No recipients configured for daily summary email."
         logger.warning(msg)
@@ -284,11 +285,17 @@ def send_email(
         if not email_pattern.match(email):
             raise ValueError(f"Invalid recipient email address: {email}")
 
+    if reply_to and not email_pattern.match(reply_to):
+        raise ValueError(f"Invalid reply-to email address: {reply_to}")
+
     try:
         msg_obj = MIMEMultipart("alternative")
         msg_obj["Subject"] = subject
         msg_obj["From"] = from_email
         msg_obj["To"] = ", ".join(to_emails)
+
+        if reply_to:
+            msg_obj["Reply-To"] = reply_to
 
         html_part = MIMEText(html_body, "html")
         msg_obj.attach(html_part)
@@ -323,6 +330,7 @@ def send_daily_summary(
     subject_prefix: str = "[Plagiarism Alert]",
     footer_note: Optional[str] = None,
     status_callback: Optional[Callable[[bool, str], None]] = None,
+    reply_to: Optional[str] = None,
 ) -> bool:
     """
     Main function to aggregate daily incidents and send summary email.
@@ -331,6 +339,7 @@ def send_daily_summary(
         subject_prefix: Prefix to prepend to the email subject line
         footer_note: Optional custom administrator note to append to the email body
         status_callback: Optional callback receiving (success: bool, message: str)
+        reply_to: Optional Reply-To email address header
 
     Returns:
         True if email sent successfully, False otherwise
@@ -347,7 +356,7 @@ def send_daily_summary(
 
     prefix = f"{subject_prefix} " if subject_prefix else ""
     subject = f"{prefix}Daily Plagiarism Summary - {datetime.now().strftime('%Y-%m-%d')}"
-    success = send_email(admin_emails, subject, html_body, status_callback=status_callback)
+    success = send_email(admin_emails, subject, html_body, status_callback=status_callback, reply_to=reply_to)
 
     return success
 

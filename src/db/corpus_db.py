@@ -709,6 +709,32 @@ def get_documents_by_class(class_section: str) -> list:
         return [r[0] for r in rows]
 
 
+def get_documents_by_extension(ext: str) -> list[dict]:
+    """
+    Fetch all document records matching a specific file extension.
+
+    Args:
+        ext: File extension to search for (e.g. '.pdf' or 'pdf').
+
+    Returns:
+        List of dictionaries containing document records.
+    """
+    clean_ext = ext.lstrip(".")
+
+    with _connect() as conn:
+        old_factory = conn.row_factory
+        conn.row_factory = sqlite3.Row
+        try:
+            cursor = conn.execute(
+                "SELECT * FROM documents WHERE filename LIKE '%.' || ? AND is_deleted = 0",
+                (clean_ext,),
+            )
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+        finally:
+            conn.row_factory = old_factory
+
+
 def get_embedding_count() -> int:
     """Return the number of durable chunk embeddings in the corpus."""
     with _connect() as conn:

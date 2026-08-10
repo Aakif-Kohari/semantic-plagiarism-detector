@@ -213,7 +213,11 @@ def render_faiss_results_ui(
             st.caption("📋 Vector Chunk ID")
             st.code(chunk_id, language="text")
 
-        st.caption(chunk_text[:300] + ("..." if len(chunk_text) > 300 else ""))
+        # Streamlit's code block includes a built-in one-click copy control.
+        # Render the complete matched chunk so reports can copy the exact
+        # sentence/passage instead of the previously truncated preview.
+        st.caption("📋 Matched Text")
+        st.code(chunk_text, language="text")
 
         if st.button("🔍 Inspect Diff", key=f"diff_btn_{i}_{doc_name}_{chunk_index}"):
             source_pdf_bytes = (
