@@ -70,7 +70,7 @@ def extract_google_drive_folder_id(url_or_id: str) -> str | None:
     if _DRIVE_ID_RE.match(cleaned):
         return cleaned
 
-match = _DRIVE_URL_RE.search(cleaned)
+    match = _DRIVE_URL_RE.search(cleaned)
     if match:
         return match.group(1)
 
