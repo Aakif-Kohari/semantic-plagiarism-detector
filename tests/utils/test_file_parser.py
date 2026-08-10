@@ -1,5 +1,28 @@
+"""
+tests/utils/test_file_parser.py
+-------------------------------
+Includes tests for password-protected PDF parsing, MIME categorization,
+and magic-byte MIME type detection (Issue #1570).
+"""
+
 import fitz
-from src.utils.file_parser import get_pdf_page_count
+import pytest
+
+from src.utils.file_parser import (
+    EncryptedPDFError,
+    extract_pdf_metadata,
+    extract_text_from_pdf,
+    get_file_mime_type_from_bytes,
+    get_file_size_formatted,
+    get_file_mime_category,
+    get_pdf_page_count,
+    get_supported_mime_categories,
+    is_extension_supported,
+    is_office_open_xml,
+)
+
+
+# ── PDF Page Count Tests ─────────────────────────────────────────────────────
 
 
 def test_get_pdf_page_count_single_page():
@@ -32,23 +55,9 @@ def test_get_pdf_page_count_corrupted():
 def test_get_pdf_page_count_empty():
     """Verify that empty bytes return 0."""
     assert get_pdf_page_count(b"") == 0
-"""
-tests/utils/test_file_parser.py
---------------------------------
-Includes tests for password-protected PDF parsing and MIME categorization.
-"""
 
-import pytest
 
-from src.utils.file_parser import (
-    EncryptedPDFError,
-    extract_pdf_metadata,
-    extract_text_from_pdf,
-    get_file_size_formatted,
-    get_file_mime_category,
-    get_supported_mime_categories,
-    is_extension_supported,
-)
+# ── Encrypted PDF Handling Tests ─────────────────────────────────────────────
 
 
 class TestEncryptedPDFHandling:
@@ -82,6 +91,9 @@ class TestEncryptedPDFHandling:
         assert is_protected is True
 
 
+# ── File Size Formatting Tests ───────────────────────────────────────────────
+
+
 class TestFileSizeFormatting:
     """Test suite for file size formatting utility."""
 
@@ -99,6 +111,9 @@ class TestFileSizeFormatting:
 
     def test_get_file_size_formatted_fractional(self):
         assert get_file_size_formatted(1536) == "1.50 KB"
+
+
+# ── MIME Category Tests ──────────────────────────────────────────────────────
 
 
 class TestFileMimeCategory:
@@ -127,7 +142,7 @@ class TestFileMimeCategory:
             (".hidden_file", "unknown"),
             (None, "unknown"),
             (12345, "unknown"),  # Non-string input
-        ]
+        ],
     )
     def test_get_file_mime_category(self, filename, expected_category):
         """Test MIME categorization for various file extensions and edge cases."""
@@ -153,11 +168,16 @@ class TestFileMimeCategory:
             ("guide.markdown", None, True),
             ("notes.mdown", None, True),
             ("archive.zip", ["text", "code"], False),
-        ]
+        ],
     )
-    def test_is_extension_supported(self, filename, allowed_categories, expected_result):
+    def test_is_extension_supported(
+        self, filename, allowed_categories, expected_result
+    ):
         """Test extension support validation against allowed categories."""
         assert is_extension_supported(filename, allowed_categories) == expected_result
+
+
+# ── PDF Metadata Extraction Tests ────────────────────────────────────────────
 
 
 class TestPdfMetadataExtraction:
@@ -224,3 +244,95 @@ class TestPdfMetadataExtraction:
         doc.close()
         with pytest.raises(EncryptedPDFError):
             extract_pdf_metadata(pdf_bytes)
+
+
+# ── Magic Byte MIME Type Detection Tests (Issue #1570) ───────────────────────
+
+
+class TestGetFileMimeTypeFromBytes:
+    """Test suite for magic byte MIME type detection."""
+
+    def test_pdf_detection(self):
+        """Verify PDF magic bytes are correctly identified."""
+        pdf_bytes = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n"
+        assert get_file_mime_type_from_bytes(pdf_bytes) == "application/pdf"
+
+    def test_zip_detection(self):
+        """Verify standard ZIP magic bytes are identified."""
+        zip_bytes = b"PK\x03\x04\x14\x00\x00\x00"
+        assert get_file_mime_type_from_bytes(zip_bytes) == "application/zip"
+
+    def test_docx_detection_as_zip(self):
+        """Verify DOCX (which is a ZIP) returns application/zip."""
+        # DOCX starts with standard ZIP header
+        docx_bytes = b"PK\x03\x04\x14\x00\x06\x00[Content_Types].xml"
+        assert get_file_mime_type_from_bytes(docx_bytes) == "application/zip"
+
+    def test_legacy_doc_detection(self):
+        """Verify legacy MS Compound Document (DOC) magic bytes."""
+        doc_bytes = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1\x00\x00\x00\x00"
+        assert get_file_mime_type_from_bytes(doc_bytes) == "application/msword"
+
+    def test_rtf_detection(self):
+        """Verify Rich Text Format magic bytes."""
+        rtf_bytes = b"{\\rtf1\\ansi\\ansicpg1252\\deff0"
+        assert get_file_mime_type_from_bytes(rtf_bytes) == "application/rtf"
+
+    def test_jpeg_detection(self):
+        """Verify JPEG image magic bytes."""
+        jpeg_bytes = b"\xff\xd8\xff\xe0\x00\x10JFIF"
+        assert get_file_mime_type_from_bytes(jpeg_bytes) == "image/jpeg"
+
+    def test_png_detection(self):
+        """Verify PNG image magic bytes."""
+        png_bytes = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+        assert get_file_mime_type_from_bytes(png_bytes) == "image/png"
+
+    def test_plain_text_detection(self):
+        """Verify standard ASCII/UTF-8 text is detected as text/plain."""
+        text_bytes = b"This is a standard plain text document.\nIt has multiple lines."
+        assert get_file_mime_type_from_bytes(text_bytes) == "text/plain"
+
+    def test_markdown_detection_as_text(self):
+        """Verify Markdown files are detected as text/plain."""
+        md_bytes = b"# Heading\n\nThis is **bold** text.\n- List item"
+        assert get_file_mime_type_from_bytes(md_bytes) == "text/plain"
+
+    def test_unknown_binary_returns_octet_stream(self):
+        """Verify unknown binary data returns application/octet-stream."""
+        binary_bytes = b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09"
+        assert get_file_mime_type_from_bytes(binary_bytes) == "application/octet-stream"
+
+    def test_empty_bytes_returns_octet_stream(self):
+        """Verify empty byte stream returns application/octet-stream."""
+        assert get_file_mime_type_from_bytes(b"") == "application/octet-stream"
+        assert get_file_mime_type_from_bytes(None) == "application/octet-stream"
+
+    def test_memoryview_input(self):
+        """Verify function accepts memoryview objects."""
+        pdf_bytes = memoryview(b"%PDF-1.4\n")
+        assert get_file_mime_type_from_bytes(pdf_bytes) == "application/pdf"
+
+    def test_bytearray_input(self):
+        """Verify function accepts bytearray objects."""
+        pdf_bytes = bytearray(b"%PDF-1.4\n")
+        assert get_file_mime_type_from_bytes(pdf_bytes) == "application/pdf"
+
+
+class TestIsOfficeOpenXml:
+    """Test suite for OOXML specific ZIP detection."""
+
+    def test_valid_docx_bytes(self):
+        """Verify ZIP with OOXML markers returns True."""
+        docx_bytes = b"PK\x03\x04\x14\x00\x06\x00[Content_Types].xml"
+        assert is_office_open_xml(docx_bytes) is True
+
+    def test_standard_zip_returns_false(self):
+        """Verify standard ZIP without OOXML markers returns False."""
+        zip_bytes = b"PK\x03\x04\x14\x00\x00\x00random_file.txt"
+        assert is_office_open_xml(zip_bytes) is False
+
+    def test_empty_bytes_returns_false(self):
+        """Verify empty input returns False."""
+        assert is_office_open_xml(b"") is False
+        assert is_office_open_xml(None) is False
