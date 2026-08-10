@@ -77,6 +77,16 @@ from app.components.real_time_monitor import (
     MonitoringEngine,
     HealthChecker,
 )
+from app.components.auto_ml_optimizer import (
+    render_auto_ml_dashboard,
+    initialize_auto_ml,
+    AutoMLOptimizer,
+    AutoOptimizationIntegration,
+    OptimizationConfig,
+    OptimizationMetrics,
+    UserFeedback,
+    PatternProfile,
+)
 
 try:
     from streamlit_plotly_events import plotly_events  # type: ignore
