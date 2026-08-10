@@ -11,6 +11,16 @@ from src.db.corpus_db import get_corpus_db_path
 
 SQLITE_HEADER = b"SQLite format 3\x00"
 
+_ALLOWED_DB_DIR = Path(__file__).parent.parent.parent.resolve()
+
+
+def _resolve_safe_path(db_path: str | Path) -> Path:
+    """Resolve path and reject anything outside the project root."""
+    path = Path(db_path).expanduser().resolve()
+    if not path.is_relative_to(_ALLOWED_DB_DIR):
+        raise ValueError(f"db_path is outside the allowed directory: {path}")
+    return path
+
 
 def create_sqlite_snapshot(database_path: str | Path) -> bytes:
     """Return a transactionally consistent SQLite snapshot.
@@ -52,6 +62,12 @@ def create_sqlite_snapshot(database_path: str | Path) -> bytes:
         )
 
     return snapshot
+
+
+def get_database_file_size_bytes(db_path: str | Path) -> int:
+    """Return the file size in bytes, or 0 if the file does not exist."""
+    path = _resolve_safe_path(db_path)
+    return path.stat().st_size if path.is_file() else 0
 
 
 def create_corpus_database_snapshot() -> bytes:

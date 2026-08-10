@@ -3,7 +3,12 @@ from datetime import datetime
 
 import pytest
 
-from src.db.database_backup import SQLITE_HEADER, create_sqlite_snapshot
+from src.db.database_backup import (
+    SQLITE_HEADER,
+    _ALLOWED_DB_DIR,
+    create_sqlite_snapshot,
+    get_database_file_size_bytes,
+)
 
 from contextlib import closing
 
@@ -117,3 +122,37 @@ def test_backup_panel_modified_date_formatting(tmp_path):
     # Must be a non-empty string matching YYYY-MM-DD HH:MM
     import re
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", formatted)
+
+
+# ── get_database_file_size_bytes ──────────────────────────────────────────────
+
+
+def test_get_database_file_size_bytes_existing_file():
+    db = _ALLOWED_DB_DIR / "corpus.db"
+    create_test_database(db)
+    try:
+        assert get_database_file_size_bytes(db) == db.stat().st_size
+        assert get_database_file_size_bytes(db) > 0
+    finally:
+        db.unlink(missing_ok=True)
+
+
+def test_get_database_file_size_bytes_missing_file():
+    missing = _ALLOWED_DB_DIR / "__nonexistent_test__.db"
+    assert get_database_file_size_bytes(missing) == 0
+
+
+def test_get_database_file_size_bytes_accepts_string_path():
+    db = _ALLOWED_DB_DIR / "users_test_size.db"
+    create_test_database(db)
+    try:
+        assert get_database_file_size_bytes(str(db)) == db.stat().st_size
+    finally:
+        db.unlink(missing_ok=True)
+
+
+def test_get_database_file_size_bytes_rejects_path_traversal(tmp_path):
+    outside = tmp_path / "evil.db"
+    outside.write_text("x")
+    with pytest.raises(ValueError, match="outside the allowed directory"):
+        get_database_file_size_bytes(outside)
