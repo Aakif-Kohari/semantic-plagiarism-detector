@@ -241,7 +241,7 @@ if missing_env_vars:
 # ── Project Core & Utils Imports ──────────────────────────────────────────────
 from app.theme import (
     back_to_top_html,
-    get_colors,
+    get_chart_colors,
     get_theme_name,
     inject_css,
     set_theme,
@@ -628,6 +628,8 @@ if SessionKeys.PDF_PASSWORDS not in st.session_state:
     st.session_state[SessionKeys.PDF_PASSWORDS] = {}
 if SessionKeys.LANG not in st.session_state:
     st.session_state[SessionKeys.LANG] = "en"
+if SessionKeys.SESSION_START_TIME not in st.session_state:
+    st.session_state[SessionKeys.SESSION_START_TIME] = time.time()
 
 if SessionKeys.MODEL_LOAD_TIME not in st.session_state:
     from src.core.embedding_model import EmbeddingModelManager
@@ -662,7 +664,6 @@ def build_visualization_lazily(is_enabled, build_fn):
     if is_enabled:
         return build_fn()
     return None
-
 
 @st.dialog("⚠️ Confirm Bulk Clear")
 def clear_all_dialog():
@@ -714,7 +715,7 @@ def clear_all_dialog():
 
             st.success("✅ All documents, chunks, and incidents have been cleared.")
             st.rerun()
->>>>>>> f7b2ce9 (Fix linting, type-checking, and syntax errors)
+
 
 
 # ── Issue #1383: Cosine vs Lexical Similarity Comparison Table ─────────────────
@@ -796,6 +797,7 @@ def render_cosine_vs_lexical_comparison_table(
     comp_df = pd.DataFrame(rows)
     if not comp_df.empty:
         st.dataframe(comp_df, use_container_width=True)
+
     return comp_df
 
 from datetime import date, timedelta
@@ -1016,23 +1018,6 @@ def logout_dialog():
                     del st.session_state[key]
             clear_session(SESSION_ID)
             st.rerun()
-
-@st.dialog("⚠️ Clear All Documents")
-def clear_all_dialog():
-    st.write("Are you sure you want to completely clear the local database?")
-    st.write("This action cannot be undone.")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Cancel", use_container_width=True, key="cancel_clear_all"):
-            st.rerun()
-    with col2:
-        if st.button("Clear All", type="primary", use_container_width=True, key="confirm_clear_all"):
-            from src.db.corpus_db import clear_all_data
-            clear_all_data()
-            clear_session()
-            st.cache_data.clear()
-            st.rerun()
-
 
 
 
@@ -2332,10 +2317,12 @@ st.divider()
     tab_matrix,
     tab_heatmap,
     tab_drill,
+    tab_compare,
     tab_analytics,
     tab_users,
     tab_settings,
     tab_history,
+    tab_audit,
 ) = st.tabs(
     [
         get_text("tab_warnings", lang=lang_code),
@@ -2343,10 +2330,12 @@ st.divider()
         get_text("tab_matrix", lang=lang_code),
         get_text("tab_heatmap", lang=lang_code),
         get_text("tab_drill", lang=lang_code),
+        "🔬 Comparison",
         get_text("tab_analytics", lang=lang_code),
         get_text("tab_users", lang=lang_code),
         get_text("tab_settings", lang=lang_code),
         "📊 History",
+        get_text("tab_audit_logs", lang=lang_code),
     ],
     key="main_tabs",
 )
@@ -2474,7 +2463,6 @@ with tab_matrix:
         st.dataframe(active_sim_df.style.format("{:.4f}"), use_container_width=True)
 
 # ══ TAB 4: HEATMAP ════════════════════════════════════════════════════════
-# ══ TAB 4: HEATMAP ════════════════════════════════════════════════════════
 with tab_heatmap:
     update_page_title("Heatmap")
     st.subheader("🗺️ Heatmap & Network")
@@ -2482,7 +2470,7 @@ with tab_heatmap:
     if active_sim_df is not None:
         heatmap_fig = ui_exception_handler("Similarity Heatmap")(
             plot_similarity_heatmap
-        )(active_sim_df, threshold=threshold, theme_colors=get_colors())
+        )(active_sim_df, threshold=threshold, theme_colors=get_chart_colors())
 
     if heatmap_fig is not None:
         # plot_similarity_heatmap() returns a Matplotlib Figure, so it is
@@ -2517,11 +2505,10 @@ with tab_heatmap:
             title="Interactive Document Plagiarism Network",
         )
 
-<<<<<<< HEAD
     if network_fig is not None:
         # plot_similarity_network() returns a Plotly go.Figure.
         st.plotly_chart(network_fig, use_container_width=True)
-=======
+
     # ── Plagiarism Cluster Detection Summary (Issue #1675) ───────────────────
     if active_sim_df is not None and len(doc_names) >= 2:
         from src.core.similarity import detect_plagiarism_clusters
@@ -2544,7 +2531,7 @@ with tab_heatmap:
                     for doc in group["documents"]:
                         st.markdown(f"- 📄 `{doc}`")
                     st.divider()
->>>>>>> 6fd8e0d43897198ba883ee60d9dea50d17446de8
+
 
 # ══ TAB 5: PAIR DRILL-DOWN ════════════════════════════════════════════════
 with tab_drill:
@@ -2612,14 +2599,21 @@ with tab_drill:
                                 copy_label="📋 Copy Snippet",
                             )
 
-# ══ TAB 6: ANALYTICS ══════════════════════════════════════════════════════
+# ══ TAB 6: COMPARISON ══════════════════════════════════════════════════════
+with tab_compare:
+    update_page_title("Comparison")
+    from app.components.document_comparison import render_document_comparison
+    render_document_comparison()
+
+
+# ══ TAB 7: ANALYTICS ══════════════════════════════════════════════════════
 with tab_analytics:
     update_page_title("Analytics")
     st.subheader("📊 Analytics Dashboard")
     st.markdown("### ⏱️ Pipeline Processing Time Breakdown")
     stage_timings = st.session_state.get("last_stage_timings") or st.session_state.get("stage_timings")
     if plot_processing_time_breakdown:
-        active_theme_colors = get_colors() if callable(get_colors) else None
+        active_theme_colors = get_chart_colors() if callable(get_chart_colors) else None
         fig_time = plot_processing_time_breakdown(
             stage_timings=stage_timings,
             theme_colors=active_theme_colors,
@@ -2643,6 +2637,14 @@ with tab_settings:
 
     from app.components.storage_quota import render_storage_quota_progress
     render_storage_quota_progress()
+
+    st.markdown("### 📊 Visualization")
+    st.toggle(
+        "Force Dark Mode Charts",
+        value=False,
+        key=SessionKeys.FORCE_DARK_CHARTS,
+        help="Render Plotly charts with dark styling regardless of the current Light/Dark app theme.",
+    )
 
     if user_role == "admin":
         st.markdown("### ⚙️ Advanced Configuration")
@@ -2912,6 +2914,7 @@ with tab_settings:
 
         if "db_schema_status_msg" in st.session_state:
             st.info(st.session_state["db_schema_status_msg"])
+            
 # ══ TAB 9: SECURITY AUDIT LOGS ═════════════════════════════════════════════
 with tab_audit:
     update_page_title("Security Audit Logs")
@@ -3151,13 +3154,13 @@ with tab_history:
         st.info("No scan history found for the selected date range. Run a scan to populate this dashboard.")
     else:
         # Similarity Trend Line Chart
-        trend_fig = plot_similarity_trend_line(history_data, theme_colors=get_colors())
+        trend_fig = plot_similarity_trend_line(history_data, theme_colors=get_chart_colors())
         st.plotly_chart(trend_fig, use_container_width=True)
         
         st.divider()
         
         # Flagged Documents Bar Chart
-        bar_fig = plot_flagged_documents_bar(history_data, theme_colors=get_colors())
+        bar_fig = plot_flagged_documents_bar(history_data, theme_colors=get_chart_colors())
         st.plotly_chart(bar_fig, use_container_width=True)
         
         st.divider()
@@ -3191,6 +3194,8 @@ with _footer_col1:
         f"🎓 Semantic Plagiarism Detection System · v{APP_VERSION} · Streamlit · "
         "🐛 Report Bug / Feedback"
     )
+    from app.theme import render_session_status_banner
+    render_session_status_banner()
 with _footer_col2:
     if _latest_tag:
         st.markdown(
@@ -3202,3 +3207,4 @@ with _footer_col2:
         )
     else:
         st.caption("✅ Up to date")
+        

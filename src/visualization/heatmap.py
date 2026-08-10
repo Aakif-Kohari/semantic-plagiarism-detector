@@ -55,17 +55,21 @@ try:
     )
 except ImportError:
     UI_COLORMAP_OPTIONS = [
-        "Viridis",
-        "Cividis",
-        "Plasma",
-        "Coolwarm",
-        "YlOrRd",
-    ]
+    "Viridis",
+    "Cividis",
+    "Plasma",
+    "Blues",
+    "RdYlGn",
+    "Coolwarm",
+    "YlOrRd",
+]
 
     MATPLOTLIB_CMAP_MAPPING = {
         "Viridis": "viridis",
         "Cividis": "cividis",
         "Plasma": "plasma",
+        "Blues": "Blues",
+        "RdYlGn": "RdYlGn",
         "Coolwarm": "coolwarm",
         "YlOrRd": "YlOrRd",
     }
@@ -411,7 +415,6 @@ def plot_similarity_heatmap(
         fig.tight_layout()
         return fig
 
-
 # ── Interactive Visualization (Plotly) ─────────────────────────────────────────
 def plot_similarity_heatmap_plotly(
     similarity_df: pd.DataFrame,
@@ -419,7 +422,8 @@ def plot_similarity_heatmap_plotly(
     threshold: float = PLAGIARISM_THRESHOLD,
     theme_colors: Optional[Dict[str, str]] = None,
     colormap_name: str = DEFAULT_UI_COLORMAP,
-    colorscale: str = "Viridis",
+
+    colorscale: Optional[str] = None,
     show_annotations: bool = True,
     mask_threshold: Optional[float] = None,
     log_scale: bool = False,
@@ -432,7 +436,7 @@ def plot_similarity_heatmap_plotly(
     """Interactive Plotly heatmap featuring dynamic hover values and custom threshold bounds."""
     import plotly.graph_objects as go
 
-    scale = max(0.5, float(font_scale))
+    scale = max(0.5, float(1.0))
 
     if similarity_df.empty or len(similarity_df) == 0:
         fig = go.Figure()
@@ -467,7 +471,8 @@ def plot_similarity_heatmap_plotly(
         safe_title = "Semantic Similarity Matrix"
 
     cmap = PLOTLY_CMAP_MAPPING.get(colormap_name, "Viridis")
-
+    if colorscale is None:
+        colorscale = cmap
     try:
         clean_df = validate_similarity_matrix(similarity_df)
     except ValueError as error:
@@ -1455,7 +1460,6 @@ def plot_multi_heatmap_grid(
                     )
 
         # Per-panel axis styling
-        axis_idx = panel_idx + 1
         tick_sz = int(max(7, 10 - n // 3) * scale)
         fig.update_xaxes(
             tickangle=-30,
@@ -1510,4 +1514,3 @@ def plot_multi_heatmap_grid(
     )
 
     return fig
-
