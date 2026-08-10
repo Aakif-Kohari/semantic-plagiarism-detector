@@ -10,6 +10,7 @@ from src.utils.processing_time import (
     BYTES_PER_MB,
     ProcessingTimer,
     calculate_average_latency,
+    calculate_docs_per_minute,
     calculate_mb_per_minute,
     calculate_page_throughput,
     calculate_processing_throughput,
@@ -19,9 +20,7 @@ from src.utils.processing_time import (
     format_throughput_human_readable,
     processing_eta_text,
     uploaded_files_total_bytes,
-)
-
-# ============================================================================
+)# ============================================================================
 # Page Throughput Tests
 # ============================================================================
 
@@ -376,3 +375,18 @@ def test_calculate_mb_per_minute():
 
     # Test zero bytes processed
     assert calculate_mb_per_minute(0, 60.0) == 0.0
+
+
+def test_calculate_docs_per_minute():
+    # Test normal calculation: 30 docs in 60 seconds (1 minute) = 30.0 docs/min
+    assert calculate_docs_per_minute(30, 60.0) == 30.0
+
+    # Test fractional result rounds to 2 decimal places: 10 docs in 45 seconds
+    assert calculate_docs_per_minute(10, 45.0) == 13.33
+
+    # Test zero or negative elapsed time returns 0.0
+    assert calculate_docs_per_minute(10, 0.0) == 0.0
+    assert calculate_docs_per_minute(10, -5.0) == 0.0
+
+    # Test zero documents processed
+    assert calculate_docs_per_minute(0, 60.0) == 0.0
