@@ -389,20 +389,22 @@ megabytes = total_bytes / (1024 * 1024)
     return round(megabytes / minutes, 2)
 
 
-def calculate_docs_per_minute(doc_count: int, elapsed_seconds: float) -> float:
+def calculate_kb_per_second(total_bytes: int, elapsed_seconds: float) -> float:
     """
-    Calculate scan throughput in documents processed per minute (docs/min).
-
+    Calculate document processing throughput in kilobytes per second (KB/sec).
+    
     Args:
-        doc_count (int): Total number of documents processed.
+        total_bytes (int): Total size processed in bytes.
         elapsed_seconds (float): Time elapsed in seconds.
-
+        
     Returns:
-        float: Throughput in docs/min rounded to 2 decimal places. Returns 0.0 if elapsed_seconds <= 0.
+        float: Throughput in KB/sec rounded to 2 decimal places. Returns 0.0 if elapsed_seconds <= 0.
     """
-    if elapsed_seconds <= 0:
+    if elapsed_seconds <= 0 or total_bytes <= 0:
         return 0.0
+    
+    kilobytes = total_bytes / 1024.0
+    
+    return round(kilobytes / elapsed_seconds, 2)
 
-    minutes = elapsed_seconds / 60.0
-    return round(doc_count / minutes, 2)
 

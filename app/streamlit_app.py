@@ -996,6 +996,22 @@ if not st.session_state.get(SessionKeys.AUTHENTICATED, False):
             st.error("Invalid username or password.")
     st.stop()
 
+def file_uploader_callback():
+    uploaded = st.session_state.get("file_uploader")
+    if uploaded:
+        st.session_state["staged_files_count"] = len(uploaded)
+        total_size = sum(getattr(f, "size", 0) for f in uploaded)
+        st.session_state["staged_files_size"] = total_size
+    else:
+        st.session_state["staged_files_count"] = 0
+        st.session_state["staged_files_size"] = 0
+
+
+if "staged_files_count" not in st.session_state:
+    st.session_state["staged_files_count"] = 0
+if "staged_files_size" not in st.session_state:
+    st.session_state["staged_files_size"] = 0
+
 user_role = st.session_state.get(SessionKeys.ROLE, "user")
 
 # ── Top-right Theme Toggle ───────────────────────────────────────────────────
@@ -1492,7 +1508,13 @@ uploaded_files = st.file_uploader(
     type=["pdf", "docx", "txt", "md", "markdown", "mdown"],
     accept_multiple_files=True,
     key="file_uploader",
+    on_change=file_uploader_callback,
 )
+
+if st.session_state.get("staged_files_count", 0) > 0:
+    staged_count = st.session_state["staged_files_count"]
+    staged_size_mb = st.session_state["staged_files_size"] / (1024 * 1024)
+    st.info(f"📁 Staged {staged_count} files (Total Size: {staged_size_mb:.1f} MB)")
 
 if user_role != "admin":
     st.subheader("🔎 Secure Student Search Portal")
@@ -2153,7 +2175,13 @@ if user_role == "admin":
         type=["pdf", "docx", "txt", "md", "markdown", "mdown", "zip", "csv"],
         accept_multiple_files=True,
         key="file_uploader",
+        on_change=file_uploader_callback,
     )
+
+    if st.session_state.get("staged_files_count", 0) > 0:
+        staged_count = st.session_state["staged_files_count"]
+        staged_size_mb = st.session_state["staged_files_size"] / (1024 * 1024)
+        st.info(f"📁 Staged {staged_count} files (Total Size: {staged_size_mb:.1f} MB)")
 
     MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 10MB limit
     file_bytes_dict = {}
