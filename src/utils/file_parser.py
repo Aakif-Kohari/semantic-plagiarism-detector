@@ -23,6 +23,15 @@ import fitz
 logger = logging.getLogger(__name__)
 
 
+# ── String & Name Formatting ─────────────────────────────────────────────────
+
+def truncate_filename(name: str, max_len: int = 35) -> str:
+    """Truncate filename with ellipsis if it exceeds max_len."""
+    if len(name) <= max_len:
+        return name
+    return name[: max_len - 3] + "..."
+
+
 # ── Magic Byte Signatures (Issue #1570) ──────────────────────────────────────
 
 # Magic byte signatures for common document and image formats.
@@ -191,6 +200,33 @@ def get_file_size_formatted(num_bytes: int) -> str:
         size /= 1024
 
     return f"{size:.2f} {units[-1]}"
+
+
+def get_file_size_formatted_short(num_bytes: int) -> str:
+    """
+    Convert a file size in bytes to a compact human-readable string.
+
+    Args:
+        num_bytes (int): File size in bytes.
+
+    Returns:
+        str: Compact file size using B, KB, MB, or GB with no spaces
+            and no trailing zeros (e.g. "1MB", "500KB", "12B").
+    """
+    units = ["B", "KB", "MB", "GB"]
+    size = float(num_bytes)
+
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(size)}{unit}"
+            rounded = round(size, 2)
+            if rounded == int(rounded):
+                return f"{int(rounded)}{unit}"
+            return f"{rounded:g}{unit}"
+        size /= 1024
+
+    return f"{size:g}{units[-1]}"
 
 
 # ── PDF Extraction & Metadata ────────────────────────────────────────────────
