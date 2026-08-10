@@ -26,6 +26,7 @@ from src.utils.temp_manager import (
     register_temp_path,
     unregister_temp_path,
     verify_available_temp_space,
+    check_temp_disk_space,
     _REGISTERED_TEMP_PATHS,
 )
 
@@ -605,4 +606,29 @@ def test_cleanup_temp_files_retention(tmp_path):
 
     # Cleanup remaining new items to prevent test leakage
     cleanup_registered_temp_paths()
+
+
+def test_check_temp_disk_space_success():
+    """Verify that check_temp_disk_space returns True when free space is sufficient."""
+    with patch(
+        "src.utils.temp_manager.shutil.disk_usage",
+        return_value=(1000 * 1024 * 1024, 200 * 1024 * 1024, 800 * 1024 * 1024),
+    ):
+        # 800 MB is free, min required is 100 MB, should succeed
+        assert check_temp_disk_space(min_free_mb=100) is True
+
+
+def test_check_temp_disk_space_failure():
+    """Verify that check_temp_disk_space raises OSError when free space is below safety threshold."""
+    import pytest
+    with patch(
+        "src.utils.temp_manager.shutil.disk_usage",
+        return_value=(1000 * 1024 * 1024, 950 * 1024 * 1024, 50 * 1024 * 1024),
+    ):
+        # 50 MB is free, min required is 100 MB, should raise OSError
+        with pytest.raises(
+            OSError,
+            match="Disk space in temp directory below safety threshold",
+        ):
+            check_temp_disk_space(min_free_mb=100)
 

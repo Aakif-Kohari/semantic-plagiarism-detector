@@ -55,21 +55,17 @@ try:
     )
 except ImportError:
     UI_COLORMAP_OPTIONS = [
-    "Viridis",
-    "Cividis",
-    "Plasma",
-    "Blues",
-    "RdYlGn",
-    "Coolwarm",
-    "YlOrRd",
-]
+        "Viridis",
+        "Cividis",
+        "Plasma",
+        "Coolwarm",
+        "YlOrRd",
+    ]
 
     MATPLOTLIB_CMAP_MAPPING = {
         "Viridis": "viridis",
         "Cividis": "cividis",
         "Plasma": "plasma",
-        "Blues": "Blues",
-        "RdYlGn": "RdYlGn",
         "Coolwarm": "coolwarm",
         "YlOrRd": "YlOrRd",
     }
@@ -90,10 +86,6 @@ except ImportError:
     # Default Plotly font family
     DEFAULT_FONT_FAMILY: str = "Inter, sans-serif"
 
-
-# Ensure DEFAULT_FONT_FAMILY is always defined even when app.theme import succeeds
-if "DEFAULT_FONT_FAMILY" not in dir():
-    DEFAULT_FONT_FAMILY: str = "Inter, sans-serif"  # type: ignore[no-redef]
 
 
 # ── Security & Sanitization ────────────────────────────────────────────────────
@@ -412,18 +404,13 @@ def plot_similarity_heatmap(
                 )
                 legend.get_frame().set_edgecolor(theme_colors.get("border", "#E2E8F0"))
 
-        fig.tight_layout()
-        return fig
-
 # ── Interactive Visualization (Plotly) ─────────────────────────────────────────
 def plot_similarity_heatmap_plotly(
     similarity_df: pd.DataFrame,
     title: str = "Semantic Similarity Matrix",
     threshold: float = PLAGIARISM_THRESHOLD,
     theme_colors: Optional[Dict[str, str]] = None,
-    colormap_name: str = DEFAULT_UI_COLORMAP,
-
-    colorscale: Optional[str] = None,
+    colorscale: str = "Viridis",
     show_annotations: bool = True,
     mask_threshold: Optional[float] = None,
     log_scale: bool = False,
@@ -435,8 +422,6 @@ def plot_similarity_heatmap_plotly(
 ):
     """Interactive Plotly heatmap featuring dynamic hover values and custom threshold bounds."""
     import plotly.graph_objects as go
-
-    scale = max(0.5, float(1.0))
 
     if similarity_df.empty or len(similarity_df) == 0:
         fig = go.Figure()
@@ -452,7 +437,7 @@ def plot_similarity_heatmap_plotly(
         fig.add_annotation(
             text="No document data available for heatmap visualization",
             showarrow=False,
-            font=dict(size=int(14 * scale), color="#666666"),
+            font=dict(size=14, color="#666666"),
             bordercolor="#cccccc",
             borderwidth=1,
             borderpad=10,
@@ -471,8 +456,7 @@ def plot_similarity_heatmap_plotly(
         safe_title = "Semantic Similarity Matrix"
 
     cmap = PLOTLY_CMAP_MAPPING.get(colormap_name, "Viridis")
-    if colorscale is None:
-        colorscale = cmap
+
     try:
         clean_df = validate_similarity_matrix(similarity_df)
     except ValueError as error:
@@ -490,7 +474,7 @@ def plot_similarity_heatmap_plotly(
         fig.add_annotation(
             text="No document data available for heatmap visualization",
             showarrow=False,
-            font=dict(size=int(14 * scale), color="#666666"),
+            font=dict(size=14, color="#666666"),
             bordercolor="#cccccc",
             borderwidth=1,
             borderpad=10,
@@ -507,7 +491,7 @@ def plot_similarity_heatmap_plotly(
         fig.add_annotation(
             text="At least 2 documents are required to build a pairwise heatmap",
             showarrow=False,
-            font=dict(size=int(14 * scale), color="#666666"),
+            font=dict(size=14, color="#666666"),
             bordercolor="#cccccc",
             borderwidth=1,
             borderpad=10,
@@ -556,13 +540,14 @@ def plot_similarity_heatmap_plotly(
             text=hover_text,
             hovertemplate="%{text}",
             colorscale=colorscale,
-            zmin=zmin,
-            zmax=zmax,
+            zmin=0.0,
+            zmax=1.0,
             colorbar=dict(title="Cosine Similarity", thickness=15, tickformat=".0%"),
             xgap=2,
             ygap=2,
         )
     )
+
     annotations = []
     if show_annotations:
         for i in range(n):
@@ -589,7 +574,7 @@ def plot_similarity_heatmap_plotly(
                         text=f"{val:.2f}",
                         showarrow=False,
                         font=dict(
-                            size=int(max(9, 14 - n) * scale),
+                            size=max(9, 14 - n),
                             color=font_color,
                             family=DEFAULT_FONT_FAMILY,
                         ),
@@ -624,7 +609,7 @@ def plot_similarity_heatmap_plotly(
     fig.update_layout(
         title=dict(
             text=safe_title,
-            font=dict(size=int(18 * scale), family=DEFAULT_FONT_FAMILY, color=ink_color),
+            font=dict(size=18, family=DEFAULT_FONT_FAMILY, color=ink_color),
         ),
         height=max(500, n * cell_px + 150),
         autosize=True,
@@ -634,11 +619,9 @@ def plot_similarity_heatmap_plotly(
             title="Document ID",
             color=ink_color,
             fixedrange=False,
-            tickfont=dict(size=int(10 * scale)),
         ),
         yaxis=dict(
-            autorange="reversed", title="Document ID", color=ink_color, fixedrange=False,
-            tickfont=dict(size=int(10 * scale)),
+            autorange="reversed", title="Document ID", color=ink_color, fixedrange=False
         ),
         annotations=annotations,
         shapes=shapes,
@@ -648,7 +631,7 @@ def plot_similarity_heatmap_plotly(
         font=dict(color=ink_color),
         hoverlabel=dict(
             bgcolor=_get_theme_color(theme_colors, "surface", "white"),
-            font_size=int(14 * scale),
+            font_size=14,
             font_family=DEFAULT_FONT_FAMILY,
         ),
     )
@@ -669,7 +652,6 @@ def plot_document_similarity_heatmap(
     class_tag: Optional[str] = None,
     doc_class_map: Optional[dict] = None,
     dim_diagonal: bool = False,
-    font_scale: float = 1.0,
 ):
     """Wrapper function for plot_similarity_heatmap_plotly with empty state handling."""
     return plot_similarity_heatmap_plotly(
@@ -685,7 +667,6 @@ def plot_document_similarity_heatmap(
         class_tag=class_tag,
         doc_class_map=doc_class_map,
         dim_diagonal=dim_diagonal,
-        font_scale=font_scale,
     )
 
 
@@ -1075,7 +1056,6 @@ def render_heatmap_ui(
     similarity_df: pd.DataFrame,
     threshold: float = PLAGIARISM_THRESHOLD,
     theme_colors: Optional[Dict[str, str]] = None,
-    font_scale: float = 1.0,
 ):
     """Streamlit UI wrapper for similarity heatmap controls."""
     if similarity_df.empty:
@@ -1168,7 +1148,6 @@ def render_heatmap_ui(
         log_scale=log_scale,
         dim_diagonal=dim_diagonal,
         show_annotations=show_annotations,
-        font_scale=font_scale,
     )
 
     if zoom_mode == "Fit Matrix":
@@ -1514,3 +1493,5 @@ def plot_multi_heatmap_grid(
     )
 
     return fig
+
+
