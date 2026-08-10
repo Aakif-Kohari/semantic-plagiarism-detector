@@ -321,6 +321,7 @@ from src.utils.redis_cache import (
     get_faiss_index,
     get_session_state,
 )
+from src.utils.file_parser import truncate_filename
 from src.utils.storage_metrics import calculate_storage_usage
 from src.visualization.heatmap import (
     plot_similarity_heatmap,
@@ -1131,6 +1132,7 @@ with st.sidebar:
             0.99,
             value=st.session_state.get("threshold_slider", PLAGIARISM_THRESHOLD),
             step=0.01,
+            help="Cosine similarity threshold for flagging.",
             help=(
                 "Combined Hybrid score threshold for flagging pair plagiarism. "
                 "Calculated from Lexical (exact phrase overlap) and Semantic (meaning alignment) scores. "
@@ -1619,6 +1621,15 @@ active_sim_df = chunk_sim_df if use_chunk_matrix else sim_df
 flags = flag_plagiarism(active_sim_df, threshold=threshold)
 
 st.subheader("📊 Analysis Summary")
+st.write(f"Processed **{len(raw_texts)}** documents with Chunk Size: `{chunk_size}` and Overlap: `{chunk_overlap}`.")
+
+selected_class = st.selectbox(
+    "Select Class/Section",
+    unique_classes,
+    index=0,
+    key="class_filter_selectbox",
+)
+
 st.write(
     f"Processed **{len(raw_texts)}** documents with Chunk Size: `{chunk_size}` and Overlap: `{chunk_overlap}`."
 )
@@ -1635,6 +1646,28 @@ st.markdown("""
 """)
 st.markdown("---")
 st.caption("Semantic Plagiarism Detector · FAISS edition")
+
+if user_role == "admin":
+    st.markdown("---")
+    st.markdown("### 📁 Document Management")
+    existing_docs = get_all_documents()
+    if existing_docs:
+        st.write(f"**{len(existing_docs)}** documents in database")
+        for doc in existing_docs:
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.text(f"📄 {doc['filename']}")
+            with col2:
+                if st.button("🗑️", key=f"del_{doc['filename']}"):
+                    delete_document(doc["filename"])
+                    embeddings_matrix = get_all_embeddings()
+                    if embeddings_matrix.size > 0:
+                        new_index = build_index_from_matrix(embeddings_matrix)
+                        save_index(new_index, _INDEX_PATH)
+                    else:
+                        if os.path.exists(_INDEX_PATH):
+                            os.remove(_INDEX_PATH)
+                    st.rerun()
 
 if user_role == "admin":
     st.markdown("---")
@@ -1869,6 +1902,20 @@ if user_role == "admin":
             clear_all_dialog()  # type: ignore
         st.markdown("<br>", unsafe_allow_html=True)
 
+
+st.markdown("---")
+if st.button("🚪 Log Out", use_container_width=True, key="logout_button"):
+    for key in ["authenticated", "username", "role", "last_interaction"]:
+        if key in st.session_state:
+            del st.session_state[key]
+    clear_session(SESSION_ID)
+    st.rerun()
+
+
+# ── Onboarding Tour for First-Time Admin Users ───────────────────────────────────
+if Tour is not None and user_role == "admin" and not get_tour_completed(st.session_state.username):
+    username = st.session_state.username
+    
         st.markdown("---")
         if st.button("🚪 Log Out", use_container_width=True, key="logout_button"):
             logout_dialog()
@@ -2014,6 +2061,7 @@ if user_role == "admin":
             index_buffer = _io.BytesIO(cached_index_data)
             faiss_index = faiss.deserialize_index(faiss.read_index(index_buffer))
             registry = get_chunk_registry()
+            st.info(f"📂 Loaded FAISS index from Redis cache with {faiss_index.ntotal} vectors")
             st.info(
                 f"📂 Loaded FAISS index from Redis cache with {faiss_index.ntotal} vectors"
             )
@@ -2035,6 +2083,11 @@ if user_role == "admin":
                         "initialized safely."
                     )
             else:
+                st.info(f"Loaded and validated the existing FAISS index with {faiss_index.ntotal} vectors.")
+
+    if "analysis_results" not in st.session_state:
+        st.session_state.analysis_results = None
+        # Try to load from Redis cache
                 st.info(
                     f"Loaded and validated the existing FAISS index with "
                     f"{faiss_index.ntotal} vectors."
@@ -2425,6 +2478,40 @@ with tab_warnings:
             else "📁 Collapse All"
         )
 
+        faiss_query = st.text_input(
+            "Query FAISS Index:",
+            placeholder="Type a text snippet to search vector index...",
+            key="faiss_query_input",
+        )
+        if st.button("🔍 Run FAISS Search", key="run_faiss_search_btn"):
+            if faiss_query.strip() and faiss_index is not None:
+                from src.core.embedding_model import embed_chunks
+
+                q_vec = embed_chunks([faiss_query.strip()])[0]
+                q_results = search_similar_chunks(
+                    q_vec,
+                    faiss_index,
+                    registry,
+                    top_k=faiss_top_k,
+                    threshold=threshold,
+                )
+                if q_results:
+                    rows = []
+                    for rec, score in q_results:
+                        truncated_name = truncate_filename(rec.doc_name)
+                        rows.append({
+                            "Document": truncated_name,
+                            "Chunk Index": rec.chunk_index,
+                            "Similarity": f"{score:.1%}",
+                            "Content Preview": rec.chunk_text[:120] + "..." if len(rec.chunk_text) > 120 else rec.chunk_text
+                        })
+                    st.dataframe(pd.DataFrame(rows), use_container_width=True)
+                else:
+                    st.info("No matching vector chunks found above threshold.")
+
+    # ══ TAB 3: MATRIX ═════════════════════════════════════════════════════════
+    with tab_matrix:
+        st.subheader("📋 Similarity Matrix")
         if st.button(button_label, key="toggle_warning_accordions"):
             st.session_state[SessionKeys.WARNINGS_EXPAND_ALL] = not st.session_state[
                 SessionKeys.WARNINGS_EXPAND_ALL
