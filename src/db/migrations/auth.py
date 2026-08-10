@@ -228,6 +228,7 @@ def migration_014_add_must_change_password(
         )
 
 
+
 def migration_013_add_user_status(
     connection: sqlite3.Connection,
 ) -> None:

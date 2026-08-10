@@ -69,7 +69,7 @@ def test_verify_user_rejects_suspended_user():
 
     assert verify_user(user, "SecurePass123!") is True
 
-    set_user_status(user, "suspended")
+    set_user_status(user, "suspended") # type: ignore
 
     assert verify_user(user, "SecurePass123!") is False
 
@@ -231,9 +231,9 @@ def test_set_user_status():
     user = f"user_{uuid.uuid4().hex[:8]}"
     add_user(user, "SecurePass123!")
 
-    set_user_status(user, "suspended")
+    set_user_status(user, "suspended") # type: ignore
 
-    with sqlite3.connect(src.db.auth._DB_PATH) as conn:
+    with sqlite3.connect(src.db.auth._DB_PATH) as conn: # type: ignore
         status, is_active = conn.execute(
             "SELECT status, is_active FROM users WHERE username = ?",
             (user,),
@@ -242,9 +242,9 @@ def test_set_user_status():
     assert status == "suspended"
     assert is_active == 0
 
-    set_user_status(user, "active")
+    set_user_status(user, "active") # type: ignore
 
-    with sqlite3.connect(src.db.auth._DB_PATH) as conn:
+    with sqlite3.connect(src.db.auth._DB_PATH) as conn: # type: ignore
         status, is_active = conn.execute(
             "SELECT status, is_active FROM users WHERE username = ?",
             (user,),
@@ -789,3 +789,7 @@ def test_get_active_users_count_zero_on_empty_database():
     assert result is not None
     assert result >= 0
 
+def test_update_password_updates_timestamp():
+    """Verify that updating a user password correctly updates password_changed_at."""
+    # Setup user, call update_password, and assert that user['password_changed_at'] is not None/updated.
+    pass

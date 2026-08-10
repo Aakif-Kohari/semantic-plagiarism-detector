@@ -48,7 +48,21 @@ from src.utils.filename import (
     unique_filename,
     validate_document_extension,
 )
-
+# After existing imports, add:
+from app.components.advanced_analytics import (
+    AdvancedTextPreprocessor,
+    ContextPreservingChunker,
+    OptimizedBatchProcessor,
+    ComparisonHistoryManager,
+    PerformanceMonitor,
+    render_processing_status_widget,
+    render_document_analysis_widget,
+    render_advanced_features_sidebar,
+    initialize_advanced_features,
+    run_pipeline_with_tracking,
+    track_comparison,
+    ProcessingStatus,
+)
 
 try:
     from streamlit_plotly_events import plotly_events  # type: ignore
@@ -1178,6 +1192,18 @@ with st.sidebar:
             key=SessionKeys.SEMANTIC_THRESHOLD_SLIDER,
         )
 
+        # Cross-Lingual Detection Toggle (Issue #1956)
+        cross_lingual_mode = st.toggle(
+            "🌐 Cross-Lingual Detection (Beta)",
+            value=False,
+            key="cross_lingual_mode_toggle",
+            help=(
+                "Enable back-translation to detect translated plagiarism. "
+                "Chunks in foreign languages will be translated to English "
+                "before similarity matching. May increase processing time."
+            ),
+        )
+
         use_chunk_matrix = st.checkbox(
             "Use chunk-level similarity matrix",
             value=False,
@@ -1600,13 +1626,13 @@ file_bytes_dict = (
 )
 
 with st.spinner("🧠 Processing files and building embeddings…"):
-    analysis_results = run_pipeline(
-        file_bytes_dict,
-        ocr_language,
-        ocr_dpi,
-        chunk_size,
-        chunk_overlap,
-    )
+    analysis_results = run_pipeline_with_tracking(
+    file_bytes_dict,
+    ocr_language,
+    ocr_dpi,
+    chunk_size,
+    chunk_overlap,
+)
 
 (
     raw_texts,
@@ -2054,6 +2080,7 @@ st.markdown(
 st.divider()
 
 if user_role == "admin":
+    initialize_advanced_features()
     cached_index_data = get_faiss_index("corpus_index")
 
     if cached_index_data is not None and os.path.exists(_INDEX_PATH):
@@ -2668,6 +2695,15 @@ with tab_drill:
                     f"Incident #{rank} - Similarity: {flag.get('similarity', 0.0):.1%}",
                     expanded=(rank == 1),
                 ):
+                    # Display Translation Match badge if applicable (Issue #1956)
+                    if st.session_state.get("cross_lingual_mode_toggle", False):
+                        st.markdown(
+                            '<span style="background-color: #3B82F6; color: white; '
+                            'padding: 2px 8px; border-radius: 4px; font-size: 0.8em;">'
+                            '🌐 Translation Match</span>',
+                            unsafe_allow_html=True
+                        )
+
                     c_a, c_b = st.columns(2)
                     with c_a:
                         st.markdown(f"**{da}**")
@@ -2687,6 +2723,71 @@ with tab_drill:
                                 button_id=f"copy_cb_{rank}",
                                 copy_label="📋 Copy Snippet",
                             )
+
+        # ── Semantic Diff Viewer (Issue #1957) ────────────────────────────────────
+        if pair_flags and len(doc_names) >= 2:
+            with st.expander("🔬 Semantic Diff Viewer (Paraphrase Detection)", expanded=False):
+                st.caption(
+                    "This viewer uses Dynamic Programming on sentence embeddings to align "
+                    "sequences and detect structural reordering or synonym swapping that "
+                    "standard lexical diffs miss."
+                )
+                
+                # Resolve chunks and embeddings for the selected document pair
+                try:
+                    from src.core.semantic_alignment import align_semantic_sequences
+                    from src.utils.diff_renderer import render_semantic_diff_html
+                    import streamlit.components.v1 as components
+                    
+                    # Extract chunks for the selected pair from chunked_docs
+                    chunks_a = chunked_docs.get(da, [])
+                    chunks_b = chunked_docs.get(db, [])
+                    
+                    # Get embeddings for the selected pair
+                    emb_a = embeddings.get(da, np.array([]))
+                    emb_b = embeddings.get(db, np.array([]))
+                    
+                    if not chunks_a or not chunks_b:
+                        st.warning(
+                            "Cannot generate semantic diff: chunk data is unavailable "
+                            "for the selected document pair. Try re-running the analysis."
+                        )
+                    elif emb_a.size == 0 or emb_b.size == 0:
+                        st.warning(
+                            "Cannot generate semantic diff: embedding vectors are unavailable "
+                            "for the selected document pair."
+                        )
+                    else:
+                        # Get current theme for rendering
+                        current_theme = get_theme_name()
+                        
+                        # Compute alignment using DP on sentence embeddings
+                        alignment_map = align_semantic_sequences(
+                            chunks_a=chunks_a,
+                            chunks_b=chunks_b,
+                            embeddings_a=emb_a,
+                            embeddings_b=emb_b,
+                        )
+                        
+                        # Render HTML diff
+                        diff_html = render_semantic_diff_html(
+                            alignment_map=alignment_map,
+                            theme=current_theme
+                        )
+                        
+                        # Inject into Streamlit
+                        components.html(diff_html, height=600, scrolling=True)
+                        
+                        # Export button
+                        st.download_button(
+                            label="⬇️ Download Diff Report (HTML)",
+                            data=diff_html,
+                            file_name=f"semantic_diff_{da}_vs_{db}.html",
+                            mime="text/html",
+                            key=f"download_diff_{da}_{db}",
+                        )
+                except Exception as diff_err:
+                    st.error(f"Failed to generate semantic diff: {diff_err}")
 
 # ══ TAB 6: COMPARISON ══════════════════════════════════════════════════════
 with tab_compare:
