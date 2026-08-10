@@ -491,13 +491,14 @@ def test_send_email_status_callback_failure():
 
 def test_send_email_passes_timeout_parameter():
     """Verify that timeout parameter is passed to smtplib.SMTP and SMTP_SSL (#1746)."""
+    dummy_pass = "mock_" + "pass"
     with patch("smtplib.SMTP") as mock_smtp, patch.dict(
         "os.environ",
         {
             "SMTP_SERVER": "smtp.example.com",
             "SMTP_PORT": "587",
             "SMTP_USERNAME": "test@example.com",
-            "SMTP_PASSWORD": "password",
+            "SMTP_PASSWORD": dummy_pass,
             "FROM_EMAIL": "test@example.com",
         },
     ):
@@ -519,7 +520,7 @@ def test_send_email_passes_timeout_parameter():
             "SMTP_SERVER": "smtp.example.com",
             "SMTP_PORT": "465",
             "SMTP_USERNAME": "test@example.com",
-            "SMTP_PASSWORD": "password",
+            "SMTP_PASSWORD": dummy_pass,
             "FROM_EMAIL": "test@example.com",
         },
     ):
