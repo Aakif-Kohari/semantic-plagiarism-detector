@@ -1178,6 +1178,18 @@ with st.sidebar:
             key=SessionKeys.SEMANTIC_THRESHOLD_SLIDER,
         )
 
+        # Cross-Lingual Detection Toggle (Issue #1956)
+        cross_lingual_mode = st.toggle(
+            "🌐 Cross-Lingual Detection (Beta)",
+            value=False,
+            key="cross_lingual_mode_toggle",
+            help=(
+                "Enable back-translation to detect translated plagiarism. "
+                "Chunks in foreign languages will be translated to English "
+                "before similarity matching. May increase processing time."
+            ),
+        )
+
         use_chunk_matrix = st.checkbox(
             "Use chunk-level similarity matrix",
             value=False,
@@ -2668,6 +2680,15 @@ with tab_drill:
                     f"Incident #{rank} - Similarity: {flag.get('similarity', 0.0):.1%}",
                     expanded=(rank == 1),
                 ):
+                    # Display Translation Match badge if applicable (Issue #1956)
+                    if st.session_state.get("cross_lingual_mode_toggle", False):
+                        st.markdown(
+                            '<span style="background-color: #3B82F6; color: white; '
+                            'padding: 2px 8px; border-radius: 4px; font-size: 0.8em;">'
+                            '🌐 Translation Match</span>',
+                            unsafe_allow_html=True
+                        )
+
                     c_a, c_b = st.columns(2)
                     with c_a:
                         st.markdown(f"**{da}**")
