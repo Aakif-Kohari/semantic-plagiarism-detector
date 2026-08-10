@@ -812,6 +812,8 @@ def get_date_range_preset(preset: str) -> tuple[date, date]:
         return today, today
     elif preset == "Last 7 Days":
         return today - timedelta(days=6), today
+    elif preset == "Last 14 Days":
+        return today - timedelta(days=14), today
     elif preset == "Last 30 Days":
         return today - timedelta(days=29), today
     else:  # "All Time"
@@ -2400,7 +2402,7 @@ with tab_warnings:
     st.markdown("### 📅 Incident Date Filter")
     date_preset = st.radio(
         "Select Date Range",
-        options=["Today", "Last 7 Days", "Last 30 Days", "All Time"],
+        options=["Today", "Last 7 Days", "Last 14 Days", "Last 30 Days", "All Time"],
         horizontal=True,
         key="incident_date_preset",
         help="Quickly filter the incident table by common date ranges.",
