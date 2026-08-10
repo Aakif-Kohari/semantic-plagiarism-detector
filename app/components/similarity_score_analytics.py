@@ -177,8 +177,14 @@ def _prepare_dataframe(incidents: List[Any]) -> pd.DataFrame:
         if score is None:
             score = _get_val("similarity")
 
+        # Also support source/target names if available for heatmap/matrix summaries
+        source = _get_val("source_document") or _get_val("source") or _get_val("document_a") or "Doc A"
+        target = _get_val("target_document") or _get_val("target") or _get_val("document_b") or "Doc B"
+
         rows.append({
-            "similarity_score": _safe_float(score, default=0.0)
+            "similarity_score": _safe_float(score, default=0.0),
+            "source_document": str(source),
+            "target_document": str(target)
         })
 
     return pd.DataFrame(rows)
@@ -382,6 +388,31 @@ def _render_outlier_summary(outliers_info: Dict[str, Any]) -> None:
             description="Minimum outlier value",
             accent_color_var="--accent"
         )
+
+
+def _render_heatmap_data_summary(df: pd.DataFrame) -> None:
+    """Render text summary of top 5 highest similarity matrix cells inside an st.code block."""
+    st.markdown("### Top 5 Similarity Matrix Summary")
+    st.markdown("Quick text summary of the highest similarity matrix data points for copying:")
+
+    if df.empty or "similarity_score" not in df.columns:
+        st.code("No similarity data available.", language="text")
+        return
+
+    # Sort descending by similarity score and take top 5
+    top_df = df.sort_values(by="similarity_score", ascending=False).head(5)
+
+    summary_lines = ["TOP 5 SIMILARITY MATRIX CELLS SUMMARY:", "-" * 40]
+    for idx, row in enumerate(top_df.itertupless(), start=1):
+        score = getattr(row, "similarity_score", 0.0)
+        source = getattr(row, "source_document", "Doc A")
+        target = getattr(row, "target_document", "Doc B")
+        summary_lines.append(f"{idx}. Source: {source} | Target: {target} | Score: {score:.4f}")
+
+    summary_text = "\n".join(summary_lines)
+    
+    # Render inside st.code block which provides built-in 1-click clipboard copy button
+    st.code(summary_text, language="text")
 
 
 def _render_download_buttons(stats: Dict[str, Any], percentiles: Dict[str, float]) -> None:
@@ -672,6 +703,11 @@ def render_similarity_score_analytics() -> None:
 
     st.markdown("---")
 
+    # NEW SECTION: Heatmap Data Summary with st.code and clipboard copy button (#1731)
+    _render_heatmap_data_summary(df)
+
+    st.markdown("---")
+
     # SECTION 7: Distribution Summary
     st.markdown("### Distribution Summary & Interpretation")
 
@@ -718,3 +754,4 @@ def render_similarity_score_analytics() -> None:
     # SECTION 8: Downloads
     st.markdown("### Export Analytics Data")
     _render_download_buttons(stats, percentiles)
+    
