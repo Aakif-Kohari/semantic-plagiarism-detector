@@ -11,6 +11,7 @@ from src.utils.processing_time import (
     ProcessingTimer,
     calculate_average_latency,
     calculate_mb_per_minute,
+    calculate_kb_per_second,
     calculate_page_throughput,
     calculate_processing_throughput,
     estimate_processing_seconds,
@@ -376,3 +377,19 @@ def test_calculate_mb_per_minute():
 
     # Test zero bytes processed
     assert calculate_mb_per_minute(0, 60.0) == 0.0
+
+
+def test_calculate_kb_per_second():
+    # Test normal calculation: 100 KB (102400 bytes) in 5.0 seconds = 20.0 KB/sec
+    assert calculate_kb_per_second(102400, 5.0) == 20.0
+
+    # Test rounding to 2 decimal places: 100 KB in 3.0 seconds = 33.33 KB/sec
+    assert calculate_kb_per_second(102400, 3.0) == 33.33
+
+    # Test zero or negative elapsed time returns 0.0
+    assert calculate_kb_per_second(102400, 0.0) == 0.0
+    assert calculate_kb_per_second(102400, -2.5) == 0.0
+
+    # Test zero or negative bytes processed
+    assert calculate_kb_per_second(0, 5.0) == 0.0
+    assert calculate_kb_per_second(-1024, 5.0) == 0.0
