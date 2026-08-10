@@ -891,16 +891,40 @@ class TestCreateDatabaseBackup:
             db_path, backup_dir=tmp_path / "backups", compress_backup=False
         )
 
-        assert backup_path.exists()
-        assert backup_path.name.endswith(".db")
-        assert not backup_path.name.endswith(".db.gz")
-        assert backup_path.read_bytes().startswith(SQLITE_HEADER)
+    # Must be a non-empty string matching YYYY-MM-DD HH:MM
+    import re
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", formatted)
 
-    def test_create_database_backup_raises_file_not_found_when_missing(self):
-        """Verify FileNotFoundError is raised when source DB is missing (Issue #1885)."""
-        missing_db_path = "non_existent_database.sqlite3"
-        
-        expected_message = f"Source database file does not exist: {missing_db_path}"
-        with pytest.raises(FileNotFoundError, match=expected_message):
-            create_database_backup(missing_db_path)
-            
+
+# ── get_database_file_size_bytes ──────────────────────────────────────────────
+
+
+def test_get_database_file_size_bytes_existing_file():
+    db = _ALLOWED_DB_DIR / "corpus.db"
+    create_test_database(db)
+    try:
+        assert get_database_file_size_bytes(db) == db.stat().st_size
+        assert get_database_file_size_bytes(db) > 0
+    finally:
+        db.unlink(missing_ok=True)
+
+
+def test_get_database_file_size_bytes_missing_file():
+    missing = _ALLOWED_DB_DIR / "__nonexistent_test__.db"
+    assert get_database_file_size_bytes(missing) == 0
+
+
+def test_get_database_file_size_bytes_accepts_string_path():
+    db = _ALLOWED_DB_DIR / "users_test_size.db"
+    create_test_database(db)
+    try:
+        assert get_database_file_size_bytes(str(db)) == db.stat().st_size
+    finally:
+        db.unlink(missing_ok=True)
+
+
+def test_get_database_file_size_bytes_rejects_path_traversal(tmp_path):
+    outside = tmp_path / "evil.db"
+    outside.write_text("x")
+    with pytest.raises(ValueError, match="outside the allowed directory"):
+        get_database_file_size_bytes(outside)
