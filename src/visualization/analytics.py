@@ -312,26 +312,16 @@ def plot_high_severity_trends(
 )
 
     fig.update_layout(
-
-    xaxis_title="Date",
-    yaxis_title="Number of High Severity Incidents",
-    yaxis2=dict(
-        title="Cumulative Incidents",
-        overlaying="y",
-        side="right",
-    ),
-    hovermode="x unified",
-    height=400,
-    showlegend=True,
-    autosize=True,
-)
-
-
         xaxis_title="Date",
         yaxis_title="Number of High Severity Incidents",
+        yaxis2=dict(
+            title="Cumulative Incidents",
+            overlaying="y",
+            side="right",
+        ),
         hovermode="x unified",
         height=400,
-        showlegend=False,
+        showlegend=True,
         autosize=True,
     )
     fig.update_xaxes(showgrid=show_grid)

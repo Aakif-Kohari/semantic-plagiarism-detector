@@ -901,3 +901,30 @@ def test_client_host_fallback():
     response = _ip_middleware_client().get("/ip")
     assert response.status_code == 200
     assert response.json()["ip"] is not None
+
+
+# ── Multipart Content-Type Header Validation Tests (#1785) ────────────────────
+
+
+def test_scan_endpoint_rejects_non_multipart_content_type():
+    """Verify POST /api/v1/scan returns HTTP 415 when Content-Type is not multipart/form-data."""
+    client = TestClient(app)
+    headers = {
+        "Authorization": "Bearer test-write-token",
+        "Content-Type": "application/json",
+    }
+    response = client.post("/api/v1/scan", content=b"{}", headers=headers)
+    assert response.status_code == 415
+    data = response.json()
+    assert data.get("message") == "Unsupported Media Type: Request must be multipart/form-data" or data.get("detail") == "Unsupported Media Type: Request must be multipart/form-data"
+
+
+def test_scan_endpoint_rejects_missing_content_type():
+    """Verify POST /api/v1/scan returns HTTP 415 when Content-Type header is missing."""
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer test-write-token"}
+    response = client.post("/api/v1/scan", content=b"data", headers=headers)
+    assert response.status_code == 415
+    data = response.json()
+    assert data.get("message") == "Unsupported Media Type: Request must be multipart/form-data" or data.get("detail") == "Unsupported Media Type: Request must be multipart/form-data"
+

@@ -76,7 +76,7 @@ def compute_file_hash_stream(
     """
     hasher = hashlib.sha256()
 
-while chunk := file_stream.read(chunk_size):
+    while chunk := file_stream.read(chunk_size):
         hasher.update(chunk)
 
     return hasher.hexdigest()
