@@ -544,3 +544,39 @@ class TestChunkTextSentencePadding:
             text, chunk_size=100, chunk_overlap=0, sentence_padding=False
         )
         assert padded == unpadded
+
+
+# ── NLTK punkt download caching (Issue #2059) ────────────────────────────────
+
+
+def test_nltk_punkt_download_called_at_most_once(monkeypatch):
+    """Missing punkt corpus should trigger nltk.download only once across calls."""
+    from unittest.mock import MagicMock
+    import sys
+
+    import src.core.text_chunking as text_chunking
+    from src.core.text_chunking import _split_into_sentences
+
+    text_chunking._nltk_punkt_checked = False
+
+    mock_download = MagicMock()
+    mock_sent_tokenize = MagicMock(side_effect=LookupError("punkt missing"))
+
+    fake_tokenize = MagicMock()
+    fake_tokenize.sent_tokenize = mock_sent_tokenize
+
+    fake_nltk = MagicMock()
+    fake_nltk.download = mock_download
+    fake_nltk.tokenize = fake_tokenize
+
+    monkeypatch.setitem(sys.modules, "nltk", fake_nltk)
+    monkeypatch.setitem(sys.modules, "nltk.tokenize", fake_tokenize)
+
+    sample = "First sentence. Second sentence."
+    for _ in range(5):
+        result = _split_into_sentences(sample)
+        assert len(result) >= 1
+
+    assert mock_download.call_count == 1
+    mock_download.assert_called_with("punkt_tab", quiet=True)
+    assert text_chunking._nltk_punkt_checked is True
