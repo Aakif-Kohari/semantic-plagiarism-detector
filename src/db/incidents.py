@@ -20,6 +20,7 @@ from src.core.config import (
     normalize_severity_label,
     severity_from_score,
 )
+from src.db.base import BaseRepository
 from src.db.migrations import migrate_corpus_database, table_exists
 from src.db.migrations.common import column_exists
 from src.db.schemas import MatchResult
@@ -41,6 +42,27 @@ CSV_COLUMNS = [
     "Review Status",
     "Date Flagged",
 ]
+
+
+class IncidentsRepository(BaseRepository):
+    """Data access repository for plagiarism incidents, filtering, and export."""
+
+    def __init__(self, db_path: str | Path = DEFAULT_DB_PATH) -> None:
+        super().__init__(db_path)
+
+    def init_incident_db(self) -> None:
+        """Create or upgrade the shared corpus/incident database."""
+        init_incident_db(self._db_path)
+
+
+incidents_repo = IncidentsRepository(DEFAULT_DB_PATH)
+
+
+def configure_db_path(db_path: str | Path) -> None:
+    """Configure the SQLite database path used by the incidents module."""
+    global DEFAULT_DB_PATH
+    DEFAULT_DB_PATH = Path(os.path.abspath(str(db_path)))
+    incidents_repo.configure_db_path(DEFAULT_DB_PATH)
 
 
 def _utc_now_iso() -> str:
