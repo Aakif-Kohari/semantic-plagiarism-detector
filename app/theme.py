@@ -13,17 +13,6 @@ Provides:
 """
 # -*- coding: utf-8 -*-
 
-.notification-badge {
-    display: inline-block;
-    background-color: #DC2626;
-    color: #FFFFFF;
-    border-radius: 999px;
-    padding: 2px 8px;
-    margin-left: 6px;
-    font-size: 0.75rem;
-    font-weight: 700;
-    line-height: 1.2;
-}
 from app.css_constants import (
     BADGE,
     EMPTY_STATE,

@@ -216,6 +216,25 @@ def _strip_image_metadata(file_bytes: bytes) -> bytes:
             if image.mode == "P":
                 image = image.convert("RGBA")
 
+            # High bit depth images (16-bit or 32-bit float/int modes like I, F, I;16)
+            # can cause Pillow PNG/JPEG encoding errors. Convert to standard 8-bit RGB.
+            high_bit_depth_modes = {
+                "I",
+                "F",
+                "I;16",
+                "I;16L",
+                "I;16B",
+                "I;16N",
+                "BGR;15",
+                "BGR;16",
+                "BGR;32",
+            }
+            if (
+                image.mode in high_bit_depth_modes
+                or image.mode.startswith(("I;", "BGR;"))
+            ):
+                image = image.convert("RGB")
+
             # We extract only the image data, discarding info/exif
             data = list(image.getdata())
             image_without_exif = Image.new(image.mode, image.size)
