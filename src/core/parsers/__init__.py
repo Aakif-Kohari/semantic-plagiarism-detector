@@ -1,53 +1,65 @@
-"""src/core/document_parser.py - Primary document parsing facade and text extraction pipeline."""
+"""src/core/parsers - Document parsing strategy package."""
 
-from src.core.parsers import (
-    ALLOWED_EXTENSIONS,
-    DEFAULT_OCR_DPI,
-    DEFAULT_OCR_LANGUAGE,
+from src.core.parsers.cleaners import (
     ENGLISH_STOPWORDS,
-    SUPPORTED_OCR_LANGUAGES,
     ZERO_WIDTH_CHARS_PATTERN,
-    CorruptedArchiveError,
-    OCRDependencyError,
-    PDFInput,
-    ParsedDocxText,
-    check_batch_rate_limit,
     clean_text,
-    count_pdf_images,
     detect_text_language,
-    extract_pdf_metadata,
-    extract_text,
-    extract_text_from_doc,
-    extract_text_from_docx,
-    extract_text_from_epub,
-    extract_text_from_image,
-    extract_text_from_md,
-    extract_text_from_odt,
-    extract_text_from_pdf,
-    extract_text_from_rtf,
-    extract_text_from_txt,
-    extract_text_from_url,
-    extract_text_from_zip,
-    extract_texts,
-    extract_texts_from_pdfs,
-    extract_texts_parallel,
     get_stopwords,
-    get_supported_file_extensions,
     load_custom_stopwords,
     mask_named_entities_in_text,
     normalize_extended_punctuation,
-    normalize_ocr_settings,
     normalize_unicode_nfc,
     normalize_unicode_spaces,
-    parallel_extract_texts,
     prepare_text_for_embedding,
     remove_ignore_phrases,
     sanitize_unicode_spaces,
     sanitize_zero_width_characters,
     strip_bibliography,
     strip_markdown_syntax,
+)
+from src.core.parsers.common import (
+    DEFAULT_OCR_DPI,
+    DEFAULT_OCR_LANGUAGE,
+    SUPPORTED_OCR_LANGUAGES,
+    PDFInput,
+    check_batch_rate_limit,
+    normalize_ocr_settings,
     validate_ocr_dpi,
     validate_ocr_language,
+)
+from src.core.parsers.dispatch import (
+    ALLOWED_EXTENSIONS,
+    extract_text,
+    extract_texts,
+    get_supported_file_extensions,
+    parallel_extract_texts,
+)
+from src.core.parsers.docx_parser import (
+    ParsedDocxText,
+    extract_text_from_doc,
+    extract_text_from_docx,
+)
+from src.core.parsers.ocr_parser import (
+    OCRDependencyError,
+    extract_text_from_image,
+)
+from src.core.parsers.pdf_parser import (
+    count_pdf_images,
+    extract_pdf_metadata,
+    extract_text_from_pdf,
+    extract_texts_from_pdfs,
+    extract_texts_parallel,
+)
+from src.core.parsers.text_parser import (
+    CorruptedArchiveError,
+    extract_text_from_epub,
+    extract_text_from_md,
+    extract_text_from_odt,
+    extract_text_from_rtf,
+    extract_text_from_txt,
+    extract_text_from_url,
+    extract_text_from_zip,
 )
 
 __all__ = [
