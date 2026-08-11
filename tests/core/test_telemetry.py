@@ -9,16 +9,16 @@ from src.core.telemetry import TelemetryService
 
 def test_telemetry_cache_hit():
     """
-    Test that TelemetryService.get_active_user_count correctly returns a cached value 
+    Test that TelemetryService.get_active_user_count correctly returns a cached value
     without querying the DB.
     """
     with patch('src.core.telemetry.get_cache') as mock_get_cache, \
          patch('src.core.telemetry.get_user_count') as mock_get_user_count:
-        
+
         mock_get_cache.return_value = "42"
-        
+
         count = TelemetryService.get_active_user_count()
-        
+
         assert count == 42
         mock_get_cache.assert_called_once_with(TelemetryService.CACHE_KEY_USER_COUNT)
         mock_get_user_count.assert_not_called()
@@ -30,18 +30,18 @@ def test_telemetry_cache_miss():
     with patch('src.core.telemetry.get_cache') as mock_get_cache, \
          patch('src.core.telemetry.get_user_count') as mock_get_user_count, \
          patch('src.core.telemetry.set_cache') as mock_set_cache:
-        
+
         mock_get_cache.return_value = None
         mock_get_user_count.return_value = 17
-        
+
         count = TelemetryService.get_active_user_count()
-        
+
         assert count == 17
         mock_get_cache.assert_called_once_with(TelemetryService.CACHE_KEY_USER_COUNT)
         mock_get_user_count.assert_called_once()
         mock_set_cache.assert_called_once_with(
-            TelemetryService.CACHE_KEY_USER_COUNT, 
-            "17", 
+            TelemetryService.CACHE_KEY_USER_COUNT,
+            "17",
             expire=TelemetryService.CACHE_TTL_SECONDS
         )
 
@@ -51,12 +51,12 @@ def test_telemetry_db_failure():
     """
     with patch('src.core.telemetry.get_cache') as mock_get_cache, \
          patch('src.core.telemetry.get_user_count') as mock_get_user_count:
-        
+
         mock_get_cache.return_value = None
         mock_get_user_count.side_effect = Exception("DB Connection Lost")
-        
+
         count = TelemetryService.get_active_user_count()
-        
+
         assert count == 0
 
 # ---------------------------------------------------------
@@ -71,9 +71,9 @@ def test_telemetry_doc_count_cache_hit():
          patch('src.core.telemetry.get_document_count_fast') as mock_get_doc_count_fast:
         
         mock_get_cache.return_value = "99"
-        
+
         count = TelemetryService.get_document_count()
-        
+
         assert count == 99
         mock_get_cache.assert_called_once_with(TelemetryService.CACHE_KEY_DOC_COUNT)
         mock_get_doc_count_fast.assert_not_called()
@@ -85,18 +85,18 @@ def test_telemetry_doc_count_cache_miss():
     with patch('src.core.telemetry.get_cache') as mock_get_cache, \
          patch('src.core.telemetry.get_document_count_fast') as mock_get_doc_count_fast, \
          patch('src.core.telemetry.set_cache') as mock_set_cache:
-        
+
         mock_get_cache.return_value = None
         mock_get_doc_count_fast.return_value = 3
         
         count = TelemetryService.get_document_count()
-        
+
         assert count == 3
         mock_get_cache.assert_called_once_with(TelemetryService.CACHE_KEY_DOC_COUNT)
         mock_get_doc_count_fast.assert_called_once()
         mock_set_cache.assert_called_once_with(
-            TelemetryService.CACHE_KEY_DOC_COUNT, 
-            "3", 
+            TelemetryService.CACHE_KEY_DOC_COUNT,
+            "3",
             expire=TelemetryService.CACHE_TTL_SECONDS
         )
 
@@ -111,7 +111,7 @@ def test_telemetry_doc_db_failure():
         mock_get_doc_count_fast.side_effect = Exception("DB Fault")
         
         count = TelemetryService.get_document_count()
-        
+
         assert count == 0
 
 # ---------------------------------------------------------
@@ -125,12 +125,12 @@ def test_telemetry_force_refresh():
     with patch('src.core.telemetry.get_user_count') as mock_get_user_count, \
          patch('src.core.telemetry.get_document_count_fast') as mock_get_doc_count_fast, \
          patch('src.core.telemetry.set_cache') as mock_set_cache:
-        
+
         mock_get_user_count.return_value = 100
         mock_get_doc_count_fast.return_value = 550
         
         TelemetryService.force_refresh_metrics()
-        
+
         mock_get_user_count.assert_called_once()
         mock_get_doc_count_fast.assert_called_once()
         assert mock_set_cache.call_count == 2

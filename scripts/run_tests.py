@@ -22,13 +22,13 @@ def run_tests(args):
     Enforces coverage thresholds and builds JUnit XML reports.
     """
     cmd = ["pytest"]
-    
+
     # 1. Scope selection
     if args.unit:
         cmd.extend(["-m", "unit"])
     elif args.integration:
         cmd.extend(["-m", "integration"])
-        
+
     # 2. Parallel execution
     if getattr(args, "parallel", False):
         cmd.extend(["-n", "auto"])
@@ -49,17 +49,17 @@ def run_tests(args):
         cmd.extend(cov_cmd)
     else:
         cmd.extend(["--cov=src", "--cov-report=html"])
-        
+
     # 4. Verbosity
     if args.verbose:
         cmd.append("-vv")
-        
+
     print(f"Executing Test Runner: {' '.join(cmd)}")
-    
+
     # 5. Environment isolation
     env = os.environ.copy()
     env["TESTING_MODE"] = "1"
-    
+
     try:
         result = subprocess.run(cmd, env=env, check=False)
         if result.returncode != 0:
@@ -73,21 +73,21 @@ def run_tests(args):
 
 def main():
     setup_logging()
-    
+
     parser = argparse.ArgumentParser(description="Automated Test Runner for Semantic Plagiarism Detector")
     group = parser.add_mutually_exclusive_group(required=False)
     group.add_argument("--all", action="store_true", help="Run the entire test suite (unit + integration)")
     group.add_argument("--unit", action="store_true", help="Run only isolated unit tests")
     group.add_argument("--integration", action="store_true", help="Run only integration tests")
-    
+
     parser.add_argument("--parallel", action="store_true", help="Run tests in parallel")
     parser.add_argument("--coverage", action="store_true", help="Enable test coverage reporting")
-    parser.add_argument("--enforce-coverage", type=int, metavar="PERCENT", 
+    parser.add_argument("--enforce-coverage", type=int, metavar="PERCENT",
                         help="Fail the build if code coverage drops below PERCENT")
     parser.add_argument("-v", "--verbose", action="store_true", help="Increase test output verbosity")
-    
+
     args = parser.parse_args()
-    
+
     check_dependencies()
     run_tests(args)
 

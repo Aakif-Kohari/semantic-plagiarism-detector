@@ -1,74 +1,74 @@
-"""
-tests/utils/test_google_drive.py
----------------------------------
-Unit tests for Google Drive utilities.
-"""
-
-import sys
-import os
-# Add src/utils to path to import google_drive module directly
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'utils'))
-
-import google_drive
-
-
-def test_get_supported_file_extensions():
-    """Test that get_supported_file_extensions returns expected list of extensions."""
-    extensions = google_drive.get_supported_file_extensions()
-
-    # The returned object is a list
-    assert isinstance(extensions, list)
-
-    # The list contains ".pdf"
-    assert ".pdf" in extensions
-
-    # The list contains ".docx"
-    assert ".docx" in extensions
-
-    # The list is sorted alphabetically
-    assert extensions == sorted(extensions)
-
-    # The list contains no duplicate values
-    assert len(extensions) == len(set(extensions))
-"""Mock tests for Google Drive API operations."""
-
 import os
 from unittest.mock import Mock, patch
 
 import pytest
 
-from src.utils.google_drive import (bulk_download_drive_folder,
-                                    download_file_bytes, extract_folder_id,
-                                    get_drive_service, list_files_in_folder)
+from src.utils.google_drive import (
+    bulk_download_drive_folder,
+    check_folder_access,
+    download_file_bytes,
+    extract_folder_id,
+    extract_google_drive_folder_id,
+    get_drive_service,
+    list_files_in_folder,
+    validate_service_account_key,
+)
+def test_extract_google_drive_folder_id_valid_id():
+    valid_id = "1A2B3C4D5E6F7G8H9I0J1K2L3M4N5O6P7"
+    assert len(valid_id) == 33
+    assert extract_google_drive_folder_id(valid_id) == valid_id
 
-# ── extract_folder_id tests ──────────────────────────────────────────────
+def test_extract_google_drive_folder_id_valid_url():
+    valid_id = "1A2B3C4D5E6F7G8H9I0J1K2L3M4N5O6P7"
+    url = f"https://drive.google.com/drive/folders/{valid_id}"
+    assert extract_google_drive_folder_id(url) == valid_id
+
+def test_extract_google_drive_folder_id_valid_url_with_query():
+    valid_id = "1A2B3C4D5E6F7G8H9I0J1K2L3M4N5O6P7"
+    url = f"https://drive.google.com/drive/folders/{valid_id}?usp=sharing"
+    assert extract_google_drive_folder_id(url) == valid_id
+
+def test_extract_google_drive_folder_id_malformed_url():
+    url = "https://drive.google.com/drive/folders/shortid"
+    assert extract_google_drive_folder_id(url) is None
+
+def test_extract_google_drive_folder_id_empty_string():
+    assert extract_google_drive_folder_id("") is None
+
+def test_extract_google_drive_folder_id_random_string():
+    assert extract_google_drive_folder_id("random_garbage_string_not_an_id") is None
 
 
-def test_extract_folder_id_from_url():
-    fid = extract_folder_id(
-        "https://drive.google.com/drive/folders/1A2B3C4D5E6F7G8H9"
-    )
-    assert fid == "1A2B3C4D5E6F7G8H9"
+def test_extract_folder_id_valid_id():
+    valid_id = "1A2B3C4D5E6F7G8H9I0J1K2L3M4N5O6P7"
+    assert extract_folder_id(valid_id) == valid_id
 
 
-def test_extract_folder_id_from_url_with_extra_params():
-    fid = extract_folder_id(
-        "https://drive.google.com/drive/folders/abcDEF123?usp=sharing"
-    )
-    assert fid == "abcDEF123"
+def test_extract_folder_id_valid_url():
+    valid_id = "1A2B3C4D5E6F7G8H9I0J1K2L3M4N5O6P7"
+    url = f"https://drive.google.com/drive/folders/{valid_id}"
+    assert extract_folder_id(url) == valid_id
 
 
-def test_extract_folder_id_from_raw_id():
-    assert extract_folder_id("abc123DEF_-") == "abc123DEF_-"
+def test_extract_folder_id_too_short_returns_none():
+    assert extract_folder_id("short_id_123") is None
 
 
-def test_extract_folder_id_invalid_url():
-    result = extract_folder_id("https://example.com/not-a-drive-url")
-    assert result is None
+def test_extract_folder_id_non_string_returns_none():
+    assert extract_folder_id(None) is None
+def test_extract_google_drive_folder_id_unsupported_url():
+    url = "https://google.com"
+    assert extract_google_drive_folder_id(url) is None
 
+def test_extract_google_drive_folder_id_whitespace():
+    valid_id = "1A2B3C4D5E6F7G8H9I0J1K2L3M4N5O6P7"
+    assert extract_google_drive_folder_id(f"  {valid_id}  ") == valid_id
+    url = f"  https://drive.google.com/drive/folders/{valid_id}?usp=sharing  "
+    assert extract_google_drive_folder_id(url) == valid_id
 
-def test_extract_folder_id_empty_string():
-    assert extract_folder_id("") is None
+def test_extract_google_drive_folder_id_invalid_type():
+    assert extract_google_drive_folder_id(None) is None
+    assert extract_google_drive_folder_id(12345) is None
 
 
 # ── get_drive_service tests ──────────────────────────────────────────────
@@ -263,7 +263,7 @@ def test_bulk_download_drive_folder(mock_get_service, mock_list, mock_download):
     mock_download.side_effect = [b"content1", b"content2"]
 
     result, names = bulk_download_drive_folder(
-        "https://drive.google.com/drive/folders/folder123",
+        "https://drive.google.com/drive/folders/1A2B3C4D5E6F7G8H9I0J1K2L3M4N5O6P7",
         api_key="key",
     )
 
@@ -284,7 +284,7 @@ def test_bulk_download_drive_folder_handles_download_error(
 
     with pytest.raises(Exception, match="404 Not Found"):
         bulk_download_drive_folder(
-            "https://drive.google.com/drive/folders/folder123",
+            "https://drive.google.com/drive/folders/1A2B3C4D5E6F7G8H9I0J1K2L3M4N5O6P7",
             api_key="key",
         )
 
@@ -312,15 +312,16 @@ def test_bulk_download_drive_folder_reports_aggregate_progress(
 
     calls = []
     bulk_download_drive_folder(
-        "https://drive.google.com/drive/folders/folder123",
+        "https://drive.google.com/drive/folders/1A2B3C4D5E6F7G8H9I0J1K2L3M4N5O6P7",
         api_key="key",
         progress_callback=lambda d, t: calls.append((d, t)),
     )
 
     # Progress accumulates across files against the batch total (300 bytes),
     # and the final call always reaches 100%.
-    assert calls[0] == (100, 300)
-    assert calls[1] == (300, 300)
+    assert (0, 300) in calls
+    assert (100, 300) in calls
+    assert (300, 300) in calls
     assert calls[-1] == (300, 300)
 
 
@@ -339,6 +340,91 @@ def test_bulk_download_drive_folder_handles_list_error(
 
     with pytest.raises(Exception, match="403 Forbidden"):
         bulk_download_drive_folder(
-            "https://drive.google.com/drive/folders/folder123",
+            "https://drive.google.com/drive/folders/1A2B3C4D5E6F7G8H9I0J1K2L3M4N5O6P7",
             api_key="key",
         )
+
+
+@patch("src.utils.google_drive.requests.head")
+def test_check_folder_access_accessible(mock_head):
+    mock_response = Mock()
+    mock_response.status_code = 200
+    mock_head.return_value = mock_response
+
+    result = check_folder_access("valid-folder-id")
+
+    assert result is True
+    mock_head.assert_called_once_with(
+        "https://drive.google.com/drive/folders/valid-folder-id",
+        allow_redirects=False,
+        timeout=10,
+    )
+
+
+@patch("src.utils.google_drive.requests.head")
+def test_check_folder_access_not_accessible(mock_head):
+    mock_response = Mock()
+    mock_response.status_code = 302
+    mock_head.return_value = mock_response
+
+    result = check_folder_access("private-folder-id")
+    assert result is False
+
+    mock_response.status_code = 404
+    result = check_folder_access("nonexistent-folder-id")
+    assert result is False
+
+
+@patch("src.utils.google_drive.requests.head")
+def test_check_folder_access_request_exception(mock_head):
+    from requests import RequestException
+    mock_head.side_effect = RequestException("Timeout")
+
+    result = check_folder_access("error-folder-id")
+    assert result is False
+
+
+def test_check_folder_access_invalid_folder_id():
+    assert check_folder_access("") is False
+    assert check_folder_access("folder/with/slashes") is False
+
+
+def test_validate_service_account_key_valid():
+    key_dict = {
+        "type": "service_account",
+        "project_id": "my-project",
+        "private_key": "some-private-key",
+        "client_email": "service-account@my-project.iam.gserviceaccount.com"
+    }
+    assert validate_service_account_key(key_dict) is True
+
+
+def test_validate_service_account_key_missing_fields(caplog):
+    key_dict = {
+        "type": "service_account",
+        "project_id": "my-project",
+        "private_key": "some-private-key",
+    }
+    with caplog.at_level("WARNING"):
+        assert validate_service_account_key(key_dict) is False
+        assert "Google Drive service account key is missing or empty" in caplog.text
+
+
+def test_validate_service_account_key_empty_fields(caplog):
+    key_dict = {
+        "type": "service_account",
+        "project_id": "",
+        "private_key": "some-private-key",
+        "client_email": "service-account@my-project.iam.gserviceaccount.com"
+    }
+    with caplog.at_level("WARNING"):
+        assert validate_service_account_key(key_dict) is False
+        assert "Google Drive service account key is missing or empty" in caplog.text
+
+
+def test_validate_service_account_key_invalid_type(caplog):
+    with caplog.at_level("WARNING"):
+        assert validate_service_account_key(None) is False
+        assert "Invalid key type: expected a dictionary" in caplog.text
+        assert validate_service_account_key("string-key") is False
+

@@ -11,7 +11,9 @@ import smtplib
 from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Any, Dict, List
+
+from typing import Any, Callable, Dict, List, Optional
+import re
 
 from dotenv import load_dotenv
 
@@ -62,10 +64,8 @@ def get_admin_emails() -> List[str]:
 
     for user in users:
         if user.get("role") == "admin":
-            # For now, use username as email. In production, you'd want an email field in the users table
             admin_emails.append(f"{user['username']}@localhost")
 
-    # Fallback to environment variable if no admins found
     if not admin_emails:
         env_email = os.getenv("ADMIN_EMAIL")
         if env_email:
@@ -148,22 +148,31 @@ def build_severity_section_html(severity: str, incidents: List[Dict[str, Any]]) 
 
 
 def build_email_html_body(
-    incidents_data: List[Dict[str, Any]], total_scans: int
+    incidents_data: List[Dict[str, Any]],
+    total_scans: int,
+    footer_note: Optional[str] = None,
 ) -> str:
     """
     Build a clean, inline-CSS styled HTML email body for the daily summary.
 
-    This function extracts the template logic to improve email customization
-    and ensure compatibility with various email clients (Gmail, Outlook, etc.)
-    by using inline CSS styling.
+    Issue #1252: Adds optional footer_note parameter to append administrator notes.
 
     Args:
         incidents_data: List of incident dictionaries.
         total_scans: Total number of scans performed in the period.
+        footer_note: Optional custom administrator note to display above the signature/footer.
 
     Returns:
         str: The fully formatted HTML email body.
     """
+    footer_note_html = ""
+    if footer_note:
+        footer_note_html = f"""
+        <div style="margin-top: 20px; padding: 12px; background-color: #eef6ff; border-left: 4px solid #007bff; color: #333333; font-size: 14px; border-radius: 4px;">
+            <strong>Note from Administrator:</strong><br>{footer_note}
+        </div>
+        """
+
     if not incidents_data:
         return f"""
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9; border-radius: 8px;">
@@ -171,6 +180,7 @@ def build_email_html_body(
             <p style="color: #666666; text-align: center; font-size: 16px;">
                 No new plagiarism incidents detected in the last 24 hours.
             </p>
+            {footer_note_html}
             <p style="color: #888888; text-align: center; font-size: 14px; margin-top: 40px;">
                 Total scans processed: <strong>{total_scans}</strong>
             </p>
@@ -191,23 +201,25 @@ def build_email_html_body(
         <p style="color: #666666; font-size: 14px; text-align: right;">
             Report generated on: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}
         </p>
-        
+
         <div style="background-color: #ffffff; padding: 20px; border-radius: 8px; margin-top: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
             <p style="font-size: 16px; color: #333333; margin-bottom: 20px;">
                 <strong>Total new incidents:</strong> {len(incidents_data)}<br>
                 <strong>Total scans processed:</strong> {total_scans}
             </p>
-            
+
             <p style="font-size: 14px; color: #666666; margin-bottom: 20px;">
                 <strong>Severity Breakdown:</strong><br>
                 🔴 High: {len(high_severity)} | 🟡 Medium: {len(medium_severity)} | 🟢 Low: {len(low_severity)}
             </p>
-            
+
             {build_severity_section_html("High", high_severity)}
             {build_severity_section_html("Medium", medium_severity)}
             {build_severity_section_html("Low", low_severity)}
         </div>
-        
+
+        {footer_note_html}
+
         <p style="color: #888888; text-align: center; font-size: 14px; margin-top: 30px;">
             <a href="{os.getenv('APP_BASE_URL', 'http://localhost:8501')}" style="color: #007bff; text-decoration: none;">Review all incidents in the dashboard</a>
         </p>
@@ -216,28 +228,34 @@ def build_email_html_body(
     return html
 
 
-def format_daily_summary(incidents: List[Dict[str, Any]]) -> str:
+def format_daily_summary(
+    incidents: List[Dict[str, Any]], footer_note: Optional[str] = None
+) -> str:
     """
     Legacy wrapper for backward compatibility.
     Delegates to the new build_email_html_body function.
     """
-    return build_email_html_body(incidents_data=incidents, total_scans=0)
+    return build_email_html_body(incidents_data=incidents, total_scans=0, footer_note=footer_note)
 
 
-def send_email(to_emails: List[str], subject: str, html_body: str) -> bool:
+def send_email(
+    to_emails: List[str],
+    subject: str,
+    html_body: str,
+    status_callback: Optional[Callable[[bool, str], None]] = None,
+    timeout: float = 10.0,
+    reply_to: Optional[str] = None,
+) -> bool:
     """
     Send an email using SMTP.
-
-    The connection method is chosen automatically based on ``SMTP_PORT``:
-
-    * **Port 465** – uses :class:`smtplib.SMTP_SSL` (implicit SSL).
-    * **Any other port** (default: 587) – uses :class:`smtplib.SMTP` with
-      ``STARTTLS`` upgrade.
 
     Args:
         to_emails: List of recipient email addresses
         subject: Email subject line
         html_body: HTML formatted email body
+        status_callback: Optional callback receiving (success: bool, message: str)
+        timeout: Socket connection timeout in seconds (default 10.0)
+        reply_to: Optional Reply-To email address header
 
     Returns:
         True if email sent successfully, False otherwise
@@ -249,70 +267,96 @@ def send_email(to_emails: List[str], subject: str, html_body: str) -> bool:
     from_email = os.getenv("FROM_EMAIL", smtp_username)
 
     if not all([smtp_server, smtp_username, smtp_password]):
-        logger.error(
-            "SMTP configuration incomplete. Please set SMTP_SERVER, SMTP_USERNAME, and SMTP_PASSWORD."
-        )
+        msg = "SMTP configuration incomplete. Please set SMTP_SERVER, SMTP_USERNAME, and SMTP_PASSWORD."
+        logger.error(msg)
+        if status_callback:
+            status_callback(False, msg)
+        return False
+    
+    if not to_emails:
+        msg = "No recipients configured for daily summary email."
+        logger.warning(msg)
+        if status_callback:
+            status_callback(False, msg)
         return False
 
-    if not to_emails:
-        logger.warning("No recipients configured for daily summary email.")
-        return False
+    email_pattern = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    for email in to_emails:
+        if not email_pattern.match(email):
+            raise ValueError(f"Invalid recipient email address: {email}")
+
+    if reply_to and not email_pattern.match(reply_to):
+        raise ValueError(f"Invalid reply-to email address: {reply_to}")
 
     try:
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"] = from_email
-        msg["To"] = ", ".join(to_emails)
+        msg_obj = MIMEMultipart("alternative")
+        msg_obj["Subject"] = subject
+        msg_obj["From"] = from_email
+        msg_obj["To"] = ", ".join(to_emails)
+
+        if reply_to:
+            msg_obj["Reply-To"] = reply_to
 
         html_part = MIMEText(html_body, "html")
-        msg.attach(html_part)
+        msg_obj.attach(html_part)
 
-        # Port 465 uses implicit SSL; all other ports use STARTTLS.
         if smtp_port == 465:
-            logger.debug("Using SMTP_SSL (implicit SSL) on port %d", smtp_port)
-            with smtplib.SMTP_SSL(smtp_server, smtp_port) as server:
+            logger.debug("Using SMTP_SSL (implicit SSL) on port %d with timeout %.1fs", smtp_port, timeout)
+            with smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=timeout) as server:
                 server.login(smtp_username, smtp_password)
-                server.send_message(msg)
+                server.send_message(msg_obj)
         else:
-            logger.debug("Using SMTP with STARTTLS on port %d", smtp_port)
-            with smtplib.SMTP(smtp_server, smtp_port) as server:
+            logger.debug("Using SMTP with STARTTLS on port %d with timeout %.1fs", smtp_port, timeout)
+            with smtplib.SMTP(smtp_server, smtp_port, timeout=timeout) as server:
                 server.starttls()
                 server.login(smtp_username, smtp_password)
-                server.send_message(msg)
+                server.send_message(msg_obj)
 
-        logger.info(
-            "Daily summary email sent successfully to %d recipients", len(to_emails)
-        )
+        success_msg = f"Daily summary email sent successfully to {len(to_emails)} recipients."
+        logger.info(success_msg)
+        if status_callback:
+            status_callback(True, success_msg)
         return True
 
     except Exception as e:
-        logger.error(f"Failed to send daily summary email: {e}")
+        error_msg = f"Failed to send daily summary email: {e}"
+        logger.error(error_msg)
+        if status_callback:
+            status_callback(False, error_msg)
         return False
 
 
-def send_daily_summary() -> bool:
+def send_daily_summary(
+    subject_prefix: str = "[Plagiarism Alert]",
+    footer_note: Optional[str] = None,
+    status_callback: Optional[Callable[[bool, str], None]] = None,
+    reply_to: Optional[str] = None,
+) -> bool:
     """
     Main function to aggregate daily incidents and send summary email.
+
+    Args:
+        subject_prefix: Prefix to prepend to the email subject line
+        footer_note: Optional custom administrator note to append to the email body
+        status_callback: Optional callback receiving (success: bool, message: str)
+        reply_to: Optional Reply-To email address header
 
     Returns:
         True if email sent successfully, False otherwise
     """
     logger.info("Starting daily summary email generation...")
 
-    # Get incidents from last 24 hours
     incidents = get_incidents_last_24h()
     logger.info(f"Found {len(incidents)} incidents in the last 24 hours")
 
-    # Get admin email addresses
     admin_emails = get_admin_emails()
     logger.info(f"Sending to {len(admin_emails)} admin recipients")
 
-    # Format the summary using the new inline HTML builder
-    html_body = build_email_html_body(incidents_data=incidents, total_scans=100)
+    html_body = build_email_html_body(incidents_data=incidents, total_scans=100, footer_note=footer_note)
 
-    # Send the email
-    subject = f"Daily Plagiarism Summary - {datetime.now().strftime('%Y-%m-%d')}"
-    success = send_email(admin_emails, subject, html_body)
+    prefix = f"{subject_prefix} " if subject_prefix else ""
+    subject = f"{prefix}Daily Plagiarism Summary - {datetime.now().strftime('%Y-%m-%d')}"
+    success = send_email(admin_emails, subject, html_body, status_callback=status_callback, reply_to=reply_to)
 
     return success
 
@@ -320,3 +364,4 @@ def send_daily_summary() -> bool:
 if __name__ == "__main__":
     success = send_daily_summary()
     exit(0 if success else 1)
+    

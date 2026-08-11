@@ -1,12 +1,3 @@
-"""src/utils/json_export.py
-------------------------
-Utility for exporting plagiarism detector reports, similarity matrices,
-incidents, and document analysis results into structured, schema-compliant JSON.
-
-All report export helpers automatically include an ISO 8601 UTC timestamp (`exported_at`)
-in their metadata root to ensure complete auditability and temporal reproducibility.
-"""
-
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -27,8 +18,12 @@ def get_export_timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _json_default_serializer(obj: Any) -> Any:
+def json_serializer_fallback(obj: Any) -> Any:
     """Custom JSON serializer for NumPy data types, pandas Timestamps, and datetime objects.
+
+    Passed as the ``default=`` callback to :func:`json.dumps` so that
+    otherwise non-serializable objects (e.g. ``numpy.int64``, ``numpy.float64``,
+    ``datetime``) don't raise an unhandled ``TypeError`` when exporting.
 
     Args:
         obj: Object instance to serialize.
@@ -54,6 +49,7 @@ def _json_default_serializer(obj: Any) -> Any:
 def export_similarity_matrix_to_json(
     df: Optional[Union[pd.DataFrame, Any]],
     include_metadata: bool = False,
+    indent: Optional[int] = 2,
 ) -> str:
     """Serializes a similarity matrix DataFrame into a clean JSON string.
 
@@ -81,6 +77,7 @@ def export_similarity_matrix_to_json(
     Args:
         df: Symmetric similarity DataFrame (doc × doc) or None.
         include_metadata: Whether to wrap output in a metadata object with timestamp.
+        indent: JSON indentation level (use None for minified JSON).
 
     Returns:
         JSON formatted string representation of the unique similarity pairs.
@@ -95,7 +92,7 @@ def export_similarity_matrix_to_json(
                 },
                 "pairs": [],
             }
-            return json.dumps(payload, indent=2, ensure_ascii=False)
+            return json.dumps(payload, indent=indent, ensure_ascii=False)
         return "[]"
 
     doc_names: List[str] = [str(col) for col in df.columns]
@@ -127,26 +124,26 @@ def export_similarity_matrix_to_json(
             },
             "pairs": pairs,
         }
-        return json.dumps(output_data, indent=2, ensure_ascii=False, default=_json_default_serializer)
+        return json.dumps(output_data, indent=indent, ensure_ascii=False, default=json_serializer_fallback)
 
-    return json.dumps(pairs, indent=2, ensure_ascii=False, default=_json_default_serializer)
+    return json.dumps(pairs, indent=indent, ensure_ascii=False, default=json_serializer_fallback)
 
 
 def export_to_json(
     data: Any,
     include_metadata: bool = True,
     metadata: Optional[Dict[str, Any]] = None,
-    indent: int = 2,
+    indent: Optional[int] = 2,
 ) -> str:
     """Export arbitrary report data structures into a clean JSON string with an exported_at timestamp.
 
-    Issue #1034: Adds an `exported_at` ISO 8601 UTC timestamp in the metadata root.
+    Issue #1034 & #1250: Adds an `exported_at` ISO 8601 UTC timestamp and supports configurable indent.
 
     Args:
         data: Core report data (dict, list, DataFrame, or primitive).
         include_metadata: Whether to wrap output with a metadata root object containing exported_at.
         metadata: Optional additional metadata key-values to merge into the root metadata block.
-        indent: JSON indentation spaces (default=2).
+        indent: JSON indentation level (default=2, use None for minified single-line JSON).
 
     Returns:
         JSON string with UTC timestamp in metadata.exported_at.
@@ -154,7 +151,9 @@ def export_to_json(
     exported_at_timestamp = get_export_timestamp()
 
     if isinstance(data, pd.DataFrame):
-        processed_data = json.loads(export_similarity_matrix_to_json(data, include_metadata=False))
+        processed_data = json.loads(
+            export_similarity_matrix_to_json(data, include_metadata=False, indent=indent)
+        )
     else:
         processed_data = data
 
@@ -163,7 +162,7 @@ def export_to_json(
             processed_data,
             indent=indent,
             ensure_ascii=False,
-            default=_json_default_serializer,
+            default=json_serializer_fallback,
         )
 
     root_metadata: Dict[str, Any] = {
@@ -191,21 +190,21 @@ def export_to_json(
         payload,
         indent=indent,
         ensure_ascii=False,
-        default=_json_default_serializer,
+        default=json_serializer_fallback,
     )
 
 
 def export_report_to_json(
     report_dict: Dict[str, Any],
     custom_metadata: Optional[Dict[str, Any]] = None,
-    indent: int = 2,
+    indent: Optional[int] = 2,
 ) -> str:
     """Export a comprehensive plagiarism inspection report dictionary to JSON.
 
     Args:
         report_dict: Main inspection report payload.
         custom_metadata: Optional metadata parameters.
-        indent: Indentation levels.
+        indent: JSON indentation level (use None for minified JSON).
 
     Returns:
         JSON string containing metadata.exported_at timestamp root.
@@ -225,14 +224,14 @@ def export_report_to_json(
 def export_incidents_to_json(
     incidents: List[Dict[str, Any]],
     session_id: Optional[str] = None,
-    indent: int = 2,
+    indent: Optional[int] = 2,
 ) -> str:
     """Export a list of incident log records into formatted JSON with timestamp.
 
     Args:
         incidents: List of incident dictionaries.
         session_id: Optional active session identifier.
-        indent: JSON indentation.
+        indent: JSON indentation level (use None for minified JSON).
 
     Returns:
         JSON report string with exported_at root metadata.
@@ -304,14 +303,14 @@ def generate_export_checksum(json_str: str) -> str:
 def export_batch_reports_to_json(
     reports: List[Dict[str, Any]],
     batch_id: Optional[str] = None,
-    indent: int = 2,
+    indent: Optional[int] = 2,
 ) -> str:
     """Export multiple analysis reports into a unified batch JSON document.
 
     Args:
         reports: Collection of individual report objects.
         batch_id: Optional unique batch reference ID.
-        indent: Indentation formatting.
+        indent: JSON indentation level (use None for minified JSON).
 
     Returns:
         JSON report string with batch metadata and exported_at timestamp.
@@ -335,6 +334,7 @@ def export_filtered_similarity_matrix_to_json(
     df: Optional[pd.DataFrame],
     min_similarity_threshold: float = 0.5,
     include_metadata: bool = True,
+    indent: Optional[int] = 2,
 ) -> str:
     """Export similarity matrix pairs that meet or exceed a minimum similarity threshold score.
 
@@ -342,12 +342,15 @@ def export_filtered_similarity_matrix_to_json(
         df: Input similarity matrix DataFrame.
         min_similarity_threshold: Minimum similarity score cutoff (0.0 to 1.0).
         include_metadata: Whether to include root metadata header.
+        indent: JSON indentation level (use None for minified JSON).
 
     Returns:
         JSON string of filtered similarity pairs.
     """
     if df is None or not isinstance(df, pd.DataFrame) or df.empty:
-        return export_similarity_matrix_to_json(None, include_metadata=include_metadata)
+        return export_similarity_matrix_to_json(
+            None, include_metadata=include_metadata, indent=indent
+        )
 
     doc_names: List[str] = [str(col) for col in df.columns]
     n: int = len(doc_names)
@@ -374,6 +377,7 @@ def export_filtered_similarity_matrix_to_json(
         data=filtered_pairs,
         include_metadata=include_metadata,
         metadata=metadata,
+        indent=indent,
     )
 
 
@@ -407,4 +411,3 @@ def build_export_schema_definition() -> Dict[str, Any]:
             },
         },
     }
-

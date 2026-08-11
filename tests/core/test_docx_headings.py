@@ -19,15 +19,15 @@ def test_docx_headings_extraction_and_chunking():
     # Extract text
     parsed_text = extract_text_from_docx(file_bytes)
     assert hasattr(parsed_text, "word_headings")
-    
+
     # Chunk text
     chunks = chunk_text(parsed_text, chunk_size=30, chunk_overlap=5)
-    
+
     assert len(chunks) >= 2
-    
+
     # First chunk inherits the correct section title (Heading 1 Title)
     assert chunks[0].metadata.get("section_title") == "# Heading 1 Title"
-    
+
     # Heading changes updating subsequent chunks (Heading 2 Title)
     found_heading_2 = False
     for chunk in chunks:
@@ -47,7 +47,7 @@ def test_docx_no_headings():
 
     parsed_text = extract_text_from_docx(file_bytes)
     chunks = chunk_text(parsed_text, chunk_size=30, chunk_overlap=5)
-    
+
     for chunk in chunks:
         assert not chunk.metadata or chunk.metadata.get("section_title") is None
 

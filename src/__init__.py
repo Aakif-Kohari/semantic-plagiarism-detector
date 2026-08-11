@@ -34,6 +34,8 @@ from .core import (
     get_branding_config,
     reload_branding_config,
     load_branding_config,
+    TagManager,
+    sanitize_tag_name,
 )
 
 from .db import (
@@ -61,7 +63,10 @@ from .db import (
     is_user_active,
     set_user_active_status,
     update_password,
+    update_user_profile,
     verify_user,
+    get_deleted_documents_count,
+    get_incidents_by_assignment,
 )
 try:
     from .visualization import (
@@ -71,6 +76,7 @@ try:
         plot_similarity_heatmap_plotly,
         plot_similarity_network,
         render_network_plotly,
+        plot_document_similarity_heatmap,
     )
 except ImportError:
     build_network_data = None
@@ -79,6 +85,7 @@ except ImportError:
     plot_similarity_heatmap_plotly = None
     plot_similarity_network = None
     render_network_plotly = None
+    plot_document_similarity_heatmap = None
 except ImportError:
     pass
 
@@ -102,6 +109,7 @@ __all__ = [
     "PLAGIARISM_THRESHOLD",
     "plot_similarity_heatmap",
     "plot_similarity_heatmap_plotly",
+    "plot_document_similarity_heatmap",
     "filter_heatmap_by_class_tag",
     "plot_chunk_similarity_comparison",
     "build_network_data",
@@ -133,6 +141,9 @@ __all__ = [
     "get_user_active_status",
     "set_user_active_status",
     "is_user_active",
+    "update_user_profile",
+    "get_deleted_documents_count",
+    "get_incidents_by_assignment",
     "init_corpus_db",
     "add_document",
     "get_document_by_hash",
@@ -150,4 +161,6 @@ __all__ = [
     "reload_branding_config",
     "load_branding_config",
     "sanitize_zero_width_characters",
+    "TagManager",
+    "sanitize_tag_name",
 ]

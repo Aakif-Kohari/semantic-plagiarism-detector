@@ -14,9 +14,28 @@ from app.theme import (
 )
 from unittest.mock import patch
 
+
 from app.theme import get_colors, inject_css, sanitize_hex_color
+def test_render_notification_badge_with_negative_count():
+    from app.theme import render_notification_badge
+
+from app.theme import get_colors, inject_css, sanitize_hex_color, get_chart_colors
 
 
+    assert render_notification_badge(-1) == ""
+def test_render_notification_badge_with_count():
+    from app.theme import render_notification_badge
+
+    badge = render_notification_badge(5)
+
+    assert "5" in badge
+    assert 'class="notification-badge"' in badge
+
+
+def test_render_notification_badge_with_zero_count():
+    from app.theme import render_notification_badge
+
+    assert render_notification_badge(0) == ""
 def test_get_colors_returns_valid_theme_colors():
     colors = get_colors()
 
@@ -54,6 +73,30 @@ def test_themes_have_expected_keys():
 def test_default_colors():
     """Verify default COLORS matches Light theme."""
     assert COLORS == THEMES["Light"]
+
+
+def test_get_chart_colors_matches_active_theme_when_override_disabled():
+    """Without the 'Force Dark Mode Charts' override, chart colors follow the app theme."""
+    mock_state: dict = {"force_dark_charts": False}
+    with patch("app.theme.st.session_state", mock_state):
+        with patch("app.theme.get_colors", return_value=THEMES["Light"]):
+            assert get_chart_colors() == THEMES["Light"]
+
+
+def test_get_chart_colors_forces_dark_when_override_enabled():
+    """With 'Force Dark Mode Charts' enabled, chart colors are Dark regardless of app theme."""
+    mock_state: dict = {"force_dark_charts": True}
+    with patch("app.theme.st.session_state", mock_state):
+        with patch("app.theme.get_colors", return_value=THEMES["Light"]):
+            assert get_chart_colors() == THEMES["Dark"]
+
+
+def test_get_chart_colors_defaults_to_active_theme_when_key_absent():
+    """If the override key was never set (widget not yet rendered), fall back to get_colors()."""
+    mock_state: dict = {}
+    with patch("app.theme.st.session_state", mock_state):
+        with patch("app.theme.get_colors", return_value=THEMES["Dark"]):
+            assert get_chart_colors() == THEMES["Dark"]
 
 
 def test_severity_tier_high():
@@ -127,7 +170,7 @@ def test_inject_css_generates_css_without_errors():
     with patch("app.theme.st.markdown") as mock_markdown:
         inject_css()
 
-    assert mock_markdown.call_count == 2
+    assert mock_markdown.call_count == 3
 
     css = mock_markdown.call_args_list[0].args[0]
 
@@ -285,13 +328,7 @@ from app.theme import (
 )
 
 
-def test_get_colors_returns_valid_theme_colors():
-    colors = get_colors()
 
-    assert isinstance(colors, dict)
-    assert colors
-    assert "background" in colors
-    assert "accent" in colors
 
 
 def test_severity_tier():
@@ -309,13 +346,7 @@ def test_severity_tier():
     assert severity_tier(0.58, 0.59) == "low"
 
 
-def test_tier_from_severity_label():
-    assert tier_from_severity_label("🔴 High") == "high"
-    assert tier_from_severity_label("🟡 Medium") == "medium"
-    assert tier_from_severity_label("HIGH") == "high"
-    assert tier_from_severity_label("Warning") == "medium"
-    assert tier_from_severity_label("Low") == "low"
-    assert tier_from_severity_label("unknown") == "low"
+
 
 
 def test_apply_matplotlib_theme():
@@ -369,7 +400,7 @@ def test_inject_css_includes_csp_nonce():
         with patch("app.theme.st.markdown") as mock_md:
             inject_css()
 
-        assert mock_md.call_count == 2
+        assert mock_md.call_count == 3
         style_html = mock_md.call_args_list[0].args[0]
         script_html = mock_md.call_args_list[1].args[0]
 
@@ -403,6 +434,27 @@ def test_inject_css_contains_accent_border_left():
 
     style_html = mock_md.call_args_list[0].args[0]
     assert "border-left: 4px solid #4f46e5" in style_html
+
+
+def test_inject_css_contains_high_severity_row_styling():
+    """inject_css() must output CSS rules for .high-severity-row (Issue #1569)."""
+    with patch("app.theme.st.markdown") as mock_md:
+        inject_css()
+
+    style_html = mock_md.call_args_list[0].args[0]
+    assert ".high-severity-row" in style_html
+    assert "border-left: 4px solid #ef4444" in style_html
+    assert "background-color: rgba(239, 68, 68, 0.05)" in style_html
+
+
+def test_inject_css_contains_low_confidence_card_styling():
+    """inject_css() must output CSS rules for .low-confidence-card (Issue #1726)."""
+    with patch("app.theme.st.markdown") as mock_md:
+        inject_css()
+
+    style_html = mock_md.call_args_list[0].args[0]
+    assert ".low-confidence-card" in style_html
+    assert "border-left: 4px solid #f59e0b" in style_html
 
 
 def test_active_tab_border_style_default():
@@ -531,4 +583,49 @@ def test_render_sidebar_navigation_menu():
     assert "border-left: 4px solid #4f46e5" in menu_html
 
 
+def test_css_variables_injected():
+    """Test that :root and CSS variables are correctly defined and referenced."""
+    with patch("app.theme.st.markdown") as mock_markdown:
+        inject_css()
+
+    css = mock_markdown.call_args_list[0].args[0]
+    
+    # Check :root existence
+    assert ":root" in css, "Missing :root block"
+    
+    # Check variable declarations
+    assert "--primary-bg:" in css, "Missing --primary-bg declaration"
+    assert "--text-color:" in css, "Missing --text-color declaration"
+    
+    # Verify values are valid hex colors
+    import re
+    assert re.search(r"--primary-bg:\s*#[0-9a-fA-F]+", css), "--primary-bg does not have a valid hex value"
+    assert re.search(r"--text-color:\s*#[0-9a-fA-F]+", css), "--text-color does not have a valid hex value"
+    
+    # Verify component CSS uses var() instead of hardcoded
+    assert "background-color: var(--primary-bg)" in css
+    assert "color: var(--text-color)" in css
+    assert "background-color: var(--secondary-bg)" in css
+    assert "border: 1px solid var(--border-color)" in css
+    assert "var(--accent-color)" in css
+
+
+def test_render_session_status_banner():
+    """Verify that render_session_status_banner sets session start time and displays banner."""
+    from app.theme import render_session_status_banner
+    import time
+
+    mock_state = {}
+
+    with patch("app.theme.st.session_state", mock_state), patch("app.theme.st.caption") as mock_caption:
+        # First call: should initialize session_start_time and render 0 mins
+        render_session_status_banner()
+        assert "session_start_time" in mock_state
+        mock_caption.assert_called_once_with("Active Session: 0 mins")
+
+    # Second test: with established session start time in the past
+    mock_state_past = {"session_start_time": time.time() - 45.2 * 60}
+    with patch("app.theme.st.session_state", mock_state_past), patch("app.theme.st.caption") as mock_caption_past:
+        render_session_status_banner()
+        mock_caption_past.assert_called_once_with("Active Session: 45 mins")
 

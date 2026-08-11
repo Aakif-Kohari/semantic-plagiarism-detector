@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libgomp1 \
     tesseract-ocr \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

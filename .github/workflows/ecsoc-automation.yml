@@ -11,7 +11,7 @@ on:
     types: [opened, closed]
 
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: '0 */8 * * *'
 
   workflow_dispatch:
 
@@ -75,7 +75,7 @@ jobs:
               per_page: 100
             });
 
-            const botComments = comments.filter(c => 
+            const botComments = comments.filter(c =>
               isBotComment(c) && c.body && (
                 c.body.includes("thanks for your interest in contributing under *ECSoC'26*") ||
                 c.body.includes("open for anyone to claim")
@@ -111,7 +111,7 @@ jobs:
                   per_page: 100
                 });
 
-                const issBotComments = issComments.filter(c => 
+                const issBotComments = issComments.filter(c =>
                   isBotComment(c) && c.body && (
                     c.body.includes("thanks for your interest in contributing under *ECSoC'26*") ||
                     c.body.includes("open for anyone to claim")
@@ -196,7 +196,8 @@ jobs:
               'Docs': { color: '0075ca', description: 'Documentation improvements' },
               'Security': { color: 'd93f0b', description: 'Security & Auth updates' },
               'AI': { color: '0e8a16', description: 'AI & NLP logic' },
-              'Performance': { color: 'fbca04', description: 'Performance optimizations' }
+              'Performance': { color: 'fbca04', description: 'Performance optimizations' },
+              'ECSoC26': { color: '7057ff', description: "ECSoC'26 issues" }
             };
 
             const ensureLabelsExist = async (labels) => {
@@ -230,7 +231,7 @@ jobs:
             const processIssue = async (issue) => {
               if (!issue || issue.pull_request) return;
               const text = `${issue.title}\n${issue.body || ''}`.toLowerCase();
-              const matchingLabels = [];
+              const matchingLabels = ['ECSoC26'];
               for (const rule of labelRules) {
                 const matched = rule.keywords.some(kw => new RegExp(`\\b${kw}\\b`, 'i').test(text));
                 if (matched) {
@@ -238,14 +239,17 @@ jobs:
                 }
               }
 
-              if (matchingLabels.length > 0) {
-                await ensureLabelsExist(matchingLabels);
-                console.log(`Auto-labeling issue #${issue.number} with: ${matchingLabels.join(', ')}`);
+              const existingLabelNames = (issue.labels || []).map(l => (typeof l === 'string' ? l : l.name));
+              const labelsToAdd = matchingLabels.filter(l => !existingLabelNames.includes(l));
+
+              if (labelsToAdd.length > 0) {
+                await ensureLabelsExist(labelsToAdd);
+                console.log(`Auto-labeling issue #${issue.number} with missing labels: ${labelsToAdd.join(', ')}`);
                 await github.rest.issues.addLabels({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number: issue.number,
-                  labels: matchingLabels
+                  labels: labelsToAdd
                 });
               }
             };
@@ -357,6 +361,7 @@ jobs:
   auto-unassign-stale:
     permissions:
       issues: write
+      pull-requests: write
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
@@ -390,7 +395,7 @@ jobs:
                 per_page: 100
               });
 
-              const botComments = comments.filter(c => 
+              const botComments = comments.filter(c =>
                 isBotComment(c) && c.body && (
                   c.body.includes("thanks for your interest in contributing under *ECSoC'26*") ||
                   c.body.includes("open for anyone to claim")
@@ -487,7 +492,7 @@ jobs:
                 per_page: 100
               });
 
-              const botComments = comments.filter(c => 
+              const botComments = comments.filter(c =>
                 isBotComment(c) && c.body && (
                   c.body.includes("thanks for your interest in contributing under *ECSoC'26*") ||
                   c.body.includes("open for anyone to claim")
@@ -529,7 +534,7 @@ jobs:
                       per_page: 100
                     });
 
-                    prLinked = events.some(e => 
+                    prLinked = events.some(e =>
                       e.event === 'cross-referenced' && e.source && e.source.issue && e.source.issue.pull_request
                     );
                   } catch (e) {
@@ -586,6 +591,53 @@ jobs:
               }
             }
 
+      - name: Auto-close Stale PRs (Open for 72+ hours)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const seventyTwoHoursMs = 72 * 60 * 60 * 1000;
+            const now = new Date();
+            console.log("Checking for PRs open for 72 hours or more...");
+
+            const openPRs = await github.paginate(github.rest.pulls.list, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100
+            });
+
+            for (const pr of openPRs) {
+              const createdAt = new Date(pr.created_at);
+              const ageMs = now - createdAt;
+
+              if (ageMs >= seventyTwoHoursMs) {
+                const author = pr.user ? pr.user.login : 'contributor';
+                console.log(`Closing PR #${pr.number} (open for ${Math.round(ageMs / (1000 * 60 * 60))} hours)...`);
+
+                try {
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: pr.number,
+                    body: `⏰ @${author}, this Pull Request has been open for 72 hours or more without being merged. It has been automatically closed due to inactivity, and the task is unassigned and open for anyone to claim!`
+                  });
+                } catch (e) {
+                  console.log(`Error posting comment on PR #${pr.number}:`, e.message);
+                }
+
+                try {
+                  await github.rest.pulls.update({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    pull_number: pr.number,
+                    state: 'closed'
+                  });
+                } catch (e) {
+                  console.log(`Error closing PR #${pr.number}:`, e.message);
+                }
+              }
+            }
+
   pr-conflict-reminder:
     permissions:
       issues: write
@@ -598,7 +650,7 @@ jobs:
         with:
           script: |
             const isBotComment = (c) => c.user && (c.user.type === 'Bot' || (c.user.login && c.user.login.endsWith('[bot]')));
-            const sixHoursMs = 5.5 * 60 * 60 * 1000; // Buffer for 6-hour cron schedule jitter
+            const eightHoursMs = 7.5 * 60 * 60 * 1000; // Buffer for 8-hour cron schedule jitter
             const now = new Date();
 
             let prs = [];
@@ -670,8 +722,8 @@ jobs:
               if (conflictBotComments.length > 0) {
                 const lastComment = conflictBotComments[conflictBotComments.length - 1];
                 const lastCommentTime = new Date(lastComment.created_at);
-                if ((now - lastCommentTime) < sixHoursMs) {
-                  console.log(`Skipping PR #${pr.number}: Merge conflict reminder already posted within the last 6 hours.`);
+                if ((now - lastCommentTime) < eightHoursMs) {
+                  console.log(`Skipping PR #${pr.number}: Merge conflict reminder already posted within the last 8 hours.`);
                   continue;
                 }
               }

@@ -87,8 +87,10 @@ SSRF_BLOCKED_MULTICAST = "Blocked multicast IP: {ip}"
 SSRF_BLOCKED_UNSPECIFIED = "Blocked unspecified IP: {ip}"
 SSRF_DNS_NO_ADDRESSES = "No addresses found for hostname '{hostname}'"
 SSRF_DNS_RESOLUTION_FAILED = "DNS resolution failed for hostname '{hostname}': {error}"
-
-# API ErrorsAPI_UNAUTHORIZED = "Invalid or missing authentication token."
+SSRF_DOMAIN_NOT_ALLOWED = "Webhook domain '{hostname}' is not in ALLOWED_WEBHOOK_DOMAINS."
+SSRF_MAX_REDIRECTS_EXCEEDED = "Maximum HTTP redirect depth exceeded"
+SSRF_CIRCULAR_REDIRECT_LOOP = "Circular HTTP redirect loop detected"# API Errors
+API_UNAUTHORIZED = "Invalid or missing authentication token."
 API_FILENAME_MISSING = "Filename must be provided."
 API_FILE_EMPTY = "Uploaded file is empty."
 API_TEXT_EXTRACTION_FAILED = "Failed to extract readable text from the uploaded file."
@@ -153,6 +155,16 @@ class ExportFailedError(RuntimeError):
     """Raised when an export cannot be generated or written safely."""
 
 
+class OCRFileBatchError(Exception):
+    """Raised when OCR extraction fails on one or more files in a batch."""
+
+    def __init__(self, failed_files: list, failure_details: list) -> None:
+        self.failed_files = failed_files
+        self.failure_details = failure_details
+        joined = "; ".join(failure_details) if failure_details else ", ".join(failed_files)
+        super().__init__(f"OCR extraction failed for {len(failed_files)} file(s): {joined}")
+
+
 EXPORT_WRITE_FAILED = (
     "Unable to write the {format_name} export to '{destination}'. "
     "Check the destination permissions and available disk space, then try again."
@@ -162,3 +174,10 @@ EXPORT_GENERATION_IO_FAILED = (
     "Unable to generate the {format_name} export because an I/O operation failed. "
     "Please try again."
 )
+
+
+
+class StaleDataException(Exception):
+    """Raised when an update fails because the version has changed (optimistic locking)."""
+    pass
+

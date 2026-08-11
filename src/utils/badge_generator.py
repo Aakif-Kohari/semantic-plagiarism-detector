@@ -5,6 +5,7 @@ Generates "Originality Verified" badges for students with 0% similarity results.
 Supports both PNG and PDF output formats for gamification and academic integrity encouragement.
 """
 
+import html
 import re
 from datetime import datetime
 from io import BytesIO
@@ -39,8 +40,46 @@ def validate_hex_color(color: Optional[str]) -> str:
     return DEFAULT_BADGE_COLOR
 
 
-def generate_badge_png(    student_name: str = "Student",
+def generate_badge_svg(
+    student_name: str = "Student",
     date: Optional[str] = None,
+    accent_color: Optional[str] = None,
+    font_family: str = "Verdana, Geneva, sans-serif",
+) -> str:
+    """
+    Generates a simple SVG "Originality Verified" badge.
+
+    The accent_color is validated (and defaulted if invalid) before being
+    inserted into the SVG markup, preventing malformed or unescaped color
+    values from producing invalid SVG.
+
+    Args:
+        student_name: Name of the student (optional, defaults to "Student")
+        date: Date string (optional, defaults to current date)
+        accent_color: Optional hex color string for the badge accent
+        font_family: Font family to use for SVG text elements
+
+    Returns:
+        A string containing the SVG markup for the badge.
+    """
+    safe_color = validate_hex_color(accent_color)
+    if date is None:
+        date = datetime.now().strftime("%B %d, %Y")
+
+    safe_name = html.escape(student_name)
+    safe_date = html.escape(date)
+    
+    safe_font = html.escape(font_family)
+
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="400" height="120" viewBox="0 0 400 120">
+  <rect width="400" height="120" rx="12" fill="{safe_color}" />
+  <text x="20" y="45" font-family="{safe_font}" font-size="20" fill="#ffffff">Originality Verified</text>
+  <text x="20" y="75" font-family="{safe_font}" font-size="14" fill="#e0e7ff">Awarded to: {safe_name}</text>
+  <text x="20" y="100" font-family="{safe_font}" font-size="12" fill="#e0e7ff">Date: {safe_date}</text>
+</svg>"""
+
+
+def generate_badge_png(    student_name: str = "Student",    date: Optional[str] = None,
     text_preview: str = "",
 ) -> BytesIO:
     """

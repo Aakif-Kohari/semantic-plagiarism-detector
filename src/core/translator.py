@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
 from deep_translator import GoogleTranslator
 
 # Comprehensive ISO-639-1 (and ISO-639-2) language code database
@@ -223,6 +222,11 @@ def translate_text(
     if not original.strip():
         return original
 
+    # Reject unsupported target language codes before reaching the translation
+    # model, so invalid codes surface a clear ValueError instead of an uncaught
+    # provider/model exception.
+    validate_target_language_code(target_lang)
+
     try:
         translated = GoogleTranslator(
             source=source_lang or "auto",
@@ -301,6 +305,26 @@ def is_valid_language_code(code: str) -> bool:
     if not code or not isinstance(code, str):
         return False
     return code.strip().lower() in ISO_639_LANGUAGES
+
+
+def validate_target_language_code(lang_code: str) -> bool:
+    """Validate a target language code against the ISO-639-1 language code set.
+
+    Args:
+        lang_code: Target language code to validate (case-insensitive).
+
+    Returns:
+        True if the code is a supported ISO-639-1 language code.
+
+    Raises:
+        ValueError: If the language code is not a supported ISO-639-1 code.
+    """
+    if (
+        not isinstance(lang_code, str)
+        or lang_code.strip().lower() not in ISO_639_LANGUAGES
+    ):
+        raise ValueError(f"Unsupported target language code: {lang_code}")
+    return True
 
 
 def get_supported_language_codes() -> list[str]:
@@ -397,6 +421,23 @@ def format_language_display(code: str, include_native: bool = True) -> str:
     return name
 
 
+def get_language_display_name(code: str) -> str:
+    """
+    Map ISO-639-1 code to full language name (e.g. 'de' -> 'German').
+    Return uppercase code string if language is unmapped.
+
+    Args:
+        code: ISO-639-1 language code.
+
+    Returns:
+        Full language name or uppercase code.
+    """
+    if not code or not isinstance(code, str):
+        return ""
+    normalized = code.strip().lower()
+    return LANGUAGE_NAME_MAP.get(normalized, code.strip().upper())
+
+
 def get_common_translation_pairs() -> list[tuple[str, str]]:
     """Return a list of primary cross-lingual translation language code pairs.
 
@@ -415,4 +456,3 @@ def get_common_translation_pairs() -> list[tuple[str, str]]:
         ("pt", "en"),
         ("it", "en"),
     ]
-

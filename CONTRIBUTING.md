@@ -114,6 +114,10 @@ src/core/parser.py
 tests/core/test_parser.py
 ```
 
+### Architecture Decisions
+
+If your contribution introduces major architectural changes, please document them by writing an Architecture Decision Record (ADR). Follow the format defined in the [ADR Template](docs/adr/adr-template.md).
+
 ---
 
 # 📌 Issue Assignment Policy

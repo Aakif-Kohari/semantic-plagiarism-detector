@@ -157,7 +157,7 @@ class TestRedisCache:
         # Ensure hashes are distinct
         assert hash1 != hash2
 
-        # Simulate a boundary scenario where the hash prefixes appear identical 
+        # Simulate a boundary scenario where the hash prefixes appear identical
         # (e.g., first 12 characters are the same)
         similar_prefix = "abc123def456"
         simulated_hash1 = f"{similar_prefix}{hash1[12:]}"
@@ -169,7 +169,7 @@ class TestRedisCache:
 
         # Verify that two distinct keys were set in Redis, meaning no collision occurred
         assert mock_redis_client.setex.call_count == 2
-        
+
         call_args_list = mock_redis_client.setex.call_args_list
         key1_called = call_args_list[0][0][0]
         key2_called = call_args_list[1][0][0]
@@ -328,27 +328,27 @@ class TestRedisCache:
         cache1 = get_cache()
         cache2 = get_cache()
         assert cache1 is cache2
-    
+
     def test_redis_url_without_ssl_redis_scheme(self):
         """Test that redis:// URL (without SSL) is handled correctly."""
         test_url = "redis://localhost:6379/0"
-        
+
         with patch.object(redis, 'from_url') as mock_from_url:
             mock_client = Mock()
             mock_client.ping.return_value = True
             mock_from_url.return_value = mock_client
-            
+
             # Temporarily modify REDIS_URL
             import src.utils.redis_cache as redis_cache_module
             original_url = redis_cache_module.REDIS_URL
-            
+
             try:
                 redis_cache_module.REDIS_URL = test_url
-                
+
                 # Create new instance to trigger reconnection
                 cache = RedisCache.__new__(RedisCache)
                 cache._connect()
-                
+
                 # Verify from_url was called with the URL
                 mock_from_url.assert_called_once_with(
                     test_url,
@@ -358,27 +358,27 @@ class TestRedisCache:
                 )
             finally:
                 redis_cache_module.REDIS_URL = original_url
-    
+
     def test_redis_url_with_ssl_rediss_scheme(self):
         """Test that rediss:// URL (with SSL) is handled correctly."""
         test_url = "rediss://localhost:6380/0"
-        
+
         with patch.object(redis, 'from_url') as mock_from_url:
             mock_client = Mock()
             mock_client.ping.return_value = True
             mock_from_url.return_value = mock_client
-            
+
             # Temporarily modify REDIS_URL
             import src.utils.redis_cache as redis_cache_module
             original_url = redis_cache_module.REDIS_URL
-            
+
             try:
                 redis_cache_module.REDIS_URL = test_url
-                
+
                 # Create new instance to trigger reconnection
                 cache = RedisCache.__new__(RedisCache)
                 cache._connect()
-                
+
                 # Verify from_url was called with the URL
                 # Note: redis.from_url automatically sets ssl=True for rediss://
                 mock_from_url.assert_called_once_with(
@@ -389,27 +389,27 @@ class TestRedisCache:
                 )
             finally:
                 redis_cache_module.REDIS_URL = original_url
-    
+
     def test_redis_url_with_password_and_ssl(self):
         """Test that rediss:// URL with password is handled correctly."""
         test_url = "rediss://user:password@redis.example.com:6380/1"
-        
+
         with patch.object(redis, 'from_url') as mock_from_url:
             mock_client = Mock()
             mock_client.ping.return_value = True
             mock_from_url.return_value = mock_client
-            
+
             import src.utils.redis_cache as redis_cache_module
             original_url = redis_cache_module.REDIS_URL
             original_password = redis_cache_module.REDIS_PASSWORD
-            
+
             try:
                 redis_cache_module.REDIS_URL = test_url
                 redis_cache_module.REDIS_PASSWORD = None  # Password is in URL
-                
+
                 cache = RedisCache.__new__(RedisCache)
                 cache._connect()
-                
+
                 # Verify from_url was called correctly
                 mock_from_url.assert_called_once_with(
                     test_url,
@@ -420,29 +420,29 @@ class TestRedisCache:
             finally:
                 redis_cache_module.REDIS_URL = original_url
                 redis_cache_module.REDIS_PASSWORD = original_password
-    
+
     def test_redis_host_port_without_ssl(self):
         """Test that host/port config without SSL works correctly."""
         # Use redis:// scheme to ensure SSL is disabled
         test_url = "redis://localhost:6379/0"
-        
+
         with patch.object(redis, 'from_url') as mock_from_url:
             mock_client = Mock()
             mock_client.ping.return_value = True
             mock_from_url.return_value = mock_client
-            
+
             import src.utils.redis_cache as redis_cache_module
             original_url = redis_cache_module.REDIS_URL
-            
+
             try:
                 redis_cache_module.REDIS_URL = test_url
-                
+
                 cache = RedisCache.__new__(RedisCache)
                 cache._connect()
-                
+
                 # Verify from_url was called
                 mock_from_url.assert_called_once()
-                
+
                 # Get the call arguments to verify SSL is not set to True
                 call_kwargs = mock_from_url.call_args.kwargs
                 # redis.from_url automatically sets ssl based on scheme
@@ -450,25 +450,25 @@ class TestRedisCache:
                 assert 'ssl' not in call_kwargs or call_kwargs.get('ssl', False) is False
             finally:
                 redis_cache_module.REDIS_URL = original_url
-    
+
     def test_redis_connection_failure_with_message(self):
         """Test that connection failures print appropriate error messages."""
         test_url = "redis://unreachable-host:9999/0"
-        
+
         with patch.object(redis, 'from_url') as mock_from_url:
             # Simulate connection failure
             mock_from_url.side_effect = redis.ConnectionError("Connection refused")
-            
+
             import src.utils.redis_cache as redis_cache_module
             original_url = redis_cache_module.REDIS_URL
-            
+
             try:
                 redis_cache_module.REDIS_URL = test_url
-                
+
                 # This should not raise, but set _client to None
                 cache = RedisCache.__new__(RedisCache)
                 cache._connect()
-                
+
                 # Should be None after connection failure
                 assert cache._client is None
             finally:
@@ -477,108 +477,108 @@ class TestRedisCache:
         """Test graceful fallback when Redis fails during a get operation."""
         cache = RedisCache.__new__(RedisCache)
         mock_client = Mock()
-        
+
         # Simulate Redis disconnection during get
         mock_client.get.side_effect = RedisError("Connection refused")
         cache._client = mock_client
-        
+
         # Should return None gracefully without crashing
         result = cache.get("test_key")
         assert result is None
-    
+
     def test_redis_failover_during_set(self):
         """Test graceful fallback when Redis fails during a set operation."""
         cache = RedisCache.__new__(RedisCache)
         mock_client = Mock()
-        
+
         # Simulate Redis disconnection during set
         mock_client.setex.side_effect = RedisError("Connection timeout")
         cache._client = mock_client
-        
+
         # Should return False gracefully
         result = cache.set("test_key", "test_value", ttl=60)
         assert result is False
-    
+
     def test_redis_failover_during_delete(self):
         """Test graceful fallback when Redis fails during a delete operation."""
         cache = RedisCache.__new__(RedisCache)
         mock_client = Mock()
-        
+
         # Simulate Redis disconnection during delete
         mock_client.delete.side_effect = RedisError("Connection lost")
         cache._client = mock_client
-        
+
         # Should return False gracefully
         result = cache.delete("test_key")
         assert result is False
-    
+
     def test_redis_failover_during_exists(self):
         """Test graceful fallback when Redis fails during an exists check."""
         cache = RedisCache.__new__(RedisCache)
         mock_client = Mock()
-        
+
         # Simulate Redis disconnection during exists check
         mock_client.exists.side_effect = RedisError("Server unavailable")
         cache._client = mock_client
-        
+
         # Should return False gracefully
         result = cache.exists("test_key")
         assert result is False
-    
+
     def test_redis_failover_during_get_json(self):
         """Test graceful fallback when Redis fails during JSON get."""
         cache = RedisCache.__new__(RedisCache)
         mock_client = Mock()
-        
+
         # Simulate Redis disconnection during JSON get
         mock_client.get.side_effect = RedisError("Connection refused")
         cache._client = mock_client
-        
+
         # Should return None gracefully
         result = cache.get_json("test_json")
         assert result is None
-    
+
     def test_redis_failover_during_set_json(self):
         """Test graceful fallback when Redis fails during JSON set."""
         cache = RedisCache.__new__(RedisCache)
         mock_client = Mock()
-        
+
         # Simulate Redis disconnection during JSON set
         mock_client.setex.side_effect = RedisError("Connection timeout")
         cache._client = mock_client
-        
+
         # Should return False gracefully
         result = cache.set_json("test_json", {"key": "value"}, ttl=60)
         assert result is False
-    
+
     def test_redis_failover_during_clear_pattern(self):
         """Test graceful fallback when Redis fails during pattern clear."""
         cache = RedisCache.__new__(RedisCache)
         mock_client = Mock()
-        
+
         # Simulate Redis disconnection during pattern clear
         mock_client.keys.side_effect = RedisError("Connection lost")
         cache._client = mock_client
-        
+
         # Should return 0 gracefully
         result = cache.clear_pattern("session:*")
         assert result == 0
-    
+
     def test_redis_failover_during_is_available(self):
         """Test is_available returns False when Redis is unavailable."""
         cache = RedisCache.__new__(RedisCache)
         cache._client = Mock()
         cache._client.ping.side_effect = RedisError("Connection refused")
-        
+
         # Should return False without crashing
         result = cache.is_available()
         assert result is False
-    
+
     def test_cache_fallback_when_redis_unavailable(self):
         """Test that cache gracefully falls back when Redis is completely unavailable."""
         cache = RedisCache.__new__(RedisCache)
         cache._client = None
-        
+
         # All operations should return None/False gracefully
         assert cache.is_available() is False
         assert cache.get("test_key") is None
@@ -588,15 +588,15 @@ class TestRedisCache:
         assert cache.get_json("test_key") is None
         assert cache.set_json("test_key", {"value": 1}) is False
         assert cache.clear_pattern("session:*") == 0
-    
+
     def test_session_state_fallback_when_redis_unavailable(self):
         """Test that session state functions gracefully when Redis is unavailable."""
         from src.utils.redis_cache import _cache as global_cache
-        
+
         # Temporarily disable Redis
         original_client = global_cache._client
         global_cache._client = None
-        
+
         try:
             # These should not crash, just return False/None
             assert cache_session_state("test_session", "key", "value") is False
@@ -605,15 +605,15 @@ class TestRedisCache:
         finally:
             # Restore original client
             global_cache._client = original_client
-    
+
     def test_faiss_index_fallback_when_redis_unavailable(self):
         """Test that FAISS index functions gracefully when Redis is unavailable."""
         from src.utils.redis_cache import _cache as global_cache
-        
+
         # Temporarily disable Redis
         original_client = global_cache._client
         global_cache._client = None
-        
+
         try:
             # These should not crash, just return None/False
             assert cache_faiss_index("test_key", b"test_data") is False
@@ -621,15 +621,15 @@ class TestRedisCache:
         finally:
             # Restore original client
             global_cache._client = original_client
-    
+
     def test_analysis_results_fallback_when_redis_unavailable(self):
         """Test that analysis results functions gracefully when Redis is unavailable."""
         from src.utils.redis_cache import _cache as global_cache
-        
+
         # Temporarily disable Redis
         original_client = global_cache._client
         global_cache._client = None
-        
+
         try:
             # These should not crash, just return None/False
             assert cache_analysis_results("test_key", {"results": []}) is False
@@ -637,44 +637,44 @@ class TestRedisCache:
         finally:
             # Restore original client
             global_cache._client = original_client
-    
+
     def test_pickle_error_handling_in_get(self):
         """Test graceful handling of pickle deserialization errors."""
         cache = RedisCache.__new__(RedisCache)
         mock_client = Mock()
-        
+
         # Simulate valid connection but invalid pickle data
         mock_client.get.return_value = b"invalid_pickle_data"
         cache._client = mock_client
-        
+
         # Should return None gracefully instead of crashing
         result = cache.get("test_key")
         assert result is None
-    
+
     def test_json_decode_error_handling_in_get_json(self):
         """Test graceful handling of JSON deserialization errors."""
         cache = RedisCache.__new__(RedisCache)
         mock_client = Mock()
-        
+
         # Simulate valid connection but invalid JSON data
         mock_client.get.return_value = "invalid json {"
         cache._client = mock_client
-        
+
         # Should return None gracefully instead of crashing
         result = cache.get_json("test_json")
         assert result is None
-    
+
     def test_redis_timeout_during_get(self):
         """Test graceful handling of Redis timeout during get."""
         from src.utils.redis_cache import RedisError
-        
+
         cache = RedisCache.__new__(RedisCache)
         mock_client = Mock()
-        
+
         # Simulate Redis timeout
         mock_client.get.side_effect = redis.TimeoutError("Request timed out") if hasattr(redis, 'TimeoutError') else RedisError("Timeout")
         cache._client = mock_client
-        
+
         # Should return None gracefully
         result = cache.get("test_key")
         assert result is None
@@ -711,3 +711,99 @@ class TestRedisCache:
         assert stats2["misses"] == 1
         assert stats2["hit_ratio"] == 0.5
 
+class TestHitRateTracking:
+    """Test hit/miss counter tracking and get_hit_rate() (Issue #714)."""
+
+    @pytest.fixture
+    def mock_redis_client(self):
+        """Create a mock Redis client."""
+        client = Mock()
+        client.ping.return_value = True
+        return client
+
+    @pytest.fixture
+    def cache_with_mock(self, mock_redis_client):
+        """Create a RedisCache instance with mocked client and reset counters."""
+        from src.utils.redis_cache import _cache
+
+        cache = RedisCache.__new__(RedisCache)
+        cache._client = mock_redis_client
+        cache._hits = 0
+        cache._misses = 0
+        cache._fallback_cache = {}
+        _cache._client = mock_redis_client
+        yield cache
+        _cache._client = None
+
+    def test_hit_rate_zero_attempts(self, cache_with_mock):
+        """No get()/get_json() calls yet -> 0.0, no ZeroDivisionError."""
+        assert cache_with_mock.get_hit_rate() == 0.0
+
+    def test_hit_rate_all_hits(self, cache_with_mock, mock_redis_client):
+        """All lookups hit -> 100.0."""
+        import pickle
+
+        mock_redis_client.get.return_value = pickle.dumps("value")
+        for _ in range(4):
+            cache_with_mock.get("some_key")
+        assert cache_with_mock.get_hit_rate() == 100.0
+
+    def test_hit_rate_all_misses(self, cache_with_mock, mock_redis_client):
+        """All lookups miss -> 0.0."""
+        mock_redis_client.get.return_value = None
+        for _ in range(4):
+            cache_with_mock.get("missing_key")
+        assert cache_with_mock.get_hit_rate() == 0.0
+
+    def test_hit_rate_mixed(self, cache_with_mock, mock_redis_client):
+        """3 hits, 1 miss -> 75.0."""
+        import pickle
+
+        mock_redis_client.get.return_value = pickle.dumps("value")
+        for _ in range(3):
+            cache_with_mock.get("hit_key")
+
+        mock_redis_client.get.return_value = None
+        cache_with_mock.get("miss_key")
+
+        assert cache_with_mock.get_hit_rate() == 75.0
+
+    def test_hit_rate_tracks_get_json(self, cache_with_mock, mock_redis_client):
+        """get_json() hits/misses are counted toward the same hit rate."""
+        mock_redis_client.get.return_value = '{"a": 1}'
+        cache_with_mock.get_json("json_key")
+        assert cache_with_mock.get_hit_rate() == 100.0
+
+        mock_redis_client.get.return_value = None
+        cache_with_mock.get_json("missing_json_key")
+        assert cache_with_mock.get_hit_rate() == 50.0
+
+    def test_hit_rate_counts_fallback_path(self, cache_with_mock):
+        """When Redis is unavailable, fallback cache hits/misses still count."""
+        cache_with_mock._client = None  # force fallback path
+        cache_with_mock._fallback_cache["fb_key"] = ("fb_value", None)
+
+        cache_with_mock.get("fb_key")          # hit via fallback
+        cache_with_mock.get("nonexistent_key")  # miss via fallback
+
+        assert cache_with_mock.get_hit_rate() == 50.0
+
+    def test_hit_rate_thread_safety(self, cache_with_mock, mock_redis_client):
+        """Concurrent get() calls must not lose counter updates."""
+        import pickle
+        import threading
+
+        mock_redis_client.get.return_value = pickle.dumps("value")
+
+        def hammer():
+            for _ in range(100):
+                cache_with_mock.get("hot_key")
+
+        threads = [threading.Thread(target=hammer) for _ in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert cache_with_mock._hits == 1000
+        assert cache_with_mock.get_hit_rate() == 100.0

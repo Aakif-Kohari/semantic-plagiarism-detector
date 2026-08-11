@@ -5,7 +5,7 @@ Comprehensive unit test suite for src/utils/json_export.py.
 
 Tests cover:
 - ISO 8601 UTC timestamp (`exported_at`) generation and schema compliance (Issue #1034).
-- `export_to_json()` metadata root wrapping, custom metadata merging, and data preservation.
+- `export_to_json()` metadata root wrapping, custom metadata merging, data preservation, and configurable indentation (Issue #1250).
 - `export_similarity_matrix_to_json()` backward compatibility and pair extraction.
 - `export_report_to_json()` and `export_incidents_to_json()` helper outputs.
 - `parse_export_json()` parsing and schema validator `validate_json_export_schema()`.
@@ -14,7 +14,6 @@ Tests cover:
 
 from datetime import datetime, timezone
 import json
-import math
 import re
 
 import numpy as np
@@ -22,12 +21,16 @@ import pandas as pd
 import pytest
 
 from src.utils.json_export import (
-    _json_default_serializer,
+    build_export_schema_definition,
+    export_batch_reports_to_json,
+    export_filtered_similarity_matrix_to_json,
     export_incidents_to_json,
     export_report_to_json,
     export_similarity_matrix_to_json,
     export_to_json,
+    generate_export_checksum,
     get_export_timestamp,
+    json_serializer_fallback,
     parse_export_json,
     validate_json_export_schema,
 )
@@ -102,6 +105,23 @@ def test_export_to_json_without_metadata():
     assert "metadata" not in result
 
 
+def test_export_to_json_minified_indent_none():
+    """Verify minified single-line JSON generation when indent=None (Issue #1250)."""
+    data = {"doc": "A", "score": 0.95}
+    json_str = export_to_json(data, include_metadata=False, indent=None)
+
+    assert "\n" not in json_str
+    assert json_str == '{"doc": "A", "score": 0.95}'
+
+
+def test_export_to_json_custom_indentation():
+    """Verify custom indentation formatting (Issue #1250)."""
+    data = {"doc": "A"}
+    json_str = export_to_json(data, include_metadata=False, indent=4)
+
+    assert '\n    "doc": "A"' in json_str
+
+
 def test_export_similarity_matrix_to_json_valid():
     """Verify that a valid similarity matrix is converted to a clean JSON array of unique pairs."""
     data = [[1.0, 0.85, 0.45], [0.85, 1.0, 0.92], [0.45, 0.92, 1.0]]
@@ -128,6 +148,9 @@ def test_export_similarity_matrix_to_json_valid():
         "document_2": "docC",
         "similarity_score": 0.92,
     }
+    # Verify pretty-printing with indent=2 (#1614)
+    assert "\n" in json_str
+    assert '  "document_1"' in json_str
 
 
 def test_export_similarity_matrix_to_json_with_metadata():
@@ -262,8 +285,6 @@ def test_validate_json_export_schema():
 
 def test_generate_export_checksum():
     """Verify generate_export_checksum() computes deterministic 64-char SHA-256 hex string."""
-    from src.utils.json_export import generate_export_checksum
-
     json_text = '{"metadata": {"exported_at": "2026-07-31T07:25:00Z"}, "data": [1, 2]}'
     checksum = generate_export_checksum(json_text)
 
@@ -274,8 +295,6 @@ def test_generate_export_checksum():
 
 def test_export_batch_reports_to_json():
     """Verify export_batch_reports_to_json() packages multiple reports into batch payload."""
-    from src.utils.json_export import export_batch_reports_to_json
-
     reports = [{"id": 1, "score": 0.8}, {"id": 2, "score": 0.3}]
     json_str = export_batch_reports_to_json(reports, batch_id="batch_001")
     parsed = json.loads(json_str)
@@ -289,12 +308,9 @@ def test_export_batch_reports_to_json():
 
 def test_export_filtered_similarity_matrix_to_json():
     """Verify export_filtered_similarity_matrix_to_json() filters pairs below min similarity threshold."""
-    from src.utils.json_export import export_filtered_similarity_matrix_to_json
-
     data = [[1.0, 0.85, 0.20], [0.85, 1.0, 0.95], [0.20, 0.95, 1.0]]
     df = pd.DataFrame(data, index=["docA", "docB", "docC"], columns=["docA", "docB", "docC"])
 
-    # Filter >= 0.50 threshold (should keep docA-docB [0.85] and docB-docC [0.95], drop docA-docC [0.20])
     json_str = export_filtered_similarity_matrix_to_json(df, min_similarity_threshold=0.50)
     parsed = json.loads(json_str)
 
@@ -307,25 +323,57 @@ def test_export_filtered_similarity_matrix_to_json():
 
 def test_build_export_schema_definition():
     """Verify build_export_schema_definition() returns valid JSON Schema object."""
-    from src.utils.json_export import build_export_schema_definition
-
     schema = build_export_schema_definition()
     assert isinstance(schema, dict)
     assert schema["title"] == "PlagiarismDetectorExportReport"
     assert "exported_at" in schema["properties"]["metadata"]["required"]
 
 
-
-def test_json_default_serializer():
+def test_json_serializer_fallback():
     """Verify custom NumPy, pandas, and datetime serializer function."""
-    assert _json_default_serializer(np.int64(42)) == 42
-    assert _json_default_serializer(np.float64(3.14159)) == 3.14159
-    assert _json_default_serializer(np.nan) == 0.0
+    assert json_serializer_fallback(np.int64(42)) == 42
+    assert json_serializer_fallback(np.float64(3.14159)) == 3.14159
+    assert json_serializer_fallback(np.nan) == 0.0
 
     now = datetime(2026, 7, 31, 7, 25, 0, tzinfo=timezone.utc)
-    assert _json_default_serializer(now) == "2026-07-31T07:25:00+00:00"
+    assert json_serializer_fallback(now) == "2026-07-31T07:25:00+00:00"
 
     ts = pd.Timestamp("2026-07-31 07:25:00")
-    assert _json_default_serializer(ts) == "2026-07-31T07:25:00"
+    assert json_serializer_fallback(ts) == "2026-07-31T07:25:00"
 
-    assert _json_default_serializer({1, 2, 3}) == [1, 2, 3] or isinstance(_json_default_serializer({1, 2, 3}), list)
+    assert json_serializer_fallback({1, 2, 3}) == [1, 2, 3] or isinstance(json_serializer_fallback({1, 2, 3}), list)
+
+
+def test_export_to_json_serializes_numpy_types_without_error():
+    """Issue: passing NumPy types/datetime through export_to_json() must not raise
+    an unhandled TypeError — verifies default=json_serializer_fallback is actually
+    wired into json.dumps() end-to-end, not just tested in isolation."""
+    data = {
+        "count": np.int64(7),
+        "score": np.float32(0.85),
+        "matrix": np.array([1, 2, 3]),
+        "generated_on": datetime(2026, 7, 31, 7, 25, 0, tzinfo=timezone.utc),
+    }
+
+    # Must not raise TypeError: Object of type int64 is not JSON serializable
+    json_str = export_to_json(data, include_metadata=False)
+    parsed = json.loads(json_str)
+
+    assert parsed["count"] == 7
+    assert isinstance(parsed["count"], int)
+    assert parsed["score"] == pytest.approx(0.85, rel=1e-4)
+    assert parsed["matrix"] == [1, 2, 3]
+    assert parsed["generated_on"] == "2026-07-31T07:25:00+00:00"
+
+
+def test_export_to_json_numpy_types_with_metadata_wrapper():
+    """Same as above but through the default include_metadata=True path, which
+    uses a different json.dumps() call site — both must use the fallback."""
+    data = {"total": np.int32(3), "average": np.float64(1.5)}
+
+    json_str = export_to_json(data)
+    parsed = json.loads(json_str)
+
+    assert parsed["data"]["total"] == 3
+    assert parsed["data"]["average"] == 1.5
+    assert "exported_at" in parsed["metadata"]

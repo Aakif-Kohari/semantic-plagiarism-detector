@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+from typing import Any
 
 from datetime import datetime
 from io import BytesIO
@@ -19,7 +20,7 @@ from src.core.app_config import get_pdf_footer_text
 from reportlab.lib.colors import HexColor
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
@@ -161,21 +162,7 @@ def compress_pdf_buffer(pdf_buffer: BytesIO) -> BytesIO:
             out_buf.seek(0)
             return out_buf
         except ImportError:
-            try:
-                from PyPDF2 import PdfReader, PdfWriter
-
-                reader = PdfReader(BytesIO(pdf_bytes))
-                writer = PdfWriter()
-                for page in reader.pages:
-                    writer.add_page(page)
-                for page in writer.pages:
-                    page.compress_content_streams()
-                out_buf = BytesIO()
-                writer.write(out_buf)
-                out_buf.seek(0)
-                return out_buf
-            except ImportError:
-                pass
+            pass
 
         # If all compression attempts fail, return the original buffer
         pdf_buffer.seek(original_pos)
@@ -239,7 +226,10 @@ def generate_plagiarism_report(
     logo_image: Optional[bytes] = None,
     brand_color: Optional[str] = None,
     dark_mode: Optional[bool] = None,
+    language: str = "en",
 ) -> BytesIO:
+
+    from src.i18n.translator import get_text
 
     brand_hex = brand_color or "#1e3a8a"
 
@@ -406,10 +396,10 @@ def generate_plagiarism_report(
     story.append(Paragraph("Document Comparison", heading_style))
 
     doc_data = [
-        ["Document A", truncate_filename(doc_a, 40)],
-        ["Document B", truncate_filename(doc_b, 40)],
-        ["Overall Similarity", f"{overall_similarity:.1%}"],
-        ["Detection Threshold", f"{threshold:.1%}"],
+        [get_text("pdf_document_name", language), truncate_filename(doc_a, 40)],
+        [get_text("pdf_document_name", language), truncate_filename(doc_b, 40)],
+        [get_text("pdf_similarity_score", language), f"{overall_similarity:.1%}"],
+        [get_text("pdf_detection_threshold", language), f"{threshold:.1%}"],
     ]
 
     doc_table = Table(doc_data, colWidths=[2 * inch, 4 * inch], hAlign=TA_LEFT)
@@ -446,11 +436,11 @@ def generate_plagiarism_report(
     if doc_a_text is not None or doc_b_text is not None:
         story.append(Paragraph("Document Statistics", heading_style))
         story.append(Spacer(1, 0.1 * inch))
-        
+
         # Compute statistics for each document
         doc_a_stats = compute_text_stats(doc_a_text) if doc_a_text else None
         doc_b_stats = compute_text_stats(doc_b_text) if doc_b_text else None
-        
+
         # Create statistics table
         stats_data = [
             ['', doc_a, doc_b],
@@ -459,10 +449,10 @@ def generate_plagiarism_report(
             ['Unique Words', str(doc_a_stats['unique_word_count']) if doc_a_stats else 'N/A', str(doc_b_stats['unique_word_count']) if doc_b_stats else 'N/A'],
             ['Unique Word Ratio', f"{doc_a_stats['unique_word_ratio']:.2%}" if doc_a_stats else 'N/A', f"{doc_b_stats['unique_word_ratio']:.2%}" if doc_b_stats else 'N/A'],
         ]
-        
+
         # Calculate column widths - give more space to document names
         col_widths = [1.5 * inch, 2.25 * inch, 2.25 * inch]
-        
+
         stats_table = Table(stats_data, colWidths=col_widths, hAlign=TA_LEFT)
         stats_table.setStyle(
             TableStyle(
@@ -658,7 +648,6 @@ def generate_plagiarism_report(
     doc.build(story, onFirstPage=_draw_header, onLaterPages=_draw_header)
     buffer.seek(0)
     return buffer
-import fitz  # PyMuPDF
 
 
 def highlight_pdf_matches(
@@ -666,10 +655,7 @@ def highlight_pdf_matches(
     matching_chunks: List[str],
     highlight_color: Tuple[float, float, float] = (1.0, 0.85, 0.0),
 ) -> bytes:
-
-
-    """
-    Opens an original PDF, searches for matching plagiarized text chunks,
+    """Opens an original PDF, searches for matching plagiarized text chunks,
     applies yellow highlight annotations on exact coordinate boxes,
     and returns the modified PDF as bytes.
 
@@ -688,7 +674,6 @@ def highlight_pdf_matches(
         with open(pdf_source, "rb") as f:
             return f.read()
 
-
     if isinstance(pdf_source, bytes):
         doc = fitz.open(stream=pdf_source, filetype="pdf")
     else:
@@ -696,18 +681,9 @@ def highlight_pdf_matches(
 
     for page in doc:
         for chunk in matching_chunks:
-
             chunk_clean = str(chunk).strip()
             if len(chunk_clean) < 3:
                 continue
-
-
-            chunk_clean = chunk.strip()
-            # Skip very short or empty chunks to prevent accidental full-page highlights
-            if len(chunk_clean) < 3:
-                continue
-
-            # Search for coordinate rectangles of the text on the page
 
             quad_matches = page.search_for(chunk_clean)
             for rect in quad_matches:
@@ -715,9 +691,552 @@ def highlight_pdf_matches(
                 annot.set_colors(stroke=highlight_color)
                 annot.update()
 
-    # Save highlighted PDF to byte stream
-    output_buffer = doc.tobytes()
+    output_bytes = doc.tobytes()
     doc.close()
+    return output_bytes
 
 
+def generate_audit_summary_html(
+    metrics: dict[str, Any],
+    top_flagged_pairs: list[dict[str, Any]],
+    report_title: str = "Class Plagiarism Audit Summary Report",
+    class_section: str = "All Classes",
+) -> str:
+    """Generate a clean, self-contained HTML audit summary report for instructors.
+
+    Args:
+        metrics: Dictionary containing class-wide summary statistics (documents, pairs, incidents, severity breakdown).
+        top_flagged_pairs: List of flagged document pair dictionaries.
+        report_title: Title header for the audit report.
+        class_section: Active class or section filter name.
+
+    Returns:
+        Full HTML report document string.
+    """
+    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    total_docs = metrics.get("total_documents", 0)
+    eval_pairs = metrics.get("evaluated_pairs", 0)
+    flagged_cnt = metrics.get("flagged_incidents", len(top_flagged_pairs))
+    threshold_pct = f"{metrics.get('threshold', 0.59):.0%}"
+    
+    high_cnt = metrics.get("high_severity_count", sum(1 for p in top_flagged_pairs if p.get("similarity", 0) >= 0.90))
+    med_cnt = metrics.get("medium_severity_count", sum(1 for p in top_flagged_pairs if 0.75 <= p.get("similarity", 0) < 0.90))
+    low_cnt = metrics.get("low_severity_count", sum(1 for p in top_flagged_pairs if p.get("similarity", 0) < 0.75))
+
+    table_rows_html = ""
+    if not top_flagged_pairs:
+        table_rows_html = '<tr><td colspan="5" style="text-align: center; color: #64748b; padding: 20px;">No flagged plagiarism pairs found for this section.</td></tr>'
+    else:
+        for idx, item in enumerate(top_flagged_pairs, 1):
+            doc_a = item.get("doc_a", item.get("document_a", "Document A"))
+            doc_b = item.get("doc_b", item.get("document_b", "Document B"))
+            score = item.get("similarity", item.get("similarity_score", 0.0))
+            if isinstance(score, str):
+                try:
+                    score = float(score)
+                except ValueError:
+                    score = 0.0
+
+            if score >= 0.90:
+                sev_badge = '<span style="background-color: #fee2e2; color: #dc2626; padding: 4px 8px; border-radius: 4px; font-weight: 600; font-size: 12px;">High (≥90%)</span>'
+            elif score >= 0.75:
+                sev_badge = '<span style="background-color: #ffedd5; color: #ea580c; padding: 4px 8px; border-radius: 4px; font-weight: 600; font-size: 12px;">Medium (75-89%)</span>'
+            else:
+                sev_badge = '<span style="background-color: #dcfce7; color: #16a34a; padding: 4px 8px; border-radius: 4px; font-weight: 600; font-size: 12px;">Low (&lt;75%)</span>'
+
+            table_rows_html += f"""
+            <tr>
+                <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: center;">#{idx}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; font-family: monospace;">{truncate_filename(str(doc_a), 35)}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; font-family: monospace;">{truncate_filename(str(doc_b), 35)}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; font-weight: 700; text-align: center; color: #1e293b;">{score:.1%}</td>
+                <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; text-align: center;">{sev_badge}</td>
+            </tr>
+            """
+
+    html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{report_title}</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: #1e293b;
+            background-color: #f8fafc;
+            margin: 0;
+            padding: 30px;
+        }}
+        .container {{
+            max-width: 900px;
+            margin: 0 auto;
+            background: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+            padding: 36px;
+            border: 1px solid #e2e8f0;
+        }}
+        .header {{
+            border-bottom: 2px solid #4f46e5;
+            padding-bottom: 20px;
+            margin-bottom: 24px;
+        }}
+        .header h1 {{
+            margin: 0 0 8px 0;
+            color: #1e1b4b;
+            font-size: 24px;
+        }}
+        .meta-line {{
+            color: #64748b;
+            font-size: 13px;
+            margin: 4px 0;
+        }}
+        .grid {{
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 28px;
+        }}
+        .card {{
+            background: #f1f5f9;
+            border-radius: 8px;
+            padding: 16px;
+            text-align: center;
+            border: 1px solid #cbd5e1;
+        }}
+        .card-val {{
+            font-size: 22px;
+            font-weight: 700;
+            color: #4f46e5;
+            margin-top: 4px;
+        }}
+        .card-lbl {{
+            font-size: 12px;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }}
+        .section-title {{
+            font-size: 16px;
+            font-weight: 700;
+            color: #0f172a;
+            margin-top: 28px;
+            margin-bottom: 12px;
+            border-left: 4px solid #4f46e5;
+            padding-left: 10px;
+        }}
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 12px;
+            font-size: 13px;
+        }}
+        th {{
+            background: #f8fafc;
+            color: #475569;
+            font-weight: 600;
+            text-align: left;
+            padding: 10px;
+            border-bottom: 2px solid #cbd5e1;
+        }}
+        .footer {{
+            margin-top: 40px;
+            padding-top: 16px;
+            border-top: 1px solid #e2e8f0;
+            font-size: 12px;
+            color: #94a3b8;
+            text-align: center;
+        }}
+        @media print {{
+            body {{ background: white; padding: 0; }}
+            .container {{ box-shadow: none; border: none; padding: 0; }}
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎓 Plagiarism Audit Executive Summary</h1>
+            <div class="meta-line"><b>Generated:</b> {generated_at} UTC | <b>Class / Section:</b> {class_section}</div>
+            <div class="meta-line"><b>Detection Threshold:</b> {threshold_pct} | <b>Algorithm:</b> Transformer Semantic Vector Index (FAISS)</div>
+        </div>
+
+        <div class="grid">
+            <div class="card">
+                <div class="card-lbl">Total Documents</div>
+                <div class="card-val">{total_docs}</div>
+            </div>
+            <div class="card">
+                <div class="card-lbl">Evaluated Pairs</div>
+                <div class="card-val">{eval_pairs}</div>
+            </div>
+            <div class="card">
+                <div class="card-lbl">Flagged Incidents</div>
+                <div class="card-val" style="color: #dc2626;">{flagged_cnt}</div>
+            </div>
+            <div class="card">
+                <div class="card-lbl">High Risk (≥90%)</div>
+                <div class="card-val" style="color: #ea580c;">{high_cnt}</div>
+            </div>
+        </div>
+
+        <div class="section-title">📊 Severity Distribution Breakdown</div>
+        <div style="display: flex; gap: 12px; margin-bottom: 20px;">
+            <div style="flex: 1; background: #fef2f2; border: 1px solid #fca5a5; padding: 12px; border-radius: 6px; text-align: center;">
+                <span style="font-weight: 700; color: #dc2626; font-size: 18px;">{high_cnt}</span><br>
+                <span style="font-size: 12px; color: #991b1b;">High Severity (≥90%)</span>
+            </div>
+            <div style="flex: 1; background: #fff7ed; border: 1px solid #fdba74; padding: 12px; border-radius: 6px; text-align: center;">
+                <span style="font-weight: 700; color: #ea580c; font-size: 18px;">{med_cnt}</span><br>
+                <span style="font-size: 12px; color: #9a3412;">Medium Severity (75-89%)</span>
+            </div>
+            <div style="flex: 1; background: #f0fdf4; border: 1px solid #86efac; padding: 12px; border-radius: 6px; text-align: center;">
+                <span style="font-weight: 700; color: #16a34a; font-size: 18px;">{low_cnt}</span><br>
+                <span style="font-size: 12px; color: #166534;">Low Severity (&lt;75%)</span>
+            </div>
+        </div>
+
+        <div class="section-title">🚨 Top Flagged Document Pairs</div>
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 40px; text-align: center;">#</th>
+                    <th>Document A</th>
+                    <th>Document B</th>
+                    <th style="text-align: center;">Similarity</th>
+                    <th style="text-align: center;">Severity Level</th>
+                </tr>
+            </thead>
+            <tbody>
+                {table_rows_html}
+            </tbody>
+        </table>
+
+        <div class="footer">
+            Semantic Plagiarism Detection System Audit Report · Automated Compliance Summary
+        </div>
+    </div>
+</body>
+</html>"""
+    return html_content
+
+
+def generate_audit_summary_pdf(
+    metrics: dict[str, Any],
+    top_flagged_pairs: list[dict[str, Any]],
+    report_title: str = "Class Plagiarism Audit Summary Report",
+    class_section: str = "All Classes",
+) -> BytesIO:
+    """Generate a clean, multi-page ReportLab PDF audit summary report.
+
+    Args:
+        metrics: Class summary statistics.
+        top_flagged_pairs: Flagged pairs list.
+        report_title: Document title.
+        class_section: Section filter title.
+
+    Returns:
+        BytesIO containing generated PDF bytes.
+    """
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=54,
+        leftMargin=54,
+        topMargin=54,
+        bottomMargin=40,
+    )
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "AuditTitle",
+        parent=styles["Heading1"],
+        fontName="Helvetica-Bold",
+        fontSize=18,
+        leading=22,
+        textColor=HexColor("#1e1b4b"),
+        spaceAfter=15,
+        alignment=TA_LEFT,
+    )
+    heading_style = ParagraphStyle(
+        "AuditHeading",
+        parent=styles["Heading2"],
+        fontName="Helvetica-Bold",
+        fontSize=13,
+        leading=16,
+        textColor=HexColor("#4f46e5"),
+        spaceBefore=14,
+        spaceAfter=8,
+        keepWithNext=True,
+    )
+    body_style = ParagraphStyle(
+        "AuditBody",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=9,
+        leading=12,
+        textColor=HexColor("#334155"),
+    )
+
+    story = []
+    story.append(Paragraph(report_title, title_style))
+    
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    threshold_str = f"{metrics.get('threshold', 0.59):.0%}"
+    meta_text = f"<b>Generated:</b> {timestamp} UTC &nbsp;|&nbsp; <b>Section:</b> {class_section} &nbsp;|&nbsp; <b>Threshold:</b> {threshold_str}"
+    story.append(Paragraph(meta_text, body_style))
+    story.append(Spacer(1, 0.15 * inch))
+
+    total_docs = metrics.get("total_documents", 0)
+    eval_pairs = metrics.get("evaluated_pairs", 0)
+    flagged_cnt = metrics.get("flagged_incidents", len(top_flagged_pairs))
+    high_cnt = metrics.get("high_severity_count", sum(1 for p in top_flagged_pairs if p.get("similarity", 0) >= 0.90))
+
+    summary_data = [
+        ["Total Documents", str(total_docs), "Evaluated Pairs", str(eval_pairs)],
+        ["Flagged Incidents", str(flagged_cnt), "High Severity (≥90%)", str(high_cnt)],
+    ]
+    summary_table = Table(summary_data, colWidths=[1.8 * inch, 1.2 * inch, 1.8 * inch, 1.2 * inch])
+    summary_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (0, -1), HexColor("#F1F5F9")),
+                ("BACKGROUND", (2, 0), (2, -1), HexColor("#F1F5F9")),
+                ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("TEXTCOLOR", (1, 0), (1, -1), HexColor("#4F46E5")),
+                ("TEXTCOLOR", (3, 0), (3, -1), HexColor("#DC2626")),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("GRID", (0, 0), (-1, -1), 0.5, HexColor("#CBD5E1")),
+            ]
+        )
+    )
+    story.append(summary_table)
+    story.append(Spacer(1, 0.2 * inch))
+
+    story.append(Paragraph("Top Flagged Document Pairs", heading_style))
+    
+    table_data = [["#", "Document A", "Document B", "Similarity", "Severity"]]
+    for idx, item in enumerate(top_flagged_pairs[:20], 1):
+        doc_a = item.get("doc_a", item.get("document_a", "Doc A"))
+        doc_b = item.get("doc_b", item.get("document_b", "Doc B"))
+        score = item.get("similarity", item.get("similarity_score", 0.0))
+        if isinstance(score, str):
+            try:
+                score = float(score)
+            except ValueError:
+                score = 0.0
+
+        if score >= 0.90:
+            sev_str = "High"
+        elif score >= 0.75:
+            sev_str = "Medium"
+        else:
+            sev_str = "Low"
+
+        table_data.append(
+            [
+                str(idx),
+                truncate_filename(str(doc_a), 28),
+                truncate_filename(str(doc_b), 28),
+                f"{score:.1%}",
+                sev_str,
+            ]
+        )
+
+    if len(table_data) == 1:
+        table_data.append(["-", "No flagged incidents found", "-", "-", "-"])
+
+    pairs_table = Table(table_data, colWidths=[0.4 * inch, 2.3 * inch, 2.3 * inch, 1.0 * inch, 1.0 * inch])
+    pairs_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), HexColor("#1E293B")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), HexColor("#FFFFFF")),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ("ALIGN", (0, 0), (0, -1), "CENTER"),
+                ("ALIGN", (3, 0), (-1, -1), "CENTER"),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("GRID", (0, 0), (-1, -1), 0.5, HexColor("#E2E8F0")),
+            ]
+        )
+    )
+    story.append(pairs_table)
+    story.append(Spacer(1, 0.2 * inch))
+
+    story.append(Paragraph("Audit Notes & Compliance", heading_style))
+    notes_text = (
+        "This audit report compiles class-wide similarity inspection metrics generated by the "
+        "Semantic Plagiarism Detection System. Flagged document pairs reflect cosine similarity "
+        "measurements computed over dense vector embeddings. Final academic integrity determination "
+        "requires instructor evaluation."
+    )
+    story.append(Paragraph(notes_text, body_style))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+def generate_batch_plagiarism_report(
+    incidents: list[dict[str, Any]],
+    *,
+    report_title: str = "Batch Plagiarism Investigation Report",
+) -> BytesIO:
+    """Generate one consolidated PDF containing all flagged incidents."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import inch
+    from reportlab.platypus import (
+        SimpleDocTemplate,
+        Paragraph,
+        Spacer,
+        Table,
+        TableStyle,
+        PageBreak,
+    )
+
+    buffer = BytesIO()
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=40,
+        leftMargin=40,
+        topMargin=40,
+        bottomMargin=40,
+    )
+
+    styles = getSampleStyleSheet()
+    story = []
+
+    story.append(Paragraph(report_title, styles["Title"]))
+    story.append(Spacer(1, 12))
+
+    total_incidents = len(incidents)
+
+    severity_counts: dict[str, int] = {}
+    for incident in incidents:
+        severity = str(incident.get("severity_rank", "Unknown"))
+        severity_counts[severity] = severity_counts.get(severity, 0) + 1
+
+    story.append(Paragraph("Summary Statistics", styles["Heading2"]))
+    story.append(
+        Paragraph(
+            f"Total flagged incidents: {total_incidents}",
+            styles["BodyText"],
+        )
+    )
+    story.append(Spacer(1, 10))
+
+    severity_rows = [["Severity", "Count"]]
+    severity_rows.extend(
+        [severity, str(count)]
+        for severity, count in severity_counts.items()
+    )
+
+    severity_table = Table(severity_rows)
+    severity_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ("PADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+
+    story.append(severity_table)
+    story.append(PageBreak())
+
+    story.append(
+        Paragraph("Flagged Plagiarism Cases", styles["Heading2"])
+    )
+    story.append(Spacer(1, 10))
+
+    for index, incident in enumerate(incidents, start=1):
+        document_a = str(incident.get("document_a", "Unknown"))
+        document_b = str(incident.get("document_b", "Unknown"))
+        severity = str(incident.get("severity_rank", "Unknown"))
+
+        similarity = incident.get("similarity_score", 0)
+        try:
+            similarity_text = f"{float(similarity):.1%}"
+        except (TypeError, ValueError):
+            similarity_text = str(similarity)
+
+        story.append(
+            Paragraph(
+                f"Case {index}: {document_a} ↔ {document_b}",
+                styles["Heading3"],
+            )
+        )
+
+        case_rows = [
+            ["Field", "Value"],
+            ["Document A", document_a],
+            ["Document B", document_b],
+            ["Similarity", similarity_text],
+            ["Severity", severity],
+        ]
+
+        case_table = Table(
+            case_rows,
+            colWidths=[1.5 * inch, 4.5 * inch],
+        )
+        case_table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                    ("PADDING", (0, 0), (-1, -1), 6),
+                ]
+            )
+        )
+
+        story.append(case_table)
+        story.append(Spacer(1, 15))
+
+        if index < len(incidents):
+            story.append(PageBreak())
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+def generate_audit_summary_report(
+    metrics: dict[str, Any],
+    top_flagged_pairs: list[dict[str, Any]],
+    output_format: str = "pdf",
+    class_section: str = "All Classes",
+) -> bytes | str:
+    """Consolidated helper to export audit summary report in PDF or HTML format.
+
+    Args:
+        metrics: Summary metrics dictionary.
+        top_flagged_pairs: List of top flagged document pairs.
+        output_format: Output format type ('pdf' or 'html').
+        class_section: Selected class section label.
+
+    Returns:
+        Bytes for PDF export or str for HTML export.
+    """
+    if str(output_format).lower() == "html":
+        return generate_audit_summary_html(
+            metrics=metrics,
+            top_flagged_pairs=top_flagged_pairs,
+            class_section=class_section,
+        )
+    else:
+        pdf_buf = generate_audit_summary_pdf(
+            metrics=metrics,
+            top_flagged_pairs=top_flagged_pairs,
+            class_section=class_section,
+        )
+        return pdf_buf.getvalue()
 

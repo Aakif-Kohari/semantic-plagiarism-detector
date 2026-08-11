@@ -146,7 +146,7 @@ def test_filtering_occurs_before_pagination():
     assert len(page.items) == 2
     assert page.total_pages == 2
 
-    
+
 
 
 def test_filter_warnings_by_minimum_match_length():
@@ -206,4 +206,3 @@ def test_page_size_clamping_to_max_100():
     assert page.page_size == 100
     assert len(page.items) == 100
     assert page.total_pages == 2
-

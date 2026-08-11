@@ -5,7 +5,7 @@ import json
 import os
 from datetime import datetime
 from io import BytesIO
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 
 import pytest
 
@@ -221,7 +221,7 @@ def test_compute_text_stats():
     """Test comprehensive text statistics computation."""
     text = "Hello world. Hello there. The world is beautiful."
     stats = compute_text_stats(text)
-    
+
     assert stats['word_count'] > 0
     assert stats['sentence_count'] > 0
     assert stats['unique_word_count'] > 0
@@ -236,9 +236,9 @@ def test_format_stats_for_pdf():
         'unique_word_count': 100,
         'unique_word_ratio': 0.67,
     }
-    
+
     rows = format_stats_for_pdf(stats)
-    
+
     assert len(rows) == 4
     assert rows[0] == ['Word Count', '150']
     assert rows[1] == ['Sentence Count', '12']
@@ -250,24 +250,24 @@ def test_generate_plagiarism_report_with_text_stats():
     """Test PDF generation with text statistics included."""
     sample_text_a = "This is the first document with some text. It has multiple sentences and words. The content is designed to test the text statistics feature in the PDF report generation."
     sample_text_b = "This is the second document with different content. It has some similar words but mostly unique text. The purpose is to compare with the first document for plagiarism detection purposes."
-    
+
     pdf_buffer = generate_plagiarism_report(
         doc_a="student_a.pdf",
         doc_b="student_b.pdf",
         overall_similarity=0.934,
         threshold=0.59,
         top_pairs=[
-            ("First matching paragraph from document A.", 
+            ("First matching paragraph from document A.",
              "First matching paragraph from document B.", 0.96),
         ],
         doc_a_text=sample_text_a,
         doc_b_text=sample_text_b,
     )
-    
+
     pdf_bytes = pdf_buffer.getvalue()
     assert pdf_bytes.startswith(b"%PDF")
     assert len(pdf_bytes) > 1000
-    
+
     # Verify statistics are in the PDF
     text = _read_text(pdf_bytes)
     assert "Document Statistics" in text
@@ -287,11 +287,11 @@ def test_generate_plagiarism_report_without_text_stats():
             ("First matching paragraph.", "Second matching paragraph.", 0.96),
         ],
     )
-    
+
     pdf_bytes = pdf_buffer.getvalue()
     assert pdf_bytes.startswith(b"%PDF")
     assert len(pdf_bytes) > 1000
-    
+
     # Statistics section should not be present when text not provided
     text = _read_text(pdf_bytes)
     assert "Document Statistics" not in text
@@ -369,11 +369,9 @@ def test_compress_pdf_buffer_all_fail(monkeypatch):
 
     monkeypatch.setattr(fitz, "open", mock_fitz_open)
 
-    # Disable pypdf and PyPDF2 locally to test full fallback safety
+    # Disable pypdf locally to test full fallback safety
     original_pypdf = sys.modules.get("pypdf")
-    original_PyPDF2 = sys.modules.get("PyPDF2")
     sys.modules["pypdf"] = None
-    sys.modules["PyPDF2"] = None
 
     try:
         # Generate plagiarism report where all compression libraries are unavailable/fail
@@ -398,11 +396,6 @@ def test_compress_pdf_buffer_all_fail(monkeypatch):
             sys.modules["pypdf"] = original_pypdf
         else:
             sys.modules.pop("pypdf", None)
-
-        if original_PyPDF2 is not None:
-            sys.modules["PyPDF2"] = original_PyPDF2
-        else:
-            sys.modules.pop("PyPDF2", None)
 
 
 # ── Snapshot / Golden Fixture Tests ────────────────────────────────────────
@@ -633,3 +626,38 @@ def test_generate_plagiarism_report_auto_detect_dark_mode():
     pdf_bytes = pdf_buffer.getvalue()
     assert pdf_bytes.startswith(b"%PDF")
     st.session_state.theme = "Light"
+
+
+# ── i18n / language header tests ──────────────────────────────────────────
+
+
+def test_pdf_report_headers_spanish():
+    """PDF table headers are translated to Spanish when language='es'."""
+    pdf_buffer = generate_plagiarism_report(
+        doc_a="alumno_a.pdf",
+        doc_b="alumno_b.pdf",
+        overall_similarity=0.80,
+        threshold=0.59,
+        top_pairs=[("Párrafo A.", "Párrafo B.", 0.82)],
+        language="es",
+    )
+    text = _read_text(pdf_buffer.getvalue())
+    assert "Nombre del Documento" in text
+    assert "Puntuación de Similitud" in text or "Puntuaci" in text
+    assert "Umbral de Detección" in text or "Umbral de Detecci" in text
+
+
+def test_pdf_report_headers_french():
+    """PDF table headers are translated to French when language='fr'."""
+    pdf_buffer = generate_plagiarism_report(
+        doc_a="etudiant_a.pdf",
+        doc_b="etudiant_b.pdf",
+        overall_similarity=0.80,
+        threshold=0.59,
+        top_pairs=[("Paragraphe A.", "Paragraphe B.", 0.82)],
+        language="fr",
+    )
+    text = _read_text(pdf_buffer.getvalue())
+    assert "Nom du Document" in text
+    assert "Score de Similarit" in text
+    assert "Seuil de D" in text

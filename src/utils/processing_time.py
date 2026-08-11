@@ -21,8 +21,10 @@ from typing import Any, Dict, List, Optional
 @dataclass
 class StageTiming:
     """Data class representing timing for a specific pipeline stage."""
+
     stage_name: str
     duration_seconds: float
+
 
 BYTES_PER_MB = 1024 * 1024
 BYTES_PER_KB = 1024
@@ -33,10 +35,11 @@ DEFAULT_SECONDS_PER_MB = 2.0
 # HIERARCHICAL EXECUTION PROFILER
 # ============================================================================
 
+
 class ProfilerSpan:
     """Represents a single measurable unit of work."""
-    
-    def __init__(self, name: str, parent: Optional['ProfilerSpan'] = None):
+
+    def __init__(self, name: str, parent: Optional["ProfilerSpan"] = None):
         self.name = name
         self.parent = parent
         self.children: List["ProfilerSpan"] = []
@@ -124,8 +127,27 @@ def calculate_processing_throughput(total_bytes: int, elapsed_seconds: float) ->
     if elapsed_seconds <= 0:
         return 0.0
 
-    total_kb = total_bytes / BYTES_PER_KB
+    total_kb = total_bytes / BYTES_PER_KB # type: ignore 
     throughput = total_kb / elapsed_seconds
+    return round(throughput, 2)
+
+
+def calculate_page_throughput(total_pages: int, elapsed_seconds: float) -> float:
+    """
+    Calculate the processing throughput in pages per second.
+
+    Args:
+        total_pages: The total number of pages processed.
+        elapsed_seconds: The total time elapsed in seconds.
+
+    Returns:
+        float: The throughput in pages/sec, rounded to 2 decimal places.
+            Returns 0.0 if elapsed_seconds <= 0.
+    """
+    if elapsed_seconds <= 0:
+        return 0.0
+
+    throughput = total_pages / elapsed_seconds
     return round(throughput, 2)
 
 
@@ -139,12 +161,11 @@ def format_throughput_human_readable(throughput_kbps: float) -> str:
     Returns:
         str: A formatted string (e.g., "1.50 KB/s", "2.30 MB/s").
     """
-    if throughput_kbps < 1024.0:
-        return f"{throughput_kbps:.2f} KB/s"
-    else:
-        mbps = throughput_kbps / 1024.0
-        return f"{mbps:.2f} MB/s"
+    throughput = _validate_non_negative_number("throughput_kbps", throughput_kbps)
+    if throughput < 1024:
+        return f"{throughput:.2f} KB/s"
 
+    return f"{throughput / 1024:.2f} MB/s"
 
 # ============================================================================
 # STREAMLIT UI COMPONENTS
@@ -262,6 +283,25 @@ def estimate_processing_seconds(
     return max(1, math.ceil(estimated))
 
 
+def format_duration(seconds: float) -> str:
+    """
+    Format a floating-point execution time into a concise string.
+
+    Args:
+        seconds: The duration in seconds.
+
+    Returns:
+        str: A formatted string (e.g., "45.2s" or "2m 5s").
+    """
+    numeric = _validate_non_negative_number("seconds", seconds)
+
+    if numeric < 60.0:
+        return f"{numeric:.1f}s"
+
+    minutes, remaining_seconds = divmod(numeric, 60)
+    return f"{int(minutes)}m {int(remaining_seconds)}s"
+
+
 def uploaded_files_total_bytes(files: Iterable[Any]) -> int:
     """Return the total byte size for Streamlit-like uploaded files."""
     total = 0
@@ -320,3 +360,51 @@ def processing_eta_text(
     seconds = estimate_processing_seconds(total_bytes, seconds_per_mb=seconds_per_mb)
     duration = format_processing_duration(seconds)
     return f"Estimated processing time: about {duration}"
+
+
+def calculate_average_latency(latencies: list[float]) -> float:
+    """Calculate the average latency from a list of latencies, rounded to 3 decimals."""
+    if not latencies:
+        return 0.0
+    return round(sum(latencies) / len(latencies), 3)
+
+
+def calculate_mb_per_minute(total_bytes: int, elapsed_seconds: float) -> float:
+    """
+    Calculate document processing throughput in megabytes per minute (MB/min).
+    
+    Args:
+        total_bytes (int): Total size processed in bytes.
+        elapsed_seconds (float): Time elapsed in seconds.
+        
+    Returns:
+        float: Throughput in MB/min rounded to 2 decimal places. Returns 0.0 if elapsed_seconds <= 0.
+    """
+    if elapsed_seconds <= 0 or total_bytes <= 0:
+        return 0.0
+
+    megabytes = total_bytes / (1024 * 1024)
+    minutes = elapsed_seconds / 60.0
+
+    return round(megabytes / minutes, 2)
+
+
+def calculate_kb_per_second(total_bytes: int, elapsed_seconds: float) -> float:
+    """
+    Calculate document processing throughput in kilobytes per second (KB/sec).
+    
+    Args:
+        total_bytes (int): Total size processed in bytes.
+        elapsed_seconds (float): Time elapsed in seconds.
+        
+    Returns:
+        float: Throughput in KB/sec rounded to 2 decimal places. Returns 0.0 if elapsed_seconds <= 0.
+    """
+    if elapsed_seconds <= 0 or total_bytes <= 0:
+        return 0.0
+    
+    kilobytes = total_bytes / 1024.0
+    
+    return round(kilobytes / elapsed_seconds, 2)
+
+

@@ -16,7 +16,7 @@ TensorFlow / Keras installation. The embedding_model tests mock _get_model()
 directly, so no real model is loaded.
 
 Recent Additions (Issue #566):
-- Added `sample_document_files` parameterized fixture supplying valid synthetic 
+- Added `sample_document_files` parameterized fixture supplying valid synthetic
   file buffers for PDF, DOCX, and TXT formats for comprehensive parser testing.
 """
 
@@ -46,6 +46,15 @@ try:
 except ImportError:
     pass
 
+# Patch torch.__spec__ for Python 3.13 + PyTorch compatibility
+try:
+    import torch
+    if getattr(torch, "__spec__", None) is None:
+        import importlib.util
+        torch.__spec__ = importlib.util.spec_from_loader("torch", loader=None)
+except ImportError:
+    pass
+
 # ── Repository Root Path Bootstrap ────────────────────────────────────────────
 _REPO_ROOT = pathlib.Path(__file__).parent.parent.resolve()
 if str(_REPO_ROOT) not in sys.path:
@@ -71,7 +80,7 @@ for mod_name in [
     "fitz", "redis", "bs4", "faker", "argon2", "argon2.exceptions",
     "pdfplumber", "langdetect", "striprtf", "striprtf.striprtf", "src.core.translator",
     "src.core.webhook",
-    "pypdf", "PyPDF2", "reportlab", "reportlab.pdfgen", "reportlab.lib", "reportlab.platypus",
+    "pypdf", "reportlab", "reportlab.pdfgen", "reportlab.lib", "reportlab.platypus",
     "reportlab.lib.colors", "reportlab.lib.enums", "reportlab.lib.styles", "reportlab.lib.units",
     "reportlab.lib.pagesizes", "reportlab.lib.utils",
     "matplotlib", "matplotlib.patches", "matplotlib.pyplot", "matplotlib.figure", "matplotlib.ticker",
@@ -81,6 +90,7 @@ for mod_name in [
     "sklearn.feature_extraction", "sklearn.feature_extraction.text",
     "requests",
     "streamlit", "streamlit.components", "streamlit.components.v1",
+    "transformers",
 ]:
     if mod_name not in sys.modules:
         try:
@@ -129,9 +139,9 @@ def clean_test_env():
                 os.remove(path)
             except Exception:
                 pass
-                
+
     yield
-    
+
     try:
         from src.db.corpus_db import clear_all_data
         clear_all_data()
@@ -141,7 +151,7 @@ def clean_test_env():
             close_connections()
         except Exception:
             pass
-            
+
     for path in [index_path, db_path, users_db_path]:
         if os.path.exists(path):
             try:
@@ -220,22 +230,22 @@ def mock_db(tmp_path):
 def sample_document_files(request):
     """
     Parameterized fixture supplying valid synthetic file buffers for PDF, DOCX, and TXT.
-    
-    This fixture is essential for testing the document parsing pipeline 
+
+    This fixture is essential for testing the document parsing pipeline
     (`src.core.document_parser`) without relying on external, static test files.
     It generates minimal, structurally valid file formats in memory.
-    
+
     Yields:
         tuple: (io.BytesIO buffer, str filename)
     """
     file_type = request.param
-    
+
     if file_type == "txt":
         # Standard plain text file
         content = b"This is a sample text document for testing purposes.\nIt contains multiple lines to verify line-by-line parsing.\n"
         filename = "sample_test.txt"
         yield io.BytesIO(content), filename
-        
+
     elif file_type == "pdf":
         # Minimal valid PDF 1.4 structure
         # Contains Catalog, Pages, and a single Page object to satisfy basic parsers
@@ -249,7 +259,7 @@ def sample_document_files(request):
         )
         filename = "sample_test.pdf"
         yield io.BytesIO(pdf_content), filename
-        
+
     elif file_type == "docx":
         # Minimal valid DOCX structure (ZIP archive with required Office Open XML files)
         zip_buffer = io.BytesIO()
@@ -285,3 +295,12 @@ def sample_document_files(request):
         zip_buffer.seek(0)
         filename = "sample_test.docx"
         yield zip_buffer, filename
+
+import pytest
+@pytest.fixture(autouse=True)
+def clear_streamlit_singletons():
+    try:
+        from streamlit.delta_generator_singletons import _dg_singleton
+        _dg_singleton._instance = None
+    except ImportError:
+        pass

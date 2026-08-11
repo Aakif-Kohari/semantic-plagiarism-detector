@@ -76,12 +76,12 @@ def filter_warnings(
 ) -> list[dict[str, Any]]:
     """Filter normalized warnings using functional predicate matching."""
     normalised = [_normalise_warning(item) for item in warnings]
-    
+
     if min_match_length > 0:
         normalised = [
             item for item in normalised if item.get("matched_length", 0) >= min_match_length
         ]
-        
+
     query = _truncate_search_query(search_query).casefold()
     if not query:
         return normalised
@@ -322,6 +322,7 @@ def render_warning_controls(
     threshold: float,
     ai_probabilities: dict[str, dict[str, Any]] | None = None,
     lang_code: str = "en",
+    expanded: bool = False,
 ) -> None:
     if "warning_page" not in st.session_state:
         st.session_state.warning_page = 1

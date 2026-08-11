@@ -10,7 +10,7 @@ import unicodedata
 from collections.abc import Collection, Mapping
 from pathlib import PurePath
 from typing import TypeVar
-
+from typing import IO
 
 DEFAULT_FILENAME = "document"
 MAX_FILENAME_LENGTH = 150
@@ -60,8 +60,50 @@ def _safe_extension(filename: str) -> str:
     return cleaned
 
 
-def sanitize_filename(
-    filename: object,
+def get_file_sha256_hash(file_bytes: bytes) -> str:
+    """Return the SHA-256 hex digest for file bytes."""
+    return hashlib.sha256(file_bytes).hexdigest()
+
+
+def compute_file_hash_stream(
+    file_stream: IO[bytes],
+    chunk_size: int = 65536,
+) -> str:
+    """Return the SHA-256 hex digest for a file-like object.
+
+    The stream is read incrementally in fixed-size chunks to avoid loading
+    the entire file into memory.
+    """
+    hasher = hashlib.sha256()
+
+    while chunk := file_stream.read(chunk_size):
+        hasher.update(chunk)
+
+    return hasher.hexdigest()
+
+
+_SHA256_HEX_RE = re.compile(r"[0-9a-fA-F]{64}")
+
+
+def normalize_sha256_hash(hash_str: str) -> str:
+    """Validate a SHA-256 hex digest and return it in lower-case form.
+
+    Args:
+        hash_str: A 64-character hexadecimal SHA-256 digest, in any case.
+
+    Returns:
+        str: The digest normalized to lower-case.
+
+    Raises:
+        ValueError: If the input is not a 64-character hexadecimal string.
+    """
+    if not isinstance(hash_str, str) or not _SHA256_HEX_RE.fullmatch(hash_str):
+        raise ValueError("Invalid SHA-256 hash: expected a 64-character hex string.")
+
+    return hash_str.lower()
+
+
+def sanitize_filename(    filename: object,
     *,
     fallback: str = DEFAULT_FILENAME,
     max_length: int = MAX_FILENAME_LENGTH,
@@ -112,7 +154,9 @@ def sanitize_filename(
         if allowed_stem > 0:
             truncated_stem = stem[:allowed_stem].rstrip(" ._-")
             if not truncated_stem:
-                truncated_stem = safe_fallback[:allowed_stem] or DEFAULT_FILENAME[:allowed_stem]
+                truncated_stem = (
+                    safe_fallback[:allowed_stem] or DEFAULT_FILENAME[:allowed_stem]
+                )
             stem = f"{truncated_stem}{hash_suffix}"
         else:
             stem = hash_prefix[:maximum_stem_length]
@@ -255,9 +299,17 @@ def get_final_extension(filename: object) -> str:
     raw = _CONTROL_RE.sub("", raw)
     raw = _HTML_TAG_RE.sub("", raw)
     basename = _basename(raw).strip()
-
-    _stem, extension = os.path.splitext(basename)
+    stem, extension = os.path.splitext(basename)
     return extension.casefold()
+
+def get_file_extension_sanitized(filename: str) -> str:
+    """Return the lower-case file extension, starting with a dot.
+
+    Returns an empty string if the filename has no extension.
+    """
+    basename = _basename(str(filename or ""))
+    _stem, extension = os.path.splitext(basename)
+    return extension.lower()
 
 
 def validate_document_extension(
@@ -331,3 +383,4 @@ def sanitize_and_validate_filename(
         fallback=fallback,
         max_length=max_length,
     )
+

@@ -1,6 +1,11 @@
+import streamlit as st
+# Mock st.dialog to be a no-op decorator before faiss_results is imported
+st.dialog = lambda *args, **kwargs: lambda f: f
+
 import numpy as np
 import pandas as pd
 from app.components.faiss_results import faiss_results_dataframe, RESULT_COLUMNS
+
 
 
 class MockRecord:
@@ -103,3 +108,157 @@ def test_faiss_results_dataframe_missing_attributes():
     assert len(df) == 1
     assert df.iloc[0]["Target Document"] == "Unknown document"
     assert df.iloc[0]["Chunk"] == 1  # chunk_index (default 0) + 1
+
+
+def test_inspect_diff_dialog():
+    """Verify inspect_diff_dialog calls streamlit elements to render comparison."""
+    from unittest.mock import patch, MagicMock
+    from app.components.faiss_results import inspect_diff_dialog
+
+    with patch("app.components.faiss_results.st") as mock_st:
+        col1, col2 = MagicMock(), MagicMock()
+        mock_st.columns.return_value = (col1, col2)
+
+        inspect_diff_dialog("query text sample", "matched text sample", "test_doc.pdf", 0.85)
+
+        mock_st.markdown.assert_any_call("### Match Similarity: **85.0%**")
+        mock_st.columns.assert_called_once_with(2)
+
+
+def test_render_faiss_results_ui():
+    """Verify render_faiss_results_ui renders list of results and handles click."""
+    from unittest.mock import patch
+    from app.components.faiss_results import render_faiss_results_ui
+
+    results = [
+        (MockRecord("doc_a.pdf", 2, "Matched text here"), 0.88),
+    ]
+    with patch("app.components.faiss_results.st") as mock_st, \
+         patch("app.components.faiss_results.inspect_diff_dialog") as mock_dialog:
+        mock_st.button.return_value = True
+
+        render_faiss_results_ui(results, "query text")
+
+        mock_st.button.assert_called_once()
+        mock_dialog.assert_called_once_with("query text", "Matched text here", "doc_a.pdf", 0.88)
+
+
+def test_render_faiss_results_ui_passes_matching_pdf_bytes():
+    """When a source PDF is available for the matched document, it is forwarded to the dialog."""
+    from unittest.mock import patch
+    from app.components.faiss_results import render_faiss_results_ui
+
+    results = [
+        (MockRecord("doc_a.pdf", 2, "Matched text here"), 0.88),
+    ]
+    source_bytes = b"%PDF-1.4 raw bytes"
+
+    with patch("app.components.faiss_results.st") as mock_st, \
+         patch("app.components.faiss_results.inspect_diff_dialog") as mock_dialog:
+        mock_st.button.return_value = True
+
+        render_faiss_results_ui(
+            results, "query text", document_pdf_bytes={"doc_a.pdf": source_bytes}
+        )
+
+        mock_dialog.assert_called_once_with(
+            "query text", "Matched text here", "doc_a.pdf", 0.88, pdf_bytes=source_bytes
+        )
+
+
+def test_render_faiss_results_ui_no_matching_pdf_bytes():
+    """When the matched document isn't in document_pdf_bytes, behavior is unchanged."""
+    from unittest.mock import patch
+    from app.components.faiss_results import render_faiss_results_ui
+
+    results = [
+        (MockRecord("doc_a.pdf", 2, "Matched text here"), 0.88),
+    ]
+
+    with patch("app.components.faiss_results.st") as mock_st, \
+         patch("app.components.faiss_results.inspect_diff_dialog") as mock_dialog:
+        mock_st.button.return_value = True
+
+        render_faiss_results_ui(
+            results, "query text", document_pdf_bytes={"other_doc.pdf": b"bytes"}
+        )
+
+        mock_dialog.assert_called_once_with("query text", "Matched text here", "doc_a.pdf", 0.88)
+
+
+def test_inspect_diff_dialog_offers_pdf_download_when_highlighting_succeeds():
+    """Verify a 'Download Highlighted PDF' button is rendered using annotated bytes."""
+    from unittest.mock import patch, MagicMock
+    from app.components.faiss_results import inspect_diff_dialog
+
+    fake_pdf_bytes = b"%PDF-1.4 source bytes"
+    fake_annotated_bytes = b"%PDF-1.4 annotated bytes"
+
+    fake_highlighter = MagicMock(return_value=fake_annotated_bytes)
+
+    with patch("app.components.faiss_results.st") as mock_st, \
+         patch.dict(
+             "sys.modules",
+             {"src.utils.pdf_highlighter": MagicMock(highlight_pdf_matches=fake_highlighter)},
+         ):
+        col1, col2 = MagicMock(), MagicMock()
+        mock_st.columns.return_value = (col1, col2)
+
+        inspect_diff_dialog(
+            "query text sample",
+            "matched text sample",
+            "essay1.pdf",
+            0.85,
+            pdf_bytes=fake_pdf_bytes,
+        )
+
+        fake_highlighter.assert_called_once_with(fake_pdf_bytes, ["matched text sample"])
+        mock_st.download_button.assert_called_once()
+        _, kwargs = mock_st.download_button.call_args
+        assert kwargs["data"] == fake_annotated_bytes
+        assert kwargs["file_name"] == "highlighted_essay1.pdf"
+        assert kwargs["mime"] == "application/pdf"
+
+
+def test_inspect_diff_dialog_skips_download_without_pdf_bytes():
+    """Verify no download button is offered when no source PDF is available."""
+    from unittest.mock import patch, MagicMock
+    from app.components.faiss_results import inspect_diff_dialog
+
+    with patch("app.components.faiss_results.st") as mock_st:
+        col1, col2 = MagicMock(), MagicMock()
+        mock_st.columns.return_value = (col1, col2)
+
+        inspect_diff_dialog("query text sample", "matched text sample", "test_doc.pdf", 0.85)
+
+        mock_st.download_button.assert_not_called()
+
+
+def test_render_faiss_results_ui_doc_hash_copy_box():
+    """Verify doc_hash is rendered using st.code for built-in 1-click clipboard copy (#1724)."""
+    from unittest.mock import patch
+    from app.components.faiss_results import render_faiss_results_ui
+
+    sample_hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    record = {"doc_name": "doc_a.pdf", "chunk_index": 0, "doc_hash": sample_hash}
+    results = [(record, 0.88)]
+
+    with patch("app.components.faiss_results.st") as mock_st:
+        render_faiss_results_ui(results, "query text")
+        mock_st.code.assert_any_call(sample_hash, language="text")
+
+
+def test_inspect_diff_dialog_renders_doc_hash():
+    """Verify inspect_diff_dialog renders st.code(doc_hash) when doc_hash is passed (#1724)."""
+    from unittest.mock import patch, MagicMock
+    from app.components.faiss_results import inspect_diff_dialog
+
+    sample_hash = "a" * 64
+    with patch("app.components.faiss_results.st") as mock_st:
+        col1, col2 = MagicMock(), MagicMock()
+        mock_st.columns.return_value = (col1, col2)
+
+        inspect_diff_dialog("query", "match", "doc.pdf", 0.90, doc_hash=sample_hash)
+        mock_st.code.assert_any_call(sample_hash, language="text")
+
+
