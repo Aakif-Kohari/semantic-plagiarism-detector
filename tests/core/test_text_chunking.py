@@ -8,6 +8,7 @@ Also validates sentence-aware chunk padding (Issue #1480).
 import pytest
 
 from src.core.text_chunking import (
+    ChunkString,
     chunk_by_sentences,
     chunk_documents,
     chunk_text,
@@ -544,3 +545,13 @@ class TestChunkTextSentencePadding:
             text, chunk_size=100, chunk_overlap=0, sentence_padding=False
         )
         assert padded == unpadded
+
+
+def test_chunkstring_strip_returns_plain_str():
+    """str operations on ChunkString drop metadata and return a plain str."""
+    chunk = ChunkString("hello", {"k": "v"})
+    result = chunk.strip()
+
+    assert result == "hello"
+    assert type(result) is str
+    assert not hasattr(result, "metadata")

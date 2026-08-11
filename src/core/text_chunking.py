@@ -78,6 +78,11 @@ def _split_into_sentences(text: str) -> List[str]:
 
 
 class ChunkString(str):
+    """str subclass that carries optional chunk metadata.
+
+    Warning: Metadata is lost if the string is modified via standard str operations.
+    """
+
     def __new__(cls, value, metadata=None):
         obj = super().__new__(cls, value)
         obj.metadata = metadata or {}
