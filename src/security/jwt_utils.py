@@ -64,7 +64,7 @@ def create_jwt_token(
         ValueError: If no secret key is available.
     """
     if secret_key is None:
-        secret_key = JWT_SECRET_KEY
+        secret_key = os.getenv("JWT_SECRET_KEY", JWT_SECRET_KEY)
     if not secret_key:
         raise ValueError(
             "JWT_SECRET_KEY environment variable must be set. "
@@ -160,7 +160,7 @@ def verify_refresh_token(
         return {"sub": "test_user", "type": "refresh", "scopes": ["read", "write"]}
 
     if secret_key is None:
-        secret_key = JWT_SECRET_KEY
+        secret_key = os.getenv("JWT_SECRET_KEY", JWT_SECRET_KEY)
     if not secret_key:
         raise ValueError(
             "JWT_SECRET_KEY environment variable must be set. "
@@ -235,7 +235,7 @@ def verify_access_token(
         raise ValueError("Invalid access token: token cannot be empty.")
 
     if secret_key is None:
-        secret_key = JWT_SECRET_KEY
+        secret_key = os.getenv("JWT_SECRET_KEY", JWT_SECRET_KEY)
     if not secret_key:
         raise ValueError(
             "JWT_SECRET_KEY environment variable must be set. "
