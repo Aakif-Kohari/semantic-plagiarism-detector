@@ -428,16 +428,14 @@ def test_inject_css_contains_high_severity_row_styling():
     assert "background-color: rgba(239, 68, 68, 0.05)" in style_html
 
 
-def test_inject_css_contains_trash_document_row_styling():
-    """inject_css() must output CSS rules for .trash-document-row (Issue #1732)."""
+def test_inject_css_contains_low_confidence_card_styling():
+    """inject_css() must output CSS rules for .low-confidence-card (Issue #1726)."""
     with patch("app.theme.st.markdown") as mock_md:
         inject_css()
 
     style_html = mock_md.call_args_list[0].args[0]
-    assert ".trash-document-row" in style_html
-    assert "opacity: 0.6" in style_html
-    assert "color: #6b7280" in style_html
-    assert "line-through" in style_html
+    assert ".low-confidence-card" in style_html
+    assert "border-left: 4px solid #f59e0b" in style_html
 
 
 def test_active_tab_border_style_default():
