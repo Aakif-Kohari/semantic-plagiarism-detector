@@ -1,5 +1,4 @@
-
-from src.core.tag_manager import TagManager
+from src.core.tag_manager import TagManager, sanitize_tag_name
 
 
 def test_parse_tags_empty():
@@ -90,3 +89,18 @@ def test_remove_tag_bulk(mocker):
 
     assert update_mock.call_count == 1
     update_mock.assert_called_once_with("doc1.pdf", "#goodtag")
+
+
+def test_sanitize_tag_name_max_length():
+    """Pass a 50-character tag and assert the output is exactly 30 characters."""
+    long_tag = "a" * 50
+    sanitized = sanitize_tag_name(long_tag)
+    assert len(sanitized) == 30
+    assert sanitized == "a" * 30
+
+
+def test_sanitize_tag_name_html_strip():
+    """Assert <b>tag</b> becomes tag."""
+    html_tag = "<b>tag</b>"
+    assert sanitize_tag_name(html_tag) == "tag"
+
