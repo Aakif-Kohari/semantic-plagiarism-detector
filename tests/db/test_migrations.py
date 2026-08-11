@@ -7,6 +7,7 @@ import pytest
 from src.db.migrations import (AUTH_SCHEMA_VERSION, CORPUS_SCHEMA_VERSION,
                                column_exists, get_user_version, index_exists,
                                migrate_auth_database, migrate_corpus_database,
+                               rollback_migration,
                                run_migrations, table_exists, check_table_exists)
 
 
@@ -401,4 +402,355 @@ def test_check_table_exists():
         connection.execute("CREATE TABLE test_table (id INTEGER)")
         assert check_table_exists(connection, "test_table") is True
     finally:
-        connection.close()
+        connection.close()
+
+
+# ---------------------------------------------------------------------------
+# Tests for rollback_migration (Issue: automated migration rollback / step_down)
+# ---------------------------------------------------------------------------
+
+
+def _test_up_v1(connection: sqlite3.Connection) -> None:
+    connection.execute("CREATE TABLE widgets (id INTEGER PRIMARY KEY)")
+
+
+def _test_up_v2(connection: sqlite3.Connection) -> None:
+    connection.execute("CREATE TABLE sprockets (id INTEGER PRIMARY KEY)")
+
+
+def _test_down_v1(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP TABLE widgets")
+
+
+def _test_down_v2(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP TABLE sprockets")
+
+
+_TEST_UP_MIGRATIONS = {1: _test_up_v1, 2: _test_up_v2}
+_TEST_DOWN_MIGRATIONS = {1: _test_down_v1, 2: _test_down_v2}
+
+
+def test_rollback_migration_restores_schema_and_version(tmp_path):
+    """A partial rollback undoes only the versions above the target, restores
+    PRAGMA user_version, and leaves earlier schema changes intact."""
+    with connect(tmp_path / "rollback-partial.db") as connection:
+        run_migrations(connection, migrations=_TEST_UP_MIGRATIONS, target_version=2)
+        assert get_user_version(connection) == 2
+        assert table_exists(connection, "widgets")
+        assert table_exists(connection, "sprockets")
+
+        result = rollback_migration(connection, 1, down_migrations=_TEST_DOWN_MIGRATIONS)
+
+        assert result == 1
+        assert get_user_version(connection) == 1
+        assert table_exists(connection, "widgets")
+        assert not table_exists(connection, "sprockets")
+
+
+def test_rollback_migration_to_zero_undoes_everything(tmp_path):
+    """Rolling back to version 0 undoes every registered migration."""
+    with connect(tmp_path / "rollback-full.db") as connection:
+        run_migrations(connection, migrations=_TEST_UP_MIGRATIONS, target_version=2)
+
+        result = rollback_migration(connection, 0, down_migrations=_TEST_DOWN_MIGRATIONS)
+
+        assert result == 0
+        assert get_user_version(connection) == 0
+        assert not table_exists(connection, "widgets")
+        assert not table_exists(connection, "sprockets")
+
+
+def test_rollback_migration_is_noop_when_already_at_target(tmp_path):
+    """Rolling back to the current version is a no-op, not an error."""
+    with connect(tmp_path / "rollback-noop.db") as connection:
+        run_migrations(connection, migrations=_TEST_UP_MIGRATIONS, target_version=1)
+
+        result = rollback_migration(connection, 1, down_migrations=_TEST_DOWN_MIGRATIONS)
+
+        assert result == 1
+        assert get_user_version(connection) == 1
+        assert table_exists(connection, "widgets")
+
+
+def test_rollback_migration_rejects_target_newer_than_current(tmp_path):
+    """Rolling back to a version newer than the current one must raise."""
+    with connect(tmp_path / "rollback-invalid-target.db") as connection:
+        run_migrations(connection, migrations=_TEST_UP_MIGRATIONS, target_version=1)
+
+        with pytest.raises(RuntimeError):
+            rollback_migration(connection, 2, down_migrations=_TEST_DOWN_MIGRATIONS)
+
+
+def test_rollback_migration_rejects_missing_down_definition(tmp_path):
+    """Rolling back must raise if a required down-migration isn't registered."""
+    with connect(tmp_path / "rollback-missing-def.db") as connection:
+        run_migrations(connection, migrations=_TEST_UP_MIGRATIONS, target_version=2)
+
+        with pytest.raises(RuntimeError):
+            # Only version 2's down-migration is supplied; version 1's is missing.
+            rollback_migration(connection, 0, down_migrations={2: _test_down_v2})
+
+
+def test_rollback_migration_rejects_negative_target(tmp_path):
+    """A negative target_version must be rejected outright."""
+    with connect(tmp_path / "rollback-negative.db") as connection:
+        run_migrations(connection, migrations=_TEST_UP_MIGRATIONS, target_version=1)
+
+        with pytest.raises(ValueError):
+            rollback_migration(connection, -1, down_migrations=_TEST_DOWN_MIGRATIONS)
+
+
+def test_rollback_migration_is_atomic_on_failure(tmp_path):
+    """If a down-migration raises partway through, the whole rollback is
+    reverted (schema and PRAGMA user_version both stay at the pre-rollback
+    state), matching run_migrations' atomicity guarantee."""
+    def _failing_down_v2(connection: sqlite3.Connection) -> None:
+        connection.execute("DROP TABLE sprockets")
+        raise RuntimeError("simulated failure mid-rollback")
+
+    with connect(tmp_path / "rollback-atomic.db") as connection:
+        run_migrations(connection, migrations=_TEST_UP_MIGRATIONS, target_version=2)
+
+        broken_down_migrations = {1: _test_down_v1, 2: _failing_down_v2}
+
+        with pytest.raises(RuntimeError, match="simulated failure"):
+            rollback_migration(connection, 0, down_migrations=broken_down_migrations)
+
+        # Nothing should have been undone — the failed transaction rolled back.
+        assert get_user_version(connection) == 2
+        assert table_exists(connection, "sprockets")
+        assert table_exists(connection, "widgets")
+
+
+
+# ---------------------------------------------------------------------------
+# Issue #1770: Migration Duration Logging — regression tests
+# ---------------------------------------------------------------------------
+
+
+def test_issue_1770_migration_duration_logging_exact_format(tmp_path, caplog):
+    """Issue #1770: the duration log message must match the exact
+    format specified in the acceptance criteria:
+
+        logger.info("Migration [%s] executed in %.3f seconds.", ...)
+
+    This test asserts the exact message template (including the
+    square-bracket around the migration name and the 3-decimal-place
+    seconds value) is present in the log output.
+    """
+    import logging
+    import re
+
+    def migration_issue_1770_test(conn: sqlite3.Connection) -> None:
+        conn.execute("CREATE TABLE issue_1770_test (id INTEGER)")
+
+    connection = sqlite3.connect(str(tmp_path / "issue_1770_format.db"))
+    try:
+        with caplog.at_level(logging.INFO, logger="src.db.migrations.common"):
+            run_migrations(
+                connection,
+                migrations={1: migration_issue_1770_test},
+                target_version=1,
+            )
+
+        # Find the duration log record.
+        duration_records = [
+            r for r in caplog.records
+            if "executed in" in r.message and "seconds" in r.message
+        ]
+        assert len(duration_records) >= 1, (
+            f"Expected at least one 'executed in ... seconds' log record; "
+            f"found: {[r.message for r in caplog.records]}"
+        )
+
+        record = duration_records[0]
+        # Assert the exact format: "Migration [<name>] executed in <N.NNN> seconds."
+        assert re.match(
+            r"^Migration \[migration_issue_1770_test\] executed in \d+\.\d{3} seconds\.$",
+            record.message,
+        ), f"Log message does not match the required format: {record.message!r}"
+
+        # Assert the logger name is correct.
+        assert record.name == "src.db.migrations.common"
+        assert record.levelno == logging.INFO
+    finally:
+        connection.close()
+
+
+def test_issue_1770_migration_duration_logging_multiple_migrations(tmp_path, caplog):
+    """Issue #1770: each migration in a multi-migration run must
+    produce its own duration log line, not just the first or last.
+    """
+    import logging
+
+    def mig_v1(conn: sqlite3.Connection) -> None:
+        conn.execute("CREATE TABLE issue_1770_a (id INTEGER)")
+
+    def mig_v2(conn: sqlite3.Connection) -> None:
+        conn.execute("CREATE TABLE issue_1770_b (id INTEGER)")
+
+    def mig_v3(conn: sqlite3.Connection) -> None:
+        conn.execute("CREATE TABLE issue_1770_c (id INTEGER)")
+
+    connection = sqlite3.connect(str(tmp_path / "issue_1770_multi.db"))
+    try:
+        with caplog.at_level(logging.INFO, logger="src.db.migrations.common"):
+            run_migrations(
+                connection,
+                migrations={1: mig_v1, 2: mig_v2, 3: mig_v3},
+                target_version=3,
+            )
+
+        duration_records = [
+            r for r in caplog.records
+            if "executed in" in r.message and "Migration [" in r.message
+        ]
+        assert len(duration_records) == 3, (
+            f"Expected 3 duration log records (one per migration), "
+            f"got {len(duration_records)}: {[r.message for r in duration_records]}"
+        )
+
+        # Verify each migration name appears.
+        names_in_logs = [r.message for r in duration_records]
+        assert any("mig_v1" in n for n in names_in_logs)
+        assert any("mig_v2" in n for n in names_in_logs)
+        assert any("mig_v3" in n for n in names_in_logs)
+    finally:
+        connection.close()
+
+
+def test_issue_1770_migration_duration_uses_perf_counter(tmp_path):
+    """Issue #1770: the timing must use ``time.perf_counter()`` (not
+    ``time.time()``) for monotonic high-resolution measurement.
+
+    This test verifies the function's source code contains the
+    ``perf_counter`` call, guarding against a refactor that switches
+    to the less-precise ``time.time()``.
+    """
+    import inspect
+    from src.db.migrations.common import run_migrations
+
+    source = inspect.getsource(run_migrations)
+    assert "perf_counter" in source, (
+        "run_migrations must use time.perf_counter() for high-resolution "
+        "duration measurement, per issue #1770."
+    )
+    assert "time.time()" not in source, (
+        "run_migrations must NOT use time.time() for duration measurement "
+        "(it is not monotonic); use time.perf_counter() instead."
+    )
+
+
+def test_issue_1770_migration_duration_logs_migration_name_attribute(tmp_path, caplog):
+    """Issue #1770: the migration name in the log must be the
+    function's ``__name__`` attribute, falling back to ``v<version>``
+    when the attribute is missing (e.g., for lambdas).
+    """
+    import logging
+
+    def migration_named_explicitly(conn: sqlite3.Connection) -> None:
+        conn.execute("CREATE TABLE issue_1770_named (id INTEGER)")
+
+    connection = sqlite3.connect(str(tmp_path / "issue_1770_name.db"))
+    try:
+        with caplog.at_level(logging.INFO, logger="src.db.migrations.common"):
+            run_migrations(
+                connection,
+                migrations={1: migration_named_explicitly},
+                target_version=1,
+            )
+
+        # The migration name should be the function's __name__.
+        assert any(
+            "migration_named_explicitly" in r.message
+            for r in caplog.records
+            if "executed in" in r.message
+        ), (
+            "The log message must contain the migration function's __name__; "
+            f"records: {[r.message for r in caplog.records]}"
+        )
+    finally:
+        connection.close()
+
+
+def test_issue_1770_migration_duration_logs_fallback_name_for_lambda(tmp_path, caplog):
+    """Issue #1770: when the migration function has no ``__name__``
+    (e.g., a lambda), the log must fall back to ``v<version>``.
+    """
+    import logging
+
+    connection = sqlite3.connect(str(tmp_path / "issue_1770_lambda.db"))
+    try:
+        with caplog.at_level(logging.INFO, logger="src.db.migrations.common"):
+            run_migrations(
+                connection,
+                migrations={1: lambda conn: conn.execute("CREATE TABLE issue_1770_lambda (id INTEGER)")},
+                target_version=1,
+            )
+
+        # A lambda's __name__ is '<lambda>', so the getattr fallback
+        # will actually return '<lambda>'. Either way, the log should
+        # contain the word 'executed in'.
+        duration_records = [
+            r for r in caplog.records
+            if "executed in" in r.message
+        ]
+        assert len(duration_records) >= 1
+    finally:
+        connection.close()
+
+
+def test_issue_1770_rollback_duration_logging(tmp_path, caplog):
+    """Issue #1770: rollback migrations must also log their execution
+    duration using the same format, with the 'Rollback migration'
+    prefix.
+
+    The rollback_migration function already has this logging (lines
+    276-282), but no test covers it. This test locks it in.
+    """
+    import logging
+    import re
+
+    def up_v1(conn: sqlite3.Connection) -> None:
+        conn.execute("CREATE TABLE issue_1770_rb (id INTEGER)")
+
+    def down_v1(conn: sqlite3.Connection) -> None:
+        conn.execute("DROP TABLE issue_1770_rb")
+
+    connection = sqlite3.connect(str(tmp_path / "issue_1770_rb.db"))
+    try:
+        # First, apply the migration.
+        run_migrations(
+            connection,
+            migrations={1: up_v1},
+            target_version=1,
+        )
+
+        caplog.clear()
+
+        # Now roll back.
+        with caplog.at_level(logging.INFO, logger="src.db.migrations.common"):
+            rollback_migration(
+                connection,
+                target_version=0,
+                down_migrations={1: down_v1},
+            )
+
+        rollback_duration_records = [
+            r for r in caplog.records
+            if "Rollback migration" in r.message and "executed in" in r.message
+        ]
+        assert len(rollback_duration_records) >= 1, (
+            f"Expected a 'Rollback migration [...] executed in ... seconds' log; "
+            f"records: {[r.message for r in caplog.records]}"
+        )
+
+        record = rollback_duration_records[0]
+        assert re.match(
+            r"^Rollback migration \[down_v1\] executed in \d+\.\d{3} seconds\.$",
+            record.message,
+        ), f"Rollback log does not match required format: {record.message!r}"
+    finally:
+        connection.close()
+
+

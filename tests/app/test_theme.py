@@ -14,9 +14,28 @@ from app.theme import (
 )
 from unittest.mock import patch
 
+
+from app.theme import get_colors, inject_css, sanitize_hex_color
+def test_render_notification_badge_with_negative_count():
+    from app.theme import render_notification_badge
+
 from app.theme import get_colors, inject_css, sanitize_hex_color, get_chart_colors
 
 
+    assert render_notification_badge(-1) == ""
+def test_render_notification_badge_with_count():
+    from app.theme import render_notification_badge
+
+    badge = render_notification_badge(5)
+
+    assert "5" in badge
+    assert 'class="notification-badge"' in badge
+
+
+def test_render_notification_badge_with_zero_count():
+    from app.theme import render_notification_badge
+
+    assert render_notification_badge(0) == ""
 def test_get_colors_returns_valid_theme_colors():
     colors = get_colors()
 
@@ -426,6 +445,16 @@ def test_inject_css_contains_high_severity_row_styling():
     assert ".high-severity-row" in style_html
     assert "border-left: 4px solid #ef4444" in style_html
     assert "background-color: rgba(239, 68, 68, 0.05)" in style_html
+
+
+def test_inject_css_contains_low_confidence_card_styling():
+    """inject_css() must output CSS rules for .low-confidence-card (Issue #1726)."""
+    with patch("app.theme.st.markdown") as mock_md:
+        inject_css()
+
+    style_html = mock_md.call_args_list[0].args[0]
+    assert ".low-confidence-card" in style_html
+    assert "border-left: 4px solid #f59e0b" in style_html
 
 
 def test_active_tab_border_style_default():

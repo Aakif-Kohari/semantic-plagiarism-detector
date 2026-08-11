@@ -360,6 +360,15 @@ def normalize_unicode_spaces(text: str) -> str:
     return text.strip()
 
 
+
+    return text
+def sanitize_unicode_spaces(text: str) -> str:
+    """Replace special Unicode spaces with standard ASCII spaces."""
+    if not text:
+        return text
+
+    return text.replace("\u00A0", " ").replace("\u2009", " ")
+
 def check_batch_rate_limit(file_count: int, session_id: Optional[str] = None) -> None:
     """
     Validates batch file collection size against session rate limits.
@@ -1966,17 +1975,3 @@ def extract_texts(
         results[name] = raw_texts.get(name, "")
 
     return results
-
-+--- a/src/core/document_parser.py
-+@@ -20,6 +20,7 @@
-+ import re
-+ 
-+ class DocumentParser:
-++    def strip_digits(self, text):
-++        return re.sub(r'\d+', '', text)
-+ 
-+     def parse_document(self, content):
-+         # Example parsing logic
-+-        parsed_content = content.strip()
-++        parsed_content = self.strip_digits(content).strip()
-+         return parsed_content

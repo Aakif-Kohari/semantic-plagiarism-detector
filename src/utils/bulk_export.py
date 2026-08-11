@@ -58,6 +58,26 @@ _MULTIPLE_UNDERSCORES_PATTERN = re.compile(r"_{2,}")
 _LEADING_TRAILING_PATTERN = re.compile(r"^[\s_]+|[\s_]+$")
 
 
+def sanitize_csv_cell_value(val: Any) -> str:
+    """Sanitize a CSV cell value to prevent CSV formula injection (Issue #1744).
+
+    Prepends a single quote `'` if the string representation of val begins with
+    '=', '+', '-', or '@'.
+
+    Args:
+        val: Any cell value (string, numeric, None, etc.)
+
+    Returns:
+        Sanitized string representation safe from formula injection.
+    """
+    if val is None:
+        return ""
+    str_val = str(val)
+    if str_val and str_val[0] in ("=", "+", "-", "@"):
+        return f"'{str_val}"
+    return str_val
+
+
 def normalize_csv_headers(headers: list[str]) -> list[str]:
     """Normalize CSV column headers to a standardized, clean format.
 
@@ -220,13 +240,13 @@ def export_incidents_csv_stream(
 
         writer.writerow(
             {
-                "Incident ID": incident.get("incident_id", ""),
-                "Doc A": incident.get("document_a", ""),
-                "Doc B": incident.get("document_b", ""),
-                "Similarity": similarity_str,
-                "Severity": incident.get("severity_rank", ""),
-                "Status": incident.get("review_status", ""),
-                "Date": incident.get("date_flagged", ""),
+                "Incident ID": sanitize_csv_cell_value(incident.get("incident_id", "")),
+                "Doc A": sanitize_csv_cell_value(incident.get("document_a", "")),
+                "Doc B": sanitize_csv_cell_value(incident.get("document_b", "")),
+                "Similarity": sanitize_csv_cell_value(similarity_str),
+                "Severity": sanitize_csv_cell_value(incident.get("severity_rank", "")),
+                "Status": sanitize_csv_cell_value(incident.get("review_status", "")),
+                "Date": sanitize_csv_cell_value(incident.get("date_flagged", "")),
             }
         )
 
@@ -316,13 +336,13 @@ def stream_incidents_csv_chunks(
 
             writer.writerow(
                 {
-                    "Incident ID": incident.get("incident_id", ""),
-                    "Doc A": incident.get("document_a", ""),
-                    "Doc B": incident.get("document_b", ""),
-                    "Similarity": similarity_str,
-                    "Severity": incident.get("severity_rank", ""),
-                    "Status": incident.get("review_status", ""),
-                    "Date": incident.get("date_flagged", ""),
+                    "Incident ID": sanitize_csv_cell_value(incident.get("incident_id", "")),
+                    "Doc A": sanitize_csv_cell_value(incident.get("document_a", "")),
+                    "Doc B": sanitize_csv_cell_value(incident.get("document_b", "")),
+                    "Similarity": sanitize_csv_cell_value(similarity_str),
+                    "Severity": sanitize_csv_cell_value(incident.get("severity_rank", "")),
+                    "Status": sanitize_csv_cell_value(incident.get("review_status", "")),
+                    "Date": sanitize_csv_cell_value(incident.get("date_flagged", "")),
                 }
             )
 

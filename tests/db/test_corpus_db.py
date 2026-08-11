@@ -18,6 +18,7 @@ from src.db.corpus_db import (
     get_document_count_by_user,
     get_document_word_counts,
     get_documents_by_class,
+    get_documents_by_extension,
     get_total_document_count,
     get_deleted_documents_count,
     get_unique_class_sections,
@@ -909,5 +910,43 @@ def test_soft_delete_and_restore_document():
     # Verify visible in queries again
     active_docs_after_restore = get_all_documents(include_deleted=False)
     assert any(doc["filename"] == filename for doc in active_docs_after_restore)
+
+
+def test_get_documents_by_extension(mock_db):
+    """Verify get_documents_by_extension correctly filters and returns matching document dictionaries."""
+    # 1. Clear database
+    clear_all_data()
+
+    # 2. Insert documents with different extensions
+    add_document("doc1.pdf", "hash1", student_name="Alice")
+    add_document("doc2.docx", "hash2", student_name="Bob")
+    add_document("doc3.pdf", "hash3", student_name="Charlie")
+    add_document("doc4.txt", "hash4", student_name="David")
+    
+    # 3. Soft-delete one document to test that it is excluded (is_deleted = 0)
+    soft_delete_document("doc3.pdf")
+
+    # 4. Search by extension '.pdf' (leading dot)
+    pdf_docs_dot = get_documents_by_extension(".pdf")
+    # Should only return doc1.pdf because doc3.pdf is soft-deleted
+    assert len(pdf_docs_dot) == 1
+    assert pdf_docs_dot[0]["filename"] == "doc1.pdf"
+    assert pdf_docs_dot[0]["student_name"] == "Alice"
+    assert isinstance(pdf_docs_dot[0], dict)
+
+    # 5. Search by extension 'pdf' (no leading dot)
+    pdf_docs = get_documents_by_extension("pdf")
+    assert len(pdf_docs) == 1
+    assert pdf_docs[0]["filename"] == "doc1.pdf"
+
+    # 6. Search by extension 'docx'
+    docx_docs = get_documents_by_extension("docx")
+    assert len(docx_docs) == 1
+    assert docx_docs[0]["filename"] == "doc2.docx"
+    assert docx_docs[0]["student_name"] == "Bob"
+
+    # 7. Search by extension 'unknown'
+    no_docs = get_documents_by_extension("xyz")
+    assert len(no_docs) == 0
 
 

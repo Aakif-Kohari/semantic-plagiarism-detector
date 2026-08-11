@@ -13,6 +13,28 @@ Provides:
 """
 # -*- coding: utf-8 -*-
 
+.notification-badge {
+    display: inline-block;
+    background-color: #DC2626;
+    color: #FFFFFF;
+    border-radius: 999px;
+    padding: 2px 8px;
+    margin-left: 6px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+from app.css_constants import (
+    BADGE,
+    EMPTY_STATE,
+    EMPTY_ICON,
+    EMPTY_TITLE,
+    EMPTY_DESC,
+    SIDEBAR_USER_BADGE,
+    AVATAR,
+    SIM_PILL,
+)
+
 
 """
 theme.py
@@ -653,12 +675,31 @@ def inject_css() -> None:
             border-left: 4px solid var(--success) !important;
         }}
 
+        /* ── Low-confidence detection card amber accent border (Issue #1726) ─ */
+
+        .low-confidence-card {{
+            border-left: 4px solid #f59e0b !important;
+        }}
+
         /* ── High severity row accent border (Issue #1569) ───────────── */
 
-        .high-severity-row {{
+        .high-severity-row {
             border-left: 4px solid #ef4444 !important;
             background-color: rgba(239, 68, 68, 0.05) !important;
-        }}
+        }
+
+        /* ── Soft-deleted document row styling (Issue #1732) ─────────── */
+
+        .trash-document-row {
+            opacity: 0.6 !important;
+            color: #6b7280 !important;
+        }
+
+        .trash-document-row .doc-title,
+        .trash-document-row title,
+        .trash-document-row .document-title {
+            text-decoration: line-through !important;
+        }
 
         /* ── Warning list container animation (#369) ─────────────────
            The threshold slider re-filters the warning list on every
@@ -1352,7 +1393,19 @@ def badge_html(tier: str, label: str = None) -> str:
         f"{display_label}</span>"
     )
 
+def render_notification_badge(count: int) -> str:
+    """Render a red notification badge for unresolved incidents.
 
+    Returns an empty string when there are no unresolved incidents.
+    """
+    if count <= 0:
+        return ""
+
+    return (
+        '<span class="notification-badge">'
+        f"{count}"
+        "</span>"
+    )
 # ── UI helpers ────────────────────────────────────────────────────────────────
 def format_similarity_html(
     score: float,
