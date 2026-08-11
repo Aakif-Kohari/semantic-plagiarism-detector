@@ -33,6 +33,7 @@ from .similarity import (
     flag_plagiarism,
     manhattan_similarity,
 )
+from .pipeline import ChunkRecord as PipelineChunkRecord, run_extraction_pipeline, run_pipeline
 from .tag_manager import TagManager, sanitize_tag_name
 from .text_chunking import chunk_by_sentences, chunk_document, chunk_documents
 from .translator import translate_text
@@ -77,4 +78,7 @@ __all__ = [
     "sanitize_zero_width_characters",
     "TagManager",
     "sanitize_tag_name",
+    "run_pipeline",
+    "run_extraction_pipeline",
 ]
+
