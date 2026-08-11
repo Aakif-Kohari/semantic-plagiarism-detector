@@ -13,6 +13,28 @@ Provides:
 """
 # -*- coding: utf-8 -*-
 
+.notification-badge {
+    display: inline-block;
+    background-color: #DC2626;
+    color: #FFFFFF;
+    border-radius: 999px;
+    padding: 2px 8px;
+    margin-left: 6px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+from app.css_constants import (
+    BADGE,
+    EMPTY_STATE,
+    EMPTY_ICON,
+    EMPTY_TITLE,
+    EMPTY_DESC,
+    SIDEBAR_USER_BADGE,
+    AVATAR,
+    SIM_PILL,
+)
+
 
 """
 theme.py
@@ -1371,7 +1393,19 @@ def badge_html(tier: str, label: str = None) -> str:
         f"{display_label}</span>"
     )
 
+def render_notification_badge(count: int) -> str:
+    """Render a red notification badge for unresolved incidents.
 
+    Returns an empty string when there are no unresolved incidents.
+    """
+    if count <= 0:
+        return ""
+
+    return (
+        '<span class="notification-badge">'
+        f"{count}"
+        "</span>"
+    )
 # ── UI helpers ────────────────────────────────────────────────────────────────
 def format_similarity_html(
     score: float,
