@@ -8,6 +8,10 @@ ensuring secure and accurate file routing before heavy extraction logic
 is executed.
 
 Supports decrypted and password-protected PDF parsing using PyMuPDF (fitz),
+along with file categorization and validation helpers.
+"""
+
+from typing import List, Optional, Tuple
 along with file categorization, validation helpers, and PDF metadata extraction.
 
 Recent Additions (Issue #1570):
@@ -31,6 +35,7 @@ def truncate_filename(name: str, max_len: int = 35) -> str:
         return name
     return name[: max_len - 3] + "..."
 
+import fitz  # PyMuPDF
 
 # ── Magic Byte Signatures (Issue #1570) ──────────────────────────────────────
 
@@ -198,10 +203,63 @@ def get_file_size_formatted(num_bytes: int) -> str:
                 return f"{int(size)} {unit}"
             return f"{size:.2f} {unit}"
         size /= 1024
-
+        
     return f"{size:.2f} {units[-1]}"
 
 
+
+
+def validate_pdf_page_count(
+    file_bytes: bytes,
+    max_pages: int = 500,
+) -> int:
+    """Validate that a PDF does not exceed the configured page limit.
+
+    The document is opened only to inspect its page count; no page text is
+    extracted. The PyMuPDF document is always closed before returning or
+    raising.
+
+    Args:
+        file_bytes: Raw PDF bytes.
+        max_pages: Maximum allowed number of pages. Defaults to 500.
+
+    Returns:
+        The PDF page count when it is within the configured limit.
+
+    Raises:
+        TypeError: If ``file_bytes`` is not bytes-like or ``max_pages`` is not
+            an integer.
+        ValueError: If ``max_pages`` is less than one or the PDF exceeds the
+            configured page limit.
+        fitz.FileDataError: If the supplied bytes are not a valid PDF.
+    """
+    if not isinstance(file_bytes, (bytes, bytearray, memoryview)):
+        raise TypeError("file_bytes must be bytes-like.")
+
+    if isinstance(max_pages, bool) or not isinstance(max_pages, int):
+        raise TypeError("max_pages must be an integer.")
+
+    if max_pages < 1:
+        raise ValueError("max_pages must be at least 1.")
+
+    doc = fitz.open(
+        stream=bytes(file_bytes),
+        filetype="pdf",
+    )
+    try:
+        page_count = doc.page_count
+    finally:
+        doc.close()
+
+    if page_count > max_pages:
+        raise ValueError(
+            "PDF exceeds maximum allowed page limit "
+            f"({max_pages} pages)"
+        )
+
+    return page_count
+
+def extract_text_from_pdf(file_bytes: bytes, password: Optional[str] = None) -> Tuple[str, bool]:
 def get_file_size_formatted_short(num_bytes: int) -> str:
     """
     Convert a file size in bytes to a compact human-readable string.
@@ -262,6 +320,8 @@ def extract_text_from_pdf(
     Raises:
         EncryptedPDFError: If the PDF is encrypted and no password (or an incorrect password) is provided.
     """
+    validate_pdf_page_count(file_bytes)
+
     doc = fitz.open(stream=file_bytes, filetype="pdf")
     is_protected = doc.is_encrypted or doc.needs_pass
 
@@ -321,8 +381,8 @@ def extract_pdf_metadata(file_bytes: bytes) -> dict[str, Any]:
 def get_file_mime_category(filename: str) -> str:
     """
     Categorize an uploaded file into a high-level MIME group based on its extension.
-
-    This helper simplifies routing and validation logic by grouping specific
+    
+    This helper simplifies routing and validation logic by grouping specific 
     file extensions into broader, semantic categories.
 
     Args:
@@ -366,7 +426,7 @@ def get_file_mime_category(filename: str) -> str:
 def get_supported_mime_categories() -> List[str]:
     """
     Retrieve a list of all supported high-level MIME categories.
-
+    
     Returns:
         List[str]: A list of unique category names.
     """
@@ -378,11 +438,11 @@ def is_extension_supported(
 ) -> bool:
     """
     Check if a file's extension belongs to an allowed list of MIME categories.
-
+    
     Args:
         filename: The name of the file to check.
         allowed_categories: List of allowed categories. Defaults to all known categories except 'unknown'.
-
+        
     Returns:
         bool: True if the file's category is in the allowed list, False otherwise.
     """
