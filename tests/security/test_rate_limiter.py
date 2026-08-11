@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 import redis
@@ -123,3 +123,20 @@ def test_header_format_compliance(rate_limiter, mock_redis):
     # Verify specific header names match HTTP standards
     expected_headers = {"X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "Retry-After"}
     assert set(headers.keys()) == expected_headers
+
+
+def test_rate_limit_header_exact_values(rate_limiter, mock_redis):
+    """Test that returned rate-limiting headers contain the correct exact calculated values."""
+    mock_redis.get.return_value = "1"
+    
+    with patch('time.time') as mock_time:
+        mock_time.return_value = 1600000000.0
+        
+        is_allowed, headers = rate_limiter.check_rate_limit("192.168.1.2")
+        
+        assert is_allowed is True
+        assert headers["X-RateLimit-Limit"] == "5"
+        assert headers["X-RateLimit-Remaining"] == "3"
+        assert headers["X-RateLimit-Reset"] == "1600000060"
+        assert headers["Retry-After"] == "60"
+
