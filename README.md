@@ -65,7 +65,7 @@ similarity, and **FAISS vector search**.
               └────────┘ └────────┘ └────────┘ └───────┘ └──────┘ └───────┘
 ```
 
->For a detailed explanation of the system components and data flow, see the [Architecture Guide](docs/ARCHITECTURE.md).
+> For a detailed explanation of the system components and data flow, see the [Architecture Guide](docs/ARCHITECTURE.md). To understand domain-specific terms (FAISS, Cosine Similarity, SSRF, WAL, TTR, etc.), reference the [Glossary](docs/GLOSSARY.md).
 
 ### Module Responsibilities
 

@@ -793,7 +793,11 @@ def test_normalize_unicode_spaces():
 
     assert normalized == "Hello World! Python,Testing."
 
+def test_sanitize_unicode_spaces():
+    from src.core.document_parser import sanitize_unicode_spaces
 
+    text = "Hello\u00A0World\u2009Python"
+    assert sanitize_unicode_spaces(text) == "Hello World Python"
 class TestCleanWhitespaceOption:
     """Unit tests for clean_whitespace option in extract_text."""
 

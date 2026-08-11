@@ -58,6 +58,7 @@ from src.core.similarity import (
 from src.core.text_chunking import chunk_document
 from src.db.auth import get_user_role
 from src.db.corpus_db import _connect, clear_all_data, init_corpus_db, get_document_by_hash
+from src.security.mime_validator import is_executable_upload
 from src.utils.file_streaming import stream_upload_file_to_disk
 from src.utils.hash_util import calculate_file_sha256
 from src.utils.redis_cache import CacheKeyPrefix, get_cache
@@ -236,7 +237,7 @@ app.add_middleware(SlowAPIMiddleware)
 def validate_content_type(request: Request) -> None:
     """Ensure the request is multipart/form-data before parsing."""
     content_type = request.headers.get("content-type", "")
-    if "multipart/form-data" not in content_type:
+    if "multipart/form-data" not in content_type.lower():
         raise HTTPException(
             status_code=415,
             detail="Unsupported Media Type: Request must be multipart/form-data",
@@ -675,6 +676,19 @@ async def scan_document(
         )
 
     filename = file.filename
+
+    # Reject executable/script uploads immediately, before any streaming,
+    # hashing, or text-extraction work — checks both the file extension
+    # (.exe, .sh, .bat, .dll, ...) and leading magic bytes (PE header "MZ",
+    # shell shebang "#!/bin/sh") so a renamed executable is still caught.
+    file_head = await file.read(64)
+    await file.seek(0)
+    if is_executable_upload(file_head, filename):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Unsupported Media Type: executable and script files are not allowed.",
+        )
+
     temp_path = await stream_upload_file_to_disk(file)
 
     try:

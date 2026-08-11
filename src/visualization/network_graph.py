@@ -28,6 +28,7 @@ DEFAULT_TAG_COLORS = [
     "#14B8A6",  # Teal
 ]
 NETWORK_GRAPH_CONFIG = {
+    "scrollZoom": True,
     "toImageButtonOptions": {
         "format": "png",
         "filename": "plagiarism_network",
@@ -96,6 +97,7 @@ def build_network_data(
     iterations: int = 50,
     repulsion: float = 1.0,
     max_label_len: int = 15,
+    max_nodes: int = 50,
 ) -> dict:
     """Processes similarity matrix data, constructs NetworkX graph layout with force-directed physics, and formats traces.
 
@@ -112,11 +114,17 @@ def build_network_data(
         iterations: Number of force-directed spring layout simulation iterations (default 50).
         repulsion: Repulsion force multiplier factor for node positioning.
         max_label_len: Maximum length for node label text before truncation.
+        max_nodes: Keep at most this many highest-degree nodes when the graph is large.
 
     Returns:
         Dictionary containing shapes, edge_hover_trace, node_trace, graph, pos coordinates,
         tag_color_map, and document_tags.
     """
+    if isinstance(max_nodes, bool) or not isinstance(max_nodes, int):
+        raise TypeError("max_nodes must be an integer.")
+    if max_nodes < 1:
+        raise ValueError("max_nodes must be at least 1.")
+
     G = nx.Graph()
 
     # Add all documents as nodes
@@ -142,6 +150,43 @@ def build_network_data(
         G.remove_nodes_from(
             [node for node, degree in dict(G.degree()).items() if degree == 0]
         )
+
+    # Retain only the highest-degree documents when the graph exceeds the
+    # configured limit. Input order provides deterministic tie-breaking.
+    visible_node_count = len(G)
+    hidden_node_count = max(0, visible_node_count - max_nodes)
+    if hidden_node_count:
+        original_order = {
+            name: index for index, name in enumerate(doc_names)
+        }
+        ranked_nodes = sorted(
+            G.nodes(),
+            key=lambda node: (
+                -G.degree(node),
+                original_order.get(node, len(original_order)),
+            ),
+        )
+        retained_nodes = set(ranked_nodes[:max_nodes])
+        G.remove_nodes_from(
+            [
+                node
+                for node in list(G.nodes())
+                if node not in retained_nodes
+            ]
+        )
+        edge_similarities = {
+            edge: score
+            for edge, score in edge_similarities.items()
+            if edge[0] in retained_nodes and edge[1] in retained_nodes
+        }
+    # Keep only the top max_nodes highest-degree documents when the graph is large
+    hidden_nodes = 0
+    if max_nodes and len(G) > max_nodes:
+        ranked = sorted(G.degree(), key=lambda item: item[1], reverse=True)
+        keep = {node for node, _ in ranked[:max_nodes]}
+        drop = [node for node in list(G.nodes()) if node not in keep]
+        hidden_nodes = len(drop)
+        G.remove_nodes_from(drop)
 
     # Compute force-directed layout coordinates with physics customization
     num_nodes = len(G.nodes())
@@ -298,7 +343,6 @@ def build_network_data(
 
     # ── Plagiarism Cluster Detection (Issue #1675) ───────────────────────────────
     # Use connected components to identify collusion rings
-
     connected_components = list(nx.connected_components(G))
     cluster_map = {}
     for cluster_id, component in enumerate(connected_components):
@@ -429,6 +473,7 @@ def build_network_data(
         "tag_color_map": tag_color_map,
         "document_tags": document_tags,
         "cluster_map": cluster_map,
+        "hidden_nodes": hidden_nodes,
     }
 
 
@@ -462,6 +507,7 @@ def render_network_plotly(
     shapes = network_data.get("shapes", [])
     edge_hover_trace = network_data.get("edge_hover_trace")
     node_trace = network_data.get("node_trace")
+    hidden_node_count = int(network_data.get("hidden_node_count", 0) or 0)
 
     bg_color = theme_colors.get("background", "#FFFFFF") if theme_colors else "#FFFFFF"
 
@@ -475,6 +521,23 @@ def render_network_plotly(
         if hasattr(node_trace, "textfont") and node_trace.textfont:
             node_trace.textfont.size = int(base_node_text_size * scale)
         traces.append(node_trace)
+
+    hidden_nodes = network_data.get("hidden_nodes", 0)
+    annotations = []
+    if hidden_nodes:
+        annotations.append(
+            dict(
+                text=f"{hidden_nodes} nodes hidden",
+                showarrow=False,
+                xref="paper",
+                yref="paper",
+                x=0.5,
+                y=-0.06,
+                xanchor="center",
+                yanchor="top",
+                font=dict(size=12, color=ink_color),
+            )
+        )
 
     fig = go.Figure(
         data=traces,
@@ -491,12 +554,13 @@ def render_network_plotly(
             autosize=True,
             width=None,
             margin=dict(
-                b=40,
+                b=55 if hidden_nodes else 40,
                 l=40,
                 r=40,
                 t=int(50 * scale),
             ),
             shapes=shapes,
+            annotations=annotations,
             xaxis=dict(
                 showgrid=False,
                 zeroline=False,
@@ -516,6 +580,33 @@ def render_network_plotly(
         ),
     )
 
+    if hidden_node_count > 0:
+        fig.add_annotation(
+            text=(
+                f"{hidden_node_count} node"
+                f"{'s' if hidden_node_count != 1 else ''} hidden "
+                "to keep the network readable."
+            ),
+            x=0.5,
+            y=-0.08,
+            xref="paper",
+            yref="paper",
+            showarrow=False,
+            xanchor="center",
+            yanchor="top",
+            font=dict(
+                size=max(10, int(11 * scale)),
+                color=ink_color,
+            ),
+        )
+        fig.update_layout(
+            margin=dict(
+                b=max(70, int(70 * scale)),
+                l=40,
+                r=40,
+                t=int(50 * scale),
+            )
+        )
     return fig
 
 
@@ -572,6 +663,7 @@ def plot_similarity_network(
     iterations: int = 50,
     repulsion: float = 1.0,
     max_label_len: int = 15,
+    max_nodes: int = 50,
 ) -> go.Figure:
     """Builds a NetworkX graph from the similarity matrix and returns an interactive Plotly figure."""
     network_data = build_network_data(
@@ -588,6 +680,7 @@ def plot_similarity_network(
         iterations=iterations,
         repulsion=repulsion,
         max_label_len=max_label_len,
+        max_nodes=max_nodes,
     )
     return render_network_plotly(
         network_data=network_data,
@@ -609,6 +702,7 @@ def plot_plagiarism_network_graph(
     iterations: int = 50,
     repulsion: float = 1.0,
     max_label_len: int = 15,
+    max_nodes: int = 50,
 ) -> go.Figure:
     """Renders an interactive force-directed plagiarism network graph with custom physics controls and label truncation."""
     return plot_similarity_network(
@@ -624,6 +718,7 @@ def plot_plagiarism_network_graph(
         iterations=iterations,
         repulsion=repulsion,
         max_label_len=max_label_len,
+        max_nodes=max_nodes,
     )
 
 
