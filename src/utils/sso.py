@@ -11,6 +11,8 @@ load_dotenv()
 def get_google_auth_url() -> tuple[str, str]:
     """Return the Google OAuth authorization URL and state."""
     client_id = os.getenv("GOOGLE_CLIENT_ID")
+    if not client_id:
+        raise ValueError("GOOGLE_CLIENT_ID environment variable is not configured")
     redirect_uri = os.getenv("APP_BASE_URL", "http://localhost:8501")
     state = secrets.token_urlsafe(16)
 
@@ -28,7 +30,11 @@ def get_google_auth_url() -> tuple[str, str]:
 def exchange_google_code(code: str) -> dict | None:
     """Exchange code for access token and fetch user info."""
     client_id = os.getenv("GOOGLE_CLIENT_ID")
+    if not client_id:
+        raise ValueError("GOOGLE_CLIENT_ID environment variable is not configured")
     client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+    if not client_secret:
+        raise ValueError("GOOGLE_CLIENT_SECRET environment variable is not configured")
     redirect_uri = os.getenv("APP_BASE_URL", "http://localhost:8501")
 
     token_resp = requests.post(
@@ -61,6 +67,8 @@ def exchange_google_code(code: str) -> dict | None:
 def get_github_auth_url() -> tuple[str, str]:
     """Return the GitHub OAuth authorization URL and state."""
     client_id = os.getenv("GITHUB_CLIENT_ID")
+    if not client_id:
+        raise ValueError("GITHUB_CLIENT_ID environment variable is not configured")
     redirect_uri = os.getenv("APP_BASE_URL", "http://localhost:8501")
     state = secrets.token_urlsafe(16)
 
@@ -77,7 +85,11 @@ def get_github_auth_url() -> tuple[str, str]:
 def exchange_github_code(code: str) -> dict | None:
     """Exchange code for access token and fetch user info."""
     client_id = os.getenv("GITHUB_CLIENT_ID")
+    if not client_id:
+        raise ValueError("GITHUB_CLIENT_ID environment variable is not configured")
     client_secret = os.getenv("GITHUB_CLIENT_SECRET")
+    if not client_secret:
+        raise ValueError("GITHUB_CLIENT_SECRET environment variable is not configured")
     redirect_uri = os.getenv("APP_BASE_URL", "http://localhost:8501")
 
     token_resp = requests.post(
