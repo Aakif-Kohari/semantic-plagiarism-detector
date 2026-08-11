@@ -1,23 +1,43 @@
 """src/api/app.py - FastAPI REST API for LMS integration."""
 
+import logging
 import os
-from typing import Dict
+import time
+from datetime import datetime, timezone
 
-from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
+from fastapi import Depends, FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBearer
-import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
+from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from src.api.dependencies import (
+    custom_rate_limit_exceeded_handler,
+    get_corpus_documents_with_embeddings,
+    limiter,
+    validate_content_type,
+)
+from src.api.middleware import get_current_user, verify_bearer_token
+from src.api.routers import (
+    admin_router,
+    analysis_router,
+    auth_router,
+    corpus_router,
+)
+
+# Re-exports for backward compatibility with existing tests and scripts
+from src.api.routers.admin import START_TIME, _HEALTHZ_DB_PATHS
+from src.api.routers.analysis import scan_jobs, total_scans
+from src.api.routers.corpus import INDEX_PATH
 from src.core.document_parser import extract_text
 from src.core.embedding_model import embed_chunks, get_document_embedding
-from src.core.similarity import (
-    PLAGIARISM_THRESHOLD,
-    chunk_max_similarity,
-    find_most_similar_chunks,
-)
 from src.core.text_chunking import chunk_document
-from src.db.corpus_db import _connect, init_corpus_db
+from src.db.corpus_db import get_document_by_hash
+from src.utils.hash_util import calculate_file_sha256
+
+logger = logging.getLogger(__name__)
 
 # ── API Initialization ────────────────────────────────────────────────────────
 
@@ -25,221 +45,132 @@ app = FastAPI(
     title="Semantic Plagiarism Detector API",
     description="REST API for programmatically checking documents for semantic plagiarism.",
     version="1.0.0",
+    contact={
+        "name": "API Support",
+        "url": "http://example.com/support",
+        "email": "support@example.com",
+    },
+    openapi_tags=[
+        {"name": "Authentication", "description": "Authenticate user"},
+        {"name": "Plagiarism Detection", "description": "Scanning operations"},
+        {"name": "System Administration", "description": "Admin operations"},
+        {"name": "Health", "description": "Health checks"},
+    ],
+    dependencies=[Depends(verify_bearer_token)],
 )
 
 # Enable CORS for external LMS frontends
+origins = os.getenv("CORS_ALLOWED_ORIGINS", "*")
+if origins.strip() == "*":
+    allowed_origins = ["*"]
+else:
+    allowed_origins = [
+        origin.strip() for origin in origins.split(",") if origin.strip()
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    max_age=3600,
 )
 
-# ── Bearer Token Authentication ────────────────────────────────────────────────
-
-security = HTTPBearer()
-
-
-def get_expected_bearer_token() -> str:
-    """Retrieve the API Bearer Token from environment variable or default fallback."""
-    return os.getenv("API_BEARER_TOKEN", "dev-bearer-token")
+# SlowAPI Rate Limiting setup
+app.state.limiter = limiter
 
 
-def verify_bearer_token(
-    credentials=Depends(security),
-) -> str:
-    """Validate incoming Bearer token against configured secret."""
-    expected_token = get_expected_bearer_token()
-    if not credentials or credentials.credentials != expected_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing authentication token.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    return credentials.credentials
-
-
-# ── Database Helpers ───────────────────────────────────────────────────────────
-
-def get_corpus_documents_with_embeddings() -> Dict[str, Dict]:
-    """Load all stored corpus documents, text chunks, and chunk embeddings from SQLite."""
-    init_corpus_db()
-    corpus: Dict[str, Dict] = {}
-
-    with _connect() as conn:
-        rows = conn.execute(
-            "SELECT filename, chunk_index, chunk_text, embedding FROM chunks ORDER BY filename, chunk_index"
-        ).fetchall()
-
-    for filename, _chunk_index, chunk_text, embedding_blob in rows:
-        if filename not in corpus:
-            corpus[filename] = {"chunks": [], "embeddings": []}
-
-        vec = np.frombuffer(embedding_blob, dtype=np.float32)
-        corpus[filename]["chunks"].append(chunk_text)
-        corpus[filename]["embeddings"].append(vec)
-
-    # Convert list of vectors into stacked 2D numpy arrays
-    for filename in corpus:
-        vecs = corpus[filename]["embeddings"]
-        corpus[filename]["embeddings"] = (
-            np.vstack(vecs) if vecs else np.empty((0, 384), dtype=np.float32)
-        )
-
-    return corpus
-
-
-# ── API Endpoints ──────────────────────────────────────────────────────────────
-
-@app.get("/health", tags=["Health"])
-def health_check():
-    """Healthcheck endpoint for readiness and liveness probes."""
-    return {
-        "status": "healthy",
-        "service": "Semantic Plagiarism Detector API",
-        "version": "1.0.0",
-    }
-
-
-@app.post("/api/v1/scan", tags=["Plagiarism Detection"])
-async def scan_document(
-    file: UploadFile = File(..., description="Document file to scan (.pdf, .docx, .txt)"),
-    threshold: float = Query(
-        default=PLAGIARISM_THRESHOLD,
-        ge=0.0,
-        le=1.0,
-        description="Similarity threshold for flagging plagiarism (default: 0.59)",
-    ),
-    top_k: int = Query(
-        default=3,
-        ge=1,
-        le=10,
-        description="Number of top matching paragraph pairs to include per matched document",
-    ),
-    _token: str = Depends(verify_bearer_token),
-):
-    """Scan an uploaded document against the indexed corpus database for plagiarism."""
-    if not file.filename:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Filename must be provided.",
-        )
-
-    filename = file.filename
-    file_bytes = await file.read()
-
-    if not file_bytes:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Uploaded file is empty.",
-        )
-
-    # Extract text from uploaded document
-    extracted_text = extract_text(file_bytes, filename)
-    if not extracted_text.strip():
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Failed to extract readable text from the uploaded file.",
-        )
-
-    words = extracted_text.split()
-    word_count = len(words)
-
-    # Split document into paragraph-level chunks
-    chunks = chunk_document(extracted_text)
-    if not chunks:
-        # Fallback if text is shorter than MIN_CHUNK_WORDS
-        chunks = [extracted_text[:1000]]
-
-    # Generate chunk embeddings
-    uploaded_embeddings = embed_chunks(chunks)
-
-    # Compute overall single document embedding
-    doc_embedding = get_document_embedding(uploaded_embeddings)
-
-    # Query corpus from SQLite database
-    corpus_docs = get_corpus_documents_with_embeddings()
-
-    matched_documents = []
-    max_overall_score = 0.0
-    max_chunk_overall_score = 0.0
-
-    for corpus_filename, corpus_data in corpus_docs.items():
-        # Avoid self-comparison if the same document is in the corpus
-        if corpus_filename == filename:
-            continue
-
-        c_embeddings = corpus_data["embeddings"]
-        c_chunks = corpus_data["chunks"]
-
-        if c_embeddings.size == 0:
-            continue
-
-        # Document-level mean similarity
-        c_doc_embedding = get_document_embedding(c_embeddings)
-        sim_doc = float(
-            np.clip(
-                cosine_similarity(
-                    doc_embedding.reshape(1, -1), c_doc_embedding.reshape(1, -1)
-                )[0, 0],
-                0.0,
-                1.0,
-            )
-        )
-
-        # Chunk-level max similarity
-        sim_chunk = chunk_max_similarity(uploaded_embeddings, c_embeddings)
-
-        combined_score = max(sim_doc, sim_chunk)
-        max_overall_score = max(max_overall_score, sim_doc)
-        max_chunk_overall_score = max(max_chunk_overall_score, sim_chunk)
-
-        if combined_score >= threshold:
-            severity = "🔴 High" if combined_score >= 0.90 else "🟡 Medium"
-
-            # Find top matching chunk pairs
-            similar_chunks = find_most_similar_chunks(
-                chunks_a=chunks,
-                chunks_b=c_chunks,
-                emb_a=uploaded_embeddings,
-                emb_b=c_embeddings,
-                top_k=top_k,
-                threshold=threshold,
-            )
-
-            flagged_chunks = [
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Return a standardized JSON response for request validation errors."""
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={
+            "error": True,
+            "message": "Validation failed.",
+            "details": [
                 {
-                    "uploaded_chunk": pair[0],
-                    "matched_chunk": pair[1],
-                    "similarity_score": round(float(pair[2]), 4),
+                    "field": ".".join(map(str, err["loc"])),
+                    "message": err["msg"],
+                    "type": err["type"],
                 }
-                for pair in similar_chunks
-            ]
+                for err in exc.errors()
+            ],
+        },
+    )
 
-            matched_documents.append(
-                {
-                    "filename": corpus_filename,
-                    "document_similarity_score": round(sim_doc, 4),
-                    "max_chunk_similarity_score": round(sim_chunk, 4),
-                    "severity": severity,
-                    "flagged_chunks": flagged_chunks,
-                }
-            )
 
-    # Sort matches by max chunk similarity descending
-    matched_documents.sort(key=lambda x: x["max_chunk_similarity_score"], reverse=True)
+@app.exception_handler(404)
+async def not_found_handler(request, exc: StarletteHTTPException):
+    """Custom exception handler for HTTP 404 errors."""
+    return JSONResponse(
+        status_code=404,
+        content={
+            "error": True,
+            "code": 404,
+            "message": "API endpoint or resource not found",
+        },
+    )
 
-    is_flagged = len(matched_documents) > 0 or max_chunk_overall_score >= threshold
 
-    return {
-        "filename": filename,
-        "word_count": word_count,
-        "chunk_count": len(chunks),
-        "plagiarism_flagged": is_flagged,
-        "threshold_used": threshold,
-        "overall_document_similarity": round(max_overall_score, 4),
-        "max_chunk_similarity": round(max_chunk_overall_score, 4),
-        "matched_documents_count": len(matched_documents),
-        "matched_documents": matched_documents,
-    }
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Catch-all handler that returns a standardized JSON error payload for any unhandled exception."""
+    status_code = getattr(exc, "status_code", status.HTTP_500_INTERNAL_SERVER_ERROR)
+    is_production = os.getenv("APP_ENVIRONMENT", "production").lower() == "production"
+
+    logging.getLogger(__name__).error(
+        f"Unhandled exception: {exc}", exc_info=not is_production
+    )
+
+    message = "An internal server error occurred." if is_production else str(exc)
+
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": True,
+            "code": status_code,
+            "message": message,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def custom_http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Custom exception handler for HTTP errors to return standardized JSON payloads."""
+    status_code = exc.status_code
+    if status_code == 404:
+        message = "API endpoint or resource not found"
+    else:
+        message = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+
+    log_level = logging.WARNING if 400 <= status_code < 500 else logging.ERROR
+    logger.log(
+        log_level,
+        "HTTP %d error on %s %s: %s",
+        status_code,
+        request.method,
+        request.url.path,
+        message,
+    )
+
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": True,
+            "code": status_code,
+            "message": message,
+        },
+    )
+
+
+app.add_exception_handler(RateLimitExceeded, custom_rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
+# ── Register Sub-Routers ──────────────────────────────────────────────────────
+app.include_router(auth_router)
+app.include_router(analysis_router)
+app.include_router(corpus_router)
+app.include_router(admin_router)

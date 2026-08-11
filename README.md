@@ -1,5 +1,7 @@
 # 🔍 Semantic Plagiarism Detection System
 
+![Semantic Plagiarism Detector Banner](assets/hero_banner.png)
+
 > **[▶ Live Demo](https://semantic-plagiarism-detector.streamlit.app/)**
 
 A production-ready NLP application that detects **semantic plagiarism** in student
@@ -63,6 +65,8 @@ similarity, and **FAISS vector search**.
               └────────┘ └────────┘ └────────┘ └───────┘ └──────┘ └───────┘
 ```
 
+> For a detailed explanation of the system components and data flow, see the [Architecture Guide](docs/ARCHITECTURE.md). To understand domain-specific terms (FAISS, Cosine Similarity, SSRF, WAL, TTR, etc.), reference the [Glossary](docs/GLOSSARY.md).
+
 ### Module Responsibilities
 
 | Module | Responsibility |
@@ -92,6 +96,7 @@ semantic_plagiarism_detector/
 │   ├── components/           # Incident export and UI helper components
 │   ├── streamlit_app.py      # Main Streamlit dashboard entrypoint
 │   └── theme.py              # Visual design system and CSS injection
+├── assets/                   # Project visual assets & AI header graphics
 ├── src/                      # Core backend source package
 │   ├── core/                 # Parsing, chunking, embedding, FAISS & similarity
 │   ├── db/                   # SQLite authentication, corpus & incident databases
@@ -121,7 +126,10 @@ semantic_plagiarism_detector/
 
 ## 🚀 Setup & Running
 
+For a detailed local setup guide detailing virtual environment creation, native C dependencies (Tesseract and Poppler) installation, and running pytest, refer to the [Developer Setup Guide](docs/DEVELOPMENT.md).
+
 ### 1. Clone / download the project
+
 
 ```bash
 git clone https://github.com/your-org/semantic-plagiarism-detector.git
@@ -139,6 +147,7 @@ source venv/bin/activate        # Windows: venv\Scripts\activate
 
 ```bash
 pip install -r requirements.txt
+pip install pytest-cov  # Required for coverage reporting
 ```
 
 > **Note:** The first run will download the `paraphrase-multilingual-MiniLM-L12-v2` model (~420 MB).
@@ -152,6 +161,79 @@ streamlit run app/streamlit_app.py
 
 The app opens at **http://localhost:8501**.
 
+### 5. Pre-populated Seed Data (Optional for Contributors)
+
+To quickly test dashboard UI/CSS changes or verify logic without manually registering accounts or uploading documents, you can load pre-populated seed data:
+
+```bash
+# Load seed databases (users.db, corpus.db) and FAISS index (corpus.index)
+make load-seed   # Or: python scripts/manage_seed.py load
+```
+
+After loading the seed data, launch the Streamlit dashboard and log in with the pre-configured contributor accounts:
+* **Admin**: `admin` / `admin123`
+* **Teacher**: `teacher` / `teacher123`
+
+
+### Docker Deployment (recommended for quick setup)
+
+One-command local deployment using Docker and Docker Compose. This builds a slim
+Python 3.11 image with all dependencies and spins up the Streamlit dashboard plus
+an optional Redis cache.
+
+**Prerequisites:**
+- Docker Engine 20.10+
+- Docker Compose v2+
+
+**Start the app:**
+
+```bash
+docker compose up --build
+```
+
+The dashboard is available at **http://localhost:8501**.
+
+**Optional services:**
+- **Redis** is included in `docker-compose.yml` for session caching and rate-limiting.
+  The app runs without Redis and falls back to local in-memory state, so you can
+  comment out the `redis` service if you only need the Streamlit UI.
+
+**Environment variables:**
+
+Customize behavior via a `.env` file in the project root or inline in
+`docker-compose.yml`. Key variables:
+
+| Variable | Default | Description |
+|---|---|---|
+| `REDIS_URL` | `redis://redis:6379/0` | Redis connection URL |
+| `APP_BASE_URL` | `http://localhost:8501` | Base URL used in notifications |
+| `SMTP_SERVER` | `smtp.gmail.com` | SMTP server for daily summary emails |
+| `SMTP_PORT` | `587` | SMTP port |
+| `SMTP_USERNAME` | | SMTP username |
+| `SMTP_PASSWORD` | | SMTP password |
+| `API_BEARER_TOKEN` | | Bearer token for REST API |
+
+See `.env.example` for the full list.
+
+**Rebuild after dependency changes:**
+
+```bash
+docker compose build --no-cache
+docker compose up
+```
+
+**Stop the app:**
+
+```bash
+docker compose down
+```
+
+To also remove the Redis data volume:
+
+```bash
+docker compose down -v
+```
+
 ### Default credentials
 
 | Username | Password | Role |
@@ -159,6 +241,49 @@ The app opens at **http://localhost:8501**.
 | `admin` | `admin123` | Admin — full access + user management |
 
 Additional users can be created from the **User Management** page (admin only).
+
+---
+
+## 🛠️ Troubleshooting
+
+If you encounter issues while setting up the project locally, refer to the
+[Troubleshooting Guide](docs/TROUBLESHOOTING.md) for solutions to common problems including:
+
+- Tesseract OCR installation
+- PyTorch CPU vs CUDA installation
+- SQLite permission issues
+
+---
+
+
+## ⚓ Pre-commit Hooks
+
+To maintain code quality and styling standards, we use client-side Git hooks managed by `pre-commit`. The hooks execute automatically before every commit to format and check code.
+
+### Installation
+
+1. Install the `pre-commit` utility:
+   ```bash
+   pip install pre-commit
+   ```
+
+2. Install the Git hooks:
+   ```bash
+   pre-commit install
+   ```
+
+After installation, the following checks run automatically on every staged file:
+- **`black`**: Formats Python code.
+- **`isort`**: Sorts import lines.
+- **`ruff`**: Checks for lint warnings and errors.
+- **`pre-commit-hooks`**: Performs basic validation (trailing whitespace, end-of-file fixer, check-yaml, check-added-large-files).
+
+### Run Hooks Manually
+
+You can manually trigger all hooks on all files in the repository at any time:
+```bash
+pre-commit run --all-files
+```
 
 ---
 
@@ -228,6 +353,8 @@ service.
 ---
 
 ## 🧠 How It Works
+
+![Semantic Vector Search & AI NLP Architecture](assets/vector_search_concept.png)
 
 ### Step 1 – Text Extraction
 PyPDF2 reads each PDF page and concatenates the text.
@@ -415,8 +542,85 @@ The TF-IDF baseline relies on exact word overlap — it fails when students para
 Sentence Transformers encode **meaning**, catching paraphrases that surface-level
 methods miss entirely.
 
+## Similarity threshold and severity configuration
+
+All plagiarism and severity boundaries are defined in
+`src/core/config.py`.
+
+| Rule | Default |
+|---|---:|
+| Pair is flagged as plagiarism | `>= 0.59` |
+| Medium severity | `>= 0.75` |
+| High severity | `>= 0.90` |
+
+The required ordering is:
+
+```text
+0.0 <= plagiarism <= medium <= high <= 1.0
+```
+
+The administrator slider controls which pairs are flagged. It does not redefine
+the Medium or High severity bands.
+
+Scores outside `[0.0, 1.0]` are clamped for consistent presentation. Invalid
+non-numeric, NaN, or infinite values are rejected.
+
+
+## Versioned SQLite schema migrations
+
+`users.db` and `corpus.db` are upgraded automatically using SQLite
+`PRAGMA user_version`.
+
+Migration definitions live in:
+
+```text
+src/db/migrations/auth.py
+src/db/migrations/corpus.py
+src/db/migrations/common.py
+```
+
+Each upgrade:
+
+1. reads the current schema version,
+2. applies every missing migration in order,
+3. runs inside a rollback-safe savepoint,
+4. updates `PRAGMA user_version` only after all migrations succeed,
+5. preserves existing users, documents, chunks, embeddings, and incidents.
+
+Existing database files should not be deleted during an application upgrade.
+
+---
+
+## Documentation
+
+- [Architecture](docs/ARCHITECTURE.md)
+- [API Reference](docs/API.md)
+- [Document Parsing & Formats](docs/PARSING.md)
+- [NLP Architecture & Similarity Algorithm Guide](docs/ALGORITHMS.md)
+
+
+- [Bulk Export Formats & Data Fields](docs/EXPORTS.md)
+
+- [UI Customization and Theme Guide](docs/THEMING.md)
+
+
 ---
 
 ## 📄 License
 
 MIT License. Free for academic and educational use.
+
+
+## Webhook retry behaviour
+
+Plagiarism webhook delivery automatically retries temporary failures up to
+three times with exponential backoff.
+
+Retries apply to:
+
+- connection failures and request timeouts,
+- HTTP 408, 425, and 429,
+- HTTP 500, 502, 503, and 504.
+
+Permanent client errors such as HTTP 400 and 401 are not retried. Webhook SSRF
+validation runs before dispatch and is never bypassed or retried.
