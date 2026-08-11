@@ -8,7 +8,8 @@ from pathlib import Path
 import sys
 import time
 import hashlib
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date, timedelta
+import json
 
 import numpy as np
 import pandas as pd
@@ -260,9 +261,11 @@ from app.theme import (
     inject_css,
     set_theme,
     version_check_widget_html,
+    render_timezone_footer,
+    render_session_status_banner,
 )
 from src.core.ai_detector import detect_documents_ai_probability
-from src.core.config import DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD
+from src.core.config import DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD, get_branding_config
 from src.core.document_parser import (
     DEFAULT_OCR_DPI,
     DEFAULT_OCR_LANGUAGE,
@@ -555,7 +558,7 @@ def _run_backup_daemon():
 
                 filename = (
                     backup_dir
-                    / f"corpus_backup_{datetime.datetime.now():%Y%m%d_%H%M%S}.db"
+                    / f"corpus_backup_{datetime.now():%Y%m%d_%H%M%S}.db"
                 )
 
                 filename.write_bytes(snapshot)
@@ -596,13 +599,6 @@ _INDEX_PATH = str(FAISS_INDEX_PATH)
 
 # Load validated branding configuration
 branding_config = get_branding_config()
-_INDEX_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "corpus.index")
-)
-try:
-    from streamlit_tour import Tour
-except ImportError:
-    Tour = None
 
 # -----------------------------------------------------------------------------
 # Page Configuration & Session State
@@ -627,7 +623,7 @@ def configure_page_meta(title: str, icon: str) -> None:
 
 
 # Initialize page metadata with dynamic branding
-configure_page_meta(title="Semantic Plagiarism Detector - Dashboard", icon="🔍")
+configure_page_meta(title="Semantic Plagiarism Processor - Dashboard", icon="🔍")
 
 
 def update_page_title(tab_name: str):
@@ -753,31 +749,7 @@ def render_cosine_vs_lexical_comparison_table(
     semantic_threshold: float = SEMANTIC_HIGH_THRESHOLD,
     lexical_threshold: float = LEXICAL_LOW_THRESHOLD,
 ):
-    """Render a two-column score comparison table in the results / drill-down view.
-
-    Compares vector-embedding similarity (cosine semantic) against Jaccard
-    lexical similarity side-by-side for every unique document pair, and
-    highlights pairs where the cosine score is high (>= ``semantic_threshold``)
-    but the Jaccard score is low (<= ``lexical_threshold``). Such pairs are
-    strong indicators of paraphrasing / semantic plagiarism that pure lexical
-    matching would miss.
-
-    Parameters
-    ----------
-    sim_df : pandas.DataFrame
-        Square cosine similarity matrix indexed/columned by document names.
-    raw_texts : Dict[str, str]
-        Mapping of document name → extracted text. Used to compute Jaccard.
-    semantic_threshold : float, default 0.80
-        Cosine score at/above which a pair is considered semantically similar.
-    lexical_threshold : float, default 0.30
-        Jaccard score at/below which a pair is considered lexically dissimilar.
-
-    Returns
-    -------
-    pandas.DataFrame
-        The styled comparison DataFrame (also rendered to the UI).
-    """
+    """Render a two-column score comparison table in the results / drill-down view."""
     import itertools
 
     if sim_df is None or raw_texts is None or len(raw_texts) < 2:
@@ -790,13 +762,11 @@ def render_cosine_vs_lexical_comparison_table(
     doc_names = list(sim_df.columns) if sim_df is not None else list(raw_texts.keys())
     rows = []
     for da, db in itertools.combinations(doc_names, 2):
-        # Cosine score from the (already-computed) semantic matrix.
         try:
             cosine_score = float(sim_df.loc[da, db])
         except Exception:
             cosine_score = 0.0
 
-        # Jaccard lexical score from the raw extracted texts.
         text_a = raw_texts.get(da, "") or ""
         text_b = raw_texts.get(db, "") or ""
         try:
@@ -823,13 +793,9 @@ def render_cosine_vs_lexical_comparison_table(
 
     return comp_df
 
-from datetime import date, timedelta
 
-
-def get_date_range_preset(preset: str) -> tuple[date, date]:
-    """
-    Calculate start and end dates based on a given preset string.
-    """
+def get_date_range_preset(preset: str) -> tuple:
+    """Calculate start and end dates based on a given preset string."""
     today = date.today()
     if preset == "Today":
         return today, today
@@ -891,7 +857,7 @@ if not st.session_state.get(SessionKeys.AUTHENTICATED, False):
         if _user_info and _user_info.get("email"):
             _email = _user_info["email"]
             if not is_user_active(_email):
-                st.error("🚨 Account suspended. Please contact your administrator.")
+                st.error("🚨 Account suspended. Please contact your Administrator.")
                 st.query_params.clear()
             else:
                 _role = get_or_create_sso_user(_email)
@@ -1173,7 +1139,6 @@ with st.sidebar:
             0.99,
             value=st.session_state.get("threshold_slider", PLAGIARISM_THRESHOLD),
             step=0.01,
-            help="Cosine similarity threshold for flagging.",
             help=(
                 "Combined Hybrid score threshold for flagging pair plagiarism. "
                 "Calculated from Lexical (exact phrase overlap) and Semantic (meaning alignment) scores. "
@@ -1359,9 +1324,6 @@ if not selected_classes:
         )
 
     # ── System Health Widget (Issue #1246) ──────────────────────────────────────
-    # Collapsible sidebar expander showing RAM usage, disk space, and DB status
-    # for administrators monitoring the application health at a glance.
-    # ── Real-Time Memory Consumption Monitor (Issue #1371) ──────────────────────
     with st.expander("🖥️ System Health & Memory", expanded=False):
         try:
             import os
@@ -1369,7 +1331,6 @@ if not selected_classes:
             mem_info = process.memory_info()
             rss_mb = mem_info.rss / (1024 * 1024)
             
-            # Host limit estimation or default shared host limit (e.g., 2048 MB)
             host_limit_mb = 2048.0
             try:
                 from src.core.app_config import get_host_memory_limit_mb
@@ -1380,7 +1341,6 @@ if not selected_classes:
             ram_usage_percent = min(rss_mb / host_limit_mb, 1.0)
             ram_percent_val = (rss_mb / host_limit_mb) * 100
 
-            # Determine warning state (>80% amber warning)
             if ram_percent_val >= 80:
                 st.warning(f"⚠️ High RAM Usage: {rss_mb:.1f} MB / {host_limit_mb:.0f} MB ({ram_percent_val:.0f}%)")
             else:
@@ -1388,10 +1348,6 @@ if not selected_classes:
 
             st.progress(ram_usage_percent)
 
-        except Exception as mem_err:
-            st.error(f"Failed to measure process memory: {mem_err}")
-            
-            # Free disk space on the partition containing the project root
             disk_usage = psutil.disk_usage(str(ROOT_DIR))
             free_disk_gb = disk_usage.free / (1024**3)
             total_disk_gb = disk_usage.total / (1024**3)
@@ -1464,7 +1420,6 @@ if not selected_classes:
             st.error(f"Failed to load system health data: {health_err}")
 
         st.divider()
-        from app.theme import render_timezone_footer
         render_timezone_footer()
 
 # ── Main UI ───────────────────────────────────────────────────────────────────
@@ -2416,7 +2371,7 @@ if user_role == "admin":
         ai_probabilities = {}
 
 st.subheader(get_text("analysis_summary", lang=lang_code))
-doc_names = list(raw_texts.keys())
+doc_names = list(raw_texts.keys()) if raw_texts else []
 n_docs = len(doc_names)
 total_pairs = n_docs * (n_docs - 1) // 2 if n_docs > 1 else 0
 n_flagged = len(flags)
@@ -2459,7 +2414,7 @@ st.divider()
     key="main_tabs",
 )
 
-# Record scan summary for historical tracking
+# Record scan summary for historical tracking (Issue #1672)
 if flags and len(file_bytes_dict) >= 2:
     from src.db.corpus_db import record_scan_summary
     
@@ -2544,6 +2499,12 @@ with tab_warnings:
             else "📁 Collapse All"
         )
 
+        if st.button(button_label, key="toggle_warning_accordions"):
+            st.session_state[SessionKeys.WARNINGS_EXPAND_ALL] = not st.session_state[
+                SessionKeys.WARNINGS_EXPAND_ALL
+            ]
+            st.rerun()
+
         faiss_query = st.text_input(
             "Query FAISS Index:",
             placeholder="Type a text snippet to search vector index...",
@@ -2575,21 +2536,6 @@ with tab_warnings:
                 else:
                     st.info("No matching vector chunks found above threshold.")
 
-    # ══ TAB 3: MATRIX ═════════════════════════════════════════════════════════
-    with tab_matrix:
-        st.subheader("📋 Similarity Matrix")
-        if st.button(button_label, key="toggle_warning_accordions"):
-            st.session_state[SessionKeys.WARNINGS_EXPAND_ALL] = not st.session_state[
-                SessionKeys.WARNINGS_EXPAND_ALL
-            ]
-            st.rerun()
-
-        render_warning_controls(
-            flags,
-            threshold=threshold,
-            ai_probabilities=ai_probabilities,
-            expanded=st.session_state[SessionKeys.WARNINGS_EXPAND_ALL],
-        )
 
 # ══ TAB 2: FAISS ══════════════════════════════════════════════════════════
 with tab_faiss:
@@ -2597,8 +2543,8 @@ with tab_faiss:
     st.subheader("⚡ FAISS Vector Search")
     if faiss_index is not None:
         st.info(f"Index total: {faiss_index.ntotal} vectors.")
-        faiss_query = st.text_input("Query FAISS Index:", key="faiss_query_input")
-        if st.button("Run Search") and faiss_query.strip():
+        faiss_query = st.text_input("Query FAISS Index:", key="faiss_query_input_tab2")
+        if st.button("Run Search", key="run_search_tab2") and faiss_query.strip():
             q_vec = embed_chunks([faiss_query.strip()])[0]
             results = search_similar_chunks(
                 q_vec, faiss_index, registry, top_k=faiss_top_k, threshold=threshold
@@ -2626,10 +2572,6 @@ with tab_heatmap:
         )(active_sim_df, threshold=threshold, theme_colors=get_chart_colors())
 
     if heatmap_fig is not None:
-        # plot_similarity_heatmap() returns a Matplotlib Figure, so it is
-        # rendered with st.pyplot(), not st.plotly_chart(). Passing
-        # use_container_width=True keeps it in sync with the container
-        # width (sidebar collapse/expand, mobile/tablet/desktop layouts).
         st.pyplot(heatmap_fig, use_container_width=True)
 
     doc_select_options = (
@@ -2659,7 +2601,6 @@ with tab_heatmap:
         )
 
     if network_fig is not None:
-        # plot_similarity_network() returns a Plotly go.Figure.
         st.plotly_chart(network_fig, use_container_width=True)
 
     # ── Plagiarism Cluster Detection Summary (Issue #1675) ───────────────────
@@ -2825,6 +2766,55 @@ with tab_drill:
                         )
                 except Exception as diff_err:
                     st.error(f"Failed to generate semantic diff: {diff_err}")
+        # ── Bibliography Citation Graph (Issue #1958) ─────────────────────────────
+        # Integrated cleanly without conflicting with separate Semantic Diff PR
+        with st.expander("📚 Bibliography Analysis (Citation Lifting)", expanded=False):
+            st.caption(
+                "Detects structural plagiarism by comparing the reference sections. "
+                "High overlap indicates students may have copied bibliographies without reading the sources."
+            )
+            
+            try:
+                from src.db.citation_db import get_shared_citations, compute_citation_jaccard
+                from src.visualization.citation_graph import plot_citation_network
+                
+                jaccard_score = compute_citation_jaccard(da, db)
+                shared_cites = get_shared_citations(da, db)
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Citation Jaccard Similarity", f"{jaccard_score:.1%}")
+                with col2:
+                    st.metric("Shared References", len(shared_cites))
+                    
+                if jaccard_score > 0.80:
+                    st.error(
+                        f"🚨 **High Citation Overlap Detected ({jaccard_score:.1%})**: "
+                        "These documents share an unusually high number of identical references."
+                    )
+                    
+                if shared_cites:
+                    current_theme = get_theme_name()
+                    fig = plot_citation_network(
+                        doc_a=da, 
+                        doc_b=db, 
+                        shared_citations=shared_cites,
+                        theme_colors=get_chart_colors()
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    with st.expander("View Shared Citations List"):
+                        st.dataframe(
+                            pd.DataFrame(shared_cites)[["author", "year", "title"]],
+                            use_container_width=True,
+                            hide_index=True
+                        )
+                else:
+                    st.info("No shared citations found between these two documents.")
+                    
+            except Exception as cite_err:
+                st.warning(f"Bibliography analysis unavailable: {cite_err}")
+
 
 # ══ TAB 6: COMPARISON ══════════════════════════════════════════════════════
 with tab_compare:
@@ -2861,7 +2851,7 @@ with tab_analytics:
         timings=st.session_state.get("last_stage_timings", {})
     )
 
-# ══ TAB 7: USERS ══════════════════════════════════════════════════════════
+# ══ TAB 8: USERS ══════════════════════════════════════════════════════════
 with tab_users:
     update_page_title("Users")
     st.subheader("👥 User Management")
@@ -2869,7 +2859,7 @@ with tab_users:
     for u in users:
         st.write(f"User: **{u['username']}** | Role: `{u['role']}`")
 
-# ══ TAB 8: SETTINGS ═══════════════════════════════════════════════════════
+# ══ TAB 9: SETTINGS ═══════════════════════════════════════════════════════
 with tab_settings:
     update_page_title("Settings")
     st.subheader("⚙️ System Configuration")
@@ -3154,7 +3144,7 @@ with tab_settings:
         if "db_schema_status_msg" in st.session_state:
             st.info(st.session_state["db_schema_status_msg"])
             
-# ══ TAB 9: SECURITY AUDIT LOGS ═════════════════════════════════════════════
+# ══ TAB 10: SECURITY AUDIT LOGS ═════════════════════════════════════════════
 with tab_audit:
     update_page_title("Security Audit Logs")
     st.subheader(get_text("tab_audit_logs", lang=lang_code))
@@ -3358,7 +3348,7 @@ with tab_audit:
                 "ℹ️ No security audit log records found matching the specified filters."
             )
 
-# ══ TAB 10: History ══════════════════════════════════════════════════════════
+# ══ TAB 11: History ══════════════════════════════════════════════════════════
 with tab_history:
     update_page_title("History")
     st.subheader("📊 Document Similarity History Dashboard")
@@ -3366,7 +3356,6 @@ with tab_history:
     
     from src.db.corpus_db import get_scan_history
     from src.visualization.history_charts import plot_similarity_trend_line, plot_flagged_documents_bar
-    from datetime import datetime, timedelta
     
     # Date range filter
     col1, col2 = st.columns(2)
@@ -3418,6 +3407,149 @@ with tab_history:
             hide_index=True,
         )
 
+
+# ── Document Management & Bulk Export (Admin Only) ────────────────────────────
+if user_role == "admin":
+    st.markdown("---")
+    st.markdown("### 📁 Document Management & Bulk Export")
+    existing_docs = get_all_documents()
+    if existing_docs:
+        st.write(f"**{len(existing_docs)}** documents in database")
+        
+        # Bulk selection and export logic
+        import pandas as pd
+        from src.db.corpus_db import (
+            get_document_char_counts,
+            get_document_word_counts,
+        )
+
+        word_counts = get_document_word_counts()
+        char_counts = get_document_char_counts()
+
+        doc_rows = []
+        for doc in existing_docs:
+            fn = (
+                doc.filename
+                if hasattr(doc, "filename")
+                else (doc.get("filename") if isinstance(doc, dict) else str(doc))
+            )
+            doc_rows.append(
+                {
+                    "Select": False,
+                    "Filename": fn,
+                    "Word Count": word_counts.get(fn, 0),
+                    "Char Count": char_counts.get(fn, 0),
+                }
+            )
+
+        corpus_df = pd.DataFrame(doc_rows)
+        
+        if st.session_state.get("corpus_select_all_toggle", False):
+            corpus_df["Select"] = True
+
+        edited_df = st.data_editor(
+            corpus_df,
+            column_config={
+                "Select": st.column_config.CheckboxColumn("Select", default=False),
+                "Filename": st.column_config.TextColumn("Filename", disabled=True),
+                "Word Count": st.column_config.NumberColumn("Word Count", format="%d words", disabled=True),
+                "Char Count": st.column_config.NumberColumn("Char Count", format="%d chars", disabled=True),
+            },
+            disabled=["Filename", "Word Count", "Char Count"],
+            hide_index=True,
+            key="sidebar_corpus_data_editor",
+            use_container_width=True,
+        )
+
+        selected_rows = edited_df[edited_df["Select"]]
+        selected_filenames = selected_rows["Filename"].tolist()
+
+        if selected_filenames:
+            zip_data = create_documents_bulk_zip_archive(selected_filenames)
+            st.download_button(
+                label=f"📦 Export Selected as ZIP ({len(selected_filenames)})",
+                data=zip_data,
+                file_name=f"corpus_export_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.zip",
+                mime="application/zip",
+                key="sidebar_export_selected_zip_btn",
+                use_container_width=True,
+                type="primary",
+            )
+
+        st.markdown("---")
+        for doc in existing_docs:
+            fn = (
+                doc.filename
+                if hasattr(doc, "filename")
+                else (doc.get("filename") if isinstance(doc, dict) else str(doc))
+            )
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.text(f"📄 {fn}")
+            with col2:
+                if st.button("🗑️", key=f"del_{fn}"):
+                    delete_document(fn)
+                    embeddings_matrix = get_all_embeddings()
+                    if embeddings_matrix.size > 0:
+                        new_index = build_index_from_matrix(embeddings_matrix)
+                        save_index(new_index, _INDEX_PATH)
+                    else:
+                        if os.path.exists(_INDEX_PATH):
+                            os.remove(_INDEX_PATH)
+                    st.rerun()
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button(
+        "🗑️ Clear All Documents",
+        key="clear_all_documents_button",
+        use_container_width=True,
+    ):
+        clear_all_dialog()  # type: ignore
+
+
+# ── Onboarding Tour for First-Time Admin Users ───────────────────────────────────
+if (
+    Tour is not None
+    and user_role == "admin"
+    and st.session_state.get(SessionKeys.USERNAME)
+    and not get_tour_completed(st.session_state[SessionKeys.USERNAME])
+):
+    username = st.session_state[SessionKeys.USERNAME]
+    if st.button("🎯 Start Guided Tour", key="start_tour_button", type="primary"):
+        st.session_state[SessionKeys.SHOW_TOUR] = True
+
+    if st.session_state.get(SessionKeys.SHOW_TOUR, False):
+        tour_steps = [
+            Tour.info(
+                title="👋 Welcome to the Plagiarism Detection System!",
+                desc="This guided tour will walk you through the key features to help you get started.",
+            ),
+            Tour.bind(
+                SessionKeys.THRESHOLD_SLIDER,
+                title="⚙️ Plagiarism Threshold",
+                desc=f"Adjust the flagging threshold. Default is {DEFAULT_THRESHOLDS.plagiarism:.0%}.",
+                side="right",
+            ),
+            Tour.bind(
+                SessionKeys.CLASS_FILTER_SELECTBOX,
+                title="🔍 Class Filter",
+                desc="Filter analysis results by specific class sections.",
+                side="right",
+            ),
+            Tour.info(
+                title="📊 Analysis Dashboard",
+                desc="View similarity metrics, flagged pairs, and comparisons in the tabs below.",
+            ),
+        ]
+        tour = Tour(steps=tour_steps)
+        tour.start()
+        if st.button("✅ Finish Tour", use_container_width=True):
+            set_tour_completed(username, True)
+            st.session_state[SessionKeys.SHOW_TOUR] = False
+            st.success("✅ Onboarding tour completed!")
+            st.rerun()
+
+
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.divider()
 from src.utils.version_check import APP_VERSION, check_for_update_sync
@@ -3433,8 +3565,12 @@ with _footer_col1:
         f"🎓 Semantic Plagiarism Detection System · v{APP_VERSION} · Streamlit · "
         "🐛 Report Bug / Feedback"
     )
-    from app.theme import render_session_status_banner
     render_session_status_banner()
+    
+    # Logout button placed in footer for easy access
+    if st.button("🚪 Log Out", use_container_width=True, key="logout_button_footer"):
+        logout_dialog()
+
 with _footer_col2:
     if _latest_tag:
         st.markdown(
@@ -3446,4 +3582,3 @@ with _footer_col2:
         )
     else:
         st.caption("✅ Up to date")
-        
