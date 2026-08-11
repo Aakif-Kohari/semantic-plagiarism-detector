@@ -233,3 +233,32 @@ def test_inspect_diff_dialog_skips_download_without_pdf_bytes():
 
         mock_st.download_button.assert_not_called()
 
+
+def test_render_faiss_results_ui_doc_hash_copy_box():
+    """Verify doc_hash is rendered using st.code for built-in 1-click clipboard copy (#1724)."""
+    from unittest.mock import patch
+    from app.components.faiss_results import render_faiss_results_ui
+
+    sample_hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    record = {"doc_name": "doc_a.pdf", "chunk_index": 0, "doc_hash": sample_hash}
+    results = [(record, 0.88)]
+
+    with patch("app.components.faiss_results.st") as mock_st:
+        render_faiss_results_ui(results, "query text")
+        mock_st.code.assert_any_call(sample_hash, language="text")
+
+
+def test_inspect_diff_dialog_renders_doc_hash():
+    """Verify inspect_diff_dialog renders st.code(doc_hash) when doc_hash is passed (#1724)."""
+    from unittest.mock import patch, MagicMock
+    from app.components.faiss_results import inspect_diff_dialog
+
+    sample_hash = "a" * 64
+    with patch("app.components.faiss_results.st") as mock_st:
+        col1, col2 = MagicMock(), MagicMock()
+        mock_st.columns.return_value = (col1, col2)
+
+        inspect_diff_dialog("query", "match", "doc.pdf", 0.90, doc_hash=sample_hash)
+        mock_st.code.assert_any_call(sample_hash, language="text")
+
+

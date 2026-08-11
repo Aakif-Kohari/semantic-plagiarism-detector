@@ -107,6 +107,7 @@ def inspect_diff_dialog(
     score: float,
     pdf_bytes: bytes | None = None,
     chunk_id: str | None = None,
+    doc_hash: str | None = None,
 ):
     """Render a side-by-side highlighted diff of query vs matched chunk inside a modal."""
     formatted_score = f"{score:.4f}"
@@ -121,6 +122,10 @@ def inspect_diff_dialog(
         if chunk_id:
             st.caption("📋 Vector Chunk ID")
             st.code(chunk_id, language="text")
+
+    if doc_hash:
+        st.caption("🔑 Document SHA-256 Hash")
+        st.code(str(doc_hash), language="text")
 
     from src.utils.diff_highlighter import highlight_overlap
     highlighted_query, highlighted_match = highlight_overlap(query_text, matched_text)
@@ -173,8 +178,8 @@ def render_faiss_results_ui(
     document_pdf_bytes: Mapping[str, bytes] | None = None,
 ) -> None:
     """
-    Render FAISS search results with a clean interface, quick-copy score and chunk IDs,
-    and an interactive 'Inspect Diff' modal dialog for side-by-side comparison.
+    Render FAISS search results with a clean interface, quick-copy score, chunk IDs,
+    document SHA-256 hashes, and an interactive 'Inspect Diff' modal dialog.
 
     Args:
         results: An iterable of (record, score) tuples returned by the FAISS search.
@@ -195,6 +200,8 @@ def render_faiss_results_ui(
         chunk_index = int(_record_value(record, "chunk_index", 0))
         chunk_id = str(_record_value(record, "chunk_id", f"chunk_{chunk_index + 1}"))
         chunk_text = str(_record_value(record, "chunk_text", ""))
+        raw_hash = _record_value(record, "doc_hash", None) or _record_value(record, "file_hash", None) or _record_value(record, "hash", None)
+        doc_hash = str(raw_hash) if raw_hash else None
 
         st.markdown(
             f"<div style='border: 1px solid #e2e8f0; padding: 12px; border-radius: 8px; margin-bottom: 8px;'>"
@@ -213,11 +220,11 @@ def render_faiss_results_ui(
             st.caption("📋 Vector Chunk ID")
             st.code(chunk_id, language="text")
 
-        # Streamlit's code block includes a built-in one-click copy control.
-        # Render the complete matched chunk so reports can copy the exact
-        # sentence/passage instead of the previously truncated preview.
-        st.caption("📋 Matched Text")
-        st.code(chunk_text, language="text")
+        if doc_hash:
+            st.caption("🔑 Document SHA-256 Hash")
+            st.code(doc_hash, language="text")
+
+        st.caption(chunk_text[:300] + ("..." if len(chunk_text) > 300 else ""))
 
         if st.button("🔍 Inspect Diff", key=f"diff_btn_{i}_{doc_name}_{chunk_index}"):
             source_pdf_bytes = (
@@ -231,6 +238,7 @@ def render_faiss_results_ui(
                     score,
                     pdf_bytes=source_pdf_bytes,
                     chunk_id=chunk_id,
+                    doc_hash=doc_hash,
                 )
             else:
                 inspect_diff_dialog(
@@ -239,6 +247,7 @@ def render_faiss_results_ui(
                     doc_name,
                     score,
                     chunk_id=chunk_id,
+                    doc_hash=doc_hash,
                 )
 
         st.markdown("<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
