@@ -465,6 +465,17 @@ def get_documents_by_class(class_section: str) -> list:
         ).fetchall()
         return [r[0] for r in rows]
 
+
+def get_document_count_fast(include_deleted: bool = False) -> int:
+    """Return the total document count using SELECT COUNT(*) query."""
+    query = "SELECT COUNT(1) FROM documents"
+    if not include_deleted:
+        query += " WHERE is_deleted IS NULL OR is_deleted = 0"
+    with _connect() as conn:
+        row = conn.execute(query).fetchone()
+        return int(row[0]) if row else 0
+
+
 def get_embedding_count() -> int:
     """Return the number of durable chunk embeddings in the corpus."""
     with _connect() as conn:

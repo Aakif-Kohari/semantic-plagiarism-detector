@@ -68,7 +68,7 @@ def test_telemetry_doc_count_cache_hit():
     Test that TelemetryService.get_document_count hits the cache.
     """
     with patch('src.core.telemetry.get_cache') as mock_get_cache, \
-         patch('src.core.telemetry.get_all_documents') as mock_get_all_documents:
+         patch('src.core.telemetry.get_document_count_fast') as mock_get_doc_count_fast:
         
         mock_get_cache.return_value = "99"
         
@@ -76,24 +76,24 @@ def test_telemetry_doc_count_cache_hit():
         
         assert count == 99
         mock_get_cache.assert_called_once_with(TelemetryService.CACHE_KEY_DOC_COUNT)
-        mock_get_all_documents.assert_not_called()
+        mock_get_doc_count_fast.assert_not_called()
 
 def test_telemetry_doc_count_cache_miss():
     """
     Test that on cache miss, get_document_count queries DB and populates cache.
     """
     with patch('src.core.telemetry.get_cache') as mock_get_cache, \
-         patch('src.core.telemetry.get_all_documents') as mock_get_all_documents, \
+         patch('src.core.telemetry.get_document_count_fast') as mock_get_doc_count_fast, \
          patch('src.core.telemetry.set_cache') as mock_set_cache:
         
         mock_get_cache.return_value = None
-        mock_get_all_documents.return_value = [{"doc": 1}, {"doc": 2}, {"doc": 3}]
+        mock_get_doc_count_fast.return_value = 3
         
         count = TelemetryService.get_document_count()
         
         assert count == 3
         mock_get_cache.assert_called_once_with(TelemetryService.CACHE_KEY_DOC_COUNT)
-        mock_get_all_documents.assert_called_once()
+        mock_get_doc_count_fast.assert_called_once()
         mock_set_cache.assert_called_once_with(
             TelemetryService.CACHE_KEY_DOC_COUNT, 
             "3", 
@@ -105,10 +105,10 @@ def test_telemetry_doc_db_failure():
     Test that if document DB query fails, service falls back safely.
     """
     with patch('src.core.telemetry.get_cache') as mock_get_cache, \
-         patch('src.core.telemetry.get_all_documents') as mock_get_all_documents:
+         patch('src.core.telemetry.get_document_count_fast') as mock_get_doc_count_fast:
         
         mock_get_cache.return_value = None
-        mock_get_all_documents.side_effect = Exception("DB Fault")
+        mock_get_doc_count_fast.side_effect = Exception("DB Fault")
         
         count = TelemetryService.get_document_count()
         
@@ -123,14 +123,14 @@ def test_telemetry_force_refresh():
     Test that force_refresh bypasses the get_cache check and immediately updates cache.
     """
     with patch('src.core.telemetry.get_user_count') as mock_get_user_count, \
-         patch('src.core.telemetry.get_all_documents') as mock_get_all_documents, \
+         patch('src.core.telemetry.get_document_count_fast') as mock_get_doc_count_fast, \
          patch('src.core.telemetry.set_cache') as mock_set_cache:
         
         mock_get_user_count.return_value = 100
-        mock_get_all_documents.return_value = [1] * 550
+        mock_get_doc_count_fast.return_value = 550
         
         TelemetryService.force_refresh_metrics()
         
         mock_get_user_count.assert_called_once()
-        mock_get_all_documents.assert_called_once()
+        mock_get_doc_count_fast.assert_called_once()
         assert mock_set_cache.call_count == 2

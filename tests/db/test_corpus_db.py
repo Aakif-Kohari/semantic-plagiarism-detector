@@ -15,6 +15,7 @@ from src.db.corpus_db import (
     get_document_by_hash,
     get_document_chunks_count,
     get_document_count_by_user,
+    get_document_count_fast,
     get_documents_by_class,
     get_unique_class_sections,
     purge_stale_trash,
@@ -427,3 +428,25 @@ def test_get_document_count_by_user_returns_int(mock_db):
     result = get_document_count_by_user("alice")
     assert isinstance(result, int)
     assert result == 1
+
+
+def test_get_document_count_fast(mock_db):
+    """Verify that get_document_count_fast returns correct counts for active and deleted documents."""
+    clear_all_data()
+    
+    # Initially count is 0
+    assert get_document_count_fast(include_deleted=False) == 0
+    assert get_document_count_fast(include_deleted=True) == 0
+
+    # Add active documents
+    add_document("doc1.pdf", "hash_1")
+    add_document("doc2.pdf", "hash_2")
+    
+    # Add soft-deleted document
+    add_document("doc3.pdf", "hash_3")
+    soft_delete_document("doc3.pdf")
+
+    # Verify counts
+    assert get_document_count_fast(include_deleted=False) == 2
+    assert get_document_count_fast(include_deleted=True) == 3
+
