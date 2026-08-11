@@ -223,3 +223,20 @@ def test_clear_all_documents_already_empty(
     mock_clear_db.assert_called_once()
     mock_exists.assert_called_once()
     mock_remove.assert_not_called()
+
+
+def test_bearer_token_not_set_in_production():
+    """Verify that when API_BEARER_TOKEN is unset in production, a clean HTTP 500 JSON response is returned."""
+    import os
+    env_mock = os.environ.copy()
+    env_mock.pop("API_BEARER_TOKEN", None)
+    env_mock["APP_ENV"] = "production"
+
+    with patch.dict("os.environ", env_mock, clear=True):
+        response = client.post(
+            "/api/v1/clear?username=admin",
+            headers={"Authorization": "Bearer any-token"},
+        )
+        assert response.status_code == 500
+        assert response.json()["detail"] == "Server misconfiguration: API_BEARER_TOKEN not set."
+

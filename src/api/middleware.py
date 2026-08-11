@@ -31,16 +31,16 @@ def get_expected_bearer_token() -> str:
     """Retrieve the API Bearer Token from environment variable.
 
     Raises:
-        RuntimeError: If API_BEARER_TOKEN is not set and not in test environment.
+        HTTPException: If API_BEARER_TOKEN is not set and not in test environment.
     """
     token = os.getenv("API_BEARER_TOKEN")
     if not token:
         is_test = os.getenv("APP_ENV") == "test"
         if is_test:
             return "dev-bearer-token"
-        raise RuntimeError(
-            "API_BEARER_TOKEN environment variable must be set. "
-            "Do not use default secrets in production."
+        raise HTTPException(
+            status_code=500,
+            detail="Server misconfiguration: API_BEARER_TOKEN not set.",
         )
     return token
 
