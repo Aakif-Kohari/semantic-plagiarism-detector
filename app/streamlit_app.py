@@ -1952,13 +1952,6 @@ if st.button("🚪 Log Out", use_container_width=True, key="logout_button"):
 
 
 # ── Onboarding Tour for First-Time Admin Users ───────────────────────────────────
-if Tour is not None and user_role == "admin" and not get_tour_completed(st.session_state.username):
-    username = st.session_state.username
-    
-        st.markdown("---")
-        if st.button("🚪 Log Out", use_container_width=True, key="logout_button"):
-            logout_dialog()
-
 # Onboarding Tour
 if (
     Tour is not None
@@ -2124,21 +2117,6 @@ if user_role == "admin":
                     )
             else:
                 st.info(f"Loaded and validated the existing FAISS index with {faiss_index.ntotal} vectors.")
-
-    if "analysis_results" not in st.session_state:
-        st.session_state.analysis_results = None
-        # Try to load from Redis cache
-                st.info(
-                    f"Loaded and validated the existing FAISS index with "
-                    f"{faiss_index.ntotal} vectors."
-                )
-    else:
-        if os.path.exists(_INDEX_PATH):
-            faiss_index = load_index(_INDEX_PATH)
-            registry = get_chunk_registry()
-        else:
-            faiss_index = None
-            registry = []
 
     if SessionKeys.ANALYSIS_RESULTS not in st.session_state:
         st.session_state[SessionKeys.ANALYSIS_RESULTS] = None
