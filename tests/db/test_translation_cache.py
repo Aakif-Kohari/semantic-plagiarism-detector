@@ -300,3 +300,17 @@ def test_get_cache_performance_summary():
     assert summary["misses"] == 1
     assert abs(summary["hit_ratio_percentage"] - 66.6666666) < 0.1
 
+def test_get_translation_cache_stats(self, temp_db_path):
+        """Test retrieving accurate cache statistics."""
+        conn = sqlite3.connect(temp_db_path)
+        translation_cache.get_cached_translation("init")
+        self._seed_cache_with_dates(conn, [10, 50, 100])
+
+        stats = translation_cache.get_translation_cache_stats()
+
+        assert stats == {"total_entries": 3}
+
+def test_get_translation_cache_stats_empty(self, temp_db_path):
+        """Test stats retrieval on an empty cache."""
+        stats = translation_cache.get_translation_cache_stats()
+        assert stats == {"total_entries": 0}

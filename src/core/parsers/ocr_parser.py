@@ -29,7 +29,7 @@ def _is_blank_scanned_page(
 ) -> bool:
     """Return True if a rendered page looks blank (very low pixel variance)."""
     try:
-        import fitz
+        import fitz  # PyMuPDF
         from PIL import Image
     except ImportError:
         return False
@@ -73,11 +73,12 @@ def _ocr_pdf_page(
 ) -> str:
     """Render one PDF page and extract text with Tesseract."""
     try:
-        import fitz
+        import fitz  # PyMuPDF
         import pytesseract
         from PIL import Image
     except ImportError as exc:
         from src.errors import OCR_DEPENDENCIES_MISSING
+
         raise OCRDependencyError(OCR_DEPENDENCIES_MISSING) from exc
 
     _configure_tesseract(pytesseract)
@@ -114,6 +115,7 @@ def extract_text_from_image(
         from PIL import Image
     except ImportError as exc:
         from src.errors import OCR_DEPENDENCIES_MISSING
+
         raise OCRDependencyError(OCR_DEPENDENCIES_MISSING) from exc
 
     _configure_tesseract(pytesseract)
@@ -138,6 +140,7 @@ def extract_text_from_image(
             return "[OCR extraction failed for the file]"
     except pytesseract.TesseractNotFoundError as exc:
         from src.errors import OCR_TESSERACT_NOT_FOUND
+
         raise OCRDependencyError(OCR_TESSERACT_NOT_FOUND) from exc
     except Exception as exc:
         logger.error(f"[document_parser] Error reading image: {exc}")

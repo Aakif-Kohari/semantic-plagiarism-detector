@@ -26,12 +26,26 @@ SUPPORTED_OCR_LANGUAGES: dict[str, str] = {
     "ara": "Arabic",
 }
 
+# In-memory session scan counters for rate limiting
 _session_scan_counters: dict[str, int] = {}
 MAX_BATCH_FILES = 100
 
 
 def check_batch_rate_limit(file_count: int, session_id: Optional[str] = None) -> None:
-    """Enforce batch rate limit on document parsing requests."""
+    """Enforce batch rate limit on document parsing requests.
+
+    Parameters
+    ----------
+    file_count : int
+        Number of files in current batch.
+    session_id : str, optional
+        Unique session identifier for tracking cumulative uploads.
+
+    Raises
+    ------
+    ValueError
+        If batch size exceeds single-batch limit or cumulative session limit.
+    """
     if file_count > MAX_BATCH_FILES:
         raise ValueError(
             f"Batch size of {file_count} files exceeds maximum threshold of {MAX_BATCH_FILES} files."

@@ -7,6 +7,8 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import pdfplumber
+
 from src.core.parsers.common import (
     DEFAULT_OCR_DPI,
     DEFAULT_OCR_LANGUAGE,
@@ -143,7 +145,6 @@ def _parse_pdf_page(
 ) -> List[str]:
     """Extract text from a single PDF page."""
     try:
-        import pdfplumber
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
             page = pdf.pages[page_index]
             tables = page.find_tables()
@@ -392,7 +393,6 @@ def extract_text_from_pdf(
             return ""
 
     try:
-        import pdfplumber
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
             num_pages = len(pdf.pages)
             if num_pages == 0:
