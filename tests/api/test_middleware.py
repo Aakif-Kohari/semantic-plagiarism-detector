@@ -1,0 +1,168 @@
+"""
+tests/api/test_middleware.py
+----------------------------
+Unit tests for API middleware components.
+
+Includes tests for token validation, security headers, and JSON parsing.
+"""
+
+import json
+import os
+import pytest
+from unittest.mock import patch
+import logging
+
+from src.api.middleware import get_valid_tokens
+
+
+class TestGetValidTokens:
+    """Test suite for get_valid_tokens() JSON parsing."""
+
+    def test_returns_empty_dict_when_env_not_set(self):
+        """Verify returns empty dict when API_BEARER_TOKENS_MAPPING not set."""
+        with patch.dict(os.environ, {}, clear=True):
+            result = get_valid_tokens()
+            assert result == {}
+
+    def test_returns_empty_dict_when_env_empty_string(self):
+        """Verify returns empty dict when env var is empty string."""
+        with patch.dict(os.environ, {"API_BEARER_TOKENS_MAPPING": ""}, clear=True):
+            result = get_valid_tokens()
+            assert result == {}
+
+    def test_parses_valid_json_correctly(self):
+        """Verify parses valid JSON mapping correctly."""
+        valid_json = json.dumps({"token123": ["read", "write"], "token456": ["admin"]})
+
+        with patch.dict(
+            os.environ, {"API_BEARER_TOKENS_MAPPING": valid_json}, clear=True
+        ):
+            result = get_valid_tokens()
+
+        assert result == {"token123": ["read", "write"], "token456": ["admin"]}
+
+    def test_logs_error_on_malformed_json(self, caplog):
+        """Verify logs error when JSON is malformed."""
+        malformed_json = '{"token123": ["read", "write"'  # Missing closing brace
+
+        with patch.dict(
+            os.environ, {"API_BEARER_TOKENS_MAPPING": malformed_json}, clear=True
+        ):
+            with caplog.at_level(logging.ERROR):
+                result = get_valid_tokens()
+
+        assert result == {}
+        assert any(
+            "Failed to parse API_BEARER_TOKENS_MAPPING as JSON" in record.message
+            for record in caplog.records
+        )
+
+    def test_logs_error_on_non_dict_json(self, caplog):
+        """Verify logs error when JSON is not a dict."""
+        array_json = json.dumps(["token1", "token2"])
+
+        with patch.dict(
+            os.environ, {"API_BEARER_TOKENS_MAPPING": array_json}, clear=True
+        ):
+            with caplog.at_level(logging.ERROR):
+                result = get_valid_tokens()
+
+        assert result == {}
+        assert any(
+            "must be a JSON object" in record.message for record in caplog.records
+        )
+
+    def test_filters_non_string_token_keys(self, caplog):
+        """Verify filters out non-string token keys with warning."""
+        mixed_json = json.dumps(
+            {"valid_token": ["read"], 123: ["write"]}  # Invalid: numeric key
+        )
+
+        with patch.dict(
+            os.environ, {"API_BEARER_TOKENS_MAPPING": mixed_json}, clear=True
+        ):
+            with caplog.at_level(logging.WARNING):
+                result = get_valid_tokens()
+
+        assert "valid_token" in result
+        assert 123 not in result
+        assert any(
+            "Skipping non-string token key" in record.message
+            for record in caplog.records
+        )
+
+    def test_filters_non_list_scopes(self, caplog):
+        """Verify filters out tokens with non-list scopes."""
+        invalid_scopes = json.dumps(
+            {"token1": "read", "token2": ["write"]}  # Invalid: string instead of list
+        )
+
+        with patch.dict(
+            os.environ, {"API_BEARER_TOKENS_MAPPING": invalid_scopes}, clear=True
+        ):
+            with caplog.at_level(logging.WARNING):
+                result = get_valid_tokens()
+
+        assert "token1" not in result
+        assert "token2" in result
+        assert any("has non-list scopes" in record.message for record in caplog.records)
+
+    def test_filters_non_string_scopes(self, caplog):
+        """Verify filters out non-string scope values."""
+        mixed_scopes = json.dumps({"token1": ["read", 123, "write"]})  # 123 is invalid
+
+        with patch.dict(
+            os.environ, {"API_BEARER_TOKENS_MAPPING": mixed_scopes}, clear=True
+        ):
+            with caplog.at_level(logging.WARNING):
+                result = get_valid_tokens()
+
+        assert result["token1"] == ["read", "write"]  # 123 filtered out
+        assert any(
+            "has non-string scopes" in record.message for record in caplog.records
+        )
+
+    def test_handles_unexpected_exception(self, caplog):
+        """Verify handles unexpected exceptions gracefully."""
+        # Mock json.loads to raise unexpected exception
+        with patch.dict(os.environ, {"API_BEARER_TOKENS_MAPPING": "{}"}, clear=True):
+            with patch("json.loads", side_effect=RuntimeError("Unexpected error")):
+                with caplog.at_level(logging.ERROR):
+                    result = get_valid_tokens()
+
+        assert result == {}
+        assert any(
+            "Unexpected error parsing API_BEARER_TOKENS_MAPPING" in record.message
+            for record in caplog.records
+        )
+
+    def test_empty_dict_is_valid(self):
+        """Verify empty JSON object is valid."""
+        empty_json = json.dumps({})
+
+        with patch.dict(
+            os.environ, {"API_BEARER_TOKENS_MAPPING": empty_json}, clear=True
+        ):
+            result = get_valid_tokens()
+
+        assert result == {}
+
+    def test_complex_valid_mapping(self):
+        """Verify handles complex valid mapping correctly."""
+        complex_json = json.dumps(
+            {
+                "admin_token_xyz": ["admin", "read", "write", "delete"],
+                "readonly_token_abc": ["read"],
+                "limited_token_123": ["read", "write"],
+            }
+        )
+
+        with patch.dict(
+            os.environ, {"API_BEARER_TOKENS_MAPPING": complex_json}, clear=True
+        ):
+            result = get_valid_tokens()
+
+        assert len(result) == 3
+        assert result["admin_token_xyz"] == ["admin", "read", "write", "delete"]
+        assert result["readonly_token_abc"] == ["read"]
+        assert result["limited_token_123"] == ["read", "write"]
