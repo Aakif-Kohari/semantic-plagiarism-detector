@@ -120,6 +120,11 @@ def build_network_data(
         Dictionary containing shapes, edge_hover_trace, node_trace, graph, pos coordinates,
         tag_color_map, and document_tags.
     """
+    if isinstance(max_nodes, bool) or not isinstance(max_nodes, int):
+        raise TypeError("max_nodes must be an integer.")
+    if max_nodes < 1:
+        raise ValueError("max_nodes must be at least 1.")
+
     G = nx.Graph()
 
     # Add all documents as nodes
@@ -146,6 +151,34 @@ def build_network_data(
             [node for node, degree in dict(G.degree()).items() if degree == 0]
         )
 
+    # Retain only the highest-degree documents when the graph exceeds the
+    # configured limit. Input order provides deterministic tie-breaking.
+    visible_node_count = len(G)
+    hidden_node_count = max(0, visible_node_count - max_nodes)
+    if hidden_node_count:
+        original_order = {
+            name: index for index, name in enumerate(doc_names)
+        }
+        ranked_nodes = sorted(
+            G.nodes(),
+            key=lambda node: (
+                -G.degree(node),
+                original_order.get(node, len(original_order)),
+            ),
+        )
+        retained_nodes = set(ranked_nodes[:max_nodes])
+        G.remove_nodes_from(
+            [
+                node
+                for node in list(G.nodes())
+                if node not in retained_nodes
+            ]
+        )
+        edge_similarities = {
+            edge: score
+            for edge, score in edge_similarities.items()
+            if edge[0] in retained_nodes and edge[1] in retained_nodes
+        }
     # Keep only the top max_nodes highest-degree documents when the graph is large
     hidden_nodes = 0
     if max_nodes and len(G) > max_nodes:
@@ -474,6 +507,7 @@ def render_network_plotly(
     shapes = network_data.get("shapes", [])
     edge_hover_trace = network_data.get("edge_hover_trace")
     node_trace = network_data.get("node_trace")
+    hidden_node_count = int(network_data.get("hidden_node_count", 0) or 0)
 
     bg_color = theme_colors.get("background", "#FFFFFF") if theme_colors else "#FFFFFF"
 
@@ -546,6 +580,33 @@ def render_network_plotly(
         ),
     )
 
+    if hidden_node_count > 0:
+        fig.add_annotation(
+            text=(
+                f"{hidden_node_count} node"
+                f"{'s' if hidden_node_count != 1 else ''} hidden "
+                "to keep the network readable."
+            ),
+            x=0.5,
+            y=-0.08,
+            xref="paper",
+            yref="paper",
+            showarrow=False,
+            xanchor="center",
+            yanchor="top",
+            font=dict(
+                size=max(10, int(11 * scale)),
+                color=ink_color,
+            ),
+        )
+        fig.update_layout(
+            margin=dict(
+                b=max(70, int(70 * scale)),
+                l=40,
+                r=40,
+                t=int(50 * scale),
+            )
+        )
     return fig
 
 

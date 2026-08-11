@@ -940,3 +940,114 @@ class TestNetworkExport:
         assert "doc1" in lines[1]
         assert "doc2" in lines[1]
         assert "0.8" in lines[1]
+
+
+
+# ==============================================================================
+# Max Connected Nodes Filter Tests (Issue #1278)
+# ==============================================================================
+
+
+def _max_nodes_matrix():
+    labels = ["hub", "mid", "leaf1", "leaf2", "isolated"]
+    return pd.DataFrame(
+        [
+            [1.0, 0.9, 0.9, 0.9, 0.1],
+            [0.9, 1.0, 0.8, 0.1, 0.1],
+            [0.9, 0.8, 1.0, 0.1, 0.1],
+            [0.9, 0.1, 0.1, 1.0, 0.1],
+            [0.1, 0.1, 0.1, 0.1, 1.0],
+        ],
+        index=labels,
+        columns=labels,
+    )
+
+
+def test_build_network_data_keeps_top_highest_degree_nodes():
+    data = build_network_data(
+        _max_nodes_matrix(),
+        threshold=0.75,
+        show_isolated=True,
+        max_nodes=3,
+    )
+    assert set(data["graph"].nodes()) == {"hub", "mid", "leaf1"}
+    assert data["hidden_node_count"] == 2
+
+
+def test_max_nodes_tie_breaking_follows_original_order():
+    labels = ["A", "B", "C", "D"]
+    df = pd.DataFrame(
+        [
+            [1.0, 0.9, 0.9, 0.9],
+            [0.9, 1.0, 0.1, 0.1],
+            [0.9, 0.1, 1.0, 0.1],
+            [0.9, 0.1, 0.1, 1.0],
+        ],
+        index=labels,
+        columns=labels,
+    )
+    data = build_network_data(
+        df,
+        threshold=0.75,
+        show_isolated=True,
+        max_nodes=2,
+    )
+    assert list(data["graph"].nodes()) == ["A", "B"]
+    assert data["hidden_node_count"] == 2
+
+
+def test_max_nodes_does_not_filter_small_graph():
+    data = build_network_data(
+        _max_nodes_matrix(),
+        threshold=0.75,
+        show_isolated=True,
+        max_nodes=10,
+    )
+    assert len(data["graph"]) == 5
+    assert data["hidden_node_count"] == 0
+
+
+@pytest.mark.parametrize("max_nodes", [0, -1])
+def test_max_nodes_rejects_non_positive_values(max_nodes):
+    with pytest.raises(ValueError, match="max_nodes must be at least 1"):
+        build_network_data(
+            _max_nodes_matrix(),
+            show_isolated=True,
+            max_nodes=max_nodes,
+        )
+
+
+@pytest.mark.parametrize("max_nodes", [True, 1.5, "50", None])
+def test_max_nodes_rejects_non_integer_values(max_nodes):
+    with pytest.raises(TypeError, match="max_nodes must be an integer"):
+        build_network_data(
+            _max_nodes_matrix(),
+            show_isolated=True,
+            max_nodes=max_nodes,
+        )
+
+
+def test_render_network_plotly_displays_hidden_node_caption():
+    data = build_network_data(
+        _max_nodes_matrix(),
+        threshold=0.75,
+        show_isolated=True,
+        max_nodes=3,
+    )
+    fig = render_network_plotly(data)
+    assert len(fig.layout.annotations) == 1
+    assert (
+        fig.layout.annotations[0].text
+        == "2 nodes hidden to keep the network readable."
+    )
+
+
+def test_plot_plagiarism_network_graph_accepts_max_nodes():
+    fig = plot_plagiarism_network_graph(
+        _max_nodes_matrix(),
+        threshold=0.75,
+        show_isolated=True,
+        max_nodes=2,
+    )
+    assert len(fig.data[1].customdata) == 2
+    assert "3 nodes hidden" in fig.layout.annotations[0].text
