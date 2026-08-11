@@ -12,14 +12,34 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 import requests
 
+import logging
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
 from src.utils.filename import unique_filename
 
+logger = logging.getLogger(__name__)
+
 # Supported extensions for the plagiarism detection pipeline
 SUPPORTED_EXTENSIONS = (".pdf", ".docx", ".doc", ".txt")
+
+
+def validate_service_account_key(key_dict: dict) -> bool:
+    """
+    Validate that the service account JSON key dictionary contains required fields.
+    """
+    if not isinstance(key_dict, dict):
+        logger.warning("Invalid key type: expected a dictionary.")
+        return False
+
+    required_keys = ["type", "project_id", "private_key", "client_email"]
+    for key in required_keys:
+        if key not in key_dict or not key_dict[key]:
+            logger.warning(f"Google Drive service account key is missing or empty for required field: {key}")
+            return False
+
+    return True
 
 
 def get_supported_file_extensions() -> List[str]:
@@ -57,8 +77,35 @@ def extract_google_drive_folder_id(url_or_id: str) -> str | None:
     return None
 
 
-def get_drive_service(
-    api_key: Optional[str] = None, service_account_info: Optional[dict] = None
+_FOLDER_ID_PATTERN = re.compile(r"[\w-]{25,}")
+
+
+def extract_folder_id(url_or_id: str) -> str | None:
+    """
+    Extracts a Google Drive folder ID from a full Drive URL or raw ID string.
+
+    Uses a permissive regex to match any run of word characters and hyphens
+    that is at least 25 characters long, so it accepts both full folder
+    URLs (e.g. "https://drive.google.com/drive/folders/1A2B3C...") and a
+    bare folder ID pasted on its own.
+
+    Args:
+        url_or_id: A Google Drive folder URL or a raw folder ID string.
+
+    Returns:
+        The extracted folder ID string, or None if no valid ID is found.
+    """
+    if not isinstance(url_or_id, str):
+        return None
+
+    match = _FOLDER_ID_PATTERN.search(url_or_id)
+    if match:
+        return match.group(0)
+
+    return None
+
+
+def get_drive_service(    api_key: Optional[str] = None, service_account_info: Optional[dict] = None
 ):
     """
     Builds and returns a Google Drive API service instance using an API key or Service Account.

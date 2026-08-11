@@ -7,11 +7,12 @@ from src.utils.google_drive import (
     bulk_download_drive_folder,
     check_folder_access,
     download_file_bytes,
+    extract_folder_id,
     extract_google_drive_folder_id,
     get_drive_service,
     list_files_in_folder,
+    validate_service_account_key,
 )
-
 def test_extract_google_drive_folder_id_valid_id():
     valid_id = "1A2B3C4D5E6F7G8H9I0J1K2L3M4N5O6P7"
     assert len(valid_id) == 33
@@ -37,6 +38,24 @@ def test_extract_google_drive_folder_id_empty_string():
 def test_extract_google_drive_folder_id_random_string():
     assert extract_google_drive_folder_id("random_garbage_string_not_an_id") is None
 
+
+def test_extract_folder_id_valid_id():
+    valid_id = "1A2B3C4D5E6F7G8H9I0J1K2L3M4N5O6P7"
+    assert extract_folder_id(valid_id) == valid_id
+
+
+def test_extract_folder_id_valid_url():
+    valid_id = "1A2B3C4D5E6F7G8H9I0J1K2L3M4N5O6P7"
+    url = f"https://drive.google.com/drive/folders/{valid_id}"
+    assert extract_folder_id(url) == valid_id
+
+
+def test_extract_folder_id_too_short_returns_none():
+    assert extract_folder_id("short_id_123") is None
+
+
+def test_extract_folder_id_non_string_returns_none():
+    assert extract_folder_id(None) is None
 def test_extract_google_drive_folder_id_unsupported_url():
     url = "https://google.com"
     assert extract_google_drive_folder_id(url) is None
@@ -368,3 +387,44 @@ def test_check_folder_access_request_exception(mock_head):
 def test_check_folder_access_invalid_folder_id():
     assert check_folder_access("") is False
     assert check_folder_access("folder/with/slashes") is False
+
+
+def test_validate_service_account_key_valid():
+    key_dict = {
+        "type": "service_account",
+        "project_id": "my-project",
+        "private_key": "some-private-key",
+        "client_email": "service-account@my-project.iam.gserviceaccount.com"
+    }
+    assert validate_service_account_key(key_dict) is True
+
+
+def test_validate_service_account_key_missing_fields(caplog):
+    key_dict = {
+        "type": "service_account",
+        "project_id": "my-project",
+        "private_key": "some-private-key",
+    }
+    with caplog.at_level("WARNING"):
+        assert validate_service_account_key(key_dict) is False
+        assert "Google Drive service account key is missing or empty" in caplog.text
+
+
+def test_validate_service_account_key_empty_fields(caplog):
+    key_dict = {
+        "type": "service_account",
+        "project_id": "",
+        "private_key": "some-private-key",
+        "client_email": "service-account@my-project.iam.gserviceaccount.com"
+    }
+    with caplog.at_level("WARNING"):
+        assert validate_service_account_key(key_dict) is False
+        assert "Google Drive service account key is missing or empty" in caplog.text
+
+
+def test_validate_service_account_key_invalid_type(caplog):
+    with caplog.at_level("WARNING"):
+        assert validate_service_account_key(None) is False
+        assert "Invalid key type: expected a dictionary" in caplog.text
+        assert validate_service_account_key("string-key") is False
+

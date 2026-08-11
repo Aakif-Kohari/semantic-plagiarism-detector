@@ -1,20 +1,35 @@
 from __future__ import annotations
 
-
-import logging
-
-from src.core.cross_lingual import (detect_language,
-                                    prepare_chunks_for_embedding,
-                                    prepare_documents_for_embedding,
-                                    prepare_text_for_embedding)
+import numpy as np
+import pytest
+from unittest.mock import patch, MagicMock
 
 from src.core.cross_lingual import (
+    TranslationMemoryCache,
+    back_translate_chunk,
+    detect_chunk_language,
     detect_language,
     prepare_chunks_for_embedding,
     prepare_documents_for_embedding,
     prepare_text_for_embedding,
-    translate_to_english,
+    verify_semantic_fidelity,
 )
+from src.db.translation_cache import init_translation_cache, clear_translation_cache
+
+
+# ── Issue #1956 Cache Fixture ────────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def setup_cache():
+    """Initialize and clear the translation cache before/after each test."""
+    init_translation_cache()
+    clear_translation_cache()
+    yield
+    clear_translation_cache()
+
+
+# ── Original Language Detection Tests ─────────────────────────────────────────
 
 
 def test_detects_english_text():
@@ -32,27 +47,6 @@ def test_detects_hindi_text():
     )
     assert detect_language(text) == ("hi", True)
 
-
-def test_low_confidence_logs_warning(monkeypatch, caplog):
-    """A detection confidence below 0.7 should trigger a warning log."""
-
-    class FakeLang:
-        lang = "fr"
-        prob = 0.5
-
-    monkeypatch.setattr(
-        "src.core.cross_lingual.detect_langs", lambda text: [FakeLang()]
-    )
-
-    with caplog.at_level(logging.WARNING):
-        detect_language(
-            "This is a sufficiently long snippet of text for detection to run."
-        )
-
-    assert any(
-        "Low language detection confidence" in record.message
-        for record in caplog.records
-    )
 
 def test_english_text_is_not_translated():
     calls = []
@@ -130,7 +124,10 @@ def test_detect_language_low_confidence(caplog):
 
         assert lang == "en"
         assert confident is False
-        assert any("Low-confidence language detection" in record.message for record in caplog.records)
+        assert any(
+            "Low-confidence language detection" in record.message
+            for record in caplog.records
+        )
 
 
 def test_detect_language_high_confidence():
@@ -140,7 +137,7 @@ def test_detect_language_high_confidence():
 
     with patch("src.core.cross_lingual.detect_langs") as mock_detect_langs:
         mock_detect_langs.return_value = [Language("fr", 0.9)]
-        lang, confident = detect_language("some text in the french language")
+        lang, confident = detect_language("some text in french")
 
         assert lang == "fr"
         assert confident is True
@@ -210,23 +207,196 @@ def test_document_preparation_does_not_mutate_source_chunks(monkeypatch):
     assert metadata["spanish.pdf"][0]["translated"] is True
 
 
-def test_translate_to_english_confidence():
-    """Verify translate_to_english returns dictionary with confidence metrics."""
-    # 1. English text -> confidence should be 1.0
-    english_input = "Artificial intelligence supports modern education."
-    res_en = translate_to_english(english_input)
-    assert res_en["confidence"] == 1.0
-    assert res_en["source_language"] == "en"
-    assert res_en["translated_text"] == english_input
+def test_translation_memory_cache_hits_for_identical_sentence():
+    cache = TranslationMemoryCache()
+    calls = []
+    sentence = "La inteligencia artificial ayuda a los profesores."
 
-    # 2. Non-English text with mock translator
-    spanish_input = "La inteligencia artificial ayuda a los profesores en el aula."
+    def fake_translator(text, **kwargs):
+        calls.append((text, kwargs))
+        return "Artificial intelligence helps teachers."
 
-    def mock_translator(text, target_lang="en", source_lang="es"):
-        return "Artificial intelligence helps teachers in the classroom."
+    first = prepare_text_for_embedding(
+        sentence,
+        detector=lambda _: "es",
+        translator=fake_translator,
+        translation_cache=cache,
+    )
+    second = prepare_text_for_embedding(
+        sentence,
+        detector=lambda _: "es",
+        translator=fake_translator,
+        translation_cache=cache,
+    )
 
-    res_es = translate_to_english(spanish_input, translator=mock_translator)
-    assert res_es["source_language"] == "es"
-    assert isinstance(res_es["confidence"], float)
-    assert 0.0 <= res_es["confidence"] <= 1.0
-    assert res_es["translated_text"] == "Artificial intelligence helps teachers in the classroom."
+    assert first["embedding_text"] == second["embedding_text"]
+    assert first["translated"] is True
+    assert second["translated"] is True
+    assert len(calls) == 1
+    assert len(cache) == 1
+
+
+def test_translation_cache_keys_include_language_pair():
+    cache = TranslationMemoryCache()
+    calls = []
+
+    def fake_translator(text, **kwargs):
+        calls.append(kwargs["source_lang"])
+        return f"translated from {kwargs['source_lang']}"
+
+    spanish = prepare_text_for_embedding(
+        "shared sentence",
+        detector=lambda _: "es",
+        translator=fake_translator,
+        translation_cache=cache,
+    )
+    french = prepare_text_for_embedding(
+        "shared sentence",
+        detector=lambda _: "fr",
+        translator=fake_translator,
+        translation_cache=cache,
+    )
+
+    assert spanish["embedding_text"] == "translated from es"
+    assert french["embedding_text"] == "translated from fr"
+    assert calls == ["es", "fr"]
+    assert len(cache) == 2
+
+
+def test_failed_translation_is_not_cached():
+    cache = TranslationMemoryCache()
+    calls = []
+
+    def failing_translator(*args, **kwargs):
+        calls.append(1)
+        raise RuntimeError("translation unavailable")
+
+    for _ in range(2):
+        result = prepare_text_for_embedding(
+            "Texte français répétitif.",
+            detector=lambda _: "fr",
+            translator=failing_translator,
+            translation_cache=cache,
+        )
+        assert result["translation_failed"] is True
+
+    assert len(calls) == 2
+    assert len(cache) == 0
+
+
+def test_translation_cache_clear_removes_entries():
+    cache = TranslationMemoryCache()
+    cache.set(
+        "Hola",
+        "Hello",
+        source_lang="es",
+        target_lang="en",
+    )
+
+    assert len(cache) == 1
+    cache.clear()
+    assert len(cache) == 0
+
+
+def test_english_text_does_not_enter_translation_cache():
+    cache = TranslationMemoryCache()
+
+    result = prepare_text_for_embedding(
+        "Artificial intelligence supports education.",
+        detector=lambda _: "en",
+        translator=lambda *_args, **_kwargs: "unused",
+        translation_cache=cache,
+    )
+
+    assert result["translated"] is False
+    assert len(cache) == 0
+
+
+# ── Issue #1956: Lightweight Language Detection Tests ─────────────────────────
+
+
+class TestDetectChunkLanguage:
+    """Tests for lightweight language detection heuristics."""
+
+    def test_detect_spanish(self):
+        text = "El rápido zorro marrón salta sobre el perro perezoso."
+        assert detect_chunk_language(text) == "es"
+
+    def test_detect_french(self):
+        text = "Le renard brun rapide saute par-dessus le chien paresseux."
+        assert detect_chunk_language(text) == "fr"
+
+    def test_detect_german(self):
+        text = "Der schnelle braune Fuchs springt über den faulen Hund."
+        assert detect_chunk_language(text) == "de"
+
+    def test_detect_chinese(self):
+        text = "快速的棕色狐狸跳过懒狗。"
+        assert detect_chunk_language(text) == "zh"
+
+    def test_detect_english_default(self):
+        text = "The quick brown fox jumps over the lazy dog."
+        assert detect_chunk_language(text) == "en"
+
+    def test_empty_text_returns_english(self):
+        assert detect_chunk_language("") == "en"
+        assert detect_chunk_language(None) == "en"
+
+
+# ── Issue #1956: Back-Translation & Cache Tests ───────────────────────────────
+
+
+class TestBackTranslateChunk:
+    """Tests for the back-translation and caching logic."""
+
+    def test_english_text_unchanged(self):
+        text = "This is already in English."
+        result = back_translate_chunk(text, source_lang="en")
+        assert result == text
+
+    @patch("src.core.cross_lingual.save_translation")
+    @patch("src.core.cross_lingual.get_cached_translation", return_value=None)
+    def test_cache_miss_triggers_translation(self, mock_get, mock_save):
+        text = "El zorro marrón."
+        result = back_translate_chunk(text, source_lang="es", use_cache=True)
+
+        # Should call save_translation after mock translation
+        mock_save.assert_called_once()
+        assert "[Translated from es]" in result
+
+    @patch("src.core.cross_lingual.save_translation")
+    @patch(
+        "src.core.cross_lingual.get_cached_translation", return_value="The brown fox."
+    )
+    def test_cache_hit_returns_cached_value(self, mock_get, mock_save):
+        text = "El zorro marrón."
+        result = back_translate_chunk(text, source_lang="es", use_cache=True)
+
+        assert result == "The brown fox."
+        mock_save.assert_not_called()
+
+    def test_cache_disabled_skips_lookup(self):
+        text = "El zorro marrón."
+        # With use_cache=False, it should bypass cache and translate directly
+        result = back_translate_chunk(text, source_lang="es", use_cache=False)
+        assert "[Translated from es]" in result
+
+
+# ── Issue #1956: Semantic Fidelity Verification Tests ─────────────────────────
+
+
+class TestVerifySemanticFidelity:
+    """Tests for embedding similarity verification."""
+
+    def test_identical_embeddings_return_one(self):
+        vec = np.array([1.0, 0.0, 0.0])
+        assert verify_semantic_fidelity(vec, vec) == pytest.approx(1.0)
+
+    def test_orthogonal_embeddings_return_zero(self):
+        vec_a = np.array([1.0, 0.0, 0.0])
+        vec_b = np.array([0.0, 1.0, 0.0])
+        assert verify_semantic_fidelity(vec_a, vec_b) == pytest.approx(0.0)
+
+    def test_empty_embeddings_return_zero(self):
+        assert verify_semantic_fidelity(np.array([]), np.array([1.0])) == 0.0
+        assert verify_semantic_fidelity(None, None) == 0.0

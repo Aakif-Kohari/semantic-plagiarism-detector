@@ -6,7 +6,10 @@ import sqlite3
 
 from .common import column_exists, run_migrations
 
-AUTH_SCHEMA_VERSION = 12
+
+AUTH_SCHEMA_VERSION = 13
+
+AUTH_SCHEMA_VERSION = 14
 
 
 def migration_001_create_users(
@@ -190,6 +193,65 @@ def migration_012_create_revoked_tokens_table(
     )
 
 
+def migration_013_create_password_history_table(
+    connection: sqlite3.Connection,
+) -> None:
+    """Create password_history table for tracking recent password hashes per user."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS password_history (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            username      TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at    TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_password_history_username
+        ON password_history(username)
+        """
+    )
+
+
+def migration_014_add_must_change_password(
+    connection: sqlite3.Connection,
+) -> None:
+    """Add must_change_password flag to force password reset on next login."""
+    if not column_exists(connection, "users", "must_change_password"):
+        connection.execute(
+            """
+            ALTER TABLE users
+            ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0
+            """
+        )
+
+
+
+def migration_013_add_user_status(
+    connection: sqlite3.Connection,
+) -> None:
+    """Add account status field and migrate the legacy is_active flag."""
+    if not column_exists(connection, "users", "status"):
+        connection.execute(
+            """
+            ALTER TABLE users
+            ADD COLUMN status TEXT NOT NULL DEFAULT 'active'
+            """
+        )
+
+    connection.execute(
+        """
+        UPDATE users
+        SET status = CASE
+            WHEN is_active = 0 THEN 'suspended'
+            ELSE 'active'
+        END
+        """
+    )
+
+
 AUTH_MIGRATIONS = {
     1: migration_001_create_users,
     2: migration_002_add_onboarding_state,
@@ -203,6 +265,9 @@ AUTH_MIGRATIONS = {
     10: migration_010_add_password_changed_at,
     11: migration_011_add_version_column,
     12: migration_012_create_revoked_tokens_table,
+    13: migration_013_add_user_status,
+    14: migration_013_create_password_history_table,
+    15: migration_014_add_must_change_password,
 }
 
 

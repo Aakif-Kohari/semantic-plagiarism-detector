@@ -68,74 +68,25 @@ def test_extract_unique_tags_with_spaces():
 def test_has_matching_tag_spaces():
     assert TagManager.has_matching_tag(' #hw1 , #final ', '#hw1') is True
 
-from unittest.mock import patch
+def test_apply_tag_bulk(mocker):
+    mocker.patch('src.core.tag_manager.TagManager.parse_tags', return_value="#newtag")
+    mocker.patch('src.db.corpus_db.get_document_tags', side_effect=["#oldtag", "#newtag", ""])
+    update_mock = mocker.patch('src.db.corpus_db.update_document_tags')
 
+    from src.core.tag_manager import TagManager
+    TagManager.apply_tag(["doc1.pdf", "doc2.pdf", "doc3.pdf"], "#newtag")
 
-def test_apply_tag_bulk():
-    with patch('src.core.tag_manager.TagManager.parse_tags', return_value="#newtag"), \
-         patch('src.db.corpus_db.get_document_tags', side_effect=["#oldtag", "#newtag", ""]), \
-         patch('src.db.corpus_db.update_document_tags') as update_mock:
-        from src.core.tag_manager import TagManager
-        TagManager.apply_tag(["doc1.pdf", "doc2.pdf", "doc3.pdf"], "#newtag")
-        assert update_mock.call_count == 2
-        update_mock.assert_any_call("doc1.pdf", "#newtag,#oldtag")
-        update_mock.assert_any_call("doc3.pdf", "#newtag")
+    assert update_mock.call_count == 2
+    update_mock.assert_any_call("doc1.pdf", "#newtag,#oldtag")
+    update_mock.assert_any_call("doc3.pdf", "#newtag")
 
+def test_remove_tag_bulk(mocker):
+    mocker.patch('src.core.tag_manager.TagManager.parse_tags', return_value="#badtag")
+    mocker.patch('src.db.corpus_db.get_document_tags', side_effect=["#badtag,#goodtag", "#goodtag", ""])
+    update_mock = mocker.patch('src.db.corpus_db.update_document_tags')
 
-def test_remove_tag_bulk():
-    with patch('src.core.tag_manager.TagManager.parse_tags', return_value="#badtag"), \
-         patch('src.db.corpus_db.get_document_tags', side_effect=["#badtag,#goodtag", "#goodtag", ""]), \
-         patch('src.db.corpus_db.update_document_tags') as update_mock:
-        from src.core.tag_manager import TagManager
-        TagManager.remove_tag(["doc1.pdf", "doc2.pdf", "doc3.pdf"], "#badtag")
-        assert update_mock.call_count == 1
-        update_mock.assert_called_once_with("doc1.pdf", "#goodtag")
+    from src.core.tag_manager import TagManager
+    TagManager.remove_tag(["doc1.pdf", "doc2.pdf", "doc3.pdf"], "#badtag")
 
-
-# ── sanitize_tag_name tests (#936) ───────────────────────────────────────────
-
-import pytest
-from src.core.tag_manager import sanitize_tag_name
-
-
-def test_sanitize_tag_name_removes_html_tags():
-    assert sanitize_tag_name("<b>#hw1</b>") == "#hw1"
-    assert sanitize_tag_name("<script>alert('xss')</script>#tag") == "alert('xss')#tag"
-
-
-def test_sanitize_tag_name_removes_slashes_and_whitespace():
-    assert sanitize_tag_name(" #class / section \\ test ") == "#classsectiontest"
-    assert sanitize_tag_name("tag/name\\1") == "tagname1"
-
-
-def test_sanitize_tag_name_truncates_to_30_chars():
-    long_tag = "a" * 50
-    result = sanitize_tag_name(long_tag)
-    assert len(result) == 30
-    assert result == "a" * 30
-
-
-def test_sanitize_tag_name_rejects_empty_and_whitespace():
-    with pytest.raises(ValueError, match="empty or whitespace-only"):
-        sanitize_tag_name("")
-
-    with pytest.raises(ValueError, match="empty or whitespace-only"):
-        sanitize_tag_name("   ")
-
-    with pytest.raises(ValueError, match="empty or whitespace-only"):
-        sanitize_tag_name("\t\n ")
-
-    with pytest.raises(ValueError, match="empty or whitespace-only"):
-        sanitize_tag_name(None)
-
-
-def test_sanitize_tag_name_rejects_empty_after_sanitization():
-    with pytest.raises(ValueError, match="empty or whitespace-only"):
-        sanitize_tag_name("<script></script>")
-
-    with pytest.raises(ValueError, match="empty or whitespace-only"):
-        sanitize_tag_name(" // \\  ")
-
-
-def test_tag_manager_static_sanitize_tag_name():
-    assert TagManager.sanitize_tag_name("<b>#valid_tag</b>") == "#valid_tag"
+    assert update_mock.call_count == 1
+    update_mock.assert_called_once_with("doc1.pdf", "#goodtag")

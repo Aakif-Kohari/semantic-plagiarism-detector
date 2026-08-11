@@ -127,7 +127,7 @@ def calculate_processing_throughput(total_bytes: int, elapsed_seconds: float) ->
     if elapsed_seconds <= 0:
         return 0.0
 
-    total_kb = total_bytes / BYTES_PE # type: ignore 
+    total_kb = total_bytes / BYTES_PER_KB # type: ignore 
     throughput = total_kb / elapsed_seconds
     return round(throughput, 2)
 
@@ -360,3 +360,51 @@ def processing_eta_text(
     seconds = estimate_processing_seconds(total_bytes, seconds_per_mb=seconds_per_mb)
     duration = format_processing_duration(seconds)
     return f"Estimated processing time: about {duration}"
+
+
+def calculate_average_latency(latencies: list[float]) -> float:
+    """Calculate the average latency from a list of latencies, rounded to 3 decimals."""
+    if not latencies:
+        return 0.0
+    return round(sum(latencies) / len(latencies), 3)
+
+
+def calculate_mb_per_minute(total_bytes: int, elapsed_seconds: float) -> float:
+    """
+    Calculate document processing throughput in megabytes per minute (MB/min).
+    
+    Args:
+        total_bytes (int): Total size processed in bytes.
+        elapsed_seconds (float): Time elapsed in seconds.
+        
+    Returns:
+        float: Throughput in MB/min rounded to 2 decimal places. Returns 0.0 if elapsed_seconds <= 0.
+    """
+    if elapsed_seconds <= 0 or total_bytes <= 0:
+        return 0.0
+
+    megabytes = total_bytes / (1024 * 1024)
+    minutes = elapsed_seconds / 60.0
+
+    return round(megabytes / minutes, 2)
+
+
+def calculate_kb_per_second(total_bytes: int, elapsed_seconds: float) -> float:
+    """
+    Calculate document processing throughput in kilobytes per second (KB/sec).
+    
+    Args:
+        total_bytes (int): Total size processed in bytes.
+        elapsed_seconds (float): Time elapsed in seconds.
+        
+    Returns:
+        float: Throughput in KB/sec rounded to 2 decimal places. Returns 0.0 if elapsed_seconds <= 0.
+    """
+    if elapsed_seconds <= 0 or total_bytes <= 0:
+        return 0.0
+    
+    kilobytes = total_bytes / 1024.0
+    
+    return round(kilobytes / elapsed_seconds, 2)
+
+

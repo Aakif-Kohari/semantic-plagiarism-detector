@@ -1,11 +1,27 @@
+from fastapi.testclient import TestClient
+from src.api.app import app
+
+client = TestClient(app)
+
+
+def test_http_404_not_found():
+    """Verify that a nonexistent route returns a standardized JSON 404 response payload."""
+    response = client.get("/api/v1/nonexistent-endpoint-xyz")
+    assert response.status_code == 404
+    assert response.json() == {
+        "error": True,
+        "code": 404,
+        "message": "API endpoint or resource not found",
+    }
 # JSONContentTypeMiddleware unit coverage for Issue #1394.
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient as StarletteTestClient
+from starlette.requests import Request
 
-from src.asgi_app import JSONContentTypeMiddleware
+from src.asgi_app import JSONContentTypeMiddleware, ClientIPLoggingMiddleware
 
 
 async def _json_echo(request):
@@ -247,6 +263,7 @@ def test_api_v1_status_returns_online_payload():
     response = _status_client.get("/api/v1/status")
 
     assert response.status_code == 200
+    assert "application/json" in response.headers["content-type"]
     data = response.json()
     assert data["status"] == "online"
     assert data["version"] == "1.0.0"
@@ -568,7 +585,10 @@ def test_streaming_multipart_upload_streams_chunks_to_disk():
     from src.api.app import app
 
     client = TestClient(app)
-    content = b"This is a test paragraph for verifying streaming chunk reader upload functionality.\n\n" * 5
+    content = (
+        b"This is a test paragraph for verifying streaming chunk reader upload functionality.\n\n"
+        * 5
+    )
 
     files = {"file": ("stream_test.txt", content, "text/plain")}
     headers = {"Authorization": "Bearer test-write-token"}
@@ -578,6 +598,78 @@ def test_streaming_multipart_upload_streams_chunks_to_disk():
     data = response.json()
     assert data["filename"] == "stream_test.txt"
     assert data["word_count"] > 0
+
+
+def test_scan_rejects_exe_upload_with_415():
+    """Verify POST /api/v1/scan rejects a Windows PE executable (.exe, MZ header) with 415."""
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+
+    client = TestClient(app)
+    # Minimal DOS/PE executable header ("MZ" magic bytes).
+    payload = b"MZ" + b"\x90\x00" * 30
+
+    files = {"file": ("malware.exe", payload, "application/octet-stream")}
+    headers = {"Authorization": "Bearer test-write-token"}
+
+    response = client.post("/api/v1/scan", files=files, headers=headers)
+    assert response.status_code == 415
+    assert "unsupported media type" in response.json()["message"].lower()
+
+
+def test_scan_rejects_shell_script_upload_with_415():
+    """Verify POST /api/v1/scan rejects a shell script (#!/bin/sh shebang) with 415."""
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+
+    client = TestClient(app)
+    payload = b"#!/bin/sh\necho 'hello'\n"
+
+    # Even with an unrelated/misleading extension, the shebang magic bytes
+    # alone must be enough to trigger the rejection.
+    files = {"file": ("notes.txt", payload, "text/plain")}
+    headers = {"Authorization": "Bearer test-write-token"}
+
+    response = client.post("/api/v1/scan", files=files, headers=headers)
+    assert response.status_code == 415
+
+
+def test_scan_rejects_bat_and_dll_extensions_with_415():
+    """Verify POST /api/v1/scan rejects .bat and .dll uploads by extension, with 415."""
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer test-write-token"}
+
+    for filename, payload in [
+        ("run.bat", b"@echo off\r\necho hi\r\n"),
+        ("library.dll", b"MZ" + b"\x00" * 30),
+    ]:
+        files = {"file": (filename, payload, "application/octet-stream")}
+        response = client.post("/api/v1/scan", files=files, headers=headers)
+        assert response.status_code == 415, f"{filename} was not rejected with 415"
+
+
+def test_scan_does_not_reject_ordinary_text_upload():
+    """Sanity check: a normal .txt upload must NOT be blocked by the executable check."""
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+    from src.db.corpus_db import init_corpus_db
+
+    # Ensure the corpus DB tables exist — scan_document() reaches the DB
+    # layer once a file clears the executable check, and table creation
+    # is otherwise only triggered lazily elsewhere in the app.
+    init_corpus_db()
+
+    client = TestClient(app)
+    payload = b"This is an ordinary plain-text document, not an executable.\n" * 3
+
+    files = {"file": ("essay.txt", payload, "text/plain")}
+    headers = {"Authorization": "Bearer test-write-token"}
+
+    response = client.post("/api/v1/scan", files=files, headers=headers)
+    assert response.status_code != 415
 
 
 def test_refresh_token_success_with_signed_refresh_token(tmp_path):
@@ -682,9 +774,7 @@ def test_refresh_token_expired_returns_401(tmp_path):
         {"sub": "charlie", "type": "refresh"}, expires_in_seconds=-100
     )
 
-    res = client.post(
-        "/api/v1/auth/refresh", json={"refresh_token": expired_token}
-    )
+    res = client.post("/api/v1/auth/refresh", json={"refresh_token": expired_token})
     assert res.status_code == 401
     assert "expired" in res.json()["detail"].lower()
 
@@ -704,8 +794,137 @@ def test_refresh_token_revoked_returns_401(tmp_path):
     refresh_token = create_refresh_token(sub="dave")
     revoke_token(refresh_token, details="Revoked for testing")
 
-    res = client.post(
-        "/api/v1/auth/refresh", json={"refresh_token": refresh_token}
-    )
+    res = client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
     assert res.status_code == 401
     assert "revoked" in res.json()["detail"].lower()
+
+
+def test_api_usage_endpoint():
+    """Verify that GET /api/v1/usage returns the correct schema and increments total_scans."""
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+    import src.api.app as api_app
+
+    client = TestClient(app)
+
+    # Initial request
+    response = client.get("/api/v1/usage")
+    assert response.status_code == 200
+    data = response.json()
+    assert "total_scans" in data
+    assert "uptime_seconds" in data
+    assert isinstance(data["total_scans"], int)
+    assert isinstance(data["uptime_seconds"], float)
+    assert data["uptime_seconds"] >= 0.0
+
+    # Test the counter increment reflection
+    initial_scans = data["total_scans"]
+    api_app.total_scans += 1
+
+    response = client.get("/api/v1/usage")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total_scans"] == initial_scans + 1
+
+
+def test_hsts_security_header_options():
+    """Verify HSTS Strict-Transport-Security header behavior when ENABLE_HSTS is configured."""
+    import os
+    from starlette.applications import Starlette
+    from starlette.middleware import Middleware
+    from starlette.responses import PlainTextResponse
+    from starlette.routing import Route
+    from starlette.testclient import TestClient
+    from src.asgi_app import SecurityHeadersMiddleware
+
+    def dummy_app(request):
+        return PlainTextResponse("OK")
+
+    # Disabled by default
+    app_disabled = Starlette(
+        routes=[Route("/", dummy_app)],
+        middleware=[Middleware(SecurityHeadersMiddleware)],
+    )
+    client_disabled = TestClient(app_disabled)
+    res_disabled = client_disabled.get("/")
+    assert "Strict-Transport-Security" not in res_disabled.headers
+
+    # Enabled via ENABLE_HSTS=true
+    os.environ["ENABLE_HSTS"] = "true"
+    try:
+        app_enabled = Starlette(
+            routes=[Route("/", dummy_app)],
+            middleware=[Middleware(SecurityHeadersMiddleware)],
+        )
+        client_enabled = TestClient(app_enabled)
+        res_enabled = client_enabled.get("/")
+        assert (
+            res_enabled.headers.get("Strict-Transport-Security")
+            == "max-age=31536000; includeSubDomains"
+        )
+    finally:
+        os.environ.pop("ENABLE_HSTS", None)
+
+
+# ── ClientIPLoggingMiddleware Tests ───────────────────────────────────────────
+
+
+def _ip_middleware_client():
+    async def _ip_echo(request: Request):
+        return JSONResponse({"ip": getattr(request.state, "client_ip", None)})
+
+    test_app = Starlette(
+        routes=[Route("/ip", _ip_echo, methods=["GET"])],
+        middleware=[Middleware(ClientIPLoggingMiddleware)],
+    )
+    return StarletteTestClient(test_app)
+
+
+def test_client_ip_from_forwarded_for():
+    response = _ip_middleware_client().get(
+        "/ip",
+        headers={"X-Forwarded-For": "203.0.113.8"},
+    )
+    assert response.status_code == 200
+    assert response.json()["ip"] == "203.0.113.8"
+
+
+def test_multiple_forwarded_addresses():
+    response = _ip_middleware_client().get(
+        "/ip",
+        headers={"X-Forwarded-For": "203.0.113.8, 10.0.0.1"},
+    )
+    assert response.json()["ip"] == "203.0.113.8"
+
+
+def test_client_host_fallback():
+    response = _ip_middleware_client().get("/ip")
+    assert response.status_code == 200
+    assert response.json()["ip"] is not None
+
+
+# ── Multipart Content-Type Header Validation Tests (#1785) ────────────────────
+
+
+def test_scan_endpoint_rejects_non_multipart_content_type():
+    """Verify POST /api/v1/scan returns HTTP 415 when Content-Type is not multipart/form-data."""
+    client = TestClient(app)
+    headers = {
+        "Authorization": "Bearer test-write-token",
+        "Content-Type": "application/json",
+    }
+    response = client.post("/api/v1/scan", content=b"{}", headers=headers)
+    assert response.status_code == 415
+    data = response.json()
+    assert data.get("message") == "Unsupported Media Type: Request must be multipart/form-data" or data.get("detail") == "Unsupported Media Type: Request must be multipart/form-data"
+
+
+def test_scan_endpoint_rejects_missing_content_type():
+    """Verify POST /api/v1/scan returns HTTP 415 when Content-Type header is missing."""
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer test-write-token"}
+    response = client.post("/api/v1/scan", content=b"data", headers=headers)
+    assert response.status_code == 415
+    data = response.json()
+    assert data.get("message") == "Unsupported Media Type: Request must be multipart/form-data" or data.get("detail") == "Unsupported Media Type: Request must be multipart/form-data"
+
