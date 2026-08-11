@@ -887,13 +887,10 @@ class TestCreateDatabaseBackup:
         db_path = tmp_path / "source.db"
         self._make_sample_db(db_path)
 
-        backup_path = create_database_backup(
-            db_path, backup_dir=tmp_path / "backups", compress_backup=False
         )
-
-    # Must be a non-empty string matching YYYY-MM-DD HH:MM
-    import re
-    assert re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", formatted)
+        assert backup_path.exists()
+        assert backup_path.name.endswith(".db")
+        assert not backup_path.name.endswith(".gz")
 
 
 # ── get_database_file_size_bytes ──────────────────────────────────────────────

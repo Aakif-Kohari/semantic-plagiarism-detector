@@ -20,6 +20,7 @@ import psutil
 
 from src.core.app_config import CORPUS_DB_PATH, FALLBACK_CORPUS_DB_PATH
 from src.core.concurrency import with_sqlite_retry
+from src.db.base import BaseRepository
 from src.db.migrations.common import column_exists, delete_all_if_table_exists
 from src.utils.filename import sanitize_filename
 
@@ -31,11 +32,26 @@ _DB_PATH = os.path.abspath(str(CORPUS_DB_PATH))
 _connection_pool = threading.local()
 
 
+class CorpusRepository(BaseRepository):
+    """Data access repository for corpus documents, text chunks, and vector embeddings."""
+
+    def __init__(self, db_path: str | os.PathLike = CORPUS_DB_PATH) -> None:
+        super().__init__(db_path)
+
+    def init_corpus_db(self) -> None:
+        """Create or upgrade corpus.db without deleting persisted data."""
+        init_corpus_db()
+
+
+corpus_repo = CorpusRepository(_DB_PATH)
+
+
 def configure_db_path(db_path: str | os.PathLike) -> None:
     """Configure the SQLite database path used by the corpus module."""
     global _DB_PATH
     close_connections()
     _DB_PATH = os.path.abspath(os.fspath(db_path))
+    corpus_repo.configure_db_path(_DB_PATH)
 
 
 def get_corpus_db_path() -> Path:

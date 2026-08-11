@@ -23,6 +23,7 @@ from argon2.exceptions import VerificationError, VerifyMismatchError
 
 from src.core.app_config import AUTH_DB_PATH
 from src.core.concurrency import with_sqlite_retry
+from src.db.base import BaseRepository
 from src.db.migrations import migrate_auth_database, table_exists
 from src.errors import StaleDataException
 
@@ -41,10 +42,25 @@ PASSWORD_COMPLEXITY_REGEX = re.compile(
 _ph = PasswordHasher()
 
 
+class AuthRepository(BaseRepository):
+    """Data access repository for authentication, user management, and security audit logs."""
+
+    def __init__(self, db_path: str | os.PathLike = AUTH_DB_PATH) -> None:
+        super().__init__(db_path)
+
+    def init_db(self) -> None:
+        """Create or upgrade users.db and seed default administrator accounts."""
+        init_db()
+
+
+auth_repo = AuthRepository(_DB_PATH)
+
+
 def configure_db_path(db_path: str | os.PathLike) -> None:
     """Configure the SQLite database path used by the authentication module."""
     global _DB_PATH
     _DB_PATH = os.path.abspath(os.fspath(db_path))
+    auth_repo.configure_db_path(_DB_PATH)
 
 
 from contextlib import contextmanager
