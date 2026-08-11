@@ -15,16 +15,22 @@ import os
 import time
 from typing import Any
 
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-jwt-secret-key-change-in-production")
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
 JWT_ALGORITHM = "HS256"
 
-# Known static testing / fallback refresh tokens for integration tests
-VALID_STATIC_REFRESH_TOKENS = {
-    "dev-refresh-token",
-    "valid-refresh-token",
-    "test-refresh-token",
-    "sample-refresh-token",
-}
+_IS_TEST = os.getenv("APP_ENV") == "test"
+
+# Static testing tokens only in test environment
+VALID_STATIC_REFRESH_TOKENS = (
+    {
+        "dev-refresh-token",
+        "valid-refresh-token",
+        "test-refresh-token",
+        "sample-refresh-token",
+    }
+    if _IS_TEST
+    else set()
+)
 
 
 def base64url_encode(data: bytes) -> str:
@@ -41,7 +47,7 @@ def base64url_decode(data: str) -> bytes:
 def create_jwt_token(
     data: dict[str, Any],
     expires_in_seconds: int = 3600,
-    secret_key: str = JWT_SECRET_KEY,
+    secret_key: str | None = None,
 ) -> str:
     """
     Create a signed JWT token with header, payload, expiration timestamp, and HMAC-SHA256 signature.
@@ -49,11 +55,22 @@ def create_jwt_token(
     Args:
         data: Dictionary of claims to include in the payload.
         expires_in_seconds: Lifetime of token in seconds (default 3600).
-        secret_key: HMAC secret key used to sign the token.
+        secret_key: HMAC secret key used to sign the token. Uses JWT_SECRET_KEY if None.
 
     Returns:
         3-part dot-separated JWT token string.
+
+    Raises:
+        ValueError: If no secret key is available.
     """
+    if secret_key is None:
+        secret_key = JWT_SECRET_KEY
+    if not secret_key:
+        raise ValueError(
+            "JWT_SECRET_KEY environment variable must be set. "
+            "Do not use default secrets in production."
+        )
+
     header = {"alg": JWT_ALGORITHM, "typ": "JWT"}
     now = int(time.time())
     payload = {
@@ -114,29 +131,41 @@ def create_refresh_token(
 
 def verify_refresh_token(
     token: str,
-    secret_key: str = JWT_SECRET_KEY,
+    secret_key: str | None = None,
 ) -> dict[str, Any]:
     """
     Verify refresh token signature and expiration timestamp.
 
     Args:
         token: JWT refresh token or configured static testing refresh token.
-        secret_key: Secret key used to verify signature.
+        secret_key: Secret key used to verify signature. Uses JWT_SECRET_KEY if None.
 
     Returns:
         Decoded token payload dict.
 
     Raises:
-        ValueError: If token signature is invalid, expired, or wrong type.
+        ValueError: If token signature is invalid, expired, wrong type, or secret is missing.
     """
     if not token or not isinstance(token, str):
         raise ValueError("Invalid refresh token: token cannot be empty.")
 
     token = token.strip()
 
-    # Support static / testing refresh tokens
+    # Support static / testing refresh tokens only in test environment
     if token in VALID_STATIC_REFRESH_TOKENS:
+        if not _IS_TEST:
+            raise ValueError(
+                "Invalid refresh token: static testing tokens are not allowed outside test environment."
+            )
         return {"sub": "test_user", "type": "refresh", "scopes": ["read", "write"]}
+
+    if secret_key is None:
+        secret_key = JWT_SECRET_KEY
+    if not secret_key:
+        raise ValueError(
+            "JWT_SECRET_KEY environment variable must be set. "
+            "Cannot verify tokens without a secret key."
+        )
 
     parts = token.split(".")
     if len(parts) != 3:
@@ -187,23 +216,31 @@ def verify_refresh_token(
 
 def verify_access_token(
     token: str,
-    secret_key: str = JWT_SECRET_KEY,
+    secret_key: str | None = None,
 ) -> dict[str, Any]:
     """
     Verify access token signature and expiration timestamp.
 
     Args:
         token: JWT access token.
-        secret_key: Secret key used to verify signature.
+        secret_key: Secret key used to verify signature. Uses JWT_SECRET_KEY if None.
 
     Returns:
         Decoded token payload dict.
 
     Raises:
-        ValueError: If token signature is invalid, expired, or wrong type.
+        ValueError: If token signature is invalid, expired, wrong type, or secret is missing.
     """
     if not token or not isinstance(token, str):
         raise ValueError("Invalid access token: token cannot be empty.")
+
+    if secret_key is None:
+        secret_key = JWT_SECRET_KEY
+    if not secret_key:
+        raise ValueError(
+            "JWT_SECRET_KEY environment variable must be set. "
+            "Cannot verify tokens without a secret key."
+        )
 
     parts = token.strip().split(".")
     if len(parts) != 3:
