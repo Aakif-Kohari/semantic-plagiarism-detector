@@ -676,3 +676,17 @@ class TestSanitizeCsvCellValue:
 
 
 
+
+
+def test_sanitize_export_filename():
+    from src.utils.bulk_export import sanitize_export_filename
+    
+    # Test stripping illegal OS characters
+    assert sanitize_export_filename('test<file>.csv') == 'testfile.csv'
+    assert sanitize_export_filename('test:file|name?.csv') == 'testfilename.csv'
+    
+    # Test missing extension
+    assert sanitize_export_filename('testfile') == 'testfile.csv'
+    
+    # Test valid filename
+    assert sanitize_export_filename('my_valid_file.csv') == 'my_valid_file.csv'
