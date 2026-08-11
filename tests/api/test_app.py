@@ -928,3 +928,57 @@ def test_scan_endpoint_rejects_missing_content_type():
     data = response.json()
     assert data.get("message") == "Unsupported Media Type: Request must be multipart/form-data" or data.get("detail") == "Unsupported Media Type: Request must be multipart/form-data"
 
+
+# ── RequestIDMiddleware Tests (#2024) ──────────────────────────────────────────
+
+from src.asgi_app import RequestIDMiddleware
+
+def _request_id_middleware_client():
+    async def _request_id_echo(request: Request):
+        return JSONResponse({"request_id": getattr(request.state, "request_id", None)})
+
+    test_app = Starlette(
+        routes=[Route("/test-request-id", _request_id_echo, methods=["GET"])],
+        middleware=[Middleware(RequestIDMiddleware)],
+    )
+    return StarletteTestClient(test_app)
+
+def test_request_id_middleware_generates_id():
+    """Verify that RequestIDMiddleware generates a new UUID request ID and attaches it to response headers and state."""
+    client = _request_id_middleware_client()
+    response = client.get("/test-request-id")
+    
+    assert response.status_code == 200
+    
+    # 1. Header presence and format
+    assert "X-Request-ID" in response.headers
+    request_id_header = response.headers["X-Request-ID"]
+    assert len(request_id_header) > 0
+    
+    # 2. Attached to request state
+    data = response.json()
+    assert data["request_id"] == request_id_header
+
+def test_request_id_middleware_propagates_incoming_id():
+    """Verify that RequestIDMiddleware propagates a valid incoming X-Request-ID header."""
+    client = _request_id_middleware_client()
+    incoming_id = "test-correlation-id-12345"
+    response = client.get("/test-request-id", headers={"X-Request-ID": incoming_id})
+    
+    assert response.status_code == 200
+    assert response.headers.get("X-Request-ID") == incoming_id
+    assert response.json()["request_id"] == incoming_id
+
+def test_request_id_middleware_ignores_invalid_oversized_id():
+    """Verify that RequestIDMiddleware ignores an oversized incoming X-Request-ID and generates a new one."""
+    client = _request_id_middleware_client()
+    oversized_id = "a" * 200  # Exceeds MAX_INCOMING_LENGTH (128)
+    response = client.get("/test-request-id", headers={"X-Request-ID": oversized_id})
+    
+    assert response.status_code == 200
+    request_id = response.headers.get("X-Request-ID")
+    assert request_id != oversized_id
+    assert len(request_id) > 0
+    assert response.json()["request_id"] == request_id
+
+
