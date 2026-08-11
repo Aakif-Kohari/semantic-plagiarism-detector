@@ -180,6 +180,12 @@ def normalize_unicode_spaces(text: str) -> str:
     text = text.translate(FULLWIDTH_TRANSLATION)
 
     return text
+def sanitize_unicode_spaces(text: str) -> str:
+    """Replace special Unicode spaces with standard ASCII spaces."""
+    if not text:
+        return text
+
+    return text.replace("\u00A0", " ").replace("\u2009", " ")
 def check_batch_rate_limit(file_count: int, session_id: Optional[str] = None) -> None:
     """
     Validates batch file collection size against session rate limits.
