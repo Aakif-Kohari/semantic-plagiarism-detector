@@ -15,8 +15,23 @@ from app.theme import (
 from unittest.mock import patch
 
 from app.theme import get_colors, inject_css, sanitize_hex_color
+def test_render_notification_badge_with_negative_count():
+    from app.theme import render_notification_badge
+
+    assert render_notification_badge(-1) == ""
+def test_render_notification_badge_with_count():
+    from app.theme import render_notification_badge
+
+    badge = render_notification_badge(5)
+
+    assert "5" in badge
+    assert 'class="notification-badge"' in badge
 
 
+def test_render_notification_badge_with_zero_count():
+    from app.theme import render_notification_badge
+
+    assert render_notification_badge(0) == ""
 def test_get_colors_returns_valid_theme_colors():
     colors = get_colors()
 
