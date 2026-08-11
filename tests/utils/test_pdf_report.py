@@ -37,6 +37,26 @@ def test_generates_valid_pdf_with_required_fields():
     assert "First matching paragraph" in text
 
 
+def test_generates_pdf_with_qr_code():
+    pdf_buffer = generate_plagiarism_report(
+        doc_a="student_a.pdf",
+        doc_b="student_b.pdf",
+        overall_similarity=0.934,
+        threshold=0.59,
+        top_pairs=[
+            ("First matching paragraph.", "Second matching paragraph.", 0.96),
+        ],
+        incident_id="INC-QR-12345"
+    )
+    pdf_bytes = pdf_buffer.getvalue()
+
+    assert pdf_bytes.startswith(b"%PDF")
+    assert len(pdf_bytes) > 1000
+
+    text = _read_text(pdf_bytes)
+    assert "student_a.pdf" in text
+
+
 def test_wrap_text_truncates_long_strings():
     short = "Hello world"
     assert wrap_text(short, max_chars=20) == "Hello world"

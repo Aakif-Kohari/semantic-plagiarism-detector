@@ -48,3 +48,4 @@ uvicorn>=0.27.0                 # ASGI server implementation
 python-multipart>=0.0.6         # Multipart form parsing for file uploads
 httpx>=0.26.0                   # Async HTTP client for API testing
 
+qrcode>=7.4.2
