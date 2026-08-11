@@ -17,7 +17,6 @@ import time
 import zlib
 from enum import Enum
 from typing import Any, Optional
-import threading
 
 
 class CacheKeyPrefix(str, Enum):

@@ -2,20 +2,21 @@
 
 import logging
 import os
+import time
 import uuid
 from datetime import datetime, timezone
 
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 import psutil
 import numpy as np
+
+START_TIME = time.time()
+total_scans = 0
+logger = logging.getLogger(__name__)
 from fastapi import (
     BackgroundTasks,
-    Depends,
-    FastAPI,
-    File,
-    HTTPException,
-    Query,
-    UploadFile,
-    status,
     Request,
     Security,
 )
@@ -25,8 +26,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse, JSONResponse
+from fastapi.responses import PlainTextResponse
 
 from src.api.middleware import verify_bearer_token, get_current_user
 from src.api.schemas import (
@@ -45,6 +45,7 @@ from src.api.schemas import (
     TokenResponse,
 )
 from sklearn.metrics.pairwise import cosine_similarity
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.core.app_config import FAISS_INDEX_PATH, HEALTHZ_DB_PATHS
 from src.core.document_parser import extract_text
@@ -56,8 +57,10 @@ from src.core.similarity import (
 )
 from src.core.text_chunking import chunk_document
 from src.db.auth import get_user_role
-from src.db.corpus_db import _connect, clear_all_data, init_corpus_db
+from src.db.corpus_db import _connect, clear_all_data, init_corpus_db, get_document_by_hash
+from src.security.mime_validator import is_executable_upload
 from src.utils.file_streaming import stream_upload_file_to_disk
+from src.utils.hash_util import calculate_file_sha256
 from src.utils.redis_cache import CacheKeyPrefix, get_cache
 
 # ── API Initialization ────────────────────────────────────────────────────────
@@ -134,6 +137,20 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 
+
+@app.exception_handler(404)
+async def not_found_handler(request, exc: StarletteHTTPException):
+    """Custom exception handler for HTTP 404 errors."""
+    return JSONResponse(
+        status_code=404,
+        content={
+            "error": True,
+            "code": 404,
+            "message": "API endpoint or resource not found",
+        },
+    )
+
+# ── Bearer Token Authentication ────────────────────────────────────────────────
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """
@@ -160,6 +177,58 @@ async def global_exception_handler(request: Request, exc: Exception):
         },
     )
 
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+@app.exception_handler(StarletteHTTPException)
+async def custom_http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Custom exception handler for HTTP errors to return standardized JSON payloads.
+
+    FastAPI's default 404 handler returns a plain text response or a simple
+    {"detail": "Not Found"} JSON. This handler intercepts all HTTP exceptions
+    and returns a structured JSON payload that matches the overall API response
+    formatting used by other endpoints and the global exception handler.
+
+    For 404 Not Found errors specifically, it returns a standardized message
+    to prevent information leakage about internal routing structures.
+
+    Args:
+        request: The incoming Starlette Request object.
+        exc: The raised StarletteHTTPException containing status code and detail.
+
+    Returns:
+        A JSONResponse with the standardized error payload format.
+    """
+    # Determine the appropriate status code
+    status_code = exc.status_code
+    
+    # For 404 errors, use a standardized message to prevent route enumeration
+    if status_code == 404:
+        message = "API endpoint or resource not found"
+    else:
+        # For other HTTP errors, use the detail provided by FastAPI/Starlette
+        message = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+
+    # Log the error for monitoring and debugging purposes
+    # Use WARNING level for 4xx client errors, ERROR for 5xx server errors
+    log_level = logging.WARNING if 400 <= status_code < 500 else logging.ERROR
+    logger.log(
+        log_level,
+        "HTTP %d error on %s %s: %s",
+        status_code,
+        request.method,
+        request.url.path,
+        message,
+    )
+
+    # Return the standardized JSON error payload
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": True,
+            "code": status_code,
+            "message": message,
+        },
+    )
 
 app.add_exception_handler(RateLimitExceeded, custom_rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
@@ -168,7 +237,7 @@ app.add_middleware(SlowAPIMiddleware)
 def validate_content_type(request: Request) -> None:
     """Ensure the request is multipart/form-data before parsing."""
     content_type = request.headers.get("content-type", "")
-    if "multipart/form-data" not in content_type:
+    if "multipart/form-data" not in content_type.lower():
         raise HTTPException(
             status_code=415,
             detail="Unsupported Media Type: Request must be multipart/form-data",
@@ -387,10 +456,27 @@ def get_service_status(request: Request):
     version, and the server timestamp in ISO 8601 UTC format so external clients
     can quickly confirm the service is online.
     """
+    logger.debug("Service status requested")
     return {
         "status": "online",
         "version": request.app.version,
         "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get(
+    "/api/v1/usage",
+    tags=["Health"],
+    summary="Get current API request usage statistics and scan counts",
+    status_code=status.HTTP_200_OK,
+)
+def get_api_usage(request: Request):
+    """Public usage endpoint returning total scan count and system uptime."""
+    global total_scans
+    uptime = time.time() - START_TIME
+    return {
+        "total_scans": total_scans,
+        "uptime_seconds": float(uptime),
     }
 
 
@@ -573,10 +659,16 @@ async def scan_document(
         le=10,
         description="Number of top matching paragraph pairs to include per matched document",
     ),
+    reprocess: bool = Query(
+        default=False,
+        description="Bypass duplicate detection and process the file anyway",
+    ),
     _user: dict = Security(get_current_user, scopes=["write"]),
     _content_type: None = Depends(validate_content_type),
 ):
     """Scan an uploaded document against the indexed corpus database for plagiarism."""
+    global total_scans
+    total_scans += 1
     if not file.filename:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -584,9 +676,39 @@ async def scan_document(
         )
 
     filename = file.filename
+
+    # Reject executable/script uploads immediately, before any streaming,
+    # hashing, or text-extraction work — checks both the file extension
+    # (.exe, .sh, .bat, .dll, ...) and leading magic bytes (PE header "MZ",
+    # shell shebang "#!/bin/sh") so a renamed executable is still caught.
+    file_head = await file.read(64)
+    await file.seek(0)
+    if is_executable_upload(file_head, filename):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Unsupported Media Type: executable and script files are not allowed.",
+        )
+
     temp_path = await stream_upload_file_to_disk(file)
 
     try:
+        if not reprocess:
+            file_hash = calculate_file_sha256(temp_path)
+            existing_doc = get_document_by_hash(file_hash)
+            if existing_doc:
+                if os.path.exists(temp_path):
+                    try:
+                        os.unlink(temp_path)
+                    except Exception:
+                        pass
+                return JSONResponse(
+                    status_code=status.HTTP_409_CONFLICT,
+                    content={
+                        "duplicate": True,
+                        "message": "This file has already been uploaded."
+                    }
+                )
+
         # Extract text from uploaded document streamed to disk
         extracted_text = extract_text(temp_path, filename)
         if not extracted_text.strip():
@@ -864,10 +986,16 @@ async def scan_document_async(
         le=10,
         description="Number of top matching paragraph pairs to include per matched document",
     ),
+    reprocess: bool = Query(
+        default=False,
+        description="Bypass duplicate detection and process the file anyway",
+    ),
     _user: dict = Security(get_current_user, scopes=["write"]),
     _content_type: None = Depends(validate_content_type),
 ):
     """Enqueue a document scanning job for asynchronous background processing."""
+    global total_scans
+    total_scans += 1
     if not file.filename:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -876,6 +1004,23 @@ async def scan_document_async(
 
     filename = file.filename
     temp_path = await stream_upload_file_to_disk(file)
+
+    if not reprocess:
+        file_hash = calculate_file_sha256(temp_path)
+        existing_doc = get_document_by_hash(file_hash)
+        if existing_doc:
+            if os.path.exists(temp_path):
+                try:
+                    os.unlink(temp_path)
+                except Exception:
+                    pass
+            return JSONResponse(
+                status_code=status.HTTP_409_CONFLICT,
+                content={
+                    "duplicate": True,
+                    "message": "This file has already been uploaded."
+                }
+            )
 
     job_id = f"job_{uuid.uuid4().hex[:12]}"
     status_url = f"/api/v1/scan/status/{job_id}"
@@ -941,7 +1086,6 @@ def get_async_scan_status(
 
 # ── System Administration ──────────────────────────────────────────────────────
 
-logger = logging.getLogger(__name__)
 # Cast to str for consistency with callers that may pass it to faiss.*
 # or other C-extension APIs that require str paths.
 INDEX_PATH = str(FAISS_INDEX_PATH)

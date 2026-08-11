@@ -181,6 +181,41 @@ def search_similar_chunks(
     return results
 
 
+def search_batch_vectors(
+    query_matrix: np.ndarray,
+    index: faiss.Index,
+    top_k: int = 5,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Search the FAISS index for a batch of query vectors.
+
+    Supports flexible parameter ordering for convenience: (query_matrix, index)
+    or (index, query_matrix).
+
+    Args:
+        query_matrix: 2D numpy array of shape (N, dim) containing query vectors.
+        index:        FAISS index built by build_index().
+        top_k:        Number of nearest neighbors to retrieve. Defaults to 5.
+
+    Returns:
+        (distances, indices) - Distance matrix and index ID matrix of shape (N, top_k).
+    """
+    if isinstance(query_matrix, faiss.Index) or (not isinstance(query_matrix, np.ndarray) and hasattr(query_matrix, "search")):
+        index, query_matrix = query_matrix, index
+
+    if not isinstance(query_matrix, np.ndarray):
+        raise TypeError("query_matrix must be a numpy.ndarray")
+    if index is None or not hasattr(index, "search"):
+        raise ValueError("index must be a valid FAISS index")
+
+    queries = query_matrix.astype("float32")
+    if queries.ndim == 1:
+        queries = queries.reshape(1, -1)
+
+    distances, indices = index.search(queries, top_k)  # type: ignore[call-arg]
+    return distances, indices
+
+
 def find_plagiarised_chunks(
     embeddings: Dict[str, np.ndarray],
     chunked_docs: Dict[str, List[str]],
@@ -562,4 +597,82 @@ def optimize_faiss_index(index_manager: Any, nlist: int = 100) -> bool:
     else:
         logger.info(f"[faiss_index] Vector count after index optimization: {count_before}")
         return True
+
+
+# ── FAISS Memory Footprint Helper (Issue #1563) ───────────────────────────────
+
+
+def get_faiss_index_memory_bytes(index: Optional[Any] = None) -> int:
+    """Calculate the RAM memory footprint of a FAISS vector index in bytes.
+
+    Args:
+        index: FAISS index instance, IndexIDMap wrapper, dict containing 'index',
+               or object with an 'index' attribute.
+
+    Returns:
+        int: Memory footprint in bytes, or 0 if index is None, empty, or uninitialized.
+    """
+    if index is None:
+        return 0
+
+    # Unwrap object or dictionary wrapping FAISS index
+    if hasattr(index, "index") and not isinstance(index, faiss.Index):
+        index = getattr(index, "index")
+    elif isinstance(index, dict) and "index" in index:
+        index = index["index"]
+
+    if index is None:
+        return 0
+
+    try:
+        ntotal = getattr(index, "ntotal", 0)
+        if not ntotal or ntotal <= 0:
+            return 0
+
+        # Exact serialized byte footprint from FAISS serializer if available
+        buf = faiss.serialize_index(index)
+        return int(getattr(buf, "nbytes", len(buf)))
+    except Exception:
+        # Fallback estimation if serialize_index fails or for mocks
+        try:
+            ntotal = getattr(index, "ntotal", 0)
+            dim = getattr(index, "d", 384)
+            if ntotal > 0:
+                bytes_per_vec = dim * 4 + (8 if isinstance(index, faiss.IndexIDMap) else 0)
+                return int(ntotal * bytes_per_vec)
+        except Exception:
+            pass
+        return 0
+
+
+def format_faiss_memory_badge(index: Optional[Any] = None) -> str:
+    """Format the FAISS vector index memory footprint badge text for display.
+
+    Example output:
+        "FAISS Memory: 12.4 MB (10,000 vectors)"
+        "FAISS Memory: 0 MB" (if uninitialized/empty)
+
+    Args:
+        index: FAISS index instance or wrapper.
+
+    Returns:
+        str: Formatted memory badge string.
+    """
+    bytes_val = get_faiss_index_memory_bytes(index)
+    if bytes_val <= 0:
+        return "FAISS Memory: 0 MB"
+
+    unwrapped = index
+    if hasattr(index, "index") and not isinstance(index, faiss.Index):
+        unwrapped = getattr(index, "index")
+    elif isinstance(index, dict) and "index" in index:
+        unwrapped = index["index"]
+
+    vector_count = getattr(unwrapped, "ntotal", 0) if unwrapped is not None else 0
+    mb_val = bytes_val / (1024 * 1024)
+
+    if vector_count > 0:
+        return f"FAISS Memory: {mb_val:.1f} MB ({vector_count:,} vectors)"
+    return f"FAISS Memory: {mb_val:.1f} MB"
+
 

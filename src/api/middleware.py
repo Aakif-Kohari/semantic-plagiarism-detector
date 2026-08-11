@@ -20,6 +20,7 @@ PUBLIC_PATHS = {
     "/api/v1/version",
     "/api/v1/healthz",
     "/api/v1/status",
+    "/api/v1/usage",
     "/docs",
     "/redoc",
     "/openapi.json",
@@ -27,12 +28,29 @@ PUBLIC_PATHS = {
 
 
 def get_expected_bearer_token() -> str:
-    """Retrieve the API Bearer Token from environment variable or default fallback."""
-    return os.getenv("API_BEARER_TOKEN", "dev-bearer-token")
+    """Retrieve the API Bearer Token from environment variable.
+
+    Raises:
+        RuntimeError: If API_BEARER_TOKEN is not set and not in test environment.
+    """
+    token = os.getenv("API_BEARER_TOKEN")
+    if not token:
+        is_test = os.getenv("APP_ENV") == "test"
+        if is_test:
+            return "dev-bearer-token"
+        raise RuntimeError(
+            "API_BEARER_TOKEN environment variable must be set. "
+            "Do not use default secrets in production."
+        )
+    return token
 
 
 def get_valid_tokens() -> dict[str, list[str]]:
-    """Retrieve all valid tokens and their associated scopes."""
+    """Retrieve all valid tokens and their associated scopes.
+
+    In test environment, includes hardcoded test tokens. In production,
+    only uses environment-configured tokens.
+    """
     default_expected = get_expected_bearer_token()
     tokens = {default_expected: ["read", "write", "admin"]}
 
@@ -45,11 +63,13 @@ def get_valid_tokens() -> dict[str, list[str]]:
         except Exception:
             pass
 
-    # Dynamic testing tokens
-    tokens["test-read-token"] = ["read"]
-    tokens["test-write-token"] = ["write"]
-    tokens["test-admin-token"] = ["admin"]
-    tokens["test-no-scope-token"] = []
+    # Test tokens only in test environment
+    is_test = os.getenv("APP_ENV") == "test"
+    if is_test:
+        tokens["test-read-token"] = ["read"]
+        tokens["test-write-token"] = ["write"]
+        tokens["test-admin-token"] = ["admin"]
+        tokens["test-no-scope-token"] = []
 
     return tokens
 
