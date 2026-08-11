@@ -190,6 +190,22 @@ def test_strip_palette_image_preserves_colors():
     assert pixel == (7, 0, 248, 255)
 
 
+@pytest.mark.parametrize("mode", ["I", "F", "I;16"])
+def test_strip_high_bit_depth_image_converts_to_rgb(mode):
+    # 16-bit / 32-bit float or integer images should be converted to standard 8-bit RGB
+    img = Image.new(mode, (10, 10), 100)
+    img_bytes = io.BytesIO()
+    # Save TIFF format as TIFF supports high bit depth mode headers
+    img.save(img_bytes, format="TIFF")
+
+    result = strip_exif_metadata(img_bytes.getvalue(), "test.png")
+
+    with Image.open(io.BytesIO(result)) as out_image:
+        assert out_image.mode == "RGB"
+        assert isinstance(result, bytes)
+        assert len(result) > 0
+
+
 def test_strip_image_metadata_decompression_bomb(monkeypatch):
     # Mock Image.open to raise DecompressionBombError
     def mock_open(*args, **kwargs):
