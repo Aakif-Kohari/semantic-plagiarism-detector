@@ -4,6 +4,7 @@ from unittest.mock import patch
 import pytest
 
 from src.security.ssrf_protector import (
+    DEFAULT_USER_AGENT,
     RESTRICTED_IPV4_CIDR_BLOCKS,
     SSRFProtector,
     SSRFSecurityException,
@@ -323,3 +324,50 @@ def test_validate_url_safety_allows_public_address(
 
     assert validated_url == "https://example.com/webhook"
     assert pinned_ip == "93.184.216.34"
+
+
+def test_default_user_agent_constant_defined():
+    assert DEFAULT_USER_AGENT == "SemanticPlagiarismDetector/1.0"
+    assert SSRFProtector.DEFAULT_USER_AGENT == "SemanticPlagiarismDetector/1.0"
+
+
+@patch("src.security.ssrf_protector.socket.getaddrinfo")
+def test_validate_url_safety_attaches_default_user_agent_header(
+    mock_getaddrinfo,
+    mock_requests_head,
+):
+    mock_getaddrinfo.return_value = [
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))
+    ]
+
+    SSRFProtector.validate_url_safety("https://example.com/webhook")
+
+    mock_requests_head.assert_called_once_with(
+        "https://example.com/webhook",
+        headers={"User-Agent": "SemanticPlagiarismDetector/1.0"},
+        timeout=5.0,
+        allow_redirects=False,
+    )
+
+
+@patch("src.security.ssrf_protector.socket.getaddrinfo")
+def test_validate_url_safety_attaches_custom_user_agent_header(
+    mock_getaddrinfo,
+    mock_requests_head,
+):
+    mock_getaddrinfo.return_value = [
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))
+    ]
+
+    custom_agent = "CustomBot/2.0"
+    SSRFProtector.validate_url_safety(
+        "https://example.com/webhook",
+        user_agent=custom_agent,
+    )
+
+    mock_requests_head.assert_called_once_with(
+        "https://example.com/webhook",
+        headers={"User-Agent": custom_agent},
+        timeout=5.0,
+        allow_redirects=False,
+    )
