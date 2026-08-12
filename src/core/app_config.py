@@ -47,6 +47,9 @@ SUPPORTED_OCR_LANGUAGES = {
     "eng": "English",
     "spa": "Spanish",
     "fra": "French",
+    "deu": "German",
+    "por": "Portuguese",
+    "ita": "Italian",
 }
 
 

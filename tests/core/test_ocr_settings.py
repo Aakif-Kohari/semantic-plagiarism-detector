@@ -35,7 +35,7 @@ def test_invalid_ocr_dpi_type_is_rejected(value):
         validate_ocr_dpi(value)
 
 
-@pytest.mark.parametrize("language", ["eng", "spa", "fra"])
+@pytest.mark.parametrize("language", ["eng", "spa", "fra", "deu", "por", "ita"])
 def test_supported_ocr_languages(language):
     assert validate_ocr_language(language) == language
 
@@ -44,7 +44,7 @@ def test_language_is_normalized():
     assert validate_ocr_language(" SPA ") == "spa"
 
 
-@pytest.mark.parametrize("language", ["", "deu", "hin", None])
+@pytest.mark.parametrize("language", ["", "hin", None])
 def test_unsupported_ocr_language_is_rejected(language):
     with pytest.raises(ValueError, match="Unsupported OCR language"):
         validate_ocr_language(language)
@@ -55,8 +55,10 @@ def test_language_mapping_matches_issue_scope():
         "eng": "English",
         "spa": "Spanish",
         "fra": "French",
+        "deu": "German",
+        "por": "Portuguese",
+        "ita": "Italian",
     }
-
 
 def test_dpi_bounds_match_issue_scope():
     assert MIN_OCR_DPI == 150
