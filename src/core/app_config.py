@@ -47,6 +47,9 @@ SUPPORTED_OCR_LANGUAGES = {
     "eng": "English",
     "spa": "Spanish",
     "fra": "French",
+    "deu": "German",
+    "por": "Portuguese",
+    "ita": "Italian",
 }
 
 
@@ -78,11 +81,14 @@ HEALTHZ_DB_PATHS: Final[tuple[Path, ...]] = (CORPUS_DB_PATH, AUTH_DB_PATH)
 # Temp-dir fallback used when the primary data directory is not writable.
 # All three of corpus_db.py / incidents.py / translation_cache.py previously
 # hard-coded this exact path; it is now centralized here.
-FALLBACK_DATA_DIR: Final[Path] = Path(tempfile.gettempdir()) / "semantic_plagiarism_detector" / "data"
+FALLBACK_DATA_DIR: Final[Path] = (
+    Path(tempfile.gettempdir()) / "semantic_plagiarism_detector" / "data"
+)
 FALLBACK_CORPUS_DB_PATH: Final[Path] = FALLBACK_DATA_DIR / "corpus.db"
 
 
 # ─── Application display accessors (pre-existing) ──────────────────────────
+
 
 def get_app_title() -> str:
     """Return the configured application title.

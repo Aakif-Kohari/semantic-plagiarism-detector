@@ -20,9 +20,7 @@ class DeterministicModel:
         assert convert_to_numpy is True
         with self._lock:
             self.calls.append(list(texts))
-            self.thread_names.add(
-                threading.current_thread().name
-            )
+            self.thread_names.add(threading.current_thread().name)
 
         # Encourage overlap so the test exercises executor workers.
         time.sleep(0.01)
@@ -88,9 +86,7 @@ def test_single_thread_path_avoids_executor():
     model = DeterministicModel()
 
     with patch("src.core.embeddings._model", model):
-        with patch(
-            "src.core.embeddings.ThreadPoolExecutor"
-        ) as executor:
+        with patch("src.core.embeddings.ThreadPoolExecutor") as executor:
             result = generate_embeddings(
                 ["chunk-0", "chunk-1"],
                 num_threads=1,

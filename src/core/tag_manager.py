@@ -4,6 +4,7 @@ from typing import List, Set
 
 logger = logging.getLogger(__name__)
 
+
 class TagManager:
     """
     Core utility to parse, normalize, and handle document tags.
@@ -42,7 +43,7 @@ class TagManager:
             return ""
 
         # Split by comma or space using regex to handle multiple spaces/commas gracefully
-        tokens = re.split(r'[,\s]+', raw_input)
+        tokens = re.split(r"[,\s]+", raw_input)
 
         normalized_tags: Set[str] = set()
 
@@ -53,15 +54,19 @@ class TagManager:
 
             # Strip all non-alphanumeric except existing hash
             # This prevents SQL injection payloads or weird UI rendering issues
-            clean_token = re.sub(r'[^a-z0-9#]', '', token)
+            clean_token = re.sub(r"[^a-z0-9#]", "", token)
 
             # If after stripping the token is empty or just a hash, skip it
-            if not clean_token or clean_token == '#':
+            if not clean_token or clean_token == "#":
+                continue
+
+            # Skip purely numeric or non-alpha tokens (must contain at least one alphabetic character)
+            if not re.sub(r"[^a-z]", "", clean_token):
                 continue
 
             # Ensure it starts with a hash prefix
-            if not clean_token.startswith('#'):
-                clean_token = '#' + clean_token
+            if not clean_token.startswith("#"):
+                clean_token = "#" + clean_token
 
             normalized_tags.add(clean_token)
 
@@ -138,7 +143,9 @@ class TagManager:
             if not current_tags_str:
                 new_tags_str = normalized_tag
             else:
-                individual_tags = [t.strip() for t in current_tags_str.split(",") if t.strip()]
+                individual_tags = [
+                    t.strip() for t in current_tags_str.split(",") if t.strip()
+                ]
                 if normalized_tag in individual_tags:
                     continue
                 individual_tags.append(normalized_tag)
@@ -166,7 +173,9 @@ class TagManager:
             current_tags_str = get_document_tags(doc_id)
             if not current_tags_str:
                 continue
-            individual_tags = [t.strip() for t in current_tags_str.split(",") if t.strip()]
+            individual_tags = [
+                t.strip() for t in current_tags_str.split(",") if t.strip()
+            ]
             if normalized_tag not in individual_tags:
                 continue
 
@@ -212,10 +221,10 @@ def sanitize_tag_name(tag: str) -> str:
         raise ValueError("Tag name cannot be empty or whitespace-only.")
 
     # Remove HTML tags (e.g. <script>, <b>, etc.)
-    cleaned = re.sub(r'<[^>]*>', '', tag)
+    cleaned = re.sub(r"<[^>]*>", "", tag)
 
     # Remove slashes (/ and \) and all whitespace characters
-    cleaned = re.sub(r'[/\\\s]', '', cleaned)
+    cleaned = re.sub(r"[/\\\s]", "", cleaned)
 
     if not cleaned:
         raise ValueError("Tag name cannot be empty or whitespace-only.")

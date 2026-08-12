@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 AUTH_PATH = Path("src/db/auth.py")
 
 

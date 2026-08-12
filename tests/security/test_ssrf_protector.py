@@ -4,11 +4,19 @@ from unittest.mock import patch
 import pytest
 
 from src.security.ssrf_protector import (
+    DEFAULT_USER_AGENT,
     RESTRICTED_IPV4_CIDR_BLOCKS,
     SSRFProtector,
     SSRFSecurityException,
     is_ip_in_cidr_block,
 )
+
+
+@pytest.fixture(autouse=True)
+def mock_requests_head():
+    with patch("src.security.ssrf_protector.requests.head") as mock_head:
+        mock_head.return_value.status_code = 200
+        yield mock_head
 
 
 @pytest.fixture(autouse=True)
@@ -189,20 +197,29 @@ def test_validate_webhook_url_allowed_webhook_domains(mock_getaddrinfo, monkeypa
     monkeypatch.setenv("ALLOWED_WEBHOOK_DOMAINS", "hooks.slack.com, discord.com")
 
     # Allowed domain exact match passes
-    assert SSRFProtector.validate_webhook_url("https://discord.com/api/webhooks/123/abc") is True
+    assert (
+        SSRFProtector.validate_webhook_url("https://discord.com/api/webhooks/123/abc")
+        is True
+    )
 
     # Allowed domain subdomain match passes
-    assert SSRFProtector.validate_webhook_url("https://hooks.slack.com/services/123") is True
-    assert SSRFProtector.validate_webhook_url("https://sub.hooks.slack.com/services/123") is True
+    assert (
+        SSRFProtector.validate_webhook_url("https://hooks.slack.com/services/123")
+        is True
+    )
+    assert (
+        SSRFProtector.validate_webhook_url("https://sub.hooks.slack.com/services/123")
+        is True
+    )
 
     # Disallowed domain raises SSRFSecurityException without calling DNS resolution
     mock_getaddrinfo.reset_mock()
-    with pytest.raises(SSRFSecurityException, match="is not in ALLOWED_WEBHOOK_DOMAINS"):
+    with pytest.raises(
+        SSRFSecurityException, match="is not in ALLOWED_WEBHOOK_DOMAINS"
+    ):
         SSRFProtector.validate_webhook_url("https://unallowed-domain.org/webhook")
 
     mock_getaddrinfo.assert_not_called()
-
-
 
 
 @pytest.mark.parametrize(
@@ -291,9 +308,7 @@ def test_validate_url_safety_integrates_required_cidr_filter(
     ]
 
     with pytest.raises(SSRFSecurityException):
-        SSRFProtector.validate_url_safety(
-            "https://blocked.example/webhook"
-        )
+        SSRFProtector.validate_url_safety("https://blocked.example/webhook")
 
 
 @patch("src.security.ssrf_protector.socket.getaddrinfo")
@@ -316,3 +331,50 @@ def test_validate_url_safety_allows_public_address(
 
     assert validated_url == "https://example.com/webhook"
     assert pinned_ip == "93.184.216.34"
+
+
+def test_default_user_agent_constant_defined():
+    assert DEFAULT_USER_AGENT == "SemanticPlagiarismDetector/1.0"
+    assert SSRFProtector.DEFAULT_USER_AGENT == "SemanticPlagiarismDetector/1.0"
+
+
+@patch("src.security.ssrf_protector.socket.getaddrinfo")
+def test_validate_url_safety_attaches_default_user_agent_header(
+    mock_getaddrinfo,
+    mock_requests_head,
+):
+    mock_getaddrinfo.return_value = [
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))
+    ]
+
+    SSRFProtector.validate_url_safety("https://example.com/webhook")
+
+    mock_requests_head.assert_called_once_with(
+        "https://example.com/webhook",
+        headers={"User-Agent": "SemanticPlagiarismDetector/1.0"},
+        timeout=5.0,
+        allow_redirects=False,
+    )
+
+
+@patch("src.security.ssrf_protector.socket.getaddrinfo")
+def test_validate_url_safety_attaches_custom_user_agent_header(
+    mock_getaddrinfo,
+    mock_requests_head,
+):
+    mock_getaddrinfo.return_value = [
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))
+    ]
+
+    custom_agent = "CustomBot/2.0"
+    SSRFProtector.validate_url_safety(
+        "https://example.com/webhook",
+        user_agent=custom_agent,
+    )
+
+    mock_requests_head.assert_called_once_with(
+        "https://example.com/webhook",
+        headers={"User-Agent": custom_agent},
+        timeout=5.0,
+        allow_redirects=False,
+    )

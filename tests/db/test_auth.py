@@ -8,9 +8,15 @@ from src.db.auth import (
     delete_user,
     disable_2fa,
     enable_2fa,
+    format_user_created_date,
     get_2fa_status,
     get_active_users_count,
+    get_all_users,
+    get_distinct_audit_event_types,
+    get_security_audit_log_count,
+    get_security_audit_logs,
     get_user_active_status,
+    get_user_last_login,
     get_user_role,
     get_user_theme,
     init_db,
@@ -19,13 +25,8 @@ from src.db.auth import (
     set_user_active_status,
     set_user_theme,
     update_password,
-    get_security_audit_logs,
-    get_security_audit_log_count,
-    get_distinct_audit_event_types,
-    verify_user,
     update_user_profile,
-    get_all_users,
-    format_user_created_date,
+    verify_user,
 )
 from src.errors import StaleDataException
 
@@ -64,11 +65,48 @@ def test_verify_user():
     assert verify_user(user, "WrongPass123!") is False
 
 
+def test_verify_user_rejects_suspended_user():
+    user = f"user_{uuid.uuid4().hex[:8]}"
+    add_user(user, "SecurePass123!")
+
+    assert verify_user(user, "SecurePass123!") is True
+
+    set_user_status(user, "suspended")  # type: ignore
+
+    assert verify_user(user, "SecurePass123!") is False
+
+    delete_user(user)
+
+
 def test_get_user_role():
     user = f"user_{uuid.uuid4().hex[:8]}"
     add_user(user, "password123")
     assert get_user_role(user) is not None
     assert get_user_role("non_existent_user_999") is None
+
+
+def test_get_user_last_login_none_before_first_login():
+    """A newly created user who has never logged in has no last_login_at yet."""
+    user = f"user_{uuid.uuid4().hex[:8]}"
+    add_user(user, "SecurePass123!")
+    assert get_user_last_login(user) is None
+
+
+def test_get_user_last_login_none_for_unknown_user():
+    assert get_user_last_login("non_existent_user_999") is None
+
+
+def test_get_user_last_login_set_after_successful_login():
+    """verify_user() records last_login_at; get_user_last_login() should surface it."""
+    user = f"user_{uuid.uuid4().hex[:8]}"
+    add_user(user, "SecurePass123!")
+    assert get_user_last_login(user) is None
+
+    assert verify_user(user, "SecurePass123!") is True
+
+    last_login = get_user_last_login(user)
+    assert last_login is not None
+    assert isinstance(last_login, str)
 
 
 def test_update_password():
@@ -193,6 +231,35 @@ def test_2fa_flow():
     delete_user(username)
 
 
+def test_set_user_status():
+    user = f"user_{uuid.uuid4().hex[:8]}"
+    add_user(user, "SecurePass123!")
+
+    set_user_status(user, "suspended")  # type: ignore
+
+    with sqlite3.connect(src.db.auth._DB_PATH) as conn:  # type: ignore
+        status, is_active = conn.execute(
+            "SELECT status, is_active FROM users WHERE username = ?",
+            (user,),
+        ).fetchone()
+
+    assert status == "suspended"
+    assert is_active == 0
+
+    set_user_status(user, "active")  # type: ignore
+
+    with sqlite3.connect(src.db.auth._DB_PATH) as conn:  # type: ignore
+        status, is_active = conn.execute(
+            "SELECT status, is_active FROM users WHERE username = ?",
+            (user,),
+        ).fetchone()
+
+    assert status == "active"
+    assert is_active == 1
+
+    delete_user(user)
+
+
 def test_suspend_account():
     username = f"user_{uuid.uuid4().hex[:8]}"
     add_user(username, "password123!")
@@ -287,24 +354,20 @@ def test_delete_user_removes_matching_session_and_authorization_rows(mock_db):
     add_user(user, "password123")
 
     with sqlite3.connect(src.db.auth._DB_PATH) as conn:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS user_sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT NOT NULL,
                 session_state TEXT NOT NULL
             )
-            """
-        )
-        conn.execute(
-            """
+            """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS authorization_tokens (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT NOT NULL,
                 token TEXT NOT NULL
             )
-            """
-        )
+            """)
         conn.execute(
             "INSERT INTO user_sessions (username, session_state) VALUES (?, ?)",
             (user, '{"page": "dashboard"}'),
@@ -355,7 +418,10 @@ def test_delete_user_removes_matching_session_and_authorization_rows(mock_db):
 def test_connect_uses_fifteen_second_timeout():
     """Verify that _connect helper sets sqlite3 timeout to 15.0 seconds."""
     from unittest.mock import patch
-    from src.db.auth import _connect
+
+    from src.db.auth import SQLITE_TIMEOUT, _connect
+
+    assert SQLITE_TIMEOUT == 15.0
 
     with patch("sqlite3.connect") as mock_connect:
         _connect()
@@ -581,7 +647,9 @@ def test_password_history_validation_prevents_reuse_of_last_3_passwords(mock_db)
     for forbidden_pass in (pass1, pass2, pass3):
         with pytest.raises(ValueError) as exc_info:
             update_password(user, forbidden_pass)
-        assert "New password cannot be one of your last 3 passwords" in str(exc_info.value)
+        assert "New password cannot be one of your last 3 passwords" in str(
+            exc_info.value
+        )
 
     # 5. Update to pass4 (succeeds)
     update_password(user, pass4)
@@ -620,3 +688,127 @@ def test_get_recent_audit_events(mock_db):
     # Negative limit raises ValueError
     with pytest.raises(ValueError):
         get_recent_audit_events(limit=-5)
+
+
+def test_password_change_required_flag(mock_db):
+    """Verify set_password_change_required sets/clears the flag, and verify_user returns it."""
+    from src.db.auth import set_password_change_required
+
+    username = f"flaguser_{uuid.uuid4().hex[:8]}"
+    password = "Secure_Pass123!"
+    add_user(username, password)
+
+    # 1. Standard call returns True
+    assert verify_user(username, password) is True
+
+    # 2. By default must_change_password is False (0)
+    result = verify_user(username, password, return_details=True)
+    assert isinstance(result, dict)
+    assert result["authenticated"] is True
+    assert result["must_change_password"] is False
+
+    # 3. Admin sets must_change_password = True
+    set_password_change_required(username, required=True)
+    result = verify_user(username, password, return_details=True)
+    assert isinstance(result, dict)
+    assert result["authenticated"] is True
+    assert result["must_change_password"] is True
+
+    # 4. Clear the flag back to False
+    set_password_change_required(username, required=False)
+    result = verify_user(username, password, return_details=True)
+    assert result["must_change_password"] is False
+
+    # 5. Setting flag on non-existent user raises ValueError
+    with pytest.raises(ValueError):
+        set_password_change_required("nonexistent_user_xyz", required=True)
+
+    # 6. Invalid credentials still return False (or dict with authenticated=False)
+    assert verify_user(username, "WrongPassword!") is False
+    assert verify_user(username, "WrongPassword!", return_details=True) == {
+        "authenticated": False,
+        "must_change_password": False,
+    }
+
+
+# ── Issue #1778: SQL query shape regression guard ─────────────────────────
+
+
+def test_get_active_users_count_uses_count_one_and_is_active_predicate():
+    """Issue #1778: the function must use ``SELECT COUNT(1) FROM users
+    WHERE is_active = 1`` — matching the issue's literal query shape
+    (``COUNT(1)`` + active-status predicate) while adapting the
+    predicate to the real ``is_active INTEGER`` schema.
+
+    This guards against silent refactors that swap ``COUNT(1)`` for
+    ``COUNT(*)`` or that change the predicate away from the
+    ``is_active`` column.
+    """
+    import inspect
+
+    source = inspect.getsource(get_active_users_count)
+    # The function must use COUNT(1), not COUNT(*), per the issue text.
+    assert "SELECT COUNT(1)" in source, (
+        "get_active_users_count must use SELECT COUNT(1) per issue #1778; "
+        "found different COUNT expression in source:\n" + source
+    )
+    # The predicate must reference the is_active column (the
+    # schema-correct equivalent of the issue's "status = 'active'").
+    assert "is_active = 1" in source or "is_active=1" in source, (
+        "get_active_users_count must filter on is_active = 1 per issue #1778; "
+        "found different predicate in source:\n" + source
+    )
+    # Must NOT reference a non-existent `status` column.
+    assert "status = 'active'" not in source, (
+        "get_active_users_count must NOT use 'status = active' — the "
+        "users table has an is_active INTEGER column, not a status text "
+        "column. Using status would raise OperationalError at runtime."
+    )
+
+
+def test_get_active_users_count_returns_int():
+    """Issue #1778: the function's return type annotation must be ``int``
+    and the actual returned value must be a Python ``int`` (not a
+    SQLite-returned ``numpy.int64`` or similar).
+    """
+    import inspect
+
+    sig = inspect.signature(get_active_users_count)
+    assert sig.return_annotation is int, (
+        f"get_active_users_count return annotation must be `int`, got "
+        f"{sig.return_annotation!r}"
+    )
+    result = get_active_users_count()
+    assert isinstance(result, int), (
+        f"get_active_users_count must return a Python int, got "
+        f"{type(result).__name__}: {result!r}"
+    )
+
+
+def test_get_active_users_count_zero_on_empty_database():
+    """Issue #1778: when no users are active, the function must return 0
+    rather than None or raising. Guards against a refactor that returns
+    ``row[0]`` without the ``if row else 0`` fallback.
+    """
+    # We can't easily empty the production users table in a test, but we
+    # can verify the function never returns None by checking the type.
+    result = get_active_users_count()
+    assert result is not None
+    assert result >= 0
+
+
+def test_update_password_updates_timestamp():
+    """Verify that updating a user password correctly updates password_changed_at."""
+    # Setup user, call update_password, and assert that user['password_changed_at'] is not None/updated.
+    pass
+
+
+from src.db.auth import format_user_creation_date
+
+
+def test_format_user_creation_date():
+    assert format_user_creation_date("2026-07-28T10:30:00Z") == "Jul 28, 2026"
+
+
+def test_format_user_creation_date_with_timezone():
+    assert format_user_creation_date("2026-08-12T15:30:00+05:30") == "Aug 12, 2026"

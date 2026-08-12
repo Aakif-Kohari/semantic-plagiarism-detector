@@ -1,10 +1,35 @@
 from __future__ import annotations
 
-from src.core.cross_lingual import (TranslationMemoryCache,
-                                    detect_language,
-                                    prepare_chunks_for_embedding,
-                                    prepare_documents_for_embedding,
-                                    prepare_text_for_embedding)
+from unittest.mock import patch
+
+import numpy as np
+import pytest
+
+from src.core.cross_lingual import (
+    TranslationMemoryCache,
+    back_translate_chunk,
+    detect_chunk_language,
+    detect_language,
+    prepare_chunks_for_embedding,
+    prepare_documents_for_embedding,
+    prepare_text_for_embedding,
+    verify_semantic_fidelity,
+)
+from src.db.translation_cache import clear_translation_cache, init_translation_cache
+
+# ── Issue #1956 Cache Fixture ────────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def setup_cache():
+    """Initialize and clear the translation cache before/after each test."""
+    init_translation_cache()
+    clear_translation_cache()
+    yield
+    clear_translation_cache()
+
+
+# ── Original Language Detection Tests ─────────────────────────────────────────
 
 
 def test_detects_english_text():
@@ -87,33 +112,37 @@ def test_short_or_empty_text_is_safe():
 
 def test_detect_language_low_confidence(caplog):
     """Verify that low-confidence detections return 'en', is_confident=False and log warnings."""
-    from unittest.mock import patch
-    from langdetect.language import Language
     import logging
+    from unittest.mock import patch
+
+    from langdetect.language import Language
 
     with patch("src.core.cross_lingual.detect_langs") as mock_detect_langs:
         mock_detect_langs.return_value = [Language("fr", 0.5)]
-        
+
         with caplog.at_level(logging.WARNING):
             lang, confident = detect_language("some text in french but low confidence")
-            
+
         assert lang == "en"
         assert confident is False
-        assert any("Low-confidence language detection" in record.message for record in caplog.records)
+        assert any(
+            "Low-confidence language detection" in record.message
+            for record in caplog.records
+        )
 
 
 def test_detect_language_high_confidence():
     """Verify that high-confidence detections return the correct language and is_confident=True."""
     from unittest.mock import patch
+
     from langdetect.language import Language
 
     with patch("src.core.cross_lingual.detect_langs") as mock_detect_langs:
         mock_detect_langs.return_value = [Language("fr", 0.9)]
         lang, confident = detect_language("some text in french")
-        
+
         assert lang == "fr"
         assert confident is True
-
 
 
 def test_chunk_preparation_preserves_original_order():
@@ -178,7 +207,6 @@ def test_document_preparation_does_not_mutate_source_chunks(monkeypatch):
     assert source["spanish.pdf"][0] == "La IA apoya la educación."
     assert aligned["spanish.pdf"][0] == "AI supports education."
     assert metadata["spanish.pdf"][0]["translated"] is True
-
 
 
 def test_translation_memory_cache_hits_for_identical_sentence():
@@ -284,3 +312,93 @@ def test_english_text_does_not_enter_translation_cache():
 
     assert result["translated"] is False
     assert len(cache) == 0
+
+
+# ── Issue #1956: Lightweight Language Detection Tests ─────────────────────────
+
+
+class TestDetectChunkLanguage:
+    """Tests for lightweight language detection heuristics."""
+
+    def test_detect_spanish(self):
+        text = "El rápido zorro marrón salta sobre el perro perezoso."
+        assert detect_chunk_language(text) == "es"
+
+    def test_detect_french(self):
+        text = "Le renard brun rapide saute par-dessus le chien paresseux."
+        assert detect_chunk_language(text) == "fr"
+
+    def test_detect_german(self):
+        text = "Der schnelle braune Fuchs springt über den faulen Hund."
+        assert detect_chunk_language(text) == "de"
+
+    def test_detect_chinese(self):
+        text = "快速的棕色狐狸跳过懒狗。"
+        assert detect_chunk_language(text) == "zh"
+
+    def test_detect_english_default(self):
+        text = "The quick brown fox jumps over the lazy dog."
+        assert detect_chunk_language(text) == "en"
+
+    def test_empty_text_returns_english(self):
+        assert detect_chunk_language("") == "en"
+        assert detect_chunk_language(None) == "en"
+
+
+# ── Issue #1956: Back-Translation & Cache Tests ───────────────────────────────
+
+
+class TestBackTranslateChunk:
+    """Tests for the back-translation and caching logic."""
+
+    def test_english_text_unchanged(self):
+        text = "This is already in English."
+        result = back_translate_chunk(text, source_lang="en")
+        assert result == text
+
+    @patch("src.core.cross_lingual.save_translation")
+    @patch("src.core.cross_lingual.get_cached_translation", return_value=None)
+    def test_cache_miss_triggers_translation(self, mock_get, mock_save):
+        text = "El zorro marrón."
+        result = back_translate_chunk(text, source_lang="es", use_cache=True)
+
+        # Should call save_translation after mock translation
+        mock_save.assert_called_once()
+        assert "[Translated from es]" in result
+
+    @patch("src.core.cross_lingual.save_translation")
+    @patch(
+        "src.core.cross_lingual.get_cached_translation", return_value="The brown fox."
+    )
+    def test_cache_hit_returns_cached_value(self, mock_get, mock_save):
+        text = "El zorro marrón."
+        result = back_translate_chunk(text, source_lang="es", use_cache=True)
+
+        assert result == "The brown fox."
+        mock_save.assert_not_called()
+
+    def test_cache_disabled_skips_lookup(self):
+        text = "El zorro marrón."
+        # With use_cache=False, it should bypass cache and translate directly
+        result = back_translate_chunk(text, source_lang="es", use_cache=False)
+        assert "[Translated from es]" in result
+
+
+# ── Issue #1956: Semantic Fidelity Verification Tests ─────────────────────────
+
+
+class TestVerifySemanticFidelity:
+    """Tests for embedding similarity verification."""
+
+    def test_identical_embeddings_return_one(self):
+        vec = np.array([1.0, 0.0, 0.0])
+        assert verify_semantic_fidelity(vec, vec) == pytest.approx(1.0)
+
+    def test_orthogonal_embeddings_return_zero(self):
+        vec_a = np.array([1.0, 0.0, 0.0])
+        vec_b = np.array([0.0, 1.0, 0.0])
+        assert verify_semantic_fidelity(vec_a, vec_b) == pytest.approx(0.0)
+
+    def test_empty_embeddings_return_zero(self):
+        assert verify_semantic_fidelity(np.array([]), np.array([1.0])) == 0.0
+        assert verify_semantic_fidelity(None, None) == 0.0

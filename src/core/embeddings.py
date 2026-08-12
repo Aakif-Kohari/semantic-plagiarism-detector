@@ -14,7 +14,6 @@ from typing import Sequence
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
-
 # Load a lightweight, fast model for semantic embeddings.
 _model = SentenceTransformer("all-MiniLM-L6-v2")
 
@@ -35,8 +34,7 @@ def _split_into_batches(
     """Split texts into contiguous, non-empty worker batches."""
     batch_size = ceil(len(texts) / worker_count)
     return [
-        texts[start : start + batch_size]
-        for start in range(0, len(texts), batch_size)
+        texts[start : start + batch_size] for start in range(0, len(texts), batch_size)
     ]
 
 
@@ -87,9 +85,7 @@ def generate_embeddings(
     if worker_count == 1:
         result = _encode_batch(texts)
         if result.ndim != 2 or result.shape[0] != len(texts):
-            raise RuntimeError(
-                "Embedding model returned an unexpected output shape."
-            )
+            raise RuntimeError("Embedding model returned an unexpected output shape.")
         return result
 
     batches = _split_into_batches(texts, worker_count)
@@ -100,30 +96,21 @@ def generate_embeddings(
     ) as executor:
         # executor.map preserves the input batch order while still
         # running the batch calls concurrently.
-        encoded_batches = list(
-            executor.map(_encode_batch, batches)
-        )
+        encoded_batches = list(executor.map(_encode_batch, batches))
 
     if not encoded_batches:
         return np.empty((0, 0), dtype=np.float32)
 
     embedding_dimensions = {
-        batch.shape[1]
-        for batch in encoded_batches
-        if batch.ndim == 2
+        batch.shape[1] for batch in encoded_batches if batch.ndim == 2
     }
-    if (
-        len(embedding_dimensions) != 1
-        or any(batch.ndim != 2 for batch in encoded_batches)
+    if len(embedding_dimensions) != 1 or any(
+        batch.ndim != 2 for batch in encoded_batches
     ):
-        raise RuntimeError(
-            "Embedding workers returned incompatible output shapes."
-        )
+        raise RuntimeError("Embedding workers returned incompatible output shapes.")
 
     result = np.concatenate(encoded_batches, axis=0)
     if result.shape[0] != len(texts):
-        raise RuntimeError(
-            "Embedding workers returned an unexpected row count."
-        )
+        raise RuntimeError("Embedding workers returned an unexpected row count.")
 
     return result
