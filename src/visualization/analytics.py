@@ -43,6 +43,156 @@ def apply_plotly_theme(
 
     return fig
 
+
+def plot_similarity_boxplot_by_group(
+    scores_dict: dict[str, list[float]],
+    show_grid: bool = True,
+    theme_colors: dict[str, str] | None = None,
+) -> go.Figure:
+    """Create a box plot of similarity score quartiles, grouped by assignment.
+
+    Renders one box (25th/50th/75th percentile, whiskers, and outliers) per
+    key in ``scores_dict`` so distributions can be compared across groups.
+
+    Args:
+        scores_dict: Mapping of assignment/group name to its list of
+            similarity scores (0.0-1.0).
+        show_grid: Whether to show chart gridlines.
+        theme_colors: Optional theme palette for light/dark backgrounds.
+
+    Returns:
+        Plotly Figure object with one box trace per group.
+    """
+    if not scores_dict:
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No similarity scores available to plot",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
+            font=dict(size=16, color=_annotation_color(theme_colors)),
+        )
+        fig.update_layout(
+            title="Similarity Score Quartile Distribution",
+            xaxis_title="Assignment",
+            yaxis_title="Similarity Score",
+            height=400,
+            autosize=True,
+        )
+        fig.update_xaxes(showgrid=show_grid)
+        fig.update_yaxes(showgrid=show_grid)
+
+        _apply_theme_colors(fig, theme_colors)
+        return fig
+
+    fig = go.Figure()
+    for group_name, scores in scores_dict.items():
+        fig.add_trace(
+            go.Box(
+                y=scores,
+                name=str(group_name),
+                boxpoints="outliers",
+                marker_color="#636efa",
+                line_color="#4a4dba",
+                hovertemplate=(
+                    "<b>%{name}</b><br>Similarity Score: %{y:.2f}<extra></extra>"
+                ),
+            )
+        )
+
+    fig.update_layout(
+        title="Similarity Score Quartile Distribution",
+        xaxis_title="Assignment",
+        yaxis_title="Similarity Score",
+        height=400,
+        showlegend=False,
+        autosize=True,
+    )
+
+    fig.update_xaxes(showgrid=show_grid)
+    fig.update_yaxes(showgrid=show_grid, range=[0.0, 1.0])
+
+    _apply_theme_colors(fig, theme_colors)
+
+    return fig
+
+
+def _apply_theme_colors(
+    fig: go.Figure,
+    theme_colors: dict[str, str] | None,
+    theme_override: str | None = None,
+) -> None:
+    """Apply light/dark theme colors to a Plotly figure layout.
+
+    Matches the ``theme_colors`` palette produced by ``app.theme.get_colors()``
+    so charts render on dark backgrounds in Dark mode. When ``theme_colors``
+    is ``None`` the default Plotly template is left untouched.
+
+    Args:
+        fig: Plotly figure to style.
+        theme_colors: Optional dict with ``background``, ``surface``, ``ink``,
+            ``muted`` and ``border`` color keys.
+        theme_override: Optional explicit override ("light" or "dark") that
+            forces the ``plotly_white``/``plotly_dark`` template, bypassing
+            automatic theme detection.
+    """
+    if theme_override == "light":
+        fig.update_layout(template="plotly_white")
+    elif theme_override == "dark":
+        fig.update_layout(template="plotly_dark")
+
+    if not theme_colors:
+        return
+
+
+def calculate_severity_ratios(incidents: list[dict[str, Any]]) -> dict[str, float]:
+    """Calculate the percentage breakdown of High, Medium, and Low severity incidents.
+
+    Severity is derived from each incident's similarity score:
+        High:   score >= 0.80 (80%)
+        Medium: 0.50 <= score < 0.80 (50-79%)
+        Low:    score < 0.50
+
+    Incidents without a usable numeric score are ignored. Percentages are
+    calculated against the count of incidents that had a usable score.
+
+    Args:
+        incidents: List of dicts, each expected to contain a
+            'similarity_score' key (falls back to 'similarity').
+
+    Returns:
+        Dict with 'High', 'Medium', and 'Low' keys mapping to their
+        percentage share (0.0-100.0), rounded to 2 decimal places.
+        Returns all zeros if no usable scores are found.
+    """
+    counts = {"High": 0, "Medium": 0, "Low": 0}
+    total = 0
+
+    for incident in incidents:
+        score = incident.get("similarity_score")
+        if score is None:
+            score = incident.get("similarity")
+        try:
+            score = float(score)
+        except (TypeError, ValueError):
+            continue
+
+        total += 1
+        if score >= 0.80:
+            counts["High"] += 1
+        elif score >= 0.50:
+            counts["Medium"] += 1
+        else:
+            counts["Low"] += 1
+
+    if total == 0:
+        return {"High": 0.0, "Medium": 0.0, "Low": 0.0}
+
+    return {label: round((count / total) * 100, 2) for label, count in counts.items()}
+
+
 def _annotation_color(theme_colors: dict[str, str] | None) -> str:
     """Pick a readable annotation color for the given theme.
 
@@ -52,6 +202,7 @@ def _annotation_color(theme_colors: dict[str, str] | None) -> str:
     if theme_colors and isinstance(theme_colors, dict):
         return theme_colors.get("ink", "#64748b")
     return "#64748b"
+
 
 def build_visualization_lazily(
     enabled: bool,
@@ -113,6 +264,7 @@ def plot_high_severity_trends(
     trend_data: list[dict[str, Any]],
     show_grid: bool = True,
     theme_colors: dict[str, str] | None = None,
+    theme_override: str | None = None,
 ) -> go.Figure:
     """Create an interactive line chart showing High severity plagiarism incidents over time."""
     if not trend_data:
@@ -139,6 +291,7 @@ def plot_high_severity_trends(
 
     df = pd.DataFrame(trend_data)
     df["date"] = pd.to_datetime(df["date"])
+    df["cumulative"] = df["count"].cumsum()
 
     fig = px.line(
         df,
@@ -148,13 +301,27 @@ def plot_high_severity_trends(
         labels={"date": "Date", "count": "Number of High Severity Incidents"},
         markers=True,
     )
+    fig.add_trace(
+        go.Scatter(
+            x=df["date"],
+            y=df["cumulative"],
+            mode="lines+markers",
+            name="Cumulative Incidents",
+            yaxis="y2",
+        )
+    )
 
     fig.update_layout(
         xaxis_title="Date",
         yaxis_title="Number of High Severity Incidents",
+        yaxis2=dict(
+            title="Cumulative Incidents",
+            overlaying="y",
+            side="right",
+        ),
         hovermode="x unified",
         height=400,
-        showlegend=False,
+        showlegend=True,
         autosize=True,
     )
     fig.update_xaxes(showgrid=show_grid)
@@ -170,6 +337,7 @@ def plot_most_plagiarized_documents(
     doc_data: list[dict[str, Any]],
     show_grid: bool = True,
     theme_colors: dict[str, str] | None = None,
+    theme_override: str | None = None,
 ) -> go.Figure:
     """Create a bar chart showing the most frequently plagiarized documents."""
     if not doc_data:
@@ -271,7 +439,10 @@ def plot_similarity_distribution(
         scores,
         nbins=30,
         title=title,
-        labels={"value": "Similarity Score Range (%)", "count": "Number of Document Pairs"},
+        labels={
+            "value": "Similarity Score Range (%)",
+            "count": "Number of Document Pairs",
+        },
         range_x=[0.0, 1.0],
     )
 
@@ -393,9 +564,7 @@ def plot_similarity_boxplot(
 
     grouped: dict[str, list[float]] = {}
     for row in rows:
-        grouped.setdefault(row["assignment_title"], []).append(
-            row["similarity_score"]
-        )
+        grouped.setdefault(row["assignment_title"], []).append(row["similarity_score"])
 
     fig = go.Figure()
     for title, scores in grouped.items():
@@ -407,8 +576,7 @@ def plot_similarity_boxplot(
                 marker_color="#636efa",
                 line_color="#4a4dba",
                 hovertemplate=(
-                    "<b>%{name}</b><br>"
-                    "Similarity Score: %{y:.2f}<extra></extra>"
+                    "<b>%{name}</b><br>" "Similarity Score: %{y:.2f}<extra></extra>"
                 ),
             )
         )
@@ -445,6 +613,7 @@ def plot_severity_donut_chart(
         fig.update_layout(
             title="Plagiarism Incident Severity Distribution",
             height=400,
+            autosize=True,
         )
         return apply_plotly_theme(fig, theme_colors, show_grid=False)
 
@@ -479,6 +648,7 @@ def plot_severity_donut_chart(
         title="Plagiarism Incident Severity Distribution",
         height=400,
         showlegend=True,
+        autosize=True,
     )
     return apply_plotly_theme(fig, theme_colors, show_grid=False)
 
@@ -603,6 +773,8 @@ def plot_similarity_percentiles(
         hovertemplate="<b>%{y}</b><br>Similarity Score: %{x:.2f}<extra></extra>",
     )
     return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)
+
+
 def plot_hierarchical_dendrogram(
     similarity_matrix: pd.DataFrame,
     title: str = "Hierarchical Clustering Dendrogram",
@@ -699,9 +871,7 @@ def plot_hierarchical_dendrogram(
     # Clamp similarities into [0, 1] defensively: some embedding pipelines
     # produce tiny negative cosines that should be treated as 0 similarity
     # (maximum distance) rather than as invalid input.
-    sim_values = np.clip(
-        similarity_matrix.to_numpy(dtype=float), 0.0, 1.0
-    )
+    sim_values = np.clip(similarity_matrix.to_numpy(dtype=float), 0.0, 1.0)
 
     # Distance = 1 − similarity.  Ward's method expects a condensed
     # distance vector (upper triangle, row-major).  ``squareform`` with
@@ -735,10 +905,7 @@ def plot_hierarchical_dendrogram(
         if cluster_id < n_leaves:
             return [cluster_id]
         row = linkage_matrix[cluster_id - n_leaves]
-        return (
-            _cluster_members(int(row[0]))
-            + _cluster_members(int(row[1]))
-        )
+        return _cluster_members(int(row[0])) + _cluster_members(int(row[1]))
 
     for step, row in enumerate(linkage_matrix, start=1):
         left_id = int(row[0])
@@ -752,9 +919,7 @@ def plot_hierarchical_dendrogram(
         # The merge-distance y-coordinate of each child is its own cluster
         # height.  Leaves have height 0.
         left_y = (
-            float(linkage_matrix[left_id - n_leaves][2])
-            if left_id >= n_leaves
-            else 0.0
+            float(linkage_matrix[left_id - n_leaves][2]) if left_id >= n_leaves else 0.0
         )
         right_y = (
             float(linkage_matrix[right_id - n_leaves][2])
@@ -830,3 +995,4 @@ def plot_hierarchical_dendrogram(
 
     return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)
 
+    return fig

@@ -1,4 +1,5 @@
 """Diff highlighting utility for exact matches between text chunks."""
+
 from __future__ import annotations
 
 import difflib
@@ -56,9 +57,9 @@ def highlight_overlap(
                 highlight_b[i] = True
 
     return (
-    _build_html(tokens_a, highlight_a, theme_colors),
-    _build_html(tokens_b, highlight_b, theme_colors),
-)
+        _build_html(tokens_a, highlight_a, theme_colors),
+        _build_html(tokens_b, highlight_b, theme_colors),
+    )
 
 
 def _escape_text(text: str) -> str:

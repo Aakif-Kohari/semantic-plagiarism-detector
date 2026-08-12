@@ -11,12 +11,11 @@ import sys
 from io import BytesIO
 from pathlib import Path
 
-from src.core.logging_config import setup_logging
 from src.core.app_config import FAISS_INDEX_PATH
 from src.core.cross_lingual import prepare_text_for_embedding
-from src.core.document_parser import (DEFAULT_OCR_DPI, DEFAULT_OCR_LANGUAGE,
-                                      extract_text)
+from src.core.document_parser import DEFAULT_OCR_DPI, DEFAULT_OCR_LANGUAGE, extract_text
 from src.core.embedding_model import embed_documents
+from src.core.logging_config import setup_logging
 from src.core.similarity import document_similarity_matrix, flag_plagiarism
 from src.core.synchronization import verify_and_repair_index
 from src.core.text_chunking import chunk_documents
@@ -118,8 +117,11 @@ def run_scan(folder_path: str, threshold: float, output_format: str = "text") ->
     elif output_format == "csv":
         import csv
         import io
+
         output = io.StringIO()
-        writer = csv.DictWriter(output, fieldnames=["document_1", "document_2", "similarity_score"])
+        writer = csv.DictWriter(
+            output, fieldnames=["document_1", "document_2", "similarity_score"]
+        )
         writer.writeheader()
         for m in matches:
             writer.writerow(m)
@@ -130,7 +132,9 @@ def run_scan(folder_path: str, threshold: float, output_format: str = "text") ->
         if matches:
             print("Matches Found:")
             for m in matches:
-                print(f"- {m['document_1']} <-> {m['document_2']}: {m['similarity_score']:.4f}")
+                print(
+                    f"- {m['document_1']} <-> {m['document_2']}: {m['similarity_score']:.4f}"
+                )
         else:
             print("No matches found.")
 
@@ -186,9 +190,14 @@ def run_prewarm(folder_path: str | None = None) -> int:
         # Pre-warm using documents from corpus database
         try:
             from src.db.corpus_db import get_all_documents
+
             docs = get_all_documents()
             for doc in docs:
-                fname = getattr(doc, "filename", None) if not isinstance(doc, dict) else doc.get("filename")
+                fname = (
+                    getattr(doc, "filename", None)
+                    if not isinstance(doc, dict)
+                    else doc.get("filename")
+                )
                 if fname:
                     raw_texts[fname] = f"Document content for {fname}"
         except Exception as e:
@@ -214,6 +223,7 @@ def run_prewarm(folder_path: str | None = None) -> int:
             # Populate Redis cache
             try:
                 from src.utils.redis_cache import cache_analysis_results, get_cache
+
                 cache = get_cache()
                 if cache and getattr(cache, "is_available", lambda: True)():
                     cache_analysis_results(
@@ -227,14 +237,19 @@ def run_prewarm(folder_path: str | None = None) -> int:
                 else:
                     redis_status = "fallback_in_memory"
             except Exception as cache_err:
-                sys.stderr.write(f"Warning: Redis cache population skipped: {cache_err}\n")
+                sys.stderr.write(
+                    f"Warning: Redis cache population skipped: {cache_err}\n"
+                )
 
             # Refresh telemetry cache
             try:
                 from src.core.telemetry import TelemetryService
+
                 TelemetryService.force_refresh_metrics()
             except Exception as telem_err:
-                sys.stderr.write(f"Warning: Telemetry cache refresh failed: {telem_err}\n")
+                sys.stderr.write(
+                    f"Warning: Telemetry cache refresh failed: {telem_err}\n"
+                )
 
         except Exception as e:
             sys.stderr.write(f"Error during cache pre-warming pipeline: {e}\n")
@@ -251,7 +266,6 @@ def run_prewarm(folder_path: str | None = None) -> int:
     return 0
 
 
-
 def run_db_status(
     db_path: str,
     db_type: str,
@@ -265,11 +279,7 @@ def run_db_status(
             get_migration_status,
         )
 
-        migrations = (
-            AUTH_MIGRATIONS
-            if db_type == "auth"
-            else CORPUS_MIGRATIONS
-        )
+        migrations = AUTH_MIGRATIONS if db_type == "auth" else CORPUS_MIGRATIONS
         status = get_migration_status(db_path, migrations)
     except (
         FileNotFoundError,
@@ -281,9 +291,7 @@ def run_db_status(
         sys.stderr.write(f"Error: {exc}\n")
         return 1
     except Exception as exc:
-        sys.stderr.write(
-            f"Error: Unable to inspect database migration status: {exc}\n"
-        )
+        sys.stderr.write(f"Error: Unable to inspect database migration status: {exc}\n")
         return 1
 
     if output_format == "json":
@@ -291,9 +299,7 @@ def run_db_status(
     else:
         pending = status["pending_migrations"]
         pending_text = (
-            ", ".join(str(version) for version in pending)
-            if pending
-            else "none"
+            ", ".join(str(version) for version in pending) if pending else "none"
         )
         print(f"Database: {db_path}")
         print(f"Type: {db_type}")
@@ -302,6 +308,7 @@ def run_db_status(
         print(f"Pending migrations: {pending_text}")
 
     return 0
+
 
 def run_database_optimization(db_path: str) -> int:
     """Run SQLite maintenance for one database and return a CLI exit code."""
@@ -400,10 +407,11 @@ def main() -> None:
     if args.verify_schema is not None:
         if args.command is not None:
             parser.error("--verify-schema cannot be combined with a subcommand")
-            
+
         from pathlib import Path
+
         from src.db.migrations.common import verify_schema_integrity
-        
+
         # Define expected tables for the corpus database
         # These should match the tables created in src/db/corpus_db.py
         expected_corpus_tables = [
@@ -413,11 +421,10 @@ def main() -> None:
             "plagiarism_incidents",
             "false_positives",
         ]
-        
+
         try:
             is_valid = verify_schema_integrity(
-                Path(args.verify_schema), 
-                expected_corpus_tables
+                Path(args.verify_schema), expected_corpus_tables
             )
             if is_valid:
                 print("✅ Schema verification PASSED.")
@@ -445,7 +452,9 @@ def main() -> None:
             sys.stderr.write("Error: Threshold must be a float between 0.0 and 1.0.\n")
             sys.exit(1)
 
-        exit_code = run_scan(args.folder, args.threshold, output_format=args.output_format)
+        exit_code = run_scan(
+            args.folder, args.threshold, output_format=args.output_format
+        )
         sys.exit(exit_code)
 
     elif args.command == "sync-index":

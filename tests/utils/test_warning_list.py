@@ -1,4 +1,3 @@
-
 from src.utils.warning_list import (
     build_key_extractor,
     filter_warnings,
@@ -31,7 +30,7 @@ WARNINGS = [
 
 
     assert predicate_alpha(WARNINGS[0]) is True  # doc_b matches
-    assert predicate_alpha(WARNINGS[1]) is False # no match
+    assert predicate_alpha(WARNINGS[1]) is False  # no match
     assert predicate_alpha(WARNINGS[2]) is True  # doc_a matches
     assert predicate_empty(WARNINGS[1]) is True  # empty query matches all
 
@@ -140,8 +139,6 @@ def test_filtering_occurs_before_pagination():
     assert len(filtered) == 12
     assert len(page.items) == 2
     assert page.total_pages == 2
-
-
 
 
 def test_filter_warnings_by_minimum_match_length():

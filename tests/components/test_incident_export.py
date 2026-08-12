@@ -41,10 +41,11 @@ def test_render_incident_export_panel_with_copy_details(mock_sync, mock_st):
     ]
     mock_sync.return_value = sample_incidents
     mock_st.selectbox.side_effect = ["All", "INC-001", "Pending"]
-    
+
     render_incident_export_panel(sample_incidents)
 
     # Verify st.code was called with the expected formatted quick-copy summary string
-    expected_summary = "Incident ID: #INC-001 | Similarity: 85.0% | Doc A: doc1.pdf | Doc B: doc2.pdf"
+    expected_summary = (
+        "Incident ID: #INC-001 | Similarity: 85.0% | Doc A: doc1.pdf | Doc B: doc2.pdf"
+    )
     mock_st.code.assert_called_once_with(expected_summary, language="text")
-    

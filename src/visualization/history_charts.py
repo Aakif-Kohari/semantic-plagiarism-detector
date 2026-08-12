@@ -7,10 +7,11 @@ Provides functions to visualize historical scan trends, similarity distributions
 and frequently flagged documents over time.
 """
 
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional
+
 import pandas as pd
-import plotly.graph_objects as go
 import plotly.express as px
+import plotly.graph_objects as go
 
 
 def plot_similarity_trend_line(

@@ -22,9 +22,7 @@ def test_generate_incident_txt_formats_flagged_pairs():
     report = LMSExportEngine.generate_incident_txt(incidents)
 
     assert report is not None
-    assert report.startswith(
-        "SEMANTIC PLAGIARISM INCIDENT REPORT"
-    )
+    assert report.startswith("SEMANTIC PLAGIARISM INCIDENT REPORT")
     assert "Total flagged pairs: 2" in report
     assert "Incident #1" in report
     assert "Document A: student1.pdf" in report
