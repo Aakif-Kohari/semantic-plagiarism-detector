@@ -128,14 +128,15 @@ def add_document_citations(doc_name: str, citations: List[Dict[str, str]]) -> in
 
                 # Link to document
                 try:
-                    conn.execute(
+                    cursor = conn.execute(
                         """
                         INSERT OR IGNORE INTO document_citations (doc_name, citation_hash)
                         VALUES (?, ?)
                         """,
                         (doc_name, cit["hash"]),
                     )
-                    added_count += 1
+                    if cursor.rowcount > 0:
+                        added_count += 1
                 except sqlite3.IntegrityError:
                     pass
     except Exception as exc:
