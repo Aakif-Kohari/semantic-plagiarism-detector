@@ -29,9 +29,7 @@ def test_parse_target_similarity_accepts_supported_formats(
     raw_value,
     expected,
 ):
-    assert parse_target_similarity(raw_value) == pytest.approx(
-        expected
-    )
+    assert parse_target_similarity(raw_value) == pytest.approx(expected)
 
 
 @pytest.mark.parametrize(
@@ -55,24 +53,18 @@ def test_parse_target_similarity_rejects_invalid_values(
 def test_cli_uses_existing_95_percent_default():
     config = parse_args([])
 
-    assert config.target_similarity == (
-        DEFAULT_TARGET_SIMILARITY
-    )
+    assert config.target_similarity == (DEFAULT_TARGET_SIMILARITY)
     assert config.verbose is False
 
 
 def test_cli_accepts_decimal_target():
-    config = parse_args(
-        ["--target-similarity", "0.85"]
-    )
+    config = parse_args(["--target-similarity", "0.85"])
 
     assert config.target_similarity == pytest.approx(0.85)
 
 
 def test_cli_accepts_percentage_target():
-    config = parse_args(
-        ["--target-similarity", "85%"]
-    )
+    config = parse_args(["--target-similarity", "85%"])
 
     assert config.target_similarity == pytest.approx(0.85)
 

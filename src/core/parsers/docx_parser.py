@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+
 from src.core.parsers.common import PDFInput
 
 logger = logging.getLogger(__name__)

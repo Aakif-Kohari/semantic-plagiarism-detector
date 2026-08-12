@@ -15,10 +15,10 @@ from src.db import translation_cache
 from src.db.translation_cache import (
     DB_PATH,
     cache_translation,
-    get_cached_translation,
-    reset_translation_cache_counters,
     get_cache_performance_summary,
+    get_cached_translation,
     get_translation_cache_hit_ratio,
+    reset_translation_cache_counters,
 )
 
 
@@ -126,13 +126,11 @@ class TestTranslationCacheTTL:
         """Test purging with 0 days (should purge nothing inserted 'now')."""
         conn = sqlite3.connect(temp_db_path)
         translation_cache.get_cached_translation("init")
-        conn.execute(
-            """
+        conn.execute("""
             INSERT INTO translation_cache
             (text_hash, foreign_text, translated_text, source_lang, target_lang)
             VALUES ('hash_now', 'foreign', 'translated', 'auto', 'en')
-            """
-        )
+            """)
         conn.commit()
 
         deleted_count = translation_cache.purge_expired_translation_cache(days_old=0)
@@ -149,7 +147,9 @@ class TestTranslationCacheTTL:
         """Test that database errors during purge are logged and return 0."""
         with patch("sqlite3.connect") as mock_connect:
             mock_conn = mock_connect.return_value.__enter__.return_value
-            mock_conn.cursor.return_value.execute.side_effect = sqlite3.Error("DB locked")
+            mock_conn.cursor.return_value.execute.side_effect = sqlite3.Error(
+                "DB locked"
+            )
 
             deleted_count = translation_cache.purge_expired_translation_cache()
 
@@ -191,7 +191,9 @@ class TestTranslationCacheTTL:
         """Test that database errors during purge are logged and return 0."""
         with patch("sqlite3.connect") as mock_connect:
             mock_conn = mock_connect.return_value.__enter__.return_value
-            mock_conn.cursor.return_value.execute.side_effect = sqlite3.Error("DB locked")
+            mock_conn.cursor.return_value.execute.side_effect = sqlite3.Error(
+                "DB locked"
+            )
 
             deleted_count = translation_cache.purge_translation_cache_older_than()
 
@@ -262,9 +264,11 @@ class TestTranslationCacheTTL:
         assert translation_cache.cache_misses == 1
         assert get_translation_cache_hit_ratio() == 2 / 3
 
+
 def test_init_db_closes_connection():
     """Verify that _init_db() explicitly closes the database connection."""
     from unittest.mock import MagicMock
+
     with patch("sqlite3.connect") as mock_connect:
         mock_conn = MagicMock()
         mock_connect.return_value = mock_conn
@@ -300,17 +304,19 @@ def test_get_cache_performance_summary():
     assert summary["misses"] == 1
     assert abs(summary["hit_ratio_percentage"] - 66.6666666) < 0.1
 
+
 def test_get_translation_cache_stats(self, temp_db_path):
-        """Test retrieving accurate cache statistics."""
-        conn = sqlite3.connect(temp_db_path)
-        translation_cache.get_cached_translation("init")
-        self._seed_cache_with_dates(conn, [10, 50, 100])
+    """Test retrieving accurate cache statistics."""
+    conn = sqlite3.connect(temp_db_path)
+    translation_cache.get_cached_translation("init")
+    self._seed_cache_with_dates(conn, [10, 50, 100])
 
-        stats = translation_cache.get_translation_cache_stats()
+    stats = translation_cache.get_translation_cache_stats()
 
-        assert stats == {"total_entries": 3}
+    assert stats == {"total_entries": 3}
+
 
 def test_get_translation_cache_stats_empty(self, temp_db_path):
-        """Test stats retrieval on an empty cache."""
-        stats = translation_cache.get_translation_cache_stats()
-        assert stats == {"total_entries": 0}
+    """Test stats retrieval on an empty cache."""
+    stats = translation_cache.get_translation_cache_stats()
+    assert stats == {"total_entries": 0}

@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 TRANSLATOR_PATH = Path("src/i18n/translator.py")
 
 
@@ -14,10 +13,7 @@ def test_translation_loader_uses_streamlit_cache_data():
 def test_load_translations_delegates_to_cached_loader():
     source = TRANSLATOR_PATH.read_text(encoding="utf-8")
 
-    assert (
-        "_load_translation_dictionary(file_path)"
-        in source
-    )
+    assert "_load_translation_dictionary(file_path)" in source
 
 
 def test_cache_can_be_cleared_explicitly():

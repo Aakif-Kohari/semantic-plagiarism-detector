@@ -4,28 +4,27 @@ tests/utils/test_file_parser.py
 Includes tests for password-protected PDF parsing and MIME categorization.
 """
 
+import logging
+from typing import Any, List, Optional, Tuple, Union
+
 import fitz
 import pytest
 
 from src.utils.file_parser import (
     EncryptedPDFError,
     extract_text_from_pdf,
-    get_file_size_formatted,
     get_file_mime_category,
+    get_file_size_formatted,
     get_supported_mime_categories,
     is_extension_supported,
     validate_pdf_page_count,
 )
 
-import logging
-from typing import Any, List, Optional, Tuple, Union
-
-import fitz
-
 logger = logging.getLogger(__name__)
 
 
 # ── String & Name Formatting ─────────────────────────────────────────────────
+
 
 def truncate_filename(name: str, max_len: int = 35) -> str:
     """Truncate filename with ellipsis if it exceeds max_len."""
@@ -69,6 +68,7 @@ _MAX_INSPECTION_BYTES = 16
 
 class EncryptedPDFError(Exception):
     pass
+
 
 class TestEncryptedPDFHandling:
     """Test suite for password-protected PDF parsing."""
@@ -146,7 +146,7 @@ class TestFileMimeCategory:
             (".hidden_file", "unknown"),
             (None, "unknown"),
             (12345, "unknown"),  # Non-string input
-        ]
+        ],
     )
     def test_get_file_mime_category(self, filename, expected_category):
         """Test MIME categorization for various file extensions and edge cases."""
@@ -172,12 +172,14 @@ class TestFileMimeCategory:
             ("guide.markdown", None, True),
             ("notes.mdown", None, True),
             ("archive.zip", ["text", "code"], False),
-        ]
+        ],
     )
-    def test_is_extension_supported(self, filename, allowed_categories, expected_result):
+    def test_is_extension_supported(
+        self, filename, allowed_categories, expected_result
+    ):
         """Test extension support validation against allowed categories."""
         assert is_extension_supported(filename, allowed_categories) == expected_result
-      
+
 
 class TestPDFPageCountValidation:
     """Tests for the PDF page-count safety guard."""
@@ -203,10 +205,13 @@ class TestPDFPageCountValidation:
     def test_validate_pdf_page_count_allows_exact_limit(self):
         pdf_bytes = self._make_pdf(5)
 
-        assert validate_pdf_page_count(
-            pdf_bytes,
-            max_pages=5,
-        ) == 5
+        assert (
+            validate_pdf_page_count(
+                pdf_bytes,
+                max_pages=5,
+            )
+            == 5
+        )
 
     def test_validate_pdf_page_count_rejects_over_default_limit(
         self,
@@ -230,10 +235,7 @@ class TestPDFPageCountValidation:
             )
             with pytest.raises(
                 ValueError,
-                match=(
-                    r"^PDF exceeds maximum allowed page limit "
-                    r"\(500 pages\)$"
-                ),
+                match=(r"^PDF exceeds maximum allowed page limit " r"\(500 pages\)$"),
             ):
                 validate_pdf_page_count(b"%PDF-test")
 
@@ -244,10 +246,7 @@ class TestPDFPageCountValidation:
 
         with pytest.raises(
             ValueError,
-            match=(
-                r"^PDF exceeds maximum allowed page limit "
-                r"\(3 pages\)$"
-            ),
+            match=(r"^PDF exceeds maximum allowed page limit " r"\(3 pages\)$"),
         ):
             validate_pdf_page_count(
                 pdf_bytes,
@@ -313,9 +312,7 @@ class TestPDFPageCountValidation:
 
         def fake_guard(file_bytes, max_pages=500):
             calls.append((file_bytes, max_pages))
-            raise ValueError(
-                "PDF exceeds maximum allowed page limit (500 pages)"
-            )
+            raise ValueError("PDF exceeds maximum allowed page limit (500 pages)")
 
         monkeypatch.setattr(
             "src.utils.file_parser.validate_pdf_page_count",
@@ -324,14 +321,12 @@ class TestPDFPageCountValidation:
 
         with pytest.raises(
             ValueError,
-            match=(
-                r"^PDF exceeds maximum allowed page limit "
-                r"\(500 pages\)$"
-            ),
+            match=(r"^PDF exceeds maximum allowed page limit " r"\(500 pages\)$"),
         ):
             extract_text_from_pdf(b"oversized")
 
         assert calls == [(b"oversized", 500)]
+
 
 # ── MIME Type Detection from Bytes (Issue #1570) ─────────────────────────────
 

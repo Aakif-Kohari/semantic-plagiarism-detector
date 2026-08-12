@@ -26,7 +26,6 @@ from src.core.parsers.pdf_parser import (
     _read_pdf_bytes,
     _should_use_parallel,
     extract_text_from_pdf,
-    extract_texts_from_pdfs,
     extract_texts_parallel,
 )
 from src.core.parsers.text_parser import (
@@ -157,7 +156,9 @@ def parallel_extract_texts(
     from concurrent.futures import ProcessPoolExecutor, as_completed
 
     cpu_count = os.cpu_count() or 1
-    safe_max_workers = min(max_workers, cpu_count) if max_workers is not None else cpu_count
+    safe_max_workers = (
+        min(max_workers, cpu_count) if max_workers is not None else cpu_count
+    )
 
     results = {}
     try:

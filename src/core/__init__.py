@@ -24,6 +24,8 @@ from .faiss_index import (
     save_index,
     search_similar_chunks,
 )
+from .pipeline import ChunkRecord as PipelineChunkRecord
+from .pipeline import run_extraction_pipeline, run_pipeline
 from .similarity import (
     PLAGIARISM_THRESHOLD,
     calculate_paragraph_similarity_breakdown,
@@ -33,12 +35,10 @@ from .similarity import (
     flag_plagiarism,
     manhattan_similarity,
 )
-from .pipeline import ChunkRecord as PipelineChunkRecord, run_extraction_pipeline, run_pipeline
 from .tag_manager import TagManager, sanitize_tag_name
 from .text_chunking import chunk_by_sentences, chunk_document, chunk_documents
 from .translator import translate_text
 from .webhook import dispatch_plagiarism_alert, send_plagiarism_alert
-
 
 __all__ = [
     "with_sqlite_retry",
@@ -81,4 +81,3 @@ __all__ = [
     "run_pipeline",
     "run_extraction_pipeline",
 ]
-
