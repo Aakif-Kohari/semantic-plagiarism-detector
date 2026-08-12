@@ -21,8 +21,12 @@ DEFAULT_BRAND_COLOR = "#1e3a8a"
 DEFAULT_LOGO_PATH = None
 
 # Path to branding config file (relative to project root)
-BRANDING_CONFIG_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "branding_config.json")
+BRANDING_CONFIG_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "..",
+    "..",
+    "config",
+    "branding_config.json",
 )
 
 
@@ -340,3 +344,9 @@ def normalize_severity_label(label: str) -> str:
 def severity_rank(label: str) -> int:
     """Return a stable sort rank for a severity label."""
     return SEVERITY_RANK[normalize_severity_label(label)]
+
+def test_branding_config_path_exists():
+    """Test that BRANDING_CONFIG_PATH resolves to an existing file."""
+    config_path = config_module.BRANDING_CONFIG_PATH
+
+    assert os.path.isfile(config_path)
