@@ -646,3 +646,16 @@ def test_get_document_count_fast(mock_db):
     assert get_document_count_fast(include_deleted=False) == 2
     assert get_document_count_fast(include_deleted=True) == 3
 
+
+def test_get_document_count_by_user():
+    from src.db.corpus_db import _connect, get_document_count_by_user
+    with _connect() as db:
+        db.execute("INSERT INTO documents (filename, file_hash, upload_date, owner, is_deleted) VALUES (?, ?, ?, ?, ?)", ("1.pdf", "hash1", "date", "alice", 0))
+        db.execute("INSERT INTO documents (filename, file_hash, upload_date, owner, is_deleted) VALUES (?, ?, ?, ?, ?)", ("2.pdf", "hash2", "date", "alice", 0))
+        db.execute("INSERT INTO documents (filename, file_hash, upload_date, owner, is_deleted) VALUES (?, ?, ?, ?, ?)", ("3.pdf", "hash3", "date", "alice", 1))
+    
+    assert get_document_count_by_user("alice") == 2
+
+def test_get_document_count_by_user_empty():
+    from src.db.corpus_db import get_document_count_by_user
+    assert get_document_count_by_user("unknown-user") == 0
