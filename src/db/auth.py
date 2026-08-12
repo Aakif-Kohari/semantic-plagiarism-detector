@@ -22,7 +22,7 @@ from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError, VerifyMismatchError
 
 from src.core.app_config import AUTH_DB_PATH
-from src.core.concurrency import with_sqlite_retry
+from src.db.common import with_sqlite_retry
 from src.db.base import BaseRepository
 from src.db.migrations import migrate_auth_database, table_exists
 from src.errors import StaleDataException
@@ -1155,3 +1155,8 @@ def get_upload_count(username: str | None = None) -> int:
             return row[0] if row else 0
     except sqlite3.Error:
         return 0
+
+def format_user_creation_date(iso_str: str) -> str:
+    """Format an ISO creation date as 'MMM DD, YYYY'."""
+    date = dt.fromisoformat(iso_str.replace("Z", "+00:00"))
+    return date.strftime("%b %d, %Y")

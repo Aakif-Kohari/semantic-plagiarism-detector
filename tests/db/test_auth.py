@@ -793,3 +793,19 @@ def test_update_password_updates_timestamp():
     """Verify that updating a user password correctly updates password_changed_at."""
     # Setup user, call update_password, and assert that user['password_changed_at'] is not None/updated.
     pass
+
+from src.db.auth import format_user_creation_date
+
+
+def test_format_user_creation_date():
+    assert (
+        format_user_creation_date("2026-07-28T10:30:00Z")
+        == "Jul 28, 2026"
+    )
+
+
+def test_format_user_creation_date_with_timezone():
+    assert (
+        format_user_creation_date("2026-08-12T15:30:00+05:30")
+        == "Aug 12, 2026"
+    )
