@@ -33,7 +33,7 @@ def _pool() -> dict:
 
 
 @contextmanager
-def _connect():
+def _connect(readonly: bool = False):
     """Borrow a reusable SQLite connection."""
     import os
 
@@ -53,7 +53,8 @@ def _connect():
 
     try:
         yield conn
-        conn.commit()
+        if not readonly:
+            conn.commit()
     except Exception:
         conn.rollback()
         raise
@@ -161,7 +162,7 @@ def get_shared_citations(doc_a: str, doc_b: str) -> List[Dict[str, str]]:
         WHERE dc1.doc_name = ? AND dc2.doc_name = ?
     """
     try:
-        with _connect() as conn:
+        with _connect(readonly=True) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(query, (doc_a, doc_b))
             return [dict(row) for row in cursor.fetchall()]
@@ -186,7 +187,7 @@ def compute_citation_jaccard(doc_a: str, doc_b: str) -> float:
     query_b = "SELECT citation_hash FROM document_citations WHERE doc_name = ?"
 
     try:
-        with _connect() as conn:
+        with _connect(readonly=True) as conn:
             set_a = {row[0] for row in conn.execute(query_a, (doc_a,)).fetchall()}
             set_b = {row[0] for row in conn.execute(query_b, (doc_b,)).fetchall()}
 

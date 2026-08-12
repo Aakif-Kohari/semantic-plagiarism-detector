@@ -32,6 +32,14 @@ from reportlab.platypus import (
     TableStyle,
     PageBreak,
 )
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from reportlab.lib import colors
+from reportlab.lib.utils import ImageReader
+from io import BytesIO
+from typing import List, Optional, Tuple
+from datetime import datetime
+import os
 
 try:
     import fitz  # PyMuPDF
@@ -225,6 +233,7 @@ def generate_plagiarism_report(
     report_title: str = "Plagiarism Detection Report",
     logo_image: Optional[bytes] = None,
     brand_color: Optional[str] = None,
+    incident_id: Optional[str] = None,
     dark_mode: Optional[bool] = None,
     language: str = "en",
 ) -> BytesIO:
@@ -327,6 +336,10 @@ def generate_plagiarism_report(
 
     def _draw_header(canvas_obj, _doc):
         canvas_obj.saveState()
+        
+        if logo_image:
+            try:
+                reader = ImageReader(BytesIO(logo_image))
         if dark_mode:
             canvas_obj.setFillColor(HexColor("#0F172A"))
             canvas_obj.rect(
@@ -357,6 +370,41 @@ def generate_plagiarism_report(
             except Exception:
                 pass
 
+        if incident_id:
+            try:
+                import qrcode
+                base_url = os.getenv("APP_BASE_URL", "http://localhost:8501").rstrip("/")
+                verify_url = f"{base_url}/verify/{incident_id}"
+                
+                qr = qrcode.QRCode(version=1, box_size=4, border=0)
+                qr.add_data(verify_url)
+                qr.make(fit=True)
+                img = qr.make_image(fill_color="black", back_color="white")
+                
+                img_byte_arr = BytesIO()
+                img.save(img_byte_arr, format='PNG')
+                img_byte_arr.seek(0)
+                
+                qr_reader = ImageReader(img_byte_arr)
+                qr_w, qr_h = qr_reader.getSize()
+                
+                qr_display_w = 1.0 * inch
+                qr_display_h = qr_display_w * qr_h / qr_w
+                
+                qr_x = _doc.pagesize[0] - _doc.rightMargin - qr_display_w
+                qr_y = _doc.pagesize[1] - 36 - qr_display_h
+                
+                canvas_obj.drawImage(
+                    qr_reader,
+                    qr_x,
+                    qr_y,
+                    width=qr_display_w,
+                    height=qr_display_h,
+                    preserveAspectRatio=True,
+                    mask="auto",
+                )
+            except Exception:
+                pass
         footer_text = get_pdf_footer_text()
         if footer_text:
             canvas_obj.setFont("Helvetica", 9)
