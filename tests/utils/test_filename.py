@@ -270,3 +270,43 @@ def test_normalize_sha256_hash_invalid_length_raises():
 def test_normalize_sha256_hash_invalid_characters_raises():
     with pytest.raises(ValueError):
         normalize_sha256_hash("z" * 64)
+
+
+from src.utils.filename import format_extension_badge
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected"),
+    [
+        ("report.pdf", "📄 PDF"),
+        ("REPORT.PDF", "📄 PDF"),
+        ("essay.docx", "📝 DOCX"),
+        ("legacy.doc", "📝 DOC"),
+        ("notes.txt", "📑 TXT"),
+        ("data.csv", "📊 CSV"),
+        ("Data.CSV", "📊 CSV"),
+        ("book.epub", "📚 EPUB"),
+        ("memo.rtf", "📃 RTF"),
+        ("archive.zip", "📦 ZIP"),
+    ],
+)
+def test_format_extension_badge_known_extensions(filename, expected):
+    assert format_extension_badge(filename) == expected
+
+
+def test_format_extension_badge_unknown_extension_uses_fallback():
+    assert format_extension_badge("script.py") == "📁 FILE"
+
+
+def test_format_extension_badge_no_extension_uses_fallback():
+    assert format_extension_badge("README") == "📁 FILE"
+
+
+def test_format_extension_badge_empty_filename_uses_fallback():
+    assert format_extension_badge("") == "📁 FILE"
+
+
+def test_format_extension_badge_ignores_double_extension_trick():
+    """A double extension like 'report.pdf.exe' must badge by its true
+    final extension, not an earlier one hidden inside the name."""
+    assert format_extension_badge("report.pdf.exe") == "📁 FILE"
