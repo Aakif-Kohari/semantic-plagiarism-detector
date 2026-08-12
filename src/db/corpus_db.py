@@ -748,7 +748,7 @@ def get_document_count_by_user(owner_username: str) -> int:
     """Return the number of non-deleted documents owned by a specific user."""
     with _connect() as conn:
         row = conn.execute(
-            "SELECT COUNT(1) FROM documents WHERE owner = ? AND (is_deleted IS NULL OR is_deleted = 0)",
+            "SELECT COUNT(1) FROM documents WHERE owner = ? AND is_deleted = 0",
             (owner_username,),
         ).fetchone()
         return int(row[0]) if row else 0

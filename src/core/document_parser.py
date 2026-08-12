@@ -12,7 +12,8 @@ import socket
 import subprocess
 import tempfile
 import xml.etree.ElementTree
-import zipfilefrom collections import Counter
+import zipfile
+from collections import Counter
 from pathlib import Path
 from typing import BinaryIO, Dict, List, Optional, Union
 
