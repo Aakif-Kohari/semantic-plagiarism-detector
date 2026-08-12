@@ -27,10 +27,7 @@ def _columns():
 
 
 def test_matched_chunk_is_rendered_in_copyable_code_block():
-    matched_chunk = (
-        "This sentence is the exact FAISS match that should "
-        "be copyable."
-    )
+    matched_chunk = "This sentence is the exact FAISS match that should " "be copyable."
     results = [
         (
             MockRecord(
@@ -42,9 +39,7 @@ def test_matched_chunk_is_rendered_in_copyable_code_block():
         )
     ]
 
-    with patch(
-        "app.components.faiss_results.st"
-    ) as mock_st:
+    with patch("app.components.faiss_results.st") as mock_st:
         mock_st.columns.return_value = _columns()
         mock_st.button.return_value = False
 
@@ -65,9 +60,7 @@ def test_matched_chunk_is_rendered_in_copyable_code_block():
 
 
 def test_matched_chunk_copy_block_keeps_full_untruncated_text():
-    matched_chunk = (
-        "Long matched sentence. " * 30
-    ).strip()
+    matched_chunk = ("Long matched sentence. " * 30).strip()
     assert len(matched_chunk) > 300
 
     results = [
@@ -82,9 +75,7 @@ def test_matched_chunk_copy_block_keeps_full_untruncated_text():
         )
     ]
 
-    with patch(
-        "app.components.faiss_results.st"
-    ) as mock_st:
+    with patch("app.components.faiss_results.st") as mock_st:
         mock_st.columns.return_value = _columns()
         mock_st.button.return_value = False
 
@@ -98,16 +89,9 @@ def test_matched_chunk_copy_block_keeps_full_untruncated_text():
         language="text",
     )
 
-    rendered_values = [
-        args[0]
-        for args, _kwargs in mock_st.code.call_args_list
-        if args
-    ]
+    rendered_values = [args[0] for args, _kwargs in mock_st.code.call_args_list if args]
     assert matched_chunk in rendered_values
-    assert (
-        matched_chunk[:300] + "..."
-        not in rendered_values
-    )
+    assert matched_chunk[:300] + "..." not in rendered_values
 
 
 def test_one_matched_text_code_block_is_added_per_result():
@@ -132,9 +116,7 @@ def test_one_matched_text_code_block_is_added_per_result():
         ),
     ]
 
-    with patch(
-        "app.components.faiss_results.st"
-    ) as mock_st:
+    with patch("app.components.faiss_results.st") as mock_st:
         mock_st.columns.side_effect = [
             _columns(),
             _columns(),
@@ -154,9 +136,4 @@ def test_one_matched_text_code_block_is_added_per_result():
         "Second matched chunk",
         language="text",
     )
-    assert (
-        mock_st.caption.call_args_list.count(
-            call("📋 Matched Text")
-        )
-        == 2
-    )
+    assert mock_st.caption.call_args_list.count(call("📋 Matched Text")) == 2

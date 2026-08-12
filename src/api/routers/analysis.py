@@ -75,9 +75,9 @@ def _process_scan_job(
         extracted_text = extract_text(file_input, filename)
         if not extracted_text.strip():
             scan_jobs[job_id]["status"] = "failed"
-            scan_jobs[job_id]["error"] = (
-                "Failed to extract readable text from the uploaded file."
-            )
+            scan_jobs[job_id][
+                "error"
+            ] = "Failed to extract readable text from the uploaded file."
             return
 
         words = extracted_text.split()
@@ -291,8 +291,8 @@ async def scan_document(
                     status_code=status.HTTP_409_CONFLICT,
                     content={
                         "duplicate": True,
-                        "message": "This file has already been uploaded."
-                    }
+                        "message": "This file has already been uploaded.",
+                    },
                 )
 
         extracted_text = extract_text(temp_path, filename)
@@ -375,7 +375,9 @@ async def scan_document(
                     }
                 )
 
-        matched_documents.sort(key=lambda x: x["max_chunk_similarity_score"], reverse=True)
+        matched_documents.sort(
+            key=lambda x: x["max_chunk_similarity_score"], reverse=True
+        )
         is_flagged = len(matched_documents) > 0 or max_chunk_overall_score >= threshold
 
         return {
@@ -457,8 +459,8 @@ async def scan_document_async(
                 status_code=status.HTTP_409_CONFLICT,
                 content={
                     "duplicate": True,
-                    "message": "This file has already been uploaded."
-                }
+                    "message": "This file has already been uploaded.",
+                },
             )
 
     job_id = f"job_{uuid.uuid4().hex[:12]}"

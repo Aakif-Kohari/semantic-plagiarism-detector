@@ -55,7 +55,10 @@ def test_non_english_text_is_translated_for_embedding_only():
     assert result["original_text"] == original
     assert result["detected_language"] == "es"
     assert result["translated"] is True
-    assert result["embedding_text"] == "[translated La inteligencia artificial ayuda a los profesores.]"
+    assert (
+        result["embedding_text"]
+        == "[translated La inteligencia artificial ayuda a los profesores.]"
+    )
 
 
 def test_detect_language_with_chunk_record():

@@ -10,17 +10,16 @@ import plotly.graph_objects as go
 import pytest
 
 from src.visualization.analytics import (
-
-    plot_high_severity_trends,
-
     calculate_severity_ratios,
-
+    plot_high_severity_trends,
     plot_severity_donut_chart,
     plot_similarity_boxplot,
     plot_similarity_boxplot_by_group,
     plot_similarity_histogram,
     plot_similarity_percentiles,
 )
+
+
 def test_plot_high_severity_trends_cumulative_line():
     """Verify cumulative incidents are plotted on a secondary Y-axis."""
     trend_data = [
@@ -32,10 +31,8 @@ def test_plot_high_severity_trends_cumulative_line():
     fig = plot_high_severity_trends(trend_data)
 
     cumulative_trace = next(
-        trace for trace in fig.data
-        if trace.name == "Cumulative Incidents"
+        trace for trace in fig.data if trace.name == "Cumulative Incidents"
     )
-
 
     assert list(cumulative_trace.y) == [2, 5, 6]
     assert cumulative_trace.yaxis == "y2"
@@ -56,6 +53,8 @@ def test_plot_similarity_percentiles_returns_figure():
     """Test that the function returns a Plotly Figure."""
     fig = plot_similarity_percentiles([0.4, 0.6, 0.8])
     assert isinstance(fig, go.Figure)
+
+
 def test_plot_similarity_boxplot_by_group_returns_figure():
     """Test that the function returns a Plotly Figure with one box per group."""
     scores_dict = {
@@ -77,6 +76,7 @@ def test_plot_similarity_boxplot_by_group_empty_dict():
     assert isinstance(fig, go.Figure)
     assert len(fig.data) == 0
     assert fig.layout.annotations[0].text == "No similarity scores available to plot"
+
 
 def test_plot_similarity_percentiles_empty_scores():
     """Test that an empty score list returns an empty chart with a message."""
@@ -222,9 +222,6 @@ def test_plot_similarity_boxplot_fallback_keys():
     assert list(fig.data[0].y) == [0.9, 0.5]
 
 
-
-
-
 def test_plot_similarity_histogram_returns_figure():
     scores = [0.1, 0.2, 0.35, 0.5, 0.55, 0.9]
     fig = plot_similarity_histogram(scores, n_bins=10)
@@ -279,25 +276,18 @@ def test_plot_analytics_charts_dark_mode_theme_colors():
     assert fig2.layout.paper_bgcolor == "#0F172A"
     assert fig2.layout.plot_bgcolor == "#1E293B"
 
-    fig3 = plot_severity_donut_chart(
-        [{"severity": "High"}], theme_colors=dark_theme
-    )
+    fig3 = plot_severity_donut_chart([{"severity": "High"}], theme_colors=dark_theme)
     assert fig3.layout.paper_bgcolor == "#0F172A"
     assert fig3.layout.plot_bgcolor == "#1E293B"
 
-    fig4 = plot_similarity_percentiles(
-        [0.5, 0.8, 0.9], theme_colors=dark_theme
-    )
+    fig4 = plot_similarity_percentiles([0.5, 0.8, 0.9], theme_colors=dark_theme)
     assert fig4.layout.paper_bgcolor == "#0F172A"
-
 
 
 # ── Hierarchical Clustering Dendrogram (Issue #1367) ──────────────────────
 
 
-def _make_similarity_matrix(
-    n: int = 5, seed: int = 42
-) -> "pd.DataFrame":
+def _make_similarity_matrix(n: int = 5, seed: int = 42) -> "pd.DataFrame":
     """Build a synthetic symmetric similarity matrix for testing."""
     import pandas as pd
 
@@ -374,19 +364,14 @@ def test_plot_hierarchical_dendrogram_empty_input_returns_annotation_figure():
     fig = plot_hierarchical_dendrogram(empty_df)
     assert isinstance(fig, go.Figure)
     assert len(fig.layout.annotations) >= 1
-    assert (
-        "No similarity data available"
-        in fig.layout.annotations[0].text
-    )
+    assert "No similarity data available" in fig.layout.annotations[0].text
 
 
 def test_plot_hierarchical_dendrogram_single_document_returns_annotation_figure():
     """A 1×1 matrix must return an annotation figure, not raise."""
     from src.visualization.analytics import plot_hierarchical_dendrogram
 
-    single_df = pd.DataFrame(
-        [[1.0]], index=["only_doc"], columns=["only_doc"]
-    )
+    single_df = pd.DataFrame([[1.0]], index=["only_doc"], columns=["only_doc"])
     fig = plot_hierarchical_dendrogram(single_df)
     assert isinstance(fig, go.Figure)
     assert len(fig.layout.annotations) >= 1
@@ -489,8 +474,7 @@ def test_plot_hierarchical_dendrogram_uses_wards_method():
     rendered_sorted = sorted(rendered_distances)
     for expected, rendered in zip(expected_distances, rendered_sorted):
         assert abs(expected - rendered) < 1e-9, (
-            f"Ward merge distance mismatch: expected {expected}, "
-            f"got {rendered}"
+            f"Ward merge distance mismatch: expected {expected}, " f"got {rendered}"
         )
 
 
@@ -525,13 +509,14 @@ def test_theme_override_none_leaves_default_template():
         "rgb(17,17,17)",
     )
 
+
 def test_calculate_severity_ratios_percentage_breakdown():
     """Test the exact percentage breakdown across High, Medium, and Low."""
     incidents = [
-        {"similarity_score": 0.9},   # High
+        {"similarity_score": 0.9},  # High
         {"similarity_score": 0.85},  # High
-        {"similarity_score": 0.6},   # Medium
-        {"similarity_score": 0.3},   # Low
+        {"similarity_score": 0.6},  # Medium
+        {"similarity_score": 0.3},  # Low
     ]
     ratios = calculate_severity_ratios(incidents)
 

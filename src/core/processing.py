@@ -16,27 +16,27 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 
+from src.core.ai_detector import detect_documents_ai_probability
 from src.core.config import PLAGIARISM_THRESHOLD
 from src.core.document_parser import extract_text
 from src.core.embedding_model import embed_documents
-from src.core.faiss_index import build_index, ChunkRecord
+from src.core.faiss_index import ChunkRecord, build_index
 from src.core.similarity import document_similarity_matrix, flag_plagiarism
 from src.core.text_chunking import chunk_documents
-from src.core.ai_detector import detect_documents_ai_probability
 
 logger = logging.getLogger(__name__)
 
 
 PipelineResult = Tuple[
-    Dict[str, str],             # raw_texts
-    Dict[str, List[str]],       # chunked_docs
-    Dict[str, np.ndarray],      # embeddings
-    pd.DataFrame,               # sim_df
-    pd.DataFrame,               # chunk_sim_df
-    Any,                        # faiss_index
-    List[ChunkRecord],          # registry
+    Dict[str, str],  # raw_texts
+    Dict[str, List[str]],  # chunked_docs
+    Dict[str, np.ndarray],  # embeddings
+    pd.DataFrame,  # sim_df
+    pd.DataFrame,  # chunk_sim_df
+    Any,  # faiss_index
+    List[ChunkRecord],  # registry
     Dict[str, Dict[str, Any]],  # ai_probabilities
-    List[Dict[str, Any]],       # flags
+    List[Dict[str, Any]],  # flags
 ]
 
 
@@ -83,10 +83,12 @@ def run_full_pipeline(
 
     if failed_files:
         from src.errors import OCRFileBatchError
+
         raise OCRFileBatchError(failed_files, failure_details)
 
     if ignore_phrases and ignore_phrases.strip():
         from src.core.document_parser import remove_ignore_phrases
+
         raw_texts = {
             name: remove_ignore_phrases(text, ignore_phrases)
             for name, text in raw_texts.items()

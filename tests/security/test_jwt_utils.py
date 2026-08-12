@@ -5,6 +5,7 @@ Unit tests for JWT token generation, signature verification, and expiration in s
 """
 
 import pytest
+
 from src.security import jwt_utils
 from src.security.jwt_utils import (
     create_access_token,
@@ -59,6 +60,7 @@ def test_wrong_token_type():
     refresh_token = create_refresh_token(sub="eve")
     with pytest.raises(ValueError, match="expected 'access'"):
         verify_access_token(refresh_token)
+
 
 def test_secret_key_set_after_import(monkeypatch):
     """Regression test for #2050: JWT_SECRET_KEY must be read at call time,

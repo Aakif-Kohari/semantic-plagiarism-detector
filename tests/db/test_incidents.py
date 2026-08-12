@@ -23,6 +23,7 @@ from src.db.incidents import (
     update_review_status,
 )
 
+
 @pytest.fixture(autouse=True)
 def test_db(mock_db):
     # Backward compatibility for tests expecting test_db fixture returning the path
@@ -287,7 +288,6 @@ def test_get_incidents_by_severity(test_db):
     assert results[0]["document_a"] == "high_doc1.pdf"
 
 
-
 def test_get_incidents_by_severity_orders_by_timestamp_desc(test_db):
     """Verify same-severity incidents are returned newest first."""
     flags = [
@@ -313,6 +313,7 @@ def test_get_incidents_by_severity_orders_by_timestamp_desc(test_db):
     assert len(results) == 2
     assert results[0]["document_a"] == "high_doc_newer_a.pdf"
     assert results[1]["document_a"] == "high_doc_older_a.pdf"
+
 
 def test_purge_old_incidents_deletes_resolved_older_than_days(test_db):
     """Test that purge_old_incidents deletes resolved incidents older than specified days."""
@@ -527,9 +528,7 @@ def test_get_recent_incidents_caching_and_invalidation(test_db):
     get_recent_incidents.cache_clear()
 
     # 2. Insert initial incidents via sync
-    flags = [
-        {"doc_a": "doc1.pdf", "doc_b": "doc2.pdf", "similarity": 0.85}
-    ]
+    flags = [{"doc_a": "doc1.pdf", "doc_b": "doc2.pdf", "similarity": 0.85}]
     sync_flagged_incidents(flags, test_db)
 
     # 3. Call get_recent_incidents for the first time (should hit DB)
@@ -551,6 +550,7 @@ def test_get_recent_incidents_caching_and_invalidation(test_db):
     # 6. Call get_recent_incidents again (should hit DB because cache was invalidated)
     incidents_3 = get_recent_incidents(limit=5, db_path=test_db)
     assert len(incidents_3) == 2
+
 
 def test_archive_old_incidents_moves_rows_to_archive_table(test_db):
     """Test that archive_old_incidents copies old rows and removes them."""
@@ -641,18 +641,17 @@ def test_get_incidents_by_assignment(test_db):
 def test_get_incidents_by_assignment_direct_table(tmp_path):
     """Verify get_incidents_by_assignment queries 'incidents' table directly when it exists."""
     import sqlite3
+
     db_file = tmp_path / "custom_incidents.db"
     with sqlite3.connect(db_file) as conn:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE incidents (
                 id INTEGER PRIMARY KEY,
                 assignment_title TEXT,
                 timestamp TEXT,
                 details TEXT
             )
-            """
-        )
+            """)
         conn.execute(
             "INSERT INTO incidents (assignment_title, timestamp, details) VALUES (?, ?, ?)",
             ("Essay 1", "2026-05-01T10:00:00Z", "Incident A"),
@@ -671,7 +670,6 @@ def test_get_incidents_by_assignment_direct_table(tmp_path):
     assert len(res) == 2
     assert res[0]["details"] == "Incident B"
     assert res[1]["details"] == "Incident A"
-
 
 
 # ── Issue #1765: get_incidents_by_user() ─────────────────────────────────────
@@ -725,7 +723,9 @@ def test_get_incidents_by_user_filters_by_owner(test_db):
         now="2026-01-03T00:00:00Z",
     )
     sync_flagged_incidents(
-        [{"doc_a": "bob_doc1.pdf", "doc_b": "bob_doc1.pdf", "similarity": 0.7}],  # skipped (same doc)
+        [
+            {"doc_a": "bob_doc1.pdf", "doc_b": "bob_doc1.pdf", "similarity": 0.7}
+        ],  # skipped (same doc)
         test_db,
     )
 
@@ -827,8 +827,7 @@ def test_get_incidents_by_user_legacy_incidents_table(tmp_path):
 
     db_file = tmp_path / "legacy_incidents.db"
     with sqlite3.connect(db_file) as conn:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE incidents (
                 id INTEGER PRIMARY KEY,
                 owner TEXT,
@@ -838,8 +837,7 @@ def test_get_incidents_by_user_legacy_incidents_table(tmp_path):
                 similarity_score REAL,
                 details TEXT
             )
-            """
-        )
+            """)
         conn.execute(
             "INSERT INTO incidents (owner, timestamp, document_a, document_b, similarity_score, details) "
             "VALUES (?, ?, ?, ?, ?, ?)",
@@ -853,7 +851,7 @@ def test_get_incidents_by_user_legacy_incidents_table(tmp_path):
         conn.execute(
             "INSERT INTO incidents (owner, timestamp, document_a, document_b, similarity_score, details) "
             "VALUES (?, ?, ?, ?, ?, ?)",
-            ("bob",   "2026-05-03T10:00:00Z", "b1.pdf", "b2.pdf", 0.78, "Incident C"),
+            ("bob", "2026-05-03T10:00:00Z", "b1.pdf", "b2.pdf", 0.78, "Incident C"),
         )
         conn.commit()
 
@@ -881,8 +879,7 @@ def test_get_incidents_by_user_legacy_table_returns_all_columns(tmp_path):
 
     db_file = tmp_path / "legacy_full.db"
     with sqlite3.connect(db_file) as conn:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE incidents (
                 id INTEGER PRIMARY KEY,
                 owner TEXT,
@@ -894,13 +891,21 @@ def test_get_incidents_by_user_legacy_table_returns_all_columns(tmp_path):
                 review_status TEXT,
                 details TEXT
             )
-            """
-        )
+            """)
         conn.execute(
             "INSERT INTO incidents (owner, timestamp, document_a, document_b, "
             "similarity_score, severity_rank, review_status, details) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            ("alice", "2026-05-01T10:00:00Z", "a.pdf", "b.pdf", 0.91, "High", "Pending", "flagged"),
+            (
+                "alice",
+                "2026-05-01T10:00:00Z",
+                "a.pdf",
+                "b.pdf",
+                0.91,
+                "High",
+                "Pending",
+                "flagged",
+            ),
         )
         conn.commit()
 
@@ -908,12 +913,20 @@ def test_get_incidents_by_user_legacy_table_returns_all_columns(tmp_path):
     assert len(res) == 1
     row = res[0]
     # All columns from SELECT * must be present.
-    for col in ("id", "owner", "timestamp", "document_a", "document_b",
-                "similarity_score", "severity_rank", "review_status", "details"):
+    for col in (
+        "id",
+        "owner",
+        "timestamp",
+        "document_a",
+        "document_b",
+        "similarity_score",
+        "severity_rank",
+        "review_status",
+        "details",
+    ):
         assert col in row, f"Missing column: {col}"
     assert row["details"] == "flagged"
     assert row["severity_rank"] == "High"
-
 
 
 # ── Issue #1772: Additional comprehensive tests for get_incident_by_id ──────
@@ -1128,5 +1141,3 @@ def test_get_incident_by_id_returns_dict_type(test_db):
     assert result is not None
     assert isinstance(result, dict)
     assert not isinstance(result, sqlite3.Row)
-
-

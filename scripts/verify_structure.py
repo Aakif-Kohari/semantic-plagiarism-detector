@@ -35,7 +35,7 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import List, Tuple
 
 # Add project root to path
 ROOT_DIR = Path(__file__).resolve().parent.parent

@@ -54,7 +54,9 @@ def check_batch_rate_limit(file_count: int, session_id: Optional[str] = None) ->
     if session_id:
         current_count = _session_scan_counters.get(session_id, 0)
         if current_count + file_count > MAX_BATCH_FILES * 5:
-            raise ValueError("Cumulative session limit exceeded. Please try again later.")
+            raise ValueError(
+                "Cumulative session limit exceeded. Please try again later."
+            )
         _session_scan_counters[session_id] = current_count + file_count
 
 
@@ -115,9 +117,5 @@ def normalize_ocr_settings(
         if ocr_language is not None
         else DEFAULT_OCR_LANGUAGE
     )
-    dpi = (
-        validate_ocr_dpi(ocr_dpi)
-        if ocr_dpi is not None
-        else DEFAULT_OCR_DPI
-    )
+    dpi = validate_ocr_dpi(ocr_dpi) if ocr_dpi is not None else DEFAULT_OCR_DPI
     return lang, dpi

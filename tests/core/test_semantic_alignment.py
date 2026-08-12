@@ -4,11 +4,12 @@ tests/core/test_semantic_alignment.py
 Unit tests for the semantic-aware sequence alignment algorithm.
 """
 
-import pytest
 import numpy as np
+import pytest
+
 from src.core.semantic_alignment import (
-    align_semantic_sequences,
     _cosine_similarity_matrix,
+    align_semantic_sequences,
 )
 
 

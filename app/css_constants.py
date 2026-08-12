@@ -181,7 +181,7 @@ ST_TABS = "stTabs"
 ST_TABS_BUTTON = "stTabs button"
 """Individual tab button."""
 
-ST_TABS_BUTTON_ACTIVE = "stTabs button[aria-selected=\"true\"]"
+ST_TABS_BUTTON_ACTIVE = 'stTabs button[aria-selected="true"]'
 """Active (selected) tab button."""
 CLASS_BADGE = "badge"
 CLASS_SIM_PILL = "sim-pill"

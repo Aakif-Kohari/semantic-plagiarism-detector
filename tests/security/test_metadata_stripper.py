@@ -116,7 +116,9 @@ def test_strip_image_metadata_memory_footprint_exceeds_limit():
 
     with pytest.raises(ValueError) as excinfo:
         strip_exif_metadata(img_bytes.getvalue(), "test.png")
-    assert "Decompressed image memory footprint exceeds 100 MB safety limit" in str(excinfo.value)
+    assert "Decompressed image memory footprint exceeds 100 MB safety limit" in str(
+        excinfo.value
+    )
 
 
 def test_strip_image_metadata_decompressed_memory_exceeds_limit(monkeypatch):

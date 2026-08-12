@@ -34,14 +34,14 @@ ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from src.core.webhook import send_plagiarism_alert
+
 # Import modules under test
 from src.utils.redis_cache import (
     RedisCache,
     RedisConnectionError,
     RedisTimeoutError,
 )
-from src.core.webhook import send_plagiarism_alert
-
 
 # ── Fixtures ───────────────────────────────────────────────────────────────────
 
@@ -497,7 +497,7 @@ class TestDatabaseFaultTolerance:
         permissions, the system should log the error and potentially
         fall back to a temp directory.
         """
-        from src.db.corpus_db import init_corpus_db, configure_db_path
+        from src.db.corpus_db import configure_db_path, init_corpus_db
 
         # Create a read-only directory
         readonly_dir = tmp_path / "readonly"

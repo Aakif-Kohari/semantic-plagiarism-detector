@@ -1,5 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
+
 from src.api.app import app
 
 client = TestClient(app)
@@ -26,12 +27,16 @@ def test_openapi_schema_responses():
         "ErrorResponse",
     ]
     for schema_name in expected_schemas:
-        assert schema_name in schemas, f"Schema {schema_name} missing from OpenAPI specification"
+        assert (
+            schema_name in schemas
+        ), f"Schema {schema_name} missing from OpenAPI specification"
 
     paths = openapi.get("paths", {})
 
     # Verify /api/v1/auth/login response codes
-    login_responses = paths.get("/api/v1/auth/login", {}).get("post", {}).get("responses", {})
+    login_responses = (
+        paths.get("/api/v1/auth/login", {}).get("post", {}).get("responses", {})
+    )
     assert "200" in login_responses
     assert "400" in login_responses
     assert "401" in login_responses
@@ -45,7 +50,9 @@ def test_openapi_schema_responses():
     assert "500" in scan_responses
 
     # Verify /api/v1/clear response codes
-    clear_responses = paths.get("/api/v1/clear", {}).get("post", {}).get("responses", {})
+    clear_responses = (
+        paths.get("/api/v1/clear", {}).get("post", {}).get("responses", {})
+    )
     assert "200" in clear_responses
     assert "403" in clear_responses
     assert "500" in clear_responses

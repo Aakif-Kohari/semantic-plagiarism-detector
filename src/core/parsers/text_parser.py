@@ -2,13 +2,11 @@
 
 import io
 import logging
-import re
 import xml.etree.ElementTree
 import zipfile
 from urllib.parse import urlparse
 
 from src.core.parsers.cleaners import (
-    clean_text,
     strip_bibliography,
     strip_markdown_syntax,
 )
@@ -24,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 class CorruptedArchiveError(RuntimeError):
     """Raised when an uploaded ZIP archive is corrupted or contains unreadable entries."""
+
     pass
 
 
@@ -174,6 +173,7 @@ def extract_text_from_zip(
 ) -> str:
     """Extract and aggregate text from all valid documents inside a ZIP archive."""
     from src.core.parsers.dispatch import extract_text
+
     raw_data = _read_pdf_bytes(file)
     zip_stream = io.BytesIO(raw_data)
 
