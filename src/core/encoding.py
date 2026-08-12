@@ -1,7 +1,9 @@
 """Encoding fallback for document parsing."""
+
 from __future__ import annotations
 
 from typing import Any
+
 
 def normalize_encoding(text: Any) -> str:
     """Replace common mojibake with the intended characters."""

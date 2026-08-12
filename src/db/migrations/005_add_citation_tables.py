@@ -8,8 +8,7 @@ structural plagiarism analysis and citation graph extraction (Issue #1958).
 
 def migrate(connection):
     """Execute the migration SQL."""
-    connection.execute(
-        """
+    connection.execute("""
         CREATE TABLE IF NOT EXISTS citations (
             hash TEXT PRIMARY KEY,
             author TEXT,
@@ -17,11 +16,9 @@ def migrate(connection):
             title TEXT,
             raw_text TEXT
         )
-    """
-    )
+    """)
 
-    connection.execute(
-        """
+    connection.execute("""
         CREATE TABLE IF NOT EXISTS document_citations (
             doc_name TEXT NOT NULL,
             citation_hash TEXT NOT NULL,
@@ -29,12 +26,9 @@ def migrate(connection):
             PRIMARY KEY (doc_name, citation_hash),
             FOREIGN KEY (citation_hash) REFERENCES citations(hash) ON DELETE CASCADE
         )
-    """
-    )
+    """)
 
-    connection.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_doc_citations_doc 
+    connection.execute("""
+        CREATE INDEX IF NOT EXISTS idx_doc_citations_doc
         ON document_citations(doc_name)
-    """
-    )
+    """)

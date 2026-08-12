@@ -64,6 +64,7 @@ DEFAULT_BACKUP_DIRECTORY = Path("backups")
 class BackupRestoreSecurityError(ValueError):
     """Raised when a backup fails pre-restore security validation."""
 
+
 _ALLOWED_DB_DIR = Path(__file__).parent.parent.parent.resolve()
 
 
@@ -882,4 +883,3 @@ def checkpoint_wal_log(db_path: str | Path) -> bool:
             exc,
         )
         return False
-    

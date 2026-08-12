@@ -66,7 +66,10 @@ def test_get_cross_encoder_success():
     fake_instance = DummyModel()
     mock_cross_encoder_cls.return_value = fake_instance
 
-    with patch.dict("sys.modules", {"sentence_transformers": MagicMock(CrossEncoder=mock_cross_encoder_cls)}):
+    with patch.dict(
+        "sys.modules",
+        {"sentence_transformers": MagicMock(CrossEncoder=mock_cross_encoder_cls)},
+    ):
         model = _get_cross_encoder("custom-cross-encoder")
         assert model is fake_instance
         assert get_cross_encoder_info("custom-cross-encoder")["is_loaded"] is True
@@ -95,7 +98,9 @@ def test_rerank_candidates_with_cross_encoder_default_model_name():
 
     pairs = [("Sentence 1", "Sentence 2", 0.70)]
 
-    with patch("src.core.similarity._get_cross_encoder", return_value=DummyModel([2.0])):
+    with patch(
+        "src.core.similarity._get_cross_encoder", return_value=DummyModel([2.0])
+    ):
         rescored = rerank_candidates_with_cross_encoder(pairs)
         assert len(rescored) == 1
         assert rescored[0][0] == "Sentence 1"
@@ -128,7 +133,9 @@ def test_rerank_candidates_with_cross_encoder_preserves_additional_tuple_element
         ("Doc C", "Doc D", 0.90, "pair_id_102", {"severity": "Medium"}),
     ]
 
-    mock_model = DummyModel([3.0, -1.0])  # Pair 0 gets high score, Pair 1 gets low score
+    mock_model = DummyModel(
+        [3.0, -1.0]
+    )  # Pair 0 gets high score, Pair 1 gets low score
     _CROSS_ENCODER_MODELS["test-meta"] = mock_model
 
     rescored = rerank_candidates_with_cross_encoder(pairs, model_name="test-meta")
@@ -186,6 +193,8 @@ def test_rerank_candidates_with_cross_encoder_malformed_pairs():
     mock_model = DummyModel()
     _CROSS_ENCODER_MODELS["test-invalid"] = mock_model
 
-    rescored = rerank_candidates_with_cross_encoder(invalid_pairs, model_name="test-invalid")
+    rescored = rerank_candidates_with_cross_encoder(
+        invalid_pairs, model_name="test-invalid"
+    )
 
     assert rescored == invalid_pairs

@@ -8,6 +8,7 @@ factory methods, and navigation helpers.
 """
 
 import pytest
+
 from src.utils.pagination import PaginationPage
 
 

@@ -69,9 +69,7 @@ def test_migration_adds_nullable_text_column(tmp_path):
 
         columns = {
             row[1]: row
-            for row in connection.execute(
-                "PRAGMA table_info(users)"
-            ).fetchall()
+            for row in connection.execute("PRAGMA table_info(users)").fetchall()
         }
 
     column = columns["password_changed_at"]
@@ -90,9 +88,7 @@ def test_migration_is_idempotent(tmp_path):
 
         matching_columns = [
             row
-            for row in connection.execute(
-                "PRAGMA table_info(users)"
-            ).fetchall()
+            for row in connection.execute("PRAGMA table_info(users)").fetchall()
             if row[1] == "password_changed_at"
         ]
 
@@ -124,10 +120,13 @@ def test_successful_password_change_updates_timestamp():
 
     assert changed_at.tzinfo is not None
     assert before <= changed_at <= after
-    assert verify_user(
-        username,
-        "UpdatedPassword2@",
-    ) is True
+    assert (
+        verify_user(
+            username,
+            "UpdatedPassword2@",
+        )
+        is True
+    )
 
 
 def test_second_password_change_advances_timestamp(
@@ -180,9 +179,7 @@ def test_second_password_change_advances_timestamp(
     )
     second = read_password_changed_at(username)
 
-    assert datetime.fromisoformat(second) > (
-        datetime.fromisoformat(first)
-    )
+    assert datetime.fromisoformat(second) > (datetime.fromisoformat(first))
 
 
 def test_unknown_user_does_not_create_timestamp():
@@ -223,7 +220,10 @@ def test_authorization_failure_does_not_change_timestamp():
         )
 
     assert read_password_changed_at(target) is None
-    assert verify_user(
-        target,
-        "TargetPassword1!",
-    ) is True
+    assert (
+        verify_user(
+            target,
+            "TargetPassword1!",
+        )
+        is True
+    )

@@ -243,7 +243,11 @@ class ProgressTracker:
     actually changed (see `_dirty` guard in `_render`).
     """
 
-    def __init__(self, total_files: int, container: Optional["st.delta_generator.DeltaGenerator"] = None) -> None:
+    def __init__(
+        self,
+        total_files: int,
+        container: Optional["st.delta_generator.DeltaGenerator"] = None,
+    ) -> None:
         _inject_css()
         self._state = _TrackerState(total_files=total_files)
         self._placeholder = container.empty() if container is not None else st.empty()
@@ -262,7 +266,12 @@ class ProgressTracker:
         """Advance to a new file. `file_index` is 1-based."""
         self._state.current_file_index = file_index
         self._state.current_file_name = file_name
-        logger.debug("Now processing file %d/%d: %s", file_index, self._state.total_files, file_name)
+        logger.debug(
+            "Now processing file %d/%d: %s",
+            file_index,
+            self._state.total_files,
+            file_name,
+        )
         self._render()
 
     def update_stage(self, stage: ScanStage) -> None:
@@ -298,7 +307,9 @@ class ProgressTracker:
             if hasattr(self._state, key):
                 setattr(self._state, key, value)
             else:
-                logger.warning("ProgressTracker.update: unknown field '%s' ignored", key)
+                logger.warning(
+                    "ProgressTracker.update: unknown field '%s' ignored", key
+                )
         self._render()
 
     def finish(self, documents: int, incidents: int) -> None:
@@ -348,7 +359,11 @@ class ProgressTracker:
         total = max(self._state.total_files, 1)
         # Treat the file currently in progress as partially done so the
         # bar isn't stuck at the previous file's completion percentage.
-        fraction = (self._state.current_file_index - 0.5) / total if self._state.current_file_index else 0.0
+        fraction = (
+            (self._state.current_file_index - 0.5) / total
+            if self._state.current_file_index
+            else 0.0
+        )
         return min(max(fraction, 0.0), 1.0)
 
     def _signature(self) -> tuple:

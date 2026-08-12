@@ -6,18 +6,24 @@ and raw scan session log table.
 """
 
 from datetime import datetime, timedelta
+
 import pandas as pd
 import streamlit as st
 
 from app.theme import get_chart_colors
 from src.db.corpus_db import get_scan_history
-from src.visualization.history_charts import plot_flagged_documents_bar, plot_similarity_trend_line
+from src.visualization.history_charts import (
+    plot_flagged_documents_bar,
+    plot_similarity_trend_line,
+)
 
 
 def render_history_view():
     """Render Tab 10: Document Similarity History Dashboard."""
     st.subheader("📊 Document Similarity History Dashboard")
-    st.caption("Monitor plagiarism patterns and similarity trends across previous scan sessions.")
+    st.caption(
+        "Monitor plagiarism patterns and similarity trends across previous scan sessions."
+    )
 
     col1, col2 = st.columns(2)
     with col1:
@@ -40,27 +46,37 @@ def render_history_view():
     )
 
     if not history_data:
-        st.info("No scan history found for the selected date range. Run a scan to populate this dashboard.")
+        st.info(
+            "No scan history found for the selected date range. Run a scan to populate this dashboard."
+        )
     else:
-        trend_fig = plot_similarity_trend_line(history_data, theme_colors=get_chart_colors())
+        trend_fig = plot_similarity_trend_line(
+            history_data, theme_colors=get_chart_colors()
+        )
         st.plotly_chart(trend_fig, use_container_width=True)
 
         st.divider()
 
-        bar_fig = plot_flagged_documents_bar(history_data, theme_colors=get_chart_colors())
+        bar_fig = plot_flagged_documents_bar(
+            history_data, theme_colors=get_chart_colors()
+        )
         st.plotly_chart(bar_fig, use_container_width=True)
 
         st.divider()
 
         st.markdown("### 📋 Raw Scan History Data")
         df_history = pd.DataFrame(history_data)
-        df_history["timestamp"] = pd.to_datetime(df_history["timestamp"]).dt.strftime("%Y-%m-%d %H:%M:%S")
+        df_history["timestamp"] = pd.to_datetime(df_history["timestamp"]).dt.strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
         st.dataframe(
-            df_history.style.format({
-                "avg_similarity": "{:.2%}",
-                "max_similarity": "{:.2%}",
-                "threshold_used": "{:.2%}",
-            }),
+            df_history.style.format(
+                {
+                    "avg_similarity": "{:.2%}",
+                    "max_similarity": "{:.2%}",
+                    "threshold_used": "{:.2%}",
+                }
+            ),
             use_container_width=True,
             hide_index=True,
         )

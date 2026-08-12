@@ -1,7 +1,7 @@
-import os
 import json
 import logging
-from typing import Optional, Dict, List
+import os
+from typing import Dict, List, Optional
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, SecurityScopes
@@ -50,66 +50,62 @@ def get_expected_bearer_token() -> str:
 
 def get_valid_tokens() -> Dict[str, List[str]]:
     """Parse and return the API bearer tokens mapping from environment.
-    
+
     Returns:
         Dictionary mapping token strings to lists of scope strings.
         Returns empty dict if parsing fails or env var not set.
-        
+
     Note:
         Logs an error if API_BEARER_TOKENS_MAPPING contains malformed JSON
         to help administrators debug configuration issues.
     """
     tokens_json = os.getenv("API_BEARER_TOKENS_MAPPING", "")
-    
+
     if not tokens_json:
         return {}
-    
+
     try:
         tokens_mapping = json.loads(tokens_json)
-        
+
         # Validate structure: should be dict of str -> list of str
         if not isinstance(tokens_mapping, dict):
             logger.error(
                 "API_BEARER_TOKENS_MAPPING must be a JSON object, got %s",
-                type(tokens_mapping).__name__
+                type(tokens_mapping).__name__,
             )
             return {}
-            
+
         # Validate each entry
         validated = {}
         for token, scopes in tokens_mapping.items():
             if not isinstance(token, str):
                 logger.warning(
                     "Skipping non-string token key in API_BEARER_TOKENS_MAPPING: %s",
-                    token
+                    token,
                 )
                 continue
-                
+
             if not isinstance(scopes, list):
-                logger.warning(
-                    "Token '%s' has non-list scopes, skipping",
-                    token
-                )
+                logger.warning("Token '%s' has non-list scopes, skipping", token)
                 continue
-                
+
             # Ensure all scopes are strings
             valid_scopes = [s for s in scopes if isinstance(s, str)]
             if len(valid_scopes) != len(scopes):
                 logger.warning(
-                    "Token '%s' has non-string scopes, filtering them out",
-                    token
+                    "Token '%s' has non-string scopes, filtering them out", token
                 )
-                
+
             validated[token] = valid_scopes
-            
+
         return validated
-        
+
     except json.JSONDecodeError as exc:
         logger.error(
             "Failed to parse API_BEARER_TOKENS_MAPPING as JSON: %s. "
             "Scoped token authentication is disabled. "
             "Please check the environment variable for syntax errors.",
-            exc
+            exc,
         )
         return {}
     except Exception as exc:
@@ -117,7 +113,7 @@ def get_valid_tokens() -> Dict[str, List[str]]:
             "Unexpected error parsing API_BEARER_TOKENS_MAPPING: %s. "
             "Scoped token authentication is disabled.",
             exc,
-            exc_info=True
+            exc_info=True,
         )
         return {}
 

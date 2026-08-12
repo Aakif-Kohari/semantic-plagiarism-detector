@@ -1,6 +1,7 @@
 """Unit tests for render_timezone_footer in app/theme.py."""
 
 from unittest.mock import patch
+
 from app.theme import render_timezone_footer
 
 

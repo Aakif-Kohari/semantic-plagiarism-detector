@@ -98,7 +98,6 @@ def build_incident_id(doc_a: str, doc_b: str) -> str:
     return f"INC-{digest[:12].upper()}"
 
 
-
 def _parse_incident_id(val: str | int | None) -> int | None:
     if val is None:
         return None
@@ -113,6 +112,7 @@ def _parse_incident_id(val: str | int | None) -> int | None:
         except ValueError:
             pass
     return None
+
 
 def _get_connection(db_path: str | Path) -> sqlite3.Connection:
     abs_path = os.path.abspath(str(db_path))
@@ -300,8 +300,7 @@ def sync_flagged_incidents(
                 conn.commit()
                 get_recent_incidents.cache_clear()
 
-            rows = conn.execute(
-                """
+            rows = conn.execute("""
                 SELECT pi.incident_id, pi.document_a, pi.document_b,
                        pi.similarity_score, pi.severity_rank,
                        pi.review_status, pi.date_flagged, pi.last_seen,
@@ -312,8 +311,7 @@ def sync_flagged_incidents(
                 WHERE (da.is_deleted IS NULL OR da.is_deleted = 0)
                   AND (db.is_deleted IS NULL OR db.is_deleted = 0)
                 ORDER BY pi.date_flagged DESC, pi.incident_id ASC
-                """
-            ).fetchall()
+                """).fetchall()
 
             return [
                 MatchResult(
@@ -377,16 +375,14 @@ def get_total_incidents_count(
     """
     init_incident_db(db_path)
     with closing(_get_connection(db_path)) as conn:
-        row = conn.execute(
-            """
+        row = conn.execute("""
             SELECT COUNT(*)
             FROM plagiarism_incidents pi
             LEFT JOIN documents da ON pi.document_a = da.filename
             LEFT JOIN documents db ON pi.document_b = db.filename
             WHERE (da.is_deleted IS NULL OR da.is_deleted = 0)
               AND (db.is_deleted IS NULL OR db.is_deleted = 0)
-            """
-        ).fetchone()
+            """).fetchone()
     return int(row[0]) if row is not None else 0
 
 
@@ -634,9 +630,11 @@ def get_incidents_by_user(
         # Mirrors the dual-path strategy used by get_incidents_by_assignment
         # so older deployments (and tests that pre-populate the legacy
         # table) keep working with the exact SQL from the issue spec.
-        if table_exists(conn, "incidents") \
-                and column_exists(conn, "incidents", "owner") \
-                and column_exists(conn, "incidents", "timestamp"):
+        if (
+            table_exists(conn, "incidents")
+            and column_exists(conn, "incidents", "owner")
+            and column_exists(conn, "incidents", "timestamp")
+        ):
             rows = conn.execute(
                 """
                 SELECT * FROM incidents
@@ -824,8 +822,7 @@ def get_incidents_count_by_date(
     init_incident_db(db_path)
     with closing(_get_connection(db_path)) as conn:
         conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            """
+        rows = conn.execute("""
             SELECT
                 DATE(pi.date_flagged) as date,
                 COUNT(*) as count
@@ -836,8 +833,7 @@ def get_incidents_count_by_date(
               AND (db.is_deleted IS NULL OR db.is_deleted = 0)
             GROUP BY DATE(pi.date_flagged)
             ORDER BY date ASC
-            """
-        ).fetchall()
+            """).fetchall()
         return [dict(row) for row in rows]
 
 

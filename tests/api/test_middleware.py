@@ -7,10 +7,9 @@ Includes tests for token validation, security headers, and JSON parsing.
 """
 
 import json
-import os
-import pytest
-from unittest.mock import patch
 import logging
+import os
+from unittest.mock import patch
 
 from src.api.middleware import get_valid_tokens
 

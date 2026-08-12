@@ -20,9 +20,7 @@ def populated_incident_db(mock_db):
     )
 
     for index in range(65):
-        timestamp = (
-            base_time + timedelta(minutes=index)
-        ).isoformat()
+        timestamp = (base_time + timedelta(minutes=index)).isoformat()
         sync_flagged_incidents(
             [
                 {
@@ -79,26 +77,30 @@ def test_final_partial_page(
 def test_offset_beyond_total_returns_empty_page(
     populated_incident_db,
 ):
-    assert get_all_incidents(
-        populated_incident_db,
-        limit=10,
-        offset=1000,
-    ) == []
+    assert (
+        get_all_incidents(
+            populated_incident_db,
+            limit=10,
+            offset=1000,
+        )
+        == []
+    )
 
 
 def test_total_count_is_independent_of_page_size(
     populated_incident_db,
 ):
-    assert get_total_incidents_count(
-        populated_incident_db
-    ) == 65
-    assert len(
-        get_all_incidents(
-            populated_incident_db,
-            limit=7,
-            offset=0,
+    assert get_total_incidents_count(populated_incident_db) == 65
+    assert (
+        len(
+            get_all_incidents(
+                populated_incident_db,
+                limit=7,
+                offset=0,
+            )
         )
-    ) == 7
+        == 7
+    )
 
 
 @pytest.mark.parametrize(

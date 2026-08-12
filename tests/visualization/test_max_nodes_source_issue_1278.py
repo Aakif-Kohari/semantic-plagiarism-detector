@@ -6,8 +6,8 @@ TESTS = Path("tests/visualization/test_network_graph.py")
 
 def test_plot_api_has_required_default():
     source = SOURCE.read_text(encoding="utf-8")
-    section = source[source.index("def plot_plagiarism_network_graph("):]
-    signature = section[:section.index(") -> go.Figure:")]
+    section = source[source.index("def plot_plagiarism_network_graph(") :]
+    signature = section[: section.index(") -> go.Figure:")]
     assert "max_nodes: int = 50" in signature
 
 

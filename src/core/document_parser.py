@@ -291,32 +291,32 @@ FULLWIDTH_TRANSLATION = str.maketrans(
 
 def normalize_unicode_spaces(text: str) -> str:
     """Normalize special Unicode whitespace, zero-width characters, and full-width punctuation.
-    
+
     Documents extracted from PDFs, DOCX files, or web sources often contain
     non-standard Unicode characters that break string matching, lexical
     similarity calculations, and tokenization. This function acts as a
     comprehensive fallback normalizer to ensure consistent text representation
     across different operating systems and extraction libraries.
-    
+
     Handled conversions:
-    - Non-breaking spaces (\u00A0) -> standard space
-    - Thin spaces (\u2009), hair spaces (\u200A) -> standard space
-    - Zero-width spaces (\u200B), zero-width joiners/non-joiners -> empty string
-    - Soft hyphens (\u00AD) -> empty string
-    - Byte Order Mark / Zero-width no-break space (\uFEFF) -> empty string
+    - Non-breaking spaces (\u00a0) -> standard space
+    - Thin spaces (\u2009), hair spaces (\u200a) -> standard space
+    - Zero-width spaces (\u200b), zero-width joiners/non-joiners -> empty string
+    - Soft hyphens (\u00ad) -> empty string
+    - Byte Order Mark / Zero-width no-break space (\ufeff) -> empty string
     - Full-width punctuation and alphanumerics -> half-width (via NFKC normalization)
-    
+
     Args:
         text: The input text string to normalize.
-        
+
     Returns:
         The normalized text string with standard spaces and half-width characters.
         Returns an empty string if the input is None, empty, or not a string.
-        
+
     Examples:
-        >>> normalize_unicode_spaces("Hello\u00A0World")
+        >>> normalize_unicode_spaces("Hello\u00a0World")
         'Hello World'
-        >>> normalize_unicode_spaces("soft\u00ADhyphen")
+        >>> normalize_unicode_spaces("soft\u00adhyphen")
         'softhyphen'
         >>> normalize_unicode_spaces("Ｆｕｌｌ－ｗｉｄｔｈ")
         'Full-width'
@@ -324,52 +324,53 @@ def normalize_unicode_spaces(text: str) -> str:
     # Validate input type and handle empty/None gracefully
     if not text or not isinstance(text, str):
         return ""
-        
+
     # Step 1: Apply NFKC normalization to convert full-width characters to half-width
     # and compose compatibility characters. This handles Asian full-width punctuation
     # and ensures mathematical symbols are standardized.
     text = unicodedata.normalize("NFKC", text)
-    
+
     # Step 2: Map specific problematic Unicode characters to standard equivalents
     # using str.translate for O(1) performance per character lookup.
     # This is significantly faster than chained .replace() calls.
     unicode_mapping = {
-        0x00A0: " ",    # Non-breaking space (common in PDFs and web scrapes)
-        0x2009: " ",    # Thin space
-        0x200A: " ",    # Hair space
-        0x202F: " ",    # Narrow no-break space
-        0x205F: " ",    # Medium mathematical space
-        0x3000: " ",    # Ideographic space (full-width space used in CJK text)
-        0x00AD: "",     # Soft hyphen (invisible but breaks regex word boundaries)
-        0x200B: "",     # Zero-width space
-        0x200C: "",     # Zero-width non-joiner
-        0x200D: "",     # Zero-width joiner
-        0xFEFF: "",     # Zero-width no-break space / Byte Order Mark (BOM)
-        0x2060: "",     # Word joiner
-        0x2028: "\n",   # Line separator -> standard newline
-        0x2029: "\n\n", # Paragraph separator -> double newline
+        0x00A0: " ",  # Non-breaking space (common in PDFs and web scrapes)
+        0x2009: " ",  # Thin space
+        0x200A: " ",  # Hair space
+        0x202F: " ",  # Narrow no-break space
+        0x205F: " ",  # Medium mathematical space
+        0x3000: " ",  # Ideographic space (full-width space used in CJK text)
+        0x00AD: "",  # Soft hyphen (invisible but breaks regex word boundaries)
+        0x200B: "",  # Zero-width space
+        0x200C: "",  # Zero-width non-joiner
+        0x200D: "",  # Zero-width joiner
+        0xFEFF: "",  # Zero-width no-break space / Byte Order Mark (BOM)
+        0x2060: "",  # Word joiner
+        0x2028: "\n",  # Line separator -> standard newline
+        0x2029: "\n\n",  # Paragraph separator -> double newline
     }
-    
+
     text = text.translate(unicode_mapping)
-    
+
     # Step 3: Collapse multiple consecutive standard spaces into a single space
     # to prevent artificial inflation of lexical distance metrics and ensure
     # consistent tokenization in downstream embedding models.
     text = re.sub(r" {2,}", " ", text)
-    
+
     # Step 4: Strip leading/trailing whitespace that may have been introduced
     # by the normalization process.
     return text.strip()
 
-
-
     return text
+
+
 def sanitize_unicode_spaces(text: str) -> str:
     """Replace special Unicode spaces with standard ASCII spaces."""
     if not text:
         return text
 
-    return text.replace("\u00A0", " ").replace("\u2009", " ")
+    return text.replace("\u00a0", " ").replace("\u2009", " ")
+
 
 def check_batch_rate_limit(file_count: int, session_id: Optional[str] = None) -> None:
     """
@@ -1364,9 +1365,7 @@ def _reject_internal_destination(hostname: str) -> None:
             or ip.is_unspecified
             or ip.is_reserved
         ):
-            raise ValueError(
-                f"URL resolves to a restricted internal address: {ip_str}"
-            )
+            raise ValueError(f"URL resolves to a restricted internal address: {ip_str}")
 
 
 def extract_text_from_url(url: str) -> str:
@@ -1391,7 +1390,7 @@ def extract_text_from_url(url: str) -> str:
             "requests using: python -m pip install beautifulsoup4 requests"
         ) from exc
 
-# Validate URL
+    # Validate URL
     parsed = urlparse(url)
     if not all([parsed.scheme, parsed.netloc]) or parsed.scheme not in (
         "http",
@@ -1403,7 +1402,7 @@ def extract_text_from_url(url: str) -> str:
         raise ValueError(f"Invalid URL: {url}")
     _reject_internal_destination(parsed.hostname)
 
-    try:        # Fetch the webpage with a user agent to avoid being blocked
+    try:  # Fetch the webpage with a user agent to avoid being blocked
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
@@ -1947,7 +1946,9 @@ def parallel_extract_texts(
     from concurrent.futures import ProcessPoolExecutor, as_completed
 
     cpu_count = os.cpu_count() or 1
-    safe_max_workers = min(max_workers, cpu_count) if max_workers is not None else cpu_count
+    safe_max_workers = (
+        min(max_workers, cpu_count) if max_workers is not None else cpu_count
+    )
 
     results = {}
     try:

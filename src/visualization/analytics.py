@@ -43,6 +43,7 @@ def apply_plotly_theme(
 
     return fig
 
+
 def plot_similarity_boxplot_by_group(
     scores_dict: dict[str, list[float]],
     show_grid: bool = True,
@@ -117,6 +118,7 @@ def plot_similarity_boxplot_by_group(
 
     return fig
 
+
 def _apply_theme_colors(
     fig: go.Figure,
     theme_colors: dict[str, str] | None,
@@ -143,6 +145,7 @@ def _apply_theme_colors(
 
     if not theme_colors:
         return
+
 
 def calculate_severity_ratios(incidents: list[dict[str, Any]]) -> dict[str, float]:
     """Calculate the percentage breakdown of High, Medium, and Low severity incidents.
@@ -187,10 +190,8 @@ def calculate_severity_ratios(incidents: list[dict[str, Any]]) -> dict[str, floa
     if total == 0:
         return {"High": 0.0, "Medium": 0.0, "Low": 0.0}
 
-    return {
-        label: round((count / total) * 100, 2)
-        for label, count in counts.items()
-    }    
+    return {label: round((count / total) * 100, 2) for label, count in counts.items()}
+
 
 def _annotation_color(theme_colors: dict[str, str] | None) -> str:
     """Pick a readable annotation color for the given theme.
@@ -201,7 +202,6 @@ def _annotation_color(theme_colors: dict[str, str] | None) -> str:
     if theme_colors and isinstance(theme_colors, dict):
         return theme_colors.get("ink", "#64748b")
     return "#64748b"
-
 
 
 def build_visualization_lazily(
@@ -302,14 +302,14 @@ def plot_high_severity_trends(
         markers=True,
     )
     fig.add_trace(
-    go.Scatter(
-        x=df["date"],
-        y=df["cumulative"],
-        mode="lines+markers",
-        name="Cumulative Incidents",
-        yaxis="y2",
+        go.Scatter(
+            x=df["date"],
+            y=df["cumulative"],
+            mode="lines+markers",
+            name="Cumulative Incidents",
+            yaxis="y2",
+        )
     )
-)
 
     fig.update_layout(
         xaxis_title="Date",
@@ -337,7 +337,7 @@ def plot_most_plagiarized_documents(
     doc_data: list[dict[str, Any]],
     show_grid: bool = True,
     theme_colors: dict[str, str] | None = None,
-    theme_override: str | None = None, 
+    theme_override: str | None = None,
 ) -> go.Figure:
     """Create a bar chart showing the most frequently plagiarized documents."""
     if not doc_data:
@@ -439,7 +439,10 @@ def plot_similarity_distribution(
         scores,
         nbins=30,
         title=title,
-        labels={"value": "Similarity Score Range (%)", "count": "Number of Document Pairs"},
+        labels={
+            "value": "Similarity Score Range (%)",
+            "count": "Number of Document Pairs",
+        },
         range_x=[0.0, 1.0],
     )
 
@@ -561,9 +564,7 @@ def plot_similarity_boxplot(
 
     grouped: dict[str, list[float]] = {}
     for row in rows:
-        grouped.setdefault(row["assignment_title"], []).append(
-            row["similarity_score"]
-        )
+        grouped.setdefault(row["assignment_title"], []).append(row["similarity_score"])
 
     fig = go.Figure()
     for title, scores in grouped.items():
@@ -575,8 +576,7 @@ def plot_similarity_boxplot(
                 marker_color="#636efa",
                 line_color="#4a4dba",
                 hovertemplate=(
-                    "<b>%{name}</b><br>"
-                    "Similarity Score: %{y:.2f}<extra></extra>"
+                    "<b>%{name}</b><br>" "Similarity Score: %{y:.2f}<extra></extra>"
                 ),
             )
         )
@@ -773,6 +773,8 @@ def plot_similarity_percentiles(
         hovertemplate="<b>%{y}</b><br>Similarity Score: %{x:.2f}<extra></extra>",
     )
     return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)
+
+
 def plot_hierarchical_dendrogram(
     similarity_matrix: pd.DataFrame,
     title: str = "Hierarchical Clustering Dendrogram",
@@ -869,9 +871,7 @@ def plot_hierarchical_dendrogram(
     # Clamp similarities into [0, 1] defensively: some embedding pipelines
     # produce tiny negative cosines that should be treated as 0 similarity
     # (maximum distance) rather than as invalid input.
-    sim_values = np.clip(
-        similarity_matrix.to_numpy(dtype=float), 0.0, 1.0
-    )
+    sim_values = np.clip(similarity_matrix.to_numpy(dtype=float), 0.0, 1.0)
 
     # Distance = 1 − similarity.  Ward's method expects a condensed
     # distance vector (upper triangle, row-major).  ``squareform`` with
@@ -905,10 +905,7 @@ def plot_hierarchical_dendrogram(
         if cluster_id < n_leaves:
             return [cluster_id]
         row = linkage_matrix[cluster_id - n_leaves]
-        return (
-            _cluster_members(int(row[0]))
-            + _cluster_members(int(row[1]))
-        )
+        return _cluster_members(int(row[0])) + _cluster_members(int(row[1]))
 
     for step, row in enumerate(linkage_matrix, start=1):
         left_id = int(row[0])
@@ -922,9 +919,7 @@ def plot_hierarchical_dendrogram(
         # The merge-distance y-coordinate of each child is its own cluster
         # height.  Leaves have height 0.
         left_y = (
-            float(linkage_matrix[left_id - n_leaves][2])
-            if left_id >= n_leaves
-            else 0.0
+            float(linkage_matrix[left_id - n_leaves][2]) if left_id >= n_leaves else 0.0
         )
         right_y = (
             float(linkage_matrix[right_id - n_leaves][2])

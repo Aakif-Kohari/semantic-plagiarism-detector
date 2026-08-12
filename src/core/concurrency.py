@@ -1,15 +1,16 @@
-import functools
 import logging
 import os
-import sqlite3
 import time
 from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
+
 class ConcurrencyTimeoutError(Exception):
     """Raised when the FAISS lock cannot be acquired within the timeout threshold."""
+
     pass
+
 
 class FAISSLock:
     """
@@ -24,6 +25,7 @@ class FAISSLock:
     def __init__(self, lock_file: str = "faiss_rebuild.lock", timeout: int = None):
         if timeout is None:
             from src.core.app_config import get_lock_timeout
+
             timeout = get_lock_timeout()
 
         self.lock_file = lock_file
@@ -47,7 +49,9 @@ class FAISSLock:
     def _clear_stale_lock(self):
         """Attempts to aggressively clear a lock file if it is deemed stale."""
         try:
-            logger.warning(f"Detected stale FAISS lock: {self.lock_file}. Attempting aggressive clear.")
+            logger.warning(
+                f"Detected stale FAISS lock: {self.lock_file}. Attempting aggressive clear."
+            )
             os.remove(self.lock_file)
         except OSError as e:
             logger.error(f"Failed to clear stale FAISS lock: {e}")
@@ -83,6 +87,7 @@ class FAISSLock:
         except OSError as e:
             logger.warning(f"Failed to release FAISS lock gracefully: {e}")
 
+
 @contextmanager
 def faiss_write_lock(lock_path: str = "corpus.index.lock", timeout: int = None):
     """
@@ -99,6 +104,7 @@ def faiss_write_lock(lock_path: str = "corpus.index.lock", timeout: int = None):
         yield
     finally:
         lock.release()
+
 
 # with_sqlite_retry now lives in src/db/common.py — re-exported here so
 # existing callers (`from src.core.concurrency import with_sqlite_retry`

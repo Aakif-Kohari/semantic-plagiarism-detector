@@ -14,7 +14,7 @@ def test_db_schema_status_ui_elements():
     source = APP_PATH.read_text(encoding="utf-8")
     assert "Check Database Schema" in source
     assert "get_user_version" in source
-    assert 'db_schema_status_msg' in source
-    assert 'Corpus Schema: v' in source
-    assert 'Auth Schema: v' in source
-    assert 'st.toast(' in source
+    assert "db_schema_status_msg" in source
+    assert "Corpus Schema: v" in source
+    assert "Auth Schema: v" in source
+    assert "st.toast(" in source
