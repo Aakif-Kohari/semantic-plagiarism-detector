@@ -81,7 +81,12 @@ from app.components.auto_ml_optimizer import (
     UserFeedback,
     PatternProfile,
 )
-
+from app.components.smart_search import (
+    render_smart_search_ui,
+    render_search_analytics,
+    initialize_smart_search,
+    SmartSearchEngine,
+)
 try:
     from streamlit_plotly_events import plotly_events  # type: ignore
 except ImportError:  # pragma: no cover - optional dependency
