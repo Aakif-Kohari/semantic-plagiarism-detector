@@ -70,7 +70,9 @@ def _pool() -> dict[str, sqlite3.Connection]:
 
 @contextmanager
 def _connect():
-    """Borrow a reusable connection and manage the operation transaction."""
+    """Open a connection for the duration of the operation and always close
+    it on exit (success, error, or exception) to avoid leaked file handles
+    under concurrent requests."""
     path = os.path.abspath(_DB_PATH)
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -78,17 +80,13 @@ def _connect():
         path = str(FALLBACK_CORPUS_DB_PATH)
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
-    pool = _pool()
-    conn = pool.get(path)
-    if conn is None:
-        try:
-            conn = sqlite3.connect(path, check_same_thread=False)
-        except sqlite3.OperationalError:
-            path = str(FALLBACK_CORPUS_DB_PATH)
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            conn = sqlite3.connect(path, check_same_thread=False)
-        conn.execute("PRAGMA foreign_keys = ON")
-        pool[path] = conn
+    try:
+        conn = sqlite3.connect(path, check_same_thread=False)
+    except sqlite3.OperationalError:
+        path = str(FALLBACK_CORPUS_DB_PATH)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        conn = sqlite3.connect(path, check_same_thread=False)
+    conn.execute("PRAGMA foreign_keys = ON")
 
     try:
         yield conn
@@ -96,7 +94,11 @@ def _connect():
     except Exception:
         conn.rollback()
         raise
-
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 def close_connections() -> None:
     """Close all pooled corpus connections for the current thread."""
