@@ -60,6 +60,10 @@ class TagManager:
             if not clean_token or clean_token == "#":
                 continue
 
+            # Skip purely numeric or non-alpha tokens (must contain at least one alphabetic character)
+            if not re.sub(r"[^a-z]", "", clean_token):
+                continue
+
             # Ensure it starts with a hash prefix
             if not clean_token.startswith("#"):
                 clean_token = "#" + clean_token
