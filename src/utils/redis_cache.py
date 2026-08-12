@@ -79,6 +79,13 @@ class PayloadCompressor:
     """
     Handles robust compression and decompression of serialized cache payloads.
     Uses zlib (standard library) to drastically reduce memory usage of large matrices.
+
+    Redis wire format:
+        Compressed payloads: MAGIC_HEADER + zlib-compressed data.
+        Uncompressed payloads: raw serialized bytes.
+
+    Payloads are compressed when their serialized size is at least
+    COMPRESSION_THRESHOLD_BYTES (512 KiB).
     """
 
     # Threshold above which data is compressed (e.g., 512KB)
