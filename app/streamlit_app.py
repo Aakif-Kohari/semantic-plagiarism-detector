@@ -49,6 +49,15 @@ from app.components.advanced_analytics import (
     run_pipeline_with_tracking,
     track_comparison,
 )
+# ── Document Version Control Imports ─────────────────────────────────────
+from app.components.document_version_control import (
+    render_version_control_ui,
+    initialize_version_control,
+    VersionManager,
+    ChangeTracker,
+    DocumentVersion,
+    VersionDiff,
+)
 from app.components.auto_ml_optimizer import (
     AutoMLOptimizer,
     AutoOptimizationIntegration,
