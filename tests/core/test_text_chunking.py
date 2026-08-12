@@ -591,3 +591,30 @@ def test_nltk_punkt_download_called_at_most_once(monkeypatch):
     assert mock_download.call_count == 1
     mock_download.assert_called_with("punkt_tab", quiet=True)
     assert text_chunking._nltk_punkt_checked is True
+
+
+def test_chunk_text_dynamic_respects_max_chunks():
+    text = "This is a test sentence. " * 10000
+
+    chunks = chunk_text_dynamic(
+        text,
+        max_chunks=10,
+    )
+
+    assert len(chunks) == 10
+
+def test_chunk_text_dynamic_default_max_chunks():
+    text = "This is a test sentence. " * 100000
+
+    chunks = chunk_text_dynamic(text)
+
+    assert len(chunks) <= 1000
+
+def test_chunk_text_dynamic_logs_when_max_chunks_reached(caplog):
+    text = "This is a test sentence. " * 10000
+
+    with caplog.at_level("WARNING"):
+        chunks = chunk_text_dynamic(text, max_chunks=10)
+
+    assert len(chunks) == 10
+    assert "Maximum chunk limit reached" in caplog.text

@@ -443,6 +443,7 @@ def chunk_text_dynamic(
     text: str,
     target_size: int = 500,
     min_overlap: int = 50,
+    max_chunks: int = 1000,
 ) -> List[str]:
     """Dynamically split text into sliding window chunks while preserving sentence boundaries.
 
@@ -459,6 +460,9 @@ def chunk_text_dynamic(
     """
     if not text or not text.strip():
         return []
+        
+    if max_chunks <= 0:
+        raise ValueError("max_chunks must be greater than 0")
 
     clean_src = text.strip()
     n_total = len(clean_src)
@@ -500,6 +504,13 @@ def chunk_text_dynamic(
         chunk_content = clean_src[start:actual_end].strip()
         if chunk_content:
             chunks.append(ChunkString(chunk_content))
+
+            if len(chunks) >= max_chunks:
+                logger.warning(
+                    "Maximum chunk limit reached in chunk_text_dynamic: %d",
+                    max_chunks,
+                )
+                break
 
         if actual_end >= n_total:
             break
