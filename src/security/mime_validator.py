@@ -6,8 +6,9 @@ import io
 import logging
 import zipfile
 from typing import Optional
-from xml.etree import ElementTree
 
+import defusedxml.ElementTree as ElementTree
+from defusedxml.common import DefusedXmlException
 logger = logging.getLogger(__name__)
 
 # Strict mapping of file extension to allowed MIME types/signatures.
@@ -232,15 +233,15 @@ def _validate_ooxml_archive(
 
             return True
 
-    except (
+except (
         zipfile.BadZipFile,
         zipfile.LargeZipFile,
         ElementTree.ParseError,
+        DefusedXmlException,
         KeyError,
         OSError,
         RuntimeError,
-    ) as exception:
-        logger.warning(
+    ) as exception:        logger.warning(
             "[mime_validator] Invalid OOXML archive '%s': %s",
             filename,
             exception,
