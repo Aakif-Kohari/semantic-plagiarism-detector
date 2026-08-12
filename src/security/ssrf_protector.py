@@ -1,10 +1,10 @@
 import ipaddress
 import logging
+import requests
 import socket
 import time
 import urllib.parse
-from typing import Dict, Tuple
-
+from typing import Dict
 import requests
 
 from src.errors import (
@@ -80,10 +80,10 @@ class SSRFProtector:
 
     # Simple in-memory cache to prevent repeated DNS lookups and mitigate
     # slow-DNS denial of service attacks. (Format: {hostname: (ip_str, timestamp)})
-    _dns_cache: Dict[str, tuple[str, float]] = {}
+_dns_cache: Dict[str, tuple[str, float]] = {}
     DNS_CACHE_TTL_SECONDS = 300  # 5 minutes
     RESTRICTED_IPV4_CIDR_BLOCKS = RESTRICTED_IPV4_CIDR_BLOCKS
-    DEFAULT_USER_AGENT = DEFAULT_USER_AGENT
+    MAX_REDIRECT_DEPTH = 5    DEFAULT_USER_AGENT = DEFAULT_USER_AGENT
 
     @classmethod
     def _resolve_hostname(cls, hostname: str) -> str:
@@ -210,9 +210,68 @@ class SSRFProtector:
         except Exception as e:
             logger.debug(f"Outgoing HTTP validation request failed for {url}: {e}")
 
+# If it passed all checks, it's considered safe (public routable IP)
         logger.debug(f"SSRF Check passed for {url} -> {ip_str}")
         return True
 
+    @classmethod
+    def _check_redirect_depth(
+        cls,
+        current_url: str,
+        allowed_domains: list[str] | None = None,
+    ) -> str | None:
+        """
+        Inspects a single hop of a redirect chain.
+
+        The URL is fully re-validated (domain allow-list, DNS resolution,
+        internal/private IP checks) BEFORE any outbound HTTP request is
+        made, so this module never contacts an attacker-controlled internal
+        address.
+
+        Returns:
+            The next URL in the chain if a redirect is present, else None.
+        """
+        # Validate BEFORE making any outbound request.
+        cls.validate_webhook_url(current_url, allowed_domains=allowed_domains)
+
+        response = requests.head(current_url, allow_redirects=False, timeout=5)
+        if response.status_code in (301, 302, 303, 307, 308):
+            location = response.headers.get("Location")
+            if location:
+                return urllib.parse.urljoin(current_url, location)
+        return None
+
+    @classmethod
+    def validate_url_safety(
+        cls,
+        url: str,
+        allowed_domains: list[str] | None = None,
+        max_redirects: int | None = None,
+    ) -> tuple[str, str]:
+        """
+        Validates a URL and any redirect chain it produces, ensuring every
+        hop is checked for internal/private IPs before it is requested.
+
+        Returns:
+            A tuple of (final_validated_url, pinned_ip).
+        """
+        if max_redirects is None:
+            max_redirects = cls.MAX_REDIRECT_DEPTH
+
+        cls.validate_webhook_url(url, allowed_domains=allowed_domains)
+        current_url = url
+        pinned_ip = cls._resolve_hostname(urllib.parse.urlparse(current_url).hostname)
+
+        for _ in range(max_redirects):
+            next_url = cls._check_redirect_depth(current_url, allowed_domains)
+            if next_url is None:
+                break
+            current_url = next_url
+            pinned_ip = cls._resolve_hostname(
+                urllib.parse.urlparse(current_url).hostname
+            )
+
+        return current_url, pinned_ip
     @classmethod
     def validate_url_safety(
         cls,
