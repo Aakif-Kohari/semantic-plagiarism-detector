@@ -593,6 +593,11 @@ def clear_all_dialog():
             use_container_width=True,
             key="confirm_clear_all",
         ):
+            # ========== ADD THIS LINE ==========
+            from src.utils.redis_cache import clear_all_large_data
+            clear_all_large_data(SESSION_ID)
+            # ===================================
+            
             clear_all_data()
             if os.path.exists(_INDEX_PATH):
                 try:
@@ -817,6 +822,12 @@ def logout_dialog():
             username = st.session_state.get(SessionKeys.USERNAME, "unknown")
             timestamp = datetime.now(timezone.utc).isoformat()
             logger.info("User '%s' logged out at %s", username, timestamp)
+            
+            # ========== ADD THIS LINE ==========
+            from src.utils.redis_cache import clear_all_large_data
+            clear_all_large_data(SESSION_ID)
+            # ===================================
+            
             for key in [
                 SessionKeys.AUTHENTICATED,
                 SessionKeys.USERNAME,
@@ -1795,11 +1806,27 @@ if user_role == "admin":
             else:
                 st.info(f"Loaded and validated the existing FAISS index with {faiss_index.ntotal} vectors.")
 
+    from src.utils.redis_cache import store_large_data, get_large_data, clear_large_data
+
     if SessionKeys.ANALYSIS_RESULTS not in st.session_state:
-        st.session_state[SessionKeys.ANALYSIS_RESULTS] = None
-        cached_results = get_analysis_results(f"{SESSION_ID}:current")
-        if cached_results is not None:
-            st.session_state[SessionKeys.ANALYSIS_RESULTS] = cached_results
+        # Store only metadata in session state
+        cached_metadata = get_large_data(f"{SESSION_ID}:analysis_metadata")
+        if cached_metadata is not None:
+            st.session_state[SessionKeys.ANALYSIS_RESULTS] = cached_metadata
+        else:
+            st.session_state[SessionKeys.ANALYSIS_RESULTS] = {
+                "has_results": False,
+                "doc_count": 0,
+                "timestamp": time.time(),
+                "cache_key": None
+            }
+    
+    # Check if we have cached results
+    cached_results = get_large_data(f"{SESSION_ID}:analysis_results")
+    if cached_results is not None:
+        st.session_state[SessionKeys.ANALYSIS_RESULTS]["has_results"] = True
+        st.session_state[SessionKeys.ANALYSIS_RESULTS]["doc_count"] = cached_results.get("doc_count", 0)
+        st.session_state[SessionKeys.ANALYSIS_RESULTS]["cache_key"] = f"{SESSION_ID}:analysis_results"
 
     if SessionKeys.ANALYSIS_FILE_SIGNATURE not in st.session_state:
         st.session_state[SessionKeys.ANALYSIS_FILE_SIGNATURE] = None
@@ -2038,6 +2065,41 @@ if user_role == "admin":
             chunk_size,
             chunk_overlap,
         )
+        
+        # ========== ADD THIS BLOCK ==========
+        from src.utils.redis_cache import store_large_data
+        
+        # Store large results in Redis with compression
+        large_results = {
+            "chunked_docs": chunked_docs,
+            "embeddings": embeddings,
+            "sim_df": sim_df,
+            "chunk_sim_df": chunk_sim_df,
+            "faiss_index": faiss_index,
+            "registry": registry,
+            "ai_probabilities": ai_probabilities,
+            "doc_count": len(chunked_docs),
+            "timestamp": time.time()
+        }
+        
+        store_large_data(f"{SESSION_ID}:analysis_results", large_results, ttl=1800)
+        
+        # Update session state with metadata only
+        st.session_state[SessionKeys.ANALYSIS_RESULTS] = {
+            "has_results": True,
+            "doc_count": len(chunked_docs),
+            "timestamp": time.time(),
+            "cache_key": f"{SESSION_ID}:analysis_results"
+        }
+        
+        store_large_data(f"{SESSION_ID}:analysis_metadata", {
+            "has_results": True,
+            "doc_count": len(chunked_docs),
+            "timestamp": time.time(),
+            "cache_key": f"{SESSION_ID}:analysis_results"
+        }, ttl=1800)
+        # ===================================
+        
         st.session_state[SessionKeys.SCANNING] = False
         active_sim_df = chunk_sim_df if use_chunk_matrix else sim_df
         flags = flag_plagiarism(active_sim_df, threshold=threshold)
