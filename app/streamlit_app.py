@@ -95,6 +95,18 @@ from app.components.smart_notifications import (
     SmartFilter,
     UserNotificationPreferences,
 )
+# ── Collaboration Hub Imports ────────────────────────────────────────────
+from app.components.collaboration_hub import (
+    render_collaboration_hub,
+    initialize_collaboration_hub,
+    CollaborationHub,
+    PlagiarismCase,
+    CaseStatus,
+    CasePriority,
+    TeamWorkspace,
+    DiscussionThread,
+    ReviewQueue,
+)
 from app.components.auto_ml_optimizer import (
     render_auto_ml_dashboard,
     initialize_auto_ml,
