@@ -50,6 +50,7 @@ class LMSExportEngine:
         except Exception as exception:
             logger.error("Failed to format incident data as HTML: %s", exception)
             return None
+
     def build_download_response(
         data: str | bytes,
         *,

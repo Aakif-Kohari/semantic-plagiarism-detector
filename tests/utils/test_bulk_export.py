@@ -3,8 +3,8 @@ import json
 import zipfile
 
 from src.utils.bulk_export import (
-    export_incidents_csv_stream,
     export_incidents_csv,
+    export_incidents_csv_stream,
     generate_bulk_reports_zip,
 )
 
@@ -408,80 +408,90 @@ def test_create_batch_incident_zip_archive():
 
 from src.utils.bulk_export import stream_incidents_csv_chunks
 
+
 def test_stream_incidents_csv_chunks_default_batch():
     """Verify default batch size and incremental query calls."""
     calls = []
-    
+
     def mock_query(limit, offset):
         calls.append((limit, offset))
         if offset >= 2500:
             return []
-        
+
         size = min(limit, 2500 - offset)
         return [{"incident_id": f"INC-{offset+i}"} for i in range(size)]
-        
+
     chunks = list(stream_incidents_csv_chunks(mock_query))
-    
+
     assert len(chunks) == 4
-    
+
     header = chunks[0]
     assert "Incident ID" in header
     assert "Doc A" in header
-    
+
     assert calls == [(1000, 0), (1000, 1000), (1000, 2000)]
-    
+
+
 def test_stream_incidents_csv_chunks_custom_batch():
     """Verify custom batch size works."""
     calls = []
-    
+
     def mock_query(limit, offset):
         calls.append((limit, offset))
         if offset >= 10:
             return []
         size = min(limit, 10 - offset)
         return [{"incident_id": f"INC-{offset+i}"} for i in range(size)]
-        
+
     chunks = list(stream_incidents_csv_chunks(mock_query, batch_size=3))
-    
+
     assert calls == [(3, 0), (3, 3), (3, 6), (3, 9)]
     assert len(chunks) == 5
-    
+
+
 def test_stream_incidents_csv_chunks_empty_results():
     def mock_query(limit, offset):
         return []
-        
+
     chunks = list(stream_incidents_csv_chunks(mock_query))
     assert len(chunks) == 1
     assert "Incident ID" in chunks[0]
 
+
 def test_stream_incidents_csv_chunks_memory_efficient():
     """Verify that entire dataset is not accumulated in memory."""
+
     def mock_query(limit, offset):
         if offset >= 50:
             return []
-        return [{"incident_id": f"INC-{offset+i}"} for i in range(min(limit, 50 - offset))]
-        
+        return [
+            {"incident_id": f"INC-{offset+i}"} for i in range(min(limit, 50 - offset))
+        ]
+
     stream = stream_incidents_csv_chunks(mock_query, batch_size=10)
-    
+
     header = next(stream)
     assert "Incident ID" in header
-    
+
     first_batch = next(stream)
     assert "INC-0" in first_batch
     assert "INC-9" in first_batch
     assert "INC-10" not in first_batch
 
+
 def test_stream_incidents_csv_chunks_escaping():
     def mock_query(limit, offset):
         if offset > 0:
             return []
-        return [{
-            "incident_id": "INC-1",
-            "document_a": "comma, in name.pdf",
-            "document_b": 'quote" in name.pdf',
-            "similarity_score": 0.5
-        }]
-        
+        return [
+            {
+                "incident_id": "INC-1",
+                "document_a": "comma, in name.pdf",
+                "document_b": 'quote" in name.pdf',
+                "similarity_score": 0.5,
+            }
+        ]
+
     chunks = list(stream_incidents_csv_chunks(mock_query))
     assert len(chunks) == 2
     data = chunks[1]
@@ -548,15 +558,18 @@ def test_export_incidents_csv_stream_tab_delimiter():
 def test_stream_incidents_csv_chunks_semicolon_delimiter():
     """stream_incidents_csv_chunks must honor delimiter=';' across both
     the header chunk and the data chunks."""
+
     def mock_query(limit, offset):
         if offset > 0:
             return []
-        return [{
-            "incident_id": "INC-1",
-            "document_a": "alice.pdf",
-            "document_b": "bob.pdf",
-            "similarity_score": 0.5,
-        }]
+        return [
+            {
+                "incident_id": "INC-1",
+                "document_a": "alice.pdf",
+                "document_b": "bob.pdf",
+                "similarity_score": 0.5,
+            }
+        ]
 
     chunks = list(stream_incidents_csv_chunks(mock_query, delimiter=";"))
 
@@ -617,10 +630,15 @@ def test_export_incidents_csv_quoting_style():
     text_all = csv_bytes_all.decode("utf-8-sig")
     first_line_all = text_all.splitlines()[0]
     # Header fields must be quoted
-    assert '"Incident ID","Doc A","Doc B","Similarity","Severity","Status","Date"' in first_line_all
+    assert (
+        '"Incident ID","Doc A","Doc B","Similarity","Severity","Status","Date"'
+        in first_line_all
+    )
 
     # Test QUOTE_MINIMAL: default minimal quoting (normal string without special characters is unquoted)
-    csv_bytes_min = export_incidents_csv(_SAMPLE_INCIDENTS, quoting_style=csv.QUOTE_MINIMAL)
+    csv_bytes_min = export_incidents_csv(
+        _SAMPLE_INCIDENTS, quoting_style=csv.QUOTE_MINIMAL
+    )
     text_min = csv_bytes_min.decode("utf-8-sig")
     first_line_min = text_min.splitlines()[0]
     # Header fields must not be quoted
@@ -674,19 +692,15 @@ class TestSanitizeCsvCellValue:
         assert "'@admin" in text
 
 
-
-
-
-
 def test_sanitize_export_filename():
     from src.utils.bulk_export import sanitize_export_filename
-    
+
     # Test stripping illegal OS characters
-    assert sanitize_export_filename('test<file>.csv') == 'testfile.csv'
-    assert sanitize_export_filename('test:file|name?.csv') == 'testfilename.csv'
-    
+    assert sanitize_export_filename("test<file>.csv") == "testfile.csv"
+    assert sanitize_export_filename("test:file|name?.csv") == "testfilename.csv"
+
     # Test missing extension
-    assert sanitize_export_filename('testfile') == 'testfile.csv'
-    
+    assert sanitize_export_filename("testfile") == "testfile.csv"
+
     # Test valid filename
-    assert sanitize_export_filename('my_valid_file.csv') == 'my_valid_file.csv'
+    assert sanitize_export_filename("my_valid_file.csv") == "my_valid_file.csv"

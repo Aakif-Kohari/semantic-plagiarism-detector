@@ -5,12 +5,19 @@ Renders Tab 2 for querying the FAISS vector index and visualizing match results.
 """
 
 import streamlit as st
+
 from app.components.faiss_results import render_faiss_results_ui
 from src.core.embedding_model import embed_chunks
 from src.core.faiss_index import search_similar_chunks
 
 
-def render_faiss_view(faiss_index, registry, faiss_top_k: int, threshold: float, file_bytes_dict: dict = None):
+def render_faiss_view(
+    faiss_index,
+    registry,
+    faiss_top_k: int,
+    threshold: float,
+    file_bytes_dict: dict = None,
+):
     """Render Tab 2: FAISS Vector Search."""
     st.subheader("⚡ FAISS Vector Search")
     if faiss_index is not None:

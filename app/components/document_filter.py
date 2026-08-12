@@ -5,6 +5,7 @@ Document search filter component with Clear Search action button.
 """
 
 from typing import Any
+
 import pandas as pd
 import streamlit as st
 
@@ -36,7 +37,9 @@ def render_document_filter(
 
     with col2:
         st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
-        if st.button("Clear Search", key=f"clear_{search_key}_btn", use_container_width=True):
+        if st.button(
+            "Clear Search", key=f"clear_{search_key}_btn", use_container_width=True
+        ):
             st.session_state[search_key] = ""
             st.rerun()
 
@@ -48,7 +51,8 @@ def render_document_filter(
         if df_or_docs.empty:
             return df_or_docs
         mask = df_or_docs.astype(str).apply(
-            lambda row: row.str.lower().str.contains(query_str, regex=False).any(), axis=1
+            lambda row: row.str.lower().str.contains(query_str, regex=False).any(),
+            axis=1,
         )
         return df_or_docs[mask]
 

@@ -8,13 +8,12 @@ and delegating view rendering to modular components.
 import asyncio
 import hashlib
 import io as _io
+import json
 import logging
 import os
 import sys
 import time
-import hashlib
-from datetime import datetime, timezone, date, timedelta
-import json
+from datetime import date, datetime, timedelta, timezone
 
 import numpy as np
 import pandas as pd
@@ -32,8 +31,50 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
+# After existing imports, add:
+from app.components.advanced_analytics import (
+    AdvancedTextPreprocessor,
+    ComparisonHistoryManager,
+    ContextPreservingChunker,
+    OptimizedBatchProcessor,
+    PerformanceMonitor,
+    ProcessingStatus,
+    initialize_advanced_features,
+    render_advanced_features_sidebar,
+    render_document_analysis_widget,
+    render_processing_status_widget,
+    run_pipeline_with_tracking,
+    track_comparison,
+)
+from app.components.auto_ml_optimizer import (
+    AutoMLOptimizer,
+    AutoOptimizationIntegration,
+    OptimizationConfig,
+    OptimizationMetrics,
+    PatternProfile,
+    UserFeedback,
+    initialize_auto_ml,
+    render_auto_ml_dashboard,
+)
+
+# Add with other imports (around line 200-250)
+from app.components.real_time_monitor import (
+    HealthChecker,
+    MonitoringEngine,
+    initialize_monitoring,
+    render_real_time_monitor,
+)
+
+# Add with other imports (around line 200-250)
+from app.components.report_generator import (
+    PlagiarismReportGenerator,
+    initialize_report_generator,
+    render_report_generator_ui,
+    render_scheduled_reports_ui,
+)
 from src.security.metadata_stripper import strip_exif_metadata
 from src.utils.filename import (
     InvalidFileExtensionError,
@@ -41,45 +82,6 @@ from src.utils.filename import (
     sanitize_filename,
     unique_filename,
     validate_document_extension,
-)
-# Add with other imports (around line 200-250)
-from app.components.report_generator import (
-    render_report_generator_ui,
-    render_scheduled_reports_ui,
-    initialize_report_generator,
-    PlagiarismReportGenerator,
-)
-# After existing imports, add:
-from app.components.advanced_analytics import (
-    AdvancedTextPreprocessor,
-    ContextPreservingChunker,
-    OptimizedBatchProcessor,
-    ComparisonHistoryManager,
-    PerformanceMonitor,
-    render_processing_status_widget,
-    render_document_analysis_widget,
-    render_advanced_features_sidebar,
-    initialize_advanced_features,
-    run_pipeline_with_tracking,
-    track_comparison,
-    ProcessingStatus,
-)
-# Add with other imports (around line 200-250)
-from app.components.real_time_monitor import (
-    render_real_time_monitor,
-    initialize_monitoring,
-    MonitoringEngine,
-    HealthChecker,
-)
-from app.components.auto_ml_optimizer import (
-    render_auto_ml_dashboard,
-    initialize_auto_ml,
-    AutoMLOptimizer,
-    AutoOptimizationIntegration,
-    OptimizationConfig,
-    OptimizationMetrics,
-    UserFeedback,
-    PatternProfile,
 )
 from app.components.smart_search import (
     render_smart_search_ui,
@@ -105,6 +107,7 @@ except ImportError:  # pragma: no cover - optional dependency
     plotly_events = None
 
 from src.core.logging_config import setup_logging
+
 setup_logging()
 logger = logging.getLogger(__name__)
 
@@ -122,15 +125,30 @@ if missing_env_vars:
         ", ".join(missing_env_vars),
     )
 
+from src.db.auth import get_all_users, get_upload_count, init_db
+
 # Import DB and Core initializations
 from src.db.corpus_db import get_all_documents, get_total_document_count, init_corpus_db
-from src.db.auth import get_all_users, get_upload_count, init_db
-from src.db.incidents import get_all_incidents, get_total_incidents_count, init_incident_db, sync_flagged_incidents
+from src.db.incidents import (
+    get_all_incidents,
+    get_total_incidents_count,
+    init_incident_db,
+    sync_flagged_incidents,
+)
 from src.utils.temp_manager import purge_expired_temp_files
 
 init_corpus_db()
 init_db()
 purge_expired_temp_files()
+
+# Add after existing imports
+from app.components.enhanced_dashboard import (
+    DocumentTrendAnalyzer,
+    PlagiarismPatternAnalyzer,
+    initialize_enhanced_dashboard,
+    render_enhanced_analytics_tab,
+    render_enhanced_document_analysis,
+)
 
 # Centralized imports & backward compatibility re-exports
 from app.session_keys import SessionKeys
@@ -149,13 +167,16 @@ from app.theme import (
     get_theme_name,
     inject_css,
     render_session_status_banner,
+    render_timezone_footer,
     set_theme,
     version_check_widget_html,
-    render_timezone_footer,
-    render_session_status_banner,
 )
 from src.core.ai_detector import detect_documents_ai_probability
-from src.core.config import DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD, get_branding_config
+from src.core.config import (
+    DEFAULT_THRESHOLDS,
+    PLAGIARISM_THRESHOLD,
+    get_branding_config,
+)
 from src.core.document_parser import (
     DEFAULT_OCR_DPI,
     DEFAULT_OCR_LANGUAGE,
@@ -173,22 +194,24 @@ from src.core.faiss_index import (
     search_similar_chunks,
 )
 from src.core.pipeline import ChunkRecord, run_extraction_pipeline, run_pipeline
-from src.core.similarity import cosine_similarity, document_similarity_matrix, flag_plagiarism
-from src.db import clear_all_data, delete_document, get_all_embeddings, get_chunk_registry
+from src.core.similarity import (
+    cosine_similarity,
+    document_similarity_matrix,
+    flag_plagiarism,
+)
+from src.db import (
+    clear_all_data,
+    delete_document,
+    get_all_embeddings,
+    get_chunk_registry,
+)
 from src.i18n.translator import _SUPPORTED_LANGUAGES, get_text
+from src.utils.diff_highlighter import highlight_overlap
+from src.utils.file_parser import truncate_filename
 from src.utils.processing_time import (
     estimate_processing_seconds,
     format_processing_duration,
 )
-# Add after existing imports
-from app.components.enhanced_dashboard import (
-    render_enhanced_analytics_tab,
-    render_enhanced_document_analysis,
-    initialize_enhanced_dashboard,
-    PlagiarismPatternAnalyzer,
-    DocumentTrendAnalyzer,
-)
-from src.utils.diff_highlighter import highlight_overlap
 from src.utils.redis_cache import (
     cache_session_state,
     clear_session,
@@ -196,15 +219,13 @@ from src.utils.redis_cache import (
     get_faiss_index,
     get_session_state,
 )
-from src.utils.file_parser import truncate_filename
 from src.utils.storage_metrics import calculate_storage_usage
 from src.visualization.heatmap import (
     plot_similarity_heatmap,
 )
-from src.core.config import get_branding_config
 
 try:
-    from src.utils.warning_list import render_warning_controls, render_copy_button
+    from src.utils.warning_list import render_copy_button, render_warning_controls
     from src.visualization.analytics import (
         plot_high_severity_trends,
         plot_most_plagiarized_documents,
@@ -254,10 +275,11 @@ init_db()
 purge_expired_temp_files()
 # Start lightweight REST API server for /healthz endpoint in background
 import threading
+
 import uvicorn
 
-from src.api.app import app as fastapi_app
 import src.core.app_config as app_config
+from src.api.app import app as fastapi_app
 
 
 def update_global_activity():
@@ -395,10 +417,10 @@ def _run_backup_daemon():
                 and idle >= timeout
                 and last_activity > last_backup_time
             ):
+                from src.db.corpus_db import get_corpus_db_path
                 from src.db.database_backup import (
                     create_corpus_database_snapshot,
                 )
-                from src.db.corpus_db import get_corpus_db_path
 
                 snapshot = create_corpus_database_snapshot()
 
@@ -844,7 +866,7 @@ with st.sidebar:
         initialize_report_generator()
         # ── Threshold Presets (Issue #1674) ───────────────────────────────────────
         st.markdown("### 🎯 Threshold Presets")
-        
+
         # Define preset options with descriptions
         preset_options = {
             "Strict (0.80)": 0.80,
@@ -852,7 +874,7 @@ with st.sidebar:
             "Lenient (0.45)": 0.45,
             "Custom": None,
         }
-        
+
         # Determine current preset based on session state threshold
         current_threshold = st.session_state.get("threshold_slider", PLAGIARISM_THRESHOLD)
         current_preset = "Custom"
@@ -860,7 +882,7 @@ with st.sidebar:
             if value is not None and abs(current_threshold - value) < 0.001:
                 current_preset = label
                 break
-        
+
         selected_preset = st.radio(
             "Select Evaluation Standard:",
             options=list(preset_options.keys()),
@@ -869,7 +891,7 @@ with st.sidebar:
             horizontal=True,
             help="Choose a predefined threshold standard or use the custom slider below.",
         )
-        
+
         # Sync preset selection with slider value
         if selected_preset != "Custom" and preset_options[selected_preset] is not None:
             st.session_state["threshold_slider"] = preset_options[selected_preset]
@@ -891,7 +913,7 @@ with st.sidebar:
             key="threshold_slider",
             on_change=save_preferences_callback,
         )
-        
+
         # If user manually changes slider, reset preset to "Custom"
         if abs(threshold - preset_options.get(selected_preset, -1)) > 0.001:
             if st.session_state.get("threshold_preset_radio") != "Custom":
@@ -1018,14 +1040,14 @@ with st.sidebar:
     render_api_quota_gauge()
 
 
-unique_classes = get_unique_class_sections()
-selected_classes = st.multiselect(
-    "Select Class/Section(s)",
-    unique_classes,
-    default=unique_classes,
-    key=SessionKeys.CLASS_FILTER_SELECTBOX,
-)
-lang_code = render_sidebar(user_role, str(ROOT_DIR), faiss_index)
+    unique_classes = get_unique_class_sections()
+    selected_classes = st.multiselect(
+        "Select Class/Section(s)",
+        unique_classes,
+        default=unique_classes,
+        key=SessionKeys.CLASS_FILTER_SELECTBOX,
+    )
+    lang_code = render_sidebar(user_role, str(ROOT_DIR), faiss_index)
 
     # ── System Health Widget (Issue #1246) ──────────────────────────────────────
     with st.expander("🖥️ System Health & Memory", expanded=False):
@@ -1034,7 +1056,7 @@ lang_code = render_sidebar(user_role, str(ROOT_DIR), faiss_index)
             process = psutil.Process(os.getpid())
             mem_info = process.memory_info()
             rss_mb = mem_info.rss / (1024 * 1024)
-            
+
             host_limit_mb = 2048.0
             try:
                 from src.core.app_config import get_host_memory_limit_mb
@@ -1073,7 +1095,7 @@ lang_code = render_sidebar(user_role, str(ROOT_DIR), faiss_index)
             st.markdown("**🗄️ Database Status**")
 
             try:
-                from src.core.app_config import CORPUS_DB_PATH, AUTH_DB_PATH
+                from src.core.app_config import AUTH_DB_PATH, CORPUS_DB_PATH
 
                 corpus_db_exists = CORPUS_DB_PATH.exists()
                 if corpus_db_exists:
@@ -1506,6 +1528,7 @@ if has_enough_files:
             st.write(f"**{len(existing_docs)}** documents in database")
 
             import pandas as pd
+
             from src.db.corpus_db import (
                 get_document_char_counts,
                 get_document_word_counts,
@@ -2220,10 +2243,10 @@ with tab_heatmap:
     # ── Plagiarism Cluster Detection Summary (Issue #1675) ───────────────────
     if active_sim_df is not None and len(doc_names) >= 2:
         from src.core.similarity import detect_plagiarism_clusters
-        
+
         cluster_data = detect_plagiarism_clusters(active_sim_df, threshold=threshold)
         suspicious_groups = cluster_data["suspicious_groups"]
-        
+
         if suspicious_groups:
             with st.expander(
                 f"🚨 Suspicious Collusion Rings Detected ({len(suspicious_groups)})",
@@ -2233,7 +2256,7 @@ with tab_heatmap:
                     f"Found {len(suspicious_groups)} group(s) of 3+ highly similar documents. "
                     "These may indicate collusion or shared source material."
                 )
-                
+
                 for group in suspicious_groups:
                     st.markdown(f"**Cluster #{group['cluster_id']}** ({group['size']} documents):")
                     for doc in group["documents"]:
@@ -2316,21 +2339,22 @@ with tab_drill:
                     "sequences and detect structural reordering or synonym swapping that "
                     "standard lexical diffs miss."
                 )
-                
+
                 # Resolve chunks and embeddings for the selected document pair
                 try:
+                    import streamlit.components.v1 as components
+
                     from src.core.semantic_alignment import align_semantic_sequences
                     from src.utils.diff_renderer import render_semantic_diff_html
-                    import streamlit.components.v1 as components
-                    
+
                     # Extract chunks for the selected pair from chunked_docs
                     chunks_a = chunked_docs.get(da, [])
                     chunks_b = chunked_docs.get(db, [])
-                    
+
                     # Get embeddings for the selected pair
                     emb_a = embeddings.get(da, np.array([]))
                     emb_b = embeddings.get(db, np.array([]))
-                    
+
                     if not chunks_a or not chunks_b:
                         st.warning(
                             "Cannot generate semantic diff: chunk data is unavailable "
@@ -2344,7 +2368,7 @@ with tab_drill:
                     else:
                         # Get current theme for rendering
                         current_theme = get_theme_name()
-                        
+
                         # Compute alignment using DP on sentence embeddings
                         alignment_map = align_semantic_sequences(
                             chunks_a=chunks_a,
@@ -2352,16 +2376,16 @@ with tab_drill:
                             embeddings_a=emb_a,
                             embeddings_b=emb_b,
                         )
-                        
+
                         # Render HTML diff
                         diff_html = render_semantic_diff_html(
                             alignment_map=alignment_map,
                             theme=current_theme
                         )
-                        
+
                         # Inject into Streamlit
                         components.html(diff_html, height=600, scrolling=True)
-                        
+
                         # Export button
                         st.download_button(
                             label="⬇️ Download Diff Report (HTML)",
@@ -2379,36 +2403,39 @@ with tab_drill:
                 "Detects structural plagiarism by comparing the reference sections. "
                 "High overlap indicates students may have copied bibliographies without reading the sources."
             )
-            
+
             try:
-                from src.db.citation_db import get_shared_citations, compute_citation_jaccard
+                from src.db.citation_db import (
+                    compute_citation_jaccard,
+                    get_shared_citations,
+                )
                 from src.visualization.citation_graph import plot_citation_network
-                
+
                 jaccard_score = compute_citation_jaccard(da, db)
                 shared_cites = get_shared_citations(da, db)
-                
+
                 col1, col2 = st.columns(2)
                 with col1:
                     st.metric("Citation Jaccard Similarity", f"{jaccard_score:.1%}")
                 with col2:
                     st.metric("Shared References", len(shared_cites))
-                    
+
                 if jaccard_score > 0.80:
                     st.error(
                         f"🚨 **High Citation Overlap Detected ({jaccard_score:.1%})**: "
                         "These documents share an unusually high number of identical references."
                     )
-                    
+
                 if shared_cites:
                     current_theme = get_theme_name()
                     fig = plot_citation_network(
-                        doc_a=da, 
-                        doc_b=db, 
+                        doc_a=da,
+                        doc_b=db,
                         shared_citations=shared_cites,
                         theme_colors=get_chart_colors()
                     )
                     st.plotly_chart(fig, use_container_width=True)
-                    
+
                     with st.expander("View Shared Citations List"):
                         st.dataframe(
                             pd.DataFrame(shared_cites)[["author", "year", "title"]],
@@ -2417,7 +2444,7 @@ with tab_drill:
                         )
                 else:
                     st.info("No shared citations found between these two documents.")
-                    
+
             except Exception as cite_err:
                 st.warning(f"Bibliography analysis unavailable: {cite_err}")
 
@@ -2431,13 +2458,14 @@ with tab_compare:
 with tab_analytics:
     update_page_title("Analytics")
     st.subheader("📊 Analytics Dashboard")
-    
+
     # Get data for enhanced analytics
     history_data = []
     try:
-        from src.db.corpus_db import get_scan_history
         from datetime import datetime, timedelta
-        
+
+        from src.db.corpus_db import get_scan_history
+
         end_date = datetime.now()
         start_date = end_date - timedelta(days=30)
         history_data = get_scan_history(
@@ -2447,7 +2475,7 @@ with tab_analytics:
         )
     except Exception as e:
         logger.error(f"Failed to load history data: {e}")
-    
+
     # Render enhanced analytics
     render_enhanced_analytics_tab(
         sim_matrix=active_sim_df if active_sim_df is not None else pd.DataFrame(),
@@ -2532,7 +2560,8 @@ with tab_history:
         if st.button("Check Database Schema", key="check_db_schema_btn", use_container_width=True):
             try:
                 import sqlite3
-                from src.core.app_config import CORPUS_DB_PATH, AUTH_DB_PATH
+
+                from src.core.app_config import AUTH_DB_PATH, CORPUS_DB_PATH
                 from src.db.migrations.common import get_user_version
 
                 corpus_ver = 8
@@ -2558,7 +2587,7 @@ with tab_history:
 
         if "db_schema_status_msg" in st.session_state:
             st.info(st.session_state["db_schema_status_msg"])
-            
+
 # ══ TAB 10: SECURITY AUDIT LOGS ═════════════════════════════════════════════
 with tab_audit:
     update_page_title("Security Audit Logs")
@@ -2704,10 +2733,13 @@ with tab_history:
     update_page_title("History")
     st.subheader("📊 Document Similarity History Dashboard")
     st.caption("Monitor plagiarism patterns and similarity trends across previous scan sessions.")
-    
+
     from src.db.corpus_db import get_scan_history
-    from src.visualization.history_charts import plot_similarity_trend_line, plot_flagged_documents_bar
-    
+    from src.visualization.history_charts import (
+        plot_flagged_documents_bar,
+        plot_similarity_trend_line,
+    )
+
     # Date range filter
     col1, col2 = st.columns(2)
     with col1:
@@ -2722,28 +2754,28 @@ with tab_history:
             value=datetime.now(),
             key="history_end_date",
         )
-        
+
     history_data = get_scan_history(
         start_date=start_date.strftime("%Y-%m-%d"),
         end_date=end_date.strftime("%Y-%m-%d"),
         limit=100,
     )
-    
+
     if not history_data:
         st.info("No scan history found for the selected date range. Run a scan to populate this dashboard.")
     else:
         # Similarity Trend Line Chart
         trend_fig = plot_similarity_trend_line(history_data, theme_colors=get_chart_colors())
         st.plotly_chart(trend_fig, use_container_width=True)
-        
+
         st.divider()
-        
+
         # Flagged Documents Bar Chart
         bar_fig = plot_flagged_documents_bar(history_data, theme_colors=get_chart_colors())
         st.plotly_chart(bar_fig, use_container_width=True)
-        
+
         st.divider()
-        
+
         # Raw Data Table
         st.markdown("### 📋 Raw Scan History Data")
         df_history = pd.DataFrame(history_data)
@@ -2766,9 +2798,10 @@ if user_role == "admin":
     existing_docs = get_all_documents()
     if existing_docs:
         st.write(f"**{len(existing_docs)}** documents in database")
-        
+
         # Bulk selection and export logic
         import pandas as pd
+
         from src.db.corpus_db import (
             get_document_char_counts,
             get_document_word_counts,
@@ -2795,7 +2828,7 @@ if user_role == "admin":
             )
 
         corpus_df = pd.DataFrame(doc_rows)
-        
+
         if st.session_state.get("corpus_select_all_toggle", False):
             corpus_df["Select"] = True
 
@@ -2919,7 +2952,7 @@ with _footer_col1:
         "🐛 Report Bug / Feedback"
     )
     render_session_status_banner()
-    
+
     # Logout button placed in footer for easy access
     if st.button("🚪 Log Out", use_container_width=True, key="logout_button_footer"):
         logout_dialog()

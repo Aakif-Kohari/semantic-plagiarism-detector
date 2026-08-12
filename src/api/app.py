@@ -2,7 +2,6 @@
 
 import logging
 import os
-import time
 from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, Request, status
@@ -15,11 +14,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.api.dependencies import (
     custom_rate_limit_exceeded_handler,
-    get_corpus_documents_with_embeddings,
     limiter,
-    validate_content_type,
 )
-from src.api.middleware import get_current_user, verify_bearer_token
+from src.api.middleware import verify_bearer_token
 from src.api.routers import (
     admin_router,
     analysis_router,
@@ -28,14 +25,6 @@ from src.api.routers import (
 )
 
 # Re-exports for backward compatibility with existing tests and scripts
-from src.api.routers.admin import START_TIME, _HEALTHZ_DB_PATHS
-from src.api.routers.analysis import scan_jobs, total_scans
-from src.api.routers.corpus import INDEX_PATH
-from src.core.document_parser import extract_text
-from src.core.embedding_model import embed_chunks, get_document_embedding
-from src.core.text_chunking import chunk_document
-from src.db.corpus_db import get_document_by_hash
-from src.utils.hash_util import calculate_file_sha256
 
 logger = logging.getLogger(__name__)
 

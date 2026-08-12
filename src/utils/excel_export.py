@@ -16,9 +16,9 @@ from typing import Generator
 
 import pandas as pd
 from openpyxl import Workbook
+from openpyxl.comments import Comment
 from openpyxl.formatting.rule import ColorScaleRule
 from openpyxl.styles import Alignment, Font, PatternFill
-from openpyxl.comments import Comment
 
 
 def _create_managed_temp_file(suffix: str = ".xlsx", prefix: str = "temp_") -> str:
@@ -53,9 +53,7 @@ def _truncate_title(title: str, max_length: int = 60) -> str:
     return title[: max_length - 3] + "..."
 
 
-def build_similarity_workbook(
-    df: pd.DataFrame, threshold: float = 0.59
-) -> Workbook:
+def build_similarity_workbook(df: pd.DataFrame, threshold: float = 0.59) -> Workbook:
     """Helper function that builds and styles the openpyxl Workbook."""
     wb = Workbook()
     ws = wb.active

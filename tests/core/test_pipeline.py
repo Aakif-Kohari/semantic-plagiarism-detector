@@ -11,17 +11,13 @@ def sample_documents():
         "doc1.txt": b"""Artificial intelligence is transforming education.
 Students use AI for personalized learning.
 Machine learning improves teaching.""",
-
         "doc2.txt": b"""Artificial intelligence is transforming education.
 Students use AI for personalized learning.
 Deep learning also improves education.""",
-
         "doc3.txt": b"""Python is a popular programming language.
 It is widely used for web development and data science.""",
-
         "doc4.txt": b"""Cloud computing provides scalable infrastructure.
 Organizations use cloud services to deploy applications.""",
-
         "doc5.txt": b"""Cybersecurity protects systems from attacks.
 Encryption improves information security.""",
     }

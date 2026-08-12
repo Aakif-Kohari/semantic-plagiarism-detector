@@ -7,12 +7,12 @@ import uuid
 import pytest
 
 from src.db.auth import (
+    _connect,
     add_user,
     init_db,
     log_security_event,
     update_password,
 )
-from src.db.auth import _connect
 
 
 @pytest.fixture(autouse=True)

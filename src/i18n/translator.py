@@ -17,7 +17,6 @@ from typing import Any, Dict
 
 import streamlit as st
 
-
 logger = logging.getLogger(__name__)
 
 _I18N_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -29,8 +28,7 @@ _SUPPORTED_LANGUAGES = {
 }
 LANGUAGE_DISPLAY = _SUPPORTED_LANGUAGES
 DISPLAY_TO_CODE = {
-    display_name: code
-    for code, display_name in _SUPPORTED_LANGUAGES.items()
+    display_name: code for code, display_name in _SUPPORTED_LANGUAGES.items()
 }
 
 _translations: Dict[str, Dict[str, str]] = {}
@@ -51,15 +49,9 @@ def _load_translation_dictionary(
         loaded = json.load(translation_file)
 
     if not isinstance(loaded, dict):
-        raise ValueError(
-            "Translation file must contain a JSON object: "
-            f"{file_path}"
-        )
+        raise ValueError("Translation file must contain a JSON object: " f"{file_path}")
 
-    return {
-        str(key): str(value)
-        for key, value in loaded.items()
-    }
+    return {str(key): str(value) for key, value in loaded.items()}
 
 
 def load_translations() -> None:
@@ -88,9 +80,7 @@ def load_translations() -> None:
             continue
 
         try:
-            loaded_translations[lang_code] = (
-                _load_translation_dictionary(file_path)
-            )
+            loaded_translations[lang_code] = _load_translation_dictionary(file_path)
         except (
             OSError,
             json.JSONDecodeError,
@@ -142,8 +132,7 @@ def get_text(
 
     if kwargs:
         escaped_values = {
-            name: html.escape(str(value))
-            for name, value in kwargs.items()
+            name: html.escape(str(value)) for name, value in kwargs.items()
         }
         text = text.format(**escaped_values)
 

@@ -22,10 +22,9 @@ import sqlite3
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any, Optional
 
-from src.core.app_config import CORPUS_DB_PATH, FALLBACK_CORPUS_DB_PATH, _REPO_ROOT
+from src.core.app_config import _REPO_ROOT, CORPUS_DB_PATH, FALLBACK_CORPUS_DB_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +67,7 @@ def _connect():
 def init_translation_cache() -> None:
     """Create the translation cache table if it does not exist (Issue #1956)."""
     with _connect() as conn:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS translation_cache (
                 source_hash TEXT PRIMARY KEY,
                 source_text TEXT NOT NULL,
@@ -78,14 +76,11 @@ def init_translation_cache() -> None:
                 translated_text TEXT NOT NULL,
                 created_at TEXT NOT NULL
             )
-        """
-        )
-        conn.execute(
-            """
+        """)
+        conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_translation_langs
             ON translation_cache(source_lang, target_lang)
-        """
-        )
+        """)
     logger.info("Translation cache initialized at %s", _CACHE_DB_PATH)
 
 
@@ -214,8 +209,7 @@ def _init_db() -> None:
     try:
         with conn:
             cursor = conn.cursor()
-            cursor.execute(
-                """
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS legacy_translation_cache (
                     text_hash TEXT PRIMARY KEY,
                     foreign_text TEXT NOT NULL,
@@ -224,14 +218,11 @@ def _init_db() -> None:
                     target_lang TEXT DEFAULT 'en',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
-                """
-            )
-            cursor.execute(
-                """
+                """)
+            cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_legacy_translation_cache_created_at
                 ON legacy_translation_cache(created_at)
-                """
-            )
+                """)
             conn.commit()
     finally:
         conn.close()

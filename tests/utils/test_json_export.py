@@ -12,9 +12,9 @@ Tests cover:
 - Data serialization edge cases: NumPy types, NaNs, infinities, Timestamps, and Unicode text.
 """
 
-from datetime import datetime, timezone
 import json
 import re
+from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
@@ -43,7 +43,9 @@ def test_get_export_timestamp_format():
     """Verify that get_export_timestamp() returns a valid ISO 8601 UTC timestamp string ending with Z."""
     ts = get_export_timestamp()
     assert isinstance(ts, str)
-    assert ISO_8601_UTC_PATTERN.match(ts), f"Timestamp '{ts}' does not match ISO 8601 UTC pattern YYYY-MM-DDTHH:MM:SSZ"
+    assert ISO_8601_UTC_PATTERN.match(
+        ts
+    ), f"Timestamp '{ts}' does not match ISO 8601 UTC pattern YYYY-MM-DDTHH:MM:SSZ"
 
 
 def test_export_to_json_includes_exported_at_timestamp():
@@ -225,7 +227,9 @@ def test_export_report_to_json():
         "summary": "Plagiarism analysis completed",
         "top_matches": [{"pair": ["A", "B"], "score": 0.91}],
     }
-    json_str = export_report_to_json(report_data, custom_metadata={"author": "Inspector"})
+    json_str = export_report_to_json(
+        report_data, custom_metadata={"author": "Inspector"}
+    )
 
     parsed = json.loads(json_str)
     assert parsed["metadata"]["report_type"] == "plagiarism_analysis"
@@ -253,7 +257,9 @@ def test_export_incidents_to_json():
 
 def test_parse_export_json_valid_and_invalid():
     """Verify parse_export_json() parses valid JSON and handles invalid input gracefully."""
-    valid_json = '{"metadata": {"exported_at": "2026-07-31T07:25:00Z"}, "data": [1, 2, 3]}'
+    valid_json = (
+        '{"metadata": {"exported_at": "2026-07-31T07:25:00Z"}, "data": [1, 2, 3]}'
+    )
     parsed = parse_export_json(valid_json)
     assert parsed["metadata"]["exported_at"] == "2026-07-31T07:25:00Z"
 
@@ -309,9 +315,13 @@ def test_export_batch_reports_to_json():
 def test_export_filtered_similarity_matrix_to_json():
     """Verify export_filtered_similarity_matrix_to_json() filters pairs below min similarity threshold."""
     data = [[1.0, 0.85, 0.20], [0.85, 1.0, 0.95], [0.20, 0.95, 1.0]]
-    df = pd.DataFrame(data, index=["docA", "docB", "docC"], columns=["docA", "docB", "docC"])
+    df = pd.DataFrame(
+        data, index=["docA", "docB", "docC"], columns=["docA", "docB", "docC"]
+    )
 
-    json_str = export_filtered_similarity_matrix_to_json(df, min_similarity_threshold=0.50)
+    json_str = export_filtered_similarity_matrix_to_json(
+        df, min_similarity_threshold=0.50
+    )
     parsed = json.loads(json_str)
 
     assert parsed["metadata"]["min_similarity_threshold"] == 0.50
@@ -341,7 +351,9 @@ def test_json_serializer_fallback():
     ts = pd.Timestamp("2026-07-31 07:25:00")
     assert json_serializer_fallback(ts) == "2026-07-31T07:25:00"
 
-    assert json_serializer_fallback({1, 2, 3}) == [1, 2, 3] or isinstance(json_serializer_fallback({1, 2, 3}), list)
+    assert json_serializer_fallback({1, 2, 3}) == [1, 2, 3] or isinstance(
+        json_serializer_fallback({1, 2, 3}), list
+    )
 
 
 def test_export_to_json_serializes_numpy_types_without_error():

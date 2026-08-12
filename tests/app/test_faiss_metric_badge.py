@@ -1,8 +1,13 @@
 """Unit tests for FAISS distance metric badge helper functions."""
 
 from unittest.mock import MagicMock, patch
+
 import faiss
-from app.components.faiss_results import get_faiss_metric_label, render_faiss_metric_badge
+
+from app.components.faiss_results import (
+    get_faiss_metric_label,
+    render_faiss_metric_badge,
+)
 
 
 def test_get_faiss_metric_label_uninitialized():

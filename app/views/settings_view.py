@@ -10,6 +10,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+
 import streamlit as st
 
 from app.components.storage_quota import render_storage_quota_progress
@@ -17,7 +18,11 @@ from app.session_keys import SessionKeys
 from app.state_manager import save_preferences_callback
 from app.theme import set_theme
 from src.core.config import DEFAULT_THRESHOLDS
-from src.core.document_parser import DEFAULT_OCR_DPI, DEFAULT_OCR_LANGUAGE, SUPPORTED_OCR_LANGUAGES
+from src.core.document_parser import (
+    DEFAULT_OCR_DPI,
+    DEFAULT_OCR_LANGUAGE,
+    SUPPORTED_OCR_LANGUAGES,
+)
 from src.i18n.translator import get_text
 
 
@@ -256,7 +261,9 @@ def render_settings_view(user_role: str, lang_code: str, root_dir: str):
                 st.error("🚨 Disconnected")
 
         st.markdown("### 🗄️ Database Schema Status")
-        if st.button("Check Database Schema", key="check_db_schema_btn", use_container_width=True):
+        if st.button(
+            "Check Database Schema", key="check_db_schema_btn", use_container_width=True
+        ):
             try:
                 from src.core.app_config import AUTH_DB_PATH, CORPUS_DB_PATH
                 from src.db.migrations.common import get_user_version
@@ -277,7 +284,9 @@ def render_settings_view(user_role: str, lang_code: str, root_dir: str):
                     except Exception:
                         pass
 
-                st.session_state["db_schema_status_msg"] = f"Corpus Schema: v{corpus_ver} | Auth Schema: v{auth_ver}"
+                st.session_state["db_schema_status_msg"] = (
+                    f"Corpus Schema: v{corpus_ver} | Auth Schema: v{auth_ver}"
+                )
                 st.toast("✅ Database schema checked successfully!")
             except Exception as e:
                 st.error(f"❌ Failed to check schema versions: {e}")

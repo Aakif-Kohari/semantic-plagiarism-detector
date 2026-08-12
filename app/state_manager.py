@@ -8,18 +8,17 @@ and UI exception wrapping.
 
 import functools
 import logging
-import os
-import sys
 import threading
 import time
 import traceback
 import uuid
 from datetime import datetime
+
 import streamlit as st
 
 from app.session_keys import SessionKeys
 from src.core.config import PLAGIARISM_THRESHOLD
-from src.db.auth import get_user_preferences, update_user_preferences
+from src.db.auth import update_user_preferences
 from src.utils.redis_cache import (
     cache_session_state,
     clear_session,
@@ -119,6 +118,7 @@ def get_active_sessions_count() -> int:
 
 def _start_api_server():
     import uvicorn
+
     from src.api.app import app as fastapi_app
 
     uvicorn.run(
@@ -137,6 +137,7 @@ def init_api_server_daemon():
         app_config._api_server_started = True
 
         from starlette.middleware.base import BaseHTTPMiddleware
+
         from src.api.app import app as fastapi_app
 
         class ActivityMiddleware(BaseHTTPMiddleware):
@@ -198,8 +199,7 @@ def _run_backup_daemon():
                 backup_dir.mkdir(parents=True, exist_ok=True)
 
                 filename = (
-                    backup_dir
-                    / f"corpus_backup_{datetime.now():%Y%m%d_%H%M%S}.db"
+                    backup_dir / f"corpus_backup_{datetime.now():%Y%m%d_%H%M%S}.db"
                 )
 
                 filename.write_bytes(snapshot)

@@ -6,20 +6,21 @@ when an insertion operation fails halfway.
 """
 
 import sqlite3
-import pytest
+
 import numpy as np
+import pytest
 
 from src.db.corpus_db import (
     _connect,
-    init_corpus_db,
+    add_document,
     clear_all_data,
     get_all_documents,
     get_chunk_registry,
-    add_document,
+    init_corpus_db,
 )
 from src.db.incidents import (
-    init_incident_db,
     _get_connection,
+    init_incident_db,
 )
 
 
@@ -58,7 +59,9 @@ def test_raw_sqlite_transaction_rollback_on_halfway_error(sqlite_database_path):
     count = cursor.fetchone()[0]
     conn.close()
 
-    assert count == 0, "Database should contain 0 rows after halfway insertion failure rollback"
+    assert (
+        count == 0
+    ), "Database should contain 0 rows after halfway insertion failure rollback"
 
 
 def test_corpus_db_rollback_on_chunk_insertion_error():
@@ -88,7 +91,9 @@ def test_corpus_db_rollback_on_chunk_insertion_error():
 
     # Verify no chunks were persisted
     registry = get_chunk_registry()
-    assert len(registry) == 0, "No chunks should remain persisted after transaction rollback"
+    assert (
+        len(registry) == 0
+    ), "No chunks should remain persisted after transaction rollback"
 
 
 def test_corpus_db_multi_table_atomic_rollback():
@@ -111,7 +116,13 @@ def test_corpus_db_multi_table_atomic_rollback():
             # Simulated failure halfway: duplicate vector_id or constraint failure
             conn.execute(
                 "INSERT INTO chunks (vector_id, filename, chunk_index, chunk_text, embedding) VALUES (?, ?, ?, ?, ?)",
-                (10, "atomic_doc.pdf", 1, "Duplicate vector_id chunk", dummy_emb.tobytes()),
+                (
+                    10,
+                    "atomic_doc.pdf",
+                    1,
+                    "Duplicate vector_id chunk",
+                    dummy_emb.tobytes(),
+                ),
             )
     except sqlite3.IntegrityError:
         pass
@@ -119,7 +130,9 @@ def test_corpus_db_multi_table_atomic_rollback():
     # Verify atomic rollback: neither document nor chunk exists
     docs = get_all_documents()
     chunks = get_chunk_registry()
-    assert len(docs) == 0, "Document insertion must roll back when chunk insertion fails"
+    assert (
+        len(docs) == 0
+    ), "Document insertion must roll back when chunk insertion fails"
     assert len(chunks) == 0, "Chunk insertion must roll back completely"
 
 
@@ -133,35 +146,35 @@ def test_incidents_batch_insertion_rollback_on_error(sqlite_database_path):
     conn = _get_connection(sqlite_database_path)
     try:
         # Check initial state
-        initial_count = conn.execute("SELECT COUNT(*) FROM plagiarism_incidents").fetchone()[0]
+        initial_count = conn.execute(
+            "SELECT COUNT(*) FROM plagiarism_incidents"
+        ).fetchone()[0]
         assert initial_count == 0
 
         # Run a multi-insert statement transaction that fails halfway
         try:
             with conn:
-                conn.execute(
-                    """
+                conn.execute("""
                     INSERT INTO plagiarism_incidents (incident_id, document_a, document_b, similarity_score, severity_rank)
                     VALUES ('INC-001', 'docA.pdf', 'docB.pdf', 0.85, 'High')
-                    """
-                )
-                conn.execute(
-                    """
+                    """)
+                conn.execute("""
                     INSERT INTO plagiarism_incidents (incident_id, document_a, document_b, similarity_score, severity_rank)
                     VALUES ('INC-002', 'docC.pdf', 'docD.pdf', 0.92, 'High')
-                    """
-                )
+                    """)
                 # Fail on 3rd row with duplicate incident_id
-                conn.execute(
-                    """
+                conn.execute("""
                     INSERT INTO plagiarism_incidents (incident_id, document_a, document_b, similarity_score, severity_rank)
                     VALUES ('INC-001', 'docE.pdf', 'docF.pdf', 0.75, 'Medium')
-                    """
-                )
+                    """)
         except sqlite3.IntegrityError:
             pass
 
-        final_count = conn.execute("SELECT COUNT(*) FROM plagiarism_incidents").fetchone()[0]
-        assert final_count == 0, "Plagiarism incidents table should have 0 rows after rollback"
+        final_count = conn.execute(
+            "SELECT COUNT(*) FROM plagiarism_incidents"
+        ).fetchone()[0]
+        assert (
+            final_count == 0
+        ), "Plagiarism incidents table should have 0 rows after rollback"
     finally:
         conn.close()
