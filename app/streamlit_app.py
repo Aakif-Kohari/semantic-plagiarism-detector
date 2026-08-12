@@ -80,6 +80,21 @@ from app.components.document_version_control import (
     DocumentVersion,
     VersionDiff,
 )
+# ── Smart Notifications Imports ──────────────────────────────────────────
+from app.components.smart_notifications import (
+    render_notification_center,
+    render_notification_stats,
+    render_notification_badge,
+    initialize_notifications,
+    NotificationManager,
+    Notification,
+    AlertRule,
+    NotificationPriority,
+    NotificationChannel,
+    NotificationStatus,
+    SmartFilter,
+    UserNotificationPreferences,
+)
 from app.components.auto_ml_optimizer import (
     render_auto_ml_dashboard,
     initialize_auto_ml,
