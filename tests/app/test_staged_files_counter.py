@@ -1,4 +1,3 @@
-import os
 from streamlit.testing.v1 import AppTest
 
 
@@ -18,13 +17,13 @@ def test_staged_files_counter_badge():
         def __init__(self, name, size):
             self.name = name
             self.size = size
-            
+
         def getvalue(self):
             return b"x" * self.size
 
     file1 = MockUploadedFile("doc1.pdf", 1024 * 1024)  # 1.0 MB
-    file2 = MockUploadedFile("doc2.docx", 512 * 1024)   # 0.5 MB
-    
+    file2 = MockUploadedFile("doc2.docx", 512 * 1024)  # 0.5 MB
+
     # In AppTest, we can set the file_uploader session state directly
     at.session_state["file_uploader"] = [file1, file2]
     # Trigger the callback manually or run the app so the callback is executed

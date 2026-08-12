@@ -7,17 +7,21 @@ and Student Quick Verification search portal.
 
 import hashlib
 import os
+
 import streamlit as st
 
 from app.session_keys import SessionKeys
-from src.core.document_parser import DEFAULT_OCR_DPI, DEFAULT_OCR_LANGUAGE
 from src.core.embedding_model import embed_chunks
 from src.core.faiss_index import (
     build_index_from_matrix,
     load_index,
     search_similar_chunks,
 )
-from src.db.corpus_db import get_all_embeddings, get_chunk_registry, get_document_by_hash
+from src.db.corpus_db import (
+    get_all_embeddings,
+    get_chunk_registry,
+    get_document_by_hash,
+)
 from src.i18n.translator import get_text
 from src.security.metadata_stripper import strip_exif_metadata
 from src.utils.filename import (
@@ -268,19 +272,19 @@ def render_upload_section(user_role: str, lang_code: str, index_path: str):
             existing_doc = get_document_by_hash(file_hash)
 
             if existing_doc:
-                st.warning(f"⚠️ File **'{original_name}'** is identical to **'{existing_doc}'** already in the database.")
+                st.warning(
+                    f"⚠️ File **'{original_name}'** is identical to **'{existing_doc}'** already in the database."
+                )
                 action = st.radio(
                     f"Action for duplicate file '{original_name}':",
                     ["Skip", "Reprocess"],
                     key=f"dup_{file_hash}_{original_name}",
-                    horizontal=True
+                    horizontal=True,
                 )
                 if action == "Skip":
                     continue
 
-            file_bytes_dict[safe_name] = strip_exif_metadata(
-                file_bytes, safe_name
-            )
+            file_bytes_dict[safe_name] = strip_exif_metadata(file_bytes, safe_name)
 
     for drive_name, drive_bytes in st.session_state.get(
         "drive_imported_files", {}

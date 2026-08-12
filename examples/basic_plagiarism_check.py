@@ -6,6 +6,7 @@ check between documents using the core NLP components.
 
 import os
 import sys
+
 from sklearn.metrics.pairwise import cosine_similarity
 
 # Ensure project root is in the python path

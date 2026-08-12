@@ -7,14 +7,17 @@ Unit tests for class-wide Plagiarism Audit Summary Report generation (PDF and HT
 from __future__ import annotations
 
 from io import BytesIO
-from PyPDF2 import PdfReader
+
 import pytest
+from PyPDF2 import PdfReader
 
 from src.utils.pdf_report import (
     generate_audit_summary_html,
     generate_audit_summary_pdf,
     generate_audit_summary_report,
 )
+
+
 def test_generate_batch_plagiarism_report():
     incidents = [
         {
@@ -41,10 +44,7 @@ def test_generate_batch_plagiarism_report():
     assert pdf_bytes.startswith(b"%PDF")
 
     reader = PdfReader(BytesIO(pdf_bytes))
-    text = "\n".join(
-        page.extract_text() or ""
-        for page in reader.pages
-    )
+    text = "\n".join(page.extract_text() or "" for page in reader.pages)
 
     assert "Batch Plagiarism Investigation Report" in text
     assert "alice.pdf" in text
@@ -53,6 +53,7 @@ def test_generate_batch_plagiarism_report():
     assert "david.pdf" in text
     assert "92.0%" in text
     assert "81.0%" in text
+
 
 @pytest.fixture
 def sample_audit_data():

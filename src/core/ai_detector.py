@@ -1,9 +1,9 @@
 # pylint: disable=streamlit-global-mutation
 
 import logging
+import math
 import os
 import re
-import math
 from typing import Any, Dict, List
 
 import numpy as np
@@ -196,7 +196,7 @@ def normalize_perplexity(raw_score: float, scale_factor: float = 100.0) -> float
     """
     if raw_score is None or not isinstance(raw_score, (int, float)):
         return 0.0
-    
+
     if raw_score <= 0.0:
         return 0.0
 
@@ -370,7 +370,7 @@ def _calculate_burstiness(text: str) -> float:
         return 0.0
 
     # Split into sentences using a simple regex
-    sentences = re.split(r'[.!?]+', text.strip())
+    sentences = re.split(r"[.!?]+", text.strip())
     sentence_lengths = [len(s.split()) for s in sentences if s.strip()]
 
     if len(sentence_lengths) < 2:
@@ -399,13 +399,14 @@ def _calculate_ngram_repetitiveness(text: str, n: int = 3) -> float:
     if len(words) < n:
         return 0.0
 
-    ngrams = [' '.join(words[i:i+n]) for i in range(len(words) - n + 1)]
+    ngrams = [" ".join(words[i : i + n]) for i in range(len(words) - n + 1)]
     if not ngrams:
         return 0.0
 
     unique_ngrams = set(ngrams)
     repetition_ratio = 1.0 - (len(unique_ngrams) / len(ngrams))
     return float(repetition_ratio)
+
 
 def extract_stylometric_features(text: str) -> dict[str, float]:
     """Extract stylometric features for authorship attribution and consistency analysis.
@@ -460,8 +461,8 @@ def extract_stylometric_features(text: str) -> dict[str, float]:
 
     # Tokenize words using regex to extract alphanumeric sequences
     # This handles punctuation and contractions reasonably well for stylometry
-    words = re.findall(r'\b\w+\b', text.lower())
-    
+    words = re.findall(r"\b\w+\b", text.lower())
+
     if not words:
         return default_features
 
@@ -479,19 +480,19 @@ def extract_stylometric_features(text: str) -> dict[str, float]:
 
     # 3. & 4. Sentence Length Metrics
     # Split text into sentences using common punctuation delimiters
-    sentences = re.split(r'[.!?]+', text.strip())
+    sentences = re.split(r"[.!?]+", text.strip())
     # Filter out empty strings that result from trailing punctuation
     sentences = [s.strip() for s in sentences if s.strip()]
-    
+
     if not sentences:
         # If no sentences detected (e.g., text is just a fragment without punctuation),
         # treat the entire text as a single sentence for length calculations
         sentences = [text.strip()]
 
-    sentence_lengths = [len(re.findall(r'\b\w+\b', s)) for s in sentences]
-    
+    sentence_lengths = [len(re.findall(r"\b\w+\b", s)) for s in sentences]
+
     avg_sentence_length = float(np.mean(sentence_lengths)) if sentence_lengths else 0.0
-    
+
     # Variance measures "burstiness" - human text has higher variance
     # Using sample variance (ddof=1) if we have >1 sentence, else 0.0
     if len(sentence_lengths) > 1:
@@ -508,18 +509,19 @@ def extract_stylometric_features(text: str) -> dict[str, float]:
     if total_words > 0:
         # Calculate word frequencies
         from collections import Counter
+
         word_freqs = Counter(words)
-        
+
         # Calculate frequency of frequencies (how many words appear exactly i times)
         freq_of_freqs = Counter(word_freqs.values())
-        
+
         # Compute the sum of (f_i * i^2)
-        sum_fi_i2 = sum(freq * (i ** 2) for i, freq in freq_of_freqs.items())
-        
+        sum_fi_i2 = sum(freq * (i**2) for i, freq in freq_of_freqs.items())
+
         # Apply Yule's K formula
         N = total_words
         if N > 0:
-            M2 = sum_fi_i2 / (N ** 2)
+            M2 = sum_fi_i2 / (N**2)
             yules_k = 10000.0 * (M2 - (1.0 / N))
             # Clamp to prevent negative values due to floating point inaccuracies
             yules_k = max(0.0, yules_k)
@@ -539,6 +541,7 @@ def extract_stylometric_features(text: str) -> dict[str, float]:
     )
 
     return features
+
 
 def detect_ai_generated_text(text: str) -> Dict[str, Any]:
     """
@@ -599,6 +602,7 @@ def detect_ai_generated_text(text: str) -> Dict[str, Any]:
         "ngram_repetitiveness": ngram_repetitiveness,
     }
 
+
 def categorize_ai_probability(score: float) -> str:
     """
     Map a raw AI probability score to a human-readable confidence category.
@@ -618,6 +622,7 @@ def categorize_ai_probability(score: float) -> str:
     else:
         return "Low Probability"
 
+
 def categorize_perplexity_score(score: float) -> str:
     """
     Categorize perplexity score into predictable tiers.
@@ -628,5 +633,3 @@ def categorize_perplexity_score(score: float) -> str:
         return "Moderate"
     else:
         return "Unpredictable"
-
-    

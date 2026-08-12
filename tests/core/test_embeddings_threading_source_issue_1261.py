@@ -1,10 +1,7 @@
 from pathlib import Path
 
-
 EMBEDDINGS_PATH = Path("src/core/embeddings.py")
-TEST_PATH = Path(
-    "tests/core/test_embeddings_multithreaded_issue_1261.py"
-)
+TEST_PATH = Path("tests/core/test_embeddings_multithreaded_issue_1261.py")
 
 
 def test_generate_embeddings_has_required_parameter():
@@ -25,8 +22,5 @@ def test_thread_pool_and_batch_processing_are_used():
 def test_dimension_equivalence_test_exists():
     source = TEST_PATH.read_text(encoding="utf-8")
 
-    assert (
-        "test_multithreaded_dimensions_match_single_threaded"
-        in source
-    )
+    assert "test_multithreaded_dimensions_match_single_threaded" in source
     assert "single.shape == multi.shape" in source

@@ -229,9 +229,8 @@ def _strip_image_metadata(file_bytes: bytes) -> bytes:
                 "BGR;16",
                 "BGR;32",
             }
-            if (
-                image.mode in high_bit_depth_modes
-                or image.mode.startswith(("I;", "BGR;"))
+            if image.mode in high_bit_depth_modes or image.mode.startswith(
+                ("I;", "BGR;")
             ):
                 image = image.convert("RGB")
 

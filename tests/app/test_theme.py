@@ -1,28 +1,31 @@
 """Tests for app/theme.py theming and styling utilities."""
 
-from app.theme import (
-    THEMES,
-    COLORS,
-    severity_tier,
-    tier_from_severity_label,
-    tier_color,
-    badge_html,
-    format_similarity_html,
-    empty_state_html,
-    sidebar_user_badge_html,
-    pipeline_progress_html,
-)
 from unittest.mock import patch
 
+from app.theme import (
+    COLORS,
+    THEMES,
+    badge_html,
+    empty_state_html,
+    format_similarity_html,
+    get_chart_colors,
+    get_colors,
+    inject_css,
+    pipeline_progress_html,
+    sanitize_hex_color,
+    severity_tier,
+    sidebar_user_badge_html,
+    tier_color,
+    tier_from_severity_label,
+)
 
-from app.theme import get_colors, inject_css, sanitize_hex_color
+
 def test_render_notification_badge_with_negative_count():
     from app.theme import render_notification_badge
 
-from app.theme import get_colors, inject_css, sanitize_hex_color, get_chart_colors
-
-
     assert render_notification_badge(-1) == ""
+
+
 def test_render_notification_badge_with_count():
     from app.theme import render_notification_badge
 
@@ -36,6 +39,8 @@ def test_render_notification_badge_with_zero_count():
     from app.theme import render_notification_badge
 
     assert render_notification_badge(0) == ""
+
+
 def test_get_colors_returns_valid_theme_colors():
     colors = get_colors()
 
@@ -150,7 +155,7 @@ def test_tier_color():
 def test_badge_html_default():
     """Test badge HTML generation with default label."""
     html = badge_html("high")
-    assert "class=\"badge\"" in html
+    assert 'class="badge"' in html
     assert f"background-color: {COLORS['danger_soft']}" in html
     assert f"color: {COLORS['danger']}" in html
     assert "border: 1px solid" in html
@@ -166,6 +171,7 @@ def test_badge_html_default():
     assert f"color: {COLORS['success']}" in html_low
     assert "🟢 Low" in html_low
 
+
 def test_inject_css_generates_css_without_errors():
     with patch("app.theme.st.markdown") as mock_markdown:
         inject_css()
@@ -178,8 +184,6 @@ def test_inject_css_generates_css_without_errors():
     assert len(css.strip()) > 0
     assert "block-container" in css
     assert "stAlert" in css
-
-
 
 
 def test_sanitize_hex_color_valid_and_invalid():
@@ -206,7 +210,9 @@ def test_badge_html_returns_valid_html():
 
 
 import streamlit as st
+
 from app.theme import initialize_theme, set_theme
+
 
 def test_initialize_theme_loads_dark_from_query_params():
     st.session_state.clear()
@@ -214,17 +220,20 @@ def test_initialize_theme_loads_dark_from_query_params():
         initialize_theme()
     assert st.session_state.theme == "Dark"
 
+
 def test_initialize_theme_loads_light_from_query_params():
     st.session_state.clear()
     with patch("app.theme.st.query_params", {"theme": "light"}):
         initialize_theme()
     assert st.session_state.theme == "Light"
 
+
 def test_initialize_theme_invalid_query_params_fallback():
     st.session_state.clear()
     with patch("app.theme.st.query_params", {"theme": "invalid_value"}):
         initialize_theme()
     assert st.session_state.theme == "Light"
+
 
 def test_badge_html_custom_label():
     """Test badge HTML with custom label."""
@@ -314,6 +323,8 @@ def test_pipeline_progress_html_with_active_and_done():
     assert 'class="pipeline-step active"' in html
     assert "✓ Extract" in html
     assert "Chunk" in html
+
+
 def test_set_theme_updates_query_params():
     mock_query_params = {}
     st.session_state.clear()
@@ -322,13 +333,12 @@ def test_set_theme_updates_query_params():
     assert mock_query_params["theme"] == "dark"
     assert st.session_state.theme == "Dark"
 
+
 import matplotlib as mpl
+
 from app.theme import (
     apply_matplotlib_theme,
 )
-
-
-
 
 
 def test_severity_tier():
@@ -344,9 +354,6 @@ def test_severity_tier():
     assert severity_tier(0.65, 0.59) == "medium"
     assert severity_tier(0.59, 0.59) == "medium"
     assert severity_tier(0.58, 0.59) == "low"
-
-
-
 
 
 def test_apply_matplotlib_theme():
@@ -369,7 +376,7 @@ def test_apply_matplotlib_theme():
 
 
 # ── Issue #644: CSP Nonce Tests ───────────────────────────────────────────────
-from app.theme import generate_csp_nonce, get_csp_nonce, back_to_top_html
+from app.theme import back_to_top_html, generate_csp_nonce, get_csp_nonce
 
 
 def test_generate_csp_nonce_returns_unique_hex_strings():
@@ -396,7 +403,7 @@ def test_inject_css_includes_csp_nonce():
     """inject_css() must attach nonce="..." to both the <style> and <script> blocks."""
     mock_state: dict = {}
     with patch("app.theme.st.session_state", mock_state):
-        nonce = get_csp_nonce()          # prime the nonce in mock state
+        nonce = get_csp_nonce()  # prime the nonce in mock state
         with patch("app.theme.st.markdown") as mock_md:
             inject_css()
 
@@ -483,14 +490,16 @@ def test_get_active_sidebar_tab_css():
 
     css_block = get_active_sidebar_tab_css("#4f46e5")
     assert isinstance(css_block, str)
-    assert 'border-left: 4px solid #4f46e5' in css_block
+    assert "border-left: 4px solid #4f46e5" in css_block
     assert 'button[data-selected="true"]' in css_block
 
 
 def test_get_sidebar_tab_style_selected():
     from app.theme import get_sidebar_tab_style
 
-    selected_style = get_sidebar_tab_style(is_selected=True, accent_border_color="#4f46e5")
+    selected_style = get_sidebar_tab_style(
+        is_selected=True, accent_border_color="#4f46e5"
+    )
     assert selected_style["border-left"] == "4px solid #4f46e5"
     assert selected_style["font-weight"] == "700"
 
@@ -589,19 +598,24 @@ def test_css_variables_injected():
         inject_css()
 
     css = mock_markdown.call_args_list[0].args[0]
-    
+
     # Check :root existence
     assert ":root" in css, "Missing :root block"
-    
+
     # Check variable declarations
     assert "--primary-bg:" in css, "Missing --primary-bg declaration"
     assert "--text-color:" in css, "Missing --text-color declaration"
-    
+
     # Verify values are valid hex colors
     import re
-    assert re.search(r"--primary-bg:\s*#[0-9a-fA-F]+", css), "--primary-bg does not have a valid hex value"
-    assert re.search(r"--text-color:\s*#[0-9a-fA-F]+", css), "--text-color does not have a valid hex value"
-    
+
+    assert re.search(
+        r"--primary-bg:\s*#[0-9a-fA-F]+", css
+    ), "--primary-bg does not have a valid hex value"
+    assert re.search(
+        r"--text-color:\s*#[0-9a-fA-F]+", css
+    ), "--text-color does not have a valid hex value"
+
     # Verify component CSS uses var() instead of hardcoded
     assert "background-color: var(--primary-bg)" in css
     assert "color: var(--text-color)" in css
@@ -612,12 +626,15 @@ def test_css_variables_injected():
 
 def test_render_session_status_banner():
     """Verify that render_session_status_banner sets session start time and displays banner."""
-    from app.theme import render_session_status_banner
     import time
+
+    from app.theme import render_session_status_banner
 
     mock_state = {}
 
-    with patch("app.theme.st.session_state", mock_state), patch("app.theme.st.caption") as mock_caption:
+    with patch("app.theme.st.session_state", mock_state), patch(
+        "app.theme.st.caption"
+    ) as mock_caption:
         # First call: should initialize session_start_time and render 0 mins
         render_session_status_banner()
         assert "session_start_time" in mock_state
@@ -625,7 +642,8 @@ def test_render_session_status_banner():
 
     # Second test: with established session start time in the past
     mock_state_past = {"session_start_time": time.time() - 45.2 * 60}
-    with patch("app.theme.st.session_state", mock_state_past), patch("app.theme.st.caption") as mock_caption_past:
+    with patch("app.theme.st.session_state", mock_state_past), patch(
+        "app.theme.st.caption"
+    ) as mock_caption_past:
         render_session_status_banner()
         mock_caption_past.assert_called_once_with("Active Session: 45 mins")
-

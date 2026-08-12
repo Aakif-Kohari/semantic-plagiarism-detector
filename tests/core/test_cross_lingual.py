@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import numpy as np
 import pytest
-from unittest.mock import patch, MagicMock
 
 from src.core.cross_lingual import (
     TranslationMemoryCache,
@@ -14,8 +15,7 @@ from src.core.cross_lingual import (
     prepare_text_for_embedding,
     verify_semantic_fidelity,
 )
-from src.db.translation_cache import init_translation_cache, clear_translation_cache
-
+from src.db.translation_cache import clear_translation_cache, init_translation_cache
 
 # ── Issue #1956 Cache Fixture ────────────────────────────────────────────────
 
@@ -112,9 +112,10 @@ def test_short_or_empty_text_is_safe():
 
 def test_detect_language_low_confidence(caplog):
     """Verify that low-confidence detections return 'en', is_confident=False and log warnings."""
-    from unittest.mock import patch
-    from langdetect.language import Language
     import logging
+    from unittest.mock import patch
+
+    from langdetect.language import Language
 
     with patch("src.core.cross_lingual.detect_langs") as mock_detect_langs:
         mock_detect_langs.return_value = [Language("fr", 0.5)]
@@ -133,6 +134,7 @@ def test_detect_language_low_confidence(caplog):
 def test_detect_language_high_confidence():
     """Verify that high-confidence detections return the correct language and is_confident=True."""
     from unittest.mock import patch
+
     from langdetect.language import Language
 
     with patch("src.core.cross_lingual.detect_langs") as mock_detect_langs:

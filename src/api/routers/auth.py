@@ -1,6 +1,7 @@
 """src/api/routers/auth.py - Authentication and token management router."""
 
 import logging
+
 from fastapi import APIRouter, HTTPException, Request, status
 
 from src.api.dependencies import limiter
@@ -42,7 +43,10 @@ async def login(request: Request):
     status_code=status.HTTP_200_OK,
     responses={
         400: {"model": ErrorResponse, "description": "Bad Request"},
-        401: {"model": ErrorResponse, "description": "Unauthorized / Invalid Refresh Token"},
+        401: {
+            "model": ErrorResponse,
+            "description": "Unauthorized / Invalid Refresh Token",
+        },
         500: {"model": ErrorResponse, "description": "Internal Server Error"},
     },
 )

@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -460,7 +460,7 @@ def chunk_text_dynamic(
     """
     if not text or not text.strip():
         return []
-        
+
     if max_chunks <= 0:
         raise ValueError("max_chunks must be greater than 0")
 

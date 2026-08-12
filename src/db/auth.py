@@ -22,8 +22,8 @@ from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError, VerifyMismatchError
 
 from src.core.app_config import AUTH_DB_PATH
-from src.db.common import with_sqlite_retry
 from src.db.base import BaseRepository
+from src.db.common import with_sqlite_retry
 from src.db.migrations import migrate_auth_database, table_exists
 from src.errors import StaleDataException
 
@@ -65,6 +65,7 @@ def configure_db_path(db_path: str | os.PathLike) -> None:
 
 from contextlib import contextmanager
 from typing import Generator
+
 
 @contextmanager
 def _connect() -> Generator[sqlite3.Connection, None, None]:
@@ -402,7 +403,9 @@ def verify_user(
 
         elif stored_hash and stored_hash.startswith(("$2a$", "$2b$", "$2y$")):
             try:
-                if bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8")):
+                if bcrypt.checkpw(
+                    password.encode("utf-8"), stored_hash.encode("utf-8")
+                ):
                     hashed = _hash_password(password)
                     with _connect() as conn_migrate:
                         conn_migrate.execute(
@@ -418,7 +421,9 @@ def verify_user(
         if return_details:
             return {
                 "authenticated": authenticated,
-                "must_change_password": bool(must_change_password) if authenticated else False,
+                "must_change_password": (
+                    bool(must_change_password) if authenticated else False
+                ),
             }
         return authenticated
     except sqlite3.Error as e:
@@ -860,6 +865,7 @@ def get_user_active_status(username: str) -> bool:
     except sqlite3.Error as e:
         raise sqlite3.Error(f"Failed to retrieve user active status: {e}") from e
 
+
 @with_sqlite_retry
 def set_user_status(username: str, status: str) -> None:
     """Set a user's account status and synchronize the legacy is_active flag."""
@@ -882,6 +888,8 @@ def set_user_status(username: str, status: str) -> None:
             conn.commit()
     except sqlite3.Error as e:
         raise sqlite3.Error(f"Failed to update user status: {e}") from e
+
+
 @with_sqlite_retry
 def set_user_active_status(username: str, is_active: bool) -> None:
     """Set whether a user account is active (suspended or active)."""
@@ -962,12 +970,12 @@ SET role = ?,
                 WHERE username = ? AND version = ?
                 """,
                 (
-    role,
-    is_active_val,
-    "active" if is_active else "suspended",
-    username,
-    expected_version,
-)
+                    role,
+                    is_active_val,
+                    "active" if is_active else "suspended",
+                    username,
+                    expected_version,
+                ),
             )
             if cursor.rowcount == 0:
                 raise StaleDataException(
@@ -1073,16 +1081,14 @@ def revoke_token(token: str, details: str | None = None) -> None:
 
     try:
         with _connect() as conn:
-            conn.execute(
-                """
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS revoked_tokens (
                     id         INTEGER PRIMARY KEY AUTOINCREMENT,
                     token_signature TEXT UNIQUE NOT NULL,
                     revoked_at TEXT NOT NULL,
                     details    TEXT DEFAULT NULL
                 )
-                """
-            )
+                """)
             conn.execute(
                 """
                 INSERT OR IGNORE INTO revoked_tokens (token_signature, revoked_at, details)
@@ -1155,6 +1161,7 @@ def get_upload_count(username: str | None = None) -> int:
             return row[0] if row else 0
     except sqlite3.Error:
         return 0
+
 
 def format_user_creation_date(iso_str: str) -> str:
     """Format an ISO creation date as 'MMM DD, YYYY'."""

@@ -1,5 +1,7 @@
 import importlib
+
 from fastapi.testclient import TestClient
+
 
 def test_cors_headers(monkeypatch):
     """Verify configured origins receive the correct CORS headers."""
@@ -10,6 +12,7 @@ def test_cors_headers(monkeypatch):
 
     # Reload the app module so the environment variable is picked up during initialization
     import src.api.app
+
     importlib.reload(src.api.app)
     from src.api.app import app
 

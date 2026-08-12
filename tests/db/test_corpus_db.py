@@ -18,9 +18,6 @@ from src.db.corpus_db import (
     get_document_count_by_user,
     get_document_count_fast,
     get_documents_by_class,
-    get_documents_by_extension,
-    get_total_document_count,
-    get_deleted_documents_count,
     get_unique_class_sections,
     purge_stale_trash,
     restore_document,
@@ -47,9 +44,9 @@ def test_add_document_metadata():
 
 def test_add_document_returns_existing_id_for_duplicate_hash(caplog):
     import logging
-    
+
     hash_value = "abc1234_dup"
-    
+
     with caplog.at_level(logging.INFO):
         first_id = add_document(
             filename="file1_dup.pdf",
@@ -204,7 +201,7 @@ def test_class_queries():
 
 
 def test_batch_soft_delete_documents():
-    from src.db.corpus_db import batch_soft_delete_documents, _connect
+    from src.db.corpus_db import _connect, batch_soft_delete_documents
 
     # Add some test documents
     add_document("doc_soft1.pdf", "hash_s1")
@@ -250,7 +247,7 @@ def test_batch_soft_delete_documents():
 
 
 def test_batch_permanently_delete_documents():
-    from src.db.corpus_db import batch_permanently_delete_documents, _connect
+    from src.db.corpus_db import _connect, batch_permanently_delete_documents
 
     add_document("doc_perm1.pdf", "hash_p1")
     add_document("doc_perm2.pdf", "hash_p2")
@@ -288,7 +285,7 @@ def test_batch_permanently_delete_documents():
 
 
 def test_batch_permanently_delete_documents_purges_related_records():
-    from src.db.corpus_db import batch_permanently_delete_documents, _connect
+    from src.db.corpus_db import _connect, batch_permanently_delete_documents
 
     add_document("doc_perm_soft.pdf", "hash_ps")
     add_document("doc_perm_other.pdf", "hash_po")
@@ -315,9 +312,7 @@ def test_batch_permanently_delete_documents_purges_related_records():
                 "2026-01-01T00:00:00",
             ),
         )
-        rows = conn.execute(
-            "SELECT id, filename FROM documents ORDER BY id"
-        ).fetchall()
+        rows = conn.execute("SELECT id, filename FROM documents ORDER BY id").fetchall()
         doc_ids = {row[1]: row[0] for row in rows}
 
     soft_id = doc_ids["doc_perm_soft.pdf"]
@@ -369,7 +364,15 @@ def test_clear_all_data_clears_incidents(mock_db):
             INSERT INTO plagiarism_incidents (incident_id, document_a, document_b, similarity_score, severity_rank, date_flagged, last_seen)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            ("INC-1", "doc1.pdf", "doc2.pdf", 0.85, "High", "2026-01-01T00:00:00", "2026-01-01T00:00:00"),
+            (
+                "INC-1",
+                "doc1.pdf",
+                "doc2.pdf",
+                0.85,
+                "High",
+                "2026-01-01T00:00:00",
+                "2026-01-01T00:00:00",
+            ),
         )
 
     # Verify incident exists
@@ -629,7 +632,7 @@ def test_get_document_count_by_user_returns_int(mock_db):
 def test_get_document_count_fast(mock_db):
     """Verify that get_document_count_fast returns correct counts for active and deleted documents."""
     clear_all_data()
-    
+
     # Initially count is 0
     assert get_document_count_fast(include_deleted=False) == 0
     assert get_document_count_fast(include_deleted=True) == 0
@@ -637,7 +640,7 @@ def test_get_document_count_fast(mock_db):
     # Add active documents
     add_document("doc1.pdf", "hash_1")
     add_document("doc2.pdf", "hash_2")
-    
+
     # Add soft-deleted document
     add_document("doc3.pdf", "hash_3")
     soft_delete_document("doc3.pdf")
@@ -649,13 +652,25 @@ def test_get_document_count_fast(mock_db):
 
 def test_get_document_count_by_user():
     from src.db.corpus_db import _connect, get_document_count_by_user
+
     with _connect() as db:
-        db.execute("INSERT INTO documents (filename, file_hash, upload_date, owner, is_deleted) VALUES (?, ?, ?, ?, ?)", ("1.pdf", "hash1", "date", "alice", 0))
-        db.execute("INSERT INTO documents (filename, file_hash, upload_date, owner, is_deleted) VALUES (?, ?, ?, ?, ?)", ("2.pdf", "hash2", "date", "alice", 0))
-        db.execute("INSERT INTO documents (filename, file_hash, upload_date, owner, is_deleted) VALUES (?, ?, ?, ?, ?)", ("3.pdf", "hash3", "date", "alice", 1))
-    
+        db.execute(
+            "INSERT INTO documents (filename, file_hash, upload_date, owner, is_deleted) VALUES (?, ?, ?, ?, ?)",
+            ("1.pdf", "hash1", "date", "alice", 0),
+        )
+        db.execute(
+            "INSERT INTO documents (filename, file_hash, upload_date, owner, is_deleted) VALUES (?, ?, ?, ?, ?)",
+            ("2.pdf", "hash2", "date", "alice", 0),
+        )
+        db.execute(
+            "INSERT INTO documents (filename, file_hash, upload_date, owner, is_deleted) VALUES (?, ?, ?, ?, ?)",
+            ("3.pdf", "hash3", "date", "alice", 1),
+        )
+
     assert get_document_count_by_user("alice") == 2
+
 
 def test_get_document_count_by_user_empty():
     from src.db.corpus_db import get_document_count_by_user
+
     assert get_document_count_by_user("unknown-user") == 0

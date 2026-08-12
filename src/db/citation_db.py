@@ -15,7 +15,7 @@ import logging
 import sqlite3
 import threading
 from contextlib import contextmanager
-from typing import List, Dict, Set, Tuple
+from typing import Dict, List
 
 from src.db.corpus_db import _DB_PATH, FALLBACK_CORPUS_DB_PATH
 
@@ -63,8 +63,7 @@ def _connect(readonly: bool = False):
 def init_citation_db() -> None:
     """Create the citation tables if they do not exist."""
     with _connect() as conn:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS citations (
                 hash TEXT PRIMARY KEY,
                 author TEXT,
@@ -72,10 +71,8 @@ def init_citation_db() -> None:
                 title TEXT,
                 raw_text TEXT
             )
-        """
-        )
-        conn.execute(
-            """
+        """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS document_citations (
                 doc_name TEXT NOT NULL,
                 citation_hash TEXT NOT NULL,
@@ -83,14 +80,11 @@ def init_citation_db() -> None:
                 PRIMARY KEY (doc_name, citation_hash),
                 FOREIGN KEY (citation_hash) REFERENCES citations(hash) ON DELETE CASCADE
             )
-        """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_doc_citations_doc 
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_doc_citations_doc
             ON document_citations(doc_name)
-        """
-        )
+        """)
     logger.info("Citation database tables initialized.")
 
 

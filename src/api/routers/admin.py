@@ -4,10 +4,9 @@ import logging
 import os
 import time
 from datetime import datetime, timezone
-from typing import Dict
 
 import psutil
-from fastapi import APIRouter, Depends, Request, Security, status
+from fastapi import APIRouter, Request, Security, status
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from src.api.dependencies import get_current_user
@@ -68,6 +67,7 @@ def get_service_status(request: Request):
 def get_api_usage(request: Request):
     """Public usage endpoint returning total scan count and system uptime."""
     from src.api.routers.analysis import total_scans
+
     uptime = time.time() - START_TIME
     return {
         "total_scans": total_scans,

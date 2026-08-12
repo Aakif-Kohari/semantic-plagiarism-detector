@@ -3,6 +3,7 @@
 import io
 import logging
 import os
+
 from src.core.parsers.common import DEFAULT_OCR_DPI, DEFAULT_OCR_LANGUAGE, PDFInput
 
 logger = logging.getLogger(__name__)
@@ -10,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 class OCRDependencyError(RuntimeError):
     """Raised when Tesseract or system dependencies required for OCR are missing."""
+
     pass
 
 
@@ -121,6 +123,7 @@ def extract_text_from_image(
     _configure_tesseract(pytesseract)
 
     from src.core.parsers.pdf_parser import _read_pdf_bytes
+
     file_bytes = _read_pdf_bytes(file)
     try:
         image = Image.open(io.BytesIO(file_bytes))
