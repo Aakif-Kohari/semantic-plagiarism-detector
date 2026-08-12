@@ -312,6 +312,40 @@ def get_file_extension_sanitized(filename: str) -> str:
     return extension.lower()
 
 
+_EXTENSION_BADGES: dict[str, str] = {
+    ".pdf": "📄 PDF",
+    ".docx": "📝 DOCX",
+    ".doc": "📝 DOC",
+    ".txt": "📑 TXT",
+    ".csv": "📊 CSV",
+    ".epub": "📚 EPUB",
+    ".rtf": "📃 RTF",
+    ".zip": "📦 ZIP",
+}
+_DEFAULT_EXTENSION_BADGE = "📁 FILE"
+
+
+def format_extension_badge(filename: str) -> str:
+    """Return a color-coded emoji badge describing a filename's format.
+
+    Used in document list views so filenames aren't shown as plain text
+    with no visual indication of file type, e.g. ``"📄 PDF"`` for a
+    ``.pdf`` file. Falls back to a generic file badge for unrecognized or
+    missing extensions.
+
+    Examples
+    --------
+    >>> format_extension_badge("report.pdf")
+    '📄 PDF'
+    >>> format_extension_badge("notes.CSV")
+    '📊 CSV'
+    >>> format_extension_badge("no_extension")
+    '📁 FILE'
+    """
+    extension = get_final_extension(filename)
+    return _EXTENSION_BADGES.get(extension, _DEFAULT_EXTENSION_BADGE)
+
+
 def validate_document_extension(
     filename: object,
     *,

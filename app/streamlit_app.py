@@ -37,6 +37,7 @@ load_dotenv()
 from src.security.metadata_stripper import strip_exif_metadata
 from src.utils.filename import (
     InvalidFileExtensionError,
+    format_extension_badge,
     sanitize_filename,
     unique_filename,
     validate_document_extension,
@@ -1506,6 +1507,7 @@ if has_enough_files:
                 doc_rows.append(
                     {
                         "Select": False,
+                        "Format": format_extension_badge(fn),
                         "Filename": fn,
                         "Word Count": word_counts.get(fn, 0),
                         "Char Count": char_counts.get(fn, 0),
@@ -1543,6 +1545,7 @@ if has_enough_files:
                         default=False,
                         help="Select for bulk ZIP export",
                     ),
+                    "Format": st.column_config.TextColumn("Format", disabled=True, width="small"),
                     "Filename": st.column_config.TextColumn("Filename", disabled=True),
                     "Word Count": st.column_config.NumberColumn(
                         "Word Count", format="%d words", disabled=True
@@ -1551,7 +1554,7 @@ if has_enough_files:
                         "Char Count", format="%d chars", disabled=True
                     ),
                 },
-                disabled=["Filename", "Word Count", "Char Count"],
+                disabled=["Format", "Filename", "Word Count", "Char Count"],
                 hide_index=True,
                 key="sidebar_corpus_data_editor",
                 use_container_width=True,
@@ -1588,7 +1591,7 @@ if has_enough_files:
                 )
                 col1, col2 = st.columns([3, 1])
                 with col1:
-                    st.text(f"📄 {fn}")
+                    st.text(f"{format_extension_badge(fn)} {fn}")
                 with col2:
                     if st.button("🗑️", key=f"del_{fn}"):
                         delete_document(fn)
@@ -2767,6 +2770,7 @@ if user_role == "admin":
             doc_rows.append(
                 {
                     "Select": False,
+                    "Format": format_extension_badge(fn),
                     "Filename": fn,
                     "Word Count": word_counts.get(fn, 0),
                     "Char Count": char_counts.get(fn, 0),
@@ -2782,11 +2786,12 @@ if user_role == "admin":
             corpus_df,
             column_config={
                 "Select": st.column_config.CheckboxColumn("Select", default=False),
+                "Format": st.column_config.TextColumn("Format", disabled=True, width="small"),
                 "Filename": st.column_config.TextColumn("Filename", disabled=True),
                 "Word Count": st.column_config.NumberColumn("Word Count", format="%d words", disabled=True),
                 "Char Count": st.column_config.NumberColumn("Char Count", format="%d chars", disabled=True),
             },
-            disabled=["Filename", "Word Count", "Char Count"],
+            disabled=["Format", "Filename", "Word Count", "Char Count"],
             hide_index=True,
             key="sidebar_corpus_data_editor",
             use_container_width=True,
@@ -2816,7 +2821,7 @@ if user_role == "admin":
             )
             col1, col2 = st.columns([3, 1])
             with col1:
-                st.text(f"📄 {fn}")
+                st.text(f"{format_extension_badge(fn)} {fn}")
             with col2:
                 if st.button("🗑️", key=f"del_{fn}"):
                     delete_document(fn)
