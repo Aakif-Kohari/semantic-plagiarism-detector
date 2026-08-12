@@ -436,8 +436,16 @@ def verify_user(
 authenticate_user = verify_user
 
 
-def get_user_role(username: str) -> str | None:
-    """Return the role of a user, or None if not found."""
+def get_user_role(username: str) -> str:
+    """
+    Return the role of a user, or 'user' as default if not found.
+    
+    Args:
+        username: The username to look up
+        
+    Returns:
+        str: The user's role (admin, teacher, or user)
+    """
     try:
         username = _validate_username(username)
         with _connect() as conn:
@@ -445,9 +453,55 @@ def get_user_role(username: str) -> str | None:
                 "SELECT role FROM users WHERE username = ?",
                 (username,),
             ).fetchone()
-            return row[0] if row else None
+            # Return the role if found, otherwise default to "user"
+            return row[0] if row else "user"
     except sqlite3.Error as e:
-        raise sqlite3.Error(f"Failed to retrieve user role: {e}") from e
+        logger.error(f"Failed to retrieve user role for {username}: {e}")
+        return "user"  # Safe fallback
+
+def get_user_role_safe(username: str, default: str = "user") -> str:
+    """
+    Safely get user role with a custom default.
+    
+    Args:
+        username: The username to look up
+        default: Default role if user not found (default: "user")
+    
+    Returns:
+        str: The user's role or the default
+    """
+    try:
+        return get_user_role(username)
+    except Exception as e:
+        logger.error(f"Error getting role for {username}: {e}")
+        return default
+
+
+def is_admin(username: str) -> bool:
+    """
+    Check if a user is an admin.
+    
+    Args:
+        username: The username to check
+    
+    Returns:
+        bool: True if user is admin, False otherwise
+    """
+    return get_user_role(username) == "admin"
+
+
+def is_teacher(username: str) -> bool:
+    """
+    Check if a user is a teacher.
+    
+    Args:
+        username: The username to check
+    
+    Returns:
+        bool: True if user is teacher, False otherwise
+    """
+    role = get_user_role(username)
+    return role == "teacher" or role == "admin"
 
 
 def get_user_last_login(username: str) -> str | None:
@@ -1167,3 +1221,526 @@ def format_user_creation_date(iso_str: str) -> str:
     """Format an ISO creation date as 'MMM DD, YYYY'."""
     date = dt.fromisoformat(iso_str.replace("Z", "+00:00"))
     return date.strftime("%b %d, %Y")
+
+
+
+# ============================================================================
+# ROLE-BASED ACCESS CONTROL (RBAC) ENHANCEMENTS - Issue #2171
+# ============================================================================
+
+from enum import Enum
+from typing import Set, List, Optional, Dict, Any
+from functools import wraps
+import streamlit as st
+
+
+# ============================================================================
+# ROLE DEFINITIONS
+# ============================================================================
+
+class UserRole(Enum):
+    """User roles with hierarchical permissions."""
+    
+    USER = "user"
+    TEACHER = "teacher"
+    ADMIN = "admin"
+    SUPER_ADMIN = "super_admin"
+    
+    @classmethod
+    def from_string(cls, role: str) -> "UserRole":
+        """Convert string to UserRole enum."""
+        try:
+            return cls(role.lower())
+        except ValueError:
+            return cls.USER
+    
+    def level(self) -> int:
+        """Get role hierarchy level (higher = more permissions)."""
+        levels = {
+            UserRole.USER: 0,
+            UserRole.TEACHER: 1,
+            UserRole.ADMIN: 2,
+            UserRole.SUPER_ADMIN: 3,
+        }
+        return levels.get(self, 0)
+    
+    def has_permission(self, required_role: "UserRole") -> bool:
+        """Check if this role has permission for a required role."""
+        return self.level() >= required_role.level()
+
+
+# ============================================================================
+# PERMISSION DEFINITIONS
+# ============================================================================
+
+class Permission(Enum):
+    """Available permissions in the system."""
+    
+    # User permissions
+    VIEW_DASHBOARD = "view_dashboard"
+    VIEW_PROFILE = "view_profile"
+    EDIT_PROFILE = "edit_profile"
+    
+    # Document permissions
+    UPLOAD_DOCUMENTS = "upload_documents"
+    VIEW_DOCUMENTS = "view_documents"
+    DELETE_DOCUMENTS = "delete_documents"
+    EXPORT_DOCUMENTS = "export_documents"
+    
+    # Analysis permissions
+    RUN_ANALYSIS = "run_analysis"
+    VIEW_ANALYSIS = "view_analysis"
+    DELETE_ANALYSIS = "delete_analysis"
+    EXPORT_ANALYSIS = "export_analysis"
+    
+    # User management permissions
+    VIEW_USERS = "view_users"
+    CREATE_USERS = "create_users"
+    EDIT_USERS = "edit_users"
+    DELETE_USERS = "delete_users"
+    MANAGE_ROLES = "manage_roles"
+    
+    # System permissions
+    VIEW_LOGS = "view_logs"
+    VIEW_SETTINGS = "view_settings"
+    EDIT_SETTINGS = "edit_settings"
+    VIEW_AUDIT_LOGS = "view_audit_logs"
+    MANAGE_BACKUPS = "manage_backups"
+    VIEW_SYSTEM_HEALTH = "view_system_health"
+
+
+# ============================================================================
+# ROLE-PERMISSION MAPPING
+# ============================================================================
+
+_ROLE_PERMISSIONS: Dict[UserRole, Set[Permission]] = {
+    UserRole.USER: {
+        Permission.VIEW_DASHBOARD,
+        Permission.VIEW_PROFILE,
+        Permission.EDIT_PROFILE,
+        Permission.VIEW_DOCUMENTS,
+        Permission.VIEW_ANALYSIS,
+    },
+    UserRole.TEACHER: {
+        Permission.VIEW_DASHBOARD,
+        Permission.VIEW_PROFILE,
+        Permission.EDIT_PROFILE,
+        Permission.UPLOAD_DOCUMENTS,
+        Permission.VIEW_DOCUMENTS,
+        Permission.EXPORT_DOCUMENTS,
+        Permission.RUN_ANALYSIS,
+        Permission.VIEW_ANALYSIS,
+        Permission.EXPORT_ANALYSIS,
+        Permission.VIEW_USERS,
+    },
+    UserRole.ADMIN: {
+        Permission.VIEW_DASHBOARD,
+        Permission.VIEW_PROFILE,
+        Permission.EDIT_PROFILE,
+        Permission.UPLOAD_DOCUMENTS,
+        Permission.VIEW_DOCUMENTS,
+        Permission.DELETE_DOCUMENTS,
+        Permission.EXPORT_DOCUMENTS,
+        Permission.RUN_ANALYSIS,
+        Permission.VIEW_ANALYSIS,
+        Permission.DELETE_ANALYSIS,
+        Permission.EXPORT_ANALYSIS,
+        Permission.VIEW_USERS,
+        Permission.CREATE_USERS,
+        Permission.EDIT_USERS,
+        Permission.DELETE_USERS,
+        Permission.MANAGE_ROLES,
+        Permission.VIEW_LOGS,
+        Permission.VIEW_SETTINGS,
+        Permission.EDIT_SETTINGS,
+        Permission.VIEW_AUDIT_LOGS,
+        Permission.MANAGE_BACKUPS,
+        Permission.VIEW_SYSTEM_HEALTH,
+    },
+    UserRole.SUPER_ADMIN: {
+        Permission.VIEW_DASHBOARD,
+        Permission.VIEW_PROFILE,
+        Permission.EDIT_PROFILE,
+        Permission.UPLOAD_DOCUMENTS,
+        Permission.VIEW_DOCUMENTS,
+        Permission.DELETE_DOCUMENTS,
+        Permission.EXPORT_DOCUMENTS,
+        Permission.RUN_ANALYSIS,
+        Permission.VIEW_ANALYSIS,
+        Permission.DELETE_ANALYSIS,
+        Permission.EXPORT_ANALYSIS,
+        Permission.VIEW_USERS,
+        Permission.CREATE_USERS,
+        Permission.EDIT_USERS,
+        Permission.DELETE_USERS,
+        Permission.MANAGE_ROLES,
+        Permission.VIEW_LOGS,
+        Permission.VIEW_SETTINGS,
+        Permission.EDIT_SETTINGS,
+        Permission.VIEW_AUDIT_LOGS,
+        Permission.MANAGE_BACKUPS,
+        Permission.VIEW_SYSTEM_HEALTH,
+    }
+}
+
+
+# ============================================================================
+# PERMISSION CHECK FUNCTIONS
+# ============================================================================
+
+def get_role_permissions(role: UserRole) -> Set[Permission]:
+    """Get all permissions for a role."""
+    return _ROLE_PERMISSIONS.get(role, set())
+
+
+def has_permission(username: str, permission: Permission) -> bool:
+    """
+    Check if a user has a specific permission.
+    
+    Args:
+        username: The username to check
+        permission: The permission to check for
+    
+    Returns:
+        bool: True if user has the permission
+    """
+    try:
+        role_str = get_user_role(username)
+        role = UserRole.from_string(role_str)
+        permissions = get_role_permissions(role)
+        return permission in permissions
+    except Exception as e:
+        logger.error(f"Failed to check permission for {username}: {e}")
+        return False
+
+
+def has_any_permission(username: str, *permissions: Permission) -> bool:
+    """Check if a user has any of the given permissions."""
+    for permission in permissions:
+        if has_permission(username, permission):
+            return True
+    return False
+
+
+def has_all_permissions(username: str, *permissions: Permission) -> bool:
+    """Check if a user has all of the given permissions."""
+    for permission in permissions:
+        if not has_permission(username, permission):
+            return False
+    return True
+
+
+def require_permission(permission: Permission):
+    """
+    Decorator to require a specific permission for a function.
+    
+    Usage:
+        @require_permission(Permission.VIEW_AUDIT_LOGS)
+        def admin_function():
+            pass
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Get username from session state
+            username = st.session_state.get(SessionKeys.USERNAME)
+            if not username:
+                st.error("🔒 Authentication required.")
+                return None
+            
+            if not has_permission(username, permission):
+                st.error(f"🔒 Permission denied. Requires: {permission.value}")
+                return None
+            
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
+def require_role(required_role: UserRole):
+    """
+    Decorator to require a specific role for a function.
+    
+    Usage:
+        @require_role(UserRole.ADMIN)
+        def admin_function():
+            pass
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            username = st.session_state.get(SessionKeys.USERNAME)
+            if not username:
+                st.error("🔒 Authentication required.")
+                return None
+            
+            role_str = get_user_role(username)
+            role = UserRole.from_string(role_str)
+            
+            if not role.has_permission(required_role):
+                st.error(f"🔒 Role required: {required_role.value}")
+                return None
+            
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
+# ============================================================================
+# RBAC HELPERS
+# ============================================================================
+
+def get_user_role_enhanced(username: str) -> Dict[str, Any]:
+    """
+    Get enhanced user role information.
+    
+    Returns:
+        Dict with role, level, permissions, and hierarchy info
+    """
+    role_str = get_user_role(username)
+    role = UserRole.from_string(role_str)
+    permissions = get_role_permissions(role)
+    
+    return {
+        "username": username,
+        "role": role_str,
+        "role_enum": role,
+        "level": role.level(),
+        "permissions": [p.value for p in permissions],
+        "permission_count": len(permissions),
+        "is_admin": role in [UserRole.ADMIN, UserRole.SUPER_ADMIN],
+        "is_teacher": role in [UserRole.TEACHER, UserRole.ADMIN, UserRole.SUPER_ADMIN],
+        "is_super_admin": role == UserRole.SUPER_ADMIN,
+    }
+
+
+def get_roles_hierarchy() -> Dict[str, int]:
+    """Get the hierarchy levels for all roles."""
+    return {
+        role.value: role.level()
+        for role in UserRole
+    }
+
+
+def get_available_permissions() -> List[str]:
+    """Get list of all available permissions."""
+    return [p.value for p in Permission]
+
+
+def get_roles_summary() -> Dict[str, Dict[str, Any]]:
+    """Get summary of all roles and their permissions."""
+    summary = {}
+    for role in UserRole:
+        permissions = get_role_permissions(role)
+        summary[role.value] = {
+            "level": role.level(),
+            "permission_count": len(permissions),
+            "permissions": [p.value for p in permissions],
+        }
+    return summary
+
+
+def get_users_by_role(role: UserRole) -> List[str]:
+    """
+    Get all users with a specific role.
+    
+    Args:
+        role: The role to filter by
+    
+    Returns:
+        List of usernames with the specified role
+    """
+    try:
+        from src.db.auth import get_all_users
+        users = get_all_users()
+        return [
+            user["username"]
+            for user in users
+            if UserRole.from_string(user["role"]) == role
+        ]
+    except Exception as e:
+        logger.error(f"Failed to get users by role: {e}")
+        return []
+
+
+def get_users_by_permission(permission: Permission) -> List[str]:
+    """
+    Get all users who have a specific permission.
+    
+    Args:
+        permission: The permission to check
+    
+    Returns:
+        List of usernames with the permission
+    """
+    try:
+        from src.db.auth import get_all_users
+        users = get_all_users()
+        return [
+            user["username"]
+            for user in users
+            if has_permission(user["username"], permission)
+        ]
+    except Exception as e:
+        logger.error(f"Failed to get users by permission: {e}")
+        return []
+
+
+def promote_user(username: str, new_role: UserRole, admin_username: str) -> bool:
+    """
+    Promote a user to a new role.
+    
+    Args:
+        username: The user to promote
+        new_role: The new role
+        admin_username: The admin performing the promotion
+    
+    Returns:
+        bool: True if promotion was successful
+    """
+    try:
+        username = _validate_username(username)
+        admin_role = UserRole.from_string(get_user_role(admin_username))
+        
+        # Only admins can promote users
+        if not admin_role.has_permission(UserRole.ADMIN):
+            raise PermissionError("Only admins can promote users")
+        
+        # Cannot promote to higher than admin
+        if new_role.level() > UserRole.ADMIN.level():
+            raise ValueError("Cannot promote users to Super Admin")
+        
+        with _connect() as conn:
+            cursor = conn.execute(
+                "UPDATE users SET role = ? WHERE username = ?",
+                (new_role.value, username)
+            )
+            affected = cursor.rowcount
+            conn.commit()
+            
+            if affected > 0:
+                log_security_event(
+                    event_type="user_role_changed",
+                    username=username,
+                    details=f"Role changed to {new_role.value} by {admin_username}"
+                )
+                return True
+            return False
+            
+    except Exception as e:
+        logger.error(f"Failed to promote user {username}: {e}")
+        return False
+
+
+def demote_user(username: str, admin_username: str) -> bool:
+    """
+    Demote a user to the default USER role.
+    
+    Args:
+        username: The user to demote
+        admin_username: The admin performing the demotion
+    
+    Returns:
+        bool: True if demotion was successful
+    """
+    return promote_user(username, UserRole.USER, admin_username)
+
+
+# ============================================================================
+# STREAMLIT UI HELPERS
+# ============================================================================
+
+def render_role_badge(role: str) -> str:
+    """
+    Render a role badge HTML.
+    
+    Args:
+        role: The role string
+    
+    Returns:
+        HTML string for the role badge
+    """
+    badges = {
+        "super_admin": '<span style="background: #8B0000; color: white; padding: 2px 10px; border-radius: 12px; font-size: 0.8rem;">🛡️ Super Admin</span>',
+        "admin": '<span style="background: #1e3a8a; color: white; padding: 2px 10px; border-radius: 12px; font-size: 0.8rem;">🔑 Admin</span>',
+        "teacher": '<span style="background: #0d9488; color: white; padding: 2px 10px; border-radius: 12px; font-size: 0.8rem;">👨‍🏫 Teacher</span>',
+        "user": '<span style="background: #6b7280; color: white; padding: 2px 10px; border-radius: 12px; font-size: 0.8rem;">👤 User</span>',
+    }
+    return badges.get(role.lower(), badges.get("user"))
+
+
+def render_role_selector(username: str, current_role: str) -> None:
+    """
+    Render a role selector dropdown for admin users.
+    
+    Args:
+        username: The user to change role for
+        current_role: The current role
+    """
+    roles = [r.value for r in UserRole if r != UserRole.SUPER_ADMIN]
+    selected = st.selectbox(
+        f"Role for {username}",
+        options=roles,
+        index=roles.index(current_role) if current_role in roles else 0,
+        key=f"role_select_{username}"
+    )
+    
+    if selected != current_role:
+        if st.button(f"Update Role for {username}", key=f"role_update_{username}"):
+            admin = st.session_state.get(SessionKeys.USERNAME)
+            new_role = UserRole.from_string(selected)
+            if promote_user(username, new_role, admin):
+                st.success(f"✅ Role updated to {selected} for {username}")
+                st.rerun()
+            else:
+                st.error("❌ Failed to update role")
+
+
+def render_permission_checklist(username: str) -> None:
+    """
+    Render a checklist of permissions for a user.
+    
+    Args:
+        username: The user to display permissions for
+    """
+    role_str = get_user_role(username)
+    role = UserRole.from_string(role_str)
+    permissions = get_role_permissions(role)
+    
+    st.markdown(f"### Permissions for {username}")
+    st.caption(f"Role: {role_str} (Level {role.level()})")
+    
+    cols = st.columns(3)
+    for idx, permission in enumerate(sorted(permissions, key=lambda x: x.value)):
+        col_idx = idx % 3
+        with cols[col_idx]:
+            st.markdown(f"✅ {permission.value}")
+
+
+# ============================================================================
+# EXPORTS
+# ============================================================================
+
+__all__ = [
+    'UserRole',
+    'Permission',
+    'get_role_permissions',
+    'has_permission',
+    'has_any_permission',
+    'has_all_permissions',
+    'require_permission',
+    'require_role',
+    'get_user_role_enhanced',
+    'get_roles_hierarchy',
+    'get_available_permissions',
+    'get_roles_summary',
+    'get_users_by_role',
+    'get_users_by_permission',
+    'promote_user',
+    'demote_user',
+    'render_role_badge',
+    'render_role_selector',
+    'render_permission_checklist',
+]
+
+# ============================================================================
