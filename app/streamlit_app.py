@@ -110,6 +110,10 @@ from app.components.batch_processor_enhanced import (
     JobPriority,
     JobStatus,
 )
+
+# ── Audit Logs View Import ──────────────────────────────────────────────
+from app.views.audit_logs import render_audit_view
+
 try:
     from streamlit_plotly_events import plotly_events  # type: ignore
 except ImportError:  # pragma: no cover - optional dependency
@@ -2600,8 +2604,9 @@ with tab_history:
 # ══ TAB 10: SECURITY AUDIT LOGS ═════════════════════════════════════════════
 with tab_audit:
     update_page_title("Security Audit Logs")
+    # ========== USE THE NEW MODULE ==========
     render_audit_view(user_role, lang_code)
-
+    
 # Sidebar document management details
 render_document_management_sidebar(user_role, _INDEX_PATH, SESSION_ID, last_interaction)
 
