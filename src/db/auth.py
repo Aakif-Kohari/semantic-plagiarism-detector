@@ -22,7 +22,7 @@ from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError, VerifyMismatchError
 
 from src.core.app_config import AUTH_DB_PATH
-from src.core.concurrency import with_sqlite_retry
+from src.db.common import with_sqlite_retry
 from src.db.base import BaseRepository
 from src.db.migrations import migrate_auth_database, table_exists
 from src.errors import StaleDataException
