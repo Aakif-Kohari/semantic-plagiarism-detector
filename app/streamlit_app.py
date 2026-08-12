@@ -49,6 +49,30 @@ from app.components.advanced_analytics import (
     run_pipeline_with_tracking,
     track_comparison,
 )
+# ── Document Version Control Imports ─────────────────────────────────────
+from app.components.document_version_control import (
+    render_version_control_ui,
+    initialize_version_control,
+    VersionManager,
+    ChangeTracker,
+    DocumentVersion,
+    VersionDiff,
+)
+# ── Smart Notifications Imports ──────────────────────────────────────────
+from app.components.smart_notifications import (
+    render_notification_center,
+    render_notification_stats,
+    render_notification_badge,
+    initialize_notifications,
+    NotificationManager,
+    Notification,
+    AlertRule,
+    NotificationPriority,
+    NotificationChannel,
+    NotificationStatus,
+    SmartFilter,
+    UserNotificationPreferences,
+)
 from app.components.auto_ml_optimizer import (
     AutoMLOptimizer,
     AutoOptimizationIntegration,
@@ -83,7 +107,24 @@ from src.utils.filename import (
     unique_filename,
     validate_document_extension,
 )
-
+from app.components.smart_search import (
+    render_smart_search_ui,
+    render_search_analytics,
+    initialize_smart_search,
+    SmartSearchEngine,
+)
+# ── Enhanced Batch Processor Imports ─────────────────────────────────────
+from app.components.batch_processor_enhanced import (
+    render_batch_processor_ui,
+    render_batch_analytics,
+    render_batch_scheduler_ui,
+    initialize_batch_processor,
+    EnhancedBatchProcessor,
+    BatchScheduler,
+    BatchJob,
+    JobPriority,
+    JobStatus,
+)
 try:
     from streamlit_plotly_events import plotly_events  # type: ignore
 except ImportError:  # pragma: no cover - optional dependency

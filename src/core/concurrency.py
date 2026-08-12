@@ -1,5 +1,6 @@
 import logging
 import os
+import random
 import time
 from contextlib import contextmanager
 
@@ -41,7 +42,7 @@ class FAISSLock:
                 return False
             mtime = os.path.getmtime(self.lock_file)
             age = time.time() - mtime
-            return age > self.timeout
+            return age > max(self.timeout * 2, 5.0)
         except OSError:
             # If we can't read the mtime, assume it's not stale to be safe
             return False
@@ -76,7 +77,7 @@ class FAISSLock:
                 if time.time() - start_time >= self.timeout:
                     logger.error(f"Timeout ({self.timeout}s) waiting for FAISS lock.")
                     raise ConcurrencyTimeoutError("Failed to acquire FAISS lock.")
-                time.sleep(0.1)  # Spin wait
+                time.sleep(0.1 + random.uniform(0, 0.05))  # Spin wait with randomized jitter
 
     def release(self):
         """Releases the atomic file lock."""
