@@ -1,6 +1,9 @@
 """Unit tests for src/utils/storage_metrics.py."""
 
+import logging
 from pathlib import Path
+from unittest.mock import patch
+
 from src.utils.storage_metrics import (
     calculate_storage_usage,
     get_faiss_index_paths,
@@ -44,3 +47,11 @@ def test_get_faiss_index_paths() -> None:
     assert isinstance(paths, list)
     for p in paths:
         assert isinstance(p, Path)
+
+
+def test_path_resolution_logs_debug_warning(caplog) -> None:
+    """Verify that exceptions during path resolution log debug warnings."""
+    with caplog.at_level(logging.DEBUG):
+        with patch("src.db.corpus_db.get_corpus_db_path", side_effect=Exception("Database path resolution error")):
+            get_sqlite_db_paths()
+            assert "Could not resolve path: Database path resolution error" in caplog.text

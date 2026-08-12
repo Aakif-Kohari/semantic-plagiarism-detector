@@ -336,10 +336,7 @@ def generate_plagiarism_report(
 
     def _draw_header(canvas_obj, _doc):
         canvas_obj.saveState()
-        
-        if logo_image:
-            try:
-                reader = ImageReader(BytesIO(logo_image))
+
         if dark_mode:
             canvas_obj.setFillColor(HexColor("#0F172A"))
             canvas_obj.rect(

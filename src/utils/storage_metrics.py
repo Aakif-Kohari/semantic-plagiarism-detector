@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 def get_sqlite_db_paths() -> List[Path]:
@@ -13,23 +16,26 @@ def get_sqlite_db_paths() -> List[Path]:
     # 1. Corpus DB path
     try:
         from src.db.corpus_db import get_corpus_db_path
+
         paths.append(get_corpus_db_path())
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Could not resolve path: %s", e)
 
     # 2. Auth DB path
     try:
         from src.db.auth import _DB_PATH as auth_db_path
+
         paths.append(Path(auth_db_path))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Could not resolve path: %s", e)
 
     # 3. Incidents DB path
     try:
         from src.db.incidents import DEFAULT_DB_PATH as incidents_db_path
+
         paths.append(Path(incidents_db_path))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Could not resolve path: %s", e)
 
     # 4. Search root and data directories for additional .db files
     base_dir = Path(__file__).resolve().parents[2]
@@ -48,8 +54,8 @@ def get_sqlite_db_paths() -> List[Path]:
             if resolved not in seen:
                 seen.add(resolved)
                 unique_paths.append(p)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Could not resolve path: %s", e)
 
     return unique_paths
 
@@ -78,8 +84,8 @@ def get_faiss_index_paths() -> List[Path]:
             if resolved not in seen:
                 seen.add(resolved)
                 unique_paths.append(p)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Could not resolve path: %s", e)
 
     return unique_paths
 
@@ -112,16 +118,16 @@ def calculate_storage_usage(
         try:
             if db_path.exists() and db_path.is_file():
                 sqlite_bytes += db_path.stat().st_size
-        except OSError:
-            pass
+        except OSError as e:
+            logger.debug("Could not resolve path: %s", e)
 
     faiss_bytes = 0
     for idx_path in index_paths:
         try:
             if idx_path.exists() and idx_path.is_file():
                 faiss_bytes += idx_path.stat().st_size
-        except OSError:
-            pass
+        except OSError as e:
+            logger.debug("Could not resolve path: %s", e)
 
     total_bytes = sqlite_bytes + faiss_bytes
 
