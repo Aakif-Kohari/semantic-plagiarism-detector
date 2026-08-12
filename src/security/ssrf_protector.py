@@ -4,7 +4,7 @@ import requests
 import socket
 import time
 import urllib.parse
-from typing import Dict
+from typing import Dict, Tuple
 import requests
 
 from src.errors import (
@@ -80,10 +80,11 @@ class SSRFProtector:
 
     # Simple in-memory cache to prevent repeated DNS lookups and mitigate
     # slow-DNS denial of service attacks. (Format: {hostname: (ip_str, timestamp)})
-_dns_cache: Dict[str, tuple[str, float]] = {}
+    _dns_cache: Dict[str, tuple[str, float]] = {}
     DNS_CACHE_TTL_SECONDS = 300  # 5 minutes
     RESTRICTED_IPV4_CIDR_BLOCKS = RESTRICTED_IPV4_CIDR_BLOCKS
-    MAX_REDIRECT_DEPTH = 5    DEFAULT_USER_AGENT = DEFAULT_USER_AGENT
+    MAX_REDIRECT_DEPTH = 5
+    DEFAULT_USER_AGENT = DEFAULT_USER_AGENT
 
     @classmethod
     def _resolve_hostname(cls, hostname: str) -> str:
