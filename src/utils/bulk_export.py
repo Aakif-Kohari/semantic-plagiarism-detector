@@ -24,7 +24,7 @@ import os
 import re
 import zipfile
 from datetime import datetime
-from typing import Dict, List, Optional, Generator, Callable
+from typing import Dict, List, Optional, Generator, Callable, Union, Tuple, Any
 import numpy as np
 
 import pandas as pd
@@ -254,11 +254,22 @@ def export_incidents_csv_stream(
     return csv_text.encode("utf-8-sig")
 
 
+def sanitize_export_filename(filename: str, default_ext: str = ".csv") -> str:
+    """
+    Strip illegal OS/filesystem characters from the filename and ensure it ends with default_ext.
+    """
+    sanitized = re.sub(r'[<>:"/\\|?*]', '', filename)
+    if not sanitized.endswith(default_ext):
+        sanitized += default_ext
+    return sanitized
+
+
 def export_incidents_csv(
     incidents_list: List[Dict],
     delimiter: str = ",",
     quoting_style: int = csv.QUOTE_MINIMAL,
-) -> bytes:
+    filename: Optional[str] = None,
+) -> Union[bytes, Tuple[bytes, str]]:
     """Export a list of incident dicts to a CSV-formatted byte stream.
 
     Validates that the delimiter is a single character string, falling back to a
@@ -266,9 +277,14 @@ def export_incidents_csv(
     """
     if not isinstance(delimiter, str) or len(delimiter) != 1:
         delimiter = ","
-    return export_incidents_csv_stream(
+    
+    csv_bytes = export_incidents_csv_stream(
         incidents_list, delimiter=delimiter, quoting_style=quoting_style
     )
+    
+    if filename is not None:
+        return csv_bytes, sanitize_export_filename(filename)
+    return csv_bytes
 
 
 def stream_incidents_csv_chunks(
