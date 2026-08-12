@@ -100,6 +100,7 @@ def _connect():
         except Exception:
             pass
 
+
 def close_connections() -> None:
     """Close all pooled corpus connections for the current thread."""
     pool = getattr(_connection_pool, "connections", {})
@@ -112,8 +113,7 @@ def init_corpus_db() -> None:
     """Create or upgrade corpus.db without deleting persisted data."""
     with _connect() as conn:
         # 1. ALWAYS CREATE TABLES FIRST
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS documents (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 filename TEXT UNIQUE NOT NULL,
@@ -132,11 +132,9 @@ def init_corpus_db() -> None:
                 deleted_at TEXT,
                 created_at TEXT
             )
-            """
-        )
+            """)
 
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS chunks (
                 vector_id INTEGER PRIMARY KEY,
                 filename TEXT NOT NULL,
@@ -147,11 +145,9 @@ def init_corpus_db() -> None:
                 REFERENCES documents(filename)
                 ON DELETE CASCADE
             )
-            """
-        )
+            """)
 
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS deleted_chunks (
                 vector_id INTEGER PRIMARY KEY,
                 filename TEXT NOT NULL,
@@ -159,11 +155,9 @@ def init_corpus_db() -> None:
                 chunk_text TEXT NOT NULL,
                 embedding BLOB NOT NULL
             )
-            """
-        )
+            """)
 
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS plagiarism_incidents (
                 incident_id TEXT PRIMARY KEY,
                 document_a TEXT NOT NULL,
@@ -176,22 +170,18 @@ def init_corpus_db() -> None:
                 last_seen TEXT NOT NULL,
                 threshold_at_time_of_flag REAL DEFAULT 0.0
             )
-            """
-        )
+            """)
 
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS false_positives (
                 document_a TEXT,
                 document_b TEXT,
                 date_dismissed TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (document_a, document_b)
             )
-            """
-        )
+            """)
 
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS scan_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT NOT NULL,
@@ -201,8 +191,7 @@ def init_corpus_db() -> None:
                 flagged_count INTEGER NOT NULL,
                 threshold_used REAL NOT NULL
             )
-            """
-        )
+            """)
 
         # 2. RUN SCHEMA MIGRATIONS / ALTER TABLES AFTER CREATION
         columns_to_ensure = [
@@ -232,8 +221,7 @@ def init_corpus_db() -> None:
         # search. Also created by migration_012, but we create it here too
         # so that ``init_corpus_db()`` (which doesn't call
         # ``migrate_corpus_database()``) still sets up FTS.
-        conn.execute(
-            """
+        conn.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
                 filename,
                 student_name,
@@ -241,34 +229,27 @@ def init_corpus_db() -> None:
                 content='documents',
                 content_rowid='id'
             )
-            """
-        )
-        conn.execute(
-            """
+            """)
+        conn.execute("""
             CREATE TRIGGER IF NOT EXISTS documents_ai AFTER INSERT ON documents BEGIN
                 INSERT INTO documents_fts(rowid, filename, student_name, assignment_title)
                 VALUES (new.id, new.filename, new.student_name, new.assignment_title);
             END
-            """
-        )
-        conn.execute(
-            """
+            """)
+        conn.execute("""
             CREATE TRIGGER IF NOT EXISTS documents_ad AFTER DELETE ON documents BEGIN
                 INSERT INTO documents_fts(documents_fts, rowid, filename, student_name, assignment_title)
                 VALUES ('delete', old.id, old.filename, old.student_name, old.assignment_title);
             END
-            """
-        )
-        conn.execute(
-            """
+            """)
+        conn.execute("""
             CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
                 INSERT INTO documents_fts(documents_fts, rowid, filename, student_name, assignment_title)
                 VALUES ('delete', old.id, old.filename, old.student_name, old.assignment_title);
                 INSERT INTO documents_fts(rowid, filename, student_name, assignment_title)
                 VALUES (new.id, new.filename, new.student_name, new.assignment_title);
             END
-            """
-        )
+            """)
         # Backfill any existing rows into the FTS index
         try:
             conn.execute("INSERT INTO documents_fts(documents_fts) VALUES ('rebuild')")
@@ -986,9 +967,6 @@ def get_total_document_count(include_deleted: bool = False) -> int:
                 "SELECT COUNT(1) FROM documents WHERE is_deleted IS NULL OR is_deleted = 0"
             ).fetchone()
         return int(row[0]) if row else 0
-
-
-
 
 
 def search_documents_fts(query_text: str) -> list[dict]:

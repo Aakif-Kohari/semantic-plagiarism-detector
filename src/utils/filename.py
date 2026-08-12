@@ -9,8 +9,7 @@ import re
 import unicodedata
 from collections.abc import Collection, Mapping
 from pathlib import PurePath
-from typing import TypeVar
-from typing import IO
+from typing import IO, TypeVar
 
 DEFAULT_FILENAME = "document"
 MAX_FILENAME_LENGTH = 150
@@ -103,7 +102,8 @@ def normalize_sha256_hash(hash_str: str) -> str:
     return hash_str.lower()
 
 
-def sanitize_filename(    filename: object,
+def sanitize_filename(
+    filename: object,
     *,
     fallback: str = DEFAULT_FILENAME,
     max_length: int = MAX_FILENAME_LENGTH,
@@ -302,6 +302,7 @@ def get_final_extension(filename: object) -> str:
     stem, extension = os.path.splitext(basename)
     return extension.casefold()
 
+
 def get_file_extension_sanitized(filename: str) -> str:
     """Return the lower-case file extension, starting with a dot.
 
@@ -417,4 +418,3 @@ def sanitize_and_validate_filename(
         fallback=fallback,
         max_length=max_length,
     )
-

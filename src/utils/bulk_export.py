@@ -24,9 +24,9 @@ import os
 import re
 import zipfile
 from datetime import datetime
-from typing import Dict, List, Optional, Generator, Callable, Union, Tuple, Any
-import numpy as np
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
 
+import numpy as np
 import pandas as pd
 
 from src.core.similarity import find_most_similar_chunks
@@ -258,7 +258,7 @@ def sanitize_export_filename(filename: str, default_ext: str = ".csv") -> str:
     """
     Strip illegal OS/filesystem characters from the filename and ensure it ends with default_ext.
     """
-    sanitized = re.sub(r'[<>:"/\\|?*]', '', filename)
+    sanitized = re.sub(r'[<>:"/\\|?*]', "", filename)
     if not sanitized.endswith(default_ext):
         sanitized += default_ext
     return sanitized
@@ -277,11 +277,11 @@ def export_incidents_csv(
     """
     if not isinstance(delimiter, str) or len(delimiter) != 1:
         delimiter = ","
-    
+
     csv_bytes = export_incidents_csv_stream(
         incidents_list, delimiter=delimiter, quoting_style=quoting_style
     )
-    
+
     if filename is not None:
         return csv_bytes, sanitize_export_filename(filename)
     return csv_bytes
@@ -352,12 +352,18 @@ def stream_incidents_csv_chunks(
 
             writer.writerow(
                 {
-                    "Incident ID": sanitize_csv_cell_value(incident.get("incident_id", "")),
+                    "Incident ID": sanitize_csv_cell_value(
+                        incident.get("incident_id", "")
+                    ),
                     "Doc A": sanitize_csv_cell_value(incident.get("document_a", "")),
                     "Doc B": sanitize_csv_cell_value(incident.get("document_b", "")),
                     "Similarity": sanitize_csv_cell_value(similarity_str),
-                    "Severity": sanitize_csv_cell_value(incident.get("severity_rank", "")),
-                    "Status": sanitize_csv_cell_value(incident.get("review_status", "")),
+                    "Severity": sanitize_csv_cell_value(
+                        incident.get("severity_rank", "")
+                    ),
+                    "Status": sanitize_csv_cell_value(
+                        incident.get("review_status", "")
+                    ),
                     "Date": sanitize_csv_cell_value(incident.get("date_flagged", "")),
                 }
             )
@@ -631,7 +637,7 @@ def create_documents_bulk_zip_archive(filenames: list[str]) -> bytes:
     Returns:
         ZIP archive file bytes ready for download.
     """
-    from src.db.corpus_db import get_all_documents, get_document_word_counts, _connect
+    from src.db.corpus_db import _connect, get_all_documents, get_document_word_counts
     from src.utils.filename import sanitize_filename
 
     buffer = io.BytesIO()

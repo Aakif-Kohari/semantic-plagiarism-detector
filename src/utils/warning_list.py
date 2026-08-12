@@ -79,7 +79,9 @@ def filter_warnings(
 
     if min_match_length > 0:
         normalised = [
-            item for item in normalised if item.get("matched_length", 0) >= min_match_length
+            item
+            for item in normalised
+            if item.get("matched_length", 0) >= min_match_length
         ]
 
     query = _truncate_search_query(search_query).casefold()
@@ -96,8 +98,12 @@ def filter_warnings(
             continue
 
         if fuzz is not None:
-            score_a = max(fuzz.partial_ratio(query, doc_a), fuzz.token_set_ratio(query, doc_a))
-            score_b = max(fuzz.partial_ratio(query, doc_b), fuzz.token_set_ratio(query, doc_b))
+            score_a = max(
+                fuzz.partial_ratio(query, doc_a), fuzz.token_set_ratio(query, doc_a)
+            )
+            score_b = max(
+                fuzz.partial_ratio(query, doc_b), fuzz.token_set_ratio(query, doc_b)
+            )
             if score_a >= FUZZY_THRESHOLD or score_b >= FUZZY_THRESHOLD:
                 filtered.append(item)
 
@@ -106,9 +112,11 @@ def filter_warnings(
 
 def build_key_extractor(field: str) -> Callable[[Mapping[str, Any]], Any]:
     """Return a key extraction function suitable for sorting warning items."""
+
     def extract_key(item: Mapping[str, Any]) -> Any:
         val = item.get(field, "")
         return val.casefold() if isinstance(val, str) else val
+
     return extract_key
 
 
@@ -181,7 +189,13 @@ def _reset_page() -> None:
     st.session_state.warning_page = 1
 
 
-def render_copy_button(text_to_copy: str, button_id: str = "copy-btn", copy_label: str = "📋 Copy", copied_label: str = "✅ Copied!", height: int = 45) -> None:
+def render_copy_button(
+    text_to_copy: str,
+    button_id: str = "copy-btn",
+    copy_label: str = "📋 Copy",
+    copied_label: str = "✅ Copied!",
+    height: int = 45,
+) -> None:
     escaped_text = (
         text_to_copy.replace("\\", "\\\\")
         .replace('"', '\\"')
@@ -629,8 +643,6 @@ def render_warning_controls(
             )
         markdown_text = "\n".join(markdown_lines)
 
-
-
     left, middle, right = st.columns([3, 2, 2])
     with left:
         if current_page.total_items:
@@ -648,7 +660,7 @@ def render_warning_controls(
             text_to_copy=markdown_text,
             button_id="copy-summary-btn",
             copy_label="📋 Copy Summary",
-            copied_label="✅ Copied!"
+            copied_label="✅ Copied!",
         )
     with right:
         st.download_button(
@@ -771,6 +783,8 @@ def render_warning_controls(
         ):
             st.session_state.warning_page = current_page.page + 1
             st.rerun()
+
+
 def matches_query_predicate(flag: dict, search_query: str) -> bool:
     """
     Check if a flagged incident matches a search query across document names or text snippets.
@@ -784,9 +798,4 @@ def matches_query_predicate(flag: dict, search_query: str) -> bool:
     snippet_a = str(flag.get("snippet_a", "")).lower()
     snippet_b = str(flag.get("snippet_b", "")).lower()
 
-    return (
-        query in doc_a
-        or query in doc_b
-        or query in snippet_a
-        or query in snippet_b
-    )
+    return query in doc_a or query in doc_b or query in snippet_a or query in snippet_b

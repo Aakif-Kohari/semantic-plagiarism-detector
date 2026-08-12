@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Optional
+
 from pydantic import BaseModel
 
 
@@ -25,6 +26,7 @@ class DictLikeModel(BaseModel):
 
 class User(DictLikeModel):
     """Pydantic model representing a User record DTO."""
+
     id: Optional[int] = None
     username: str
     role: str
@@ -32,9 +34,9 @@ class User(DictLikeModel):
     version: int = 1
 
 
-
 class Document(DictLikeModel):
     """Pydantic model representing a Document metadata DTO."""
+
     filename: str
     file_hash: str
     upload_date: str
@@ -50,6 +52,7 @@ class Document(DictLikeModel):
 
 class MatchResult(DictLikeModel):
     """Pydantic model representing a similarity PlagiarismIncident DTO."""
+
     incident_id: Optional[int] = None
     document_a: str
     document_b: str

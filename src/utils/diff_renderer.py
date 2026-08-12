@@ -14,7 +14,7 @@ Recent Additions (Issue #1957):
 
 import html
 import logging
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -144,14 +144,12 @@ def render_semantic_diff_html(
     html_parts = [css, '<div class="diff-container">']
 
     # Header row
-    html_parts.append(
-        """
+    html_parts.append("""
         <div class="diff-row" style="background-color: rgba(0,0,0,0.05); font-weight: bold;">
             <div class="diff-col">Document A (Source)</div>
             <div class="diff-col">Document B (Suspicious)</div>
         </div>
-    """
-    )
+    """)
 
     for op in alignment_map:
         op_type = op.get("type", "match")

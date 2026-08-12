@@ -8,6 +8,7 @@ import unicodedata
 from typing import Optional
 
 from langdetect import DetectorFactory, LangDetectException, detect
+
 from src.core.translator import translate_text
 
 DetectorFactory.seed = 0
@@ -169,11 +170,16 @@ _BIBLIOGRAPHY_HEADERS = re.compile(
 )
 
 _DATE_PATTERNS = [
-    re.compile(r"\b(?:\d{1,2}[-/th|st|nd|rd ]+)?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[-/ ,]+\d{2,4}\b", re.IGNORECASE),
+    re.compile(
+        r"\b(?:\d{1,2}[-/th|st|nd|rd ]+)?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[-/ ,]+\d{2,4}\b",
+        re.IGNORECASE,
+    ),
     re.compile(r"\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\b"),
 ]
 _ORG_PATTERNS = [
-    re.compile(r"\b[A-Z][a-zA-Z0-9&]+ (?:Inc|Corp|LLC|Ltd|University|College|Department|Association|Group|Foundation)\b"),
+    re.compile(
+        r"\b[A-Z][a-zA-Z0-9&]+ (?:Inc|Corp|LLC|Ltd|University|College|Department|Association|Group|Foundation)\b"
+    ),
 ]
 _PERSON_PATTERNS = [
     re.compile(r"\b(?:Prof\.|Dr\.|Mr\.|Ms\.|Mrs\.)\s+[A-Z][a-z]+\s+[A-Z][a-z]+\b"),
@@ -251,7 +257,7 @@ def sanitize_unicode_spaces(text: str) -> str:
     """Replace special Unicode spaces with standard ASCII spaces."""
     if not text:
         return text
-    return text.replace("\u00A0", " ").replace("\u2009", " ")
+    return text.replace("\u00a0", " ").replace("\u2009", " ")
 
 
 def detect_text_language(text: str) -> str:
@@ -274,6 +280,7 @@ def strip_bibliography(text: str) -> str:
         if hasattr(text, "word_headings"):
             words_in_sliced = len(sliced_text.split())
             from src.core.parsers.docx_parser import ParsedDocxText
+
             return ParsedDocxText(
                 sliced_text, word_headings=text.word_headings[:words_in_sliced]
             )
@@ -372,6 +379,7 @@ def mask_named_entities_in_text(text: str) -> str:
 
     try:
         import nltk
+
         try:
             tokens = nltk.word_tokenize(masked)
             pos_tags = nltk.pos_tag(tokens)

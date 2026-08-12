@@ -4,11 +4,10 @@ tests/core/test_citation_extractor.py
 Unit tests for the bibliography citation extraction engine.
 """
 
-import pytest
 from src.core.citation_extractor import (
-    extract_citations,
     _generate_citation_hash,
     _normalize_text,
+    extract_citations,
 )
 
 

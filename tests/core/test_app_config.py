@@ -15,9 +15,7 @@ def test_app_title_uses_environment_value(monkeypatch):
         "Stanford Plagiarism Detector",
     )
 
-    assert get_app_title() == (
-        "Stanford Plagiarism Detector"
-    )
+    assert get_app_title() == ("Stanford Plagiarism Detector")
 
 
 def test_app_title_strips_surrounding_whitespace(monkeypatch):
@@ -36,21 +34,28 @@ def test_blank_app_title_falls_back_to_default(monkeypatch):
 
 
 def test_get_lock_timeout_default(mocker):
-    mocker.patch('os.getenv', return_value='30')
+    mocker.patch("os.getenv", return_value="30")
     from src.core.app_config import get_lock_timeout
+
     assert get_lock_timeout() == 30
+
 
 def test_get_lock_timeout_custom(mocker):
-    mocker.patch('os.getenv', return_value='60')
+    mocker.patch("os.getenv", return_value="60")
     from src.core.app_config import get_lock_timeout
+
     assert get_lock_timeout() == 60
 
+
 def test_get_lock_timeout_invalid(mocker):
-    mocker.patch('os.getenv', return_value='invalid')
+    mocker.patch("os.getenv", return_value="invalid")
     from src.core.app_config import get_lock_timeout
+
     assert get_lock_timeout() == 30
 
+
 def test_get_lock_timeout_minimum(mocker):
-    mocker.patch('os.getenv', return_value='0')
+    mocker.patch("os.getenv", return_value="0")
     from src.core.app_config import get_lock_timeout
+
     assert get_lock_timeout() == 1

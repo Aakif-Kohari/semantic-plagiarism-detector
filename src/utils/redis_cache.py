@@ -26,13 +26,13 @@ class CacheKeyPrefix(str, Enum):
     DOCUMENT_CACHE = "doc:"
     LEGACY_UPLOADS_PREFIX = UPLOAD_COUNT
 
+
 try:
     import redis
 except ImportError:
     redis = None
 
 from dotenv import load_dotenv
-
 
 try:
     from src.core.app_config import REDIS_CACHE_TTL
@@ -44,14 +44,25 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 _RedisErr = getattr(redis, "RedisError", Exception)
-RedisError = _RedisErr if isinstance(_RedisErr, type) and issubclass(_RedisErr, BaseException) else Exception
+RedisError = (
+    _RedisErr
+    if isinstance(_RedisErr, type) and issubclass(_RedisErr, BaseException)
+    else Exception
+)
 
 _ConnErr = getattr(redis, "ConnectionError", ConnectionError)
-RedisConnectionError = _ConnErr if isinstance(_ConnErr, type) and issubclass(_ConnErr, BaseException) else ConnectionError
+RedisConnectionError = (
+    _ConnErr
+    if isinstance(_ConnErr, type) and issubclass(_ConnErr, BaseException)
+    else ConnectionError
+)
 
 _TimeoutErr = getattr(redis, "TimeoutError", TimeoutError)
-RedisTimeoutError = _TimeoutErr if isinstance(_TimeoutErr, type) and issubclass(_TimeoutErr, BaseException) else TimeoutError
-
+RedisTimeoutError = (
+    _TimeoutErr
+    if isinstance(_TimeoutErr, type) and issubclass(_TimeoutErr, BaseException)
+    else TimeoutError
+)
 
 
 # Redis connection configuration
@@ -75,10 +86,18 @@ DEFAULT_TTL = 24 * 60 * 60  # 24 hours fallback for keys without explicit TTL
 # COMPRESSION UTILITIES
 # ============================================================================
 
+
 class PayloadCompressor:
     """
     Handles robust compression and decompression of serialized cache payloads.
     Uses zlib (standard library) to drastically reduce memory usage of large matrices.
+
+    Redis wire format:
+        Compressed payloads: MAGIC_HEADER + zlib-compressed data.
+        Uncompressed payloads: raw serialized bytes.
+
+    Payloads are compressed when their serialized size is at least
+    COMPRESSION_THRESHOLD_BYTES (512 KiB).
     """
 
     # Threshold above which data is compressed (e.g., 512KB)
@@ -113,7 +132,9 @@ class PayloadCompressor:
 
             return cls.MAGIC_HEADER + compressed_data
         except zlib.error as e:
-            logger.error(f"[CacheCompression] zlib compression failed: {e}. Falling back to uncompressed.")
+            logger.error(
+                f"[CacheCompression] zlib compression failed: {e}. Falling back to uncompressed."
+            )
             return data
 
     @classmethod
@@ -133,7 +154,7 @@ class PayloadCompressor:
         if data.startswith(cls.MAGIC_HEADER):
             try:
                 start_time = time.perf_counter()
-                payload = data[len(cls.MAGIC_HEADER):]
+                payload = data[len(cls.MAGIC_HEADER) :]
                 decompressed_data = zlib.decompress(payload)
 
                 logger.debug(
@@ -142,7 +163,9 @@ class PayloadCompressor:
                 )
                 return decompressed_data
             except zlib.error as e:
-                logger.error(f"[CacheCompression] zlib decompression failed: {e}. Corrupted payload?")
+                logger.error(
+                    f"[CacheCompression] zlib decompression failed: {e}. Corrupted payload?"
+                )
                 raise e
 
         return data
@@ -151,6 +174,7 @@ class PayloadCompressor:
 # ============================================================================
 # REDIS NAMESPACES
 # ============================================================================
+
 
 class CacheNamespace(str, Enum):
     SESSION = "spd:v1:session"
@@ -168,6 +192,7 @@ class CacheNamespace(str, Enum):
 # MAIN REDIS CACHE MANAGER
 # ============================================================================
 
+
 class RedisCache:
     """Redis cache manager for session state and computational results."""
 
@@ -184,6 +209,7 @@ class RedisCache:
                     cls._instance._hits = 0
                     cls._instance._misses = 0
         return cls._instance
+
     def __init__(self):
         if not hasattr(self, "_fallback_cache") or self._fallback_cache is None:
             self._fallback_cache = {}
@@ -227,7 +253,9 @@ class RedisCache:
     def _fallback_exists(self, key: str) -> bool:
         return self._fallback_get(key) is not None
 
-    def _fallback_set_json(self, key: str, value: dict, ttl: Optional[int] = None) -> bool:
+    def _fallback_set_json(
+        self, key: str, value: dict, ttl: Optional[int] = None
+    ) -> bool:
         serialized = json.dumps(value)
         return self._fallback_set(key, json.loads(serialized), ttl)
 
@@ -239,9 +267,11 @@ class RedisCache:
 
     def _fallback_clear_pattern(self, pattern: str) -> int:
         import fnmatch
+
         with self._lock:
             keys_to_delete = [
-                key for key in list(self.fallback_cache.keys())
+                key
+                for key in list(self.fallback_cache.keys())
                 if fnmatch.fnmatch(key, pattern)
             ]
             count = 0
@@ -282,7 +312,9 @@ class RedisCache:
             ConnectionRefusedError,
         ) as e:
             print(f"[RedisCache] Redis connection failed: {e}. Running without cache.")
-            logger.warning(f"[RedisCache] Redis connection failed: {e}. Running without cache.")
+            logger.warning(
+                f"[RedisCache] Redis connection failed: {e}. Running without cache."
+            )
             self._client = None
 
     def is_available(self) -> bool:
@@ -294,8 +326,6 @@ class RedisCache:
             return True
         except Exception:
             return False
-
-
 
     def ping(self) -> tuple[bool, Optional[float]]:
         if self._client is None:
@@ -338,7 +368,6 @@ class RedisCache:
         if total == 0:
             return 0.0
         return (hits / total) * 100
-    
 
     def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
         """Store a value in Redis with optional TTL and automatic compression."""
@@ -363,8 +392,12 @@ class RedisCache:
                 ConnectionResetError,
                 pickle.PickleError,
             ) as e:
-                print(f"[RedisCache] Error setting key {key}: {e}. Falling back to in-memory.")
-                logger.error(f"[RedisCache] Error setting key {key}: {e}. Falling back to in-memory.")
+                print(
+                    f"[RedisCache] Error setting key {key}: {e}. Falling back to in-memory."
+                )
+                logger.error(
+                    f"[RedisCache] Error setting key {key}: {e}. Falling back to in-memory."
+                )
 
         return self._fallback_set(key, value, ttl)
 
@@ -386,8 +419,12 @@ class RedisCache:
                 pickle.PickleError,
                 zlib.error,
             ) as e:
-                print(f"[RedisCache] Error getting key {key}: {e}. Falling back to in-memory.")
-                logger.error(f"[RedisCache] Error getting key {key}: {e}. Falling back to in-memory.")
+                print(
+                    f"[RedisCache] Error getting key {key}: {e}. Falling back to in-memory."
+                )
+                logger.error(
+                    f"[RedisCache] Error getting key {key}: {e}. Falling back to in-memory."
+                )
 
         val = self._fallback_get(key)
         if val is not None:
@@ -398,7 +435,7 @@ class RedisCache:
         with self._lock:
             self._misses += 1
         return None
-    
+
     def delete(self, key: str) -> bool:
         redis_deleted = False
         if self.is_available():
@@ -414,7 +451,7 @@ class RedisCache:
         """Store a JSON-serializable dict in Redis with automatic compression."""
         if self.is_available():
             try:
-                serialized = json.dumps(value).encode('utf-8')
+                serialized = json.dumps(value).encode("utf-8")
                 processed_bytes = PayloadCompressor.compress(serialized)
 
                 if ttl:
@@ -426,7 +463,6 @@ class RedisCache:
                 logger.error(f"[RedisCache] Error setting JSON key {key}: {e}")
 
         return self._fallback_set_json(key, value, ttl)
-
 
     def get_json(self, key: str) -> Optional[dict]:
         """Retrieve a JSON value from Redis with automatic decompression."""
@@ -445,8 +481,12 @@ class RedisCache:
                 ConnectionResetError,
                 json.JSONDecodeError,
             ) as e:
-                print(f"[RedisCache] Error getting JSON key {key}: {e}. Falling back to in-memory.")
-                logger.error(f"[RedisCache] Error getting JSON key {key}: {e}. Falling back to in-memory.")
+                print(
+                    f"[RedisCache] Error getting JSON key {key}: {e}. Falling back to in-memory."
+                )
+                logger.error(
+                    f"[RedisCache] Error getting JSON key {key}: {e}. Falling back to in-memory."
+                )
 
         val = self._fallback_get_json(key)
         if val is not None:
@@ -486,12 +526,17 @@ class RedisCache:
                 ConnectionResetError,
                 Exception,
             ) as e:
-                print(f"[RedisCache] Error clearing pattern {pattern}: {e}. Falling back to in-memory.")
-                logger.error(f"[RedisCache] Error clearing pattern {pattern}: {e}. Falling back to in-memory.")
+                print(
+                    f"[RedisCache] Error clearing pattern {pattern}: {e}. Falling back to in-memory."
+                )
+                logger.error(
+                    f"[RedisCache] Error clearing pattern {pattern}: {e}. Falling back to in-memory."
+                )
 
         fallback_count = self._fallback_clear_pattern(pattern)
-        return (int(redis_count) if isinstance(redis_count, (int, float)) else 0) + fallback_count
-
+        return (
+            int(redis_count) if isinstance(redis_count, (int, float)) else 0
+        ) + fallback_count
 
     def close(self) -> None:
         with self._lock:
@@ -511,44 +556,55 @@ _cache = RedisCache()
 # MODULE LEVEL PUBLIC API
 # ============================================================================
 
+
 def get_cache(key: Optional[str] = None):
     if key is not None:
         return _cache.get(key)
     return _cache
 
+
 def set_cache(key: str, value: Any, expire: Optional[int] = None) -> bool:
     return _cache.set(key, value, ttl=expire)
 
+
 def delete_cache(key: str) -> bool:
     return _cache.delete(key)
+
 
 def cache_session_state(session_id: str, key: str, value: Any) -> bool:
     cache_key = CacheNamespace.SESSION.build_key(session_id, key)
     return _cache.set(cache_key, value, SESSION_TTL)
 
+
 def get_session_state(session_id: str, key: str) -> Optional[Any]:
     cache_key = CacheNamespace.SESSION.build_key(session_id, key)
     return _cache.get(cache_key)
+
 
 def clear_session(session_id: str) -> bool:
     pattern = CacheNamespace.SESSION.build_key(session_id, "*")
     return _cache.clear_pattern(pattern) > 0
 
+
 def cache_faiss_index(index_key: str, index_data: bytes) -> bool:
     cache_key = CacheNamespace.FAISS.build_key("index", index_key)
     return _cache.set(cache_key, index_data, FAISS_INDEX_TTL)
+
 
 def get_faiss_index(index_key: str) -> Optional[bytes]:
     cache_key = CacheNamespace.FAISS.build_key("index", index_key)
     return _cache.get(cache_key)
 
+
 def cache_analysis_results(analysis_key: str, results: dict) -> bool:
     cache_key = CacheNamespace.ANALYSIS.build_key(analysis_key)
     return _cache.set(cache_key, results, ANALYSIS_RESULTS_TTL)
 
+
 def get_analysis_results(analysis_key: str) -> Optional[dict]:
     cache_key = CacheNamespace.ANALYSIS.build_key(analysis_key)
     return _cache.get(cache_key)
+
 
 def increment_login_attempts(identifier: str) -> int:
     cache_key = CacheNamespace.LOGIN_ATTEMPTS.build_key(identifier)
@@ -559,17 +615,21 @@ def increment_login_attempts(identifier: str) -> int:
     _cache.set(cache_key, current, LOGIN_LOCKOUT_TTL)
     return current
 
+
 def get_login_attempts(identifier: str) -> int:
     cache_key = CacheNamespace.LOGIN_ATTEMPTS.build_key(identifier)
     current = _cache.get(cache_key)
     return current if current is not None else 0
 
+
 def is_login_locked_out(identifier: str) -> bool:
     return get_login_attempts(identifier) >= 5
+
 
 def clear_login_attempts(identifier: str) -> bool:
     cache_key = CacheNamespace.LOGIN_ATTEMPTS.build_key(identifier)
     return _cache.delete(cache_key)
+
 
 def increment_upload_count(username: str) -> int:
     cache_key = CacheNamespace.UPLOADS.build_key(username)
@@ -580,16 +640,20 @@ def increment_upload_count(username: str) -> int:
     _cache.set(cache_key, current, UPLOAD_RATE_TTL)
     return current
 
+
 def get_upload_count(username: str) -> int:
     cache_key = CacheNamespace.UPLOADS.build_key(username)
     current = _cache.get(cache_key)
     return current if current is not None else 0
 
+
 def is_upload_rate_limited(username: str) -> bool:
     return get_upload_count(username) >= 100
+
 
 def _cleanup_redis() -> None:
     if _cache:
         _cache.close()
+
 
 atexit.register(_cleanup_redis)

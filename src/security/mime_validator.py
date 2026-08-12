@@ -9,6 +9,7 @@ from typing import Optional
 
 import defusedxml.ElementTree as ElementTree
 from defusedxml.common import DefusedXmlException
+
 logger = logging.getLogger(__name__)
 
 # Strict mapping of file extension to allowed MIME types/signatures.
@@ -368,7 +369,7 @@ def validate_mime_type(file_bytes: bytes, filename: str) -> bool:
     """
     if not file_bytes:
         return False
-        
+
     if not validate_single_extension(filename):
         logger.warning(
         "[mime_validator] Blocked executable double extension: '%s'.",

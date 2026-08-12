@@ -6,6 +6,7 @@ document snippet inspection.
 """
 
 import itertools
+
 import pandas as pd
 import streamlit as st
 

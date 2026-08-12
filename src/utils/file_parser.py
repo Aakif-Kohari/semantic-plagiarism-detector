@@ -11,13 +11,6 @@ Supports decrypted and password-protected PDF parsing using PyMuPDF (fitz),
 along with file categorization and validation helpers.
 """
 
-from typing import List, Optional, Tuple
-along with file categorization, validation helpers, and PDF metadata extraction.
-
-Recent Additions (Issue #1570):
-- Added get_file_mime_type_from_bytes() to inspect raw byte headers and
-  return standard MIME type strings without relying on file extensions.
-"""
 
 import logging
 from typing import Any, List, Optional, Tuple, Union
@@ -203,7 +196,7 @@ def get_file_size_formatted(num_bytes: int) -> str:
                 return f"{int(size)} {unit}"
             return f"{size:.2f} {unit}"
         size /= 1024
-        
+
     return f"{size:.2f} {units[-1]}"
 
 
@@ -381,8 +374,8 @@ def extract_pdf_metadata(file_bytes: bytes) -> dict[str, Any]:
 def get_file_mime_category(filename: str) -> str:
     """
     Categorize an uploaded file into a high-level MIME group based on its extension.
-    
-    This helper simplifies routing and validation logic by grouping specific 
+
+    This helper simplifies routing and validation logic by grouping specific
     file extensions into broader, semantic categories.
 
     Args:
@@ -426,7 +419,7 @@ def get_file_mime_category(filename: str) -> str:
 def get_supported_mime_categories() -> List[str]:
     """
     Retrieve a list of all supported high-level MIME categories.
-    
+
     Returns:
         List[str]: A list of unique category names.
     """
@@ -438,11 +431,11 @@ def is_extension_supported(
 ) -> bool:
     """
     Check if a file's extension belongs to an allowed list of MIME categories.
-    
+
     Args:
         filename: The name of the file to check.
         allowed_categories: List of allowed categories. Defaults to all known categories except 'unknown'.
-        
+
     Returns:
         bool: True if the file's category is in the allowed list, False otherwise.
     """

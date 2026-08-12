@@ -5,8 +5,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.core.document_parser import (OCRDependencyError, _has_meaningful_text,
-                                      extract_text_from_pdf)
+from src.core.document_parser import (
+    OCRDependencyError,
+    _has_meaningful_text,
+    extract_text_from_pdf,
+)
 
 
 class FakePage:

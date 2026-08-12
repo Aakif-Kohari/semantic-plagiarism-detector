@@ -1,19 +1,16 @@
+import json
 import os
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
 
-from src.core.webhook import send_plagiarism_alert
-
-import json
-import time
-
 from src.core.webhook import (
     compute_webhook_signature,
+    send_plagiarism_alert,
     verify_webhook_signature,
 )
-
 
 WEBHOOK_URL = "https://mock-webhook.url"
 

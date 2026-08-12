@@ -15,7 +15,7 @@ Recent Additions (Issue #1958):
 import hashlib
 import logging
 import re
-from typing import List, Dict, Optional, Tuple
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 

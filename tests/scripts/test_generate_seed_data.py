@@ -8,8 +8,7 @@ Validates seed data creation, dry-run mode, and error handling.
 
 import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock
-import pytest
+from unittest.mock import patch
 
 # Add scripts directory to path
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent

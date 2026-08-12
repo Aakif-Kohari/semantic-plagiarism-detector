@@ -6,18 +6,23 @@ and Jaccard similarity edge cases.
 """
 
 import os
-import sqlite3
+
 import pytest
 
-from src.db.citation_db import add_document_citations, init_citation_db, compute_citation_jaccard
+from src.db.citation_db import (
+    add_document_citations,
+    compute_citation_jaccard,
+    init_citation_db,
+)
 from src.db.corpus_db import _DB_PATH
+
 
 @pytest.fixture(autouse=True)
 def setup_teardown_db():
     # Setup test database
     if os.path.exists(_DB_PATH):
         os.remove(_DB_PATH)
-    
+
     init_citation_db()
     yield
     # Teardown test database
@@ -27,6 +32,7 @@ def setup_teardown_db():
         except PermissionError:
             pass
 
+
 def test_add_document_citations_duplicate_count():
     doc_name = "test_doc.pdf"
     citations = [
@@ -35,14 +41,14 @@ def test_add_document_citations_duplicate_count():
             "author": "Smith",
             "year": "2023",
             "title": "A Great Paper",
-            "raw_text": "Smith, 2023, A Great Paper"
+            "raw_text": "Smith, 2023, A Great Paper",
         }
     ]
-    
+
     # First insert should return 1
     added = add_document_citations(doc_name, citations)
     assert added == 1
-    
+
     # Second insert of the exact same citation should return 0
     added_duplicate = add_document_citations(doc_name, citations)
     assert added_duplicate == 0
@@ -126,4 +132,3 @@ def test_jaccard_partial_overlap():
     score = compute_citation_jaccard("doc_a.pdf", "doc_b.pdf")
     # Intersection = {hash2} (1), Union = {hash1, hash2, hash3} (3) -> 1/3 ≈ 0.333333
     assert abs(score - (1 / 3)) < 1e-6
-    

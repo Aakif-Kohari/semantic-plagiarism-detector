@@ -53,9 +53,7 @@ def test_incorrect_old_password_creates_failure_event():
 
     events = failed_events(username)
     assert len(events) == 1
-    assert json.loads(events[0][2]) == {
-        "reason": "incorrect_old_password"
-    }
+    assert json.loads(events[0][2]) == {"reason": "incorrect_old_password"}
     assert verify_user(username, "OldPassword1!") is True
     assert verify_user(username, "NewPassword2@") is False
 
@@ -82,9 +80,7 @@ def test_complexity_failure_is_audited(weak_password):
 
     events = failed_events(username)
     assert len(events) == 1
-    assert json.loads(events[0][2]) == {
-        "reason": "complexity_failed"
-    }
+    assert json.loads(events[0][2]) == {"reason": "complexity_failed"}
     assert verify_user(username, "OldPassword1!") is True
 
 
@@ -99,9 +95,7 @@ def test_unknown_user_failure_is_audited():
 
     events = failed_events(username)
     assert len(events) == 1
-    assert json.loads(events[0][2]) == {
-        "reason": "user_not_found"
-    }
+    assert json.loads(events[0][2]) == {"reason": "user_not_found"}
 
 
 def test_unauthorized_foreign_change_is_audited():
@@ -119,9 +113,7 @@ def test_unauthorized_foreign_change_is_audited():
 
     events = failed_events(username)
     assert len(events) == 1
-    assert json.loads(events[0][2]) == {
-        "reason": "unauthorized_actor"
-    }
+    assert json.loads(events[0][2]) == {"reason": "unauthorized_actor"}
 
 
 def test_success_does_not_create_failure_event():
@@ -200,6 +192,4 @@ def test_database_failure_is_audited(
 
     events = failed_events(username)
     assert len(events) == 1
-    assert json.loads(events[0][2]) == {
-        "reason": "database_error"
-    }
+    assert json.loads(events[0][2]) == {"reason": "database_error"}

@@ -7,16 +7,26 @@ document management table, bulk ZIP export, and bulk clear dialogs.
 
 import logging
 import os
+from datetime import datetime, timezone
+
 import psutil
 import streamlit as st
-from datetime import datetime, timezone
 
 from app.session_keys import SessionKeys
 from app.state_manager import save_preferences_callback
-from app.theme import get_theme_name, render_timezone_footer, set_theme
+from app.theme import render_timezone_footer
 from src.core.config import DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD
-from src.core.document_parser import DEFAULT_OCR_DPI, DEFAULT_OCR_LANGUAGE, SUPPORTED_OCR_LANGUAGES
-from src.db import clear_all_data, delete_document, get_all_documents, get_unique_class_sections
+from src.core.document_parser import (
+    DEFAULT_OCR_DPI,
+    DEFAULT_OCR_LANGUAGE,
+    SUPPORTED_OCR_LANGUAGES,
+)
+from src.db import (
+    clear_all_data,
+    delete_document,
+    get_all_documents,
+    get_unique_class_sections,
+)
 from src.db.auth import (
     get_tour_completed,
     get_upload_count,
@@ -112,6 +122,7 @@ def logout_dialog(session_id: str):
                 if key in st.session_state:
                     del st.session_state[key]
             from src.utils.redis_cache import clear_session
+
             clear_session(session_id)
             st.rerun()
 
@@ -123,7 +134,9 @@ def render_sidebar(user_role: str, root_dir: str, faiss_index=None):
             _current_username = st.session_state.get(SessionKeys.USERNAME) or "Unknown"
             with st.sidebar.expander(f"👤 Logged in as: {_current_username}"):
                 st.markdown(f"**Username:** {_current_username}")
-                st.markdown(f"**Role:** {user_role.capitalize() if user_role else 'N/A'}")
+                st.markdown(
+                    f"**Role:** {user_role.capitalize() if user_role else 'N/A'}"
+                )
                 try:
                     _last_login = get_user_last_login(_current_username)
                 except Exception:
@@ -158,7 +171,9 @@ def render_sidebar(user_role: str, root_dir: str, faiss_index=None):
                 "Custom": None,
             }
 
-            current_threshold = st.session_state.get("threshold_slider", PLAGIARISM_THRESHOLD)
+            current_threshold = st.session_state.get(
+                "threshold_slider", PLAGIARISM_THRESHOLD
+            )
             current_preset = "Custom"
             for label, value in preset_options.items():
                 if value is not None and abs(current_threshold - value) < 0.001:
@@ -174,7 +189,10 @@ def render_sidebar(user_role: str, root_dir: str, faiss_index=None):
                 help="Choose a predefined threshold standard or use the custom slider below.",
             )
 
-            if selected_preset != "Custom" and preset_options[selected_preset] is not None:
+            if (
+                selected_preset != "Custom"
+                and preset_options[selected_preset] is not None
+            ):
                 st.session_state["threshold_slider"] = preset_options[selected_preset]
                 if current_preset != selected_preset:
                     st.rerun()
@@ -230,9 +248,11 @@ def render_sidebar(user_role: str, root_dir: str, faiss_index=None):
             )
 
             from app.components.faiss_results import render_faiss_metric_badge
+
             render_faiss_metric_badge(st.session_state.get("faiss_index", None))
 
             from src.core.faiss_index import format_faiss_memory_badge
+
             current_faiss = faiss_index or st.session_state.get("faiss_index")
             faiss_badge_text = format_faiss_memory_badge(current_faiss)
             st.caption(f"⚡ **{faiss_badge_text}**")
@@ -278,6 +298,7 @@ def render_sidebar(user_role: str, root_dir: str, faiss_index=None):
                 )
 
         from app.components.api_quota_gauge import render_api_quota_gauge
+
         render_api_quota_gauge()
 
         unique_classes = get_unique_class_sections()
@@ -289,7 +310,9 @@ def render_sidebar(user_role: str, root_dir: str, faiss_index=None):
         )
         if not selected_classes:
             st.button(
-                "🔄 Reset All Filters", key="reset_all_filters_button", use_container_width=True
+                "🔄 Reset All Filters",
+                key="reset_all_filters_button",
+                use_container_width=True,
             )
 
         with st.expander("⌨️ Keyboard Shortcuts"):
@@ -312,6 +335,7 @@ def render_sidebar(user_role: str, root_dir: str, faiss_index=None):
                 host_limit_mb = 2048.0
                 try:
                     from src.core.app_config import get_host_memory_limit_mb
+
                     host_limit_mb = float(get_host_memory_limit_mb())
                 except Exception:
                     pass
@@ -320,9 +344,13 @@ def render_sidebar(user_role: str, root_dir: str, faiss_index=None):
                 ram_percent_val = (rss_mb / host_limit_mb) * 100
 
                 if ram_percent_val >= 80:
-                    st.warning(f"⚠️ High RAM Usage: {rss_mb:.1f} MB / {host_limit_mb:.0f} MB ({ram_percent_val:.0f}%)")
+                    st.warning(
+                        f"⚠️ High RAM Usage: {rss_mb:.1f} MB / {host_limit_mb:.0f} MB ({ram_percent_val:.0f}%)"
+                    )
                 else:
-                    st.markdown(f"**RAM Usage:** {rss_mb:.1f} MB / {host_limit_mb:.0f} MB ({ram_percent_val:.0f}%)")
+                    st.markdown(
+                        f"**RAM Usage:** {rss_mb:.1f} MB / {host_limit_mb:.0f} MB ({ram_percent_val:.0f}%)"
+                    )
 
                 st.progress(ram_usage_percent)
             except Exception as mem_err:
@@ -370,7 +398,9 @@ def render_corpus_header(index_path: str):
             clear_all_dialog(index_path)
 
 
-def render_document_management_sidebar(user_role: str, index_path: str, session_id: str, last_interaction: float):
+def render_document_management_sidebar(
+    user_role: str, index_path: str, session_id: str, last_interaction: float
+):
     """Render Document Management table, bulk export ZIP, and clear buttons."""
     if user_role != "admin":
         return
@@ -383,7 +413,7 @@ def render_document_management_sidebar(user_role: str, index_path: str, session_
 
     safe_last_interaction = int(last_interaction or 0)
     st.markdown(
-        f"""
+        """
         <div id="session-timer" style="
             background-color: rgba(255, 165, 0, 0.1);
             border: 1px solid rgba(255, 165, 0, 0.3);
@@ -420,7 +450,11 @@ def render_document_management_sidebar(user_role: str, index_path: str, session_
                     (
                         doc.assignment_title
                         if hasattr(doc, "assignment_title")
-                        else (doc.get("assignment_title") if isinstance(doc, dict) else None)
+                        else (
+                            doc.get("assignment_title")
+                            if isinstance(doc, dict)
+                            else None
+                        )
                     )
                     for doc in existing_docs
                 }
@@ -440,7 +474,9 @@ def render_document_management_sidebar(user_role: str, index_path: str, session_
                 if (
                     doc.assignment_title
                     if hasattr(doc, "assignment_title")
-                    else (doc.get("assignment_title") if isinstance(doc, dict) else None)
+                    else (
+                        doc.get("assignment_title") if isinstance(doc, dict) else None
+                    )
                 )
                 == selected_assignment
             ]
@@ -550,6 +586,7 @@ def render_document_management_sidebar(user_role: str, index_path: str, session_
                     delete_document(fn)
                     from src.core.faiss_index import build_index_from_matrix, save_index
                     from src.db.corpus_db import get_all_embeddings
+
                     embeddings_matrix = get_all_embeddings()
                     if embeddings_matrix.size > 0:
                         new_index = build_index_from_matrix(embeddings_matrix)
