@@ -1381,7 +1381,8 @@ def extract_text_from_url(url: str) -> str:
     Raises:
         ValueError: If the URL is invalid
         Exception: If fetching or parsing fails
-    """    try:
+    """
+    try:
         import requests
         from bs4 import BeautifulSoup
     except ImportError as exc:
