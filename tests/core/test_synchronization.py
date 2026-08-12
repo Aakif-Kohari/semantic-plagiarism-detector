@@ -138,3 +138,21 @@ def test_backup_corrupted_index_mechanics():
             "/fake/data/backups/corpus_20240101_120000.index.bak"
         )
         mock_copy.assert_called_once_with("/fake/data/corpus.index", expected_dest)
+
+
+def test_atexit_graceful_shutdown_registered():
+    """Verify that background_tasks.shutdown is registered with atexit."""
+    import atexit
+    from src.core.synchronization import background_tasks
+    
+    found = False
+    for handler in atexit._exithandlers:
+        # atexit handlers are tuples of (func, args, kwargs)
+        func, args, kwargs = handler[0], handler[1], handler[2]
+        if func == background_tasks.shutdown:
+            assert kwargs.get("wait") is True
+            found = True
+            break
+            
+    assert found, "Graceful shutdown callback was not registered with atexit"
+
