@@ -9,12 +9,11 @@ import pytest
 
 from src.core.text_chunking import (
     ChunkString,
+    _find_sentence_boundary,
     chunk_by_sentences,
     chunk_documents,
     chunk_text,
     chunk_text_dynamic,
-    _find_sentence_boundary,
-    DEFAULT_CHUNK_SIZE,
 )
 
 
@@ -562,8 +561,8 @@ def test_chunkstring_strip_returns_plain_str():
 
 def test_nltk_punkt_download_called_at_most_once(monkeypatch):
     """Missing punkt corpus should trigger nltk.download only once across calls."""
-    from unittest.mock import MagicMock
     import sys
+    from unittest.mock import MagicMock
 
     import src.core.text_chunking as text_chunking
     from src.core.text_chunking import _split_into_sentences
@@ -591,16 +590,18 @@ def test_nltk_punkt_download_called_at_most_once(monkeypatch):
     assert mock_download.call_count == 1
     mock_download.assert_called_with("punkt_tab", quiet=True)
     assert text_chunking._nltk_punkt_checked is True
+
+
 def test_dynamic_snaps_to_period():
     """Test that chunk_text_dynamic snaps chunk boundaries to a period within the margin."""
     from src.core.text_chunking import chunk_text_dynamic
-    
+
     # Construct text where a period falls near the target split boundary (e.g. target ~50 chars)
     # The snapping margin is 20% (±10 chars around index 50).
     text = "This is the first sentence that is quite long. Here is the second short sentence."
-    
+
     chunks = chunk_text_dynamic(text, target_size=45)
-    
+
     # Verify that the first chunk correctly snapped to the period after "long."
     assert len(chunks) > 0
     assert chunks[0].endswith(".")
@@ -610,12 +611,12 @@ def test_dynamic_snaps_to_period():
 def test_dynamic_no_punctuation():
     """Test that text without sentence-ending punctuation falls back to an exact character split."""
     from src.core.text_chunking import chunk_text_dynamic
-    
+
     text = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
     target_size = 20
-    
+
     chunks = chunk_text_dynamic(text, target_size=target_size)
-    
+
     # Verify that chunks are split strictly by the target character length without punctuation snapping
     assert len(chunks) > 1
     assert chunks[0] == text[:target_size]
@@ -624,16 +625,18 @@ def test_dynamic_no_punctuation():
 def test_dynamic_single_chunk():
     """Test that text shorter than target_size is returned as a single chunk."""
     from src.core.text_chunking import chunk_text_dynamic
-    
+
     text = "Short text."
     chunks = chunk_text_dynamic(text, target_size=100)
-    
+
     assert len(chunks) == 1
     assert chunks[0] == text
+
+
 def test_sentence_boundary_empty_text():
     """Test that _find_sentence_boundary returns the original index when given empty text."""
     from src.core.text_chunking import _find_sentence_boundary
-    
+
     index = 10
     result = _find_sentence_boundary("", index, max_search=5)
     assert result == index
@@ -642,7 +645,7 @@ def test_sentence_boundary_empty_text():
 def test_sentence_boundary_no_match():
     """Test that _find_sentence_boundary returns the original index when no punctuation is found within max_search."""
     from src.core.text_chunking import _find_sentence_boundary
-    
+
     text = "abcdefghijklmnopqrstuvwxyz"
     index = 10
     # No punctuation anywhere near index 10, and tight max_search
@@ -653,7 +656,7 @@ def test_sentence_boundary_no_match():
 def test_sentence_boundary_backward():
     """Test that _find_sentence_boundary finds the nearest backward sentence end."""
     from src.core.text_chunking import _find_sentence_boundary
-    
+
     # "Hello world. How are you?"
     # Period is at index 11. If target index is 13, it should search backward and snap to index 12 (after period/space).
     text = "Hello world. How are you?"
@@ -667,11 +670,10 @@ def test_sentence_boundary_backward():
 def test_sentence_boundary_forward():
     """Test that _find_sentence_boundary finds the nearest forward sentence end."""
     from src.core.text_chunking import _find_sentence_boundary
-    
+
     text = "Hello world. How are you?"
     # Index 9 is inside "world", period is at index 11. Searching forward within max_search should find it.
     index = 9
     result = _find_sentence_boundary(text, index, max_search=5)
     assert result != index
     assert text[result - 1] in ".!?"
-    

@@ -29,6 +29,7 @@ def test_login_rate_limit():
     assert response.status_code == 429
     assert "detail" in response.json()
 
+
 def test_health_check():
     """Verify that GET /health returns 200 OK and healthy status."""
     response = client.get("/health")
@@ -228,6 +229,7 @@ def test_clear_all_documents_already_empty(
 def test_bearer_token_not_set_in_production():
     """Verify that when API_BEARER_TOKEN is unset in production, a clean HTTP 500 JSON response is returned."""
     import os
+
     env_mock = os.environ.copy()
     env_mock.pop("API_BEARER_TOKEN", None)
     env_mock["APP_ENV"] = "production"
@@ -238,5 +240,7 @@ def test_bearer_token_not_set_in_production():
             headers={"Authorization": "Bearer any-token"},
         )
         assert response.status_code == 500
-        assert response.json()["detail"] == "Server misconfiguration: API_BEARER_TOKEN not set."
-
+        assert (
+            response.json()["detail"]
+            == "Server misconfiguration: API_BEARER_TOKEN not set."
+        )

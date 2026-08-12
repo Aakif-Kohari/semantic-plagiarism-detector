@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 INCIDENTS_PATH = Path("src/db/incidents.py")
 
 

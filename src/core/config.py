@@ -11,7 +11,7 @@ import json
 import logging
 import os
 import re
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -186,10 +186,12 @@ def reload_branding_config() -> BrandingConfig:
     global _branding_config
     _branding_config = load_branding_config()
     return _branding_config
+
+
 """Central plagiarism threshold and severity configuration."""
 
-from dataclasses import dataclass
 import os
+from dataclasses import dataclass
 from math import isfinite
 from numbers import Real
 from typing import Final, Mapping
@@ -228,8 +230,7 @@ class SimilarityThresholds:
 
         if not plagiarism <= medium <= high:
             raise ValueError(
-                "Thresholds must satisfy "
-                "0.0 <= plagiarism <= medium <= high <= 1.0."
+                "Thresholds must satisfy " "0.0 <= plagiarism <= medium <= high <= 1.0."
             )
 
         object.__setattr__(self, "plagiarism", plagiarism)
@@ -258,8 +259,7 @@ def validate_thresholds(
 
     if not thresholds.plagiarism <= thresholds.medium <= thresholds.high:
         raise ValueError(
-            "Thresholds must satisfy "
-            "0.0 <= plagiarism <= medium <= high <= 1.0."
+            "Thresholds must satisfy " "0.0 <= plagiarism <= medium <= high <= 1.0."
         )
 
     return thresholds

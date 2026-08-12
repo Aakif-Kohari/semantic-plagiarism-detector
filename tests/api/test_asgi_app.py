@@ -7,10 +7,11 @@ Includes tests for security headers, CSP policy, and middleware behavior.
 """
 
 import os
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
-from starlette.testclient import TestClient
 from fastapi import FastAPI
+from starlette.testclient import TestClient
 
 from src.asgi_app import SecurityHeadersMiddleware
 

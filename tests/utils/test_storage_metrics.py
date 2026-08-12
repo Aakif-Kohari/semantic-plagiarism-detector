@@ -52,6 +52,11 @@ def test_get_faiss_index_paths() -> None:
 def test_path_resolution_logs_debug_warning(caplog) -> None:
     """Verify that exceptions during path resolution log debug warnings."""
     with caplog.at_level(logging.DEBUG):
-        with patch("src.db.corpus_db.get_corpus_db_path", side_effect=Exception("Database path resolution error")):
+        with patch(
+            "src.db.corpus_db.get_corpus_db_path",
+            side_effect=Exception("Database path resolution error"),
+        ):
             get_sqlite_db_paths()
-            assert "Could not resolve path: Database path resolution error" in caplog.text
+            assert (
+                "Could not resolve path: Database path resolution error" in caplog.text
+            )

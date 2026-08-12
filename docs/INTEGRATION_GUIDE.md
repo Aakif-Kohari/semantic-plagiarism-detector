@@ -200,11 +200,11 @@ def scan_document(file_path: str, threshold: float = 0.59):
     url = f"{API_URL}/api/v1/scan"
     params = {"threshold": threshold}
     headers = {"Authorization": f"Bearer {API_TOKEN}"}
-    
+
     with open(file_path, "rb") as f:
         files = {"file": (file_path, f, "application/pdf")}
         response = requests.post(url, headers=headers, params=params, files=files)
-    
+
     return response.json()
 
 result = scan_document("assignment1.pdf")
@@ -225,10 +225,10 @@ async function scanDocument(filePath, threshold = 0.59) {
   const headers = {
     'Authorization': `Bearer ${API_TOKEN}`
   };
-  
+
   const form = new FormData();
   form.append('file', fs.createReadStream(filePath));
-  
+
   const response = await axios.post(url, form, { headers });
   return response.data;
 }
@@ -248,27 +248,27 @@ $filePath = 'assignment1.pdf';
 
 function scanDocument($filePath, $threshold = 0.59) {
     global $apiUrl, $apiToken;
-    
+
     $url = $apiUrl . '/api/v1/scan?threshold=' . $threshold;
     $ch = curl_init();
-    
+
     $postFields = [
         'file' => new CURLFile($filePath)
     ];
-    
+
     $headers = [
         'Authorization: Bearer ' . $apiToken
     ];
-    
+
     curl_setopt($ch, CURLOPT_URL, $url);
     curl_setopt($ch, CURLOPT_POST, true);
     curl_setopt($ch, CURLOPT_POSTFIELDS, $postFields);
     curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    
+
     $response = curl_exec($ch);
     curl_close($ch);
-    
+
     return json_decode($response, true);
 }
 
@@ -354,12 +354,12 @@ def process_scan_result(result: dict):
             'status': 'clean',
             'score': result['max_chunk_similarity']
         }
-    
+
     flagged_matches = result['matched_documents']
     highest_match = max(flagged_matches, key=lambda x: x['max_chunk_similarity_score'])
-    
+
     severity = 'high' if highest_match['max_chunk_similarity_score'] >= 0.90 else 'medium'
-    
+
     return {
         'status': 'flagged',
         'score': highest_match['max_chunk_similarity_score'],
@@ -378,14 +378,14 @@ function processScanResult(result) {
             score: result.max_chunk_similarity
         };
     }
-    
+
     const flaggedMatches = result.matched_documents;
-    const highestMatch = flaggedMatches.reduce((max, m) => 
+    const highestMatch = flaggedMatches.reduce((max, m) =>
         m.max_chunk_similarity_score > max.max_chunk_similarity_score ? m : max
     );
-    
+
     const severity = highestMatch.max_chunk_similarity_score >= 0.90 ? 'high' : 'medium';
-    
+
     return {
         status: 'flagged',
         score: highestMatch.max_chunk_similarity_score,
@@ -405,15 +405,15 @@ function processScanResult($result) {
             'score' => $result['max_chunk_similarity']
         ];
     }
-    
+
     $flaggedMatches = $result['matched_documents'];
     $highestMatch = array_reduce($flaggedMatches, function($carry, $item) {
-        return ($item['max_chunk_similarity_score'] > $carry['max_chunk_similarity_score']) 
+        return ($item['max_chunk_similarity_score'] > $carry['max_chunk_similarity_score'])
             ? $item : $carry;
     });
-    
+
     $severity = $highestMatch['max_chunk_similarity_score'] >= 0.90 ? 'high' : 'medium';
-    
+
     return [
         'status' => 'flagged',
         'score' => $highestMatch['max_chunk_similarity_score'],
@@ -431,7 +431,7 @@ function processScanResult($result) {
 def store_in_gradebook(student_id, assignment_id, result, canvas_api):
     score = result['max_chunk_similarity']
     status = 'flagged' if result['plagiarism_flagged'] else 'clean'
-    
+
     # Update LMS grade or status
     canvas_api.update_submission_status(
         assignment_id,
@@ -644,14 +644,14 @@ def submit_to_plagiarism_detector(canvas_submission, api_token):
     # Download file from Canvas
     file_url = canvas_submission['attachments'][0]['url']
     file_response = requests.get(file_url)
-    
+
     # Scan with plagiarism detector
     scan_response = requests.post(
         "http://localhost:8000/api/v1/scan",
         headers={"Authorization": f"Bearer {api_token}"},
         files={"file": (canvas_submission['attachments'][0]['filename'], file_response.content)}
     )
-    
+
     return scan_response.json()
 ```
 
@@ -706,23 +706,23 @@ $service = [
 ```php
 function submit_to_plagiarism_detector($filepath, $apikey) {
     $url = 'http://localhost:8000/api/v1/scan';
-    
+
     $ch = curl_init();
     curl_setopt($ch, CURLOPT_URL, $url);
     curl_setopt($ch, CURLOPT_POST, 1);
-    
+
     $cfile = new CURLFile($filepath);
     $post = ['file' => $cfile];
-    
+
     curl_setopt($ch, CURLOPT_HTTPHEADER, [
         'Authorization: Bearer ' . $apikey
     ]);
     curl_setopt($ch, CURLOPT_POSTFIELDS, $post);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    
+
     $response = curl_exec($ch);
     curl_close($ch);
-    
+
     return json_decode($response, true);
 }
 ```
@@ -752,19 +752,19 @@ Blackboard uses the Building Blocks API.
 ```java
 // Blackboard Java integration
 public class PlagiarismSubmission {
-    
+
     public PlagiarismResult submitToPlagiarismDetector(String filePath) {
         try {
             URL url = new URL("http://localhost:8000/api/v1/scan");
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            
+
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Authorization", "Bearer " + apiKey);
             conn.setDoOutput(true);
-            
+
             // Upload file and get response
             // ... (file upload logic)
-            
+
         } catch (Exception e) {
             // Handle error
         }
@@ -808,10 +808,10 @@ Never expose the API over HTTP in production:
 server {
     listen 443 ssl;
     server_name plagiarism-api.your-institution.edu;
-    
+
     ssl_certificate /path/to/cert.pem;
     ssl_certificate_key /path/to/key.pem;
-    
+
     location / {
         proxy_pass http://localhost:8000;
     }
@@ -905,13 +905,13 @@ def test_health_check():
 def test_scan_document(api_token):
     # Create test file
     test_content = b"This is a test document for plagiarism checking."
-    
+
     response = requests.post(
         "http://localhost:8000/api/v1/scan",
         headers={"Authorization": f"Bearer {api_token}"},
         files={"file": ("test.txt", test_content)}
     )
-    
+
     assert response.status_code == 200
     data = response.json()
     assert "filename" in data
@@ -936,14 +936,14 @@ def test_scan_document(api_token):
 
 ### Issue: Webhook not sending
 
-**Solution:** 
+**Solution:**
 1. Verify `PLAGIARISM_WEBHOOK_URL` is set
 2. Check webhook URL is accessible
 3. Review server logs for request failures
 
 ### Issue: High memory usage
 
-**Solution:** 
+**Solution:**
 1. Limit `top_k` parameter
 2. Reduce `threshold` to scan fewer documents
 3. Restart server after large batches

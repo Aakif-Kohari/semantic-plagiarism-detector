@@ -2,10 +2,16 @@ import faiss
 import numpy as np
 import pytest
 
-from src.core.faiss_index import (ChunkRecord, build_index,
-                                  find_plagiarised_chunks, load_index,
-                                  optimize_faiss_index, save_index, search_similar_chunks,
-                                  search_batch_vectors)
+from src.core.faiss_index import (
+    ChunkRecord,
+    build_index,
+    find_plagiarised_chunks,
+    load_index,
+    optimize_faiss_index,
+    save_index,
+    search_batch_vectors,
+    search_similar_chunks,
+)
 
 
 def _unit_vecs(n, dim=384):
@@ -227,6 +233,7 @@ def test_optimize_faiss_index_below_threshold(caplog):
 def test_optimize_faiss_index_converts_above_threshold(caplog, monkeypatch):
     """Above 5000 threshold, converts flat index to IVF index and logs count."""
     import logging
+
     import src.core.faiss_index as faiss_mod
 
     # Lower threshold temporarily for unit test speed
@@ -314,7 +321,7 @@ def test_search_batch_vectors():
     # Check shapes
     assert distances.shape == (3, 5)
     assert indices.shape == (3, 5)
-    
+
     # Check types and basic properties
     assert distances.dtype == np.float32
     assert np.issubdtype(indices.dtype, np.integer)
@@ -338,5 +345,3 @@ def test_search_batch_vectors():
 
     with pytest.raises(ValueError):
         search_batch_vectors(query_batch, "not-a-faiss-index")
-
-

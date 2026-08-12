@@ -10,13 +10,14 @@ from pathlib import Path
 from typing import Any, Generator, Iterable, Optional
 
 from src.db.common import with_sqlite_retry
-from src.db.connection import DEFAULT_SQLITE_TIMEOUT, create_connection, get_connection
+from src.db.connection import create_connection, get_connection
 
 logger = logging.getLogger(__name__)
 
 
 class DatabaseError(Exception):
     """Base exception class for database access errors."""
+
     pass
 
 
@@ -79,9 +80,7 @@ class BaseRepository:
             return cursor.rowcount
 
     @with_sqlite_retry
-    def fetch_one(
-        self, sql: str, params: tuple | dict = ()
-    ) -> Optional[sqlite3.Row]:
+    def fetch_one(self, sql: str, params: tuple | dict = ()) -> Optional[sqlite3.Row]:
         """Fetch a single matching row."""
         with self.connection(read_only=True) as conn:
             cursor = conn.cursor()
@@ -89,9 +88,7 @@ class BaseRepository:
             return cursor.fetchone()
 
     @with_sqlite_retry
-    def fetch_all(
-        self, sql: str, params: tuple | dict = ()
-    ) -> list[sqlite3.Row]:
+    def fetch_all(self, sql: str, params: tuple | dict = ()) -> list[sqlite3.Row]:
         """Fetch all matching rows."""
         with self.connection(read_only=True) as conn:
             cursor = conn.cursor()
@@ -113,5 +110,8 @@ class BaseRepository:
         with self.connection(read_only=True) as conn:
             cursor = conn.cursor()
             cursor.execute(f"PRAGMA table_info('{table_name}')")
-            columns = [r["name"] if isinstance(r, sqlite3.Row) else r[1] for r in cursor.fetchall()]
+            columns = [
+                r["name"] if isinstance(r, sqlite3.Row) else r[1]
+                for r in cursor.fetchall()
+            ]
             return column_name in columns

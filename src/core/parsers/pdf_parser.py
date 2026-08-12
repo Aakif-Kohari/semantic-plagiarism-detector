@@ -16,7 +16,11 @@ from src.core.parsers.common import (
     check_batch_rate_limit,
     normalize_ocr_settings,
 )
-from src.core.parsers.ocr_parser import OCRDependencyError, _is_blank_scanned_page, _ocr_pdf_page
+from src.core.parsers.ocr_parser import (
+    OCRDependencyError,
+    _is_blank_scanned_page,
+    _ocr_pdf_page,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -195,6 +199,7 @@ def _extract_single_file_helper(
 ) -> str:
     """Helper running in a subprocess to extract text from a single file."""
     from src.core.parsers.dispatch import extract_text
+
     return extract_text(data, name, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
 
 
@@ -330,6 +335,7 @@ def count_pdf_images(pdf_bytes: bytes) -> int:
     """Count embedded images in a PDF by inspecting page image lists."""
     try:
         import fitz
+
         with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
             return sum(len(page.get_images()) for page in doc)
     except Exception:
@@ -343,6 +349,7 @@ def extract_pdf_metadata(file: PDFInput) -> Dict[str, str]:
 
     try:
         import fitz
+
         with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
             doc_metadata = doc.metadata
             metadata["author"] = doc_metadata.get("author")
@@ -379,6 +386,7 @@ def extract_text_from_pdf(
 
     try:
         import magic
+
         mime_type = magic.from_buffer(pdf_bytes, mime=True)
         if mime_type != "application/pdf":
             logger.warning(
@@ -400,6 +408,7 @@ def extract_text_from_pdf(
 
             if _should_use_parallel() and num_pages > 1:
                 from concurrent.futures import ProcessPoolExecutor
+
                 page_lines = [[] for _ in range(num_pages)]
                 try:
                     with ProcessPoolExecutor() as executor:

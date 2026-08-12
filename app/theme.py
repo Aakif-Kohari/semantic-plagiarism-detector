@@ -13,17 +13,6 @@ Provides:
 """
 # -*- coding: utf-8 -*-
 
-from app.css_constants import (
-    BADGE,
-    EMPTY_STATE,
-    EMPTY_ICON,
-    EMPTY_TITLE,
-    EMPTY_DESC,
-    SIDEBAR_USER_BADGE,
-    AVATAR,
-    SIM_PILL,
-)
-
 
 """
 theme.py
@@ -42,6 +31,7 @@ Recent Additions (Issue #572):
 import re
 import secrets
 from datetime import datetime, timezone
+
 import streamlit as st
 
 
@@ -166,6 +156,7 @@ except ImportError:
         CLASS_SIM_PILL,
         CLASS_WELCOME_BANNER,
     )
+
 from src.core.config import DEFAULT_THRESHOLDS, normalize_severity_label, severity_key
 
 # ── CSS Class Constants ────────────────────────────────────────────────────────
@@ -1278,8 +1269,10 @@ def inject_css() -> None:
     st.markdown(hotkey_js, unsafe_allow_html=True)
     st.markdown(back_to_top_html(), unsafe_allow_html=True)
 
+
 # ── Severity Helpers ───────────────────────────────────────────────────────────
 from typing import Any
+
 try:
     from src.core.config import (
         DEFAULT_THRESHOLDS,
@@ -1382,6 +1375,7 @@ def badge_html(tier: str, label: str = None) -> str:
         f"{display_label}</span>"
     )
 
+
 def render_notification_badge(count: int) -> str:
     """Render a red notification badge for unresolved incidents.
 
@@ -1390,11 +1384,9 @@ def render_notification_badge(count: int) -> str:
     if count <= 0:
         return ""
 
-    return (
-        '<span class="notification-badge">'
-        f"{count}"
-        "</span>"
-    )
+    return '<span class="notification-badge">' f"{count}" "</span>"
+
+
 # ── UI helpers ────────────────────────────────────────────────────────────────
 def format_similarity_html(
     score: float,
@@ -1559,7 +1551,6 @@ def version_check_widget_html(
     """
 
 
-
 def active_tab_border_style(color: str = "#4f46e5", width: int = 4) -> str:
     """Return inline CSS string for an active navigation tab accent border (Issue #1028).
 
@@ -1717,7 +1708,7 @@ def generate_active_tab_theme_tokens(theme_name: str | None = None) -> dict[str,
     }
 
 
-def get_sidebar_navigation_config() -> dict[str, Any]: # type: ignore
+def get_sidebar_navigation_config() -> dict[str, Any]:  # type: ignore
     """Return central configuration parameters for sidebar active tab rendering.
 
     Returns:
@@ -1904,6 +1895,7 @@ def render_timezone_footer() -> str:
 def render_session_status_banner() -> None:
     """Render caption banner in dashboard footer displaying active session runtime."""
     import time
+
     from app.session_keys import SessionKeys
 
     if SessionKeys.SESSION_START_TIME not in st.session_state:
@@ -1914,5 +1906,3 @@ def render_session_status_banner() -> None:
     elapsed_minutes = int(elapsed_seconds // 60)
 
     st.caption(f"Active Session: {elapsed_minutes} mins")
-
-

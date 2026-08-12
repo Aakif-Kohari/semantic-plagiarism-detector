@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -57,7 +56,9 @@ def create_connection(
             conn.execute("PRAGMA journal_mode = WAL")
             conn.execute("PRAGMA synchronous = NORMAL")
         except sqlite3.OperationalError as exc:
-            logger.debug(f"[db.connection] Could not set WAL mode for '{db_path}': {exc}")
+            logger.debug(
+                f"[db.connection] Could not set WAL mode for '{db_path}': {exc}"
+            )
 
     return conn
 

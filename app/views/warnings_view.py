@@ -6,6 +6,7 @@ date range filters, and expand/collapse controls.
 """
 
 from datetime import date, timedelta
+
 import streamlit as st
 
 from app.session_keys import SessionKeys
@@ -35,7 +36,9 @@ def get_date_range_preset(preset: str) -> tuple[date, date]:
         return date(2020, 1, 1), today
 
 
-def render_warnings_view(flags: list, threshold: float, ai_probabilities: dict, lang_code: str):
+def render_warnings_view(
+    flags: list, threshold: float, ai_probabilities: dict, lang_code: str
+):
     """Render Tab 1: Warnings & Live Incident Stream."""
     st.subheader(get_text("tab_warnings", lang=lang_code))
 

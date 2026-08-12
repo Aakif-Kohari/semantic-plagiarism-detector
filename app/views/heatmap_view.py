@@ -6,6 +6,7 @@ and collusion ring cluster summaries.
 """
 
 import streamlit as st
+
 from app.state_manager import ui_exception_handler
 from app.theme import get_chart_colors
 from src.core.similarity import detect_plagiarism_clusters
@@ -69,7 +70,9 @@ def render_heatmap_view(active_sim_df, threshold: float, doc_names: list):
                 )
 
                 for group in suspicious_groups:
-                    st.markdown(f"**Cluster #{group['cluster_id']}** ({group['size']} documents):")
+                    st.markdown(
+                        f"**Cluster #{group['cluster_id']}** ({group['size']} documents):"
+                    )
                     for doc in group["documents"]:
                         st.markdown(f"- 📄 `{doc}`")
                     st.divider()

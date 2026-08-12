@@ -40,9 +40,10 @@ def compare_pdf_bytes(
         return (False, f"Golden fixture not found: {golden_path}")
 
     # Extract text from both PDFs using pypdf
-    from pypdf import PdfReader
-    from io import BytesIO
     import re
+    from io import BytesIO
+
+    from pypdf import PdfReader
 
     def extract_text(pdf_bytes: bytes) -> str:
         reader = PdfReader(BytesIO(pdf_bytes))
@@ -53,7 +54,9 @@ def compare_pdf_bytes(
         # Remove "Generated: YYYY-MM-DD HH:MM:SS" lines
         text = re.sub(r"Generated:\s*\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}", "", text)
         # Remove "Generated: YYYY-MM-DD HH:MM:SS" with optional leading/trailing space
-        text = re.sub(r"\s*Generated:\s*\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\s*", "\n", text)
+        text = re.sub(
+            r"\s*Generated:\s*\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\s*", "\n", text
+        )
         # Clean up multiple consecutive newlines
         text = re.sub(r"\n{3,}", "\n\n", text)
         # Strip leading/trailing whitespace from each line

@@ -12,7 +12,7 @@ Recent Additions (Issue #1998):
 """
 
 from dataclasses import dataclass
-from typing import Generic, List, TypeVar, Optional
+from typing import Generic, List, Optional, TypeVar
 
 T = TypeVar("T")
 

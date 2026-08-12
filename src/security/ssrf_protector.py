@@ -1,10 +1,10 @@
 import ipaddress
 import logging
-import requests
 import socket
 import time
 import urllib.parse
 from typing import Dict, Tuple
+
 import requests
 
 from src.errors import (
@@ -190,9 +190,7 @@ class SSRFProtector:
                         raise SSRFSecurityException(
                             SSRF_BLOCKED_LOOPBACK.format(ip=ip_str)
                         )
-                    raise SSRFSecurityException(
-                        SSRF_BLOCKED_PRIVATE.format(ip=ip_str)
-                    )
+                    raise SSRFSecurityException(SSRF_BLOCKED_PRIVATE.format(ip=ip_str))
         if ip.is_loopback:
             raise SSRFSecurityException(SSRF_BLOCKED_LOOPBACK.format(ip=ip_str))
         if ip.is_link_local:
@@ -211,7 +209,7 @@ class SSRFProtector:
         except Exception as e:
             logger.debug(f"Outgoing HTTP validation request failed for {url}: {e}")
 
-# If it passed all checks, it's considered safe (public routable IP)
+        # If it passed all checks, it's considered safe (public routable IP)
         logger.debug(f"SSRF Check passed for {url} -> {ip_str}")
         return True
 
@@ -273,6 +271,7 @@ class SSRFProtector:
             )
 
         return current_url, pinned_ip
+
     @classmethod
     def validate_url_safety(
         cls,
