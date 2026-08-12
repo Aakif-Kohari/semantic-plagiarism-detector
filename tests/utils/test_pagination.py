@@ -7,9 +7,146 @@ Validates PaginationPage dataclass behavior including __repr__, __eq__,
 factory methods, and navigation helpers.
 """
 
+import doctest
+
 import pytest
 
+from src.utils import pagination
 from src.utils.pagination import PaginationPage
+
+
+class TestPaginationPageReprClassName:
+    """Regression tests for the class name in __repr__ (Issue #2200).
+
+    __repr__ built its output from a hardcoded string that misspelled the
+    class as "PagnationPage". Every log line, traceback, and debugger frame
+    printed a class name that does not exist, so grepping logs for
+    "PaginationPage" returned nothing.
+
+    The pre-existing repr tests below all assert on substrings like
+    "page=1/2" and "items=[1, 2, 3]" and never look at the class name, which
+    is exactly how the typo survived. These tests close that gap.
+    """
+
+    def test_repr_starts_with_the_real_class_name(self):
+        page = PaginationPage(
+            items=[1, 2, 3],
+            page=1,
+            total_pages=2,
+            total_items=10,
+            per_page=5,
+        )
+
+        assert repr(page).startswith("PaginationPage(")
+
+    def test_repr_does_not_contain_the_misspelling(self):
+        page = PaginationPage(
+            items=[1, 2, 3],
+            page=1,
+            total_pages=2,
+            total_items=10,
+            per_page=5,
+        )
+
+        assert "PagnationPage" not in repr(page)
+
+    def test_repr_class_name_matches_the_type(self):
+        """The name must be derived from the type, not hardcoded."""
+        page = PaginationPage(
+            items=[],
+            page=1,
+            total_pages=1,
+            total_items=0,
+            per_page=10,
+        )
+
+        assert repr(page).startswith(f"{type(page).__name__}(")
+
+    def test_subclass_reports_its_own_name(self):
+        """A hardcoded name would report the base class for any subclass."""
+
+        class AuditLogPage(PaginationPage):
+            pass
+
+        page = AuditLogPage(
+            items=[1, 2],
+            page=1,
+            total_pages=1,
+            total_items=2,
+            per_page=10,
+        )
+
+        assert repr(page).startswith("AuditLogPage(")
+        assert "PaginationPage(" not in repr(page)
+
+    def test_repr_includes_per_page(self):
+        """per_page is a field but was invisible in the repr."""
+        page = PaginationPage(
+            items=[1, 2, 3],
+            page=1,
+            total_pages=2,
+            total_items=10,
+            per_page=5,
+        )
+
+        assert "per_page=5" in repr(page)
+
+    def test_repr_distinguishes_pages_that_differ_only_by_page_size(self):
+        """Without per_page these two rendered identically."""
+        first = PaginationPage(
+            items=[1, 2, 3],
+            page=1,
+            total_pages=2,
+            total_items=10,
+            per_page=5,
+        )
+        second = PaginationPage(
+            items=[1, 2, 3],
+            page=1,
+            total_pages=2,
+            total_items=10,
+            per_page=50,
+        )
+
+        assert repr(first) != repr(second)
+
+    def test_repr_is_exactly_as_documented(self):
+        """Pin the full string so the format cannot drift silently."""
+        truncated = PaginationPage(
+            items=[1, 2, 3, 4, 5],
+            page=1,
+            total_pages=2,
+            total_items=10,
+            per_page=5,
+        )
+        full = PaginationPage(
+            items=[1, 2],
+            page=1,
+            total_pages=1,
+            total_items=2,
+            per_page=10,
+        )
+
+        assert repr(truncated) == "PaginationPage(page=1/2, items=5, per_page=5)"
+        assert repr(full) == "PaginationPage(page=1/1, items=[1, 2], per_page=10)"
+
+
+class TestPaginationModuleDoctests:
+    """The __repr__ docstring examples must match real behaviour."""
+
+    def test_docstring_examples_pass(self):
+        results = doctest.testmod(pagination, verbose=False)
+
+        assert results.failed == 0, (
+            f"{results.failed} of {results.attempted} doctests in "
+            "src/utils/pagination.py failed"
+        )
+
+    def test_doctests_are_actually_present(self):
+        """Guard the guard: testmod passes vacuously with no examples."""
+        results = doctest.testmod(pagination, verbose=False)
+
+        assert results.attempted > 0, "expected doctest examples in pagination.py"
 
 
 class TestPaginationPageRepr:
@@ -173,7 +310,9 @@ class TestPaginationPageEq:
         assert page != "not a page"
         assert page != 123
         assert page != {"items": [1, 2, 3]}
-        assert page != None
+        # Deliberate `!=` rather than `is not`: this exercises __eq__'s
+        # non-PaginationPage branch, which `is not None` would bypass.
+        assert page != None  # noqa: E711
 
     def test_equal_pages_have_same_hash(self):
         """Verify equal pages have the same hash (for use in sets/dicts)."""
