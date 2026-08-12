@@ -3,8 +3,9 @@ import logging
 import socket
 import time
 import urllib.parse
-from typing import Dict
+from typing import Dict, Tuple
 
+import requests
 
 from src.errors import (
     SSRF_BLOCKED_LINK_LOCAL,
@@ -15,16 +16,15 @@ from src.errors import (
     SSRF_DNS_NO_ADDRESSES,
     SSRF_DNS_RESOLUTION_FAILED,
     SSRF_DOMAIN_NOT_ALLOWED,
-    SSRF_WEBHOOK_URL_EMPTY,
     SSRF_INSECURE_SCHEME,
     SSRF_INVALID_IP_FORMAT,
     SSRF_MISSING_HOSTNAME,
+    SSRF_WEBHOOK_URL_EMPTY,
 )
-
 
 logger = logging.getLogger(__name__)
 
-
+DEFAULT_USER_AGENT = "SemanticPlagiarismDetector/1.0"
 
 RESTRICTED_IPV4_CIDR_BLOCKS = (
     "127.0.0.0/8",
@@ -83,6 +83,8 @@ class SSRFProtector:
     _dns_cache: Dict[str, tuple[str, float]] = {}
     DNS_CACHE_TTL_SECONDS = 300  # 5 minutes
     RESTRICTED_IPV4_CIDR_BLOCKS = RESTRICTED_IPV4_CIDR_BLOCKS
+    MAX_REDIRECT_DEPTH = 5
+    DEFAULT_USER_AGENT = DEFAULT_USER_AGENT
 
     @classmethod
     def _resolve_hostname(cls, hostname: str) -> str:
@@ -119,16 +121,18 @@ class SSRFProtector:
         cls,
         url: str,
         allowed_domains: list[str] | None = None,
+        user_agent: str = DEFAULT_USER_AGENT,
     ) -> bool:
         """
         Validates that a provided webhook URL is safe to dispatch.
         Ensures the URL uses HTTPS, its domain is in ALLOWED_WEBHOOK_DOMAINS (if configured),
-        and does not resolve to any internal network IP.
+        does not resolve to any internal network IP, and sends an outgoing HTTP validation check.
 
         Args:
             url: The webhook URL string
             allowed_domains: Optional list of allowed domain hostnames. If None,
                 fetches configured domains via ``get_allowed_webhook_domains()``.
+            user_agent: Custom User-Agent header for validation requests.
 
         Returns:
             True if the URL is strictly safe.
@@ -152,6 +156,7 @@ class SSRFProtector:
         # Domain whitelist validation
         if allowed_domains is None:
             from src.core.app_config import get_allowed_webhook_domains
+
             allowed_domains = get_allowed_webhook_domains()
 
         if allowed_domains:
@@ -185,9 +190,7 @@ class SSRFProtector:
                         raise SSRFSecurityException(
                             SSRF_BLOCKED_LOOPBACK.format(ip=ip_str)
                         )
-                    raise SSRFSecurityException(
-                        SSRF_BLOCKED_PRIVATE.format(ip=ip_str)
-                    )
+                    raise SSRFSecurityException(SSRF_BLOCKED_PRIVATE.format(ip=ip_str))
         if ip.is_loopback:
             raise SSRFSecurityException(SSRF_BLOCKED_LOOPBACK.format(ip=ip_str))
         if ip.is_link_local:
@@ -199,6 +202,101 @@ class SSRFProtector:
         if ip.is_private:
             raise SSRFSecurityException(SSRF_BLOCKED_PRIVATE.format(ip=ip_str))
 
+        # Outgoing HTTP validation request attaching configured User-Agent header
+        headers = {"User-Agent": user_agent}
+        try:
+            requests.head(url, headers=headers, timeout=5.0, allow_redirects=False)
+        except Exception as e:
+            logger.debug(f"Outgoing HTTP validation request failed for {url}: {e}")
+
         # If it passed all checks, it's considered safe (public routable IP)
         logger.debug(f"SSRF Check passed for {url} -> {ip_str}")
         return True
+
+    @classmethod
+    def _check_redirect_depth(
+        cls,
+        current_url: str,
+        allowed_domains: list[str] | None = None,
+    ) -> str | None:
+        """
+        Inspects a single hop of a redirect chain.
+
+        The URL is fully re-validated (domain allow-list, DNS resolution,
+        internal/private IP checks) BEFORE any outbound HTTP request is
+        made, so this module never contacts an attacker-controlled internal
+        address.
+
+        Returns:
+            The next URL in the chain if a redirect is present, else None.
+        """
+        # Validate BEFORE making any outbound request.
+        cls.validate_webhook_url(current_url, allowed_domains=allowed_domains)
+
+        response = requests.head(current_url, allow_redirects=False, timeout=5)
+        if response.status_code in (301, 302, 303, 307, 308):
+            location = response.headers.get("Location")
+            if location:
+                return urllib.parse.urljoin(current_url, location)
+        return None
+
+    @classmethod
+    def validate_url_safety(
+        cls,
+        url: str,
+        allowed_domains: list[str] | None = None,
+        max_redirects: int | None = None,
+    ) -> tuple[str, str]:
+        """
+        Validates a URL and any redirect chain it produces, ensuring every
+        hop is checked for internal/private IPs before it is requested.
+
+        Returns:
+            A tuple of (final_validated_url, pinned_ip).
+        """
+        if max_redirects is None:
+            max_redirects = cls.MAX_REDIRECT_DEPTH
+
+        cls.validate_webhook_url(url, allowed_domains=allowed_domains)
+        current_url = url
+        pinned_ip = cls._resolve_hostname(urllib.parse.urlparse(current_url).hostname)
+
+        for _ in range(max_redirects):
+            next_url = cls._check_redirect_depth(current_url, allowed_domains)
+            if next_url is None:
+                break
+            current_url = next_url
+            pinned_ip = cls._resolve_hostname(
+                urllib.parse.urlparse(current_url).hostname
+            )
+
+        return current_url, pinned_ip
+
+    @classmethod
+    def validate_url_safety(
+        cls,
+        url: str,
+        allowed_domains: list[str] | None = None,
+        user_agent: str = DEFAULT_USER_AGENT,
+        timeout: float = 5.0,
+    ) -> Tuple[str, str]:
+        """
+        Validates URL safety against SSRF attacks, verifies host resolution,
+        issues an HTTP validation HEAD request using the application User-Agent header,
+        and returns the validated URL alongside its pinned IP address.
+
+        Args:
+            url: Target URL to validate.
+            allowed_domains: Optional domain whitelist.
+            user_agent: Custom User-Agent header string.
+            timeout: Request timeout in seconds.
+
+        Returns:
+            Tuple of (validated_url, pinned_ip).
+        """
+        cls.validate_webhook_url(
+            url, allowed_domains=allowed_domains, user_agent=user_agent
+        )
+        parsed = urllib.parse.urlparse(url)
+        ip_str = cls._resolve_hostname(parsed.hostname)
+        return url, ip_str

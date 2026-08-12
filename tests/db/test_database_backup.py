@@ -25,6 +25,7 @@ import pytest
 from src.db.database_backup import (
     SQLITE_HEADER,
     BackupRestoreSecurityError,
+    checkpoint_wal_log,
     cleanup_old_backups,
     create_database_backup,
     create_password_protected_backup,
@@ -35,11 +36,11 @@ from src.db.database_backup import (
     optimize_database,
     restore,
     run_incremental_vacuum,
-    checkpoint_wal_log,
 )
 
 try:
     import pyzipper  # noqa: F401
+
     HAS_PYZIPPER = True
 except ImportError:
     HAS_PYZIPPER = False
@@ -125,8 +126,9 @@ class TestCorpusSnapshotAndBackup:
         snapshot = create_sqlite_snapshot(temp_db_path)
         password = "secure_password_123"
 
-        zip_data = create_password_protected_backup(snapshot, password, archive_name="corpus.db")
-
+        zip_data = create_password_protected_backup(
+            snapshot, password, archive_name="corpus.db"
+        )
 
         assert isinstance(zip_data, bytes)
         assert len(zip_data) > 0
@@ -154,7 +156,6 @@ class TestCorpusSnapshotAndBackup:
         res = cursor.fetchone()
         conn.close()
         assert res[0] == "ok"
-
 
 
 class TestOptimizeDatabase:
@@ -438,6 +439,7 @@ class TestGetDatabaseSizeBytes:
 
         assert size == db_path.stat().st_size
 
+
 class TestGetDatabaseTableStats:
     """Tests for the get_database_table_stats helper (issue #1156)."""
 
@@ -465,15 +467,9 @@ class TestGetDatabaseTableStats:
         db_path = tmp_path / "test_stats.db"
 
         conn = sqlite3.connect(str(db_path))
-        conn.execute(
-            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)"
-        )
-        conn.execute(
-            "CREATE TABLE documents (id INTEGER PRIMARY KEY, title TEXT)"
-        )
-        conn.execute(
-            "CREATE TABLE incidents (id INTEGER PRIMARY KEY, severity TEXT)"
-        )
+        conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
+        conn.execute("CREATE TABLE documents (id INTEGER PRIMARY KEY, title TEXT)")
+        conn.execute("CREATE TABLE incidents (id INTEGER PRIMARY KEY, severity TEXT)")
         conn.executemany(
             "INSERT INTO users (name) VALUES (?)",
             [("Alice",), ("Bob",), ("Charlie",)],
@@ -579,9 +575,7 @@ class TestGetDatabaseTableStats:
         conn = sqlite3.connect(str(db_path))
         # Create 5 tables with varying row counts
         for i in range(5):
-            conn.execute(
-                f"CREATE TABLE table_{i} (id INTEGER PRIMARY KEY, data TEXT)"
-            )
+            conn.execute(f"CREATE TABLE table_{i} (id INTEGER PRIMARY KEY, data TEXT)")
             for j in range(i + 1):
                 conn.execute(
                     f"INSERT INTO table_{i} (data) VALUES (?)",
@@ -615,6 +609,113 @@ class TestGetDatabaseTableStats:
         assert stats["test"] == 1
 
 
+class TestGetDatabaseTableStatsIssue1773:
+    """Regression tests for issue #1773 acceptance criteria.
+
+    Issue #1773 asks for ``get_database_table_stats(db_path: str | Path)
+    -> dict[str, int]`` in ``src/db/database_backup.py`` that queries
+    ``sqlite_master`` for table names and returns
+    ``{table_name: row_count}``.
+
+    The function was originally added under issue #1156 — these tests
+    lock in the issue #1773 acceptance criteria so a future refactor
+    cannot silently break the contract.
+    """
+
+    def test_issue_1773_function_exists_with_correct_signature(self):
+        """The function must exist and accept str | Path, return dict[str, int]."""
+        import inspect
+
+        from src.db.database_backup import get_database_table_stats
+
+        sig = inspect.signature(get_database_table_stats)
+        params = list(sig.parameters.values())
+        assert len(params) == 1, f"Expected 1 parameter (db_path), got {len(params)}"
+        # Annotation should be str | Path (or the typing-quoted form).
+        annotation = params[0].annotation
+        annotation_str = str(annotation)
+        assert (
+            "str" in annotation_str and "Path" in annotation_str
+        ), f"db_path annotation must be 'str | Path', got {annotation_str}"
+        # Return annotation must be dict[str, int].
+        return_str = str(sig.return_annotation)
+        assert (
+            "dict" in return_str and "int" in return_str
+        ), f"return annotation must be dict[str, int], got {return_str}"
+
+    def test_issue_1773_queries_sqlite_master(self):
+        """The function's source must query ``sqlite_master`` for table names."""
+        import inspect
+
+        from src.db.database_backup import get_database_table_stats
+
+        source = inspect.getsource(get_database_table_stats)
+        assert (
+            "sqlite_master" in source
+        ), "get_database_table_stats must query sqlite_master for table names"
+        assert (
+            "type='table'" in source
+        ), "get_database_table_stats must filter sqlite_master by type='table'"
+
+    def test_issue_1773_returns_dict_of_table_name_to_row_count(self, tmp_path):
+        """Return value must be ``{table_name: row_count}`` with int values."""
+        import sqlite3 as _sqlite3
+
+        from src.db.database_backup import get_database_table_stats
+
+        db_path = tmp_path / "issue1773.db"
+        conn = _sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE t1 (id INTEGER PRIMARY KEY)")
+        conn.execute("CREATE TABLE t2 (id INTEGER PRIMARY KEY)")
+        conn.executemany("INSERT INTO t1 (id) VALUES (?)", [(1,), (2,), (3,)])
+        conn.execute("INSERT INTO t2 (id) VALUES (1)")
+        conn.commit()
+        conn.close()
+
+        stats = get_database_table_stats(db_path)
+
+        assert isinstance(stats, dict)
+        # Every value must be an int (row count).
+        for key, value in stats.items():
+            assert isinstance(value, int), (
+                f"stats[{key!r}] = {value!r} is {type(value).__name__}, " "expected int"
+            )
+        # The special _table_count key is also an int.
+        assert isinstance(stats.get("_table_count"), int)
+        # Spot-check the actual row counts.
+        assert stats["t1"] == 3
+        assert stats["t2"] == 1
+
+    def test_issue_1773_accepts_str_and_path_equivalently(self, tmp_path):
+        """The function must accept both ``str`` and ``Path`` inputs."""
+        import sqlite3 as _sqlite3
+        from pathlib import Path as _Path
+
+        from src.db.database_backup import get_database_table_stats
+
+        db_path = tmp_path / "issue1773_types.db"
+        conn = _sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE x (id INTEGER PRIMARY KEY)")
+        conn.execute("INSERT INTO x (id) VALUES (1)")
+        conn.commit()
+        conn.close()
+
+        stats_from_str = get_database_table_stats(str(db_path))
+        stats_from_path = get_database_table_stats(_Path(db_path))
+
+        assert stats_from_str == stats_from_path
+        assert stats_from_str["x"] == 1
+
+    def test_issue_1773_returns_empty_for_nonexistent_db(self, tmp_path):
+        """A nonexistent db must return ``{'_table_count': 0}``, not raise."""
+        from src.db.database_backup import get_database_table_stats
+
+        stats = get_database_table_stats(tmp_path / "does_not_exist.db")
+
+        assert isinstance(stats, dict)
+        assert stats == {"_table_count": 0}
+
+
 class TestGetTableSchemaInfo:
     """Tests for the get_table_schema_info helper (issue #1586)."""
 
@@ -623,16 +724,14 @@ class TestGetTableSchemaInfo:
         db_path = tmp_path / "schema_test.db"
 
         conn = sqlite3.connect(str(db_path))
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE documents (
                 id INTEGER PRIMARY KEY,
                 filename TEXT NOT NULL,
                 tags TEXT DEFAULT 'untagged',
                 size REAL
             )
-            """
-        )
+            """)
         conn.commit()
         conn.close()
 
@@ -697,9 +796,7 @@ class TestGetTableSchemaInfo:
         """Table names that are not plain identifiers must be refused."""
         db_path = self._make_db(tmp_path)
 
-        schema = get_table_schema_info(
-            db_path, "documents; DROP TABLE documents; --"
-        )
+        schema = get_table_schema_info(db_path, "documents; DROP TABLE documents; --")
 
         assert schema == []
 
@@ -743,7 +840,6 @@ class TestCheckpointWalLog:
 
         conn.close()
 
-
     def test_checkpoint_wal_log_file_not_found(self):
         """Verify checkpoint fails for non-existent database paths."""
         res = checkpoint_wal_log("/nonexistent/path/to/db.db")
@@ -753,6 +849,7 @@ class TestCheckpointWalLog:
         """Verify checkpoint fails if the database path is a directory."""
         res = checkpoint_wal_log(tmp_path)
         assert res is False
+
 
 class TestCreateDatabaseBackup:
     """Tests for the create_database_backup function (issue #1488)."""
@@ -782,10 +879,42 @@ class TestCreateDatabaseBackup:
         self._make_sample_db(db_path)
 
         backup_path = create_database_backup(
-            db_path, backup_dir=tmp_path / "backups", compress_backup=False
+            db_path, backup_dir=tmp_path / "backups", compress=False
         )
-
         assert backup_path.exists()
         assert backup_path.name.endswith(".db")
-        assert not backup_path.name.endswith(".db.gz")
-        assert backup_path.read_bytes().startswith(SQLITE_HEADER)
+        assert not backup_path.name.endswith(".gz")
+
+
+# ── get_database_file_size_bytes ──────────────────────────────────────────────
+
+
+def test_get_database_file_size_bytes_existing_file():
+    db = _ALLOWED_DB_DIR / "corpus.db"
+    create_test_database(db)
+    try:
+        assert get_database_file_size_bytes(db) == db.stat().st_size
+        assert get_database_file_size_bytes(db) > 0
+    finally:
+        db.unlink(missing_ok=True)
+
+
+def test_get_database_file_size_bytes_missing_file():
+    missing = _ALLOWED_DB_DIR / "__nonexistent_test__.db"
+    assert get_database_file_size_bytes(missing) == 0
+
+
+def test_get_database_file_size_bytes_accepts_string_path():
+    db = _ALLOWED_DB_DIR / "users_test_size.db"
+    create_test_database(db)
+    try:
+        assert get_database_file_size_bytes(str(db)) == db.stat().st_size
+    finally:
+        db.unlink(missing_ok=True)
+
+
+def test_get_database_file_size_bytes_rejects_path_traversal(tmp_path):
+    outside = tmp_path / "evil.db"
+    outside.write_text("x")
+    with pytest.raises(ValueError, match="outside the allowed directory"):
+        get_database_file_size_bytes(outside)

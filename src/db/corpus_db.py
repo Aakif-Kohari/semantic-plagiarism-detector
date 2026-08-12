@@ -19,7 +19,8 @@ import numpy as np
 import psutil
 
 from src.core.app_config import CORPUS_DB_PATH, FALLBACK_CORPUS_DB_PATH
-from src.db.common import with_sqlite_retry
+from src.core.concurrency import with_sqlite_retry
+from src.db.base import BaseRepository
 from src.db.migrations.common import column_exists, delete_all_if_table_exists
 from src.utils.filename import sanitize_filename
 
@@ -31,11 +32,26 @@ _DB_PATH = os.path.abspath(str(CORPUS_DB_PATH))
 _connection_pool = threading.local()
 
 
+class CorpusRepository(BaseRepository):
+    """Data access repository for corpus documents, text chunks, and vector embeddings."""
+
+    def __init__(self, db_path: str | os.PathLike = CORPUS_DB_PATH) -> None:
+        super().__init__(db_path)
+
+    def init_corpus_db(self) -> None:
+        """Create or upgrade corpus.db without deleting persisted data."""
+        init_corpus_db()
+
+
+corpus_repo = CorpusRepository(_DB_PATH)
+
+
 def configure_db_path(db_path: str | os.PathLike) -> None:
     """Configure the SQLite database path used by the corpus module."""
     global _DB_PATH
     close_connections()
     _DB_PATH = os.path.abspath(os.fspath(db_path))
+    corpus_repo.configure_db_path(_DB_PATH)
 
 
 def get_corpus_db_path() -> Path:
@@ -54,7 +70,9 @@ def _pool() -> dict[str, sqlite3.Connection]:
 
 @contextmanager
 def _connect():
-    """Borrow a reusable connection and manage the operation transaction."""
+    """Open a connection for the duration of the operation and always close
+    it on exit (success, error, or exception) to avoid leaked file handles
+    under concurrent requests."""
     path = os.path.abspath(_DB_PATH)
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -62,17 +80,13 @@ def _connect():
         path = str(FALLBACK_CORPUS_DB_PATH)
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
-    pool = _pool()
-    conn = pool.get(path)
-    if conn is None:
-        try:
-            conn = sqlite3.connect(path, check_same_thread=False)
-        except sqlite3.OperationalError:
-            path = str(FALLBACK_CORPUS_DB_PATH)
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            conn = sqlite3.connect(path, check_same_thread=False)
-        conn.execute("PRAGMA foreign_keys = ON")
-        pool[path] = conn
+    try:
+        conn = sqlite3.connect(path, check_same_thread=False)
+    except sqlite3.OperationalError:
+        path = str(FALLBACK_CORPUS_DB_PATH)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        conn = sqlite3.connect(path, check_same_thread=False)
+    conn.execute("PRAGMA foreign_keys = ON")
 
     try:
         yield conn
@@ -80,6 +94,11 @@ def _connect():
     except Exception:
         conn.rollback()
         raise
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def close_connections() -> None:
@@ -94,8 +113,7 @@ def init_corpus_db() -> None:
     """Create or upgrade corpus.db without deleting persisted data."""
     with _connect() as conn:
         # 1. ALWAYS CREATE TABLES FIRST
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS documents (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 filename TEXT UNIQUE NOT NULL,
@@ -114,11 +132,9 @@ def init_corpus_db() -> None:
                 deleted_at TEXT,
                 created_at TEXT
             )
-            """
-        )
+            """)
 
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS chunks (
                 vector_id INTEGER PRIMARY KEY,
                 filename TEXT NOT NULL,
@@ -129,11 +145,9 @@ def init_corpus_db() -> None:
                 REFERENCES documents(filename)
                 ON DELETE CASCADE
             )
-            """
-        )
+            """)
 
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS deleted_chunks (
                 vector_id INTEGER PRIMARY KEY,
                 filename TEXT NOT NULL,
@@ -141,11 +155,9 @@ def init_corpus_db() -> None:
                 chunk_text TEXT NOT NULL,
                 embedding BLOB NOT NULL
             )
-            """
-        )
+            """)
 
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS plagiarism_incidents (
                 incident_id TEXT PRIMARY KEY,
                 document_a TEXT NOT NULL,
@@ -158,22 +170,18 @@ def init_corpus_db() -> None:
                 last_seen TEXT NOT NULL,
                 threshold_at_time_of_flag REAL DEFAULT 0.0
             )
-            """
-        )
+            """)
 
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS false_positives (
                 document_a TEXT,
                 document_b TEXT,
                 date_dismissed TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (document_a, document_b)
             )
-            """
-        )
+            """)
 
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS scan_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT NOT NULL,
@@ -183,8 +191,7 @@ def init_corpus_db() -> None:
                 flagged_count INTEGER NOT NULL,
                 threshold_used REAL NOT NULL
             )
-            """
-        )
+            """)
 
         # 2. RUN SCHEMA MIGRATIONS / ALTER TABLES AFTER CREATION
         columns_to_ensure = [
@@ -214,8 +221,7 @@ def init_corpus_db() -> None:
         # search. Also created by migration_012, but we create it here too
         # so that ``init_corpus_db()`` (which doesn't call
         # ``migrate_corpus_database()``) still sets up FTS.
-        conn.execute(
-            """
+        conn.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
                 filename,
                 student_name,
@@ -223,34 +229,27 @@ def init_corpus_db() -> None:
                 content='documents',
                 content_rowid='id'
             )
-            """
-        )
-        conn.execute(
-            """
+            """)
+        conn.execute("""
             CREATE TRIGGER IF NOT EXISTS documents_ai AFTER INSERT ON documents BEGIN
                 INSERT INTO documents_fts(rowid, filename, student_name, assignment_title)
                 VALUES (new.id, new.filename, new.student_name, new.assignment_title);
             END
-            """
-        )
-        conn.execute(
-            """
+            """)
+        conn.execute("""
             CREATE TRIGGER IF NOT EXISTS documents_ad AFTER DELETE ON documents BEGIN
                 INSERT INTO documents_fts(documents_fts, rowid, filename, student_name, assignment_title)
                 VALUES ('delete', old.id, old.filename, old.student_name, old.assignment_title);
             END
-            """
-        )
-        conn.execute(
-            """
+            """)
+        conn.execute("""
             CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
                 INSERT INTO documents_fts(documents_fts, rowid, filename, student_name, assignment_title)
                 VALUES ('delete', old.id, old.filename, old.student_name, old.assignment_title);
                 INSERT INTO documents_fts(rowid, filename, student_name, assignment_title)
                 VALUES (new.id, new.filename, new.student_name, new.assignment_title);
             END
-            """
-        )
+            """)
         # Backfill any existing rows into the FTS index
         try:
             conn.execute("INSERT INTO documents_fts(documents_fts) VALUES ('rebuild')")
@@ -276,13 +275,30 @@ def add_document(
     tags: str = None,
     detected_language: str = None,
     owner: str = None,
-) -> bool:
+) -> int | None:
     """Insert a new document metadata row using parameterized execution."""
     filename = sanitize_filename(filename)
 
     try:
         with _connect() as conn:
-            conn.execute(
+            existing = conn.execute(
+                """
+                SELECT id
+                FROM documents
+                WHERE file_hash = ?
+                  AND (is_deleted IS NULL OR is_deleted = 0)
+                """,
+                (file_hash,),
+            ).fetchone()
+
+            if existing:
+                logger.info(
+                    "Document %s already exists in corpus; skipping insertion.",
+                    file_hash,
+                )
+                return existing[0]
+
+            cursor = conn.execute(
                 "INSERT INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, tags, detected_language, owner) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     filename,
@@ -299,9 +315,9 @@ def add_document(
                     owner,
                 ),
             )
-            return True
+            return cursor.lastrowid
     except sqlite3.IntegrityError:
-        return False
+        return None
 
 
 def get_document_by_hash(file_hash: str) -> str | None:
@@ -452,6 +468,15 @@ def get_deleted_documents() -> list:
             )
             for r in rows
         ]
+
+
+def get_deleted_documents_count() -> int:
+    """Return the count of documents currently in the trash."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(1) FROM documents WHERE is_deleted = 1"
+        ).fetchone()
+        return row[0] if row else 0
 
 
 @with_sqlite_retry
@@ -683,6 +708,16 @@ def get_documents_by_class(class_section: str) -> list:
         return [r[0] for r in rows]
 
 
+def get_document_count_fast(include_deleted: bool = False) -> int:
+    """Return the total document count using SELECT COUNT(*) query."""
+    query = "SELECT COUNT(1) FROM documents"
+    if not include_deleted:
+        query += " WHERE is_deleted IS NULL OR is_deleted = 0"
+    with _connect() as conn:
+        row = conn.execute(query).fetchone()
+        return int(row[0]) if row else 0
+
+
 def get_embedding_count() -> int:
     """Return the number of durable chunk embeddings in the corpus."""
     with _connect() as conn:
@@ -694,7 +729,7 @@ def get_document_count_by_user(owner_username: str) -> int:
     """Return the number of non-deleted documents owned by a specific user."""
     with _connect() as conn:
         row = conn.execute(
-            "SELECT COUNT(1) FROM documents WHERE owner = ? AND (is_deleted IS NULL OR is_deleted = 0)",
+            "SELECT COUNT(1) FROM documents WHERE owner = ? AND is_deleted = 0",
             (owner_username,),
         ).fetchone()
         return int(row[0]) if row else 0
@@ -934,15 +969,6 @@ def get_total_document_count(include_deleted: bool = False) -> int:
         return int(row[0]) if row else 0
 
 
-def get_deleted_documents_count() -> int:
-    """Return the count of documents currently sitting in trash (is_deleted = 1)."""
-    with _connect() as conn:
-        row = conn.execute(
-            "SELECT COUNT(1) FROM documents WHERE is_deleted = 1"
-        ).fetchone()
-        return int(row[0]) if row else 0
-
-
 def search_documents_fts(query_text: str) -> list[dict]:
     """Search the document corpus using the FTS5 full-text index (issue #1359).
 
@@ -1035,7 +1061,7 @@ def record_scan_summary(
         with _connect() as conn:
             conn.execute(
                 """
-                INSERT INTO scan_history 
+                INSERT INTO scan_history
                 (timestamp, document_count, avg_similarity, max_similarity, flagged_count, threshold_used)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,

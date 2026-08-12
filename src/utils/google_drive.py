@@ -6,20 +6,41 @@ and bulk downloading supported assignment files (.pdf, .docx, .txt).
 """
 
 import io
+import logging
 import os
 import re
 from typing import Callable, Dict, List, Optional, Tuple
 
 import requests
-
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
 from src.utils.filename import unique_filename
 
+logger = logging.getLogger(__name__)
+
 # Supported extensions for the plagiarism detection pipeline
 SUPPORTED_EXTENSIONS = (".pdf", ".docx", ".doc", ".txt")
+
+
+def validate_service_account_key(key_dict: dict) -> bool:
+    """
+    Validate that the service account JSON key dictionary contains required fields.
+    """
+    if not isinstance(key_dict, dict):
+        logger.warning("Invalid key type: expected a dictionary.")
+        return False
+
+    required_keys = ["type", "project_id", "private_key", "client_email"]
+    for key in required_keys:
+        if key not in key_dict or not key_dict[key]:
+            logger.warning(
+                f"Google Drive service account key is missing or empty for required field: {key}"
+            )
+            return False
+
+    return True
 
 
 def get_supported_file_extensions() -> List[str]:
@@ -34,6 +55,7 @@ def get_supported_file_extensions() -> List[str]:
 
 _DRIVE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{33}$")
 _DRIVE_URL_RE = re.compile(r"folders/([a-zA-Z0-9_-]{33})(?:[/?]|$)")
+
 
 def extract_google_drive_folder_id(url_or_id: str) -> str | None:
     """
@@ -53,6 +75,34 @@ def extract_google_drive_folder_id(url_or_id: str) -> str | None:
     match = _DRIVE_URL_RE.search(cleaned)
     if match:
         return match.group(1)
+
+    return None
+
+
+_FOLDER_ID_PATTERN = re.compile(r"[\w-]{25,}")
+
+
+def extract_folder_id(url_or_id: str) -> str | None:
+    """
+    Extracts a Google Drive folder ID from a full Drive URL or raw ID string.
+
+    Uses a permissive regex to match any run of word characters and hyphens
+    that is at least 25 characters long, so it accepts both full folder
+    URLs (e.g. "https://drive.google.com/drive/folders/1A2B3C...") and a
+    bare folder ID pasted on its own.
+
+    Args:
+        url_or_id: A Google Drive folder URL or a raw folder ID string.
+
+    Returns:
+        The extracted folder ID string, or None if no valid ID is found.
+    """
+    if not isinstance(url_or_id, str):
+        return None
+
+    match = _FOLDER_ID_PATTERN.search(url_or_id)
+    if match:
+        return match.group(0)
 
     return None
 
@@ -171,9 +221,7 @@ def bulk_download_drive_folder(
     # Pre-compute total batch size (in bytes) so the callback can report overall
     # progress rather than just per-file progress. Files without a reported size
     # (rare, but the Drive API allows it) simply don't contribute to the total.
-    batch_total_bytes = sum(
-        int(f["size"]) for f in files_to_download if f.get("size")
-    )
+    batch_total_bytes = sum(int(f["size"]) for f in files_to_download if f.get("size"))
 
     downloaded_files_dict = {}
     downloaded_names = []
@@ -185,14 +233,13 @@ def bulk_download_drive_folder(
     for file_record in files_to_download:
         file_progress_cb = None
         if progress_callback is not None:
+
             def file_progress_cb(
                 file_bytes_downloaded,
                 _file_total_bytes,
                 _base=bytes_done_before_current_file,
             ):
-                progress_callback(
-                    _base + file_bytes_downloaded, batch_total_bytes
-                )
+                progress_callback(_base + file_bytes_downloaded, batch_total_bytes)
 
         file_bytes = download_file_bytes(
             service, file_record["id"], progress_callback=file_progress_cb
@@ -203,7 +250,9 @@ def bulk_download_drive_folder(
         )
         downloaded_files_dict[safe_name] = file_bytes
         downloaded_names.append(safe_name)
-        bytes_done_before_current_file += int(file_record.get("size") or len(file_bytes))
+        bytes_done_before_current_file += int(
+            file_record.get("size") or len(file_bytes)
+        )
         if progress_callback is not None:
             progress_callback(bytes_done_before_current_file, batch_total_bytes)
 

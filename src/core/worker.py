@@ -129,7 +129,17 @@ def _run_upload_job(
             ignore_phrases=ignore_phrases,
         )
 
-        raw_texts, chunked_docs, embeddings, sim_df, chunk_sim_df, faiss_index, registry, ai_probabilities, flags = pipeline_result
+        (
+            raw_texts,
+            chunked_docs,
+            embeddings,
+            sim_df,
+            chunk_sim_df,
+            faiss_index,
+            registry,
+            ai_probabilities,
+            flags,
+        ) = pipeline_result
 
         incidents = sync_flagged_incidents(flags)
 

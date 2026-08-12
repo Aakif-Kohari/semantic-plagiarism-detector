@@ -7,9 +7,29 @@ from typing import Any, Mapping, Sequence
 import pandas as pd
 import streamlit as st
 
-from src.db.incidents import (DEFAULT_DB_PATH, get_all_incidents,
-                              incidents_to_csv, sync_flagged_incidents,
-                              update_review_status)
+from src.db.incidents import (
+    DEFAULT_DB_PATH,
+    get_all_incidents,
+    incidents_to_csv,
+    sync_flagged_incidents,
+    update_review_status,
+)
+from src.utils.pdf_report import generate_batch_plagiarism_report
+
+pdf_buffer = generate_batch_plagiarism_report(get_all_incidents(db_path))
+
+pdf_filename = (
+    "plagiarism_batch_report_"
+    f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.pdf"
+)
+
+st.download_button(
+    "Download Consolidated Plagiarism PDF",
+    data=pdf_buffer.getvalue(),
+    file_name=pdf_filename,
+    mime="application/pdf",
+    use_container_width=True,
+)
 
 
 def render_incident_export_panel(
@@ -100,4 +120,3 @@ def render_incident_export_panel(
         mime="text/csv",
         use_container_width=True,
     )
-    

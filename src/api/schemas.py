@@ -27,9 +27,7 @@ class TokenResponse(BaseModel):
     access_token: str = Field(
         ..., description="Newly issued OAuth2 Bearer access token"
     )
-    token_type: str = Field(
-        default="bearer", description="Token type (bearer)"
-    )
+    token_type: str = Field(default="bearer", description="Token type (bearer)")
     expires_in: int = Field(
         default=3600, description="Token expiration lifetime in seconds"
     )

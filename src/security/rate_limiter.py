@@ -20,6 +20,7 @@ DEFAULT_LIMIT = 100  # Maximum requests
 DEFAULT_WINDOW = 60  # Time window in seconds
 DEFAULT_BLOCK_DURATION = 300  # Lock duration in seconds when limit is exceeded
 
+
 class RateLimiter:
     """
     A Redis-backed rate limiter that tracks request counts and enforces limits.
@@ -32,7 +33,7 @@ class RateLimiter:
         limit: int = DEFAULT_LIMIT,
         window: int = DEFAULT_WINDOW,
         block_duration: int = DEFAULT_BLOCK_DURATION,
-        prefix: str = "rate_limit"
+        prefix: str = "rate_limit",
     ):
         """
         Initialize the rate limiter.
@@ -83,10 +84,12 @@ class RateLimiter:
                 "X-RateLimit-Limit": str(self.limit),
                 "X-RateLimit-Remaining": "0",
                 "X-RateLimit-Reset": str(current_time + retry_after),
-                "Retry-After": str(retry_after)
+                "Retry-After": str(retry_after),
             }
 
-            logger.warning(f"Rate limit exceeded for {identifier}. Blocked for {retry_after}s.")
+            logger.warning(
+                f"Rate limit exceeded for {identifier}. Blocked for {retry_after}s."
+            )
             return False, headers
 
         # Get current request count
@@ -110,10 +113,12 @@ class RateLimiter:
                 "X-RateLimit-Limit": str(self.limit),
                 "X-RateLimit-Remaining": "0",
                 "X-RateLimit-Reset": str(current_time + self.block_duration),
-                "Retry-After": str(self.block_duration)
+                "Retry-After": str(self.block_duration),
             }
 
-            logger.warning(f"Rate limit exceeded for {identifier}. Blocking for {self.block_duration}s.")
+            logger.warning(
+                f"Rate limit exceeded for {identifier}. Blocking for {self.block_duration}s."
+            )
             return False, headers
 
         # Increment the counter
@@ -130,7 +135,7 @@ class RateLimiter:
             "X-RateLimit-Limit": str(self.limit),
             "X-RateLimit-Remaining": str(remaining),
             "X-RateLimit-Reset": str(reset_time),
-            "Retry-After": str(self.window)  # Fallback retry-after
+            "Retry-After": str(self.window),  # Fallback retry-after
         }
 
         return True, headers
@@ -156,11 +161,12 @@ class RateLimiter:
         logger.info(f"Rate limit reset for {identifier}")
         return True
 
+
 def get_rate_limit_headers(
     redis_client: redis.Redis,
     identifier: str,
     limit: int = DEFAULT_LIMIT,
-    window: int = DEFAULT_WINDOW
+    window: int = DEFAULT_WINDOW,
 ) -> Tuple[bool, Dict[str, str]]:
     """
     Convenience function to check rate limits and get headers.

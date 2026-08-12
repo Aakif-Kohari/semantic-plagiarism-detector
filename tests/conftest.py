@@ -42,6 +42,7 @@ os.environ.setdefault("REDIS_DB", "1")
 os.environ.setdefault("MPLBACKEND", "Agg")
 try:
     import matplotlib
+
     matplotlib.use("Agg")
 except ImportError:
     pass
@@ -49,8 +50,10 @@ except ImportError:
 # Patch torch.__spec__ for Python 3.13 + PyTorch compatibility
 try:
     import torch
+
     if getattr(torch, "__spec__", None) is None:
         import importlib.util
+
         torch.__spec__ = importlib.util.spec_from_loader("torch", loader=None)
 except ImportError:
     pass
@@ -68,8 +71,10 @@ if "sentence_transformers" not in sys.modules:
 
 if "torch" not in sys.modules:
     torch_stub = types.ModuleType("torch")
+
     class Tensor:
         pass
+
     torch_stub.Tensor = Tensor  # type: ignore
     sys.modules["torch"] = torch_stub
 
@@ -77,19 +82,47 @@ if "torch" not in sys.modules:
 import importlib.util
 
 for mod_name in [
-    "fitz", "redis", "bs4", "faker", "argon2", "argon2.exceptions",
-    "pdfplumber", "langdetect", "striprtf", "striprtf.striprtf", "src.core.translator",
-    "src.core.webhook",
-    "pypdf", "reportlab", "reportlab.pdfgen", "reportlab.lib", "reportlab.platypus",
-    "reportlab.lib.colors", "reportlab.lib.enums", "reportlab.lib.styles", "reportlab.lib.units",
-    "reportlab.lib.pagesizes", "reportlab.lib.utils",
-    "matplotlib", "matplotlib.patches", "matplotlib.pyplot", "matplotlib.figure", "matplotlib.ticker",
+    "fitz",
+    "redis",
+    "bs4",
+    "faker",
+    "argon2",
+    "argon2.exceptions",
+    "pdfplumber",
+    "langdetect",
+    "striprtf",
+    "striprtf.striprtf",
+    "src.core.translator",
+    "pypdf",
+    "reportlab",
+    "reportlab.pdfgen",
+    "reportlab.lib",
+    "reportlab.platypus",
+    "reportlab.lib.colors",
+    "reportlab.lib.enums",
+    "reportlab.lib.styles",
+    "reportlab.lib.units",
+    "reportlab.lib.pagesizes",
+    "reportlab.lib.utils",
+    "matplotlib",
+    "matplotlib.patches",
+    "matplotlib.pyplot",
+    "matplotlib.figure",
+    "matplotlib.ticker",
     "networkx",
-    "faiss", "torch", "psutil", "pytesseract",
-    "sklearn", "sklearn.metrics", "sklearn.metrics.pairwise",
-    "sklearn.feature_extraction", "sklearn.feature_extraction.text",
+    "faiss",
+    "torch",
+    "psutil",
+    "pytesseract",
+    "sklearn",
+    "sklearn.metrics",
+    "sklearn.metrics.pairwise",
+    "sklearn.feature_extraction",
+    "sklearn.feature_extraction.text",
     "requests",
-    "streamlit", "streamlit.components", "streamlit.components.v1",
+    "streamlit",
+    "streamlit.components",
+    "streamlit.components.v1",
     "transformers",
 ]:
     if mod_name not in sys.modules:
@@ -121,10 +154,12 @@ def clean_test_env():
     """
     try:
         from src.db.corpus_db import clear_all_data
+
         clear_all_data()
     except Exception:
         try:
             from src.db.corpus_db import close_connections
+
             close_connections()
         except Exception:
             pass
@@ -144,10 +179,12 @@ def clean_test_env():
 
     try:
         from src.db.corpus_db import clear_all_data
+
         clear_all_data()
     except Exception:
         try:
             from src.db.corpus_db import close_connections
+
             close_connections()
         except Exception:
             pass
@@ -177,6 +214,7 @@ class MockDataFactory:
     Generalized factory pattern for generating test mocks.
     Consolidates multiple disparate mocking functions.
     """
+
     @staticmethod
     def embed_chunks(chunks, batch_size=64):
         """Standardized fast embedding mock for streamlit app tests."""
@@ -208,18 +246,25 @@ def mock_db(tmp_path):
     auth_db_file = tmp_path / "test_users.db"
 
     import unittest.mock
-    with unittest.mock.patch("src.db.corpus_db._DB_PATH", str(corpus_db_file)), \
-         unittest.mock.patch("src.db.incidents.DEFAULT_DB_PATH", str(corpus_db_file)), \
-         unittest.mock.patch("src.db.auth._DB_PATH", str(auth_db_file)):
+
+    with unittest.mock.patch(
+        "src.db.corpus_db._DB_PATH", str(corpus_db_file)
+    ), unittest.mock.patch(
+        "src.db.incidents.DEFAULT_DB_PATH", str(corpus_db_file)
+    ), unittest.mock.patch(
+        "src.db.auth._DB_PATH", str(auth_db_file)
+    ):
         try:
+            from src.db.auth import init_db
             from src.db.corpus_db import init_corpus_db
             from src.db.incidents import init_incident_db
-            from src.db.auth import init_db
+
             init_corpus_db()
             init_incident_db()
             init_db()
         except Exception:
             import traceback
+
             traceback.print_exc()
 
         yield str(corpus_db_file)
@@ -272,17 +317,17 @@ def sample_document_files(request):
                 b'<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
                 b'<Default Extension="xml" ContentType="application/xml"/>'
                 b'<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
-                b'</Types>'
+                b"</Types>",
             )
             # 2. Main Document
             zf.writestr(
                 "word/document.xml",
                 b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
                 b'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
-                b'<w:body>'
-                b'<w:p><w:r><w:t>Sample DOCX content for testing the parsing pipeline.</w:t></w:r></w:p>'
-                b'</w:body>'
-                b'</w:document>'
+                b"<w:body>"
+                b"<w:p><w:r><w:t>Sample DOCX content for testing the parsing pipeline.</w:t></w:r></w:p>"
+                b"</w:body>"
+                b"</w:document>",
             )
             # 3. Relationships
             zf.writestr(
@@ -290,8 +335,21 @@ def sample_document_files(request):
                 b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
                 b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
                 b'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>'
-                b'</Relationships>'
+                b"</Relationships>",
             )
         zip_buffer.seek(0)
         filename = "sample_test.docx"
         yield zip_buffer, filename
+
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def clear_streamlit_singletons():
+    try:
+        from streamlit.delta_generator_singletons import _dg_singleton
+
+        _dg_singleton._instance = None
+    except ImportError:
+        pass

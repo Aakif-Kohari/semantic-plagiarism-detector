@@ -67,6 +67,35 @@ def cleanup_registered_temp_paths() -> None:
 atexit.register(cleanup_registered_temp_paths)
 
 
+def cleanup_temp_files(retention_hours: float = 1.0) -> None:
+    """
+    Cleans up registered temporary files and directories that are older than the specified retention hours.
+
+    Args:
+        retention_hours: The number of hours to retain files. Files/directories older than this
+                         (based on modification time st_mtime) will be deleted. Defaults to 1.0.
+    """
+    now = time.time()
+    retention_seconds = retention_hours * 3600.0
+
+    for path in list(_REGISTERED_TEMP_PATHS):
+        try:
+            if os.path.exists(path) or os.path.islink(path):
+                mtime = os.path.getmtime(path)
+                if now - mtime > retention_seconds:
+                    if os.path.isdir(path) and not os.path.islink(path):
+                        shutil.rmtree(path, ignore_errors=True)
+                    else:
+                        os.remove(path)
+                    if path in _REGISTERED_TEMP_PATHS:
+                        _REGISTERED_TEMP_PATHS.remove(path)
+            else:
+                if path in _REGISTERED_TEMP_PATHS:
+                    _REGISTERED_TEMP_PATHS.remove(path)
+        except OSError as exc:
+            logger.warning("Failed to clean up temp path %s: %s", path, exc)
+
+
 def create_managed_temp_file(
     suffix: Optional[str] = None, prefix: Optional[str] = None
 ) -> str:
@@ -226,6 +255,50 @@ def get_temp_directory_size_bytes() -> int:
     return total_size
 
 
+def verify_available_temp_space(required_bytes: int) -> bool:
+    """
+    Verify that the system temporary directory has enough free disk space.
+
+    Args:
+        required_bytes: Minimum number of free bytes required.
+
+    Returns:
+        True if sufficient free space is available.
+
+    Raises:
+        OSError: If the temporary directory does not have enough free space.
+    """
+    temp_dir = tempfile.gettempdir()
+    _, _, free = shutil.disk_usage(temp_dir)
+
+    if free < required_bytes:
+        raise OSError("Insufficient free disk space in temp directory")
+
+    return True
+
+
+def check_temp_disk_space(min_free_mb: int = 100) -> bool:
+    """
+    Verify that available disk space in the system temporary directory exceeds the minimum safety threshold.
+
+    Args:
+        min_free_mb: Minimum free space required in megabytes. Defaults to 100.
+
+    Returns:
+        True if the free space is equal to or greater than the threshold.
+
+    Raises:
+        OSError: If the free space is below the threshold.
+    """
+    temp_dir = tempfile.gettempdir()
+    _, _, free = shutil.disk_usage(temp_dir)
+
+    if free < min_free_mb * 1024 * 1024:
+        raise OSError("Disk space in temp directory below safety threshold")
+
+    return True
+
+
 def rotate_backup_files(backup_dir: Path, keep_count: int = 5) -> int:
     """Enforce retention policies on backup directories by keeping only the N most recent files.
 
@@ -320,7 +393,7 @@ def rotate_backup_files(backup_dir: Path, keep_count: int = 5) -> int:
 
     # Files to keep are the first `keep_count` entries
     files_to_delete = backup_files[keep_count:]
-    
+
     deleted_count = 0
     freed_bytes = 0
 
@@ -331,7 +404,7 @@ def rotate_backup_files(backup_dir: Path, keep_count: int = 5) -> int:
             os.remove(file_path)
             deleted_count += 1
             freed_bytes += file_size
-            
+
             logger.info(
                 "rotate_backup_files: deleted old backup %s (age: %.1f days, size: %.2f MB)",
                 os.path.basename(file_path),

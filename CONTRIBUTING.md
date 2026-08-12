@@ -114,6 +114,10 @@ src/core/parser.py
 tests/core/test_parser.py
 ```
 
+### Architecture Decisions
+
+If your contribution introduces major architectural changes, please document them by writing an Architecture Decision Record (ADR). Follow the format defined in the [ADR Template](docs/adr/adr-template.md).
+
 ---
 
 # 📌 Issue Assignment Policy
@@ -166,6 +170,35 @@ The project uses pytest with configuration in `pytest.ini`. Tests are located in
 - Ensure all tests pass before submitting
 - Run `ruff check .` and `ruff format .` to maintain code quality
 - Respond to review feedback promptly and make requested changes
+
+## Changelog
+
+This project maintains `CHANGELOG.md` following the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+If your PR changes behavior, adds a feature, or fixes a bug, add an entry under the `## [Unreleased]` section at the top of `CHANGELOG.md` (create this section if it doesn't exist yet, directly below the file header). Use these subsections as needed:
+
+- `### Added` - new features
+- `### Changed` - changes to existing functionality
+- `### Fixed` - bug fixes
+
+Each entry should be a short bullet describing the change, referencing the relevant module or file path where helpful. Skip the changelog for purely internal changes with no user-facing or API impact (e.g. test-only additions, typo fixes in comments).
+
+Example:
+
+```markdown
+## [Unreleased]
+
+### Added
+- Support for `.rtf` file uploads in the document parser (`src/core/document_parser.py`).
+
+### Changed
+- Increased default similarity threshold from 0.55 to 0.59 for improved precision.
+
+### Fixed
+- Corrected off-by-one error in paragraph chunk indexing (`src/core/text_chunking.py`).
+```
+
+When a new version is released, the maintainer will rename `[Unreleased]` to the version number and date (e.g. `## [1.1.0] - 2026-08-15`) and open a fresh `[Unreleased]` section above it.
 
 ## Reporting Issues
 
