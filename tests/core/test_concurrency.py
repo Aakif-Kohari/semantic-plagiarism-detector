@@ -156,10 +156,35 @@ def test_faiss_lock_configurable_timeout(mocker):
 
 def test_faiss_write_lock_context_configurable_timeout(mocker):
     mocker.patch("src.core.app_config.get_lock_timeout", return_value=45)
+    mock_lock = mocker.patch("src.core.concurrency.FAISSLock")
+
     from src.core.concurrency import faiss_write_lock
 
-    with mocker.patch("src.core.concurrency.FAISSLock") as mock_lock:
-        mock_lock.return_value.acquire.return_value = None
-        with faiss_write_lock():
-            pass
-        mock_lock.assert_called_with(lock_file="corpus.index.lock", timeout=45)
+    with faiss_write_lock():
+        pass
+    mock_lock.assert_called_with(lock_file="corpus.index.lock", timeout=None)
+
+
+def test_faiss_lock_acquire_sleep_jitter(tmp_path, mocker):
+    """
+    Test that FAISSLock.acquire() uses randomized jitter in sleep intervals during retries.
+    """
+    lock_file = tmp_path / "test_jitter.lock"
+    fd = os.open(str(lock_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    os.write(fd, b"locked")
+    os.close(fd)
+
+    mock_sleep = mocker.patch("src.core.concurrency.time.sleep")
+    lock = FAISSLock(lock_file=str(lock_file), timeout=0.3)
+
+    with pytest.raises(ConcurrencyTimeoutError):
+        lock.acquire()
+
+    assert mock_sleep.call_count > 1
+    sleep_args = [call.args[0] for call in mock_sleep.call_args_list]
+
+    for val in sleep_args:
+        assert 0.1 <= val <= 0.15
+
+    assert len(set(sleep_args)) > 1
+
