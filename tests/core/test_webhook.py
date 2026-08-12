@@ -451,3 +451,52 @@ class TestWebhookHMACSignature:
 
         # Should not have signature header if no secret
         assert "X-Plagiarism-Signature" not in headers
+
+
+def test_compute_signature_deterministic():
+    """Verify same payload + key + timestamp produces same signature."""
+    payload = b'{"event": "test"}'
+    secret = "test_secret_key"
+    ts = 1600000000
+
+    sig1 = compute_webhook_signature(payload, secret, timestamp=ts)
+    sig2 = compute_webhook_signature(payload, secret, timestamp=ts)
+
+    assert sig1 == sig2
+    assert len(sig1) > 0
+
+
+def test_verify_valid_signature():
+    """Verify round-trip signing and verification succeeds."""
+    payload = b'{"event": "test"}'
+    secret = "test_secret_key"
+    ts = int(time.time())
+
+    sig = compute_webhook_signature(payload, secret, timestamp=ts)
+    assert verify_webhook_signature(payload, sig, secret, timestamp=ts) is True
+
+
+def test_verify_expired_timestamp():
+    """Verify signature with old timestamp is rejected."""
+    payload = b'{"event": "test"}'
+    secret = "test_secret_key"
+    old_ts = int(time.time()) - 600
+
+    sig = compute_webhook_signature(payload, secret, timestamp=old_ts)
+    assert (
+        verify_webhook_signature(
+            payload, sig, secret, timestamp=old_ts, max_age_seconds=300
+        )
+        is False
+    )
+
+
+def test_verify_wrong_key():
+    """Verify signature verification fails with a different key."""
+    payload = b'{"event": "test"}'
+    key1 = "secret_key_1"
+    key2 = "secret_key_2"
+    ts = int(time.time())
+
+    sig = compute_webhook_signature(payload, key1, timestamp=ts)
+    assert verify_webhook_signature(payload, sig, key2, timestamp=ts) is False

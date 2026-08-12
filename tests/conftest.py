@@ -79,7 +79,6 @@ import importlib.util
 for mod_name in [
     "fitz", "redis", "bs4", "faker", "argon2", "argon2.exceptions",
     "pdfplumber", "langdetect", "striprtf", "striprtf.striprtf", "src.core.translator",
-    "src.core.webhook",
     "pypdf", "reportlab", "reportlab.pdfgen", "reportlab.lib", "reportlab.platypus",
     "reportlab.lib.colors", "reportlab.lib.enums", "reportlab.lib.styles", "reportlab.lib.units",
     "reportlab.lib.pagesizes", "reportlab.lib.utils",
