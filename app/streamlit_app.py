@@ -89,6 +89,18 @@ from app.components.smart_search import (
     initialize_smart_search,
     SmartSearchEngine,
 )
+# ── Enhanced Batch Processor Imports ─────────────────────────────────────
+from app.components.batch_processor_enhanced import (
+    render_batch_processor_ui,
+    render_batch_analytics,
+    render_batch_scheduler_ui,
+    initialize_batch_processor,
+    EnhancedBatchProcessor,
+    BatchScheduler,
+    BatchJob,
+    JobPriority,
+    JobStatus,
+)
 try:
     from streamlit_plotly_events import plotly_events  # type: ignore
 except ImportError:  # pragma: no cover - optional dependency
