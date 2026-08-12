@@ -630,3 +630,48 @@ def test_dynamic_single_chunk():
     
     assert len(chunks) == 1
     assert chunks[0] == text
+def test_sentence_boundary_empty_text():
+    """Test that _find_sentence_boundary returns the original index when given empty text."""
+    from src.core.text_chunking import _find_sentence_boundary
+    
+    index = 10
+    result = _find_sentence_boundary("", index, max_search=5)
+    assert result == index
+
+
+def test_sentence_boundary_no_match():
+    """Test that _find_sentence_boundary returns the original index when no punctuation is found within max_search."""
+    from src.core.text_chunking import _find_sentence_boundary
+    
+    text = "abcdefghijklmnopqrstuvwxyz"
+    index = 10
+    # No punctuation anywhere near index 10, and tight max_search
+    result = _find_sentence_boundary(text, index, max_search=3)
+    assert result == index
+
+
+def test_sentence_boundary_backward():
+    """Test that _find_sentence_boundary finds the nearest backward sentence end."""
+    from src.core.text_chunking import _find_sentence_boundary
+    
+    # "Hello world. How are you?"
+    # Period is at index 11. If target index is 13, it should search backward and snap to index 12 (after period/space).
+    text = "Hello world. How are you?"
+    index = 13
+    result = _find_sentence_boundary(text, index, max_search=5)
+    # Depending on implementation details, it should identify the boundary near index 11 or 12.
+    assert result != index
+    assert text[result - 1] in ".!?"
+
+
+def test_sentence_boundary_forward():
+    """Test that _find_sentence_boundary finds the nearest forward sentence end."""
+    from src.core.text_chunking import _find_sentence_boundary
+    
+    text = "Hello world. How are you?"
+    # Index 9 is inside "world", period is at index 11. Searching forward within max_search should find it.
+    index = 9
+    result = _find_sentence_boundary(text, index, max_search=5)
+    assert result != index
+    assert text[result - 1] in ".!?"
+    
