@@ -98,14 +98,7 @@ def run_full_pipeline(
         raw_texts, chunk_size=chunk_size, chunk_overlap=chunk_overlap
     )
 
-    translated_chunked_docs: Dict[str, List[str]] = {}
-    for doc_name, chunks in chunked_docs.items():
-        prepared_list: List[str] = []
-        for chunk in chunks:
-            prepared_list.append(chunk)
-        translated_chunked_docs[doc_name] = prepared_list
-
-    embeddings = embed_documents(translated_chunked_docs)
+    embeddings = embed_documents(chunked_docs)
     sim_df = document_similarity_matrix(embeddings)
 
     names = list(embeddings.keys())
