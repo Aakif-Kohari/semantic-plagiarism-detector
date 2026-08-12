@@ -71,6 +71,15 @@ from app.components.real_time_monitor import (
     MonitoringEngine,
     HealthChecker,
 )
+# ── Document Version Control Imports ─────────────────────────────────────
+from app.components.document_version_control import (
+    render_version_control_ui,
+    initialize_version_control,
+    VersionManager,
+    ChangeTracker,
+    DocumentVersion,
+    VersionDiff,
+)
 from app.components.auto_ml_optimizer import (
     render_auto_ml_dashboard,
     initialize_auto_ml,
