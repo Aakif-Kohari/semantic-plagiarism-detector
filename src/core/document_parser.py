@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import io
+import ipaddress
 import logging
 import os
 import re
 import shutil
+import socket
 import subprocess
 import tempfile
 import xml.etree.ElementTree
-import zipfile
-from collections import Counter
+import zipfilefrom collections import Counter
 from pathlib import Path
 from typing import BinaryIO, Dict, List, Optional, Union
 
@@ -1338,6 +1339,35 @@ def extract_text_from_doc(file: PDFInput) -> str:
             pass
 
 
+def _reject_internal_destination(hostname: str) -> None:
+    """Resolve hostname and raise ValueError if it points to an internal,
+    private, loopback, link-local, multicast, or unspecified IP address
+    (e.g. 127.0.0.1, localhost, 169.254.169.254)."""
+    try:
+        addr_info = socket.getaddrinfo(hostname, None)
+    except socket.gaierror as exc:
+        raise ValueError(f"Could not resolve host: {hostname}") from exc
+
+    for family, _, _, _, sockaddr in addr_info:
+        ip_str = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError as exc:
+            raise ValueError(f"Invalid resolved IP for {hostname}") from exc
+
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_unspecified
+            or ip.is_reserved
+        ):
+            raise ValueError(
+                f"URL resolves to a restricted internal address: {ip_str}"
+            )
+
+
 def extract_text_from_url(url: str) -> str:
     """Extract text content from a URL using web scraping.
 
@@ -1350,8 +1380,7 @@ def extract_text_from_url(url: str) -> str:
     Raises:
         ValueError: If the URL is invalid
         Exception: If fetching or parsing fails
-    """
-    try:
+    """    try:
         import requests
         from bs4 import BeautifulSoup
     except ImportError as exc:
@@ -1360,7 +1389,7 @@ def extract_text_from_url(url: str) -> str:
             "requests using: python -m pip install beautifulsoup4 requests"
         ) from exc
 
-    # Validate URL
+# Validate URL
     parsed = urlparse(url)
     if not all([parsed.scheme, parsed.netloc]) or parsed.scheme not in (
         "http",
@@ -1368,8 +1397,11 @@ def extract_text_from_url(url: str) -> str:
     ):
         raise ValueError(f"Invalid URL: {url}")
 
-    try:
-        # Fetch the webpage with a user agent to avoid being blocked
+    if not parsed.hostname:
+        raise ValueError(f"Invalid URL: {url}")
+    _reject_internal_destination(parsed.hostname)
+
+    try:        # Fetch the webpage with a user agent to avoid being blocked
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
