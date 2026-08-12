@@ -31,6 +31,9 @@ DEFAULT_CHUNK_SIZE = 500
 DEFAULT_CHUNK_OVERLAP = 50
 MIN_CHUNK_SIZE = 50
 
+# Track whether we've already attempted to download the NLTK punkt corpus
+_nltk_punkt_checked = False
+
 # Regex pattern to identify sentence boundaries.
 # Matches '.', '!', or '?' followed by a space and an uppercase letter,
 # or followed by the end of the string.
@@ -47,6 +50,8 @@ def _split_into_sentences(text: str) -> List[str]:
     if NLTK data is unavailable so the function works in restricted environments
     (e.g. CI containers without the punkt corpus downloaded).
     """
+    global _nltk_punkt_checked
+
     try:
         import nltk  # type: ignore
 
@@ -58,13 +63,15 @@ def _split_into_sentences(text: str) -> List[str]:
                 return sentences
         except LookupError:
             # punkt_tab / punkt corpus not downloaded – trigger download once
-            try:
-                nltk.download("punkt_tab", quiet=True)
-                from nltk.tokenize import sent_tokenize  # type: ignore
+            if not _nltk_punkt_checked:
+                _nltk_punkt_checked = True
+                try:
+                    nltk.download("punkt_tab", quiet=True)
+                    from nltk.tokenize import sent_tokenize  # type: ignore
 
-                return sent_tokenize(text)
-            except Exception:
-                pass
+                    return sent_tokenize(text)
+                except Exception:
+                    pass
     except ImportError:
         pass
 
