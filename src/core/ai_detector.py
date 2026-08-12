@@ -196,7 +196,7 @@ def normalize_perplexity(raw_score: float, scale_factor: float = 100.0) -> float
     """
     if raw_score is None or not isinstance(raw_score, (int, float)):
         return 0.0
-    
+
     if raw_score <= 0.0:
         return 0.0
 
@@ -461,7 +461,7 @@ def extract_stylometric_features(text: str) -> dict[str, float]:
     # Tokenize words using regex to extract alphanumeric sequences
     # This handles punctuation and contractions reasonably well for stylometry
     words = re.findall(r'\b\w+\b', text.lower())
-    
+
     if not words:
         return default_features
 
@@ -482,16 +482,16 @@ def extract_stylometric_features(text: str) -> dict[str, float]:
     sentences = re.split(r'[.!?]+', text.strip())
     # Filter out empty strings that result from trailing punctuation
     sentences = [s.strip() for s in sentences if s.strip()]
-    
+
     if not sentences:
         # If no sentences detected (e.g., text is just a fragment without punctuation),
         # treat the entire text as a single sentence for length calculations
         sentences = [text.strip()]
 
     sentence_lengths = [len(re.findall(r'\b\w+\b', s)) for s in sentences]
-    
+
     avg_sentence_length = float(np.mean(sentence_lengths)) if sentence_lengths else 0.0
-    
+
     # Variance measures "burstiness" - human text has higher variance
     # Using sample variance (ddof=1) if we have >1 sentence, else 0.0
     if len(sentence_lengths) > 1:
@@ -509,13 +509,13 @@ def extract_stylometric_features(text: str) -> dict[str, float]:
         # Calculate word frequencies
         from collections import Counter
         word_freqs = Counter(words)
-        
+
         # Calculate frequency of frequencies (how many words appear exactly i times)
         freq_of_freqs = Counter(word_freqs.values())
-        
+
         # Compute the sum of (f_i * i^2)
         sum_fi_i2 = sum(freq * (i ** 2) for i, freq in freq_of_freqs.items())
-        
+
         # Apply Yule's K formula
         N = total_words
         if N > 0:
@@ -573,7 +573,7 @@ def detect_ai_generated_text(text: str) -> Dict[str, Any]:
             "ai_probability": 0.0,
             "confidence_tier": "low",
             "classification_tier": "low",
-            "perplexity_score": 150.0,
+            "perplexity_score": 0.0,
             "burstiness_score": 0.0,
             "ngram_repetitiveness": 0.0,
         }
@@ -617,4 +617,4 @@ def categorize_ai_probability(score: float) -> str:
         return "Moderate Probability"
     else:
         return "Low Probability"
-    
+
