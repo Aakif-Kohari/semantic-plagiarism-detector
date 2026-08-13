@@ -7,6 +7,7 @@ and strong password complexity policies.
 """
 
 from __future__ import annotations
+from pathlib import Path
 
 import datetime
 import json
@@ -32,6 +33,10 @@ from src.errors import StaleDataException
 logger = logging.getLogger(__name__)
 
 _DB_PATH = os.path.abspath(str(AUTH_DB_PATH))
+
+
+def get_auth_db_path() -> Path:
+    return Path(_DB_PATH)
 
 VALID_ROLES = {"admin", "teacher"}
 
