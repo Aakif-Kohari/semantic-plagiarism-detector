@@ -50,6 +50,16 @@ from app.components.advanced_analytics import (
     run_pipeline_with_tracking,
     track_comparison,
 )
+
+from app.components.cross_lingual_ui import (
+    render_cross_lingual_settings,
+    render_cross_lingual_ui_in_drilldown,
+    get_cross_lingual_metadata,
+    is_cross_lingual_enabled,
+    render_cross_lingual_stats,
+)
+
+
 # ── Document Version Control Imports ─────────────────────────────────────
 from app.components.document_version_control import (
     render_version_control_ui,
@@ -1031,17 +1041,9 @@ with st.sidebar:
             key=SessionKeys.SEMANTIC_THRESHOLD_SLIDER,
         )
 
-        # Cross-Lingual Detection Toggle (Issue #1956)
-        cross_lingual_mode = st.toggle(
-            "🌐 Cross-Lingual Detection (Beta)",
-            value=False,
-            key="cross_lingual_mode_toggle",
-            help=(
-                "Enable back-translation to detect translated plagiarism. "
-                "Chunks in foreign languages will be translated to English "
-                "before similarity matching. May increase processing time."
-            ),
-        )
+        # Cross-Lingual Detection Settings
+        from app.components.cross_lingual_ui import render_cross_lingual_settings
+        cross_lingual_mode = render_cross_lingual_settings()
 
         use_chunk_matrix = st.checkbox(
             "Use chunk-level similarity matrix",
@@ -1055,6 +1057,36 @@ with st.sidebar:
             value=5,
             key=SessionKeys.FAISS_TOP_K_SLIDER,
         )
+
+
+        use_chunk_matrix = st.checkbox(
+            "Use chunk-level similarity matrix",
+            value=False,
+            key=SessionKeys.CHUNK_MATRIX_CHECKBOX,
+        )
+        faiss_top_k = st.slider(
+            "FAISS: matches per chunk",
+            1,
+            20,
+            value=5,
+            key=SessionKeys.FAISS_TOP_K_SLIDER,
+        )
+
+        # ========== ADD THIS ==========
+        # Cross-Lingual Detection Toggle (Issue #1956)
+        cross_lingual_mode = st.toggle(
+            "🌐 Cross-Lingual Detection (Beta)",
+            value=False,
+            key="cross_lingual_mode_toggle",
+            help=(
+                "Enable back-translation to detect translated plagiarism. "
+                "Chunks in foreign languages will be translated to English "
+                "before similarity matching. May increase processing time."
+            ),
+        )
+        # ==============================
+
+
         from app.components.faiss_results import render_faiss_metric_badge
         render_faiss_metric_badge(st.session_state.get("faiss_index", None))
 
