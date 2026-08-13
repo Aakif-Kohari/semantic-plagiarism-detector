@@ -29,7 +29,7 @@ python-dotenv>=1.0.0             # Load credentials from .env
 plotly>=5.20.0                   # Interactive heatmap with hover values
 deep-translator>=1.11.4          # Translation alignment for cross-lingual support
 streamlit-tour>=1.1.0            # Interactive guided tour component
-streamlit-plotly-events==0.0.6
+streamlit-plotly-events>=0.0.6
 
 # ── Data & ML ─────────────────────────────────────────────────────────────────
 numpy>=2.0.0
