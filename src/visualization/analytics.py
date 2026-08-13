@@ -76,30 +76,15 @@ def plot_similarity_boxplot_by_group(
     Returns:
         Plotly Figure object with one box trace per group.
     """
-    if not scores_dict:
-        fig = go.Figure()
-        fig.add_annotation(
-            text="No similarity scores available to plot",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font=dict(size=16, color=_annotation_color(theme_colors)),
-        )
-        fig.update_layout(
+if not scores_dict:
+        return _empty_chart(
             title="Similarity Score Quartile Distribution",
+            message="No similarity scores available to plot",
+            theme_colors=theme_colors,
+            show_grid=show_grid,
             xaxis_title="Assignment",
             yaxis_title="Similarity Score",
-            height=400,
-            autosize=True,
         )
-        fig.update_xaxes(showgrid=show_grid)
-        fig.update_yaxes(showgrid=show_grid)
-
-        _apply_theme_colors(fig, theme_colors)
-        return fig
-
     fig = go.Figure()
     for group_name, scores in scores_dict.items():
         fig.add_trace(_create_boxplot_trace(name=str(group_name), scores=scores))
@@ -206,6 +191,57 @@ def _annotation_color(theme_colors: dict[str, str] | None) -> str:
     return "#64748b"
 
 
+def _empty_chart(
+    title: str,
+    message: str,
+    theme_colors: dict[str, str] | None = None,
+    show_grid: bool = True,
+    height: int = 400,
+    xaxis_title: str | None = None,
+    yaxis_title: str | None = None,
+) -> go.Figure:
+    """Build a themed placeholder figure for an empty-state chart.
+
+    Centralizes the boilerplate every chart function needs when there is
+    no data to plot: an empty figure with a centered message annotation,
+    the standard title/height layout, and consistent theme/gridline styling.
+
+    Args:
+        title: Chart title to display.
+        message: Empty-state message shown as a centered annotation.
+        theme_colors: Optional theme palette for light/dark backgrounds.
+        show_grid: Whether to show chart gridlines.
+        height: Plot height in pixels.
+        xaxis_title: Optional x-axis label (omitted if not provided).
+        yaxis_title: Optional y-axis label (omitted if not provided).
+
+    Returns:
+        A themed Plotly Figure with no data traces and an explanatory
+        annotation.
+    """
+    fig = go.Figure()
+    fig.add_annotation(
+        text=message,
+        xref="paper",
+        yref="paper",
+        x=0.5,
+        y=0.5,
+        showarrow=False,
+        font=dict(size=16, color=_annotation_color(theme_colors)),
+    )
+
+    layout_kwargs: dict[str, Any] = {"title": title, "height": height, "autosize": True}
+    if xaxis_title is not None:
+        layout_kwargs["xaxis_title"] = xaxis_title
+    if yaxis_title is not None:
+        layout_kwargs["yaxis_title"] = yaxis_title
+    fig.update_layout(**layout_kwargs)
+
+    fig.update_xaxes(showgrid=show_grid)
+    fig.update_yaxes(showgrid=show_grid)
+
+    return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)
+
 def build_visualization_lazily(
     enabled: bool,
     factory: Callable[[], FigureT],
@@ -269,28 +305,15 @@ def plot_high_severity_trends(
     theme_override: str | None = None,
 ) -> go.Figure:
     """Create an interactive line chart showing High severity plagiarism incidents over time."""
-    if not trend_data:
-        fig = go.Figure()
-        fig.add_annotation(
-            text="No High severity incidents recorded in the specified period",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font=dict(size=16, color=_annotation_color(theme_colors)),
-        )
-        fig.update_layout(
+if not trend_data:
+        return _empty_chart(
             title="High Severity Plagiarism Trends (Last 30 Days)",
+            message="No High severity incidents recorded in the specified period",
+            theme_colors=theme_colors,
+            show_grid=show_grid,
             xaxis_title="Date",
             yaxis_title="Number of High Severity Incidents",
-            height=400,
-            autosize=True,
         )
-        fig.update_xaxes(showgrid=show_grid)
-        fig.update_yaxes(showgrid=show_grid)
-        return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)
-
     df = pd.DataFrame(trend_data)
     df["date"] = pd.to_datetime(df["date"])
     df["cumulative"] = df["count"].cumsum()
@@ -342,28 +365,15 @@ def plot_most_plagiarized_documents(
     theme_override: str | None = None,
 ) -> go.Figure:
     """Create a bar chart showing the most frequently plagiarized documents."""
-    if not doc_data:
-        fig = go.Figure()
-        fig.add_annotation(
-            text="No plagiarism incidents recorded",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font=dict(size=16, color=_annotation_color(theme_colors)),
-        )
-        fig.update_layout(
+if not doc_data:
+        return _empty_chart(
             title="Most Frequently Plagiarized Documents",
+            message="No plagiarism incidents recorded",
+            theme_colors=theme_colors,
+            show_grid=show_grid,
             xaxis_title="Document Name",
             yaxis_title="Number of Incidents",
-            height=400,
-            autosize=True,
         )
-        fig.update_xaxes(showgrid=show_grid)
-        fig.update_yaxes(showgrid=show_grid)
-        return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)
-
     df = pd.DataFrame(doc_data)
     df["display_name"] = df["document_name"].apply(
         lambda x: x[:30] + "..." if len(x) > 30 else x
@@ -412,28 +422,15 @@ def plot_similarity_distribution(
     theme_colors: dict[str, str] | None = None,
 ) -> go.Figure:
     """Create a histogram showing the distribution of all pairwise similarity scores."""
-    if sim_matrix.empty or sim_matrix.shape[0] < 2:
-        fig = go.Figure()
-        fig.add_annotation(
-            text="Not enough documents to compute a similarity distribution",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font=dict(size=16, color=_annotation_color(theme_colors)),
-        )
-        fig.update_layout(
+if sim_matrix.empty or sim_matrix.shape[0] < 2:
+        return _empty_chart(
             title=title,
+            message="Not enough documents to compute a similarity distribution",
+            theme_colors=theme_colors,
+            show_grid=show_grid,
             xaxis_title="Similarity Score",
             yaxis_title="Number of Document Pairs",
-            height=400,
-            autosize=True,
         )
-        fig.update_xaxes(showgrid=show_grid)
-        fig.update_yaxes(showgrid=show_grid)
-        return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)
-
     mask = np.triu(np.ones(sim_matrix.shape, dtype=bool), k=1)
     scores = sim_matrix.where(mask).stack().values
 
@@ -474,22 +471,13 @@ def plot_document_sizes(
     theme_colors: dict[str, str] | None = None,
 ) -> go.Figure:
     """Create a bar chart visualizing document word counts."""
-    if not word_counts:
-        fig = go.Figure()
-        fig.add_annotation(
-            text="No documents currently in the database",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font=dict(size=16, color=_annotation_color(theme_colors)),
+if not word_counts:
+        return _empty_chart(
+            title="Document Word Counts",
+            message="No documents currently in the database",
+            theme_colors=theme_colors,
+            show_grid=show_grid,
         )
-        fig.update_layout(title="Document Word Counts", height=400, autosize=True)
-        fig.update_xaxes(showgrid=show_grid)
-        fig.update_yaxes(showgrid=show_grid)
-        return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)
-
     doc_names = list(word_counts.keys())
     counts = list(word_counts.values())
 
@@ -542,28 +530,15 @@ def plot_similarity_boxplot(
             continue
         rows.append({"assignment_title": str(title), "similarity_score": score})
 
-    if not rows:
-        fig = go.Figure()
-        fig.add_annotation(
-            text="No similarity scores recorded for the selected incidents",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font=dict(size=16, color=_annotation_color(theme_colors)),
-        )
-        fig.update_layout(
+if not rows:
+        return _empty_chart(
             title="Similarity Score Distribution by Assignment",
+            message="No similarity scores recorded for the selected incidents",
+            theme_colors=theme_colors,
+            show_grid=show_grid,
             xaxis_title="Assignment Title",
             yaxis_title="Similarity Score",
-            height=400,
-            autosize=True,
         )
-        fig.update_xaxes(showgrid=show_grid)
-        fig.update_yaxes(showgrid=show_grid)
-        return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)
-
     grouped: dict[str, list[float]] = {}
     for row in rows:
         grouped.setdefault(row["assignment_title"], []).append(row["similarity_score"])
@@ -590,24 +565,13 @@ def plot_severity_donut_chart(
     theme_colors: dict[str, str] | None = None,
 ) -> go.Figure:
     """Create a donut chart showing the distribution of plagiarism incident severities."""
-    if not incidents:
-        fig = go.Figure()
-        fig.add_annotation(
-            text="No plagiarism incidents recorded",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font=dict(size=16, color=_annotation_color(theme_colors)),
-        )
-        fig.update_layout(
+if not incidents:
+        return _empty_chart(
             title="Plagiarism Incident Severity Distribution",
-            height=400,
-            autosize=True,
+            message="No plagiarism incidents recorded",
+            theme_colors=theme_colors,
+            show_grid=False,
         )
-        return apply_plotly_theme(fig, theme_colors, show_grid=False)
-
     df = pd.DataFrame(incidents)
     if "severity" not in df.columns:
         df["severity"] = "Unknown"
@@ -663,24 +627,13 @@ def plot_similarity_histogram(
     Returns:
         A Plotly figure with the similarity score histogram.
     """
-    if not scores:
-        fig = go.Figure()
-        fig.add_annotation(
-            text="No similarity scores available to plot",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font=dict(size=16, color=_annotation_color(theme_colors)),
-        )
-        fig.update_layout(
+if not scores:
+        return _empty_chart(
             title="Similarity Score Distribution",
-            height=400,
-            autosize=True,
+            message="No similarity scores available to plot",
+            theme_colors=theme_colors,
+            show_grid=False,
         )
-        return apply_plotly_theme(fig, theme_colors, show_grid=False)
-
     counts, bin_edges = np.histogram(scores, bins=n_bins, range=(0.0, 1.0))
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
 
@@ -723,28 +676,15 @@ def plot_similarity_percentiles(
         except (TypeError, ValueError):
             continue
 
-    if not scores:
-        fig = go.Figure()
-        fig.add_annotation(
-            text="No similarity scores available to compute percentiles",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font=dict(size=16, color=_annotation_color(theme_colors)),
-        )
-        fig.update_layout(
+if not scores:
+        return _empty_chart(
             title="Similarity Score Percentile Breakdown",
+            message="No similarity scores available to compute percentiles",
+            theme_colors=theme_colors,
+            show_grid=show_grid,
             xaxis_title="Similarity Score",
             yaxis_title="Percentile",
-            height=400,
-            autosize=True,
         )
-        fig.update_xaxes(showgrid=show_grid)
-        fig.update_yaxes(showgrid=show_grid)
-        return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)
-
     percentile_values = np.percentile(scores, [25, 50, 75, 90])
     percentile_labels = ["25th", "50th (Median)", "75th", "90th"]
 
@@ -825,44 +765,27 @@ def plot_hierarchical_dendrogram(
     fig = go.Figure()
 
     # ── Validate input ───────────────────────────────────────────────
-    if similarity_matrix is None or similarity_matrix.empty:
-        fig.add_annotation(
-            text="No similarity data available to build a dendrogram",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font=dict(size=16, color=_annotation_color(theme_colors)),
-        )
-        fig.update_layout(
+if similarity_matrix is None or similarity_matrix.empty:
+        return _empty_chart(
             title=title,
+            message="No similarity data available to build a dendrogram",
+            theme_colors=theme_colors,
+            show_grid=show_grid,
+            height=height,
             xaxis_title="Document",
             yaxis_title="Merge Distance (1 − similarity)",
-            height=height,
-            autosize=True,
         )
-        return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)
 
     if similarity_matrix.shape[0] < 2:
-        fig.add_annotation(
-            text="At least two documents are required to build a dendrogram",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font=dict(size=16, color=_annotation_color(theme_colors)),
-        )
-        fig.update_layout(
+        return _empty_chart(
             title=title,
+            message="At least two documents are required to build a dendrogram",
+            theme_colors=theme_colors,
+            show_grid=show_grid,
+            height=height,
             xaxis_title="Document",
             yaxis_title="Merge Distance (1 − similarity)",
-            height=height,
-            autosize=True,
         )
-        return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)
-
     # ── Build linkage matrix via Ward's method ──────────────────────
     # Lazy import keeps cold-start fast for users who never render this
     # chart, and keeps scipy out of the import graph of lighter modules
