@@ -94,6 +94,20 @@ def _backup_corrupted_index(index_path: str) -> None:
         backup_path = os.path.join(backup_dir, f"corpus_{timestamp}.index.bak")
         shutil.copy2(index_path, backup_path)
         logger.info(f"Backed up corrupted index to {backup_path}")
+
+        # Cap retention so desync backups cannot fill the disk
+        backups = sorted(
+            [
+                os.path.join(backup_dir, name)
+                for name in os.listdir(backup_dir)
+                if name.endswith(".index.bak")
+            ],
+            key=os.path.getmtime,
+        )
+        while len(backups) > 5:
+            oldest = backups.pop(0)
+            os.remove(oldest)
+            logger.info(f"Removed old FAISS index backup: {oldest}")
     except Exception as e:
         logger.warning(f"Failed to backup corrupted FAISS index: {e}")
 

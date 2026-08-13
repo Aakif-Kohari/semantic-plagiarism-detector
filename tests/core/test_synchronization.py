@@ -125,6 +125,8 @@ def test_backup_corrupted_index_mechanics():
     with patch("os.path.exists", side_effect=[True, False]), patch(
         "os.makedirs"
     ) as mock_makedirs, patch("shutil.copy2") as mock_copy, patch(
+        "os.listdir", return_value=[]
+    ), patch(
         "src.core.synchronization.datetime"
     ) as mock_dt:
 
@@ -138,6 +140,29 @@ def test_backup_corrupted_index_mechanics():
             "/fake/data/backups/corpus_20240101_120000.index.bak"
         )
         mock_copy.assert_called_once_with("/fake/data/corpus.index", expected_dest)
+
+
+def test_backup_corrupted_index_retention_cap(tmp_path):
+    """Keep at most 5 .index.bak files after a new backup is created."""
+    import time
+
+    index_path = tmp_path / "corpus.index"
+    index_path.write_bytes(b"index-data")
+
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+
+    base = time.time() - 1000
+    for i in range(5):
+        path = backup_dir / f"corpus_old{i}.index.bak"
+        path.write_bytes(b"old")
+        os.utime(path, (base + i, base + i))
+
+    _backup_corrupted_index(str(index_path))
+
+    backups = sorted(backup_dir.glob("*.index.bak"))
+    assert len(backups) == 5
+    assert not (backup_dir / "corpus_old0.index.bak").exists()
 
 
 def test_atexit_graceful_shutdown_registered():
