@@ -1,4 +1,4 @@
-.PHONY: run test lint format clean load-seed save-seed
+.PHONY: run test test-unit test-integration test-cov lint lint-fix format clean load-seed save-seed
 
 # Run the Streamlit dashboard application
 run:
@@ -25,6 +25,10 @@ lint:
 	ruff check .
 	black --check .
 	isort --check-only --profile black .
+	mypy src/ --ignore-missing-imports
+
+lint-fix:
+	ruff check . --fix
 
 # Auto-format codebase
 format:
