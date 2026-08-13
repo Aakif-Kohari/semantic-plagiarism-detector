@@ -31,13 +31,49 @@ from src.core.ai_detector import (
 def test_categorize_ai_probability_boundaries():
     """Verify that the confidence categorization partitions the [0,1] range correctly."""
     assert categorize_ai_probability(0.85) == "High Probability"
-    assert categorize_ai_probability(0.80) == "High Probability"
-    assert categorize_ai_probability(0.79) == "Moderate Probability"
-    assert categorize_ai_probability(0.65) == "Moderate Probability"
+    assert categorize_ai_probability(0.75) == "High Probability"
+    assert categorize_ai_probability(0.74) == "Moderate Probability"
     assert categorize_ai_probability(0.50) == "Moderate Probability"
-    assert categorize_ai_probability(0.49) == "Low Probability"
-    assert categorize_ai_probability(0.20) == "Low Probability"
+    assert categorize_ai_probability(0.40) == "Moderate Probability"
+    assert categorize_ai_probability(0.39) == "Low Probability"
     assert categorize_ai_probability(0.00) == "Low Probability"
+
+
+def test_ai_probability_categorization_consistency():
+    """Verify that both categorize_ai_probability and detect_ai_generated_text use consistent thresholds."""
+    from src.core.ai_detector import (
+        AI_HIGH_THRESHOLD,
+        AI_MEDIUM_THRESHOLD,
+        categorize_ai_probability,
+        detect_ai_generated_text,
+    )
+
+    test_scores = [
+        0.0,
+        0.2,
+        AI_MEDIUM_THRESHOLD - 0.01,
+        AI_MEDIUM_THRESHOLD,
+        0.5,
+        AI_HIGH_THRESHOLD - 0.01,
+        AI_HIGH_THRESHOLD,
+        0.9,
+        1.0,
+    ]
+
+    mapping = {
+        "high": "High Probability",
+        "medium": "Moderate Probability",
+        "low": "Low Probability",
+    }
+
+    for score in test_scores:
+        # Mock detect_ai_probability to return the score
+        with patch("src.core.ai_detector.detect_ai_probability", return_value=score):
+            res = detect_ai_generated_text("Some text for the classifier pipeline analysis.")
+            tier = res["confidence_tier"]
+            category = categorize_ai_probability(score)
+            assert mapping[tier] == category, f"Inconsistent categorization for score {score}: tier={tier}, category={category}"
+
 
 
 @pytest.fixture(autouse=True)
