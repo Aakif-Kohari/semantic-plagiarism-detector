@@ -23,9 +23,9 @@ def get_sqlite_db_paths() -> List[Path]:
 
     # 2. Auth DB path
     try:
-        from src.db.auth import _DB_PATH as auth_db_path
+        from src.db.auth import get_auth_db_path
 
-        paths.append(Path(auth_db_path))
+        paths.append(get_auth_db_path())
     except Exception as e:
         logger.debug("Could not resolve path: %s", e)
 
