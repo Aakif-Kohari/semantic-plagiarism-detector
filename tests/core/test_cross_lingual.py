@@ -402,3 +402,160 @@ class TestVerifySemanticFidelity:
     def test_empty_embeddings_return_zero(self):
         assert verify_semantic_fidelity(np.array([]), np.array([1.0])) == 0.0
         assert verify_semantic_fidelity(None, None) == 0.0
+
+
+class TestBackTranslateChunkRealTranslation:
+    """Test suite for real translation call implementation (Issue #2219)."""
+
+    @patch("src.core.cross_lingual.translate_text")
+    @patch("src.core.cross_lingual.detect_chunk_language", return_value="es")
+    @patch("src.core.cross_lingual.get_cached_translation", return_value=None)
+    @patch("src.core.cross_lingual.save_translation")
+    def test_calls_translate_text_with_correct_args(
+        self, mock_save, mock_cache, mock_detect, mock_translate
+    ):
+        """Verify translate_text is called with correct arguments."""
+        mock_translate.return_value = "Hello world"
+        
+        result = back_translate_chunk("Hola mundo", source_lang="es")
+        
+        mock_translate.assert_called_once_with(
+            "Hola mundo",
+            target_lang="en",
+            source_lang="es",
+        )
+        assert result == "Hello world"
+
+    @patch("src.core.cross_lingual.translate_text")
+    @patch("src.core.cross_lingual.detect_chunk_language", return_value="fr")
+    @patch("src.core.cross_lingual.get_cached_translation", return_value=None)
+    @patch("src.core.cross_lingual.save_translation")
+    def test_saves_translation_to_cache(
+        self, mock_save, mock_cache, mock_detect, mock_translate
+    ):
+        """Verify successful translation is saved to cache."""
+        mock_translate.return_value = "Good morning"
+        
+        result = back_translate_chunk("Bonjour", source_lang="fr", use_cache=True)
+        
+        mock_save.assert_called_once_with(
+            "Bonjour",
+            "fr",
+            "en",
+            "Good morning",
+        )
+        assert result == "Good morning"
+
+    @patch("src.core.cross_lingual.translate_text", side_effect=Exception("API Error"))
+    @patch("src.core.cross_lingual.detect_chunk_language", return_value="de")
+    @patch("src.core.cross_lingual.get_cached_translation", return_value=None)
+    @patch("src.core.cross_lingual.save_translation")
+    def test_fallback_on_translation_failure(
+        self, mock_save, mock_cache, mock_detect, mock_translate
+    ):
+        """Verify fallback to original text when translation fails."""
+        original_text = "Guten Tag"
+        
+        result = back_translate_chunk(original_text, source_lang="de")
+        
+        # Should return original text, not raise exception
+        assert result == original_text
+        # Should not save failed translation to cache
+        mock_save.assert_not_called()
+
+    @patch("src.core.cross_lingual.translate_text", return_value="")
+    @patch("src.core.cross_lingual.detect_chunk_language", return_value="it")
+    @patch("src.core.cross_lingual.get_cached_translation", return_value=None)
+    @patch("src.core.cross_lingual.save_translation")
+    def test_fallback_on_empty_translation(
+        self, mock_save, mock_cache, mock_detect, mock_translate
+    ):
+        """Verify fallback to original text when translation returns empty string."""
+        original_text = "Buongiorno"
+        
+        result = back_translate_chunk(original_text, source_lang="it")
+        
+        assert result == original_text
+        mock_save.assert_not_called()
+
+    @patch("src.core.cross_lingual.translate_text", return_value=None)
+    @patch("src.core.cross_lingual.detect_chunk_language", return_value="pt")
+    @patch("src.core.cross_lingual.get_cached_translation", return_value=None)
+    @patch("src.core.cross_lingual.save_translation")
+    def test_fallback_on_none_translation(
+        self, mock_save, mock_cache, mock_detect, mock_translate
+    ):
+        """Verify fallback to original text when translation returns None."""
+        original_text = "Bom dia"
+        
+        result = back_translate_chunk(original_text, source_lang="pt")
+        
+        assert result == original_text
+        mock_save.assert_not_called()
+
+    @patch("src.core.cross_lingual.translate_text", return_value="  Hello  ")
+    @patch("src.core.cross_lingual.detect_chunk_language", return_value="es")
+    @patch("src.core.cross_lingual.get_cached_translation", return_value=None)
+    @patch("src.core.cross_lingual.save_translation")
+    def test_strips_whitespace_from_translation(
+        self, mock_save, mock_cache, mock_detect, mock_translate
+    ):
+        """Verify whitespace is stripped from translation result."""
+        result = back_translate_chunk("Hola", source_lang="es")
+        
+        assert result == "Hello"
+        # Cache should store stripped version
+        mock_save.assert_called_once_with("Hola", "es", "en", "Hello")
+
+    @patch("src.core.cross_lingual.translate_text")
+    @patch("src.core.cross_lingual.detect_chunk_language", return_value="es")
+    @patch("src.core.cross_lingual.get_cached_translation", return_value=None)
+    @patch("src.core.cross_lingual.save_translation")
+    def test_skips_cache_when_disabled(
+        self, mock_save, mock_cache, mock_detect, mock_translate
+    ):
+        """Verify cache is skipped when use_cache=False."""
+        mock_translate.return_value = "Hello"
+        
+        result = back_translate_chunk("Hola", source_lang="es", use_cache=False)
+        
+        # Should not check cache
+        mock_cache.assert_not_called()
+        # Should not save to cache
+        mock_save.assert_not_called()
+        assert result == "Hello"
+
+    @patch("src.core.cross_lingual.translate_text")
+    @patch("src.core.cross_lingual.detect_chunk_language", return_value="en")
+    def test_skips_translation_for_target_language(self, mock_detect, mock_translate):
+        """Verify no translation occurs when source is already target language."""
+        text = "Hello world"
+        
+        result = back_translate_chunk(text, source_lang="en")
+        
+        # Should not call translate_text
+        mock_translate.assert_not_called()
+        # Should return original text unchanged
+        assert result == text
+
+    def test_handles_empty_input(self):
+        """Verify empty input returns empty string."""
+        assert back_translate_chunk("") == ""
+        assert back_translate_chunk(None) == ""
+
+    def test_handles_non_string_input(self):
+        """Verify non-string input returns empty string."""
+        assert back_translate_chunk(123) == ""
+        assert back_translate_chunk([]) == ""
+
+    @patch("src.core.cross_lingual.translate_text", return_value="Hello world")
+    @patch("src.core.cross_lingual.get_cached_translation", return_value="Cached translation")
+    def test_prefers_cache_over_translation(self, mock_cache, mock_translate):
+        """Verify cached translation is preferred over new translation."""
+        result = back_translate_chunk("Hola mundo", source_lang="es", use_cache=True)
+        
+        # Should return cached value
+        assert result == "Cached translation"
+        # Should not call translate_text
+        mock_translate.assert_not_called()
+
