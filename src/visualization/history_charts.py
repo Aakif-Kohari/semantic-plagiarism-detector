@@ -14,6 +14,17 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 
+_DEFAULT_BG = "#FFFFFF"
+_DEFAULT_INK = "#0F172A"
+_DEFAULT_PRIMARY = "#3B82F6"
+_DEFAULT_DANGER = "#EF4444"
+_DEFAULT_WARNING = "#F59E0B"
+
+
+def _resolve_color(theme_colors: dict | None, key: str, default: str) -> str:
+    """Resolve a theme color with a fallback to the default color."""
+    return theme_colors.get(key, default) if theme_colors else default
+
 def plot_similarity_trend_line(
     history_data: List[Dict],
     theme_colors: Optional[Dict] = None,
@@ -50,12 +61,10 @@ def plot_similarity_trend_line(
     df["timestamp"] = pd.to_datetime(df["timestamp"])
     df = df.sort_values("timestamp")
 
-    bg_color = theme_colors.get("background", "#FFFFFF") if theme_colors else "#FFFFFF"
-    ink_color = theme_colors.get("ink", "#0F172A") if theme_colors else "#0F172A"
-    danger_color = theme_colors.get("danger", "#EF4444") if theme_colors else "#EF4444"
-    warning_color = (
-        theme_colors.get("warning", "#F59E0B") if theme_colors else "#F59E0B"
-    )
+    bg_color = _resolve_color(theme_colors, "background", _DEFAULT_BG)
+    ink_color = _resolve_color(theme_colors, "ink", _DEFAULT_INK)
+    danger_color = _resolve_color(theme_colors, "danger", _DEFAULT_DANGER)
+    warning_color = _resolve_color(theme_colors, "warning", _DEFAULT_WARNING)
 
     fig = go.Figure()
 
@@ -134,11 +143,9 @@ def plot_flagged_documents_bar(
     df["timestamp"] = pd.to_datetime(df["timestamp"])
     df["date_str"] = df["timestamp"].dt.strftime("%Y-%m-%d %H:%M")
 
-    bg_color = theme_colors.get("background", "#FFFFFF") if theme_colors else "#FFFFFF"
-    ink_color = theme_colors.get("ink", "#0F172A") if theme_colors else "#0F172A"
-    primary_color = (
-        theme_colors.get("primary", "#3B82F6") if theme_colors else "#3B82F6"
-    )
+    bg_color = _resolve_color(theme_colors, "background", _DEFAULT_BG)
+    ink_color = _resolve_color(theme_colors, "ink", _DEFAULT_INK)
+    primary_color = _resolve_color(theme_colors, "primary", _DEFAULT_PRIMARY)
 
     fig = px.bar(
         df,
