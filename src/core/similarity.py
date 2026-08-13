@@ -550,14 +550,21 @@ def find_most_similar_chunks(
     sim_matrix = cosine_similarity(emb_a, emb_b)
 
     pairs = []
-    for i in range(sim_matrix.shape[0]):
-        for j in range(sim_matrix.shape[1]):
-            score = sim_matrix[i, j]
-            if score >= threshold:
-                pairs.append((chunks_a[i], chunks_b[j], float(score)))
+    flat_indices = np.argsort(sim_matrix, axis=None)[::-1]
 
-    pairs.sort(key=lambda x: x[2], reverse=True)
-    return pairs[:top_k]
+    for idx in flat_indices:
+        i, j = np.unravel_index(idx, sim_matrix.shape)
+        score = float(sim_matrix[i, j])
+
+        if score < threshold:
+            break
+
+        if len(pairs) >= top_k:
+            break
+
+        pairs.append((chunks_a[i], chunks_b[j], score))
+
+    return pairs
 
 
 # ── Cross-Lingual Chunk Matching (Issue #1956) ────────────────────────────────
