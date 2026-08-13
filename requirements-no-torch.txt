@@ -43,8 +43,6 @@ seaborn>=0.13.0
 networkx>=3.0                    # Graph visualisations for document relationships
 
 # ── Code Quality ──────────────────────────────────────────────────────────────
-ruff>=0.15.22
-pylint>=3.0.0
 typing-extensions>=4.8.0         # Type hint compatibility extensions
 
 # ── Development & Testing ─────────────────────────────────────────────────────
@@ -65,10 +63,6 @@ fastapi>=0.109.0                # REST API framework for LMS integrations
 uvicorn>=0.27.0                 # ASGI server implementation
 python-multipart>=0.0.6         # Multipart form parsing for file uploads
 httpx>=0.26.0                   # Async HTTP client for API testing
-# ── Code Formatting & Linting ──────────────────────────────────────────────────
-pre-commit>=3.6.0               # Client-side Git hooks manager
-black>=24.1.0                   # Opinionated Python code formatter
-isort>=5.13.0                   # Import sorting library
 
 # ── Google Integration ─────────────────────────────────────────────────────────
 google-api-python-client>=2.198.0
