@@ -1,4 +1,3 @@
-from .concurrency import with_sqlite_retry
 from .config import (
     BrandingConfig,
     get_branding_config,
@@ -81,3 +80,14 @@ __all__ = [
     "run_pipeline",
     "run_extraction_pipeline",
 ]
+
+
+# with_sqlite_retry is re-exported from src.core.concurrency (which lazily
+# re-exports it from src.db.common). A lazy lookup avoids the circular import
+# chain (src.db -> src.core -> src.db.common).
+def __getattr__(name):
+    if name == "with_sqlite_retry":
+        from .concurrency import with_sqlite_retry
+
+        return with_sqlite_retry
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

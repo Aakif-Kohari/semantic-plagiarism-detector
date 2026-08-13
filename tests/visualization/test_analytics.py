@@ -251,6 +251,16 @@ def test_plot_similarity_histogram_uses_color_gradient():
     assert bar_trace.marker.colorscale is not None
 
 
+def test_plot_similarity_histogram_custom_colorscale():
+    scores = [0.1, 0.2, 0.35, 0.5, 0.55, 0.9]
+    fig = plot_similarity_histogram(scores, n_bins=10, colorscale="Cividis")
+
+    bar_trace = fig.data[0]
+    # Plotly expands named colorscales to their tuple form; Cividis starts
+    # with a dark blue (#00224e) that differs from Viridis' starting purple.
+    assert bar_trace.marker.colorscale[0][1] == "#00224e"
+
+
 def test_plot_similarity_histogram_empty_scores():
     fig = plot_similarity_histogram([])
 

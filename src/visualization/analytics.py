@@ -647,9 +647,22 @@ def plot_severity_donut_chart(
 def plot_similarity_histogram(
     scores: list[float],
     n_bins: int = 20,
+    colorscale: str = "Viridis",
     theme_colors: dict[str, str] | None = None,
 ) -> go.Figure:
-    """Create an interactive histogram of pairwise similarity scores with gradient coloring."""
+    """Create an interactive histogram of pairwise similarity scores with gradient coloring.
+
+    Args:
+        scores: List of similarity scores to plot.
+        n_bins: Number of histogram bins.
+        colorscale: Plotly colorscale for the bar gradient. Accessible options
+            include "Viridis" (default), "Cividis", "Plasma", "Inferno", and
+            "Turbo". "Cividis" is designed for colorblind accessibility.
+        theme_colors: Optional theme color overrides.
+
+    Returns:
+        A Plotly figure with the similarity score histogram.
+    """
     if not scores:
         fig = go.Figure()
         fig.add_annotation(
@@ -677,7 +690,7 @@ def plot_similarity_histogram(
             y=counts,
             marker=dict(
                 color=counts,
-                colorscale="Viridis",
+                colorscale=colorscale,
                 colorbar=dict(title="Pair Count"),
                 line=dict(color="#4a4dba", width=1),
             ),
