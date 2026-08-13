@@ -192,3 +192,81 @@ def test_page_size_clamping_to_max_100():
     assert page.page_size == 100
     assert len(page.items) == 100
     assert page.total_pages == 2
+
+
+def test_has_exact_match_no_results():
+    """Verify that _has_exact_match returns False if analysis_results is missing from session state."""
+    import streamlit as st
+    from src.utils.warning_list import _has_exact_match
+
+    # Ensure analysis_results is not in session state
+    if "analysis_results" in st.session_state:
+        del st.session_state["analysis_results"]
+
+    assert _has_exact_match("doc_a.pdf", "doc_b.pdf") is False
+
+
+def test_has_exact_match_with_matching_tuple_results():
+    """Verify that _has_exact_match works with legacy tuple format where index 1 is chunked_docs."""
+    import streamlit as st
+    from src.utils.warning_list import _has_exact_match
+
+    chunked_docs = {
+        "doc_a.pdf": ["hello world", "some other chunk"],
+        "doc_b.pdf": ["hello world", "different chunk"]
+    }
+    legacy_results = (None, chunked_docs, None, None, None, None, None, None, None)
+    st.session_state.analysis_results = legacy_results
+
+    assert _has_exact_match("doc_a.pdf", "doc_b.pdf") is True
+
+
+def test_has_exact_match_with_non_matching_tuple_results():
+    """Verify that _has_exact_match returns False when no chunks match."""
+    import streamlit as st
+    from src.utils.warning_list import _has_exact_match
+
+    chunked_docs = {
+        "doc_a.pdf": ["hello world"],
+        "doc_b.pdf": ["different chunk"]
+    }
+    legacy_results = (None, chunked_docs, None, None, None, None, None, None, None)
+    st.session_state.analysis_results = legacy_results
+
+    assert _has_exact_match("doc_a.pdf", "doc_b.pdf") is False
+
+
+def test_has_exact_match_with_named_tuple_results():
+    """Verify that _has_exact_match works with NamedTuple format, accessing chunked_docs attribute."""
+    import streamlit as st
+    from collections import namedtuple
+    from src.utils.warning_list import _has_exact_match
+
+    MockPipelineResult = namedtuple("MockPipelineResult", ["raw_texts", "chunked_docs"])
+    chunked_docs = {
+        "doc_a.pdf": ["exact match chunk"],
+        "doc_b.pdf": ["exact match chunk"]
+    }
+    named_results = MockPipelineResult(raw_texts={}, chunked_docs=chunked_docs)
+    st.session_state.analysis_results = named_results
+
+    assert _has_exact_match("doc_a.pdf", "doc_b.pdf") is True
+
+
+def test_has_exact_match_with_pure_attribute():
+    """Verify that _has_exact_match works with an object that only has chunked_docs attribute."""
+    import streamlit as st
+    from src.utils.warning_list import _has_exact_match
+
+    class MockNamedTuple:
+        def __init__(self, chunked_docs):
+            self.chunked_docs = chunked_docs
+
+    chunked_docs = {
+        "doc_a.pdf": ["exact match"],
+        "doc_b.pdf": ["exact match"]
+    }
+    st.session_state.analysis_results = MockNamedTuple(chunked_docs)
+
+    assert _has_exact_match("doc_a.pdf", "doc_b.pdf") is True
+

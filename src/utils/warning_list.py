@@ -279,7 +279,12 @@ def _has_exact_match(doc_a: str, doc_b: str) -> bool:
         or st.session_state.analysis_results is None
     ):
         return False
-    chunked_docs = st.session_state.analysis_results[1]
+    results = st.session_state.analysis_results
+    # Index 1 of the analysis_results tuple corresponds to chunked_docs
+    if hasattr(results, "chunked_docs"):
+        chunked_docs = results.chunked_docs
+    else:
+        chunked_docs = results[1]
     chunks_a = chunked_docs.get(doc_a, [])
     chunks_b = chunked_docs.get(doc_b, [])
 
