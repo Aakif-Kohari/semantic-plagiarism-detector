@@ -51,6 +51,19 @@ from app.components.advanced_analytics import (
     track_comparison,
 )
 
+
+from src.core.lexical_similarity import (
+    jaccard_similarity,
+    dice_coefficient,
+    overlap_coefficient,
+    lexical_similarity_matrix,
+    calculate_lexical_similarity,
+    n_gram_overlap,
+    scale_lexical_score,
+    compute_char_ngram_similarity,
+)
+
+
 from app.components.cross_lingual_ui import (
     render_cross_lingual_settings,
     render_cross_lingual_ui_in_drilldown,
@@ -58,6 +71,7 @@ from app.components.cross_lingual_ui import (
     is_cross_lingual_enabled,
     render_cross_lingual_stats,
 )
+
 
 
 # ── Document Version Control Imports ─────────────────────────────────────
@@ -2840,3 +2854,127 @@ with _footer_col2:
         )
     else:
         st.caption("✅ Up to date")
+
+
+# ─── End of file ──────────────────────────────────────────────────────────────
+
+# ── Hybrid Similarity (Lexical + Semantic) ─────────────────────────────────────
+
+def compute_hybrid_similarity_matrix(
+    semantic_df: pd.DataFrame,
+    lexical_df: pd.DataFrame,
+    alpha: float = 0.7,
+) -> pd.DataFrame:
+    """
+    Compute hybrid similarity matrix combining semantic and lexical scores.
+    
+    Formula: hybrid = alpha * semantic + (1 - alpha) * lexical
+    
+    Args:
+        semantic_df: Semantic similarity matrix (from embeddings)
+        lexical_df: Lexical similarity matrix (from text)
+        alpha: Weight for semantic similarity (0.7 = 70% semantic, 30% lexical)
+        
+    Returns:
+        Hybrid similarity DataFrame
+    """
+    if semantic_df.shape != lexical_df.shape:
+        raise ValueError("Semantic and lexical matrices must have same shape")
+    
+    hybrid = alpha * semantic_df + (1 - alpha) * lexical_df
+    return hybrid
+
+
+def compute_hybrid_similarity_score(
+    text_a: str,
+    text_b: str,
+    semantic_score: float,
+    alpha: float = 0.7,
+    lexical_method: str = 'tfidf'
+) -> float:
+    """
+    Compute hybrid similarity for a single pair.
+    
+    Args:
+        text_a: First text
+        text_b: Second text
+        semantic_score: Semantic similarity score
+        alpha: Weight for semantic similarity
+        lexical_method: Lexical method to use ('tfidf', 'jaccard', 'dice', 'overlap', 'ngram')
+        
+    Returns:
+        Hybrid similarity score
+    """
+    from src.core.lexical_similarity import (
+        calculate_lexical_similarity,
+        jaccard_similarity,
+        dice_coefficient,
+        overlap_coefficient,
+        n_gram_overlap,
+        compute_char_ngram_similarity
+    )
+    
+    if lexical_method == 'tfidf':
+        lexical_score = calculate_lexical_similarity(text_a, text_b)
+    elif lexical_method == 'jaccard':
+        lexical_score = jaccard_similarity(text_a, text_b)
+    elif lexical_method == 'dice':
+        lexical_score = dice_coefficient(text_a, text_b)
+    elif lexical_method == 'overlap':
+        lexical_score = overlap_coefficient(text_a, text_b)
+    elif lexical_method == 'ngram':
+        lexical_score = n_gram_overlap(text_a, text_b, n=3)
+    elif lexical_method == 'char_ngram':
+        lexical_score = compute_char_ngram_similarity(text_a, text_b, n=5)
+    else:
+        lexical_score = calculate_lexical_similarity(text_a, text_b)
+    
+    hybrid_score = alpha * semantic_score + (1 - alpha) * lexical_score
+    return min(1.0, max(0.0, hybrid_score))
+
+
+def get_hybrid_similarity_stats(
+    semantic_scores: List[float],
+    lexical_scores: List[float],
+    alpha: float = 0.7
+) -> Dict[str, Any]:
+    """
+    Get statistics about hybrid similarity distribution.
+    
+    Args:
+        semantic_scores: List of semantic scores
+        lexical_scores: List of lexical scores
+        alpha: Weight for semantic similarity
+        
+    Returns:
+        Dictionary with statistics
+    """
+    if not semantic_scores or not lexical_scores:
+        return {
+            'semantic_avg': 0.0,
+            'lexical_avg': 0.0,
+            'hybrid_avg': 0.0,
+            'hybrid_min': 0.0,
+            'hybrid_max': 0.0,
+            'semantic_lexical_correlation': 0.0,
+            'alpha_used': alpha
+        }
+    
+    hybrid_scores = [
+        alpha * sem + (1 - alpha) * lex
+        for sem, lex in zip(semantic_scores, lexical_scores)
+    ]
+    
+    return {
+        'semantic_avg': sum(semantic_scores) / len(semantic_scores),
+        'lexical_avg': sum(lexical_scores) / len(lexical_scores),
+        'hybrid_avg': sum(hybrid_scores) / len(hybrid_scores),
+        'hybrid_min': min(hybrid_scores),
+        'hybrid_max': max(hybrid_scores),
+        'semantic_lexical_correlation': np.corrcoef(semantic_scores, lexical_scores)[0, 1] 
+            if len(semantic_scores) > 1 else 0.0,
+        'alpha_used': alpha
+    }
+
+
+# ─── End of file ──────────────────────────────────────────────────────────────
