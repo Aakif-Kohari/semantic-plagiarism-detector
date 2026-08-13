@@ -340,3 +340,26 @@ def normalize_severity_label(label: str) -> str:
 def severity_rank(label: str) -> int:
     """Return a stable sort rank for a severity label."""
     return SEVERITY_RANK[normalize_severity_label(label)]
+
+
+# ============================================================================
+# OFFLINE MODE CONFIGURATION
+# ============================================================================
+
+def get_offline_mode_status() -> bool:
+    """Check if offline mode is enabled."""
+    import os
+    return os.getenv("OFFLINE_MODE", "false").lower() == "true"
+
+
+def get_offline_config() -> Dict[str, Any]:
+    """Get offline mode configuration."""
+    import os
+    return {
+        "enabled": get_offline_mode_status(),
+        "cache_dir": os.getenv("OFFLINE_CACHE_DIR", ".cache/offline"),
+        "model_cache_dir": os.getenv("OFFLINE_MODEL_CACHE_DIR", ".cache/models"),
+        "max_cache_size_mb": int(os.getenv("OFFLINE_MAX_CACHE_SIZE_MB", "500")),
+        "preload_models": os.getenv("OFFLINE_PRELOAD_MODELS", "true").lower() == "true",
+        "disable_telemetry": os.getenv("OFFLINE_DISABLE_TELEMETRY", "true").lower() == "true",
+    }
