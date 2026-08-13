@@ -789,6 +789,7 @@ def render_warning_controls(
             st.rerun()
 
 
+
 def matches_query_predicate(flag: dict, search_query: str) -> bool:
     """
     Check if a flagged incident matches a search query across document names or text snippets.
