@@ -12,8 +12,8 @@ else:
     from unittest.mock import MagicMock
     st = MagicMock()
 
-from app.theme import badge_html, tier_from_severity_label
-from src.core.config import normalize_severity_label, severity_from_score, severity_rank
+from app.session_keys import SessionKeys
+from app.theme import badge_html, tier_from_severity_labelfrom src.core.config import normalize_severity_label, severity_from_score, severity_rank
 from src.db.incidents import _normalise_pair, add_false_positive, get_false_positives
 from src.i18n.translator import get_text
 from src.utils.pagination import PaginationPage, paginate_items
@@ -345,9 +345,8 @@ def render_warning_controls(
 ) -> None:
     if "warning_page" not in st.session_state:
         st.session_state.warning_page = 1
-    if "compact_view" not in st.session_state:
-        st.session_state.compact_view = False
-
+if SessionKeys.COMPACT_VIEW not in st.session_state:
+        st.session_state[SessionKeys.COMPACT_VIEW] = False
     from src.core.config import DEFAULT_THRESHOLDS
 
     st.caption(
@@ -368,8 +367,7 @@ def render_warning_controls(
             }
         )
 
-    if st.session_state.get("compact_view", False):
-        active_filters.append(
+if st.session_state.get(SessionKeys.COMPACT_VIEW, False):        active_filters.append(
             {
                 "key": "clear_compact_view",
                 "label": "Compact View \u24e7",
@@ -483,9 +481,8 @@ def render_warning_controls(
                         st.session_state.class_filter_selectbox = "All Classes"
                     elif f["action"] == "min_match_length":
                         st.session_state.warning_min_match_length = 0
-                    elif f["action"] == "compact_view":
-                        st.session_state.compact_view = False
-                    st.rerun()
+elif f["action"] == "compact_view":
+                        st.session_state[SessionKeys.COMPACT_VIEW] = False                    st.rerun()
 
     dismissed_pairs = get_false_positives()
     filtered_flags = [
@@ -517,8 +514,7 @@ def render_warning_controls(
     with compact_col:
         compact_view = st.checkbox(
             "Compact View",
-            key="compact_view",
-            help="Show warnings as compact single-line rows",
+key=SessionKeys.COMPACT_VIEW,            help="Show warnings as compact single-line rows",
             on_change=_reset_page,
         )
     with size_col:
