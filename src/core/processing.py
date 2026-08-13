@@ -62,7 +62,11 @@ def run_full_pipeline(
     Returns:
         A ``PipelineResult`` with all pipeline outputs including the final flags list.
     """
-    import psutil
+    try:
+        import psutil
+    except ImportError:
+        psutil = None
+        logger.debug("psutil is not installed; skipping system memory usage check.")
 
     raw_texts: Dict[str, str] = {}
     failed_files: List[str] = []
@@ -122,13 +126,17 @@ def run_full_pipeline(
 
     chunk_sim_df = pd.DataFrame(chunk_mat, index=names, columns=names)
 
-    memory = psutil.virtual_memory()
-    if memory.percent >= 85:
-        logger.warning(
-            "High memory usage detected (%d%%). Large FAISS indexes may cause "
-            "instability or OOM crashes.",
-            memory.percent,
-        )
+    if psutil is not None:
+        try:
+            memory = psutil.virtual_memory()
+            if memory.percent >= 85:
+                logger.warning(
+                    "High memory usage detected (%d%%). Large FAISS indexes may cause "
+                    "instability or OOM crashes.",
+                    memory.percent,
+                )
+        except Exception as exc:
+            logger.debug("System memory usage check failed: %s", exc)
 
     faiss_index, registry = build_index(embeddings, chunked_docs)
     ai_probabilities = detect_documents_ai_probability(chunked_docs)

@@ -389,7 +389,7 @@ def prepare_text_for_embedding(
         else:
             detected_lang = res
         language = _normalise_language_code(detected_lang)
-except (LangDetectException, ValueError, TypeError) as exc:
+    except (LangDetectException, ValueError, TypeError) as exc:
         logger.warning("Language detection failed, defaulting to 'en': %s", exc)
         language = "en"
     if language in ENGLISH_CODES or language == "unknown":
@@ -424,9 +424,10 @@ except (LangDetectException, ValueError, TypeError) as exc:
                     original_text,
                     target_lang=target_language,
                 )
-except (TypeError, ValueError, ConnectionError) as exc:
+            except (TypeError, ValueError, ConnectionError) as exc:
                 logger.warning("Fallback translation call failed: %s", exc)
-                translated_text = ""        except (TypeError, ValueError, ConnectionError) as exc:
+                translated_text = ""
+        except (TypeError, ValueError, ConnectionError) as exc:
             logger.warning("Translation call failed: %s", exc)
             translated_text = ""
     translated_text = str(translated_text or "").strip()
