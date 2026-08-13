@@ -122,7 +122,7 @@ def test_detect_ai_generated_text_empty():
     res = detect_ai_generated_text("")
     assert res["ai_probability"] == 0.0
     assert res["confidence_tier"] == "low"
-    assert res["perplexity_score"] == 150.0
+    assert res["perplexity_score"] == 0.0
     assert res["burstiness_score"] == 0.0
     assert res["ngram_repetitiveness"] == 0.0
     assert res["classification_tier"] == "low"
@@ -133,7 +133,7 @@ def test_detect_ai_generated_text_whitespace():
     res = detect_ai_generated_text("   \n\t  ")
     assert res["ai_probability"] == 0.0
     assert res["confidence_tier"] == "low"
-    assert res["perplexity_score"] == 150.0
+    assert res["perplexity_score"] == 0.0
     assert res["burstiness_score"] == 0.0
     assert res["ngram_repetitiveness"] == 0.0
 

@@ -129,31 +129,19 @@ def _run_upload_job(
             ignore_phrases=ignore_phrases,
         )
 
-        (
-            raw_texts,
-            chunked_docs,
-            embeddings,
-            sim_df,
-            chunk_sim_df,
-            faiss_index,
-            registry,
-            ai_probabilities,
-            flags,
-        ) = pipeline_result
-
-        incidents = sync_flagged_incidents(flags)
+        incidents = sync_flagged_incidents(pipeline_result.flags)
 
         elapsed = time.perf_counter() - start
         logger.info(
             "Background job finished: %d documents, %d flags, %.2fs elapsed",
-            len(raw_texts),
-            len(flags),
+            len(pipeline_result.raw_texts),
+            len(pipeline_result.flags),
             elapsed,
         )
 
         return {
-            "document_count": len(raw_texts),
-            "flags_count": len(flags),
+            "document_count": len(pipeline_result.raw_texts),
+            "flags_count": len(pipeline_result.flags),
             "incidents_count": len(incidents),
             "elapsed_seconds": round(elapsed, 2),
         }

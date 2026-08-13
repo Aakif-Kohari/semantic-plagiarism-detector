@@ -44,7 +44,19 @@ class RateLimiter:
             window: Time window in seconds.
             block_duration: Duration in seconds to block the client after exceeding the limit.
             prefix: Redis key prefix for rate limiting data.
+
+        Raises:
+            ValueError: If limit, window, or block_duration is not positive.
         """
+        if limit < 1:
+            raise ValueError(f"limit must be >= 1, got {limit}")
+        if window < 1:
+            raise ValueError(f"window must be >= 1 second, got {window}")
+        if block_duration < 1:
+            raise ValueError(
+                f"block_duration must be >= 1 second, got {block_duration}"
+            )
+
         self.redis = redis_client
         self.limit = limit
         self.window = window
@@ -59,9 +71,32 @@ class RateLimiter:
         """Generate the Redis key for a blocked client."""
         return f"{self.prefix}:blocked:{identifier}"
 
+    def _build_headers(self, remaining: int, retry_after: int) -> Dict[str, str]:
+        """Assemble the standard rate-limit response headers.
+
+        Args:
+            remaining: Requests still available in the current window.
+            retry_after: Seconds until the client may retry / the window resets.
+
+        Returns:
+            Dictionary of HTTP header names to string values.
+        """
+        retry_after = max(1, int(retry_after))
+
+        return {
+            "X-RateLimit-Limit": str(self.limit),
+            "X-RateLimit-Remaining": str(max(0, int(remaining))),
+            "X-RateLimit-Reset": str(int(time.time()) + retry_after),
+            "Retry-After": str(retry_after),
+        }
+
     def check_rate_limit(self, identifier: str) -> Tuple[bool, Dict[str, str]]:
         """
         Check if a request is allowed under the rate limit and return headers.
+
+        The counter is incremented atomically and the returned count is the
+        authoritative value, so two concurrent callers can never both observe
+        the same pre-increment value and both decide they are under the limit.
 
         Args:
             identifier: Unique identifier for the client (e.g., IP address or user ID).
@@ -73,72 +108,50 @@ class RateLimiter:
         """
         key = self._get_key(identifier)
         block_key = self._get_block_key(identifier)
-        current_time = int(time.time())
 
         # Check if the client is currently blocked
         if self.redis.exists(block_key):
             ttl = self.redis.ttl(block_key)
-            retry_after = max(1, ttl)
-
-            headers = {
-                "X-RateLimit-Limit": str(self.limit),
-                "X-RateLimit-Remaining": "0",
-                "X-RateLimit-Reset": str(current_time + retry_after),
-                "Retry-After": str(retry_after),
-            }
+            retry_after = max(1, int(ttl))
 
             logger.warning(
                 f"Rate limit exceeded for {identifier}. Blocked for {retry_after}s."
             )
-            return False, headers
+            return False, self._build_headers(remaining=0, retry_after=retry_after)
 
-        # Get current request count
-        current_count = self.redis.get(key)
+        # Increment first, then read the TTL, in a single round trip. INCR
+        # creates the key at 1 when it does not exist, so there is no separate
+        # "first request" branch that could double-count.
+        pipe = self.redis.pipeline()
+        pipe.incr(key)
+        pipe.ttl(key)
+        results = pipe.execute()
 
-        if current_count is None:
-            # First request in the window
-            pipe = self.redis.pipeline()
-            pipe.setex(key, self.window, 1)
-            pipe.execute()
-            current_count = 1
-        else:
-            current_count = int(current_count)
+        current_count = int(results[0])
+        ttl = int(results[1])
 
-        # Check if limit is exceeded
-        if current_count >= self.limit:
-            # Block the client
+        # A brand new key (count == 1) has no expiry yet. A pre-existing key
+        # reporting -1 lost its TTL somehow; re-arming it stops the counter
+        # from living forever and locking the client out permanently.
+        if current_count == 1 or ttl < 0:
+            self.redis.expire(key, self.window)
+            ttl = self.window
+
+        # current_count is the number of requests served *including* this one,
+        # so the request that lands exactly on `limit` is still allowed and the
+        # next one is not. This serves exactly `limit` requests per window.
+        if current_count > self.limit:
             self.redis.setex(block_key, self.block_duration, "1")
-
-            headers = {
-                "X-RateLimit-Limit": str(self.limit),
-                "X-RateLimit-Remaining": "0",
-                "X-RateLimit-Reset": str(current_time + self.block_duration),
-                "Retry-After": str(self.block_duration),
-            }
 
             logger.warning(
                 f"Rate limit exceeded for {identifier}. Blocking for {self.block_duration}s."
             )
-            return False, headers
+            return False, self._build_headers(
+                remaining=0, retry_after=self.block_duration
+            )
 
-        # Increment the counter
-        pipe = self.redis.pipeline()
-        pipe.incr(key)
-        # Ensure the key expires even if it was created without expiration
-        pipe.expire(key, self.window)
-        pipe.execute()
-
-        remaining = max(0, self.limit - current_count - 1)
-        reset_time = current_time + self.window
-
-        headers = {
-            "X-RateLimit-Limit": str(self.limit),
-            "X-RateLimit-Remaining": str(remaining),
-            "X-RateLimit-Reset": str(reset_time),
-            "Retry-After": str(self.window),  # Fallback retry-after
-        }
-
-        return True, headers
+        remaining = self.limit - current_count
+        return True, self._build_headers(remaining=remaining, retry_after=ttl)
 
     def reset_limit(self, identifier: str) -> bool:
         """

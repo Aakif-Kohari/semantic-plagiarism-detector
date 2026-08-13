@@ -14,6 +14,7 @@ import os
 import sys
 import time
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -137,6 +138,10 @@ from app.components.batch_processor_enhanced import (
     JobPriority,
     JobStatus,
 )
+
+# ── Audit Logs View Import ──────────────────────────────────────────────
+from app.views.audit_logs import render_audit_view
+
 try:
     from streamlit_plotly_events import plotly_events  # type: ignore
 except ImportError:  # pragma: no cover - optional dependency
@@ -207,6 +212,22 @@ from app.theme import (
     set_theme,
     version_check_widget_html,
 )
+
+# Extracted tab renderers (de-monolith refactor). These are called below but
+# were never imported, so every tab that uses one raised NameError at runtime.
+from app.views.audit_view import render_audit_view
+from app.views.auth_view import handle_oauth_callbacks, render_login_view
+from app.views.corpus_view import (
+    render_corpus_header,
+    render_document_management_sidebar,
+    render_sidebar,
+)
+from app.views.drilldown_view import render_drilldown_view
+from app.views.history_view import render_history_view
+from app.views.matrix_view import render_matrix_view
+from app.views.settings_view import render_settings_view
+from app.views.upload_view import render_upload_section
+from app.views.users_view import render_users_view
 from src.core.ai_detector import detect_documents_ai_probability
 from src.core.config import (
     DEFAULT_THRESHOLDS,
@@ -221,6 +242,8 @@ from src.core.document_parser import (
     prepare_text_for_embedding,
 )
 from src.core.embedding_model import embed_chunks, embed_documents
+from src.core.lexical_similarity import jaccard_similarity
+from src.core.text_chunking import chunk_documents
 from src.core.faiss_index import (
     build_index,
     build_index_from_matrix,
@@ -241,7 +264,19 @@ from src.db import (
     get_all_embeddings,
     get_chunk_registry,
 )
+from src.db.auth import (
+    get_tour_completed,
+    get_user_last_login,
+    is_user_active,
+    set_tour_completed,
+    update_user_preferences,
+)
+from src.db.corpus_db import (
+    get_document_by_hash,
+    get_unique_class_sections,
+)
 from src.i18n.translator import _SUPPORTED_LANGUAGES, get_text
+from src.utils.bulk_export import create_documents_bulk_zip_archive
 from src.utils.diff_highlighter import highlight_overlap
 from src.utils.file_parser import truncate_filename
 from src.utils.processing_time import (
@@ -259,6 +294,7 @@ from src.utils.storage_metrics import calculate_storage_usage
 from src.visualization.heatmap import (
     plot_similarity_heatmap,
 )
+from src.visualization.network_graph import plot_similarity_network
 
 try:
     from src.utils.warning_list import render_copy_button, render_warning_controls
@@ -1094,7 +1130,14 @@ with st.sidebar:
         default=unique_classes,
         key=SessionKeys.CLASS_FILTER_SELECTBOX,
     )
-    lang_code = render_sidebar(user_role, str(ROOT_DIR), faiss_index)
+    # The local `faiss_index` is not built until further down this script, so
+    # read the cached handle from session state instead of referencing a name
+    # that does not exist yet. render_sidebar() applies the same fallback.
+    lang_code = render_sidebar(
+        user_role,
+        str(ROOT_DIR),
+        st.session_state.get("faiss_index"),
+    )
 
     # ── System Health Widget (Issue #1246) ──────────────────────────────────────
     with st.expander("🖥️ System Health & Memory", expanded=False):
@@ -1756,21 +1799,6 @@ st.title(get_text("title", lang=lang_code))
 st.markdown(get_text("subtitle", lang=lang_code))
 st.divider()
 
-    active_sim_df = chunk_sim_df if use_chunk_matrix else sim_df
-    flags = flag_plagiarism(active_sim_df, threshold=threshold)
-
-    init_incident_db()
-    incidents = sync_flagged_incidents(flags)
-else:
-    cached_index_data = get_faiss_index("corpus_index")
-
-st.title("🔍 Semantic Plagiarism Detection System")
-st.markdown(
-    "Upload student PDF, DOCX, TXT, or Markdown files. Detects **semantic similarity** "
-    "using transformer embeddings + **FAISS vector search**."
-)
-st.divider()
-
 if user_role == "admin":
     initialize_advanced_features()
     cached_index_data = get_faiss_index("corpus_index")
@@ -1782,7 +1810,6 @@ if user_role == "admin":
             index_buffer = _io.BytesIO(cached_index_data)
             faiss_index = faiss.deserialize_index(faiss.read_index(index_buffer))
             registry = get_chunk_registry()
-            st.info(f"📂 Loaded FAISS index from Redis cache with {faiss_index.ntotal} vectors")
             st.info(
                 f"📂 Loaded FAISS index from Redis cache with {faiss_index.ntotal} vectors"
             )
@@ -2595,299 +2622,14 @@ with tab_history:
     update_page_title("History")
     render_history_view()
 
-        st.markdown("")
-        if st.button(
-            "🔄 Reset to Factory Defaults",
-            key="reset_defaults_button",
-            use_container_width=True,
-        ):
-            keys_to_reset = [
-                "theme_selector",
-                SessionKeys.THRESHOLD_SLIDER,
-                SessionKeys.CLASS_FILTER_SELECTBOX,
-                SessionKeys.CHUNK_MATRIX_CHECKBOX,
-                SessionKeys.FAISS_TOP_K_SLIDER,
-                SessionKeys.CHUNK_SIZE_SLIDER,
-                SessionKeys.CHUNK_OVERLAP_SLIDER,
-                SessionKeys.OCR_LANGUAGE_SELECTOR,
-                SessionKeys.OCR_DPI_SLIDER,
-            ]
-            for key in keys_to_reset:
-                if key in st.session_state:
-                    del st.session_state[key]
-            if "threshold" in st.query_params:
-                del st.query_params["threshold"]
-            set_theme("Light")
-            st.success("✅ Settings reset to defaults!")
-            st.rerun()
-
-        st.markdown("")
-        if st.button(
-            "🗑️ Clear Application Cache",
-            key="clear_app_cache_button",
-            use_container_width=True,
-            type="primary",
-        ):
-            from src.utils.redis_cache import get_cache
-
-            st.cache_data.clear()
-            try:
-                cache = get_cache()
-                if cache._client:
-                    cache._client.flushdb()
-                elif hasattr(cache, "clear_pattern"):
-                    cache.clear_pattern("*")
-            except Exception:
-                pass
-            st.success("✅ Application cache cleared successfully!")
-            st.toast("✅ Session cache cleared successfully!")
-
-        st.markdown("")
-        if st.button(
-            "🔍 Ping Redis", key="ping_redis_button", use_container_width=True
-        ):
-            from src.utils.redis_cache import get_cache
-
-            connected, latency = get_cache().ping()
-            if connected:
-                st.success(f"✅ Connected ({latency} ms ping)")
-            else:
-                st.error("🚨 Disconnected")
-
-        st.markdown("### 🗄️ Database Schema Status")
-        if st.button("Check Database Schema", key="check_db_schema_btn", use_container_width=True):
-            try:
-                import sqlite3
-
-                from src.core.app_config import AUTH_DB_PATH, CORPUS_DB_PATH
-                from src.db.migrations.common import get_user_version
-
-                corpus_ver = 8
-                if CORPUS_DB_PATH.exists():
-                    try:
-                        with sqlite3.connect(CORPUS_DB_PATH) as conn:
-                            corpus_ver = get_user_version(conn)
-                    except Exception:
-                        pass
-
-                auth_ver = 3
-                if AUTH_DB_PATH.exists():
-                    try:
-                        with sqlite3.connect(AUTH_DB_PATH) as conn:
-                            auth_ver = get_user_version(conn)
-                    except Exception:
-                        pass
-
-                st.session_state["db_schema_status_msg"] = f"Corpus Schema: v{corpus_ver} | Auth Schema: v{auth_ver}"
-                st.toast("✅ Database schema checked successfully!")
-            except Exception as e:
-                st.error(f"❌ Failed to check schema versions: {e}")
-
-        if "db_schema_status_msg" in st.session_state:
-            st.info(st.session_state["db_schema_status_msg"])
-
 # ══ TAB 10: SECURITY AUDIT LOGS ═════════════════════════════════════════════
 with tab_audit:
     update_page_title("Security Audit Logs")
+    # ========== USE THE NEW MODULE ==========
     render_audit_view(user_role, lang_code)
-
+    
 # Sidebar document management details
 render_document_management_sidebar(user_role, _INDEX_PATH, SESSION_ID, last_interaction)
-
-        total_pages = max(1, (total_records + per_page - 1) // per_page)
-
-        current_page = st.session_state.get(SessionKeys.AUDIT_LOG_PAGE, 1)
-        if current_page > total_pages:
-            current_page = total_pages
-            st.session_state[SessionKeys.AUDIT_LOG_PAGE] = current_page
-        if current_page < 1:
-            current_page = 1
-            st.session_state[SessionKeys.AUDIT_LOG_PAGE] = current_page
-
-        offset = (current_page - 1) * per_page
-
-        # Fetch records for current page
-        logs = get_security_audit_logs(
-            username=username_filter,
-            event_type=event_type_filter,
-            start_date=start_date_str,
-            end_date=end_date_str,
-            limit=per_page,
-            offset=offset,
-        )
-
-        # Summary Metrics
-        m1, m2, m3 = st.columns(3)
-        m1.metric("📋 Total Log Entries", total_records)
-        m2.metric("🏷️ Active Filter", selected_event_type)
-        m3.metric("📑 Page", f"{current_page} / {total_pages}")
-
-        st.divider()
-
-        # Display Data Table
-        if logs:
-            df = pd.DataFrame(logs)
-            display_df = df[
-                ["id", "timestamp", "event_type", "username", "details"]
-            ].rename(
-                columns={
-                    "id": "ID",
-                    "timestamp": "Timestamp (UTC)",
-                    "event_type": "Event Type",
-                    "username": "Username",
-                    "details": "Details / Payload",
-                }
-            )
-
-            st.dataframe(
-                display_df,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "ID": st.column_config.NumberColumn("ID", width="small"),
-                    "Timestamp (UTC)": st.column_config.TextColumn(
-                        "Timestamp (UTC)", width="medium"
-                    ),
-                    "Event Type": st.column_config.TextColumn(
-                        "Event Type", width="medium"
-                    ),
-                    "Username": st.column_config.TextColumn("Username", width="medium"),
-                    "Details / Payload": st.column_config.TextColumn(
-                        "Details / Payload", width="large"
-                    ),
-                },
-            )
-
-            # Pagination Controls
-            nav_col1, nav_col2, nav_col3, nav_col4 = st.columns([1, 2, 2, 1])
-            with nav_col1:
-                if st.button(
-                    "← Previous",
-                    disabled=(current_page <= 1),
-                    key="audit_prev_page",
-                ):
-                    st.session_state[SessionKeys.AUDIT_LOG_PAGE] = current_page - 1
-                    st.rerun()
-
-            with nav_col2:
-                end_range = min(offset + per_page, total_records)
-                start_range = offset + 1 if total_records > 0 else 0
-                st.caption(
-                    f"Showing {start_range} - {end_range} of {total_records} logs"
-                )
-
-            with nav_col3:
-                page_select = st.number_input(
-                    "Go to Page",
-                    min_value=1,
-                    max_value=total_pages,
-                    value=current_page,
-                    step=1,
-                    key="audit_page_num_input",
-                )
-                if page_select != current_page:
-                    st.session_state[SessionKeys.AUDIT_LOG_PAGE] = page_select
-                    st.rerun()
-
-            with nav_col4:
-                if st.button(
-                    "Next →",
-                    disabled=(current_page >= total_pages),
-                    key="audit_next_page",
-                ):
-                    st.session_state[SessionKeys.AUDIT_LOG_PAGE] = current_page + 1
-                    st.rerun()
-
-            st.divider()
-
-            # CSV Export Functionality
-            export_all_logs = get_security_audit_logs(
-                username=username_filter,
-                event_type=event_type_filter,
-                start_date=start_date_str,
-                end_date=end_date_str,
-                limit=10000,
-                offset=0,
-            )
-            export_df = pd.DataFrame(export_all_logs)
-            csv_bytes = export_df.to_csv(index=False).encode("utf-8")
-
-            st.download_button(
-                label="⬇️ Download Audit Logs (CSV)",
-                data=csv_bytes,
-                file_name=f"security_audit_logs_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv",
-                key="download_audit_logs_csv",
-                use_container_width=True,
-                type="primary",
-            )
-        else:
-            st.info(
-                "ℹ️ No security audit log records found matching the specified filters."
-            )
-
-# ══ TAB 11: History ══════════════════════════════════════════════════════════
-with tab_history:
-    update_page_title("History")
-    st.subheader("📊 Document Similarity History Dashboard")
-    st.caption("Monitor plagiarism patterns and similarity trends across previous scan sessions.")
-
-    from src.db.corpus_db import get_scan_history
-    from src.visualization.history_charts import (
-        plot_flagged_documents_bar,
-        plot_similarity_trend_line,
-    )
-
-    # Date range filter
-    col1, col2 = st.columns(2)
-    with col1:
-        start_date = st.date_input(
-            "Start Date",
-            value=datetime.now() - timedelta(days=30),
-            key="history_start_date",
-        )
-    with col2:
-        end_date = st.date_input(
-            "End Date",
-            value=datetime.now(),
-            key="history_end_date",
-        )
-
-    history_data = get_scan_history(
-        start_date=start_date.strftime("%Y-%m-%d"),
-        end_date=end_date.strftime("%Y-%m-%d"),
-        limit=100,
-    )
-
-    if not history_data:
-        st.info("No scan history found for the selected date range. Run a scan to populate this dashboard.")
-    else:
-        # Similarity Trend Line Chart
-        trend_fig = plot_similarity_trend_line(history_data, theme_colors=get_chart_colors())
-        st.plotly_chart(trend_fig, use_container_width=True)
-
-        st.divider()
-
-        # Flagged Documents Bar Chart
-        bar_fig = plot_flagged_documents_bar(history_data, theme_colors=get_chart_colors())
-        st.plotly_chart(bar_fig, use_container_width=True)
-
-        st.divider()
-
-        # Raw Data Table
-        st.markdown("### 📋 Raw Scan History Data")
-        df_history = pd.DataFrame(history_data)
-        df_history["timestamp"] = pd.to_datetime(df_history["timestamp"]).dt.strftime("%Y-%m-%d %H:%M:%S")
-        st.dataframe(
-            df_history.style.format({
-                "avg_similarity": "{:.2%}",
-                "max_similarity": "{:.2%}",
-                "threshold_used": "{:.2%}",
-            }),
-            use_container_width=True,
-            hide_index=True,
-        )
-
 
 # ── Document Management & Bulk Export (Admin Only) ────────────────────────────
 if user_role == "admin":

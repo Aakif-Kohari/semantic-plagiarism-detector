@@ -463,6 +463,7 @@ def extract_stylometric_features(text: str) -> dict[str, float]:
     # Tokenize words using regex to extract alphanumeric sequences
     # This handles punctuation and contractions reasonably well for stylometry
     words = re.findall(r'\b\w+\b', text.lower())
+
     words = re.findall(r"\b\w+\b", text.lower())
 
     if not words:
@@ -580,7 +581,7 @@ def detect_ai_generated_text(text: str) -> Dict[str, Any]:
             "ai_probability": 0.0,
             "confidence_tier": "low",
             "classification_tier": "low",
-            "perplexity_score": 150.0,
+            "perplexity_score": 0.0,
             "burstiness_score": 0.0,
             "ngram_repetitiveness": 0.0,
         }

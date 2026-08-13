@@ -40,10 +40,12 @@ numpy>=2.0.0
 pandas>=2.2.0
 scikit-learn>=1.4.0              # cosine_similarity utility
 openpyxl>=3.1.5                  # Engine for exporting DataFrames to Excel
+networkx>=3.0                     # Plagiarism cluster detection
 
 # ── Visualisation ─────────────────────────────────────────────────────────────
 matplotlib>=3.8.0
 seaborn>=0.13.0
+networkx>=3.0                     # Plagiarism cluster detection
 
 # ── Code Quality ──────────────────────────────────────────────────────────────
 ruff>=0.15.22
