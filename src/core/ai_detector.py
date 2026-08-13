@@ -15,6 +15,7 @@ _model = None
 _tokenizer = None
 
 _DEFAULT_MODEL = "roberta-base-openai-detector"
+_FALLBACK_SENTINEL = object()
 
 # Default perplexity value returned when text cannot be analyzed.
 # A score of 0.0 indicates the function could not compute a valid perplexity.
@@ -51,8 +52,8 @@ def _get_model_and_tokenizer():
                 f"({err}). Using fallback mode."
             )
 
-            _model = "fallback"
-            _tokenizer = "fallback"
+            _model = _FALLBACK_SENTINEL
+            _tokenizer = _FALLBACK_SENTINEL
 
     return _model, _tokenizer
 
@@ -100,7 +101,7 @@ def calculate_text_perplexity(text: str) -> float:
 
         # If the model failed to load during initialization, we cannot
         # compute perplexity. Return the default score gracefully.
-        if model == "fallback" or tokenizer == "fallback":
+        if model is _FALLBACK_SENTINEL or tokenizer is _FALLBACK_SENTINEL:
             logger.warning(
                 "[ai_detector] calculate_text_perplexity: model is in fallback mode, "
                 "cannot compute perplexity. Returning default score."
@@ -238,7 +239,7 @@ def detect_ai_probability_batch(
         model, tokenizer = _get_model_and_tokenizer()
 
         # Use fallback mode if transformer model failed to initialize
-        if model == "fallback":
+        if model is _FALLBACK_SENTINEL:
             return [0.0] * len(texts)
     except Exception:
         return [0.0] * len(texts)
