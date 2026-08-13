@@ -649,3 +649,20 @@ def test_categorize_perplexity_score():
     assert categorize_perplexity_score(25.0) == "Highly Predictable"
     assert categorize_perplexity_score(50.0) == "Moderate"
     assert categorize_perplexity_score(85.0) == "Unpredictable"
+
+
+def test_split_sentences_simple():
+    """Verify that _split_sentences_simple correctly splits text into sentences and filters empty strings."""
+    from src.core.ai_detector import _split_sentences_simple
+
+    # Basic splitting
+    assert _split_sentences_simple("Hello! World? How are you.") == ["Hello", "World", "How are you"]
+
+    # Trailing punctuation empty strings filtered
+    assert _split_sentences_simple("One sentence... Two sentences!!!") == ["One sentence", "Two sentences"]
+
+    # Empty inputs and invalid types handled gracefully
+    assert _split_sentences_simple("") == []
+    assert _split_sentences_simple(None) == []
+    assert _split_sentences_simple(123) == []  # type: ignore
+
