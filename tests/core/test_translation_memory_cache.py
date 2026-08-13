@@ -1,5 +1,5 @@
 import threading
-import pytest
+import pytest  # noqa: F401
 from src.core.cross_lingual import TranslationMemoryCache
 
 def test_concurrent_translations_writing():

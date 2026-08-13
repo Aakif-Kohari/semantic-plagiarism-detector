@@ -1,7 +1,7 @@
 import json
 import pytest
-from pathlib import Path
-from unittest.mock import patch, mock_open
+from pathlib import Path  # noqa: F401
+from unittest.mock import patch, mock_open  # noqa: F401
 
 from src.core.app_config import (
     DEFAULT_APP_TITLE,
