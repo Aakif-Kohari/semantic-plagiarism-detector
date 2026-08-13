@@ -1638,6 +1638,64 @@ def promote_user(username: str, new_role: UserRole, admin_username: str) -> bool
             cursor = conn.execute(
                 "UPDATE users SET role = ? WHERE username = ?",
                 (new_role.value, username)
+            )
+            affected = cursor.rowcount
+            conn.commit()
+
+            if affected > 0:
+                log_security_event(
+                    event_type="user_role_changed",
+                    username=username,
+                    details=f"Role changed to {new_role.value} by {admin_username}"
+                )
+                return True
+            return False
+
+    except Exception as e:
+        logger.error(f"Failed to promote user {username}: {e}")
+        return False
+
+
+def demote_user(username: str, admin_username: str) -> bool:
+    """
+    Demote a user to the member role.
+
+    Args:
+        username: The user to demote
+        admin_username: The admin performing the demotion
+
+    Returns:
+        bool: True if demotion was successful
+    """
+    try:
+        username = _validate_username(username)
+        admin_role = UserRole.from_string(get_user_role(admin_username))
+
+        # Only admins can demote users
+        if not admin_role.has_permission(UserRole.ADMIN):
+            raise PermissionError("Only admins can demote users")
+
+        with _connect() as conn:
+            cursor = conn.execute(
+                "UPDATE users SET role = ? WHERE username = ?",
+                (UserRole.MEMBER.value, username)
+            )
+            affected = cursor.rowcount
+            conn.commit()
+
+            if affected > 0:
+                log_security_event(
+                    event_type="user_role_changed",
+                    username=username,
+                    details=f"Role changed to {UserRole.MEMBER.value} by {admin_username}"
+                )
+                return True
+            return False
+
+    except Exception as e:
+        logger.error(f"Failed to demote user {username}: {e}")
+        return False
+
 
 # ============================================================================
 # SSO SECURITY ENHANCEMENTS - Issue #2172
@@ -2104,33 +2162,6 @@ def render_permission_checklist(username: str) -> None:
         with cols[col_idx]:
             st.markdown(f"✅ {permission.value}")
 
-                    event_type="sso_access_revoked",
-                    username=username,
-                    details="SSO access revoked by administrator"
-                )
-                return True
-            return False
-    except Exception as e:
-        logger.error(f"Failed to revoke SSO access: {e}")
-        return False
-
-
-def is_sso_user(username: str) -> bool:
-    """
-    Check if a user is an SSO user.
-    
-    Args:
-        username: The username to check
-    
-    Returns:
-        True if the user is an SSO user
-    """
-    try:
-        info = get_sso_user_info(username)
-        return info is not None and info.get("is_sso_user", False)
-    except Exception:
-        return False
-
 
 def get_sso_users_count() -> int:
     """
@@ -2228,10 +2259,6 @@ __all__ = [
     'render_role_badge',
     'render_role_selector',
     'render_permission_checklist',
-]
-
-# ============================================================================
-
     'generate_secure_password',
     'generate_sso_token',
     'generate_sso_state',

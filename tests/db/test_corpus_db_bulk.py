@@ -1,3 +1,5 @@
+import sqlite3
+
 import pytest
 
 from src.db.corpus_db import (
@@ -9,7 +11,8 @@ from src.db.corpus_db import (
 
 
 @pytest.fixture(autouse=True)
-def setup_teardown():
+def setup_teardown(mock_db):
+    # mock_db patches the corpus DB path to an isolated temp file (Issue #2263)
     init_corpus_db()
     clear_all_data()
     yield
@@ -89,13 +92,9 @@ def test_add_documents_bulk_empty():
 
 
 def test_add_documents_bulk_missing_fields():
-    # Verify defaults handle missing fields gracefully
-    docs = [
-        {
-            "file_hash": "hash123"
-        }  # filename is missing, triggers IntegrityError on PRIMARY KEY which is swallowed by INSERT OR IGNORE
-    ]
+    # Missing filename is rejected upfront with an IntegrityError (not swallowed)
+    docs = [{"file_hash": "hash123"}]  # filename is missing
 
-    success_count = add_documents_bulk(docs)
-    assert success_count == 0
+    with pytest.raises(sqlite3.IntegrityError):
+        add_documents_bulk(docs)
     assert len(get_all_documents()) == 0
