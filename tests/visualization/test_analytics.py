@@ -562,3 +562,58 @@ def test_calculate_severity_ratios_empty_incidents():
     ratios = calculate_severity_ratios([])
 
     assert ratios == {"High": 0.0, "Medium": 0.0, "Low": 0.0}
+
+
+def test_severity_ratios_all_high():
+    """All incidents scoring >= 0.80 should be classified as High only."""
+    incidents = [
+        {"similarity_score": 0.80},
+        {"similarity_score": 0.9},
+        {"similarity_score": 1.0},
+    ]
+    ratios = calculate_severity_ratios(incidents)
+
+    assert ratios == {"High": 100.0, "Medium": 0.0, "Low": 0.0}
+
+
+def test_severity_ratios_mixed():
+    """Scores spanning all three tiers should split proportionally."""
+    incidents = [
+        {"similarity_score": 0.95},
+        {"similarity_score": 0.65},
+        {"similarity_score": 0.55},
+        {"similarity_score": 0.2},
+    ]
+    ratios = calculate_severity_ratios(incidents)
+
+    assert ratios == {"High": 25.0, "Medium": 50.0, "Low": 25.0}
+
+
+def test_severity_ratios_empty_list():
+    """An empty incident list must return all zeros, not error."""
+    ratios = calculate_severity_ratios([])
+
+    assert ratios == {"High": 0.0, "Medium": 0.0, "Low": 0.0}
+
+
+def test_severity_ratios_non_numeric_skipped():
+    """Incidents with None or non-numeric scores should be ignored."""
+    incidents = [
+        {"similarity_score": 0.9},
+        {"similarity_score": None},
+        {"similarity_score": "invalid"},
+    ]
+    ratios = calculate_severity_ratios(incidents)
+
+    assert ratios == {"High": 100.0, "Medium": 0.0, "Low": 0.0}
+
+
+def test_severity_ratios_fallback_key():
+    """The 'similarity' key should be used when 'similarity_score' is missing."""
+    incidents = [
+        {"similarity": 0.9},
+        {"similarity": 0.6},
+    ]
+    ratios = calculate_severity_ratios(incidents)
+
+    assert ratios == {"High": 50.0, "Medium": 50.0, "Low": 0.0}
