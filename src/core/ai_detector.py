@@ -358,6 +358,14 @@ def detect_documents_ai_probability(
     return results
 
 
+def _split_sentences_simple(text: str) -> List[str]:
+    """Split text into sentences using common punctuation delimiters and filter empty strings."""
+    if not text or not isinstance(text, str):
+        return []
+    sentences = re.split(r"[.!?]+", text.strip())
+    return [s.strip() for s in sentences if s.strip()]
+
+
 def _calculate_burstiness(text: str) -> float:
     """Calculate the burstiness score of a text.
 
@@ -371,8 +379,8 @@ def _calculate_burstiness(text: str) -> float:
         return 0.0
 
     # Split into sentences using a simple regex
-    sentences = re.split(r"[.!?]+", text.strip())
-    sentence_lengths = [len(s.split()) for s in sentences if s.strip()]
+    sentences = _split_sentences_simple(text)
+    sentence_lengths = [len(s.split()) for s in sentences]
 
     if len(sentence_lengths) < 2:
         return 0.0
@@ -483,16 +491,13 @@ def extract_stylometric_features(text: str) -> dict[str, float]:
 
     # 3. & 4. Sentence Length Metrics
     # Split text into sentences using common punctuation delimiters
-    sentences = re.split(r"[.!?]+", text.strip())
-    # Filter out empty strings that result from trailing punctuation
-    sentences = [s.strip() for s in sentences if s.strip()]
+    sentences = _split_sentences_simple(text)
 
     if not sentences:
         # If no sentences detected (e.g., text is just a fragment without punctuation),
         # treat the entire text as a single sentence for length calculations
         sentences = [text.strip()]
 
-    sentence_lengths = [len(re.findall(r'\b\w+\b', s)) for s in sentences]
     sentence_lengths = [len(re.findall(r"\b\w+\b", s)) for s in sentences]
 
     avg_sentence_length = float(np.mean(sentence_lengths)) if sentence_lengths else 0.0
