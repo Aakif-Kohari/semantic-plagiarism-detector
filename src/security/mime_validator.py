@@ -234,7 +234,7 @@ def _validate_ooxml_archive(
 
             return True
 
-except (
+    except (
         zipfile.BadZipFile,
         zipfile.LargeZipFile,
         ElementTree.ParseError,
@@ -242,7 +242,8 @@ except (
         KeyError,
         OSError,
         RuntimeError,
-    ) as exception:        logger.warning(
+    ) as exception:
+        logger.warning(
             "[mime_validator] Invalid OOXML archive '%s': %s",
             filename,
             exception,
@@ -372,8 +373,8 @@ def validate_mime_type(file_bytes: bytes, filename: str) -> bool:
 
     if not validate_single_extension(filename):
         logger.warning(
-        "[mime_validator] Blocked executable double extension: '%s'.",
-        filename,
+            "[mime_validator] Blocked executable double extension: '%s'.",
+            filename,
         )
         return False
 
