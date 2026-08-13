@@ -20,7 +20,7 @@ python-magic>=0.4.27             # File magic bytes verification
 striprtf>=0.0.32                 # Extract text from RTF documents
 EbookLib>=0.18                   # Extract text from EPUB documents
 # ── Web UI ────────────────────────────────────────────────────────────────────
-streamlit>=1.60.0                # Dashboard framework
+streamlit>=1.61.1                # Dashboard framework
 bcrypt>=4.0.0                    # Password hashing for auth
 argon2-cffi>=23.1.0              # Argon2 password hashing support
 pyotp>=2.10.0                     # TOTP generator/verifier for 2FA
@@ -68,4 +68,4 @@ httpx>=0.26.0                   # Async HTTP client for API testing
 google-api-python-client>=2.198.0
 google-auth>=2.56.2
 
-starlette<0.40.0
+
