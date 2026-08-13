@@ -1255,12 +1255,7 @@ def format_user_creation_date(iso_str: str) -> str:
 from enum import Enum
 from typing import Set, List, Optional, Dict, Any
 from functools import wraps
-import sys
-if "pytest" not in sys.modules:
-    import streamlit as st
-else:
-    from unittest.mock import MagicMock
-    st = MagicMock()
+import streamlit as st
 
 
 # ============================================================================

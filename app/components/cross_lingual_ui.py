@@ -8,7 +8,8 @@ and cross-lingual match indicators in the Streamlit dashboard.
 import streamlit as st
 from typing import Dict, List, Any, Optional, Tuple  # noqa: F401
 import pandas as pd
-from src.core.cross_lingual import get_language_name, SUPPORTED_LANGUAGES
+from src.core.translator import get_language_name
+from src.i18n.translator import _SUPPORTED_LANGUAGES
 
 
 # ============================================================================
@@ -323,7 +324,7 @@ def render_cross_lingual_settings() -> bool:
             
             # Show supported languages
             with st.expander("🌍 Supported Languages"):
-                langs = sorted(SUPPORTED_LANGUAGES.items())
+                langs = sorted(_SUPPORTED_LANGUAGES.items())
                 cols = st.columns(3)
                 for idx, (code, name) in enumerate(langs[:30]):
                     col_idx = idx % 3

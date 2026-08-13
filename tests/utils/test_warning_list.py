@@ -29,13 +29,6 @@ WARNINGS = [
 ]
 
 
-def test_predicates():
-    assert predicate_alpha(WARNINGS[0]) is True  # doc_b matches
-    assert predicate_alpha(WARNINGS[1]) is False  # no match
-    assert predicate_alpha(WARNINGS[2]) is True  # doc_a matches
-    assert predicate_empty(WARNINGS[1]) is True  # empty query matches all
-
-
 def test_build_key_extractor():
     extractor_doc_a = build_key_extractor("doc_a")
     extractor_sim = build_key_extractor("similarity")

@@ -12,12 +12,7 @@ from typing import Dict, List, Any, Optional, Tuple  # noqa: F401
 
 import numpy as np
 import pandas as pd
-import sys
-if "pytest" not in sys.modules:
-    import streamlit as st
-else:
-    from unittest.mock import MagicMock
-    st = MagicMock()
+import streamlit as st
 
 from src.core.ai_detector import detect_documents_ai_probability
 from src.core.document_parser import (

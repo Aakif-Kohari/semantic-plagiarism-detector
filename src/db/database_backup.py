@@ -56,6 +56,7 @@ from src.db.corpus_db import get_corpus_db_path
 
 # ── Logger Configuration ───────────────────────────────────────────────────────
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 SQLITE_HEADER = b"SQLite format 3\x00"
 DEFAULT_BACKUP_DIRECTORY = Path("backups")

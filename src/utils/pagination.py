@@ -203,3 +203,28 @@ class PaginationPage(Generic[T]):
             "next_page": self.next_page(),
             "previous_page": self.previous_page(),
         }
+
+def paginate_items(
+    items: List[T],
+    page_size: int = 10,
+    current_page: int = 1,
+) -> PaginationPage[T]:
+    import math
+    if page_size < 1:
+        page_size = 10
+    if current_page < 1:
+        current_page = 1
+        
+    total_items = len(items)
+    total_pages = max(1, math.ceil(total_items / page_size))
+    
+    start_idx = (current_page - 1) * page_size
+    end_idx = start_idx + page_size
+    
+    return PaginationPage(
+        items=items[start_idx:end_idx],
+        page=current_page,
+        total_pages=total_pages,
+        total_items=total_items,
+        per_page=page_size
+    )
