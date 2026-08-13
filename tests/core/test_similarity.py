@@ -923,3 +923,59 @@ def test_cosine_distance_to_similarity_array():
 
     assert isinstance(similarities, np.ndarray)
     assert np.allclose(similarities, [1.0, 0.5, 0.0, 0.0])
+
+
+def test_find_most_similar_chunks_comparison_with_legacy():
+    """Verify that the optimized argsort implementation produces identical results to the legacy nested-loop implementation."""
+    from src.core.similarity import find_most_similar_chunks
+
+    # Define the legacy implementation to compare against
+    def legacy_find_most_similar_chunks(
+        chunks_a: List[str],
+        chunks_b: List[str],
+        emb_a: np.ndarray,
+        emb_b: np.ndarray,
+        top_k: int = 3,
+        threshold: float = 0.5,
+    ) -> List[Tuple[str, str, float]]:
+        if emb_a.size == 0 or emb_b.size == 0:
+            return []
+        from sklearn.metrics.pairwise import cosine_similarity
+        sim_matrix = cosine_similarity(emb_a, emb_b)
+        pairs = []
+        for i in range(sim_matrix.shape[0]):
+            for j in range(sim_matrix.shape[1]):
+                score = sim_matrix[i, j]
+                if score >= threshold:
+                    pairs.append((chunks_a[i], chunks_b[j], float(score)))
+        pairs.sort(key=lambda x: x[2], reverse=True)
+        return pairs[:top_k]
+
+    # Generate some dummy data
+    chunks_a = [f"A_chunk_{i}" for i in range(10)]
+    chunks_b = [f"B_chunk_{i}" for i in range(10)]
+
+    # Deterministic embeddings for repeatability
+    np.random.seed(42)
+    emb_a = np.random.randn(10, 8)
+    emb_b = np.random.randn(10, 8)
+
+    # Normalize to have valid cosine similarities
+    emb_a = emb_a / np.linalg.norm(emb_a, axis=1, keepdims=True)
+    emb_b = emb_b / np.linalg.norm(emb_b, axis=1, keepdims=True)
+
+    for threshold in [0.0, 0.3, 0.5, 0.7]:
+        for top_k in [1, 3, 5, 15]:
+            legacy_res = legacy_find_most_similar_chunks(
+                chunks_a, chunks_b, emb_a, emb_b, top_k, threshold
+            )
+            new_res = find_most_similar_chunks(
+                chunks_a, chunks_b, emb_a, emb_b, top_k, threshold
+            )
+
+            assert len(legacy_res) == len(new_res)
+            for item_legacy, item_new in zip(legacy_res, new_res):
+                assert item_legacy[0] == item_new[0]
+                assert item_legacy[1] == item_new[1]
+                assert np.isclose(item_legacy[2], item_new[2])
+
