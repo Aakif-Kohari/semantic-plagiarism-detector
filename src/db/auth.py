@@ -856,30 +856,9 @@ def get_or_create_sso_user(email: str, default_role: str = "teacher") -> str:
         email=email,
         provider="unknown",
         provider_user_id=email,
-        default_role=default_role
+        default_role=default_role,
     )
     return result["role"]
-        
-        # Generate a strong random password for SSO users
-        random_password = _generate_secure_password()
-        hashed = _hash_password(random_password)
-        role = _validate_role(default_role)
-        
-        conn.execute(
-            "INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
-            (username, hashed, role),
-        )
-        conn.commit()
-        
-        # Log SSO user creation
-        from src.db.auth import log_security_event
-        log_security_event(
-            event_type="sso_user_created",
-            username=username,
-            details=f"SSO user created with role: {role}"
-        )
-        
-        return role
 
 
 def is_sso_user(username: str) -> bool:
