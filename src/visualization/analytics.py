@@ -928,3 +928,209 @@ if similarity_matrix is None or similarity_matrix.empty:
     fig.update_yaxes(showgrid=show_grid)
 
     return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)
+
+
+def plot_monthly_incident_trends(
+    incidents: list[dict[str, Any]],
+    show_grid: bool = True,
+    theme_colors: dict[str, str] | None = None,
+    months_to_show: int = 12,
+) -> go.Figure:
+    """Create a vertical bar chart showing monthly plagiarism incident trends.
+    
+    Aggregates incident counts by month (YYYY-MM format) to help instructors
+    and administrators track semester-over-semester plagiarism patterns.
+    This visualization is particularly useful for identifying seasonal spikes
+    (e.g., during midterms or finals) and evaluating the effectiveness of
+    academic integrity interventions over time.
+    
+    The chart displays the most recent ``months_to_show`` months, sorted
+    chronologically from oldest to newest (left to right). Months with zero
+    incidents are included in the timeline to maintain temporal continuity.
+    
+    Args:
+        incidents: List of incident dictionaries. Each dict should contain a
+                   ``date_flagged`` or ``timestamp`` key with an ISO 8601
+                   datetime string or parseable date format.
+        show_grid: Whether to display horizontal gridlines for easier
+                   value estimation. Defaults to True.
+        theme_colors: Optional theme palette dictionary for Light/Dark mode
+                      synchronization. When None, Plotly defaults are used.
+        months_to_show: Number of recent months to display on the x-axis.
+                        Defaults to 12 (one full year). Must be >= 1.
+                        
+    Returns:
+        A Plotly Figure object containing the monthly trend bar chart.
+        If no valid incidents are provided, returns an empty-state chart
+        with an explanatory annotation.
+        
+    Data Requirements:
+        Each incident dictionary should ideally contain:
+        - ``date_flagged`` or ``timestamp``: ISO 8601 datetime string
+        - ``similarity_score``: Optional, used for severity coloring
+        
+    Examples:
+        >>> incidents = [
+        ...     {"date_flagged": "2024-01-15T10:00:00", "similarity_score": 0.85},
+        ...     {"date_flagged": "2024-01-20T14:30:00", "similarity_score": 0.92},
+        ...     {"date_flagged": "2024-02-05T09:15:00", "similarity_score": 0.75},
+        ... ]
+        >>> fig = plot_monthly_incident_trends(incidents, months_to_show=6)
+        >>> # Returns a bar chart with Jan 2024 (2 incidents) and Feb 2024 (1 incident)
+        
+    Notes:
+        - Months are formatted as "YYYY-MM" (e.g., "2024-01") for clarity
+        - The y-axis always starts at 0 to prevent misleading visualizations
+        - Bars are colored using the primary theme color with hover tooltips
+          showing the exact month and incident count
+    """
+    # ── Validate and parse input data ─────────────────────────────────────────
+    if not incidents or not isinstance(incidents, list):
+        return _empty_chart(
+            title="Monthly Plagiarism Incident Trends",
+            message="No plagiarism incidents recorded to display trends",
+            theme_colors=theme_colors,
+            show_grid=show_grid,
+            xaxis_title="Month (YYYY-MM)",
+            yaxis_title="Number of Incidents",
+        )
+
+    # Parse dates and aggregate by month
+    monthly_counts: dict[str, int] = {}
+    valid_dates_found = False
+    
+    for incident in incidents:
+        # Try multiple common date keys
+        date_str = (
+            incident.get("date_flagged") 
+            or incident.get("timestamp") 
+            or incident.get("created_at")
+        )
+        
+        if not date_str:
+            continue
+            
+        try:
+            # Parse ISO 8601 or common datetime formats
+            if isinstance(date_str, str):
+                # Handle ISO format with timezone
+                if "T" in date_str:
+                    dt = pd.to_datetime(date_str, utc=True)
+                else:
+                    dt = pd.to_datetime(date_str)
+            else:
+                # Assume it's already a datetime-like object
+                dt = pd.to_datetime(date_str)
+                
+            # Extract YYYY-MM format
+            month_key = dt.strftime("%Y-%m")
+            monthly_counts[month_key] = monthly_counts.get(month_key, 0) + 1
+            valid_dates_found = True
+            
+        except (ValueError, TypeError, pd.errors.ParserError) as exc:
+            # Skip incidents with unparseable dates
+            continue
+
+    if not valid_dates_found or not monthly_counts:
+        return _empty_chart(
+            title="Monthly Plagiarism Incident Trends",
+            message="No incidents with valid dates found in the dataset",
+            theme_colors=theme_colors,
+            show_grid=show_grid,
+            xaxis_title="Month (YYYY-MM)",
+            yaxis_title="Number of Incidents",
+        )
+
+    # ── Build complete timeline (fill missing months with 0) ──────────────────
+    # Sort months chronologically
+    sorted_months = sorted(monthly_counts.keys())
+    
+    # Determine the date range to display
+    if len(sorted_months) > months_to_show:
+        # Show only the most recent N months
+        display_months = sorted_months[-months_to_show:]
+    else:
+        display_months = sorted_months
+        
+    # Fill in any missing months within the display range to maintain continuity
+    # This prevents gaps in the timeline that could mislead viewers
+    start_date = pd.to_datetime(display_months[0] + "-01")
+    end_date = pd.to_datetime(display_months[-1] + "-01")
+    
+    # Generate complete month range
+    complete_range = pd.date_range(start=start_date, end=end_date, freq="MS")
+    
+    # Build final data structure
+    chart_data = []
+    for dt in complete_range:
+        month_key = dt.strftime("%Y-%m")
+        count = monthly_counts.get(month_key, 0)
+        chart_data.append({
+            "month": month_key,
+            "incident_count": count,
+            "display_label": dt.strftime("%b %Y"),  # "Jan 2024" format for readability
+        })
+
+    # ── Create Plotly bar chart ───────────────────────────────────────────────
+    df = pd.DataFrame(chart_data)
+    
+    # Determine bar color based on theme
+    bar_color = "#636efa"  # Default Plotly blue
+    if theme_colors and isinstance(theme_colors, dict):
+        # Use primary color if available, otherwise fallback
+        bar_color = theme_colors.get("primary", "#636efa")
+    
+    fig = px.bar(
+        df,
+        x="display_label",
+        y="incident_count",
+        title="Monthly Plagiarism Incident Trends",
+        labels={
+            "display_label": "Month",
+            "incident_count": "Number of Incidents",
+        },
+        orientation="v",
+    )
+
+    # ── Customize layout and styling ─────────────────────────────────────────
+    fig.update_layout(
+        xaxis_title="Month",
+        yaxis_title="Number of Incidents",
+        height=450,
+        showlegend=False,
+        autosize=True,
+        bargap=0.2,  # Space between bars
+        yaxis=dict(
+            rangemode="tozero",  # Always start y-axis at 0
+            dtick=1,  # Integer ticks only (can't have 1.5 incidents)
+        ),
+    )
+    
+    fig.update_xaxes(
+        showgrid=show_grid,
+        tickangle=-45,  # Angle labels for better readability
+    )
+    fig.update_yaxes(showgrid=show_grid)
+
+    # Style the bars
+    fig.update_traces(
+        marker_color=bar_color,
+        marker_line_color="#4a4dba",
+        marker_line_width=1.5,
+        customdata=df["month"],  # Store YYYY-MM for tooltip
+        hovertemplate=(
+            "<b>%{customdata}</b><br>"
+            "Incidents: %{y}<br>"
+            "<extra></extra>"
+        ),
+    )
+
+    # Add value labels on top of bars for quick reading
+    fig.update_traces(
+        text=df["incident_count"],
+        textposition="outside",
+        textfont=dict(size=11),
+    )
+
+    # Apply theme colors for Light/Dark mode support
+    return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)

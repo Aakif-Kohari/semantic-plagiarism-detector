@@ -499,6 +499,146 @@ def test_plot_hierarchical_dendrogram_uses_wards_method():
         )
 
 
+class TestPlotMonthlyIncidentTrends:
+    """Test suite for the monthly incident trend bar chart (Issue #2211)."""
+
+    @pytest.fixture
+    def sample_incidents(self):
+        """Provide a standard set of incidents spanning multiple months."""
+        return [
+            {"date_flagged": "2024-01-15T10:00:00", "similarity_score": 0.85},
+            {"date_flagged": "2024-01-20T14:30:00", "similarity_score": 0.92},
+            {"date_flagged": "2024-02-05T09:15:00", "similarity_score": 0.75},
+            {"date_flagged": "2024-03-10T11:00:00", "similarity_score": 0.88},
+            {"date_flagged": "2024-03-15T16:45:00", "similarity_score": 0.95},
+            {"date_flagged": "2024-03-20T08:30:00", "similarity_score": 0.82},
+        ]
+
+    def test_aggregates_incidents_by_month(self, sample_incidents):
+        """Verify incidents are correctly aggregated by YYYY-MM."""
+        fig = plot_monthly_incident_trends(sample_incidents)
+        
+        # Extract data from the first bar trace
+        bar_trace = fig.data[0]
+        
+        # Should have 3 months: Jan, Feb, Mar
+        assert len(bar_trace.x) == 3
+        
+        # Verify counts: Jan=2, Feb=1, Mar=3
+        y_values = list(bar_trace.y)
+        assert 2 in y_values  # January
+        assert 1 in y_values  # February
+        assert 3 in y_values  # March
+
+    def test_handles_empty_incidents_list(self):
+        """Verify empty list returns an empty-state chart."""
+        fig = plot_monthly_incident_trends([])
+        
+        # Should have an annotation instead of bar traces
+        assert len(fig.data) == 0
+        assert len(fig.layout.annotations) > 0
+        assert "No plagiarism incidents" in fig.layout.annotations[0].text
+
+    def test_handles_none_input(self):
+        """Verify None input returns an empty-state chart."""
+        fig = plot_monthly_incident_trends(None)
+        
+        assert len(fig.data) == 0
+        assert len(fig.layout.annotations) > 0
+
+    def test_fills_missing_months_with_zeros(self):
+        """Verify months with no incidents are included with count=0."""
+        incidents = [
+            {"date_flagged": "2024-01-15T10:00:00"},
+            # February is missing
+            {"date_flagged": "2024-03-10T11:00:00"},
+        ]
+        
+        fig = plot_monthly_incident_trends(incidents)
+        bar_trace = fig.data[0]
+        
+        # Should have 3 bars: Jan, Feb (0), Mar
+        assert len(bar_trace.x) == 3
+        
+        # Find the February bar (should have y=0)
+        y_values = list(bar_trace.y)
+        assert 0 in y_values
+
+    def test_respects_months_to_show_parameter(self):
+        """Verify only the most recent N months are displayed."""
+        # Create incidents spanning 12 months
+        incidents = [
+            {"date_flagged": f"2024-{str(m).zfill(2)}-15T10:00:00"}
+            for m in range(1, 13)
+        ]
+        
+        # Request only last 3 months
+        fig = plot_monthly_incident_trends(incidents, months_to_show=3)
+        bar_trace = fig.data[0]
+        
+        # Should only show Oct, Nov, Dec
+        assert len(bar_trace.x) == 3
+
+    def test_ignores_incidents_with_invalid_dates(self):
+        """Verify incidents with unparseable dates are silently skipped."""
+        incidents = [
+            {"date_flagged": "2024-01-15T10:00:00"},
+            {"date_flagged": "not-a-date"},
+            {"date_flagged": None},
+            {"date_flagged": "2024-02-05T09:15:00"},
+        ]
+        
+        fig = plot_monthly_incident_trends(incidents)
+        bar_trace = fig.data[0]
+        
+        # Should only process Jan and Feb
+        assert len(bar_trace.x) == 2
+
+    def test_applies_theme_colors(self):
+        """Verify theme colors are applied to the chart."""
+        incidents = [{"date_flagged": "2024-01-15T10:00:00"}]
+        dark_colors = get_chart_theme_colors("Dark")
+        
+        fig = plot_monthly_incident_trends(incidents, theme_colors=dark_colors)
+        
+        # Verify dark background is applied
+        assert fig.layout.paper_bgcolor == "#1e293b"
+
+    def test_y_axis_starts_at_zero(self):
+        """Verify y-axis always starts at 0 to prevent misleading visualizations."""
+        incidents = [
+            {"date_flagged": "2024-01-15T10:00:00"},
+            {"date_flagged": "2024-01-20T14:30:00"},
+        ]
+        
+        fig = plot_monthly_incident_trends(incidents)
+        
+        # Check y-axis range mode
+        assert fig.layout.yaxis.rangemode == "tozero"
+
+    def test_handles_timestamp_key_fallback(self):
+        """Verify function falls back to 'timestamp' key if 'date_flagged' missing."""
+        incidents = [
+            {"timestamp": "2024-01-15T10:00:00"},
+            {"created_at": "2024-02-05T09:15:00"},
+        ]
+        
+        fig = plot_monthly_incident_trends(incidents)
+        bar_trace = fig.data[0]
+        
+        # Should process both incidents
+        assert len(bar_trace.x) == 2
+
+    def test_chart_title_and_labels(self):
+        """Verify chart has correct title and axis labels."""
+        incidents = [{"date_flagged": "2024-01-15T10:00:00"}]
+        fig = plot_monthly_incident_trends(incidents)
+        
+        assert fig.layout.title.text == "Monthly Plagiarism Incident Trends"
+        assert fig.layout.xaxis.title.text == "Month"
+        assert fig.layout.yaxis.title.text == "Number of Incidents"
+
+
 def test_plot_charts_default_to_light_template_without_theme_colors():
     """Without theme_colors the layout must keep the Plotly defaults."""
     fig = plot_similarity_percentiles([0.4, 0.6, 0.8])
