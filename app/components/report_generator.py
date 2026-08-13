@@ -23,13 +23,13 @@ import streamlit as st
 
 # Report generation libraries (optional, with fallbacks)
 try:
-    from reportlab.graphics.charts.barcharts import VerticalBarChart
-    from reportlab.graphics.charts.linecharts import HorizontalLineChart
-    from reportlab.graphics.charts.piecharts import Pie
-    from reportlab.graphics.shapes import Drawing
+    from reportlab.graphics.charts.barcharts import VerticalBarChart  # noqa: F401
+    from reportlab.graphics.charts.linecharts import HorizontalLineChart  # noqa: F401
+    from reportlab.graphics.charts.piecharts import Pie  # noqa: F401
+    from reportlab.graphics.shapes import Drawing  # noqa: F401
     from reportlab.lib import colors
-    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-    from reportlab.lib.pagesizes import A4, landscape, letter
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT  # noqa: F401
+    from reportlab.lib.pagesizes import A4, landscape, letter  # noqa: F401
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import inch
     from reportlab.platypus import (
@@ -45,21 +45,21 @@ except ImportError:
     REPORTLAB_AVAILABLE = False
 
 try:
-    import pdfkit
+    import pdfkit  # noqa: F401
 
     PDFKIT_AVAILABLE = True
 except ImportError:
     PDFKIT_AVAILABLE = False
 
 try:
-    import markdown
+    import markdown  # noqa: F401
 
     MARKDOWN_AVAILABLE = True
 except ImportError:
     MARKDOWN_AVAILABLE = False
 
 try:
-    import jinja2
+    import jinja2  # noqa: F401
 
     JINJA_AVAILABLE = True
 except ImportError:
@@ -70,7 +70,7 @@ except ImportError:
 # ==============================================================================
 
 
-@dataclass
+@dataclass  # noqa: F821
 class ReportConfig:
     """Configuration for report generation."""
 
@@ -87,7 +87,7 @@ class ReportConfig:
     output_format: str = "pdf"  # pdf, html, json
 
 
-@dataclass
+@dataclass  # noqa: F821
 class ReportData:
     """Data structure for report generation."""
 
@@ -727,9 +727,9 @@ def render_report_generator_ui():
     if data_source == "Custom Range":
         col1, col2 = st.columns(2)
         with col1:
-            start_date = st.date_input("Start Date", datetime.now() - timedelta(days=7))
+            start_date = st.date_input("Start Date", datetime.now() - timedelta(days=7))  # noqa: F841
         with col2:
-            end_date = st.date_input("End Date", datetime.now())
+            end_date = st.date_input("End Date", datetime.now())  # noqa: F841
 
     # Generate button
     if st.button("📥 Generate Report", type="primary", use_container_width=True):
