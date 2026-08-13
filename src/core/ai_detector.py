@@ -15,6 +15,7 @@ _model = None
 _tokenizer = None
 
 _DEFAULT_MODEL = "roberta-base-openai-detector"
+_FALLBACK_SENTINEL = object()
 
 # Default perplexity value returned when text cannot be analyzed.
 # A score of 0.0 indicates the function could not compute a valid perplexity.
@@ -51,8 +52,8 @@ def _get_model_and_tokenizer():
                 f"({err}). Using fallback mode."
             )
 
-            _model = "fallback"
-            _tokenizer = "fallback"
+            _model = _FALLBACK_SENTINEL
+            _tokenizer = _FALLBACK_SENTINEL
 
     return _model, _tokenizer
 
@@ -100,7 +101,7 @@ def calculate_text_perplexity(text: str) -> float:
 
         # If the model failed to load during initialization, we cannot
         # compute perplexity. Return the default score gracefully.
-        if model == "fallback" or tokenizer == "fallback":
+        if model is _FALLBACK_SENTINEL or tokenizer is _FALLBACK_SENTINEL:
             logger.warning(
                 "[ai_detector] calculate_text_perplexity: model is in fallback mode, "
                 "cannot compute perplexity. Returning default score."
@@ -238,7 +239,7 @@ def detect_ai_probability_batch(
         model, tokenizer = _get_model_and_tokenizer()
 
         # Use fallback mode if transformer model failed to initialize
-        if model == "fallback":
+        if model is _FALLBACK_SENTINEL:
             return [0.0] * len(texts)
     except Exception:
         return [0.0] * len(texts)
@@ -461,6 +462,8 @@ def extract_stylometric_features(text: str) -> dict[str, float]:
 
     # Tokenize words using regex to extract alphanumeric sequences
     # This handles punctuation and contractions reasonably well for stylometry
+    words = re.findall(r'\b\w+\b', text.lower())
+
     words = re.findall(r"\b\w+\b", text.lower())
 
     if not words:
@@ -489,6 +492,7 @@ def extract_stylometric_features(text: str) -> dict[str, float]:
         # treat the entire text as a single sentence for length calculations
         sentences = [text.strip()]
 
+    sentence_lengths = [len(re.findall(r'\b\w+\b', s)) for s in sentences]
     sentence_lengths = [len(re.findall(r"\b\w+\b", s)) for s in sentences]
 
     avg_sentence_length = float(np.mean(sentence_lengths)) if sentence_lengths else 0.0
@@ -516,6 +520,7 @@ def extract_stylometric_features(text: str) -> dict[str, float]:
         freq_of_freqs = Counter(word_freqs.values())
 
         # Compute the sum of (f_i * i^2)
+        sum_fi_i2 = sum(freq * (i ** 2) for i, freq in freq_of_freqs.items())
         sum_fi_i2 = sum(freq * (i**2) for i, freq in freq_of_freqs.items())
 
         # Apply Yule's K formula
@@ -576,7 +581,7 @@ def detect_ai_generated_text(text: str) -> Dict[str, Any]:
             "ai_probability": 0.0,
             "confidence_tier": "low",
             "classification_tier": "low",
-            "perplexity_score": 150.0,
+            "perplexity_score": 0.0,
             "burstiness_score": 0.0,
             "ngram_repetitiveness": 0.0,
         }
@@ -621,6 +626,7 @@ def categorize_ai_probability(score: float) -> str:
         return "Moderate Probability"
     else:
         return "Low Probability"
+
 
 
 def categorize_perplexity_score(score: float) -> str:

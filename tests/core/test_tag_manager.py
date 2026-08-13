@@ -119,3 +119,25 @@ def test_sanitize_tag_name_html_strip():
     """Assert <b>tag</b> becomes tag."""
     html_tag = "<b>tag</b>"
     assert sanitize_tag_name(html_tag) == "tag"
+
+
+def test_parse_tags_minimum_alpha_requirement():
+    """Assert that tags containing only symbols/digits (no alphabetic characters) are skipped."""
+    assert TagManager.parse_tags("#123") == ""
+    assert TagManager.parse_tags("123") == ""
+    assert TagManager.parse_tags("#123,#456") == ""
+    assert TagManager.parse_tags("#123, #hw1") == "#hw1"
+
+
+def test_sanitize_tag_name_html_entity_encoded_payload():
+    """Assert HTML-entity-encoded script payloads are unescaped and stripped."""
+    import pytest
+
+    entity_payload = "&lt;script&gt;alert(1)&lt;/script&gt;"
+    assert sanitize_tag_name(entity_payload) == "alert(1)"
+
+    entity_script_only = "&lt;script&gt;&lt;/script&gt;"
+    with pytest.raises(ValueError, match="cannot be empty"):
+        sanitize_tag_name(entity_script_only)
+
+

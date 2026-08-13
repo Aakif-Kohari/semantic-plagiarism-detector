@@ -8,6 +8,17 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import pytest
+import pandas as pd
+from src.visualization.analytics import plot_similarity_distribution
+
+def test_plot_similarity_distribution_xaxis_label():
+    sim_df = pd.DataFrame(
+        [[1.0, 0.4, 0.2], [0.4, 1.0, 0.5], [0.2, 0.5, 1.0]],
+        index=["Doc1", "Doc2", "Doc3"],
+        columns=["Doc1", "Doc2", "Doc3"]
+    )
+    fig = plot_similarity_distribution(sim_df)
+    assert fig.layout.xaxis.title.text == "Similarity Score"
 
 from src.visualization.analytics import (
     calculate_severity_ratios,
