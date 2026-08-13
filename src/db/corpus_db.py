@@ -768,13 +768,14 @@ def add_documents_bulk(documents: list) -> int:
     success_count = 0
     with _connect() as conn:
         try:
-            total_before = conn.total_changes
+            before = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
             conn.executemany(
                 "INSERT OR IGNORE INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title, pdf_author, pdf_creation_date, pdf_title, tags, detected_language) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 formatted_docs,
             )
-            success_count = conn.total_changes - total_before
             conn.commit()
+            after = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+            success_count = after - before
         except sqlite3.Error as e:
             conn.rollback()
             raise e
