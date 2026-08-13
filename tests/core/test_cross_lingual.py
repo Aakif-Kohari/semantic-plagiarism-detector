@@ -384,6 +384,177 @@ class TestBackTranslateChunk:
         assert "[Translated from es]" in result
 
 
+# ── Issue #2222: Add Italian and Portuguese language detection heuristics ─────
+
+class TestItalianPortugueseLanguageDetection:
+    """Test suite for Italian and Portuguese language detection (Issue #2222)."""
+
+    def test_detects_italian_text(self):
+        """Verify Italian text is correctly identified."""
+        italian_text = "Il gatto è sul tavolo e la donna legge un libro in biblioteca"
+        
+        result = detect_chunk_language(italian_text)
+        
+        assert result == "it"
+
+    def test_detects_italian_with_mixed_case(self):
+        """Verify Italian detection works with mixed case."""
+        italian_text = "IL GATTO È SUL TAVOLO E LA DONNA LEGGE UN LIBRO"
+        
+        result = detect_chunk_language(italian_text)
+        
+        assert result == "it"
+
+    def test_detects_italian_academic_text(self):
+        """Verify Italian detection works with academic text."""
+        italian_text = (
+            "La ricerca dimostra che il metodo sperimentale è fondamentale "
+            "per la validazione delle ipotesi scientifiche in chimica"
+        )
+        
+        result = detect_chunk_language(italian_text)
+        
+        assert result == "it"
+
+    def test_detects_portuguese_text(self):
+        """Verify Portuguese text is correctly identified."""
+        portuguese_text = "O gato está na mesa e a mulher lê um livro na biblioteca"
+        
+        result = detect_chunk_language(portuguese_text)
+        
+        assert result == "pt"
+
+    def test_detects_portuguese_with_mixed_case(self):
+        """Verify Portuguese detection works with mixed case."""
+        portuguese_text = "O GATO ESTÁ NA MESA E A MULHER LÊ UM LIVRO"
+        
+        result = detect_chunk_language(portuguese_text)
+        
+        assert result == "pt"
+
+    def test_detects_portuguese_academic_text(self):
+        """Verify Portuguese detection works with academic text."""
+        portuguese_text = (
+            "A pesquisa demonstra que o método experimental é fundamental "
+            "para a validação das hipóteses científicas em química"
+        )
+        
+        result = detect_chunk_language(portuguese_text)
+        
+        assert result == "pt"
+
+    def test_italian_vs_spanish_distinction(self):
+        """Verify Italian and Spanish are distinguished correctly."""
+        italian = "Il gatto è sul tavolo e la donna legge"
+        spanish = "El gato está en la mesa y la mujer lee"
+        
+        assert detect_chunk_language(italian) == "it"
+        assert detect_chunk_language(spanish) == "es"
+
+    def test_portuguese_vs_spanish_distinction(self):
+        """Verify Portuguese and Spanish are distinguished correctly."""
+        portuguese = "O gato está na mesa e a mulher lê"
+        spanish = "El gato está en la mesa y la mujer lee"
+        
+        assert detect_chunk_language(portuguese) == "pt"
+        assert detect_chunk_language(spanish) == "es"
+
+    def test_italian_low_stop_word_density_returns_english(self):
+        """Verify Italian text with low stop word density defaults to English."""
+        # Text with very few Italian stop words
+        low_density_text = "cat dog house car tree"
+        
+        result = detect_chunk_language(low_density_text)
+        
+        # Should default to English when stop word density < 10%
+        assert result == "en"
+
+    def test_portuguese_low_stop_word_density_returns_english(self):
+        """Verify Portuguese text with low stop word density defaults to English."""
+        # Text with very few Portuguese stop words
+        low_density_text = "computer programming algorithm data structure"
+        
+        result = detect_chunk_language(low_density_text)
+        
+        # Should default to English when stop word density < 10%
+        assert result == "en"
+
+    def test_italian_in_heuristics_dict(self):
+        """Verify Italian pattern exists in _LANGUAGE_HEURISTICS."""
+        from src.core.cross_lingual import _LANGUAGE_HEURISTICS
+        
+        assert "it" in _LANGUAGE_HEURISTICS
+        assert isinstance(_LANGUAGE_HEURISTICS["it"], type(re.compile("")))
+
+    def test_portuguese_in_heuristics_dict(self):
+        """Verify Portuguese pattern exists in _LANGUAGE_HEURISTICS."""
+        from src.core.cross_lingual import _LANGUAGE_HEURISTICS
+        
+        assert "pt" in _LANGUAGE_HEURISTICS
+        assert isinstance(_LANGUAGE_HEURISTICS["pt"], type(re.compile("")))
+
+    def test_italian_pattern_matches_stop_words(self):
+        """Verify Italian regex pattern matches common stop words."""
+        from src.core.cross_lingual import _LANGUAGE_HEURISTICS
+        
+        pattern = _LANGUAGE_HEURISTICS["it"]
+        
+        # Test common Italian stop words
+        assert pattern.search("il gatto")
+        assert pattern.search("la donna")
+        assert pattern.search("di Roma")
+        assert pattern.search("e poi")
+        assert pattern.search("che cosa")
+
+    def test_portuguese_pattern_matches_stop_words(self):
+        """Verify Portuguese regex pattern matches common stop words."""
+        from src.core.cross_lingual import _LANGUAGE_HEURISTICS
+        
+        pattern = _LANGUAGE_HEURISTICS["pt"]
+        
+        # Test common Portuguese stop words
+        assert pattern.search("o gato")
+        assert pattern.search("a mulher")
+        assert pattern.search("de Lisboa")
+        assert pattern.search("em casa")
+        assert pattern.search("que fazer")
+
+    def test_short_text_returns_english(self):
+        """Verify very short text (< 3 words) defaults to English."""
+        short_italian = "Il gatto"
+        short_portuguese = "O gato"
+        
+        # Should default to English for very short text
+        assert detect_chunk_language(short_italian) == "en"
+        assert detect_chunk_language(short_portuguese) == "en"
+
+    def test_empty_text_returns_english(self):
+        """Verify empty text defaults to English."""
+        assert detect_chunk_language("") == "en"
+        assert detect_chunk_language(None) == "en"
+
+    @pytest.mark.parametrize(
+        "text,expected_lang",
+        [
+            ("Il professore spiega la teoria", "it"),
+            ("La studentessa studia per l'esame", "it"),
+            ("O professor explica a teoria", "pt"),
+            ("A estudante estuda para o exame", "pt"),
+            ("El profesor explica la teoría", "es"),
+            ("Le professeur explique la théorie", "fr"),
+            ("Der Professor erklärt die Theorie", "de"),
+        ],
+    )
+    def test_academic_phrases_parametrized(self, text, expected_lang):
+        """Verify academic phrases in multiple languages are detected correctly."""
+        # Add more context to meet minimum word count
+        full_text = f"{text} nella università oggi"
+        
+        result = detect_chunk_language(full_text)
+        
+        assert result == expected_lang
+
+
 # ── Issue #1956: Semantic Fidelity Verification Tests ─────────────────────────
 
 
