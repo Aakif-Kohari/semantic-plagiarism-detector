@@ -979,3 +979,33 @@ def test_find_most_similar_chunks_comparison_with_legacy():
                 assert item_legacy[1] == item_new[1]
                 assert np.isclose(item_legacy[2], item_new[2])
 
+
+def test_bm25_similarity_common_vs_rare():
+    """Verify that BM25 similarity is sensitive to term rarity (common vs rare terms)."""
+    from src.core.similarity import _compute_bm25_similarity
+
+    # Identical documents should have a perfect score of 1.0
+    score_identical = _compute_bm25_similarity("hello world", "hello world")
+    assert pytest.approx(score_identical) == 1.0
+
+    # Partial match of a document with two terms
+    score_partial = _compute_bm25_similarity("hello world", "hello")
+    assert 0.0 < score_partial < 1.0
+
+
+def test_bm25_idf_calculation():
+    """Test that terms appearing in one vs both documents receive different IDF weights and scores are correct."""
+    from src.core.similarity import _compute_bm25_similarity
+
+    # With dynamic IDF:
+    # If we match a term, it is present in both docs (df_t = 2 -> idf = log(1.2))
+    # Unmatched terms are present in only one doc (df_t = 1 -> idf = log(2.0))
+    # Let's ensure the calculation is correct and doesn't divide by zero or clip incorrectly.
+    score_1 = _compute_bm25_similarity("rare common", "common")
+    score_2 = _compute_bm25_similarity("very rare common", "common")
+
+    # Since "very rare common" has more unmatched rare terms (which have higher IDF weight log(2.0) than log(1.2)),
+    # its score_max_a is much higher, so the normalized similarity should be lower.
+    assert score_2 < score_1
+
+

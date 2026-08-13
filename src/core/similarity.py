@@ -305,19 +305,24 @@ def _compute_bm25_similarity(
     len_b = len(tokens_b)
     avg_len = (len_a + len_b) / 2.0
 
-    idf = math.log((2 - 2 + 0.5) / (2 + 0.5) + 1.0)
+    N = 2
+    all_terms = set(freq_a.keys()) | set(freq_b.keys())
+    idf = {}
+    for t in all_terms:
+        df_t = 2 if (t in freq_a and t in freq_b) else 1
+        idf[t] = math.log((N - df_t + 0.5) / (df_t + 0.5) + 1.0)
 
     score_a = sum(
-        idf
+        idf[t]
         * (freq_b[t] * (k1 + 1.0))
         / (freq_b[t] + k1 * (1.0 - b + b * (len_b / avg_len)))
         for t in common_terms
     )
     score_max_a = sum(
-        idf
+        idf[t]
         * (freq_a[t] * (k1 + 1.0))
         / (freq_a[t] + k1 * (1.0 - b + b * (len_a / avg_len)))
-        for t in common_terms
+        for t in freq_a.keys()
     )
 
     if score_max_a == 0:
