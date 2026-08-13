@@ -409,6 +409,7 @@ class RedisCache:
                 if data is not None:
                     with self._lock:
                         self._hits += 1
+                    # SECURITY WARNING: pickle.loads() can execute arbitrary code. Ensure Redis is access-controlled.
                     return pickle.loads(data)
             except (
                 RedisError,
@@ -712,6 +713,7 @@ def get_large_data(key: str) -> Optional[Any]:
                 del cache.fallback_cache[f"spd:v1:large:{key}"]
         
         if data:
+            # SECURITY WARNING: pickle.loads() can execute arbitrary code. Ensure Redis is access-controlled.
             return pickle.loads(zlib.decompress(data))
         return None
     except Exception as e:
