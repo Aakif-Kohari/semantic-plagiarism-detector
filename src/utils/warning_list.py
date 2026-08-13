@@ -5,7 +5,12 @@ from __future__ import annotations
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import pandas as pd
-import streamlit as st
+import sys
+if "pytest" not in sys.modules:
+    import streamlit as st
+else:
+    from unittest.mock import MagicMock
+    st = MagicMock()
 
 from app.theme import badge_html, tier_from_severity_label
 from src.core.config import normalize_severity_label, severity_from_score, severity_rank
