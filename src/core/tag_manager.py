@@ -1,3 +1,4 @@
+import html
 import logging
 import re
 from typing import List, Set
@@ -58,6 +59,10 @@ class TagManager:
 
             # If after stripping the token is empty or just a hash, skip it
             if not clean_token or clean_token == "#":
+                continue
+
+            # Skip purely numeric or non-alpha tokens (must contain at least one alphabetic character)
+            if not re.sub(r"[^a-z]", "", clean_token):
                 continue
 
             # Ensure it starts with a hash prefix
@@ -216,8 +221,11 @@ def sanitize_tag_name(tag: str) -> str:
     if tag is None or not isinstance(tag, str) or not tag.strip():
         raise ValueError("Tag name cannot be empty or whitespace-only.")
 
+    # Unescape HTML entities first (e.g. &lt;script&gt; -> <script>)
+    cleaned = html.unescape(tag)
+
     # Remove HTML tags (e.g. <script>, <b>, etc.)
-    cleaned = re.sub(r"<[^>]*>", "", tag)
+    cleaned = re.sub(r"<[^>]*>", "", cleaned)
 
     # Remove slashes (/ and \) and all whitespace characters
     cleaned = re.sub(r"[/\\\s]", "", cleaned)

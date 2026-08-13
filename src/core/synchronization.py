@@ -1,3 +1,4 @@
+import atexit
 import concurrent.futures
 import logging
 import os
@@ -14,6 +15,9 @@ logger = logging.getLogger(__name__)
 background_tasks = concurrent.futures.ThreadPoolExecutor(
     max_workers=4, thread_name_prefix="bg_task"
 )
+
+# Register graceful shutdown of the background thread pool on application exit
+atexit.register(background_tasks.shutdown, wait=True)
 
 
 def run_background(

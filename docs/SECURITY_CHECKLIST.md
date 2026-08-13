@@ -17,6 +17,11 @@ Referrer-Policy, Strict-Transport-Security in nginx.conf)
 (cover: not exposing Redis port publicly, restricting nginx to necessary ports,
 running containers as non-root, keeping base images patched)
 
+Note: `src/utils/redis_cache.py` uses `pickle.loads()` for cache deserialization.
+Pickle can execute arbitrary code if an attacker can write to Redis — keep Redis
+access-controlled (auth, network isolation) and prefer JSON for non-binary payloads
+when feasible.
+
 ## 5. Application-Level Hardening
 (cover: enforcing 2FA for admin accounts, session expiry settings,
 SSRF/MIME/file-upload protections already in src/security/, rate limiting)

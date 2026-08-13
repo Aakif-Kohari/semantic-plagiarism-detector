@@ -28,7 +28,6 @@ def truncate_filename(name: str, max_len: int = 35) -> str:
         return name
     return name[: max_len - 3] + "..."
 
-import fitz  # PyMuPDF
 
 # ── Magic Byte Signatures (Issue #1570) ──────────────────────────────────────
 
@@ -252,7 +251,7 @@ def validate_pdf_page_count(
 
     return page_count
 
-def extract_text_from_pdf(file_bytes: bytes, password: Optional[str] = None) -> Tuple[str, bool]:
+
 def get_file_size_formatted_short(num_bytes: int) -> str:
     """
     Convert a file size in bytes to a compact human-readable string.
@@ -312,26 +311,32 @@ def extract_text_from_pdf(
 
     Raises:
         EncryptedPDFError: If the PDF is encrypted and no password (or an incorrect password) is provided.
+        ValueError: If the PDF exceeds the configured page limit.
     """
     validate_pdf_page_count(file_bytes)
 
     doc = fitz.open(stream=file_bytes, filetype="pdf")
-    is_protected = doc.is_encrypted or doc.needs_pass
 
-    if is_protected:
-        if not password:
-            raise EncryptedPDFError("PDF is password-protected. Password required.")
+    try:
+        is_protected = bool(doc.is_encrypted or doc.needs_pass)
 
-        # doc.authenticate returns > 0 on success
-        auth_success = doc.authenticate(password)
-        if not auth_success:
-            raise EncryptedPDFError("Incorrect password for PDF.")
+        if is_protected:
+            if not password:
+                raise EncryptedPDFError("PDF is password-protected. Password required.")
 
-    text_content = []
-    for page in doc:
-        text_content.append(page.get_text())
+            # doc.authenticate returns > 0 on success
+            auth_success = doc.authenticate(password)
+            if not auth_success:
+                raise EncryptedPDFError("Incorrect password for PDF.")
 
-    doc.close()
+        text_content = []
+        for page in doc:
+            text_content.append(page.get_text())
+    finally:
+        # Release the handle on every path, including the EncryptedPDFError
+        # raises above, which previously leaked the open document.
+        doc.close()
+
     return "\n".join(text_content), is_protected
 
 
