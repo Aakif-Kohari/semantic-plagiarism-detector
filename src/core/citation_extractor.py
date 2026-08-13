@@ -82,7 +82,7 @@ def extract_citations(raw_text: str) -> List[Dict[str, str]]:
 
     # Split by common bibliography delimiters (newlines with hanging indents)
     # For simplicity, we process line by line or block by block.
-    lines = [l.strip() for l in raw_text.split("\n") if l.strip()]
+    lines = [l.strip() for l in raw_text.split("\n") if l.strip()]  # noqa: E741
 
     for line in lines:
         author, year, title = None, None, None

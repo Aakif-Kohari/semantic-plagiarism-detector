@@ -9,7 +9,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple  # noqa: F401
 
 
 # ============================================================================
@@ -289,7 +289,7 @@ def render_lexical_vs_semantic_scatter(
         textposition='top center',
         marker=dict(
             size=12,
-            color=[s + l for s, l in zip(semantic_scores, lexical_scores)],
+            color=[s + l for s, l in zip(semantic_scores, lexical_scores)],  # noqa: E741
             colorscale='Viridis',
             showscale=True,
             colorbar=dict(title="Total Score")

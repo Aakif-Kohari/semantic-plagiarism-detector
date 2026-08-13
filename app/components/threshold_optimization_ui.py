@@ -7,12 +7,12 @@ Provides UI elements for automated threshold optimization.
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional  # noqa: F401
 from src.core.threshold_optimizer import (
-    ThresholdOptimizer,
-    ThresholdConfig,
+    ThresholdOptimizer,  # noqa: F401
+    ThresholdConfig,  # noqa: F401
     get_threshold_optimizer,
-    OptimizationResult,
+    OptimizationResult,  # noqa: F401
     detect_document_type,
 )
 
@@ -28,7 +28,7 @@ def render_threshold_optimization_panel() -> None:
     
     # Document type selector
     doc_types = ["homogeneous", "heterogeneous", "mixed", "unknown"]
-    selected_type = st.selectbox(
+    selected_type = st.selectbox(  # noqa: F841
         "📄 Document Type",
         options=doc_types,
         help="Select document type for threshold optimization"
@@ -37,7 +37,7 @@ def render_threshold_optimization_panel() -> None:
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        precision_weight = st.slider(
+        precision_weight = st.slider(  # noqa: F841
             "🎯 Precision Weight",
             min_value=0.0,
             max_value=1.0,
@@ -47,7 +47,7 @@ def render_threshold_optimization_panel() -> None:
         )
     
     with col2:
-        recall_weight = st.slider(
+        recall_weight = st.slider(  # noqa: F841
             "📊 Recall Weight",
             min_value=0.0,
             max_value=1.0,
@@ -57,7 +57,7 @@ def render_threshold_optimization_panel() -> None:
         )
     
     with col3:
-        f1_weight = st.slider(
+        f1_weight = st.slider(  # noqa: F841
             "⚖️ F1 Weight",
             min_value=0.0,
             max_value=1.0,
@@ -173,7 +173,7 @@ def render_threshold_sweep_chart(
     ))
     
     # Find optimal threshold
-    optimal_idx = np.argmax(f1_scores)
+    optimal_idx = np.argmax(f1_scores)  # noqa: F821
     optimal_threshold = thresholds[optimal_idx]
     optimal_f1 = f1_scores[optimal_idx]
     

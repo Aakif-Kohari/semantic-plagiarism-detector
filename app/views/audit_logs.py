@@ -11,17 +11,17 @@ Provides a comprehensive security audit log viewer with:
 - Alert configurations
 """
 
-import time
+import time  # noqa: F401
 import pandas as pd
 import streamlit as st
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone  # noqa: F401
 from typing import Optional, List, Dict, Any
 import logging
-import io
+import io  # noqa: F401
 import base64
 
 from app.session_keys import SessionKeys
-from app.theme import get_chart_colors
+from app.theme import get_chart_colors  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -406,7 +406,7 @@ def _export_csv(df: pd.DataFrame) -> None:
 
 def _export_excel(df: pd.DataFrame) -> None:
     """Export audit logs as Excel."""
-    import io
+    import io  # noqa: F811
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, sheet_name="Audit Logs", index=False)

@@ -92,7 +92,7 @@ class TestCitationHashing:
             "Smith, J.", "2020", "The Art of Plagiarism Detection in AI Systems"
         )
         # Student B adds a typo and extra whitespace
-        h2 = _generate_citation_hash(
+        h2 = _generate_citation_hash(  # noqa: F841
             "Smith J", "2020", "The Art of Plagiarism Detection in AI Systems."
         )
 

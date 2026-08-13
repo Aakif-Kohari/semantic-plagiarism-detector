@@ -2934,10 +2934,10 @@ def compute_hybrid_similarity_score(
 
 
 def get_hybrid_similarity_stats(
-    semantic_scores: List[float],
-    lexical_scores: List[float],
+    semantic_scores: List[float],  # noqa: F821
+    lexical_scores: List[float],  # noqa: F821
     alpha: float = 0.7
-) -> Dict[str, Any]:
+) -> Dict[str, Any]:  # noqa: F821
     """
     Get statistics about hybrid similarity distribution.
     

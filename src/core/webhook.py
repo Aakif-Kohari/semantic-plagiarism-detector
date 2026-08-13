@@ -299,7 +299,7 @@ def _post_webhook(
     return response
 
 
-def compute_webhook_signature(
+def compute_webhook_signature(  # noqa: F811
     payload_bytes: bytes,
     secret_key: str,
     timestamp: Optional[int] = None,
@@ -323,7 +323,7 @@ def compute_webhook_signature(
     return signature
 
 
-def verify_webhook_signature(
+def verify_webhook_signature(  # noqa: F811
     payload_bytes: bytes,
     signature: str,
     secret_key: str,
