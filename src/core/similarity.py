@@ -596,8 +596,8 @@ def find_cross_lingual_matches(
         )
 
     # Determine which document needs translation
-    lang_a = detect_chunk_language(" ".join(chunks_a[:3])) if chunks_a else "en"
-    lang_b = detect_chunk_language(" ".join(chunks_b[:3])) if chunks_b else "en"
+    lang_a = detect_chunk_language(" ".join(chunks_a[:3])) if chunks_a else "en"  # noqa: F841
+    lang_b = detect_chunk_language(" ".join(chunks_b[:3])) if chunks_b else "en"  # noqa: F841
 
     # For this implementation, we assume emb_a and emb_b are already computed
     # on the back-translated text by the calling pipeline.

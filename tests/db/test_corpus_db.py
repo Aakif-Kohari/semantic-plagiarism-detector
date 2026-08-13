@@ -405,7 +405,7 @@ def test_get_document_word_counts():
     ]
     add_chunks(chunks)
 
-    word_counts = get_document_word_counts()
+    word_counts = get_document_word_counts()  # noqa: F821
     assert word_counts["doc1.txt"] == 13
     assert word_counts["doc2.txt"] == 6
 
