@@ -346,9 +346,7 @@ def render_warning_controls(
     from src.core.config import DEFAULT_THRESHOLDS
 
     st.caption(
-        get_text("warn_pairs_caption", lang=lang_code).format(
-            threshold=f"{threshold:.2f}"
-        )
+        get_text("warn_pairs_caption", lang=lang_code, threshold=f"{threshold:.2f}")
     )
 
     active_filters = []
@@ -356,8 +354,10 @@ def render_warning_controls(
         active_filters.append(
             {
                 "key": "clear_threshold",
-                "label": get_text("warn_filter_threshold", lang=lang_code).format(
-                    pct=f"{threshold*100:.0f}"
+                "label": get_text(
+                    "warn_filter_threshold",
+                    lang=lang_code,
+                    pct=f"{threshold*100:.0f}",
                 ),
                 "action": "threshold",
             }
@@ -389,8 +389,8 @@ def render_warning_controls(
         active_filters.append(
             {
                 "key": "clear_warning_search",
-                "label": get_text("warn_filter_search", lang=lang_code).format(
-                    query=display_search
+                "label": get_text(
+                    "warn_filter_search", lang=lang_code, query=display_search
                 ),
                 "action": "warning_search",
             }
@@ -406,8 +406,8 @@ def render_warning_controls(
         active_filters.append(
             {
                 "key": "clear_document_filter",
-                "label": get_text("warn_filter_document", lang=lang_code).format(
-                    doc=display_doc
+                "label": get_text(
+                    "warn_filter_document", lang=lang_code, doc=display_doc
                 ),
                 "action": "selected_document_id",
             }
@@ -421,8 +421,8 @@ def render_warning_controls(
         active_filters.append(
             {
                 "key": "clear_class_filter",
-                "label": get_text("warn_filter_class", lang=lang_code).format(
-                    class_name=display_class
+                "label": get_text(
+                    "warn_filter_class", lang=lang_code, class_name=display_class
                 ),
                 "action": "class_filter",
             }
@@ -433,8 +433,8 @@ def render_warning_controls(
         active_filters.append(
             {
                 "key": "clear_min_match_length",
-                "label": get_text("warn_filter_min_words", lang=lang_code).format(
-                    count=min_match_len_val
+                "label": get_text(
+                    "warn_filter_min_words", lang=lang_code, count=min_match_len_val
                 ),
                 "action": "min_match_length",
             }
@@ -633,8 +633,8 @@ def render_warning_controls(
             matched_words = flag.get("matched_length", 0)
             sim_label = get_text("warn_summary_similarity_label", lang=lang_code)
             sev_label = get_text("warn_summary_severity_label", lang=lang_code)
-            words_text = get_text("warn_summary_words_matched", lang=lang_code).format(
-                count=matched_words
+            words_text = get_text(
+                "warn_summary_words_matched", lang=lang_code, count=matched_words
             )
             markdown_lines.append(
                 f"{idx}. **{flag['doc_a']}** ↔ **{flag['doc_b']}** — "
@@ -647,7 +647,9 @@ def render_warning_controls(
     with left:
         if current_page.total_items:
             st.markdown(
-                get_text("warn_showing", lang=lang_code).format(
+                get_text(
+                    "warn_showing",
+                    lang=lang_code,
                     start=current_page.start_index,
                     end=current_page.end_index,
                     total=current_page.total_items,
@@ -707,8 +709,8 @@ def render_warning_controls(
                         # Replaced the standard similarity text with your matched length display logic
                         matched_words = flag.get("matched_length", 0)
                         display_text = get_text(
-                            "warn_similarity_progress", lang=lang_code
-                        ).format(
+                            "warn_similarity_progress",
+                            lang=lang_code,
                             pct=f"{flag['similarity'] * 100:.1f}",
                             words=matched_words,
                         )
@@ -727,7 +729,9 @@ def render_warning_controls(
                             )
                             if ai_a > 0 or ai_b > 0:
                                 st.caption(
-                                    get_text("warn_ai_prob", lang=lang_code).format(
+                                    get_text(
+                                        "warn_ai_prob",
+                                        lang=lang_code,
                                         doc_a=flag["doc_a"],
                                         ai_a=ai_a,
                                         doc_b=flag["doc_b"],
