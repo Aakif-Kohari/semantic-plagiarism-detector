@@ -281,7 +281,7 @@ def main() -> int:
         logger.info("-" * 70)
 
     try:
-        summary = generate_seed_data(  # noqa: F841
+        summary = generate_seed_data(
             seed_dir=args.seed_dir,
             dry_run=args.dry_run,
         )

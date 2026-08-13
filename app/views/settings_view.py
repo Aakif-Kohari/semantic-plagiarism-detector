@@ -109,7 +109,7 @@ def render_settings_view(user_role: str, lang_code: str, root_dir: str):
             language_names = list(ocr_language_labels)
             default_language_name = SUPPORTED_OCR_LANGUAGES[DEFAULT_OCR_LANGUAGE]
 
-            selected_ocr_language_name = st.selectbox(  # noqa: F841
+            selected_ocr_language_name = st.selectbox(
                 "OCR Language",
                 options=language_names,
                 index=language_names.index(default_language_name),

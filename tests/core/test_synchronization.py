@@ -148,7 +148,7 @@ def test_atexit_graceful_shutdown_registered():
     found = False
     for handler in atexit._exithandlers:
         # atexit handlers are tuples of (func, args, kwargs)
-        func, args, kwargs = handler[0], handler[1], handler[2]  # noqa: F841
+        func, args, kwargs = handler[0], handler[1], handler[2]
         if func == background_tasks.shutdown:
             assert kwargs.get("wait") is True
             found = True

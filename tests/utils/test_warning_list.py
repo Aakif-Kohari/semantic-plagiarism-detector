@@ -29,7 +29,6 @@ WARNINGS = [
 ]
 
 
-def test_predicates():
     assert predicate_alpha(WARNINGS[0]) is True  # doc_b matches
     assert predicate_alpha(WARNINGS[1]) is False  # no match
     assert predicate_alpha(WARNINGS[2]) is True  # doc_a matches

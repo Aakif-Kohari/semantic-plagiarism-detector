@@ -8,16 +8,11 @@ and cross-lingual plagiarism detection.
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple  # noqa: F401
+from typing import Dict, List, Any, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-import sys
-if "pytest" not in sys.modules:
-    import streamlit as st
-else:
-    from unittest.mock import MagicMock
-    st = MagicMock()
+import streamlit as st
 
 from src.core.ai_detector import detect_documents_ai_probability
 from src.core.document_parser import (
@@ -57,7 +52,7 @@ def _get_cross_lingual_mode() -> bool:
     """Get cross-lingual mode from session state."""
     try:
         return st.session_state.get("cross_lingual_mode_toggle", False)
-    except:  # noqa: E722
+    except:
         return False
 
 
@@ -192,7 +187,7 @@ def run_pipeline(
             from src.core.cross_lingual import prepare_documents_for_embedding
             
             # Convert chunked_docs to dict format
-            doc_chunks = {}  # noqa: F841
+            doc_chunks = {}
             for doc_name, chunks in zip(file_bytes_dict.keys(), [chunked_docs]):
                 # Rebuild document chunks
                 pass
@@ -267,7 +262,7 @@ def run_pipeline(
     if cross_lingual_mode and translation_metadata:
         try:
             st.session_state["translation_metadata"] = translation_metadata
-        except:  # noqa: E722
+        except:
             pass
 
     return (
@@ -377,7 +372,7 @@ def run_extraction_pipeline(
     if cross_lingual_mode and translation_metadata:
         try:
             st.session_state["translation_metadata"] = translation_metadata
-        except:  # noqa: E722
+        except:
             pass
 
     return (

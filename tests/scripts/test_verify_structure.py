@@ -126,10 +126,10 @@ class TestTextFormat:
 
         # Check that items appear in sorted order
         lines = output.split("\n")
-        found_lines = [l for l in lines if "✓" in l]  # noqa: E741
+        found_lines = [l for l in lines if "✓" in l]
 
         # Extract item names
-        items = [l.strip().replace("✓ ", "") for l in found_lines]  # noqa: E741
+        items = [l.strip().replace("✓ ", "") for l in found_lines]
 
         # Verify sorted
         assert items == sorted(items)

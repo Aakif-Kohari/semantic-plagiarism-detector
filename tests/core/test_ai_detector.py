@@ -340,7 +340,7 @@ def test_calculate_text_perplexity_returns_float():
 def test_calculate_text_perplexity_with_fallback_model():
     """When model is in fallback mode, return default perplexity score."""
     with patch("src.core.ai_detector._get_model_and_tokenizer") as mock_loader:
-        mock_loader.return_value = (_FALLBACK_SENTINEL, _FALLBACK_SENTINEL)  # noqa: F821
+        mock_loader.return_value = (_FALLBACK_SENTINEL, _FALLBACK_SENTINEL)
         result = calculate_text_perplexity("Some text to evaluate.")
         assert result == 0.0
 

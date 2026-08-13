@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import pytest
-import pandas as pd  # noqa: F811
+import pandas as pd
 from src.visualization.analytics import plot_similarity_distribution
 
 def test_plot_similarity_distribution_xaxis_label():

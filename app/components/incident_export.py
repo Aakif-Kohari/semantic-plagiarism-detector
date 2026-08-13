@@ -16,7 +16,7 @@ from src.db.incidents import (
 )
 from src.utils.pdf_report import generate_batch_plagiarism_report
 
-pdf_buffer = generate_batch_plagiarism_report(get_all_incidents(db_path))  # noqa: F821
+pdf_buffer = generate_batch_plagiarism_report(get_all_incidents(db_path))
 
 pdf_filename = (
     "plagiarism_batch_report_"

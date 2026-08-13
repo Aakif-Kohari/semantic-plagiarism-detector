@@ -17,15 +17,15 @@ import time
 import hashlib
 import difflib
 from pathlib import Path
-from datetime import datetime, timedelta  # noqa: F401
-from typing import Dict, List, Any, Optional, Tuple, Set  # noqa: F401
+from datetime import datetime, timedelta
+from typing import Dict, List, Any, Optional, Tuple, Set
 from dataclasses import dataclass, field, asdict
 from collections import defaultdict
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import numpy as np  # noqa: F401
+import numpy as np
 
 # ==============================================================================
 # DATA CLASSES
@@ -297,7 +297,7 @@ class VersionManager:
         
         added = []
         removed = []
-        modified = []  # noqa: F841
+        modified = []
         unchanged = []
         
         for line in diff:
@@ -809,7 +809,7 @@ def render_rollback_ui(version_manager: VersionManager, doc_id: str, doc_name: s
             
             # Rollback
             author = st.session_state.get("username", "system")
-            comment = st.text_area("Rollback Comment", f"Rollback to version {version_num}")  # noqa: F841
+            comment = st.text_area("Rollback Comment", f"Rollback to version {version_num}")
             
             if st.button("⏪ Execute Rollback", type="primary", use_container_width=True):
                 with st.spinner("Rolling back..."):

@@ -453,7 +453,7 @@ def plot_similarity_heatmap_plotly(
     except MatplotlibInjectionError:
         safe_title = "Semantic Similarity Matrix"
 
-    cmap = PLOTLY_CMAP_MAPPING.get(colormap_name, "Viridis")  # noqa: F821
+    cmap = PLOTLY_CMAP_MAPPING.get(colormap_name, "Viridis")
 
     try:
         clean_df = validate_similarity_matrix(similarity_df)

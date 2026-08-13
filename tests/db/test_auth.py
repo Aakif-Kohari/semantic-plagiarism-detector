@@ -71,7 +71,7 @@ def test_verify_user_rejects_suspended_user():
 
     assert verify_user(user, "SecurePass123!") is True
 
-    set_user_status(user, "suspended")  # type: ignore  # noqa: F821
+    set_user_status(user, "suspended")  # type: ignore
 
     assert verify_user(user, "SecurePass123!") is False
 
@@ -235,9 +235,9 @@ def test_set_user_status():
     user = f"user_{uuid.uuid4().hex[:8]}"
     add_user(user, "SecurePass123!")
 
-    set_user_status(user, "suspended")  # type: ignore  # noqa: F821
+    set_user_status(user, "suspended")  # type: ignore
 
-    with sqlite3.connect(src.db.auth._DB_PATH) as conn:  # type: ignore  # noqa: F821
+    with sqlite3.connect(src.db.auth._DB_PATH) as conn:  # type: ignore
         status, is_active = conn.execute(
             "SELECT status, is_active FROM users WHERE username = ?",
             (user,),
@@ -246,9 +246,9 @@ def test_set_user_status():
     assert status == "suspended"
     assert is_active == 0
 
-    set_user_status(user, "active")  # type: ignore  # noqa: F821
+    set_user_status(user, "active")  # type: ignore
 
-    with sqlite3.connect(src.db.auth._DB_PATH) as conn:  # type: ignore  # noqa: F821
+    with sqlite3.connect(src.db.auth._DB_PATH) as conn:  # type: ignore
         status, is_active = conn.execute(
             "SELECT status, is_active FROM users WHERE username = ?",
             (user,),

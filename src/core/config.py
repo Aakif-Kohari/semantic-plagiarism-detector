@@ -371,7 +371,7 @@ def get_offline_config() -> Dict[str, Any]:
 
 def test_branding_config_path_exists():
     """Test that BRANDING_CONFIG_PATH resolves to an existing file."""
-    config_path = config_module.BRANDING_CONFIG_PATH  # noqa: F821
+    config_path = config_module.BRANDING_CONFIG_PATH
 
     assert os.path.isfile(config_path)
 

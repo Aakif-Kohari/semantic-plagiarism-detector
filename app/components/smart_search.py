@@ -16,14 +16,14 @@ import time
 import hashlib
 import numpy as np
 import pandas as pd
-from pathlib import Path  # noqa: F401
-from datetime import datetime, timedelta  # noqa: F401
-from typing import Dict, List, Any, Optional, Tuple, Set  # noqa: F401
-from dataclasses import dataclass, field, asdict  # noqa: F401
-from collections import defaultdict, Counter  # noqa: F401
+from pathlib import Path
+from datetime import datetime, timedelta
+from typing import Dict, List, Any, Optional, Tuple, Set
+from dataclasses import dataclass, field, asdict
+from collections import defaultdict, Counter
 import streamlit as st
-import plotly.graph_objects as go  # noqa: F401
-from plotly.subplots import make_subplots  # noqa: F401
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 # ML Libraries for NLP
 try:
@@ -34,8 +34,8 @@ except ImportError:
 
 try:
     import nltk
-    from nltk.tokenize import word_tokenize, sent_tokenize  # noqa: F401
-    from nltk.corpus import stopwords  # noqa: F401
+    from nltk.tokenize import word_tokenize, sent_tokenize
+    from nltk.corpus import stopwords
     NLTK_AVAILABLE = True
     # Download required NLTK data
     try:
@@ -50,7 +50,7 @@ except ImportError:
     NLTK_AVAILABLE = False
 
 try:
-    import spacy  # noqa: F401
+    import spacy
     SPACY_AVAILABLE = True
 except ImportError:
     SPACY_AVAILABLE = False
@@ -509,7 +509,7 @@ def render_smart_search_ui():
         )
     
     with col2:
-        search_type = st.selectbox(  # noqa: F841
+        search_type = st.selectbox(
             "Type",
             ["Semantic", "Keyword", "Hybrid"],
             index=0

@@ -6,7 +6,7 @@ and cross-lingual match indicators in the Streamlit dashboard.
 """
 
 import streamlit as st
-from typing import Dict, List, Any, Optional, Tuple  # noqa: F401
+from typing import Dict, List, Any, Optional, Tuple
 import pandas as pd
 from src.core.cross_lingual import get_language_name, SUPPORTED_LANGUAGES
 

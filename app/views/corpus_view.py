@@ -411,7 +411,7 @@ def render_document_management_sidebar(
     if existing_docs:
         st.write(f"**{len(existing_docs)}** documents in database")
 
-    safe_last_interaction = int(last_interaction or 0)  # noqa: F841
+    safe_last_interaction = int(last_interaction or 0)
     st.markdown(
         """
         <div id="session-timer" style="

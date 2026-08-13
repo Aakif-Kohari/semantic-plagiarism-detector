@@ -890,25 +890,25 @@ class TestCreateDatabaseBackup:
 
 
 def test_get_database_file_size_bytes_existing_file():
-    db = _ALLOWED_DB_DIR / "corpus.db"  # noqa: F821
-    create_test_database(db)  # noqa: F821
+    db = _ALLOWED_DB_DIR / "corpus.db"
+    create_test_database(db)
     try:
-        assert get_database_file_size_bytes(db) == db.stat().st_size  # noqa: F821
-        assert get_database_file_size_bytes(db) > 0  # noqa: F821
+        assert get_database_file_size_bytes(db) == db.stat().st_size
+        assert get_database_file_size_bytes(db) > 0
     finally:
         db.unlink(missing_ok=True)
 
 
 def test_get_database_file_size_bytes_missing_file():
-    missing = _ALLOWED_DB_DIR / "__nonexistent_test__.db"  # noqa: F821
-    assert get_database_file_size_bytes(missing) == 0  # noqa: F821
+    missing = _ALLOWED_DB_DIR / "__nonexistent_test__.db"
+    assert get_database_file_size_bytes(missing) == 0
 
 
 def test_get_database_file_size_bytes_accepts_string_path():
-    db = _ALLOWED_DB_DIR / "users_test_size.db"  # noqa: F821
-    create_test_database(db)  # noqa: F821
+    db = _ALLOWED_DB_DIR / "users_test_size.db"
+    create_test_database(db)
     try:
-        assert get_database_file_size_bytes(str(db)) == db.stat().st_size  # noqa: F821
+        assert get_database_file_size_bytes(str(db)) == db.stat().st_size
     finally:
         db.unlink(missing_ok=True)
 
@@ -917,4 +917,4 @@ def test_get_database_file_size_bytes_rejects_path_traversal(tmp_path):
     outside = tmp_path / "evil.db"
     outside.write_text("x")
     with pytest.raises(ValueError, match="outside the allowed directory"):
-        get_database_file_size_bytes(outside)  # noqa: F821
+        get_database_file_size_bytes(outside)

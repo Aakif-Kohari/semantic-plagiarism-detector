@@ -3,7 +3,7 @@ import json
 import csv
 import zipfile
 import pytest
-from unittest.mock import patch, MagicMock  # noqa: F401
+from unittest.mock import patch, MagicMock
 
 from src.utils.bulk_export import (
     ExportFormat,

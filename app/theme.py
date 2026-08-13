@@ -994,7 +994,7 @@ def inject_css() -> None:
                 max-width: 85vw !important;
             }}
         }}
-    """  # noqa: F821
+    """
     # Issue #572: File Uploader Drag-Zone Customization
     file_uploader_css = f"""
     /* File Uploader Drag-Zone Customization */

@@ -12,18 +12,18 @@ Features:
 - Scheduled batch jobs
 """
 
-import asyncio  # noqa: F401
+import asyncio
 import json
 import time
 import threading
 import queue
-import hashlib  # noqa: F401
+import hashlib
 from enum import Enum
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Tuple, Callable, Union  # noqa: F401
-from dataclasses import dataclass, field, asdict  # noqa: F401
-from collections import deque, defaultdict  # noqa: F401
+from typing import Dict, List, Any, Optional, Tuple, Callable, Union
+from dataclasses import dataclass, field, asdict
+from collections import deque, defaultdict
 import concurrent.futures
 import streamlit as st
 import pandas as pd
@@ -779,7 +779,7 @@ def render_batch_processor_ui():
                     for log in job.logs[-3:]:
                         st.text(f"• {log}")
                 
-                if st.button(f"❌ Cancel", key=f"cancel_{job_id}"):  # noqa: F541
+                if st.button(f"❌ Cancel", key=f"cancel_{job_id}"):
                     processor.cancel_job(job_id)
                     st.rerun()
     
@@ -915,7 +915,7 @@ def render_batch_scheduler_ui():
             priority = st.selectbox("Priority", ["NORMAL", "HIGH", "LOW"])
             doc_count = st.number_input("Documents per batch", 1, 1000, 50)
         with col3:
-            enabled = st.checkbox("Enabled", value=True)  # noqa: F841
+            enabled = st.checkbox("Enabled", value=True)
             if st.button("📅 Create Schedule", use_container_width=True):
                 config = {
                     "data": {

@@ -5,12 +5,12 @@ Provides UI elements for configuring and monitoring offline mode.
 """
 
 import streamlit as st
-from typing import Dict, Any  # noqa: F401
+from typing import Dict, Any
 import time
-from pathlib import Path  # noqa: F401
+from pathlib import Path
 
 from src.core.offline_mode import (
-    OfflineConfig,  # noqa: F401
+    OfflineConfig,
     get_offline_manager,
     is_offline_mode,
     initialize_offline_mode,
@@ -56,13 +56,13 @@ def render_offline_mode_settings() -> None:
             # Cache settings
             col1, col2 = st.columns(2)
             with col1:
-                use_cache = st.checkbox(  # noqa: F841
+                use_cache = st.checkbox(
                     "Use local cache",
                     value=config.use_local_cache,
                     key="offline_use_cache"
                 )
             with col2:
-                max_cache = st.number_input(  # noqa: F841
+                max_cache = st.number_input(
                     "Max cache size (MB)",
                     value=config.max_cache_size_mb,
                     min_value=50,
@@ -74,13 +74,13 @@ def render_offline_mode_settings() -> None:
             # Model settings
             col1, col2 = st.columns(2)
             with col1:
-                preload = st.checkbox(  # noqa: F841
+                preload = st.checkbox(
                     "Preload models on startup",
                     value=config.preload_models,
                     key="offline_preload_models"
                 )
             with col2:
-                use_fallback = st.checkbox(  # noqa: F841
+                use_fallback = st.checkbox(
                     "Use fallback embedding",
                     value=config.use_fallback_embedding,
                     key="offline_fallback_embedding"
@@ -90,25 +90,25 @@ def render_offline_mode_settings() -> None:
             with st.expander("🔧 Advanced Settings"):
                 col1, col2 = st.columns(2)
                 with col1:
-                    disable_telemetry = st.checkbox(  # noqa: F841
+                    disable_telemetry = st.checkbox(
                         "Disable telemetry",
                         value=config.disable_telemetry,
                         key="offline_disable_telemetry"
                     )
                 with col2:
-                    auto_cleanup = st.checkbox(  # noqa: F841
+                    auto_cleanup = st.checkbox(
                         "Auto cleanup cache",
                         value=config.auto_cleanup,
                         key="offline_auto_cleanup"
                     )
                 
-                cache_dir = st.text_input(  # noqa: F841
+                cache_dir = st.text_input(
                     "Cache directory",
                     value=config.cache_dir,
                     key="offline_cache_dir"
                 )
                 
-                model_cache_dir = st.text_input(  # noqa: F841
+                model_cache_dir = st.text_input(
                     "Model cache directory",
                     value=config.model_cache_dir,
                     key="offline_model_cache_dir"

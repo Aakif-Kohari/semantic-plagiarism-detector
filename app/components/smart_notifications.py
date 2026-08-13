@@ -14,18 +14,18 @@ Features:
 
 import json
 import time
-import smtplib  # noqa: F401
-import requests  # noqa: F401
+import smtplib
+import requests
 from pathlib import Path
-from datetime import datetime, timedelta  # noqa: F401
-from typing import Dict, List, Any, Optional, Callable, Set  # noqa: F401
+from datetime import datetime, timedelta
+from typing import Dict, List, Any, Optional, Callable, Set
 from dataclasses import dataclass, field, asdict
 from enum import Enum
-from collections import defaultdict, deque  # noqa: F401
+from collections import defaultdict, deque
 import threading
 import queue
 import streamlit as st
-import pandas as pd  # noqa: F401
+import pandas as pd
 import plotly.graph_objects as go
 
 # ==============================================================================
@@ -852,7 +852,7 @@ def render_notification_stats():
     col4.metric("Failed", stats["delivery_stats"]["failed"])
     
     # Charts
-    fig = make_subplots(rows=1, cols=2, subplot_titles=("By Priority", "By Channel"))  # noqa: F821
+    fig = make_subplots(rows=1, cols=2, subplot_titles=("By Priority", "By Channel"))
     
     # Priority chart
     if stats["by_priority"]:

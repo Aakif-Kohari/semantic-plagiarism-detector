@@ -199,10 +199,10 @@ class MonitoringEngine:
                         )
                         if last and (now - float(last)) <= 900:  # 15 minutes
                             active += 1
-                    except:  # noqa: E722
+                    except:
                         pass
                 return active
-        except:  # noqa: E722
+        except:
             pass
 
         # Fallback: estimate from session state
@@ -217,7 +217,7 @@ class MonitoringEngine:
             if cache.is_available():
                 queue = cache._client.llen("processing_queue")
                 return queue or 0
-        except:  # noqa: E722
+        except:
             pass
         return 0
 
@@ -854,7 +854,7 @@ def render_alerts_dashboard(monitor: MonitoringEngine):
         st.warning(f"⚠️ {len(active)} active alerts")
 
         for alert in active:
-            severity_colors = {"info": "blue", "warning": "orange", "critical": "red"}  # noqa: F841
+            severity_colors = {"info": "blue", "warning": "orange", "critical": "red"}
 
             with st.expander(
                 f"{alert.severity.upper()}: {alert.message}",
