@@ -113,6 +113,15 @@ def plot_flagged_documents_bar(
     """
     if not history_data:
         fig = go.Figure()
+        fig.add_annotation(
+            text="No scan history data available yet.",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
+            font=dict(size=16, color="#666666"),
+        )
         fig.update_layout(
             xaxis=dict(visible=False),
             yaxis=dict(visible=False),
