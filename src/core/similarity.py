@@ -596,8 +596,8 @@ def find_cross_lingual_matches(
         )
 
     # Determine which document needs translation
-    lang_a = detect_chunk_language(" ".join(chunks_a[:3])) if chunks_a else "en"
-    lang_b = detect_chunk_language(" ".join(chunks_b[:3])) if chunks_b else "en"
+    lang_a = detect_chunk_language(" ".join(chunks_a[:3])) if chunks_a else "en"  # noqa: F841
+    lang_b = detect_chunk_language(" ".join(chunks_b[:3])) if chunks_b else "en"  # noqa: F841
 
     # For this implementation, we assume emb_a and emb_b are already computed
     # on the back-translated text by the calling pipeline.
@@ -903,7 +903,20 @@ def detect_plagiarism_clusters(
         - 'cluster_map': Dict mapping document name to its cluster_id.
         - 'suspicious_groups': List of clusters with 3+ documents (potential collusion rings).
     """
-    import networkx as nx
+    try:
+        import networkx as nx
+    except ImportError:
+        logger.warning(
+            "networkx is not installed. Install it with: pip install networkx>=3.0"
+        )
+        return {
+            "clusters": {},
+            "cluster_map": {},
+            "suspicious_groups": [],
+            "total_clusters": 0,
+            "error": "networkx not installed",
+            "message": "Please install networkx: pip install networkx>=3.0"
+        }
 
     doc_names = list(similarity_df.columns)
     G = nx.Graph()

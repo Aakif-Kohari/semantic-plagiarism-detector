@@ -28,8 +28,12 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 ```bash
 pip install -r requirements.txt
+pip install -r requirements-dev.txt
 pip install pytest-cov
 ```
+
+`requirements-dev.txt` contains development-only tools (ruff, pylint, black,
+isort, pre-commit) and is not needed for deployment.
 
 ### Run the project
 ## 5. Run the project

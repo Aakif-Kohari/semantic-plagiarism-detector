@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import io
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional
 
 import numpy as np
 import pandas as pd
@@ -27,17 +27,18 @@ from src.core.text_chunking import chunk_documents
 logger = logging.getLogger(__name__)
 
 
-PipelineResult = Tuple[
-    Dict[str, str],  # raw_texts
-    Dict[str, List[str]],  # chunked_docs
-    Dict[str, np.ndarray],  # embeddings
-    pd.DataFrame,  # sim_df
-    pd.DataFrame,  # chunk_sim_df
-    Any,  # faiss_index
-    List[ChunkRecord],  # registry
-    Dict[str, Dict[str, Any]],  # ai_probabilities
-    List[Dict[str, Any]],  # flags
-]
+class PipelineResult(NamedTuple):
+    """Named outputs from ``run_full_pipeline`` (still unpackable as a tuple)."""
+
+    raw_texts: Dict[str, str]
+    chunked_docs: Dict[str, List[str]]
+    embeddings: Dict[str, np.ndarray]
+    sim_df: pd.DataFrame
+    chunk_sim_df: pd.DataFrame
+    faiss_index: Any
+    registry: List[ChunkRecord]
+    ai_probabilities: Dict[str, Dict[str, Any]]
+    flags: List[Dict[str, Any]]
 
 
 def run_full_pipeline(
@@ -59,7 +60,7 @@ def run_full_pipeline(
     suitable for background workers and API-driven usage.
 
     Returns:
-        A tuple containing all pipeline outputs including the final flags list.
+        A ``PipelineResult`` with all pipeline outputs including the final flags list.
     """
     import psutil
 
@@ -139,14 +140,14 @@ def run_full_pipeline(
         embeddings=embeddings,
     )
 
-    return (
-        raw_texts,
-        chunked_docs,
-        embeddings,
-        sim_df,
-        chunk_sim_df,
-        faiss_index,
-        registry,
-        ai_probabilities,
-        flags,
+    return PipelineResult(
+        raw_texts=raw_texts,
+        chunked_docs=chunked_docs,
+        embeddings=embeddings,
+        sim_df=sim_df,
+        chunk_sim_df=chunk_sim_df,
+        faiss_index=faiss_index,
+        registry=registry,
+        ai_probabilities=ai_probabilities,
+        flags=flags,
     )

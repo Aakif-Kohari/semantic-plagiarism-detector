@@ -1,3 +1,4 @@
+import html
 import logging
 import re
 from typing import List, Set
@@ -220,8 +221,11 @@ def sanitize_tag_name(tag: str) -> str:
     if tag is None or not isinstance(tag, str) or not tag.strip():
         raise ValueError("Tag name cannot be empty or whitespace-only.")
 
+    # Unescape HTML entities first (e.g. &lt;script&gt; -> <script>)
+    cleaned = html.unescape(tag)
+
     # Remove HTML tags (e.g. <script>, <b>, etc.)
-    cleaned = re.sub(r"<[^>]*>", "", tag)
+    cleaned = re.sub(r"<[^>]*>", "", cleaned)
 
     # Remove slashes (/ and \) and all whitespace characters
     cleaned = re.sub(r"[/\\\s]", "", cleaned)

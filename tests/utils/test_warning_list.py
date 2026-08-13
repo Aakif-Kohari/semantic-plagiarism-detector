@@ -1,7 +1,6 @@
 from src.utils.warning_list import (
     build_key_extractor,
     filter_warnings,
-    matches_query_predicate,
     paginate_warnings,
     prepare_warning_page,
     sort_warnings,
@@ -28,16 +27,6 @@ WARNINGS = [
         "severity": "Medium",
     },
 ]
-
-
-def test_matches_query_predicate():
-    predicate_alpha = matches_query_predicate("alpha")
-    predicate_empty = matches_query_predicate("   ")
-
-    assert predicate_alpha(WARNINGS[0]) is True  # doc_b matches
-    assert predicate_alpha(WARNINGS[1]) is False  # no match
-    assert predicate_alpha(WARNINGS[2]) is True  # doc_a matches
-    assert predicate_empty(WARNINGS[1]) is True  # empty query matches all
 
 
 def test_build_key_extractor():

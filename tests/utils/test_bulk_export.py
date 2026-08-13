@@ -1,11 +1,21 @@
 import io
 import json
+import csv
 import zipfile
+import pytest
+from unittest.mock import patch, MagicMock  # noqa: F401
 
 from src.utils.bulk_export import (
+    ExportFormat,
     export_incidents_csv,
     export_incidents_csv_stream,
+    export_incidents_json_stream,
+    export_incidents_to_format,
     generate_bulk_reports_zip,
+    normalize_csv_headers,
+    sanitize_csv_cell_value,
+    sanitize_export_filename,
+    stream_incidents_csv_chunks,
 )
 
 
@@ -126,12 +136,9 @@ def test_export_incidents_csv_stream_headers():
 
 def test_export_incidents_csv_stream_row_values():
     """CSV rows must reflect incident field values with correct formatting."""
-    import csv as _csv
-    import io
-
     csv_bytes = export_incidents_csv_stream(_SAMPLE_INCIDENTS)
     text = csv_bytes.decode("utf-8-sig")
-    reader = _csv.DictReader(io.StringIO(text))
+    reader = csv.DictReader(io.StringIO(text))
     rows = list(reader)
 
     assert len(rows) == 2
@@ -154,14 +161,11 @@ def test_export_incidents_csv_stream_row_values():
 
 def test_export_incidents_csv_stream_empty_list():
     """An empty incidents list should produce only the header row with BOM."""
-    import csv as _csv
-    import io
-
     csv_bytes = export_incidents_csv_stream([])
     assert csv_bytes.startswith(b"\xef\xbb\xbf")
 
     text = csv_bytes.decode("utf-8-sig")
-    reader = _csv.DictReader(io.StringIO(text))
+    reader = csv.DictReader(io.StringIO(text))
     rows = list(reader)
 
     assert rows == []
@@ -172,9 +176,6 @@ def test_export_incidents_csv_stream_empty_list():
 
 def test_export_incidents_csv_stream_non_numeric_similarity():
     """Non-numeric similarity_score should be written as-is without raising."""
-    import csv as _csv
-    import io
-
     incidents = [
         {
             "incident_id": "INC-X",
@@ -191,7 +192,7 @@ def test_export_incidents_csv_stream_non_numeric_similarity():
     assert csv_bytes.startswith(b"\xef\xbb\xbf")
 
     text = csv_bytes.decode("utf-8-sig")
-    reader = _csv.DictReader(io.StringIO(text))
+    reader = csv.DictReader(io.StringIO(text))
     rows = list(reader)
 
     assert len(rows) == 1
@@ -201,8 +202,6 @@ def test_export_incidents_csv_stream_non_numeric_similarity():
 # ---------------------------------------------------------------------------
 # Tests for normalize_csv_headers (Issue #1253)
 # ---------------------------------------------------------------------------
-
-from src.utils.bulk_export import normalize_csv_headers
 
 
 class TestNormalizeCsvHeaders:
@@ -406,8 +405,6 @@ def test_create_batch_incident_zip_archive():
 # Tests for stream_incidents_csv_chunks (Issue #1511)
 # ---------------------------------------------------------------------------
 
-from src.utils.bulk_export import stream_incidents_csv_chunks
-
 
 def test_stream_incidents_csv_chunks_default_batch():
     """Verify default batch size and incremental query calls."""
@@ -518,9 +515,6 @@ def test_export_incidents_csv_stream_default_delimiter_is_comma():
 def test_export_incidents_csv_stream_semicolon_delimiter():
     """delimiter=';' must produce semicolon-delimited CSV, parseable back
     into the original field values."""
-    import csv as _csv
-    import io as _io
-
     csv_bytes = export_incidents_csv_stream(_SAMPLE_INCIDENTS, delimiter=";")
     text = csv_bytes.decode("utf-8-sig")
     first_line = text.splitlines()[0]
@@ -528,7 +522,7 @@ def test_export_incidents_csv_stream_semicolon_delimiter():
     # Header row uses semicolons, not commas, as the field separator
     assert first_line == "Incident ID;Doc A;Doc B;Similarity;Severity;Status;Date"
 
-    reader = _csv.DictReader(_io.StringIO(text), delimiter=";")
+    reader = csv.DictReader(io.StringIO(text), delimiter=";")
     rows = list(reader)
 
     assert len(rows) == 2
@@ -540,9 +534,6 @@ def test_export_incidents_csv_stream_semicolon_delimiter():
 
 def test_export_incidents_csv_stream_tab_delimiter():
     """delimiter='\\t' must produce tab-delimited CSV."""
-    import csv as _csv
-    import io as _io
-
     csv_bytes = export_incidents_csv_stream(_SAMPLE_INCIDENTS, delimiter="\t")
     text = csv_bytes.decode("utf-8-sig")
     first_line = text.splitlines()[0]
@@ -550,7 +541,7 @@ def test_export_incidents_csv_stream_tab_delimiter():
     assert "\t" in first_line
     assert "," not in first_line
 
-    reader = _csv.DictReader(_io.StringIO(text), delimiter="\t")
+    reader = csv.DictReader(io.StringIO(text), delimiter="\t")
     rows = list(reader)
     assert rows[0]["Doc A"] == "alice.pdf"
 
@@ -623,8 +614,6 @@ def test_export_incidents_csv_delimiter_validation():
 
 def test_export_incidents_csv_quoting_style():
     """Verify that export_incidents_csv respects custom quoting styles (#1739)."""
-    import csv
-
     # Test QUOTE_ALL: all fields should be quoted
     csv_bytes_all = export_incidents_csv(_SAMPLE_INCIDENTS, quoting_style=csv.QUOTE_ALL)
     text_all = csv_bytes_all.decode("utf-8-sig")
@@ -648,8 +637,6 @@ def test_export_incidents_csv_quoting_style():
 # ---------------------------------------------------------------------------
 # Tests for sanitize_csv_cell_value (Issue #1744)
 # ---------------------------------------------------------------------------
-
-from src.utils.bulk_export import sanitize_csv_cell_value
 
 
 class TestSanitizeCsvCellValue:
@@ -693,8 +680,6 @@ class TestSanitizeCsvCellValue:
 
 
 def test_sanitize_export_filename():
-    from src.utils.bulk_export import sanitize_export_filename
-
     # Test stripping illegal OS characters
     assert sanitize_export_filename("test<file>.csv") == "testfile.csv"
     assert sanitize_export_filename("test:file|name?.csv") == "testfilename.csv"
@@ -704,3 +689,199 @@ def test_sanitize_export_filename():
 
     # Test valid filename
     assert sanitize_export_filename("my_valid_file.csv") == "my_valid_file.csv"
+
+
+# ---------------------------------------------------------------------------
+# Tests for ExportFormat Enum (Issue #2008)
+# ---------------------------------------------------------------------------
+
+
+class TestExportFormatEnum:
+    """Test suite for the ExportFormat Enum definition and behavior."""
+
+    def test_enum_members_exist(self):
+        """Verify all required enum members are defined."""
+        assert ExportFormat.CSV.value == "csv"
+        assert ExportFormat.JSON.value == "json"
+        assert ExportFormat.XLSX.value == "xlsx"
+        assert ExportFormat.PDF.value == "pdf"
+
+    def test_enum_is_string_subclass(self):
+        """Verify ExportFormat inherits from str for seamless integration."""
+        assert isinstance(ExportFormat.CSV, str)
+        assert ExportFormat.JSON == "json"
+
+    def test_case_insensitive_lookup(self):
+        """Verify the _missing_ override allows case-insensitive string matching."""
+        assert ExportFormat("CSV") == ExportFormat.CSV
+        assert ExportFormat("Json") == ExportFormat.JSON
+        assert ExportFormat("XLSX") == ExportFormat.XLSX
+        assert ExportFormat("pdf") == ExportFormat.PDF
+
+    def test_whitespace_stripping(self):
+        """Verify leading/trailing whitespace is ignored during lookup."""
+        assert ExportFormat("  csv  ") == ExportFormat.CSV
+        assert ExportFormat("\tjson\n") == ExportFormat.JSON
+
+    def test_invalid_format_raises_value_error(self):
+        """Verify unrecognized strings raise a descriptive ValueError."""
+        with pytest.raises(ValueError, match="Invalid export format: 'xml'"):
+            ExportFormat("xml")
+
+        with pytest.raises(ValueError, match="Invalid export format: 'txt'"):
+            ExportFormat("txt")
+
+    def test_get_mime_type(self):
+        """Verify MIME type mapping for each format."""
+        assert ExportFormat.CSV.get_mime_type() == "text/csv"
+        assert ExportFormat.JSON.get_mime_type() == "application/json"
+        assert ExportFormat.PDF.get_mime_type() == "application/pdf"
+        assert "spreadsheetml" in ExportFormat.XLSX.get_mime_type()
+
+    def test_get_file_extension(self):
+        """Verify file extension generation."""
+        assert ExportFormat.CSV.get_file_extension() == ".csv"
+        assert ExportFormat.JSON.get_file_extension() == ".json"
+        assert ExportFormat.XLSX.get_file_extension() == ".xlsx"
+        assert ExportFormat.PDF.get_file_extension() == ".pdf"
+
+
+# ---------------------------------------------------------------------------
+# Tests for export_incidents_to_format Dispatcher (Issue #2008)
+# ---------------------------------------------------------------------------
+
+
+class TestExportIncidentsToFormat:
+    """Test suite for the export_incidents_to_format dispatcher."""
+
+    @pytest.fixture
+    def sample_incidents(self):
+        """Provide a standard list of incident dictionaries for testing."""
+        return [
+            {
+                "incident_id": "INC-001",
+                "document_a": "alice.pdf",
+                "document_b": "bob.pdf",
+                "similarity_score": 0.95,
+                "severity_rank": "High",
+                "review_status": "Pending",
+                "date_flagged": "2024-01-15T10:00:00",
+            },
+            {
+                "incident_id": "INC-002",
+                "document_a": "charlie.docx",
+                "document_b": "dave.docx",
+                "similarity_score": 0.72,
+                "severity_rank": "Medium",
+                "review_status": "Reviewed",
+                "date_flagged": "2024-01-16T08:30:00",
+            },
+        ]
+
+    def test_dispatcher_accepts_enum(self, sample_incidents):
+        """Verify dispatcher works when passed an ExportFormat enum directly."""
+        result = export_incidents_to_format(sample_incidents, ExportFormat.JSON)
+        assert isinstance(result, bytes)
+        parsed = json.loads(result.decode("utf-8"))
+        assert len(parsed) == 2
+
+    def test_dispatcher_accepts_string(self, sample_incidents):
+        """Verify dispatcher works when passed a raw string."""
+        result = export_incidents_to_format(sample_incidents, "json")
+        assert isinstance(result, bytes)
+
+    def test_dispatcher_csv_output(self, sample_incidents):
+        """Verify CSV output is correctly formatted and encoded."""
+        result = export_incidents_to_format(sample_incidents, ExportFormat.CSV)
+
+        # Check BOM
+        assert result.startswith(b"\xef\xbb\xbf")
+
+        # Parse CSV
+        text = result.decode("utf-8-sig")
+        reader = csv.DictReader(io.StringIO(text))
+        rows = list(reader)
+
+        assert len(rows) == 2
+        assert rows[0]["Incident ID"] == "INC-001"
+        assert rows[0]["Similarity"] == "95.00%"
+
+    def test_dispatcher_json_output(self, sample_incidents):
+        """Verify JSON output is valid and contains all fields."""
+        result = export_incidents_to_format(sample_incidents, ExportFormat.JSON)
+        parsed = json.loads(result.decode("utf-8"))
+
+        assert parsed[0]["incident_id"] == "INC-001"
+        assert parsed[1]["similarity_score"] == 0.72
+
+    def test_dispatcher_invalid_string_raises(self, sample_incidents):
+        """Verify dispatcher raises ValueError for invalid format strings."""
+        with pytest.raises(ValueError, match="Invalid export format"):
+            export_incidents_to_format(sample_incidents, "yaml")
+
+    def test_dispatcher_invalid_type_raises(self, sample_incidents):
+        """Verify dispatcher raises TypeError for non-string/non-enum inputs."""
+        with pytest.raises(TypeError, match="format must be an ExportFormat"):
+            export_incidents_to_format(sample_incidents, 123)
+
+        with pytest.raises(TypeError, match="format must be an ExportFormat"):
+            export_incidents_to_format(sample_incidents, ["csv"])
+
+    def test_dispatcher_xlsx_fallback_to_csv(self, sample_incidents):
+        """Verify XLSX export falls back to CSV if openpyxl is missing."""
+        # Mock pandas.ExcelWriter to raise ImportError
+        with patch(
+            "pandas.ExcelWriter", side_effect=ImportError("No module named 'openpyxl'")
+        ):
+            result = export_incidents_to_format(sample_incidents, ExportFormat.XLSX)
+
+        # Should fall back to CSV (starts with BOM)
+        assert result.startswith(b"\xef\xbb\xbf")
+
+    def test_dispatcher_pdf_fallback_to_json(self, sample_incidents):
+        """Verify PDF export via dispatcher falls back to JSON for incident lists."""
+        result = export_incidents_to_format(sample_incidents, ExportFormat.PDF)
+
+        # Should return valid JSON bytes
+        parsed = json.loads(result.decode("utf-8"))
+        assert isinstance(parsed, list)
+        assert len(parsed) == 2
+
+    def test_empty_incidents_list(self):
+        """Verify dispatcher handles empty incident lists gracefully."""
+        csv_result = export_incidents_to_format([], ExportFormat.CSV)
+        json_result = export_incidents_to_format([], ExportFormat.JSON)
+
+        # CSV should just have headers
+        assert b"Incident ID" in csv_result
+
+        # JSON should be empty array
+        assert json.loads(json_result.decode("utf-8")) == []
+
+
+# ---------------------------------------------------------------------------
+# Tests for Legacy Direct Functions
+# ---------------------------------------------------------------------------
+
+
+class TestLegacyFunctions:
+    """Test suite to ensure legacy direct functions still work."""
+
+    def test_csv_stream_basic(self):
+        """Verify export_incidents_csv_stream works independently."""
+        incidents = [
+            {
+                "incident_id": "1",
+                "document_a": "A",
+                "document_b": "B",
+                "similarity_score": 0.5,
+            }
+        ]
+        result = export_incidents_csv_stream(incidents)
+        assert isinstance(result, bytes)
+
+    def test_json_stream_basic(self):
+        """Verify export_incidents_json_stream works independently."""
+        incidents = [{"incident_id": "1", "document_a": "A"}]
+        result = export_incidents_json_stream(incidents)
+        assert json.loads(result.decode("utf-8"))[0]["incident_id"] == "1"

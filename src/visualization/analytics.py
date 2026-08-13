@@ -44,6 +44,19 @@ def apply_plotly_theme(
     return fig
 
 
+def _create_boxplot_trace(name: str, scores: list[float], **kwargs: Any) -> go.Box:
+    """Create a standardized Plotly Box trace with uniform styling."""
+    return go.Box(
+        y=scores,
+        name=name,
+        boxpoints="outliers",
+        marker_color="#636efa",
+        line_color="#4a4dba",
+        hovertemplate="<b>%{name}</b><br>Similarity Score: %{y:.2f}<extra></extra>",
+        **kwargs,
+    )
+
+
 def plot_similarity_boxplot_by_group(
     scores_dict: dict[str, list[float]],
     show_grid: bool = True,
@@ -89,18 +102,7 @@ def plot_similarity_boxplot_by_group(
 
     fig = go.Figure()
     for group_name, scores in scores_dict.items():
-        fig.add_trace(
-            go.Box(
-                y=scores,
-                name=str(group_name),
-                boxpoints="outliers",
-                marker_color="#636efa",
-                line_color="#4a4dba",
-                hovertemplate=(
-                    "<b>%{name}</b><br>Similarity Score: %{y:.2f}<extra></extra>"
-                ),
-            )
-        )
+        fig.add_trace(_create_boxplot_trace(name=str(group_name), scores=scores))
 
     fig.update_layout(
         title="Similarity Score Quartile Distribution",
@@ -423,7 +425,7 @@ def plot_similarity_distribution(
         )
         fig.update_layout(
             title=title,
-            xaxis_title="Similarity Score Range (%)",
+            xaxis_title="Similarity Score",
             yaxis_title="Number of Document Pairs",
             height=400,
             autosize=True,
@@ -440,14 +442,14 @@ def plot_similarity_distribution(
         nbins=30,
         title=title,
         labels={
-            "value": "Similarity Score Range (%)",
+            "value": "Similarity Score",
             "count": "Number of Document Pairs",
         },
         range_x=[0.0, 1.0],
     )
 
     fig.update_layout(
-        xaxis_title="Similarity Score Range (%)",
+        xaxis_title="Similarity Score",
         yaxis_title="Number of Document Pairs",
         bargap=0.05,
         height=400,
@@ -568,18 +570,7 @@ def plot_similarity_boxplot(
 
     fig = go.Figure()
     for title, scores in grouped.items():
-        fig.add_trace(
-            go.Box(
-                y=scores,
-                name=title,
-                boxpoints="outliers",
-                marker_color="#636efa",
-                line_color="#4a4dba",
-                hovertemplate=(
-                    "<b>%{name}</b><br>" "Similarity Score: %{y:.2f}<extra></extra>"
-                ),
-            )
-        )
+        fig.add_trace(_create_boxplot_trace(name=title, scores=scores))
 
     fig.update_layout(
         title="Similarity Score Distribution by Assignment",
@@ -656,9 +647,22 @@ def plot_severity_donut_chart(
 def plot_similarity_histogram(
     scores: list[float],
     n_bins: int = 20,
+    colorscale: str = "Viridis",
     theme_colors: dict[str, str] | None = None,
 ) -> go.Figure:
-    """Create an interactive histogram of pairwise similarity scores with gradient coloring."""
+    """Create an interactive histogram of pairwise similarity scores with gradient coloring.
+
+    Args:
+        scores: List of similarity scores to plot.
+        n_bins: Number of histogram bins.
+        colorscale: Plotly colorscale for the bar gradient. Accessible options
+            include "Viridis" (default), "Cividis", "Plasma", "Inferno", and
+            "Turbo". "Cividis" is designed for colorblind accessibility.
+        theme_colors: Optional theme color overrides.
+
+    Returns:
+        A Plotly figure with the similarity score histogram.
+    """
     if not scores:
         fig = go.Figure()
         fig.add_annotation(
@@ -686,7 +690,7 @@ def plot_similarity_histogram(
             y=counts,
             marker=dict(
                 color=counts,
-                colorscale="Viridis",
+                colorscale=colorscale,
                 colorbar=dict(title="Pair Count"),
                 line=dict(color="#4a4dba", width=1),
             ),
@@ -901,11 +905,18 @@ def plot_hierarchical_dendrogram(
     }
 
     def _cluster_members(cluster_id: int) -> list[int]:
-        """Return the leaf indices that belong to a cluster node."""
-        if cluster_id < n_leaves:
-            return [cluster_id]
-        row = linkage_matrix[cluster_id - n_leaves]
-        return _cluster_members(int(row[0])) + _cluster_members(int(row[1]))
+        """Return the leaf indices that belong to a cluster node iteratively."""
+        members = []
+        stack = [cluster_id]
+        while stack:
+            curr_id = stack.pop()
+            if curr_id < n_leaves:
+                members.append(int(curr_id))
+            else:
+                row = linkage_matrix[curr_id - n_leaves]
+                stack.append(int(row[0]))
+                stack.append(int(row[1]))
+        return members
 
     for step, row in enumerate(linkage_matrix, start=1):
         left_id = int(row[0])
@@ -994,5 +1005,3 @@ def plot_hierarchical_dendrogram(
     fig.update_yaxes(showgrid=show_grid)
 
     return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)
-
-    return fig

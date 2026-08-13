@@ -1,5 +1,6 @@
 import csv
 import io
+import os
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -1141,3 +1142,49 @@ def test_get_incident_by_id_returns_dict_type(test_db):
     assert result is not None
     assert isinstance(result, dict)
     assert not isinstance(result, sqlite3.Row)
+
+
+# ---------------------------------------------------------------------------
+# Tests for lazy singleton instantiation (Issue: defer eager module-level
+# IncidentsRepository construction, which could fail on a fresh clone
+# before data/ exists).
+# ---------------------------------------------------------------------------
+
+
+def test_get_incidents_repo_returns_same_instance():
+    """get_incidents_repo() must behave as a singleton — same object every call."""
+    from src.db.incidents import get_incidents_repo
+
+    repo1 = get_incidents_repo()
+    repo2 = get_incidents_repo()
+    assert repo1 is repo2
+
+
+def test_incidents_repo_attribute_matches_get_incidents_repo():
+    """The bare `incidents_repo` name (existing callers) must resolve to the
+    same singleton instance as get_incidents_repo()."""
+    import src.db.incidents as incidents_module
+    from src.db.incidents import get_incidents_repo
+
+    assert incidents_module.incidents_repo is get_incidents_repo()
+
+
+def test_incidents_module_has_no_eager_repo_construction_marker():
+    """The module must not define a real module-level `incidents_repo`
+    attribute at import time — it should only be reachable lazily via
+    module __getattr__, not present in the module's own __dict__."""
+    import src.db.incidents as incidents_module
+
+    assert "incidents_repo" not in vars(incidents_module)
+
+
+def test_configure_db_path_updates_the_lazy_singleton(tmp_path):
+    """configure_db_path() must still correctly configure whichever
+    IncidentsRepository instance get_incidents_repo() returns."""
+    from src.db.incidents import configure_db_path, get_incidents_repo
+
+    new_path = tmp_path / "custom_incidents.db"
+    configure_db_path(str(new_path))
+
+    repo = get_incidents_repo()
+    assert str(repo.db_path) == os.path.abspath(str(new_path))

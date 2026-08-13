@@ -9,15 +9,16 @@ This module implements a Dynamic Programming (DP) alignment algorithm
 (similar to Needleman-Wunsch) that operates on sentence embedding vectors
 instead of exact character matches.
 
-Recent Additions (Issue #1957):
-- Implemented banded DP alignment to handle documents up to 500 chunks
-  without exceeding memory or time limits.
-- Uses cosine similarity of sentence embeddings as the scoring function.
+Recent Additions (Issue #2001):
+- Added memory allocation guard to prevent OOM errors on massive documents.
+- The current implementation allocates a full (N+1) × (M+1) DP matrix.
+  While banding restricts computation to a diagonal window, the underlying
+  NumPy array still reserves the full N×M memory footprint.
+- Raises ValueError if N > 1000 or M > 1000 to prevent regressions.
 """
 
 import logging
-from typing import Any, Dict, List
-
+from typing import List, Dict, Any, Optional  # noqa: F401
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,12 @@ logger = logging.getLogger(__name__)
 DEFAULT_MATCH_THRESHOLD = 0.60
 DEFAULT_GAP_PENALTY = -0.25
 DEFAULT_BAND_WIDTH = 20  # Sakoe-Chiba band width for O(N*W) complexity
+
+# Memory allocation limits (Issue #2001)
+# A 1000x1000 float32 matrix is ~4 MB. 5000x5000 is ~100 MB.
+# We cap at 1000 to prevent accidental OOM on large document comparisons
+# until a true sparse/banded memory allocation is implemented.
+MAX_SEQUENCE_LENGTH = 1000
 
 
 def _cosine_similarity_matrix(emb_a: np.ndarray, emb_b: np.ndarray) -> np.ndarray:
@@ -69,8 +76,16 @@ def align_semantic_sequences(
     Uses a banded Needleman-Wunsch dynamic programming algorithm to find
     the optimal global alignment between Document A and Document B. The
     banding restricts the DP matrix computation to a diagonal window,
-    reducing time and space complexity from O(N*M) to O(N*W), making it
-    feasible for documents with hundreds of chunks.
+    reducing time complexity from O(N*M) to O(N*W).
+
+    Memory Trade-off Note (Issue #2001):
+        Although the computation is banded, the current implementation
+        allocates a full (N+1) × (M+1) NumPy array for simplicity and
+        traceback ease. For N, M <= 1000, this consumes ~4 MB of RAM,
+        which is acceptable. For larger inputs, this would cause excessive
+        memory allocation. A guard is enforced at the top of this function
+        to raise ValueError if N > 1000 or M > 1000. Future optimizations
+        should implement a true sparse banded matrix allocation.
 
     Args:
         chunks_a: List of text strings from Document A.
@@ -88,9 +103,22 @@ def align_semantic_sequences(
         - 'text_a': The chunk from Document A (or None if gap)
         - 'text_b': The chunk from Document B (or None if gap)
         - 'score': The cosine similarity score (0.0 for gaps)
+
+    Raises:
+        ValueError: If len(chunks_a) > 1000 or len(chunks_b) > 1000.
     """
     n = len(chunks_a)
     m = len(chunks_b)
+
+    # ── Memory Allocation Guard (Issue #2001) ─────────────────────────────────
+    if n > MAX_SEQUENCE_LENGTH or m > MAX_SEQUENCE_LENGTH:
+        raise ValueError(
+            f"Sequence alignment matrix size limit exceeded. "
+            f"Got N={n}, M={m}. Maximum allowed is {MAX_SEQUENCE_LENGTH}x{MAX_SEQUENCE_LENGTH} "
+            f"to prevent excessive memory allocation. "
+            f"The current implementation allocates a full (N+1)×(M+1) DP matrix. "
+            f"Please use smaller chunk sizes or split the documents."
+        )
 
     if n == 0 and m == 0:
         return []
@@ -109,9 +137,7 @@ def align_semantic_sequences(
     sim_matrix = _cosine_similarity_matrix(embeddings_a, embeddings_b)
 
     # Initialize DP matrix with negative infinity
-    # We only allocate the band to save memory, but for simplicity in traceback
-    # and given N, M <= 500, a full matrix is ~1MB which is perfectly fine.
-    # Banding is applied during the computation loop.
+    # Note: This allocates the full (n+1) x (m+1) matrix.
     dp = np.full((n + 1, m + 1), -np.inf)
     dp[0, 0] = 0.0
 

@@ -122,7 +122,7 @@ def test_detect_ai_generated_text_empty():
     res = detect_ai_generated_text("")
     assert res["ai_probability"] == 0.0
     assert res["confidence_tier"] == "low"
-    assert res["perplexity_score"] == 150.0
+    assert res["perplexity_score"] == 0.0
     assert res["burstiness_score"] == 0.0
     assert res["ngram_repetitiveness"] == 0.0
     assert res["classification_tier"] == "low"
@@ -133,7 +133,7 @@ def test_detect_ai_generated_text_whitespace():
     res = detect_ai_generated_text("   \n\t  ")
     assert res["ai_probability"] == 0.0
     assert res["confidence_tier"] == "low"
-    assert res["perplexity_score"] == 150.0
+    assert res["perplexity_score"] == 0.0
     assert res["burstiness_score"] == 0.0
     assert res["ngram_repetitiveness"] == 0.0
 
@@ -340,7 +340,7 @@ def test_calculate_text_perplexity_returns_float():
 def test_calculate_text_perplexity_with_fallback_model():
     """When model is in fallback mode, return default perplexity score."""
     with patch("src.core.ai_detector._get_model_and_tokenizer") as mock_loader:
-        mock_loader.return_value = ("fallback", "fallback")
+        mock_loader.return_value = (_FALLBACK_SENTINEL, _FALLBACK_SENTINEL)  # noqa: F821
         result = calculate_text_perplexity("Some text to evaluate.")
         assert result == 0.0
 

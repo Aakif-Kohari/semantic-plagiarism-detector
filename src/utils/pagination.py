@@ -50,17 +50,21 @@ class PaginationPage(Generic[T]):
         to prevent console flooding during debugging. Shows the count of
         items instead of the full list.
 
+        The class name is read from ``type(self)`` rather than hardcoded, so
+        it cannot drift from the class again and subclasses report their own
+        name.
+
         Returns:
-            Formatted string showing page info and item count.
+            Formatted string showing page info, item count, and page size.
 
         Examples:
             >>> page = PaginationPage(items=[1,2,3,4,5], page=1, total_pages=2, total_items=10, per_page=5)
             >>> repr(page)
-            'PaginationPage(page=1/2, items=5)'
+            'PaginationPage(page=1/2, items=5, per_page=5)'
 
             >>> small_page = PaginationPage(items=[1,2], page=1, total_pages=1, total_items=2, per_page=10)
             >>> repr(small_page)
-            'PaginationPage(page=1/1, items=[1, 2])'
+            'PaginationPage(page=1/1, items=[1, 2], per_page=10)'
         """
         # Show full items list if 3 or fewer items
         if len(self.items) <= 3:
@@ -70,9 +74,10 @@ class PaginationPage(Generic[T]):
             items_repr = f"{len(self.items)}"
 
         return (
-            f"PagnationPage("
+            f"{type(self).__name__}("
             f"page={self.page}/{self.total_pages}, "
-            f"items={items_repr}"
+            f"items={items_repr}, "
+            f"per_page={self.per_page}"
             f")"
         )
 
@@ -198,3 +203,28 @@ class PaginationPage(Generic[T]):
             "next_page": self.next_page(),
             "previous_page": self.previous_page(),
         }
+
+def paginate_items(
+    items: List[T],
+    page_size: int = 10,
+    current_page: int = 1,
+) -> PaginationPage[T]:
+    import math
+    if page_size < 1:
+        page_size = 10
+    if current_page < 1:
+        current_page = 1
+        
+    total_items = len(items)
+    total_pages = max(1, math.ceil(total_items / page_size))
+    
+    start_idx = (current_page - 1) * page_size
+    end_idx = start_idx + page_size
+    
+    return PaginationPage(
+        items=items[start_idx:end_idx],
+        page=current_page,
+        total_pages=total_pages,
+        total_items=total_items,
+        per_page=page_size
+    )

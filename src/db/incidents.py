@@ -55,14 +55,42 @@ class IncidentsRepository(BaseRepository):
         init_incident_db(self._db_path)
 
 
-incidents_repo = IncidentsRepository(DEFAULT_DB_PATH)
+_incidents_repo_singleton: IncidentsRepository | None = None
+
+
+def get_incidents_repo() -> IncidentsRepository:
+    """Return the process-wide :class:`IncidentsRepository` singleton.
+
+    The instance is created lazily on first call rather than eagerly at
+    module import time. Eager module-level instantiation could fail in a
+    fresh clone (e.g. before ``data/`` exists on disk), so construction is
+    deferred until a caller actually needs the repository.
+    """
+    global _incidents_repo_singleton
+    if _incidents_repo_singleton is None:
+        _incidents_repo_singleton = IncidentsRepository(DEFAULT_DB_PATH)
+    return _incidents_repo_singleton
+
+
+def __getattr__(name: str):
+    """PEP 562 module-level lazy attribute access.
+
+    Preserves ``from src.db.incidents import incidents_repo`` and
+    ``src.db.incidents.incidents_repo`` for existing callers without
+    eagerly constructing ``IncidentsRepository`` at import time — the
+    singleton is only created the first time ``incidents_repo`` is
+    actually accessed.
+    """
+    if name == "incidents_repo":
+        return get_incidents_repo()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def configure_db_path(db_path: str | Path) -> None:
     """Configure the SQLite database path used by the incidents module."""
     global DEFAULT_DB_PATH
     DEFAULT_DB_PATH = Path(os.path.abspath(str(db_path)))
-    incidents_repo.configure_db_path(DEFAULT_DB_PATH)
+    get_incidents_repo().configure_db_path(DEFAULT_DB_PATH)
 
 
 def _utc_now_iso() -> str:

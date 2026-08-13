@@ -122,39 +122,39 @@ def sanitize_theme_colors(colors: dict) -> dict:
 
 try:
     from app.css_constants import (
-        CLASS_AVATAR,
-        CLASS_BADGE,
-        CLASS_EMPTY_DESC,
-        CLASS_EMPTY_ICON,
-        CLASS_EMPTY_STATE,
-        CLASS_EMPTY_TITLE,
-        CLASS_PIPELINE_ACTIVE,
-        CLASS_PIPELINE_ARROW,
-        CLASS_PIPELINE_DONE,
-        CLASS_PIPELINE_ETA,
-        CLASS_PIPELINE_STEP,
-        CLASS_PIPELINE_STEPS,
-        CLASS_SIDEBAR_USER_BADGE,
-        CLASS_SIM_PILL,
-        CLASS_WELCOME_BANNER,
+        AVATAR,
+        BADGE,
+        EMPTY_DESC,
+        EMPTY_ICON,
+        EMPTY_STATE,
+        EMPTY_TITLE,
+        PIPELINE_ACTIVE,
+        PIPELINE_ARROW,
+        PIPELINE_DONE,
+        PIPELINE_ETA,
+        PIPELINE_STEP,
+        PIPELINE_STEPS,
+        SIDEBAR_USER_BADGE,
+        SIM_PILL,
+        WELCOME_BANNER,
     )
 except ImportError:
     from css_constants import (
-        CLASS_AVATAR,
-        CLASS_BADGE,
-        CLASS_EMPTY_DESC,
-        CLASS_EMPTY_ICON,
-        CLASS_EMPTY_STATE,
-        CLASS_EMPTY_TITLE,
-        CLASS_PIPELINE_ACTIVE,
-        CLASS_PIPELINE_ARROW,
-        CLASS_PIPELINE_DONE,
-        CLASS_PIPELINE_ETA,
-        CLASS_PIPELINE_STEP,
-        CLASS_PIPELINE_STEPS,
-        CLASS_SIDEBAR_USER_BADGE,
-        CLASS_SIM_PILL,
-        CLASS_WELCOME_BANNER,
+        AVATAR,
+        BADGE,
+        EMPTY_DESC,
+        EMPTY_ICON,
+        EMPTY_STATE,
+        EMPTY_TITLE,
+        PIPELINE_ACTIVE,
+        PIPELINE_ARROW,
+        PIPELINE_DONE,
+        PIPELINE_ETA,
+        PIPELINE_STEP,
+        PIPELINE_STEPS,
+        SIDEBAR_USER_BADGE,
+        SIM_PILL,
+        WELCOME_BANNER,
     )
 
 from src.core.config import DEFAULT_THRESHOLDS, normalize_severity_label, severity_key
@@ -162,39 +162,39 @@ from src.core.config import DEFAULT_THRESHOLDS, normalize_severity_label, severi
 # ── CSS Class Constants ────────────────────────────────────────────────────────
 try:
     from app.css_constants import (
-        CLASS_AVATAR,
-        CLASS_BADGE,
-        CLASS_EMPTY_DESC,
-        CLASS_EMPTY_ICON,
-        CLASS_EMPTY_STATE,
-        CLASS_EMPTY_TITLE,
-        CLASS_PIPELINE_ACTIVE,
-        CLASS_PIPELINE_ARROW,
-        CLASS_PIPELINE_DONE,
-        CLASS_PIPELINE_ETA,
-        CLASS_PIPELINE_STEP,
-        CLASS_PIPELINE_STEPS,
-        CLASS_SIDEBAR_USER_BADGE,
-        CLASS_SIM_PILL,
-        CLASS_WELCOME_BANNER,
+        AVATAR,
+        BADGE,
+        EMPTY_DESC,
+        EMPTY_ICON,
+        EMPTY_STATE,
+        EMPTY_TITLE,
+        PIPELINE_ACTIVE,
+        PIPELINE_ARROW,
+        PIPELINE_DONE,
+        PIPELINE_ETA,
+        PIPELINE_STEP,
+        PIPELINE_STEPS,
+        SIDEBAR_USER_BADGE,
+        SIM_PILL,
+        WELCOME_BANNER,
     )
 except ImportError:
     # Fallbacks for isolated testing
-    CLASS_AVATAR = "avatar-circle"
-    CLASS_BADGE = "severity-badge"
-    CLASS_EMPTY_DESC = "empty-desc"
-    CLASS_EMPTY_ICON = "empty-icon"
-    CLASS_EMPTY_STATE = "empty-state"
-    CLASS_EMPTY_TITLE = "empty-title"
-    CLASS_PIPELINE_ACTIVE = "pipeline-active"
-    CLASS_PIPELINE_ARROW = "pipeline-arrow"
-    CLASS_PIPELINE_DONE = "pipeline-done"
-    CLASS_PIPELINE_ETA = "pipeline-eta"
-    CLASS_PIPELINE_STEP = "pipeline-step"
-    CLASS_PIPELINE_STEPS = "pipeline-steps"
-    CLASS_SIDEBAR_USER_BADGE = "sidebar-user-badge"
-    CLASS_SIM_PILL = "sim-pill"
-    CLASS_WELCOME_BANNER = "welcome-banner"
+    AVATAR = "avatar-circle"
+    BADGE = "severity-badge"
+    EMPTY_DESC = "empty-desc"
+    EMPTY_ICON = "empty-icon"
+    EMPTY_STATE = "empty-state"
+    EMPTY_TITLE = "empty-title"
+    PIPELINE_ACTIVE = "pipeline-active"
+    PIPELINE_ARROW = "pipeline-arrow"
+    PIPELINE_DONE = "pipeline-done"
+    PIPELINE_ETA = "pipeline-eta"
+    PIPELINE_STEP = "pipeline-step"
+    PIPELINE_STEPS = "pipeline-steps"
+    SIDEBAR_USER_BADGE = "sidebar-user-badge"
+    SIM_PILL = "sim-pill"
+    WELCOME_BANNER = "welcome-banner"
 
 
 # ── Theme Definitions ──────────────────────────────────────────────────────────
@@ -770,7 +770,7 @@ def inject_css() -> None:
             border-color: #ff3333 !important;
         }}
 
-        .{CLASS_WELCOME_BANNER} {{
+        .{WELCOME_BANNER} {{
     background-color: var(--secondary-bg);
     border: 1px solid var(--border-color);
     border-radius: 8px;
@@ -994,7 +994,7 @@ def inject_css() -> None:
                 max-width: 85vw !important;
             }}
         }}
-    """
+    """  # noqa: F821
     # Issue #572: File Uploader Drag-Zone Customization
     file_uploader_css = f"""
     /* File Uploader Drag-Zone Customization */
@@ -1082,7 +1082,7 @@ def inject_css() -> None:
     }}
 
     /* Empty State Styling */
-    .{CLASS_EMPTY_STATE} {{
+    .{EMPTY_STATE} {{
         text-align: center;
         padding: 2rem;
         background-color: var(--secondary-bg);
@@ -1090,53 +1090,53 @@ def inject_css() -> None:
         border: 1px dashed var(--border-color);
     }}
 
-    .{CLASS_EMPTY_ICON} {{
+    .{EMPTY_ICON} {{
         font-size: 3rem;
         margin-bottom: 1rem;
         color: var(--secondary-text-color);
     }}
 
-    .{CLASS_EMPTY_TITLE} {{
+    .{EMPTY_TITLE} {{
         font-size: 1.25rem;
         font-weight: 600;
         color: var(--text-color);
         margin-bottom: 0.5rem;
     }}
 
-    .{CLASS_EMPTY_DESC} {{
+    .{EMPTY_DESC} {{
         color: var(--secondary-text-color);
         font-size: 0.95rem;
     }}
 
     /* Pipeline Progress Styling */
-    .{CLASS_PIPELINE_STEPS} {{
+    .{PIPELINE_STEPS} {{
         display: flex;
         align-items: center;
         justify-content: space-between;
         margin: 1.5rem 0;
     }}
 
-    .{CLASS_PIPELINE_STEP} {{
+    .{PIPELINE_STEP} {{
         color: var(--secondary-text-color);
         font-weight: 500;
         font-size: 0.9rem;
     }}
 
-    .{CLASS_PIPELINE_ACTIVE} {{
+    .{PIPELINE_ACTIVE} {{
         color: var(--accent-color);
         font-weight: 700;
     }}
 
-    .{CLASS_PIPELINE_DONE} {{
+    .{PIPELINE_DONE} {{
         color: var(--success);
     }}
 
-    .{CLASS_PIPELINE_ARROW} {{
+    .{PIPELINE_ARROW} {{
         color: var(--border-color);
         margin: 0 0.5rem;
     }}
 
-    .{CLASS_PIPELINE_ETA} {{
+    .{PIPELINE_ETA} {{
         font-size: 0.8rem;
         color: var(--secondary-text-color);
         margin-top: 0.5rem;
@@ -1144,7 +1144,7 @@ def inject_css() -> None:
     }}
 
     /* Sidebar User Badge */
-    .{CLASS_SIDEBAR_USER_BADGE} {{
+    .{SIDEBAR_USER_BADGE} {{
         display: flex;
         align-items: center;
         padding: 0.75rem;
@@ -1154,7 +1154,7 @@ def inject_css() -> None:
         margin-bottom: 1rem;
     }}
 
-    .{CLASS_AVATAR} {{
+    .{AVATAR} {{
         width: 32px;
         height: 32px;
         border-radius: 50%;
@@ -1168,7 +1168,7 @@ def inject_css() -> None:
     }}
 
     /* Severity Badges */
-    .{CLASS_BADGE} {{
+    .{BADGE} {{
         display: inline-flex;
         align-items: center;
         padding: 0.25rem 0.75rem;
@@ -1177,7 +1177,7 @@ def inject_css() -> None:
         font-weight: 600;
     }}
 
-    .{CLASS_SIM_PILL} {{
+    .{SIM_PILL} {{
         display: inline-block;
         padding: 0.25rem 0.5rem;
         border-radius: 4px;
@@ -1185,7 +1185,7 @@ def inject_css() -> None:
         font-weight: 600;
     }}
 
-    .{CLASS_WELCOME_BANNER} {{
+    .{WELCOME_BANNER} {{
         background: linear-gradient(135deg, var(--accent-color) 0%, var(--success) 100%);
         color: #FFFFFF;
         padding: 1.5rem;
@@ -1332,10 +1332,10 @@ def tier_color(tier: str) -> str:
 def empty_state_html(icon: str, title: str, description: str) -> str:
     """Return styled empty-state HTML block."""
     return (
-        f'<div class="{CLASS_EMPTY_STATE}">'
-        f'<div class="{CLASS_EMPTY_ICON}">{icon}</div>'
-        f'<div class="{CLASS_EMPTY_TITLE}">{title}</div>'
-        f'<div class="{CLASS_EMPTY_DESC}">{description}</div>'
+        f'<div class="{EMPTY_STATE}">'
+        f'<div class="{EMPTY_ICON}">{icon}</div>'
+        f'<div class="{EMPTY_TITLE}">{title}</div>'
+        f'<div class="{EMPTY_DESC}">{description}</div>'
         f"</div>"
     )
 
@@ -1367,7 +1367,7 @@ def badge_html(tier: str, label: str = None) -> str:
     tooltip = tooltip_map.get(tier, "Similarity score")
 
     return (
-        f'<span class="{CLASS_BADGE}" '
+        f'<span class="{BADGE}" '
         f'title="{tooltip}" '
         f'style="background-color: {bg_color}; '
         f"color: {text_color}; "
@@ -1406,15 +1406,15 @@ def format_similarity_html(
         bg = colors["success"]
         text = "#FFFFFF"
 
-    return f'<span class="{CLASS_SIM_PILL}" style="background-color: {bg}; color: {text};">Similarity: {score * 100:.1f}%</span>'
+    return f'<span class="{SIM_PILL}" style="background-color: {bg}; color: {text};">Similarity: {score * 100:.1f}%</span>'
 
 
 def sidebar_user_badge_html(username: str, role: str) -> str:
     """Return the sidebar user badge with avatar circle."""
     initial = username[0].upper() if username else "?"
     return (
-        f'<div class="{CLASS_SIDEBAR_USER_BADGE}">'
-        f'<div class="{CLASS_AVATAR}">{initial}</div>'
+        f'<div class="{SIDEBAR_USER_BADGE}">'
+        f'<div class="{AVATAR}">{initial}</div>'
         f"<div>"
         f'<div style="font-weight: 600;">{username}</div>'
         f'<div style="font-size: 0.8rem; color: {get_colors()["muted"]};">{role.upper()}</div>'
@@ -1430,21 +1430,21 @@ def pipeline_progress_html(
     parts = []
     for i, step in enumerate(steps):
         if active_index < 0:
-            cls = CLASS_PIPELINE_STEP
+            cls = PIPELINE_STEP
         elif i < active_index:
-            cls = f"{CLASS_PIPELINE_STEP} {CLASS_PIPELINE_DONE}"
+            cls = f"{PIPELINE_STEP} {PIPELINE_DONE}"
         elif i == active_index:
-            cls = f"{CLASS_PIPELINE_STEP} {CLASS_PIPELINE_ACTIVE}"
+            cls = f"{PIPELINE_STEP} {PIPELINE_ACTIVE}"
         else:
-            cls = CLASS_PIPELINE_STEP
+            cls = PIPELINE_STEP
 
         prefix = "✓ " if active_index >= 0 and i < active_index else ""
         parts.append(f'<span class="{cls}">{prefix}{step}</span>')
 
         if i < len(steps) - 1:
-            parts.append(f'<span class="{CLASS_PIPELINE_ARROW}">→</span>')
+            parts.append(f'<span class="{PIPELINE_ARROW}">→</span>')
 
-    progress = f'<div class="{CLASS_PIPELINE_STEPS}">{"".join(parts)}</div>'
+    progress = f'<div class="{PIPELINE_STEPS}">{"".join(parts)}</div>'
 
     if estimated_seconds is None:
         return progress
@@ -1456,7 +1456,7 @@ def pipeline_progress_html(
     except ImportError:
         duration = f"{estimated_seconds}s"
 
-    eta = f'<div class="{CLASS_PIPELINE_ETA}">Estimated processing time: about {duration}</div>'
+    eta = f'<div class="{PIPELINE_ETA}">Estimated processing time: about {duration}</div>'
     return f"{progress}{eta}"
 
 

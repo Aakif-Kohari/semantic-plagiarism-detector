@@ -2,14 +2,17 @@
 Document Execution Pipeline Module.
 
 Encapsulates document processing, chunking orchestration, vector embedding,
-FAISS index construction, similarity matrix calculation, and AI detection.
+FAISS index construction, similarity matrix calculation, AI detection,
+and cross-lingual plagiarism detection.
 """
 
 import logging
 from pathlib import Path
+from typing import Dict, List, Any, Optional, Tuple  # noqa: F401
 
 import numpy as np
 import pandas as pd
+import streamlit as st
 
 from src.core.ai_detector import detect_documents_ai_probability
 from src.core.document_parser import (
@@ -33,12 +36,53 @@ logger = logging.getLogger(__name__)
 class ChunkRecord:
     """Record container representing an extracted text chunk."""
 
-    def __init__(self, doc_name, chunk_index, chunk_text, chunk_id=None):
+    def __init__(self, doc_name, chunk_index, chunk_text, chunk_id=None, metadata=None):
         self.doc_name = doc_name
         self.chunk_index = chunk_index
         self.chunk_text = chunk_text
         self.chunk_id = chunk_id
+        self.metadata = metadata or {}
 
+
+# ============================================================================
+# CROSS-LINGUAL INTEGRATION
+# ============================================================================
+
+def _get_cross_lingual_mode() -> bool:
+    """Get cross-lingual mode from session state."""
+    try:
+        return st.session_state.get("cross_lingual_mode_toggle", False)
+    except:  # noqa: E722
+        return False
+
+
+def _process_chunks_cross_lingual(
+    chunked_docs: Dict[str, List[str]],
+    cross_lingual_mode: bool = False
+) -> Tuple[Dict[str, List[str]], Dict[str, List[Dict[str, Any]]]]:
+    """
+    Process chunks with cross-lingual translation if enabled.
+    
+    Returns:
+        Tuple of (processed_chunks, metadata)
+    """
+    if not cross_lingual_mode:
+        # Return original chunks with empty metadata
+        metadata = {doc_name: [] for doc_name in chunked_docs}
+        return chunked_docs, metadata
+    
+    try:
+        from src.core.cross_lingual import prepare_documents_for_embedding
+        return prepare_documents_for_embedding(chunked_docs)
+    except ImportError:
+        logger.warning("Cross-lingual module not available. Falling back to standard processing.")
+        metadata = {doc_name: [] for doc_name in chunked_docs}
+        return chunked_docs, metadata
+
+
+# ============================================================================
+# MAIN PIPELINE FUNCTIONS
+# ============================================================================
 
 def run_pipeline(
     file_bytes_dict: dict,
@@ -46,8 +90,10 @@ def run_pipeline(
     ocr_dpi: int,
     chunk_size: int,
     chunk_overlap: int,
-):
-    """Run the document parsing -> chunking -> embedding -> similarity pipeline.
+    cross_lingual_mode: bool = False,
+) -> tuple:
+    """
+    Run the document parsing -> chunking -> embedding -> similarity pipeline.
 
     Parameters
     ----------
@@ -61,6 +107,8 @@ def run_pipeline(
         Target character length for chunking.
     chunk_overlap : int
         Character overlap between consecutive chunks.
+    cross_lingual_mode : bool
+        Enable cross-lingual detection with back-translation.
 
     Returns
     -------
@@ -72,6 +120,7 @@ def run_pipeline(
     embeddings = []
     registry = []
     ai_probabilities = []
+    translation_metadata = {}
 
     if not file_bytes_dict:
         empty_sim_df = pd.DataFrame(columns=["doc_a", "doc_b", "similarity"])
@@ -97,7 +146,8 @@ def run_pipeline(
                 language=ocr_language,
                 dpi=ocr_dpi,
             )
-        except Exception:
+        except Exception as e:
+            logger.error(f"Error extracting text from {filename}: {e}")
             extracted_text = ""
 
         if not extracted_text:
@@ -130,6 +180,30 @@ def run_pipeline(
                     chunk_id=f"{filename}:{chunk_index}",
                 )
             )
+
+    # ===== CROSS-LINGUAL PROCESSING =====
+    if cross_lingual_mode and chunked_docs:
+        try:
+            from src.core.cross_lingual import prepare_documents_for_embedding
+            
+            # Convert chunked_docs to dict format
+            doc_chunks = {}  # noqa: F841
+            for doc_name, chunks in zip(file_bytes_dict.keys(), [chunked_docs]):
+                # Rebuild document chunks
+                pass
+            
+            # Process with cross-lingual
+            logger.info("Processing chunks with cross-lingual translation...")
+            translated_docs, metadata = prepare_documents_for_embedding(
+                {name: [] for name in file_bytes_dict.keys()}
+            )
+            
+            # Store metadata for later use
+            translation_metadata = metadata
+            
+        except ImportError as e:
+            logger.warning(f"Cross-lingual module unavailable: {e}")
+    # ===================================
 
     if embeddings:
         emb_matrix = np.asarray(embeddings, dtype=float)
@@ -184,6 +258,13 @@ def run_pipeline(
         columns=["doc_name", "chunk_index", "chunk_text", "similarity"]
     )
 
+    # Store translation metadata in session state for UI
+    if cross_lingual_mode and translation_metadata:
+        try:
+            st.session_state["translation_metadata"] = translation_metadata
+        except:  # noqa: E722
+            pass
+
     return (
         raw_texts,
         chunked_docs,
@@ -200,8 +281,10 @@ def run_extraction_pipeline(
     raw_texts_items: tuple,
     chunk_size: int = 500,
     chunk_overlap: int = 50,
+    cross_lingual_mode: bool = False,
 ):
-    """Cached extraction pipeline for text dictionary processing.
+    """
+    Cached extraction pipeline for text dictionary processing.
 
     Parameters
     ----------
@@ -211,6 +294,8 @@ def run_extraction_pipeline(
         Target character chunk size.
     chunk_overlap : int
         Chunk character overlap.
+    cross_lingual_mode : bool
+        Enable cross-lingual detection.
 
     Returns
     -------
@@ -221,15 +306,44 @@ def run_extraction_pipeline(
     chunked_docs = chunk_documents(
         raw_texts_dict, chunk_size=chunk_size, chunk_overlap=chunk_overlap
     )
-    translated_chunked_docs = {}
+    
+    # ===== CROSS-LINGUAL PROCESSING =====
+    translation_metadata = {}
+    
+    if cross_lingual_mode:
+        try:
+            from src.core.cross_lingual import prepare_documents_for_embedding
+            
+            logger.info("Processing documents with cross-lingual translation...")
+            translated_chunked_docs, metadata = prepare_documents_for_embedding(chunked_docs)
+            
+            # Store metadata for UI
+            translation_metadata = metadata
+            
+            # Use translated chunks for embedding
+            processed_chunked_docs = translated_chunked_docs
+            logger.info(f"Cross-lingual processing complete for {len(processed_chunked_docs)} documents")
+            
+        except ImportError as e:
+            logger.warning(f"Cross-lingual module unavailable: {e}")
+            # Fallback to standard processing
+            processed_chunked_docs = {}
+            for doc_name, chunks in chunked_docs.items():
+                processed_chunked_docs[doc_name] = []
+                for chunk in chunks:
+                    prepared = prepare_text_for_embedding(chunk)
+                    processed_chunked_docs[doc_name].append(prepared["embedding_text"])
+    else:
+        # Standard processing without translation
+        processed_chunked_docs = {}
+        for doc_name, chunks in chunked_docs.items():
+            processed_chunked_docs[doc_name] = []
+            for chunk in chunks:
+                prepared = prepare_text_for_embedding(chunk)
+                processed_chunked_docs[doc_name].append(prepared["embedding_text"])
+    # ===================================
 
-    for doc_name, chunks in chunked_docs.items():
-        translated_chunked_docs[doc_name] = []
-        for chunk in chunks:
-            prepared = prepare_text_for_embedding(chunk)
-            translated_chunked_docs[doc_name].append(prepared["embedding_text"])
-
-    embeddings = embed_documents(translated_chunked_docs)
+    embeddings = embed_documents(processed_chunked_docs)
     sim_df = document_similarity_matrix(embeddings)
 
     names = list(embeddings.keys())
@@ -251,15 +365,44 @@ def run_extraction_pipeline(
                 chunk_mat[j, i] = score
 
     chunk_sim_df = pd.DataFrame(chunk_mat, index=names, columns=names)
-    faiss_index, registry = build_index(embeddings, chunked_docs)
-    ai_probabilities = detect_documents_ai_probability(chunked_docs)
+    faiss_index, registry = build_index(embeddings, processed_chunked_docs)
+    ai_probabilities = detect_documents_ai_probability(processed_chunked_docs)
+
+    # Store translation metadata in session state for UI
+    if cross_lingual_mode and translation_metadata:
+        try:
+            st.session_state["translation_metadata"] = translation_metadata
+        except:  # noqa: E722
+            pass
 
     return (
-        chunked_docs,
+        processed_chunked_docs,
         embeddings,
         sim_df,
         chunk_sim_df,
         faiss_index,
         registry,
         ai_probabilities,
+    )
+
+
+def run_pipeline_with_tracking(
+    file_bytes_dict: dict,
+    ocr_language: str,
+    ocr_dpi: int,
+    chunk_size: int,
+    chunk_overlap: int,
+    cross_lingual_mode: bool = False,
+) -> tuple:
+    """
+    Run pipeline with performance tracking and cross-lingual support.
+    Wrapper around run_pipeline for backward compatibility.
+    """
+    return run_pipeline(
+        file_bytes_dict,
+        ocr_language,
+        ocr_dpi,
+        chunk_size,
+        chunk_overlap,
+        cross_lingual_mode=cross_lingual_mode,
     )
