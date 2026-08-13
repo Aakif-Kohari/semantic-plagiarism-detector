@@ -21,8 +21,12 @@ DEFAULT_BRAND_COLOR = "#1e3a8a"
 DEFAULT_LOGO_PATH = None
 
 # Path to branding config file (relative to project root)
-BRANDING_CONFIG_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "branding_config.json")
+BRANDING_CONFIG_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "..",
+    "..",
+    "config",
+    "branding_config.json",
 )
 
 
@@ -342,6 +346,7 @@ def severity_rank(label: str) -> int:
     return SEVERITY_RANK[normalize_severity_label(label)]
 
 
+
 # ============================================================================
 # OFFLINE MODE CONFIGURATION
 # ============================================================================
@@ -363,3 +368,10 @@ def get_offline_config() -> Dict[str, Any]:
         "preload_models": os.getenv("OFFLINE_PRELOAD_MODELS", "true").lower() == "true",
         "disable_telemetry": os.getenv("OFFLINE_DISABLE_TELEMETRY", "true").lower() == "true",
     }
+
+def test_branding_config_path_exists():
+    """Test that BRANDING_CONFIG_PATH resolves to an existing file."""
+    config_path = config_module.BRANDING_CONFIG_PATH
+
+    assert os.path.isfile(config_path)
+

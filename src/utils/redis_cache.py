@@ -409,6 +409,7 @@ class RedisCache:
                 if data is not None:
                     with self._lock:
                         self._hits += 1
+                    # SECURITY WARNING: pickle.loads() can execute arbitrary code. Ensure Redis is access-controlled.
                     return pickle.loads(data)
             except (
                 RedisError,
@@ -657,3 +658,96 @@ def _cleanup_redis() -> None:
 
 
 atexit.register(_cleanup_redis)
+
+
+
+import zlib
+import pickle
+
+def store_large_data(key: str, data: Any, ttl: int = 1800) -> None:
+    """
+    Store large data in Redis with compression.
+    
+    Args:
+        key: Unique cache key
+        data: Data to store (will be pickled and compressed)
+        ttl: Time to live in seconds (default: 30 minutes)
+    """
+    try:
+        cache = get_cache()
+        compressed = zlib.compress(pickle.dumps(data))
+        
+        if cache.is_available():
+            cache._client.setex(f"spd:v1:large:{key}", ttl, compressed)
+        else:
+            cache.fallback_cache[f"spd:v1:large:{key}"] = {
+                "data": compressed,
+                "expiry": time.time() + ttl
+            }
+        logger.debug(f"Stored large data for key: {key} ({len(compressed)} bytes compressed)")
+    except Exception as e:
+        logger.error(f"Failed to store large data for key {key}: {e}")
+
+
+def get_large_data(key: str) -> Optional[Any]:
+    """
+    Retrieve large data from Redis with decompression.
+    
+    Args:
+        key: Unique cache key
+    
+    Returns:
+        Decompressed data or None if not found/expired
+    """
+    try:
+        cache = get_cache()
+        data = None
+        
+        if cache.is_available():
+            data = cache._client.get(f"spd:v1:large:{key}")
+        else:
+            entry = cache.fallback_cache.get(f"spd:v1:large:{key}")
+            if entry and entry.get("expiry", 0) > time.time():
+                data = entry["data"]
+            elif entry:
+                del cache.fallback_cache[f"spd:v1:large:{key}"]
+        
+        if data:
+            # SECURITY WARNING: pickle.loads() can execute arbitrary code. Ensure Redis is access-controlled.
+            return pickle.loads(zlib.decompress(data))
+        return None
+    except Exception as e:
+        logger.error(f"Failed to retrieve large data for key {key}: {e}")
+        return None
+
+
+def clear_large_data(key: str) -> None:
+    """Clear large data from cache."""
+    try:
+        cache = get_cache()
+        if cache.is_available():
+            cache._client.delete(f"spd:v1:large:{key}")
+        else:
+            cache.fallback_cache.pop(f"spd:v1:large:{key}", None)
+        logger.debug(f"Cleared large data for key: {key}")
+    except Exception as e:
+        logger.error(f"Failed to clear large data for key {key}: {e}")
+
+
+def clear_all_large_data(session_id: str) -> None:
+    """Clear all large data for a session."""
+    try:
+        cache = get_cache()
+        pattern = f"spd:v1:large:{session_id}:*"
+        
+        if cache.is_available():
+            keys = cache._client.keys(pattern)
+            if keys:
+                cache._client.delete(*keys)
+        else:
+            keys_to_remove = [k for k in cache.fallback_cache.keys() if k.startswith(f"spd:v1:large:{session_id}:")]
+            for key in keys_to_remove:
+                del cache.fallback_cache[key]
+        logger.debug(f"Cleared all large data for session: {session_id}")
+    except Exception as e:
+        logger.error(f"Failed to clear all large data for session {session_id}: {e}")

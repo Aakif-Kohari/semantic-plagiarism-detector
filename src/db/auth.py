@@ -16,6 +16,8 @@ import re
 import sqlite3
 from datetime import datetime as dt
 from datetime import timezone
+import secrets
+import string
 
 import bcrypt
 from argon2 import PasswordHasher
@@ -832,24 +834,45 @@ def set_user_theme(username: str, theme: str) -> None:
 
 
 @with_sqlite_retry
+def _generate_secure_password(length: int = 32) -> str:
+    """
+    Generate a cryptographically secure random password.
+    
+    Args:
+        length: Length of the password (default: 32 characters)
+    
+    Returns:
+        A secure random password containing uppercase, lowercase, digits, and symbols
+    """
+    alphabet = string.ascii_letters + string.digits + string.punctuation
+    return ''.join(secrets.choice(alphabet) for _ in range(length))
+
 def get_or_create_sso_user(email: str, default_role: str = "teacher") -> str:
-    """Finds a user by email (as username) or creates a new one for SSO."""
-    username = _validate_username(email)
-    with _connect() as conn:
-        row = conn.execute(
-            "SELECT role FROM users WHERE username = ?",
-            (username,),
-        ).fetchone()
-        if row:
-            return row[0]
-        hashed = _hash_password("!")
-        role = _validate_role(default_role)
-        conn.execute(
-            "INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
-            (username, hashed, role),
-        )
-        conn.commit()
-        return role
+    """
+    Get or create SSO user with enhanced security.
+    Wrapper around get_or_create_sso_user_enhanced for backward compatibility.
+    """
+    result = get_or_create_sso_user_enhanced(
+        email=email,
+        provider="unknown",
+        provider_user_id=email,
+        default_role=default_role,
+    )
+    return result["role"]
+
+
+def is_sso_user(username: str) -> bool:
+    """Check if a user was created via SSO."""
+    try:
+        username = _validate_username(username)
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT sso_provider FROM users WHERE username = ?",
+                (username,),
+            ).fetchone()
+            return row is not None and row[0] is not None
+    except sqlite3.Error:
+        return False
 
 
 def get_user_active_status(username: str) -> bool:
@@ -1167,3 +1190,487 @@ def format_user_creation_date(iso_str: str) -> str:
     """Format an ISO creation date as 'MMM DD, YYYY'."""
     date = dt.fromisoformat(iso_str.replace("Z", "+00:00"))
     return date.strftime("%b %d, %Y")
+
+
+# ============================================================================
+# SSO SECURITY ENHANCEMENTS - Issue #2172
+# ============================================================================
+
+import secrets
+import string
+from datetime import datetime, timedelta
+from typing import Optional, Dict, Any, List
+import hashlib
+import json
+
+# ============================================================================
+# SECURE PASSWORD GENERATION
+# ============================================================================
+
+def generate_secure_password(length: int = 32) -> str:
+    """
+    Generate a cryptographically secure random password.
+    
+    Args:
+        length: Length of the password (default: 32 characters)
+    
+    Returns:
+        A secure random password containing uppercase, lowercase, digits, and symbols
+    
+    Examples:
+        >>> generate_secure_password(16)
+        'K#9mP$2vL&8qR!x4'
+    """
+    if length < 12:
+        raise ValueError("Password length must be at least 12 characters for security.")
+    
+    alphabet = string.ascii_letters + string.digits + string.punctuation
+    password = ''.join(secrets.choice(alphabet) for _ in range(length))
+    
+    # Ensure password meets complexity requirements
+    while not _validate_password_complexity(password):
+        password = ''.join(secrets.choice(alphabet) for _ in range(length))
+    
+    return password
+
+
+def generate_sso_token() -> str:
+    """
+    Generate a secure token for SSO session management.
+    
+    Returns:
+        A 64-character hex token
+    """
+    return secrets.token_hex(64)
+
+
+def generate_sso_state() -> str:
+    """
+    Generate a secure state parameter for OAuth2 flow.
+    
+    Returns:
+        A 32-character hex state token
+    """
+    return secrets.token_hex(32)
+
+
+# ============================================================================
+# SSO USER MANAGEMENT
+# ============================================================================
+
+def get_or_create_sso_user_enhanced(
+    email: str,
+    provider: str,
+    provider_user_id: str,
+    default_role: str = "teacher"
+) -> Dict[str, Any]:
+    """
+    Enhanced SSO user creation with security features.
+    
+    This function:
+    1. Checks if user exists
+    2. Updates SSO provider info if needed
+    3. Creates user with secure random password
+    4. Logs security events
+    5. Returns user info with security status
+    
+    Args:
+        email: User's email address
+        provider: SSO provider (github, google, etc.)
+        provider_user_id: User ID from the provider
+        default_role: Default role for new users
+    
+    Returns:
+        Dict containing user info and security status
+    """
+    username = _validate_username(email)
+    provider = provider.lower()
+    
+    if provider not in ["github", "google", "microsoft", "gitlab"]:
+        raise ValueError(f"Unsupported SSO provider: {provider}")
+    
+    with _connect() as conn:
+        # Check if user exists
+        row = conn.execute(
+            "SELECT id, role, sso_provider, sso_provider_user_id FROM users WHERE username = ?",
+            (username,),
+        ).fetchone()
+        
+        if row:
+            user_id, role, existing_provider, existing_provider_id = row
+            
+            # Update provider info if changed
+            if existing_provider != provider or existing_provider_id != provider_user_id:
+                conn.execute(
+                    """UPDATE users 
+                       SET sso_provider = ?, 
+                           sso_provider_user_id = ?,
+                           updated_at = CURRENT_TIMESTAMP
+                       WHERE username = ?""",
+                    (provider, provider_user_id, username)
+                )
+                conn.commit()
+                
+                log_security_event(
+                    event_type="sso_provider_updated",
+                    username=username,
+                    details=f"SSO provider updated from {existing_provider} to {provider}"
+                )
+            
+            # Log successful SSO login
+            log_security_event(
+                event_type="sso_login_success",
+                username=username,
+                details=f"SSO login via {provider} (user_id: {user_id})"
+            )
+            
+            return {
+                "username": username,
+                "role": role,
+                "user_id": user_id,
+                "is_new_user": False,
+                "provider": provider,
+                "sso_enabled": True
+            }
+        
+        # New user - generate secure random password
+        secure_password = generate_secure_password(32)
+        hashed = _hash_password(secure_password)
+        role = _validate_role(default_role)
+        
+        # Insert new user with SSO info
+        cursor = conn.execute(
+            """INSERT INTO users 
+               (username, password, role, sso_provider, sso_provider_user_id, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
+            (username, hashed, role, provider, provider_user_id)
+        )
+        user_id = cursor.lastrowid
+        conn.commit()
+        
+        # Store secure password in a separate table for recovery (optional)
+        _store_sso_recovery_token(username, secure_password)
+        
+        # Log security events
+        log_security_event(
+            event_type="sso_user_created",
+            username=username,
+            details=f"SSO user created via {provider} with role: {role}"
+        )
+        
+        log_security_event(
+            event_type="user_created",
+            username=username,
+            details=f"User created via SSO ({provider}) with secure random password"
+        )
+        
+        return {
+            "username": username,
+            "role": role,
+            "user_id": user_id,
+            "is_new_user": True,
+            "provider": provider,
+            "sso_enabled": True,
+            "secure_password_set": True
+        }
+
+
+def _store_sso_recovery_token(username: str, password: str) -> None:
+    """
+    Store a recovery token for SSO users in case they need to reset password.
+    """
+    try:
+        token = generate_sso_token()
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        expires_at = (datetime.now() + timedelta(days=7)).isoformat()
+        
+        with _connect() as conn:
+            # Create recovery_tokens table if not exists
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sso_recovery_tokens (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT NOT NULL,
+                    token_hash TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    used_at TEXT DEFAULT NULL,
+                    FOREIGN KEY (username) REFERENCES users(username)
+                )
+            """)
+            
+            # Store recovery token
+            conn.execute(
+                """INSERT INTO sso_recovery_tokens (username, token_hash, expires_at)
+                   VALUES (?, ?, ?)""",
+                (username, token_hash, expires_at)
+            )
+            conn.commit()
+            
+            # Log for security
+            log_security_event(
+                event_type="sso_recovery_token_created",
+                username=username,
+                details="SSO recovery token created"
+            )
+    except Exception as e:
+        logger.error(f"Failed to store SSO recovery token: {e}")
+
+
+def verify_sso_recovery_token(username: str, token: str) -> bool:
+    """
+    Verify an SSO recovery token.
+    
+    Args:
+        username: The username
+        token: The recovery token to verify
+    
+    Returns:
+        True if token is valid and not expired
+    """
+    try:
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        
+        with _connect() as conn:
+            row = conn.execute(
+                """SELECT expires_at, used_at FROM sso_recovery_tokens 
+                   WHERE username = ? AND token_hash = ?""",
+                (username, token_hash)
+            ).fetchone()
+            
+            if not row:
+                return False
+            
+            expires_at, used_at = row
+            if used_at is not None:
+                return False  # Token already used
+            
+            if expires_at < datetime.now().isoformat():
+                return False  # Token expired
+            
+            # Mark token as used
+            conn.execute(
+                "UPDATE sso_recovery_tokens SET used_at = CURRENT_TIMESTAMP WHERE username = ? AND token_hash = ?",
+                (username, token_hash)
+            )
+            conn.commit()
+            return True
+            
+    except Exception as e:
+        logger.error(f"Failed to verify SSO recovery token: {e}")
+        return False
+
+
+def get_sso_user_info(username: str) -> Optional[Dict[str, Any]]:
+    """
+    Get SSO user information.
+    
+    Args:
+        username: The username to lookup
+    
+    Returns:
+        Dict with SSO info or None if not an SSO user
+    """
+    try:
+        username = _validate_username(username)
+        with _connect() as conn:
+            row = conn.execute(
+                """SELECT id, username, role, sso_provider, sso_provider_user_id, 
+                          created_at, updated_at, is_active
+                   FROM users WHERE username = ? AND sso_provider IS NOT NULL""",
+                (username,)
+            ).fetchone()
+            
+            if not row:
+                return None
+            
+            return {
+                "user_id": row[0],
+                "username": row[1],
+                "role": row[2],
+                "sso_provider": row[3],
+                "sso_provider_user_id": row[4],
+                "created_at": row[5],
+                "updated_at": row[6],
+                "is_active": bool(row[7]),
+                "is_sso_user": True
+            }
+    except Exception as e:
+        logger.error(f"Failed to get SSO user info: {e}")
+        return None
+
+
+def list_sso_users() -> List[Dict[str, Any]]:
+    """
+    List all SSO users in the system.
+    
+    Returns:
+        List of SSO user info dicts
+    """
+    try:
+        with _connect() as conn:
+            rows = conn.execute(
+                """SELECT id, username, role, sso_provider, sso_provider_user_id, 
+                          created_at, updated_at, is_active
+                   FROM users WHERE sso_provider IS NOT NULL
+                   ORDER BY created_at DESC"""
+            ).fetchall()
+            
+            return [
+                {
+                    "user_id": row[0],
+                    "username": row[1],
+                    "role": row[2],
+                    "sso_provider": row[3],
+                    "sso_provider_user_id": row[4],
+                    "created_at": row[5],
+                    "updated_at": row[6],
+                    "is_active": bool(row[7])
+                }
+                for row in rows
+            ]
+    except Exception as e:
+        logger.error(f"Failed to list SSO users: {e}")
+        return []
+
+
+def revoke_sso_access(username: str) -> bool:
+    """
+    Revoke SSO access for a user.
+    
+    Args:
+        username: The username to revoke access for
+    
+    Returns:
+        True if successfully revoked
+    """
+    try:
+        username = _validate_username(username)
+        with _connect() as conn:
+            cursor = conn.execute(
+                """UPDATE users 
+                   SET sso_provider = NULL, 
+                       sso_provider_user_id = NULL,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE username = ?""",
+                (username,)
+            )
+            affected = cursor.rowcount
+            conn.commit()
+            
+            if affected > 0:
+                log_security_event(
+                    event_type="sso_access_revoked",
+                    username=username,
+                    details="SSO access revoked by administrator"
+                )
+                return True
+            return False
+    except Exception as e:
+        logger.error(f"Failed to revoke SSO access: {e}")
+        return False
+
+
+def is_sso_user(username: str) -> bool:
+    """
+    Check if a user is an SSO user.
+    
+    Args:
+        username: The username to check
+    
+    Returns:
+        True if the user is an SSO user
+    """
+    try:
+        info = get_sso_user_info(username)
+        return info is not None and info.get("is_sso_user", False)
+    except Exception:
+        return False
+
+
+def get_sso_users_count() -> int:
+    """
+    Get the total number of SSO users.
+    
+    Returns:
+        Count of SSO users
+    """
+    try:
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM users WHERE sso_provider IS NOT NULL"
+            ).fetchone()
+            return row[0] if row else 0
+    except Exception as e:
+        logger.error(f"Failed to count SSO users: {e}")
+        return 0
+
+
+def migrate_existing_sso_users() -> Dict[str, Any]:
+    """
+    Migrate existing SSO users to secure passwords.
+    
+    This function finds all SSO users with weak passwords and
+    upgrades them to secure random passwords.
+    
+    Returns:
+        Dict with migration statistics
+    """
+    try:
+        from src.db.auth import get_all_users, update_password
+        
+        sso_users = list_sso_users()
+        migrated = 0
+        failed = 0
+        
+        for user in sso_users:
+            try:
+                username = user["username"]
+                # Generate new secure password
+                new_password = generate_secure_password(32)
+                # Update password
+                update_password(username, new_password)
+                migrated += 1
+                
+                log_security_event(
+                    event_type="sso_password_upgraded",
+                    username=username,
+                    details="SSO user password upgraded from weak to secure"
+                )
+            except Exception as e:
+                logger.error(f"Failed to upgrade password for {username}: {e}")
+                failed += 1
+        
+        return {
+            "total_sso_users": len(sso_users),
+            "migrated": migrated,
+            "failed": failed,
+            "success": failed == 0
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to migrate SSO users: {e}")
+        return {
+            "total_sso_users": 0,
+            "migrated": 0,
+            "failed": 1,
+            "success": False,
+            "error": str(e)
+        }
+
+# ============================================================================
+# EXPORTS
+# ============================================================================
+
+__all__ = [
+    'generate_secure_password',
+    'generate_sso_token',
+    'generate_sso_state',
+    'get_or_create_sso_user_enhanced',
+    'get_sso_user_info',
+    'list_sso_users',
+    'revoke_sso_access',
+    'is_sso_user',
+    'get_sso_users_count',
+    'migrate_existing_sso_users',
+    'verify_sso_recovery_token',
+]

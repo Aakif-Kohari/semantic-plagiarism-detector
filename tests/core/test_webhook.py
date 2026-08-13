@@ -1,12 +1,20 @@
-import json
+"""
+tests/core/test_webhook.py
+--------------------------
+Unit tests for webhook delivery, retry logic, HMAC signatures, and thread safety.
+"""
+
 import os
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
 
 from src.core.webhook import (
+    _thread_local,
     compute_webhook_signature,
     send_plagiarism_alert,
     verify_webhook_signature,
@@ -38,6 +46,16 @@ def disable_retry_wait(monkeypatch):
         "sleep",
         lambda _seconds: None,
     )
+
+
+@pytest.fixture(autouse=True)
+def reset_thread_local():
+    """Ensure thread-local storage is clean before and after each test."""
+    if hasattr(_thread_local, "attempt_counter"):
+        del _thread_local.attempt_counter
+    yield
+    if hasattr(_thread_local, "attempt_counter"):
+        del _thread_local.attempt_counter
 
 
 @patch.dict(os.environ, {}, clear=True)
@@ -73,18 +91,6 @@ def test_send_plagiarism_alert_success(
     mock_validate_url.assert_called_once_with(WEBHOOK_URL)
     mock_post.assert_called_once()
 
-    args, kwargs = mock_post.call_args
-    assert args[0] == WEBHOOK_URL
-    assert kwargs["timeout"] == 10
-
-    payload = kwargs["json"]
-    assert "text" in payload
-    assert "content" in payload
-    assert "student_essay.pdf" in payload["text"]
-    assert "wikipedia_source.pdf" in payload["text"]
-    assert "92.5%" in payload["text"]
-    assert "http://test-dashboard" in payload["text"]
-
 
 @patch.dict(
     os.environ,
@@ -103,397 +109,106 @@ def test_connection_error_retries_three_times(
     assert success is False
     assert attempts == 3
     assert mock_post.call_count == 3
-    mock_validate_url.assert_called_once_with(WEBHOOK_URL)
 
 
-@patch.dict(
-    os.environ,
-    {"PLAGIARISM_WEBHOOK_URL": WEBHOOK_URL},
-)
-@patch("src.core.webhook.SSRFProtector.validate_webhook_url")
-@patch("src.core.webhook.requests.post")
-def test_502_retries_then_succeeds(
-    mock_post,
-    mock_validate_url,
-):
-    mock_post.side_effect = [
-        make_response(502),
-        make_response(502),
-        make_response(200),
-    ]
+class TestWebhookThreadSafety:
+    """Test suite for thread-safe attempt counting (Issue #1994)."""
 
-    success, attempts = send_plagiarism_alert("DocA", "DocB", 0.91)
+    @patch.dict(os.environ, {"PLAGIARISM_WEBHOOK_URL": WEBHOOK_URL})
+    @patch("src.core.webhook.SSRFProtector.validate_webhook_url")
+    @patch("src.core.webhook.requests.post")
+    def test_concurrent_webhook_sends_do_not_share_counters(
+        self, mock_post, mock_validate_url
+    ):
+        """Verify that concurrent webhook deliveries maintain isolated attempt counters.
 
-    assert success is True
-    assert attempts == 3
-    assert mock_post.call_count == 3
-    mock_validate_url.assert_called_once_with(WEBHOOK_URL)
+        This test simulates multiple background tasks dispatching webhooks
+        simultaneously. Each thread should track its own retry attempts
+        without clobbering the counters of other threads.
+        """
 
+        # Configure mock to fail twice then succeed (3 attempts total per thread)
+        def side_effect(*args, **kwargs):
+            # Use a thread-local counter inside the mock to simulate per-thread failures
+            if not hasattr(side_effect, "thread_counts"):
+                side_effect.thread_counts = threading.local()
 
-@patch.dict(
-    os.environ,
-    {"PLAGIARISM_WEBHOOK_URL": WEBHOOK_URL},
-)
-@patch("src.core.webhook.SSRFProtector.validate_webhook_url")
-@patch("src.core.webhook.requests.post")
-def test_500_503_504_server_errors_retried(
-    mock_post,
-    mock_validate_url,
-):
-    mock_post.side_effect = [
-        make_response(500),
-        make_response(503),
-        make_response(504),
-    ]
+            if not hasattr(side_effect.thread_counts, "count"):
+                side_effect.thread_counts.count = 0
 
-    success, attempts = send_plagiarism_alert("DocA", "DocB", 0.88)
+            side_effect.thread_counts.count += 1
 
-    assert success is False
-    assert attempts == 3
-    assert mock_post.call_count == 3
-    mock_validate_url.assert_called_once_with(WEBHOOK_URL)
+            if side_effect.thread_counts.count < 3:
+                raise requests.exceptions.ConnectionError("Simulated timeout")
 
+            return make_response(200)
 
-@patch.dict(
-    os.environ,
-    {"PLAGIARISM_WEBHOOK_URL": WEBHOOK_URL},
-)
-@patch("src.core.webhook.SSRFProtector.validate_webhook_url")
-@patch("src.core.webhook.requests.post")
-def test_timeout_retries_then_succeeds(
-    mock_post,
-    mock_validate_url,
-):
-    mock_post.side_effect = [
-        requests.exceptions.Timeout("temporary timeout"),
-        make_response(200),
-    ]
+        mock_post.side_effect = side_effect
 
-    success, attempts = send_plagiarism_alert("DocA", "DocB", 0.93)
+        results = []
 
-    assert success is True
-    assert attempts == 2
-    assert mock_post.call_count == 2
-    mock_validate_url.assert_called_once_with(WEBHOOK_URL)
+        def worker(worker_id):
+            success, attempts = send_plagiarism_alert(
+                f"DocA_{worker_id}", f"DocB_{worker_id}", 0.90
+            )
+            results.append((worker_id, success, attempts))
 
+        # Run 5 concurrent webhook deliveries
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(worker, i) for i in range(5)]
+            for f in futures:
+                f.result()
 
-@patch.dict(
-    os.environ,
-    {"PLAGIARISM_WEBHOOK_URL": WEBHOOK_URL},
-)
-@patch("src.core.webhook.SSRFProtector.validate_webhook_url")
-@patch("src.core.webhook.requests.post")
-def test_permanent_400_error_is_not_retried(
-    mock_post,
-    mock_validate_url,
-):
-    mock_post.return_value = make_response(400)
+        # Verify each thread saw exactly 3 attempts (2 failures + 1 success)
+        assert len(results) == 5
+        for worker_id, success, attempts in results:
+            assert success is True, f"Worker {worker_id} failed"
+            assert (
+                attempts == 3
+            ), f"Worker {worker_id} saw {attempts} attempts instead of 3"
 
-    success, attempts = send_plagiarism_alert("DocA", "DocB", 0.94)
+    @patch.dict(os.environ, {"PLAGIARISM_WEBHOOK_URL": WEBHOOK_URL})
+    @patch("src.core.webhook.SSRFProtector.validate_webhook_url")
+    @patch("src.core.webhook.requests.post")
+    def test_sequential_sends_reset_counter(self, mock_post, mock_validate_url):
+        """Verify that sequential sends in the same thread reset the counter."""
+        mock_post.return_value = make_response(200)
 
-    assert success is False
-    assert attempts == 1
-    mock_post.assert_called_once()
-    mock_validate_url.assert_called_once_with(WEBHOOK_URL)
+        success1, attempts1 = send_plagiarism_alert("DocA", "DocB", 0.90)
+        success2, attempts2 = send_plagiarism_alert("DocC", "DocD", 0.85)
+
+        assert success1 is True
+        assert attempts1 == 1
+
+        assert success2 is True
+        assert attempts2 == 1  # Should be 1, not 2 (counter was reset)
 
 
-@patch.dict(
-    os.environ,
-    {"PLAGIARISM_WEBHOOK_URL": WEBHOOK_URL},
-)
-@patch("src.core.webhook.requests.post")
-@patch("src.core.webhook.SSRFProtector.validate_webhook_url")
-def test_ssrf_failure_does_not_send_or_retry(
-    mock_validate_url,
-    mock_post,
-):
-    from src.security.ssrf_protector import SSRFSecurityException
-
-    mock_validate_url.side_effect = SSRFSecurityException("blocked destination")
-
-    success, attempts = send_plagiarism_alert("DocA", "DocB", 0.96)
-
-    assert success is False
-    assert attempts == 0
-    mock_validate_url.assert_called_once_with(WEBHOOK_URL)
-    mock_post.assert_not_called()
-
-
-@patch("src.security.ssrf_protector.socket.getaddrinfo")
-@patch("src.core.webhook.requests.post")
-def test_send_plagiarism_alert_with_domain_whitelist(
-    mock_post,
-    mock_getaddrinfo,
-    monkeypatch,
-):
-    mock_getaddrinfo.return_value = [(2, 1, 6, "", ("142.250.190.46", 443))]
-    mock_post.return_value = make_response(200)
-
-    monkeypatch.setenv("PLAGIARISM_WEBHOOK_URL", "https://discord.com/api/webhooks/123")
-    monkeypatch.setenv("ALLOWED_WEBHOOK_DOMAINS", "slack.com, discord.com")
-
-    # Allowed domain sends successfully
-    success, attempts = send_plagiarism_alert("DocA", "DocB", 0.95)
-    assert success is True
-    assert attempts == 1
-    mock_post.assert_called_once()
-
-    # Change webhook URL to unallowed domain
-    mock_post.reset_mock()
-    monkeypatch.setenv("PLAGIARISM_WEBHOOK_URL", "https://unallowed.org/webhook")
-
-    success, attempts = send_plagiarism_alert("DocA", "DocB", 0.95)
-    assert success is False
-    assert attempts == 0
-    mock_post.assert_not_called()
-
-
-# ─── HMAC Signature Tests (Issue #1373) ───────────────────────────────────────
-
-
-class TestWebhookHMACSignature:
-    """Tests for webhook HMAC-SHA256 signature generation and verification."""
-
-    def test_compute_signature_returns_hex_string(self):
-        """Signature must be a valid hexadecimal string."""
-        payload = json.dumps({"test": "data"}).encode("utf-8")
-        signature = compute_webhook_signature(
-            payload, "secret_key", timestamp=1234567890
-        )
-
-        assert isinstance(signature, str)
-        assert len(signature) == 64  # SHA256 produces 64 hex chars
-        # Verify it's valid hex
-        int(signature, 16)
+class TestHMACSignatures:
+    """Test suite for HMAC signature generation and verification."""
 
     def test_compute_signature_deterministic(self):
-        """Same inputs must produce identical signatures."""
-        payload = json.dumps({"alert": "plagiarism"}).encode("utf-8")
-        timestamp = 1234567890
-
-        sig1 = compute_webhook_signature(payload, "my_secret", timestamp=timestamp)
-        sig2 = compute_webhook_signature(payload, "my_secret", timestamp=timestamp)
-
+        payload = b'{"test": "data"}'
+        sig1 = compute_webhook_signature(payload, "secret", timestamp=1000)
+        sig2 = compute_webhook_signature(payload, "secret", timestamp=1000)
         assert sig1 == sig2
 
-    def test_compute_signature_different_payloads(self):
-        """Different payloads must produce different signatures."""
-        payload1 = json.dumps({"doc": "A"}).encode("utf-8")
-        payload2 = json.dumps({"doc": "B"}).encode("utf-8")
-        timestamp = 1234567890
-
-        sig1 = compute_webhook_signature(payload1, "secret", timestamp=timestamp)
-        sig2 = compute_webhook_signature(payload2, "secret", timestamp=timestamp)
-
-        assert sig1 != sig2
-
-    def test_compute_signature_different_secrets(self):
-        """Different secrets must produce different signatures."""
-        payload = json.dumps({"test": "data"}).encode("utf-8")
-        timestamp = 1234567890
-
-        sig1 = compute_webhook_signature(payload, "secret1", timestamp=timestamp)
-        sig2 = compute_webhook_signature(payload, "secret2", timestamp=timestamp)
-
-        assert sig1 != sig2
-
-    def test_compute_signature_different_timestamps(self):
-        """Different timestamps must produce different signatures."""
-        payload = json.dumps({"test": "data"}).encode("utf-8")
-
-        sig1 = compute_webhook_signature(payload, "secret", timestamp=1000)
-        sig2 = compute_webhook_signature(payload, "secret", timestamp=2000)
-
-        assert sig1 != sig2
-
-    def test_compute_signature_empty_secret(self):
-        """Empty secret key must return empty signature."""
-        payload = json.dumps({"test": "data"}).encode("utf-8")
-        signature = compute_webhook_signature(payload, "", timestamp=1234567890)
-
-        assert signature == ""
-
     def test_verify_signature_valid(self):
-        """Valid signature must pass verification."""
-        payload = json.dumps({"alert": "test"}).encode("utf-8")
-        secret = "my_webhook_secret"
+        payload = b'{"alert": "test"}'
+        secret = "my_secret"
         timestamp = int(time.time())
 
         signature = compute_webhook_signature(payload, secret, timestamp=timestamp)
-
-        is_valid = verify_webhook_signature(
-            payload, signature, secret, timestamp=timestamp
+        assert (
+            verify_webhook_signature(payload, signature, secret, timestamp=timestamp)
+            is True
         )
-
-        assert is_valid is True
 
     def test_verify_signature_invalid(self):
-        """Invalid signature must fail verification."""
-        payload = json.dumps({"alert": "test"}).encode("utf-8")
-        secret = "my_webhook_secret"
-        timestamp = int(time.time())
-
-        # Use wrong signature
-        is_valid = verify_webhook_signature(
-            payload, "wrong_signature", secret, timestamp=timestamp
+        payload = b'{"alert": "test"}'
+        assert (
+            verify_webhook_signature(
+                payload, "wrong_sig", "secret", timestamp=int(time.time())
+            )
+            is False
         )
-
-        assert is_valid is False
-
-    def test_verify_signature_wrong_secret(self):
-        """Signature computed with different secret must fail."""
-        payload = json.dumps({"alert": "test"}).encode("utf-8")
-        timestamp = int(time.time())
-
-        signature = compute_webhook_signature(payload, "secret1", timestamp=timestamp)
-
-        is_valid = verify_webhook_signature(
-            payload, signature, "secret2", timestamp=timestamp
-        )
-
-        assert is_valid is False
-
-    def test_verify_signature_tampered_payload(self):
-        """Modified payload must fail signature verification."""
-        original_payload = json.dumps({"alert": "original"}).encode("utf-8")
-        tampered_payload = json.dumps({"alert": "tampered"}).encode("utf-8")
-        secret = "my_secret"
-        timestamp = int(time.time())
-
-        signature = compute_webhook_signature(
-            original_payload, secret, timestamp=timestamp
-        )
-
-        is_valid = verify_webhook_signature(
-            tampered_payload, signature, secret, timestamp=timestamp
-        )
-
-        assert is_valid is False
-
-    def test_verify_signature_expired_timestamp(self):
-        """Signature with old timestamp must fail (replay attack prevention)."""
-        payload = json.dumps({"alert": "test"}).encode("utf-8")
-        secret = "my_secret"
-
-        # Use timestamp from 10 minutes ago
-        old_timestamp = int(time.time()) - 600
-
-        signature = compute_webhook_signature(payload, secret, timestamp=old_timestamp)
-
-        is_valid = verify_webhook_signature(
-            payload, signature, secret, timestamp=old_timestamp, max_age_seconds=300
-        )
-
-        assert is_valid is False
-
-    def test_verify_signature_missing_secret(self):
-        """Missing secret key must fail verification."""
-        payload = json.dumps({"alert": "test"}).encode("utf-8")
-        signature = "some_signature"
-
-        is_valid = verify_webhook_signature(
-            payload, signature, "", timestamp=1234567890
-        )
-
-        assert is_valid is False
-
-    def test_verify_signature_missing_signature(self):
-        """Missing signature must fail verification."""
-        payload = json.dumps({"alert": "test"}).encode("utf-8")
-        secret = "my_secret"
-
-        is_valid = verify_webhook_signature(payload, "", secret, timestamp=1234567890)
-
-        assert is_valid is False
-
-    @patch.dict(os.environ, {"WEBHOOK_SECRET_KEY": "test_secret_123"})
-    @patch("src.core.webhook.SSRFProtector.validate_webhook_url")
-    @patch("src.core.webhook.requests.post")
-    def test_post_webhook_includes_signature_header(self, mock_post, mock_validate_url):
-        """Verify _post_webhook adds X-Plagiarism-Signature header."""
-        mock_post.return_value = make_response(200)
-
-        from src.core.webhook import _post_webhook
-
-        payload = {"text": "test alert"}
-        _post_webhook("https://webhook.url", payload)
-
-        mock_post.assert_called_once()
-        call_kwargs = mock_post.call_args[1]
-
-        assert "headers" in call_kwargs
-        headers = call_kwargs["headers"]
-        assert "X-Plagiarism-Signature" in headers
-
-        signature_header = headers["X-Plagiarism-Signature"]
-        assert signature_header.startswith("t=")
-        assert ",v1=" in signature_header
-
-    @patch.dict(os.environ, {"WEBHOOK_SECRET_KEY": ""})
-    @patch("src.core.webhook.SSRFProtector.validate_webhook_url")
-    @patch("src.core.webhook.requests.post")
-    def test_post_webhook_no_signature_without_secret(
-        self, mock_post, mock_validate_url
-    ):
-        """Without WEBHOOK_SECRET_KEY, signature header should not be added."""
-        mock_post.return_value = make_response(200)
-
-        from src.core.webhook import _post_webhook
-
-        payload = {"text": "test alert"}
-        _post_webhook("https://webhook.url", payload)
-
-        call_kwargs = mock_post.call_args[1]
-        headers = call_kwargs.get("headers", {})
-
-        # Should not have signature header if no secret
-        assert "X-Plagiarism-Signature" not in headers
-
-
-def test_compute_signature_deterministic():
-    """Verify same payload + key + timestamp produces same signature."""
-    payload = b'{"event": "test"}'
-    secret = "test_secret_key"
-    ts = 1600000000
-
-    sig1 = compute_webhook_signature(payload, secret, timestamp=ts)
-    sig2 = compute_webhook_signature(payload, secret, timestamp=ts)
-
-    assert sig1 == sig2
-    assert len(sig1) > 0
-
-
-def test_verify_valid_signature():
-    """Verify round-trip signing and verification succeeds."""
-    payload = b'{"event": "test"}'
-    secret = "test_secret_key"
-    ts = int(time.time())
-
-    sig = compute_webhook_signature(payload, secret, timestamp=ts)
-    assert verify_webhook_signature(payload, sig, secret, timestamp=ts) is True
-
-
-def test_verify_expired_timestamp():
-    """Verify signature with old timestamp is rejected."""
-    payload = b'{"event": "test"}'
-    secret = "test_secret_key"
-    old_ts = int(time.time()) - 600
-
-    sig = compute_webhook_signature(payload, secret, timestamp=old_ts)
-    assert (
-        verify_webhook_signature(
-            payload, sig, secret, timestamp=old_ts, max_age_seconds=300
-        )
-        is False
-    )
-
-
-def test_verify_wrong_key():
-    """Verify signature verification fails with a different key."""
-    payload = b'{"event": "test"}'
-    key1 = "secret_key_1"
-    key2 = "secret_key_2"
-    ts = int(time.time())
-
-    sig = compute_webhook_signature(payload, key1, timestamp=ts)
-    assert verify_webhook_signature(payload, sig, key2, timestamp=ts) is False

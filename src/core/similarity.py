@@ -903,7 +903,20 @@ def detect_plagiarism_clusters(
         - 'cluster_map': Dict mapping document name to its cluster_id.
         - 'suspicious_groups': List of clusters with 3+ documents (potential collusion rings).
     """
-    import networkx as nx
+    try:
+        import networkx as nx
+    except ImportError:
+        logger.warning(
+            "networkx is not installed. Install it with: pip install networkx>=3.0"
+        )
+        return {
+            "clusters": {},
+            "cluster_map": {},
+            "suspicious_groups": [],
+            "total_clusters": 0,
+            "error": "networkx not installed",
+            "message": "Please install networkx: pip install networkx>=3.0"
+        }
 
     doc_names = list(similarity_df.columns)
     G = nx.Graph()
