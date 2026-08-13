@@ -43,8 +43,8 @@ from .corpus_db import (
 from .incidents import (
     IncidentsRepository,
     get_incidents_by_assignment,
+    get_incidents_repo,
     get_recent_incidents,
-    incidents_repo,
     log_incident,
 )
 
@@ -57,6 +57,7 @@ __all__ = [
     "get_connection",
     "auth_repo",
     "corpus_repo",
+    "get_incidents_repo",
     "incidents_repo",
     "get_read_connection",
     "init_db",
@@ -116,3 +117,16 @@ __all__.extend(
         "table_exists",
     ]
 )
+
+
+def __getattr__(name: str):
+    """PEP 562 module-level lazy attribute access.
+
+    Preserves ``from src.db import incidents_repo`` for existing callers
+    without eagerly constructing ``IncidentsRepository`` at package import
+    time — forwards to :func:`src.db.incidents.get_incidents_repo`, which
+    creates the singleton lazily on first actual access.
+    """
+    if name == "incidents_repo":
+        return get_incidents_repo()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
