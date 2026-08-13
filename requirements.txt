@@ -83,3 +83,5 @@ hiredis>=2.3.0                  # C-extension Redis parser for faster RQ job deq
 slowapi
 
 streamlit-autorefresh>=1.0.1
+
+starlette<0.40.0
