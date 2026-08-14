@@ -119,7 +119,21 @@ class PayloadCompressor:
 
         try:
             start_time = time.perf_counter()
-            compressed_data = zlib.compress(data, level=zlib.Z_BEST_SPEED)
+            raw_level = os.getenv("REDIS_COMPRESSION_LEVEL", "").strip()
+            compression_level = zlib.Z_BEST_SPEED
+            if raw_level:
+                try:
+                    compression_level = int(raw_level)
+                except ValueError:
+                    consts = {
+                        "Z_BEST_SPEED": zlib.Z_BEST_SPEED,
+                        "Z_BEST_COMPRESSION": zlib.Z_BEST_COMPRESSION,
+                        "Z_DEFAULT_COMPRESSION": zlib.Z_DEFAULT_COMPRESSION,
+                        "Z_NO_COMPRESSION": zlib.Z_NO_COMPRESSION,
+                    }
+                    compression_level = consts.get(raw_level.upper(), zlib.Z_BEST_SPEED)
+
+            compressed_data = zlib.compress(data, level=compression_level)
             compression_ratio = len(data) / max(1, len(compressed_data))
 
             logger.debug(
