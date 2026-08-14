@@ -1,5 +1,4 @@
 import threading
-import sqlite3
 from src.db.corpus_db import get_connection, close_connections, _all_connections
 
 def test_close_all_connections_across_threads(tmp_path):
