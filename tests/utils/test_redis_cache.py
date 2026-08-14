@@ -872,3 +872,32 @@ def test_redis_payload_compression_level_configurable(monkeypatch):
     assert compressed_invalid.startswith(PayloadCompressor.MAGIC_HEADER)
     assert PayloadCompressor.decompress(compressed_invalid) == large_data
 
+
+def test_redis_payload_compression_threshold_configurable(monkeypatch):
+    """Verify that PayloadCompressor respects the REDIS_COMPRESSION_THRESHOLD env var."""
+    from src.utils.redis_cache import PayloadCompressor
+
+    # 1. Default fallback to 512KB when env var is not set
+    monkeypatch.delenv("REDIS_COMPRESSION_THRESHOLD", raising=False)
+    assert PayloadCompressor.get_threshold() == 512 * 1024
+
+    # Data below default threshold (e.g. 10KB) should not be compressed
+    data_small = b"a" * (10 * 1024)
+    compressed_small = PayloadCompressor.compress(data_small)
+    assert not compressed_small.startswith(PayloadCompressor.MAGIC_HEADER)
+    assert compressed_small == data_small
+
+    # 2. Configured lower threshold (e.g. 5KB)
+    monkeypatch.setenv("REDIS_COMPRESSION_THRESHOLD", str(5 * 1024))
+    assert PayloadCompressor.get_threshold() == 5 * 1024
+
+    # Now, the same 10KB data exceeds the 5KB threshold and must be compressed
+    compressed_now = PayloadCompressor.compress(data_small)
+    assert compressed_now.startswith(PayloadCompressor.MAGIC_HEADER)
+    assert PayloadCompressor.decompress(compressed_now) == data_small
+
+    # 3. Invalid threshold format fallback
+    monkeypatch.setenv("REDIS_COMPRESSION_THRESHOLD", "invalid_number")
+    assert PayloadCompressor.get_threshold() == 512 * 1024
+
+
