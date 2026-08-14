@@ -160,6 +160,21 @@ from app.components.workflow_automation import (
     TriggerType,
     WorkflowCategory,
 )
+# ── API Gateway Imports ──────────────────────────────────────────────────
+from app.components.api_gateway import (
+    render_api_gateway,
+    initialize_api_gateway,
+    ApiGateway,
+    ApiEndpoint,
+    ApiKey,
+    Webhook,
+    ServiceConnection,
+    ApiLog,
+    ApiMethod,
+    ApiStatus,
+    WebhookStatus,
+    ServiceType,
+)
 # ── Collaboration Hub Imports ────────────────────────────────────────────
 from app.components.collaboration_hub import (
     render_collaboration_hub,
