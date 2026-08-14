@@ -216,9 +216,11 @@ def render_copy_button(
     button_id: str = "copy-btn",
     copy_label: str = "📋 Copy",
     copied_label: str = "✅ Copied!",
+    failed_label: str = "❌ Copy failed",
     height: int = 45,
 ) -> None:
     safe_button_id = html.escape(button_id)
+    safe_failed_label = html.escape(failed_label)
     escaped_text = (
         text_to_copy.replace("\\", "\\\\")
         .replace('"', '\\"')
@@ -259,31 +261,68 @@ def render_copy_button(
     <script>
         document.getElementById("{safe_button_id}").addEventListener("click", function() {{
             const text = "{escaped_text}";
-            const textArea = document.createElement("textarea");
-            textArea.value = text;
-            textArea.style.top = "0";
-            textArea.style.left = "0";
-            textArea.style.position = "fixed";
-            document.body.appendChild(textArea);
-            textArea.focus();
-            textArea.select();
-            try {{
-                const successful = document.execCommand('copy');
-                if (successful) {{
-                    const btn = document.getElementById("{safe_button_id}");
-                    btn.innerHTML = "{copied_label}";
-                    btn.style.borderColor = "#28a745";
-                    btn.style.color = "#28a745";
-                    setTimeout(function() {{
-                        btn.innerHTML = "{copy_label}";
-                        btn.style.borderColor = "#d6d6d8";
-                        btn.style.color = "#31333f";
-                    }}, 2000);
-                }}
-            }} catch (err) {{
-                console.error("Could not copy: ", err);
+            const btn = document.getElementById("{safe_button_id}");
+
+            function showCopied() {{
+                btn.innerHTML = "{copied_label}";
+                btn.style.borderColor = "#28a745";
+                btn.style.color = "#28a745";
+                setTimeout(function() {{
+                    btn.innerHTML = "{copy_label}";
+                    btn.style.borderColor = "#d6d6d8";
+                    btn.style.color = "#31333f";
+                }}, 2000);
             }}
-            document.body.removeChild(textArea);
+
+            function showFailed() {{
+                btn.innerHTML = "{safe_failed_label}";
+                btn.style.borderColor = "#dc3545";
+                btn.style.color = "#dc3545";
+                setTimeout(function() {{
+                    btn.innerHTML = "{copy_label}";
+                    btn.style.borderColor = "#d6d6d8";
+                    btn.style.color = "#31333f";
+                }}, 2000);
+            }}
+
+            // Fallback for older browsers (e.g. legacy Safari/Firefox) that
+            // don't implement the async Clipboard API. Only used when
+            // navigator.clipboard.writeText is unavailable or rejects.
+            function legacyCopyFallback() {{
+                const textArea = document.createElement("textarea");
+                textArea.value = text;
+                textArea.style.position = "fixed";
+                textArea.style.top = "0";
+                textArea.style.left = "0";
+                textArea.style.opacity = "0";
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                try {{
+                    const successful = document.execCommand('copy');
+                    if (successful) {{
+                        showCopied();
+                    }} else {{
+                        showFailed();
+                    }}
+                }} catch (err) {{
+                    console.error("Legacy copy fallback failed: ", err);
+                    showFailed();
+                }} finally {{
+                    document.body.removeChild(textArea);
+                }}
+            }}
+
+            if (navigator.clipboard && navigator.clipboard.writeText) {{
+                navigator.clipboard.writeText(text).then(function() {{
+                    showCopied();
+                }}).catch(function(err) {{
+                    console.error("navigator.clipboard.writeText failed, falling back: ", err);
+                    legacyCopyFallback();
+                }});
+            }} else {{
+                legacyCopyFallback();
+            }}
         }});
     </script>
     """
