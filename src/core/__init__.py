@@ -34,12 +34,24 @@ from .similarity import (
     flag_plagiarism,
     manhattan_similarity,
 )
+from .similarity_base import BaseSimilarityEngine
+from .similarity_engines import (
+    HybridSimilarityEngine,
+    LexicalSimilarityEngine,
+    SemanticSimilarityEngine,
+    SimilarityEngineFactory,
+)
 from .tag_manager import TagManager, sanitize_tag_name
 from .text_chunking import chunk_by_sentences, chunk_document, chunk_documents
 from .translator import translate_text
 from .webhook import dispatch_plagiarism_alert, send_plagiarism_alert
 
 __all__ = [
+    "BaseSimilarityEngine",
+    "SemanticSimilarityEngine",
+    "LexicalSimilarityEngine",
+    "HybridSimilarityEngine",
+    "SimilarityEngineFactory",
     "with_sqlite_retry",
     "manhattan_similarity",
     "extract_text_from_pdf",
