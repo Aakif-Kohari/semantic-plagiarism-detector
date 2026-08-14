@@ -160,7 +160,7 @@ def test_second_password_change_advances_timestamp(
             )
 
     monkeypatch.setattr(
-        "src.db.auth.datetime",
+        "src.db.auth.dt",
         FirstDateTime,
     )
     update_password(
@@ -170,7 +170,7 @@ def test_second_password_change_advances_timestamp(
     first = read_password_changed_at(username)
 
     monkeypatch.setattr(
-        "src.db.auth.datetime",
+        "src.db.auth.dt",
         SecondDateTime,
     )
     update_password(
