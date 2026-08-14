@@ -45,6 +45,7 @@ def generate_badge_svg(
     date: Optional[str] = None,
     accent_color: Optional[str] = None,
     font_family: str = "Verdana, Geneva, sans-serif",
+    font_size: int = 11,
 ) -> str:
     """
     Generates a simple SVG "Originality Verified" badge.
@@ -73,9 +74,9 @@ def generate_badge_svg(
 
     return f"""<svg xmlns="http://www.w3.org/2000/svg" width="400" height="120" viewBox="0 0 400 120">
   <rect width="400" height="120" rx="12" fill="{safe_color}" />
-  <text x="20" y="45" font-family="{safe_font}" font-size="20" fill="#ffffff">Originality Verified</text>
-  <text x="20" y="75" font-family="{safe_font}" font-size="14" fill="#e0e7ff">Awarded to: {safe_name}</text>
-  <text x="20" y="100" font-family="{safe_font}" font-size="12" fill="#e0e7ff">Date: {safe_date}</text>
+  <text x="20" y="45" font-family="{safe_font}" font-size="{font_size}" fill="#ffffff">Originality Verified</text>
+  <text x="20" y="75" font-family="{safe_font}" font-size="{font_size}" fill="#e0e7ff">Awarded to: {safe_name}</text>
+  <text x="20" y="100" font-family="{safe_font}" font-size="{font_size}" fill="#e0e7ff">Date: {safe_date}</text>
 </svg>"""
 
 
