@@ -837,3 +837,38 @@ class TestHitRateTracking:
 
         assert cache_with_mock._hits == 1000
         assert cache_with_mock.get_hit_rate() == 100.0
+
+
+def test_redis_payload_compression_level_configurable(monkeypatch):
+    """Verify that PayloadCompressor respects the REDIS_COMPRESSION_LEVEL env var."""
+    import zlib
+    from src.utils.redis_cache import PayloadCompressor
+
+    # Create dummy data large enough to trigger compression (threshold is 512KB)
+    large_data = b"a" * (PayloadCompressor.COMPRESSION_THRESHOLD_BYTES + 100)
+
+    # 1. Test default (Z_BEST_SPEED) when env var is not set
+    monkeypatch.delenv("REDIS_COMPRESSION_LEVEL", raising=False)
+    compressed_default = PayloadCompressor.compress(large_data)
+    assert compressed_default.startswith(PayloadCompressor.MAGIC_HEADER)
+    decompressed_default = PayloadCompressor.decompress(compressed_default)
+    assert decompressed_default == large_data
+
+    # 2. Test Z_BEST_COMPRESSION (as constant name string)
+    monkeypatch.setenv("REDIS_COMPRESSION_LEVEL", "Z_BEST_COMPRESSION")
+    compressed_best_const = PayloadCompressor.compress(large_data)
+    assert compressed_best_const.startswith(PayloadCompressor.MAGIC_HEADER)
+    assert PayloadCompressor.decompress(compressed_best_const) == large_data
+
+    # 3. Test explicit integer compression level (e.g., 9)
+    monkeypatch.setenv("REDIS_COMPRESSION_LEVEL", "9")
+    compressed_best_int = PayloadCompressor.compress(large_data)
+    assert compressed_best_int.startswith(PayloadCompressor.MAGIC_HEADER)
+    assert PayloadCompressor.decompress(compressed_best_int) == large_data
+
+    # 4. Test invalid environment variable fallback
+    monkeypatch.setenv("REDIS_COMPRESSION_LEVEL", "INVALID_VALUE")
+    compressed_invalid = PayloadCompressor.compress(large_data)
+    assert compressed_invalid.startswith(PayloadCompressor.MAGIC_HEADER)
+    assert PayloadCompressor.decompress(compressed_invalid) == large_data
+
