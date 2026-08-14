@@ -1,8 +1,11 @@
+from unittest.mock import patch
+
 from src.utils.warning_list import (
     build_key_extractor,
     filter_warnings,
     paginate_warnings,
     prepare_warning_page,
+    render_copy_button,
     sort_warnings,
 )
 
@@ -270,3 +273,19 @@ def test_has_exact_match_with_pure_attribute():
 
     assert _has_exact_match("doc_a.pdf", "doc_b.pdf") is True
 
+
+def test_render_copy_button_xss_sanitization():
+    """Verify that button_id is properly sanitized to prevent XSS."""
+    malicious_id = '"><script>alert(1)</script><div id="'
+
+    with patch("streamlit.components.v1.html") as mock_html:
+        render_copy_button("Sample text", button_id=malicious_id)
+
+        # Verify Streamlit HTML component was called
+        assert mock_html.called
+        rendered_html = mock_html.call_args[0][0]
+
+        # Assert no unescaped/raw <script> tag from button_id appears
+        assert 'id=""><script>alert(1)</script>' not in rendered_html
+        assert '&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;' in rendered_html
+        
