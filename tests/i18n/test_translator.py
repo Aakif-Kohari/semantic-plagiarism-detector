@@ -342,3 +342,16 @@ def test_get_language_display_name():
     assert get_language_display_name("xyz") == "XYZ"
     assert get_language_display_name("") == ""
     assert get_language_display_name(None) == ""
+def test_new_languages_supported():
+    """Test that Portuguese and Chinese are present in supported languages and translations load correctly."""
+    from src.i18n.translator import _SUPPORTED_LANGUAGES, get_text
+    
+    assert "pt" in _SUPPORTED_LANGUAGES
+    assert "zh" in _SUPPORTED_LANGUAGES
+    
+    assert _SUPPORTED_LANGUAGES["pt"] == "Português"
+    assert _SUPPORTED_LANGUAGES["zh"] == "中文"
+    
+    # Verify fallback or translation lookup succeeds for app_title
+    assert get_text("app_title", lang="pt") == "Detector de Plágio Semântico"
+    assert get_text("app_title", lang="zh") == "语义查重系统"
