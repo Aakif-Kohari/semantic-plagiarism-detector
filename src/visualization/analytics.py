@@ -44,6 +44,71 @@ def apply_plotly_theme(
     return fig
 
 
+def get_chart_theme_colors(theme_mode: str) -> dict[str, str]:
+    """Return a dictionary of Plotly-compatible theme colors based on the UI mode.
+    
+    This helper synchronizes Plotly chart background and font colors with the
+    current Streamlit UI theme mode (Light vs Dark). It ensures that charts
+    rendered in the analytics dashboard remain legible and visually consistent
+    regardless of the user's selected theme.
+    
+    The returned dictionary is structured to be passed directly into the
+    ``theme_colors`` parameter of :func:`apply_plotly_theme` or used manually
+    in Plotly layout updates.
+    
+    Args:
+        theme_mode: The current UI theme mode. Expected values are "Light" 
+                    or "Dark" (case-insensitive). Any other value defaults 
+                    to the Light theme palette.
+                    
+    Returns:
+        A dictionary containing the following keys:
+        - ``background``: The main paper/canvas background color.
+        - ``surface``: The plot area background color.
+        - ``ink``: The primary text/font color.
+        - ``muted``: Secondary text color for subtitles and annotations.
+        - ``border``: Gridline and axis border color.
+        
+    Color Specifications:
+        - **Light Mode**: 
+          - Background: ``#ffffff`` (Pure white)
+          - Ink: ``#0f172a`` (Slate 900 - high contrast dark text)
+        - **Dark Mode**: 
+          - Background: ``#1e293b`` (Slate 800 - deep blue-gray)
+          - Ink: ``#f8fafc`` (Slate 50 - high contrast light text)
+          
+    Examples:
+        >>> colors = get_chart_theme_colors("Dark")
+        >>> colors["background"]
+        '#1e293b'
+        
+        >>> fig.update_layout(paper_bgcolor=colors["background"], font_color=colors["ink"])
+    """
+    # Normalize input to handle case variations like "dark", "DARK", "Light"
+    normalized_mode = (theme_mode or "light").strip().lower()
+    
+    if normalized_mode == "dark":
+        # Dark theme palette optimized for OLED/LCD screens and reduced eye strain
+        return {
+            "background": "#1e293b",  # Slate 800
+            "surface": "#0f172a",     # Slate 900 (slightly darker plot area)
+            "ink": "#f8fafc",         # Slate 50
+            "muted": "#94a3b8",       # Slate 400
+            "border": "#334155",      # Slate 700
+            "grid": "#475569",        # Slate 600
+        }
+    else:
+        # Light theme palette (default) optimized for bright environments
+        return {
+            "background": "#ffffff",  # Pure white
+            "surface": "#f8fafc",     # Slate 50 (very light gray plot area)
+            "ink": "#0f172a",         # Slate 900
+            "muted": "#64748b",       # Slate 500
+            "border": "#e2e8f0",      # Slate 200
+            "grid": "#cbd5e1",        # Slate 300
+        }
+
+
 def _create_boxplot_trace(name: str, scores: list[float], **kwargs: Any) -> go.Box:
     """Create a standardized Plotly Box trace with uniform styling."""
     return go.Box(

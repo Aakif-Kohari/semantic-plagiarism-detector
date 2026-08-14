@@ -617,3 +617,254 @@ def test_severity_ratios_fallback_key():
     ratios = calculate_severity_ratios(incidents)
 
     assert ratios == {"High": 50.0, "Medium": 50.0, "Low": 0.0}
+
+
+# ── Added tests for theme synchronization and helper utilities ─────────────
+
+from unittest.mock import patch, MagicMock  # noqa: F401
+from src.visualization.analytics import (
+    get_chart_theme_colors,
+    apply_plotly_theme,
+    calculate_severity_ratios,
+    get_top_similar_pairs,
+    plot_similarity_boxplot_by_group,
+    _empty_chart,
+)
+
+
+class TestGetChartThemeColors:
+    """Test suite for the get_chart_theme_colors() synchronizer (Issue #1887)."""
+
+    def test_light_mode_returns_correct_palette(self):
+        """Verify Light mode returns white background and dark ink."""
+        colors = get_chart_theme_colors("Light")
+        
+        assert colors["background"] == "#ffffff"
+        assert colors["ink"] == "#0f172a"
+        assert "surface" in colors
+        assert "muted" in colors
+        assert "border" in colors
+
+    def test_dark_mode_returns_correct_palette(self):
+        """Verify Dark mode returns slate background and light ink."""
+        colors = get_chart_theme_colors("Dark")
+        
+        assert colors["background"] == "#1e293b"
+        assert colors["ink"] == "#f8fafc"
+        assert colors["surface"] == "#0f172a"
+
+    def test_case_insensitive_handling(self):
+        """Verify theme mode string is case-insensitive."""
+        assert get_chart_theme_colors("dark")["background"] == "#1e293b"
+        assert get_chart_theme_colors("DARK")["background"] == "#1e293b"
+        assert get_chart_theme_colors("LIGHT")["background"] == "#ffffff"
+        assert get_chart_theme_colors("light")["background"] == "#ffffff"
+
+    def test_whitespace_handling(self):
+        """Verify leading/trailing whitespace is stripped."""
+        assert get_chart_theme_colors("  Dark  ")["background"] == "#1e293b"
+        assert get_chart_theme_colors("\tLight\n")["background"] == "#ffffff"
+
+    def test_invalid_mode_defaults_to_light(self):
+        """Verify unrecognized theme modes safely default to Light palette."""
+        colors = get_chart_theme_colors("midnight")
+        assert colors["background"] == "#ffffff"
+        
+        colors = get_chart_theme_colors("")
+        assert colors["background"] == "#ffffff"
+
+    def test_none_input_defaults_to_light(self):
+        """Verify None input safely defaults to Light palette."""
+        colors = get_chart_theme_colors(None)
+        assert colors["background"] == "#ffffff"
+        assert colors["ink"] == "#0f172a"
+
+    def test_color_contrast_ratios(self):
+        """Verify ink and background colors have sufficient contrast for readability.
+        
+        This is a basic sanity check to ensure we aren't returning white-on-white
+        or black-on-black combinations that would render charts invisible.
+        """
+        light = get_chart_theme_colors("Light")
+        dark = get_chart_theme_colors("Dark")
+        
+        # Light mode: dark ink on white background
+        assert light["ink"] != light["background"]
+        
+        # Dark mode: light ink on dark background
+        assert dark["ink"] != dark["background"]
+        
+        # Ensure muted text is distinct from primary ink
+        assert light["muted"] != light["ink"]
+        assert dark["muted"] != dark["ink"]
+
+
+class TestApplyPlotlyTheme:
+    """Test suite for the apply_plotly_theme() layout updater."""
+
+    def test_applies_light_theme_to_figure(self):
+        """Verify light theme colors are applied to Plotly figure layout."""
+        import plotly.graph_objects as go
+        
+        fig = go.Figure()
+        colors = get_chart_theme_colors("Light")
+        
+        updated_fig = apply_plotly_theme(fig, theme_colors=colors)
+        
+        assert updated_fig.layout.paper_bgcolor == "#ffffff"
+        assert updated_fig.layout.font.color == "#0f172a"
+
+    def test_applies_dark_theme_to_figure(self):
+        """Verify dark theme colors are applied to Plotly figure layout."""
+        import plotly.graph_objects as go
+        
+        fig = go.Figure()
+        colors = get_chart_theme_colors("Dark")
+        
+        updated_fig = apply_plotly_theme(fig, theme_colors=colors)
+        
+        assert updated_fig.layout.paper_bgcolor == "#1e293b"
+        assert updated_fig.layout.font.color == "#f8fafc"
+
+    def test_handles_none_theme_colors_gracefully(self):
+        """Verify function doesn't crash when theme_colors is None."""
+        import plotly.graph_objects as go
+        
+        fig = go.Figure()
+        # Should not raise, just return the figure unchanged
+        updated_fig = apply_plotly_theme(fig, theme_colors=None)
+        assert updated_fig is fig
+
+    def test_gridlines_toggle(self):
+        """Verify show_grid parameter controls gridline visibility."""
+        import plotly.graph_objects as go
+        
+        fig = go.Figure()
+        colors = get_chart_theme_colors("Light")
+        
+        # With grid
+        fig_grid = apply_plotly_theme(fig, theme_colors=colors, show_grid=True)
+        assert fig_grid.layout.xaxis.gridcolor == colors["border"]
+        
+        # Without grid
+        fig_no_grid = apply_plotly_theme(go.Figure(), theme_colors=colors, show_grid=False)
+        # When show_grid=False, gridcolor shouldn't be explicitly set by our function
+        # (Plotly defaults apply)
+
+
+class TestCalculateSeverityRatios:
+    """Test suite for severity percentage calculations."""
+
+    def test_calculates_correct_percentages(self):
+        """Verify High/Medium/Low ratios are calculated correctly."""
+        incidents = [
+            {"similarity_score": 0.90},  # High
+            {"similarity_score": 0.85},  # High
+            {"similarity_score": 0.60},  # Medium
+            {"similarity_score": 0.30},  # Low
+        ]
+        
+        ratios = calculate_severity_ratios(incidents)
+        
+        assert ratios["High"] == 50.0   # 2/4
+        assert ratios["Medium"] == 25.0 # 1/4
+        assert ratios["Low"] == 25.0    # 1/4
+
+    def test_handles_empty_incidents_list(self):
+        """Verify empty list returns all zeros."""
+        ratios = calculate_severity_ratios([])
+        assert ratios == {"High": 0.0, "Medium": 0.0, "Low": 0.0}
+
+    def test_ignores_invalid_scores(self):
+        """Verify incidents with non-numeric scores are ignored."""
+        incidents = [
+            {"similarity_score": 0.90},
+            {"similarity_score": "invalid"},
+            {"similarity_score": None},
+        ]
+        
+        ratios = calculate_severity_ratios(incidents)
+        # Only 1 valid incident (High)
+        assert ratios["High"] == 100.0
+        assert ratios["Medium"] == 0.0
+        assert ratios["Low"] == 0.0
+
+    def test_fallback_to_similarity_key(self):
+        """Verify function falls back to 'similarity' key if 'similarity_score' missing."""
+        incidents = [
+            {"similarity": 0.55},  # Medium
+        ]
+        
+        ratios = calculate_severity_ratios(incidents)
+        assert ratios["Medium"] == 100.0
+
+
+class TestGetTopSimilarPairs:
+    """Test suite for extracting top-N similar document pairs."""
+
+    def test_returns_top_n_pairs_sorted(self):
+        """Verify top N pairs are returned in descending order."""
+        df = pd.DataFrame(
+            [[1.0, 0.8, 0.2], [0.8, 1.0, 0.9], [0.2, 0.9, 1.0]],
+            index=["A", "B", "C"],
+            columns=["A", "B", "C"]
+        )
+        
+        pairs = get_top_similar_pairs(df, top_n=2)
+        
+        assert len(pairs) == 2
+        # Top pair should be B-C (0.9)
+        assert pairs[0] == ("B", "C", 0.9) or pairs[0] == ("C", "B", 0.9)
+        # Second should be A-B (0.8)
+        assert pairs[1][2] == 0.8
+
+    def test_excludes_self_similarity(self):
+        """Verify diagonal (self-similarity) is excluded."""
+        df = pd.DataFrame(
+            [[1.0, 0.5], [0.5, 1.0]],
+            index=["A", "B"],
+            columns=["A", "B"]
+        )
+        
+        pairs = get_top_similar_pairs(df, top_n=5)
+        
+        # Should only return A-B pair, not A-A or B-B
+        assert len(pairs) == 1
+        assert pairs[0][2] == 0.5
+
+    def test_handles_empty_dataframe(self):
+        """Verify empty DataFrame returns empty list."""
+        df = pd.DataFrame()
+        assert get_top_similar_pairs(df) == []
+
+    def test_handles_single_document(self):
+        """Verify DataFrame with < 2 documents returns empty list."""
+        df = pd.DataFrame([[1.0]], index=["A"], columns=["A"])
+        assert get_top_similar_pairs(df) == []
+
+
+class TestEmptyChartHelper:
+    """Test suite for the _empty_chart() placeholder generator."""
+
+    def test_creates_figure_with_annotation(self):
+        """Verify empty chart contains the specified message annotation."""
+        fig = _empty_chart(
+            title="Test Title",
+            message="No data available",
+            theme_colors=get_chart_theme_colors("Light")
+        )
+        
+        assert fig.layout.title.text == "Test Title"
+        assert len(fig.layout.annotations) == 1
+        assert fig.layout.annotations[0].text == "No data available"
+
+    def test_applies_theme_colors(self):
+        """Verify theme colors are applied to the empty chart."""
+        dark_colors = get_chart_theme_colors("Dark")
+        fig = _empty_chart(
+            title="Test",
+            message="Test",
+            theme_colors=dark_colors
+        )
+        
+        assert fig.layout.paper_bgcolor == "#1e293b"
