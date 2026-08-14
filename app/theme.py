@@ -663,23 +663,23 @@ def inject_css() -> None:
 
         /* ── High severity row accent border (Issue #1569) ───────────── */
 
-        .high-severity-row {
+        .high-severity-row {{
             border-left: 4px solid #ef4444 !important;
             background-color: rgba(239, 68, 68, 0.05) !important;
-        }
+        }}
 
         /* ── Soft-deleted document row styling (Issue #1732) ─────────── */
 
-        .trash-document-row {
+        .trash-document-row {{
             opacity: 0.6 !important;
             color: #6b7280 !important;
-        }
+        }}
 
         .trash-document-row .doc-title,
         .trash-document-row title,
-        .trash-document-row .document-title {
+        .trash-document-row .document-title {{
             text-decoration: line-through !important;
-        }
+        }}
 
         /* ── Warning list container animation (#369) ─────────────────
            The threshold slider re-filters the warning list on every
@@ -1320,11 +1320,12 @@ def tier_from_severity_label(label: str) -> str:
 def tier_color(tier: str) -> str:
     """Returns color hex associated with a tier."""
     colors = get_colors()
-    if tier == "high":
+    tier_lower = tier.lower() if isinstance(tier, str) else ""
+    if tier_lower == "high":
         return colors["danger"]
-    elif tier == "medium":
+    elif tier_lower == "medium":
         return colors["warning"]
-    elif tier == "low":
+    elif tier_lower == "low":
         return colors["success"]
     return colors["neutral_soft"]
 
