@@ -639,9 +639,8 @@ def render_warning_controls(
     )
 
     summary_flags = [
-        flag
-        for flag in display_flags
-        if flag["severity"] in ("High", "Medium")
+        nf for flag in flags
+        if (nf := _normalise_warning(flag))["severity"] in ("High", "Medium")
     ]
     if not summary_flags:
         markdown_text = get_text("warn_no_summary", lang=lang_code)
