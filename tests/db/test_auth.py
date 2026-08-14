@@ -117,8 +117,11 @@ def test_update_password():
 
 
 def test_delete_user():
-    delete_user("hnsdf9")
-    assert get_user_role("hnsdf9") is None
+    user = f"user_{uuid.uuid4().hex[:8]}"
+    add_user(user, "SecurePass123!")
+    assert get_user_role(user) is not None
+    delete_user(user)
+    assert get_user_role(user) is None
 
 
 import unittest.mock as mock
