@@ -145,6 +145,21 @@ from app.components.audit_compliance_engine import (
     PolicyType,
     Regulation,
 )
+# ── Workflow Automation Imports ──────────────────────────────────────────
+from app.components.workflow_automation import (
+    render_workflow_automation,
+    initialize_workflow_automation,
+    WorkflowEngine,
+    Workflow,
+    WorkflowExecution,
+    Task,
+    ApprovalRequest,
+    WorkflowTemplate,
+    WorkflowStatus,
+    TaskStatus,
+    TriggerType,
+    WorkflowCategory,
+)
 # ── Collaboration Hub Imports ────────────────────────────────────────────
 from app.components.collaboration_hub import (
     render_collaboration_hub,
