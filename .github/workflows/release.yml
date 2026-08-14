@@ -47,26 +47,12 @@ jobs:
 
 
 
-      - name: Generate Changelog
-        id: changelog
-        run: |
-          # Placeholder for changelog generation logic
-          # A simple git log command capturing commits since the previous tag
-          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-          echo "### Changelog" > CHANGELOG.md
-          if [ -z "$PREVIOUS_TAG" ]; then
-            git log --pretty=format:"* %s (%h)" >> CHANGELOG.md
-          else
-            git log ${PREVIOUS_TAG}..HEAD --pretty=format:"* %s (%h)" >> CHANGELOG.md
-          fi
-          echo "Changelog generated."
-
       - name: Create Release Draft
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.validate_tag.outputs.tag_name }}
           name: Release ${{ steps.validate_tag.outputs.tag_name }}
-          body_path: CHANGELOG.md
+          generate_release_notes: true
           draft: true
           prerelease: ${{ contains(github.ref, '-') }}
         env:
