@@ -51,7 +51,7 @@ TARGET_LANGUAGE = "en"
 # Avoids heavy dependencies like langdetect for fast chunk-level detection.
 _LANGUAGE_HEURISTICS = {
     "es": re.compile(
-        r"\b(el|la|los|las|de|del|en|y|a|que|es|por|con|para|se|su)\b",
+        r"\b(el|la|los|las|de|del|en|que|es|por|con|para|se|su)\b",
         re.IGNORECASE,
     ),
     "fr": re.compile(
@@ -114,8 +114,8 @@ def detect_chunk_language(text: str) -> str:
     # Find the language with the highest stop word density
     if matches:
         best_lang = max(matches, key=matches.get)
-        # Require at least 10% of words to be stop words to avoid false positives
-        if matches[best_lang] / total_words > 0.10:
+        # Require at least 15% of words to be stop words to avoid false positives
+        if matches[best_lang] / total_words > 0.15:
             return best_lang
 
     return TARGET_LANGUAGE
