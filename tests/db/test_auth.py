@@ -139,14 +139,24 @@ def mock_audit_db():
             details TEXT
         )
     """)
+    from datetime import datetime, timedelta
+
+    now = datetime.now()
+    t1 = (now - timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
+    t2 = (now - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S")
+    t3 = (now - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+
     conn.execute(
-        "INSERT INTO security_audit_log (event_type, username, timestamp) VALUES ('login', 'alice', '2023-01-01 10:00:00')"
+        "INSERT INTO security_audit_log (event_type, username, timestamp) VALUES (?, ?, ?)",
+        ("login", "alice", t1),
     )
     conn.execute(
-        "INSERT INTO security_audit_log (event_type, username, timestamp) VALUES ('login', 'bob', '2023-01-02 10:00:00')"
+        "INSERT INTO security_audit_log (event_type, username, timestamp) VALUES (?, ?, ?)",
+        ("login", "bob", t2),
     )
     conn.execute(
-        "INSERT INTO security_audit_log (event_type, username, timestamp) VALUES ('logout', 'alice', '2023-01-03 10:00:00')"
+        "INSERT INTO security_audit_log (event_type, username, timestamp) VALUES (?, ?, ?)",
+        ("logout", "alice", t3),
     )
     conn.commit()
 
