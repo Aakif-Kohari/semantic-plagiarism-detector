@@ -38,5 +38,5 @@ class SessionKeys:
     CLASS_FILTER_SELECTBOX = "class_filter_selectbox"
     AUDIT_LOG_PAGE = "audit_log_page"
     FORCE_DARK_CHARTS = "force_dark_charts"
-SESSION_START_TIME = "session_start_time"
+    SESSION_START_TIME = "session_start_time"
     COMPACT_VIEW = "compact_view"

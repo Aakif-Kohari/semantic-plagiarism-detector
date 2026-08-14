@@ -146,7 +146,6 @@ def init_corpus_db() -> None:
         if not SCHEMA_PATH.exists():
             raise FileNotFoundError(f"Schema file not found at: {SCHEMA_PATH}")
 
-feat/scan-history-median-similarity-2339
         conn.execute("""
             CREATE TABLE IF NOT EXISTS chunks (
                 vector_id INTEGER PRIMARY KEY,
@@ -209,7 +208,6 @@ feat/scan-history-median-similarity-2339
 
         schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
         conn.executescript(schema_sql)
- main
 
         # 2. RUN SCHEMA MIGRATIONS / ALTER TABLES AFTER CREATION
         columns_to_ensure = [
