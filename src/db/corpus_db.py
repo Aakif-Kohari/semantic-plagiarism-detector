@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 # Seed the corpus DB path from the centralized app_config.
 _DB_PATH = os.path.abspath(str(CORPUS_DB_PATH))
+SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
 
 _connection_pool = threading.local()
 
@@ -112,86 +113,11 @@ def close_connections() -> None:
 def init_corpus_db() -> None:
     """Create or upgrade corpus.db without deleting persisted data."""
     with _connect() as conn:
-        # 1. ALWAYS CREATE TABLES FIRST
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS documents (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                filename TEXT UNIQUE NOT NULL,
-                file_hash TEXT UNIQUE NOT NULL,
-                upload_date TEXT NOT NULL,
-                class_section TEXT,
-                student_name TEXT,
-                assignment_title TEXT,
-                pdf_author TEXT,
-                pdf_creation_date TEXT,
-                pdf_title TEXT,
-                tags TEXT,
-                detected_language TEXT,
-                owner TEXT,
-                is_deleted INTEGER DEFAULT 0,
-                deleted_at TEXT,
-                created_at TEXT
-            )
-            """)
+        if not SCHEMA_PATH.exists():
+            raise FileNotFoundError(f"Schema file not found at: {SCHEMA_PATH}")
 
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS chunks (
-                vector_id INTEGER PRIMARY KEY,
-                filename TEXT NOT NULL,
-                chunk_index INTEGER NOT NULL,
-                chunk_text TEXT NOT NULL,
-                embedding BLOB NOT NULL,
-                FOREIGN KEY (filename)
-                REFERENCES documents(filename)
-                ON DELETE CASCADE
-            )
-            """)
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS deleted_chunks (
-                vector_id INTEGER PRIMARY KEY,
-                filename TEXT NOT NULL,
-                chunk_index INTEGER NOT NULL,
-                chunk_text TEXT NOT NULL,
-                embedding BLOB NOT NULL
-            )
-            """)
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS plagiarism_incidents (
-                incident_id TEXT PRIMARY KEY,
-                document_a TEXT NOT NULL,
-                document_b TEXT NOT NULL,
-                similarity_score REAL NOT NULL,
-                severity_rank TEXT NOT NULL,
-                review_status TEXT NOT NULL DEFAULT 'Pending'
-                    CHECK (review_status IN ('Pending', 'Resolved')),
-                date_flagged TEXT NOT NULL,
-                last_seen TEXT NOT NULL,
-                threshold_at_time_of_flag REAL DEFAULT 0.0
-            )
-            """)
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS false_positives (
-                document_a TEXT,
-                document_b TEXT,
-                date_dismissed TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (document_a, document_b)
-            )
-            """)
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS scan_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                document_count INTEGER NOT NULL,
-                avg_similarity REAL NOT NULL,
-                max_similarity REAL NOT NULL,
-                flagged_count INTEGER NOT NULL,
-                threshold_used REAL NOT NULL
-            )
-            """)
+        schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
+        conn.executescript(schema_sql)
 
         # 2. RUN SCHEMA MIGRATIONS / ALTER TABLES AFTER CREATION
         columns_to_ensure = [
