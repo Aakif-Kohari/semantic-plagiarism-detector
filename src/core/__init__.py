@@ -23,7 +23,6 @@ from .faiss_index import (
     save_index,
     search_similar_chunks,
 )
-from .pipeline import ChunkRecord as PipelineChunkRecord  # noqa: F401
 from .pipeline import run_extraction_pipeline, run_pipeline
 from .similarity import (
     PLAGIARISM_THRESHOLD,
