@@ -2010,3 +2010,13 @@ def extract_texts(
         results[name] = raw_texts.get(name, "")
 
     return results
+class ParsedDocxText(str):
+    """Represents parsed text from a docx file along with its associated headings.
+
+    > **Warning:** The `word_headings` attribute is lost if the string is modified 
+    > via standard `str` operations (such as `.strip()`, concatenation `+`, or slicing).
+    """
+    def __new__(cls, text: str, word_headings: list = None):
+        obj = super().__new__(cls, text)
+        obj.word_headings = word_headings or []
+        return obj
