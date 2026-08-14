@@ -103,6 +103,16 @@ class PayloadCompressor:
     # Threshold above which data is compressed (e.g., 512KB)
     COMPRESSION_THRESHOLD_BYTES = 512 * 1024
 
+    @classmethod
+    def get_threshold(cls) -> int:
+        raw_threshold = os.getenv("REDIS_COMPRESSION_THRESHOLD", "").strip()
+        if raw_threshold:
+            try:
+                return int(raw_threshold)
+            except ValueError:
+                pass
+        return cls.COMPRESSION_THRESHOLD_BYTES
+
     # Magic header bytes to distinguish compressed vs uncompressed payloads in Redis
     MAGIC_HEADER = b"ZLIB_COMPRESSED_V1::"
 
@@ -117,7 +127,7 @@ class PayloadCompressor:
         Returns:
             bytes: Compressed bytes with header, or original bytes if too small.
         """
-        if len(data) < cls.COMPRESSION_THRESHOLD_BYTES:
+        if len(data) < cls.get_threshold():
             return data
 
         try:
