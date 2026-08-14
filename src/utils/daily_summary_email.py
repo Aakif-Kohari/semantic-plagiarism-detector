@@ -9,6 +9,7 @@ import logging
 import os
 import smtplib
 from datetime import datetime, timedelta, timezone
+from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any, Callable, Dict, List, Optional
@@ -241,6 +242,7 @@ def send_email(
     subject: str,
     html_body: str,
     status_callback: Optional[Callable[[bool, str], None]] = None,
+    attachment_filename: str = "daily_plagiarism_summary.csv",
 ) -> bool:
     """
     Send an email using SMTP.
@@ -282,6 +284,13 @@ def send_email(
 
         html_part = MIMEText(html_body, "html")
         msg_obj.attach(html_part)
+        attachment = MIMEApplication(b"", _subtype="csv")
+        attachment.add_header(
+          "Content-Disposition",
+          "attachment",
+          filename=attachment_filename,
+      )
+        msg_obj.attach(attachment)
 
         if smtp_port == 465:
             logger.debug("Using SMTP_SSL (implicit SSL) on port %d", smtp_port)
