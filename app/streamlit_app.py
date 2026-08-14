@@ -128,6 +128,23 @@ from app.components.advanced_analytics_engine import (
     InsightType,
     ForecastPeriod,
 )
+# ── Audit Compliance Engine Imports ──────────────────────────────────────
+from app.components.audit_compliance_engine import (
+    render_audit_compliance_engine,
+    initialize_audit_compliance_engine,
+    AuditTrailManager,
+    PolicyEnforcer,
+    ComplianceReportGenerator,
+    CertificateManager,
+    AuditEvent,
+    PolicyViolation,
+    ComplianceReport,
+    ComplianceCertificate,
+    ComplianceStatus,
+    AuditSeverity,
+    PolicyType,
+    Regulation,
+)
 # ── Collaboration Hub Imports ────────────────────────────────────────────
 from app.components.collaboration_hub import (
     render_collaboration_hub,
