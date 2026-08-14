@@ -1,3 +1,5 @@
+from typing import TYPE_CHECKING
+
 from .config import (
     BrandingConfig,
     get_branding_config,
@@ -44,6 +46,13 @@ from .tag_manager import TagManager, sanitize_tag_name
 from .text_chunking import chunk_by_sentences, chunk_document, chunk_documents
 from .translator import translate_text
 from .webhook import dispatch_plagiarism_alert, send_plagiarism_alert
+
+# TYPE_CHECKING block for lazy imports (Issue #2363)
+# This satisfies static analysis tools (mypy, pylance) that would otherwise
+# complain that src.core has no attribute 'with_sqlite_retry', even though
+# it's dynamically resolved via __getattr__ and listed in __all__.
+if TYPE_CHECKING:
+    from .concurrency import with_sqlite_retry
 
 __all__ = [
     "BaseSimilarityEngine",
