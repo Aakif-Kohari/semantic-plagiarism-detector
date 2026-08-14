@@ -76,7 +76,7 @@ def plot_similarity_boxplot_by_group(
     Returns:
         Plotly Figure object with one box trace per group.
     """
-if not scores_dict:
+    if not scores_dict:
         return _empty_chart(
             title="Similarity Score Quartile Distribution",
             message="No similarity scores available to plot",
@@ -305,7 +305,7 @@ def plot_high_severity_trends(
     theme_override: str | None = None,
 ) -> go.Figure:
     """Create an interactive line chart showing High severity plagiarism incidents over time."""
-if not trend_data:
+    if not trend_data:
         return _empty_chart(
             title="High Severity Plagiarism Trends (Last 30 Days)",
             message="No High severity incidents recorded in the specified period",
@@ -365,7 +365,7 @@ def plot_most_plagiarized_documents(
     theme_override: str | None = None,
 ) -> go.Figure:
     """Create a bar chart showing the most frequently plagiarized documents."""
-if not doc_data:
+    if not doc_data:
         return _empty_chart(
             title="Most Frequently Plagiarized Documents",
             message="No plagiarism incidents recorded",
@@ -422,7 +422,7 @@ def plot_similarity_distribution(
     theme_colors: dict[str, str] | None = None,
 ) -> go.Figure:
     """Create a histogram showing the distribution of all pairwise similarity scores."""
-if sim_matrix.empty or sim_matrix.shape[0] < 2:
+    if sim_matrix.empty or sim_matrix.shape[0] < 2:
         return _empty_chart(
             title=title,
             message="Not enough documents to compute a similarity distribution",
@@ -471,7 +471,7 @@ def plot_document_sizes(
     theme_colors: dict[str, str] | None = None,
 ) -> go.Figure:
     """Create a bar chart visualizing document word counts."""
-if not word_counts:
+    if not word_counts:
         return _empty_chart(
             title="Document Word Counts",
             message="No documents currently in the database",
@@ -530,7 +530,7 @@ def plot_similarity_boxplot(
             continue
         rows.append({"assignment_title": str(title), "similarity_score": score})
 
-if not rows:
+    if not rows:
         return _empty_chart(
             title="Similarity Score Distribution by Assignment",
             message="No similarity scores recorded for the selected incidents",
@@ -565,7 +565,7 @@ def plot_severity_donut_chart(
     theme_colors: dict[str, str] | None = None,
 ) -> go.Figure:
     """Create a donut chart showing the distribution of plagiarism incident severities."""
-if not incidents:
+    if not incidents:
         return _empty_chart(
             title="Plagiarism Incident Severity Distribution",
             message="No plagiarism incidents recorded",
@@ -627,7 +627,7 @@ def plot_similarity_histogram(
     Returns:
         A Plotly figure with the similarity score histogram.
     """
-if not scores:
+    if not scores:
         return _empty_chart(
             title="Similarity Score Distribution",
             message="No similarity scores available to plot",
@@ -676,7 +676,7 @@ def plot_similarity_percentiles(
         except (TypeError, ValueError):
             continue
 
-if not scores:
+    if not scores:
         return _empty_chart(
             title="Similarity Score Percentile Breakdown",
             message="No similarity scores available to compute percentiles",
@@ -765,7 +765,7 @@ def plot_hierarchical_dendrogram(
     fig = go.Figure()
 
     # ── Validate input ───────────────────────────────────────────────
-if similarity_matrix is None or similarity_matrix.empty:
+    if similarity_matrix is None or similarity_matrix.empty:
         return _empty_chart(
             title=title,
             message="No similarity data available to build a dendrogram",
