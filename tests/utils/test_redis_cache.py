@@ -901,3 +901,51 @@ def test_redis_payload_compression_threshold_configurable(monkeypatch):
     assert PayloadCompressor.get_threshold() == 512 * 1024
 
 
+class TestRedisCacheTTLConfiguration:
+    """Test suite for environment-configurable TTL values (Issue #2323)."""
+
+    def test_default_ttl_values_when_env_not_set(self, monkeypatch):
+        """Verify hardcoded defaults are used when env vars are missing."""
+        # Clear any existing env vars
+        for var in ["SESSION_TTL", "FAISS_INDEX_TTL", "ANALYSIS_RESULTS_TTL", 
+                    "LOGIN_LOCKOUT_TTL", "UPLOAD_RATE_TTL", "DEFAULT_TTL"]:
+            monkeypatch.delenv(var, raising=False)
+            
+        # Re-import to trigger module-level evaluation
+        import importlib
+        import src.utils.redis_cache as redis_cache_module
+        importlib.reload(redis_cache_module)
+        
+        assert redis_cache_module.SESSION_TTL == 15 * 60
+        assert redis_cache_module.FAISS_INDEX_TTL == 24 * 60 * 60
+        assert redis_cache_module.ANALYSIS_RESULTS_TTL == 2 * 60 * 60
+        assert redis_cache_module.LOGIN_LOCKOUT_TTL == 15 * 60
+        assert redis_cache_module.UPLOAD_RATE_TTL == 60 * 60
+        assert redis_cache_module.DEFAULT_TTL == 24 * 60 * 60
+
+    def test_custom_ttl_values_from_env(self, monkeypatch):
+        """Verify custom TTL values are loaded from environment variables."""
+        monkeypatch.setenv("SESSION_TTL", "3600")  # 1 hour
+        monkeypatch.setenv("FAISS_INDEX_TTL", "7200")  # 2 hours
+        monkeypatch.setenv("LOGIN_LOCKOUT_TTL", "900") # 15 mins
+        
+        import importlib
+        import src.utils.redis_cache as redis_cache_module
+        importlib.reload(redis_cache_module)
+        
+        assert redis_cache_module.SESSION_TTL == 3600
+        assert redis_cache_module.FAISS_INDEX_TTL == 7200
+        assert redis_cache_module.LOGIN_LOCKOUT_TTL == 900
+        
+    def test_invalid_env_values_fallback_or_raise(self, monkeypatch):
+        """Verify behavior when env vars contain non-integer strings."""
+        monkeypatch.setenv("SESSION_TTL", "invalid_string")
+        
+        import importlib
+        import src.utils.redis_cache as redis_cache_module
+        
+        # int() on a non-numeric string raises ValueError at module load time
+        import pytest
+        with pytest.raises(ValueError):
+            importlib.reload(redis_cache_module)
+

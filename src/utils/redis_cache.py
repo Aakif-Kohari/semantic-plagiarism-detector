@@ -70,13 +70,14 @@ REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", None)
 REDIS_URL = os.getenv("REDIS_URL", f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}")
 REDIS_TIMEOUT_SECONDS = float(os.getenv("REDIS_TIMEOUT_SECONDS", "2.0"))
 
-# TTL settings (in seconds)
-SESSION_TTL = 15 * 60  # 15 minutes for session state
-FAISS_INDEX_TTL = 24 * 60 * 60  # 24 hours for FAISS index cache
-ANALYSIS_RESULTS_TTL = 2 * 60 * 60  # 2 hours for analysis results
-LOGIN_LOCKOUT_TTL = 15 * 60  # 15 minutes for login lockout
-UPLOAD_RATE_TTL = 60 * 60  # 1 hour for upload rate limiting
-DEFAULT_TTL = 24 * 60 * 60  # 24 hours fallback for keys without explicit TTL
+# TTL settings (in seconds) - Configurable via environment variables (Issue #2323)
+# Defaults are preserved for backward compatibility when env vars are not set
+SESSION_TTL = int(os.getenv("SESSION_TTL", str(15 * 60)))  # 15 minutes for session state
+FAISS_INDEX_TTL = int(os.getenv("FAISS_INDEX_TTL", str(24 * 60 * 60)))  # 24 hours for FAISS index cache
+ANALYSIS_RESULTS_TTL = int(os.getenv("ANALYSIS_RESULTS_TTL", str(2 * 60 * 60)))  # 2 hours for analysis results
+LOGIN_LOCKOUT_TTL = int(os.getenv("LOGIN_LOCKOUT_TTL", str(15 * 60)))  # 15 minutes for login lockout
+UPLOAD_RATE_TTL = int(os.getenv("UPLOAD_RATE_TTL", str(60 * 60)))  # 1 hour for upload rate limiting
+DEFAULT_TTL = int(os.getenv("DEFAULT_TTL", str(24 * 60 * 60)))  # 24 hours fallback for keys without explicit TTL
 
 
 # ============================================================================
