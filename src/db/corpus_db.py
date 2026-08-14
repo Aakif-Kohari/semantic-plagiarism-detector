@@ -146,8 +146,70 @@ def init_corpus_db() -> None:
         if not SCHEMA_PATH.exists():
             raise FileNotFoundError(f"Schema file not found at: {SCHEMA_PATH}")
 
+feat/scan-history-median-similarity-2339
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS chunks (
+                vector_id INTEGER PRIMARY KEY,
+                filename TEXT NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                chunk_text TEXT NOT NULL,
+                embedding BLOB NOT NULL,
+                FOREIGN KEY (filename)
+                REFERENCES documents(filename)
+                ON DELETE CASCADE
+            )
+            """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS deleted_chunks (
+                vector_id INTEGER PRIMARY KEY,
+                filename TEXT NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                chunk_text TEXT NOT NULL,
+                embedding BLOB NOT NULL
+            )
+            """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS plagiarism_incidents (
+                incident_id TEXT PRIMARY KEY,
+                document_a TEXT NOT NULL,
+                document_b TEXT NOT NULL,
+                similarity_score REAL NOT NULL,
+                severity_rank TEXT NOT NULL,
+                review_status TEXT NOT NULL DEFAULT 'Pending'
+                    CHECK (review_status IN ('Pending', 'Resolved')),
+                date_flagged TEXT NOT NULL,
+                last_seen TEXT NOT NULL,
+                threshold_at_time_of_flag REAL DEFAULT 0.0
+            )
+            """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS false_positives (
+                document_a TEXT,
+                document_b TEXT,
+                date_dismissed TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (document_a, document_b)
+            )
+            """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS scan_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                document_count INTEGER NOT NULL,
+                avg_similarity REAL NOT NULL,
+                max_similarity REAL NOT NULL,
+                median_similarity REAL NOT NULL DEFAULT 0.0,
+                flagged_count INTEGER NOT NULL,
+                threshold_used REAL NOT NULL
+            )
+            """)
+
         schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
         conn.executescript(schema_sql)
+ main
 
         # 2. RUN SCHEMA MIGRATIONS / ALTER TABLES AFTER CREATION
         columns_to_ensure = [
@@ -172,6 +234,10 @@ def init_corpus_db() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at)"
         )
+
+        if not column_exists(conn, "scan_history", "median_similarity"):
+            conn.execute("ALTER TABLE scan_history ADD COLUMN median_similarity REAL DEFAULT 0.0")
+
 
         # Issue #1359: Create FTS5 virtual table + sync triggers for full-text
         # search. Also created by migration_012, but we create it here too
