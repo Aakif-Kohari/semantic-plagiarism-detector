@@ -330,6 +330,17 @@ def build_visualization_lazily(
 
     return factory()
 
+def get_chart_theme_colors(theme_mode: str) -> dict:
+    if theme_mode.lower() == "dark":
+        return {
+            "background": "#1e293b",
+            "font": "#f8fafc",
+        }
+
+    return {
+        "background": "#ffffff",
+        "font": "#0f172a",
+    }
 
 def get_top_similar_pairs(
     similarity_df: pd.DataFrame,
@@ -371,13 +382,37 @@ def plot_high_severity_trends(
 ) -> go.Figure:
     """Create an interactive line chart showing High severity plagiarism incidents over time."""
     if not trend_data:
+
+        # Return empty chart with message
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No High severity incidents recorded in the specified period",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
+            font=dict(size=16, color="gray"),
+        )
+        colors = get_chart_theme_colors(theme_mode)
+        fig.update_layout(
+
         return _empty_chart(
+
             title="High Severity Plagiarism Trends (Last 30 Days)",
             message="No High severity incidents recorded in the specified period",
             theme_colors=theme_colors,
             show_grid=show_grid,
             xaxis_title="Date",
             yaxis_title="Number of High Severity Incidents",
+
+            height=400,
+            autosize=True,
+            paper_bgcolor=colors["background"],
+            plot_bgcolor=colors["background"],
+            font=dict(color=colors["font"]),
+
+
         )
     df = pd.DataFrame(trend_data)
     df["date"] = pd.to_datetime(df["date"])

@@ -163,8 +163,41 @@ def test_send_email_success(mock_smtp):
     mock_server.starttls.assert_called_once()
     mock_server.login.assert_called_once_with("test@example.com", "password")
     mock_server.send_message.assert_called_once()
+@patch("smtplib.SMTP")
+@patch.dict(
+    "os.environ",
+    {
+        "SMTP_SERVER": "smtp.example.com",
+        "SMTP_PORT": "587",
+        "SMTP_USERNAME": "test@example.com",
+        "SMTP_PASSWORD": "password",
+        "FROM_EMAIL": "test@example.com",
+    },
+)
+def test_send_email_custom_attachment_filename(mock_smtp):
+    """Test custom CSV attachment filename."""
+    mock_server = MagicMock()
+    mock_smtp.return_value.__enter__.return_value = mock_server
 
+    result = send_email(
+        ["recipient@example.com"],
+        "Test Subject",
+        "<p>Test Body</p>",
+        attachment_filename="custom_report.csv",
+    )
 
+    assert result is True
+
+    message = mock_server.send_message.call_args[0][0]
+
+    attachments = [
+        part
+        for part in message.walk()
+        if part.get_content_disposition() == "attachment"
+    ]
+
+    assert len(attachments) == 1
+    assert attachments[0].get_filename() == "custom_report.csv"
 @patch.dict("os.environ", {}, clear=True)
 def test_send_email_missing_config():
     """Test email sending with missing SMTP configuration."""
