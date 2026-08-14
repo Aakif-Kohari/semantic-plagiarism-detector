@@ -142,6 +142,35 @@ def get_backup_idle_timeout() -> int:
         return 30 * 60
 
 
+def get_rescan_interval_minutes() -> int:
+    """Return the configured scheduled plagiarism-rescan interval in minutes.
+
+    Continuous background rescanning (see ``src.core.scheduler``) is an
+    explicit opt-in: this returns ``0`` (disabled) unless
+    ``RESCAN_INTERVAL_MINUTES`` is set in the environment to a positive
+    integer.
+    """
+    try:
+        minutes = int(os.getenv("RESCAN_INTERVAL_MINUTES", "0"))
+        return max(0, minutes)
+    except ValueError:
+        return 0
+
+
+def get_rescan_grace_period_minutes() -> int:
+    """Return how far back (in minutes) a scheduled rescan looks for
+    "recently added" documents to re-check against the rest of the corpus.
+
+    Defaults to 60 minutes. Configurable via
+    ``RESCAN_GRACE_PERIOD_MINUTES``.
+    """
+    try:
+        minutes = int(os.getenv("RESCAN_GRACE_PERIOD_MINUTES", "60"))
+        return max(1, minutes)
+    except ValueError:
+        return 60
+
+
 def get_allowed_webhook_domains() -> list[str]:
     """Return the list of allowed webhook domain hostnames.
 
