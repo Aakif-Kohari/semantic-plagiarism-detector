@@ -45,7 +45,7 @@ MIN_DETECTION_CHARACTERS = 20
 # Target language for back-translation (primary corpus language)
 TARGET_LANGUAGE = "en"
 
-# ── Lightweight Language Detection Heuristics (Issue #1956) ──────────────────
+# ── Lightweight Language Detection Heuristics (Issue #1956, #2222) ────────────
 
 # Regex patterns for common stop words and character ranges.
 # Avoids heavy dependencies like langdetect for fast chunk-level detection.
@@ -60,6 +60,14 @@ _LANGUAGE_HEURISTICS = {
     ),
     "de": re.compile(
         r"\b(der|die|das|und|ist|von|zu|den|mit|sich|des|auf|für|ein|eine)\b",
+        re.IGNORECASE,
+    ),
+    "it": re.compile(
+        r"\b(il|la|le|di|e|che|un|una|in|per|con|da|si|del)\b",
+        re.IGNORECASE,
+    ),
+    "pt": re.compile(
+        r"\b(o|a|os|as|de|do|da|em|um|uma|e|que|para|por|com)\b",
         re.IGNORECASE,
     ),
     "zh": re.compile(r"[\u4e00-\u9fff]"),  # CJK Unified Ideographs
