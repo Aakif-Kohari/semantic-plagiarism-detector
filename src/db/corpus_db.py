@@ -75,16 +75,16 @@ def _connect():
     under concurrent requests."""
     path = os.path.abspath(_DB_PATH)
     try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
     except (OSError, PermissionError):
         path = str(FALLBACK_CORPUS_DB_PATH)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
 
     try:
         conn = sqlite3.connect(path, check_same_thread=False)
     except sqlite3.OperationalError:
         path = str(FALLBACK_CORPUS_DB_PATH)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(path, check_same_thread=False)
     conn.execute("PRAGMA foreign_keys = ON")
 
