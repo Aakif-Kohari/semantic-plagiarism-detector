@@ -188,6 +188,7 @@ def init_corpus_db() -> None:
                 document_count INTEGER NOT NULL,
                 avg_similarity REAL NOT NULL,
                 max_similarity REAL NOT NULL,
+                median_similarity REAL NOT NULL DEFAULT 0.0,
                 flagged_count INTEGER NOT NULL,
                 threshold_used REAL NOT NULL
             )
@@ -216,6 +217,10 @@ def init_corpus_db() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at)"
         )
+
+        if not column_exists(conn, "scan_history", "median_similarity"):
+            conn.execute("ALTER TABLE scan_history ADD COLUMN median_similarity REAL DEFAULT 0.0")
+
 
         # Issue #1359: Create FTS5 virtual table + sync triggers for full-text
         # search. Also created by migration_012, but we create it here too
