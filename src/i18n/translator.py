@@ -17,7 +17,6 @@ from typing import Any, Dict
 
 import streamlit as st
 
-
 logger = logging.getLogger(__name__)
 
 _I18N_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -29,8 +28,7 @@ _SUPPORTED_LANGUAGES = {
 }
 LANGUAGE_DISPLAY = _SUPPORTED_LANGUAGES
 DISPLAY_TO_CODE = {
-    display_name: code
-    for code, display_name in _SUPPORTED_LANGUAGES.items()
+    display_name: code for code, display_name in _SUPPORTED_LANGUAGES.items()
 }
 
 _translations: Dict[str, Dict[str, str]] = {}
@@ -51,15 +49,9 @@ def _load_translation_dictionary(
         loaded = json.load(translation_file)
 
     if not isinstance(loaded, dict):
-        raise ValueError(
-            "Translation file must contain a JSON object: "
-            f"{file_path}"
-        )
+        raise ValueError("Translation file must contain a JSON object: " f"{file_path}")
 
-    return {
-        str(key): str(value)
-        for key, value in loaded.items()
-    }
+    return {str(key): str(value) for key, value in loaded.items()}
 
 
 def load_translations() -> None:
@@ -88,9 +80,7 @@ def load_translations() -> None:
             continue
 
         try:
-            loaded_translations[lang_code] = (
-                _load_translation_dictionary(file_path)
-            )
+            loaded_translations[lang_code] = _load_translation_dictionary(file_path)
         except (
             OSError,
             json.JSONDecodeError,
@@ -118,15 +108,98 @@ def clear_translation_cache() -> None:
 load_translations()
 
 
+class _EscapedValue:
+    """Wrapper that HTML-escapes a value *after* its format spec is applied.
+
+    The previous implementation escaped values by calling ``html.escape(str(v))``
+    before substitution. That coerced every value to ``str``, so a translation
+    carrying a numeric format spec — ``"{ai_a:.1%}"``, which all four locale
+    files use — raised ``ValueError: Unknown format code '%' for object of
+    type 'str'``.
+
+    Deferring the escape to ``__format__`` lets ``str.format`` apply the spec to
+    the original object first, so ``{ai_a:.1%}`` still renders as ``85.0%`` and
+    only the resulting text is escaped.
+    """
+
+    __slots__ = ("_value",)
+
+    def __init__(self, value: Any) -> None:
+        self._value = value
+
+    def __format__(self, format_spec: str) -> str:
+        return html.escape(format(self._value, format_spec))
+
+    def __str__(self) -> str:
+        return html.escape(str(self._value))
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return f"_EscapedValue({self._value!r})"
+
+
+def format_text(
+    template: str,
+    escape_html: bool = True,
+    **kwargs: Any,
+) -> str:
+    """Substitute ``kwargs`` into ``template``, degrading instead of raising.
+
+    Args:
+        template: A ``str.format``-style template, typically from ``get_text``.
+        escape_html: When True (the default, preserving existing behaviour),
+            each substituted value is HTML-escaped after its format spec is
+            applied. Set False only for sinks that must receive raw text and
+            will never interpret entities -- for example a PDF report cell or
+            a CSV field, where ``&amp;`` would be shown literally.
+        **kwargs: Values to substitute.
+
+    Returns:
+        The formatted string, or the unmodified template if substitution fails.
+
+    Notes:
+        A translation file is data, not code: a missing placeholder, a stray
+        brace or a spec that does not apply to the supplied value must not take
+        down the page. Such failures are logged and the raw template is
+        returned so the UI stays usable.
+    """
+    if not kwargs:
+        return template
+
+    values: Dict[str, Any]
+    if escape_html:
+        values = {name: _EscapedValue(value) for name, value in kwargs.items()}
+    else:
+        values = dict(kwargs)
+
+    try:
+        return template.format(**values)
+    except (KeyError, IndexError, ValueError, TypeError, AttributeError) as exception:
+        logger.warning(
+            "Unable to format translation template %r with keys %s: %s",
+            template,
+            sorted(kwargs),
+            exception,
+        )
+        return template
+
+
 def get_text(
     key: str,
     lang: str = "en",
+    escape_html: bool = True,
     **kwargs: Any,
 ) -> str:
     """Return translated text with English and key fallbacks.
 
-    Keyword values are HTML-escaped before ``str.format`` substitution
-    to prevent untrusted values from injecting markup.
+    Args:
+        key: Translation key to look up.
+        lang: Language code. Falls back to English, then to the key itself.
+        escape_html: Forwarded to :func:`format_text`. See its docstring for
+            when to enable it.
+        **kwargs: Values substituted into the translated template.
+
+    Returns:
+        The translated and formatted string.
     """
     if not _translations:
         load_translations()
@@ -140,11 +213,4 @@ def get_text(
         _translations.get("en", {}).get(key, key),
     )
 
-    if kwargs:
-        escaped_values = {
-            name: html.escape(str(value))
-            for name, value in kwargs.items()
-        }
-        text = text.format(**escaped_values)
-
-    return text
+    return format_text(text, escape_html=escape_html, **kwargs)

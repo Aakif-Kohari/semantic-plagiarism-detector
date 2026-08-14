@@ -9,9 +9,7 @@ alignment on common documents, hover annotations, class tag filters, and static 
 from __future__ import annotations
 
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
 import pytest
 from matplotlib.figure import Figure
 
@@ -73,8 +71,12 @@ def test_differential_heatmap_document_alignment_subset():
     names_a = ["doc1", "doc2", "doc3"]
     names_b = ["doc2", "doc3", "doc4"]
 
-    df_a = _build_test_matrix([[1.0, 0.8, 0.3], [0.8, 1.0, 0.5], [0.3, 0.5, 1.0]], names_a)
-    df_b = _build_test_matrix([[1.0, 0.4, 0.2], [0.4, 1.0, 0.6], [0.2, 0.6, 1.0]], names_b)
+    df_a = _build_test_matrix(
+        [[1.0, 0.8, 0.3], [0.8, 1.0, 0.5], [0.3, 0.5, 1.0]], names_a
+    )
+    df_b = _build_test_matrix(
+        [[1.0, 0.4, 0.2], [0.4, 1.0, 0.6], [0.2, 0.6, 1.0]], names_b
+    )
 
     fig = plot_differential_heatmap(df_a, df_b)
     trace = fig.data[0]
@@ -89,9 +91,7 @@ def test_differential_heatmap_hover_template_formatting():
     df_a = _build_test_matrix([[1.0, 0.75], [0.75, 1.0]], names)
     df_b = _build_test_matrix([[1.0, 0.25], [0.25, 1.0]], names)
 
-    fig = plot_differential_heatmap(
-        df_a, df_b, label_a="Model X", label_b="Model Y"
-    )
+    fig = plot_differential_heatmap(df_a, df_b, label_a="Model X", label_b="Model Y")
 
     hover_text = fig.data[0].hovertext[0][1]
     assert "<b>Model X:</b> 0.75" in hover_text
@@ -102,8 +102,12 @@ def test_differential_heatmap_hover_template_formatting():
 def test_differential_heatmap_class_tag_filtering():
     """Verify class_tag parameter filters rows and columns appropriately."""
     names = ["doc1.pdf", "doc2.pdf", "doc3.pdf"]
-    df_a = _build_test_matrix([[1.0, 0.8, 0.2], [0.8, 1.0, 0.3], [0.2, 0.3, 1.0]], names)
-    df_b = _build_test_matrix([[1.0, 0.5, 0.1], [0.5, 1.0, 0.2], [0.1, 0.2, 1.0]], names)
+    df_a = _build_test_matrix(
+        [[1.0, 0.8, 0.2], [0.8, 1.0, 0.3], [0.2, 0.3, 1.0]], names
+    )
+    df_b = _build_test_matrix(
+        [[1.0, 0.5, 0.1], [0.5, 1.0, 0.2], [0.1, 0.2, 1.0]], names
+    )
 
     doc_class_map = {
         "doc1.pdf": "CS101",
@@ -141,8 +145,12 @@ def test_differential_heatmap_theme_palette_styling():
 def test_differential_heatmap_matplotlib_rendering():
     """Verify static Matplotlib implementation creates non-empty Figure with correct title."""
     names = ["doc1", "doc2", "doc3"]
-    df_a = _build_test_matrix([[1.0, 0.9, 0.4], [0.9, 1.0, 0.7], [0.4, 0.7, 1.0]], names)
-    df_b = _build_test_matrix([[1.0, 0.6, 0.5], [0.6, 1.0, 0.3], [0.5, 0.3, 1.0]], names)
+    df_a = _build_test_matrix(
+        [[1.0, 0.9, 0.4], [0.9, 1.0, 0.7], [0.4, 0.7, 1.0]], names
+    )
+    df_b = _build_test_matrix(
+        [[1.0, 0.6, 0.5], [0.6, 1.0, 0.3], [0.5, 0.3, 1.0]], names
+    )
 
     fig = plot_differential_heatmap_matplotlib(
         df_a, df_b, title="Static Matplotlib Differential Heatmap"

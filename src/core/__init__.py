@@ -1,30 +1,56 @@
-from .document_parser import (extract_text, extract_text_from_pdf,
-                              extract_texts, extract_texts_from_pdfs,
-                              sanitize_zero_width_characters)
-
-from .embedding_model import (embed_chunks, embed_documents,
-                              get_document_embedding)
-from .faiss_index import (ChunkRecord, build_index, build_index_from_matrix,
-                          find_plagiarised_chunks, load_index, save_index,
-                          search_similar_chunks)
-from .similarity import (
-    manhattan_similarity,PLAGIARISM_THRESHOLD, calculate_paragraph_similarity_breakdown,
-                         chunk_similarity_matrix, document_similarity_matrix,
-                         find_most_similar_chunks, flag_plagiarism)
-from .text_chunking import chunk_by_sentences, chunk_document, chunk_documents
-from .translator import translate_text
-from .webhook import send_plagiarism_alert
 from .config import (
     BrandingConfig,
     get_branding_config,
-    reload_branding_config,
     load_branding_config,
+    reload_branding_config,
+)
+from .document_parser import (
+    extract_text,
+    extract_text_from_pdf,
+    extract_texts,
+    extract_texts_from_pdfs,
+    sanitize_zero_width_characters,
+)
+from .embedding_model import embed_chunks, embed_documents, get_document_embedding
+from .faiss_index import (
+    ChunkRecord,
+    build_index,
+    build_index_from_matrix,
+    find_plagiarised_chunks,
+    format_faiss_memory_badge,
+    get_faiss_index_memory_bytes,
+    load_index,
+    save_index,
+    search_similar_chunks,
+)
+from .pipeline import run_extraction_pipeline, run_pipeline
+from .similarity import (
+    PLAGIARISM_THRESHOLD,
+    calculate_paragraph_similarity_breakdown,
+    chunk_similarity_matrix,
+    document_similarity_matrix,
+    find_most_similar_chunks,
+    flag_plagiarism,
+    manhattan_similarity,
+)
+from .similarity_base import BaseSimilarityEngine
+from .similarity_engines import (
+    HybridSimilarityEngine,
+    LexicalSimilarityEngine,
+    SemanticSimilarityEngine,
+    SimilarityEngineFactory,
 )
 from .tag_manager import TagManager, sanitize_tag_name
-from .concurrency import with_sqlite_retry
-
+from .text_chunking import chunk_by_sentences, chunk_document, chunk_documents
+from .translator import translate_text
+from .webhook import dispatch_plagiarism_alert, send_plagiarism_alert
 
 __all__ = [
+    "BaseSimilarityEngine",
+    "SemanticSimilarityEngine",
+    "LexicalSimilarityEngine",
+    "HybridSimilarityEngine",
+    "SimilarityEngineFactory",
     "with_sqlite_retry",
     "manhattan_similarity",
     "extract_text_from_pdf",
@@ -46,6 +72,8 @@ __all__ = [
     "build_index",
     "search_similar_chunks",
     "find_plagiarised_chunks",
+    "get_faiss_index_memory_bytes",
+    "format_faiss_memory_badge",
     "save_index",
     "load_index",
     "ChunkRecord",
@@ -60,4 +88,17 @@ __all__ = [
     "sanitize_zero_width_characters",
     "TagManager",
     "sanitize_tag_name",
+    "run_pipeline",
+    "run_extraction_pipeline",
 ]
+
+
+# with_sqlite_retry is re-exported from src.core.concurrency (which lazily
+# re-exports it from src.db.common). A lazy lookup avoids the circular import
+# chain (src.db -> src.core -> src.db.common).
+def __getattr__(name):
+    if name == "with_sqlite_retry":
+        from .concurrency import with_sqlite_retry
+
+        return with_sqlite_retry
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

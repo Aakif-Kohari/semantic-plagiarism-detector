@@ -6,7 +6,9 @@ Package initialization for the Semantic Plagiarism Detector core utilities, data
 
 from .core import (
     PLAGIARISM_THRESHOLD,
+    BrandingConfig,
     ChunkRecord,
+    TagManager,
     build_index,
     build_index_from_matrix,
     calculate_paragraph_similarity_breakdown,
@@ -24,20 +26,17 @@ from .core import (
     find_most_similar_chunks,
     find_plagiarised_chunks,
     flag_plagiarism,
-    get_document_embedding,
-    load_index,
-    save_index,
-    sanitize_zero_width_characters,
-    translate_text,
-    send_plagiarism_alert,
-    BrandingConfig,
     get_branding_config,
-    reload_branding_config,
+    get_document_embedding,
     load_branding_config,
-    TagManager,
+    load_index,
+    reload_branding_config,
     sanitize_tag_name,
+    sanitize_zero_width_characters,
+    save_index,
+    send_plagiarism_alert,
+    translate_text,
 )
-
 from .db import (
     add_chunks,
     add_document,
@@ -52,9 +51,11 @@ from .db import (
     get_all_embeddings,
     get_all_users,
     get_chunk_registry,
+    get_deleted_documents_count,
     get_document_by_hash,
     get_document_chunks_count,
     get_documents_by_class,
+    get_incidents_by_assignment,
     get_unique_class_sections,
     get_user_active_status,
     get_user_role,
@@ -65,14 +66,13 @@ from .db import (
     update_password,
     update_user_profile,
     verify_user,
-    get_recent_incidents,
-    log_incident,
-    get_deleted_documents_count,
 )
+
 try:
     from .visualization import (
         build_network_data,
         plot_chunk_similarity_comparison,
+        plot_document_similarity_heatmap,
         plot_similarity_heatmap,
         plot_similarity_heatmap_plotly,
         plot_similarity_network,
@@ -85,6 +85,7 @@ except ImportError:
     plot_similarity_heatmap_plotly = None
     plot_similarity_network = None
     render_network_plotly = None
+    plot_document_similarity_heatmap = None
 except ImportError:
     pass
 
@@ -108,6 +109,7 @@ __all__ = [
     "PLAGIARISM_THRESHOLD",
     "plot_similarity_heatmap",
     "plot_similarity_heatmap_plotly",
+    "plot_document_similarity_heatmap",
     "filter_heatmap_by_class_tag",
     "plot_chunk_similarity_comparison",
     "build_network_data",
@@ -115,7 +117,6 @@ __all__ = [
     "export_network_to_csv_bytes",
     "render_network_plotly",
     "plot_similarity_network",
-
     "translate_text",
     "send_plagiarism_alert",
     "dispatch_plagiarism_alert",
@@ -140,9 +141,8 @@ __all__ = [
     "set_user_active_status",
     "is_user_active",
     "update_user_profile",
-    "get_recent_incidents",
-    "log_incident",
     "get_deleted_documents_count",
+    "get_incidents_by_assignment",
     "init_corpus_db",
     "add_document",
     "get_document_by_hash",

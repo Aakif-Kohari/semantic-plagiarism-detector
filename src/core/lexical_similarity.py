@@ -17,7 +17,10 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 import numpy as np
@@ -31,19 +34,124 @@ _TOKEN_RE: re.Pattern[str] = re.compile(r"[a-z0-9]+(?:'[a-z]+)?")
 
 # Compact fallback list — covers high-frequency English function words.
 _FALLBACK_STOPWORDS: Set[str] = {
-    "a", "an", "the", "and", "or", "but", "if", "then", "else", "when",
-    "at", "by", "for", "with", "about", "against", "between", "into",
-    "through", "during", "before", "after", "above", "below", "to", "from",
-    "up", "down", "in", "out", "on", "off", "over", "under", "again",
-    "further", "is", "are", "was", "were", "be", "been", "being", "am",
-    "have", "has", "had", "having", "do", "does", "did", "doing", "will",
-    "would", "shall", "should", "can", "could", "may", "might", "must",
-    "of", "as", "it", "its", "this", "that", "these", "those", "i", "you",
-    "he", "she", "we", "they", "them", "his", "her", "their", "our", "my",
-    "your", "me", "him", "us", "so", "than", "too", "very", "s", "t",
-    "just", "also", "not", "no", "nor", "only", "own", "same", "such",
-    "more", "most", "other", "some", "any", "each", "few", "both", "all",
-    "there", "here", "where", "why", "how", "what", "which", "who", "whom",
+    "a",
+    "an",
+    "the",
+    "and",
+    "or",
+    "but",
+    "if",
+    "then",
+    "else",
+    "when",
+    "at",
+    "by",
+    "for",
+    "with",
+    "about",
+    "against",
+    "between",
+    "into",
+    "through",
+    "during",
+    "before",
+    "after",
+    "above",
+    "below",
+    "to",
+    "from",
+    "up",
+    "down",
+    "in",
+    "out",
+    "on",
+    "off",
+    "over",
+    "under",
+    "again",
+    "further",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "being",
+    "am",
+    "have",
+    "has",
+    "had",
+    "having",
+    "do",
+    "does",
+    "did",
+    "doing",
+    "will",
+    "would",
+    "shall",
+    "should",
+    "can",
+    "could",
+    "may",
+    "might",
+    "must",
+    "of",
+    "as",
+    "it",
+    "its",
+    "this",
+    "that",
+    "these",
+    "those",
+    "i",
+    "you",
+    "he",
+    "she",
+    "we",
+    "they",
+    "them",
+    "his",
+    "her",
+    "their",
+    "our",
+    "my",
+    "your",
+    "me",
+    "him",
+    "us",
+    "so",
+    "than",
+    "too",
+    "very",
+    "s",
+    "t",
+    "just",
+    "also",
+    "not",
+    "no",
+    "nor",
+    "only",
+    "own",
+    "same",
+    "such",
+    "more",
+    "most",
+    "other",
+    "some",
+    "any",
+    "each",
+    "few",
+    "both",
+    "all",
+    "there",
+    "here",
+    "where",
+    "why",
+    "how",
+    "what",
+    "which",
+    "who",
+    "whom",
 }
 
 
@@ -84,7 +192,9 @@ def _get_combined_stopwords(
     """
     combined: Set[str] = set(STOPWORDS)
     if custom_stopwords:
-        combined.update(w.lower().strip() for w in custom_stopwords if isinstance(w, str))
+        combined.update(
+            w.lower().strip() for w in custom_stopwords if isinstance(w, str)
+        )
     return combined
 
 
@@ -109,7 +219,9 @@ def remove_stopwords(
     if not text or not isinstance(text, str):
         return ""
     stop_set: Set[str] = set(stopwords) if stopwords is not None else STOPWORDS
-    tokens: List[str] = [tok for tok in _TOKEN_RE.findall(text.lower()) if tok not in stop_set]
+    tokens: List[str] = [
+        tok for tok in _TOKEN_RE.findall(text.lower()) if tok not in stop_set
+    ]
     return " ".join(tokens)
 
 
@@ -165,7 +277,9 @@ def get_ngrams(
     if not text or not isinstance(text, str) or n < 1:
         return set()
     stop_set: Set[str] = set(stopwords) if stopwords is not None else STOPWORDS
-    tokens: List[str] = [tok for tok in _TOKEN_RE.findall(text.lower()) if tok not in stop_set]
+    tokens: List[str] = [
+        tok for tok in _TOKEN_RE.findall(text.lower()) if tok not in stop_set
+    ]
     if len(tokens) < n:
         return set()
     return {tuple(tokens[i : i + n]) for i in range(len(tokens) - n + 1)}
@@ -417,7 +531,12 @@ def compute_tfidf_lexical_similarity(
     float
         Normalized similarity score bounded strictly between 0.0 and 1.0.
     """
-    if not doc_a or not doc_b or not isinstance(doc_a, str) or not isinstance(doc_b, str):
+    if (
+        not doc_a
+        or not doc_b
+        or not isinstance(doc_a, str)
+        or not isinstance(doc_b, str)
+    ):
         return 0.0
     if not doc_a.strip() or not doc_b.strip():
         return 0.0
@@ -436,7 +555,6 @@ def compute_tfidf_lexical_similarity(
         return float(np.clip(sim, 0.0, 1.0))
     except ValueError:
         return 0.0
-
 
 
 def _make_documents_hash(
@@ -494,7 +612,9 @@ def _cached_lexical_similarity_matrix(
 
     texts: List[str] = [documents[name] for name in doc_names]
     stop_words_list: List[str] = list(
-        _get_combined_stopwords(set(custom_stopwords_tuple) if custom_stopwords_tuple else None)
+        _get_combined_stopwords(
+            set(custom_stopwords_tuple) if custom_stopwords_tuple else None
+        )
     )
 
     try:
@@ -539,7 +659,9 @@ def lexical_similarity_matrix(
     pd.DataFrame
         Square N x N pandas DataFrame containing similarity scores in range [0.0, 1.0].
     """
-    custom_tuple: Tuple[str, ...] = tuple(sorted(custom_stopwords)) if custom_stopwords else ()
+    custom_tuple: Tuple[str, ...] = (
+        tuple(sorted(custom_stopwords)) if custom_stopwords else ()
+    )
 
     if use_cache:
         documents_tuple: Tuple[Tuple[str, str], ...] = tuple(sorted(documents.items()))
@@ -694,3 +816,97 @@ def scale_lexical_matrix(
         return pd.DataFrame(scaled_vals, index=matrix.index, columns=matrix.columns)
     return softmax_normalize_scores(matrix, steepness=steepness, midpoint=midpoint)
 
+
+def compute_char_ngram_similarity(text_a: str, text_b: str, n: int = 5) -> float:
+    """Compute character-level sliding n-gram Jaccard similarity between two texts.
+
+    Word-level Jaccard similarity misses obfuscations where words are misspelled,
+    hyphenated, or slightly altered. Character-level n-gram overlap (shingling)
+    detects sub-word plagiarism by comparing sequences of `n` consecutive characters.
+
+    Mathematical Formula
+    --------------------
+    .. math::
+
+        J_{char}(A, B) = \frac{|N_n(A) \cap N_n(B)|}{|N_n(A) \cup N_n(B)|}
+
+    where :math:`N_n(X)` represents the set of unique character n-grams for text X.
+    Both texts are converted to lowercase and stripped leading/trailing whitespace
+    before n-gram extraction to ensure case-insensitive comparison.
+
+    Parameters
+    ----------
+    text_a : str
+        First document text string.
+    text_b : str
+        Second document text string.
+    n : int, default=5
+        Length of the character sliding window (n-gram size). Must be >= 1.
+        A value of 5 is recommended for detecting paraphrased or slightly
+        obfuscated academic text.
+
+    Returns
+    -------
+    float
+        Jaccard similarity index bounded between 0.0 and 1.0.
+        Returns 0.0 if either text is empty, None, or shorter than `n` characters
+        after preprocessing.
+
+    Examples
+    --------
+    >>> compute_char_ngram_similarity("plagiarism", "plagiarism", n=5)
+    1.0
+    >>> compute_char_ngram_similarity("plagiarism", "plagarism", n=5)
+    0.75
+    >>> compute_char_ngram_similarity("hello world", "goodbye moon", n=3)
+    0.0
+    """
+    # Validate inputs and handle edge cases gracefully
+    if not isinstance(text_a, str) or not isinstance(text_b, str):
+        logger.debug(
+            "compute_char_ngram_similarity: non-string input provided, returning 0.0"
+        )
+        return 0.0
+
+    if not text_a or not text_b:
+        return 0.0
+
+    if n < 1:
+        logger.warning(
+            "compute_char_ngram_similarity: n must be >= 1, received %d. Defaulting to 5.",
+            n,
+        )
+        n = 5
+
+    # Preprocess texts: lowercase and strip whitespace for consistent comparison
+    processed_a = text_a.lower().strip()
+    processed_b = text_b.lower().strip()
+
+    # If either text is shorter than n after preprocessing, no n-grams can be formed
+    if len(processed_a) < n or len(processed_b) < n:
+        return 0.0
+
+    # Extract sliding character n-grams using set comprehension for O(1) lookups
+    # A sliding window of size n moves one character at a time across the string
+    ngrams_a = {processed_a[i : i + n] for i in range(len(processed_a) - n + 1)}
+    ngrams_b = {processed_b[i : i + n] for i in range(len(processed_b) - n + 1)}
+
+    # Calculate Jaccard index: intersection over union
+    intersection_len = len(ngrams_a & ngrams_b)
+    union_len = len(ngrams_a | ngrams_b)
+
+    if union_len == 0:
+        return 0.0
+
+    similarity = float(intersection_len / union_len)
+
+    logger.debug(
+        "compute_char_ngram_similarity: computed char %d-gram similarity=%.4f "
+        "(intersection=%d, union=%d)",
+        n,
+        similarity,
+        intersection_len,
+        union_len,
+    )
+
+    return similarity

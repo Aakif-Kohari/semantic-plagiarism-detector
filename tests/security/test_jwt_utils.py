@@ -4,8 +4,9 @@ test_jwt_utils.py
 Unit tests for JWT token generation, signature verification, and expiration in src/security/jwt_utils.py.
 """
 
-import time
 import pytest
+
+from src.security import jwt_utils
 from src.security.jwt_utils import (
     create_access_token,
     create_jwt_token,
@@ -59,3 +60,19 @@ def test_wrong_token_type():
     refresh_token = create_refresh_token(sub="eve")
     with pytest.raises(ValueError, match="expected 'access'"):
         verify_access_token(refresh_token)
+
+
+def test_secret_key_set_after_import(monkeypatch):
+    """Regression test for #2050: JWT_SECRET_KEY must be read at call time,
+    not only at module import time, so setting the env var after import
+    (e.g. via a later dotenv.load_dotenv() call) still works."""
+    monkeypatch.setattr(jwt_utils, "JWT_SECRET_KEY", None)
+    monkeypatch.setenv("JWT_SECRET_KEY", "late-loaded-secret")
+
+    token = create_jwt_token({"sub": "frank", "type": "access"})
+    payload = verify_access_token(token)
+    assert payload["sub"] == "frank"
+
+    refresh_token = create_jwt_token({"sub": "frank", "type": "refresh"})
+    refresh_payload = verify_refresh_token(refresh_token)
+    assert refresh_payload["sub"] == "frank"

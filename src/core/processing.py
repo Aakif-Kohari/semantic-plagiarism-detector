@@ -10,34 +10,35 @@ from __future__ import annotations
 
 import io
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional
 
 import numpy as np
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 
+from src.core.ai_detector import detect_documents_ai_probability
 from src.core.config import PLAGIARISM_THRESHOLD
 from src.core.document_parser import extract_text
 from src.core.embedding_model import embed_documents
-from src.core.faiss_index import build_index, ChunkRecord
+from src.core.faiss_index import ChunkRecord, build_index
 from src.core.similarity import document_similarity_matrix, flag_plagiarism
 from src.core.text_chunking import chunk_documents
-from src.core.ai_detector import detect_documents_ai_probability
 
 logger = logging.getLogger(__name__)
 
 
-PipelineResult = Tuple[
-    Dict[str, str],             # raw_texts
-    Dict[str, List[str]],       # chunked_docs
-    Dict[str, np.ndarray],      # embeddings
-    pd.DataFrame,               # sim_df
-    pd.DataFrame,               # chunk_sim_df
-    Any,                        # faiss_index
-    List[ChunkRecord],          # registry
-    Dict[str, Dict[str, Any]],  # ai_probabilities
-    List[Dict[str, Any]],       # flags
-]
+class PipelineResult(NamedTuple):
+    """Named outputs from ``run_full_pipeline`` (still unpackable as a tuple)."""
+
+    raw_texts: Dict[str, str]
+    chunked_docs: Dict[str, List[str]]
+    embeddings: Dict[str, np.ndarray]
+    sim_df: pd.DataFrame
+    chunk_sim_df: pd.DataFrame
+    faiss_index: Any
+    registry: List[ChunkRecord]
+    ai_probabilities: Dict[str, Dict[str, Any]]
+    flags: List[Dict[str, Any]]
 
 
 def run_full_pipeline(
@@ -59,9 +60,13 @@ def run_full_pipeline(
     suitable for background workers and API-driven usage.
 
     Returns:
-        A tuple containing all pipeline outputs including the final flags list.
+        A ``PipelineResult`` with all pipeline outputs including the final flags list.
     """
-    import psutil
+    try:
+        import psutil
+    except ImportError:
+        psutil = None
+        logger.debug("psutil is not installed; skipping system memory usage check.")
 
     raw_texts: Dict[str, str] = {}
     failed_files: List[str] = []
@@ -83,10 +88,12 @@ def run_full_pipeline(
 
     if failed_files:
         from src.errors import OCRFileBatchError
+
         raise OCRFileBatchError(failed_files, failure_details)
 
     if ignore_phrases and ignore_phrases.strip():
         from src.core.document_parser import remove_ignore_phrases
+
         raw_texts = {
             name: remove_ignore_phrases(text, ignore_phrases)
             for name, text in raw_texts.items()
@@ -96,14 +103,7 @@ def run_full_pipeline(
         raw_texts, chunk_size=chunk_size, chunk_overlap=chunk_overlap
     )
 
-    translated_chunked_docs: Dict[str, List[str]] = {}
-    for doc_name, chunks in chunked_docs.items():
-        prepared_list: List[str] = []
-        for chunk in chunks:
-            prepared_list.append(chunk)
-        translated_chunked_docs[doc_name] = prepared_list
-
-    embeddings = embed_documents(translated_chunked_docs)
+    embeddings = embed_documents(chunked_docs)
     sim_df = document_similarity_matrix(embeddings)
 
     names = list(embeddings.keys())
@@ -126,13 +126,17 @@ def run_full_pipeline(
 
     chunk_sim_df = pd.DataFrame(chunk_mat, index=names, columns=names)
 
-    memory = psutil.virtual_memory()
-    if memory.percent >= 85:
-        logger.warning(
-            "High memory usage detected (%d%%). Large FAISS indexes may cause "
-            "instability or OOM crashes.",
-            memory.percent,
-        )
+    if psutil is not None:
+        try:
+            memory = psutil.virtual_memory()
+            if memory.percent >= 85:
+                logger.warning(
+                    "High memory usage detected (%d%%). Large FAISS indexes may cause "
+                    "instability or OOM crashes.",
+                    memory.percent,
+                )
+        except Exception as exc:
+            logger.debug("System memory usage check failed: %s", exc)
 
     faiss_index, registry = build_index(embeddings, chunked_docs)
     ai_probabilities = detect_documents_ai_probability(chunked_docs)
@@ -144,14 +148,14 @@ def run_full_pipeline(
         embeddings=embeddings,
     )
 
-    return (
-        raw_texts,
-        chunked_docs,
-        embeddings,
-        sim_df,
-        chunk_sim_df,
-        faiss_index,
-        registry,
-        ai_probabilities,
-        flags,
+    return PipelineResult(
+        raw_texts=raw_texts,
+        chunked_docs=chunked_docs,
+        embeddings=embeddings,
+        sim_df=sim_df,
+        chunk_sim_df=chunk_sim_df,
+        faiss_index=faiss_index,
+        registry=registry,
+        ai_probabilities=ai_probabilities,
+        flags=flags,
     )

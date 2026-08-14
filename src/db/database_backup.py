@@ -28,6 +28,10 @@ Recent Additions (Issue #1047):
 Recent Additions (Issue #1156):
 - Added `get_database_table_stats` function returning a dictionary mapping
   each table name to its row count, plus a special '_table_count' key.
+
+Recent Additions (Issue #1885):
+- Added explicit file existence check in `create_database_backup` before
+  copying or compressing.
 """
 
 from __future__ import annotations
@@ -36,6 +40,7 @@ import gzip
 import io
 import logging
 import os
+import re
 import shutil
 import sqlite3
 import stat
@@ -46,6 +51,7 @@ from contextlib import closing
 from pathlib import Path
 from typing import Dict, Optional, Union
 
+from src.db.connection import apply_busy_timeout
 from src.db.corpus_db import get_corpus_db_path
 
 # ── Logger Configuration ───────────────────────────────────────────────────────
@@ -55,9 +61,31 @@ logger.setLevel(logging.INFO)
 SQLITE_HEADER = b"SQLite format 3\x00"
 DEFAULT_BACKUP_DIRECTORY = Path("backups")
 
+# Maintenance operations open their own connections rather than going through
+# src.db.connection.create_connection(), because they need isolation_level=None
+# for VACUUM. They still share the busy-timeout helper so that the timeout a
+# connection is opened with is the timeout SQLite actually enforces.
+OPTIMIZE_TIMEOUT_SECONDS: float = 5.0
+CHECKPOINT_TIMEOUT_SECONDS: float = 10.0
 
-class BackupRestoreSecurityError(ValueError):
-    """Raised when a backup fails pre-restore security validation."""
+
+class BackupRestoreSecurityError(Exception):
+    """Raised when a backup fails pre-restore security validation.
+
+    Inherits from Exception (not ValueError) so callers catching ValueError
+    do not accidentally suppress security errors.
+    """
+
+
+_ALLOWED_DB_DIR = Path(__file__).parent.parent.parent.resolve()
+
+
+def _resolve_safe_path(db_path: str | Path) -> Path:
+    """Resolve path and reject anything outside the project root."""
+    path = Path(db_path).expanduser().resolve()
+    if not path.is_relative_to(_ALLOWED_DB_DIR):
+        raise ValueError(f"db_path is outside the allowed directory: {path}")
+    return path
 
 
 def create_sqlite_snapshot(database_path: str | Path) -> bytes:
@@ -112,6 +140,12 @@ def create_sqlite_snapshot(database_path: str | Path) -> bytes:
         return snapshot
 
 
+def get_database_file_size_bytes(db_path: str | Path) -> int:
+    """Return the file size in bytes, or 0 if the file does not exist."""
+    path = _resolve_safe_path(db_path)
+    return path.stat().st_size if path.is_file() else 0
+
+
 def create_corpus_database_snapshot() -> bytes:
     """Return a downloadable snapshot of the configured corpus DB."""
     return create_sqlite_snapshot(get_corpus_db_path())
@@ -129,7 +163,13 @@ def create_database_backup(
     streamed through ``gzip.GzipFile`` and written as a ``.db.gz`` file,
     cutting backup storage footprint by roughly 70%. When False, a plain
     ``.db`` copy is written instead (issue #1488).
+
+    Raises:
+        FileNotFoundError: If the source database file does not exist on disk.
     """
+    if not os.path.exists(database_path):
+        raise FileNotFoundError(f"Source database file does not exist: {database_path}")
+
     snapshot_bytes = create_sqlite_snapshot(database_path)
 
     source_name = Path(database_path).name
@@ -148,7 +188,8 @@ def create_database_backup(
     return backup_path
 
 
-def get_database_size_bytes(db_path: str | Path) -> int:    """Return the size of a SQLite database file in bytes.
+def get_database_size_bytes(db_path: str | Path) -> int:
+    """Return the size of a SQLite database file in bytes.
 
     Acceptance criteria (issue #1047):
     - Returns the on-disk file size in bytes for an existing database.
@@ -240,11 +281,14 @@ def get_database_table_stats(db_path: str | Path) -> dict[str, int]:
 
         >>> get_database_table_stats("/nonexistent.db")
         {'_table_count': 0}
+
+    Issue traceability:
+        Originally added under issue #1156. Issue #1773 requests the same
+        helper with the same acceptance criteria; regression tests in
+        ``TestGetDatabaseTableStatsIssue1773`` lock in the contract.
     """
     resolved_path = Path(db_path).expanduser().resolve()
 
-    # If the database file does not exist, return an empty stats dictionary
-    # with the special _table_count key set to 0.
     if not resolved_path.exists():
         logger.debug(
             "get_database_table_stats: database does not exist at %s, "
@@ -270,9 +314,6 @@ def get_database_table_stats(db_path: str | Path) -> dict[str, int]:
                 check_same_thread=False,
             )
         ) as connection:
-            # Query sqlite_master for all user-defined tables.
-            # We exclude internal SQLite tables (those starting with 'sqlite_')
-            # and views (type='view') to focus on actual data tables.
             cursor = connection.execute(
                 "SELECT name FROM sqlite_master "
                 "WHERE type='table' AND name NOT LIKE 'sqlite_%' "
@@ -280,12 +321,8 @@ def get_database_table_stats(db_path: str | Path) -> dict[str, int]:
             )
             table_names = [row[0] for row in cursor.fetchall()]
 
-            # Count rows in each table using SELECT COUNT(*)
             for table_name in table_names:
                 try:
-                    # Use parameterized quoting for table names is not possible
-                    # in SQLite, so we validate the table name comes from
-                    # sqlite_master (which is safe against injection).
                     count_cursor = connection.execute(
                         f'SELECT COUNT(*) FROM "{table_name}"'
                     )
@@ -294,9 +331,6 @@ def get_database_table_stats(db_path: str | Path) -> dict[str, int]:
                     stats[table_name] = row_count
 
                 except sqlite3.Error as exc:
-                    # If counting rows fails for a specific table (e.g.,
-                    # corrupted page), log the error and report 0 rows
-                    # for that table rather than aborting the entire scan.
                     logger.warning(
                         "get_database_table_stats: failed to count rows "
                         "for table '%s': %s",
@@ -306,9 +340,6 @@ def get_database_table_stats(db_path: str | Path) -> dict[str, int]:
                     stats[table_name] = 0
 
     except sqlite3.Error as exc:
-        # If we cannot open or connect to the database at all, return
-        # empty stats. This handles corrupted databases or permission
-        # issues gracefully.
         logger.error(
             "get_database_table_stats: failed to open database at %s: %s",
             resolved_path,
@@ -317,7 +348,6 @@ def get_database_table_stats(db_path: str | Path) -> dict[str, int]:
         return {"_table_count": 0}
 
     except OSError as exc:
-        # Handle filesystem errors (permission denied, etc.)
         logger.error(
             "get_database_table_stats: filesystem error reading %s: %s",
             resolved_path,
@@ -325,7 +355,6 @@ def get_database_table_stats(db_path: str | Path) -> dict[str, int]:
         )
         return {"_table_count": 0}
 
-    # Add the special _table_count key with the total number of tables
     stats["_table_count"] = len(table_names)
 
     logger.debug(
@@ -335,6 +364,75 @@ def get_database_table_stats(db_path: str | Path) -> dict[str, int]:
     )
 
     return stats
+
+
+def get_table_schema_info(db_path: str | Path, table_name: str) -> list[dict]:
+    """Return column metadata for the given table in a SQLite database.
+
+    Executes ``PRAGMA table_info([table_name])`` and returns one dictionary
+    per column with the keys ``name``, ``type``, ``notnull``, ``dflt_value``
+    and ``pk``. The ``notnull`` and ``pk`` values are ``0``/``1`` flags as
+    reported by SQLite.
+
+    Args:
+        db_path: Path to the SQLite database file. Accepts ``str`` or
+            :class:`~pathlib.Path`. Relative paths and ``~`` are expanded
+            automatically.
+        table_name: Name of the table to inspect. Must be a plain SQL
+            identifier (letters, digits and underscores) to prevent SQL
+            injection.
+
+    Returns:
+        A list of dictionaries describing each column of the table. Returns
+        an empty list when the database file does not exist, the path is not
+        a file, the table name is unsafe, or the table has no columns.
+
+    Example:
+        >>> from src.db.database_backup import get_table_schema_info
+        >>> get_table_schema_info("data/corpus.db", "documents")
+        [{'name': 'id', 'type': 'INTEGER', 'notnull': 0, 'dflt_value': None, 'pk': 1}]
+    """
+    if not re.fullmatch(r"[A-Za-z0-9_]+", table_name):
+        logger.warning(
+            "get_table_schema_info: refusing unsafe table name %r.",
+            table_name,
+        )
+        return []
+
+    resolved_path = Path(db_path).expanduser().resolve()
+
+    if not resolved_path.exists() or not resolved_path.is_file():
+        logger.debug(
+            "get_table_schema_info: database file not found at %s.",
+            resolved_path,
+        )
+        return []
+
+    try:
+        with closing(
+            sqlite3.connect(str(resolved_path), check_same_thread=False)
+        ) as connection:
+            cursor = connection.execute(f"PRAGMA table_info([{table_name}])")
+            rows = cursor.fetchall()
+    except sqlite3.Error as exc:
+        logger.error(
+            "get_table_schema_info: failed to inspect table %r in %s: %s",
+            table_name,
+            resolved_path,
+            exc,
+        )
+        return []
+
+    return [
+        {
+            "name": row[1],
+            "type": row[2],
+            "notnull": row[3],
+            "dflt_value": row[4],
+            "pk": row[5],
+        }
+        for row in rows
+    ]
 
 
 def create_password_protected_backup(
@@ -420,7 +518,6 @@ def _resolve_authorized_backup(
         )
 
     return resolved_source
-
 
 
 def _validate_sqlite_backup(source: Path) -> None:
@@ -509,7 +606,6 @@ def restore(
 
         with temporary_path.open("r+b") as restored_file:
             os.fsync(restored_file.fileno())
-
 
         os.replace(temporary_path, destination_path)
         temporary_path = None
@@ -670,16 +766,14 @@ def optimize_database(db_path: str | Path) -> bool:
     )
 
     try:
-        # isolation_level=None keeps the maintenance connection in autocommit
-        # mode. This guarantees VACUUM is not executed inside a transaction.
         with closing(
             sqlite3.connect(
                 str(target_path),
-                timeout=5.0,
+                timeout=OPTIMIZE_TIMEOUT_SECONDS,
                 isolation_level=None,
             )
         ) as connection:
-            connection.execute("PRAGMA busy_timeout = 5000")
+            apply_busy_timeout(connection, OPTIMIZE_TIMEOUT_SECONDS)
             connection.execute("PRAGMA auto_vacuum = INCREMENTAL")
 
             quick_check = connection.execute("PRAGMA quick_check").fetchone()
@@ -691,8 +785,6 @@ def optimize_database(db_path: str | Path) -> bool:
                 )
                 return False
 
-            # Flush committed WAL pages before rebuilding the main database.
-            # A non-WAL database accepts this pragma harmlessly.
             try:
                 connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             except sqlite3.DatabaseError:
@@ -762,7 +854,6 @@ def checkpoint_wal_log(db_path: str | Path) -> bool:
 
     wal_path = Path(f"{target_path}-wal")
 
-    # Log WAL size before checkpoint
     wal_size_before = wal_path.stat().st_size if wal_path.exists() else 0
     logger.info(
         "WAL file size before checkpoint for %s: %.2f KB (%d bytes)",
@@ -775,14 +866,13 @@ def checkpoint_wal_log(db_path: str | Path) -> bool:
         with closing(
             sqlite3.connect(
                 str(target_path),
-                timeout=10.0,
+                timeout=CHECKPOINT_TIMEOUT_SECONDS,
                 isolation_level=None,
             )
         ) as connection:
-            connection.execute("PRAGMA busy_timeout = 5000")
+            apply_busy_timeout(connection, CHECKPOINT_TIMEOUT_SECONDS)
             connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
-        # Log WAL size after checkpoint
         wal_size_after = wal_path.stat().st_size if wal_path.exists() else 0
         logger.info(
             "WAL file size after checkpoint for %s: %.2f KB (%d bytes)",
@@ -805,4 +895,3 @@ def checkpoint_wal_log(db_path: str | Path) -> bool:
             exc,
         )
         return False
-
