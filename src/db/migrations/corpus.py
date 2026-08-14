@@ -6,7 +6,7 @@ import sqlite3
 
 from .common import column_exists, run_migrations
 
-CORPUS_SCHEMA_VERSION = 14
+CORPUS_SCHEMA_VERSION = 15
 
 
 def migration_001_create_base_schema(
@@ -266,6 +266,27 @@ def migration_013_add_incident_archive_table(
         """)
 
 
+def migration_015_add_scheduler_runs(
+    connection: sqlite3.Connection,
+) -> None:
+    """Create the scheduler_runs table.
+
+    Tracks the last-completed run of background scheduled jobs (e.g. the
+    scheduled plagiarism rescan job — see ``src.core.scheduler`` and
+    ``src.core.processing.rescan_recent_documents``) so a process restart
+    does not lose track of when a job last ran. Keyed by ``job_name`` so
+    multiple scheduled jobs can share this table.
+    """
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS scheduler_runs (
+            job_name           TEXT PRIMARY KEY,
+            last_run_at        TEXT NOT NULL,
+            documents_scanned  INTEGER NOT NULL DEFAULT 0,
+            new_incidents      INTEGER NOT NULL DEFAULT 0
+        )
+        """)
+
+
 CORPUS_MIGRATIONS = {
     1: migration_001_create_base_schema,
     2: migration_002_add_document_metadata,
@@ -281,6 +302,7 @@ CORPUS_MIGRATIONS = {
     12: migration_012_add_fts5_index,
     13: migration_013_add_incident_archive_table,
     14: migration_013_add_incident_severity_idx,
+    15: migration_015_add_scheduler_runs,
 }
 
 

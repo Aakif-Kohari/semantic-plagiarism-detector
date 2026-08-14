@@ -11,12 +11,15 @@ import os
 import time
 import uuid
 from collections.abc import Iterable
+from contextlib import asynccontextmanager
 
 import streamlit as st
 from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
+
+from src.core.scheduler import start_scheduler, stop_scheduler
 
 DEFAULT_MAX_REQUEST_BYTES = 52_428_800
 JSON_API_PREFIX = "/api/"
@@ -332,6 +335,28 @@ class TokenBucketRateLimiter(BaseHTTPMiddleware):
         )
 
 
+@asynccontextmanager
+async def _lifespan(app):
+    """Start/stop the scheduled plagiarism-rescan background job.
+
+    Wraps ``src.core.scheduler.RescanScheduler``, which re-checks recently
+    uploaded documents against the full corpus on a configurable interval
+    so cross-submission plagiarism that only becomes apparent once a later
+    document is uploaded still gets caught (and reviewers get notified via
+    the existing webhook layer).
+
+    The scheduler is disabled by default and becomes a no-op unless
+    ``RESCAN_INTERVAL_MINUTES`` is set to a positive value in the
+    environment, so existing deployments are unaffected until they
+    explicitly opt in.
+    """
+    await start_scheduler()
+    try:
+        yield
+    finally:
+        await stop_scheduler()
+
+
 app = st.App(
     "app/streamlit_app.py",
     middleware=[
@@ -342,4 +367,5 @@ app = st.App(
         Middleware(JSONContentTypeMiddleware),
         Middleware(TokenBucketRateLimiter),
     ],
+    lifespan=_lifespan,
 )
