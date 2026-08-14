@@ -111,6 +111,23 @@ from app.components.export_integration import (
     CloudProvider,
     ExportStatus,
 )
+# ── Advanced Analytics Engine Imports ────────────────────────────────────
+from app.components.advanced_analytics_engine import (
+    render_analytics_engine,
+    initialize_analytics_engine,
+    PredictiveEngine,
+    AnomalyDetector,
+    InsightGenerator,
+    RiskScorer,
+    PatternRecognizer,
+    PredictiveInsight,
+    TrendForecast,
+    RiskAssessment,
+    AnomalyDetectionResult,
+    RiskLevel,
+    InsightType,
+    ForecastPeriod,
+)
 # ── Collaboration Hub Imports ────────────────────────────────────────────
 from app.components.collaboration_hub import (
     render_collaboration_hub,
