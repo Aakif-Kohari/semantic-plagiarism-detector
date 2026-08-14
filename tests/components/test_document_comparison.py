@@ -11,7 +11,7 @@ def test_render_document_comparison_inputs_empty():
     """Verify component renders correctly with empty inputs."""
     with patch("streamlit.columns") as mock_cols, patch(
         "streamlit.text_area"
-    ) as mock_text_area, patch("streamlit.popover") as mock_popover:
+    ) as mock_text_area, patch("streamlit.popover") as mock_popover:  # noqa: F841
         mock_col = MagicMock()
         mock_cols.return_value = [mock_col, mock_col]
         mock_text_area.return_value = ""
@@ -28,7 +28,7 @@ def test_render_document_comparison_highlight_overlap():
 
     with patch("streamlit.columns") as mock_cols, patch(
         "streamlit.text_area"
-    ) as mock_text_area, patch("streamlit.popover") as mock_popover, patch(
+    ) as mock_text_area, patch("streamlit.popover") as mock_popover, patch(  # noqa: F841
         "streamlit.markdown"
     ) as mock_markdown:
         mock_col = MagicMock()

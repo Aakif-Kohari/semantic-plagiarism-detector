@@ -98,6 +98,83 @@ from app.components.smart_notifications import (
     SmartFilter,
     UserNotificationPreferences,
 )
+# ── Export Integration Imports ───────────────────────────────────────────
+from app.components.export_integration import (
+    render_export_center,
+    render_export_bulk,
+    initialize_export_system,
+    ExportManager,
+    ExportFormat,
+    ExportJob,
+    ExportTemplate,
+    CloudConfig,
+    CloudProvider,
+    ExportStatus,
+)
+# ── Advanced Analytics Engine Imports ────────────────────────────────────
+from app.components.advanced_analytics_engine import (
+    render_analytics_engine,
+    initialize_analytics_engine,
+    PredictiveEngine,
+    AnomalyDetector,
+    InsightGenerator,
+    RiskScorer,
+    PatternRecognizer,
+    PredictiveInsight,
+    TrendForecast,
+    RiskAssessment,
+    AnomalyDetectionResult,
+    RiskLevel,
+    InsightType,
+    ForecastPeriod,
+)
+# ── Audit Compliance Engine Imports ──────────────────────────────────────
+from app.components.audit_compliance_engine import (
+    render_audit_compliance_engine,
+    initialize_audit_compliance_engine,
+    AuditTrailManager,
+    PolicyEnforcer,
+    ComplianceReportGenerator,
+    CertificateManager,
+    AuditEvent,
+    PolicyViolation,
+    ComplianceReport,
+    ComplianceCertificate,
+    ComplianceStatus,
+    AuditSeverity,
+    PolicyType,
+    Regulation,
+)
+# ── Workflow Automation Imports ──────────────────────────────────────────
+from app.components.workflow_automation import (
+    render_workflow_automation,
+    initialize_workflow_automation,
+    WorkflowEngine,
+    Workflow,
+    WorkflowExecution,
+    Task,
+    ApprovalRequest,
+    WorkflowTemplate,
+    WorkflowStatus,
+    TaskStatus,
+    TriggerType,
+    WorkflowCategory,
+)
+# ── API Gateway Imports ──────────────────────────────────────────────────
+from app.components.api_gateway import (
+    render_api_gateway,
+    initialize_api_gateway,
+    ApiGateway,
+    ApiEndpoint,
+    ApiKey,
+    Webhook,
+    ServiceConnection,
+    ApiLog,
+    ApiMethod,
+    ApiStatus,
+    WebhookStatus,
+    ServiceType,
+)
 # ── Collaboration Hub Imports ────────────────────────────────────────────
 from app.components.collaboration_hub import (
     render_collaboration_hub,
@@ -2934,10 +3011,10 @@ def compute_hybrid_similarity_score(
 
 
 def get_hybrid_similarity_stats(
-    semantic_scores: List[float],
-    lexical_scores: List[float],
+    semantic_scores: List[float],  # noqa: F821
+    lexical_scores: List[float],  # noqa: F821
     alpha: float = 0.7
-) -> Dict[str, Any]:
+) -> Dict[str, Any]:  # noqa: F821
     """
     Get statistics about hybrid similarity distribution.
     

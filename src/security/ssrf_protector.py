@@ -1,9 +1,30 @@
+"""
+src/security/ssrf_protector.py
+------------------------------
+Server-Side Request Forgery (SSRF) protection module for webhook validation.
+
+Provides comprehensive URL validation including:
+- HTTPS scheme enforcement
+- Domain allowlist verification
+- DNS resolution with caching
+- Private/loopback/link-local IP blocking
+- Redirect chain validation with depth limits
+- Explicit User-Agent header attachment (Issue #2212)
+
+Recent Additions (Issue #2212):
+- Ensured DEFAULT_USER_AGENT is explicitly attached to all outgoing HEAD/GET requests
+- Added GET fallback when servers reject HEAD requests with 405 Method Not Allowed
+- Enhanced logging for User-Agent header inspection
+"""
+
+from __future__ import annotations
+
 import ipaddress
 import logging
 import socket
 import time
 import urllib.parse
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional
 
 import requests
 
@@ -26,6 +47,9 @@ from src.errors import (
 
 logger = logging.getLogger(__name__)
 
+# Default User-Agent header for all outgoing validation requests (Issue #2212)
+# Explicitly identifying the application prevents remote servers from blocking
+# requests due to missing or generic User-Agent headers.
 DEFAULT_USER_AGENT = "SemanticPlagiarismDetector/1.0"
 
 # Default per-request timeout, in seconds, for outgoing validation requests.
@@ -33,6 +57,10 @@ DEFAULT_REQUEST_TIMEOUT = 5.0
 
 # HTTP status codes that carry a Location header worth following.
 REDIRECT_STATUS_CODES = (301, 302, 303, 307, 308)
+
+# HTTP status codes that indicate the server rejected the HEAD method
+# and we should fall back to GET for validation (Issue #2212)
+HEAD_REJECTION_STATUS_CODES = (405, 501)
 
 RESTRICTED_IPV4_CIDR_BLOCKS = (
     "127.0.0.0/8",
@@ -175,7 +203,7 @@ class SSRFProtector:
                     SSRF_DOMAIN_NOT_ALLOWED.format(hostname=hostname)
                 )
 
-        # 2. DNS Resolution
+        # DNS Resolution
         ip_str = cls._resolve_hostname(hostname)
 
         try:
@@ -194,6 +222,7 @@ class SSRFProtector:
                             SSRF_BLOCKED_LOOPBACK.format(ip=ip_str)
                         )
                     raise SSRFSecurityException(SSRF_BLOCKED_PRIVATE.format(ip=ip_str))
+                    
         if ip.is_loopback:
             raise SSRFSecurityException(SSRF_BLOCKED_LOOPBACK.format(ip=ip_str))
         if ip.is_link_local:
@@ -210,6 +239,66 @@ class SSRFProtector:
         return ip_str
 
     @classmethod
+    def _make_validation_request(
+        cls,
+        url: str,
+        user_agent: str,
+        timeout: float,
+    ) -> requests.Response:
+        """Make an outgoing HTTP validation request with User-Agent header.
+        
+        Attempts a HEAD request first for efficiency. If the server rejects
+        HEAD with 405 Method Not Allowed or 501 Not Implemented, falls back
+        to a GET request (Issue #2212).
+        
+        Args:
+            url: The URL to validate.
+            user_agent: User-Agent header value to attach.
+            timeout: Request timeout in seconds.
+            
+        Returns:
+            The HTTP response object.
+            
+        Raises:
+            requests.RequestException: If both HEAD and GET fail.
+        """
+        headers = {"User-Agent": user_agent}
+        
+        logger.debug(
+            "Making validation request to %s with User-Agent: %s",
+            url, user_agent
+        )
+        
+        try:
+            # Try HEAD first (more efficient, no body download)
+            response = requests.head(
+                url,
+                headers=headers,
+                timeout=timeout,
+                allow_redirects=False,
+            )
+            
+            # If server rejects HEAD, fall back to GET
+            if response.status_code in HEAD_REJECTION_STATUS_CODES:
+                logger.debug(
+                    "Server rejected HEAD with %d, falling back to GET for %s",
+                    response.status_code, url
+                )
+                response = requests.get(
+                    url,
+                    headers=headers,
+                    timeout=timeout,
+                    allow_redirects=False,
+                    stream=True,  # Don't download body
+                )
+                
+            return response
+            
+        except requests.RequestException as exc:
+            logger.debug(f"Validation request failed for {url}: {exc}")
+            raise
+
+    @classmethod
     def validate_webhook_url(
         cls,
         url: str,
@@ -219,13 +308,14 @@ class SSRFProtector:
     ) -> bool:
         """
         Validates that a provided webhook URL is safe to dispatch.
-        Ensures the URL uses HTTPS, its domain is in ALLOWED_WEBHOOK_DOMAINS (if configured),
-        does not resolve to any internal network IP, and sends an outgoing HTTP validation check.
+        
+        Ensures the URL uses HTTPS, its domain is in ALLOWED_WEBHOOK_DOMAINS,
+        does not resolve to any internal network IP, and sends an outgoing
+        HTTP validation check with explicit User-Agent header (Issue #2212).
 
         Args:
             url: The webhook URL string
-            allowed_domains: Optional list of allowed domain hostnames. If None,
-                fetches configured domains via ``get_allowed_webhook_domains()``.
+            allowed_domains: Optional list of allowed domain hostnames.
             user_agent: Custom User-Agent header for validation requests.
             timeout: Timeout in seconds for the outgoing validation request.
 
@@ -237,11 +327,12 @@ class SSRFProtector:
         """
         cls._validate_url_target(url, allowed_domains=allowed_domains)
 
-        # Outgoing HTTP validation request attaching configured User-Agent header
-        headers = {"User-Agent": user_agent}
+        # Outgoing HTTP validation request with User-Agent header (Issue #2212)
         try:
-            requests.head(url, headers=headers, timeout=timeout, allow_redirects=False)
+            cls._make_validation_request(url, user_agent, timeout)
         except Exception as e:
+            # Network errors during validation are logged but don't fail validation
+            # The URL passed all security checks, server might just be temporarily down
             logger.debug(f"Outgoing HTTP validation request failed for {url}: {e}")
 
         return True
@@ -257,24 +348,15 @@ class SSRFProtector:
         """
         Inspects a single hop of a redirect chain.
 
-        The URL is fully re-validated (domain allow-list, DNS resolution,
-        internal/private IP checks) BEFORE any outbound HTTP request is
-        made, so this module never contacts an attacker-controlled internal
-        address.
+        The URL is fully re-validated BEFORE any outbound HTTP request is made.
 
         Returns:
             The next URL in the chain if a redirect is present, else None.
         """
-        # Validate BEFORE making any outbound request. Uses the network-free
-        # checks so this hop costs exactly one HTTP request, not two.
         cls._validate_url_target(current_url, allowed_domains=allowed_domains)
 
-        response = requests.head(
-            current_url,
-            headers={"User-Agent": user_agent},
-            allow_redirects=False,
-            timeout=timeout,
-        )
+        response = cls._make_validation_request(current_url, user_agent, timeout)
+        
         if response.status_code in REDIRECT_STATUS_CODES:
             location = response.headers.get("Location")
             if location:
@@ -293,10 +375,8 @@ class SSRFProtector:
         """
         Validates a URL and every hop of any redirect chain it produces.
 
-        Each hop is fully re-validated (domain allow-list, DNS resolution,
-        internal/private IP checks) *before* it is requested, so a host on an
-        allow-listed domain cannot redirect this module to a loopback,
-        link-local, or RFC 1918 address.
+        Each hop is fully re-validated before it is requested. Attaches explicit
+        User-Agent header to all outgoing requests (Issue #2212).
 
         Args:
             url: Target URL to validate.

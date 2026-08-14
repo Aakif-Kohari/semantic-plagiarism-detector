@@ -44,6 +44,71 @@ def apply_plotly_theme(
     return fig
 
 
+def get_chart_theme_colors(theme_mode: str) -> dict[str, str]:
+    """Return a dictionary of Plotly-compatible theme colors based on the UI mode.
+    
+    This helper synchronizes Plotly chart background and font colors with the
+    current Streamlit UI theme mode (Light vs Dark). It ensures that charts
+    rendered in the analytics dashboard remain legible and visually consistent
+    regardless of the user's selected theme.
+    
+    The returned dictionary is structured to be passed directly into the
+    ``theme_colors`` parameter of :func:`apply_plotly_theme` or used manually
+    in Plotly layout updates.
+    
+    Args:
+        theme_mode: The current UI theme mode. Expected values are "Light" 
+                    or "Dark" (case-insensitive). Any other value defaults 
+                    to the Light theme palette.
+                    
+    Returns:
+        A dictionary containing the following keys:
+        - ``background``: The main paper/canvas background color.
+        - ``surface``: The plot area background color.
+        - ``ink``: The primary text/font color.
+        - ``muted``: Secondary text color for subtitles and annotations.
+        - ``border``: Gridline and axis border color.
+        
+    Color Specifications:
+        - **Light Mode**: 
+          - Background: ``#ffffff`` (Pure white)
+          - Ink: ``#0f172a`` (Slate 900 - high contrast dark text)
+        - **Dark Mode**: 
+          - Background: ``#1e293b`` (Slate 800 - deep blue-gray)
+          - Ink: ``#f8fafc`` (Slate 50 - high contrast light text)
+          
+    Examples:
+        >>> colors = get_chart_theme_colors("Dark")
+        >>> colors["background"]
+        '#1e293b'
+        
+        >>> fig.update_layout(paper_bgcolor=colors["background"], font_color=colors["ink"])
+    """
+    # Normalize input to handle case variations like "dark", "DARK", "Light"
+    normalized_mode = (theme_mode or "light").strip().lower()
+    
+    if normalized_mode == "dark":
+        # Dark theme palette optimized for OLED/LCD screens and reduced eye strain
+        return {
+            "background": "#1e293b",  # Slate 800
+            "surface": "#0f172a",     # Slate 900 (slightly darker plot area)
+            "ink": "#f8fafc",         # Slate 50
+            "muted": "#94a3b8",       # Slate 400
+            "border": "#334155",      # Slate 700
+            "grid": "#475569",        # Slate 600
+        }
+    else:
+        # Light theme palette (default) optimized for bright environments
+        return {
+            "background": "#ffffff",  # Pure white
+            "surface": "#f8fafc",     # Slate 50 (very light gray plot area)
+            "ink": "#0f172a",         # Slate 900
+            "muted": "#64748b",       # Slate 500
+            "border": "#e2e8f0",      # Slate 200
+            "grid": "#cbd5e1",        # Slate 300
+        }
+
+
 def _create_boxplot_trace(name: str, scores: list[float], **kwargs: Any) -> go.Box:
     """Create a standardized Plotly Box trace with uniform styling."""
     return go.Box(
@@ -77,29 +142,14 @@ def plot_similarity_boxplot_by_group(
         Plotly Figure object with one box trace per group.
     """
     if not scores_dict:
-        fig = go.Figure()
-        fig.add_annotation(
-            text="No similarity scores available to plot",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font=dict(size=16, color=_annotation_color(theme_colors)),
-        )
-        fig.update_layout(
+        return _empty_chart(
             title="Similarity Score Quartile Distribution",
+            message="No similarity scores available to plot",
+            theme_colors=theme_colors,
+            show_grid=show_grid,
             xaxis_title="Assignment",
             yaxis_title="Similarity Score",
-            height=400,
-            autosize=True,
         )
-        fig.update_xaxes(showgrid=show_grid)
-        fig.update_yaxes(showgrid=show_grid)
-
-        _apply_theme_colors(fig, theme_colors)
-        return fig
-
     fig = go.Figure()
     for group_name, scores in scores_dict.items():
         fig.add_trace(_create_boxplot_trace(name=str(group_name), scores=scores))
@@ -206,6 +256,57 @@ def _annotation_color(theme_colors: dict[str, str] | None) -> str:
     return "#64748b"
 
 
+def _empty_chart(
+    title: str,
+    message: str,
+    theme_colors: dict[str, str] | None = None,
+    show_grid: bool = True,
+    height: int = 400,
+    xaxis_title: str | None = None,
+    yaxis_title: str | None = None,
+) -> go.Figure:
+    """Build a themed placeholder figure for an empty-state chart.
+
+    Centralizes the boilerplate every chart function needs when there is
+    no data to plot: an empty figure with a centered message annotation,
+    the standard title/height layout, and consistent theme/gridline styling.
+
+    Args:
+        title: Chart title to display.
+        message: Empty-state message shown as a centered annotation.
+        theme_colors: Optional theme palette for light/dark backgrounds.
+        show_grid: Whether to show chart gridlines.
+        height: Plot height in pixels.
+        xaxis_title: Optional x-axis label (omitted if not provided).
+        yaxis_title: Optional y-axis label (omitted if not provided).
+
+    Returns:
+        A themed Plotly Figure with no data traces and an explanatory
+        annotation.
+    """
+    fig = go.Figure()
+    fig.add_annotation(
+        text=message,
+        xref="paper",
+        yref="paper",
+        x=0.5,
+        y=0.5,
+        showarrow=False,
+        font=dict(size=16, color=_annotation_color(theme_colors)),
+    )
+
+    layout_kwargs: dict[str, Any] = {"title": title, "height": height, "autosize": True}
+    if xaxis_title is not None:
+        layout_kwargs["xaxis_title"] = xaxis_title
+    if yaxis_title is not None:
+        layout_kwargs["yaxis_title"] = yaxis_title
+    fig.update_layout(**layout_kwargs)
+
+    fig.update_xaxes(showgrid=show_grid)
+    fig.update_yaxes(showgrid=show_grid)
+
+    return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)
+
 def build_visualization_lazily(
     enabled: bool,
     factory: Callable[[], FigureT],
@@ -270,27 +371,14 @@ def plot_high_severity_trends(
 ) -> go.Figure:
     """Create an interactive line chart showing High severity plagiarism incidents over time."""
     if not trend_data:
-        fig = go.Figure()
-        fig.add_annotation(
-            text="No High severity incidents recorded in the specified period",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font=dict(size=16, color=_annotation_color(theme_colors)),
-        )
-        fig.update_layout(
+        return _empty_chart(
             title="High Severity Plagiarism Trends (Last 30 Days)",
+            message="No High severity incidents recorded in the specified period",
+            theme_colors=theme_colors,
+            show_grid=show_grid,
             xaxis_title="Date",
             yaxis_title="Number of High Severity Incidents",
-            height=400,
-            autosize=True,
         )
-        fig.update_xaxes(showgrid=show_grid)
-        fig.update_yaxes(showgrid=show_grid)
-        return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)
-
     df = pd.DataFrame(trend_data)
     df["date"] = pd.to_datetime(df["date"])
     df["cumulative"] = df["count"].cumsum()
@@ -343,27 +431,14 @@ def plot_most_plagiarized_documents(
 ) -> go.Figure:
     """Create a bar chart showing the most frequently plagiarized documents."""
     if not doc_data:
-        fig = go.Figure()
-        fig.add_annotation(
-            text="No plagiarism incidents recorded",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font=dict(size=16, color=_annotation_color(theme_colors)),
-        )
-        fig.update_layout(
+        return _empty_chart(
             title="Most Frequently Plagiarized Documents",
+            message="No plagiarism incidents recorded",
+            theme_colors=theme_colors,
+            show_grid=show_grid,
             xaxis_title="Document Name",
             yaxis_title="Number of Incidents",
-            height=400,
-            autosize=True,
         )
-        fig.update_xaxes(showgrid=show_grid)
-        fig.update_yaxes(showgrid=show_grid)
-        return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)
-
     df = pd.DataFrame(doc_data)
     df["display_name"] = df["document_name"].apply(
         lambda x: x[:30] + "..." if len(x) > 30 else x
@@ -413,27 +488,14 @@ def plot_similarity_distribution(
 ) -> go.Figure:
     """Create a histogram showing the distribution of all pairwise similarity scores."""
     if sim_matrix.empty or sim_matrix.shape[0] < 2:
-        fig = go.Figure()
-        fig.add_annotation(
-            text="Not enough documents to compute a similarity distribution",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font=dict(size=16, color=_annotation_color(theme_colors)),
-        )
-        fig.update_layout(
+        return _empty_chart(
             title=title,
+            message="Not enough documents to compute a similarity distribution",
+            theme_colors=theme_colors,
+            show_grid=show_grid,
             xaxis_title="Similarity Score",
             yaxis_title="Number of Document Pairs",
-            height=400,
-            autosize=True,
         )
-        fig.update_xaxes(showgrid=show_grid)
-        fig.update_yaxes(showgrid=show_grid)
-        return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)
-
     mask = np.triu(np.ones(sim_matrix.shape, dtype=bool), k=1)
     scores = sim_matrix.where(mask).stack().values
 
@@ -475,21 +537,12 @@ def plot_document_sizes(
 ) -> go.Figure:
     """Create a bar chart visualizing document word counts."""
     if not word_counts:
-        fig = go.Figure()
-        fig.add_annotation(
-            text="No documents currently in the database",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font=dict(size=16, color=_annotation_color(theme_colors)),
+        return _empty_chart(
+            title="Document Word Counts",
+            message="No documents currently in the database",
+            theme_colors=theme_colors,
+            show_grid=show_grid,
         )
-        fig.update_layout(title="Document Word Counts", height=400, autosize=True)
-        fig.update_xaxes(showgrid=show_grid)
-        fig.update_yaxes(showgrid=show_grid)
-        return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)
-
     doc_names = list(word_counts.keys())
     counts = list(word_counts.values())
 
@@ -543,27 +596,14 @@ def plot_similarity_boxplot(
         rows.append({"assignment_title": str(title), "similarity_score": score})
 
     if not rows:
-        fig = go.Figure()
-        fig.add_annotation(
-            text="No similarity scores recorded for the selected incidents",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font=dict(size=16, color=_annotation_color(theme_colors)),
-        )
-        fig.update_layout(
+        return _empty_chart(
             title="Similarity Score Distribution by Assignment",
+            message="No similarity scores recorded for the selected incidents",
+            theme_colors=theme_colors,
+            show_grid=show_grid,
             xaxis_title="Assignment Title",
             yaxis_title="Similarity Score",
-            height=400,
-            autosize=True,
         )
-        fig.update_xaxes(showgrid=show_grid)
-        fig.update_yaxes(showgrid=show_grid)
-        return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)
-
     grouped: dict[str, list[float]] = {}
     for row in rows:
         grouped.setdefault(row["assignment_title"], []).append(row["similarity_score"])
@@ -591,23 +631,12 @@ def plot_severity_donut_chart(
 ) -> go.Figure:
     """Create a donut chart showing the distribution of plagiarism incident severities."""
     if not incidents:
-        fig = go.Figure()
-        fig.add_annotation(
-            text="No plagiarism incidents recorded",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font=dict(size=16, color=_annotation_color(theme_colors)),
-        )
-        fig.update_layout(
+        return _empty_chart(
             title="Plagiarism Incident Severity Distribution",
-            height=400,
-            autosize=True,
+            message="No plagiarism incidents recorded",
+            theme_colors=theme_colors,
+            show_grid=False,
         )
-        return apply_plotly_theme(fig, theme_colors, show_grid=False)
-
     df = pd.DataFrame(incidents)
     if "severity" not in df.columns:
         df["severity"] = "Unknown"
@@ -664,23 +693,12 @@ def plot_similarity_histogram(
         A Plotly figure with the similarity score histogram.
     """
     if not scores:
-        fig = go.Figure()
-        fig.add_annotation(
-            text="No similarity scores available to plot",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font=dict(size=16, color=_annotation_color(theme_colors)),
-        )
-        fig.update_layout(
+        return _empty_chart(
             title="Similarity Score Distribution",
-            height=400,
-            autosize=True,
+            message="No similarity scores available to plot",
+            theme_colors=theme_colors,
+            show_grid=False,
         )
-        return apply_plotly_theme(fig, theme_colors, show_grid=False)
-
     counts, bin_edges = np.histogram(scores, bins=n_bins, range=(0.0, 1.0))
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
 
@@ -724,27 +742,14 @@ def plot_similarity_percentiles(
             continue
 
     if not scores:
-        fig = go.Figure()
-        fig.add_annotation(
-            text="No similarity scores available to compute percentiles",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font=dict(size=16, color=_annotation_color(theme_colors)),
-        )
-        fig.update_layout(
+        return _empty_chart(
             title="Similarity Score Percentile Breakdown",
+            message="No similarity scores available to compute percentiles",
+            theme_colors=theme_colors,
+            show_grid=show_grid,
             xaxis_title="Similarity Score",
             yaxis_title="Percentile",
-            height=400,
-            autosize=True,
         )
-        fig.update_xaxes(showgrid=show_grid)
-        fig.update_yaxes(showgrid=show_grid)
-        return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)
-
     percentile_values = np.percentile(scores, [25, 50, 75, 90])
     percentile_labels = ["25th", "50th (Median)", "75th", "90th"]
 
@@ -826,43 +831,26 @@ def plot_hierarchical_dendrogram(
 
     # ── Validate input ───────────────────────────────────────────────
     if similarity_matrix is None or similarity_matrix.empty:
-        fig.add_annotation(
-            text="No similarity data available to build a dendrogram",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font=dict(size=16, color=_annotation_color(theme_colors)),
-        )
-        fig.update_layout(
+        return _empty_chart(
             title=title,
+            message="No similarity data available to build a dendrogram",
+            theme_colors=theme_colors,
+            show_grid=show_grid,
+            height=height,
             xaxis_title="Document",
             yaxis_title="Merge Distance (1 − similarity)",
-            height=height,
-            autosize=True,
         )
-        return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)
 
     if similarity_matrix.shape[0] < 2:
-        fig.add_annotation(
-            text="At least two documents are required to build a dendrogram",
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            showarrow=False,
-            font=dict(size=16, color=_annotation_color(theme_colors)),
-        )
-        fig.update_layout(
+        return _empty_chart(
             title=title,
+            message="At least two documents are required to build a dendrogram",
+            theme_colors=theme_colors,
+            show_grid=show_grid,
+            height=height,
             xaxis_title="Document",
             yaxis_title="Merge Distance (1 − similarity)",
-            height=height,
-            autosize=True,
         )
-        return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)
-
     # ── Build linkage matrix via Ward's method ──────────────────────
     # Lazy import keeps cold-start fast for users who never render this
     # chart, and keeps scipy out of the import graph of lighter modules
@@ -1004,4 +992,210 @@ def plot_hierarchical_dendrogram(
     fig.update_xaxes(showgrid=False)
     fig.update_yaxes(showgrid=show_grid)
 
+    return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)
+
+
+def plot_monthly_incident_trends(
+    incidents: list[dict[str, Any]],
+    show_grid: bool = True,
+    theme_colors: dict[str, str] | None = None,
+    months_to_show: int = 12,
+) -> go.Figure:
+    """Create a vertical bar chart showing monthly plagiarism incident trends.
+    
+    Aggregates incident counts by month (YYYY-MM format) to help instructors
+    and administrators track semester-over-semester plagiarism patterns.
+    This visualization is particularly useful for identifying seasonal spikes
+    (e.g., during midterms or finals) and evaluating the effectiveness of
+    academic integrity interventions over time.
+    
+    The chart displays the most recent ``months_to_show`` months, sorted
+    chronologically from oldest to newest (left to right). Months with zero
+    incidents are included in the timeline to maintain temporal continuity.
+    
+    Args:
+        incidents: List of incident dictionaries. Each dict should contain a
+                   ``date_flagged`` or ``timestamp`` key with an ISO 8601
+                   datetime string or parseable date format.
+        show_grid: Whether to display horizontal gridlines for easier
+                   value estimation. Defaults to True.
+        theme_colors: Optional theme palette dictionary for Light/Dark mode
+                      synchronization. When None, Plotly defaults are used.
+        months_to_show: Number of recent months to display on the x-axis.
+                        Defaults to 12 (one full year). Must be >= 1.
+                        
+    Returns:
+        A Plotly Figure object containing the monthly trend bar chart.
+        If no valid incidents are provided, returns an empty-state chart
+        with an explanatory annotation.
+        
+    Data Requirements:
+        Each incident dictionary should ideally contain:
+        - ``date_flagged`` or ``timestamp``: ISO 8601 datetime string
+        - ``similarity_score``: Optional, used for severity coloring
+        
+    Examples:
+        >>> incidents = [
+        ...     {"date_flagged": "2024-01-15T10:00:00", "similarity_score": 0.85},
+        ...     {"date_flagged": "2024-01-20T14:30:00", "similarity_score": 0.92},
+        ...     {"date_flagged": "2024-02-05T09:15:00", "similarity_score": 0.75},
+        ... ]
+        >>> fig = plot_monthly_incident_trends(incidents, months_to_show=6)
+        >>> # Returns a bar chart with Jan 2024 (2 incidents) and Feb 2024 (1 incident)
+        
+    Notes:
+        - Months are formatted as "YYYY-MM" (e.g., "2024-01") for clarity
+        - The y-axis always starts at 0 to prevent misleading visualizations
+        - Bars are colored using the primary theme color with hover tooltips
+          showing the exact month and incident count
+    """
+    # ── Validate and parse input data ─────────────────────────────────────────
+    if not incidents or not isinstance(incidents, list):
+        return _empty_chart(
+            title="Monthly Plagiarism Incident Trends",
+            message="No plagiarism incidents recorded to display trends",
+            theme_colors=theme_colors,
+            show_grid=show_grid,
+            xaxis_title="Month (YYYY-MM)",
+            yaxis_title="Number of Incidents",
+        )
+
+    # Parse dates and aggregate by month
+    monthly_counts: dict[str, int] = {}
+    valid_dates_found = False
+    
+    for incident in incidents:
+        # Try multiple common date keys
+        date_str = (
+            incident.get("date_flagged") 
+            or incident.get("timestamp") 
+            or incident.get("created_at")
+        )
+        
+        if not date_str:
+            continue
+            
+        try:
+            # Parse ISO 8601 or common datetime formats
+            if isinstance(date_str, str):
+                # Handle ISO format with timezone
+                if "T" in date_str:
+                    dt = pd.to_datetime(date_str, utc=True)
+                else:
+                    dt = pd.to_datetime(date_str)
+            else:
+                # Assume it's already a datetime-like object
+                dt = pd.to_datetime(date_str)
+                
+            # Extract YYYY-MM format
+            month_key = dt.strftime("%Y-%m")
+            monthly_counts[month_key] = monthly_counts.get(month_key, 0) + 1
+            valid_dates_found = True
+            
+        except (ValueError, TypeError, pd.errors.ParserError) as exc:
+            # Skip incidents with unparseable dates
+            continue
+
+    if not valid_dates_found or not monthly_counts:
+        return _empty_chart(
+            title="Monthly Plagiarism Incident Trends",
+            message="No incidents with valid dates found in the dataset",
+            theme_colors=theme_colors,
+            show_grid=show_grid,
+            xaxis_title="Month (YYYY-MM)",
+            yaxis_title="Number of Incidents",
+        )
+
+    # ── Build complete timeline (fill missing months with 0) ──────────────────
+    # Sort months chronologically
+    sorted_months = sorted(monthly_counts.keys())
+    
+    # Determine the date range to display
+    if len(sorted_months) > months_to_show:
+        # Show only the most recent N months
+        display_months = sorted_months[-months_to_show:]
+    else:
+        display_months = sorted_months
+        
+    # Fill in any missing months within the display range to maintain continuity
+    # This prevents gaps in the timeline that could mislead viewers
+    start_date = pd.to_datetime(display_months[0] + "-01")
+    end_date = pd.to_datetime(display_months[-1] + "-01")
+    
+    # Generate complete month range
+    complete_range = pd.date_range(start=start_date, end=end_date, freq="MS")
+    
+    # Build final data structure
+    chart_data = []
+    for dt in complete_range:
+        month_key = dt.strftime("%Y-%m")
+        count = monthly_counts.get(month_key, 0)
+        chart_data.append({
+            "month": month_key,
+            "incident_count": count,
+            "display_label": dt.strftime("%b %Y"),  # "Jan 2024" format for readability
+        })
+
+    # ── Create Plotly bar chart ───────────────────────────────────────────────
+    df = pd.DataFrame(chart_data)
+    
+    # Determine bar color based on theme
+    bar_color = "#636efa"  # Default Plotly blue
+    if theme_colors and isinstance(theme_colors, dict):
+        # Use primary color if available, otherwise fallback
+        bar_color = theme_colors.get("primary", "#636efa")
+    
+    fig = px.bar(
+        df,
+        x="display_label",
+        y="incident_count",
+        title="Monthly Plagiarism Incident Trends",
+        labels={
+            "display_label": "Month",
+            "incident_count": "Number of Incidents",
+        },
+        orientation="v",
+    )
+
+    # ── Customize layout and styling ─────────────────────────────────────────
+    fig.update_layout(
+        xaxis_title="Month",
+        yaxis_title="Number of Incidents",
+        height=450,
+        showlegend=False,
+        autosize=True,
+        bargap=0.2,  # Space between bars
+        yaxis=dict(
+            rangemode="tozero",  # Always start y-axis at 0
+            dtick=1,  # Integer ticks only (can't have 1.5 incidents)
+        ),
+    )
+    
+    fig.update_xaxes(
+        showgrid=show_grid,
+        tickangle=-45,  # Angle labels for better readability
+    )
+    fig.update_yaxes(showgrid=show_grid)
+
+    # Style the bars
+    fig.update_traces(
+        marker_color=bar_color,
+        marker_line_color="#4a4dba",
+        marker_line_width=1.5,
+        customdata=df["month"],  # Store YYYY-MM for tooltip
+        hovertemplate=(
+            "<b>%{customdata}</b><br>"
+            "Incidents: %{y}<br>"
+            "<extra></extra>"
+        ),
+    )
+
+    # Add value labels on top of bars for quick reading
+    fig.update_traces(
+        text=df["incident_count"],
+        textposition="outside",
+        textfont=dict(size=11),
+    )
+
+    # Apply theme colors for Light/Dark mode support
     return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)

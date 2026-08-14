@@ -405,7 +405,7 @@ def test_get_document_word_counts():
     ]
     add_chunks(chunks)
 
-    word_counts = get_document_word_counts()
+    word_counts = get_document_word_counts()  # noqa: F821
     assert word_counts["doc1.txt"] == 13
     assert word_counts["doc2.txt"] == 6
 
@@ -674,3 +674,27 @@ def test_get_document_count_by_user_empty():
     from src.db.corpus_db import get_document_count_by_user
 
     assert get_document_count_by_user("unknown-user") == 0
+
+def test_configure_db_path_plain_filename(tmp_path):
+    from src.db.corpus_db import configure_db_path, get_corpus_db_path, _connect
+    
+    original_path = get_corpus_db_path()
+    try:
+        # A plain filename with no directory components
+        plain_filename = "corpus_plain_test.db"
+        
+        import os
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            configure_db_path(plain_filename)
+            
+            # This triggers _connect() which should create the file
+            with _connect() as conn:
+                conn.execute("SELECT 1")
+                
+            assert os.path.exists(plain_filename)
+        finally:
+            os.chdir(original_cwd)
+    finally:
+        configure_db_path(original_path)

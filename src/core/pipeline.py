@@ -8,7 +8,7 @@ and cross-lingual plagiarism detection.
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple  # noqa: F401
 
 import numpy as np
 import pandas as pd
@@ -52,7 +52,7 @@ def _get_cross_lingual_mode() -> bool:
     """Get cross-lingual mode from session state."""
     try:
         return st.session_state.get("cross_lingual_mode_toggle", False)
-    except:
+    except:  # noqa: E722
         return False
 
 
@@ -187,7 +187,7 @@ def run_pipeline(
             from src.core.cross_lingual import prepare_documents_for_embedding
             
             # Convert chunked_docs to dict format
-            doc_chunks = {}
+            doc_chunks = {}  # noqa: F841
             for doc_name, chunks in zip(file_bytes_dict.keys(), [chunked_docs]):
                 # Rebuild document chunks
                 pass
@@ -262,7 +262,7 @@ def run_pipeline(
     if cross_lingual_mode and translation_metadata:
         try:
             st.session_state["translation_metadata"] = translation_metadata
-        except:
+        except:  # noqa: E722
             pass
 
     return (
@@ -372,7 +372,7 @@ def run_extraction_pipeline(
     if cross_lingual_mode and translation_metadata:
         try:
             st.session_state["translation_metadata"] = translation_metadata
-        except:
+        except:  # noqa: E722
             pass
 
     return (

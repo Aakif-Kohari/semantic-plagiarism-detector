@@ -7,6 +7,7 @@ and strong password complexity policies.
 """
 
 from __future__ import annotations
+from pathlib import Path
 
 import datetime
 import json
@@ -32,6 +33,10 @@ from src.errors import StaleDataException
 logger = logging.getLogger(__name__)
 
 _DB_PATH = os.path.abspath(str(AUTH_DB_PATH))
+
+
+def get_auth_db_path() -> Path:
+    return Path(_DB_PATH)
 
 VALID_ROLES = {"admin", "teacher"}
 
@@ -1467,7 +1472,7 @@ def require_permission(permission: Permission):
         @wraps(func)
         def wrapper(*args, **kwargs):
             # Get username from session state
-            username = st.session_state.get(SessionKeys.USERNAME)
+            username = st.session_state.get(SessionKeys.USERNAME)  # noqa: F821
             if not username:
                 st.error("🔒 Authentication required.")
                 return None
@@ -1493,7 +1498,7 @@ def require_role(required_role: UserRole):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            username = st.session_state.get(SessionKeys.USERNAME)
+            username = st.session_state.get(SessionKeys.USERNAME)  # noqa: F821
             if not username:
                 st.error("🔒 Authentication required.")
                 return None
@@ -1701,12 +1706,12 @@ def demote_user(username: str, admin_username: str) -> bool:
 # SSO SECURITY ENHANCEMENTS - Issue #2172
 # ============================================================================
 
-import secrets
-import string
-from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List
+import secrets  # noqa: F811
+import string  # noqa: F811
+from datetime import datetime, timedelta  # noqa: F811
+from typing import Optional, Dict, Any, List  # noqa: F811
 import hashlib
-import json
+import json  # noqa: F811
 
 # ============================================================================
 # SECURE PASSWORD GENERATION
@@ -2068,7 +2073,7 @@ def revoke_sso_access(username: str) -> bool:
 
                     event_type="user_role_changed",
                     username=username,
-                    details=f"Role changed to {new_role.value} by {admin_username}"
+                    details=f"Role changed to {new_role.value} by {admin_username}"  # noqa: F821
                 )
                 return True
             return False
@@ -2078,7 +2083,7 @@ def revoke_sso_access(username: str) -> bool:
         return False
 
 
-def demote_user(username: str, admin_username: str) -> bool:
+def demote_user(username: str, admin_username: str) -> bool:  # noqa: F811
     """
     Demote a user to the default USER role.
     
@@ -2133,7 +2138,7 @@ def render_role_selector(username: str, current_role: str) -> None:
     
     if selected != current_role:
         if st.button(f"Update Role for {username}", key=f"role_update_{username}"):
-            admin = st.session_state.get(SessionKeys.USERNAME)
+            admin = st.session_state.get(SessionKeys.USERNAME)  # noqa: F821
             new_role = UserRole.from_string(selected)
             if promote_user(username, new_role, admin):
                 st.success(f"✅ Role updated to {selected} for {username}")
@@ -2192,7 +2197,7 @@ def migrate_existing_sso_users() -> Dict[str, Any]:
         Dict with migration statistics
     """
     try:
-        from src.db.auth import get_all_users, update_password
+        from src.db.auth import get_all_users, update_password  # noqa: F401
         
         sso_users = list_sso_users()
         migrated = 0

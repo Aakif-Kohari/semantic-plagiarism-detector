@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 import pytest
+import requests
 
 from src.utils.sso import (
     exchange_github_code,
@@ -116,3 +117,66 @@ def test_exchange_github_code_success(mock_post, mock_get, monkeypatch):
     assert result == {"login": "octocat", "email": "octocat@github.com"}
     mock_post.assert_called_once()
     mock_get.assert_called_once()
+
+
+@patch("src.utils.sso.requests.post")
+def test_oauth_token_exchange_timeout(mock_post, monkeypatch):
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "dummy_client_id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "dummy_secret")
+
+    mock_post.side_effect = requests.Timeout()
+
+    result = exchange_google_code("valid_code")
+    assert result is None
+    
+    mock_post.assert_called_once()
+    _, kwargs = mock_post.call_args
+    assert kwargs.get("timeout") == 10
+
+@patch("src.utils.sso.requests.post")
+def test_github_oauth_token_exchange_timeout(mock_post, monkeypatch):
+    monkeypatch.setenv("GITHUB_CLIENT_ID", "dummy_client_id")
+    monkeypatch.setenv("GITHUB_CLIENT_SECRET", "dummy_secret")
+
+    mock_post.side_effect = requests.Timeout()
+
+    result = exchange_github_code("valid_code")
+    assert result is None
+    
+    mock_post.assert_called_once()
+    _, kwargs = mock_post.call_args
+    assert kwargs.get("timeout") == 10
+
+@patch("src.utils.sso.requests.get")
+@patch("src.utils.sso.requests.post")
+def test_oauth_user_request_timeout(mock_post, mock_get, monkeypatch):
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "dummy_client_id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "dummy_secret")
+
+    mock_post.return_value.ok = True
+    mock_post.return_value.json.return_value = {"access_token": "google_token_123"}
+    mock_get.side_effect = requests.Timeout()
+
+    result = exchange_google_code("valid_code")
+    assert result is None
+    
+    mock_get.assert_called_once()
+    _, kwargs = mock_get.call_args
+    assert kwargs.get("timeout") == 10
+
+@patch("src.utils.sso.requests.get")
+@patch("src.utils.sso.requests.post")
+def test_github_oauth_user_request_timeout(mock_post, mock_get, monkeypatch):
+    monkeypatch.setenv("GITHUB_CLIENT_ID", "dummy_client_id")
+    monkeypatch.setenv("GITHUB_CLIENT_SECRET", "dummy_secret")
+
+    mock_post.return_value.ok = True
+    mock_post.return_value.json.return_value = {"access_token": "github_token_123"}
+    mock_get.side_effect = requests.Timeout()
+
+    result = exchange_github_code("valid_code")
+    assert result is None
+    
+    mock_get.assert_called_once()
+    _, kwargs = mock_get.call_args
+    assert kwargs.get("timeout") == 10

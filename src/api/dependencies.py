@@ -1,3 +1,4 @@
+from src.api.middleware import get_current_user, verify_bearer_token
 """src/api/dependencies.py - Shared API dependencies and context helpers."""
 
 import logging

@@ -661,8 +661,8 @@ atexit.register(_cleanup_redis)
 
 
 
-import zlib
-import pickle
+import zlib  # noqa: F811
+import pickle  # noqa: F811
 
 def store_large_data(key: str, data: Any, ttl: int = 1800) -> None:
     """

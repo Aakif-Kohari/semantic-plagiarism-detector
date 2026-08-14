@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import logging
 import os
+import atexit
 import sqlite3
 import threading
+from typing import Optional, Set
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -28,9 +30,11 @@ logger = logging.getLogger(__name__)
 
 # Seed the corpus DB path from the centralized app_config.
 _DB_PATH = os.path.abspath(str(CORPUS_DB_PATH))
+SCHEMA_PATH = Path(__file__).resolve().parent / "schema.sql"
 
-_connection_pool = threading.local()
-
+_local = threading.local()
+_pool_lock = threading.Lock()
+_all_connections: Set[sqlite3.Connection] = set()
 
 class CorpusRepository(BaseRepository):
     """Data access repository for corpus documents, text chunks, and vector embeddings."""
@@ -42,9 +46,7 @@ class CorpusRepository(BaseRepository):
         """Create or upgrade corpus.db without deleting persisted data."""
         init_corpus_db()
 
-
 corpus_repo = CorpusRepository(_DB_PATH)
-
 
 def configure_db_path(db_path: str | os.PathLike) -> None:
     """Configure the SQLite database path used by the corpus module."""
@@ -53,20 +55,9 @@ def configure_db_path(db_path: str | os.PathLike) -> None:
     _DB_PATH = os.path.abspath(os.fspath(db_path))
     corpus_repo.configure_db_path(_DB_PATH)
 
-
 def get_corpus_db_path() -> Path:
     """Return the configured corpus SQLite database path."""
     return Path(_DB_PATH)
-
-
-def _pool() -> dict[str, sqlite3.Connection]:
-    """Return the connection pool belonging to the current thread."""
-    pool = getattr(_connection_pool, "connections", None)
-    if pool is None:
-        pool = {}
-        _connection_pool.connections = pool
-    return pool
-
 
 @contextmanager
 def _connect():
@@ -75,16 +66,16 @@ def _connect():
     under concurrent requests."""
     path = os.path.abspath(_DB_PATH)
     try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
     except (OSError, PermissionError):
         path = str(FALLBACK_CORPUS_DB_PATH)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
 
     try:
         conn = sqlite3.connect(path, check_same_thread=False)
     except sqlite3.OperationalError:
         path = str(FALLBACK_CORPUS_DB_PATH)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(path, check_same_thread=False)
     conn.execute("PRAGMA foreign_keys = ON")
 
@@ -100,40 +91,62 @@ def _connect():
         except Exception:
             pass
 
+def get_connection(db_path: str) -> sqlite3.Connection:
+    """Get or create a thread-local SQLite connection, tracked globally for cleanup."""
+    conn: Optional[sqlite3.Connection] = getattr(_local, "connection", None)
+    if conn is None:
+        conn = sqlite3.connect(db_path)
+        _local.connection = conn
+        with _pool_lock:
+            _all_connections.add(conn)
+    return conn
 
-def close_connections() -> None:
-    """Close all pooled corpus connections for the current thread."""
-    pool = getattr(_connection_pool, "connections", {})
-    for conn in pool.values():
-        conn.close()
-    pool.clear()
+def close_connections(all_threads: bool = True) -> None:
+    """
+    Close pooled SQLite connections.
+    
+    :param all_threads: If True, closes connections across all threads.
+                        If False, only closes the connection for the current thread.
+    """
+    if all_threads:
+        with _pool_lock:
+            for conn in list(_all_connections):
+                try:
+                    conn.close()
+                except (sqlite3.ProgrammingError, sqlite3.OperationalError):
+                    pass
+            _all_connections.clear()
+        _local.connection = None
+    else:
+        conn = getattr(_local, "connection", None)
+        if conn is not None:
+            with _pool_lock:
+                _all_connections.discard(conn)
+            try:
+                conn.close()
+            except (sqlite3.ProgrammingError, sqlite3.OperationalError):
+                pass
+            _local.connection = None
 
+@contextmanager
+def thread_connection_scope(db_path: str):
+    """Context manager for thread-scoped connection lifecycle management."""
+    conn = get_connection(db_path)
+    try:
+        yield conn
+    finally:
+        close_connections(all_threads=False)
+
+# Register global cleanup on interpreter shutdown
+atexit.register(close_connections, all_threads=True)
 
 def init_corpus_db() -> None:
     """Create or upgrade corpus.db without deleting persisted data."""
     with _connect() as conn:
-        # 1. ALWAYS CREATE TABLES FIRST
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS documents (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                filename TEXT UNIQUE NOT NULL,
-                file_hash TEXT UNIQUE NOT NULL,
-                upload_date TEXT NOT NULL,
-                class_section TEXT,
-                student_name TEXT,
-                assignment_title TEXT,
-                pdf_author TEXT,
-                pdf_creation_date TEXT,
-                pdf_title TEXT,
-                tags TEXT,
-                detected_language TEXT,
-                owner TEXT,
-                is_deleted INTEGER DEFAULT 0,
-                deleted_at TEXT,
-                created_at TEXT
-            )
-            """)
+        if not SCHEMA_PATH.exists():
+            raise FileNotFoundError(f"Schema file not found at: {SCHEMA_PATH}")
 
+feat/scan-history-median-similarity-2339
         conn.execute("""
             CREATE TABLE IF NOT EXISTS chunks (
                 vector_id INTEGER PRIMARY KEY,
@@ -193,6 +206,10 @@ def init_corpus_db() -> None:
                 threshold_used REAL NOT NULL
             )
             """)
+
+        schema_sql = SCHEMA_PATH.read_text(encoding="utf-8")
+        conn.executescript(schema_sql)
+ main
 
         # 2. RUN SCHEMA MIGRATIONS / ALTER TABLES AFTER CREATION
         columns_to_ensure = [
@@ -266,7 +283,6 @@ def init_corpus_db() -> None:
         except OSError:
             pass
 
-
 @with_sqlite_retry
 def add_document(
     filename: str,
@@ -324,7 +340,6 @@ def add_document(
     except sqlite3.IntegrityError:
         return None
 
-
 def get_document_by_hash(file_hash: str) -> str | None:
     """Check if a file with this hash is already indexed and return its filename."""
     with _connect() as conn:
@@ -332,7 +347,6 @@ def get_document_by_hash(file_hash: str) -> str | None:
             "SELECT filename FROM documents WHERE file_hash = ?", (file_hash,)
         ).fetchone()
         return row[0] if row else None
-
 
 def get_all_documents(include_deleted: bool = False) -> list:
     """Return all indexed documents sorted by upload date descending."""
@@ -365,7 +379,6 @@ def get_all_documents(include_deleted: bool = False) -> list:
             for r in rows
         ]
 
-
 @with_sqlite_retry
 def add_chunks(chunks_to_add: list) -> None:
     """Insert a batch of chunks with their raw text and embedded BLOBs."""
@@ -387,7 +400,6 @@ def add_chunks(chunks_to_add: list) -> None:
     mem_after = process.memory_info().rss / (1024 * 1024)
     logger.info("Memory usage after batch chunk insertion: %.2f MB", mem_after)
 
-
 def get_chunk_registry() -> list:
     """Reconstructs the registry of ChunkRecord objects ordered by vector_id."""
     from src.core.faiss_index import ChunkRecord
@@ -397,7 +409,6 @@ def get_chunk_registry() -> list:
             "SELECT filename, chunk_index, chunk_text FROM chunks ORDER BY vector_id ASC"
         ).fetchall()
         return [ChunkRecord(r[0], r[1], r[2]) for r in rows]
-
 
 def get_all_embeddings() -> np.ndarray:
     """Load all chunk embeddings from the database to rebuild the FAISS index."""
@@ -411,7 +422,6 @@ def get_all_embeddings() -> np.ndarray:
 
     embeddings = [np.frombuffer(r[0], dtype=np.float32) for r in rows]
     return np.vstack(embeddings)
-
 
 @with_sqlite_retry
 def delete_document(filename: str) -> None:
@@ -427,7 +437,6 @@ def delete_document(filename: str) -> None:
         )
         conn.execute("DELETE FROM documents WHERE filename = ?", (filename,))
         _compact_vector_ids()
-
 
 @with_sqlite_retry
 def soft_delete_document(filename: str) -> None:
@@ -448,7 +457,6 @@ def soft_delete_document(filename: str) -> None:
         )
         conn.execute("DELETE FROM chunks WHERE filename = ?", (filename,))
         _compact_vector_ids()
-
 
 def get_deleted_documents() -> list:
     """Return all soft-deleted documents sorted by deleted_at descending."""
@@ -474,7 +482,6 @@ def get_deleted_documents() -> list:
             for r in rows
         ]
 
-
 def get_deleted_documents_count() -> int:
     """Return the count of documents currently in the trash."""
     with _connect() as conn:
@@ -482,7 +489,6 @@ def get_deleted_documents_count() -> int:
             "SELECT COUNT(1) FROM documents WHERE is_deleted = 1"
         ).fetchone()
         return row[0] if row else 0
-
 
 @with_sqlite_retry
 def restore_document(filename: str) -> None:
@@ -508,12 +514,10 @@ def restore_document(filename: str) -> None:
         conn.execute("DELETE FROM deleted_chunks WHERE filename = ?", (filename,))
         _compact_vector_ids()
 
-
 @with_sqlite_retry
 def permanently_delete_document(filename: str) -> None:
     """Permanently delete a document (alias to delete_document)."""
     delete_document(filename)
-
 
 @with_sqlite_retry
 def empty_trash() -> None:
@@ -535,7 +539,6 @@ def empty_trash() -> None:
                 (filename, filename),
             )
         conn.execute("DELETE FROM documents WHERE is_deleted = 1")
-
 
 @with_sqlite_retry
 def batch_soft_delete_documents(doc_ids: list[int]) -> int:
@@ -574,7 +577,6 @@ def batch_soft_delete_documents(doc_ids: list[int]) -> int:
 
     _compact_vector_ids()
     return rowcount
-
 
 @with_sqlite_retry
 def batch_permanently_delete_documents(doc_ids: list[int]) -> int:
@@ -629,7 +631,6 @@ def batch_permanently_delete_documents(doc_ids: list[int]) -> int:
         _compact_vector_ids()
     return rowcount
 
-
 @with_sqlite_retry
 def _compact_vector_ids() -> None:
     """Re-index the vector_id column to remove any gaps left by deleted documents."""
@@ -647,7 +648,6 @@ def _compact_vector_ids() -> None:
                 formatted,
             )
 
-
 def get_document_chunks_count(filename: str) -> int:
     """Return the number of chunks for a given document."""
     with _connect() as conn:
@@ -655,7 +655,6 @@ def get_document_chunks_count(filename: str) -> int:
             "SELECT COUNT(1) FROM chunks WHERE filename = ?", (filename,)
         ).fetchone()
         return row[0] if row else 0
-
 
 def get_document_word_counts() -> dict[str, int]:
     """Calculate and return the total word count for each document currently in the database."""
@@ -670,7 +669,6 @@ def get_document_word_counts() -> dict[str, int]:
         word_counts[filename] = word_counts.get(filename, 0) + words
     return word_counts
 
-
 def get_document_char_counts() -> dict[str, int]:
     """Calculate and return the total character count for each document currently in the database."""
     with _connect() as conn:
@@ -681,7 +679,6 @@ def get_document_char_counts() -> dict[str, int]:
         chars = len(chunk_text or "")
         char_counts[filename] = char_counts.get(filename, 0) + chars
     return char_counts
-
 
 @with_sqlite_retry
 def clear_all_data() -> None:
@@ -694,7 +691,6 @@ def clear_all_data() -> None:
         delete_all_if_table_exists(conn, "plagiarism_incidents")
         delete_all_if_table_exists(conn, "false_positives")
 
-
 def get_unique_class_sections() -> list:
     """Return all unique class sections from the documents table."""
     with _connect() as conn:
@@ -703,7 +699,6 @@ def get_unique_class_sections() -> list:
         ).fetchall()
         return [r[0] for r in rows]
 
-
 def get_documents_by_class(class_section: str) -> list:
     """Return all document filenames belonging to a class section."""
     with _connect() as conn:
@@ -711,7 +706,6 @@ def get_documents_by_class(class_section: str) -> list:
             "SELECT filename FROM documents WHERE class_section = ?", (class_section,)
         ).fetchall()
         return [r[0] for r in rows]
-
 
 def get_document_count_fast(include_deleted: bool = False) -> int:
     """Return the total document count using SELECT COUNT(*) query."""
@@ -722,13 +716,11 @@ def get_document_count_fast(include_deleted: bool = False) -> int:
         row = conn.execute(query).fetchone()
         return int(row[0]) if row else 0
 
-
 def get_embedding_count() -> int:
     """Return the number of durable chunk embeddings in the corpus."""
     with _connect() as conn:
         row = conn.execute("SELECT COUNT(1) FROM chunks").fetchone()
         return int(row[0]) if row else 0
-
 
 def get_document_count_by_user(owner_username: str) -> int:
     """Return the number of non-deleted documents owned by a specific user."""
@@ -738,7 +730,6 @@ def get_document_count_by_user(owner_username: str) -> int:
             (owner_username,),
         ).fetchone()
         return int(row[0]) if row else 0
-
 
 @with_sqlite_retry
 def add_documents_bulk(documents: list) -> int:
@@ -786,7 +777,6 @@ def add_documents_bulk(documents: list) -> int:
             raise e
     return success_count
 
-
 def get_all_tags() -> list[str]:
     """Fetches all unique document tags from the database."""
     try:
@@ -802,7 +792,6 @@ def get_all_tags() -> list[str]:
     except Exception:
         return []
 
-
 def get_document_tags(filename: str) -> str:
     """Fetches the tags string for a specific document."""
     try:
@@ -814,7 +803,6 @@ def get_document_tags(filename: str) -> str:
             return row[0] if row and row[0] else ""
     except Exception:
         return ""
-
 
 @with_sqlite_retry
 def update_document_tags(filename: str, tags: str) -> bool:
@@ -829,7 +817,6 @@ def update_document_tags(filename: str, tags: str) -> bool:
     except Exception as e:
         logger.error(f"Failed to update tags for '{filename}': {e}")
         return False
-
 
 def get_tag_document_count(tag: str) -> int:
     """Counts how many documents currently have the given tag."""
@@ -852,7 +839,6 @@ def get_tag_document_count(tag: str) -> int:
     except Exception as e:
         logger.error(f"Failed to count documents for tag '{tag}': {e}")
     return count
-
 
 @with_sqlite_retry
 def delete_tag(tag: str) -> int:
@@ -889,7 +875,6 @@ def delete_tag(tag: str) -> int:
         raise
     return affected_count
 
-
 def check_database_integrity() -> list[str]:
     """Execute PRAGMA integrity_check and return the result."""
     try:
@@ -900,7 +885,6 @@ def check_database_integrity() -> list[str]:
     except Exception as e:
         logger.error(f"Integrity check failed: {e}")
         return [f"Error: {e}"]
-
 
 @with_sqlite_retry
 def optimize_database() -> dict[str, any]:
@@ -934,7 +918,6 @@ def optimize_database() -> dict[str, any]:
             "error": str(e),
         }
 
-
 @with_sqlite_retry
 def purge_stale_trash(days_in_trash: int = 30) -> int:
     """Automatically purge documents that have been soft-deleted for over a specified number of days."""
@@ -962,7 +945,6 @@ def purge_stale_trash(days_in_trash: int = 30) -> int:
 
     return deleted_count
 
-
 def get_total_document_count(include_deleted: bool = False) -> int:
     """Return the total count of non-deleted (or all) indexed documents in the corpus database."""
     with _connect() as conn:
@@ -973,7 +955,6 @@ def get_total_document_count(include_deleted: bool = False) -> int:
                 "SELECT COUNT(1) FROM documents WHERE is_deleted IS NULL OR is_deleted = 0"
             ).fetchone()
         return int(row[0]) if row else 0
-
 
 def search_documents_fts(query_text: str) -> list[dict]:
     """Search the document corpus using the FTS5 full-text index (issue #1359).
@@ -1043,7 +1024,6 @@ def search_documents_fts(query_text: str) -> list[dict]:
         logger.warning("FTS5 search failed: %s. Returning empty list.", e)
         return []
 
-
 def record_scan_summary(
     document_count: int,
     avg_similarity: float,
@@ -1090,7 +1070,6 @@ def record_scan_summary(
     except Exception as exc:
         logger.error("Failed to record scan summary: %s", exc)
         return False
-
 
 def get_scan_history(
     start_date: str | None = None,

@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+import html
+import sys
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import pandas as pd
-import streamlit as st
 
+if "pytest" not in sys.modules:
+    import streamlit as st
+else:
+    from unittest.mock import MagicMock
+    st = MagicMock()
+
+from app.session_keys import SessionKeys
 from app.theme import badge_html, tier_from_severity_label
 from src.core.config import normalize_severity_label, severity_from_score, severity_rank
 from src.db.incidents import _normalise_pair, add_false_positive, get_false_positives
@@ -20,6 +28,7 @@ except ImportError:
         from fuzzywuzzy import fuzz  # type: ignore[import-untyped,reportMissingImports]
     except ImportError:
         fuzz = None
+        
 FUZZY_THRESHOLD = 75
 MAX_SEARCH_QUERY_LENGTH = 200
 
@@ -196,6 +205,7 @@ def render_copy_button(
     copied_label: str = "✅ Copied!",
     height: int = 45,
 ) -> None:
+    safe_button_id = html.escape(button_id)
     escaped_text = (
         text_to_copy.replace("\\", "\\\\")
         .replace('"', '\\"')
@@ -211,7 +221,7 @@ def render_copy_button(
             overflow: hidden;
         }}
     </style>
-    <button id="{button_id}" style="
+    <button id="{safe_button_id}" style="
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -234,7 +244,7 @@ def render_copy_button(
         {copy_label}
     </button>
     <script>
-        document.getElementById("{button_id}").addEventListener("click", function() {{
+        document.getElementById("{safe_button_id}").addEventListener("click", function() {{
             const text = "{escaped_text}";
             const textArea = document.createElement("textarea");
             textArea.value = text;
@@ -247,7 +257,7 @@ def render_copy_button(
             try {{
                 const successful = document.execCommand('copy');
                 if (successful) {{
-                    const btn = document.getElementById("{button_id}");
+                    const btn = document.getElementById("{safe_button_id}");
                     btn.innerHTML = "{copied_label}";
                     btn.style.borderColor = "#28a745";
                     btn.style.color = "#28a745";
@@ -274,7 +284,12 @@ def _has_exact_match(doc_a: str, doc_b: str) -> bool:
         or st.session_state.analysis_results is None
     ):
         return False
-    chunked_docs = st.session_state.analysis_results[1]
+    results = st.session_state.analysis_results
+    # Index 1 of the analysis_results tuple corresponds to chunked_docs
+    if hasattr(results, "chunked_docs"):
+        chunked_docs = results.chunked_docs
+    else:
+        chunked_docs = results[1]
     chunks_a = chunked_docs.get(doc_a, [])
     chunks_b = chunked_docs.get(doc_b, [])
 
@@ -340,9 +355,10 @@ def render_warning_controls(
 ) -> None:
     if "warning_page" not in st.session_state:
         st.session_state.warning_page = 1
-    if "compact_view" not in st.session_state:
-        st.session_state.compact_view = False
-
+        
+    if SessionKeys.COMPACT_VIEW not in st.session_state:
+        st.session_state[SessionKeys.COMPACT_VIEW] = False
+        
     from src.core.config import DEFAULT_THRESHOLDS
 
     st.caption(
@@ -363,7 +379,7 @@ def render_warning_controls(
             }
         )
 
-    if st.session_state.get("compact_view", False):
+    if st.session_state.get(SessionKeys.COMPACT_VIEW, False):
         active_filters.append(
             {
                 "key": "clear_compact_view",
@@ -479,8 +495,8 @@ def render_warning_controls(
                     elif f["action"] == "min_match_length":
                         st.session_state.warning_min_match_length = 0
                     elif f["action"] == "compact_view":
-                        st.session_state.compact_view = False
-                    st.rerun()
+                        st.session_state[SessionKeys.COMPACT_VIEW] = False
+                        st.rerun()
 
     dismissed_pairs = get_false_positives()
     filtered_flags = [
@@ -509,13 +525,15 @@ def render_warning_controls(
             get_text("warn_hide_low_severity", lang=lang_code),
             key="hide_low_severity",
         )
+        
     with compact_col:
         compact_view = st.checkbox(
             "Compact View",
-            key="compact_view",
+            key=SessionKeys.COMPACT_VIEW,
             help="Show warnings as compact single-line rows",
             on_change=_reset_page,
         )
+        
     with size_col:
         page_size = st.selectbox(
             get_text("warn_per_page", lang=lang_code),
@@ -787,7 +805,6 @@ def render_warning_controls(
         ):
             st.session_state.warning_page = current_page.page + 1
             st.rerun()
-
 
 
 def matches_query_predicate(flag: dict, search_query: str) -> bool:

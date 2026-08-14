@@ -305,19 +305,24 @@ def _compute_bm25_similarity(
     len_b = len(tokens_b)
     avg_len = (len_a + len_b) / 2.0
 
-    idf = math.log((2 - 2 + 0.5) / (2 + 0.5) + 1.0)
+    N = 2
+    all_terms = set(freq_a.keys()) | set(freq_b.keys())
+    idf = {}
+    for t in all_terms:
+        df_t = 2 if (t in freq_a and t in freq_b) else 1
+        idf[t] = math.log((N - df_t + 0.5) / (df_t + 0.5) + 1.0)
 
     score_a = sum(
-        idf
+        idf[t]
         * (freq_b[t] * (k1 + 1.0))
         / (freq_b[t] + k1 * (1.0 - b + b * (len_b / avg_len)))
         for t in common_terms
     )
     score_max_a = sum(
-        idf
+        idf[t]
         * (freq_a[t] * (k1 + 1.0))
         / (freq_a[t] + k1 * (1.0 - b + b * (len_a / avg_len)))
-        for t in common_terms
+        for t in freq_a.keys()
     )
 
     if score_max_a == 0:
@@ -550,14 +555,21 @@ def find_most_similar_chunks(
     sim_matrix = cosine_similarity(emb_a, emb_b)
 
     pairs = []
-    for i in range(sim_matrix.shape[0]):
-        for j in range(sim_matrix.shape[1]):
-            score = sim_matrix[i, j]
-            if score >= threshold:
-                pairs.append((chunks_a[i], chunks_b[j], float(score)))
+    flat_indices = np.argsort(sim_matrix, axis=None)[::-1]
 
-    pairs.sort(key=lambda x: x[2], reverse=True)
-    return pairs[:top_k]
+    for idx in flat_indices:
+        i, j = np.unravel_index(idx, sim_matrix.shape)
+        score = float(sim_matrix[i, j])
+
+        if score < threshold:
+            break
+
+        if len(pairs) >= top_k:
+            break
+
+        pairs.append((chunks_a[i], chunks_b[j], score))
+
+    return pairs
 
 
 # ── Cross-Lingual Chunk Matching (Issue #1956) ────────────────────────────────
@@ -596,8 +608,8 @@ def find_cross_lingual_matches(
         )
 
     # Determine which document needs translation
-    lang_a = detect_chunk_language(" ".join(chunks_a[:3])) if chunks_a else "en"
-    lang_b = detect_chunk_language(" ".join(chunks_b[:3])) if chunks_b else "en"
+    lang_a = detect_chunk_language(" ".join(chunks_a[:3])) if chunks_a else "en"  # noqa: F841
+    lang_b = detect_chunk_language(" ".join(chunks_b[:3])) if chunks_b else "en"  # noqa: F841
 
     # For this implementation, we assume emb_a and emb_b are already computed
     # on the back-translated text by the calling pipeline.
