@@ -124,6 +124,28 @@ def test_delete_user():
     assert get_user_role(user) is None
 
 
+def test_user_theme_preferences():
+    """Verify that get_user_theme and set_user_theme manage persistent preferences correctly."""
+    user = f"user_{uuid.uuid4().hex[:8]}"
+    add_user(user, "SecurePass123!")
+
+    # 1. Verify default theme for new user is "light"
+    assert get_user_theme(user) == "light"
+
+    # 2. Verify setting the theme to "dark" updates the stored value
+    set_user_theme(user, "dark")
+    assert get_user_theme(user) == "dark"
+
+    # 3. Verify setting the theme to "light" updates it back
+    set_user_theme(user, "light")
+    assert get_user_theme(user) == "light"
+
+    # 4. Verify invalid theme input falls back to "light"
+    set_user_theme(user, "invalid_theme_name")
+    assert get_user_theme(user) == "light"
+
+
+
 import unittest.mock as mock
 
 
