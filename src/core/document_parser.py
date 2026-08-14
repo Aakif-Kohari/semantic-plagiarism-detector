@@ -2010,3 +2010,28 @@ def extract_texts(
         results[name] = raw_texts.get(name, "")
 
     return results
+import io
+from pptx import Presentation  # type: ignore # Ensure python-pptx is imported
+
+ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt", ".pptx"}
+
+def _extract_pptx_text(file_obj) -> str:
+    """Extract text from a PowerPoint (.pptx) file object."""
+    try:
+        # If file_obj is a path string or bytes/stream, handle appropriately
+        if isinstance(file_obj, (str, os.PathLike)):
+            prs = Presentation(file_obj)
+        else:
+            prs = Presentation(io.BytesIO(file_obj.read()) if hasattr(file_obj, "read") else file_obj)
+        
+        text_runs = []
+        for slide in prs.slides:
+            for shape in slide.shapes:
+                if shape.has_text_frame:
+                    for paragraph in shape.text_frame.paragraphs:
+                        for run in paragraph.runs:
+                            if run.text:
+                                text_runs.append(run.text)
+        return "\n".join(text_runs)
+    except Exception as e:
+        return f"[Error parsing PowerPoint: {e}]"
