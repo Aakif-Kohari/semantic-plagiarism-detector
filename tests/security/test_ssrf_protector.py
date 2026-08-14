@@ -1,7 +1,17 @@
+"""
+tests/security/test_ssrf_protector.py
+-------------------------------------
+Unit tests for the SSRF protection module.
+
+Validates URL validation, DNS resolution, IP blocking, redirect handling,
+and User-Agent header attachment (Issue #2212).
+"""
+
 import socket
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pytest
+import requests
 
 from src.security.ssrf_protector import (
     DEFAULT_USER_AGENT,
@@ -378,3 +388,206 @@ def test_validate_url_safety_attaches_custom_user_agent_header(
         timeout=5.0,
         allow_redirects=False,
     )
+
+
+class TestUserAgentHeaderInspection:
+    """Test suite for User-Agent header attachment (Issue #2212)."""
+
+    @patch("src.security.ssrf_protector.requests.head")
+    @patch.object(SSRFProtector, "_validate_url_target", return_value="93.184.216.34")
+    def test_default_user_agent_attached_to_head_request(self, mock_validate, mock_head):
+        """Verify DEFAULT_USER_AGENT is attached to outgoing HEAD requests."""
+        mock_head.return_value = MagicMock(status_code=200)
+        
+        SSRFProtector.validate_webhook_url("https://example.com/webhook")
+        
+        mock_head.assert_called_once()
+        call_kwargs = mock_head.call_args[1]
+        
+        assert "headers" in call_kwargs
+        assert call_kwargs["headers"]["User-Agent"] == DEFAULT_USER_AGENT
+        assert call_kwargs["headers"]["User-Agent"] == "SemanticPlagiarismDetector/1.0"
+
+    @patch("src.security.ssrf_protector.requests.head")
+    @patch("src.security.ssrf_protector.requests.get")
+    @patch.object(SSRFProtector, "_validate_url_target", return_value="93.184.216.34")
+    def test_fallback_to_get_when_head_rejected(self, mock_validate, mock_get, mock_head):
+        """Verify fallback to GET when server rejects HEAD with 405."""
+        # HEAD returns 405 Method Not Allowed
+        mock_head.return_value = MagicMock(status_code=405)
+        # GET succeeds
+        mock_get.return_value = MagicMock(status_code=200)
+        
+        SSRFProtector.validate_webhook_url("https://example.com/webhook")
+        
+        # Both HEAD and GET should be called
+        mock_head.assert_called_once()
+        mock_get.assert_called_once()
+        
+        # GET should also have User-Agent header
+        get_kwargs = mock_get.call_args[1]
+        assert get_kwargs["headers"]["User-Agent"] == DEFAULT_USER_AGENT
+
+    @patch("src.security.ssrf_protector.requests.head")
+    @patch.object(SSRFProtector, "_validate_url_target", return_value="93.184.216.34")
+    def test_custom_user_agent_override(self, mock_validate, mock_head):
+        """Verify custom User-Agent can override the default."""
+        mock_head.return_value = MagicMock(status_code=200)
+        custom_ua = "CustomBot/2.0"
+        
+        SSRFProtector.validate_webhook_url(
+            "https://example.com/webhook",
+            user_agent=custom_ua
+        )
+        
+        call_kwargs = mock_head.call_args[1]
+        assert call_kwargs["headers"]["User-Agent"] == custom_ua
+
+    @patch("src.security.ssrf_protector.requests.head")
+    @patch.object(SSRFProtector, "_check_redirect_depth", return_value=None)
+    @patch.object(SSRFProtector, "_validate_url_target", return_value="93.184.216.34")
+    def test_user_agent_attached_to_redirect_validation(self, mock_validate, mock_redirect, mock_head):
+        """Verify User-Agent is attached to requests during redirect chain validation."""
+        mock_head.return_value = MagicMock(status_code=200)
+        
+        SSRFProtector.validate_url_safety("https://example.com/webhook")
+        
+        # User-Agent should be in the HEAD request
+        call_kwargs = mock_head.call_args[1]
+        assert call_kwargs["headers"]["User-Agent"] == DEFAULT_USER_AGENT
+
+    @patch("src.security.ssrf_protector.requests.head")
+    @patch.object(SSRFProtector, "_validate_url_target", return_value="93.184.216.34")
+    def test_user_agent_constant_value(self, mock_validate, mock_head):
+        """Verify DEFAULT_USER_AGENT constant has the expected value."""
+        assert DEFAULT_USER_AGENT == "SemanticPlagiarismDetector/1.0"
+        assert SSRFProtector.DEFAULT_USER_AGENT == "SemanticPlagiarismDetector/1.0"
+
+
+class TestIPCIDRBlocking:
+    """Test suite for IP address CIDR block validation."""
+
+    def test_ip_in_cidr_block(self):
+        """Verify IP correctly identified as within CIDR block."""
+        assert is_ip_in_cidr_block("192.168.1.100", "192.168.0.0/16") is True
+        assert is_ip_in_cidr_block("10.0.0.5", "10.0.0.0/8") is True
+        assert is_ip_in_cidr_block("127.0.0.1", "127.0.0.0/8") is True
+
+    def test_ip_not_in_cidr_block(self):
+        """Verify IP correctly identified as outside CIDR block."""
+        assert is_ip_in_cidr_block("8.8.8.8", "192.168.0.0/16") is False
+        assert is_ip_in_cidr_block("1.1.1.1", "10.0.0.0/8") is False
+
+    def test_invalid_ip_returns_false(self):
+        """Verify invalid IP strings return False instead of raising."""
+        assert is_ip_in_cidr_block("not-an-ip", "192.168.0.0/16") is False
+        assert is_ip_in_cidr_block("", "10.0.0.0/8") is False
+
+    def test_invalid_cidr_returns_false(self):
+        """Verify invalid CIDR strings return False instead of raising."""
+        assert is_ip_in_cidr_block("192.168.1.1", "not-a-cidr") is False
+        assert is_ip_in_cidr_block("10.0.0.1", "") is False
+
+    def test_ipv6_support(self):
+        """Verify IPv6 addresses and CIDR blocks are supported."""
+        assert is_ip_in_cidr_block("::1", "::1/128") is True
+        assert is_ip_in_cidr_block("2001:db8::1", "2001:db8::/32") is True
+        assert is_ip_in_cidr_block("2001:db8::1", "192.168.0.0/16") is False
+
+
+class TestURLValidation:
+    """Test suite for URL target validation."""
+
+    @patch.object(SSRFProtector, "_resolve_hostname", return_value="93.184.216.34")
+    def test_valid_https_url_passes(self, mock_resolve):
+        """Verify valid HTTPS URL with public IP passes validation."""
+        ip = SSRFProtector._validate_url_target("https://example.com/webhook")
+        assert ip == "93.184.216.34"
+
+    def test_http_scheme_rejected(self):
+        """Verify non-HTTPS schemes are rejected."""
+        with pytest.raises(SSRFSecurityException, match="Insecure scheme"):
+            SSRFProtector._validate_url_target("http://example.com/webhook")
+
+    def test_empty_url_rejected(self):
+        """Verify empty URLs are rejected."""
+        with pytest.raises(SSRFSecurityException, match="empty"):
+            SSRFProtector._validate_url_target("")
+            
+        with pytest.raises(SSRFSecurityException, match="empty"):
+            SSRFProtector._validate_url_target(None)
+
+    def test_missing_hostname_rejected(self):
+        """Verify URLs without hostname are rejected."""
+        with pytest.raises(SSRFSecurityException, match="Missing hostname"):
+            SSRFProtector._validate_url_target("https://")
+
+    @patch.object(SSRFProtector, "_resolve_hostname", return_value="127.0.0.1")
+    def test_loopback_ip_rejected(self, mock_resolve):
+        """Verify loopback IPs (127.x.x.x) are rejected."""
+        with pytest.raises(SSRFSecurityException, match="loopback"):
+            SSRFProtector._validate_url_target("https://localhost/webhook")
+
+    @patch.object(SSRFProtector, "_resolve_hostname", return_value="192.168.1.100")
+    def test_private_ip_rejected(self, mock_resolve):
+        """Verify private IPs (192.168.x.x, 10.x.x.x) are rejected."""
+        with pytest.raises(SSRFSecurityException, match="private"):
+            SSRFProtector._validate_url_target("https://internal.local/webhook")
+
+    @patch.object(SSRFProtector, "_resolve_hostname", return_value="169.254.1.1")
+    def test_link_local_ip_rejected(self, mock_resolve):
+        """Verify link-local IPs (169.254.x.x) are rejected."""
+        with pytest.raises(SSRFSecurityException, match="link-local"):
+            SSRFProtector._validate_url_target("https://linklocal/webhook")
+
+
+class TestRedirectChainValidation:
+    """Test suite for redirect chain validation."""
+
+    @patch("src.security.ssrf_protector.requests.head")
+    @patch.object(SSRFProtector, "_validate_url_target", return_value="93.184.216.34")
+    def test_no_redirect_returns_original_url(self, mock_validate, mock_head):
+        """Verify URL without redirects returns original URL."""
+        mock_head.return_value = MagicMock(status_code=200, headers={})
+        
+        final_url, ip = SSRFProtector.validate_url_safety("https://example.com/webhook")
+        
+        assert final_url == "https://example.com/webhook"
+        assert ip == "93.184.216.34"
+
+    @patch("src.security.ssrf_protector.requests.head")
+    @patch.object(SSRFProtector, "_validate_url_target", return_value="93.184.216.34")
+    def test_single_redirect_followed(self, mock_validate, mock_head):
+        """Verify single redirect is followed and validated."""
+        # First request returns redirect
+        mock_head.side_effect = [
+            MagicMock(status_code=301, headers={"Location": "https://example.com/final"}),
+            MagicMock(status_code=200, headers={}),
+        ]
+        
+        final_url, ip = SSRFProtector.validate_url_safety("https://example.com/start")
+        
+        assert final_url == "https://example.com/final"
+
+    @patch("src.security.ssrf_protector.requests.head")
+    @patch.object(SSRFProtector, "_validate_url_target", return_value="93.184.216.34")
+    def test_max_redirects_exceeded_raises(self, mock_validate, mock_head):
+        """Verify exceeding max redirects raises exception."""
+        # Always return redirect
+        mock_head.return_value = MagicMock(status_code=301, headers={"Location": "https://example.com/loop"})
+        
+        with pytest.raises(SSRFSecurityException, match="max redirects"):
+            SSRFProtector.validate_url_safety("https://example.com/start", max_redirects=2)
+
+    @patch("src.security.ssrf_protector.requests.head")
+    @patch.object(SSRFProtector, "_validate_url_target", return_value="93.184.216.34")
+    def test_circular_redirect_detected(self, mock_validate, mock_head):
+        """Verify circular redirect chains are detected."""
+        # Create a loop: A -> B -> A
+        mock_head.side_effect = [
+            MagicMock(status_code=301, headers={"Location": "https://example.com/b"}),
+            MagicMock(status_code=301, headers={"Location": "https://example.com/a"}),
+        ]
+        
+        with pytest.raises(SSRFSecurityException, match="circular"):
+            SSRFProtector.validate_url_safety("https://example.com/a")
