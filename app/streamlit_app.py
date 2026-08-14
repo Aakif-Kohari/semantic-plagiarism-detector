@@ -98,6 +98,19 @@ from app.components.smart_notifications import (
     SmartFilter,
     UserNotificationPreferences,
 )
+# ── Export Integration Imports ───────────────────────────────────────────
+from app.components.export_integration import (
+    render_export_center,
+    render_export_bulk,
+    initialize_export_system,
+    ExportManager,
+    ExportFormat,
+    ExportJob,
+    ExportTemplate,
+    CloudConfig,
+    CloudProvider,
+    ExportStatus,
+)
 # ── Collaboration Hub Imports ────────────────────────────────────────────
 from app.components.collaboration_hub import (
     render_collaboration_hub,
