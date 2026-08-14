@@ -1087,3 +1087,24 @@ def test_resolve_process_pool_workers():
     assert _resolve_process_pool_workers(None, 10) == min(cpus, 10)
     assert _resolve_process_pool_workers(2, 10) == min(2, cpus)
     assert _resolve_process_pool_workers(100, 10) == min(100, cpus, 10)
+import unittest
+from src.core.document_parser import ParsedDocxText
+
+class TestParsedDocxText(unittest.TestCase):
+    def test_metadata_loss_on_string_operation(self):
+        # Initialize ParsedDocxText with text and word headings
+        original = ParsedDocxText("  hello world  ", ["Introduction"])
+        
+        # Verify initial state
+        self.assertEqual(original, "  hello world  ")
+        self.assertEqual(original.word_headings, ["Introduction"])
+        
+        # Perform standard string operation (.strip())
+        modified = original.strip()
+        
+        # Verify that it returns a plain string (or that the attribute is absent/lost)
+        self.assertEqual(modified, "hello world")
+        self.assertFalse(hasattr(modified, "word_headings"))
+
+if __name__ == "__main__":
+    unittest.main()
