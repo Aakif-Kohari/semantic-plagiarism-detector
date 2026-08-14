@@ -124,8 +124,8 @@ def back_translate_chunk(
     """Translate a text chunk back to the target language (English).
 
     This function first checks the SQLite translation cache to avoid
-    redundant API/model calls. If not cached, it performs the translation
-    (currently a mock/passthrough for local testing) and saves the result.
+    redundant API/model calls. If not cached, it calls the real translation
+    service via translate_text() and saves the result to cache.
 
     Args:
         text: The source text chunk to translate.
@@ -134,6 +134,7 @@ def back_translate_chunk(
 
     Returns:
         The back-translated text string in the target language.
+        Falls back to original text if translation fails.
     """
     if not text or not isinstance(text, str):
         return ""
@@ -154,19 +155,52 @@ def back_translate_chunk(
             )
             return cached
 
-    # Perform translation
-    # In a production environment, this would call a local model (e.g., MarianMT)
-    # or a cached API. For this implementation, we use a mock passthrough with
-    # a prefix to simulate translation for testing purposes.
+    # Perform real translation using translate_text() (Issue #2219)
     logger.info(
         "Translating chunk from %s to %s (Cache miss, executing translation).",
         source_lang,
         TARGET_LANGUAGE,
     )
 
-    # Mock translation: In reality, this would be:
-    # translated = translator_model.translate(text, src=source_lang, tgt=TARGET_LANGUAGE)
-    translated_text = f"[Translated from {source_lang}] {text}"
+    try:
+        translated_text = translate_text(
+            text,
+            target_lang=TARGET_LANGUAGE,
+            source_lang=source_lang,
+        )
+        
+        # Validate translation result
+        if not translated_text or not isinstance(translated_text, str):
+            logger.warning(
+                "Translation returned empty or invalid result for %s -> %s. "
+                "Falling back to original text.",
+                source_lang,
+                TARGET_LANGUAGE,
+            )
+            return text
+            
+        translated_text = translated_text.strip()
+        
+        # Check if translation is suspiciously identical to source
+        # (could indicate translation service failure)
+        if translated_text == text.strip() and source_lang != TARGET_LANGUAGE:
+            logger.warning(
+                "Translation service returned identical text for %s -> %s. "
+                "This may indicate a translation failure.",
+                source_lang,
+                TARGET_LANGUAGE,
+            )
+        
+    except Exception as exc:
+        # Graceful fallback: return original text if translation fails
+        logger.error(
+            "Translation failed for %s -> %s: %s. Falling back to original text.",
+            source_lang,
+            TARGET_LANGUAGE,
+            exc,
+            exc_info=True,
+        )
+        return text
 
     # Save to cache
     if use_cache:
