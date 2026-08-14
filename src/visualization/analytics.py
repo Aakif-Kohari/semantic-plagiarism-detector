@@ -42,6 +42,17 @@ def build_visualization_lazily(
         return None
 
     return factory()
+def get_chart_theme_colors(theme_mode: str) -> dict:
+    if theme_mode.lower() == "dark":
+        return {
+            "background": "#1e293b",
+            "font": "#f8fafc",
+        }
+
+    return {
+        "background": "#ffffff",
+        "font": "#0f172a",
+    }
 def get_top_similar_pairs(
     similarity_df: pd.DataFrame,
     top_n: int = 5,
@@ -105,12 +116,16 @@ def plot_high_severity_trends(trend_data: list[dict[str, Any]], show_grid: bool 
             showarrow=False,
             font=dict(size=16, color="gray"),
         )
+        colors = get_chart_theme_colors(theme_mode)
         fig.update_layout(
             title="High Severity Plagiarism Trends (Last 30 Days)",
             xaxis_title="Date",
             yaxis_title="Number of High Severity Incidents",
             height=400,
             autosize=True,
+            paper_bgcolor=colors["background"],
+            plot_bgcolor=colors["background"],
+            font=dict(color=colors["font"]),
         )
         fig.update_xaxes(showgrid=show_grid)
         fig.update_yaxes(showgrid=show_grid)
