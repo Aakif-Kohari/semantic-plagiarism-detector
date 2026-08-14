@@ -1,4 +1,3 @@
-# filepath: redis_cache.py
 """
 redis_cache.py
 --------------
@@ -32,7 +31,6 @@ try:
 except ImportError:
     redis = None
 
-from dotenv import load_dotenv
 
 try:
     from src.core.app_config import REDIS_CACHE_TTL
@@ -41,7 +39,6 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-load_dotenv()
 
 _RedisErr = getattr(redis, "RedisError", Exception)
 RedisError = (
@@ -660,9 +657,9 @@ def _cleanup_redis() -> None:
 atexit.register(_cleanup_redis)
 
 
-
 import zlib  # noqa: F811
 import pickle  # noqa: F811
+
 
 def store_large_data(key: str, data: Any, ttl: int = 1800) -> None:
     """
@@ -751,3 +748,4 @@ def clear_all_large_data(session_id: str) -> None:
         logger.debug(f"Cleared all large data for session: {session_id}")
     except Exception as e:
         logger.error(f"Failed to clear all large data for session {session_id}: {e}")
+        
