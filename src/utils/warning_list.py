@@ -49,7 +49,12 @@ WarningPage = PaginationPage[dict[str, Any]]
 
 def _normalise_warning(
     warning: Mapping[str, Any],
+    *,
+    already_normalized: bool = False,
 ) -> dict[str, Any]:
+    if already_normalized:
+        return dict(warning)
+
     try:
         similarity = float(warning.get("similarity", 0.0))
     except (TypeError, ValueError):
@@ -82,9 +87,11 @@ def filter_warnings(
     warnings: Iterable[Mapping[str, Any]],
     search_query: str = "",
     min_match_length: int = 0,
+    *,
+    already_normalized: bool = False,
 ) -> list[dict[str, Any]]:
     """Filter normalized warnings using functional predicate matching."""
-    normalised = [_normalise_warning(item) for item in warnings]
+    normalised = [_normalise_warning(item, already_normalized=already_normalized) for item in warnings]
 
     if min_match_length > 0:
         normalised = [
@@ -136,9 +143,10 @@ def sort_warnings(
     primary_descending: bool = True,
     secondary_field: str = "doc_a",
     secondary_descending: bool = False,
+    already_normalized: bool = False,
 ) -> list[dict[str, Any]]:
     """Sort warning items using secondary and primary sorting keys."""
-    items = [_normalise_warning(item) for item in warnings]
+    items = [_normalise_warning(item, already_normalized=already_normalized) for item in warnings]
     allowed = {"similarity", "doc_a", "doc_b", "severity_rank"}
 
     p_field = primary_field if primary_field in allowed else "similarity"
@@ -176,9 +184,13 @@ def prepare_warning_page(
     secondary_descending: bool = False,
     page: int = 1,
     page_size: int = 10,
+    already_normalized: bool = False,
 ) -> tuple[list[dict[str, Any]], WarningPage]:
     filtered = filter_warnings(
-        warnings, search_query, min_match_length=min_match_length
+        warnings,
+        search_query,
+        min_match_length=min_match_length,
+        already_normalized=already_normalized,
     )
     sorted_items = sort_warnings(
         filtered,
@@ -186,6 +198,7 @@ def prepare_warning_page(
         primary_descending=primary_descending,
         secondary_field=secondary_field,
         secondary_descending=secondary_descending,
+        already_normalized=True,
     )
     return sorted_items, paginate_warnings(
         sorted_items,
@@ -285,7 +298,6 @@ def _has_exact_match(doc_a: str, doc_b: str) -> bool:
     ):
         return False
     results = st.session_state.analysis_results
-    # Index 1 of the analysis_results tuple corresponds to chunked_docs
     if hasattr(results, "chunked_docs"):
         chunked_docs = results.chunked_docs
     else:
@@ -293,7 +305,6 @@ def _has_exact_match(doc_a: str, doc_b: str) -> bool:
     chunks_a = chunked_docs.get(doc_a, [])
     chunks_b = chunked_docs.get(doc_b, [])
 
-    # Normalize chunks by removing all whitespace
     norm_a = {"".join(c.split()) for c in chunks_a if c.strip()}
     norm_b = {"".join(c.split()) for c in chunks_b if c.strip()}
 
@@ -301,10 +312,7 @@ def _has_exact_match(doc_a: str, doc_b: str) -> bool:
 
 
 def render_compact_warning_row(flag: Mapping[str, Any]) -> None:
-    """
-    Render warning in compact single-line format.
-    """
-
+    """Render warning in compact single-line format."""
     doc_a = flag["doc_a"]
     doc_b = flag["doc_b"]
 
@@ -315,11 +323,8 @@ def render_compact_warning_row(flag: Mapping[str, Any]) -> None:
 
     with col1:
         exact_badge = ""
-
         if _has_exact_match(doc_a, doc_b):
-            exact_badge = (
-                " <span style='color:#2E7D32;font-weight:bold;'>✓ Exact</span>"
-            )
+            exact_badge = " <span style='color:#2E7D32;font-weight:bold;'>✓ Exact</span>"
 
         st.markdown(
             f"📄 **{doc_a}** ↔ **{doc_b}**{exact_badge}",
@@ -459,7 +464,6 @@ def render_warning_controls(
     if active_filters:
         st.markdown(
             """<style>
-            /* Make buttons look like small pills */
             div[data-testid="column"] button {
                 border-radius: 16px !important;
                 padding: 2px 12px !important;
@@ -481,7 +485,6 @@ def render_warning_controls(
                         )
                         if "last_seen_threshold_query" in st.session_state:
                             del st.session_state["last_seen_threshold_query"]
-                        # In Streamlit >= 1.30, st.query_params is dict-like
                         if "threshold" in st.query_params:
                             del st.query_params["threshold"]
                     elif f["action"] == "hide_low_severity":
@@ -602,7 +605,7 @@ def render_warning_controls(
             on_change=_reset_page,
         )
 
-    # Hide low severity warnings when checkbox is enabled
+    # Normalize once at the entry point of render_warning_controls()
     display_flags = [_normalise_warning(flag) for flag in filtered_flags]
 
     if hide_low_severity:
@@ -618,6 +621,7 @@ def render_warning_controls(
         secondary_descending=secondary_direction == _desc_text,
         page=st.session_state.warning_page,
         page_size=page_size,
+        already_normalized=True,
     )
     if current_page.page != st.session_state.warning_page:
         st.session_state.warning_page = current_page.page
@@ -634,11 +638,10 @@ def render_warning_controls(
         ]
     )
 
-    # Generate Markdown Summary of all High & Medium warnings
     summary_flags = [
-        _normalise_warning(flag)
-        for flag in flags
-        if _normalise_warning(flag)["severity"] in ("High", "Medium")
+        flag
+        for flag in display_flags
+        if flag["severity"] in ("High", "Medium")
     ]
     if not summary_flags:
         markdown_text = get_text("warn_no_summary", lang=lang_code)
@@ -692,22 +695,14 @@ def render_warning_controls(
             disabled=export_df.empty,
         )
 
-    # ── Warning list container (#369) ────────────────────────────────
-    # A stable `key` makes Streamlit attach a `st-key-warning_list_container`
-    # class to this container's wrapping div, which theme.py's CSS targets
-    # with a transition so re-filtered/re-sorted results animate smoothly
-    # instead of snapping instantly.
     with st.container(key="warning_list_container"):
-
         for flag in current_page.items:
-
             if compact_view:
                 render_compact_warning_row(flag)
                 st.markdown(
                     "<hr style='margin:4px 0;border:0;border-top:1px solid #eee;'>",
                     unsafe_allow_html=True,
                 )
-
             else:
                 tier = tier_from_severity_label(flag["severity"])
 
@@ -724,7 +719,6 @@ def render_warning_controls(
                         else:
                             st.markdown(f"**{flag['doc_a']}** ↔ **{flag['doc_b']}**")
 
-                        # Replaced the standard similarity text with your matched length display logic
                         matched_words = flag.get("matched_length", 0)
                         display_text = get_text(
                             "warn_similarity_progress",
@@ -737,7 +731,6 @@ def render_warning_controls(
                             text=display_text,
                         )
 
-                        # Display AI probabilities if available
                         if ai_probabilities:
                             ai_a = ai_probabilities.get(flag["doc_a"], {}).get(
                                 "overall", 0.0
@@ -808,9 +801,7 @@ def render_warning_controls(
 
 
 def matches_query_predicate(flag: dict, search_query: str) -> bool:
-    """
-    Check if a flagged incident matches a search query across document names or text snippets.
-    """
+    """Check if a flagged incident matches a search query across document names or text snippets."""
     if not search_query or not search_query.strip():
         return True
 
