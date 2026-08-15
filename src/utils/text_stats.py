@@ -49,7 +49,7 @@ def count_sentences(text: str) -> int:
     Returns:
         Number of sentences in the text
     """
-    if not text:
+    if not text or not text.strip():
         return 0
 
     # Common abbreviations that end with period but aren't sentence ends
@@ -97,7 +97,11 @@ def count_sentences(text: str) -> int:
 
     # Count sentence-ending punctuation
     sentence_endings = re.findall(r"[.!?]+", text_lower)
-    return len(sentence_endings)
+    return max(1, len(sentence_endings))
+
+
+# Alias get_sentence_count to count_sentences for backward compatibility
+get_sentence_count = count_sentences
 
 
 def count_unique_words(text: str) -> int:
@@ -253,10 +257,7 @@ def get_syllable_count(text: str) -> int:
     return sum(count_syllables_in_word(w) for w in words)
 
 
-def get_sentence_count(text: str) -> int:
-    """Return the total sentence count for the text."""
-    sentences = [s for s in re.split(r"[.!?]+(?:\s+|$)", text) if s.strip()]
-    return max(1, len(sentences)) if text.strip() else 0
+# get_sentence_count is aliased to count_sentences above
 
 
 def get_readability_metrics(text: str) -> tuple[float, float]:
@@ -265,7 +266,7 @@ def get_readability_metrics(text: str) -> tuple[float, float]:
     Returns (flesch_reading_ease, flesch_kincaid_grade).
     """
     words = get_word_count(text)
-    sentences = get_sentence_count(text)
+    sentences = count_sentences(text)
     syllables = get_syllable_count(text)
 
     if words == 0 or sentences == 0:
@@ -300,7 +301,7 @@ def get_text_stats(text: str) -> dict[str, int | float]:
 
     words = get_word_count(text)
     chars = get_char_count(text)
-    sentences = get_sentence_count(text)
+    sentences = count_sentences(text)
     syllables = get_syllable_count(text)
     reading_ease, grade_level = get_readability_metrics(text)
     reading_time = get_reading_time_minutes(text)
