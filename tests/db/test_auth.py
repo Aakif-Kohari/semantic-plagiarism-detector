@@ -65,6 +65,14 @@ def test_verify_user():
     assert verify_user(user, "WrongPass123!") is False
 
 
+def test_verify_user_rejects_suspended_user():
+    """Verify that verify_user returns False when a user is suspended."""
+    user = f"user_{uuid.uuid4().hex[:8]}"
+    add_user(user, "SecurePass123!")
+    set_user_active_status(user, False)
+    assert verify_user(user, "SecurePass123!") is False
+
+
 def test_get_user_role():
     user = f"user_{uuid.uuid4().hex[:8]}"
     add_user(user, "password123")
