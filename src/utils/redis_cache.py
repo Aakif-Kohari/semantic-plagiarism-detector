@@ -240,6 +240,26 @@ class RedisCache:
                 if self._client is None:
                     self._connect()
 
+    @classmethod
+    def get_instance(cls) -> "RedisCache":
+        """Thread-safe accessor for the RedisCache singleton instance.
+        
+        Provides an explicit method for acquiring the singleton in highly
+        concurrent environments, ensuring only one Redis connection pool
+        is created even under heavy thread contention. Uses double-checked
+        locking to minimize lock acquisition overhead after initialization.
+        
+        Returns:
+            The global RedisCache singleton instance.
+        """
+        if cls._instance is None:
+            with cls._lock:
+                # Double-check inside the lock to prevent race conditions
+                # where two threads passed the first check simultaneously
+                if cls._instance is None:
+                    cls._instance = cls()
+        return cls._instance
+
     @property
     def fallback_cache(self) -> dict:
         """Lazily initialize fallback cache dictionary if not present."""

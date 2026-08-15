@@ -873,6 +873,58 @@ def test_redis_payload_compression_level_configurable(monkeypatch):
     assert PayloadCompressor.decompress(compressed_invalid) == large_data
 
 
+class TestRedisCacheThreadSafety:
+    """Test suite for thread-safe singleton instantiation (Issue #2324)."""
+
+    def test_get_instance_returns_same_object(self):
+        """Verify get_instance() always returns the same singleton instance."""
+        from src.utils.redis_cache import RedisCache
+        
+        instance1 = RedisCache.get_instance()
+        instance2 = RedisCache.get_instance()
+        
+        assert instance1 is instance2
+
+    def test_concurrent_instantiation_creates_single_instance(self):
+        """Verify multiple threads calling get_instance() create only one instance."""
+        import threading
+        from src.utils.redis_cache import RedisCache
+        
+        # Reset singleton for clean test
+        with RedisCache._lock:
+            RedisCache._instance = None
+        
+        instances = []
+        errors = []
+        barrier = threading.Barrier(50)
+        
+        def worker():
+            try:
+                # Ensure all threads start at the exact same moment
+                barrier.wait()
+                instance = RedisCache.get_instance()
+                instances.append(instance)
+            except Exception as e:
+                errors.append(e)
+        
+        # Spawn 50 threads attempting to acquire the instance concurrently
+        threads = [threading.Thread(target=worker) for _ in range(50)]
+        
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+            
+        # No errors should occur
+        assert len(errors) == 0, f"Errors occurred: {errors}"
+        
+        # All threads should receive the exact same instance
+        assert len(instances) == 50
+        first_instance = instances[0]
+        for instance in instances[1:]:
+            assert instance is first_instance, "Multiple instances were created!"
+
+
 def test_redis_payload_compression_threshold_configurable(monkeypatch):
     """Verify that PayloadCompressor respects the REDIS_COMPRESSION_THRESHOLD env var."""
     from src.utils.redis_cache import PayloadCompressor
