@@ -334,4 +334,18 @@ def test_filter_warnings_early_exit_and_process_extract():
                 choices = call[0][1]
                 assert 0 not in choices  # Index 0 (exact match) early exited and was skipped
 
+
+def test_normalise_warning_logs_invalid_similarity(caplog):
+    """Verify that invalid similarity scores log a warning."""
+    import logging
+    from src.utils.warning_list import _normalise_warning
+
+    invalid_item = {"doc_a": "a.pdf", "doc_b": "b.pdf", "similarity": "N/A"}
+    with caplog.at_level(logging.WARNING):
+        result = _normalise_warning(invalid_item)
+
+    assert result["similarity"] == 0.0
+    assert "Invalid similarity score found in incident data: N/A" in caplog.text
+
+
         

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import html
+import logging
 import sys
 from typing import Any, Callable, Iterable, Mapping, Sequence
+
+logger = logging.getLogger(__name__)
 
 import pandas as pd
 
@@ -62,6 +65,10 @@ def _normalise_warning(
     try:
         similarity = float(warning.get("similarity", 0.0))
     except (TypeError, ValueError):
+        logger.warning(
+            "Invalid similarity score found in incident data: %s",
+            warning.get("similarity"),
+        )
         similarity = 0.0
 
     raw_severity = str(warning.get("severity", "")).strip()
