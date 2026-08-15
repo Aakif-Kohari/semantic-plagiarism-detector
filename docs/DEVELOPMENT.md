@@ -35,6 +35,7 @@ After activating your virtual environment, upgrade pip and install the required 
 ```bash
 pip install --upgrade pip
 pip install -r requirements.txt
+pip install -r requirements-dev.txt
 pip install pytest-cov
 ```
 
@@ -110,7 +111,7 @@ This project uses `pre-commit` to automatically check formatting, linting, and v
 
 ### Install and Register Git Hooks
 ```bash
-pip install pre-commit
+pip install -r requirements-dev.txt
 pre-commit install
 ```
 

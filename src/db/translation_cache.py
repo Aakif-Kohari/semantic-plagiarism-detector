@@ -22,10 +22,9 @@ import sqlite3
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any, Optional
 
-from src.core.app_config import CORPUS_DB_PATH, FALLBACK_CORPUS_DB_PATH, _REPO_ROOT
+from src.core.app_config import _REPO_ROOT, CORPUS_DB_PATH, FALLBACK_CORPUS_DB_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +67,7 @@ def _connect():
 def init_translation_cache() -> None:
     """Create the translation cache table if it does not exist (Issue #1956)."""
     with _connect() as conn:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS translation_cache (
                 source_hash TEXT PRIMARY KEY,
                 source_text TEXT NOT NULL,
@@ -78,14 +76,11 @@ def init_translation_cache() -> None:
                 translated_text TEXT NOT NULL,
                 created_at TEXT NOT NULL
             )
-        """
-        )
-        conn.execute(
-            """
+        """)
+        conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_translation_langs
             ON translation_cache(source_lang, target_lang)
-        """
-        )
+        """)
     logger.info("Translation cache initialized at %s", _CACHE_DB_PATH)
 
 
@@ -214,8 +209,7 @@ def _init_db() -> None:
     try:
         with conn:
             cursor = conn.cursor()
-            cursor.execute(
-                """
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS legacy_translation_cache (
                     text_hash TEXT PRIMARY KEY,
                     foreign_text TEXT NOT NULL,
@@ -224,14 +218,11 @@ def _init_db() -> None:
                     target_lang TEXT DEFAULT 'en',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
-                """
-            )
-            cursor.execute(
-                """
+                """)
+            cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_legacy_translation_cache_created_at
                 ON legacy_translation_cache(created_at)
-                """
-            )
+                """)
             conn.commit()
     finally:
         conn.close()
@@ -401,33 +392,27 @@ def purge_translation_cache_older_than(days: int = 30) -> int:
         return 0
 
 
-def get_translation_cache_stats() -> dict:
+def get_translation_cache_stats() -> dict[str, int]:
     """
     Get statistics about the current legacy translation cache.
 
     Returns:
-        dict: A dictionary containing total entries and oldest entry age in days.
+        dict[str, int]: A dictionary containing total entries count.
     """
     _init_db()
     try:
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM legacy_translation_cache")
-            total_count = cursor.fetchone()[0]
-
-            cursor.execute(
-                "SELECT CAST(JULIANDAY('now') - JULIANDAY(MIN(created_at)) AS INTEGER) "
-                "FROM legacy_translation_cache"
-            )
-            oldest_days = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM translation_cache")
+            row = cursor.fetchone()
+            total_count = row[0] if row else 0
 
             return {
-                "total_entries": total_count,
-                "oldest_entry_days": oldest_days if oldest_days else 0,
+                "total_entries": int(total_count),
             }
     except sqlite3.Error as e:
-        logger.error("Failed to get translation cache stats: %s", e)
-        return {"total_entries": 0, "oldest_entry_days": 0}
+        logger.error(f"Failed to get translation cache stats: {e}")
+        return {"total_entries": 0}
 
 
 # Fix: Original code referenced undefined `_cache_hits` / `_cache_misses`.
@@ -448,11 +433,9 @@ def get_translation_cache_hit_ratio() -> float:
 
 def reset_translation_cache_counters() -> None:
     """Reset the cache hits and misses counters to zero."""
-    global cache_hits, cache_misses, _cache_hits, _cache_misses
+    global cache_hits, cache_misses
     cache_hits = 0
     cache_misses = 0
-    _cache_hits = 0
-    _cache_misses = 0
 
 
 def get_cache_performance_summary() -> dict[str, Any]:

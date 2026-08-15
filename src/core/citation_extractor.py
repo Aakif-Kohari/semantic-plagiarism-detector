@@ -15,7 +15,7 @@ Recent Additions (Issue #1958):
 import hashlib
 import logging
 import re
-from typing import List, Dict, Optional, Tuple
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ _MLA_PATTERN = re.compile(
 def _normalize_text(text: str) -> str:
     """Lowercase, strip punctuation, and collapse whitespace for hashing."""
     text = text.lower()
-    text = re.sub(r"[^\w\s]", "", text)
+    text = re.sub(r"[^\w\s-]", "", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
@@ -83,7 +83,7 @@ def extract_citations(raw_text: str) -> List[Dict[str, str]]:
 
     # Split by common bibliography delimiters (newlines with hanging indents)
     # For simplicity, we process line by line or block by block.
-    lines = [l.strip() for l in raw_text.split("\n") if l.strip()]
+    lines = [l.strip() for l in raw_text.split("\n") if l.strip()]  # noqa: E741
 
     for line in lines:
         author, year, title = None, None, None

@@ -6,7 +6,9 @@ import io
 import logging
 import zipfile
 from typing import Optional
-from xml.etree import ElementTree
+
+import defusedxml.ElementTree as ElementTree
+from defusedxml.common import DefusedXmlException
 
 logger = logging.getLogger(__name__)
 
@@ -236,6 +238,7 @@ def _validate_ooxml_archive(
         zipfile.BadZipFile,
         zipfile.LargeZipFile,
         ElementTree.ParseError,
+        DefusedXmlException,
         KeyError,
         OSError,
         RuntimeError,
@@ -367,11 +370,11 @@ def validate_mime_type(file_bytes: bytes, filename: str) -> bool:
     """
     if not file_bytes:
         return False
-        
+
     if not validate_single_extension(filename):
         logger.warning(
-        "[mime_validator] Blocked executable double extension: '%s'.",
-        filename,
+            "[mime_validator] Blocked executable double extension: '%s'.",
+            filename,
         )
         return False
 

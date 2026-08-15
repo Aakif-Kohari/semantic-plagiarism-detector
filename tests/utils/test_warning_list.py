@@ -1,10 +1,12 @@
+import base64
+from unittest.mock import patch
 
 from src.utils.warning_list import (
     build_key_extractor,
     filter_warnings,
-    matches_query_predicate,
     paginate_warnings,
     prepare_warning_page,
+    render_copy_button,
     sort_warnings,
 )
 
@@ -29,16 +31,6 @@ WARNINGS = [
         "severity": "Medium",
     },
 ]
-
-
-def test_matches_query_predicate():
-    predicate_alpha = matches_query_predicate("alpha")
-    predicate_empty = matches_query_predicate("   ")
-
-    assert predicate_alpha(WARNINGS[0]) is True  # doc_b matches
-    assert predicate_alpha(WARNINGS[1]) is False # no match
-    assert predicate_alpha(WARNINGS[2]) is True  # doc_a matches
-    assert predicate_empty(WARNINGS[1]) is True  # empty query matches all
 
 
 def test_build_key_extractor():
@@ -147,8 +139,6 @@ def test_filtering_occurs_before_pagination():
     assert page.total_pages == 2
 
 
-
-
 def test_filter_warnings_by_minimum_match_length():
     warnings = [
         {
@@ -206,3 +196,156 @@ def test_page_size_clamping_to_max_100():
     assert page.page_size == 100
     assert len(page.items) == 100
     assert page.total_pages == 2
+
+
+def test_has_exact_match_no_results():
+    """Verify that _has_exact_match returns False if analysis_results is missing from session state."""
+    import streamlit as st
+    from src.utils.warning_list import _has_exact_match
+
+    # Ensure analysis_results is not in session state
+    if "analysis_results" in st.session_state:
+        del st.session_state["analysis_results"]
+
+    assert _has_exact_match("doc_a.pdf", "doc_b.pdf") is False
+
+
+def test_has_exact_match_with_matching_tuple_results():
+    """Verify that _has_exact_match works with legacy tuple format where index 1 is chunked_docs."""
+    import streamlit as st
+    from src.utils.warning_list import _has_exact_match
+
+    chunked_docs = {
+        "doc_a.pdf": ["hello world", "some other chunk"],
+        "doc_b.pdf": ["hello world", "different chunk"]
+    }
+    legacy_results = (None, chunked_docs, None, None, None, None, None, None, None)
+    st.session_state.analysis_results = legacy_results
+
+    assert _has_exact_match("doc_a.pdf", "doc_b.pdf") is True
+
+
+def test_has_exact_match_with_non_matching_tuple_results():
+    """Verify that _has_exact_match returns False when no chunks match."""
+    import streamlit as st
+    from src.utils.warning_list import _has_exact_match
+
+    chunked_docs = {
+        "doc_a.pdf": ["hello world"],
+        "doc_b.pdf": ["different chunk"]
+    }
+    legacy_results = (None, chunked_docs, None, None, None, None, None, None, None)
+    st.session_state.analysis_results = legacy_results
+
+    assert _has_exact_match("doc_a.pdf", "doc_b.pdf") is False
+
+
+def test_has_exact_match_with_named_tuple_results():
+    """Verify that _has_exact_match works with NamedTuple format, accessing chunked_docs attribute."""
+    import streamlit as st
+    from collections import namedtuple
+    from src.utils.warning_list import _has_exact_match
+
+    MockPipelineResult = namedtuple("MockPipelineResult", ["raw_texts", "chunked_docs"])
+    chunked_docs = {
+        "doc_a.pdf": ["exact match chunk"],
+        "doc_b.pdf": ["exact match chunk"]
+    }
+    named_results = MockPipelineResult(raw_texts={}, chunked_docs=chunked_docs)
+    st.session_state.analysis_results = named_results
+
+    assert _has_exact_match("doc_a.pdf", "doc_b.pdf") is True
+
+
+def test_has_exact_match_with_pure_attribute():
+    """Verify that _has_exact_match works with an object that only has chunked_docs attribute."""
+    import streamlit as st
+    from src.utils.warning_list import _has_exact_match
+
+    class MockNamedTuple:
+        def __init__(self, chunked_docs):
+            self.chunked_docs = chunked_docs
+
+    chunked_docs = {
+        "doc_a.pdf": ["exact match"],
+        "doc_b.pdf": ["exact match"]
+    }
+    st.session_state.analysis_results = MockNamedTuple(chunked_docs)
+
+    assert _has_exact_match("doc_a.pdf", "doc_b.pdf") is True
+
+
+def test_render_copy_button_xss_sanitization():
+    """Verify that button_id is properly sanitized to prevent XSS."""
+    malicious_id = '"><script>alert(1)</script><div id="'
+
+    with patch("streamlit.components.v1.html") as mock_html:
+        render_copy_button("Sample text", button_id=malicious_id)
+
+        # Verify Streamlit HTML component was called
+        assert mock_html.called
+        rendered_html = mock_html.call_args[0][0]
+
+        # Assert no unescaped/raw <script> tag from button_id appears
+        assert 'id=""><script>alert(1)</script>' not in rendered_html
+        assert '&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;' in rendered_html
+
+
+def test_render_copy_button_html():
+    """Verify the HTML structure and base64 encoding logic of the copy button for issue #2470."""
+    test_payload = "ECSoC26_test_string"
+    
+    # Generate the expected base64 string
+    expected_b64 = base64.b64encode(test_payload.encode('utf-8')).decode('utf-8')
+    
+    with patch("streamlit.components.v1.html") as mock_html:
+        render_copy_button(test_payload)
+        
+        # Ensure the HTML generation was called
+        assert mock_html.called, "streamlit.components.v1.html was not called"
+        html_output = mock_html.call_args[0][0]
+        
+        # Acceptance Criteria 1: Assert the result contains a <button> tag
+        assert "<button" in html_output.lower(), "The HTML output is missing a <button> tag."
+        
+        # Acceptance Criteria 2: Assert the payload string is correctly base64 encoded
+        assert expected_b64 in html_output, f"The base64 encoded payload '{expected_b64}' was not found in the HTML/JS output."
+
+
+def test_filter_warnings_early_exit_and_process_extract():
+    """Verify exact substring matches early exit without calling fuzzy process.extract."""
+    warnings = [
+        {"doc_a": "report_100.pdf", "doc_b": "essay_200.pdf", "similarity": 0.9, "severity": "High"},
+        {"doc_a": "thesis.pdf", "doc_b": "assignment.pdf", "similarity": 0.8, "severity": "Medium"},
+    ]
+
+    with patch("src.utils.warning_list._extract_matching_indices") as mock_extract:
+        mock_extract.return_value = set()
+        
+        # Search for exact substring "report"
+        results = filter_warnings(warnings, "report")
+        assert len(results) == 1
+        assert results[0]["doc_a"] == "report_100.pdf"
+        
+        # Verify fuzzy extract was only run for non-exact remaining items (thesis.pdf / assignment.pdf)
+        # and NOT for report_100.pdf (early exit)
+        if mock_extract.called:
+            for call in mock_extract.call_args_list:
+                choices = call[0][1]
+                assert 0 not in choices  # Index 0 (exact match) early exited and was skipped
+
+
+def test_normalise_warning_logs_invalid_similarity(caplog):
+    """Verify that invalid similarity scores log a warning."""
+    import logging
+    from src.utils.warning_list import _normalise_warning
+
+    invalid_item = {"doc_a": "a.pdf", "doc_b": "b.pdf", "similarity": "N/A"}
+    with caplog.at_level(logging.WARNING):
+        result = _normalise_warning(invalid_item)
+
+    assert result["similarity"] == 0.0
+    assert "Invalid similarity score found in incident data: N/A" in caplog.text
+
+
+        

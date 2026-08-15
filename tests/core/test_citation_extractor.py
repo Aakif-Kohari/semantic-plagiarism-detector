@@ -4,11 +4,10 @@ tests/core/test_citation_extractor.py
 Unit tests for the bibliography citation extraction engine.
 """
 
-import pytest
 from src.core.citation_extractor import (
-    extract_citations,
     _generate_citation_hash,
     _normalize_text,
+    extract_citations,
 )
 
 
@@ -80,6 +79,16 @@ class TestCitationHashing:
         """Verify punctuation and casing are normalized."""
         assert _normalize_text("Hello, World!") == "hello world"
 
+    def test_normalize_text_preserves_hyphens(self):
+        """Verify hyphens in compound author names are preserved (Issue #1999)."""
+        # Test 1: Just the hyphenated name (should be lowercased)
+        input_name = "García-López"
+        assert _normalize_text(input_name) == "garcía-lópez"
+        
+        # Test 2: Hyphenated name mixed with other punctuation that SHOULD be stripped
+        input_complex = "Author: García-López, 2023!"
+        assert _normalize_text(input_complex) == "author garcía-lópez 2023"
+
     def test_hash_is_deterministic(self):
         """Verify identical inputs produce identical hashes."""
         h1 = _generate_citation_hash("Smith", "2020", "Title A")
@@ -93,7 +102,7 @@ class TestCitationHashing:
             "Smith, J.", "2020", "The Art of Plagiarism Detection in AI Systems"
         )
         # Student B adds a typo and extra whitespace
-        h2 = _generate_citation_hash(
+        h2 = _generate_citation_hash(  # noqa: F841
             "Smith J", "2020", "The Art of Plagiarism Detection in AI Systems."
         )
 

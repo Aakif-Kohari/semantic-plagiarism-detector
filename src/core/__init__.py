@@ -1,4 +1,5 @@
-from .concurrency import with_sqlite_retry
+from typing import TYPE_CHECKING
+
 from .config import (
     BrandingConfig,
     get_branding_config,
@@ -15,6 +16,7 @@ from .document_parser import (
 from .embedding_model import embed_chunks, embed_documents, get_document_embedding
 from .faiss_index import (
     ChunkRecord,
+    FaissChunkRecord,
     build_index,
     build_index_from_matrix,
     find_plagiarised_chunks,
@@ -23,6 +25,11 @@ from .faiss_index import (
     load_index,
     save_index,
     search_similar_chunks,
+)
+from .pipeline import (
+    PipelineChunkRecord,
+    run_extraction_pipeline,
+    run_pipeline,
 )
 from .similarity import (
     PLAGIARISM_THRESHOLD,
@@ -33,13 +40,31 @@ from .similarity import (
     flag_plagiarism,
     manhattan_similarity,
 )
+from .similarity_base import BaseSimilarityEngine
+from .similarity_engines import (
+    HybridSimilarityEngine,
+    LexicalSimilarityEngine,
+    SemanticSimilarityEngine,
+    SimilarityEngineFactory,
+)
 from .tag_manager import TagManager, sanitize_tag_name
 from .text_chunking import chunk_by_sentences, chunk_document, chunk_documents
 from .translator import translate_text
 from .webhook import dispatch_plagiarism_alert, send_plagiarism_alert
 
+# TYPE_CHECKING block for lazy imports (Issue #2363)
+# This satisfies static analysis tools (mypy, pylance) that would otherwise
+# complain that src.core has no attribute 'with_sqlite_retry', even though
+# it's dynamically resolved via __getattr__ and listed in __all__.
+if TYPE_CHECKING:
+    from .concurrency import with_sqlite_retry
 
 __all__ = [
+    "BaseSimilarityEngine",
+    "SemanticSimilarityEngine",
+    "LexicalSimilarityEngine",
+    "HybridSimilarityEngine",
+    "SimilarityEngineFactory",
     "with_sqlite_retry",
     "manhattan_similarity",
     "extract_text_from_pdf",
@@ -66,6 +91,8 @@ __all__ = [
     "save_index",
     "load_index",
     "ChunkRecord",
+    "FaissChunkRecord",
+    "PipelineChunkRecord",
     "build_index_from_matrix",
     "translate_text",
     "send_plagiarism_alert",
@@ -77,4 +104,17 @@ __all__ = [
     "sanitize_zero_width_characters",
     "TagManager",
     "sanitize_tag_name",
+    "run_pipeline",
+    "run_extraction_pipeline",
 ]
+
+
+# with_sqlite_retry is re-exported from src.core.concurrency (which lazily
+# re-exports it from src.db.common). A lazy lookup avoids the circular import
+# chain (src.db -> src.core -> src.db.common).
+def __getattr__(name):
+    if name == "with_sqlite_retry":
+        from .concurrency import with_sqlite_retry
+
+        return with_sqlite_retry
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
