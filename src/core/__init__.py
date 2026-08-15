@@ -16,6 +16,7 @@ from .document_parser import (
 from .embedding_model import embed_chunks, embed_documents, get_document_embedding
 from .faiss_index import (
     ChunkRecord,
+    FaissChunkRecord,
     build_index,
     build_index_from_matrix,
     find_plagiarised_chunks,
@@ -25,7 +26,11 @@ from .faiss_index import (
     save_index,
     search_similar_chunks,
 )
-from .pipeline import run_extraction_pipeline, run_pipeline
+from .pipeline import (
+    PipelineChunkRecord,
+    run_extraction_pipeline,
+    run_pipeline,
+)
 from .similarity import (
     PLAGIARISM_THRESHOLD,
     calculate_paragraph_similarity_breakdown,
@@ -86,6 +91,8 @@ __all__ = [
     "save_index",
     "load_index",
     "ChunkRecord",
+    "FaissChunkRecord",
+    "PipelineChunkRecord",
     "build_index_from_matrix",
     "translate_text",
     "send_plagiarism_alert",
