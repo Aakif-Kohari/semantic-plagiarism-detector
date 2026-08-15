@@ -120,9 +120,9 @@ All error responses return a standardized JSON payload:
 
 #### `POST /api/v1/auth/login`
 
-**Summary:** Authenticate user and issue API session token.  
-**HTTP Method:** `POST`  
-**Content-Type:** `application/json`  
+**Summary:** Authenticate user and issue API session token.
+**HTTP Method:** `POST`
+**Content-Type:** `application/json`
 **Authentication:** None (Public)
 
 ##### Request Body Parameters
@@ -173,9 +173,9 @@ curl -X POST http://localhost:8000/api/v1/auth/login \
 
 #### `POST /api/v1/scan`
 
-**Summary:** Scan an uploaded document against the indexed corpus for semantic plagiarism.  
-**HTTP Method:** `POST`  
-**Content-Type:** `multipart/form-data`  
+**Summary:** Scan an uploaded document against the indexed corpus for semantic plagiarism.
+**HTTP Method:** `POST`
+**Content-Type:** `multipart/form-data`
 **Authentication:** `Bearer <TOKEN>`
 
 ##### Request Header Requirements
@@ -309,9 +309,9 @@ curl -X POST http://localhost:8000/api/v1/scan \
 
 #### `GET /api/v1/incidents`
 
-**Summary:** Query recorded plagiarism incidents from the database with pagination support.  
-**HTTP Method:** `GET`  
-**Content-Type:** `application/json`  
+**Summary:** Query recorded plagiarism incidents from the database with pagination support.
+**HTTP Method:** `GET`
+**Content-Type:** `application/json`
 **Authentication:** `Bearer <TOKEN>`
 
 ##### Query Parameters
@@ -382,8 +382,8 @@ curl -X GET "http://localhost:8000/api/v1/incidents?limit=10&offset=0" \
 
 #### `GET /api/v1/healthz` / `GET /healthz`
 
-**Summary:** Health probe endpoint for Kubernetes / Docker container orchestration.  
-**HTTP Method:** `GET`  
+**Summary:** Health probe endpoint for Kubernetes / Docker container orchestration.
+**HTTP Method:** `GET`
 **Authentication:** None (Public)
 
 ##### Example Request (cURL)
@@ -420,8 +420,8 @@ curl -X GET http://localhost:8000/api/v1/healthz
 
 #### `GET /health`
 
-**Summary:** Light application liveness check endpoint.  
-**HTTP Method:** `GET`  
+**Summary:** Light application liveness check endpoint.
+**HTTP Method:** `GET`
 **Authentication:** None (Public)
 
 ##### Example Request (cURL)
@@ -444,9 +444,9 @@ curl -X GET http://localhost:8000/health
 
 #### `GET /metrics`
 
-**Summary:** Export system performance telemetry in standard Prometheus format.  
-**HTTP Method:** `GET`  
-**Content-Type:** `text/plain; version=0.0.4; charset=utf-8`  
+**Summary:** Export system performance telemetry in standard Prometheus format.
+**HTTP Method:** `GET`
+**Content-Type:** `text/plain; version=0.0.4; charset=utf-8`
 **Authentication:** None (Public)
 
 ##### Example Request (cURL)
@@ -473,8 +473,8 @@ api_requests_total{endpoint="/api/v1/scan",status="200"} 142
 
 #### `GET /metrics/json`
 
-**Summary:** Export operational metrics in JSON structure.  
-**HTTP Method:** `GET`  
+**Summary:** Export operational metrics in JSON structure.
+**HTTP Method:** `GET`
 **Authentication:** None (Public)
 
 ##### Example Request (cURL)
@@ -505,8 +505,8 @@ curl -X GET http://localhost:8000/metrics/json
 
 #### `GET /api/v1/rate_limit`
 
-**Summary:** Retrieve current IP rate limit status.  
-**HTTP Method:** `GET`  
+**Summary:** Retrieve current IP rate limit status.
+**HTTP Method:** `GET`
 **Authentication:** None (Public)
 
 ##### Example Request (cURL)
@@ -529,8 +529,8 @@ curl -X GET http://localhost:8000/api/v1/rate_limit
 
 #### `GET /api/v1/version`
 
-**Summary:** Fetch active API software version.  
-**HTTP Method:** `GET`  
+**Summary:** Fetch active API software version.
+**HTTP Method:** `GET`
 **Authentication:** None (Public)
 
 ##### Example Request (cURL)
@@ -552,8 +552,8 @@ curl -X GET http://localhost:8000/api/v1/version
 
 #### `POST /api/v1/clear`
 
-**Summary:** Purge all stored documents, chunk vectors, and incidents from SQLite, reset the FAISS index, and invalidate Redis cache.  
-**HTTP Method:** `POST`  
+**Summary:** Purge all stored documents, chunk vectors, and incidents from SQLite, reset the FAISS index, and invalidate Redis cache.
+**HTTP Method:** `POST`
 **Authentication:** `Bearer <TOKEN>` (Administrator role required)
 
 ##### Query Parameters

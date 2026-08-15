@@ -6,6 +6,7 @@ Unit and integration tests for Collapsible API Rate Limit Usage Gauge Component.
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
 import streamlit as st
 
 from app.components.api_quota_gauge import render_api_quota_gauge
@@ -32,7 +33,9 @@ def test_render_api_quota_gauge_default(
     mock_expander_context = MagicMock()
     mock_expander.return_value = mock_expander_context
 
-    with patch.dict(st.session_state, {"api_quota_consumed": 850, "api_quota_limit": 1000}):
+    with patch.dict(
+        st.session_state, {"api_quota_consumed": 850, "api_quota_limit": 1000}
+    ):
         render_api_quota_gauge()
 
         # Check expander was opened with correct title
@@ -59,7 +62,9 @@ def test_render_api_quota_gauge_red_color_exceeds_90(
     mock_expander_context = MagicMock()
     mock_expander.return_value = mock_expander_context
 
-    with patch.dict(st.session_state, {"api_quota_consumed": 950, "api_quota_limit": 1000}):
+    with patch.dict(
+        st.session_state, {"api_quota_consumed": 950, "api_quota_limit": 1000}
+    ):
         render_api_quota_gauge()
 
         # Check progress called with 0.95

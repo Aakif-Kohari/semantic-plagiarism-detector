@@ -1,6 +1,6 @@
 import io
 import shutil
-
+import time
 import zipfile
 from unittest.mock import MagicMock, patch
 
@@ -10,27 +10,21 @@ import pytest
 
 from src.core.document_parser import (
     CorruptedArchiveError,
+    clean_text,
     extract_text,
     extract_text_from_docx,
+    extract_text_from_odt,
     extract_text_from_pdf,
     extract_text_from_txt,
     extract_text_from_zip,
     extract_texts,
-    parallel_extract_texts,
-    strip_bibliography,
-    normalize_unicode_spaces,
-    normalize_extended_punctuation,
-    parallel_extract_texts,
     mask_named_entities_in_text,
-)
-
-import time
-
-
-from src.core.document_parser import (
-    clean_text,
-    extract_text_from_odt,
+    normalize_extended_punctuation,
+    normalize_unicode_nfc,
+    normalize_unicode_spaces,
+    parallel_extract_texts,
     remove_ignore_phrases,
+    strip_bibliography,
 )
 
 # Skip OCR tests when Tesseract binary is not present on this machine
@@ -709,6 +703,7 @@ def test_extract_text_routing_doc():
 def test_large_pdf_parsing_performance_benchmark():
     """Benchmark test asserting parsing of a 200-page text PDF completes under 3 seconds."""
     import time
+
     from reportlab.pdfgen import canvas
 
     # 1. Create a 200-page synthetic PDF in-memory using reportlab
@@ -794,6 +789,13 @@ def test_normalize_unicode_spaces():
     assert normalized == "Hello World! Python,Testing."
 
 
+def test_sanitize_unicode_spaces():
+    from src.core.document_parser import sanitize_unicode_spaces
+
+    text = "Hello\u00a0World\u2009Python"
+    assert sanitize_unicode_spaces(text) == "Hello World Python"
+
+
 class TestCleanWhitespaceOption:
     """Unit tests for clean_whitespace option in extract_text."""
 
@@ -869,8 +871,6 @@ class TestNormalizeExtendedPunctuation:
 # ─── Tests for Unicode NFC Normalizer (Issue #1482) ───────────────────────────
 
 import unicodedata
-import pytest
-from src.core.document_parser import normalize_unicode_nfc
 from unittest.mock import patch
 
 
@@ -982,26 +982,28 @@ class TestNormalizeUnicodeNFC:
             result_lower = extract_text(b"dummy", "test.txt", to_lowercase=True)
             assert result_lower == "hello world!"
 
+
 # ─── Tests for Unicode Fallback Normalization (Issue #921) ────────────────────
 
 import pytest
+
 
 class TestNormalizeUnicodeSpaces:
     """Comprehensive test suite for special Unicode character normalization."""
 
     def test_non_breaking_space_conversion(self):
-        """Verify non-breaking spaces (\u00A0) are converted to standard spaces."""
-        text = "Hello\u00A0World"
+        """Verify non-breaking spaces (\u00a0) are converted to standard spaces."""
+        text = "Hello\u00a0World"
         assert normalize_unicode_spaces(text) == "Hello World"
 
     def test_soft_hyphen_removal(self):
-        """Verify soft hyphens (\u00AD) are completely removed."""
-        text = "soft\u00ADhyphen\u00ADword"
+        """Verify soft hyphens (\u00ad) are completely removed."""
+        text = "soft\u00adhyphen\u00adword"
         assert normalize_unicode_spaces(text) == "softhyphenword"
 
     def test_zero_width_space_removal(self):
-        """Verify zero-width spaces (\u200B) are removed without leaving gaps."""
-        text = "zero\u200Bwidth"
+        """Verify zero-width spaces (\u200b) are removed without leaving gaps."""
+        text = "zero\u200bwidth"
         assert normalize_unicode_spaces(text) == "zerowidth"
 
     def test_full_width_to_half_width_conversion(self):
@@ -1009,21 +1011,21 @@ class TestNormalizeUnicodeSpaces:
         text = "Ｆｕｌｌ－ｗｉｄｔｈ １２３"
         result = normalize_unicode_spaces(text)
         assert result == "Full-width 123"
-        assert all(ord(c) < 0xFF00 for c in result if c.isalnum() or c == '-')
+        assert all(ord(c) < 0xFF00 for c in result if c.isalnum() or c == "-")
 
     def test_thin_and_hair_spaces(self):
-        """Verify thin spaces (\u2009) and hair spaces (\u200A) become standard spaces."""
-        text = "thin\u2009space\u200Ahere"
+        """Verify thin spaces (\u2009) and hair spaces (\u200a) become standard spaces."""
+        text = "thin\u2009space\u200ahere"
         assert normalize_unicode_spaces(text) == "thin space here"
 
     def test_byte_order_mark_removal(self):
-        """Verify BOM / zero-width no-break space (\uFEFF) is removed."""
-        text = "\uFEFFStart of text"
+        """Verify BOM / zero-width no-break space (\ufeff) is removed."""
+        text = "\ufeffStart of text"
         assert normalize_unicode_spaces(text) == "Start of text"
 
     def test_multiple_spaces_collapsed(self):
         """Verify multiple consecutive spaces are collapsed into a single space."""
-        text = "word1    word2\u00A0\u00A0word3"
+        text = "word1    word2\u00a0\u00a0word3"
         assert normalize_unicode_spaces(text) == "word1 word2 word3"
 
     def test_line_and_paragraph_separators(self):
@@ -1051,31 +1053,58 @@ class TestNormalizeUnicodeSpaces:
     def test_complex_mixed_document(self):
         """Verify normalization on a realistic mixed-encoding document snippet."""
         # Simulates a messy PDF extraction with soft hyphens, NBSP, and full-width chars
-        messy_text = "The\u00ADquick\u00A0brown\u200Bfox\u3000jumps\uFF0E"
+        messy_text = "The\u00adquick\u00a0brown\u200bfox\u3000jumps\uff0e"
         result = normalize_unicode_spaces(messy_text)
         assert result == "Thequick brownfox jumps."
-        assert "\u00AD" not in result
-        assert "\u00A0" not in result
-        assert "\u200B" not in result
+        assert "\u00ad" not in result
+        assert "\u00a0" not in result
+        assert "\u200b" not in result
 
     def test_idempotency(self):
         """Verify that applying the function twice yields the same result as applying it once."""
-        text = "Complex\u00A0\u2009\u00AD\uFEFF text!"
-        assert normalize_unicode_spaces(text) == normalize_unicode_spaces(normalize_unicode_spaces(text))
+        text = "Complex\u00a0\u2009\u00ad\ufeff text!"
+        assert normalize_unicode_spaces(text) == normalize_unicode_spaces(
+            normalize_unicode_spaces(text)
+        )
+
 
 @patch("src.core.document_parser.extract_text_from_txt")
 def test_extract_text_to_lowercase(mock_extract_txt):
     mock_extract_txt.return_value = "Mixed CASE TeXt"
-    with patch("src.core.document_parser._read_pdf_bytes", return_value=b""), \
-         patch("src.security.mime_validator.validate_mime_type", return_value=True):
+    with patch("src.core.document_parser._read_pdf_bytes", return_value=b""), patch(
+        "src.security.mime_validator.validate_mime_type", return_value=True
+    ):
         result = extract_text(b"dummy", "test.txt", to_lowercase=True)
     assert result == "mixed case text"
 
+
 def test_resolve_process_pool_workers():
-    from src.core.document_parser import _resolve_process_pool_workers
     import os
+
+    from src.core.document_parser import _resolve_process_pool_workers
+
     cpus = os.cpu_count() or 1
     assert _resolve_process_pool_workers(None, 10) == min(cpus, 10)
     assert _resolve_process_pool_workers(2, 10) == min(2, cpus)
     assert _resolve_process_pool_workers(100, 10) == min(100, cpus, 10)
+import unittest
+from src.core.document_parser import ParsedDocxText
 
+class TestParsedDocxText(unittest.TestCase):
+    def test_metadata_loss_on_string_operation(self):
+        # Initialize ParsedDocxText with text and word headings
+        original = ParsedDocxText("  hello world  ", ["Introduction"])
+        
+        # Verify initial state
+        self.assertEqual(original, "  hello world  ")
+        self.assertEqual(original.word_headings, ["Introduction"])
+        
+        # Perform standard string operation (.strip())
+        modified = original.strip()
+        
+        # Verify that it returns a plain string (or that the attribute is absent/lost)
+        self.assertEqual(modified, "hello world")
+        self.assertFalse(hasattr(modified, "word_headings"))
+
+if __name__ == "__main__":
+    unittest.main()

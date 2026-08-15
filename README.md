@@ -65,7 +65,7 @@ similarity, and **FAISS vector search**.
               └────────┘ └────────┘ └────────┘ └───────┘ └──────┘ └───────┘
 ```
 
->For a detailed explanation of the system components and data flow, see the [Architecture Guide](docs/ARCHITECTURE.md).
+> For a detailed explanation of the system components and data flow, see the [Architecture Guide](docs/ARCHITECTURE.md). To understand domain-specific terms (FAISS, Cosine Similarity, SSRF, WAL, TTR, etc.), reference the [Glossary](docs/GLOSSARY.md).
 
 ### Module Responsibilities
 
@@ -590,6 +590,16 @@ Each upgrade:
 Existing database files should not be deleted during an application upgrade.
 
 ---
+## Linting
+
+Before submitting a pull request, run the linting checks to ensure the code follows the project's formatting and type-checking standards.
+
+Run all lint checks with:
+
+```bash
+make lint
+```
+
 
 ## Documentation
 

@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: GitHub Discussions
+    url: https://github.com/Ganesh-403/semantic-plagiarism-detector/discussions
+    about: Ask questions, discuss ideas, and engage with the community.

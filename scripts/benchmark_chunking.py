@@ -21,11 +21,10 @@ Acceptance Criteria (Issue #1803):
 import argparse
 import logging
 import random
-import string
 import sys
 import time
 from pathlib import Path
-from typing import List, Dict
+from typing import Dict, List
 
 # Add project root to path for imports
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -46,11 +45,35 @@ logger = logging.getLogger(__name__)
 
 # Vocabulary for generating realistic sentence lengths
 _VOCABULARY = [
-    "algorithm", "database", "system", "network", "security", "analysis",
-    "detection", "plagiarism", "semantic", "vector", "embedding", "model",
-    "performance", "latency", "throughput", "benchmark", "evaluation",
-    "machine", "learning", "artificial", "intelligence", "natural", "language",
-    "processing", "similarity", "cosine", "distance", "metric", "threshold",
+    "algorithm",
+    "database",
+    "system",
+    "network",
+    "security",
+    "analysis",
+    "detection",
+    "plagiarism",
+    "semantic",
+    "vector",
+    "embedding",
+    "model",
+    "performance",
+    "latency",
+    "throughput",
+    "benchmark",
+    "evaluation",
+    "machine",
+    "learning",
+    "artificial",
+    "intelligence",
+    "natural",
+    "language",
+    "processing",
+    "similarity",
+    "cosine",
+    "distance",
+    "metric",
+    "threshold",
 ]
 
 
@@ -89,35 +112,37 @@ def benchmark_chunking(
     """
     results = {}
     total_chars = sum(len(s) for s in sentences)
-    
-    logger.info(f"Total corpus size: {total_chars:,} characters across {len(sentences)} sentences.")
+
+    logger.info(
+        f"Total corpus size: {total_chars:,} characters across {len(sentences)} sentences."
+    )
     logger.info("Starting chunking benchmarks...")
 
     for size in chunk_sizes:
         logger.info(f"Testing chunk_size={size}, overlap={overlap}...")
-        
+
         # Join sentences into a single document for chunking
         # (chunk_documents expects a list of document strings)
         full_text = " ".join(sentences)
-        
+
         start_time = time.perf_counter()
         chunks = chunk_documents([full_text], chunk_size=size, chunk_overlap=overlap)
         end_time = time.perf_counter()
-        
+
         elapsed_sec = end_time - start_time
         elapsed_ms = elapsed_sec * 1000
-        
+
         # Calculate throughput
         sentences_per_sec = len(sentences) / elapsed_sec if elapsed_sec > 0 else 0
         chars_per_sec = total_chars / elapsed_sec if elapsed_sec > 0 else 0
-        
+
         results[size] = {
             "time_ms": elapsed_ms,
             "chunks_created": len(chunks) if chunks else 0,
             "sentences_per_sec": sentences_per_sec,
             "chars_per_sec": chars_per_sec,
         }
-        
+
         logger.info(
             f"  -> Completed in {elapsed_ms:.2f} ms. "
             f"Created {len(chunks)} chunks. "
@@ -135,9 +160,11 @@ def print_results_table(results: Dict[int, Dict[str, float]]) -> None:
     print("\n" + "=" * 80)
     print("  Text Chunking Performance Benchmark Results")
     print("=" * 80)
-    print(f"{'Chunk Size':<15} | {'Time (ms)':<15} | {'Chunks':<10} | {'Sentences/sec':<20} | {'Chars/sec':<15}")
+    print(
+        f"{'Chunk Size':<15} | {'Time (ms)':<15} | {'Chunks':<10} | {'Sentences/sec':<20} | {'Chars/sec':<15}"
+    )
     print("-" * 80)
-    
+
     for size, metrics in sorted(results.items()):
         print(
             f"{size:<15} | "
@@ -146,7 +173,7 @@ def print_results_table(results: Dict[int, Dict[str, float]]) -> None:
             f"{metrics['sentences_per_sec']:>15,.0f} | "
             f"{metrics['chars_per_sec']:>12,.0f}"
         )
-        
+
     print("=" * 80 + "\n")
 
 
@@ -159,7 +186,7 @@ def parse_arguments() -> argparse.Namespace:
         description="Semantic Plagiarism Detection System - Text Chunking Benchmark",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    
+
     parser.add_argument(
         "--num-sentences",
         type=int,
@@ -185,7 +212,7 @@ def parse_arguments() -> argparse.Namespace:
         default=42,
         help="Random seed for reproducible corpus generation.",
     )
-    
+
     return parser.parse_args()
 
 
@@ -195,23 +222,23 @@ def parse_arguments() -> argparse.Namespace:
 def main() -> None:
     """Main entry point for the chunking benchmark script."""
     args = parse_arguments()
-    
+
     random.seed(args.seed)
-    
+
     logger.info("=" * 80)
     logger.info("Text Chunking Performance Benchmark")
     logger.info("=" * 80)
-    
+
     sentences = generate_synthetic_corpus(num_sentences=args.num_sentences)
-    
+
     results = benchmark_chunking(
         sentences=sentences,
         chunk_sizes=args.chunk_sizes,
         overlap=args.overlap,
     )
-    
+
     print_results_table(results)
-    
+
     logger.info("Benchmark execution complete.")
 
 

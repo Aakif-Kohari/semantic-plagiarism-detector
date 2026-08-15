@@ -39,12 +39,8 @@ def test_repeated_dictionary_load_reads_disk_once(tmp_path):
         "builtins.open",
         wraps=open,
     ) as mocked_open:
-        first = translator._load_translation_dictionary(
-            str(file_path)
-        )
-        second = translator._load_translation_dictionary(
-            str(file_path)
-        )
+        first = translator._load_translation_dictionary(str(file_path))
+        second = translator._load_translation_dictionary(str(file_path))
 
     assert first == {"title": "Cached title"}
     assert second == first
@@ -82,14 +78,10 @@ def test_cached_result_is_not_mutated_by_caller(tmp_path):
         {"title": "Original"},
     )
 
-    first = translator._load_translation_dictionary(
-        str(file_path)
-    )
+    first = translator._load_translation_dictionary(str(file_path))
     first["title"] = "Changed by caller"
 
-    second = translator._load_translation_dictionary(
-        str(file_path)
-    )
+    second = translator._load_translation_dictionary(str(file_path))
 
     assert second["title"] == "Original"
 
@@ -101,21 +93,15 @@ def test_clear_translation_cache_forces_new_disk_read(tmp_path):
         {"title": "First"},
     )
 
-    first = translator._load_translation_dictionary(
-        str(file_path)
-    )
+    first = translator._load_translation_dictionary(str(file_path))
     file_path.write_text(
         json.dumps({"title": "Second"}),
         encoding="utf-8",
     )
 
-    cached = translator._load_translation_dictionary(
-        str(file_path)
-    )
+    cached = translator._load_translation_dictionary(str(file_path))
     translator.clear_translation_cache()
-    refreshed = translator._load_translation_dictionary(
-        str(file_path)
-    )
+    refreshed = translator._load_translation_dictionary(str(file_path))
 
     assert first["title"] == "First"
     assert cached["title"] == "First"
@@ -133,9 +119,7 @@ def test_non_object_json_is_rejected(tmp_path):
         ValueError,
         match="must contain a JSON object",
     ):
-        translator._load_translation_dictionary(
-            str(file_path)
-        )
+        translator._load_translation_dictionary(str(file_path))
 
 
 def test_load_translations_uses_cached_file_loader(
@@ -171,10 +155,13 @@ def test_load_translations_uses_cached_file_loader(
         translator.load_translations()
 
     assert mocked_open.call_count == 3
-    assert translator.get_text(
-        "title",
-        lang="es",
-    ) == "Título español"
+    assert (
+        translator.get_text(
+            "title",
+            lang="es",
+        )
+        == "Título español"
+    )
 
 
 def test_missing_language_file_is_skipped(
@@ -194,10 +181,13 @@ def test_missing_language_file_is_skipped(
 
     translator.load_translations()
 
-    assert translator.get_text(
-        "title",
-        lang="es",
-    ) == "English title"
+    assert (
+        translator.get_text(
+            "title",
+            lang="es",
+        )
+        == "English title"
+    )
 
 
 def test_malformed_language_file_is_skipped(
@@ -221,10 +211,13 @@ def test_malformed_language_file_is_skipped(
 
     translator.load_translations()
 
-    assert translator.get_text(
-        "title",
-        lang="es",
-    ) == "English title"
+    assert (
+        translator.get_text(
+            "title",
+            lang="es",
+        )
+        == "English title"
+    )
 
 
 def test_existing_html_safe_formatting_is_preserved(
@@ -247,7 +240,4 @@ def test_existing_html_safe_formatting_is_preserved(
     assert translator.get_text(
         "welcome",
         name="<script>alert(1)</script>",
-    ) == (
-        "Welcome, "
-        "&lt;script&gt;alert(1)&lt;/script&gt;!"
-    )
+    ) == ("Welcome, " "&lt;script&gt;alert(1)&lt;/script&gt;!")

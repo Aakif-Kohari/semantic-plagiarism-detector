@@ -20,6 +20,7 @@ from src.core.config import (
     normalize_severity_label,
     severity_from_score,
 )
+from src.db.base import BaseRepository
 from src.db.migrations import migrate_corpus_database, table_exists
 from src.db.migrations.common import column_exists
 from src.db.schemas import MatchResult
@@ -41,6 +42,27 @@ CSV_COLUMNS = [
     "Review Status",
     "Date Flagged",
 ]
+
+
+class IncidentsRepository(BaseRepository):
+    """Data access repository for plagiarism incidents, filtering, and export."""
+
+    def __init__(self, db_path: str | Path = DEFAULT_DB_PATH) -> None:
+        super().__init__(db_path)
+
+    def init_incident_db(self) -> None:
+        """Create or upgrade the shared corpus/incident database."""
+        init_incident_db(self._db_path)
+
+
+incidents_repo = IncidentsRepository(DEFAULT_DB_PATH)
+
+
+def configure_db_path(db_path: str | Path) -> None:
+    """Configure the SQLite database path used by the incidents module."""
+    global DEFAULT_DB_PATH
+    DEFAULT_DB_PATH = Path(os.path.abspath(str(db_path)))
+    incidents_repo.configure_db_path(DEFAULT_DB_PATH)
 
 
 def _utc_now_iso() -> str:
@@ -71,9 +93,40 @@ def _severity_rank(flag: Mapping[str, Any]) -> str:
 
 
 def build_incident_id(doc_a: str, doc_b: str) -> str:
+    """Build a deterministic, order-independent incident ID for a document pair.
+
+    .. warning::
+        **Breaking change**: prior to this fix, the hash input used a bare
+        ``"0"`` digit as the separator between filenames (``f"{first}0{second}"``).
+        Because filenames may themselves contain digits, this created hash
+        collisions between distinct document pairs — e.g. ``("doc10", "doc2")``
+        and ``("doc1", "0doc2")`` both hashed the input ``"doc100doc2"``.
+        The separator is now ``"||"``, a sequence very unlikely to appear in
+        a real filename. This changes the resulting ``INC-...`` ID for every
+        existing incident: any incident ID computed with the old separator
+        will no longer match one computed with the same document pair going
+        forward. Existing stored incident records are not automatically
+        migrated by this change.
+    """
     first, second = _normalise_pair(doc_a, doc_b)
-    digest = hashlib.sha256(f"{first}0{second}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(f"{first}||{second}".encode("utf-8")).hexdigest()
     return f"INC-{digest[:12].upper()}"
+
+
+def _parse_incident_id(val: str | int | None) -> int | None:
+    if val is None:
+        return None
+    if isinstance(val, int):
+        return val
+    val_str = str(val).strip()
+    if val_str.isdigit():
+        return int(val_str)
+    if val_str.startswith("INC-"):
+        try:
+            return int(val_str[4:], 16)
+        except ValueError:
+            pass
+    return None
 
 
 def _get_connection(db_path: str | Path) -> sqlite3.Connection:
@@ -184,7 +237,7 @@ def _fetch_all_incidents(
 
     return [
         MatchResult(
-            incident_id=row["incident_id"],
+            incident_id=_parse_incident_id(row["incident_id"]),
             document_a=row["document_a"],
             document_b=row["document_b"],
             similarity_score=row["similarity_score"],
@@ -262,8 +315,7 @@ def sync_flagged_incidents(
                 conn.commit()
                 get_recent_incidents.cache_clear()
 
-            rows = conn.execute(
-                """
+            rows = conn.execute("""
                 SELECT pi.incident_id, pi.document_a, pi.document_b,
                        pi.similarity_score, pi.severity_rank,
                        pi.review_status, pi.date_flagged, pi.last_seen,
@@ -274,12 +326,11 @@ def sync_flagged_incidents(
                 WHERE (da.is_deleted IS NULL OR da.is_deleted = 0)
                   AND (db.is_deleted IS NULL OR db.is_deleted = 0)
                 ORDER BY pi.date_flagged DESC, pi.incident_id ASC
-                """
-            ).fetchall()
+                """).fetchall()
 
             return [
                 MatchResult(
-                    incident_id=row["incident_id"],
+                    incident_id=_parse_incident_id(row["incident_id"]),
                     document_a=row["document_a"],
                     document_b=row["document_b"],
                     similarity_score=row["similarity_score"],
@@ -339,34 +390,55 @@ def get_total_incidents_count(
     """
     init_incident_db(db_path)
     with closing(_get_connection(db_path)) as conn:
-        row = conn.execute(
-            """
+        row = conn.execute("""
             SELECT COUNT(*)
             FROM plagiarism_incidents pi
             LEFT JOIN documents da ON pi.document_a = da.filename
             LEFT JOIN documents db ON pi.document_b = db.filename
             WHERE (da.is_deleted IS NULL OR da.is_deleted = 0)
               AND (db.is_deleted IS NULL OR db.is_deleted = 0)
-            """
-        ).fetchone()
+            """).fetchone()
     return int(row[0]) if row is not None else 0
 
 
 def get_incident_by_id(
-    incident_id: str | int,
+    incident_id: int,
     db_path: str | Path | None = None,
 ) -> dict[str, Any] | None:
-    if db_path is None:
-        db_path = DEFAULT_DB_PATH
-    """Fetch a single plagiarism incident record by its incident_id primary key.
+    """Fetch a single plagiarism incident record by its ``incident_id`` primary key.
+
+    Issue #1772: Instructors need a helper to fetch a single incident record
+    by its integer primary key without having to query by document names.
+
+    The function accepts both integer and string representations of the
+    incident_id (string IDs are common in the legacy ``INC-xxx`` format;
+    integer IDs are used by the canonical ``plagiarism_incidents`` table).
+    The query matches against both forms so callers don't need to know
+    which format is stored.
 
     Args:
-        incident_id: Integer or string primary key of the incident.
-        db_path: Path to the SQLite corpus database.
+        incident_id: Integer (or string) primary key of the incident.
+            Strings are accepted for backward compatibility with the
+            legacy ``INC-xxx`` ID format, but the canonical type is
+            ``int``.
+        db_path: Path to the SQLite corpus database. Defaults to
+            :data:`DEFAULT_DB_PATH` when ``None``.
 
     Returns:
-        Dictionary containing incident record columns, or None if not found.
+        Dictionary containing the incident record columns
+        (``incident_id``, ``document_a``, ``document_b``,
+        ``similarity_score``, ``severity_rank``, ``review_status``,
+        ``date_flagged``, ``last_seen``, ``threshold_at_time_of_flag``),
+        or ``None`` if no matching incident is found or if the incident's
+        documents have been soft-deleted.
+
+    Note:
+        Incidents linked to soft-deleted documents (``is_deleted = 1``)
+        are excluded from the result, consistent with
+        :func:`get_all_incidents`.
     """
+    if db_path is None:
+        db_path = DEFAULT_DB_PATH
     init_incident_db(db_path)
     with closing(_get_connection(db_path)) as conn:
         conn.row_factory = sqlite3.Row
@@ -573,9 +645,11 @@ def get_incidents_by_user(
         # Mirrors the dual-path strategy used by get_incidents_by_assignment
         # so older deployments (and tests that pre-populate the legacy
         # table) keep working with the exact SQL from the issue spec.
-        if table_exists(conn, "incidents") \
-                and column_exists(conn, "incidents", "owner") \
-                and column_exists(conn, "incidents", "timestamp"):
+        if (
+            table_exists(conn, "incidents")
+            and column_exists(conn, "incidents", "owner")
+            and column_exists(conn, "incidents", "timestamp")
+        ):
             rows = conn.execute(
                 """
                 SELECT * FROM incidents
@@ -763,8 +837,7 @@ def get_incidents_count_by_date(
     init_incident_db(db_path)
     with closing(_get_connection(db_path)) as conn:
         conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            """
+        rows = conn.execute("""
             SELECT
                 DATE(pi.date_flagged) as date,
                 COUNT(*) as count
@@ -775,8 +848,7 @@ def get_incidents_count_by_date(
               AND (db.is_deleted IS NULL OR db.is_deleted = 0)
             GROUP BY DATE(pi.date_flagged)
             ORDER BY date ASC
-            """
-        ).fetchall()
+            """).fetchall()
         return [dict(row) for row in rows]
 
 
@@ -971,7 +1043,7 @@ def query_incidents_paginated(
         return PaginatedIncidents(
             items=[
                 MatchResult(
-                    incident_id=row["incident_id"],
+                    incident_id=_parse_incident_id(row["incident_id"]),
                     document_a=row["document_a"],
                     document_b=row["document_b"],
                     similarity_score=row["similarity_score"],

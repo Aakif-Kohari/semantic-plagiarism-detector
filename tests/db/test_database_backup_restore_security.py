@@ -15,9 +15,7 @@ from src.db.database_backup import (
 
 def create_database(path: Path, value: str) -> None:
     with sqlite3.connect(path) as connection:
-        connection.execute(
-            "CREATE TABLE records (value TEXT NOT NULL)"
-        )
+        connection.execute("CREATE TABLE records (value TEXT NOT NULL)")
         connection.execute(
             "INSERT INTO records (value) VALUES (?)",
             (value,),
@@ -27,9 +25,7 @@ def create_database(path: Path, value: str) -> None:
 
 def read_value(path: Path) -> str:
     with sqlite3.connect(path) as connection:
-        row = connection.execute(
-            "SELECT value FROM records"
-        ).fetchone()
+        row = connection.execute("SELECT value FROM records").fetchone()
     assert row is not None
     return row[0]
 
@@ -110,9 +106,7 @@ def test_rejects_symlink_escape(tmp_path):
     try:
         link.symlink_to(outside)
     except (OSError, NotImplementedError):
-        pytest.skip(
-            "Creating symlinks is unavailable on this platform."
-        )
+        pytest.skip("Creating symlinks is unavailable on this platform.")
 
     with pytest.raises(BackupRestoreSecurityError):
         restore(
@@ -209,11 +203,7 @@ def test_atomic_replace_failure_preserves_destination(tmp_path):
             )
 
     assert read_value(destination) == "original"
-    assert not list(
-        destination.parent.glob(
-            f".{destination.name}.restore-*.tmp"
-        )
-    )
+    assert not list(destination.parent.glob(f".{destination.name}.restore-*.tmp"))
 
 
 def test_source_and_destination_must_differ(tmp_path):

@@ -2,9 +2,16 @@ import faiss
 import numpy as np
 import pytest
 
-from src.core.faiss_index import (ChunkRecord, build_index,
-                                  find_plagiarised_chunks, load_index,
-                                  optimize_faiss_index, save_index, search_similar_chunks)
+from src.core.faiss_index import (
+    ChunkRecord,
+    build_index,
+    find_plagiarised_chunks,
+    load_index,
+    optimize_faiss_index,
+    save_index,
+    search_batch_vectors,
+    search_similar_chunks,
+)
 
 
 def _unit_vecs(n, dim=384):
@@ -226,6 +233,7 @@ def test_optimize_faiss_index_below_threshold(caplog):
 def test_optimize_faiss_index_converts_above_threshold(caplog, monkeypatch):
     """Above 5000 threshold, converts flat index to IVF index and logs count."""
     import logging
+
     import src.core.faiss_index as faiss_mod
 
     # Lower threshold temporarily for unit test speed
@@ -298,3 +306,42 @@ def test_format_faiss_memory_badge_formatting():
     assert "(1,000 vectors)" in badge
 
 
+def test_search_batch_vectors():
+    """Verify that search_batch_vectors successfully queries a batch of vectors and returns correct matrices."""
+    # 1. Create populated index
+    dim = 384
+    index = faiss.IndexFlatIP(dim)
+    vecs = _unit_vecs(10, dim=dim)
+    index.add(vecs)
+
+    # 2. Search a batch of 3 vectors
+    query_batch = _unit_vecs(3, dim=dim)
+    distances, indices = search_batch_vectors(query_batch, index, top_k=5)
+
+    # Check shapes
+    assert distances.shape == (3, 5)
+    assert indices.shape == (3, 5)
+
+    # Check types and basic properties
+    assert distances.dtype == np.float32
+    assert np.issubdtype(indices.dtype, np.integer)
+    assert np.all(indices >= 0)
+    assert np.all(indices < 10)
+
+    # 3. Test alternate argument order (index first, then query_matrix)
+    distances_alt, indices_alt = search_batch_vectors(index, query_batch, top_k=5)
+    assert np.array_equal(distances, distances_alt)
+    assert np.array_equal(indices, indices_alt)
+
+    # 4. Test single 1D vector (should be reshaped and searched)
+    single_vector = query_batch[0]
+    dist_single, ind_single = search_batch_vectors(single_vector, index, top_k=5)
+    assert dist_single.shape == (1, 5)
+    assert ind_single.shape == (1, 5)
+
+    # 5. Invalid arguments checking
+    with pytest.raises(TypeError):
+        search_batch_vectors("not-a-numpy-array", index)
+
+    with pytest.raises(ValueError):
+        search_batch_vectors(query_batch, "not-a-faiss-index")
