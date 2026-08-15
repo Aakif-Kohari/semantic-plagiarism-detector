@@ -80,13 +80,18 @@ def _connect():
         path = str(FALLBACK_CORPUS_DB_PATH)
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
-    try:
-        conn = sqlite3.connect(path, check_same_thread=False)
-    except sqlite3.OperationalError:
-        path = str(FALLBACK_CORPUS_DB_PATH)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        conn = sqlite3.connect(path, check_same_thread=False)
-    conn.execute("PRAGMA foreign_keys = ON")
+    pool = _pool()
+    conn = pool.get(path)
+    if conn is None:
+        try:
+            conn = sqlite3.connect(path, check_same_thread=False)
+        except sqlite3.OperationalError:
+            path = str(FALLBACK_CORPUS_DB_PATH)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            conn = sqlite3.connect(path, check_same_thread=False)
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA journal_mode=WAL")
+        pool[path] = conn
 
     try:
         yield conn

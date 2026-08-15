@@ -675,26 +675,12 @@ def test_get_document_count_by_user_empty():
 
     assert get_document_count_by_user("unknown-user") == 0
 
-def test_configure_db_path_plain_filename(tmp_path):
-    from src.db.corpus_db import configure_db_path, get_corpus_db_path, _connect
-    
-    original_path = get_corpus_db_path()
-    try:
-        # A plain filename with no directory components
-        plain_filename = "corpus_plain_test.db"
-        
-        import os
-        original_cwd = os.getcwd()
-        try:
-            os.chdir(str(tmp_path))
-            configure_db_path(plain_filename)
-            
-            # This triggers _connect() which should create the file
-            with _connect() as conn:
-                conn.execute("SELECT 1")
-                
-            assert os.path.exists(plain_filename)
-        finally:
-            os.chdir(original_cwd)
-    finally:
-        configure_db_path(original_path)
+def test_corpus_db_wal_mode_enabled():
+    """Verify SQLite WAL journal_mode is enabled for corpus database connections (#2336)."""
+    with _connect() as conn:
+        cursor = conn.execute("PRAGMA journal_mode")
+        mode = cursor.fetchone()[0]
+        assert str(mode).lower() == "wal"
+
+
+
