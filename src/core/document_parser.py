@@ -2024,7 +2024,10 @@ def extract_texts(
 
     return results
 import io
-from pptx import Presentation  # type: ignore # Ensure python-pptx is imported
+try:
+    from pptx import Presentation  # type: ignore # Ensure python-pptx is imported
+except ImportError:
+    Presentation = None
 
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt", ".pptx"}
 
