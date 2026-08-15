@@ -43,14 +43,38 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-_RedisErr = getattr(redis, "RedisError", Exception)
-RedisError = _RedisErr if isinstance(_RedisErr, type) and issubclass(_RedisErr, BaseException) else Exception
+class DummyRedisError(Exception):
+    pass
 
-_ConnErr = getattr(redis, "ConnectionError", ConnectionError)
-RedisConnectionError = _ConnErr if isinstance(_ConnErr, type) and issubclass(_ConnErr, BaseException) else ConnectionError
 
-_TimeoutErr = getattr(redis, "TimeoutError", TimeoutError)
-RedisTimeoutError = _TimeoutErr if isinstance(_TimeoutErr, type) and issubclass(_TimeoutErr, BaseException) else TimeoutError
+class DummyRedisConnectionError(DummyRedisError):
+    pass
+
+
+class DummyRedisTimeoutError(DummyRedisError):
+    pass
+
+
+_RedisErr = getattr(redis, "RedisError", DummyRedisError)
+RedisError = (
+    _RedisErr
+    if isinstance(_RedisErr, type) and issubclass(_RedisErr, BaseException)
+    else DummyRedisError
+)
+
+_ConnErr = getattr(redis, "ConnectionError", DummyRedisConnectionError)
+RedisConnectionError = (
+    _ConnErr
+    if isinstance(_ConnErr, type) and issubclass(_ConnErr, BaseException)
+    else DummyRedisConnectionError
+)
+
+_TimeoutErr = getattr(redis, "TimeoutError", DummyRedisTimeoutError)
+RedisTimeoutError = (
+    _TimeoutErr
+    if isinstance(_TimeoutErr, type) and issubclass(_TimeoutErr, BaseException)
+    else DummyRedisTimeoutError
+)
 
 
 

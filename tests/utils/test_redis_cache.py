@@ -807,3 +807,45 @@ class TestHitRateTracking:
 
         assert cache_with_mock._hits == 1000
         assert cache_with_mock.get_hit_rate() == 100.0
+
+
+def test_redis_fallback_exceptions():
+    """Verify that when redis is missing, fallback classes are custom subclasses of Exception."""
+    import sys
+    from unittest.mock import patch
+
+    # We hide 'redis' module to simulate a missing redis package
+    with patch.dict(sys.modules, {"redis": None}):
+        # Reload redis_cache module to trigger the except ImportError block
+        import importlib
+        import src.utils.redis_cache as rc
+        importlib.reload(rc)
+
+        # Retrieve the fallback error classes
+        fallback_RedisError = rc.RedisError
+        fallback_RedisConnectionError = rc.RedisConnectionError
+        fallback_RedisTimeoutError = rc.RedisTimeoutError
+
+        # Assert they are distinct subclasses of Exception
+        assert issubclass(fallback_RedisError, Exception)
+        assert fallback_RedisError is not Exception
+
+        assert issubclass(fallback_RedisConnectionError, fallback_RedisError)
+        assert fallback_RedisConnectionError is not ConnectionError
+
+        assert issubclass(fallback_RedisTimeoutError, fallback_RedisError)
+        assert fallback_RedisTimeoutError is not TimeoutError
+
+        # Verify that catching fallback_RedisError does NOT catch a generic KeyError
+        try:
+            raise KeyError("test")
+        except fallback_RedisError:
+            pytest.fail("fallback_RedisError caught generic KeyError!")
+        except KeyError:
+            pass  # Expected
+
+    # Finally, reload the module one more time to restore it to the default environment state
+    import importlib
+    import src.utils.redis_cache as rc
+    importlib.reload(rc)
+
