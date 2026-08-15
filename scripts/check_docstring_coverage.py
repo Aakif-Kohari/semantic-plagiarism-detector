@@ -13,7 +13,7 @@ Usage:
 import ast
 import sys
 from pathlib import Path
-from typing import List, Tuple, Any
+from typing import Any, List, Tuple
 
 
 class DocstringVisitor(ast.NodeVisitor):

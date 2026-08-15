@@ -43,12 +43,7 @@ def _make_docx_bytes(text: str) -> bytes:
 
 def _make_rtf_bytes(text: str) -> bytes:
     """Create a minimal in-memory RTF containing the given text."""
-    rtf_content = (
-        r"{\rtf1\ansi"
-        r"{\fonttbl{\f0 Arial;}}"
-        rf"\f0\fs24 {text}"
-        r"}"
-    )
+    rtf_content = r"{\rtf1\ansi" r"{\fonttbl{\f0 Arial;}}" rf"\f0\fs24 {text}" r"}"
     return rtf_content.encode("utf-8")
 
 

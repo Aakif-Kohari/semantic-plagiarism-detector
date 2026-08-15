@@ -9,11 +9,10 @@ import re
 import unicodedata
 from collections.abc import Collection, Mapping
 from pathlib import PurePath
-from typing import TypeVar
-
+from typing import IO, TypeVar
 
 DEFAULT_FILENAME = "document"
-MAX_FILENAME_LENGTH = 128
+MAX_FILENAME_LENGTH = 150
 
 _HTML_TAG_RE = re.compile(r"<[^>]*>")
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
@@ -63,6 +62,44 @@ def _safe_extension(filename: str) -> str:
 def get_file_sha256_hash(file_bytes: bytes) -> str:
     """Return the SHA-256 hex digest for file bytes."""
     return hashlib.sha256(file_bytes).hexdigest()
+
+
+def compute_file_hash_stream(
+    file_stream: IO[bytes],
+    chunk_size: int = 65536,
+) -> str:
+    """Return the SHA-256 hex digest for a file-like object.
+
+    The stream is read incrementally in fixed-size chunks to avoid loading
+    the entire file into memory.
+    """
+    hasher = hashlib.sha256()
+
+    while chunk := file_stream.read(chunk_size):
+        hasher.update(chunk)
+
+    return hasher.hexdigest()
+
+
+_SHA256_HEX_RE = re.compile(r"[0-9a-fA-F]{64}")
+
+
+def normalize_sha256_hash(hash_str: str) -> str:
+    """Validate a SHA-256 hex digest and return it in lower-case form.
+
+    Args:
+        hash_str: A 64-character hexadecimal SHA-256 digest, in any case.
+
+    Returns:
+        str: The digest normalized to lower-case.
+
+    Raises:
+        ValueError: If the input is not a 64-character hexadecimal string.
+    """
+    if not isinstance(hash_str, str) or not _SHA256_HEX_RE.fullmatch(hash_str):
+        raise ValueError("Invalid SHA-256 hash: expected a 64-character hex string.")
+
+    return hash_str.lower()
 
 
 def sanitize_filename(
@@ -260,8 +297,9 @@ def get_final_extension(filename: object) -> str:
     raw = html.unescape(str(filename or ""))
     raw = unicodedata.normalize("NFKC", raw)
     raw = _CONTROL_RE.sub("", raw)
+    raw = _HTML_TAG_RE.sub("", raw)
     basename = _basename(raw).strip()
-    _stem, extension = os.path.splitext(basename)
+    stem, extension = os.path.splitext(basename)
     return extension.casefold()
 
 
@@ -275,7 +313,42 @@ def get_file_extension_sanitized(filename: str) -> str:
     return extension.lower()
 
 
-def validate_document_extension(    filename: object,
+_EXTENSION_BADGES: dict[str, str] = {
+    ".pdf": "📄 PDF",
+    ".docx": "📝 DOCX",
+    ".doc": "📝 DOC",
+    ".txt": "📑 TXT",
+    ".csv": "📊 CSV",
+    ".epub": "📚 EPUB",
+    ".rtf": "📃 RTF",
+    ".zip": "📦 ZIP",
+}
+_DEFAULT_EXTENSION_BADGE = "📁 FILE"
+
+
+def format_extension_badge(filename: str) -> str:
+    """Return a color-coded emoji badge describing a filename's format.
+
+    Used in document list views so filenames aren't shown as plain text
+    with no visual indication of file type, e.g. ``"📄 PDF"`` for a
+    ``.pdf`` file. Falls back to a generic file badge for unrecognized or
+    missing extensions.
+
+    Examples
+    --------
+    >>> format_extension_badge("report.pdf")
+    '📄 PDF'
+    >>> format_extension_badge("notes.CSV")
+    '📊 CSV'
+    >>> format_extension_badge("no_extension")
+    '📁 FILE'
+    """
+    extension = get_final_extension(filename)
+    return _EXTENSION_BADGES.get(extension, _DEFAULT_EXTENSION_BADGE)
+
+
+def validate_document_extension(
+    filename: object,
     *,
     allowed_extensions: Collection[str] = DEFAULT_ALLOWED_DOCUMENT_EXTENSIONS,
     require_extension: bool = True,
