@@ -93,7 +93,9 @@ SSRF_DOMAIN_NOT_ALLOWED = (
     "Webhook domain '{hostname}' is not in ALLOWED_WEBHOOK_DOMAINS."
 )
 SSRF_MAX_REDIRECTS_EXCEEDED = "Maximum HTTP redirect depth exceeded"
-SSRF_CIRCULAR_REDIRECT_LOOP = "Circular HTTP redirect loop detected"  # API Errors
+SSRF_CIRCULAR_REDIRECT_LOOP = "Circular HTTP redirect loop detected"
+
+# API Errors
 API_UNAUTHORIZED = "Invalid or missing authentication token."
 API_FILENAME_MISSING = "Filename must be provided."
 API_FILE_EMPTY = "Uploaded file is empty."
