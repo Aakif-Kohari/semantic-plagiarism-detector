@@ -505,6 +505,30 @@ def test_get_active_users_count():
     delete_user(user2)
 
 
+def test_update_user_profile():
+    """Verify that update_user_profile correctly updates user role and active status in the database."""
+    username = f"user_update_{uuid.uuid4().hex[:8]}"
+    add_user(username, "Password123!", "teacher")
+
+    # Fetch initial state
+    users = get_all_users()
+    initial = next(u for u in users if u["username"] == username)
+    assert initial["role"] == "teacher"
+    assert initial["is_active"] is True
+    assert initial["version"] == 1
+
+    # Update profile
+    update_user_profile(username, role="admin", is_active=False, expected_version=1)
+
+    # Fetch updated user from database and verify changes
+    updated_users = get_all_users()
+    updated = next(u for u in updated_users if u["username"] == username)
+    assert updated["role"] == "admin"
+    assert updated["is_active"] is False
+    assert updated["status"] == "suspended"
+    assert updated["version"] == 2
+
+
 def test_update_user_profile_success():
     """Verify update_user_profile successfully updates role/active status and increments version."""
     user = f"profile_user_{uuid.uuid4().hex[:8]}"
@@ -634,7 +658,9 @@ def test_password_history_validation_prevents_reuse_of_last_3_passwords(mock_db)
     for forbidden_pass in (pass1, pass2, pass3):
         with pytest.raises(ValueError) as exc_info:
             update_password(user, forbidden_pass)
-        assert "New password cannot be one of your last 3 passwords" in str(exc_info.value)
+        assert "New password cannot be one of your last 3 passwords" in str(
+            exc_info.value
+        )
 
     # 5. Update to pass4 (succeeds)
     update_password(user, pass4)
@@ -710,8 +736,10 @@ def test_password_change_required_flag(mock_db):
 
     # 6. Invalid credentials still return False (or dict with authenticated=False)
     assert verify_user(username, "WrongPassword!") is False
-    assert verify_user(username, "WrongPassword!", return_details=True) == {"authenticated": False, "must_change_password": False}
-
+    assert verify_user(username, "WrongPassword!", return_details=True) == {
+        "authenticated": False,
+        "must_change_password": False,
+    }
 
 
 # ── Issue #1778: SQL query shape regression guard ─────────────────────────
@@ -778,4 +806,3 @@ def test_get_active_users_count_zero_on_empty_database():
     result = get_active_users_count()
     assert result is not None
     assert result >= 0
-
