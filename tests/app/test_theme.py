@@ -656,3 +656,23 @@ def test_render_session_status_banner():
     ) as mock_caption_past:
         render_session_status_banner()
         mock_caption_past.assert_called_once_with("Active Session: 45 mins")
+
+# ==============================================================================
+# sanitize_hex_color edge-case tests (Issue #2352)
+# ==============================================================================
+
+
+def test_sanitize_hex_color_valid():
+    """Valid six-digit uppercase hex colors are returned unchanged."""
+    assert sanitize_hex_color("#FF0000") == "#FF0000"
+
+
+def test_sanitize_hex_color_missing_hash():
+    """Hex values without the leading hash fall back to the default."""
+    assert sanitize_hex_color("FF0000") == "#000000"
+
+
+def test_sanitize_hex_color_invalid():
+    """Invalid/non-hex values use the configured fallback."""
+    assert sanitize_hex_color("not-a-color", fallback="#FFFFFF") == "#FFFFFF"
+
