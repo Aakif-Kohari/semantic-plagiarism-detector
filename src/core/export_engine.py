@@ -39,14 +39,24 @@ class LMSExportEngine:
     @staticmethod
     def generate_incident_html(
         incidents: Sequence[Mapping[str, Any]],
+        *,
+        min_match_length: int = 0,
     ) -> str | None:
-        """Generate a standardized HTML incident report."""
+        """Generate a standardized HTML incident report.
+
+        Args:
+            incidents: Sequence of incident dictionaries.
+            min_match_length: If > 0, only incidents with
+                ``matched_length`` >= this value are exported (Issue #2474).
+        """
         if not incidents:
             logger.warning("Attempted to export an empty incident list to HTML.")
             return None
 
         try:
-            return generate_html_report(incidents)
+            return generate_html_report(
+                incidents, min_match_length=min_match_length
+            )
         except Exception as exception:
             logger.error("Failed to format incident data as HTML: %s", exception)
             return None
@@ -124,8 +134,22 @@ class LMSExportEngine:
     @staticmethod
     def generate_incident_txt(
         incidents: Sequence[Mapping[str, Any]],
+        *,
+        min_match_length: int = 0,
     ) -> str | None:
-        """Generate a readable plain-text summary of flagged incidents."""
+        """Generate a readable plain-text summary of flagged incidents.
+
+        Args:
+            incidents: Sequence of incident dictionaries.
+            min_match_length: If > 0, only incidents with
+                ``matched_length`` >= this value are exported (Issue #2474).
+        """
+        if min_match_length > 0:
+            incidents = [
+                i for i in incidents
+                if int(i.get("matched_length", 0) or 0) >= min_match_length
+            ]
+
         if not incidents:
             logger.warning("Attempted to export an empty incident list to TXT.")
             return None
