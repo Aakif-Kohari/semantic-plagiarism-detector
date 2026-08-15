@@ -16,6 +16,7 @@ from typing import List, Optional, Tuple
 
 from reportlab.lib import colors
 from src.core.app_config import get_pdf_footer_text
+from src.utils.text_stats import compute_text_stats
 from reportlab.lib.colors import HexColor
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import A4
@@ -60,23 +61,6 @@ def load_branding_logo() -> bytes | None:
             return img_f.read()
     except Exception:
         return None
-
-
-def compute_text_stats(text: str) -> dict:
-    """Computes basic text statistics for document summary tables."""
-    words = text.split() if text else []
-    sentences = [s for s in text.split('.') if s.strip()] if text else []
-    unique_words = set(w.lower() for w in words)
-    word_count = len(words)
-    unique_count = len(unique_words)
-    ratio = unique_count / max(word_count, 1)
-    return {
-        "word_count": word_count,
-        "sentence_count": len(sentences),
-        "unique_word_count": unique_count,
-        "unique_word_ratio": ratio,
-    }
-
 
 
 def truncate_filename(filename: str, max_len: int = 30) -> str:
@@ -1111,4 +1095,3 @@ def generate_audit_summary_report(
             class_section=class_section,
         )
         return pdf_buf.getvalue()
-
