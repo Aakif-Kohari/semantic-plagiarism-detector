@@ -1,5 +1,5 @@
 from src.utils.text_stats import (format_text_stats, get_char_count,
-                                   get_reading_time_minutes, count_words,
+                                   get_reading_time_minutes, count_words, count_sentences,
                                    get_sentence_count, get_syllable_count,
                                    get_readability_metrics, get_text_stats)
 
@@ -27,7 +27,8 @@ def test_get_reading_time_minutes():
 def test_get_sentence_count():
     assert get_sentence_count("Hello world. How are you? Fine!") == 3
     assert get_sentence_count("") == 0
-    assert get_sentence_count("No punctuation") == 1
+    assert get_sentence_count("No punctuation") == 0
+    assert get_sentence_count("Dr. Smith arrived. He stayed.") == 2
 
 
 def test_get_syllable_count():

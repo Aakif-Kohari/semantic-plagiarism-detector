@@ -252,8 +252,7 @@ def get_syllable_count(text: str) -> int:
 
 def get_sentence_count(text: str) -> int:
     """Return the total sentence count for the text."""
-    sentences = [s for s in re.split(r"[.!?]+(?:\s+|$)", text) if s.strip()]
-    return max(1, len(sentences)) if text.strip() else 0
+    return count_sentences(text)
 
 
 def get_readability_metrics(text: str) -> tuple[float, float]:
