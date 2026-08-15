@@ -72,6 +72,7 @@ def _connect():
             os.makedirs(os.path.dirname(path), exist_ok=True)
             conn = sqlite3.connect(path, check_same_thread=False)
         conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA journal_mode=WAL")
         pool[path] = conn
 
     try:

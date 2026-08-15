@@ -891,3 +891,12 @@ def test_soft_delete_and_restore_document():
     assert any(doc["filename"] == filename for doc in active_docs_after_restore)
 
 
+def test_corpus_db_wal_mode_enabled():
+    """Verify SQLite WAL journal_mode is enabled for corpus database connections (#2336)."""
+    with _connect() as conn:
+        cursor = conn.execute("PRAGMA journal_mode")
+        mode = cursor.fetchone()[0]
+        assert str(mode).lower() == "wal"
+
+
+
