@@ -61,7 +61,7 @@ from src.db.corpus_db import _connect, clear_all_data, init_corpus_db, get_docum
 from src.security.mime_validator import is_executable_upload
 from src.utils.file_streaming import stream_upload_file_to_disk
 from src.utils.hash_util import calculate_file_sha256
-from src.utils.redis_cache import CacheKeyPrefix, get_cache
+from src.utils.redis_cache import CacheNamespace, get_cache
 
 # ── API Initialization ────────────────────────────────────────────────────────
 
@@ -1134,8 +1134,8 @@ async def clear_all_documents(
         try:
             cache = get_cache()
             if cache.is_available():
-                cache.delete(CacheKeyPrefix.LEGACY_FAISS_INDEX.value)
-                cache.clear_pattern(CacheKeyPrefix.LEGACY_ANALYSIS_PATTERN.value)
+                cache.delete(CacheNamespace.LEGACY_FAISS_INDEX.value)
+                cache.clear_pattern(CacheNamespace.LEGACY_ANALYSIS_PATTERN.value)
         except Exception as e:
             logger.error(f"Failed to clear Redis cache: {e}")
 
