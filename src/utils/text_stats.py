@@ -195,9 +195,6 @@ def format_stats_for_pdf(stats: Dict[str, float]) -> List[List[str]]:
 logger = logging.getLogger(__name__)
 
 
-def get_word_count(text: str) -> int:
-    return len(re.findall(r"\w+", text))
-
 
 def get_char_count(text: str) -> int:
     return len(text)
@@ -206,13 +203,13 @@ def get_char_count(text: str) -> int:
 def get_reading_time_minutes(text: str) -> int:
     # Average reading speed is roughly 200-250 words per minute.
     # We'll use 200 for a conservative estimate.
-    word_count = get_word_count(text)
+    word_count = count_words(text)
     minutes = max(1, round(word_count / 200))
     return minutes
 
 
 def format_text_stats(text: str) -> str:
-    words = get_word_count(text)
+    words = count_words(text)
     chars = get_char_count(text)
     time = get_reading_time_minutes(text)
     reading_ease, grade_level = get_readability_metrics(text)
@@ -264,7 +261,7 @@ def get_readability_metrics(text: str) -> tuple[float, float]:
 
     Returns (flesch_reading_ease, flesch_kincaid_grade).
     """
-    words = get_word_count(text)
+    words = count_words(text)
     sentences = get_sentence_count(text)
     syllables = get_syllable_count(text)
 
@@ -298,7 +295,7 @@ def get_text_stats(text: str) -> dict[str, int | float]:
             "reading_time": 0,
         }
 
-    words = get_word_count(text)
+    words = count_words(text)
     chars = get_char_count(text)
     sentences = get_sentence_count(text)
     syllables = get_syllable_count(text)
