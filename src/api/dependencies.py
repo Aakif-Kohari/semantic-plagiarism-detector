@@ -1,4 +1,3 @@
-from src.api.middleware import get_current_user, verify_bearer_token
 """src/api/dependencies.py - Shared API dependencies and context helpers."""
 
 import logging
@@ -11,6 +10,7 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
+from src.api.middleware import get_current_user, verify_bearer_token  # noqa: F401
 from src.db.corpus_db import _connect, init_corpus_db
 
 logger = logging.getLogger(__name__)
