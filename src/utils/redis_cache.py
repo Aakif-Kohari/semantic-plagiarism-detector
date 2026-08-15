@@ -18,13 +18,7 @@ from enum import Enum
 from typing import Any, Optional
 
 
-class CacheKeyPrefix(str, Enum):
-    LOGIN_ATTEMPTS = "login_attempts:"
-    UPLOAD_COUNT = "upload_count:"
-    SIMILARITY_RESULT = "similarity:"
-    DOCUMENT_CACHE = "doc:"
-    LEGACY_UPLOADS_PREFIX = UPLOAD_COUNT
-
+# CacheKeyPrefix has been consolidated into CacheNamespace below
 
 try:
     import redis
@@ -217,6 +211,16 @@ class CacheNamespace(str, Enum):
     ANALYSIS = "spd:v1:analysis"
     LOGIN_ATTEMPTS = "spd:v1:login_attempts"
     UPLOADS = "spd:v1:uploads"
+
+    # Legacy/Old namespaces merged from CacheKeyPrefix
+    LEGACY_LOGIN_ATTEMPTS = "login_attempts:"
+    LEGACY_UPLOAD_COUNT = "upload_count:"
+    LEGACY_SIMILARITY_RESULT = "similarity:"
+    LEGACY_DOCUMENT_CACHE = "doc:"
+    LEGACY_UPLOADS_PREFIX = "upload_count:"
+    LEGACY_FAISS_INDEX = "faiss_index"
+    LEGACY_ANALYSIS_PATTERN = "analysis:*"
+    LEGACY_ANALYSIS_PREFIX = "analysis:"
 
     def build_key(self, *parts: str) -> str:
         """Construct a standardized cache key with namespace prefix."""

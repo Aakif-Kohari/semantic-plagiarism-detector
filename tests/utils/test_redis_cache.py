@@ -11,7 +11,7 @@ import pytest
 import redis
 
 from src.utils.redis_cache import (
-    CacheKeyPrefix,
+    CacheNamespace,
     RedisCache,
     RedisError,
     cache_analysis_results,
@@ -97,7 +97,7 @@ class TestRedisCache:
         value = True
 
         cache_session_state(session_id, key, value)
-        expected_key = f"{CacheKeyPrefix.SESSION.value}:{session_id}:{key}"
+        expected_key = CacheNamespace.SESSION.build_key(session_id, key)
         mock_redis_client.setex.assert_called_once()
 
         mock_redis_client.get.return_value = b"\x80"
@@ -108,16 +108,14 @@ class TestRedisCache:
         """Test clearing session data."""
         session_id = "test_session"
         mock_redis_client.keys.return_value = [
-            f"{CacheKeyPrefix.SESSION.value}:test_session:key1".encode("utf-8"),
-            f"{CacheKeyPrefix.SESSION.value}:test_session:key2".encode("utf-8"),
+            CacheNamespace.SESSION.build_key("test_session", "key1").encode("utf-8"),
+            CacheNamespace.SESSION.build_key("test_session", "key2").encode("utf-8"),
         ]
         mock_redis_client.delete.return_value = 2
 
         result = clear_session(session_id)
         assert result is True
-        mock_redis_client.keys.assert_called_once_with(
-            f"{CacheKeyPrefix.SESSION.value}:{session_id}:*"
-        )
+        mock_redis_client.keys.assert_called_once_with(CacheNamespace.SESSION.build_key(session_id, "*"))
 
     def test_faiss_index_caching(self, cache_with_mock, mock_redis_client):
         """Test FAISS index caching."""
@@ -139,7 +137,7 @@ class TestRedisCache:
         results = {"embeddings": np.array([[1, 2, 3]]), "similarity": 0.85}
 
         cache_analysis_results(analysis_key, results)
-        expected_key = f"{CacheKeyPrefix.ANALYSIS.value}:{analysis_key}"
+        expected_key = CacheNamespace.ANALYSIS.build_key(analysis_key)
         mock_redis_client.setex.assert_called_once()
 
         mock_redis_client.get.return_value = b"\x80"
@@ -181,14 +179,8 @@ class TestRedisCache:
         key2_called = call_args_list[1][0][0]
 
         assert key1_called != key2_called
-        assert (
-            key1_called
-            == f"{CacheKeyPrefix.LEGACY_ANALYSIS_PREFIX.value}{simulated_hash1}"
-        )
-        assert (
-            key2_called
-            == f"{CacheKeyPrefix.LEGACY_ANALYSIS_PREFIX.value}{simulated_hash2}"
-        )
+        assert key1_called == CacheNamespace.ANALYSIS.build_key(simulated_hash1)
+        assert key2_called == CacheNamespace.ANALYSIS.build_key(simulated_hash2)
 
     # ------------------------------------------------------------------
     # Issue #531 – hash-prefix boundary / collision tests
@@ -276,6 +268,8 @@ class TestRedisCache:
         assert (
             safe_key_b == f"{CacheKeyPrefix.LEGACY_ANALYSIS_PREFIX.value}{full_hash_b}"
         )
+        assert safe_key_a == CacheNamespace.ANALYSIS.build_key(full_hash_a)
+        assert safe_key_b == CacheNamespace.ANALYSIS.build_key(full_hash_b)
 
     @pytest.mark.parametrize(
         "query_a, query_b",
@@ -336,8 +330,8 @@ class TestRedisCache:
             redis_key_a != redis_key_b
         ), "Full-digest analysis keys must not collide for distinct queries."
         # Secondary: keys must be well-formed with the 'analysis:' namespace
-        assert redis_key_a == f"{CacheKeyPrefix.LEGACY_ANALYSIS_PREFIX.value}{key_a}"
-        assert redis_key_b == f"{CacheKeyPrefix.LEGACY_ANALYSIS_PREFIX.value}{key_b}"
+        assert redis_key_a == CacheNamespace.ANALYSIS.build_key(key_a)
+        assert redis_key_b == CacheNamespace.ANALYSIS.build_key(key_b)
 
     def test_get_cache_singleton(self):
         """Test that get_cache returns the same instance."""
