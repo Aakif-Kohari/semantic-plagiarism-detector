@@ -673,11 +673,13 @@ def test_theme_override_none_leaves_default_template():
 
 def test_calculate_severity_ratios_percentage_breakdown():
     """Test the exact percentage breakdown across High, Medium, and Low."""
+    from src.core.config import DEFAULT_THRESHOLDS
+
     incidents = [
-        {"similarity_score": 0.9},  # High
-        {"similarity_score": 0.85},  # High
-        {"similarity_score": 0.6},  # Medium
-        {"similarity_score": 0.3},  # Low
+        {"similarity_score": DEFAULT_THRESHOLDS.high + 0.05},    # High
+        {"similarity_score": DEFAULT_THRESHOLDS.high},           # High
+        {"similarity_score": DEFAULT_THRESHOLDS.medium},         # Medium
+        {"similarity_score": DEFAULT_THRESHOLDS.medium - 0.05},  # Low
     ]
     ratios = calculate_severity_ratios(incidents)
 
@@ -686,8 +688,10 @@ def test_calculate_severity_ratios_percentage_breakdown():
 
 def test_calculate_severity_ratios_ignores_invalid_scores():
     """Incidents with missing or non-numeric scores should be skipped."""
+    from src.core.config import DEFAULT_THRESHOLDS
+
     incidents = [
-        {"similarity_score": 0.9},
+        {"similarity_score": DEFAULT_THRESHOLDS.high},
         {"similarity_score": None},
         {"assignment_title": "no score field"},
         {"similarity_score": "not-a-number"},
