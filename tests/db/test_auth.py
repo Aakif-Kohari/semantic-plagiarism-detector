@@ -218,6 +218,32 @@ def test_2fa_flow():
     delete_user(username)
 
 
+def test_enable_disable_2fa():
+    """Verify enable_2fa saves a secret and disable_2fa removes the secret."""
+    username = f"user2fa_{uuid.uuid4().hex[:8]}"
+    add_user(username, "pass1234567!")
+
+    # Verify initial state: 2FA disabled and secret is None
+    enabled, secret = get_2fa_status(username)
+    assert enabled is False
+    assert secret is None
+
+    # Verify enable_2fa saves a secret
+    test_secret = "JBSWY3DPEHPK3PXP"
+    enable_2fa(username, test_secret)
+    enabled, secret = get_2fa_status(username)
+    assert enabled is True
+    assert secret == test_secret
+
+    # Verify disable_2fa removes the secret
+    disable_2fa(username)
+    enabled, secret = get_2fa_status(username)
+    assert enabled is False
+    assert secret is None
+
+    delete_user(username)
+
+
 def test_suspend_account():
     username = f"user_{uuid.uuid4().hex[:8]}"
     add_user(username, "password123!")
