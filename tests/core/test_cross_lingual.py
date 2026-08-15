@@ -341,6 +341,11 @@ class TestDetectChunkLanguage:
         text = "The quick brown fox jumps over the lazy dog."
         assert detect_chunk_language(text) == "en"
 
+    def test_english_with_articles_not_spanish(self):
+        """English text with common articles must stay 'en', not flip to 'es'."""
+        text = "a plan and a goal for the team next year"
+        assert detect_chunk_language(text) == "en"
+
     def test_empty_text_returns_english(self):
         assert detect_chunk_language("") == "en"
         assert detect_chunk_language(None) == "en"
