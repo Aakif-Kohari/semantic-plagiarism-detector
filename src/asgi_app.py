@@ -20,6 +20,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from src.core.scheduler import start_scheduler, stop_scheduler
+from src.utils.tracing import init_tracer_provider, _tracer_provider
 
 DEFAULT_MAX_REQUEST_BYTES = 52_428_800
 JSON_API_PREFIX = "/api/"
@@ -337,24 +338,22 @@ class TokenBucketRateLimiter(BaseHTTPMiddleware):
 
 @asynccontextmanager
 async def _lifespan(app):
-    """Start/stop the scheduled plagiarism-rescan background job.
+    """Start/stop the scheduled plagiarism-rescan background job and OpenTelemetry provider.
 
     Wraps ``src.core.scheduler.RescanScheduler``, which re-checks recently
     uploaded documents against the full corpus on a configurable interval
     so cross-submission plagiarism that only becomes apparent once a later
     document is uploaded still gets caught (and reviewers get notified via
     the existing webhook layer).
-
-    The scheduler is disabled by default and becomes a no-op unless
-    ``RESCAN_INTERVAL_MINUTES`` is set to a positive value in the
-    environment, so existing deployments are unaffected until they
-    explicitly opt in.
     """
+    init_tracer_provider()
     await start_scheduler()
     try:
         yield
     finally:
         await stop_scheduler()
+        if _tracer_provider and hasattr(_tracer_provider, "shutdown"):
+            _tracer_provider.shutdown()
 
 
 app = st.App(

@@ -419,21 +419,12 @@ def plot_high_severity_trends(
         fig.update_layout()
 
         return _empty_chart(
-
             title="High Severity Plagiarism Trends (Last 30 Days)",
             message="No High severity incidents recorded in the specified period",
             theme_colors=theme_colors,
             show_grid=show_grid,
             xaxis_title="Date",
             yaxis_title="Number of High Severity Incidents",
-
-            height=400,
-            autosize=True,
-            paper_bgcolor=colors["background"],
-            plot_bgcolor=colors["background"],
-            font=dict(color=colors["font"]),
-
-
         )
     df = pd.DataFrame(trend_data)
     df["date"] = pd.to_datetime(df["date"])
@@ -484,6 +475,7 @@ def plot_most_plagiarized_documents(
     show_grid: bool = True,
     theme_colors: dict[str, str] | None = None,
     theme_override: str | None = None,
+    max_name_len: int = 30,
 ) -> go.Figure:
     """Create a bar chart showing the most frequently plagiarized documents."""
     if not doc_data:
@@ -497,7 +489,7 @@ def plot_most_plagiarized_documents(
         )
     df = pd.DataFrame(doc_data)
     df["display_name"] = df["document_name"].apply(
-        lambda x: x[:30] + "..." if len(x) > 30 else x
+        lambda x: x[:max_name_len] + "..." if len(x) > max_name_len else x
     )
 
     fig = px.bar(
@@ -590,6 +582,7 @@ def plot_document_sizes(
     word_counts: dict[str, int],
     show_grid: bool = True,
     theme_colors: dict[str, str] | None = None,
+    max_name_len: int = 30,
 ) -> go.Figure:
     """Create a bar chart visualizing document word counts."""
     if not word_counts:
@@ -603,7 +596,8 @@ def plot_document_sizes(
     counts = list(word_counts.values())
 
     display_names = [
-        name[:30] + "..." if len(name) > 30 else name for name in doc_names
+        name[:max_name_len] + "..." if len(name) > max_name_len else name
+        for name in doc_names
     ]
 
     fig = px.bar(
@@ -1047,6 +1041,89 @@ def plot_hierarchical_dendrogram(
     )
     fig.update_xaxes(showgrid=False)
     fig.update_yaxes(showgrid=show_grid)
+
+    return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)
+
+
+def plot_precision_recall_curve(
+    evaluations: list[dict[str, Any]],
+    current_threshold: float | None = None,
+    show_grid: bool = True,
+    theme_colors: dict[str, str] | None = None,
+) -> go.Figure:
+    """Create a precision / recall / F1 calibration curve from a threshold sweep.
+
+    Plots the per-threshold metrics produced by
+    :func:`src.core.calibration.evaluate_thresholds` as three lines over the
+    threshold axis, and optionally draws a vertical reference line at the
+    currently configured threshold so the report shows exactly where the
+    active threshold sits on the precision/recall trade-off curve.
+
+    Args:
+        evaluations: Per-threshold metric rows, each with ``threshold``,
+            ``precision``, ``recall`` and ``f1`` keys.
+        current_threshold: Optional currently configured threshold value
+            drawn as a dashed vertical reference line.
+        show_grid: Whether to show chart gridlines.
+        theme_colors: Optional theme palette for light/dark mode.
+
+    Returns:
+        A themed Plotly Figure. When ``evaluations`` is empty an explanatory
+        empty-state chart is returned instead.
+    """
+    if not evaluations:
+        return _empty_chart(
+            title="Precision / Recall Calibration Curve",
+            message="No calibration sweep data available to plot",
+            theme_colors=theme_colors,
+            show_grid=show_grid,
+            xaxis_title="Similarity Threshold",
+            yaxis_title="Score",
+        )
+
+    df = pd.DataFrame(evaluations)
+    df = df.sort_values("threshold")
+
+    fig = go.Figure()
+    for column, name, color, line in [
+        ("precision", "Precision", "#636efa", "solid"),
+        ("recall", "Recall", "#00cc96", "solid"),
+        ("f1", "F1", "#ef4444", "dash"),
+    ]:
+        if column not in df.columns:
+            continue
+        fig.add_trace(
+            go.Scatter(
+                x=df["threshold"],
+                y=df[column],
+                mode="lines+markers",
+                name=name,
+                line=dict(color=color, width=2, dash=line),
+                marker=dict(size=5),
+                hovertemplate=f"<b>{name}</b>: %{{y:.3f}}<br>Threshold: %{{x:.3f}}<extra></extra>",
+            )
+        )
+
+    if current_threshold is not None:
+        fig.add_vline(
+            x=float(current_threshold),
+            line_dash="dot",
+            line_color="#64748b",
+            annotation_text=f"Current {current_threshold:.3f}",
+            annotation_position="top right",
+        )
+
+    fig.update_layout(
+        title="Precision / Recall Calibration Curve",
+        xaxis_title="Similarity Threshold",
+        yaxis_title="Score",
+        height=400,
+        showlegend=True,
+        autosize=True,
+        hovermode="x unified",
+    )
+    fig.update_xaxes(showgrid=show_grid, range=[0.0, 1.0])
+    fig.update_yaxes(showgrid=show_grid, range=[0.0, 1.0])
 
     return apply_plotly_theme(fig, theme_colors, show_grid=show_grid)
 
