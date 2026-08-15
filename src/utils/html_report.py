@@ -3,8 +3,29 @@
 from typing import Any, Mapping, Sequence
 
 
-def generate_html_report(incidents: Sequence[Mapping[str, Any]]) -> str:
-    """Generate a clean, standardized HTML report for plagiarism incidents."""
+def generate_html_report(
+    incidents: Sequence[Mapping[str, Any]],
+    *,
+    min_match_length: int = 0,
+) -> str:
+    """Generate a clean, standardized HTML report for plagiarism incidents.
+
+    Args:
+        incidents: A sequence of incident dictionaries (or mappings).
+        min_match_length: If > 0, only incidents with a ``matched_length``
+            field greater than or equal to this value are included in the
+            report. This ensures the exported HTML matches the UI view when
+            the user has applied a min-match-length filter (Issue #2474).
+
+    Returns:
+        A string containing the complete HTML document.
+    """
+    if min_match_length > 0:
+        incidents = [
+            i for i in incidents
+            if int(i.get("matched_length", 0) or 0) >= min_match_length
+        ]
+
     if not incidents:
         return "<p>No plagiarism incidents to report.</p>"
 
