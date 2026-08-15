@@ -1,3 +1,4 @@
+import xml.etree.ElementTree as ET
 """
 tests/visualization/test_network_graph.py
 -------------------------------------------
@@ -1038,3 +1039,24 @@ def test_plot_plagiarism_network_graph_accepts_max_nodes():
     )
     assert len(fig.data[1].customdata) == 2
     assert "3 nodes hidden" in fig.layout.annotations[0].text
+
+def test_export_network_to_gexf_valid_xml():
+    """Verify GEXF export returns well-formed XML with a GEXF root."""
+    data = {
+        "doc1": [1.0, 0.95],
+        "doc2": [0.95, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2"])
+
+    gexf_bytes = export_network_to_gexf_bytes(
+        df,
+        threshold=0.75,
+    )
+
+    assert isinstance(gexf_bytes, bytes)
+    assert gexf_bytes
+
+    root = ET.fromstring(gexf_bytes)
+
+    assert root.tag.endswith("gexf")
+
