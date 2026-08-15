@@ -58,6 +58,12 @@ class IncidentsRepository(BaseRepository):
 incidents_repo = IncidentsRepository(DEFAULT_DB_PATH)
 
 
+def get_incidents_repo() -> IncidentsRepository:
+    """Return singleton instance of IncidentsRepository."""
+    return incidents_repo
+
+
+
 def configure_db_path(db_path: str | Path) -> None:
     """Configure the SQLite database path used by the incidents module."""
     global DEFAULT_DB_PATH
