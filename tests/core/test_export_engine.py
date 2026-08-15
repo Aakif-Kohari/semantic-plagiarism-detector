@@ -41,10 +41,11 @@ def test_generate_incident_html_valid():
     assert "#ff4b4b" in html_content  # CRITICAL color
     assert "#ffa500" in html_content  # HIGH color
     assert "#21c55d" in html_content  # MODERATE color
+
+
 import csv
 import io
 import json
-
 
 
 def test_generate_incident_csv_empty():

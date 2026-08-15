@@ -11,13 +11,6 @@ Supports decrypted and password-protected PDF parsing using PyMuPDF (fitz),
 along with file categorization and validation helpers.
 """
 
-from typing import List, Optional, Tuple
-along with file categorization, validation helpers, and PDF metadata extraction.
-
-Recent Additions (Issue #1570):
-- Added get_file_mime_type_from_bytes() to inspect raw byte headers and
-  return standard MIME type strings without relying on file extensions.
-"""
 
 import logging
 from typing import Any, List, Optional, Tuple, Union
@@ -35,7 +28,6 @@ def truncate_filename(name: str, max_len: int = 35) -> str:
         return name
     return name[: max_len - 3] + "..."
 
-import fitz  # PyMuPDF
 
 # ── Magic Byte Signatures (Issue #1570) ──────────────────────────────────────
 
@@ -203,7 +195,7 @@ def get_file_size_formatted(num_bytes: int) -> str:
                 return f"{int(size)} {unit}"
             return f"{size:.2f} {unit}"
         size /= 1024
-        
+
     return f"{size:.2f} {units[-1]}"
 
 
@@ -259,7 +251,7 @@ def validate_pdf_page_count(
 
     return page_count
 
-def extract_text_from_pdf(file_bytes: bytes, password: Optional[str] = None) -> Tuple[str, bool]:
+
 def get_file_size_formatted_short(num_bytes: int) -> str:
     """
     Convert a file size in bytes to a compact human-readable string.
@@ -319,26 +311,32 @@ def extract_text_from_pdf(
 
     Raises:
         EncryptedPDFError: If the PDF is encrypted and no password (or an incorrect password) is provided.
+        ValueError: If the PDF exceeds the configured page limit.
     """
     validate_pdf_page_count(file_bytes)
 
     doc = fitz.open(stream=file_bytes, filetype="pdf")
-    is_protected = doc.is_encrypted or doc.needs_pass
 
-    if is_protected:
-        if not password:
-            raise EncryptedPDFError("PDF is password-protected. Password required.")
+    try:
+        is_protected = bool(doc.is_encrypted or doc.needs_pass)
 
-        # doc.authenticate returns > 0 on success
-        auth_success = doc.authenticate(password)
-        if not auth_success:
-            raise EncryptedPDFError("Incorrect password for PDF.")
+        if is_protected:
+            if not password:
+                raise EncryptedPDFError("PDF is password-protected. Password required.")
 
-    text_content = []
-    for page in doc:
-        text_content.append(page.get_text())
+            # doc.authenticate returns > 0 on success
+            auth_success = doc.authenticate(password)
+            if not auth_success:
+                raise EncryptedPDFError("Incorrect password for PDF.")
 
-    doc.close()
+        text_content = []
+        for page in doc:
+            text_content.append(page.get_text())
+    finally:
+        # Release the handle on every path, including the EncryptedPDFError
+        # raises above, which previously leaked the open document.
+        doc.close()
+
     return "\n".join(text_content), is_protected
 
 
@@ -381,8 +379,8 @@ def extract_pdf_metadata(file_bytes: bytes) -> dict[str, Any]:
 def get_file_mime_category(filename: str) -> str:
     """
     Categorize an uploaded file into a high-level MIME group based on its extension.
-    
-    This helper simplifies routing and validation logic by grouping specific 
+
+    This helper simplifies routing and validation logic by grouping specific
     file extensions into broader, semantic categories.
 
     Args:
@@ -426,7 +424,7 @@ def get_file_mime_category(filename: str) -> str:
 def get_supported_mime_categories() -> List[str]:
     """
     Retrieve a list of all supported high-level MIME categories.
-    
+
     Returns:
         List[str]: A list of unique category names.
     """
@@ -438,11 +436,11 @@ def is_extension_supported(
 ) -> bool:
     """
     Check if a file's extension belongs to an allowed list of MIME categories.
-    
+
     Args:
         filename: The name of the file to check.
         allowed_categories: List of allowed categories. Defaults to all known categories except 'unknown'.
-        
+
     Returns:
         bool: True if the file's category is in the allowed list, False otherwise.
     """

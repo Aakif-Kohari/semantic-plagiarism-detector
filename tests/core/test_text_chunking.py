@@ -8,12 +8,12 @@ Also validates sentence-aware chunk padding (Issue #1480).
 import pytest
 
 from src.core.text_chunking import (
+    ChunkString,
+    _find_sentence_boundary,
     chunk_by_sentences,
     chunk_documents,
     chunk_text,
     chunk_text_dynamic,
-    _find_sentence_boundary,
-    DEFAULT_CHUNK_SIZE,
 )
 
 
@@ -544,3 +544,136 @@ class TestChunkTextSentencePadding:
             text, chunk_size=100, chunk_overlap=0, sentence_padding=False
         )
         assert padded == unpadded
+
+
+def test_chunkstring_strip_returns_plain_str():
+    """str operations on ChunkString drop metadata and return a plain str."""
+    chunk = ChunkString("hello", {"k": "v"})
+    result = chunk.strip()
+
+    assert result == "hello"
+    assert type(result) is str
+    assert not hasattr(result, "metadata")
+
+
+# ── NLTK punkt download caching (Issue #2059) ────────────────────────────────
+
+
+def test_nltk_punkt_download_called_at_most_once(monkeypatch):
+    """Missing punkt corpus should trigger nltk.download only once across calls."""
+    import sys
+    from unittest.mock import MagicMock
+
+    import src.core.text_chunking as text_chunking
+    from src.core.text_chunking import _split_into_sentences
+
+    text_chunking._nltk_punkt_checked = False
+
+    mock_download = MagicMock()
+    mock_sent_tokenize = MagicMock(side_effect=LookupError("punkt missing"))
+
+    fake_tokenize = MagicMock()
+    fake_tokenize.sent_tokenize = mock_sent_tokenize
+
+    fake_nltk = MagicMock()
+    fake_nltk.download = mock_download
+    fake_nltk.tokenize = fake_tokenize
+
+    monkeypatch.setitem(sys.modules, "nltk", fake_nltk)
+    monkeypatch.setitem(sys.modules, "nltk.tokenize", fake_tokenize)
+
+    sample = "First sentence. Second sentence."
+    for _ in range(5):
+        result = _split_into_sentences(sample)
+        assert len(result) >= 1
+
+    assert mock_download.call_count == 1
+    mock_download.assert_called_with("punkt_tab", quiet=True)
+    assert text_chunking._nltk_punkt_checked is True
+
+
+def test_dynamic_snaps_to_period():
+    """Test that chunk_text_dynamic snaps chunk boundaries to a period within the margin."""
+    from src.core.text_chunking import chunk_text_dynamic
+
+    # Construct text where a period falls near the target split boundary (e.g. target ~50 chars)
+    # The snapping margin is 20% (±10 chars around index 50).
+    text = "This is the first sentence that is quite long. Here is the second short sentence."
+
+    chunks = chunk_text_dynamic(text, target_size=45)
+
+    # Verify that the first chunk correctly snapped to the period after "long."
+    assert len(chunks) > 0
+    assert chunks[0].endswith(".")
+    assert "first sentence" in chunks[0]
+
+
+def test_dynamic_no_punctuation():
+    """Test that text without sentence-ending punctuation falls back to an exact character split."""
+    from src.core.text_chunking import chunk_text_dynamic
+
+    text = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
+    target_size = 20
+
+    chunks = chunk_text_dynamic(text, target_size=target_size)
+
+    # Verify that chunks are split strictly by the target character length without punctuation snapping
+    assert len(chunks) > 1
+    assert chunks[0] == text[:target_size]
+
+
+def test_dynamic_single_chunk():
+    """Test that text shorter than target_size is returned as a single chunk."""
+    from src.core.text_chunking import chunk_text_dynamic
+
+    text = "Short text."
+    chunks = chunk_text_dynamic(text, target_size=100)
+
+    assert len(chunks) == 1
+    assert chunks[0] == text
+
+
+def test_sentence_boundary_empty_text():
+    """Test that _find_sentence_boundary returns the original index when given empty text."""
+    from src.core.text_chunking import _find_sentence_boundary
+
+    index = 10
+    result = _find_sentence_boundary("", index, max_search=5)
+    assert result == index
+
+
+def test_sentence_boundary_no_match():
+    """Test that _find_sentence_boundary returns the original index when no punctuation is found within max_search."""
+    from src.core.text_chunking import _find_sentence_boundary
+
+    text = "abcdefghijklmnopqrstuvwxyz"
+    index = 10
+    # No punctuation anywhere near index 10, and tight max_search
+    result = _find_sentence_boundary(text, index, max_search=3)
+    assert result == index
+
+
+def test_sentence_boundary_backward():
+    """Test that _find_sentence_boundary finds the nearest backward sentence end."""
+    from src.core.text_chunking import _find_sentence_boundary
+
+    # "Hello world. How are you?"
+    # Period is at index 11. If target index is 13, it should search backward and snap to index 12 (after period/space).
+    text = "Hello world. How are you?"
+    index = 13
+    result = _find_sentence_boundary(text, index, max_search=5)
+    # Depending on implementation details, it should identify the boundary near index 11 or 12.
+    assert result != index
+    assert text[result - 1] in ".!?"
+
+
+def test_sentence_boundary_forward():
+    """Test that _find_sentence_boundary finds the nearest forward sentence end."""
+    from src.core.text_chunking import _find_sentence_boundary
+
+    text = "Hello world. How are you?"
+    # Index 9 is inside "world", period is at index 11. Searching forward within max_search should find it.
+    index = 9
+    result = _find_sentence_boundary(text, index, max_search=5)
+    assert result != index
+    assert text[result - 1] in ".!?"

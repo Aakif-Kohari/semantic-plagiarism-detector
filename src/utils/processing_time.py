@@ -13,8 +13,8 @@ import time
 from collections import defaultdict
 from collections.abc import Iterable
 from contextlib import contextmanager
-from numbers import Real
 from dataclasses import dataclass
+from numbers import Real
 from typing import Any, Dict, List, Optional
 
 
@@ -127,7 +127,7 @@ def calculate_processing_throughput(total_bytes: int, elapsed_seconds: float) ->
     if elapsed_seconds <= 0:
         return 0.0
 
-    total_kb = total_bytes / BYTES_PER_KB # type: ignore 
+    total_kb = total_bytes / BYTES_PER_KB  # type: ignore
     throughput = total_kb / elapsed_seconds
     return round(throughput, 2)
 
@@ -166,6 +166,7 @@ def format_throughput_human_readable(throughput_kbps: float) -> str:
         return f"{throughput:.2f} KB/s"
 
     return f"{throughput / 1024:.2f} MB/s"
+
 
 # ============================================================================
 # STREAMLIT UI COMPONENTS
@@ -372,11 +373,11 @@ def calculate_average_latency(latencies: list[float]) -> float:
 def calculate_mb_per_minute(total_bytes: int, elapsed_seconds: float) -> float:
     """
     Calculate document processing throughput in megabytes per minute (MB/min).
-    
+
     Args:
         total_bytes (int): Total size processed in bytes.
         elapsed_seconds (float): Time elapsed in seconds.
-        
+
     Returns:
         float: Throughput in MB/min rounded to 2 decimal places. Returns 0.0 if elapsed_seconds <= 0.
     """
@@ -392,19 +393,17 @@ def calculate_mb_per_minute(total_bytes: int, elapsed_seconds: float) -> float:
 def calculate_kb_per_second(total_bytes: int, elapsed_seconds: float) -> float:
     """
     Calculate document processing throughput in kilobytes per second (KB/sec).
-    
+
     Args:
         total_bytes (int): Total size processed in bytes.
         elapsed_seconds (float): Time elapsed in seconds.
-        
+
     Returns:
         float: Throughput in KB/sec rounded to 2 decimal places. Returns 0.0 if elapsed_seconds <= 0.
     """
     if elapsed_seconds <= 0 or total_bytes <= 0:
         return 0.0
-    
+
     kilobytes = total_bytes / 1024.0
-    
+
     return round(kilobytes / elapsed_seconds, 2)
-
-

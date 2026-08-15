@@ -2,7 +2,6 @@ import json
 
 from src.core.export_engine import LMSExportEngine
 
-
 INCIDENTS = [
     {
         "doc_a": "alpha.pdf",

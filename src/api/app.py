@@ -2,58 +2,26 @@
 
 import logging
 import os
-import time
-import uuid
 from datetime import datetime, timezone
 
-from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
+from fastapi import Depends, FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-import psutil
-import numpy as np
-
-START_TIME = time.time()
-total_scans = 0
-logger = logging.getLogger(__name__)
-from fastapi import (
-    BackgroundTasks,
-    Request,
-    Security,
-)
-from typing import Dict, Any
-from fastapi.exceptions import RequestValidationError
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-from fastapi.responses import PlainTextResponse
-
-from src.api.middleware import verify_bearer_token, get_current_user
-from src.api.schemas import (
-    AsyncScanJobResponse,
-    AsyncScanStatusResponse,
-    ClearDataResponse,
-    ErrorResponse,
-    HealthCheckResponse,
-    HealthzResponse,
-    LoginResponse,
-    RefreshRequest,
-    RevokeRequest,
-    RevokeResponse,
-    SimilarityCheckResponse,
-    StatusResponse,
-    TokenResponse,
-)
-from sklearn.metrics.pairwise import cosine_similarity
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from src.core.app_config import FAISS_INDEX_PATH, HEALTHZ_DB_PATHS
-from src.core.document_parser import extract_text
-from src.core.embedding_model import embed_chunks, get_document_embedding
-from src.core.similarity import (
-    PLAGIARISM_THRESHOLD,
-    chunk_max_similarity,
-    find_most_similar_chunks,
+from src.api.dependencies import (
+    custom_rate_limit_exceeded_handler,
+    limiter,
+)
+from src.api.middleware import verify_bearer_token
+from src.api.routers import (
+    admin_router,
+    analysis_router,
+    auth_router,
+    corpus_router,
 )
 from src.core.text_chunking import chunk_document
 from src.db.auth import get_user_role
@@ -100,26 +68,39 @@ app.add_middleware(
     allow_headers=["*"],
     max_age=3600,
 )
+
 # SlowAPI Rate Limiting setup
-limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 
 
-def custom_rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
-    response = JSONResponse(
-        {"detail": f"Rate limit exceeded: {exc.detail}"}, status_code=429
-    )
-    response = request.app.state.limiter._inject_headers(
-        response, request.state.view_rate_limit
-    )
-    return response
+@app.middleware("http")
+async def otel_tracing_middleware(request: Request, call_next):
+    """Middleware to create an OpenTelemetry root span for every HTTP request."""
+    tracer = get_tracer()
+    request_id = request.headers.get("X-Request-ID", "unknown")
+    user_id = getattr(request.state, "user_id", "anonymous")
+
+    span_name = f"HTTP {request.method} {request.url.path}"
+    with tracer.start_as_current_span(span_name) as span:
+        span.set_attribute("http.method", request.method)
+        span.set_attribute("http.url", str(request.url))
+        span.set_attribute("http.route", request.url.path)
+        span.set_attribute("http.request_id", request_id)
+        span.set_attribute("user.id", user_id)
+
+        try:
+            response = await call_next(request)
+            span.set_attribute("http.status_code", response.status_code)
+            return response
+        except Exception as exc:
+            span.record_exception(exc)
+            span.set_attribute("http.status_code", 500)
+            raise
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """
-    Return a standardized JSON response for request validation errors.
-    """
+    """Return a standardized JSON response for request validation errors."""
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={
@@ -137,7 +118,6 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 
-
 @app.exception_handler(404)
 async def not_found_handler(request, exc: StarletteHTTPException):
     """Custom exception handler for HTTP 404 errors."""
@@ -150,14 +130,10 @@ async def not_found_handler(request, exc: StarletteHTTPException):
         },
     )
 
-# ── Bearer Token Authentication ────────────────────────────────────────────────
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """
-    Catch-all handler that returns a standardized JSON error payload for
-    any unhandled exception. Internal details (like the raw exception
-    message) are masked when APP_ENVIRONMENT is "production".
-    """
+    """Catch-all handler that returns a standardized JSON error payload for any unhandled exception."""
     status_code = getattr(exc, "status_code", status.HTTP_500_INTERNAL_SERVER_ERROR)
     is_production = os.getenv("APP_ENVIRONMENT", "production").lower() == "production"
 
@@ -177,39 +153,16 @@ async def global_exception_handler(request: Request, exc: Exception):
         },
     )
 
-from starlette.exceptions import HTTPException as StarletteHTTPException
 
 @app.exception_handler(StarletteHTTPException)
 async def custom_http_exception_handler(request: Request, exc: StarletteHTTPException):
-    """Custom exception handler for HTTP errors to return standardized JSON payloads.
-
-    FastAPI's default 404 handler returns a plain text response or a simple
-    {"detail": "Not Found"} JSON. This handler intercepts all HTTP exceptions
-    and returns a structured JSON payload that matches the overall API response
-    formatting used by other endpoints and the global exception handler.
-
-    For 404 Not Found errors specifically, it returns a standardized message
-    to prevent information leakage about internal routing structures.
-
-    Args:
-        request: The incoming Starlette Request object.
-        exc: The raised StarletteHTTPException containing status code and detail.
-
-    Returns:
-        A JSONResponse with the standardized error payload format.
-    """
-    # Determine the appropriate status code
+    """Custom exception handler for HTTP errors to return standardized JSON payloads."""
     status_code = exc.status_code
-    
-    # For 404 errors, use a standardized message to prevent route enumeration
     if status_code == 404:
         message = "API endpoint or resource not found"
     else:
-        # For other HTTP errors, use the detail provided by FastAPI/Starlette
         message = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
 
-    # Log the error for monitoring and debugging purposes
-    # Use WARNING level for 4xx client errors, ERROR for 5xx server errors
     log_level = logging.WARNING if 400 <= status_code < 500 else logging.ERROR
     logger.log(
         log_level,
@@ -220,7 +173,6 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
         message,
     )
 
-    # Return the standardized JSON error payload
     return JSONResponse(
         status_code=status_code,
         content={
@@ -229,6 +181,7 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
             "message": message,
         },
     )
+
 
 app.add_exception_handler(RateLimitExceeded, custom_rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)

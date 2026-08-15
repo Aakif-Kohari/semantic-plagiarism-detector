@@ -53,18 +53,10 @@ def test_export_network_adjacency_csv_empty_graph():
 
     assert csv_output.strip() == "Source,Target,Weight"
 
+
 from src.visualization.network_graph import (
     NETWORK_GRAPH_CONFIG,
-    build_network_data,
-    calculate_force_directed_layout,
-    export_graph_to_csv,
-    export_network_to_csv_bytes,
-    export_network_to_gexf_bytes,
-    plot_plagiarism_network_graph,
-    plot_similarity_network,
-    render_network_plotly,
 )
-
 
 
 def test_build_network_data_structure():
@@ -147,6 +139,7 @@ def test_build_network_data_node_color_severity():
     assert net_data["node_trace"].marker.color[1] == "#ff0000"
     # doc_success has max_score=0.8 -> #ffff00
     assert net_data["node_trace"].marker.color[2] == "#ffff00"
+
 
 def test_network_graph_config_enables_scroll_zoom():
     """Verify Plotly network graph configuration enables scroll zoom."""
@@ -737,9 +730,7 @@ def test_build_network_data_keeps_top_max_nodes_by_degree():
     """When node count exceeds max_nodes, retain only the highest-degree documents."""
     df = _star_similarity_matrix(6)
 
-    net_data = build_network_data(
-        df, threshold=0.75, show_isolated=True, max_nodes=3
-    )
+    net_data = build_network_data(df, threshold=0.75, show_isolated=True, max_nodes=3)
 
     assert len(net_data["graph"].nodes()) == 3
     assert net_data["hidden_nodes"] == 3
@@ -752,9 +743,7 @@ def test_build_network_data_no_filter_when_under_max_nodes():
     """Graphs at or below max_nodes keep every node and report zero hidden."""
     df = _three_doc_matrix()
 
-    net_data = build_network_data(
-        df, threshold=0.75, show_isolated=True, max_nodes=50
-    )
+    net_data = build_network_data(df, threshold=0.75, show_isolated=True, max_nodes=50)
 
     assert len(net_data["graph"].nodes()) == 3
     assert net_data["hidden_nodes"] == 0
@@ -942,7 +931,6 @@ class TestNetworkExport:
         assert "0.8" in lines[1]
 
 
-
 # ==============================================================================
 # Max Connected Nodes Filter Tests (Issue #1278)
 # ==============================================================================
@@ -1037,8 +1025,7 @@ def test_render_network_plotly_displays_hidden_node_caption():
     fig = render_network_plotly(data)
     assert len(fig.layout.annotations) == 1
     assert (
-        fig.layout.annotations[0].text
-        == "2 nodes hidden to keep the network readable."
+        fig.layout.annotations[0].text == "2 nodes hidden to keep the network readable."
     )
 
 

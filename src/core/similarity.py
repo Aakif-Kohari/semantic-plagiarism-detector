@@ -28,8 +28,7 @@ from src.core.config import (
     is_plagiarism,
     severity_from_score,
 )
-from src.core.cross_lingual import back_translate_chunk, detect_chunk_language
-
+from src.core.cross_lingual import detect_chunk_language
 
 # ── Distance / similarity conversion ──────────────────────────────────────────
 
@@ -140,26 +139,16 @@ def manhattan_similarity(
         array_a = np.asarray(vec_a, dtype=np.float64)
         array_b = np.asarray(vec_b, dtype=np.float64)
     except (TypeError, ValueError) as exc:
-        raise TypeError(
-            "Manhattan similarity requires numeric array inputs."
-        ) from exc
+        raise TypeError("Manhattan similarity requires numeric array inputs.") from exc
 
     if array_a.shape != array_b.shape:
-        raise ValueError(
-            "Manhattan similarity requires arrays with matching shapes."
-        )
+        raise ValueError("Manhattan similarity requires arrays with matching shapes.")
 
     if array_a.size == 0:
-        raise ValueError(
-            "Manhattan similarity requires non-empty arrays."
-        )
+        raise ValueError("Manhattan similarity requires non-empty arrays.")
 
-    if not np.all(np.isfinite(array_a)) or not np.all(
-        np.isfinite(array_b)
-    ):
-        raise ValueError(
-            "Manhattan similarity requires finite numeric values."
-        )
+    if not np.all(np.isfinite(array_a)) or not np.all(np.isfinite(array_b)):
+        raise ValueError("Manhattan similarity requires finite numeric values.")
 
     distance = float(np.sum(np.abs(array_a - array_b), dtype=np.float64))
     similarity = 1.0 / (1.0 + distance)
@@ -244,7 +233,10 @@ def compute_similarity_matrix(
     with app/streamlit_app.py and external modules.
     """
     return document_similarity_matrix(
-        embeddings, batch_size=batch_size, min_threshold=min_threshold, min_percentile=min_percentile
+        embeddings,
+        batch_size=batch_size,
+        min_threshold=min_threshold,
+        min_percentile=min_percentile,
     )
 
 
@@ -284,7 +276,12 @@ def _compute_bm25_similarity(
     b: float = 0.75,
 ) -> float:
     """Calculate BM25 relevance score between document pairs, normalized in [0.0, 1.0]."""
-    if not doc_a or not doc_b or not isinstance(doc_a, str) or not isinstance(doc_b, str):
+    if (
+        not doc_a
+        or not doc_b
+        or not isinstance(doc_a, str)
+        or not isinstance(doc_b, str)
+    ):
         return 0.0
 
     import math
@@ -308,15 +305,24 @@ def _compute_bm25_similarity(
     len_b = len(tokens_b)
     avg_len = (len_a + len_b) / 2.0
 
-    idf = math.log((2 - 2 + 0.5) / (2 + 0.5) + 1.0)
+    N = 2
+    all_terms = set(freq_a.keys()) | set(freq_b.keys())
+    idf = {}
+    for t in all_terms:
+        df_t = 2 if (t in freq_a and t in freq_b) else 1
+        idf[t] = math.log((N - df_t + 0.5) / (df_t + 0.5) + 1.0)
 
     score_a = sum(
-        idf * (freq_b[t] * (k1 + 1.0)) / (freq_b[t] + k1 * (1.0 - b + b * (len_b / avg_len)))
+        idf[t]
+        * (freq_b[t] * (k1 + 1.0))
+        / (freq_b[t] + k1 * (1.0 - b + b * (len_b / avg_len)))
         for t in common_terms
     )
     score_max_a = sum(
-        idf * (freq_a[t] * (k1 + 1.0)) / (freq_a[t] + k1 * (1.0 - b + b * (len_a / avg_len)))
-        for t in common_terms
+        idf[t]
+        * (freq_a[t] * (k1 + 1.0))
+        / (freq_a[t] + k1 * (1.0 - b + b * (len_a / avg_len)))
+        for t in freq_a.keys()
     )
 
     if score_max_a == 0:
@@ -357,7 +363,6 @@ def compute_hybrid_similarity(
 
 
 # ── Chunk-level similarity (local plagiarism detection) ────────────────────────
-
 
 
 def chunk_max_similarity(
@@ -550,14 +555,21 @@ def find_most_similar_chunks(
     sim_matrix = cosine_similarity(emb_a, emb_b)
 
     pairs = []
-    for i in range(sim_matrix.shape[0]):
-        for j in range(sim_matrix.shape[1]):
-            score = sim_matrix[i, j]
-            if score >= threshold:
-                pairs.append((chunks_a[i], chunks_b[j], float(score)))
+    flat_indices = np.argsort(sim_matrix, axis=None)[::-1]
 
-    pairs.sort(key=lambda x: x[2], reverse=True)
-    return pairs[:top_k]
+    for idx in flat_indices:
+        i, j = np.unravel_index(idx, sim_matrix.shape)
+        score = float(sim_matrix[i, j])
+
+        if score < threshold:
+            break
+
+        if len(pairs) >= top_k:
+            break
+
+        pairs.append((chunks_a[i], chunks_b[j], score))
+
+    return pairs
 
 
 # ── Cross-Lingual Chunk Matching (Issue #1956) ────────────────────────────────
@@ -591,11 +603,13 @@ def find_cross_lingual_matches(
     """
     if not cross_lingual_mode:
         # Fallback to standard semantic matching
-        return find_most_similar_chunks(chunks_a, chunks_b, emb_a, emb_b, top_k, threshold)
+        return find_most_similar_chunks(
+            chunks_a, chunks_b, emb_a, emb_b, top_k, threshold
+        )
 
     # Determine which document needs translation
-    lang_a = detect_chunk_language(" ".join(chunks_a[:3])) if chunks_a else "en"
-    lang_b = detect_chunk_language(" ".join(chunks_b[:3])) if chunks_b else "en"
+    lang_a = detect_chunk_language(" ".join(chunks_a[:3])) if chunks_a else "en"  # noqa: F841
+    lang_b = detect_chunk_language(" ".join(chunks_b[:3])) if chunks_b else "en"  # noqa: F841
 
     # For this implementation, we assume emb_a and emb_b are already computed
     # on the back-translated text by the calling pipeline.
@@ -697,8 +711,9 @@ def find_exact_matches(
         norm_b = text_b
 
     import re
-    segments = [s.strip() for s in re.split(r'[\n\.]', text_a) if s.strip()]
-    segments_norm = [s.strip() for s in re.split(r'[\n\.]', norm_a) if s.strip()]
+
+    segments = [s.strip() for s in re.split(r"[\n\.]", text_a) if s.strip()]
+    segments_norm = [s.strip() for s in re.split(r"[\n\.]", norm_a) if s.strip()]
 
     matches = []
     for orig, norm in zip(segments, segments_norm):
@@ -722,7 +737,9 @@ def clear_cross_encoder_cache() -> None:
     _CROSS_ENCODER_FAILED_MODELS.clear()
 
 
-def get_cross_encoder_info(model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2") -> dict:
+def get_cross_encoder_info(
+    model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
+) -> dict:
     """
     Return diagnostic status information for the specified CrossEncoder model.
 
@@ -732,12 +749,15 @@ def get_cross_encoder_info(model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-
     global _CROSS_ENCODER_MODELS, _CROSS_ENCODER_FAILED_MODELS
     return {
         "model_name": model_name,
-        "is_loaded": model_name in _CROSS_ENCODER_MODELS and _CROSS_ENCODER_MODELS[model_name] is not None,
+        "is_loaded": model_name in _CROSS_ENCODER_MODELS
+        and _CROSS_ENCODER_MODELS[model_name] is not None,
         "is_failed": model_name in _CROSS_ENCODER_FAILED_MODELS,
     }
 
 
-def _get_cross_encoder(model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2") -> Optional[Any]:
+def _get_cross_encoder(
+    model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
+) -> Optional[Any]:
     """
     Safely load and cache a SentenceTransformers CrossEncoder model.
 
@@ -768,7 +788,8 @@ def _get_cross_encoder(model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2")
         logging.getLogger(__name__).warning(
             "[similarity] Cross-Encoder model '%s' load failed: %s. "
             "Falling back to initial bi-encoder vector similarity scores.",
-            model_name, exc,
+            model_name,
+            exc,
         )
         _CROSS_ENCODER_FAILED_MODELS.add(model_name)
         return None
@@ -854,7 +875,9 @@ def rerank_candidates_with_cross_encoder(
 
         # Sort candidate pairs descending by cross-encoder score
         rescored_pairs.sort(
-            key=lambda item: item[2] if len(item) > 2 and isinstance(item[2], (int, float)) else 0.0,
+            key=lambda item: (
+                item[2] if len(item) > 2 and isinstance(item[2], (int, float)) else 0.0
+            ),
             reverse=True,
         )
         return rescored_pairs
@@ -870,35 +893,49 @@ def rerank_candidates_with_cross_encoder(
 
 # ─── Plagiarism Cluster Detection (Issue #1675) ──────────────────────────────
 
+
 def detect_plagiarism_clusters(
     similarity_df: pd.DataFrame,
     threshold: float = PLAGIARISM_THRESHOLD,
 ) -> dict:
     """Detect groups (clusters) of highly related documents using connected components.
-    
+
     Instead of only showing document pairs, this function builds a similarity graph
     where edges exist between documents exceeding the threshold, then identifies
     connected components to find groups of students who may be colluding or
     sharing source material.
-    
+
     Args:
         similarity_df: Square N×N DataFrame of similarity scores.
         threshold: Minimum similarity score to create an edge in the graph.
-        
+
     Returns:
         Dictionary containing:
         - 'clusters': Dict mapping cluster_id (int) to list of document names.
         - 'cluster_map': Dict mapping document name to its cluster_id.
         - 'suspicious_groups': List of clusters with 3+ documents (potential collusion rings).
     """
-    import networkx as nx
-    
+    try:
+        import networkx as nx
+    except ImportError:
+        logger.warning(
+            "networkx is not installed. Install it with: pip install networkx>=3.0"
+        )
+        return {
+            "clusters": {},
+            "cluster_map": {},
+            "suspicious_groups": [],
+            "total_clusters": 0,
+            "error": "networkx not installed",
+            "message": "Please install networkx: pip install networkx>=3.0"
+        }
+
     doc_names = list(similarity_df.columns)
     G = nx.Graph()
-    
+
     # Add all documents as nodes
     G.add_nodes_from(doc_names)
-    
+
     # Add edges for pairs exceeding threshold
     n = len(doc_names)
     for i in range(n):
@@ -906,17 +943,17 @@ def detect_plagiarism_clusters(
             score = float(similarity_df.iloc[i, j])
             if score >= threshold:
                 G.add_edge(doc_names[i], doc_names[j], weight=score)
-    
+
     # Detect connected components (clusters)
     clusters = {}
     cluster_map = {}
-    
+
     for cluster_id, component in enumerate(nx.connected_components(G)):
         cluster_list = sorted(list(component))
         clusters[cluster_id] = cluster_list
         for doc in cluster_list:
             cluster_map[doc] = cluster_id
-            
+
     # Identify suspicious groups (3+ documents in a cluster)
     suspicious_groups = [
         {
@@ -927,21 +964,19 @@ def detect_plagiarism_clusters(
         for cid, docs in clusters.items()
         if len(docs) >= 3
     ]
-    
+
     # Sort suspicious groups by size descending
     suspicious_groups.sort(key=lambda x: x["size"], reverse=True)
-    
+
     logger.info(
         "Detected %d plagiarism clusters, %d suspicious groups (3+ docs).",
         len(clusters),
         len(suspicious_groups),
     )
-    
+
     return {
         "clusters": clusters,
         "cluster_map": cluster_map,
         "suspicious_groups": suspicious_groups,
         "total_clusters": len(clusters),
     }
-
-    
