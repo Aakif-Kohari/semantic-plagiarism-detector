@@ -13,9 +13,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY requirements.txt .
+# Add ARG to dynamically choose requirements file (defaults to CPU-only for smaller images)
+ARG REQS_FILE=requirements-no-torch.txt
+
+# Use the ARG for copying and installing dependencies
+COPY ${REQS_FILE} .
 RUN pip install --upgrade pip && \
-    pip install -r requirements.txt
+    pip install -r ${REQS_FILE}
 
 COPY . .
 
