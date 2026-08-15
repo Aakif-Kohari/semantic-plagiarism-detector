@@ -266,24 +266,29 @@ def migration_013_add_incident_archive_table(
         """)
 
 
-def migration_015_add_scheduler_runs(
+def migration_015_add_is_deleted_index(
     connection: sqlite3.Connection,
 ) -> None:
-    """Create the scheduler_runs table.
+    """Add an index on documents.is_deleted (issue: missing index causes
+    full table scans on soft-delete filtering).
 
-    Tracks the last-completed run of background scheduled jobs (e.g. the
-    scheduled plagiarism rescan job — see ``src.core.scheduler`` and
-    ``src.core.processing.rescan_recent_documents``) so a process restart
-    does not lose track of when a job last ran. Keyed by ``job_name`` so
-    multiple scheduled jobs can share this table.
+    migration_008_add_soft_delete added the ``is_deleted`` column, but most
+    active queries filter with ``WHERE is_deleted = 0`` (e.g. corpus
+    listing, document counts, FTS backfill scope). Without an index on
+    this column, SQLite has to perform a full table scan of ``documents``
+    for every such query, which gets increasingly expensive as the corpus
+    grows.
+
+    Note: named ``migration_015_...`` rather than ``migration_013_...`` to
+    avoid colliding with the two pre-existing functions already named
+    ``migration_013_*`` in this module (mapped to schema versions 13 and
+    14 respectively) — the numeric suffix here matches this migration's
+    actual schema version, consistent with every other migration in this
+    file.
     """
     connection.execute("""
-        CREATE TABLE IF NOT EXISTS scheduler_runs (
-            job_name           TEXT PRIMARY KEY,
-            last_run_at        TEXT NOT NULL,
-            documents_scanned  INTEGER NOT NULL DEFAULT 0,
-            new_incidents      INTEGER NOT NULL DEFAULT 0
-        )
+        CREATE INDEX IF NOT EXISTS idx_documents_is_deleted
+        ON documents(is_deleted)
         """)
 
 
@@ -302,7 +307,7 @@ CORPUS_MIGRATIONS = {
     12: migration_012_add_fts5_index,
     13: migration_013_add_incident_archive_table,
     14: migration_013_add_incident_severity_idx,
-    15: migration_015_add_scheduler_runs,
+    15: migration_015_add_is_deleted_index,
 }
 
 
