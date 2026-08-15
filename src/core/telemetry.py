@@ -1,11 +1,11 @@
 import logging
 
-from src.db.auth import (get_user_count, get_user_preferences,
-                         update_user_preferences)
-from src.db.corpus_db import get_all_documents
+from src.db.auth import get_user_count, get_user_preferences, update_user_preferences
+from src.db.corpus_db import get_document_count_fast
 from src.utils.redis_cache import get_cache, set_cache
 
 logger = logging.getLogger(__name__)
+
 
 class TelemetryService:
     """
@@ -41,7 +41,9 @@ class TelemetryService:
 
         # 3. Populate Cache
         try:
-            set_cache(cls.CACHE_KEY_USER_COUNT, str(count), expire=cls.CACHE_TTL_SECONDS)
+            set_cache(
+                cls.CACHE_KEY_USER_COUNT, str(count), expire=cls.CACHE_TTL_SECONDS
+            )
         except Exception as e:
             logger.warning(f"Failed to populate telemetry cache: {e}")
 
@@ -63,7 +65,7 @@ class TelemetryService:
 
         # 2. Database Lookup
         try:
-            count = len(get_all_documents())
+            count = get_document_count_fast()
         except Exception as e:
             logger.error(f"Failed to aggregate document count: {e}")
             return 0
@@ -103,10 +105,14 @@ class TelemetryService:
         """
         try:
             u_count = get_user_count()
-            set_cache(cls.CACHE_KEY_USER_COUNT, str(u_count), expire=cls.CACHE_TTL_SECONDS)
+            set_cache(
+                cls.CACHE_KEY_USER_COUNT, str(u_count), expire=cls.CACHE_TTL_SECONDS
+            )
 
-            d_count = len(get_all_documents())
-            set_cache(cls.CACHE_KEY_DOC_COUNT, str(d_count), expire=cls.CACHE_TTL_SECONDS)
+            d_count = get_document_count_fast()
+            set_cache(
+                cls.CACHE_KEY_DOC_COUNT, str(d_count), expire=cls.CACHE_TTL_SECONDS
+            )
 
             logger.info("Telemetry metrics force-refreshed successfully.")
         except Exception as e:

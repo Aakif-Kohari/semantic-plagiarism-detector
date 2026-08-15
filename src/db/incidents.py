@@ -20,6 +20,7 @@ from src.core.config import (
     normalize_severity_label,
     severity_from_score,
 )
+from src.db.base import BaseRepository
 from src.db.migrations import migrate_corpus_database, table_exists
 from src.db.migrations.common import column_exists
 from src.db.schemas import MatchResult
@@ -41,6 +42,55 @@ CSV_COLUMNS = [
     "Review Status",
     "Date Flagged",
 ]
+
+
+class IncidentsRepository(BaseRepository):
+    """Data access repository for plagiarism incidents, filtering, and export."""
+
+    def __init__(self, db_path: str | Path = DEFAULT_DB_PATH) -> None:
+        super().__init__(db_path)
+
+    def init_incident_db(self) -> None:
+        """Create or upgrade the shared corpus/incident database."""
+        init_incident_db(self._db_path)
+
+
+_incidents_repo_singleton: IncidentsRepository | None = None
+
+
+def get_incidents_repo() -> IncidentsRepository:
+    """Return the process-wide :class:`IncidentsRepository` singleton.
+
+    The instance is created lazily on first call rather than eagerly at
+    module import time. Eager module-level instantiation could fail in a
+    fresh clone (e.g. before ``data/`` exists on disk), so construction is
+    deferred until a caller actually needs the repository.
+    """
+    global _incidents_repo_singleton
+    if _incidents_repo_singleton is None:
+        _incidents_repo_singleton = IncidentsRepository(DEFAULT_DB_PATH)
+    return _incidents_repo_singleton
+
+
+def __getattr__(name: str):
+    """PEP 562 module-level lazy attribute access.
+
+    Preserves ``from src.db.incidents import incidents_repo`` and
+    ``src.db.incidents.incidents_repo`` for existing callers without
+    eagerly constructing ``IncidentsRepository`` at import time — the
+    singleton is only created the first time ``incidents_repo`` is
+    actually accessed.
+    """
+    if name == "incidents_repo":
+        return get_incidents_repo()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def configure_db_path(db_path: str | Path) -> None:
+    """Configure the SQLite database path used by the incidents module."""
+    global DEFAULT_DB_PATH
+    DEFAULT_DB_PATH = Path(os.path.abspath(str(db_path)))
+    get_incidents_repo().configure_db_path(DEFAULT_DB_PATH)
 
 
 def _utc_now_iso() -> str:
@@ -74,6 +124,22 @@ def build_incident_id(doc_a: str, doc_b: str) -> str:
     first, second = _normalise_pair(doc_a, doc_b)
     digest = hashlib.sha256(f"{first}0{second}".encode("utf-8")).hexdigest()
     return f"INC-{digest[:12].upper()}"
+
+
+def _parse_incident_id(val: str | int | None) -> int | None:
+    if val is None:
+        return None
+    if isinstance(val, int):
+        return val
+    val_str = str(val).strip()
+    if val_str.isdigit():
+        return int(val_str)
+    if val_str.startswith("INC-"):
+        try:
+            return int(val_str[4:], 16)
+        except ValueError:
+            pass
+    return None
 
 
 def _get_connection(db_path: str | Path) -> sqlite3.Connection:
@@ -184,7 +250,7 @@ def _fetch_all_incidents(
 
     return [
         MatchResult(
-            incident_id=row["incident_id"],
+            incident_id=_parse_incident_id(row["incident_id"]),
             document_a=row["document_a"],
             document_b=row["document_b"],
             similarity_score=row["similarity_score"],
@@ -262,8 +328,7 @@ def sync_flagged_incidents(
                 conn.commit()
                 get_recent_incidents.cache_clear()
 
-            rows = conn.execute(
-                """
+            rows = conn.execute("""
                 SELECT pi.incident_id, pi.document_a, pi.document_b,
                        pi.similarity_score, pi.severity_rank,
                        pi.review_status, pi.date_flagged, pi.last_seen,
@@ -274,12 +339,11 @@ def sync_flagged_incidents(
                 WHERE (da.is_deleted IS NULL OR da.is_deleted = 0)
                   AND (db.is_deleted IS NULL OR db.is_deleted = 0)
                 ORDER BY pi.date_flagged DESC, pi.incident_id ASC
-                """
-            ).fetchall()
+                """).fetchall()
 
             return [
                 MatchResult(
-                    incident_id=row["incident_id"],
+                    incident_id=_parse_incident_id(row["incident_id"]),
                     document_a=row["document_a"],
                     document_b=row["document_b"],
                     similarity_score=row["similarity_score"],
@@ -339,34 +403,55 @@ def get_total_incidents_count(
     """
     init_incident_db(db_path)
     with closing(_get_connection(db_path)) as conn:
-        row = conn.execute(
-            """
+        row = conn.execute("""
             SELECT COUNT(*)
             FROM plagiarism_incidents pi
             LEFT JOIN documents da ON pi.document_a = da.filename
             LEFT JOIN documents db ON pi.document_b = db.filename
             WHERE (da.is_deleted IS NULL OR da.is_deleted = 0)
               AND (db.is_deleted IS NULL OR db.is_deleted = 0)
-            """
-        ).fetchone()
+            """).fetchone()
     return int(row[0]) if row is not None else 0
 
 
 def get_incident_by_id(
-    incident_id: str | int,
+    incident_id: int,
     db_path: str | Path | None = None,
 ) -> dict[str, Any] | None:
-    if db_path is None:
-        db_path = DEFAULT_DB_PATH
-    """Fetch a single plagiarism incident record by its incident_id primary key.
+    """Fetch a single plagiarism incident record by its ``incident_id`` primary key.
+
+    Issue #1772: Instructors need a helper to fetch a single incident record
+    by its integer primary key without having to query by document names.
+
+    The function accepts both integer and string representations of the
+    incident_id (string IDs are common in the legacy ``INC-xxx`` format;
+    integer IDs are used by the canonical ``plagiarism_incidents`` table).
+    The query matches against both forms so callers don't need to know
+    which format is stored.
 
     Args:
-        incident_id: Integer or string primary key of the incident.
-        db_path: Path to the SQLite corpus database.
+        incident_id: Integer (or string) primary key of the incident.
+            Strings are accepted for backward compatibility with the
+            legacy ``INC-xxx`` ID format, but the canonical type is
+            ``int``.
+        db_path: Path to the SQLite corpus database. Defaults to
+            :data:`DEFAULT_DB_PATH` when ``None``.
 
     Returns:
-        Dictionary containing incident record columns, or None if not found.
+        Dictionary containing the incident record columns
+        (``incident_id``, ``document_a``, ``document_b``,
+        ``similarity_score``, ``severity_rank``, ``review_status``,
+        ``date_flagged``, ``last_seen``, ``threshold_at_time_of_flag``),
+        or ``None`` if no matching incident is found or if the incident's
+        documents have been soft-deleted.
+
+    Note:
+        Incidents linked to soft-deleted documents (``is_deleted = 1``)
+        are excluded from the result, consistent with
+        :func:`get_all_incidents`.
     """
+    if db_path is None:
+        db_path = DEFAULT_DB_PATH
     init_incident_db(db_path)
     with closing(_get_connection(db_path)) as conn:
         conn.row_factory = sqlite3.Row
@@ -573,9 +658,11 @@ def get_incidents_by_user(
         # Mirrors the dual-path strategy used by get_incidents_by_assignment
         # so older deployments (and tests that pre-populate the legacy
         # table) keep working with the exact SQL from the issue spec.
-        if table_exists(conn, "incidents") \
-                and column_exists(conn, "incidents", "owner") \
-                and column_exists(conn, "incidents", "timestamp"):
+        if (
+            table_exists(conn, "incidents")
+            and column_exists(conn, "incidents", "owner")
+            and column_exists(conn, "incidents", "timestamp")
+        ):
             rows = conn.execute(
                 """
                 SELECT * FROM incidents
@@ -763,8 +850,7 @@ def get_incidents_count_by_date(
     init_incident_db(db_path)
     with closing(_get_connection(db_path)) as conn:
         conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            """
+        rows = conn.execute("""
             SELECT
                 DATE(pi.date_flagged) as date,
                 COUNT(*) as count
@@ -775,8 +861,7 @@ def get_incidents_count_by_date(
               AND (db.is_deleted IS NULL OR db.is_deleted = 0)
             GROUP BY DATE(pi.date_flagged)
             ORDER BY date ASC
-            """
-        ).fetchall()
+            """).fetchall()
         return [dict(row) for row in rows]
 
 
@@ -971,7 +1056,7 @@ def query_incidents_paginated(
         return PaginatedIncidents(
             items=[
                 MatchResult(
-                    incident_id=row["incident_id"],
+                    incident_id=_parse_incident_id(row["incident_id"]),
                     document_a=row["document_a"],
                     document_b=row["document_b"],
                     similarity_score=row["similarity_score"],
@@ -1119,3 +1204,130 @@ def log_incident(
         if res.incident_id == target_id:
             return res
     return results[0]
+
+
+# ── Scheduled rescan support (continuous monitoring) ───────────────────────
+#
+# Supports the scheduled/event-driven rescan pipeline in
+# ``src.core.scheduler`` / ``src.core.processing.rescan_recent_documents``:
+# it needs to know, *before* writing anything, whether a given (doc_a, doc_b)
+# pair is a brand-new incident (so a webhook alert fires) or one that was
+# already known (so re-running the scheduler never re-notifies reviewers).
+
+
+def incident_exists(
+    doc_a: str,
+    doc_b: str,
+    db_path: str | Path | None = None,
+) -> bool:
+    """Return whether an incident already exists for the ``(doc_a, doc_b)`` pair.
+
+    Uses the same pair-normalisation and id derivation as
+    :func:`sync_flagged_incidents`/:func:`build_incident_id`, so this check
+    agrees with what a subsequent sync would (re)write.
+    """
+    if db_path is None:
+        db_path = DEFAULT_DB_PATH
+    init_incident_db(db_path)
+
+    incident_id = build_incident_id(doc_a, doc_b)
+    with closing(_get_connection(db_path)) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM plagiarism_incidents WHERE incident_id = ? LIMIT 1",
+            (incident_id,),
+        ).fetchone()
+    return row is not None
+
+
+def get_existing_incident_pairs(
+    db_path: str | Path | None = None,
+) -> set[str]:
+    """Return the set of all existing incident ids.
+
+    Intended for bulk membership checks (e.g. checking many candidate pairs
+    from a single rescan pass) without one round-trip per pair.
+    """
+    if db_path is None:
+        db_path = DEFAULT_DB_PATH
+    init_incident_db(db_path)
+
+    with closing(_get_connection(db_path)) as conn:
+        rows = conn.execute("SELECT incident_id FROM plagiarism_incidents").fetchall()
+    return {row[0] for row in rows}
+
+
+@with_sqlite_retry
+def record_scheduler_run(
+    job_name: str,
+    db_path: str | Path | None = None,
+    *,
+    now: str | None = None,
+    documents_scanned: int = 0,
+    new_incidents: int = 0,
+) -> None:
+    """Persist the last-completed run of a named background job.
+
+    Used by :mod:`src.core.scheduler` so the scheduled rescan job is
+    restart-safe: on process restart it can consult
+    :func:`get_last_scheduler_run` instead of assuming no rescan has ever
+    happened.
+    """
+    if db_path is None:
+        db_path = DEFAULT_DB_PATH
+    init_incident_db(db_path)
+    timestamp = now or _utc_now_iso()
+
+    with closing(_get_connection(db_path)) as conn:
+        try:
+            conn.execute(
+                """
+                INSERT INTO scheduler_runs (
+                    job_name, last_run_at, documents_scanned, new_incidents
+                )
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(job_name) DO UPDATE SET
+                    last_run_at = excluded.last_run_at,
+                    documents_scanned = excluded.documents_scanned,
+                    new_incidents = excluded.new_incidents
+                """,
+                (job_name, timestamp, int(documents_scanned), int(new_incidents)),
+            )
+            conn.commit()
+        except sqlite3.Error as exc:
+            conn.rollback()
+            raise sqlite3.Error(f"Failed to record scheduler run: {exc}") from exc
+
+
+def get_last_scheduler_run(
+    job_name: str,
+    db_path: str | Path | None = None,
+) -> dict[str, Any] | None:
+    """Return the last recorded run of a named background job, if any.
+
+    Returns a dict with ``last_run_at``, ``documents_scanned``, and
+    ``new_incidents`` keys, or ``None`` if the job has never completed a
+    run (e.g. on a fresh database, or before the first scheduled tick).
+    """
+    if db_path is None:
+        db_path = DEFAULT_DB_PATH
+    init_incident_db(db_path)
+
+    with closing(_get_connection(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """
+            SELECT job_name, last_run_at, documents_scanned, new_incidents
+            FROM scheduler_runs
+            WHERE job_name = ?
+            """,
+            (job_name,),
+        ).fetchone()
+
+    if row is None:
+        return None
+    return {
+        "job_name": row["job_name"],
+        "last_run_at": row["last_run_at"],
+        "documents_scanned": row["documents_scanned"],
+        "new_incidents": row["new_incidents"],
+    }

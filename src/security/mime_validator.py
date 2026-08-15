@@ -6,7 +6,9 @@ import io
 import logging
 import zipfile
 from typing import Optional
-from xml.etree import ElementTree
+
+import defusedxml.ElementTree as ElementTree
+from defusedxml.common import DefusedXmlException
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +102,31 @@ BLOCKED_EXECUTABLE_EXTENSIONS = {
     "bat",
     "js",
     "vbs",
+    "dll",
 }
+
+# Magic-byte signatures that identify executable/script content regardless
+# of the declared file extension.
+#   b"MZ"        - Windows DOS/PE executable header (.exe, .dll)
+#   b"#!/bin/sh" - POSIX shell script shebang
+EXECUTABLE_MAGIC_SIGNATURES = (
+    b"MZ",
+    b"#!/bin/sh",
+)
+
+
+def is_executable_upload(file_bytes: bytes, filename: str) -> bool:
+    """Return True if the upload looks like an executable or shell script.
+
+    Checks both the declared file extension (.exe, .sh, .bat, .dll, ...)
+    and the leading magic bytes (PE header "MZ", shell shebang
+    "#!/bin/sh") so a renamed executable is still caught.
+    """
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if extension in BLOCKED_EXECUTABLE_EXTENSIONS:
+        return True
+
+    return file_bytes.startswith(EXECUTABLE_MAGIC_SIGNATURES)
 
 
 def _normalized_zip_name(name: str) -> str:
@@ -116,10 +142,6 @@ def _validate_ooxml_archive(
     """Verify that a ZIP payload is the requested OOXML package type."""
     if extension not in OOXML_EXTENSIONS:
         raise ValueError(f"Unsupported OOXML extension: {extension}")
-
-if not file_bytes.startswith(b"PK\x03\x04"):        logger.warning(
-            "[mime_validator] Invalid ZIP signature for OOXML file "
-            "'%s'.",
 
     if not file_bytes.startswith(b"PK"):
         logger.warning(
@@ -216,6 +238,7 @@ if not file_bytes.startswith(b"PK\x03\x04"):        logger.warning(
         zipfile.BadZipFile,
         zipfile.LargeZipFile,
         ElementTree.ParseError,
+        DefusedXmlException,
         KeyError,
         OSError,
         RuntimeError,
@@ -347,11 +370,11 @@ def validate_mime_type(file_bytes: bytes, filename: str) -> bool:
     """
     if not file_bytes:
         return False
-        
+
     if not validate_single_extension(filename):
         logger.warning(
-        "[mime_validator] Blocked executable double extension: '%s'.",
-        filename,
+            "[mime_validator] Blocked executable double extension: '%s'.",
+            filename,
         )
         return False
 

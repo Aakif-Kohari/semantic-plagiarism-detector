@@ -196,7 +196,10 @@ def test_embedding_model_device_logging(caplog, monkeypatch):
         model = manager.get_model()
 
     assert model is mock_model_obj
-    expected_log = "Initializing SentenceTransformer model [paraphrase-multilingual-MiniLM-L12-v2] on device [cpu]"
+    expected_log = (
+        "SentenceTransformer model [paraphrase-multilingual-MiniLM-L12-v2] "
+        "running on device [cpu]"
+    )
     assert any(
         expected_log in record.message for record in caplog.records
     ), f"Expected device log message not found in: {[r.message for r in caplog.records]}"

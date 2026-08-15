@@ -1,12 +1,30 @@
+from fastapi.testclient import TestClient
+
+from src.api.app import app
+
+client = TestClient(app)
+
+
+def test_http_404_not_found():
+    """Verify that a nonexistent route returns a standardized JSON 404 response payload."""
+    response = client.get("/api/v1/nonexistent-endpoint-xyz")
+    assert response.status_code == 404
+    assert response.json() == {
+        "error": True,
+        "code": 404,
+        "message": "API endpoint or resource not found",
+    }
+
+
 # JSONContentTypeMiddleware unit coverage for Issue #1394.
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
+from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient as StarletteTestClient
-from starlette.requests import Request
 
-from src.asgi_app import JSONContentTypeMiddleware, ClientIPLoggingMiddleware
+from src.asgi_app import ClientIPLoggingMiddleware, JSONContentTypeMiddleware
 
 
 async def _json_echo(request):
@@ -135,6 +153,7 @@ def test_json_middleware_ignores_non_api_post_routes():
 # ── TokenBucketRateLimiter Tests (#1362) ──────────────────────────────────────
 
 import time
+
 from src.asgi_app import TokenBucketRateLimiter
 
 
@@ -278,6 +297,7 @@ def test_api_v1_status_is_public_without_token():
 def test_scope_enforcement_rate_limit_endpoint():
     """Verify scope enforcement on /api/v1/rate_limit (requires 'read')."""
     from fastapi.testclient import TestClient
+
     from src.api.app import app
 
     client = TestClient(app)
@@ -302,9 +322,10 @@ def test_scope_enforcement_rate_limit_endpoint():
 
 def test_scope_enforcement_clear_endpoint(tmp_path):
     """Verify scope enforcement on /api/v1/clear (requires 'admin')."""
-    from src.db.auth import configure_db_path, init_db, add_user
     from fastapi.testclient import TestClient
+
     from src.api.app import app
+    from src.db.auth import add_user, configure_db_path, init_db
 
     db_file = tmp_path / "test_clear_scope.db"
     configure_db_path(db_file)
@@ -456,6 +477,7 @@ def test_cors_preflight_max_age_header():
 
     importlib.reload(sys.modules["src.api.app"])
     from fastapi.testclient import TestClient
+
     from src.api.app import app
 
     client = TestClient(app)
@@ -478,9 +500,10 @@ def test_token_revocation_endpoint_revokes_token_and_rejects_subsequent_requests
     tmp_path, monkeypatch
 ):
     """Verify POST /api/v1/auth/revoke invalidates token and subsequent calls return 401."""
-    from src.db.auth import configure_db_path, init_db, is_token_revoked
     from fastapi.testclient import TestClient
+
     from src.api.app import app
+    from src.db.auth import configure_db_path, init_db, is_token_revoked
 
     db_file = tmp_path / "test_auth_revoke.db"
     configure_db_path(db_file)
@@ -511,9 +534,10 @@ def test_token_revocation_endpoint_revokes_token_and_rejects_subsequent_requests
 
 def test_token_revocation_via_authorization_header(tmp_path):
     """Verify token can be revoked via Authorization header when body is omitted."""
-    from src.db.auth import configure_db_path, init_db, is_token_revoked
     from fastapi.testclient import TestClient
+
     from src.api.app import app
+    from src.db.auth import configure_db_path, init_db, is_token_revoked
 
     db_file = tmp_path / "test_auth_revoke_header.db"
     configure_db_path(db_file)
@@ -531,9 +555,10 @@ def test_token_revocation_via_authorization_header(tmp_path):
 
 def test_token_revocation_missing_token_returns_400(tmp_path):
     """Verify POST /api/v1/auth/revoke returns 400 Bad Request if no token provided."""
-    from src.db.auth import configure_db_path, init_db
     from fastapi.testclient import TestClient
+
     from src.api.app import app
+    from src.db.auth import configure_db_path, init_db
 
     db_file = tmp_path / "test_auth_revoke_missing.db"
     configure_db_path(db_file)
@@ -549,6 +574,7 @@ def test_token_revocation_missing_token_returns_400(tmp_path):
 def test_streaming_multipart_upload_file_exceeds_max_size_returns_413(monkeypatch):
     """Verify POST /api/v1/scan returns 413 Payload Too Large when payload exceeds MAX_UPLOAD_SIZE_BYTES."""
     from fastapi.testclient import TestClient
+
     from src.api.app import app
 
     monkeypatch.setenv("MAX_UPLOAD_SIZE_BYTES", "500")
@@ -567,6 +593,7 @@ def test_streaming_multipart_upload_file_exceeds_max_size_returns_413(monkeypatc
 def test_streaming_multipart_upload_streams_chunks_to_disk():
     """Verify POST /api/v1/scan streams chunks to disk and processes document scan."""
     from fastapi.testclient import TestClient
+
     from src.api.app import app
 
     client = TestClient(app)
@@ -585,12 +612,89 @@ def test_streaming_multipart_upload_streams_chunks_to_disk():
     assert data["word_count"] > 0
 
 
+def test_scan_rejects_exe_upload_with_415():
+    """Verify POST /api/v1/scan rejects a Windows PE executable (.exe, MZ header) with 415."""
+    from fastapi.testclient import TestClient
+
+    from src.api.app import app
+
+    client = TestClient(app)
+    # Minimal DOS/PE executable header ("MZ" magic bytes).
+    payload = b"MZ" + b"\x90\x00" * 30
+
+    files = {"file": ("malware.exe", payload, "application/octet-stream")}
+    headers = {"Authorization": "Bearer test-write-token"}
+
+    response = client.post("/api/v1/scan", files=files, headers=headers)
+    assert response.status_code == 415
+    assert "unsupported media type" in response.json()["message"].lower()
+
+
+def test_scan_rejects_shell_script_upload_with_415():
+    """Verify POST /api/v1/scan rejects a shell script (#!/bin/sh shebang) with 415."""
+    from fastapi.testclient import TestClient
+
+    from src.api.app import app
+
+    client = TestClient(app)
+    payload = b"#!/bin/sh\necho 'hello'\n"
+
+    # Even with an unrelated/misleading extension, the shebang magic bytes
+    # alone must be enough to trigger the rejection.
+    files = {"file": ("notes.txt", payload, "text/plain")}
+    headers = {"Authorization": "Bearer test-write-token"}
+
+    response = client.post("/api/v1/scan", files=files, headers=headers)
+    assert response.status_code == 415
+
+
+def test_scan_rejects_bat_and_dll_extensions_with_415():
+    """Verify POST /api/v1/scan rejects .bat and .dll uploads by extension, with 415."""
+    from fastapi.testclient import TestClient
+
+    from src.api.app import app
+
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer test-write-token"}
+
+    for filename, payload in [
+        ("run.bat", b"@echo off\r\necho hi\r\n"),
+        ("library.dll", b"MZ" + b"\x00" * 30),
+    ]:
+        files = {"file": (filename, payload, "application/octet-stream")}
+        response = client.post("/api/v1/scan", files=files, headers=headers)
+        assert response.status_code == 415, f"{filename} was not rejected with 415"
+
+
+def test_scan_does_not_reject_ordinary_text_upload():
+    """Sanity check: a normal .txt upload must NOT be blocked by the executable check."""
+    from fastapi.testclient import TestClient
+
+    from src.api.app import app
+    from src.db.corpus_db import init_corpus_db
+
+    # Ensure the corpus DB tables exist — scan_document() reaches the DB
+    # layer once a file clears the executable check, and table creation
+    # is otherwise only triggered lazily elsewhere in the app.
+    init_corpus_db()
+
+    client = TestClient(app)
+    payload = b"This is an ordinary plain-text document, not an executable.\n" * 3
+
+    files = {"file": ("essay.txt", payload, "text/plain")}
+    headers = {"Authorization": "Bearer test-write-token"}
+
+    response = client.post("/api/v1/scan", files=files, headers=headers)
+    assert response.status_code != 415
+
+
 def test_refresh_token_success_with_signed_refresh_token(tmp_path):
     """Verify POST /api/v1/auth/refresh issues a new valid access token."""
+    from fastapi.testclient import TestClient
+
+    from src.api.app import app
     from src.db.auth import configure_db_path, init_db
     from src.security.jwt_utils import create_refresh_token
-    from fastapi.testclient import TestClient
-    from src.api.app import app
 
     db_file = tmp_path / "test_refresh_success.db"
     configure_db_path(db_file)
@@ -616,10 +720,11 @@ def test_refresh_token_success_with_signed_refresh_token(tmp_path):
 
 def test_refresh_token_success_via_authorization_header(tmp_path):
     """Verify POST /api/v1/auth/refresh works via Authorization header."""
+    from fastapi.testclient import TestClient
+
+    from src.api.app import app
     from src.db.auth import configure_db_path, init_db
     from src.security.jwt_utils import create_refresh_token
-    from fastapi.testclient import TestClient
-    from src.api.app import app
 
     db_file = tmp_path / "test_refresh_header.db"
     configure_db_path(db_file)
@@ -640,9 +745,10 @@ def test_refresh_token_success_via_authorization_header(tmp_path):
 
 def test_refresh_token_missing_token_returns_400(tmp_path):
     """Verify POST /api/v1/auth/refresh returns 400 if refresh token is omitted."""
-    from src.db.auth import configure_db_path, init_db
     from fastapi.testclient import TestClient
+
     from src.api.app import app
+    from src.db.auth import configure_db_path, init_db
 
     db_file = tmp_path / "test_refresh_missing.db"
     configure_db_path(db_file)
@@ -656,9 +762,10 @@ def test_refresh_token_missing_token_returns_400(tmp_path):
 
 def test_refresh_token_invalid_signature_returns_401(tmp_path):
     """Verify POST /api/v1/auth/refresh returns 401 for invalid refresh token signature."""
-    from src.db.auth import configure_db_path, init_db
     from fastapi.testclient import TestClient
+
     from src.api.app import app
+    from src.db.auth import configure_db_path, init_db
 
     db_file = tmp_path / "test_refresh_invalid.db"
     configure_db_path(db_file)
@@ -673,10 +780,11 @@ def test_refresh_token_invalid_signature_returns_401(tmp_path):
 
 def test_refresh_token_expired_returns_401(tmp_path):
     """Verify POST /api/v1/auth/refresh returns 401 for an expired refresh token."""
+    from fastapi.testclient import TestClient
+
+    from src.api.app import app
     from src.db.auth import configure_db_path, init_db
     from src.security.jwt_utils import create_jwt_token
-    from fastapi.testclient import TestClient
-    from src.api.app import app
 
     db_file = tmp_path / "test_refresh_expired.db"
     configure_db_path(db_file)
@@ -694,10 +802,11 @@ def test_refresh_token_expired_returns_401(tmp_path):
 
 def test_refresh_token_revoked_returns_401(tmp_path):
     """Verify POST /api/v1/auth/refresh returns 401 if refresh token has been revoked."""
+    from fastapi.testclient import TestClient
+
+    from src.api.app import app
     from src.db.auth import configure_db_path, init_db, revoke_token
     from src.security.jwt_utils import create_refresh_token
-    from fastapi.testclient import TestClient
-    from src.api.app import app
 
     db_file = tmp_path / "test_refresh_revoked.db"
     configure_db_path(db_file)
@@ -715,8 +824,9 @@ def test_refresh_token_revoked_returns_401(tmp_path):
 def test_api_usage_endpoint():
     """Verify that GET /api/v1/usage returns the correct schema and increments total_scans."""
     from fastapi.testclient import TestClient
-    from src.api.app import app
+
     import src.api.app as api_app
+    from src.api.app import app
 
     client = TestClient(app)
 
@@ -743,11 +853,13 @@ def test_api_usage_endpoint():
 def test_hsts_security_header_options():
     """Verify HSTS Strict-Transport-Security header behavior when ENABLE_HSTS is configured."""
     import os
+
     from starlette.applications import Starlette
     from starlette.middleware import Middleware
     from starlette.responses import PlainTextResponse
     from starlette.routing import Route
     from starlette.testclient import TestClient
+
     from src.asgi_app import SecurityHeadersMiddleware
 
     def dummy_app(request):
@@ -814,3 +926,96 @@ def test_client_host_fallback():
     response = _ip_middleware_client().get("/ip")
     assert response.status_code == 200
     assert response.json()["ip"] is not None
+
+
+# ── Multipart Content-Type Header Validation Tests (#1785) ────────────────────
+
+
+def test_scan_endpoint_rejects_non_multipart_content_type():
+    """Verify POST /api/v1/scan returns HTTP 415 when Content-Type is not multipart/form-data."""
+    client = TestClient(app)
+    headers = {
+        "Authorization": "Bearer test-write-token",
+        "Content-Type": "application/json",
+    }
+    response = client.post("/api/v1/scan", content=b"{}", headers=headers)
+    assert response.status_code == 415
+    data = response.json()
+    assert (
+        data.get("message")
+        == "Unsupported Media Type: Request must be multipart/form-data"
+        or data.get("detail")
+        == "Unsupported Media Type: Request must be multipart/form-data"
+    )
+
+
+def test_scan_endpoint_rejects_missing_content_type():
+    """Verify POST /api/v1/scan returns HTTP 415 when Content-Type header is missing."""
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer test-write-token"}
+    response = client.post("/api/v1/scan", content=b"data", headers=headers)
+    assert response.status_code == 415
+    data = response.json()
+    assert (
+        data.get("message")
+        == "Unsupported Media Type: Request must be multipart/form-data"
+        or data.get("detail")
+        == "Unsupported Media Type: Request must be multipart/form-data"
+    )
+
+
+# ── RequestIDMiddleware Tests (#2024) ──────────────────────────────────────────
+
+from src.asgi_app import RequestIDMiddleware
+
+
+def _request_id_middleware_client():
+    async def _request_id_echo(request: Request):
+        return JSONResponse({"request_id": getattr(request.state, "request_id", None)})
+
+    test_app = Starlette(
+        routes=[Route("/test-request-id", _request_id_echo, methods=["GET"])],
+        middleware=[Middleware(RequestIDMiddleware)],
+    )
+    return StarletteTestClient(test_app)
+
+
+def test_request_id_middleware_generates_id():
+    """Verify that RequestIDMiddleware generates a new UUID request ID and attaches it to response headers and state."""
+    client = _request_id_middleware_client()
+    response = client.get("/test-request-id")
+
+    assert response.status_code == 200
+
+    # 1. Header presence and format
+    assert "X-Request-ID" in response.headers
+    request_id_header = response.headers["X-Request-ID"]
+    assert len(request_id_header) > 0
+
+    # 2. Attached to request state
+    data = response.json()
+    assert data["request_id"] == request_id_header
+
+
+def test_request_id_middleware_propagates_incoming_id():
+    """Verify that RequestIDMiddleware propagates a valid incoming X-Request-ID header."""
+    client = _request_id_middleware_client()
+    incoming_id = "test-correlation-id-12345"
+    response = client.get("/test-request-id", headers={"X-Request-ID": incoming_id})
+
+    assert response.status_code == 200
+    assert response.headers.get("X-Request-ID") == incoming_id
+    assert response.json()["request_id"] == incoming_id
+
+
+def test_request_id_middleware_ignores_invalid_oversized_id():
+    """Verify that RequestIDMiddleware ignores an oversized incoming X-Request-ID and generates a new one."""
+    client = _request_id_middleware_client()
+    oversized_id = "a" * 200  # Exceeds MAX_INCOMING_LENGTH (128)
+    response = client.get("/test-request-id", headers={"X-Request-ID": oversized_id})
+
+    assert response.status_code == 200
+    request_id = response.headers.get("X-Request-ID")
+    assert request_id != oversized_id
+    assert len(request_id) > 0
+    assert response.json()["request_id"] == request_id

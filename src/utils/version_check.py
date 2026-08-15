@@ -168,13 +168,9 @@ def check_for_update_sync(
         The newer tag string, or ``None``.
     """
     try:
-        loop = asyncio.new_event_loop()
-        try:
-            remote_tag = loop.run_until_complete(
-                fetch_latest_github_version(url=url, timeout=timeout)
-            )
-        finally:
-            loop.close()
+        remote_tag = asyncio.run(
+            fetch_latest_github_version(url=url, timeout=timeout)
+        )
     except Exception as exc:  # noqa: BLE001
         logger.debug("check_for_update_sync failed: %s", exc)
         return None

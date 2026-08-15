@@ -1,12 +1,11 @@
 from unittest.mock import Mock
 
-from src.visualization.analytics import (
-    build_visualization_lazily,
-)
-
 import pandas as pd
 
-from src.visualization.analytics import get_top_similar_pairs
+from src.visualization.analytics import (
+    build_visualization_lazily,
+    get_top_similar_pairs,
+)
 
 
 def test_get_top_similar_pairs():
@@ -26,10 +25,14 @@ def test_get_top_similar_pairs():
     assert pairs[0] == ("Doc A", "Doc B", 0.95)
     assert pairs[1] == ("Doc B", "Doc C", 0.82)
     assert pairs[2] == ("Doc A", "Doc C", 0.60)
+
+
 def test_get_top_similar_pairs_empty_dataframe():
     similarity_df = pd.DataFrame()
 
     assert get_top_similar_pairs(similarity_df) == []
+
+
 def test_factory_is_not_called_when_visualization_is_disabled():
     factory = Mock(return_value="figure")
 
@@ -58,6 +61,7 @@ def test_factory_exception_is_not_hidden():
         assert str(exc) == "render failed"
     else:
         raise AssertionError("Expected RuntimeError")
+
 
 # ---------------------------------------------------------------------------
 # Issue #1060 — Axis titles for plot_similarity_distribution

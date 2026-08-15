@@ -1,4 +1,5 @@
-FROM python:3.11-slim
+# Pin patch + distro so rebuilds don't silently pick up a newer python:3.11-slim.
+FROM python:3.11.9-slim-bookworm
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1

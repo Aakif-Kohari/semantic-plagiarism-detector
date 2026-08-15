@@ -11,7 +11,7 @@ import json
 import logging
 import os
 import re
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -21,8 +21,12 @@ DEFAULT_BRAND_COLOR = "#1e3a8a"
 DEFAULT_LOGO_PATH = None
 
 # Path to branding config file (relative to project root)
-BRANDING_CONFIG_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "branding_config.json")
+BRANDING_CONFIG_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "..",
+    "..",
+    "config",
+    "branding_config.json",
 )
 
 
@@ -186,10 +190,12 @@ def reload_branding_config() -> BrandingConfig:
     global _branding_config
     _branding_config = load_branding_config()
     return _branding_config
+
+
 """Central plagiarism threshold and severity configuration."""
 
-from dataclasses import dataclass
 import os
+from dataclasses import dataclass
 from math import isfinite
 from numbers import Real
 from typing import Final, Mapping
@@ -228,8 +234,7 @@ class SimilarityThresholds:
 
         if not plagiarism <= medium <= high:
             raise ValueError(
-                "Thresholds must satisfy "
-                "0.0 <= plagiarism <= medium <= high <= 1.0."
+                "Thresholds must satisfy " "0.0 <= plagiarism <= medium <= high <= 1.0."
             )
 
         object.__setattr__(self, "plagiarism", plagiarism)
@@ -258,8 +263,7 @@ def validate_thresholds(
 
     if not thresholds.plagiarism <= thresholds.medium <= thresholds.high:
         raise ValueError(
-            "Thresholds must satisfy "
-            "0.0 <= plagiarism <= medium <= high <= 1.0."
+            "Thresholds must satisfy " "0.0 <= plagiarism <= medium <= high <= 1.0."
         )
 
     return thresholds
@@ -340,3 +344,34 @@ def normalize_severity_label(label: str) -> str:
 def severity_rank(label: str) -> int:
     """Return a stable sort rank for a severity label."""
     return SEVERITY_RANK[normalize_severity_label(label)]
+
+
+
+# ============================================================================
+# OFFLINE MODE CONFIGURATION
+# ============================================================================
+
+def get_offline_mode_status() -> bool:
+    """Check if offline mode is enabled."""
+    import os
+    return os.getenv("OFFLINE_MODE", "false").lower() == "true"
+
+
+def get_offline_config() -> Dict[str, Any]:
+    """Get offline mode configuration."""
+    import os
+    return {
+        "enabled": get_offline_mode_status(),
+        "cache_dir": os.getenv("OFFLINE_CACHE_DIR", ".cache/offline"),
+        "model_cache_dir": os.getenv("OFFLINE_MODEL_CACHE_DIR", ".cache/models"),
+        "max_cache_size_mb": int(os.getenv("OFFLINE_MAX_CACHE_SIZE_MB", "500")),
+        "preload_models": os.getenv("OFFLINE_PRELOAD_MODELS", "true").lower() == "true",
+        "disable_telemetry": os.getenv("OFFLINE_DISABLE_TELEMETRY", "true").lower() == "true",
+    }
+
+def test_branding_config_path_exists():
+    """Test that BRANDING_CONFIG_PATH resolves to an existing file."""
+    config_path = config_module.BRANDING_CONFIG_PATH  # noqa: F821
+
+    assert os.path.isfile(config_path)
+

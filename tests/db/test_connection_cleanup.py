@@ -4,8 +4,9 @@ Unit tests for managed SQLite connections and cleanup (Issue #1707).
 
 import sqlite3
 import unittest
-from src.db.common import managed_connection
+
 from src.db.auth import _connect as auth_connect
+from src.db.common import managed_connection
 
 
 class TestConnectionCleanup(unittest.TestCase):

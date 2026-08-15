@@ -1,4 +1,3 @@
-from .concurrency import with_sqlite_retry
 from .config import (
     BrandingConfig,
     get_branding_config,
@@ -24,6 +23,7 @@ from .faiss_index import (
     save_index,
     search_similar_chunks,
 )
+from .pipeline import run_extraction_pipeline, run_pipeline
 from .similarity import (
     PLAGIARISM_THRESHOLD,
     calculate_paragraph_similarity_breakdown,
@@ -33,13 +33,24 @@ from .similarity import (
     flag_plagiarism,
     manhattan_similarity,
 )
+from .similarity_base import BaseSimilarityEngine
+from .similarity_engines import (
+    HybridSimilarityEngine,
+    LexicalSimilarityEngine,
+    SemanticSimilarityEngine,
+    SimilarityEngineFactory,
+)
 from .tag_manager import TagManager, sanitize_tag_name
 from .text_chunking import chunk_by_sentences, chunk_document, chunk_documents
 from .translator import translate_text
 from .webhook import dispatch_plagiarism_alert, send_plagiarism_alert
 
-
 __all__ = [
+    "BaseSimilarityEngine",
+    "SemanticSimilarityEngine",
+    "LexicalSimilarityEngine",
+    "HybridSimilarityEngine",
+    "SimilarityEngineFactory",
     "with_sqlite_retry",
     "manhattan_similarity",
     "extract_text_from_pdf",
@@ -77,4 +88,17 @@ __all__ = [
     "sanitize_zero_width_characters",
     "TagManager",
     "sanitize_tag_name",
+    "run_pipeline",
+    "run_extraction_pipeline",
 ]
+
+
+# with_sqlite_retry is re-exported from src.core.concurrency (which lazily
+# re-exports it from src.db.common). A lazy lookup avoids the circular import
+# chain (src.db -> src.core -> src.db.common).
+def __getattr__(name):
+    if name == "with_sqlite_retry":
+        from .concurrency import with_sqlite_retry
+
+        return with_sqlite_retry
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -8,14 +8,12 @@ from src.db.common import get_read_connection
 
 def create_database(path: Path) -> None:
     with sqlite3.connect(path) as connection:
-        connection.execute(
-            """
+        connection.execute("""
             CREATE TABLE documents (
                 id INTEGER PRIMARY KEY,
                 title TEXT NOT NULL
             )
-            """
-        )
+            """)
         connection.execute(
             """
             INSERT INTO documents (title)
@@ -31,12 +29,10 @@ def test_get_read_connection_allows_select_queries(tmp_path):
     create_database(database)
 
     with get_read_connection(database) as connection:
-        row = connection.execute(
-            """
+        row = connection.execute("""
             SELECT id, title
             FROM documents
-            """
-        ).fetchone()
+            """).fetchone()
 
     assert isinstance(row, sqlite3.Row)
     assert row["id"] == 1
@@ -102,9 +98,7 @@ def test_get_read_connection_handles_spaces_in_path(tmp_path):
     create_database(database)
 
     with get_read_connection(database) as connection:
-        title = connection.execute(
-            "SELECT title FROM documents"
-        ).fetchone()["title"]
+        title = connection.execute("SELECT title FROM documents").fetchone()["title"]
 
     assert title == "Reference document"
 
@@ -114,8 +108,6 @@ def test_get_read_connection_enables_foreign_keys(tmp_path):
     create_database(database)
 
     with get_read_connection(database) as connection:
-        enabled = connection.execute(
-            "PRAGMA foreign_keys"
-        ).fetchone()[0]
+        enabled = connection.execute("PRAGMA foreign_keys").fetchone()[0]
 
     assert enabled == 1
