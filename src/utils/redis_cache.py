@@ -40,26 +40,39 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-_RedisErr = getattr(redis, "RedisError", Exception)
+class DummyRedisError(Exception):
+    pass
+
+
+class DummyRedisConnectionError(DummyRedisError):
+    pass
+
+
+class DummyRedisTimeoutError(DummyRedisError):
+    pass
+
+
+_RedisErr = getattr(redis, "RedisError", DummyRedisError)
 RedisError = (
     _RedisErr
     if isinstance(_RedisErr, type) and issubclass(_RedisErr, BaseException)
-    else Exception
+    else DummyRedisError
 )
 
-_ConnErr = getattr(redis, "ConnectionError", ConnectionError)
+_ConnErr = getattr(redis, "ConnectionError", DummyRedisConnectionError)
 RedisConnectionError = (
     _ConnErr
     if isinstance(_ConnErr, type) and issubclass(_ConnErr, BaseException)
-    else ConnectionError
+    else DummyRedisConnectionError
 )
 
-_TimeoutErr = getattr(redis, "TimeoutError", TimeoutError)
+_TimeoutErr = getattr(redis, "TimeoutError", DummyRedisTimeoutError)
 RedisTimeoutError = (
     _TimeoutErr
     if isinstance(_TimeoutErr, type) and issubclass(_TimeoutErr, BaseException)
-    else TimeoutError
+    else DummyRedisTimeoutError
 )
+
 
 
 # Redis connection configuration

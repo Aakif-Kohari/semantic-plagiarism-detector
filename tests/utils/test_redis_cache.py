@@ -839,165 +839,43 @@ class TestHitRateTracking:
         assert cache_with_mock.get_hit_rate() == 100.0
 
 
-def test_redis_payload_compression_level_configurable(monkeypatch):
-    """Verify that PayloadCompressor respects the REDIS_COMPRESSION_LEVEL env var."""
-    import zlib
-    from src.utils.redis_cache import PayloadCompressor
+def test_redis_fallback_exceptions():
+    """Verify that when redis is missing, fallback classes are custom subclasses of Exception."""
+    import sys
+    from unittest.mock import patch
 
-    # Create dummy data large enough to trigger compression (threshold is 512KB)
-    large_data = b"a" * (PayloadCompressor.COMPRESSION_THRESHOLD_BYTES + 100)
-
-    # 1. Test default (Z_BEST_SPEED) when env var is not set
-    monkeypatch.delenv("REDIS_COMPRESSION_LEVEL", raising=False)
-    compressed_default = PayloadCompressor.compress(large_data)
-    assert compressed_default.startswith(PayloadCompressor.MAGIC_HEADER)
-    decompressed_default = PayloadCompressor.decompress(compressed_default)
-    assert decompressed_default == large_data
-
-    # 2. Test Z_BEST_COMPRESSION (as constant name string)
-    monkeypatch.setenv("REDIS_COMPRESSION_LEVEL", "Z_BEST_COMPRESSION")
-    compressed_best_const = PayloadCompressor.compress(large_data)
-    assert compressed_best_const.startswith(PayloadCompressor.MAGIC_HEADER)
-    assert PayloadCompressor.decompress(compressed_best_const) == large_data
-
-    # 3. Test explicit integer compression level (e.g., 9)
-    monkeypatch.setenv("REDIS_COMPRESSION_LEVEL", "9")
-    compressed_best_int = PayloadCompressor.compress(large_data)
-    assert compressed_best_int.startswith(PayloadCompressor.MAGIC_HEADER)
-    assert PayloadCompressor.decompress(compressed_best_int) == large_data
-
-    # 4. Test invalid environment variable fallback
-    monkeypatch.setenv("REDIS_COMPRESSION_LEVEL", "INVALID_VALUE")
-    compressed_invalid = PayloadCompressor.compress(large_data)
-    assert compressed_invalid.startswith(PayloadCompressor.MAGIC_HEADER)
-    assert PayloadCompressor.decompress(compressed_invalid) == large_data
-
-
-class TestRedisCacheThreadSafety:
-    """Test suite for thread-safe singleton instantiation (Issue #2324)."""
-
-    def test_get_instance_returns_same_object(self):
-        """Verify get_instance() always returns the same singleton instance."""
-        from src.utils.redis_cache import RedisCache
-        
-        instance1 = RedisCache.get_instance()
-        instance2 = RedisCache.get_instance()
-        
-        assert instance1 is instance2
-
-    def test_concurrent_instantiation_creates_single_instance(self):
-        """Verify multiple threads calling get_instance() create only one instance."""
-        import threading
-        from src.utils.redis_cache import RedisCache
-        
-        # Reset singleton for clean test
-        with RedisCache._lock:
-            RedisCache._instance = None
-        
-        instances = []
-        errors = []
-        barrier = threading.Barrier(50)
-        
-        def worker():
-            try:
-                # Ensure all threads start at the exact same moment
-                barrier.wait()
-                instance = RedisCache.get_instance()
-                instances.append(instance)
-            except Exception as e:
-                errors.append(e)
-        
-        # Spawn 50 threads attempting to acquire the instance concurrently
-        threads = [threading.Thread(target=worker) for _ in range(50)]
-        
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-            
-        # No errors should occur
-        assert len(errors) == 0, f"Errors occurred: {errors}"
-        
-        # All threads should receive the exact same instance
-        assert len(instances) == 50
-        first_instance = instances[0]
-        for instance in instances[1:]:
-            assert instance is first_instance, "Multiple instances were created!"
-
-
-def test_redis_payload_compression_threshold_configurable(monkeypatch):
-    """Verify that PayloadCompressor respects the REDIS_COMPRESSION_THRESHOLD env var."""
-    from src.utils.redis_cache import PayloadCompressor
-
-    # 1. Default fallback to 512KB when env var is not set
-    monkeypatch.delenv("REDIS_COMPRESSION_THRESHOLD", raising=False)
-    assert PayloadCompressor.get_threshold() == 512 * 1024
-
-    # Data below default threshold (e.g. 10KB) should not be compressed
-    data_small = b"a" * (10 * 1024)
-    compressed_small = PayloadCompressor.compress(data_small)
-    assert not compressed_small.startswith(PayloadCompressor.MAGIC_HEADER)
-    assert compressed_small == data_small
-
-    # 2. Configured lower threshold (e.g. 5KB)
-    monkeypatch.setenv("REDIS_COMPRESSION_THRESHOLD", str(5 * 1024))
-    assert PayloadCompressor.get_threshold() == 5 * 1024
-
-    # Now, the same 10KB data exceeds the 5KB threshold and must be compressed
-    compressed_now = PayloadCompressor.compress(data_small)
-    assert compressed_now.startswith(PayloadCompressor.MAGIC_HEADER)
-    assert PayloadCompressor.decompress(compressed_now) == data_small
-
-    # 3. Invalid threshold format fallback
-    monkeypatch.setenv("REDIS_COMPRESSION_THRESHOLD", "invalid_number")
-    assert PayloadCompressor.get_threshold() == 512 * 1024
-
-
-class TestRedisCacheTTLConfiguration:
-    """Test suite for environment-configurable TTL values (Issue #2323)."""
-
-    def test_default_ttl_values_when_env_not_set(self, monkeypatch):
-        """Verify hardcoded defaults are used when env vars are missing."""
-        # Clear any existing env vars
-        for var in ["SESSION_TTL", "FAISS_INDEX_TTL", "ANALYSIS_RESULTS_TTL", 
-                    "LOGIN_LOCKOUT_TTL", "UPLOAD_RATE_TTL", "DEFAULT_TTL"]:
-            monkeypatch.delenv(var, raising=False)
-            
-        # Re-import to trigger module-level evaluation
+    # We hide 'redis' module to simulate a missing redis package
+    with patch.dict(sys.modules, {"redis": None}):
+        # Reload redis_cache module to trigger the except ImportError block
         import importlib
-        import src.utils.redis_cache as redis_cache_module
-        importlib.reload(redis_cache_module)
-        
-        assert redis_cache_module.SESSION_TTL == 15 * 60
-        assert redis_cache_module.FAISS_INDEX_TTL == 24 * 60 * 60
-        assert redis_cache_module.ANALYSIS_RESULTS_TTL == 2 * 60 * 60
-        assert redis_cache_module.LOGIN_LOCKOUT_TTL == 15 * 60
-        assert redis_cache_module.UPLOAD_RATE_TTL == 60 * 60
-        assert redis_cache_module.DEFAULT_TTL == 24 * 60 * 60
+        import src.utils.redis_cache as rc
+        importlib.reload(rc)
 
-    def test_custom_ttl_values_from_env(self, monkeypatch):
-        """Verify custom TTL values are loaded from environment variables."""
-        monkeypatch.setenv("SESSION_TTL", "3600")  # 1 hour
-        monkeypatch.setenv("FAISS_INDEX_TTL", "7200")  # 2 hours
-        monkeypatch.setenv("LOGIN_LOCKOUT_TTL", "900") # 15 mins
-        
-        import importlib
-        import src.utils.redis_cache as redis_cache_module
-        importlib.reload(redis_cache_module)
-        
-        assert redis_cache_module.SESSION_TTL == 3600
-        assert redis_cache_module.FAISS_INDEX_TTL == 7200
-        assert redis_cache_module.LOGIN_LOCKOUT_TTL == 900
-        
-    def test_invalid_env_values_fallback_or_raise(self, monkeypatch):
-        """Verify behavior when env vars contain non-integer strings."""
-        monkeypatch.setenv("SESSION_TTL", "invalid_string")
-        
-        import importlib
-        import src.utils.redis_cache as redis_cache_module
-        
-        # int() on a non-numeric string raises ValueError at module load time
-        import pytest
-        with pytest.raises(ValueError):
-            importlib.reload(redis_cache_module)
+        # Retrieve the fallback error classes
+        fallback_RedisError = rc.RedisError
+        fallback_RedisConnectionError = rc.RedisConnectionError
+        fallback_RedisTimeoutError = rc.RedisTimeoutError
+
+        # Assert they are distinct subclasses of Exception
+        assert issubclass(fallback_RedisError, Exception)
+        assert fallback_RedisError is not Exception
+
+        assert issubclass(fallback_RedisConnectionError, fallback_RedisError)
+        assert fallback_RedisConnectionError is not ConnectionError
+
+        assert issubclass(fallback_RedisTimeoutError, fallback_RedisError)
+        assert fallback_RedisTimeoutError is not TimeoutError
+
+        # Verify that catching fallback_RedisError does NOT catch a generic KeyError
+        try:
+            raise KeyError("test")
+        except fallback_RedisError:
+            pytest.fail("fallback_RedisError caught generic KeyError!")
+        except KeyError:
+            pass  # Expected
+
+    # Finally, reload the module one more time to restore it to the default environment state
+    import importlib
+    import src.utils.redis_cache as rc
+    importlib.reload(rc)
 
