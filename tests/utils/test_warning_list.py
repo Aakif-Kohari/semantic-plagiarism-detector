@@ -1,3 +1,4 @@
+import base64
 from unittest.mock import patch
 
 from src.utils.warning_list import (
@@ -288,4 +289,25 @@ def test_render_copy_button_xss_sanitization():
         # Assert no unescaped/raw <script> tag from button_id appears
         assert 'id=""><script>alert(1)</script>' not in rendered_html
         assert '&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;' in rendered_html
+
+
+def test_render_copy_button_html():
+    """Verify the HTML structure and base64 encoding logic of the copy button for issue #2470."""
+    test_payload = "ECSoC26_test_string"
+    
+    # Generate the expected base64 string
+    expected_b64 = base64.b64encode(test_payload.encode('utf-8')).decode('utf-8')
+    
+    with patch("streamlit.components.v1.html") as mock_html:
+        render_copy_button(test_payload)
+        
+        # Ensure the HTML generation was called
+        assert mock_html.called, "streamlit.components.v1.html was not called"
+        html_output = mock_html.call_args[0][0]
+        
+        # Acceptance Criteria 1: Assert the result contains a <button> tag
+        assert "<button" in html_output.lower(), "The HTML output is missing a <button> tag."
+        
+        # Acceptance Criteria 2: Assert the payload string is correctly base64 encoded
+        assert expected_b64 in html_output, f"The base64 encoded payload '{expected_b64}' was not found in the HTML/JS output."
         
