@@ -439,6 +439,7 @@ def plot_most_plagiarized_documents(
     show_grid: bool = True,
     theme_colors: dict[str, str] | None = None,
     theme_override: str | None = None,
+    max_name_len: int = 30,
 ) -> go.Figure:
     """Create a bar chart showing the most frequently plagiarized documents."""
     if not doc_data:
@@ -452,7 +453,7 @@ def plot_most_plagiarized_documents(
         )
     df = pd.DataFrame(doc_data)
     df["display_name"] = df["document_name"].apply(
-        lambda x: x[:30] + "..." if len(x) > 30 else x
+        lambda x: x[:max_name_len] + "..." if len(x) > max_name_len else x
     )
 
     fig = px.bar(
@@ -545,6 +546,7 @@ def plot_document_sizes(
     word_counts: dict[str, int],
     show_grid: bool = True,
     theme_colors: dict[str, str] | None = None,
+    max_name_len: int = 30,
 ) -> go.Figure:
     """Create a bar chart visualizing document word counts."""
     if not word_counts:
@@ -558,7 +560,8 @@ def plot_document_sizes(
     counts = list(word_counts.values())
 
     display_names = [
-        name[:30] + "..." if len(name) > 30 else name for name in doc_names
+        name[:max_name_len] + "..." if len(name) > max_name_len else name
+        for name in doc_names
     ]
 
     fig = px.bar(
