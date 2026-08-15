@@ -16,9 +16,9 @@ def test_get_char_count():
 
 
 def test_get_reading_time_minutes():
-    assert get_reading_time_minutes("word " * 100) == 1
-    assert get_reading_time_minutes("word " * 400) == 2
-    assert get_reading_time_minutes("") == 1
+    assert get_reading_time_minutes("word " * 100) == 0.5
+    assert get_reading_time_minutes("word " * 400) == 2.0.0
+    assert get_reading_time_minutes("") == 0.1
 
 
 def test_get_sentence_count():

@@ -203,11 +203,11 @@ def get_char_count(text: str) -> int:
     return len(text)
 
 
-def get_reading_time_minutes(text: str) -> int:
+def get_reading_time_minutes(text: str) -> float:
     # Average reading speed is roughly 200-250 words per minute.
     # We'll use 200 for a conservative estimate.
     word_count = get_word_count(text)
-    minutes = max(1, round(word_count / 200))
+    minutes = max(0.1, round(word_count / 200, 1))
     return minutes
 
 
