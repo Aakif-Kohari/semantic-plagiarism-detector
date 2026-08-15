@@ -1,5 +1,6 @@
 import os
 import secrets
+import urllib.parse
 
 import requests
 import logging
@@ -17,17 +18,20 @@ def get_google_auth_url() -> tuple[str, str]:
     if not client_id:
         raise ValueError("GOOGLE_CLIENT_ID environment variable is not configured")
     redirect_uri = os.getenv("APP_BASE_URL", "http://localhost:8501")
-    state = secrets.token_urlsafe(16)
+    state = f"google_{secrets.token_urlsafe(16)}"
 
-    url = (
-        f"https://accounts.google.com/o/oauth2/v2/auth?"
-        f"response_type=code&"
-        f"client_id={client_id}&"
-        f"redirect_uri={redirect_uri}&"
-        f"scope=email%20profile&"
-        f"state=google_{state}"
-    )
-    return url, f"google_{state}"
+    query_params = {
+        "response_type": "code",
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "scope": "email profile",
+        "state": state
+    }
+    
+    encoded_args = urllib.parse.urlencode(query_params)
+    url = f"https://accounts.google.com/o/oauth2/v2/auth?{encoded_args}"
+    
+    return url, state
 
 
 def exchange_google_code(code: str) -> dict | None:
@@ -83,16 +87,19 @@ def get_github_auth_url() -> tuple[str, str]:
     if not client_id:
         raise ValueError("GITHUB_CLIENT_ID environment variable is not configured")
     redirect_uri = os.getenv("APP_BASE_URL", "http://localhost:8501")
-    state = secrets.token_urlsafe(16)
+    state = f"github_{secrets.token_urlsafe(16)}"
 
-    url = (
-        f"https://github.com/login/oauth/authorize?"
-        f"client_id={client_id}&"
-        f"redirect_uri={redirect_uri}&"
-        f"scope=user:email&"
-        f"state=github_{state}"
-    )
-    return url, f"github_{state}"
+    query_params = {
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "scope": "user:email",
+        "state": state
+    }
+    
+    encoded_args = urllib.parse.urlencode(query_params)
+    url = f"https://github.com/login/oauth/authorize?{encoded_args}"
+    
+    return url, state
 
 
 def exchange_github_code(code: str) -> dict | None:
