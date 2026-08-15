@@ -34,10 +34,7 @@ class RecordingExecutor:
 
 
 def test_process_pool_is_capped_by_cpu_count(monkeypatch):
-    files = {
-        f"document-{index}.txt": f"text-{index}".encode()
-        for index in range(10)
-    }
+    files = {f"document-{index}.txt": f"text-{index}".encode() for index in range(10)}
 
     monkeypatch.setattr(
         "src.core.document_parser.os.cpu_count",
@@ -67,10 +64,7 @@ def test_process_pool_is_capped_by_cpu_count(monkeypatch):
 
 
 def test_process_pool_is_capped_by_requested_limit(monkeypatch):
-    files = {
-        f"document-{index}.txt": b"text"
-        for index in range(8)
-    }
+    files = {f"document-{index}.txt": b"text" for index in range(8)}
 
     monkeypatch.setattr(
         "src.core.document_parser.os.cpu_count",
@@ -180,17 +174,13 @@ def test_one_worker_uses_sequential_path(monkeypatch):
         "src.core.document_parser._should_use_parallel",
         lambda: True,
     )
-    helper = MagicMock(
-        side_effect=lambda data, *_args: data.decode()
-    )
+    helper = MagicMock(side_effect=lambda data, *_args: data.decode())
     monkeypatch.setattr(
         "src.core.document_parser._extract_single_file_helper",
         helper,
     )
 
-    with patch(
-        "concurrent.futures.ProcessPoolExecutor"
-    ) as executor:
+    with patch("concurrent.futures.ProcessPoolExecutor") as executor:
         results, errors = extract_texts_parallel(
             files,
             max_workers=1,

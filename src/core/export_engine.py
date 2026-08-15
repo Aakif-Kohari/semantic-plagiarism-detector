@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Mapping, Sequence
+from typing import Any
+
+from src.utils.html_report import generate_html_report
+
+logger = logging.getLogger(__name__)
+
 import csv
 import io
 import json
 import logging
-from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
 
 from src.errors import (
     EXPORT_GENERATION_IO_FAILED,
@@ -31,6 +37,30 @@ class LMSExportEngine:
     """Generate LMS-compatible incident exports."""
 
     @staticmethod
+    def generate_incident_html(
+        incidents: Sequence[Mapping[str, Any]],
+        *,
+        min_match_length: int = 0,
+    ) -> str | None:
+        """Generate a standardized HTML incident report.
+
+        Args:
+            incidents: Sequence of incident dictionaries.
+            min_match_length: If > 0, only incidents with
+                ``matched_length`` >= this value are exported (Issue #2474).
+        """
+        if not incidents:
+            logger.warning("Attempted to export an empty incident list to HTML.")
+            return None
+
+        try:
+            return generate_html_report(
+                incidents, min_match_length=min_match_length
+            )
+        except Exception as exception:
+            logger.error("Failed to format incident data as HTML: %s", exception)
+            return None
+
     def build_download_response(
         data: str | bytes,
         *,
@@ -104,19 +134,31 @@ class LMSExportEngine:
     @staticmethod
     def generate_incident_txt(
         incidents: Sequence[Mapping[str, Any]],
+        *,
+        min_match_length: int = 0,
     ) -> str | None:
-        """Generate a readable plain-text summary of flagged incidents."""
+        """Generate a readable plain-text summary of flagged incidents.
+
+        Args:
+            incidents: Sequence of incident dictionaries.
+            min_match_length: If > 0, only incidents with
+                ``matched_length`` >= this value are exported (Issue #2474).
+        """
+        if min_match_length > 0:
+            incidents = [
+                i for i in incidents
+                if int(i.get("matched_length", 0) or 0) >= min_match_length
+            ]
+
         if not incidents:
             logger.warning("Attempted to export an empty incident list to TXT.")
             return None
 
         try:
-            lines = [
-                "SEMANTIC PLAGIARISM INCIDENT REPORT",
-                "=" * 38,
-                f"Total flagged pairs: {len(incidents)}",
-                "",
-            ]
+            buffer = io.StringIO()
+            buffer.write("SEMANTIC PLAGIARISM INCIDENT REPORT\n")
+            buffer.write(f"{'=' * 38}\n")
+            buffer.write(f"Total flagged pairs: {len(incidents)}\n\n")
 
             for index, row in enumerate(incidents, start=1):
                 sim_score = float(row.get("similarity", 0))
@@ -124,47 +166,34 @@ class LMSExportEngine:
                 doc_a = LMSExportEngine._safe_document_name(row.get("doc_a"))
                 doc_b = LMSExportEngine._safe_document_name(row.get("doc_b"))
 
-                lines.extend(
-                    [
-                        f"Incident #{index}",
-                        "-" * 24,
-                        f"Document A: {doc_a}",
-                        f"Document B: {doc_b}",
-                        (
-                            "Similarity: "
-                            f"{LMSExportEngine._format_similarity_percent(sim_score)} "
-                            f"({sim_score:.4f})"
-                        ),
-                        f"Severity: {severity}",
-                    ]
+                buffer.write(f"Incident #{index}\n")
+                buffer.write(f"{'-' * 24}\n")
+                buffer.write(f"Document A: {doc_a}\n")
+                buffer.write(f"Document B: {doc_b}\n")
+                buffer.write(
+                    "Similarity: "
+                    f"{LMSExportEngine._format_similarity_percent(sim_score)} "
+                    f"({sim_score:.4f})\n"
                 )
+                buffer.write(f"Severity: {severity}\n")
 
                 matched_length = row.get("matched_length")
                 if matched_length not in (None, ""):
-                    lines.append(f"Matched length: {matched_length} words")
+                    buffer.write(f"Matched length: {matched_length} words\n")
 
                 matched_text = str(
                     row.get("matched_text") or row.get("matching_text") or ""
                 ).strip()
                 if matched_text:
-                    lines.extend(
-                        [
-                            "Matching text:",
-                            matched_text,
-                        ]
-                    )
+                    buffer.write("Matching text:\n")
+                    buffer.write(f"{matched_text}\n")
 
-                lines.append("")
+                buffer.write("\n")
 
-            lines.extend(
-                [
-                    "=" * 38,
-                    "End of report",
-                    "",
-                ]
-            )
+            buffer.write(f"{'=' * 38}\n")
+            buffer.write("End of report\n\n")
 
-            report = "\n".join(lines)
+            report = buffer.getvalue()
         except OSError as exception:
             raise LMSExportEngine._wrap_generation_io_error(
                 "TXT",

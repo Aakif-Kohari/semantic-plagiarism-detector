@@ -1,0 +1,31 @@
+from datetime import date, timedelta
+
+from app.streamlit_app import get_date_range_preset
+
+
+def test_get_date_range_preset_last_14_days():
+    """Verify Last 14 Days date range preset calculation (#1727)."""
+    today = date.today()
+    start_date, end_date = get_date_range_preset("Last 14 Days")
+    assert end_date == today
+    assert start_date == today - timedelta(days=14)
+
+
+def test_get_date_range_preset_all_options():
+    """Verify all date range presets return correct date boundaries."""
+    today = date.today()
+
+    s_today, e_today = get_date_range_preset("Today")
+    assert (s_today, e_today) == (today, today)
+
+    s_7, e_7 = get_date_range_preset("Last 7 Days")
+    assert (s_7, e_7) == (today - timedelta(days=6), today)
+
+    s_14, e_14 = get_date_range_preset("Last 14 Days")
+    assert (s_14, e_14) == (today - timedelta(days=14), today)
+
+    s_30, e_30 = get_date_range_preset("Last 30 Days")
+    assert (s_30, e_30) == (today - timedelta(days=29), today)
+
+    s_all, e_all = get_date_range_preset("All Time")
+    assert (s_all, e_all) == (date(2020, 1, 1), today)
