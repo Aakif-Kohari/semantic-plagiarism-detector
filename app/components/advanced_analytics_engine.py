@@ -956,6 +956,16 @@ def render_analytics_engine():
     with tab5:
         render_pattern_recognition(engine)
 
+    # Calibration report (Issue #2267): shows where the active threshold sits
+    # on the precision/recall curve from the latest backtest, if one exists.
+    st.divider()
+    try:
+        from app.components.calibration_report import render_calibration_report
+
+        render_calibration_report()
+    except Exception:
+        logger.exception("Failed to render threshold calibration report")
+
 
 def render_predictive_analytics(engine: Dict):
     """Render predictive analytics UI."""
