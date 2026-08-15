@@ -42,6 +42,7 @@ def test_fresh_corpus_database_reaches_latest_version(tmp_path):
         assert index_exists(connection, "idx_incidents_status")
         assert index_exists(connection, "idx_documents_created_at")
         assert index_exists(connection, "idx_incidents_severity_time")
+        assert index_exists(connection, "idx_documents_is_deleted")
 
 
 def test_fresh_auth_database_reaches_latest_version(tmp_path):
@@ -388,6 +389,30 @@ def test_migration_013_adds_incident_severity_index(tmp_path):
         migrate_corpus_database(connection)
 
         assert index_exists(connection, "idx_incidents_severity_time")
+
+
+def test_migration_015_adds_is_deleted_index(tmp_path):
+    """migration_015_add_is_deleted_index must create idx_documents_is_deleted
+    so WHERE is_deleted = 0 filtering doesn't full-table-scan documents."""
+    with connect(tmp_path / "is-deleted-idx-corpus.db") as connection:
+        migrate_corpus_database(connection)
+
+        assert column_exists(connection, "documents", "is_deleted")
+        assert index_exists(connection, "idx_documents_is_deleted")
+
+
+def test_migration_015_index_used_by_query_planner(tmp_path):
+    """The new index should actually be selected by SQLite's query planner
+    for the common WHERE is_deleted = 0 filter, not just exist unused."""
+    with connect(tmp_path / "is-deleted-idx-plan-corpus.db") as connection:
+        migrate_corpus_database(connection)
+
+        plan_rows = connection.execute(
+            "EXPLAIN QUERY PLAN SELECT * FROM documents WHERE is_deleted = 0"
+        ).fetchall()
+        plan_text = " ".join(str(row) for row in plan_rows)
+
+        assert "idx_documents_is_deleted" in plan_text
 
 
 def test_check_table_exists():
