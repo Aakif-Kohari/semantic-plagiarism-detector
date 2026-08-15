@@ -10,8 +10,10 @@ from src.db.incidents import (
     export_current_flags_csv,
     get_all_incidents,
     get_incident_by_id,
+    get_incidents_by_assignment,
     get_incidents_by_date_range,
     get_incidents_by_severity,
+    get_incidents_by_user,
     get_incidents_count_by_date,
     get_recent_incidents,
     incidents_to_csv,
@@ -19,8 +21,8 @@ from src.db.incidents import (
     purge_old_incidents,
     sync_flagged_incidents,
     update_review_status,
-    get_incidents_by_assignment,
 )
+
 
 @pytest.fixture(autouse=True)
 def test_db(mock_db):
@@ -41,6 +43,40 @@ def test_build_incident_id_same_pair_different_order():
     id2 = build_incident_id("doc2.pdf", "doc1.pdf")
 
     assert id1 == id2
+
+
+def test_build_incident_id_no_collision_between_distinct_pairs():
+    """Regression test: build_incident_id() previously joined the two
+    normalised filenames with a bare "0" digit before hashing
+    (f"{first}0{second}"). Because filenames can themselves contain
+    digits, two genuinely different document pairs could produce the
+    exact same hash input string once joined, e.g.:
+
+        normalised pair A: ("0doc20", "doc20") -> old input "0doc200doc20"
+        normalised pair B: ("0doc2", "0doc20")  -> old input "0doc200doc20"
+
+    (Note: the pair given in the issue description, ("doc10", "doc2") vs
+    ("doc1", "0doc2"), does NOT actually collide once you account for
+    _normalise_pair()'s alphabetical sorting of the two filenames before
+    hashing — the pair above is a real, reproducing collision under the
+    old "0" separator, verified directly against the sorted output.)
+
+    The fix joins with "||" instead, which is not a valid character in
+    either filename here, so the two pairs must now hash differently.
+    """
+    id1 = build_incident_id("0doc20", "doc20")
+    id2 = build_incident_id("0doc2", "0doc20")
+
+    assert id1 != id2
+
+
+def test_build_incident_id_no_collision_for_issue_example_pair():
+    """As requested in the issue: verify no collision between
+    ("doc10", "doc2") and ("doc1", "0doc2")."""
+    id1 = build_incident_id("doc10", "doc2")
+    id2 = build_incident_id("doc1", "0doc2")
+
+    assert id1 != id2
 
 
 def test_get_incidents_by_date_range_filters_correctly(test_db):
@@ -286,7 +322,6 @@ def test_get_incidents_by_severity(test_db):
     assert results[0]["document_a"] == "high_doc1.pdf"
 
 
-
 def test_get_incidents_by_severity_orders_by_timestamp_desc(test_db):
     """Verify same-severity incidents are returned newest first."""
     flags = [
@@ -312,6 +347,7 @@ def test_get_incidents_by_severity_orders_by_timestamp_desc(test_db):
     assert len(results) == 2
     assert results[0]["document_a"] == "high_doc_newer_a.pdf"
     assert results[1]["document_a"] == "high_doc_older_a.pdf"
+
 
 def test_purge_old_incidents_deletes_resolved_older_than_days(test_db):
     """Test that purge_old_incidents deletes resolved incidents older than specified days."""
@@ -526,9 +562,7 @@ def test_get_recent_incidents_caching_and_invalidation(test_db):
     get_recent_incidents.cache_clear()
 
     # 2. Insert initial incidents via sync
-    flags = [
-        {"doc_a": "doc1.pdf", "doc_b": "doc2.pdf", "similarity": 0.85}
-    ]
+    flags = [{"doc_a": "doc1.pdf", "doc_b": "doc2.pdf", "similarity": 0.85}]
     sync_flagged_incidents(flags, test_db)
 
     # 3. Call get_recent_incidents for the first time (should hit DB)
@@ -550,6 +584,7 @@ def test_get_recent_incidents_caching_and_invalidation(test_db):
     # 6. Call get_recent_incidents again (should hit DB because cache was invalidated)
     incidents_3 = get_recent_incidents(limit=5, db_path=test_db)
     assert len(incidents_3) == 2
+
 
 def test_archive_old_incidents_moves_rows_to_archive_table(test_db):
     """Test that archive_old_incidents copies old rows and removes them."""
@@ -640,18 +675,17 @@ def test_get_incidents_by_assignment(test_db):
 def test_get_incidents_by_assignment_direct_table(tmp_path):
     """Verify get_incidents_by_assignment queries 'incidents' table directly when it exists."""
     import sqlite3
+
     db_file = tmp_path / "custom_incidents.db"
     with sqlite3.connect(db_file) as conn:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE incidents (
                 id INTEGER PRIMARY KEY,
                 assignment_title TEXT,
                 timestamp TEXT,
                 details TEXT
             )
-            """
-        )
+            """)
         conn.execute(
             "INSERT INTO incidents (assignment_title, timestamp, details) VALUES (?, ?, ?)",
             ("Essay 1", "2026-05-01T10:00:00Z", "Incident A"),
@@ -669,4 +703,475 @@ def test_get_incidents_by_assignment_direct_table(tmp_path):
     res = get_incidents_by_assignment("Essay 1", db_path=db_file)
     assert len(res) == 2
     assert res[0]["details"] == "Incident B"
-    assert res[1]["details"] == "Incident A"
+    assert res[1]["details"] == "Incident A"
+
+
+# ── Issue #1765: get_incidents_by_user() ─────────────────────────────────────
+
+
+def test_get_incidents_by_user_returns_empty_for_empty_username(test_db):
+    """Empty / whitespace-only username should short-circuit to [] without
+    touching the database (prevents accidental owner='' matches)."""
+    assert get_incidents_by_user("") == []
+    assert get_incidents_by_user("   ") == []
+    assert get_incidents_by_user(None) == []  # type: ignore[arg-type]
+
+
+def test_get_incidents_by_user_returns_empty_when_no_incidents(test_db):
+    """A fresh database with no incidents should return an empty list."""
+    assert get_incidents_by_user("alice", db_path=test_db) == []
+
+
+def test_get_incidents_by_user_filters_by_owner(test_db):
+    """Canonical schema path: incidents are filtered via documents.owner."""
+    import sqlite3
+
+    # Seed documents with different owners.
+    with sqlite3.connect(test_db) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO documents (filename, file_hash, upload_date, owner) "
+            "VALUES (?, ?, ?, ?)",
+            ("alice_doc1.pdf", "h1", "2026-01-01T00:00:00Z", "alice"),
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO documents (filename, file_hash, upload_date, owner) "
+            "VALUES (?, ?, ?, ?)",
+            ("alice_doc2.pdf", "h2", "2026-01-01T00:00:00Z", "alice"),
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO documents (filename, file_hash, upload_date, owner) "
+            "VALUES (?, ?, ?, ?)",
+            ("bob_doc1.pdf", "h3", "2026-01-01T00:00:00Z", "bob"),
+        )
+        conn.commit()
+
+    # Sync two incidents: one alice-vs-alice, one alice-vs-bob, one bob-vs-bob.
+    sync_flagged_incidents(
+        [{"doc_a": "alice_doc1.pdf", "doc_b": "alice_doc2.pdf", "similarity": 0.9}],
+        test_db,
+        now="2026-01-02T00:00:00Z",
+    )
+    sync_flagged_incidents(
+        [{"doc_a": "alice_doc1.pdf", "doc_b": "bob_doc1.pdf", "similarity": 0.8}],
+        test_db,
+        now="2026-01-03T00:00:00Z",
+    )
+    sync_flagged_incidents(
+        [
+            {"doc_a": "bob_doc1.pdf", "doc_b": "bob_doc1.pdf", "similarity": 0.7}
+        ],  # skipped (same doc)
+        test_db,
+    )
+
+    # Alice should see both incidents that touch her documents.
+    alice_results = get_incidents_by_user("alice", db_path=test_db)
+    assert len(alice_results) == 2
+    # Newest first.
+    assert alice_results[0]["document_a"] == "alice_doc1.pdf"
+    assert alice_results[0]["document_b"] == "bob_doc1.pdf"
+    # owner columns should be present (added by the JOIN).
+    assert "owner_a" in alice_results[0]
+    assert "owner_b" in alice_results[0]
+
+    # Bob should see only the cross-incident.
+    bob_results = get_incidents_by_user("bob", db_path=test_db)
+    assert len(bob_results) == 1
+    assert bob_results[0]["document_a"] == "alice_doc1.pdf"
+    assert bob_results[0]["document_b"] == "bob_doc1.pdf"
+
+    # Unknown user → empty.
+    assert get_incidents_by_user("charlie", db_path=test_db) == []
+
+
+def test_get_incidents_by_user_orders_descending_by_date_flagged(test_db):
+    """Newest incidents must come first (ORDER BY date_flagged DESC)."""
+    import sqlite3
+
+    with sqlite3.connect(test_db) as conn:
+        for i in range(3):
+            conn.execute(
+                "INSERT OR REPLACE INTO documents (filename, file_hash, upload_date, owner) "
+                "VALUES (?, ?, ?, ?)",
+                (f"u{i}_a.pdf", f"hash_a_{i}", "2026-01-01T00:00:00Z", "u1"),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO documents (filename, file_hash, upload_date, owner) "
+                "VALUES (?, ?, ?, ?)",
+                (f"u{i}_b.pdf", f"hash_b_{i}", "2026-01-01T00:00:00Z", "u1"),
+            )
+        conn.commit()
+
+    sync_flagged_incidents(
+        [{"doc_a": "u0_a.pdf", "doc_b": "u0_b.pdf", "similarity": 0.9}],
+        test_db,
+        now="2026-01-01T00:00:00Z",
+    )
+    sync_flagged_incidents(
+        [{"doc_a": "u1_a.pdf", "doc_b": "u1_b.pdf", "similarity": 0.9}],
+        test_db,
+        now="2026-06-01T00:00:00Z",
+    )
+    sync_flagged_incidents(
+        [{"doc_a": "u2_a.pdf", "doc_b": "u2_b.pdf", "similarity": 0.9}],
+        test_db,
+        now="2026-03-01T00:00:00Z",
+    )
+
+    results = get_incidents_by_user("u1", db_path=test_db)
+    assert len(results) == 3
+    dates = [r["date_flagged"] for r in results]
+    assert dates == sorted(dates, reverse=True)
+    assert results[0]["document_a"] == "u1_a.pdf"
+    assert results[-1]["document_a"] == "u0_a.pdf"
+
+
+def test_get_incidents_by_user_strips_whitespace_in_username(test_db):
+    """Leading/trailing whitespace in the username should be stripped."""
+    import sqlite3
+
+    with sqlite3.connect(test_db) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO documents (filename, file_hash, upload_date, owner) "
+            "VALUES (?, ?, ?, ?)",
+            ("a.pdf", "h1", "2026-01-01T00:00:00Z", "alice"),
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO documents (filename, file_hash, upload_date, owner) "
+            "VALUES (?, ?, ?, ?)",
+            ("b.pdf", "h2", "2026-01-01T00:00:00Z", "alice"),
+        )
+        conn.commit()
+
+    sync_flagged_incidents(
+        [{"doc_a": "a.pdf", "doc_b": "b.pdf", "similarity": 0.9}],
+        test_db,
+    )
+
+    assert len(get_incidents_by_user("  alice  ", db_path=test_db)) == 1
+    assert len(get_incidents_by_user("\talice\n", db_path=test_db)) == 1
+
+
+def test_get_incidents_by_user_legacy_incidents_table(tmp_path):
+    """Legacy schema path: when a standalone `incidents` table with `owner`
+    and `timestamp` columns exists, the function should run the exact SQL
+    from the issue spec: SELECT * FROM incidents WHERE owner = ? ORDER BY
+    timestamp DESC.
+    """
+    import sqlite3
+
+    db_file = tmp_path / "legacy_incidents.db"
+    with sqlite3.connect(db_file) as conn:
+        conn.execute("""
+            CREATE TABLE incidents (
+                id INTEGER PRIMARY KEY,
+                owner TEXT,
+                timestamp TEXT,
+                document_a TEXT,
+                document_b TEXT,
+                similarity_score REAL,
+                details TEXT
+            )
+            """)
+        conn.execute(
+            "INSERT INTO incidents (owner, timestamp, document_a, document_b, similarity_score, details) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("alice", "2026-05-01T10:00:00Z", "a1.pdf", "a2.pdf", 0.85, "Incident A"),
+        )
+        conn.execute(
+            "INSERT INTO incidents (owner, timestamp, document_a, document_b, similarity_score, details) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("alice", "2026-05-02T10:00:00Z", "a3.pdf", "a4.pdf", 0.92, "Incident B"),
+        )
+        conn.execute(
+            "INSERT INTO incidents (owner, timestamp, document_a, document_b, similarity_score, details) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("bob", "2026-05-03T10:00:00Z", "b1.pdf", "b2.pdf", 0.78, "Incident C"),
+        )
+        conn.commit()
+
+    # Alice should see her two incidents, newest first.
+    res = get_incidents_by_user("alice", db_path=db_file)
+    assert len(res) == 2
+    assert res[0]["timestamp"] == "2026-05-02T10:00:00Z"
+    assert res[0]["details"] == "Incident B"
+    assert res[1]["timestamp"] == "2026-05-01T10:00:00Z"
+    assert res[1]["details"] == "Incident A"
+
+    # Bob sees one.
+    bob_res = get_incidents_by_user("bob", db_path=db_file)
+    assert len(bob_res) == 1
+    assert bob_res[0]["details"] == "Incident C"
+
+    # Unknown user sees none.
+    assert get_incidents_by_user("charlie", db_path=db_file) == []
+
+
+def test_get_incidents_by_user_legacy_table_returns_all_columns(tmp_path):
+    """The legacy path uses SELECT *, so every column on the legacy table
+    should be present in the returned dicts."""
+    import sqlite3
+
+    db_file = tmp_path / "legacy_full.db"
+    with sqlite3.connect(db_file) as conn:
+        conn.execute("""
+            CREATE TABLE incidents (
+                id INTEGER PRIMARY KEY,
+                owner TEXT,
+                timestamp TEXT,
+                document_a TEXT,
+                document_b TEXT,
+                similarity_score REAL,
+                severity_rank TEXT,
+                review_status TEXT,
+                details TEXT
+            )
+            """)
+        conn.execute(
+            "INSERT INTO incidents (owner, timestamp, document_a, document_b, "
+            "similarity_score, severity_rank, review_status, details) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "alice",
+                "2026-05-01T10:00:00Z",
+                "a.pdf",
+                "b.pdf",
+                0.91,
+                "High",
+                "Pending",
+                "flagged",
+            ),
+        )
+        conn.commit()
+
+    res = get_incidents_by_user("alice", db_path=db_file)
+    assert len(res) == 1
+    row = res[0]
+    # All columns from SELECT * must be present.
+    for col in (
+        "id",
+        "owner",
+        "timestamp",
+        "document_a",
+        "document_b",
+        "similarity_score",
+        "severity_rank",
+        "review_status",
+        "details",
+    ):
+        assert col in row, f"Missing column: {col}"
+    assert row["details"] == "flagged"
+    assert row["severity_rank"] == "High"
+
+
+# ── Issue #1772: Additional comprehensive tests for get_incident_by_id ──────
+
+
+def test_get_incident_by_id_returns_none_for_nonexistent_integer(test_db):
+    """A nonexistent integer ID should return None, not raise."""
+    result = get_incident_by_id(99999, test_db)
+    assert result is None
+
+
+def test_get_incident_by_id_returns_none_for_zero(test_db):
+    """ID 0 (never auto-assigned) should return None."""
+    result = get_incident_by_id(0, test_db)
+    assert result is None
+
+
+def test_get_incident_by_id_returns_none_for_negative(test_db):
+    """Negative IDs should return None without raising."""
+    result = get_incident_by_id(-1, test_db)
+    assert result is None
+
+
+def test_get_incident_by_id_returns_all_expected_columns(test_db):
+    """The returned dict should contain all 9 canonical incident columns."""
+    import sqlite3
+
+    with sqlite3.connect(test_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO plagiarism_incidents (
+                incident_id, document_a, document_b, similarity_score,
+                severity_rank, review_status, date_flagged, last_seen,
+                threshold_at_time_of_flag
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                2001,
+                "col_a.pdf",
+                "col_b.pdf",
+                0.92,
+                "High",
+                "Pending",
+                "2026-08-01T10:00:00Z",
+                "2026-08-01T10:00:00Z",
+                0.59,
+            ),
+        )
+        conn.commit()
+
+    result = get_incident_by_id(2001, test_db)
+    assert result is not None
+
+    expected_keys = {
+        "incident_id",
+        "document_a",
+        "document_b",
+        "similarity_score",
+        "severity_rank",
+        "review_status",
+        "date_flagged",
+        "last_seen",
+        "threshold_at_time_of_flag",
+    }
+    assert expected_keys == set(result.keys())
+    assert result["similarity_score"] == 0.92
+    assert result["severity_rank"] == "High"
+    assert result["threshold_at_time_of_flag"] == 0.59
+
+
+def test_get_incident_by_id_string_integer_equivalence(test_db):
+    """Passing int 3001 and str '3001' should return the same record."""
+    import sqlite3
+
+    with sqlite3.connect(test_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO plagiarism_incidents (
+                incident_id, document_a, document_b, similarity_score,
+                severity_rank, review_status, date_flagged, last_seen,
+                threshold_at_time_of_flag
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                3001,
+                "equiv_a.pdf",
+                "equiv_b.pdf",
+                0.81,
+                "High",
+                "Pending",
+                "2026-08-02T00:00:00Z",
+                "2026-08-02T00:00:00Z",
+                0.50,
+            ),
+        )
+        conn.commit()
+
+    by_int = get_incident_by_id(3001, test_db)
+    by_str = get_incident_by_id("3001", test_db)
+
+    assert by_int is not None
+    assert by_str is not None
+    assert by_int["document_a"] == by_str["document_a"]
+    assert by_int["document_b"] == by_str["document_b"]
+
+
+def test_get_incident_by_id_excludes_soft_deleted_documents(test_db):
+    """If either document is soft-deleted, the incident should not be returned."""
+    import sqlite3
+
+    with sqlite3.connect(test_db) as conn:
+        conn.execute(
+            "INSERT INTO documents (filename, file_hash, upload_date, is_deleted) "
+            "VALUES (?, ?, ?, 1)",
+            ("deleted_doc.pdf", "hash_del", "2026-08-03T00:00:00Z"),
+        )
+        conn.execute(
+            "INSERT INTO documents (filename, file_hash, upload_date, is_deleted) "
+            "VALUES (?, ?, ?, 0)",
+            ("alive_doc.pdf", "hash_alive", "2026-08-03T00:00:00Z"),
+        )
+        conn.execute(
+            """
+            INSERT INTO plagiarism_incidents (
+                incident_id, document_a, document_b, similarity_score,
+                severity_rank, review_status, date_flagged, last_seen,
+                threshold_at_time_of_flag
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                4001,
+                "deleted_doc.pdf",
+                "alive_doc.pdf",
+                0.85,
+                "High",
+                "Pending",
+                "2026-08-03T00:00:00Z",
+                "2026-08-03T00:00:00Z",
+                0.50,
+            ),
+        )
+        conn.commit()
+
+    result = get_incident_by_id(4001, test_db)
+    assert result is None
+
+
+def test_get_incident_by_id_uses_default_db_path_when_none(test_db, monkeypatch):
+    """When db_path is None, the function should use DEFAULT_DB_PATH."""
+    import src.db.incidents as incidents_mod
+
+    monkeypatch.setattr(incidents_mod, "DEFAULT_DB_PATH", test_db)
+
+    import sqlite3
+
+    with sqlite3.connect(test_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO plagiarism_incidents (
+                incident_id, document_a, document_b, similarity_score,
+                severity_rank, review_status, date_flagged, last_seen,
+                threshold_at_time_of_flag
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                5001,
+                "default_a.pdf",
+                "default_b.pdf",
+                0.77,
+                "Medium",
+                "Pending",
+                "2026-08-04T00:00:00Z",
+                "2026-08-04T00:00:00Z",
+                0.50,
+            ),
+        )
+        conn.commit()
+
+    result = get_incident_by_id(5001, None)
+    assert result is not None
+    assert result["document_a"] == "default_a.pdf"
+
+
+def test_get_incident_by_id_returns_dict_type(test_db):
+    """The return type should be dict or None, never a sqlite3.Row."""
+    import sqlite3
+
+    with sqlite3.connect(test_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO plagiarism_incidents (
+                incident_id, document_a, document_b, similarity_score,
+                severity_rank, review_status, date_flagged, last_seen,
+                threshold_at_time_of_flag
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                6001,
+                "type_a.pdf",
+                "type_b.pdf",
+                0.65,
+                "Medium",
+                "Pending",
+                "2026-08-05T00:00:00Z",
+                "2026-08-05T00:00:00Z",
+                0.50,
+            ),
+        )
+        conn.commit()
+
+    result = get_incident_by_id(6001, test_db)
+    assert result is not None
+    assert isinstance(result, dict)
+    assert not isinstance(result, sqlite3.Row)

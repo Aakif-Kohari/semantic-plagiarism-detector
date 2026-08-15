@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
 import math
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
@@ -18,8 +18,12 @@ def get_export_timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _json_default_serializer(obj: Any) -> Any:
+def json_serializer_fallback(obj: Any) -> Any:
     """Custom JSON serializer for NumPy data types, pandas Timestamps, and datetime objects.
+
+    Passed as the ``default=`` callback to :func:`json.dumps` so that
+    otherwise non-serializable objects (e.g. ``numpy.int64``, ``numpy.float64``,
+    ``datetime``) don't raise an unhandled ``TypeError`` when exporting.
 
     Args:
         obj: Object instance to serialize.
@@ -30,7 +34,11 @@ def _json_default_serializer(obj: Any) -> Any:
     if isinstance(obj, (np.integer, int)):
         return int(obj)
     if isinstance(obj, (np.floating, float)):
-        return 0.0 if math.isnan(float(obj)) or math.isinf(float(obj)) else round(float(obj), 6)
+        return (
+            0.0
+            if math.isnan(float(obj)) or math.isinf(float(obj))
+            else round(float(obj), 6)
+        )
     if isinstance(obj, np.ndarray):
         return obj.tolist()
     if isinstance(obj, (datetime, pd.Timestamp)):
@@ -98,7 +106,9 @@ def export_similarity_matrix_to_json(
     for i in range(n):
         for j in range(i + 1, n):
             score = df.iloc[i, j]
-            if pd.isna(score) or (isinstance(score, (float, np.floating)) and math.isnan(float(score))):
+            if pd.isna(score) or (
+                isinstance(score, (float, np.floating)) and math.isnan(float(score))
+            ):
                 score_val = 0.0
             else:
                 score_val = round(float(score), 4)
@@ -120,9 +130,16 @@ def export_similarity_matrix_to_json(
             },
             "pairs": pairs,
         }
-        return json.dumps(output_data, indent=indent, ensure_ascii=False, default=_json_default_serializer)
+        return json.dumps(
+            output_data,
+            indent=indent,
+            ensure_ascii=False,
+            default=json_serializer_fallback,
+        )
 
-    return json.dumps(pairs, indent=indent, ensure_ascii=False, default=_json_default_serializer)
+    return json.dumps(
+        pairs, indent=indent, ensure_ascii=False, default=json_serializer_fallback
+    )
 
 
 def export_to_json(
@@ -148,7 +165,9 @@ def export_to_json(
 
     if isinstance(data, pd.DataFrame):
         processed_data = json.loads(
-            export_similarity_matrix_to_json(data, include_metadata=False, indent=indent)
+            export_similarity_matrix_to_json(
+                data, include_metadata=False, indent=indent
+            )
         )
     else:
         processed_data = data
@@ -158,7 +177,7 @@ def export_to_json(
             processed_data,
             indent=indent,
             ensure_ascii=False,
-            default=_json_default_serializer,
+            default=json_serializer_fallback,
         )
 
     root_metadata: Dict[str, Any] = {
@@ -186,7 +205,7 @@ def export_to_json(
         payload,
         indent=indent,
         ensure_ascii=False,
-        default=_json_default_serializer,
+        default=json_serializer_fallback,
     )
 
 
@@ -291,6 +310,7 @@ def generate_export_checksum(json_str: str) -> str:
         64-character SHA-256 hex string.
     """
     import hashlib
+
     if not json_str:
         return hashlib.sha256(b"").hexdigest()
     return hashlib.sha256(json_str.encode("utf-8")).hexdigest()

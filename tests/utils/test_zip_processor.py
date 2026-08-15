@@ -94,9 +94,9 @@ def test_extract_zip_handles_corrupted_inner_files():
 
 
 from src.utils.zip_processor import (
+    MAX_ABSOLUTE_UNCOMPRESSED_SIZE,
     MAX_SINGLE_FILE_SIZE,
     MAX_TOTAL_DECOMPRESSED_SIZE,
-    MAX_ABSOLUTE_UNCOMPRESSED_SIZE,
     process_zip_file,
 )
 
@@ -331,7 +331,9 @@ def test_zip_bomb_absolute_uncompressed_size_exceeded():
 
     info = zipfile.ZipInfo("huge_bomb.txt")
     info.file_size = MAX_ABSOLUTE_UNCOMPRESSED_SIZE + 1  # 500 MB + 1 byte
-    info.compress_size = MAX_ABSOLUTE_UNCOMPRESSED_SIZE  # Same compressed size → ratio ~1:1
+    info.compress_size = (
+        MAX_ABSOLUTE_UNCOMPRESSED_SIZE  # Same compressed size → ratio ~1:1
+    )
 
     zip_bytes = create_in_memory_zip({"doc.txt": b"some content"})
 
@@ -361,8 +363,9 @@ def test_zip_bomb_ratio_just_under_limit_passes():
     def mock_read(self, name_or_info):
         return b"some content"
 
-    with patch("zipfile.ZipFile.infolist", return_value=[info, mock_valid_info]), \
-         patch("zipfile.ZipFile.read", mock_read):
+    with patch("zipfile.ZipFile.infolist", return_value=[info, mock_valid_info]), patch(
+        "zipfile.ZipFile.read", mock_read
+    ):
         # Should NOT raise the ratio error (may raise total size error, but not ratio)
         try:
             process_zip_file(zip_bytes)
@@ -388,8 +391,9 @@ def test_zip_bomb_zero_compressed_size_handled():
     def mock_read(self, name_or_info):
         return b"some content"
 
-    with patch("zipfile.ZipFile.infolist", return_value=[info, mock_valid_info]), \
-         patch("zipfile.ZipFile.read", mock_read):
+    with patch("zipfile.ZipFile.infolist", return_value=[info, mock_valid_info]), patch(
+        "zipfile.ZipFile.read", mock_read
+    ):
         # Should not raise a ZeroDivisionError or ratio error
         try:
             process_zip_file(zip_bytes)

@@ -1,9 +1,9 @@
 # pylint: disable=streamlit-global-mutation
 
 import logging
+import math
 import os
 import re
-import math
 from typing import Any, Dict, List
 
 import numpy as np
@@ -15,10 +15,15 @@ _model = None
 _tokenizer = None
 
 _DEFAULT_MODEL = "roberta-base-openai-detector"
+_FALLBACK_SENTINEL = object()
 
 # Default perplexity value returned when text cannot be analyzed.
 # A score of 0.0 indicates the function could not compute a valid perplexity.
 _DEFAULT_PERPLEXITY_SCORE = 0.0
+
+# Shared AI probability thresholds
+AI_HIGH_THRESHOLD = 0.75
+AI_MEDIUM_THRESHOLD = 0.40
 
 
 def _get_model_name() -> str:
@@ -51,8 +56,8 @@ def _get_model_and_tokenizer():
                 f"({err}). Using fallback mode."
             )
 
-            _model = "fallback"
-            _tokenizer = "fallback"
+            _model = _FALLBACK_SENTINEL
+            _tokenizer = _FALLBACK_SENTINEL
 
     return _model, _tokenizer
 
@@ -100,7 +105,7 @@ def calculate_text_perplexity(text: str) -> float:
 
         # If the model failed to load during initialization, we cannot
         # compute perplexity. Return the default score gracefully.
-        if model == "fallback" or tokenizer == "fallback":
+        if model is _FALLBACK_SENTINEL or tokenizer is _FALLBACK_SENTINEL:
             logger.warning(
                 "[ai_detector] calculate_text_perplexity: model is in fallback mode, "
                 "cannot compute perplexity. Returning default score."
@@ -196,7 +201,7 @@ def normalize_perplexity(raw_score: float, scale_factor: float = 100.0) -> float
     """
     if raw_score is None or not isinstance(raw_score, (int, float)):
         return 0.0
-    
+
     if raw_score <= 0.0:
         return 0.0
 
@@ -238,7 +243,7 @@ def detect_ai_probability_batch(
         model, tokenizer = _get_model_and_tokenizer()
 
         # Use fallback mode if transformer model failed to initialize
-        if model == "fallback":
+        if model is _FALLBACK_SENTINEL:
             return [0.0] * len(texts)
     except Exception:
         return [0.0] * len(texts)
@@ -357,6 +362,14 @@ def detect_documents_ai_probability(
     return results
 
 
+def _split_sentences_simple(text: str) -> List[str]:
+    """Split text into sentences using common punctuation delimiters and filter empty strings."""
+    if not text or not isinstance(text, str):
+        return []
+    sentences = re.split(r"[.!?]+", text.strip())
+    return [s.strip() for s in sentences if s.strip()]
+
+
 def _calculate_burstiness(text: str) -> float:
     """Calculate the burstiness score of a text.
 
@@ -370,8 +383,8 @@ def _calculate_burstiness(text: str) -> float:
         return 0.0
 
     # Split into sentences using a simple regex
-    sentences = re.split(r'[.!?]+', text.strip())
-    sentence_lengths = [len(s.split()) for s in sentences if s.strip()]
+    sentences = _split_sentences_simple(text)
+    sentence_lengths = [len(s.split()) for s in sentences]
 
     if len(sentence_lengths) < 2:
         return 0.0
@@ -399,13 +412,14 @@ def _calculate_ngram_repetitiveness(text: str, n: int = 3) -> float:
     if len(words) < n:
         return 0.0
 
-    ngrams = [' '.join(words[i:i+n]) for i in range(len(words) - n + 1)]
+    ngrams = [" ".join(words[i : i + n]) for i in range(len(words) - n + 1)]
     if not ngrams:
         return 0.0
 
     unique_ngrams = set(ngrams)
     repetition_ratio = 1.0 - (len(unique_ngrams) / len(ngrams))
     return float(repetition_ratio)
+
 
 def extract_stylometric_features(text: str) -> dict[str, float]:
     """Extract stylometric features for authorship attribution and consistency analysis.
@@ -461,7 +475,9 @@ def extract_stylometric_features(text: str) -> dict[str, float]:
     # Tokenize words using regex to extract alphanumeric sequences
     # This handles punctuation and contractions reasonably well for stylometry
     words = re.findall(r'\b\w+\b', text.lower())
-    
+
+    words = re.findall(r"\b\w+\b", text.lower())
+
     if not words:
         return default_features
 
@@ -479,19 +495,17 @@ def extract_stylometric_features(text: str) -> dict[str, float]:
 
     # 3. & 4. Sentence Length Metrics
     # Split text into sentences using common punctuation delimiters
-    sentences = re.split(r'[.!?]+', text.strip())
-    # Filter out empty strings that result from trailing punctuation
-    sentences = [s.strip() for s in sentences if s.strip()]
-    
+    sentences = _split_sentences_simple(text)
+
     if not sentences:
         # If no sentences detected (e.g., text is just a fragment without punctuation),
         # treat the entire text as a single sentence for length calculations
         sentences = [text.strip()]
 
-    sentence_lengths = [len(re.findall(r'\b\w+\b', s)) for s in sentences]
-    
+    sentence_lengths = [len(re.findall(r"\b\w+\b", s)) for s in sentences]
+
     avg_sentence_length = float(np.mean(sentence_lengths)) if sentence_lengths else 0.0
-    
+
     # Variance measures "burstiness" - human text has higher variance
     # Using sample variance (ddof=1) if we have >1 sentence, else 0.0
     if len(sentence_lengths) > 1:
@@ -508,18 +522,20 @@ def extract_stylometric_features(text: str) -> dict[str, float]:
     if total_words > 0:
         # Calculate word frequencies
         from collections import Counter
+
         word_freqs = Counter(words)
-        
+
         # Calculate frequency of frequencies (how many words appear exactly i times)
         freq_of_freqs = Counter(word_freqs.values())
-        
+
         # Compute the sum of (f_i * i^2)
         sum_fi_i2 = sum(freq * (i ** 2) for i, freq in freq_of_freqs.items())
-        
+        sum_fi_i2 = sum(freq * (i**2) for i, freq in freq_of_freqs.items())
+
         # Apply Yule's K formula
         N = total_words
         if N > 0:
-            M2 = sum_fi_i2 / (N ** 2)
+            M2 = sum_fi_i2 / (N**2)
             yules_k = 10000.0 * (M2 - (1.0 / N))
             # Clamp to prevent negative values due to floating point inaccuracies
             yules_k = max(0.0, yules_k)
@@ -539,6 +555,7 @@ def extract_stylometric_features(text: str) -> dict[str, float]:
     )
 
     return features
+
 
 def detect_ai_generated_text(text: str) -> Dict[str, Any]:
     """
@@ -573,7 +590,7 @@ def detect_ai_generated_text(text: str) -> Dict[str, Any]:
             "ai_probability": 0.0,
             "confidence_tier": "low",
             "classification_tier": "low",
-            "perplexity_score": 150.0,
+            "perplexity_score": 0.0,
             "burstiness_score": 0.0,
             "ngram_repetitiveness": 0.0,
         }
@@ -583,9 +600,9 @@ def detect_ai_generated_text(text: str) -> Dict[str, Any]:
     burstiness_score = _calculate_burstiness(text)
     ngram_repetitiveness = _calculate_ngram_repetitiveness(text)
 
-    if ai_probability >= 0.75:
+    if ai_probability >= AI_HIGH_THRESHOLD:
         confidence_tier = "high"
-    elif ai_probability >= 0.40:
+    elif ai_probability >= AI_MEDIUM_THRESHOLD:
         confidence_tier = "medium"
     else:
         confidence_tier = "low"
@@ -599,6 +616,7 @@ def detect_ai_generated_text(text: str) -> Dict[str, Any]:
         "ngram_repetitiveness": ngram_repetitiveness,
     }
 
+
 def categorize_ai_probability(score: float) -> str:
     """
     Map a raw AI probability score to a human-readable confidence category.
@@ -607,14 +625,26 @@ def categorize_ai_probability(score: float) -> str:
         score: AI probability score between 0.0 and 1.0.
 
     Returns:
-        "High Probability" for score >= 0.8,
-        "Moderate Probability" for 0.5 <= score < 0.8,
-        "Low Probability" for score < 0.5.
+        "High Probability" for score >= AI_HIGH_THRESHOLD,
+        "Moderate Probability" for AI_MEDIUM_THRESHOLD <= score < AI_HIGH_THRESHOLD,
+        "Low Probability" for score < AI_MEDIUM_THRESHOLD.
     """
-    if score >= 0.8:
+    if score >= AI_HIGH_THRESHOLD:
         return "High Probability"
-    elif score >= 0.5:
+    elif score >= AI_MEDIUM_THRESHOLD:
         return "Moderate Probability"
     else:
         return "Low Probability"
-    
+
+
+
+def categorize_perplexity_score(score: float) -> str:
+    """
+    Categorize perplexity score into predictable tiers.
+    """
+    if score < 30:
+        return "Highly Predictable"
+    elif score < 70:
+        return "Moderate"
+    else:
+        return "Unpredictable"

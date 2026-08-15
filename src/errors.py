@@ -48,6 +48,7 @@ OCR_LANGUAGE_UNSUPPORTED = (
 OCR_DEPENDENCIES_MISSING = "OCR dependencies are missing. Install pytesseract, PyMuPDF and Pillow using: python -m pip install pytesseract pymupdf pillow"
 OCR_TESSERACT_NOT_FOUND = "Tesseract OCR was not found. Install Tesseract and either add it to PATH or set TESSERACT_CMD to tesseract.exe."
 BADGE_PIL_REQUIRED = "PIL/Pillow is required for PNG badge generation"
+PARSER_BATCH_LIMIT_EXCEEDED = "Batch size exceeds maximum limit of {limit} files."
 
 # Similarity & FAISS Errors
 SIM_BATCH_SIZE_INVALID = "batch_size must be an integer"
@@ -82,14 +83,19 @@ SSRF_INVALID_IP_FORMAT = "Resolved invalid IP address format: {error}"
 SSRF_BLOCKED_PRIVATE_SUBNET = "Blocked private IPv4 subnet IP: {ip} ({subnet})"
 SSRF_BLOCKED_LOOPBACK = "Blocked loopback IP: {ip}"
 SSRF_BLOCKED_PRIVATE_NETWORK = "Blocked private network IP: {ip}"
+SSRF_BLOCKED_PRIVATE = "Blocked private network IP: {ip}"
 SSRF_BLOCKED_LINK_LOCAL = "Blocked link-local IP: {ip}"
 SSRF_BLOCKED_MULTICAST = "Blocked multicast IP: {ip}"
 SSRF_BLOCKED_UNSPECIFIED = "Blocked unspecified IP: {ip}"
 SSRF_DNS_NO_ADDRESSES = "No addresses found for hostname '{hostname}'"
 SSRF_DNS_RESOLUTION_FAILED = "DNS resolution failed for hostname '{hostname}': {error}"
-SSRF_DOMAIN_NOT_ALLOWED = "Webhook domain '{hostname}' is not in ALLOWED_WEBHOOK_DOMAINS."
+SSRF_DOMAIN_NOT_ALLOWED = (
+    "Webhook domain '{hostname}' is not in ALLOWED_WEBHOOK_DOMAINS."
+)
 SSRF_MAX_REDIRECTS_EXCEEDED = "Maximum HTTP redirect depth exceeded"
-SSRF_CIRCULAR_REDIRECT_LOOP = "Circular HTTP redirect loop detected"# API Errors
+SSRF_CIRCULAR_REDIRECT_LOOP = "Circular HTTP redirect loop detected"
+
+# API Errors
 API_UNAUTHORIZED = "Invalid or missing authentication token."
 API_FILENAME_MISSING = "Filename must be provided."
 API_FILE_EMPTY = "Uploaded file is empty."
@@ -137,20 +143,6 @@ CLI_THRESHOLD_INVALID = "Error: Threshold must be a float between 0.0 and 1.0.\n
 CLI_INVALID_COMMAND = "Error: Invalid command '{command}'.\n"
 
 
-# SSRF Protection Errors
-SSRF_EMPTY_URL = "Webhook URL cannot be empty."
-SSRF_INSECURE_SCHEME = "Insecure scheme '{scheme}'. Webhooks must use 'https'."
-SSRF_MISSING_HOSTNAME = "Invalid URL: missing hostname."
-SSRF_NO_ADDRESSES = "No addresses found for hostname '{hostname}'"
-SSRF_DNS_RESOLUTION_FAILED = "DNS resolution failed for hostname '{hostname}': {error}"
-SSRF_INVALID_IP = "Resolved invalid IP address format: {error}"
-SSRF_BLOCKED_LOOPBACK = "Blocked loopback IP: {ip}"
-SSRF_BLOCKED_PRIVATE = "Blocked private network IP: {ip}"
-SSRF_BLOCKED_LINK_LOCAL = "Blocked link-local IP: {ip}"
-SSRF_BLOCKED_MULTICAST = "Blocked multicast IP: {ip}"
-SSRF_BLOCKED_UNSPECIFIED = "Blocked unspecified IP: {ip}"
-
-
 class ExportFailedError(RuntimeError):
     """Raised when an export cannot be generated or written safely."""
 
@@ -161,8 +153,12 @@ class OCRFileBatchError(Exception):
     def __init__(self, failed_files: list, failure_details: list) -> None:
         self.failed_files = failed_files
         self.failure_details = failure_details
-        joined = "; ".join(failure_details) if failure_details else ", ".join(failed_files)
-        super().__init__(f"OCR extraction failed for {len(failed_files)} file(s): {joined}")
+        joined = (
+            "; ".join(failure_details) if failure_details else ", ".join(failed_files)
+        )
+        super().__init__(
+            f"OCR extraction failed for {len(failed_files)} file(s): {joined}"
+        )
 
 
 EXPORT_WRITE_FAILED = (
@@ -176,16 +172,7 @@ EXPORT_GENERATION_IO_FAILED = (
 )
 
 
-class OCRFileBatchError(Exception):
-    """Exception raised when OCR extraction fails on one or more files in a batch."""
-
-    def __init__(self, failed_files: list[str], failure_details: list[str]):
-        self.failed_files = failed_files
-        self.failure_details = failure_details
-        super().__init__(f"OCR failed for files: {failed_files}")
-
-
 class StaleDataException(Exception):
     """Raised when an update fails because the version has changed (optimistic locking)."""
-    pass
 
+    pass

@@ -1,0 +1,105 @@
+"""src/core/parsers/docx_parser.py - Word document (.docx, .doc) text extraction strategy."""
+
+import io
+import logging
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+
+from src.core.parsers.common import PDFInput
+
+logger = logging.getLogger(__name__)
+
+
+class ParsedDocxText(str):
+    """String subclass attaching Word heading metadata per word."""
+
+    def __new__(cls, content: str, word_headings: list = None):
+        obj = super().__new__(cls, content)
+        obj.word_headings = word_headings if word_headings is not None else []
+        return obj
+
+
+def extract_text_from_docx(file: PDFInput) -> str:
+    """Extract text from a DOCX file, prefixing headings with Markdown # markers."""
+    try:
+        import docx
+
+        doc_file = io.BytesIO(file) if isinstance(file, bytes) else file
+        document = docx.Document(doc_file)
+
+        current_heading = None
+        word_headings = []
+        paragraphs_text = []
+
+        for paragraph in document.paragraphs:
+            p_text = paragraph.text
+            style_name = paragraph.style.name if paragraph.style else ""
+
+            heading_match = re.match(r"^Heading\s+(\d+)$", style_name or "")
+            if heading_match:
+                level = int(heading_match.group(1))
+                prefix = "#" * level + " "
+                p_text = prefix + p_text
+                current_heading = p_text.strip()
+
+            paragraphs_text.append(p_text)
+            p_words = p_text.split()
+            word_headings.extend([current_heading] * len(p_words))
+
+        full_text = "\n\n".join(paragraphs_text)
+        return ParsedDocxText(full_text.strip(), word_headings=word_headings)
+    except Exception as exc:
+        logger.error(f"[document_parser] Error reading DOCX: {exc}")
+    return ""
+
+
+def extract_text_from_doc(file: PDFInput) -> str:
+    """Extract plain text from a legacy Word Document (.doc) using antiword."""
+    if not shutil.which("antiword"):
+        logger.warning(
+            "antiword binary not found. Please install antiword to parse .doc files."
+        )
+        raise RuntimeError(
+            "antiword binary is not installed on the system. Cannot parse .doc files."
+        )
+
+    with tempfile.NamedTemporaryFile(suffix=".doc", delete=False) as temp_file:
+        if isinstance(file, bytes):
+            temp_file.write(file)
+        elif isinstance(file, str):
+            with open(file, "rb") as f:
+                temp_file.write(f.read())
+        else:
+            content = file.read()
+            if isinstance(content, str):
+                content = content.encode("utf-8")
+            temp_file.write(content)
+        temp_file_path = temp_file.name
+
+    try:
+        result = subprocess.run(
+            ["antiword", temp_file_path],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="ignore",
+            timeout=30,
+            check=True,
+        )
+        return result.stdout.strip()
+    except subprocess.CalledProcessError as exc:
+        logger.error(f"[document_parser] antiword failed: {exc.stderr}")
+        raise RuntimeError(
+            f"antiword failed to extract text from .doc file: {exc.stderr}"
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
+        logger.error(f"[document_parser] antiword timed out: {exc}")
+        raise RuntimeError("antiword execution timed out.") from exc
+    finally:
+        try:
+            os.remove(temp_file_path)
+        except OSError:
+            pass
