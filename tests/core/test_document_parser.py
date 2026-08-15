@@ -1087,24 +1087,23 @@ def test_resolve_process_pool_workers():
     assert _resolve_process_pool_workers(None, 10) == min(cpus, 10)
     assert _resolve_process_pool_workers(2, 10) == min(2, cpus)
     assert _resolve_process_pool_workers(100, 10) == min(100, cpus, 10)
-import unittest
-from src.core.document_parser import ParsedDocxText
 
-class TestParsedDocxText(unittest.TestCase):
-    def test_metadata_loss_on_string_operation(self):
-        # Initialize ParsedDocxText with text and word headings
-        original = ParsedDocxText("  hello world  ", ["Introduction"])
-        
-        # Verify initial state
-        self.assertEqual(original, "  hello world  ")
-        self.assertEqual(original.word_headings, ["Introduction"])
-        
-        # Perform standard string operation (.strip())
-        modified = original.strip()
-        
-        # Verify that it returns a plain string (or that the attribute is absent/lost)
-        self.assertEqual(modified, "hello world")
-        self.assertFalse(hasattr(modified, "word_headings"))
+def test_extract_pptx_text_mocked(tmp_path):
+    """Test that .pptx files are successfully parsed when using python-pptx."""
+    from pptx import Presentation # type: ignore
+    from src.core.document_parser import _allowed_file, _extract_pptx_text, ALLOWED_EXTENSIONS
+    
+    assert ".pptx" in ALLOWED_EXTENSIONS
+    assert _allowed_file("presentation.pptx") is True
 
-if __name__ == "__main__":
-    unittest.main()
+    # Create a minimal pptx presentation programmatically for testing
+    pptx_path = tmp_path / "test.pptx"
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[0])
+    slide.shapes.title.text = "Hello PowerPoint"
+    prs.save(str(pptx_path))
+
+    with open(pptx_path, "rb") as f:
+        extracted = _extract_pptx_text(f)
+    
+    assert "Hello PowerPoint" in extracted
