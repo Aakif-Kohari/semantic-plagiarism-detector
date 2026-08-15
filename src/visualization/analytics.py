@@ -349,7 +349,9 @@ def get_top_similar_pairs(
     """Return the top-N highest similarity document pairs.
 
     Extracts only the upper triangle of the similarity matrix to avoid
-    duplicate pairs and excludes self-similarity.
+    duplicate pairs and excludes self-similarity. Uses vectorized NumPy
+    operations (np.triu_indices and np.argsort) for O(n²) extraction
+    performance on large matrices instead of nested Python loops.
 
     Args:
         similarity_df: Square DataFrame containing pairwise similarity scores.
@@ -362,16 +364,35 @@ def get_top_similar_pairs(
     if similarity_df.empty or similarity_df.shape[0] < 2:
         return []
 
-    pairs: list[tuple[str, str, float]] = []
     doc_names = list(similarity_df.index)
-
-    for i in range(len(doc_names)):
-        for j in range(i + 1, len(doc_names)):
-            score = float(similarity_df.iloc[i, j])
-            pairs.append((doc_names[i], doc_names[j], score))
-
-    pairs.sort(key=lambda pair: pair[2], reverse=True)
-    return pairs[:top_n]
+    n = len(doc_names)
+    
+    # Extract upper triangle indices (k=1 excludes the diagonal/self-similarity)
+    # This is vastly faster than nested Python loops for large N
+    row_indices, col_indices = np.triu_indices(n, k=1)
+    
+    # Convert DataFrame to numpy array for fast vectorized indexing
+    sim_matrix = similarity_df.to_numpy(dtype=float)
+    
+    # Extract the scores for all upper-triangle pairs in one operation
+    scores = sim_matrix[row_indices, col_indices]
+    
+    # Get the indices that would sort the scores in descending order
+    # np.argsort sorts ascending, so we reverse it with [::-1]
+    sorted_indices = np.argsort(scores)[::-1]
+    
+    # Limit to top_n pairs
+    top_indices = sorted_indices[:top_n]
+    
+    # Build the result list of tuples from the sorted indices
+    pairs: list[tuple[str, str, float]] = []
+    for idx in top_indices:
+        i = row_indices[idx]
+        j = col_indices[idx]
+        score = float(scores[idx])
+        pairs.append((doc_names[i], doc_names[j], score))
+        
+    return pairs
 
 
 def plot_high_severity_trends(
@@ -382,6 +403,21 @@ def plot_high_severity_trends(
 ) -> go.Figure:
     """Create an interactive line chart showing High severity plagiarism incidents over time."""
     if not trend_data:
+
+        # Return empty chart with message
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No High severity incidents recorded in the specified period",
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            showarrow=False,
+            font=dict(size=16, color="gray"),
+        )
+        colors = get_chart_theme_colors(theme_mode)
+        fig.update_layout()
+
         return _empty_chart(
             title="High Severity Plagiarism Trends (Last 30 Days)",
             message="No High severity incidents recorded in the specified period",
