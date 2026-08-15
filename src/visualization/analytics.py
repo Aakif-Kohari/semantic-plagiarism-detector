@@ -15,6 +15,8 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
+from src.core.config import DEFAULT_THRESHOLDS
+
 FigureT = TypeVar("FigureT")
 
 
@@ -147,10 +149,10 @@ def _apply_theme_colors(
 def calculate_severity_ratios(incidents: list[dict[str, Any]]) -> dict[str, float]:
     """Calculate the percentage breakdown of High, Medium, and Low severity incidents.
 
-    Severity is derived from each incident's similarity score:
-        High:   score >= 0.80 (80%)
-        Medium: 0.50 <= score < 0.80 (50-79%)
-        Low:    score < 0.50
+    Severity is derived from each incident's similarity score using default config thresholds:
+        High:   score >= High threshold
+        Medium: Medium threshold <= score < High threshold
+        Low:    score < Medium threshold
 
     Incidents without a usable numeric score are ignored. Percentages are
     calculated against the count of incidents that had a usable score.
@@ -177,9 +179,9 @@ def calculate_severity_ratios(incidents: list[dict[str, Any]]) -> dict[str, floa
             continue
 
         total += 1
-        if score >= 0.80:
+        if score >= DEFAULT_THRESHOLDS.high:
             counts["High"] += 1
-        elif score >= 0.50:
+        elif score >= DEFAULT_THRESHOLDS.medium:
             counts["Medium"] += 1
         else:
             counts["Low"] += 1
