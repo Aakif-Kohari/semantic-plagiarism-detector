@@ -184,8 +184,11 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
 app.add_exception_handler(RateLimitExceeded, custom_rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
+from src.api_gateway.router import router as gateway_router
+
 # ── Register Sub-Routers ──────────────────────────────────────────────────────
 app.include_router(auth_router)
 app.include_router(analysis_router)
 app.include_router(corpus_router)
 app.include_router(admin_router)
+app.include_router(gateway_router)
