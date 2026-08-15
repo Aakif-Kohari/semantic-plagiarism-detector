@@ -24,13 +24,9 @@ def get_read_connection(
     resolved_path = db_path.expanduser().resolve(strict=False)
 
     if not resolved_path.exists():
-        raise FileNotFoundError(
-            f"SQLite database does not exist: {resolved_path}"
-        )
+        raise FileNotFoundError(f"SQLite database does not exist: {resolved_path}")
     if not resolved_path.is_file():
-        raise IsADirectoryError(
-            f"SQLite database path is not a file: {resolved_path}"
-        )
+        raise IsADirectoryError(f"SQLite database path is not a file: {resolved_path}")
 
     database_uri = f"{resolved_path.as_uri()}?mode=ro"
     connection = sqlite3.connect(
@@ -55,12 +51,16 @@ def with_sqlite_retry(
         return _make_wrapper(fn, max_retries=3, delay=0.1, backoff=2.0)
 
     def decorator(func: Callable) -> Callable:
-        return _make_wrapper(func, max_retries=max_retries, delay=delay, backoff=backoff)
+        return _make_wrapper(
+            func, max_retries=max_retries, delay=delay, backoff=backoff
+        )
 
     return decorator
 
 
-def _make_wrapper(func: Callable, max_retries: int, delay: float, backoff: float) -> Callable:
+def _make_wrapper(
+    func: Callable, max_retries: int, delay: float, backoff: float
+) -> Callable:
     @functools.wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         current_delay = delay
@@ -80,11 +80,14 @@ def _make_wrapper(func: Callable, max_retries: int, delay: float, backoff: float
                     current_delay *= backoff
                 else:
                     raise
+
     return wrapper
 
 
 @contextmanager
-def managed_connection(db_path: str | os.PathLike) -> Generator[sqlite3.Connection, None, None]:
+def managed_connection(
+    db_path: str | os.PathLike,
+) -> Generator[sqlite3.Connection, None, None]:
     """
     Context manager for SQLite connections that guarantees conn.close() on exit,
     preventing unclosed connection handle leaks (Issue #1707).

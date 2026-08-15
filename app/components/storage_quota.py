@@ -6,7 +6,9 @@ Settings component for rendering storage quota progress bar and usage caption.
 
 from pathlib import Path
 from typing import Any, Dict
+
 import streamlit as st
+
 from src.utils.storage_metrics import calculate_storage_usage
 
 STORAGE_LIMIT_GB = 10.0
@@ -51,7 +53,9 @@ def render_storage_quota_progress(limit_gb: float = 10.0) -> Dict[str, Any]:
 
     st.markdown("### 💾 Storage Quota Gauge")
     st.progress(percent)
-    caption_text = f"Storage Used: {total_gb:.1f} GB / {limit_gb:.1f} GB ({percent_display}%)"
+    caption_text = (
+        f"Storage Used: {total_gb:.1f} GB / {limit_gb:.1f} GB ({percent_display}%)"
+    )
     st.caption(caption_text)
 
     return {

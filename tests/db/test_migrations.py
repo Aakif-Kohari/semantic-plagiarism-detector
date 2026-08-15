@@ -4,11 +4,19 @@ import sqlite3
 
 import pytest
 
-from src.db.migrations import (AUTH_SCHEMA_VERSION, CORPUS_SCHEMA_VERSION,
-                               column_exists, get_user_version, index_exists,
-                               migrate_auth_database, migrate_corpus_database,
-                               rollback_migration,
-                               run_migrations, table_exists, check_table_exists)
+from src.db.migrations import (
+    AUTH_SCHEMA_VERSION,
+    CORPUS_SCHEMA_VERSION,
+    check_table_exists,
+    column_exists,
+    get_user_version,
+    index_exists,
+    migrate_auth_database,
+    migrate_corpus_database,
+    rollback_migration,
+    run_migrations,
+    table_exists,
+)
 
 
 def connect(path) -> sqlite3.Connection:
@@ -34,6 +42,7 @@ def test_fresh_corpus_database_reaches_latest_version(tmp_path):
         assert index_exists(connection, "idx_incidents_status")
         assert index_exists(connection, "idx_documents_created_at")
         assert index_exists(connection, "idx_incidents_severity_time")
+
 
 def test_fresh_auth_database_reaches_latest_version(tmp_path):
     with connect(tmp_path / "fresh-users.db") as connection:
@@ -68,18 +77,15 @@ def test_old_corpus_database_migrates_without_data_loss(tmp_path):
     path = tmp_path / "old-corpus.db"
 
     with connect(path) as connection:
-        connection.execute(
-            """
+        connection.execute("""
             CREATE TABLE documents (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 filename TEXT UNIQUE NOT NULL,
                 file_hash TEXT UNIQUE NOT NULL,
                 upload_date TEXT NOT NULL
             )
-            """
-        )
-        connection.execute(
-            """
+            """)
+        connection.execute("""
             CREATE TABLE chunks (
                 vector_id INTEGER PRIMARY KEY,
                 filename TEXT NOT NULL,
@@ -90,8 +96,7 @@ def test_old_corpus_database_migrates_without_data_loss(tmp_path):
                     REFERENCES documents(filename)
                     ON DELETE CASCADE
             )
-            """
-        )
+            """)
         connection.execute(
             """
             INSERT INTO documents (
@@ -113,13 +118,11 @@ def test_old_corpus_database_migrates_without_data_loss(tmp_path):
 
         migrate_corpus_database(connection)
 
-        row = connection.execute(
-            """
+        row = connection.execute("""
             SELECT filename, file_hash, class_section,
                    student_name, assignment_title
             FROM documents
-            """
-        ).fetchone()
+            """).fetchone()
         assert row == (
             "legacy.pdf",
             "legacy-hash",
@@ -137,16 +140,14 @@ def test_old_auth_database_migrates_without_data_loss(tmp_path):
     path = tmp_path / "old-users.db"
 
     with connect(path) as connection:
-        connection.execute(
-            """
+        connection.execute("""
             CREATE TABLE users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE NOT NULL,
                 password TEXT NOT NULL,
                 role TEXT NOT NULL DEFAULT 'teacher'
             )
-            """
-        )
+            """)
         connection.execute(
             """
             INSERT INTO users (username, password, role)
@@ -182,24 +183,20 @@ def test_old_auth_database_migrates_without_data_loss(tmp_path):
 def test_migrations_are_idempotent(tmp_path):
     with connect(tmp_path / "idempotent.db") as connection:
         first = migrate_corpus_database(connection)
-        first_schema = connection.execute(
-            """
+        first_schema = connection.execute("""
             SELECT type, name, sql
             FROM sqlite_master
             WHERE name NOT LIKE 'sqlite_%'
             ORDER BY type, name
-            """
-        ).fetchall()
+            """).fetchall()
 
         second = migrate_corpus_database(connection)
-        second_schema = connection.execute(
-            """
+        second_schema = connection.execute("""
             SELECT type, name, sql
             FROM sqlite_master
             WHERE name NOT LIKE 'sqlite_%'
             ORDER BY type, name
-            """
-        ).fetchall()
+            """).fetchall()
 
         assert first == second == CORPUS_SCHEMA_VERSION
         assert first_schema == second_schema
@@ -313,8 +310,7 @@ def test_corpus_migration_logs_info_message(tmp_path, caplog):
             migrate_corpus_database(connection)
 
         assert any(
-            "completed successfully" in record.message
-            for record in caplog.records
+            "completed successfully" in record.message for record in caplog.records
         ), f"Expected migration log message not found in: {[r.message for r in caplog.records]}"
 
 
@@ -327,8 +323,7 @@ def test_auth_migration_logs_info_message(tmp_path, caplog):
             migrate_auth_database(connection)
 
         assert any(
-            "completed successfully" in record.message
-            for record in caplog.records
+            "completed successfully" in record.message for record in caplog.records
         ), f"Expected migration log message not found in: {[r.message for r in caplog.records]}"
 
 
@@ -358,8 +353,7 @@ def test_no_log_when_already_at_target_version(tmp_path, caplog):
 
         assert result == 1
         assert not any(
-            "completed successfully" in record.message
-            for record in caplog.records
+            "completed successfully" in record.message for record in caplog.records
         ), "Should not log when no migration was performed"
     finally:
         connection.close()
@@ -387,11 +381,43 @@ def test_migration_duration_logging(tmp_path, caplog):
         ), f"Expected duration log message not found in: {[r.message for r in caplog.records]}"
     finally:
         connection.close()
+
+
 def test_migration_013_adds_incident_severity_index(tmp_path):
     with connect(tmp_path / "severity-idx-corpus.db") as connection:
         migrate_corpus_database(connection)
 
         assert index_exists(connection, "idx_incidents_severity_time")
+
+
+def test_migration_005_signature_uses_connection_param_name():
+    """migration_005_add_false_positives previously took a param literally
+    named ``cursor`` despite calling .execute() on it like a connection —
+    inconsistent with every other migration in the module and misleading
+    for type safety / readability. It must be named and typed the same
+    way as the rest: ``connection: sqlite3.Connection``."""
+    import inspect
+
+    from src.db.migrations.corpus import migration_005_add_false_positives
+
+    sig = inspect.signature(migration_005_add_false_positives)
+    params = list(sig.parameters.values())
+
+    assert len(params) == 1
+    assert params[0].name == "connection"
+    # `from __future__ import annotations` makes annotations strings at
+    # runtime rather than resolved types, so compare against both forms.
+    assert params[0].annotation in (sqlite3.Connection, "sqlite3.Connection")
+
+
+def test_migration_005_still_creates_false_positives_table(tmp_path):
+    """Behavioral regression check accompanying the parameter rename."""
+    with connect(tmp_path / "false-positives-corpus.db") as connection:
+        migrate_corpus_database(connection)
+
+        assert table_exists(connection, "false_positives")
+        for col in ("document_a", "document_b", "date_dismissed"):
+            assert column_exists(connection, "false_positives", col)
 
 
 def test_check_table_exists():
@@ -439,7 +465,9 @@ def test_rollback_migration_restores_schema_and_version(tmp_path):
         assert table_exists(connection, "widgets")
         assert table_exists(connection, "sprockets")
 
-        result = rollback_migration(connection, 1, down_migrations=_TEST_DOWN_MIGRATIONS)
+        result = rollback_migration(
+            connection, 1, down_migrations=_TEST_DOWN_MIGRATIONS
+        )
 
         assert result == 1
         assert get_user_version(connection) == 1
@@ -452,7 +480,9 @@ def test_rollback_migration_to_zero_undoes_everything(tmp_path):
     with connect(tmp_path / "rollback-full.db") as connection:
         run_migrations(connection, migrations=_TEST_UP_MIGRATIONS, target_version=2)
 
-        result = rollback_migration(connection, 0, down_migrations=_TEST_DOWN_MIGRATIONS)
+        result = rollback_migration(
+            connection, 0, down_migrations=_TEST_DOWN_MIGRATIONS
+        )
 
         assert result == 0
         assert get_user_version(connection) == 0
@@ -465,7 +495,9 @@ def test_rollback_migration_is_noop_when_already_at_target(tmp_path):
     with connect(tmp_path / "rollback-noop.db") as connection:
         run_migrations(connection, migrations=_TEST_UP_MIGRATIONS, target_version=1)
 
-        result = rollback_migration(connection, 1, down_migrations=_TEST_DOWN_MIGRATIONS)
+        result = rollback_migration(
+            connection, 1, down_migrations=_TEST_DOWN_MIGRATIONS
+        )
 
         assert result == 1
         assert get_user_version(connection) == 1
@@ -504,6 +536,7 @@ def test_rollback_migration_is_atomic_on_failure(tmp_path):
     """If a down-migration raises partway through, the whole rollback is
     reverted (schema and PRAGMA user_version both stay at the pre-rollback
     state), matching run_migrations' atomicity guarantee."""
+
     def _failing_down_v2(connection: sqlite3.Connection) -> None:
         connection.execute("DROP TABLE sprockets")
         raise RuntimeError("simulated failure mid-rollback")
@@ -520,7 +553,6 @@ def test_rollback_migration_is_atomic_on_failure(tmp_path):
         assert get_user_version(connection) == 2
         assert table_exists(connection, "sprockets")
         assert table_exists(connection, "widgets")
-
 
 
 # ---------------------------------------------------------------------------
@@ -555,7 +587,8 @@ def test_issue_1770_migration_duration_logging_exact_format(tmp_path, caplog):
 
         # Find the duration log record.
         duration_records = [
-            r for r in caplog.records
+            r
+            for r in caplog.records
             if "executed in" in r.message and "seconds" in r.message
         ]
         assert len(duration_records) >= 1, (
@@ -602,7 +635,8 @@ def test_issue_1770_migration_duration_logging_multiple_migrations(tmp_path, cap
             )
 
         duration_records = [
-            r for r in caplog.records
+            r
+            for r in caplog.records
             if "executed in" in r.message and "Migration [" in r.message
         ]
         assert len(duration_records) == 3, (
@@ -628,6 +662,7 @@ def test_issue_1770_migration_duration_uses_perf_counter(tmp_path):
     to the less-precise ``time.time()``.
     """
     import inspect
+
     from src.db.migrations.common import run_migrations
 
     source = inspect.getsource(run_migrations)
@@ -684,17 +719,18 @@ def test_issue_1770_migration_duration_logs_fallback_name_for_lambda(tmp_path, c
         with caplog.at_level(logging.INFO, logger="src.db.migrations.common"):
             run_migrations(
                 connection,
-                migrations={1: lambda conn: conn.execute("CREATE TABLE issue_1770_lambda (id INTEGER)")},
+                migrations={
+                    1: lambda conn: conn.execute(
+                        "CREATE TABLE issue_1770_lambda (id INTEGER)"
+                    )
+                },
                 target_version=1,
             )
 
         # A lambda's __name__ is '<lambda>', so the getattr fallback
         # will actually return '<lambda>'. Either way, the log should
         # contain the word 'executed in'.
-        duration_records = [
-            r for r in caplog.records
-            if "executed in" in r.message
-        ]
+        duration_records = [r for r in caplog.records if "executed in" in r.message]
         assert len(duration_records) >= 1
     finally:
         connection.close()
@@ -737,7 +773,8 @@ def test_issue_1770_rollback_duration_logging(tmp_path, caplog):
             )
 
         rollback_duration_records = [
-            r for r in caplog.records
+            r
+            for r in caplog.records
             if "Rollback migration" in r.message and "executed in" in r.message
         ]
         assert len(rollback_duration_records) >= 1, (
@@ -752,5 +789,3 @@ def test_issue_1770_rollback_duration_logging(tmp_path, caplog):
         ), f"Rollback log does not match required format: {record.message!r}"
     finally:
         connection.close()
-
-

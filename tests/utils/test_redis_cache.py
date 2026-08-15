@@ -4,24 +4,25 @@ test_redis_cache.py
 Unit tests for Redis cache functionality.
 """
 
+from unittest.mock import Mock, patch
+
 import numpy as np
 import pytest
-from unittest.mock import Mock, patch
+import redis
 
 from src.utils.redis_cache import (
     CacheKeyPrefix,
     RedisCache,
+    RedisError,
     cache_analysis_results,
     cache_faiss_index,
     cache_session_state,
     clear_session,
     get_analysis_results,
-    RedisError,
     get_cache,
     get_faiss_index,
     get_session_state,
 )
-import redis
 
 
 class TestRedisCache:
@@ -42,6 +43,7 @@ class TestRedisCache:
         cache._client = mock_redis_client
 
         yield cache
+
     def test_cache_set_get(self, cache_with_mock, mock_redis_client):
         """Test basic set and get operations."""
         import pickle
@@ -113,7 +115,9 @@ class TestRedisCache:
 
         result = clear_session(session_id)
         assert result is True
-        mock_redis_client.keys.assert_called_once_with(f"{CacheKeyPrefix.SESSION.value}:{session_id}:*")
+        mock_redis_client.keys.assert_called_once_with(
+            f"{CacheKeyPrefix.SESSION.value}:{session_id}:*"
+        )
 
     def test_faiss_index_caching(self, cache_with_mock, mock_redis_client):
         """Test FAISS index caching."""
@@ -142,7 +146,9 @@ class TestRedisCache:
         get_analysis_results(analysis_key)
         mock_redis_client.get.assert_called_once_with(expected_key)
 
-    def test_document_query_cache_key_uniqueness(self, cache_with_mock, mock_redis_client):
+    def test_document_query_cache_key_uniqueness(
+        self, cache_with_mock, mock_redis_client
+    ):
         """Test that different document queries with similar hash prefixes generate unique cache keys."""
         import hashlib
 
@@ -175,8 +181,14 @@ class TestRedisCache:
         key2_called = call_args_list[1][0][0]
 
         assert key1_called != key2_called
-        assert key1_called == f"{CacheKeyPrefix.LEGACY_ANALYSIS_PREFIX.value}{simulated_hash1}"
-        assert key2_called == f"{CacheKeyPrefix.LEGACY_ANALYSIS_PREFIX.value}{simulated_hash2}"
+        assert (
+            key1_called
+            == f"{CacheKeyPrefix.LEGACY_ANALYSIS_PREFIX.value}{simulated_hash1}"
+        )
+        assert (
+            key2_called
+            == f"{CacheKeyPrefix.LEGACY_ANALYSIS_PREFIX.value}{simulated_hash2}"
+        )
 
     # ------------------------------------------------------------------
     # Issue #531 – hash-prefix boundary / collision tests
@@ -217,9 +229,9 @@ class TestRedisCache:
         full_hash_b = hashlib.sha256(query_b.encode("utf-8")).hexdigest()
 
         # The two queries must produce genuinely different full digests.
-        assert full_hash_a != full_hash_b, (
-            "Test pre-condition failed: the two queries must hash differently."
-        )
+        assert (
+            full_hash_a != full_hash_b
+        ), "Test pre-condition failed: the two queries must hash differently."
 
         # ── Truncation boundary: graft a shared 12-char prefix ──────────────
         # Simulate a caller that truncates to 12 chars – if those 12 chars
@@ -228,9 +240,9 @@ class TestRedisCache:
         truncated_key_a = shared_prefix  # 12-char key – "unique" part lost
         truncated_key_b = shared_prefix  # same!
 
-        assert truncated_key_a == truncated_key_b, (
-            "Test pre-condition: truncated keys must be equal to model collision."
-        )
+        assert (
+            truncated_key_a == truncated_key_b
+        ), "Test pre-condition: truncated keys must be equal to model collision."
 
         # ── Case 1: truncated keys DO collide ────────────────────────────────
         mock_redis_client.reset_mock()
@@ -241,9 +253,9 @@ class TestRedisCache:
         assert mock_redis_client.setex.call_count == 2
         colliding_key_a = mock_redis_client.setex.call_args_list[0][0][0]
         colliding_key_b = mock_redis_client.setex.call_args_list[1][0][0]
-        assert colliding_key_a == colliding_key_b, (
-            "Truncated keys should collide, demonstrating the risky pattern."
-        )
+        assert (
+            colliding_key_a == colliding_key_b
+        ), "Truncated keys should collide, demonstrating the risky pattern."
 
         # ── Case 2: full-digest keys do NOT collide ──────────────────────────
         mock_redis_client.reset_mock()
@@ -255,11 +267,15 @@ class TestRedisCache:
         safe_key_b = mock_redis_client.setex.call_args_list[1][0][0]
 
         # Full-digest keys must be unique – no collision.
-        assert safe_key_a != safe_key_b, (
-            "Full-digest keys must be distinct for different queries."
+        assert (
+            safe_key_a != safe_key_b
+        ), "Full-digest keys must be distinct for different queries."
+        assert (
+            safe_key_a == f"{CacheKeyPrefix.LEGACY_ANALYSIS_PREFIX.value}{full_hash_a}"
         )
-        assert safe_key_a == f"{CacheKeyPrefix.LEGACY_ANALYSIS_PREFIX.value}{full_hash_a}"
-        assert safe_key_b == f"{CacheKeyPrefix.LEGACY_ANALYSIS_PREFIX.value}{full_hash_b}"
+        assert (
+            safe_key_b == f"{CacheKeyPrefix.LEGACY_ANALYSIS_PREFIX.value}{full_hash_b}"
+        )
 
     @pytest.mark.parametrize(
         "query_a, query_b",
@@ -302,9 +318,9 @@ class TestRedisCache:
         key_b = hashlib.sha256(query_b.encode("utf-8")).hexdigest()
 
         # Queries are intentionally different, so their digests must differ.
-        assert key_a != key_b, (
-            f"SHA-256 collision detected between:\n  '{query_a}'\n  '{query_b}'"
-        )
+        assert (
+            key_a != key_b
+        ), f"SHA-256 collision detected between:\n  '{query_a}'\n  '{query_b}'"
 
         mock_redis_client.reset_mock()
         cache_analysis_results(key_a, {"query": query_a})
@@ -316,9 +332,9 @@ class TestRedisCache:
         redis_key_b = mock_redis_client.setex.call_args_list[1][0][0]
 
         # Primary assertion: no collision
-        assert redis_key_a != redis_key_b, (
-            "Full-digest analysis keys must not collide for distinct queries."
-        )
+        assert (
+            redis_key_a != redis_key_b
+        ), "Full-digest analysis keys must not collide for distinct queries."
         # Secondary: keys must be well-formed with the 'analysis:' namespace
         assert redis_key_a == f"{CacheKeyPrefix.LEGACY_ANALYSIS_PREFIX.value}{key_a}"
         assert redis_key_b == f"{CacheKeyPrefix.LEGACY_ANALYSIS_PREFIX.value}{key_b}"
@@ -333,13 +349,14 @@ class TestRedisCache:
         """Test that redis:// URL (without SSL) is handled correctly."""
         test_url = "redis://localhost:6379/0"
 
-        with patch.object(redis, 'from_url') as mock_from_url:
+        with patch.object(redis, "from_url") as mock_from_url:
             mock_client = Mock()
             mock_client.ping.return_value = True
             mock_from_url.return_value = mock_client
 
             # Temporarily modify REDIS_URL
             import src.utils.redis_cache as redis_cache_module
+
             original_url = redis_cache_module.REDIS_URL
 
             try:
@@ -354,7 +371,7 @@ class TestRedisCache:
                     test_url,
                     password=None,
                     decode_responses=False,
-                    socket_connect_timeout=5
+                    socket_connect_timeout=5,
                 )
             finally:
                 redis_cache_module.REDIS_URL = original_url
@@ -363,13 +380,14 @@ class TestRedisCache:
         """Test that rediss:// URL (with SSL) is handled correctly."""
         test_url = "rediss://localhost:6380/0"
 
-        with patch.object(redis, 'from_url') as mock_from_url:
+        with patch.object(redis, "from_url") as mock_from_url:
             mock_client = Mock()
             mock_client.ping.return_value = True
             mock_from_url.return_value = mock_client
 
             # Temporarily modify REDIS_URL
             import src.utils.redis_cache as redis_cache_module
+
             original_url = redis_cache_module.REDIS_URL
 
             try:
@@ -385,7 +403,7 @@ class TestRedisCache:
                     test_url,
                     password=None,
                     decode_responses=False,
-                    socket_connect_timeout=5
+                    socket_connect_timeout=5,
                 )
             finally:
                 redis_cache_module.REDIS_URL = original_url
@@ -394,12 +412,13 @@ class TestRedisCache:
         """Test that rediss:// URL with password is handled correctly."""
         test_url = "rediss://user:password@redis.example.com:6380/1"
 
-        with patch.object(redis, 'from_url') as mock_from_url:
+        with patch.object(redis, "from_url") as mock_from_url:
             mock_client = Mock()
             mock_client.ping.return_value = True
             mock_from_url.return_value = mock_client
 
             import src.utils.redis_cache as redis_cache_module
+
             original_url = redis_cache_module.REDIS_URL
             original_password = redis_cache_module.REDIS_PASSWORD
 
@@ -415,7 +434,7 @@ class TestRedisCache:
                     test_url,
                     password=None,
                     decode_responses=False,
-                    socket_connect_timeout=5
+                    socket_connect_timeout=5,
                 )
             finally:
                 redis_cache_module.REDIS_URL = original_url
@@ -426,12 +445,13 @@ class TestRedisCache:
         # Use redis:// scheme to ensure SSL is disabled
         test_url = "redis://localhost:6379/0"
 
-        with patch.object(redis, 'from_url') as mock_from_url:
+        with patch.object(redis, "from_url") as mock_from_url:
             mock_client = Mock()
             mock_client.ping.return_value = True
             mock_from_url.return_value = mock_client
 
             import src.utils.redis_cache as redis_cache_module
+
             original_url = redis_cache_module.REDIS_URL
 
             try:
@@ -447,7 +467,9 @@ class TestRedisCache:
                 call_kwargs = mock_from_url.call_args.kwargs
                 # redis.from_url automatically sets ssl based on scheme
                 # For redis://, ssl defaults to False
-                assert 'ssl' not in call_kwargs or call_kwargs.get('ssl', False) is False
+                assert (
+                    "ssl" not in call_kwargs or call_kwargs.get("ssl", False) is False
+                )
             finally:
                 redis_cache_module.REDIS_URL = original_url
 
@@ -455,11 +477,12 @@ class TestRedisCache:
         """Test that connection failures print appropriate error messages."""
         test_url = "redis://unreachable-host:9999/0"
 
-        with patch.object(redis, 'from_url') as mock_from_url:
+        with patch.object(redis, "from_url") as mock_from_url:
             # Simulate connection failure
             mock_from_url.side_effect = redis.ConnectionError("Connection refused")
 
             import src.utils.redis_cache as redis_cache_module
+
             original_url = redis_cache_module.REDIS_URL
 
             try:
@@ -473,6 +496,7 @@ class TestRedisCache:
                 assert cache._client is None
             finally:
                 redis_cache_module.REDIS_URL = original_url
+
     def test_redis_failover_during_get(self):
         """Test graceful fallback when Redis fails during a get operation."""
         cache = RedisCache.__new__(RedisCache)
@@ -672,7 +696,11 @@ class TestRedisCache:
         mock_client = Mock()
 
         # Simulate Redis timeout
-        mock_client.get.side_effect = redis.TimeoutError("Request timed out") if hasattr(redis, 'TimeoutError') else RedisError("Timeout")
+        mock_client.get.side_effect = (
+            redis.TimeoutError("Request timed out")
+            if hasattr(redis, "TimeoutError")
+            else RedisError("Timeout")
+        )
         cache._client = mock_client
 
         # Should return None gracefully
@@ -702,6 +730,7 @@ class TestRedisCache:
         # 2. Write key & read back (should be a hit)
         cache_with_mock.set("existing_key", "hello")
         import pickle
+
         mock_redis_client.get.return_value = pickle.dumps("hello")
 
         val2 = cache_with_mock.get("existing_key")
@@ -710,6 +739,7 @@ class TestRedisCache:
         assert stats2["hits"] == 1
         assert stats2["misses"] == 1
         assert stats2["hit_ratio"] == 0.5
+
 
 class TestHitRateTracking:
     """Test hit/miss counter tracking and get_hit_rate() (Issue #714)."""
@@ -783,7 +813,7 @@ class TestHitRateTracking:
         cache_with_mock._client = None  # force fallback path
         cache_with_mock._fallback_cache["fb_key"] = ("fb_value", None)
 
-        cache_with_mock.get("fb_key")          # hit via fallback
+        cache_with_mock.get("fb_key")  # hit via fallback
         cache_with_mock.get("nonexistent_key")  # miss via fallback
 
         assert cache_with_mock.get_hit_rate() == 50.0

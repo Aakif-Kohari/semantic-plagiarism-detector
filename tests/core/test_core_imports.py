@@ -30,6 +30,16 @@ class TestCoreImports(unittest.TestCase):
                 f"Exported symbol '{symbol}' not found in src.core",
             )
 
+    def test_chunk_record_exports_distinct(self):
+        """Verify FaissChunkRecord and PipelineChunkRecord are distinctly exported from src.core."""
+        from src.core import FaissChunkRecord, PipelineChunkRecord
+        from src.core.faiss_index import ChunkRecord as FaissOriginal
+        from src.core.pipeline import ChunkRecord as PipelineOriginal
+
+        self.assertIs(FaissChunkRecord, FaissOriginal)
+        self.assertIs(PipelineChunkRecord, PipelineOriginal)
+        self.assertIsNot(FaissChunkRecord, PipelineChunkRecord)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_CHUNK_SIZE = 500
 DEFAULT_CHUNK_OVERLAP = 50
 MIN_CHUNK_SIZE = 50
+
+# Track whether we've already attempted to download the NLTK punkt corpus
+_nltk_punkt_checked = False
 
 # Regex pattern to identify sentence boundaries.
 # Matches '.', '!', or '?' followed by a space and an uppercase letter,
@@ -47,6 +50,8 @@ def _split_into_sentences(text: str) -> List[str]:
     if NLTK data is unavailable so the function works in restricted environments
     (e.g. CI containers without the punkt corpus downloaded).
     """
+    global _nltk_punkt_checked
+
     try:
         import nltk  # type: ignore
 
@@ -58,13 +63,15 @@ def _split_into_sentences(text: str) -> List[str]:
                 return sentences
         except LookupError:
             # punkt_tab / punkt corpus not downloaded – trigger download once
-            try:
-                nltk.download("punkt_tab", quiet=True)
-                from nltk.tokenize import sent_tokenize  # type: ignore
+            if not _nltk_punkt_checked:
+                _nltk_punkt_checked = True
+                try:
+                    nltk.download("punkt_tab", quiet=True)
+                    from nltk.tokenize import sent_tokenize  # type: ignore
 
-                return sent_tokenize(text)
-            except Exception:
-                pass
+                    return sent_tokenize(text)
+                except Exception:
+                    pass
     except ImportError:
         pass
 
@@ -78,6 +85,11 @@ def _split_into_sentences(text: str) -> List[str]:
 
 
 class ChunkString(str):
+    """str subclass that carries optional chunk metadata.
+
+    Warning: Metadata is lost if the string is modified via standard str operations.
+    """
+
     def __new__(cls, value, metadata=None):
         obj = super().__new__(cls, value)
         obj.metadata = metadata or {}
@@ -431,6 +443,7 @@ def chunk_text_dynamic(
     text: str,
     target_size: int = 500,
     min_overlap: int = 50,
+    max_chunks: int = 1000,
 ) -> List[str]:
     """Dynamically split text into sliding window chunks while preserving sentence boundaries.
 
@@ -447,6 +460,9 @@ def chunk_text_dynamic(
     """
     if not text or not text.strip():
         return []
+
+    if max_chunks <= 0:
+        raise ValueError("max_chunks must be greater than 0")
 
     clean_src = text.strip()
     n_total = len(clean_src)
@@ -488,6 +504,13 @@ def chunk_text_dynamic(
         chunk_content = clean_src[start:actual_end].strip()
         if chunk_content:
             chunks.append(ChunkString(chunk_content))
+
+            if len(chunks) >= max_chunks:
+                logger.warning(
+                    "Maximum chunk limit reached in chunk_text_dynamic: %d",
+                    max_chunks,
+                )
+                break
 
         if actual_end >= n_total:
             break

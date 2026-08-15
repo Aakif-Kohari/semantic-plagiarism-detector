@@ -10,6 +10,7 @@ import re
 from datetime import datetime
 from io import BytesIO
 from typing import Optional
+
 try:
     from PIL import Image, ImageDraw, ImageFont
 except ImportError:
@@ -22,8 +23,7 @@ from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
-from reportlab.platypus import (Paragraph, SimpleDocTemplate, Spacer, Table,
-                                TableStyle)
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 HEX_COLOR_PATTERN = re.compile(r"^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$")
 DEFAULT_BADGE_COLOR = "#4f46e5"
@@ -45,6 +45,7 @@ def generate_badge_svg(
     date: Optional[str] = None,
     accent_color: Optional[str] = None,
     font_family: str = "Verdana, Geneva, sans-serif",
+    font_size: int = 11,
 ) -> str:
     """
     Generates a simple SVG "Originality Verified" badge.
@@ -68,18 +69,20 @@ def generate_badge_svg(
 
     safe_name = html.escape(student_name)
     safe_date = html.escape(date)
-    
+
     safe_font = html.escape(font_family)
 
     return f"""<svg xmlns="http://www.w3.org/2000/svg" width="400" height="120" viewBox="0 0 400 120">
   <rect width="400" height="120" rx="12" fill="{safe_color}" />
-  <text x="20" y="45" font-family="{safe_font}" font-size="20" fill="#ffffff">Originality Verified</text>
-  <text x="20" y="75" font-family="{safe_font}" font-size="14" fill="#e0e7ff">Awarded to: {safe_name}</text>
-  <text x="20" y="100" font-family="{safe_font}" font-size="12" fill="#e0e7ff">Date: {safe_date}</text>
+  <text x="20" y="45" font-family="{safe_font}" font-size="{font_size}" fill="#ffffff">Originality Verified</text>
+  <text x="20" y="75" font-family="{safe_font}" font-size="{font_size}" fill="#e0e7ff">Awarded to: {safe_name}</text>
+  <text x="20" y="100" font-family="{safe_font}" font-size="{font_size}" fill="#e0e7ff">Date: {safe_date}</text>
 </svg>"""
 
 
-def generate_badge_png(    student_name: str = "Student",    date: Optional[str] = None,
+def generate_badge_png(
+    student_name: str = "Student",
+    date: Optional[str] = None,
     text_preview: str = "",
 ) -> BytesIO:
     """

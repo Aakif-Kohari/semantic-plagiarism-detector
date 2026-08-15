@@ -1,15 +1,20 @@
+"""
+Semantic Plagiarism Detector - Main Streamlit Application Entry Point.
+
+Lightweight coordinator responsible for page setup, routing, state management initialization,
+and delegating view rendering to modular components.
+"""
+
 import asyncio
+import hashlib
 import io as _io
+import json
 import logging
 import os
-import traceback
-import functools
-from pathlib import Path
 import sys
 import time
-import hashlib
-from datetime import datetime, timezone, date, timedelta
-import json
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -22,72 +27,221 @@ ROOT_DIR = FILE_PATH.parent.parent  # Points to semantic-plagiarism-detector/
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-# 2. Now import centralized session state keys safely
-from app.session_keys import SessionKeys
-
 # Silence harmless Windows asyncio Proactor connection lost bugs
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-
-import json
-
-_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
-
-# Standard / Third-party imports
-from src.utils.temp_manager import purge_expired_temp_files
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from src.security.metadata_stripper import strip_exif_metadata
-from src.utils.filename import (
-    InvalidFileExtensionError,
-    sanitize_filename,
-    unique_filename,
-    validate_document_extension,
-)
-# Add with other imports (around line 200-250)
-from app.components.report_generator import (
-    render_report_generator_ui,
-    render_scheduled_reports_ui,
-    initialize_report_generator,
-    PlagiarismReportGenerator,
-)
 # After existing imports, add:
 from app.components.advanced_analytics import (
     AdvancedTextPreprocessor,
+    ComparisonHistoryManager,
     ContextPreservingChunker,
     OptimizedBatchProcessor,
-    ComparisonHistoryManager,
     PerformanceMonitor,
-    render_processing_status_widget,
-    render_document_analysis_widget,
-    render_advanced_features_sidebar,
+    ProcessingStatus,
     initialize_advanced_features,
+    render_advanced_features_sidebar,
+    render_document_analysis_widget,
+    render_processing_status_widget,
     run_pipeline_with_tracking,
     track_comparison,
-    ProcessingStatus,
 )
-# Add with other imports (around line 200-250)
-from app.components.real_time_monitor import (
-    render_real_time_monitor,
-    initialize_monitoring,
-    MonitoringEngine,
-    HealthChecker,
+
+
+from src.core.lexical_similarity import (
+    jaccard_similarity,
+    dice_coefficient,
+    overlap_coefficient,
+    lexical_similarity_matrix,
+    calculate_lexical_similarity,
+    n_gram_overlap,
+    scale_lexical_score,
+    compute_char_ngram_similarity,
+)
+
+
+from app.components.cross_lingual_ui import (
+    render_cross_lingual_settings,
+    render_cross_lingual_ui_in_drilldown,
+    get_cross_lingual_metadata,
+    is_cross_lingual_enabled,
+    render_cross_lingual_stats,
+)
+
+
+
+# ── Document Version Control Imports ─────────────────────────────────────
+from app.components.document_version_control import (
+    render_version_control_ui,
+    initialize_version_control,
+    VersionManager,
+    ChangeTracker,
+    DocumentVersion,
+    VersionDiff,
+)
+# ── Smart Notifications Imports ──────────────────────────────────────────
+from app.components.smart_notifications import (
+    render_notification_center,
+    render_notification_stats,
+    render_notification_badge,
+    initialize_notifications,
+    NotificationManager,
+    Notification,
+    AlertRule,
+    NotificationPriority,
+    NotificationChannel,
+    NotificationStatus,
+    SmartFilter,
+    UserNotificationPreferences,
+)
+# ── Export Integration Imports ───────────────────────────────────────────
+from app.components.export_integration import (
+    render_export_center,
+    render_export_bulk,
+    initialize_export_system,
+    ExportManager,
+    ExportFormat,
+    ExportJob,
+    ExportTemplate,
+    CloudConfig,
+    CloudProvider,
+    ExportStatus,
+)
+# ── Advanced Analytics Engine Imports ────────────────────────────────────
+from app.components.advanced_analytics_engine import (
+    render_analytics_engine,
+    initialize_analytics_engine,
+    PredictiveEngine,
+    AnomalyDetector,
+    InsightGenerator,
+    RiskScorer,
+    PatternRecognizer,
+    PredictiveInsight,
+    TrendForecast,
+    RiskAssessment,
+    AnomalyDetectionResult,
+    RiskLevel,
+    InsightType,
+    ForecastPeriod,
+)
+# ── Audit Compliance Engine Imports ──────────────────────────────────────
+from app.components.audit_compliance_engine import (
+    render_audit_compliance_engine,
+    initialize_audit_compliance_engine,
+    AuditTrailManager,
+    PolicyEnforcer,
+    ComplianceReportGenerator,
+    CertificateManager,
+    AuditEvent,
+    PolicyViolation,
+    ComplianceReport,
+    ComplianceCertificate,
+    ComplianceStatus,
+    AuditSeverity,
+    PolicyType,
+    Regulation,
+)
+# ── Workflow Automation Imports ──────────────────────────────────────────
+from app.components.workflow_automation import (
+    render_workflow_automation,
+    initialize_workflow_automation,
+    WorkflowEngine,
+    Workflow,
+    WorkflowExecution,
+    Task,
+    ApprovalRequest,
+    WorkflowTemplate,
+    WorkflowStatus,
+    TaskStatus,
+    TriggerType,
+    WorkflowCategory,
+)
+# ── API Gateway Imports ──────────────────────────────────────────────────
+from app.components.api_gateway import (
+    render_api_gateway,
+    initialize_api_gateway,
+    ApiGateway,
+    ApiEndpoint,
+    ApiKey,
+    Webhook,
+    ServiceConnection,
+    ApiLog,
+    ApiMethod,
+    ApiStatus,
+    WebhookStatus,
+    ServiceType,
+)
+# ── Collaboration Hub Imports ────────────────────────────────────────────
+from app.components.collaboration_hub import (
+    render_collaboration_hub,
+    initialize_collaboration_hub,
+    CollaborationHub,
+    PlagiarismCase,
+    CaseStatus,
+    CasePriority,
+    TeamWorkspace,
+    DiscussionThread,
+    ReviewQueue,
 )
 from app.components.auto_ml_optimizer import (
-    render_auto_ml_dashboard,
-    initialize_auto_ml,
     AutoMLOptimizer,
     AutoOptimizationIntegration,
     OptimizationConfig,
     OptimizationMetrics,
-    UserFeedback,
     PatternProfile,
+    UserFeedback,
+    initialize_auto_ml,
+    render_auto_ml_dashboard,
 )
+
+# Add with other imports (around line 200-250)
+from app.components.real_time_monitor import (
+    HealthChecker,
+    MonitoringEngine,
+    initialize_monitoring,
+    render_real_time_monitor,
+)
+
+# Add with other imports (around line 200-250)
+from app.components.report_generator import (
+    PlagiarismReportGenerator,
+    initialize_report_generator,
+    render_report_generator_ui,
+    render_scheduled_reports_ui,
+)
+from src.security.metadata_stripper import strip_exif_metadata
+from src.utils.filename import (
+    InvalidFileExtensionError,
+    format_extension_badge,
+    sanitize_filename,
+    unique_filename,
+    validate_document_extension,
+)
+from app.components.smart_search import (
+    render_smart_search_ui,
+    render_search_analytics,
+    initialize_smart_search,
+    SmartSearchEngine,
+)
+# ── Enhanced Batch Processor Imports ─────────────────────────────────────
+from app.components.batch_processor_enhanced import (
+    render_batch_processor_ui,
+    render_batch_analytics,
+    render_batch_scheduler_ui,
+    initialize_batch_processor,
+    EnhancedBatchProcessor,
+    BatchScheduler,
+    BatchJob,
+    JobPriority,
+    JobStatus,
+)
+
+# ── Audit Logs View Import ──────────────────────────────────────────────
+from app.views.audit_logs import render_audit_view
 
 try:
     from streamlit_plotly_events import plotly_events  # type: ignore
@@ -99,176 +253,12 @@ from src.core.logging_config import setup_logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
-
-class ChunkRecord:
-    def __init__(self, doc_name, chunk_index, chunk_text, chunk_id=None):
-        self.doc_name = doc_name
-        self.chunk_index = chunk_index
-        self.chunk_text = chunk_text
-        self.chunk_id = chunk_id
-
-
-def run_pipeline(file_bytes_dict, ocr_language, ocr_dpi, chunk_size, chunk_overlap):
-    """Run the document parsing -> chunking -> embedding -> similarity pipeline."""
-    raw_texts = []
-    chunked_docs = []
-    embeddings = []
-    registry = []
-    ai_probabilities = []
-
-    if not file_bytes_dict:
-        empty_sim_df = pd.DataFrame(columns=["doc_a", "doc_b", "similarity"])
-        empty_chunk_df = pd.DataFrame(
-            columns=["doc_name", "chunk_index", "chunk_text", "similarity"]
-        )
-        return (
-            raw_texts,
-            chunked_docs,
-            np.empty((0, 0), dtype=float),
-            empty_sim_df,
-            empty_chunk_df,
-            None,
-            registry,
-            ai_probabilities,
-        )
-
-    for filename, file_bytes in file_bytes_dict.items():
-        try:
-            extracted_text = extract_text(
-                file_bytes,
-                filename=filename,
-                language=ocr_language,
-                dpi=ocr_dpi,
-            )
-        except Exception:
-            extracted_text = ""
-
-        if not extracted_text:
-            continue
-
-        prepared_text = prepare_text_for_embedding(extracted_text)
-        raw_texts.append(prepared_text)
-
-        text_chunks = chunk_documents(
-            [prepared_text],
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-        )
-        if not text_chunks:
-            continue
-
-        chunked_docs.extend(text_chunks)
-        chunk_vectors = embed_chunks(text_chunks)
-        if isinstance(chunk_vectors, np.ndarray):
-            embeddings.extend(chunk_vectors.tolist())
-        else:
-            embeddings.extend(chunk_vectors)
-
-        for chunk_index, chunk_text in enumerate(text_chunks):
-            registry.append(
-                ChunkRecord(
-                    doc_name=filename,
-                    chunk_index=chunk_index,
-                    chunk_text=chunk_text,
-                    chunk_id=f"{filename}:{chunk_index}",
-                )
-            )
-
-    if embeddings:
-        emb_matrix = np.asarray(embeddings, dtype=float)
-        if emb_matrix.ndim == 1:
-            emb_matrix = emb_matrix.reshape(1, -1)
-        faiss_index = build_index_from_matrix(emb_matrix)
-    else:
-        emb_matrix = np.empty((0, 0), dtype=float)
-        faiss_index = None
-
-    doc_names = [Path(name).stem for name in file_bytes_dict.keys()]
-    if len(raw_texts) > 1:
-        doc_embeddings = []
-        for text in raw_texts:
-            text_chunks = chunk_documents(
-                [text],
-                chunk_size=chunk_size,
-                chunk_overlap=chunk_overlap,
-            )
-            if not text_chunks:
-                continue
-            chunk_vectors = embed_chunks(text_chunks)
-            if isinstance(chunk_vectors, np.ndarray):
-                doc_embeddings.append(np.mean(chunk_vectors, axis=0))
-            else:
-                doc_embeddings.append(
-                    np.mean(np.asarray(chunk_vectors, dtype=float), axis=0)
-                )
-
-        if doc_embeddings:
-            doc_matrix = np.asarray(doc_embeddings, dtype=float)
-            if doc_matrix.ndim == 1:
-                doc_matrix = doc_matrix.reshape(1, -1)
-            sim_matrix = cosine_similarity(doc_matrix)
-            sim_rows = []
-            for i in range(len(doc_names)):
-                for j in range(i + 1, len(doc_names)):
-                    sim_rows.append(
-                        {
-                            "doc_a": doc_names[i],
-                            "doc_b": doc_names[j],
-                            "similarity": float(sim_matrix[i, j]),
-                        }
-                    )
-            sim_df = pd.DataFrame(sim_rows)
-        else:
-            sim_df = pd.DataFrame(columns=["doc_a", "doc_b", "similarity"])
-    else:
-        sim_df = pd.DataFrame(columns=["doc_a", "doc_b", "similarity"])
-
-    chunk_sim_df = pd.DataFrame(
-        columns=["doc_name", "chunk_index", "chunk_text", "similarity"]
-    )
-
-    return (
-        raw_texts,
-        chunked_docs,
-        emb_matrix,
-        sim_df,
-        chunk_sim_df,
-        faiss_index,
-        registry,
-        ai_probabilities,
-    )
-
-
-def ui_exception_handler(component_name: str):
-    """Decorator that catches exceptions in a UI component and shows a
-    friendly error message instead of a raw Streamlit traceback."""
-
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            try:
-                return func(*args, **kwargs)
-            except Exception:
-                logger.error(
-                    "Component '%s' failed to render:\n%s",
-                    component_name,
-                    traceback.format_exc(),
-                )
-                st.error(f"⚠️ Failed to load component: {component_name}")
-                return None
-
-        return wrapper
-
-    return decorator
-
-
 # Validate required environment variables during application startup
 REQUIRED_ENV_VARS = [
     "REDIS_URL",
     "PLAGIARISM_WEBHOOK_URL",
     "API_BEARER_TOKEN",
 ]
-
 missing_env_vars = [var for var in REQUIRED_ENV_VARS if not os.getenv(var)]
 if missing_env_vars:
     logger.warning(
@@ -277,19 +267,74 @@ if missing_env_vars:
         ", ".join(missing_env_vars),
     )
 
-# ── Project Core & Utils Imports ──────────────────────────────────────────────
+from src.db.auth import get_all_users, get_upload_count, init_db
+
+# Import DB and Core initializations
+from src.db.corpus_db import get_all_documents, get_total_document_count, init_corpus_db
+from src.db.incidents import (
+    get_all_incidents,
+    get_total_incidents_count,
+    init_incident_db,
+    sync_flagged_incidents,
+)
+from src.utils.temp_manager import purge_expired_temp_files
+
+init_corpus_db()
+init_db()
+purge_expired_temp_files()
+
+# Add after existing imports
+from app.components.enhanced_dashboard import (
+    DocumentTrendAnalyzer,
+    PlagiarismPatternAnalyzer,
+    initialize_enhanced_dashboard,
+    render_enhanced_analytics_tab,
+    render_enhanced_document_analysis,
+)
+
+# Centralized imports & backward compatibility re-exports
+from app.session_keys import SessionKeys
+from app.state_manager import (
+    TIMEOUT_LIMIT,
+    check_session_timeout,
+    get_active_sessions_count,
+    init_session_state,
+    save_preferences_callback,
+    ui_exception_handler,
+    update_global_activity,
+)
 from app.theme import (
     back_to_top_html,
     get_chart_colors,
     get_theme_name,
     inject_css,
+    render_session_status_banner,
+    render_timezone_footer,
     set_theme,
     version_check_widget_html,
-    render_timezone_footer,
-    render_session_status_banner,
 )
+
+# Extracted tab renderers (de-monolith refactor). These are called below but
+# were never imported, so every tab that uses one raised NameError at runtime.
+from app.views.audit_view import render_audit_view
+from app.views.auth_view import handle_oauth_callbacks, render_login_view
+from app.views.corpus_view import (
+    render_corpus_header,
+    render_document_management_sidebar,
+    render_sidebar,
+)
+from app.views.drilldown_view import render_drilldown_view
+from app.views.history_view import render_history_view
+from app.views.matrix_view import render_matrix_view
+from app.views.settings_view import render_settings_view
+from app.views.upload_view import render_upload_section
+from app.views.users_view import render_users_view
 from src.core.ai_detector import detect_documents_ai_probability
-from src.core.config import DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD, get_branding_config
+from src.core.config import (
+    DEFAULT_THRESHOLDS,
+    PLAGIARISM_THRESHOLD,
+    get_branding_config,
+)
 from src.core.document_parser import (
     DEFAULT_OCR_DPI,
     DEFAULT_OCR_LANGUAGE,
@@ -298,6 +343,8 @@ from src.core.document_parser import (
     prepare_text_for_embedding,
 )
 from src.core.embedding_model import embed_chunks, embed_documents
+from src.core.lexical_similarity import jaccard_similarity
+from src.core.text_chunking import chunk_documents
 from src.core.faiss_index import (
     build_index,
     build_index_from_matrix,
@@ -306,63 +353,37 @@ from src.core.faiss_index import (
     save_index,
     search_similar_chunks,
 )
+from src.core.pipeline import ChunkRecord, run_extraction_pipeline, run_pipeline
 from src.core.similarity import (
     cosine_similarity,
     document_similarity_matrix,
     flag_plagiarism,
 )
-from src.core.lexical_similarity import jaccard_similarity 
-from src.visualization.network_graph import (
-    plot_similarity_network,
-)
-from src.core.text_chunking import chunk_documents
 from src.db import (
     clear_all_data,
     delete_document,
-    get_all_documents,
     get_all_embeddings,
     get_chunk_registry,
-    get_unique_class_sections,
 )
 from src.db.auth import (
-    authenticate_user,
-    get_2fa_status,
-    get_all_users,
-    get_distinct_audit_event_types,
-    get_security_audit_log_count,
-    get_security_audit_logs,
     get_tour_completed,
-    get_upload_count,
     get_user_last_login,
-    get_user_preferences,
-    get_user_role,
-    init_db,
     is_user_active,
     set_tour_completed,
     update_user_preferences,
 )
-from src.db.incidents import (
-    init_incident_db,
-    get_all_incidents,
-    sync_flagged_incidents,
+from src.db.corpus_db import (
+    get_document_by_hash,
+    get_unique_class_sections,
 )
-from src.utils.bulk_export import create_documents_bulk_zip_archive
-from src.utils.pdf_report import highlight_pdf_matches
-from src.db.corpus_db import get_total_document_count, init_corpus_db, get_document_by_hash
 from src.i18n.translator import _SUPPORTED_LANGUAGES, get_text
+from src.utils.bulk_export import create_documents_bulk_zip_archive
+from src.utils.diff_highlighter import highlight_overlap
+from src.utils.file_parser import truncate_filename
 from src.utils.processing_time import (
     estimate_processing_seconds,
     format_processing_duration,
 )
-# Add after existing imports
-from app.components.enhanced_dashboard import (
-    render_enhanced_analytics_tab,
-    render_enhanced_document_analysis,
-    initialize_enhanced_dashboard,
-    PlagiarismPatternAnalyzer,
-    DocumentTrendAnalyzer,
-)
-from src.utils.diff_highlighter import highlight_overlap
 from src.utils.redis_cache import (
     cache_session_state,
     clear_session,
@@ -370,15 +391,15 @@ from src.utils.redis_cache import (
     get_faiss_index,
     get_session_state,
 )
-from src.utils.file_parser import truncate_filename
 from src.utils.storage_metrics import calculate_storage_usage
+from src.core.parse_durations import get_all_parse_durations, format_duration
 from src.visualization.heatmap import (
     plot_similarity_heatmap,
 )
-from src.core.config import get_branding_config
+from src.visualization.network_graph import plot_similarity_network
 
 try:
-    from src.utils.warning_list import render_warning_controls, render_copy_button
+    from src.utils.warning_list import render_copy_button, render_warning_controls
     from src.visualization.analytics import (
         plot_high_severity_trends,
         plot_most_plagiarized_documents,
@@ -428,10 +449,11 @@ init_db()
 purge_expired_temp_files()
 # Start lightweight REST API server for /healthz endpoint in background
 import threading
+
 import uvicorn
 
-from src.api.app import app as fastapi_app
 import src.core.app_config as app_config
+from src.api.app import app as fastapi_app
 
 
 def update_global_activity():
@@ -569,10 +591,10 @@ def _run_backup_daemon():
                 and idle >= timeout
                 and last_activity > last_backup_time
             ):
+                from src.db.corpus_db import get_corpus_db_path
                 from src.db.database_backup import (
                     create_corpus_database_snapshot,
                 )
-                from src.db.corpus_db import get_corpus_db_path
 
                 snapshot = create_corpus_database_snapshot()
 
@@ -620,8 +642,6 @@ SESSION_ID = st.session_state[SessionKeys.SESSION_ID]
 from src.core.app_config import FAISS_INDEX_PATH
 
 _INDEX_PATH = str(FAISS_INDEX_PATH)
-
-# Load validated branding configuration
 branding_config = get_branding_config()
 
 # -----------------------------------------------------------------------------
@@ -630,9 +650,7 @@ branding_config = get_branding_config()
 
 
 def configure_page_meta(title: str, icon: str) -> None:
-    """
-    Configure Streamlit page metadata including title, favicon, and layout.
-    """
+    """Configure Streamlit page metadata including title, favicon, and layout."""
     if not isinstance(title, str) or not title.strip():
         raise ValueError("Page title must be a non-empty string.")
     if not isinstance(icon, str) or not icon.strip():
@@ -662,31 +680,16 @@ def update_page_title(tab_name: str):
     )
 
 
-
-if SessionKeys.AUTHENTICATED not in st.session_state:
-    st.session_state[SessionKeys.AUTHENTICATED] = False
-if SessionKeys.USERNAME not in st.session_state:
-    st.session_state[SessionKeys.USERNAME] = None
-if SessionKeys.PDF_PASSWORDS not in st.session_state:
-    st.session_state[SessionKeys.PDF_PASSWORDS] = {}
-if SessionKeys.LANG not in st.session_state:
-    st.session_state[SessionKeys.LANG] = "en"
-if SessionKeys.SESSION_START_TIME not in st.session_state:
-    st.session_state[SessionKeys.SESSION_START_TIME] = time.time()
-
-if SessionKeys.MODEL_LOAD_TIME not in st.session_state:
-    from src.core.embedding_model import EmbeddingModelManager
-
-    with st.spinner("Initializing Vector Embedding Model..."):
-        _start_time = time.perf_counter()
-        EmbeddingModelManager.get_instance().get_model()
-        st.session_state[SessionKeys.MODEL_LOAD_TIME] = (
-            time.perf_counter() - _start_time
-        )
+# Configure Page Setup
+configure_page_meta(title="Semantic Plagiarism Detector - Dashboard", icon="🔍")
+SESSION_ID = init_session_state()
 
 st.markdown(back_to_top_html(), unsafe_allow_html=True)
 inject_css()
 
+# Session Timeout Check & Authentication Flow
+last_interaction = check_session_timeout(SESSION_ID)
+handle_oauth_callbacks(SESSION_ID)
 
 def save_preferences_callback():
     """Persist settings to user DB profile when modified."""
@@ -728,6 +731,11 @@ def clear_all_dialog():
             use_container_width=True,
             key="confirm_clear_all",
         ):
+            # ========== ADD THIS LINE ==========
+            from src.utils.redis_cache import clear_all_large_data
+            clear_all_large_data(SESSION_ID)
+            # ===================================
+            
             clear_all_data()
             if os.path.exists(_INDEX_PATH):
                 try:
@@ -903,96 +911,7 @@ if not st.session_state.get(SessionKeys.AUTHENTICATED, False):
 
 # Render Login UI if not authenticated
 if not st.session_state.get(SessionKeys.AUTHENTICATED, False):
-    if st.session_state.get(SessionKeys.PENDING_2FA, False):
-        with st.form("otp_form"):
-            st.subheader("🔒 Two-Factor Authentication")
-            st.info("Enter the 6-digit verification token from your authenticator app.")
-            otp_code = st.text_input(
-                "Verification Code", max_chars=6, key="login_otp_code"
-            )
-            col1, col2 = st.columns(2)
-            with col1:
-                verify_submitted = st.form_submit_button(
-                    "Verify", use_container_width=True
-                )
-            with col2:
-                cancel_submitted = st.form_submit_button(
-                    "Cancel", use_container_width=True
-                )
-
-            if verify_submitted:
-                username = st.session_state.get(SessionKeys.PENDING_USERNAME)
-                enabled, otp_secret = get_2fa_status(username)
-                if enabled and otp_secret:
-                    import pyotp  # type: ignore
-
-                    totp = pyotp.TOTP(otp_secret)
-                    if totp.verify(otp_code.strip()):
-                        role = st.session_state.get(SessionKeys.PENDING_ROLE)
-                        st.session_state[SessionKeys.AUTHENTICATED] = True
-                        st.session_state[SessionKeys.USERNAME] = username
-                        st.session_state[SessionKeys.ROLE] = role
-                        st.session_state[SessionKeys.LAST_INTERACTION] = time.time()
-
-                        cache_session_state(SESSION_ID, SessionKeys.AUTHENTICATED, True)
-                        cache_session_state(SESSION_ID, SessionKeys.USERNAME, username)
-                        cache_session_state(SESSION_ID, SessionKeys.ROLE, role)
-                        cache_session_state(
-                            SESSION_ID, SessionKeys.LAST_INTERACTION, time.time()
-                        )
-                        prefs = get_user_preferences(username)
-                        st.session_state.threshold = prefs.get(
-                            "threshold", DEFAULT_THRESHOLDS.plagiarism
-                        )
-                        st.session_state.theme = prefs.get("theme", "Light")
-                        set_theme(st.session_state.theme)
-
-                        del st.session_state[SessionKeys.PENDING_2FA]
-                        del st.session_state[SessionKeys.PENDING_USERNAME]
-                        del st.session_state[SessionKeys.PENDING_ROLE]
-
-                        st.success(f"✅ Welcome back, {username}!")
-                        st.rerun()
-                    else:
-                        st.error("🚨 Invalid verification code. Please try again.")
-                else:
-                    st.error("🚨 2FA configuration error. Please contact admin.")
-
-            if cancel_submitted:
-                del st.session_state[SessionKeys.PENDING_2FA]
-                del st.session_state[SessionKeys.PENDING_USERNAME]
-                del st.session_state[SessionKeys.PENDING_ROLE]
-                st.rerun()
-            st.stop()
-
-    st.header("🔑 Login")
-    username_input = st.text_input("Username")
-    password_input = st.text_input("Password", type="password")
-
-    if st.button("Login"):
-        if authenticate_user(username_input, password_input):
-            role = get_user_role(username_input)
-            enabled, _ = get_2fa_status(username_input)
-            if enabled:
-                st.session_state[SessionKeys.PENDING_2FA] = True
-                st.session_state[SessionKeys.PENDING_USERNAME] = username_input
-                st.session_state[SessionKeys.PENDING_ROLE] = role
-                st.rerun()
-            else:
-                st.session_state[SessionKeys.AUTHENTICATED] = True
-                st.session_state[SessionKeys.USERNAME] = username_input
-                st.session_state[SessionKeys.ROLE] = role
-                st.session_state[SessionKeys.LAST_INTERACTION] = time.time()
-                cache_session_state(SESSION_ID, SessionKeys.AUTHENTICATED, True)
-                cache_session_state(SESSION_ID, SessionKeys.USERNAME, username_input)
-                cache_session_state(SESSION_ID, SessionKeys.ROLE, role)
-                cache_session_state(
-                    SESSION_ID, SessionKeys.LAST_INTERACTION, time.time()
-                )
-                st.rerun()
-        else:
-            st.error("Invalid username or password.")
-    st.stop()
+    render_login_view(SESSION_ID)
 
 def file_uploader_callback():
     uploaded = st.session_state.get("file_uploader")
@@ -1012,10 +931,9 @@ if "staged_files_size" not in st.session_state:
 
 user_role = st.session_state.get(SessionKeys.ROLE, "user")
 
-# ── Top-right Theme Toggle ───────────────────────────────────────────────────
+# Top-right Theme Toggle
 current_theme = get_theme_name()
 _, theme_col = st.columns([0.94, 0.06])
-
 with theme_col:
     theme_icon = "☀️" if current_theme == "Dark" else "🌙"
     if st.button(theme_icon, key="theme_toggle"):
@@ -1023,6 +941,8 @@ with theme_col:
         set_theme(new_theme)
         st.rerun()
 
+# Corpus Overview Header & Quick Actions
+render_corpus_header(_INDEX_PATH)
 
 # ── Dialogs ───────────────────────────────────────────────────────────────────
 @st.dialog("⚠️ Confirm Logout")
@@ -1040,6 +960,12 @@ def logout_dialog():
             username = st.session_state.get(SessionKeys.USERNAME, "unknown")
             timestamp = datetime.now(timezone.utc).isoformat()
             logger.info("User '%s' logged out at %s", username, timestamp)
+            
+            # ========== ADD THIS LINE ==========
+            from src.utils.redis_cache import clear_all_large_data
+            clear_all_large_data(SESSION_ID)
+            # ===================================
+            
             for key in [
                 SessionKeys.AUTHENTICATED,
                 SessionKeys.USERNAME,
@@ -1125,7 +1051,7 @@ with st.sidebar:
         initialize_report_generator()
         # ── Threshold Presets (Issue #1674) ───────────────────────────────────────
         st.markdown("### 🎯 Threshold Presets")
-        
+
         # Define preset options with descriptions
         preset_options = {
             "Strict (0.80)": 0.80,
@@ -1133,7 +1059,7 @@ with st.sidebar:
             "Lenient (0.45)": 0.45,
             "Custom": None,
         }
-        
+
         # Determine current preset based on session state threshold
         current_threshold = st.session_state.get("threshold_slider", PLAGIARISM_THRESHOLD)
         current_preset = "Custom"
@@ -1141,7 +1067,7 @@ with st.sidebar:
             if value is not None and abs(current_threshold - value) < 0.001:
                 current_preset = label
                 break
-        
+
         selected_preset = st.radio(
             "Select Evaluation Standard:",
             options=list(preset_options.keys()),
@@ -1150,7 +1076,7 @@ with st.sidebar:
             horizontal=True,
             help="Choose a predefined threshold standard or use the custom slider below.",
         )
-        
+
         # Sync preset selection with slider value
         if selected_preset != "Custom" and preset_options[selected_preset] is not None:
             st.session_state["threshold_slider"] = preset_options[selected_preset]
@@ -1172,7 +1098,7 @@ with st.sidebar:
             key="threshold_slider",
             on_change=save_preferences_callback,
         )
-        
+
         # If user manually changes slider, reset preset to "Custom"
         if abs(threshold - preset_options.get(selected_preset, -1)) > 0.001:
             if st.session_state.get("threshold_preset_radio") != "Custom":
@@ -1207,17 +1133,9 @@ with st.sidebar:
             key=SessionKeys.SEMANTIC_THRESHOLD_SLIDER,
         )
 
-        # Cross-Lingual Detection Toggle (Issue #1956)
-        cross_lingual_mode = st.toggle(
-            "🌐 Cross-Lingual Detection (Beta)",
-            value=False,
-            key="cross_lingual_mode_toggle",
-            help=(
-                "Enable back-translation to detect translated plagiarism. "
-                "Chunks in foreign languages will be translated to English "
-                "before similarity matching. May increase processing time."
-            ),
-        )
+        # Cross-Lingual Detection Settings
+        from app.components.cross_lingual_ui import render_cross_lingual_settings
+        cross_lingual_mode = render_cross_lingual_settings()
 
         use_chunk_matrix = st.checkbox(
             "Use chunk-level similarity matrix",
@@ -1231,6 +1149,36 @@ with st.sidebar:
             value=5,
             key=SessionKeys.FAISS_TOP_K_SLIDER,
         )
+
+
+        use_chunk_matrix = st.checkbox(
+            "Use chunk-level similarity matrix",
+            value=False,
+            key=SessionKeys.CHUNK_MATRIX_CHECKBOX,
+        )
+        faiss_top_k = st.slider(
+            "FAISS: matches per chunk",
+            1,
+            20,
+            value=5,
+            key=SessionKeys.FAISS_TOP_K_SLIDER,
+        )
+
+        # ========== ADD THIS ==========
+        # Cross-Lingual Detection Toggle (Issue #1956)
+        cross_lingual_mode = st.toggle(
+            "🌐 Cross-Lingual Detection (Beta)",
+            value=False,
+            key="cross_lingual_mode_toggle",
+            help=(
+                "Enable back-translation to detect translated plagiarism. "
+                "Chunks in foreign languages will be translated to English "
+                "before similarity matching. May increase processing time."
+            ),
+        )
+        # ==============================
+
+
         from app.components.faiss_results import render_faiss_metric_badge
         render_faiss_metric_badge(st.session_state.get("faiss_index", None))
 
@@ -1299,54 +1247,21 @@ with st.sidebar:
     render_api_quota_gauge()
 
 
-unique_classes = get_unique_class_sections()
-selected_classes = st.multiselect(
-    "Select Class/Section(s)",
-    unique_classes,
-    default=unique_classes,
-    key=SessionKeys.CLASS_FILTER_SELECTBOX,
-)
-if not selected_classes:
-    selected_classes = unique_classes
-    if st.button(
-        "🔄 Reset All Filters", key="reset_all_filters_button", use_container_width=True
-    ):
-        keys_to_reset = [
-            SessionKeys.THRESHOLD_SLIDER,
-            SessionKeys.LEXICAL_THRESHOLD_SLIDER,
-            SessionKeys.SEMANTIC_THRESHOLD_SLIDER,
-            SessionKeys.CHUNK_MATRIX_CHECKBOX,
-            SessionKeys.FAISS_TOP_K_SLIDER,
-            SessionKeys.CHUNK_SIZE_SLIDER,
-            SessionKeys.CHUNK_OVERLAP_SLIDER,
-            SessionKeys.OCR_LANGUAGE_SELECTOR,
-            SessionKeys.OCR_DPI_SLIDER,
-            SessionKeys.CLASS_FILTER_SELECTBOX,
-            "heatmap_mask_threshold",
-            "heatmap_show_percentages",
-            "heatmap_dim_diagonal",
-            "heatmap_tab_class_filter",
-        ]
-        for key in keys_to_reset:
-            if key in st.session_state:
-                del st.session_state[key]
-        if "threshold" in st.query_params:
-            del st.query_params["threshold"]
-        st.success("✅ Filters reset to defaults!")
-        st.rerun()
-
-    # Keyboard shortcuts
-    with st.expander("⌨️ Keyboard Shortcuts"):
-        st.caption("• **R**: Rerun app")
-        st.caption("• **C**: Clear cache")
-        st.caption("• **Tab**: Navigate focus")
-
-    # Model load time
-    if SessionKeys.MODEL_LOAD_TIME in st.session_state:
-        st.divider()
-        st.caption(
-            f"⚡ Vector Model Loaded in {st.session_state[SessionKeys.MODEL_LOAD_TIME]:.2f} seconds"
-        )
+    unique_classes = get_unique_class_sections()
+    selected_classes = st.multiselect(
+        "Select Class/Section(s)",
+        unique_classes,
+        default=unique_classes,
+        key=SessionKeys.CLASS_FILTER_SELECTBOX,
+    )
+    # The local `faiss_index` is not built until further down this script, so
+    # read the cached handle from session state instead of referencing a name
+    # that does not exist yet. render_sidebar() applies the same fallback.
+    lang_code = render_sidebar(
+        user_role,
+        str(ROOT_DIR),
+        st.session_state.get("faiss_index"),
+    )
 
     # ── System Health Widget (Issue #1246) ──────────────────────────────────────
     with st.expander("🖥️ System Health & Memory", expanded=False):
@@ -1355,7 +1270,7 @@ if not selected_classes:
             process = psutil.Process(os.getpid())
             mem_info = process.memory_info()
             rss_mb = mem_info.rss / (1024 * 1024)
-            
+
             host_limit_mb = 2048.0
             try:
                 from src.core.app_config import get_host_memory_limit_mb
@@ -1394,7 +1309,7 @@ if not selected_classes:
             st.markdown("**🗄️ Database Status**")
 
             try:
-                from src.core.app_config import CORPUS_DB_PATH, AUTH_DB_PATH
+                from src.core.app_config import AUTH_DB_PATH, CORPUS_DB_PATH
 
                 corpus_db_exists = CORPUS_DB_PATH.exists()
                 if corpus_db_exists:
@@ -1450,21 +1365,15 @@ if not selected_classes:
 # ── Main UI ───────────────────────────────────────────────────────────────────
 st.title("🔍 Semantic Plagiarism Detection System")
 
-# ── Live Scan Statistics Metrics Header (#1508) ───────────────────────────────
+# Live Scan Statistics Metrics Header (#1508)
 try:
-    from src.db.auth import get_upload_count
-    from src.db.corpus_db import get_total_document_count
-    from src.db.incidents import get_all_incidents, get_total_incidents_count
-
     total_scans = get_upload_count()
     corpus_size = get_total_document_count()
     flagged_incidents = get_total_incidents_count()
 
     _incidents = get_all_incidents(limit=10000)
     if _incidents:
-        avg_sim = sum(inc.get("similarity_score", 0.0) for inc in _incidents) / len(
-            _incidents
-        )
+        avg_sim = sum(inc.get("similarity_score", 0.0) for inc in _incidents) / len(_incidents)
     else:
         avg_sim = 0.0
 except Exception as e:
@@ -1771,14 +1680,28 @@ if user_role == "admin":
         unsafe_allow_html=True,
     )
 
-    if user_role == "admin":
-        st.markdown("---")
-        st.markdown("### 💾 Storage Space Used")
-        storage_info = calculate_storage_usage()
-        st.metric(
-            label="Total Storage Used",
-            value=storage_info["formatted_total"],
-            help="Combined SQLite database + FAISS index disk usage",
+# Render Upload & Student Portal Section
+file_bytes_dict = render_upload_section(user_role, lang_code, _INDEX_PATH)
+
+# Threshold & Chunking Parameters from Session State
+threshold = st.session_state.get(SessionKeys.THRESHOLD_SLIDER, PLAGIARISM_THRESHOLD)
+use_chunk_matrix = st.session_state.get(SessionKeys.CHUNK_MATRIX_CHECKBOX, False)
+faiss_top_k = st.session_state.get(SessionKeys.FAISS_TOP_K_SLIDER, 5)
+chunk_size = st.session_state.get(SessionKeys.CHUNK_SIZE_SLIDER, 500)
+chunk_overlap = st.session_state.get(SessionKeys.CHUNK_OVERLAP_SLIDER, 50)
+ocr_language = st.session_state.get(SessionKeys.OCR_LANGUAGE_SELECTOR, "eng")
+ocr_dpi = st.session_state.get(SessionKeys.OCR_DPI_SLIDER, 250)
+
+has_enough_files = len(file_bytes_dict) >= 2
+
+if has_enough_files:
+    with st.spinner("🧠 Processing files and building embeddings…"):
+        analysis_results = run_pipeline(
+            file_bytes_dict,
+            ocr_language,
+            ocr_dpi,
+            chunk_size,
+            chunk_overlap,
         )
 
         st.markdown("---")
@@ -1819,6 +1742,7 @@ if user_role == "admin":
             st.write(f"**{len(existing_docs)}** documents in database")
 
             import pandas as pd
+
             from src.db.corpus_db import (
                 get_document_char_counts,
                 get_document_word_counts,
@@ -1837,6 +1761,7 @@ if user_role == "admin":
                 doc_rows.append(
                     {
                         "Select": False,
+                        "Format": format_extension_badge(fn),
                         "Filename": fn,
                         "Word Count": word_counts.get(fn, 0),
                         "Char Count": char_counts.get(fn, 0),
@@ -1874,6 +1799,7 @@ if user_role == "admin":
                         default=False,
                         help="Select for bulk ZIP export",
                     ),
+                    "Format": st.column_config.TextColumn("Format", disabled=True, width="small"),
                     "Filename": st.column_config.TextColumn("Filename", disabled=True),
                     "Word Count": st.column_config.NumberColumn(
                         "Word Count", format="%d words", disabled=True
@@ -1882,7 +1808,7 @@ if user_role == "admin":
                         "Char Count", format="%d chars", disabled=True
                     ),
                 },
-                disabled=["Filename", "Word Count", "Char Count"],
+                disabled=["Format", "Filename", "Word Count", "Char Count"],
                 hide_index=True,
                 key="sidebar_corpus_data_editor",
                 use_container_width=True,
@@ -1919,7 +1845,7 @@ if user_role == "admin":
                 )
                 col1, col2 = st.columns([3, 1])
                 with col1:
-                    st.text(f"📄 {fn}")
+                    st.text(f"{format_extension_badge(fn)} {fn}")
                 with col2:
                     if st.button("🗑️", key=f"del_{fn}"):
                         delete_document(fn)
@@ -1997,92 +1923,6 @@ st.title(get_text("title", lang=lang_code))
 st.markdown(get_text("subtitle", lang=lang_code))
 st.divider()
 
-if user_role != "admin":
-    st.subheader("🔎 Secure Student Search Portal")
-    st.caption(
-        "Paste a text snippet below to check its similarity against existing indexed assignments."
-    )
-    st.info(
-        "🔒 Note: Direct assignment uploads are restricted to Administrator access."
-    )
-    query_text = st.text_area(
-        "Search Query Text:",
-        placeholder="Paste document content here to search for matching plagiarism...",
-        height=200,
-    )
-
-    if st.button("🔍 Run Quick Verification", key="user_query") and query_text.strip():
-        with st.spinner("Loading index and searching..."):
-            try:
-                registry = get_chunk_registry()
-                embeddings_matrix = get_all_embeddings()
-
-                if embeddings_matrix.shape[0] == 0:
-                    st.warning("No documents are currently indexed.")
-                else:
-                    faiss_index = build_index_from_matrix(
-                        embeddings_matrix, index_type="auto"
-                    )
-                    processed_query = query_text.strip()
-                    query_vec = embed_chunks([processed_query])[0]
-                    results = search_similar_chunks(
-                        query_vec, faiss_index, registry, top_k=5, threshold=threshold
-                    )
-
-                    if not results:
-                        st.success(
-                            "✅ No significant matches found in the assignment database."
-                        )
-                    else:
-                        st.success(
-                            f"Found **{len(results)}** potentially similar passages."
-                        )
-                        doc_id_map = {}
-                        anon_counter = 1
-
-                        for record, score in results:
-                            if record.doc_name not in doc_id_map:
-                                doc_id_map[record.doc_name] = (
-                                    f"Document-{anon_counter:03d}"
-                                )
-                                anon_counter += 1
-
-                        for rank, (record, score) in enumerate(results, 1):
-                            anon_doc_name = doc_id_map[record.doc_name]
-                            color = "#ff4b4b" if score >= 0.90 else "#ffa500"
-
-                            with st.expander(
-                                f"#{rank} · {anon_doc_name} (chunk #{record.chunk_index + 1}) — {score:.1%}",
-                                expanded=(rank == 1),
-                            ):
-                                cq, cm = st.columns(2)
-                                with cq:
-                                    st.markdown("**Your query:**")
-                                    st.info(query_text.strip())
-                                with cm:
-                                    st.markdown(
-                                        f"**Matching passage in {anon_doc_name}:**"
-                                    )
-                                    st.warning(record.chunk_text)
-
-                                st.markdown(
-                                    f"<div style='background:{color};color:white;padding:8px;border-radius:4px;text-align:center;'>"
-                                    f"Similarity: {score * 100:.1f}%"
-                                    f"</div>",
-                                    unsafe_allow_html=True,
-                                )
-            except Exception as e:
-                st.error(f"Error loading index: {str(e)}")
-else:
-    cached_index_data = get_faiss_index("corpus_index")
-
-st.title("🔍 Semantic Plagiarism Detection System")
-st.markdown(
-    "Upload student PDF, DOCX, TXT, or Markdown files. Detects **semantic similarity** "
-    "using transformer embeddings + **FAISS vector search**."
-)
-st.divider()
-
 if user_role == "admin":
     initialize_advanced_features()
     cached_index_data = get_faiss_index("corpus_index")
@@ -2094,7 +1934,6 @@ if user_role == "admin":
             index_buffer = _io.BytesIO(cached_index_data)
             faiss_index = faiss.deserialize_index(faiss.read_index(index_buffer))
             registry = get_chunk_registry()
-            st.info(f"📂 Loaded FAISS index from Redis cache with {faiss_index.ntotal} vectors")
             st.info(
                 f"📂 Loaded FAISS index from Redis cache with {faiss_index.ntotal} vectors"
             )
@@ -2118,11 +1957,27 @@ if user_role == "admin":
             else:
                 st.info(f"Loaded and validated the existing FAISS index with {faiss_index.ntotal} vectors.")
 
+    from src.utils.redis_cache import store_large_data, get_large_data, clear_large_data
+
     if SessionKeys.ANALYSIS_RESULTS not in st.session_state:
-        st.session_state[SessionKeys.ANALYSIS_RESULTS] = None
-        cached_results = get_analysis_results(f"{SESSION_ID}:current")
-        if cached_results is not None:
-            st.session_state[SessionKeys.ANALYSIS_RESULTS] = cached_results
+        # Store only metadata in session state
+        cached_metadata = get_large_data(f"{SESSION_ID}:analysis_metadata")
+        if cached_metadata is not None:
+            st.session_state[SessionKeys.ANALYSIS_RESULTS] = cached_metadata
+        else:
+            st.session_state[SessionKeys.ANALYSIS_RESULTS] = {
+                "has_results": False,
+                "doc_count": 0,
+                "timestamp": time.time(),
+                "cache_key": None
+            }
+    
+    # Check if we have cached results
+    cached_results = get_large_data(f"{SESSION_ID}:analysis_results")
+    if cached_results is not None:
+        st.session_state[SessionKeys.ANALYSIS_RESULTS]["has_results"] = True
+        st.session_state[SessionKeys.ANALYSIS_RESULTS]["doc_count"] = cached_results.get("doc_count", 0)
+        st.session_state[SessionKeys.ANALYSIS_RESULTS]["cache_key"] = f"{SESSION_ID}:analysis_results"
 
     if SessionKeys.ANALYSIS_FILE_SIGNATURE not in st.session_state:
         st.session_state[SessionKeys.ANALYSIS_FILE_SIGNATURE] = None
@@ -2361,6 +2216,41 @@ if user_role == "admin":
             chunk_size,
             chunk_overlap,
         )
+        
+        # ========== ADD THIS BLOCK ==========
+        from src.utils.redis_cache import store_large_data
+        
+        # Store large results in Redis with compression
+        large_results = {
+            "chunked_docs": chunked_docs,
+            "embeddings": embeddings,
+            "sim_df": sim_df,
+            "chunk_sim_df": chunk_sim_df,
+            "faiss_index": faiss_index,
+            "registry": registry,
+            "ai_probabilities": ai_probabilities,
+            "doc_count": len(chunked_docs),
+            "timestamp": time.time()
+        }
+        
+        store_large_data(f"{SESSION_ID}:analysis_results", large_results, ttl=1800)
+        
+        # Update session state with metadata only
+        st.session_state[SessionKeys.ANALYSIS_RESULTS] = {
+            "has_results": True,
+            "doc_count": len(chunked_docs),
+            "timestamp": time.time(),
+            "cache_key": f"{SESSION_ID}:analysis_results"
+        }
+        
+        store_large_data(f"{SESSION_ID}:analysis_metadata", {
+            "has_results": True,
+            "doc_count": len(chunked_docs),
+            "timestamp": time.time(),
+            "cache_key": f"{SESSION_ID}:analysis_results"
+        }, ttl=1800)
+        # ===================================
+        
         st.session_state[SessionKeys.SCANNING] = False
         active_sim_df = chunk_sim_df if use_chunk_matrix else sim_df
         flags = flag_plagiarism(active_sim_df, threshold=threshold)
@@ -2386,8 +2276,22 @@ col2.metric("Pairs Evaluated", total_pairs)
 col3.metric("Flagged Pairs", n_flagged)
 col4.metric("FAISS Vectors", faiss_index.ntotal if faiss_index is not None else 0)
 col5.metric("🎯 Threshold", f"{threshold:.0%}")
+
+# ── Issue #1728: File Parsing Duration Summary ──────────────
+_parse_durations = get_all_parse_durations()
+if _parse_durations and raw_texts:
+    with st.expander("⏱️ File Parsing Times", expanded=False):
+        for _doc_name in doc_names:
+            _dur = _parse_durations.get(_doc_name)
+            _dur_str = format_duration(_dur)
+            if _dur_str:
+                st.markdown(
+                    f"**{_doc_name}** — Parsed in `{_dur_str}`"
+                )
+
 st.divider()
 
+# Main Application Tabs
 (
     tab_warnings,
     tab_faiss,
@@ -2420,11 +2324,11 @@ st.divider()
 # Record scan summary for historical tracking (Issue #1672)
 if flags and len(file_bytes_dict) >= 2:
     from src.db.corpus_db import record_scan_summary
-    
+
     all_sims = [f["similarity"] for f in flags]
     avg_sim = sum(all_sims) / len(all_sims) if all_sims else 0.0
     max_sim = max(all_sims) if all_sims else 0.0
-    
+
     record_scan_summary(
         document_count=len(file_bytes_dict),
         avg_similarity=avg_sim,
@@ -2433,8 +2337,7 @@ if flags and len(file_bytes_dict) >= 2:
         threshold_used=threshold,
     )
 
-
-# ══ TAB 1: WARNINGS ═══════════════════════════════════════════════════════
+# Render View Components into Tabs
 with tab_warnings:
     update_page_title("Warnings")
     st.subheader(get_text("tab_warnings", lang=lang_code))
@@ -2554,17 +2457,10 @@ with tab_faiss:
             )
             from app.components.faiss_results import render_faiss_results_ui
 
-            render_faiss_results_ui(results, faiss_query.strip(), document_pdf_bytes=globals().get("file_bytes_dict"))
-
-
-# ══ TAB 3: MATRIX ═════════════════════════════════════════════════════════
 with tab_matrix:
     update_page_title("Matrix")
-    st.subheader("📋 Similarity Matrix")
-    if active_sim_df is not None:
-        st.dataframe(active_sim_df.style.format("{:.4f}"), use_container_width=True)
+    render_matrix_view(active_sim_df)
 
-# ══ TAB 4: HEATMAP ════════════════════════════════════════════════════════
 with tab_heatmap:
     update_page_title("Heatmap")
     st.subheader("🗺️ Heatmap & Network")
@@ -2609,10 +2505,10 @@ with tab_heatmap:
     # ── Plagiarism Cluster Detection Summary (Issue #1675) ───────────────────
     if active_sim_df is not None and len(doc_names) >= 2:
         from src.core.similarity import detect_plagiarism_clusters
-        
+
         cluster_data = detect_plagiarism_clusters(active_sim_df, threshold=threshold)
         suspicious_groups = cluster_data["suspicious_groups"]
-        
+
         if suspicious_groups:
             with st.expander(
                 f"🚨 Suspicious Collusion Rings Detected ({len(suspicious_groups)})",
@@ -2622,7 +2518,7 @@ with tab_heatmap:
                     f"Found {len(suspicious_groups)} group(s) of 3+ highly similar documents. "
                     "These may indicate collusion or shared source material."
                 )
-                
+
                 for group in suspicious_groups:
                     st.markdown(f"**Cluster #{group['cluster_id']}** ({group['size']} documents):")
                     for doc in group["documents"]:
@@ -2633,15 +2529,7 @@ with tab_heatmap:
 # ══ TAB 5: PAIR DRILL-DOWN ════════════════════════════════════════════════
 with tab_drill:
     update_page_title("Drill Down")
-    st.subheader("🔬 Pair Drill-Down")
-
-    # ── Issue #1383: Cosine vs Lexical side-by-side comparison table ──
-    render_cosine_vs_lexical_comparison_table(
-        active_sim_df,
-        raw_texts,
-        semantic_threshold=SEMANTIC_HIGH_THRESHOLD,
-        lexical_threshold=LEXICAL_LOW_THRESHOLD,
-    )
+    render_drilldown_view(active_sim_df, raw_texts, flags, doc_names)
 
     st.markdown("---")
 
@@ -2713,21 +2601,22 @@ with tab_drill:
                     "sequences and detect structural reordering or synonym swapping that "
                     "standard lexical diffs miss."
                 )
-                
+
                 # Resolve chunks and embeddings for the selected document pair
                 try:
+                    import streamlit.components.v1 as components
+
                     from src.core.semantic_alignment import align_semantic_sequences
                     from src.utils.diff_renderer import render_semantic_diff_html
-                    import streamlit.components.v1 as components
-                    
+
                     # Extract chunks for the selected pair from chunked_docs
                     chunks_a = chunked_docs.get(da, [])
                     chunks_b = chunked_docs.get(db, [])
-                    
+
                     # Get embeddings for the selected pair
                     emb_a = embeddings.get(da, np.array([]))
                     emb_b = embeddings.get(db, np.array([]))
-                    
+
                     if not chunks_a or not chunks_b:
                         st.warning(
                             "Cannot generate semantic diff: chunk data is unavailable "
@@ -2741,7 +2630,7 @@ with tab_drill:
                     else:
                         # Get current theme for rendering
                         current_theme = get_theme_name()
-                        
+
                         # Compute alignment using DP on sentence embeddings
                         alignment_map = align_semantic_sequences(
                             chunks_a=chunks_a,
@@ -2749,16 +2638,16 @@ with tab_drill:
                             embeddings_a=emb_a,
                             embeddings_b=emb_b,
                         )
-                        
+
                         # Render HTML diff
                         diff_html = render_semantic_diff_html(
                             alignment_map=alignment_map,
                             theme=current_theme
                         )
-                        
+
                         # Inject into Streamlit
                         components.html(diff_html, height=600, scrolling=True)
-                        
+
                         # Export button
                         st.download_button(
                             label="⬇️ Download Diff Report (HTML)",
@@ -2776,36 +2665,39 @@ with tab_drill:
                 "Detects structural plagiarism by comparing the reference sections. "
                 "High overlap indicates students may have copied bibliographies without reading the sources."
             )
-            
+
             try:
-                from src.db.citation_db import get_shared_citations, compute_citation_jaccard
+                from src.db.citation_db import (
+                    compute_citation_jaccard,
+                    get_shared_citations,
+                )
                 from src.visualization.citation_graph import plot_citation_network
-                
+
                 jaccard_score = compute_citation_jaccard(da, db)
                 shared_cites = get_shared_citations(da, db)
-                
+
                 col1, col2 = st.columns(2)
                 with col1:
                     st.metric("Citation Jaccard Similarity", f"{jaccard_score:.1%}")
                 with col2:
                     st.metric("Shared References", len(shared_cites))
-                    
+
                 if jaccard_score > 0.80:
                     st.error(
                         f"🚨 **High Citation Overlap Detected ({jaccard_score:.1%})**: "
                         "These documents share an unusually high number of identical references."
                     )
-                    
+
                 if shared_cites:
                     current_theme = get_theme_name()
                     fig = plot_citation_network(
-                        doc_a=da, 
-                        doc_b=db, 
+                        doc_a=da,
+                        doc_b=db,
                         shared_citations=shared_cites,
                         theme_colors=get_chart_colors()
                     )
                     st.plotly_chart(fig, use_container_width=True)
-                    
+
                     with st.expander("View Shared Citations List"):
                         st.dataframe(
                             pd.DataFrame(shared_cites)[["author", "year", "title"]],
@@ -2814,7 +2706,7 @@ with tab_drill:
                         )
                 else:
                     st.info("No shared citations found between these two documents.")
-                    
+
             except Exception as cite_err:
                 st.warning(f"Bibliography analysis unavailable: {cite_err}")
 
@@ -2825,18 +2717,17 @@ with tab_compare:
     from app.components.document_comparison import render_document_comparison
     render_document_comparison()
 
-
-# ══ TAB 7: ANALYTICS ══════════════════════════════════════════════════════
 with tab_analytics:
     update_page_title("Analytics")
     st.subheader("📊 Analytics Dashboard")
-    
+
     # Get data for enhanced analytics
     history_data = []
     try:
-        from src.db.corpus_db import get_scan_history
         from datetime import datetime, timedelta
-        
+
+        from src.db.corpus_db import get_scan_history
+
         end_date = datetime.now()
         start_date = end_date - timedelta(days=30)
         history_data = get_scan_history(
@@ -2846,7 +2737,7 @@ with tab_analytics:
         )
     except Exception as e:
         logger.error(f"Failed to load history data: {e}")
-    
+
     # Render enhanced analytics
     render_enhanced_analytics_tab(
         sim_matrix=active_sim_df if active_sim_df is not None else pd.DataFrame(),
@@ -2857,559 +2748,25 @@ with tab_analytics:
 # ══ TAB 8: USERS ══════════════════════════════════════════════════════════
 with tab_users:
     update_page_title("Users")
-    st.subheader("👥 User Management")
-    users = get_all_users()
-    for u in users:
-        st.write(f"User: **{u['username']}** | Role: `{u['role']}`")
+    render_users_view()
 
 # ══ TAB 9: SETTINGS ═══════════════════════════════════════════════════════
 with tab_settings:
     update_page_title("Settings")
-    st.subheader("⚙️ System Configuration")
+    render_settings_view(user_role, lang_code, str(ROOT_DIR))
 
-    from app.components.storage_quota import render_storage_quota_progress
-    render_storage_quota_progress()
+with tab_history:
+    update_page_title("History")
+    render_history_view()
 
-    st.markdown("### 📊 Visualization")
-    st.toggle(
-        "Force Dark Mode Charts",
-        value=False,
-        key=SessionKeys.FORCE_DARK_CHARTS,
-        help="Render Plotly charts with dark styling regardless of the current Light/Dark app theme.",
-    )
-
-    if user_role == "admin":
-        st.markdown("### ⚙️ Advanced Configuration")
-
-        st.markdown("### 🧪 Seed Data")
-        if st.button(
-            "📥 Load Demo Database",
-            key="load_seed_data_button",
-            use_container_width=True,
-            help="Populate the database with sample documents for testing and demonstration.",
-        ):
-            with st.spinner("Generating seed data..."):
-                import subprocess
-                import sys
-
-                seed_script = os.path.join(ROOT_DIR, "scripts", "generate_seed_data.py")
-                result = subprocess.run(
-                    [sys.executable, seed_script],
-                    capture_output=True,
-                    text=True,
-                    timeout=120,
-                )
-                if result.returncode == 0:
-                    st.success("✅ Demo database loaded successfully!")
-                    st.cache_data.clear()
-                    st.rerun()
-                else:
-                    st.error(f"❌ Seed data generation failed:\n{result.stderr}")
-
-        st.markdown("### ⚙️ Thresholds")
-        threshold = st.slider(
-            get_text("threshold", lang=lang_code),
-            min_value=0.0,
-            max_value=1.0,
-            value=DEFAULT_THRESHOLDS.plagiarism,
-            step=0.01,
-            help=(
-                "Combined Hybrid score threshold for flagging pair plagiarism. "
-                "Calculated from Lexical (exact phrase overlap) and Semantic (meaning alignment) scores. "
-                "Recommended Default: 0.59 (59%)."
-            ),
-            key=SessionKeys.THRESHOLD_SLIDER,
-            on_change=save_preferences_callback,
-        )
-
-        lexical_threshold = st.slider(
-            "Lexical Sensitivity Threshold",
-            0.0,
-            1.0,
-            value=0.50,
-            step=0.01,
-            help=(
-                "Direct word-for-word and N-gram match threshold. "
-                "Higher values require near-identical text phrasing to trigger alerts. "
-                "Recommended Default: 0.50 (50%)."
-            ),
-            key="settings_lexical_slider",
-        )
-
-        semantic_threshold = st.slider(
-            "Semantic Sensitivity Threshold",
-            0.0,
-            1.0,
-            value=0.65,
-            step=0.01,
-            help=(
-                "Transformer embedding vector similarity threshold measuring conceptual alignment and paraphrasing. "
-                "Higher values require strong contextual similarity even if words differ. "
-                "Recommended Default: 0.65 (65%)."
-            ),
-            key="settings_semantic_slider",
-        )
-
-        ocr_language = DEFAULT_OCR_LANGUAGE
-        ocr_dpi = DEFAULT_OCR_DPI
-
-        with st.expander("🔤 OCR Settings", expanded=False):
-            st.caption(
-                "Used only for scanned or image-only PDF pages. Text-based PDFs continue to use native extraction."
-            )
-            ocr_language_labels = {
-                display_name: code
-                for code, display_name in SUPPORTED_OCR_LANGUAGES.items()
-            }
-            language_names = list(ocr_language_labels)
-            default_language_name = SUPPORTED_OCR_LANGUAGES[DEFAULT_OCR_LANGUAGE]
-
-            selected_ocr_language_name = st.selectbox(
-                "OCR Language",
-                options=language_names,
-                index=language_names.index(default_language_name),
-                key=SessionKeys.OCR_LANGUAGE_SELECTOR,
-            )
-            ocr_language = ocr_language_labels[selected_ocr_language_name]
-
-            ocr_dpi = st.slider(
-                "OCR DPI Resolution",
-                min_value=150,
-                max_value=400,
-                value=DEFAULT_OCR_DPI,
-                step=25,
-                key=SessionKeys.OCR_DPI_SLIDER,
-            )
-
-        st.markdown("### 🔑 API Settings")
-        st.caption("Active API Bearer Token for external REST API endpoints:")
-        api_bearer_token = os.getenv(
-            "API_BEARER_TOKEN", "default-token-secret-key-12345"
-        )
-        st.code(api_bearer_token, language=None)
-
-        st.markdown("### 💾 Backup")
-        from src.db.database_backup import (
-            create_corpus_database_snapshot,
-            create_password_protected_backup,
-        )
-
-        backup_password = st.text_input(
-            "🔑 Backup Password (optional)",
-            type="password",
-            help="If set, the backup file will be AES-256-encrypted.",
-            key="backup_password_input",
-        )
-        snapshot = create_corpus_database_snapshot()
-        if backup_password:
-            backup_data = create_password_protected_backup(
-                snapshot,
-                backup_password,
-            )
-            st.download_button(
-                label="⬇️ Download raw Database",
-                data=backup_data,
-                file_name="corpus_backup.zip",
-                mime="application/zip",
-                key="download_raw_corpus_database",
-            )
-        else:
-            st.download_button(
-                label="⬇️ Download raw Database",
-                data=snapshot,
-                file_name="corpus.db",
-                mime="application/vnd.sqlite3",
-                key="download_raw_corpus_database",
-            )
-
-        st.download_button(
-            label="📥 Backup Configuration (JSON)",
-            data=json.dumps(
-                {
-                    "theme": st.session_state.get("theme", "Light"),
-                    "threshold": st.session_state.get(
-                        SessionKeys.THRESHOLD_SLIDER, 0.75
-                    ),
-                    "class_filter": st.session_state.get(
-                        SessionKeys.CLASS_FILTER_SELECTBOX, ""
-                    ),
-                    "use_chunk_matrix": st.session_state.get(
-                        SessionKeys.CHUNK_MATRIX_CHECKBOX, False
-                    ),
-                    "faiss_top_k": st.session_state.get(
-                        SessionKeys.FAISS_TOP_K_SLIDER, 5
-                    ),
-                    "chunk_size": st.session_state.get(
-                        SessionKeys.CHUNK_SIZE_SLIDER, 500
-                    ),
-                    "chunk_overlap": st.session_state.get(
-                        SessionKeys.CHUNK_OVERLAP_SLIDER, 50
-                    ),
-                    "ocr_language": st.session_state.get(
-                        SessionKeys.OCR_LANGUAGE_SELECTOR, "eng"
-                    ),
-                    "ocr_dpi": st.session_state.get(SessionKeys.OCR_DPI_SLIDER, 250),
-                },
-                indent=2,
-            ),
-            file_name="plagiarism_config_backup.json",
-            mime="application/json",
-            key="backup_config_button",
-        )
-
-        st.markdown("")
-        if st.button(
-            "🔄 Reset to Factory Defaults",
-            key="reset_defaults_button",
-            use_container_width=True,
-        ):
-            keys_to_reset = [
-                "theme_selector",
-                SessionKeys.THRESHOLD_SLIDER,
-                SessionKeys.CLASS_FILTER_SELECTBOX,
-                SessionKeys.CHUNK_MATRIX_CHECKBOX,
-                SessionKeys.FAISS_TOP_K_SLIDER,
-                SessionKeys.CHUNK_SIZE_SLIDER,
-                SessionKeys.CHUNK_OVERLAP_SLIDER,
-                SessionKeys.OCR_LANGUAGE_SELECTOR,
-                SessionKeys.OCR_DPI_SLIDER,
-            ]
-            for key in keys_to_reset:
-                if key in st.session_state:
-                    del st.session_state[key]
-            if "threshold" in st.query_params:
-                del st.query_params["threshold"]
-            set_theme("Light")
-            st.success("✅ Settings reset to defaults!")
-            st.rerun()
-
-        st.markdown("")
-        if st.button(
-            "🗑️ Clear Application Cache",
-            key="clear_app_cache_button",
-            use_container_width=True,
-            type="primary",
-        ):
-            from src.utils.redis_cache import get_cache
-
-            st.cache_data.clear()
-            try:
-                cache = get_cache()
-                if cache._client:
-                    cache._client.flushdb()
-                elif hasattr(cache, "clear_pattern"):
-                    cache.clear_pattern("*")
-            except Exception:
-                pass
-            st.success("✅ Application cache cleared successfully!")
-            st.toast("✅ Session cache cleared successfully!")
-
-        st.markdown("")
-        if st.button(
-            "🔍 Ping Redis", key="ping_redis_button", use_container_width=True
-        ):
-            from src.utils.redis_cache import get_cache
-
-            connected, latency = get_cache().ping()
-            if connected:
-                st.success(f"✅ Connected ({latency} ms ping)")
-            else:
-                st.error("🚨 Disconnected")
-
-        st.markdown("### 🗄️ Database Schema Status")
-        if st.button("Check Database Schema", key="check_db_schema_btn", use_container_width=True):
-            try:
-                import sqlite3
-                from src.core.app_config import CORPUS_DB_PATH, AUTH_DB_PATH
-                from src.db.migrations.common import get_user_version
-
-                corpus_ver = 8
-                if CORPUS_DB_PATH.exists():
-                    try:
-                        with sqlite3.connect(CORPUS_DB_PATH) as conn:
-                            corpus_ver = get_user_version(conn)
-                    except Exception:
-                        pass
-
-                auth_ver = 3
-                if AUTH_DB_PATH.exists():
-                    try:
-                        with sqlite3.connect(AUTH_DB_PATH) as conn:
-                            auth_ver = get_user_version(conn)
-                    except Exception:
-                        pass
-
-                st.session_state["db_schema_status_msg"] = f"Corpus Schema: v{corpus_ver} | Auth Schema: v{auth_ver}"
-                st.toast("✅ Database schema checked successfully!")
-            except Exception as e:
-                st.error(f"❌ Failed to check schema versions: {e}")
-
-        if "db_schema_status_msg" in st.session_state:
-            st.info(st.session_state["db_schema_status_msg"])
-            
 # ══ TAB 10: SECURITY AUDIT LOGS ═════════════════════════════════════════════
 with tab_audit:
     update_page_title("Security Audit Logs")
-    st.subheader(get_text("tab_audit_logs", lang=lang_code))
-
-    if user_role != "admin":
-        st.error(
-            "🔒 Access Denied: Administrator privileges required to view security audit logs."
-        )
-    else:
-        st.markdown("### 📜 System Security Audit Trail")
-
-        # Filters section
-        filter_col1, filter_col2, filter_col3, filter_col4 = st.columns(4)
-
-        with filter_col1:
-            date_range = st.date_input(
-                "📅 Date Range Filter",
-                value=(),
-                key="audit_date_range_picker",
-                help="Filter audit log records by date range.",
-            )
-
-        start_date_str = None
-        end_date_str = None
-        if isinstance(date_range, (list, tuple)) and len(date_range) > 0:
-            if len(date_range) == 1:
-                start_date_str = date_range[0].strftime("%Y-%m-%d") + "T00:00:00Z"
-                end_date_str = date_range[0].strftime("%Y-%m-%d") + "T23:59:59Z"
-            elif len(date_range) == 2:
-                start_date_str = date_range[0].strftime("%Y-%m-%d") + "T00:00:00Z"
-                end_date_str = date_range[1].strftime("%Y-%m-%d") + "T23:59:59Z"
-
-        with filter_col2:
-            distinct_events = get_distinct_audit_event_types()
-            event_type_options = ["All Event Types"] + distinct_events
-            selected_event_type = st.selectbox(
-                "🏷️ Event Type",
-                options=event_type_options,
-                key="audit_event_type_filter",
-            )
-            event_type_filter = (
-                None
-                if selected_event_type == "All Event Types"
-                else selected_event_type
-            )
-
-        with filter_col3:
-            username_filter_input = st.text_input(
-                "👤 Filter by Username",
-                value="",
-                placeholder="Enter username...",
-                key="audit_username_filter",
-            ).strip()
-            username_filter = username_filter_input if username_filter_input else None
-
-        with filter_col4:
-            per_page = st.selectbox(
-                "📄 Rows Per Page",
-                options=[10, 25, 50, 100],
-                index=1,  # Default 25
-                key="audit_per_page_select",
-            )
-
-        # Count total matching records
-        total_records = get_security_audit_log_count(
-            username=username_filter,
-            event_type=event_type_filter,
-            start_date=start_date_str,
-            end_date=end_date_str,
-        )
-
-        total_pages = max(1, (total_records + per_page - 1) // per_page)
-
-        current_page = st.session_state.get(SessionKeys.AUDIT_LOG_PAGE, 1)
-        if current_page > total_pages:
-            current_page = total_pages
-            st.session_state[SessionKeys.AUDIT_LOG_PAGE] = current_page
-        if current_page < 1:
-            current_page = 1
-            st.session_state[SessionKeys.AUDIT_LOG_PAGE] = current_page
-
-        offset = (current_page - 1) * per_page
-
-        # Fetch records for current page
-        logs = get_security_audit_logs(
-            username=username_filter,
-            event_type=event_type_filter,
-            start_date=start_date_str,
-            end_date=end_date_str,
-            limit=per_page,
-            offset=offset,
-        )
-
-        # Summary Metrics
-        m1, m2, m3 = st.columns(3)
-        m1.metric("📋 Total Log Entries", total_records)
-        m2.metric("🏷️ Active Filter", selected_event_type)
-        m3.metric("📑 Page", f"{current_page} / {total_pages}")
-
-        st.divider()
-
-        # Display Data Table
-        if logs:
-            df = pd.DataFrame(logs)
-            display_df = df[
-                ["id", "timestamp", "event_type", "username", "details"]
-            ].rename(
-                columns={
-                    "id": "ID",
-                    "timestamp": "Timestamp (UTC)",
-                    "event_type": "Event Type",
-                    "username": "Username",
-                    "details": "Details / Payload",
-                }
-            )
-
-            st.dataframe(
-                display_df,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "ID": st.column_config.NumberColumn("ID", width="small"),
-                    "Timestamp (UTC)": st.column_config.TextColumn(
-                        "Timestamp (UTC)", width="medium"
-                    ),
-                    "Event Type": st.column_config.TextColumn(
-                        "Event Type", width="medium"
-                    ),
-                    "Username": st.column_config.TextColumn("Username", width="medium"),
-                    "Details / Payload": st.column_config.TextColumn(
-                        "Details / Payload", width="large"
-                    ),
-                },
-            )
-
-            # Pagination Controls
-            nav_col1, nav_col2, nav_col3, nav_col4 = st.columns([1, 2, 2, 1])
-            with nav_col1:
-                if st.button(
-                    "← Previous",
-                    disabled=(current_page <= 1),
-                    key="audit_prev_page",
-                ):
-                    st.session_state[SessionKeys.AUDIT_LOG_PAGE] = current_page - 1
-                    st.rerun()
-
-            with nav_col2:
-                end_range = min(offset + per_page, total_records)
-                start_range = offset + 1 if total_records > 0 else 0
-                st.caption(
-                    f"Showing {start_range} - {end_range} of {total_records} logs"
-                )
-
-            with nav_col3:
-                page_select = st.number_input(
-                    "Go to Page",
-                    min_value=1,
-                    max_value=total_pages,
-                    value=current_page,
-                    step=1,
-                    key="audit_page_num_input",
-                )
-                if page_select != current_page:
-                    st.session_state[SessionKeys.AUDIT_LOG_PAGE] = page_select
-                    st.rerun()
-
-            with nav_col4:
-                if st.button(
-                    "Next →",
-                    disabled=(current_page >= total_pages),
-                    key="audit_next_page",
-                ):
-                    st.session_state[SessionKeys.AUDIT_LOG_PAGE] = current_page + 1
-                    st.rerun()
-
-            st.divider()
-
-            # CSV Export Functionality
-            export_all_logs = get_security_audit_logs(
-                username=username_filter,
-                event_type=event_type_filter,
-                start_date=start_date_str,
-                end_date=end_date_str,
-                limit=10000,
-                offset=0,
-            )
-            export_df = pd.DataFrame(export_all_logs)
-            csv_bytes = export_df.to_csv(index=False).encode("utf-8")
-
-            st.download_button(
-                label="⬇️ Download Audit Logs (CSV)",
-                data=csv_bytes,
-                file_name=f"security_audit_logs_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv",
-                key="download_audit_logs_csv",
-                use_container_width=True,
-                type="primary",
-            )
-        else:
-            st.info(
-                "ℹ️ No security audit log records found matching the specified filters."
-            )
-
-# ══ TAB 11: History ══════════════════════════════════════════════════════════
-with tab_history:
-    update_page_title("History")
-    st.subheader("📊 Document Similarity History Dashboard")
-    st.caption("Monitor plagiarism patterns and similarity trends across previous scan sessions.")
+    # ========== USE THE NEW MODULE ==========
+    render_audit_view(user_role, lang_code)
     
-    from src.db.corpus_db import get_scan_history
-    from src.visualization.history_charts import plot_similarity_trend_line, plot_flagged_documents_bar
-    
-    # Date range filter
-    col1, col2 = st.columns(2)
-    with col1:
-        start_date = st.date_input(
-            "Start Date",
-            value=datetime.now() - timedelta(days=30),
-            key="history_start_date",
-        )
-    with col2:
-        end_date = st.date_input(
-            "End Date",
-            value=datetime.now(),
-            key="history_end_date",
-        )
-        
-    history_data = get_scan_history(
-        start_date=start_date.strftime("%Y-%m-%d"),
-        end_date=end_date.strftime("%Y-%m-%d"),
-        limit=100,
-    )
-    
-    if not history_data:
-        st.info("No scan history found for the selected date range. Run a scan to populate this dashboard.")
-    else:
-        # Similarity Trend Line Chart
-        trend_fig = plot_similarity_trend_line(history_data, theme_colors=get_chart_colors())
-        st.plotly_chart(trend_fig, use_container_width=True)
-        
-        st.divider()
-        
-        # Flagged Documents Bar Chart
-        bar_fig = plot_flagged_documents_bar(history_data, theme_colors=get_chart_colors())
-        st.plotly_chart(bar_fig, use_container_width=True)
-        
-        st.divider()
-        
-        # Raw Data Table
-        st.markdown("### 📋 Raw Scan History Data")
-        df_history = pd.DataFrame(history_data)
-        df_history["timestamp"] = pd.to_datetime(df_history["timestamp"]).dt.strftime("%Y-%m-%d %H:%M:%S")
-        st.dataframe(
-            df_history.style.format({
-                "avg_similarity": "{:.2%}",
-                "max_similarity": "{:.2%}",
-                "threshold_used": "{:.2%}",
-            }),
-            use_container_width=True,
-            hide_index=True,
-        )
-
+# Sidebar document management details
+render_document_management_sidebar(user_role, _INDEX_PATH, SESSION_ID, last_interaction)
 
 # ── Document Management & Bulk Export (Admin Only) ────────────────────────────
 if user_role == "admin":
@@ -3418,9 +2775,10 @@ if user_role == "admin":
     existing_docs = get_all_documents()
     if existing_docs:
         st.write(f"**{len(existing_docs)}** documents in database")
-        
+
         # Bulk selection and export logic
         import pandas as pd
+
         from src.db.corpus_db import (
             get_document_char_counts,
             get_document_word_counts,
@@ -3439,6 +2797,7 @@ if user_role == "admin":
             doc_rows.append(
                 {
                     "Select": False,
+                    "Format": format_extension_badge(fn),
                     "Filename": fn,
                     "Word Count": word_counts.get(fn, 0),
                     "Char Count": char_counts.get(fn, 0),
@@ -3446,7 +2805,7 @@ if user_role == "admin":
             )
 
         corpus_df = pd.DataFrame(doc_rows)
-        
+
         if st.session_state.get("corpus_select_all_toggle", False):
             corpus_df["Select"] = True
 
@@ -3454,11 +2813,12 @@ if user_role == "admin":
             corpus_df,
             column_config={
                 "Select": st.column_config.CheckboxColumn("Select", default=False),
+                "Format": st.column_config.TextColumn("Format", disabled=True, width="small"),
                 "Filename": st.column_config.TextColumn("Filename", disabled=True),
                 "Word Count": st.column_config.NumberColumn("Word Count", format="%d words", disabled=True),
                 "Char Count": st.column_config.NumberColumn("Char Count", format="%d chars", disabled=True),
             },
-            disabled=["Filename", "Word Count", "Char Count"],
+            disabled=["Format", "Filename", "Word Count", "Char Count"],
             hide_index=True,
             key="sidebar_corpus_data_editor",
             use_container_width=True,
@@ -3488,7 +2848,7 @@ if user_role == "admin":
             )
             col1, col2 = st.columns([3, 1])
             with col1:
-                st.text(f"📄 {fn}")
+                st.text(f"{format_extension_badge(fn)} {fn}")
             with col2:
                 if st.button("🗑️", key=f"del_{fn}"):
                     delete_document(fn)
@@ -3569,7 +2929,7 @@ with _footer_col1:
         "🐛 Report Bug / Feedback"
     )
     render_session_status_banner()
-    
+
     # Logout button placed in footer for easy access
     if st.button("🚪 Log Out", use_container_width=True, key="logout_button_footer"):
         logout_dialog()
@@ -3585,3 +2945,127 @@ with _footer_col2:
         )
     else:
         st.caption("✅ Up to date")
+
+
+# ─── End of file ──────────────────────────────────────────────────────────────
+
+# ── Hybrid Similarity (Lexical + Semantic) ─────────────────────────────────────
+
+def compute_hybrid_similarity_matrix(
+    semantic_df: pd.DataFrame,
+    lexical_df: pd.DataFrame,
+    alpha: float = 0.7,
+) -> pd.DataFrame:
+    """
+    Compute hybrid similarity matrix combining semantic and lexical scores.
+    
+    Formula: hybrid = alpha * semantic + (1 - alpha) * lexical
+    
+    Args:
+        semantic_df: Semantic similarity matrix (from embeddings)
+        lexical_df: Lexical similarity matrix (from text)
+        alpha: Weight for semantic similarity (0.7 = 70% semantic, 30% lexical)
+        
+    Returns:
+        Hybrid similarity DataFrame
+    """
+    if semantic_df.shape != lexical_df.shape:
+        raise ValueError("Semantic and lexical matrices must have same shape")
+    
+    hybrid = alpha * semantic_df + (1 - alpha) * lexical_df
+    return hybrid
+
+
+def compute_hybrid_similarity_score(
+    text_a: str,
+    text_b: str,
+    semantic_score: float,
+    alpha: float = 0.7,
+    lexical_method: str = 'tfidf'
+) -> float:
+    """
+    Compute hybrid similarity for a single pair.
+    
+    Args:
+        text_a: First text
+        text_b: Second text
+        semantic_score: Semantic similarity score
+        alpha: Weight for semantic similarity
+        lexical_method: Lexical method to use ('tfidf', 'jaccard', 'dice', 'overlap', 'ngram')
+        
+    Returns:
+        Hybrid similarity score
+    """
+    from src.core.lexical_similarity import (
+        calculate_lexical_similarity,
+        jaccard_similarity,
+        dice_coefficient,
+        overlap_coefficient,
+        n_gram_overlap,
+        compute_char_ngram_similarity
+    )
+    
+    if lexical_method == 'tfidf':
+        lexical_score = calculate_lexical_similarity(text_a, text_b)
+    elif lexical_method == 'jaccard':
+        lexical_score = jaccard_similarity(text_a, text_b)
+    elif lexical_method == 'dice':
+        lexical_score = dice_coefficient(text_a, text_b)
+    elif lexical_method == 'overlap':
+        lexical_score = overlap_coefficient(text_a, text_b)
+    elif lexical_method == 'ngram':
+        lexical_score = n_gram_overlap(text_a, text_b, n=3)
+    elif lexical_method == 'char_ngram':
+        lexical_score = compute_char_ngram_similarity(text_a, text_b, n=5)
+    else:
+        lexical_score = calculate_lexical_similarity(text_a, text_b)
+    
+    hybrid_score = alpha * semantic_score + (1 - alpha) * lexical_score
+    return min(1.0, max(0.0, hybrid_score))
+
+
+def get_hybrid_similarity_stats(
+    semantic_scores: List[float],  # noqa: F821
+    lexical_scores: List[float],  # noqa: F821
+    alpha: float = 0.7
+) -> Dict[str, Any]:  # noqa: F821
+    """
+    Get statistics about hybrid similarity distribution.
+    
+    Args:
+        semantic_scores: List of semantic scores
+        lexical_scores: List of lexical scores
+        alpha: Weight for semantic similarity
+        
+    Returns:
+        Dictionary with statistics
+    """
+    if not semantic_scores or not lexical_scores:
+        return {
+            'semantic_avg': 0.0,
+            'lexical_avg': 0.0,
+            'hybrid_avg': 0.0,
+            'hybrid_min': 0.0,
+            'hybrid_max': 0.0,
+            'semantic_lexical_correlation': 0.0,
+            'alpha_used': alpha
+        }
+    
+    hybrid_scores = [
+        alpha * sem + (1 - alpha) * lex
+        for sem, lex in zip(semantic_scores, lexical_scores)
+    ]
+    
+    return {
+        'semantic_avg': sum(semantic_scores) / len(semantic_scores),
+        'lexical_avg': sum(lexical_scores) / len(lexical_scores),
+        'hybrid_avg': sum(hybrid_scores) / len(hybrid_scores),
+        'hybrid_min': min(hybrid_scores),
+        'hybrid_max': max(hybrid_scores),
+        'semantic_lexical_correlation': np.corrcoef(semantic_scores, lexical_scores)[0, 1] 
+            if len(semantic_scores) > 1 else 0.0,
+        'alpha_used': alpha
+    }
+
+
+# ─── End of file ──────────────────────────────────────────────────────────────

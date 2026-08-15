@@ -7,13 +7,13 @@ Features modular, inline-CSS styled HTML template generation for maximum email c
 
 import logging
 import os
+import re
 import smtplib
 from datetime import datetime, timedelta, timezone
+from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-
 from typing import Any, Callable, Dict, List, Optional
-import re
 
 from dotenv import load_dotenv
 
@@ -235,7 +235,9 @@ def format_daily_summary(
     Legacy wrapper for backward compatibility.
     Delegates to the new build_email_html_body function.
     """
-    return build_email_html_body(incidents_data=incidents, total_scans=0, footer_note=footer_note)
+    return build_email_html_body(
+        incidents_data=incidents, total_scans=0, footer_note=footer_note
+    )
 
 
 def send_email(
@@ -243,8 +245,10 @@ def send_email(
     subject: str,
     html_body: str,
     status_callback: Optional[Callable[[bool, str], None]] = None,
+    attachment_filename: str = "daily_plagiarism_summary.csv",
     timeout: float = 10.0,
     reply_to: Optional[str] = None,
+
 ) -> bool:
     """
     Send an email using SMTP.
@@ -272,7 +276,7 @@ def send_email(
         if status_callback:
             status_callback(False, msg)
         return False
-    
+
     if not to_emails:
         msg = "No recipients configured for daily summary email."
         logger.warning(msg)
@@ -299,20 +303,37 @@ def send_email(
 
         html_part = MIMEText(html_body, "html")
         msg_obj.attach(html_part)
+        attachment = MIMEApplication(b"", _subtype="csv")
+        attachment.add_header(
+          "Content-Disposition",
+          "attachment",
+          filename=attachment_filename,
+      )
+        msg_obj.attach(attachment)
 
         if smtp_port == 465:
-            logger.debug("Using SMTP_SSL (implicit SSL) on port %d with timeout %.1fs", smtp_port, timeout)
+            logger.debug(
+                "Using SMTP_SSL (implicit SSL) on port %d with timeout %.1fs",
+                smtp_port,
+                timeout,
+            )
             with smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=timeout) as server:
                 server.login(smtp_username, smtp_password)
                 server.send_message(msg_obj)
         else:
-            logger.debug("Using SMTP with STARTTLS on port %d with timeout %.1fs", smtp_port, timeout)
+            logger.debug(
+                "Using SMTP with STARTTLS on port %d with timeout %.1fs",
+                smtp_port,
+                timeout,
+            )
             with smtplib.SMTP(smtp_server, smtp_port, timeout=timeout) as server:
                 server.starttls()
                 server.login(smtp_username, smtp_password)
                 server.send_message(msg_obj)
 
-        success_msg = f"Daily summary email sent successfully to {len(to_emails)} recipients."
+        success_msg = (
+            f"Daily summary email sent successfully to {len(to_emails)} recipients."
+        )
         logger.info(success_msg)
         if status_callback:
             status_callback(True, success_msg)
@@ -352,11 +373,21 @@ def send_daily_summary(
     admin_emails = get_admin_emails()
     logger.info(f"Sending to {len(admin_emails)} admin recipients")
 
-    html_body = build_email_html_body(incidents_data=incidents, total_scans=100, footer_note=footer_note)
+    html_body = build_email_html_body(
+        incidents_data=incidents, total_scans=100, footer_note=footer_note
+    )
 
     prefix = f"{subject_prefix} " if subject_prefix else ""
-    subject = f"{prefix}Daily Plagiarism Summary - {datetime.now().strftime('%Y-%m-%d')}"
-    success = send_email(admin_emails, subject, html_body, status_callback=status_callback, reply_to=reply_to)
+    subject = (
+        f"{prefix}Daily Plagiarism Summary - {datetime.now().strftime('%Y-%m-%d')}"
+    )
+    success = send_email(
+        admin_emails,
+        subject,
+        html_body,
+        status_callback=status_callback,
+        reply_to=reply_to,
+    )
 
     return success
 
@@ -364,4 +395,3 @@ def send_daily_summary(
 if __name__ == "__main__":
     success = send_daily_summary()
     exit(0 if success else 1)
-    

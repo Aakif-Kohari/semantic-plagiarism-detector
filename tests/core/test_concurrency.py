@@ -5,12 +5,12 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from src.core.concurrency import (ConcurrencyTimeoutError, FAISSLock,
-                                  faiss_write_lock)
+from src.core.concurrency import ConcurrencyTimeoutError, FAISSLock, faiss_write_lock
 
 # ---------------------------------------------------------------------------
 # Test Locking Mechanics
 # ---------------------------------------------------------------------------
+
 
 def test_faiss_lock_acquisition_and_release(tmp_path):
     """
@@ -26,6 +26,7 @@ def test_faiss_lock_acquisition_and_release(tmp_path):
     # Release
     lock.release()
     assert not os.path.exists(lock_file)
+
 
 def test_faiss_lock_timeout(tmp_path):
     """
@@ -46,6 +47,7 @@ def test_faiss_lock_timeout(tmp_path):
 
     assert time.time() - start_time >= 1.0
 
+
 def test_faiss_write_lock_context_manager(tmp_path):
     """
     Test the context manager properly acquires and automatically releases.
@@ -57,9 +59,11 @@ def test_faiss_write_lock_context_manager(tmp_path):
 
     assert not os.path.exists(lock_file)
 
+
 # ---------------------------------------------------------------------------
 # Test Concurrent Threading
 # ---------------------------------------------------------------------------
+
 
 def mock_rebuild_task(lock_file: str, shared_resource: list, thread_id: int):
     """
@@ -70,12 +74,13 @@ def mock_rebuild_task(lock_file: str, shared_resource: list, thread_id: int):
     try:
         with faiss_write_lock(lock_path=lock_file, timeout=10):
             # Critical section
-            time.sleep(0.05) # Simulate IO
+            time.sleep(0.05)  # Simulate IO
             shared_resource.append(thread_id)
             # If not thread-safe, multiple threads will append at the same index
             # or cause race conditions.
     except ConcurrencyTimeoutError:
-        shared_resource.append(-1) # Timeout failure
+        shared_resource.append(-1)  # Timeout failure
+
 
 def test_concurrent_faiss_rebuild_sequencing(tmp_path):
     """
@@ -90,7 +95,9 @@ def test_concurrent_faiss_rebuild_sequencing(tmp_path):
     with ThreadPoolExecutor(max_workers=num_threads) as executor:
         futures = []
         for i in range(num_threads):
-            futures.append(executor.submit(mock_rebuild_task, lock_file, shared_resource, i))
+            futures.append(
+                executor.submit(mock_rebuild_task, lock_file, shared_resource, i)
+            )
 
         # Wait for all to finish
         for f in futures:
@@ -98,8 +105,10 @@ def test_concurrent_faiss_rebuild_sequencing(tmp_path):
 
     # Verification
     assert len(shared_resource) == num_threads
-    assert -1 not in shared_resource # No timeouts occurred
-    assert sorted(shared_resource) == list(range(num_threads)) # All threads executed sequentially
+    assert -1 not in shared_resource  # No timeouts occurred
+    assert sorted(shared_resource) == list(
+        range(num_threads)
+    )  # All threads executed sequentially
 
 
 def test_thread_pool_handles_1000_concurrent_tasks(tmp_path):
@@ -132,22 +141,50 @@ def test_thread_pool_handles_1000_concurrent_tasks(tmp_path):
         list(executor.map(task, range(num_tasks)))
 
     assert not errors, f"Fatal exception(s) raised: {errors}"
-    assert len(results) == num_tasks, (
-        f"Expected {num_tasks} results, got {len(results)}"
-    )
+    assert (
+        len(results) == num_tasks
+    ), f"Expected {num_tasks} results, got {len(results)}"
 
 
 def test_faiss_lock_configurable_timeout(mocker):
-    mocker.patch('src.core.app_config.get_lock_timeout', return_value=15)
+    mocker.patch("src.core.app_config.get_lock_timeout", return_value=15)
     from src.core.concurrency import FAISSLock
+
     lock = FAISSLock()
     assert lock.timeout == 15
 
+
 def test_faiss_write_lock_context_configurable_timeout(mocker):
-    mocker.patch('src.core.app_config.get_lock_timeout', return_value=45)
+    mocker.patch("src.core.app_config.get_lock_timeout", return_value=45)
+    mock_lock = mocker.patch("src.core.concurrency.FAISSLock")
+
     from src.core.concurrency import faiss_write_lock
-    with mocker.patch('src.core.concurrency.FAISSLock') as mock_lock:
-        mock_lock.return_value.acquire.return_value = None
-        with faiss_write_lock():
-            pass
-        mock_lock.assert_called_with(lock_file='corpus.index.lock', timeout=45)
+
+    with faiss_write_lock():
+        pass
+    mock_lock.assert_called_with(lock_file="corpus.index.lock", timeout=None)
+
+
+def test_faiss_lock_acquire_sleep_jitter(tmp_path, mocker):
+    """
+    Test that FAISSLock.acquire() uses randomized jitter in sleep intervals during retries.
+    """
+    lock_file = tmp_path / "test_jitter.lock"
+    fd = os.open(str(lock_file), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    os.write(fd, b"locked")
+    os.close(fd)
+
+    mock_sleep = mocker.patch("src.core.concurrency.time.sleep")
+    lock = FAISSLock(lock_file=str(lock_file), timeout=0.3)
+
+    with pytest.raises(ConcurrencyTimeoutError):
+        lock.acquire()
+
+    assert mock_sleep.call_count > 1
+    sleep_args = [call.args[0] for call in mock_sleep.call_args_list]
+
+    for val in sleep_args:
+        assert 0.1 <= val <= 0.15
+
+    assert len(set(sleep_args)) > 1
+

@@ -14,7 +14,6 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
-
 DEFAULT_TAG_COLORS = [
     "#3B82F6",  # Blue
     "#10B981",  # Emerald / Green
@@ -156,9 +155,7 @@ def build_network_data(
     visible_node_count = len(G)
     hidden_node_count = max(0, visible_node_count - max_nodes)
     if hidden_node_count:
-        original_order = {
-            name: index for index, name in enumerate(doc_names)
-        }
+        original_order = {name: index for index, name in enumerate(doc_names)}
         ranked_nodes = sorted(
             G.nodes(),
             key=lambda node: (
@@ -168,11 +165,7 @@ def build_network_data(
         )
         retained_nodes = set(ranked_nodes[:max_nodes])
         G.remove_nodes_from(
-            [
-                node
-                for node in list(G.nodes())
-                if node not in retained_nodes
-            ]
+            [node for node in list(G.nodes()) if node not in retained_nodes]
         )
         edge_similarities = {
             edge: score
@@ -610,7 +603,6 @@ def render_network_plotly(
     return fig
 
 
-
 def calculate_force_directed_layout(
     graph: nx.Graph,
     spring_k: float = 0.15,
@@ -839,8 +831,9 @@ def export_network_centrality_csv(graph: nx.Graph) -> str:
     return output.getvalue()
 
 
-import networkx as nx
 import logging
+
+import networkx as nx
 
 logger = logging.getLogger(__name__)
 
