@@ -55,9 +55,10 @@ def _generate_citation_hash(author: str, year: str, title: str) -> str:
     norm_author = _normalize_text(author)
     norm_title = _normalize_text(title)
 
-    # Fuzzy matching: Use first 50 chars of title and first author name
-    # to handle minor variations in how students copy references.
-    key = f"{norm_author[:50]}|{year}|{norm_title[:80]}"
+    # Fuzzy matching: Use first 120 chars of author and first 80 chars of title
+    # to handle minor variations in how students copy references, while avoiding
+    # collisions for co-authored papers.
+    key = f"{norm_author[:120]}|{year}|{norm_title[:80]}"
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 

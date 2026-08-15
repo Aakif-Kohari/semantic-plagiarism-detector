@@ -102,3 +102,18 @@ class TestCitationHashing:
         # Let's ensure the hashing logic is stable.
         assert isinstance(h1, str)
         assert len(h1) == 64  # SHA-256 hex length
+
+    def test_hash_coauthor_collision_prevention(self):
+        """Verify that papers with overlapping first 50 characters of author produce different hashes."""
+        author_prefix = "Smith, J., Jones, M., Brown, P., Davis, R., Wilson, T., Taylor, J., Thomas, D., "
+        author1 = author_prefix + "Anderson, K."
+        author2 = author_prefix + "Martinez, L."
+
+        assert author1[:50] == author2[:50]
+        assert author1 != author2
+
+        h1 = _generate_citation_hash(author1, "2020", "Common Title of the paper")
+        h2 = _generate_citation_hash(author2, "2020", "Common Title of the paper")
+
+        assert h1 != h2
+
