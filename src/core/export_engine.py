@@ -155,12 +155,10 @@ class LMSExportEngine:
             return None
 
         try:
-            lines = [
-                "SEMANTIC PLAGIARISM INCIDENT REPORT",
-                "=" * 38,
-                f"Total flagged pairs: {len(incidents)}",
-                "",
-            ]
+            buffer = io.StringIO()
+            buffer.write("SEMANTIC PLAGIARISM INCIDENT REPORT\n")
+            buffer.write(f"{'=' * 38}\n")
+            buffer.write(f"Total flagged pairs: {len(incidents)}\n\n")
 
             for index, row in enumerate(incidents, start=1):
                 sim_score = float(row.get("similarity", 0))
@@ -168,47 +166,34 @@ class LMSExportEngine:
                 doc_a = LMSExportEngine._safe_document_name(row.get("doc_a"))
                 doc_b = LMSExportEngine._safe_document_name(row.get("doc_b"))
 
-                lines.extend(
-                    [
-                        f"Incident #{index}",
-                        "-" * 24,
-                        f"Document A: {doc_a}",
-                        f"Document B: {doc_b}",
-                        (
-                            "Similarity: "
-                            f"{LMSExportEngine._format_similarity_percent(sim_score)} "
-                            f"({sim_score:.4f})"
-                        ),
-                        f"Severity: {severity}",
-                    ]
+                buffer.write(f"Incident #{index}\n")
+                buffer.write(f"{'-' * 24}\n")
+                buffer.write(f"Document A: {doc_a}\n")
+                buffer.write(f"Document B: {doc_b}\n")
+                buffer.write(
+                    "Similarity: "
+                    f"{LMSExportEngine._format_similarity_percent(sim_score)} "
+                    f"({sim_score:.4f})\n"
                 )
+                buffer.write(f"Severity: {severity}\n")
 
                 matched_length = row.get("matched_length")
                 if matched_length not in (None, ""):
-                    lines.append(f"Matched length: {matched_length} words")
+                    buffer.write(f"Matched length: {matched_length} words\n")
 
                 matched_text = str(
                     row.get("matched_text") or row.get("matching_text") or ""
                 ).strip()
                 if matched_text:
-                    lines.extend(
-                        [
-                            "Matching text:",
-                            matched_text,
-                        ]
-                    )
+                    buffer.write("Matching text:\n")
+                    buffer.write(f"{matched_text}\n")
 
-                lines.append("")
+                buffer.write("\n")
 
-            lines.extend(
-                [
-                    "=" * 38,
-                    "End of report",
-                    "",
-                ]
-            )
+            buffer.write(f"{'=' * 38}\n")
+            buffer.write("End of report\n\n")
 
-            report = "\n".join(lines)
+            report = buffer.getvalue()
         except OSError as exception:
             raise LMSExportEngine._wrap_generation_io_error(
                 "TXT",
