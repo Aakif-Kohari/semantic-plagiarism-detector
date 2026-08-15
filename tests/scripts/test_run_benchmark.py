@@ -29,7 +29,6 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 import run_benchmark
 
-
 # ─── Synthetic Data Generation Tests ──────────────────────────────────────────
 
 

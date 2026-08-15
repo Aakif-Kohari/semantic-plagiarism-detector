@@ -7,14 +7,15 @@ Validates that the font_scale parameter correctly multiplies base font sizes
 in Plotly figure layouts across different visualization modules.
 """
 
-import pandas as pd
-import networkx as nx
-import pytest
 from unittest.mock import MagicMock, patch
 
+import networkx as nx
+import pandas as pd
+import pytest
+
 from src.visualization.network_graph import (
-    render_network_plotly,
     plot_similarity_network,
+    render_network_plotly,
 )
 
 

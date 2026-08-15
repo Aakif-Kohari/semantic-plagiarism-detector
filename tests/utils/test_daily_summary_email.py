@@ -7,8 +7,6 @@ Tests for daily summary email functionality and HTML template generation.
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
-
-
 import pytest
 
 from src.utils.daily_summary_email import (
@@ -165,8 +163,41 @@ def test_send_email_success(mock_smtp):
     mock_server.starttls.assert_called_once()
     mock_server.login.assert_called_once_with("test@example.com", "password")
     mock_server.send_message.assert_called_once()
+@patch("smtplib.SMTP")
+@patch.dict(
+    "os.environ",
+    {
+        "SMTP_SERVER": "smtp.example.com",
+        "SMTP_PORT": "587",
+        "SMTP_USERNAME": "test@example.com",
+        "SMTP_PASSWORD": "password",
+        "FROM_EMAIL": "test@example.com",
+    },
+)
+def test_send_email_custom_attachment_filename(mock_smtp):
+    """Test custom CSV attachment filename."""
+    mock_server = MagicMock()
+    mock_smtp.return_value.__enter__.return_value = mock_server
 
+    result = send_email(
+        ["recipient@example.com"],
+        "Test Subject",
+        "<p>Test Body</p>",
+        attachment_filename="custom_report.csv",
+    )
 
+    assert result is True
+
+    message = mock_server.send_message.call_args[0][0]
+
+    attachments = [
+        part
+        for part in message.walk()
+        if part.get_content_disposition() == "attachment"
+    ]
+
+    assert len(attachments) == 1
+    assert attachments[0].get_filename() == "custom_report.csv"
 @patch.dict("os.environ", {}, clear=True)
 def test_send_email_missing_config():
     """Test email sending with missing SMTP configuration."""
@@ -222,7 +253,9 @@ def test_send_daily_summary(mock_get_incidents, mock_get_emails, mock_send_email
 @patch("src.utils.daily_summary_email.send_email")
 @patch("src.utils.daily_summary_email.get_admin_emails")
 @patch("src.utils.daily_summary_email.get_incidents_last_24h")
-def test_send_daily_summary_custom_prefix(mock_get_incidents, mock_get_emails, mock_send_email):
+def test_send_daily_summary_custom_prefix(
+    mock_get_incidents, mock_get_emails, mock_send_email
+):
     """Test the complete daily summary workflow with a custom prefix."""
     mock_get_incidents.return_value = []
     mock_get_emails.return_value = ["admin@example.com"]
@@ -360,14 +393,18 @@ class TestEmailTemplateHelpers:
     def test_build_email_html_body_with_custom_footer_note(self):
         """Test that custom footer note is included in HTML output (#1252)."""
         note = "Please complete all pending reviews before Friday 5 PM."
-        html = build_email_html_body(incidents_data=[], total_scans=10, footer_note=note)
+        html = build_email_html_body(
+            incidents_data=[], total_scans=10, footer_note=note
+        )
 
         assert "Note from Administrator:" in html
         assert note in html
 
     def test_build_email_html_body_without_custom_footer_note(self):
         """Test that footer note section is omitted when footer_note is None (#1252)."""
-        html = build_email_html_body(incidents_data=[], total_scans=10, footer_note=None)
+        html = build_email_html_body(
+            incidents_data=[], total_scans=10, footer_note=None
+        )
 
         assert "Note from Administrator:" not in html
 
@@ -417,6 +454,7 @@ class TestEmailTemplateHelpers:
         assert "background-color: #f9f9f9" in html
         assert "border-radius: 8px" in html
         assert "font-family: Arial, sans-serif" in html
+
 
 def test_send_email_invalid_recipient():
     """Test that an invalid recipient email raises ValueError."""
@@ -507,10 +545,7 @@ def test_send_email_passes_timeout_parameter():
 
         # Test passing custom timeout
         send_email(
-            ["recipient@example.com"],
-            "Test Subject",
-            "<p>Body</p>",
-            timeout=15.5
+            ["recipient@example.com"], "Test Subject", "<p>Body</p>", timeout=15.5
         )
         mock_smtp.assert_called_once_with("smtp.example.com", 587, timeout=15.5)
 
@@ -561,7 +596,7 @@ def test_send_email_with_reply_to_header(mock_smtp):
         ["recipient@example.com"],
         "Test Subject",
         "<p>Body</p>",
-        reply_to="support@example.com"
+        reply_to="support@example.com",
     )
 
     assert result is True
@@ -587,10 +622,7 @@ def test_send_email_without_reply_to_header(mock_smtp):
     mock_smtp.return_value.__enter__.return_value = mock_server
 
     result = send_email(
-        ["recipient@example.com"],
-        "Test Subject",
-        "<p>Body</p>",
-        reply_to=None
+        ["recipient@example.com"], "Test Subject", "<p>Body</p>", reply_to=None
     )
 
     assert result is True
@@ -612,7 +644,9 @@ def test_send_email_invalid_reply_to_format():
 @patch("src.utils.daily_summary_email.send_email")
 @patch("src.utils.daily_summary_email.get_admin_emails")
 @patch("src.utils.daily_summary_email.get_incidents_last_24h")
-def test_send_daily_summary_passes_reply_to(mock_get_incidents, mock_get_emails, mock_send_email):
+def test_send_daily_summary_passes_reply_to(
+    mock_get_incidents, mock_get_emails, mock_send_email
+):
     """Test that send_daily_summary forwards reply_to parameter to send_email (#1737)."""
     mock_get_incidents.return_value = []
     mock_get_emails.return_value = ["admin@example.com"]
@@ -624,4 +658,3 @@ def test_send_daily_summary_passes_reply_to(mock_get_incidents, mock_get_emails,
     mock_send_email.assert_called_once()
     _, kwargs = mock_send_email.call_args
     assert kwargs.get("reply_to") == "support@example.com"
-    

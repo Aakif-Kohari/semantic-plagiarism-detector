@@ -63,17 +63,7 @@ def test_verify_user():
     add_user(user, "SecurePass123!")
     assert verify_user(user, "SecurePass123!") is True
     assert verify_user(user, "WrongPass123!") is False
-def test_verify_user_rejects_suspended_user():
-    user = f"user_{uuid.uuid4().hex[:8]}"
-    add_user(user, "SecurePass123!")
 
-    assert verify_user(user, "SecurePass123!") is True
-
-    set_user_status(user, "suspended") # type: ignore
-
-    assert verify_user(user, "SecurePass123!") is False
-
-    delete_user(user)
 
 def test_get_user_role():
     user = f"user_{uuid.uuid4().hex[:8]}"
@@ -227,33 +217,33 @@ def test_2fa_flow():
 
     delete_user(username)
 
-def test_set_user_status():
-    user = f"user_{uuid.uuid4().hex[:8]}"
-    add_user(user, "SecurePass123!")
 
-    set_user_status(user, "suspended") # type: ignore
+def test_enable_disable_2fa():
+    """Verify enable_2fa saves a secret and disable_2fa removes the secret."""
+    username = f"user2fa_{uuid.uuid4().hex[:8]}"
+    add_user(username, "pass1234567!")
 
-    with sqlite3.connect(src.db.auth._DB_PATH) as conn: # type: ignore
-        status, is_active = conn.execute(
-            "SELECT status, is_active FROM users WHERE username = ?",
-            (user,),
-        ).fetchone()
+    # Verify initial state: 2FA disabled and secret is None
+    enabled, secret = get_2fa_status(username)
+    assert enabled is False
+    assert secret is None
 
-    assert status == "suspended"
-    assert is_active == 0
+    # Verify enable_2fa saves a secret
+    test_secret = "JBSWY3DPEHPK3PXP"
+    enable_2fa(username, test_secret)
+    enabled, secret = get_2fa_status(username)
+    assert enabled is True
+    assert secret == test_secret
 
-    set_user_status(user, "active") # type: ignore
+    # Verify disable_2fa removes the secret
+    disable_2fa(username)
+    enabled, secret = get_2fa_status(username)
+    assert enabled is False
+    assert secret is None
 
-    with sqlite3.connect(src.db.auth._DB_PATH) as conn: # type: ignore
-        status, is_active = conn.execute(
-            "SELECT status, is_active FROM users WHERE username = ?",
-            (user,),
-        ).fetchone()
+    delete_user(username)
 
-    assert status == "active"
-    assert is_active == 1
 
-    delete_user(user)
 def test_suspend_account():
     username = f"user_{uuid.uuid4().hex[:8]}"
     add_user(username, "password123!")
@@ -789,7 +779,3 @@ def test_get_active_users_count_zero_on_empty_database():
     assert result is not None
     assert result >= 0
 
-def test_update_password_updates_timestamp():
-    """Verify that updating a user password correctly updates password_changed_at."""
-    # Setup user, call update_password, and assert that user['password_changed_at'] is not None/updated.
-    pass

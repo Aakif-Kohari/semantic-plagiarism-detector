@@ -4,7 +4,6 @@ import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-
 from src.db.migrations import migrate_corpus_database
 
 
@@ -78,12 +77,10 @@ def test_concurrent_readers_and_writers_no_database_locked(tmp_path):
         for future in as_completed(futures):
             future.result()
 
-    locked_errors = [
-        e for e in errors if "database is locked" in str(e).lower()
-    ]
-    assert len(locked_errors) == 0, (
-        f"Got {len(locked_errors)} 'database is locked' errors: {locked_errors}"
-    )
+    locked_errors = [e for e in errors if "database is locked" in str(e).lower()]
+    assert (
+        len(locked_errors) == 0
+    ), f"Got {len(locked_errors)} 'database is locked' errors: {locked_errors}"
 
     with connect(db_path) as conn:
         doc_count = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
@@ -138,9 +135,7 @@ def test_concurrent_reads_only_no_database_locked(tmp_path):
         for future in as_completed(futures):
             future.result()
 
-    locked_errors = [
-        e for e in errors if "database is locked" in str(e).lower()
-    ]
-    assert len(locked_errors) == 0, (
-        f"Got {len(locked_errors)} 'database is locked' errors during read-only test"
-    )
+    locked_errors = [e for e in errors if "database is locked" in str(e).lower()]
+    assert (
+        len(locked_errors) == 0
+    ), f"Got {len(locked_errors)} 'database is locked' errors during read-only test"

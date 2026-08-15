@@ -13,27 +13,34 @@ from src.utils.google_drive import (
     list_files_in_folder,
     validate_service_account_key,
 )
+
+
 def test_extract_google_drive_folder_id_valid_id():
     valid_id = "1A2B3C4D5E6F7G8H9I0J1K2L3M4N5O6P7"
     assert len(valid_id) == 33
     assert extract_google_drive_folder_id(valid_id) == valid_id
+
 
 def test_extract_google_drive_folder_id_valid_url():
     valid_id = "1A2B3C4D5E6F7G8H9I0J1K2L3M4N5O6P7"
     url = f"https://drive.google.com/drive/folders/{valid_id}"
     assert extract_google_drive_folder_id(url) == valid_id
 
+
 def test_extract_google_drive_folder_id_valid_url_with_query():
     valid_id = "1A2B3C4D5E6F7G8H9I0J1K2L3M4N5O6P7"
     url = f"https://drive.google.com/drive/folders/{valid_id}?usp=sharing"
     assert extract_google_drive_folder_id(url) == valid_id
 
+
 def test_extract_google_drive_folder_id_malformed_url():
     url = "https://drive.google.com/drive/folders/shortid"
     assert extract_google_drive_folder_id(url) is None
 
+
 def test_extract_google_drive_folder_id_empty_string():
     assert extract_google_drive_folder_id("") is None
+
 
 def test_extract_google_drive_folder_id_random_string():
     assert extract_google_drive_folder_id("random_garbage_string_not_an_id") is None
@@ -56,15 +63,19 @@ def test_extract_folder_id_too_short_returns_none():
 
 def test_extract_folder_id_non_string_returns_none():
     assert extract_folder_id(None) is None
+
+
 def test_extract_google_drive_folder_id_unsupported_url():
     url = "https://google.com"
     assert extract_google_drive_folder_id(url) is None
+
 
 def test_extract_google_drive_folder_id_whitespace():
     valid_id = "1A2B3C4D5E6F7G8H9I0J1K2L3M4N5O6P7"
     assert extract_google_drive_folder_id(f"  {valid_id}  ") == valid_id
     url = f"  https://drive.google.com/drive/folders/{valid_id}?usp=sharing  "
     assert extract_google_drive_folder_id(url) == valid_id
+
 
 def test_extract_google_drive_folder_id_invalid_type():
     assert extract_google_drive_folder_id(None) is None
@@ -77,9 +88,7 @@ def test_extract_google_drive_folder_id_invalid_type():
 @patch("src.utils.google_drive.build")
 def test_get_drive_service_with_api_key(mock_build):
     service = get_drive_service(api_key="test-api-key")
-    mock_build.assert_called_once_with(
-        "drive", "v3", developerKey="test-api-key"
-    )
+    mock_build.assert_called_once_with("drive", "v3", developerKey="test-api-key")
     assert service == mock_build.return_value
 
 
@@ -120,16 +129,18 @@ def test_get_drive_service_no_credentials(mock_build):
 
 def _mock_service_for_list(files):
     service = Mock()
-    service.files.return_value.list.return_value.execute.return_value = {
-        "files": files
-    }
+    service.files.return_value.list.return_value.execute.return_value = {"files": files}
     return service
 
 
 def test_list_files_in_folder_returns_supported():
     files = [
         {"id": "1", "name": "report.pdf", "mimeType": "application/pdf"},
-        {"id": "2", "name": "essay.docx", "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+        {
+            "id": "2",
+            "name": "essay.docx",
+            "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        },
         {"id": "3", "name": "notes.txt", "mimeType": "text/plain"},
         {"id": "4", "name": "script.exe", "mimeType": "application/x-msdownload"},
     ]
@@ -166,8 +177,9 @@ def test_list_files_in_folder_no_supported_extensions():
 
 def test_list_files_in_folder_handles_api_error():
     service = Mock()
-    service.files.return_value.list.return_value.execute.side_effect = \
-        Exception("403 Forbidden")
+    service.files.return_value.list.return_value.execute.side_effect = Exception(
+        "403 Forbidden"
+    )
 
     with pytest.raises(Exception, match="403 Forbidden"):
         list_files_in_folder(service, "folder123")
@@ -175,8 +187,9 @@ def test_list_files_in_folder_handles_api_error():
 
 def test_list_files_in_folder_handles_not_found():
     service = Mock()
-    service.files.return_value.list.return_value.execute.side_effect = \
-        Exception("404 Not Found")
+    service.files.return_value.list.return_value.execute.side_effect = Exception(
+        "404 Not Found"
+    )
 
     with pytest.raises(Exception, match="404 Not Found"):
         list_files_in_folder(service, "folder123")
@@ -214,7 +227,9 @@ def test_download_file_bytes_calls_progress_callback(mock_downloader_cls):
     service.files.return_value.get_media.return_value = Mock()
 
     calls = []
-    download_file_bytes(service, "file123", progress_callback=lambda d, t: calls.append((d, t)))
+    download_file_bytes(
+        service, "file123", progress_callback=lambda d, t: calls.append((d, t))
+    )
 
     # One callback per chunk, plus a guaranteed final 100% callback.
     assert calls[0] == (50, 100)
@@ -378,6 +393,7 @@ def test_check_folder_access_not_accessible(mock_head):
 @patch("src.utils.google_drive.requests.head")
 def test_check_folder_access_request_exception(mock_head):
     from requests import RequestException
+
     mock_head.side_effect = RequestException("Timeout")
 
     result = check_folder_access("error-folder-id")
@@ -394,7 +410,7 @@ def test_validate_service_account_key_valid():
         "type": "service_account",
         "project_id": "my-project",
         "private_key": "some-private-key",
-        "client_email": "service-account@my-project.iam.gserviceaccount.com"
+        "client_email": "service-account@my-project.iam.gserviceaccount.com",
     }
     assert validate_service_account_key(key_dict) is True
 
@@ -415,7 +431,7 @@ def test_validate_service_account_key_empty_fields(caplog):
         "type": "service_account",
         "project_id": "",
         "private_key": "some-private-key",
-        "client_email": "service-account@my-project.iam.gserviceaccount.com"
+        "client_email": "service-account@my-project.iam.gserviceaccount.com",
     }
     with caplog.at_level("WARNING"):
         assert validate_service_account_key(key_dict) is False
@@ -427,4 +443,3 @@ def test_validate_service_account_key_invalid_type(caplog):
         assert validate_service_account_key(None) is False
         assert "Invalid key type: expected a dictionary" in caplog.text
         assert validate_service_account_key("string-key") is False
-

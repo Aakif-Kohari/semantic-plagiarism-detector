@@ -40,7 +40,9 @@ def test_scale_lexical_score_boundary_one():
     assert isinstance(res, float)
 
 
-@pytest.mark.parametrize("score", [0.0, 0.05, 0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 0.9, 0.99, 1.0])
+@pytest.mark.parametrize(
+    "score", [0.0, 0.05, 0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 0.9, 0.99, 1.0]
+)
 def test_scale_lexical_score_output_bounded_in_unit_interval(score):
     """Verify output remains strictly bounded between 0.0 and 1.0 for valid range."""
     res = scale_lexical_score(score)
@@ -146,11 +148,13 @@ def test_softmax_normalize_scores_empty():
 
 def test_scale_lexical_matrix_numpy():
     """Verify matrix normalization on 2D NumPy array."""
-    mat = np.array([
-        [1.0, 0.2, 0.8],
-        [0.2, 1.0, 0.5],
-        [0.8, 0.5, 1.0],
-    ])
+    mat = np.array(
+        [
+            [1.0, 0.2, 0.8],
+            [0.2, 1.0, 0.5],
+            [0.8, 0.5, 1.0],
+        ]
+    )
     scaled = scale_lexical_matrix(mat)
 
     assert isinstance(scaled, np.ndarray)

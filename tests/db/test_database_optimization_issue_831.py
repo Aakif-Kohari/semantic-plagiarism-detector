@@ -36,12 +36,8 @@ def test_optimize_database_reclaims_deleted_pages(tmp_path):
     assert size_after < size_before
 
     with sqlite3.connect(database_path) as connection:
-        count = connection.execute(
-            "SELECT COUNT(*) FROM payloads"
-        ).fetchone()[0]
-        integrity = connection.execute(
-            "PRAGMA integrity_check"
-        ).fetchone()[0]
+        count = connection.execute("SELECT COUNT(*) FROM payloads").fetchone()[0]
+        integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
 
     assert count == 5
     assert integrity == "ok"

@@ -13,7 +13,6 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
-
 # Add scripts directory to path
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 SCRIPTS_DIR = ROOT_DIR / "scripts"
@@ -28,7 +27,9 @@ class TestSyntheticDataGeneration:
 
     def test_generate_synthetic_sentence_length(self):
         """Verify sentence generation respects min/max word constraints."""
-        sentence = benchmark_chunking.generate_synthetic_sentence(min_words=5, max_words=5)
+        sentence = benchmark_chunking.generate_synthetic_sentence(
+            min_words=5, max_words=5
+        )
         words = sentence[:-1].split()  # Remove punctuation
         assert len(words) == 5
 
@@ -52,7 +53,7 @@ class TestBenchmarkExecution:
         """Verify benchmark calculates time, chunks, and throughput correctly."""
         mock_chunk.return_value = ["chunk1", "chunk2", "chunk3"]
         sentences = ["word " * 10] * 100  # 100 sentences
-        
+
         # Mock time.perf_counter to simulate 0.5 seconds elapsed
         with patch("benchmark_chunking.time.perf_counter", side_effect=[0.0, 0.5]):
             results = benchmark_chunking.benchmark_chunking(
@@ -60,10 +61,10 @@ class TestBenchmarkExecution:
                 chunk_sizes=[500],
                 overlap=50,
             )
-            
+
         assert 500 in results
         metrics = results[500]
-        
+
         assert metrics["time_ms"] == 500.0
         assert metrics["chunks_created"] == 3
         assert metrics["sentences_per_sec"] == 200.0  # 100 sentences / 0.5 sec
@@ -73,12 +74,12 @@ class TestBenchmarkExecution:
         """Verify benchmark tests all requested chunk sizes."""
         mock_chunk.return_value = ["chunk"]
         sentences = ["test"] * 10
-        
+
         results = benchmark_chunking.benchmark_chunking(
             sentences=sentences,
             chunk_sizes=[250, 500, 1000],
         )
-        
+
         assert set(results.keys()) == {250, 500, 1000}
         assert mock_chunk.call_count == 3
 
@@ -100,11 +101,11 @@ class TestResultsReporting:
                 "chunks_created": 25,
                 "sentences_per_sec": 800.0,
                 "chars_per_sec": 4000.0,
-            }
+            },
         }
-        
+
         benchmark_chunking.print_results_table(results)
-        
+
         captured = capsys.readouterr()
         assert "250" in captured.out
         assert "500" in captured.out
@@ -119,7 +120,7 @@ class TestCLIArguments:
         """Verify default CLI argument values."""
         with patch("sys.argv", ["benchmark_chunking.py"]):
             args = benchmark_chunking.parse_arguments()
-            
+
         assert args.num_sentences == 10000
         assert args.chunk_sizes == [250, 500, 1000]
         assert args.overlap == 50
@@ -129,15 +130,20 @@ class TestCLIArguments:
         """Verify custom CLI argument values are parsed correctly."""
         test_args = [
             "benchmark_chunking.py",
-            "--num-sentences", "5000",
-            "--chunk-sizes", "100", "200",
-            "--overlap", "20",
-            "--seed", "123",
+            "--num-sentences",
+            "5000",
+            "--chunk-sizes",
+            "100",
+            "200",
+            "--overlap",
+            "20",
+            "--seed",
+            "123",
         ]
-        
+
         with patch("sys.argv", test_args):
             args = benchmark_chunking.parse_arguments()
-            
+
         assert args.num_sentences == 5000
         assert args.chunk_sizes == [100, 200]
         assert args.overlap == 20

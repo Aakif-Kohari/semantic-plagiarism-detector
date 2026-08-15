@@ -15,7 +15,7 @@ import logging
 import sqlite3
 import threading
 from contextlib import contextmanager
-from typing import List, Dict, Set, Tuple
+from typing import Dict, List
 
 from src.db.corpus_db import _DB_PATH, FALLBACK_CORPUS_DB_PATH
 
@@ -33,7 +33,7 @@ def _pool() -> dict:
 
 
 @contextmanager
-def _connect():
+def _connect(readonly: bool = False):
     """Borrow a reusable SQLite connection."""
     import os
 
@@ -53,7 +53,8 @@ def _connect():
 
     try:
         yield conn
-        conn.commit()
+        if not readonly:
+            conn.commit()
     except Exception:
         conn.rollback()
         raise
@@ -62,8 +63,7 @@ def _connect():
 def init_citation_db() -> None:
     """Create the citation tables if they do not exist."""
     with _connect() as conn:
-        conn.execute(
-            """
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS citations (
                 hash TEXT PRIMARY KEY,
                 author TEXT,
@@ -71,10 +71,8 @@ def init_citation_db() -> None:
                 title TEXT,
                 raw_text TEXT
             )
-        """
-        )
-        conn.execute(
-            """
+        """)
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS document_citations (
                 doc_name TEXT NOT NULL,
                 citation_hash TEXT NOT NULL,
@@ -82,14 +80,11 @@ def init_citation_db() -> None:
                 PRIMARY KEY (doc_name, citation_hash),
                 FOREIGN KEY (citation_hash) REFERENCES citations(hash) ON DELETE CASCADE
             )
-        """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_doc_citations_doc 
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_doc_citations_doc
             ON document_citations(doc_name)
-        """
-        )
+        """)
     logger.info("Citation database tables initialized.")
 
 
@@ -127,14 +122,15 @@ def add_document_citations(doc_name: str, citations: List[Dict[str, str]]) -> in
 
                 # Link to document
                 try:
-                    conn.execute(
+                    cursor = conn.execute(
                         """
                         INSERT OR IGNORE INTO document_citations (doc_name, citation_hash)
                         VALUES (?, ?)
                         """,
                         (doc_name, cit["hash"]),
                     )
-                    added_count += 1
+                    if cursor.rowcount > 0:
+                        added_count += 1
                 except sqlite3.IntegrityError:
                     pass
     except Exception as exc:
@@ -161,7 +157,7 @@ def get_shared_citations(doc_a: str, doc_b: str) -> List[Dict[str, str]]:
         WHERE dc1.doc_name = ? AND dc2.doc_name = ?
     """
     try:
-        with _connect() as conn:
+        with _connect(readonly=True) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(query, (doc_a, doc_b))
             return [dict(row) for row in cursor.fetchall()]
@@ -186,7 +182,7 @@ def compute_citation_jaccard(doc_a: str, doc_b: str) -> float:
     query_b = "SELECT citation_hash FROM document_citations WHERE doc_name = ?"
 
     try:
-        with _connect() as conn:
+        with _connect(readonly=True) as conn:
             set_a = {row[0] for row in conn.execute(query_a, (doc_a,)).fetchall()}
             set_b = {row[0] for row in conn.execute(query_b, (doc_b,)).fetchall()}
 
