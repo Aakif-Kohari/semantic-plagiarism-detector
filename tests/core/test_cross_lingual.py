@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from unittest.mock import patch
 
 import numpy as np
@@ -555,24 +556,42 @@ class TestItalianPortugueseLanguageDetection:
         assert result == expected_lang
 
 
-# ── Issue #1956: Semantic Fidelity Verification Tests ─────────────────────────
+# ── Issue #1956 & #2249: Semantic Fidelity Verification Tests ─────────────────
 
 
 class TestVerifySemanticFidelity:
-    """Tests for embedding similarity verification."""
+    """Tests for embedding similarity verification (Issue #2249)."""
 
-    def test_identical_embeddings_return_one(self):
-        vec = np.array([1.0, 0.0, 0.0])
-        assert verify_semantic_fidelity(vec, vec) == pytest.approx(1.0)
-
-    def test_orthogonal_embeddings_return_zero(self):
-        vec_a = np.array([1.0, 0.0, 0.0])
-        vec_b = np.array([0.0, 1.0, 0.0])
-        assert verify_semantic_fidelity(vec_a, vec_b) == pytest.approx(0.0)
-
-    def test_empty_embeddings_return_zero(self):
-        assert verify_semantic_fidelity(np.array([]), np.array([1.0])) == 0.0
+    def test_fidelity_none_embedding(self):
+        """Test that None embeddings return 0.0."""
+        assert verify_semantic_fidelity(None, np.array([1.0, 0.0])) == 0.0
+        assert verify_semantic_fidelity(np.array([1.0, 0.0]), None) == 0.0
         assert verify_semantic_fidelity(None, None) == 0.0
+
+    def test_fidelity_empty_embedding(self):
+        """Test that empty arrays return 0.0."""
+        assert verify_semantic_fidelity(np.array([]), np.array([1.0, 0.0])) == 0.0
+        assert verify_semantic_fidelity(np.array([1.0, 0.0]), np.array([])) == 0.0
+        assert verify_semantic_fidelity(np.array([]), np.array([])) == 0.0
+
+    def test_fidelity_zero_norm(self):
+        """Test that zero-norm (all-zero) vectors return 0.0."""
+        zero_vec = np.array([0.0, 0.0])
+        valid_vec = np.array([1.0, 2.0])
+        assert verify_semantic_fidelity(zero_vec, valid_vec) == 0.0
+        assert verify_semantic_fidelity(valid_vec, zero_vec) == 0.0
+        assert verify_semantic_fidelity(zero_vec, zero_vec) == 0.0
+
+    def test_fidelity_identical_vectors(self):
+        """Test that identical vectors return 1.0 (cosine similarity = 1)."""
+        vec = np.array([1.0, 2.0, 3.0])
+        assert pytest.approx(verify_semantic_fidelity(vec, vec), rel=1e-5) == 1.0
+
+    def test_fidelity_orthogonal_vectors(self):
+        """Test that orthogonal vectors return 0.0 (cosine similarity = 0)."""
+        vec_a = np.array([1.0, 0.0])
+        vec_b = np.array([0.0, 1.0])
+        assert pytest.approx(verify_semantic_fidelity(vec_a, vec_b), rel=1e-5) == 0.0
 
 
 class TestBackTranslateChunkRealTranslation:
@@ -729,4 +748,3 @@ class TestBackTranslateChunkRealTranslation:
         assert result == "Cached translation"
         # Should not call translate_text
         mock_translate.assert_not_called()
-
