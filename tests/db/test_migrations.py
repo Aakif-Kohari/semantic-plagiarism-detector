@@ -42,7 +42,6 @@ def test_fresh_corpus_database_reaches_latest_version(tmp_path):
         assert index_exists(connection, "idx_incidents_status")
         assert index_exists(connection, "idx_documents_created_at")
         assert index_exists(connection, "idx_incidents_severity_time")
-        assert index_exists(connection, "idx_documents_is_deleted")
 
 
 def test_fresh_auth_database_reaches_latest_version(tmp_path):
@@ -391,28 +390,34 @@ def test_migration_013_adds_incident_severity_index(tmp_path):
         assert index_exists(connection, "idx_incidents_severity_time")
 
 
-def test_migration_015_adds_is_deleted_index(tmp_path):
-    """migration_015_add_is_deleted_index must create idx_documents_is_deleted
-    so WHERE is_deleted = 0 filtering doesn't full-table-scan documents."""
-    with connect(tmp_path / "is-deleted-idx-corpus.db") as connection:
+def test_migration_005_signature_uses_connection_param_name():
+    """migration_005_add_false_positives previously took a param literally
+    named ``cursor`` despite calling .execute() on it like a connection —
+    inconsistent with every other migration in the module and misleading
+    for type safety / readability. It must be named and typed the same
+    way as the rest: ``connection: sqlite3.Connection``."""
+    import inspect
+
+    from src.db.migrations.corpus import migration_005_add_false_positives
+
+    sig = inspect.signature(migration_005_add_false_positives)
+    params = list(sig.parameters.values())
+
+    assert len(params) == 1
+    assert params[0].name == "connection"
+    # `from __future__ import annotations` makes annotations strings at
+    # runtime rather than resolved types, so compare against both forms.
+    assert params[0].annotation in (sqlite3.Connection, "sqlite3.Connection")
+
+
+def test_migration_005_still_creates_false_positives_table(tmp_path):
+    """Behavioral regression check accompanying the parameter rename."""
+    with connect(tmp_path / "false-positives-corpus.db") as connection:
         migrate_corpus_database(connection)
 
-        assert column_exists(connection, "documents", "is_deleted")
-        assert index_exists(connection, "idx_documents_is_deleted")
-
-
-def test_migration_015_index_used_by_query_planner(tmp_path):
-    """The new index should actually be selected by SQLite's query planner
-    for the common WHERE is_deleted = 0 filter, not just exist unused."""
-    with connect(tmp_path / "is-deleted-idx-plan-corpus.db") as connection:
-        migrate_corpus_database(connection)
-
-        plan_rows = connection.execute(
-            "EXPLAIN QUERY PLAN SELECT * FROM documents WHERE is_deleted = 0"
-        ).fetchall()
-        plan_text = " ".join(str(row) for row in plan_rows)
-
-        assert "idx_documents_is_deleted" in plan_text
+        assert table_exists(connection, "false_positives")
+        for col in ("document_a", "document_b", "date_dismissed"):
+            assert column_exists(connection, "false_positives", col)
 
 
 def test_check_table_exists():

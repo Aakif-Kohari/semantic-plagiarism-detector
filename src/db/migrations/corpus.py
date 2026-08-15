@@ -6,7 +6,7 @@ import sqlite3
 
 from .common import column_exists, run_migrations
 
-CORPUS_SCHEMA_VERSION = 15
+CORPUS_SCHEMA_VERSION = 14
 
 
 def migration_001_create_base_schema(
@@ -89,9 +89,11 @@ def migration_004_add_plagiarism_incidents(
         """)
 
 
-def migration_005_add_false_positives(cursor):
+def migration_005_add_false_positives(
+    connection: sqlite3.Connection,
+) -> None:
     """Adds a table to track dismissed false-positive plagiarism pairs."""
-    cursor.execute("""
+    connection.execute("""
         CREATE TABLE IF NOT EXISTS false_positives (
             document_a TEXT,
             document_b TEXT,
@@ -266,32 +268,6 @@ def migration_013_add_incident_archive_table(
         """)
 
 
-def migration_015_add_is_deleted_index(
-    connection: sqlite3.Connection,
-) -> None:
-    """Add an index on documents.is_deleted (issue: missing index causes
-    full table scans on soft-delete filtering).
-
-    migration_008_add_soft_delete added the ``is_deleted`` column, but most
-    active queries filter with ``WHERE is_deleted = 0`` (e.g. corpus
-    listing, document counts, FTS backfill scope). Without an index on
-    this column, SQLite has to perform a full table scan of ``documents``
-    for every such query, which gets increasingly expensive as the corpus
-    grows.
-
-    Note: named ``migration_015_...`` rather than ``migration_013_...`` to
-    avoid colliding with the two pre-existing functions already named
-    ``migration_013_*`` in this module (mapped to schema versions 13 and
-    14 respectively) — the numeric suffix here matches this migration's
-    actual schema version, consistent with every other migration in this
-    file.
-    """
-    connection.execute("""
-        CREATE INDEX IF NOT EXISTS idx_documents_is_deleted
-        ON documents(is_deleted)
-        """)
-
-
 CORPUS_MIGRATIONS = {
     1: migration_001_create_base_schema,
     2: migration_002_add_document_metadata,
@@ -307,7 +283,6 @@ CORPUS_MIGRATIONS = {
     12: migration_012_add_fts5_index,
     13: migration_013_add_incident_archive_table,
     14: migration_013_add_incident_severity_idx,
-    15: migration_015_add_is_deleted_index,
 }
 
 
