@@ -310,4 +310,28 @@ def test_render_copy_button_html():
         
         # Acceptance Criteria 2: Assert the payload string is correctly base64 encoded
         assert expected_b64 in html_output, f"The base64 encoded payload '{expected_b64}' was not found in the HTML/JS output."
+
+
+def test_filter_warnings_early_exit_and_process_extract():
+    """Verify exact substring matches early exit without calling fuzzy process.extract."""
+    warnings = [
+        {"doc_a": "report_100.pdf", "doc_b": "essay_200.pdf", "similarity": 0.9, "severity": "High"},
+        {"doc_a": "thesis.pdf", "doc_b": "assignment.pdf", "similarity": 0.8, "severity": "Medium"},
+    ]
+
+    with patch("src.utils.warning_list._extract_matching_indices") as mock_extract:
+        mock_extract.return_value = set()
+        
+        # Search for exact substring "report"
+        results = filter_warnings(warnings, "report")
+        assert len(results) == 1
+        assert results[0]["doc_a"] == "report_100.pdf"
+        
+        # Verify fuzzy extract was only run for non-exact remaining items (thesis.pdf / assignment.pdf)
+        # and NOT for report_100.pdf (early exit)
+        if mock_extract.called:
+            for call in mock_extract.call_args_list:
+                choices = call[0][1]
+                assert 0 not in choices  # Index 0 (exact match) early exited and was skipped
+
         

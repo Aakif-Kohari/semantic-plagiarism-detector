@@ -22,12 +22,16 @@ from src.i18n.translator import get_text
 from src.utils.pagination import PaginationPage, paginate_items
 
 try:
-    from thefuzz import fuzz
+    from rapidfuzz import fuzz, process
 except ImportError:
     try:
-        from fuzzywuzzy import fuzz  # type: ignore[import-untyped,reportMissingImports]
+        from thefuzz import fuzz, process
     except ImportError:
-        fuzz = None
+        try:
+            from fuzzywuzzy import fuzz, process  # type: ignore[import-untyped,reportMissingImports]
+        except ImportError:
+            fuzz = None
+            process = None
         
 FUZZY_THRESHOLD = 75
 MAX_SEARCH_QUERY_LENGTH = 200
@@ -83,6 +87,46 @@ def _truncate_search_query(search_query: str) -> str:
     return search_query[:MAX_SEARCH_QUERY_LENGTH].strip()
 
 
+def _extract_matching_indices(
+    query: str,
+    choices: dict[int, str],
+    threshold: int = FUZZY_THRESHOLD,
+) -> set[int]:
+    """Extract keys of items in choices matching query with score >= threshold using process.extract."""
+    if not choices or process is None or fuzz is None:
+        return set()
+
+    matched_indices: set[int] = set()
+
+    for scorer in (fuzz.partial_ratio, fuzz.token_set_ratio):
+        try:
+            results = process.extract(
+                query,
+                choices,
+                scorer=scorer,
+                score_cutoff=threshold,
+                limit=None,
+            )
+        except (TypeError, ValueError):
+            try:
+                results = process.extract(
+                    query,
+                    choices,
+                    scorer=scorer,
+                    limit=None,
+                )
+            except Exception:
+                results = []
+
+        for item in results:
+            if len(item) >= 3:
+                score, key = item[1], item[2]
+                if score >= threshold:
+                    matched_indices.add(key)
+
+    return matched_indices
+
+
 def filter_warnings(
     warnings: Iterable[Mapping[str, Any]],
     search_query: str = "",
@@ -105,23 +149,32 @@ def filter_warnings(
         return normalised
 
     filtered = []
-    for item in normalised:
+    remaining_indices = []
+    choices_a: dict[int, str] = {}
+    choices_b: dict[int, str] = {}
+
+    # Early exit: exact substring matches succeed without fuzzy matching
+    for i, item in enumerate(normalised):
         doc_a = item["doc_a"].casefold()
         doc_b = item["doc_b"].casefold()
 
         if query in doc_a or query in doc_b:
             filtered.append(item)
-            continue
+        else:
+            remaining_indices.append(i)
+            choices_a[i] = doc_a
+            choices_b[i] = doc_b
 
-        if fuzz is not None:
-            score_a = max(
-                fuzz.partial_ratio(query, doc_a), fuzz.token_set_ratio(query, doc_a)
-            )
-            score_b = max(
-                fuzz.partial_ratio(query, doc_b), fuzz.token_set_ratio(query, doc_b)
-            )
-            if score_a >= FUZZY_THRESHOLD or score_b >= FUZZY_THRESHOLD:
-                filtered.append(item)
+    # Vectorized C-level fuzzy matching on remaining items
+    if remaining_indices and process is not None and fuzz is not None:
+        matched_a = _extract_matching_indices(query, choices_a, FUZZY_THRESHOLD)
+        choices_b_remaining = {k: v for k, v in choices_b.items() if k not in matched_a}
+        matched_b = _extract_matching_indices(query, choices_b_remaining, FUZZY_THRESHOLD)
+
+        fuzzy_matched = matched_a | matched_b
+        for i in remaining_indices:
+            if i in fuzzy_matched:
+                filtered.append(normalised[i])
 
     return filtered
 
