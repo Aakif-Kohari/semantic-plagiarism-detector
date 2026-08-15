@@ -392,6 +392,7 @@ from src.utils.redis_cache import (
     get_session_state,
 )
 from src.utils.storage_metrics import calculate_storage_usage
+from src.core.parse_durations import get_all_parse_durations, format_duration
 from src.visualization.heatmap import (
     plot_similarity_heatmap,
 )
@@ -2275,6 +2276,19 @@ col2.metric("Pairs Evaluated", total_pairs)
 col3.metric("Flagged Pairs", n_flagged)
 col4.metric("FAISS Vectors", faiss_index.ntotal if faiss_index is not None else 0)
 col5.metric("🎯 Threshold", f"{threshold:.0%}")
+
+# ── Issue #1728: File Parsing Duration Summary ──────────────
+_parse_durations = get_all_parse_durations()
+if _parse_durations and raw_texts:
+    with st.expander("⏱️ File Parsing Times", expanded=False):
+        for _doc_name in doc_names:
+            _dur = _parse_durations.get(_doc_name)
+            _dur_str = format_duration(_dur)
+            if _dur_str:
+                st.markdown(
+                    f"**{_doc_name}** — Parsed in `{_dur_str}`"
+                )
+
 st.divider()
 
 # Main Application Tabs

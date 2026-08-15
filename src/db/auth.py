@@ -1708,7 +1708,7 @@ def demote_user(username: str, admin_username: str) -> bool:
 
 import secrets  # noqa: F811
 import string  # noqa: F811
-from datetime import datetime, timedelta  # noqa: F811
+from datetime import timedelta
 from typing import Optional, Dict, Any, List  # noqa: F811
 import hashlib
 import json  # noqa: F811
@@ -1892,7 +1892,7 @@ def _store_sso_recovery_token(username: str, password: str) -> None:
     try:
         token = generate_sso_token()
         token_hash = hashlib.sha256(token.encode()).hexdigest()
-        expires_at = (datetime.now() + timedelta(days=7)).isoformat()
+        expires_at = (dt.now() + timedelta(days=7)).isoformat()
         
         with _connect() as conn:
             # Create recovery_tokens table if not exists
@@ -1954,7 +1954,7 @@ def verify_sso_recovery_token(username: str, token: str) -> bool:
             if used_at is not None:
                 return False  # Token already used
             
-            if expires_at < datetime.now().isoformat():
+            if expires_at < dt.now().isoformat():
                 return False  # Token expired
             
             # Mark token as used

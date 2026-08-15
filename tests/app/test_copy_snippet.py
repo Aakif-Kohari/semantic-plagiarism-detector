@@ -28,3 +28,74 @@ def test_render_copy_button_exists():
     warning_list_source = WARNING_LIST_PATH.read_text(encoding="utf-8")
     assert "def render_copy_button(" in warning_list_source
     assert "document.execCommand('copy')" in warning_list_source
+
+
+def test_uses_modern_clipboard_api_as_primary_path():
+    """navigator.clipboard.writeText() must be the primary copy mechanism,
+    per the deprecation of document.execCommand('copy') (MDN 'Deprecated'
+    since 2020; Safari/Firefox may silently fail)."""
+    warning_list_source = WARNING_LIST_PATH.read_text(encoding="utf-8")
+    assert "navigator.clipboard.writeText(text)" in warning_list_source
+    assert "navigator.clipboard && navigator.clipboard.writeText" in warning_list_source
+
+
+def test_clipboard_write_has_then_and_catch_feedback():
+    """Success/failure UI feedback must be wired via .then()/.catch()."""
+    warning_list_source = WARNING_LIST_PATH.read_text(encoding="utf-8")
+    assert "navigator.clipboard.writeText(text).then(function()" in warning_list_source
+    assert ".catch(function(err)" in warning_list_source
+    # Both branches must actually drive the button's UI state.
+    assert "showCopied();" in warning_list_source
+    assert "showFailed();" in warning_list_source
+
+
+def test_execcommand_is_only_used_as_a_fallback():
+    """document.execCommand('copy') must remain solely as an older-browser
+    fallback, not the primary copy path — it must live inside the fallback
+    function and only be reached when the Clipboard API is unavailable or
+    rejects."""
+    warning_list_source = WARNING_LIST_PATH.read_text(encoding="utf-8")
+    assert "function legacyCopyFallback()" in warning_list_source
+
+    fallback_start = warning_list_source.index("function legacyCopyFallback()")
+    fallback_end = warning_list_source.index(
+        "if (navigator.clipboard && navigator.clipboard.writeText)"
+    )
+    fallback_body = warning_list_source[fallback_start:fallback_end]
+    assert "document.execCommand('copy')" in fallback_body
+
+    # The modern path must be tried first and only fall back on failure.
+    clipboard_call_index = warning_list_source.index(
+        "navigator.clipboard.writeText(text).then"
+    )
+    assert clipboard_call_index < warning_list_source.index(
+        "legacyCopyFallback();", clipboard_call_index
+    )
+
+
+def test_hidden_textarea_only_created_inside_fallback():
+    """The always-on hidden <textarea> workaround must be gone; a textarea
+    should only be created inside the legacy fallback function, not
+    unconditionally on every click."""
+    warning_list_source = WARNING_LIST_PATH.read_text(encoding="utf-8")
+
+    textarea_occurrences = warning_list_source.count(
+        'document.createElement("textarea")'
+    )
+    assert textarea_occurrences == 1
+
+    fallback_start = warning_list_source.index("function legacyCopyFallback()")
+    fallback_end = warning_list_source.index(
+        "if (navigator.clipboard && navigator.clipboard.writeText)"
+    )
+    fallback_body = warning_list_source[fallback_start:fallback_end]
+    assert 'document.createElement("textarea")' in fallback_body
+
+    # And it must be defined only within the fallback function, not created
+    # unconditionally before the modern Clipboard API path is even tried.
+    clipboard_call_index = warning_list_source.index(
+        "navigator.clipboard.writeText(text).then"
+    )
+    textarea_index = warning_list_source.index('document.createElement("textarea")')
+    assert textarea_index < clipboard_call_index
+    assert fallback_start < textarea_index < fallback_end

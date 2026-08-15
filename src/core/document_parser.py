@@ -6,6 +6,9 @@ import io
 import ipaddress
 import logging
 import os
+import time
+
+from src.core.parse_durations import record_parse_duration
 import re
 import shutil
 import socket
@@ -1833,6 +1836,8 @@ def extract_text(
 
     extension = filename.rsplit(".", 1)[-1].lower()
 
+    _parse_start = time.perf_counter()
+
     if extension == "pdf":
         raw = extract_text_from_pdf(file, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
     elif extension == "docx":
@@ -1856,6 +1861,14 @@ def extract_text(
         raw = extract_text_from_odt(file)
     else:
         raw = extract_text_from_txt(file)
+
+    _parse_elapsed = time.perf_counter() - _parse_start
+    record_parse_duration(filename, _parse_elapsed)
+    logger.info(
+        "[document_parser] Parsed '%s' in %.3f seconds.",
+        filename,
+        _parse_elapsed,
+    )
 
     raw = strip_bibliography(raw)
     raw = normalize_unicode_spaces(raw)
