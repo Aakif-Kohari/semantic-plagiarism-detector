@@ -3,8 +3,19 @@
 from enum import Enum
 
 
-class SessionKeys(str, Enum):    SESSION_ID = "session_id"
-SESSION_ID = "session_id"
+class SessionKeys(str, Enum):
+    """Every key this application stores in ``st.session_state``.
+
+    The enum subclasses :class:`str` so a member can be used anywhere a plain
+    string key is expected -- ``st.session_state[SessionKeys.LANG]`` and
+    ``st.session_state["lang"]`` address the same slot, and a member can be
+    passed straight to a widget's ``key=`` argument.
+
+    Member values are the lower-cased member names, which keeps the mapping
+    obvious and makes the migration from the old bare-string keys mechanical.
+    """
+
+    SESSION_ID = "session_id"
     AUTHENTICATED = "authenticated"
     USERNAME = "username"
     ROLE = "role"

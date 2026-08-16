@@ -693,6 +693,33 @@ def _configure_tesseract(pytesseract_module) -> None:
         pytesseract_module.pytesseract.tesseract_cmd = configured_path
 
 
+def check_ocr_dependencies() -> None:
+    """Check that required OCR Python packages and Tesseract executable are available.
+
+    Raises:
+        OCRDependencyError: If required Python packages (pytesseract, PyMuPDF, Pillow)
+            or Tesseract binary are missing/unavailable.
+    """
+    try:
+        import fitz  # PyMuPDF
+        import pytesseract
+        from PIL import Image
+    except ImportError as exc:
+        from src.errors import OCR_DEPENDENCIES_MISSING
+
+        raise OCRDependencyError(OCR_DEPENDENCIES_MISSING) from exc
+
+    _configure_tesseract(pytesseract)
+
+    try:
+        pytesseract.get_tesseract_version()
+    except (pytesseract.TesseractNotFoundError, EnvironmentError, Exception) as exc:
+        from src.errors import OCR_TESSERACT_NOT_FOUND
+
+        raise OCRDependencyError(OCR_TESSERACT_NOT_FOUND) from exc
+
+
+
 def _is_blank_scanned_page(
     pdf_bytes: bytes,
     page_index: int,
@@ -745,16 +772,12 @@ def _ocr_pdf_page(
     language: str = DEFAULT_OCR_LANGUAGE,
 ) -> str:
     """Render one PDF page and extract text with Tesseract."""
-    try:
-        import fitz  # PyMuPDF
-        import pytesseract
-        from PIL import Image
-    except ImportError as exc:
-        from src.errors import OCR_DEPENDENCIES_MISSING
+    check_ocr_dependencies()
 
-        raise OCRDependencyError(OCR_DEPENDENCIES_MISSING) from exc
+    import fitz  # PyMuPDF
+    import pytesseract
+    from PIL import Image
 
-    _configure_tesseract(pytesseract)
 
     try:
         with fitz.open(stream=pdf_bytes, filetype="pdf") as document:
@@ -778,6 +801,15 @@ def _ocr_pdf_page(
         from src.errors import OCR_TESSERACT_NOT_FOUND
 
         raise OCRDependencyError(OCR_TESSERACT_NOT_FOUND) from exc
+    except (MemoryError, Exception) as exc:
+        if isinstance(exc, MemoryError):
+            logger.warning(
+                f"[document_parser] OCR page extraction failed due to memory exhaustion: {exc}"
+            )
+        else:
+            logger.warning(f"[document_parser] OCR page extraction failed: {exc}")
+        return f"[OCR extraction failed for page {page_index}]"
+
 
 
 def _should_use_parallel() -> bool:
@@ -1652,15 +1684,11 @@ def extract_text_from_image(
     file: PDFInput, *, ocr_language: str = DEFAULT_OCR_LANGUAGE
 ) -> str:
     """Extract text from an image (PNG, JPG) using Tesseract OCR."""
-    try:
-        import pytesseract
-        from PIL import Image
-    except ImportError as exc:
-        from src.errors import OCR_DEPENDENCIES_MISSING
+    check_ocr_dependencies()
 
-        raise OCRDependencyError(OCR_DEPENDENCIES_MISSING) from exc
+    import pytesseract
+    from PIL import Image
 
-    _configure_tesseract(pytesseract)
 
     file_bytes = _read_pdf_bytes(file)
     try:

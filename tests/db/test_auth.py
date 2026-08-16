@@ -27,6 +27,9 @@ from src.db.auth import (
     update_user_profile,
     get_all_users,
     format_user_created_date,
+    generate_sso_state,
+    store_sso_state,
+    validate_sso_state,
 )
 from src.errors import StaleDataException
 
@@ -820,3 +823,25 @@ def test_get_active_users_count_zero_on_empty_database():
     result = get_active_users_count()
     assert result is not None
     assert result >= 0
+
+
+def test_oauth_state_replay_invalidation(mock_db):
+    """Verify that an OAuth state is valid on first use and invalidated on second use (replay attack prevention)."""
+    state = generate_sso_state()
+    # First validation must succeed
+    assert validate_sso_state(state) is True
+    # Second validation must fail due to replay invalidation
+    assert validate_sso_state(state) is False
+
+
+def test_validate_sso_state_invalid_and_expired(mock_db):
+    """Verify validate_sso_state returns False for invalid, empty, or expired states."""
+    assert validate_sso_state("") is False
+    assert validate_sso_state("non_existent_state_token") is False
+
+    # Stored expired state
+    expired_state = "expired_state_token_123"
+    store_sso_state(expired_state, expires_in_seconds=-10)
+    assert validate_sso_state(expired_state) is False
+
+
