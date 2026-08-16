@@ -44,6 +44,42 @@ def test_fresh_corpus_database_reaches_latest_version(tmp_path):
         assert index_exists(connection, "idx_incidents_severity_time")
 
 
+def test_corpus_migrations_apply_from_empty_database():
+    """Verify that applying the full corpus migration chain from a blank
+    in-memory database succeeds and creates all expected tables and columns."""
+    conn = sqlite3.connect(":memory:")
+
+    try:
+        migrate_corpus_database(conn)
+
+        tables = {
+            row[0]
+            for row in conn.execute(
+                """
+                SELECT name
+                FROM sqlite_master
+                WHERE type = 'table'
+                """
+            )
+        }
+
+        assert {
+            "documents",
+            "chunks",
+            "plagiarism_incidents",
+            "false_positives",
+            "incidents_archive",
+        }.issubset(tables)
+
+        documents_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(documents)")
+        }
+
+        assert "is_deleted" in documents_columns
+    finally:
+        conn.close()
+
+
 def test_fresh_auth_database_reaches_latest_version(tmp_path):
     with connect(tmp_path / "fresh-users.db") as connection:
         version = migrate_auth_database(connection)
@@ -296,7 +332,9 @@ def test_successful_migration_logs_info_message(tmp_path, caplog):
             "Database migration from version 0 to 1 completed successfully."
             in record.message
             for record in caplog.records
-        ), f"Expected migration log message not found in: {[r.message for r in caplog.records]}"
+        ), (
+            f"Expected migration log message not found in: {[r.message for r in caplog.records]}"
+        )
     finally:
         connection.close()
 
@@ -311,7 +349,9 @@ def test_corpus_migration_logs_info_message(tmp_path, caplog):
 
         assert any(
             "completed successfully" in record.message for record in caplog.records
-        ), f"Expected migration log message not found in: {[r.message for r in caplog.records]}"
+        ), (
+            f"Expected migration log message not found in: {[r.message for r in caplog.records]}"
+        )
 
 
 def test_auth_migration_logs_info_message(tmp_path, caplog):
@@ -324,7 +364,9 @@ def test_auth_migration_logs_info_message(tmp_path, caplog):
 
         assert any(
             "completed successfully" in record.message for record in caplog.records
-        ), f"Expected migration log message not found in: {[r.message for r in caplog.records]}"
+        ), (
+            f"Expected migration log message not found in: {[r.message for r in caplog.records]}"
+        )
 
 
 def test_no_log_when_already_at_target_version(tmp_path, caplog):
@@ -378,7 +420,9 @@ def test_migration_duration_logging(tmp_path, caplog):
         assert any(
             "Migration [migration_dummy_test_func] executed in" in record.message
             for record in caplog.records
-        ), f"Expected duration log message not found in: {[r.message for r in caplog.records]}"
+        ), (
+            f"Expected duration log message not found in: {[r.message for r in caplog.records]}"
+        )
     finally:
         connection.close()
 
@@ -388,6 +432,36 @@ def test_migration_013_adds_incident_severity_index(tmp_path):
         migrate_corpus_database(connection)
 
         assert index_exists(connection, "idx_incidents_severity_time")
+
+
+def test_migration_005_signature_uses_connection_param_name():
+    """migration_005_add_false_positives previously took a param literally
+    named ``cursor`` despite calling .execute() on it like a connection —
+    inconsistent with every other migration in the module and misleading
+    for type safety / readability. It must be named and typed the same
+    way as the rest: ``connection: sqlite3.Connection``."""
+    import inspect
+
+    from src.db.migrations.corpus import migration_005_add_false_positives
+
+    sig = inspect.signature(migration_005_add_false_positives)
+    params = list(sig.parameters.values())
+
+    assert len(params) == 1
+    assert params[0].name == "connection"
+    # `from __future__ import annotations` makes annotations strings at
+    # runtime rather than resolved types, so compare against both forms.
+    assert params[0].annotation in (sqlite3.Connection, "sqlite3.Connection")
+
+
+def test_migration_005_still_creates_false_positives_table(tmp_path):
+    """Behavioral regression check accompanying the parameter rename."""
+    with connect(tmp_path / "false-positives-corpus.db") as connection:
+        migrate_corpus_database(connection)
+
+        assert table_exists(connection, "false_positives")
+        for col in ("document_a", "document_b", "date_dismissed"):
+            assert column_exists(connection, "false_positives", col)
 
 
 def test_check_table_exists():

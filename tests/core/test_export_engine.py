@@ -7,6 +7,16 @@ def test_generate_incident_html_empty():
     assert result is None
 
 
+def test_calculate_severity_uses_shared_thresholds():
+    """Verify severity follows the global similarity thresholds (Issue #2443)."""
+    assert LMSExportEngine._calculate_severity(0.0) == "Low"
+    assert LMSExportEngine._calculate_severity(0.74) == "Low"
+    assert LMSExportEngine._calculate_severity(0.75) == "Medium"
+    assert LMSExportEngine._calculate_severity(0.89) == "Medium"
+    assert LMSExportEngine._calculate_severity(0.90) == "High"
+    assert LMSExportEngine._calculate_severity(1.0) == "High"
+
+
 def test_generate_incident_html_valid():
     """Verify that a valid list of incidents produces the expected HTML content."""
     incidents = [
@@ -35,12 +45,12 @@ def test_generate_incident_html_valid():
     assert "70.0%" in html_content
 
     # Verify severity ranks and styling colors are present
-    assert "CRITICAL" in html_content
-    assert "HIGH" in html_content
-    assert "MODERATE" in html_content
-    assert "#ff4b4b" in html_content  # CRITICAL color
-    assert "#ffa500" in html_content  # HIGH color
-    assert "#21c55d" in html_content  # MODERATE color
+    assert "High" in html_content
+    assert "Medium" in html_content
+    assert "Low" in html_content
+    assert "#ff4b4b" in html_content  # High color
+    assert "#ffa500" in html_content  # Medium color
+    assert "#21c55d" in html_content  # Low color
 
 
 import csv
@@ -81,16 +91,16 @@ def test_generate_incident_csv_valid_data():
         "Severity Flag",
     ]
 
-    # Check Row 1 (Critical Severity)
+    # Check Row 1 (High Severity)
     assert rows[0]["Document A"] == "student1_hw.pdf"
     assert rows[0]["Similarity Score"] == "0.9500"
-    assert rows[0]["Severity Flag"] == "CRITICAL"
+    assert rows[0]["Severity Flag"] == "High"
 
-    # Check Row 2 (High Severity)
-    assert rows[1]["Severity Flag"] == "HIGH"
+    # Check Row 2 (Medium Severity)
+    assert rows[1]["Severity Flag"] == "Medium"
 
-    # Check Row 3 (Moderate Severity)
-    assert rows[2]["Severity Flag"] == "MODERATE"
+    # Check Row 3 (Medium Severity)
+    assert rows[2]["Severity Flag"] == "Medium"
 
 
 def test_generate_incident_csv_missing_keys():
@@ -110,7 +120,7 @@ def test_generate_incident_csv_missing_keys():
     assert rows[0]["Similarity Score"] == "0.9900"
 
     assert rows[1]["Similarity Score"] == "0.0000"
-    assert rows[1]["Severity Flag"] == "MODERATE"
+    assert rows[1]["Severity Flag"] == "Low"
 
 
 def test_generate_incident_json_empty():
@@ -135,7 +145,7 @@ def test_generate_incident_json_valid_data():
     assert len(payload["incidents"]) == 1
     assert payload["incidents"][0]["document_a"] == "alpha.pdf"
     assert payload["incidents"][0]["similarity_score"] == 0.91
-    assert payload["incidents"][0]["severity_flag"] == "CRITICAL"
+    assert payload["incidents"][0]["severity_flag"] == "High"
 
 
 def test_build_download_response_sets_safe_headers_for_csv():

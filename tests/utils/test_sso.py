@@ -176,7 +176,7 @@ def test_github_oauth_user_request_timeout(mock_post, mock_get, monkeypatch):
 
     result = exchange_github_code("valid_code")
     assert result is None
-    
+
     mock_get.assert_called_once()
     _, kwargs = mock_get.call_args
     assert kwargs.get("timeout") == 10
