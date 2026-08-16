@@ -24,7 +24,21 @@ def _deduplicate_paths(paths: List[Path]) -> List[Path]:
     return unique_paths
 
 
-def get_sqlite_db_paths() -> List[Path]:    """Retrieve unique paths of SQLite database files in standard application locations."""
+def get_sqlite_db_paths() -> List[Path]:
+    """Retrieve unique paths of SQLite database files in standard locations.
+
+    Collects the three configured application databases (corpus, auth and
+    incidents) plus any additional ``*.db`` files sitting in the repository
+    root or in ``data/``.
+
+    Each configured path is resolved independently and a failure to resolve
+    one is logged at debug level and skipped, so a partially installed
+    environment still reports usage for the databases it can see.
+
+    Returns:
+        List[Path]: Existing-or-not database paths, de-duplicated by their
+        resolved absolute form. Paths are returned in discovery order.
+    """
     paths: List[Path] = []
 
     # 1. Corpus DB path
@@ -59,11 +73,22 @@ def get_sqlite_db_paths() -> List[Path]:    """Retrieve unique paths of SQLite d
             for file_path in folder.glob("*.db"):
                 paths.append(file_path)
 
-# Deduplicate resolved absolute paths
+    # Deduplicate resolved absolute paths
     return _deduplicate_paths(paths)
 
 
-def get_faiss_index_paths() -> List[Path]:    """Retrieve unique paths of FAISS index files in standard application locations."""
+def get_faiss_index_paths() -> List[Path]:
+    """Retrieve unique paths of FAISS index files in standard locations.
+
+    Always includes the two default ``corpus.index`` locations (repository
+    root and ``data/``) so a caller can report "0 bytes" for an index that has
+    not been built yet, then adds any other ``*.index`` files found alongside
+    them.
+
+    Returns:
+        List[Path]: Existing-or-not index paths, de-duplicated by their
+        resolved absolute form. Paths are returned in discovery order.
+    """
     paths: List[Path] = []
 
     base_dir = Path(__file__).resolve().parents[2]
@@ -78,7 +103,8 @@ def get_faiss_index_paths() -> List[Path]:    """Retrieve unique paths of FAISS 
             for file_path in folder.glob("*.index"):
                 paths.append(file_path)
 
-return _deduplicate_paths(paths)
+    return _deduplicate_paths(paths)
+
 
 def calculate_storage_usage(
     db_paths: Optional[List[Path]] = None,

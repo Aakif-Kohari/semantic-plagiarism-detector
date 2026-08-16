@@ -12,7 +12,7 @@ import doctest
 import pytest
 
 from src.utils import pagination
-from src.utils.pagination import PaginationPage
+from src.utils.pagination import PaginationPage, paginate_items, _coerce_integer
 
 
 class TestPaginationPageReprClassName:
@@ -485,3 +485,67 @@ class TestPaginationPageSerialization:
         assert result["has_previous"] is True
         assert result["next_page"] == 3
         assert result["previous_page"] == 1
+
+
+# --- NEW TESTS ADDED FOR ISSUE #2030 ---
+
+class TestCoerceInteger:
+    """Test suite for _coerce_integer helper function."""
+
+    def test_coerce_integer_valid_strings(self):
+        """Verify valid number strings are coerced to int."""
+        assert _coerce_integer("10", 1) == 10
+
+    def test_coerce_integer_invalid_string(self):
+        """Verify invalid strings return the fallback/default."""
+        assert _coerce_integer("abc", 1) == 1
+
+    def test_coerce_integer_none(self):
+        """Verify None returns the fallback/default."""
+        assert _coerce_integer(None, 1) == 1
+
+    def test_coerce_integer_float(self):
+        """Verify floats are coerced/truncated to int."""
+        assert _coerce_integer(3.14, 1) == 3
+        assert _coerce_integer(-2.9, 1) == -2
+
+
+class TestPaginateItemsBoundaryConditions:
+    """Test suite for paginate_items boundary conditions (Issue #2030)."""
+
+    def test_empty_list(self):
+        """Verify empty list returns empty list regardless of pagination."""
+        assert paginate_items([], page=1, page_size=10) == []
+
+    def test_page_zero(self):
+        """Verify page=0 is clamped to 1."""
+        items = [1, 2, 3, 4, 5]
+        assert paginate_items(items, page=0, page_size=2) == [1, 2]
+
+    def test_page_negative(self):
+        """Verify page=-1 is clamped to 1."""
+        items = [1, 2, 3, 4, 5]
+        assert paginate_items(items, page=-1, page_size=2) == [1, 2]
+
+    def test_page_beyond_range(self):
+        """Verify page=9999 is clamped to the last available page."""
+        items = [1, 2, 3, 4, 5]
+        # 5 items total, page_size=2 means 3 pages. The last page contains just [5].
+        assert paginate_items(items, page=9999, page_size=2) == [5]
+
+    def test_page_size_zero(self):
+        """Verify page_size=0 is clamped to a minimum valid size (1)."""
+        items = [1, 2, 3]
+        assert paginate_items(items, page=1, page_size=0) == [1]
+
+    def test_page_size_negative(self):
+        """Verify page_size=-5 is clamped to a minimum valid size (1)."""
+        items = [1, 2, 3]
+        assert paginate_items(items, page=1, page_size=-5) == [1]
+
+    def test_page_string(self):
+        """Verify string inputs for page are handled and coerced gracefully."""
+        items = [1, 2, 3, 4, 5]
+        # "abc" coercion fails, defaults to 1
+        assert paginate_items(items, page="abc", page_size=2) == [1, 2]
+        

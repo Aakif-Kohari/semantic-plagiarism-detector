@@ -288,8 +288,8 @@ class TranslationMemoryCache:
     ) -> str:
         """Return a deterministic SHA-256 key for a translation request."""
         payload = (
-            f"{_normalise_language_code(source_lang)} "
-            f"{_normalise_language_code(target_lang)} "
+            f"{_normalise_language_code(source_lang)}\0"
+            f"{_normalise_language_code(target_lang)}\0"
             f"{sentence}"
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()

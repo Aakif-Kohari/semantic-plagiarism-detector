@@ -7,6 +7,7 @@ from .config import (
     reload_branding_config,
 )
 from .document_parser import (
+    check_ocr_dependencies,
     extract_text,
     extract_text_from_pdf,
     extract_texts,
