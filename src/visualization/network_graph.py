@@ -810,23 +810,35 @@ def export_network_to_csv_bytes(
 
 def export_network_centrality_csv(graph: nx.Graph) -> str:
     """
-    Calculate node degree centrality using NetworkX and export as a CSV string
-    formatted with headers: Document_Name,Degree,Centrality_Score.
-    """
-    import csv
-    import io
+    Calculate degree and PageRank centralities and export them as CSV.
 
+    The CSV contains the raw degree, normalized degree centrality, and
+    PageRank score for each document node.
+    """
     degrees = dict(graph.degree())
-    centralities = nx.degree_centrality(graph)
+    degree_centralities = nx.degree_centrality(graph)
+    pagerank_scores = nx.pagerank(graph) if graph.number_of_nodes() else {}
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["Document_Name", "Degree", "Centrality_Score"])
+    writer.writerow(
+        [
+            "Document_Name",
+            "Degree",
+            "Centrality_Score",
+            "PageRank_Score",
+        ]
+    )
 
     for node in graph.nodes():
-        deg = degrees.get(node, 0)
-        score = centralities.get(node, 0.0)
-        writer.writerow([node, deg, score])
+        writer.writerow(
+            [
+                node,
+                degrees.get(node, 0),
+                degree_centralities.get(node, 0.0),
+                pagerank_scores.get(node, 0.0),
+            ]
+        )
 
     return output.getvalue()
 

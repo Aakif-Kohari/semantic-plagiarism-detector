@@ -24,6 +24,7 @@ import hashlib
 import logging
 import re
 from dataclasses import asdict, dataclass
+from collections import OrderedDict
 from threading import RLock
 from typing import Callable, Iterable, Optional
 
@@ -262,27 +263,33 @@ def verify_semantic_fidelity(
 
 
 class TranslationMemoryCache:
-    """Thread-safe in-memory cache for translated sentences.
+    """Thread-safe in-memory LRU cache for translated sentences.
 
     Cache keys are SHA-256 hashes of the source language, target language,
     and exact source sentence. Including both language codes prevents a
     translation produced for one language pair from being reused for another.
+
+    A configurable *maxsize* (default 512) caps memory usage by evicting the
+    least-recently-used entry whenever the cache is full (Issue #2221).
     """
 
-    def __init__(self) -> None:
-        self._translations: dict[str, str] = {}
+    def __init__(self, maxsize: int = 512) -> None:
+        if maxsize < 1:
+            raise ValueError("maxsize must be a positive integer")
+        self._translations: OrderedDict[str, str] = OrderedDict()
+        self._maxsize = maxsize
         self._lock = RLock()
 
     @staticmethod
     def _build_key(
         sentence: str,
-        source_lang: str,
-        target_lang: str,
+        source_lang: str = "auto",
+        target_lang: str = "en",
     ) -> str:
         """Return a deterministic SHA-256 key for a translation request."""
         payload = (
-            f"{_normalise_language_code(source_lang)}\0"
-            f"{_normalise_language_code(target_lang)}\0"
+            f"{_normalise_language_code(source_lang)} "
+            f"{_normalise_language_code(target_lang)} "
             f"{sentence}"
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -291,29 +298,42 @@ class TranslationMemoryCache:
         self,
         sentence: str,
         *,
-        source_lang: str,
-        target_lang: str,
+        source_lang: str = "auto",
+        target_lang: str = "en",
     ) -> str | None:
-        """Return a cached translation or ``None`` when absent."""
+        """Return a cached translation or ``None`` when absent.
+
+        Moves the accessed entry to the most-recently-used position.
+        """
         key = self._build_key(sentence, source_lang, target_lang)
         with self._lock:
-            return self._translations.get(key)
+            if key not in self._translations:
+                return None
+            self._translations.move_to_end(key)
+            return self._translations[key]
 
     def set(
         self,
         sentence: str,
         translation: str,
         *,
-        source_lang: str,
-        target_lang: str,
+        source_lang: str = "auto",
+        target_lang: str = "en",
     ) -> None:
-        """Store a successful non-empty translation."""
+        """Store a successful non-empty translation.
+
+        Evicts the least-recently-used entry when the cache is at capacity.
+        """
         normalized_translation = str(translation or "").strip()
         if not normalized_translation:
             return
-
         key = self._build_key(sentence, source_lang, target_lang)
         with self._lock:
+            if key in self._translations:
+                self._translations.move_to_end(key)
+            else:
+                if len(self._translations) >= self._maxsize:
+                    self._translations.popitem(last=False)
             self._translations[key] = normalized_translation
 
     def clear(self) -> None:

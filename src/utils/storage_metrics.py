@@ -107,6 +107,8 @@ def calculate_storage_usage(
             - 'formatted_total': str (formatted total string e.g. "1.25 MB")
             - 'formatted_sqlite': str (formatted SQLite size)
             - 'formatted_faiss': str (formatted FAISS index size)
+            - 'sqlite_file_count': int (number of SQLite files found)
+            - 'faiss_file_count': int (number of FAISS index files found)
     """
     if db_paths is None:
         db_paths = get_sqlite_db_paths()
@@ -114,18 +116,22 @@ def calculate_storage_usage(
         index_paths = get_faiss_index_paths()
 
     sqlite_bytes = 0
+    sqlite_file_count = 0
     for db_path in db_paths:
         try:
             if db_path.exists() and db_path.is_file():
                 sqlite_bytes += db_path.stat().st_size
+                sqlite_file_count += 1
         except OSError as e:
             logger.debug("Could not resolve path: %s", e)
 
     faiss_bytes = 0
+    faiss_file_count = 0
     for idx_path in index_paths:
         try:
             if idx_path.exists() and idx_path.is_file():
                 faiss_bytes += idx_path.stat().st_size
+                faiss_file_count += 1
         except OSError as e:
             logger.debug("Could not resolve path: %s", e)
 
@@ -145,4 +151,6 @@ def calculate_storage_usage(
         "formatted_total": f"{total_mb:.2f} MB",
         "formatted_sqlite": f"{sqlite_mb:.2f} MB",
         "formatted_faiss": f"{faiss_mb:.2f} MB",
+        "sqlite_file_count": sqlite_file_count,
+        "faiss_file_count": faiss_file_count,
     }

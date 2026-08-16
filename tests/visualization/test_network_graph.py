@@ -1,3 +1,4 @@
+import xml.etree.ElementTree as ET
 """
 tests/visualization/test_network_graph.py
 -------------------------------------------
@@ -81,6 +82,22 @@ def test_build_network_data_structure():
     assert len(net_data["graph"].nodes()) == 3
     assert len(net_data["graph"].edges()) == 1
     assert len(net_data["shapes"]) == 1
+
+
+def test_build_network_data_hides_isolated_nodes():
+    """Verify show_isolated=False removes unconnected/isolated nodes such as doc3."""
+    data = {
+        "doc1": [1.0, 0.85, 0.20],
+        "doc2": [0.85, 1.0, 0.10],
+        "doc3": [0.20, 0.10, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2", "doc3"])
+
+    net_data = build_network_data(df, threshold=0.75, show_isolated=False)
+
+    assert len(net_data["graph"].nodes()) == 2
+    assert "doc3" not in net_data["graph"].nodes()
+    assert set(net_data["graph"].nodes()) == {"doc1", "doc2"}
 
 
 def test_build_network_data_with_theme_colors():
@@ -688,7 +705,7 @@ def test_build_network_data_empty_clustering():
 
 
 def test_export_network_centrality_csv():
-    """Verify export_network_centrality_csv computes degree centrality and returns correct CSV format."""
+    """Verify degree centrality and PageRank are exported correctly."""
     graph = nx.Graph()
     graph.add_edge("doc1", "doc2", similarity=0.9)
     graph.add_edge("doc1", "doc3", similarity=0.8)
@@ -696,18 +713,63 @@ def test_export_network_centrality_csv():
     csv_str = export_network_centrality_csv(graph)
 
     lines = csv_str.strip().splitlines()
-    assert lines[0] == "Document_Name,Degree,Centrality_Score"
+    assert lines[0] == (
+        "Document_Name,Degree,Centrality_Score,PageRank_Score"
+    )
     assert len(lines) == 4  # Header + 3 nodes
 
-    # Parse CSV lines to verify content
     rows = [line.split(",") for line in lines[1:]]
-    row_dict = {row[0]: (int(row[1]), float(row[2])) for row in rows}
+    row_dict = {
+        row[0]: (int(row[1]), float(row[2]), float(row[3]))
+        for row in rows
+    }
 
     assert "doc1" in row_dict
-    assert row_dict["doc1"][0] == 2  # Degree 2
-    assert (
-        row_dict["doc1"][1] == 1.0
-    )  # Centrality score for connected graph of 3 nodes: 2 / (3 - 1) = 1.0
+    assert row_dict["doc1"][0] == 2
+    assert row_dict["doc1"][1] == 1.0
+    assert 0.0 < row_dict["doc1"][2] < 1.0
+
+
+def test_export_network_centrality_csv_star_graph_center_ranks_highest():
+    """Verify the center of a five-leaf star has the highest degree and PageRank."""
+    graph = nx.star_graph(4)
+    nx.relabel_nodes(
+        graph,
+        {
+            0: "center",
+            1: "leaf1",
+            2: "leaf2",
+            3: "leaf3",
+            4: "leaf4",
+        },
+        copy=False,
+    )
+
+    csv_str = export_network_centrality_csv(graph)
+    lines = csv_str.strip().splitlines()
+
+    assert lines[0] == (
+        "Document_Name,Degree,Centrality_Score,PageRank_Score"
+    )
+
+    rows = [line.split(",") for line in lines[1:]]
+    values = {
+        row[0]: {
+            "degree": int(row[1]),
+            "centrality": float(row[2]),
+            "pagerank": float(row[3]),
+        }
+        for row in rows
+    }
+
+    center = values["center"]
+
+    assert center["degree"] == 4
+    assert center["centrality"] == 1.0
+    assert center["pagerank"] == max(
+        item["pagerank"] for item in values.values()
+    )
+    assert center["pagerank"] > values["leaf1"]["pagerank"]
 
 
 # ==============================================================================
@@ -1038,3 +1100,35 @@ def test_plot_plagiarism_network_graph_accepts_max_nodes():
     )
     assert len(fig.data[1].customdata) == 2
     assert "3 nodes hidden" in fig.layout.annotations[0].text
+
+def test_get_cluster_count_returns_two_for_two_disjoint_pairs():
+    """Verify get_cluster_count counts connected components correctly."""
+    graph = nx.Graph()
+    graph.add_edges_from(
+        [
+            ("A", "B"),
+            ("C", "D"),
+        ]
+    )
+
+    assert get_cluster_count(graph) == 2
+def test_export_network_to_gexf_valid_xml():
+    """Verify GEXF export returns well-formed XML with a GEXF root."""
+    data = {
+        "doc1": [1.0, 0.95],
+        "doc2": [0.95, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2"])
+
+    gexf_bytes = export_network_to_gexf_bytes(
+        df,
+        threshold=0.75,
+    )
+
+    assert isinstance(gexf_bytes, bytes)
+    assert gexf_bytes
+
+    root = ET.fromstring(gexf_bytes)
+
+    assert root.tag.endswith("gexf")
+

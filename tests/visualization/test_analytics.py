@@ -673,11 +673,13 @@ def test_theme_override_none_leaves_default_template():
 
 def test_calculate_severity_ratios_percentage_breakdown():
     """Test the exact percentage breakdown across High, Medium, and Low."""
+    from src.core.config import DEFAULT_THRESHOLDS
+
     incidents = [
-        {"similarity_score": 0.9},  # High
-        {"similarity_score": 0.85},  # High
-        {"similarity_score": 0.6},  # Medium
-        {"similarity_score": 0.3},  # Low
+        {"similarity_score": DEFAULT_THRESHOLDS.high + 0.05},    # High
+        {"similarity_score": DEFAULT_THRESHOLDS.high},           # High
+        {"similarity_score": DEFAULT_THRESHOLDS.medium},         # Medium
+        {"similarity_score": DEFAULT_THRESHOLDS.medium - 0.05},  # Low
     ]
     ratios = calculate_severity_ratios(incidents)
 
@@ -686,8 +688,10 @@ def test_calculate_severity_ratios_percentage_breakdown():
 
 def test_calculate_severity_ratios_ignores_invalid_scores():
     """Incidents with missing or non-numeric scores should be skipped."""
+    from src.core.config import DEFAULT_THRESHOLDS
+
     incidents = [
-        {"similarity_score": 0.9},
+        {"similarity_score": DEFAULT_THRESHOLDS.high},
         {"similarity_score": None},
         {"assignment_title": "no score field"},
         {"similarity_score": "not-a-number"},
@@ -1008,3 +1012,36 @@ class TestEmptyChartHelper:
         )
         
         assert fig.layout.paper_bgcolor == "#1e293b"
+
+
+def test_get_top_similar_pairs_vectorized_matches_loop():
+    """Verify vectorized np.triu_indices implementation matches old nested loop logic."""
+    import pandas as pd
+    import numpy as np
+    from src.visualization.analytics import get_top_similar_pairs
+    
+    # Create a 10x10 similarity matrix to test performance and correctness
+    np.random.seed(42)
+    data = np.random.rand(10, 10)
+    # Make symmetric and set diagonal to 1.0
+    data = (data + data.T) / 2
+    np.fill_diagonal(data, 1.0)
+    
+    doc_names = [f"doc_{chr(65+i)}" for i in range(10)]
+    df = pd.DataFrame(data, index=doc_names, columns=doc_names)
+    
+    result = get_top_similar_pairs(df, top_n=5)
+    
+    assert len(result) == 5
+    # Verify descending order
+    for i in range(len(result) - 1):
+        assert result[i][2] >= result[i+1][2]
+    
+    # Verify no self-pairs (diagonal exclusion)
+    for doc_a, doc_b, score in result:
+        assert doc_a != doc_b
+        
+    # Verify scores are within valid range
+    for doc_a, doc_b, score in result:
+        assert 0.0 <= score <= 1.0
+

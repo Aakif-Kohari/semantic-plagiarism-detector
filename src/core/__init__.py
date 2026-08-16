@@ -1,3 +1,5 @@
+from typing import TYPE_CHECKING
+
 from .config import (
     BrandingConfig,
     get_branding_config,
@@ -14,6 +16,7 @@ from .document_parser import (
 from .embedding_model import embed_chunks, embed_documents, get_document_embedding
 from .faiss_index import (
     ChunkRecord,
+    FaissChunkRecord,
     build_index,
     build_index_from_matrix,
     find_plagiarised_chunks,
@@ -23,7 +26,11 @@ from .faiss_index import (
     save_index,
     search_similar_chunks,
 )
-from .pipeline import run_extraction_pipeline, run_pipeline
+from .pipeline import (
+    PipelineChunkRecord,
+    run_extraction_pipeline,
+    run_pipeline,
+)
 from .similarity import (
     PLAGIARISM_THRESHOLD,
     calculate_paragraph_similarity_breakdown,
@@ -44,6 +51,13 @@ from .tag_manager import TagManager, sanitize_tag_name
 from .text_chunking import chunk_by_sentences, chunk_document, chunk_documents
 from .translator import translate_text
 from .webhook import dispatch_plagiarism_alert, send_plagiarism_alert
+
+# TYPE_CHECKING block for lazy imports (Issue #2363)
+# This satisfies static analysis tools (mypy, pylance) that would otherwise
+# complain that src.core has no attribute 'with_sqlite_retry', even though
+# it's dynamically resolved via __getattr__ and listed in __all__.
+if TYPE_CHECKING:
+    from .concurrency import with_sqlite_retry
 
 __all__ = [
     "BaseSimilarityEngine",
@@ -77,6 +91,8 @@ __all__ = [
     "save_index",
     "load_index",
     "ChunkRecord",
+    "FaissChunkRecord",
+    "PipelineChunkRecord",
     "build_index_from_matrix",
     "translate_text",
     "send_plagiarism_alert",
