@@ -262,12 +262,6 @@ def get_syllable_count(text: str) -> int:
     return sum(count_syllables_in_word(w) for w in words)
 
 
-def get_sentence_count(text: str) -> int:
-    """Return the total sentence count for the text."""
-    return count_sentences(text)
-# get_sentence_count is aliased to count_sentences above
-
-
 def get_readability_metrics(text: str) -> tuple[float, float]:
     """Calculate Flesch Reading Ease and Flesch-Kincaid Grade Level.
 
