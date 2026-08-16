@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 src/core/webhook.py
 -------------------
@@ -16,6 +14,8 @@ Recent Additions (Issue #1994):
   race conditions when multiple webhook deliveries run concurrently via
   background_tasks thread pools.
 """
+
+from __future__ import annotations
 
 import hashlib
 import hmac
@@ -299,73 +299,6 @@ def _post_webhook(
     return response
 
 
-def compute_webhook_signature(  # noqa: F811
-    payload_bytes: bytes,
-    secret_key: str,
-    timestamp: Optional[int] = None,
-) -> str:
-    """Compute HMAC-SHA256 signature for webhook payload authentication."""
-    if not secret_key:
-        logger.warning("compute_webhook_signature: No secret key provided")
-        return ""
-
-    if timestamp is None:
-        timestamp = int(time.time())
-
-    signed_content = f"{timestamp}.".encode("utf-8") + payload_bytes
-
-    signature = hmac.new(
-        secret_key.encode("utf-8"),
-        signed_content,
-        hashlib.sha256,
-    ).hexdigest()
-
-    return signature
-
-
-def verify_webhook_signature(  # noqa: F811
-    payload_bytes: bytes,
-    signature: str,
-    secret_key: str,
-    timestamp: Optional[int] = None,
-    max_age_seconds: int = 300,
-) -> bool:
-    """Verify the authenticity of a webhook payload using HMAC-SHA256."""
-    if not secret_key or not signature:
-        logger.warning("verify_webhook_signature: Missing secret key or signature")
-        return False
-
-    if timestamp is not None:
-        current_time = int(time.time())
-        age = abs(current_time - timestamp)
-
-        if age > max_age_seconds:
-            logger.warning(
-                "verify_webhook_signature: Timestamp too old (%d seconds).", age
-            )
-            return False
-
-    expected_signature = compute_webhook_signature(
-        payload_bytes,
-        secret_key,
-        timestamp=timestamp,
-    )
-
-    if not expected_signature:
-        return False
-
-    is_valid = hmac.compare_digest(
-        expected_signature.encode("utf-8"),
-        signature.encode("utf-8"),
-    )
-
-    if not is_valid:
-        logger.warning("verify_webhook_signature: Signature mismatch detected")
-
-    return is_valid
-
-
-
 def send_plagiarism_alert(
     doc_a: str,
     doc_b: str,
@@ -477,20 +410,9 @@ def dispatch_plagiarism_alert(
     """
     # Issue #1995: Pass webhook_url through to send_plagiarism_alert
     success, _ = send_plagiarism_alert(
-        doc_a=doc_a, 
-        doc_b=doc_b, 
+        doc_a=doc_a,
+        doc_b=doc_b,
         similarity=similarity,
-        webhook_url=webhook_url  # Explicitly pass the override parameter
+        webhook_url=webhook_url,  # Explicitly pass the override parameter
     )
-    return success
-
-
-def dispatch_plagiarism_alert(
-    doc_a: str,
-    doc_b: str,
-    similarity: float,
-    webhook_url: str | None = None,
-) -> bool:
-    """Dispatch a plagiarism alert payload to the configured webhook endpoint."""
-    success, _ = send_plagiarism_alert(doc_a=doc_a, doc_b=doc_b, similarity=similarity)
     return success
