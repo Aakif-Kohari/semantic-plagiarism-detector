@@ -106,8 +106,8 @@ def _connect():
             pass
 
 
-def close_connections(*args, **kwargs) -> None:
-    """Close all pooled corpus connections for the current thread."""
+def close_connections(all_threads: bool = False) -> None:
+    """Close all pooled corpus connections for the current thread (or all threads if specified)."""
     pool = getattr(_connection_pool, "connections", {})
     for conn in pool.values():
         conn.close()
