@@ -260,6 +260,9 @@ def get_syllable_count(text: str) -> int:
     return sum(count_syllables_in_word(w) for w in words)
 
 
+def get_sentence_count(text: str) -> int:
+    """Return the total sentence count for the text."""
+    return count_sentences(text)
 # get_sentence_count is aliased to count_sentences above
 
 
@@ -270,6 +273,7 @@ def get_readability_metrics(text: str) -> tuple[float, float]:
     """
     words = count_words(text)
     sentences = get_sentence_count(text)
+
     words = get_word_count(text)
     sentences = count_sentences(text)
     syllables = get_syllable_count(text)

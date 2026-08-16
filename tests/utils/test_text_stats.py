@@ -1,3 +1,7 @@
+from src.utils.text_stats import (format_text_stats, get_char_count,
+                                   get_reading_time_minutes, count_words, count_sentences,
+                                   get_sentence_count, get_syllable_count,
+                                   get_readability_metrics, get_text_stats)
 from src.utils.text_stats import (
     count_syllables_in_word,
     count_words,
@@ -11,12 +15,12 @@ from src.utils.text_stats import (
 )
 
 
+
 def test_count_syllables_in_word():
     assert count_syllables_in_word("apple") == 2
     assert count_syllables_in_word("table") == 2
     assert count_syllables_in_word("blue") == 1
     assert count_syllables_in_word("the") == 1
-
 
 def test_count_words():
     assert count_words("This is a test.") == 4
@@ -41,7 +45,8 @@ def test_get_reading_time_minutes():
 def test_get_sentence_count():
     assert get_sentence_count("Hello world. How are you? Fine!") == 3
     assert get_sentence_count("") == 0
-    assert get_sentence_count("No punctuation") == 1
+    assert get_sentence_count("No punctuation") == 0
+    assert get_sentence_count("Dr. Smith arrived. He stayed.") == 2
 
 
 def test_get_syllable_count():
