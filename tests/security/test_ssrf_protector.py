@@ -776,5 +776,22 @@ def test_is_ip_in_cidr_block_ipv4_mapped_ipv6_loopback():
     assert is_ip_in_cidr_block("::ffff:127.0.0.1", "127.0.0.0/8") is True
 
 
+@patch("src.security.ssrf_protector.socket.getaddrinfo")
+def test_resolve_hostname_caching_behavior(mock_getaddrinfo):
+    """Verify that SSRFProtector._resolve_hostname successfully uses cached DNS entries on repeated lookups."""
+    mock_getaddrinfo.return_value = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80))]
+
+    # First lookup
+    ip1 = SSRFProtector._resolve_hostname("example.com")
+    assert ip1 == "93.184.216.34"
+    assert mock_getaddrinfo.call_count == 1
+
+    # Second lookup (should hit cache)
+    ip2 = SSRFProtector._resolve_hostname("example.com")
+    assert ip2 == "93.184.216.34"
+    assert mock_getaddrinfo.call_count == 1
+
+
+
 
 
