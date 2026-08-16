@@ -252,6 +252,24 @@ def test_enable_disable_2fa():
     delete_user(username)
 
 
+def test_get_2fa_status():
+    """Verify get_2fa_status returns False initially and True after calling enable_2fa."""
+    username = f"user_2fa_{uuid.uuid4().hex[:8]}"
+    add_user(username, "Password123!")
+
+    enabled, secret = get_2fa_status(username)
+    assert enabled is False
+
+    test_secret = "JBSWY3DPEHPK3PXP"
+    enable_2fa(username, test_secret)
+
+    enabled, secret = get_2fa_status(username)
+    assert enabled is True
+
+    delete_user(username)
+
+
+
 def test_suspend_account():
     username = f"user_{uuid.uuid4().hex[:8]}"
     add_user(username, "password123!")
