@@ -24,6 +24,7 @@ import logging
 import socket
 import time
 import urllib.parse
+from collections import OrderedDict
 from typing import Dict, Tuple, Optional
 
 import requests
@@ -114,10 +115,19 @@ class SSRFProtector:
     attacks via the Webhook feature. Includes DNS rebinding protection caching.
     """
 
-    # Simple in-memory cache to prevent repeated DNS lookups and mitigate
+    # Bounded LRU cache to prevent repeated DNS lookups and mitigate
     # slow-DNS denial of service attacks. (Format: {hostname: (ip_str, timestamp)})
-    _dns_cache: Dict[str, tuple[str, float]] = {}
+    #
+    # Backed by OrderedDict rather than a plain dict: a plain dict grows
+    # without limit, so a malicious actor hitting webhook validation with
+    # thousands of unique randomly generated subdomains could exhaust
+    # memory over time. OrderedDict lets us cheaply track recency
+    # (move_to_end on every hit/write) and evict the least-recently-used
+    # entry once the cache exceeds DNS_CACHE_MAX_SIZE, capping memory
+    # usage regardless of how many distinct hostnames are ever queried.
+    _dns_cache: "OrderedDict[str, tuple[str, float]]" = OrderedDict()
     DNS_CACHE_TTL_SECONDS = 300  # 5 minutes
+    DNS_CACHE_MAX_SIZE = 1000
     RESTRICTED_IPV4_CIDR_BLOCKS = RESTRICTED_IPV4_CIDR_BLOCKS
     MAX_REDIRECT_DEPTH = 5
     DEFAULT_USER_AGENT = DEFAULT_USER_AGENT
@@ -133,7 +143,12 @@ class SSRFProtector:
         if hostname in cls._dns_cache:
             cached_ip, timestamp = cls._dns_cache[hostname]
             if current_time - timestamp < cls.DNS_CACHE_TTL_SECONDS:
+                # Mark as most-recently-used so it survives future evictions.
+                cls._dns_cache.move_to_end(hostname)
                 return cached_ip
+            # Entry expired -- drop it so the lookup below writes a fresh
+            # value with a clean recency position.
+            del cls._dns_cache[hostname]
 
         # Cache miss or expired, perform DNS resolution
         try:
@@ -145,6 +160,11 @@ class SSRFProtector:
 
             ip_str = addr_info[0][4][0]
             cls._dns_cache[hostname] = (ip_str, current_time)
+            cls._dns_cache.move_to_end(hostname)
+            if len(cls._dns_cache) > cls.DNS_CACHE_MAX_SIZE:
+                # Evict the least-recently-used entry to keep the cache
+                # bounded no matter how many distinct hostnames are seen.
+                cls._dns_cache.popitem(last=False)
             return ip_str
 
         except socket.gaierror as e:
