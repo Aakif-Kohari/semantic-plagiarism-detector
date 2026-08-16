@@ -1,0 +1,18 @@
+# Ruff configuration — shared between CI and pre-commit hooks
+[lint]
+select = ["E", "F"]
+# E402: Module level import not at top of file
+#   Required because app/streamlit_app.py and evaluation/evaluate.py
+#   modify sys.path before importing project modules.
+ignore = ["E402", "E501"]
+
+# Mirror the per-file exemptions already declared in .flake8 so the two
+# linters agree about the same file.
+#
+# app/streamlit_app.py is the legacy monolith still being broken up into
+# app/views/. It re-exports a large number of component symbols for backward
+# compatibility (F401) and carries leftover locals from that refactor (F841).
+# These were previously masked: the file did not parse, so ruff stopped at a
+# single E999 and never reached the rest.
+[lint.per-file-ignores]
+"app/streamlit_app.py" = ["F401", "F811", "F841"]

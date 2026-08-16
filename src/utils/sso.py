@@ -1,0 +1,169 @@
+import os
+import secrets
+import urllib.parse
+
+import requests
+import logging
+
+logger = logging.getLogger(__name__)
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+
+def get_google_auth_url() -> tuple[str, str]:
+    """Return the Google OAuth authorization URL and state."""
+    client_id = os.getenv("GOOGLE_CLIENT_ID")
+    if not client_id:
+        raise ValueError("GOOGLE_CLIENT_ID environment variable is not configured")
+    redirect_uri = os.getenv("APP_BASE_URL", "http://localhost:8501")
+    state = f"google_{secrets.token_urlsafe(16)}"
+
+    query_params = {
+        "response_type": "code",
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "scope": "email profile",
+        "state": state
+    }
+    
+    encoded_args = urllib.parse.urlencode(query_params)
+    url = f"https://accounts.google.com/o/oauth2/v2/auth?{encoded_args}"
+    
+    return url, state
+
+
+def exchange_google_code(code: str) -> dict | None:
+    """Exchange code for access token and fetch user info."""
+    client_id = os.getenv("GOOGLE_CLIENT_ID")
+    if not client_id:
+        raise ValueError("GOOGLE_CLIENT_ID environment variable is not configured")
+    client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+    if not client_secret:
+        raise ValueError("GOOGLE_CLIENT_SECRET environment variable is not configured")
+    redirect_uri = os.getenv("APP_BASE_URL", "http://localhost:8501")
+
+    try:
+        token_resp = requests.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "code": code,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uri": redirect_uri,
+                "grant_type": "authorization_code",
+            },
+            timeout=10,
+        )
+    except requests.Timeout:
+        logger.error("OAuth token exchange timed out")
+        return None
+    if not token_resp.ok:
+        return None
+
+    access_token = token_resp.json().get("access_token")
+    if not access_token:
+        return None
+
+    try:
+        user_info_resp = requests.get(
+            "https://www.googleapis.com/oauth2/v2/userinfo",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10,
+        )
+    except requests.Timeout:
+        logger.error("OAuth user information request timed out")
+        return None
+    if not user_info_resp.ok:
+        return None
+
+    return user_info_resp.json()
+
+
+def get_github_auth_url() -> tuple[str, str]:
+    """Return the GitHub OAuth authorization URL and state."""
+    client_id = os.getenv("GITHUB_CLIENT_ID")
+    if not client_id:
+        raise ValueError("GITHUB_CLIENT_ID environment variable is not configured")
+    redirect_uri = os.getenv("APP_BASE_URL", "http://localhost:8501")
+    state = f"github_{secrets.token_urlsafe(16)}"
+
+    query_params = {
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "scope": "user:email",
+        "state": state
+    }
+    
+    encoded_args = urllib.parse.urlencode(query_params)
+    url = f"https://github.com/login/oauth/authorize?{encoded_args}"
+    
+    return url, state
+
+
+def exchange_github_code(code: str) -> dict | None:
+    """Exchange code for access token and fetch user info."""
+    client_id = os.getenv("GITHUB_CLIENT_ID")
+    if not client_id:
+        raise ValueError("GITHUB_CLIENT_ID environment variable is not configured")
+    client_secret = os.getenv("GITHUB_CLIENT_SECRET")
+    if not client_secret:
+        raise ValueError("GITHUB_CLIENT_SECRET environment variable is not configured")
+    redirect_uri = os.getenv("APP_BASE_URL", "http://localhost:8501")
+
+    try:
+        token_resp = requests.post(
+            "https://github.com/login/oauth/access_token",
+            data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "code": code,
+                "redirect_uri": redirect_uri,
+            },
+            headers={"Accept": "application/json"},
+            timeout=10,
+        )
+    except requests.Timeout:
+        logger.error("OAuth token exchange timed out")
+        return None
+    if not token_resp.ok:
+        return None
+
+    access_token = token_resp.json().get("access_token")
+    if not access_token:
+        return None
+
+    try:
+        user_info_resp = requests.get(
+            "https://api.github.com/user",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10,
+        )
+    except requests.Timeout:
+        logger.error("OAuth user information request timed out")
+        return None
+    if not user_info_resp.ok:
+        return None
+
+    user_data = user_info_resp.json()
+
+    # GitHub might not return email in /user if it's private, fetch explicitly
+    if not user_data.get("email"):
+        try:
+            emails_resp = requests.get(
+                "https://api.github.com/user/emails",
+                headers={"Authorization": f"Bearer {access_token}"},
+                timeout=10,
+            )
+        except requests.Timeout:
+            logger.error("OAuth user emails request timed out")
+            emails_resp = None
+            
+        if emails_resp and emails_resp.ok:
+            emails = emails_resp.json()
+            primary_email = next((e["email"] for e in emails if e.get("primary")), None)
+            if primary_email:
+                user_data["email"] = primary_email
+
+    return user_data
