@@ -61,17 +61,39 @@ def filter_warnings(
     warnings: Iterable[Mapping[str, Any]],
     search_query: str = "",
 ) -> list[dict[str, Any]]:
+    from src.core.app_config import FUZZY_THRESHOLD
+    
+    try:
+        from thefuzz import fuzz
+    except ImportError:
+        try:
+            from fuzzywuzzy import fuzz
+        except ImportError:
+            fuzz = None
+
     normalised = [_normalise_warning(item) for item in warnings]
     query = search_query.strip().casefold()
 
     if not query:
         return normalised
 
-    return [
-        item
-        for item in normalised
-        if query in item["doc_a"].casefold() or query in item["doc_b"].casefold()
-    ]
+    filtered = []
+    for item in normalised:
+        doc_a = item["doc_a"].casefold()
+        doc_b = item["doc_b"].casefold()
+
+        if query in doc_a or query in doc_b:
+            filtered.append(item)
+            continue
+
+        if fuzz is not None:
+            score_a = max(fuzz.partial_ratio(query, doc_a), fuzz.token_set_ratio(query, doc_a))
+            score_b = max(fuzz.partial_ratio(query, doc_b), fuzz.token_set_ratio(query, doc_b))
+
+            if score_a >= FUZZY_THRESHOLD or score_b >= FUZZY_THRESHOLD:
+                filtered.append(item)
+
+    return filtered
 
 
 def sort_warnings(
