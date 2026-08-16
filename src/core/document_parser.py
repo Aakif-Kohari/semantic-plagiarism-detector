@@ -1218,6 +1218,15 @@ def extract_text_from_docx(file: PDFInput) -> str:
             p_words = p_text.split()
             word_headings.extend([current_heading] * len(p_words))
 
+        for table in document.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        p_text = paragraph.text
+                        paragraphs_text.append(p_text)
+                        p_words = p_text.split()
+                        word_headings.extend([current_heading] * len(p_words))
+
         full_text = "\n\n".join(paragraphs_text)
         return ParsedDocxText(full_text.strip(), word_headings=word_headings)
     except (ValueError, KeyError, OSError) as exc:

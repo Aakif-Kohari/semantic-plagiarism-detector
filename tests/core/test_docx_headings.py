@@ -79,4 +79,38 @@ def test_non_docx_no_headings():
             not hasattr(chunk, "metadata")
             or chunk.metadata.get("section_title") is None
         )
+
+
+def test_extract_text_from_docx_with_tables():
+    """Verify that extract_text_from_docx extracts text from tables inside DOCX documents."""
+    from src.core.parsers.docx_parser import extract_text_from_docx as parser_extract_docx
+    # Create an in-memory DOCX file with a 2x2 table
+    doc = docx.Document()
+    table = doc.add_table(rows=2, cols=2)
+
+    # Fill cells with distinct text
+    table.cell(0, 0).text = "Cell 1,1 Text"
+    table.cell(0, 1).text = "Cell 1,2 Text"
+    table.cell(1, 0).text = "Cell 2,1 Text"
+    table.cell(1, 1).text = "Cell 2,2 Text"
+
+    # Save to bytes
+    file_stream = io.BytesIO()
+    doc.save(file_stream)
+    file_bytes = file_stream.getvalue()
+
+    # Extract using the main document parser version
+    parsed_text_1 = extract_text_from_docx(file_bytes)
+    assert "Cell 1,1 Text" in parsed_text_1
+    assert "Cell 1,2 Text" in parsed_text_1
+    assert "Cell 2,1 Text" in parsed_text_1
+    assert "Cell 2,2 Text" in parsed_text_1
+
+    # Extract using the parsers package version
+    parsed_text_2 = parser_extract_docx(file_bytes)
+    assert "Cell 1,1 Text" in parsed_text_2
+    assert "Cell 1,2 Text" in parsed_text_2
+    assert "Cell 2,1 Text" in parsed_text_2
+    assert "Cell 2,2 Text" in parsed_text_2
+
         
