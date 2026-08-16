@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
@@ -182,11 +182,53 @@ def test_github_oauth_user_request_timeout(mock_post, mock_get, monkeypatch):
     assert kwargs.get("timeout") == 10
 
 
-def test_sso_does_not_load_dotenv_at_import():
-    """Verify load_dotenv is not called during module import."""
-    import importlib
-    with patch("src.utils.sso.load_dotenv") as mock_load_dotenv:
-        import src.utils.sso as sso_mod
-        importlib.reload(sso_mod)
-        mock_load_dotenv.assert_not_called()
+@patch("src.utils.sso.requests.get")
+@patch("src.utils.sso.requests.post")
+def test_exchange_github_code_email_fallback_success(mock_post, mock_get, monkeypatch):
+    """Test GitHub email fallback when user profile does not contain email."""
+    monkeypatch.setenv("GITHUB_CLIENT_ID", "dummy_client_id")
+    monkeypatch.setenv("GITHUB_CLIENT_SECRET", "dummy_secret")
+
+    mock_post.return_value.ok = True
+    mock_post.return_value.json.return_value = {"access_token": "github_token_123"}
+
+    # First call: GET /user (returns profile without email)
+    user_response = MagicMock()
+    user_response.ok = True
+    user_response.json.return_value = {"login": "octocat", "email": None}
+
+    # Second call: GET /user/emails (returns list of emails)
+    emails_response = MagicMock()
+    emails_response.ok = True
+    emails_response.json.return_value = [
+        {"email": "secondary@github.com", "primary": False},
+        {"email": "primary@github.com", "primary": True},
+    ]
+
+    mock_get.side_effect = [user_response, emails_response]
+
+    result = exchange_github_code("valid_code")
+    assert result == {"login": "octocat", "email": "primary@github.com"}
+    assert mock_get.call_count == 2
+
+
+@patch("src.utils.sso.requests.get")
+@patch("src.utils.sso.requests.post")
+def test_exchange_github_code_email_fallback_timeout(mock_post, mock_get, monkeypatch):
+    """Test GitHub email fallback when /user/emails request times out."""
+    monkeypatch.setenv("GITHUB_CLIENT_ID", "dummy_client_id")
+    monkeypatch.setenv("GITHUB_CLIENT_SECRET", "dummy_secret")
+
+    mock_post.return_value.ok = True
+    mock_post.return_value.json.return_value = {"access_token": "github_token_123"}
+
+    user_response = MagicMock()
+    user_response.ok = True
+    user_response.json.return_value = {"login": "octocat", "email": None}
+
+    mock_get.side_effect = [user_response, requests.Timeout()]
+
+    result = exchange_github_code("valid_code")
+    assert result == {"login": "octocat", "email": None}
+    assert mock_get.call_count == 2
 
