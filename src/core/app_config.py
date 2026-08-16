@@ -255,6 +255,18 @@ def load_branding_config(config_path: Path | str | None = None) -> BrandingConfi
             else:
                 logger.debug("Ignoring unknown branding config key: %s", key)
 
+        # Validate the configured logo file (Issue #2450): log a warning and
+        # fall back to the default if the logo file is missing.
+        if not Path(config.logo_path).exists():
+            default_logo_path = BrandingConfig().logo_path
+            logger.warning(
+                "Branding logo file not found at %s. "
+                "Falling back to default logo %s.",
+                config.logo_path,
+                default_logo_path,
+            )
+            config.logo_path = default_logo_path
+
         logger.info("Successfully loaded branding config from %s", config_path)
         return config
 
