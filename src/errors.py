@@ -38,7 +38,9 @@ __all__ = [
     "SIM_BATCH_SIZE_INVALID",
     "SIM_SHAPE_MISMATCH",
     "SIM_INDEX_MISMATCH",
+    "SIM_WEIGHT_OUT_OF_RANGE",
     "FAISS_STORED_EMB_DIM_INVALID",
+    "FAISS_EMB_REGISTRY_MISMATCH",
     "INCIDENT_DB_INIT_FAILED",
     "INCIDENT_SYNC_FAILED",
     "INCIDENT_INVALID_REVIEW_STATUS",
@@ -144,8 +146,7 @@ PARSER_BATCH_LIMIT_EXCEEDED = "Batch size exceeds maximum limit of {limit} files
 SIM_BATCH_SIZE_INVALID = "batch_size must be an integer"
 
 
-def sim_weight_out_of_range(w):
-    return f"Weight w must be between 0.0 and 1.0, got {w}"
+SIM_WEIGHT_OUT_OF_RANGE = "Weight w must be between 0.0 and 1.0, got {w}"
 
 
 SIM_SHAPE_MISMATCH = "Semantic and lexical matrices must have the same shape"
@@ -155,8 +156,8 @@ SIM_INDEX_MISMATCH = (
 FAISS_STORED_EMB_DIM_INVALID = "Stored embeddings must be two-dimensional."
 
 
-def faiss_emb_registry_mismatch(emb_count, reg_count):
-    return f"Corpus embedding count does not match chunk registry count: {emb_count} != {reg_count}"
+FAISS_EMB_REGISTRY_MISMATCH = "Corpus embedding count does not match chunk registry count: {emb_count} != {reg_count}"
+
 
 
 # Incident Database Errors
