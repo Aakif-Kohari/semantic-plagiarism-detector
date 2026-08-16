@@ -39,10 +39,13 @@ def test_chunk_documents_passes_parameters():
 
 def test_min_words_filters_short_chunks():
     # "42" and "Page 1" are ultra-short; only the long sentence should survive
-    text = "42\n\nPage 1\n\nThis is a sufficiently long sentence with many words in it."
-    chunks = chunk_text(text, chunk_size=500, chunk_overlap=0, min_words=5)
+    text = "42\n\nPage 1\n\nThis is a sufficiently long sentence with many words in it. Here is a second sentence to add enough text. This is a third sentence to ensure we have enough text for overlap to potentially trigger."
+    chunks = chunk_text(text, chunk_size=100, chunk_overlap=50, min_words=5)
+    assert len(chunks) > 0
     assert all(len(c.split()) >= 5 for c in chunks)
     assert any("sufficiently" in c for c in chunks)
+    assert not any("42" in c for c in chunks)
+    assert not any("Page 1" in c for c in chunks)
 
 
 def test_min_words_default_is_five():
