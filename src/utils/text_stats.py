@@ -240,7 +240,11 @@ def count_syllables_in_word(word: str) -> int:
         is_prev_vowel = is_vowel
 
     if word.endswith("e"):
-        count -= 1
+        is_consonant_le = (
+            len(word) >= 3 and word.endswith("le") and word[-3] not in vowels
+        )
+        if not is_consonant_le:
+            count -= 1
 
     if count <= 0:
         count = 1
