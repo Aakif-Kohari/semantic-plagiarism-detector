@@ -1,5 +1,7 @@
 import base64
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock, call
+
+import pytest
 
 from src.utils.warning_list import (
     build_key_extractor,
@@ -7,6 +9,7 @@ from src.utils.warning_list import (
     paginate_warnings,
     prepare_warning_page,
     render_copy_button,
+    render_warning_controls,
     reset_warning_page,
     sort_warnings,
 )
@@ -355,4 +358,164 @@ def test_normalise_warning_logs_invalid_similarity(caplog):
     assert "Invalid similarity score found in incident data: N/A" in caplog.text
 
 
+class TestRenderWarningControls:
+    """Test suite for render_warning_controls() function."""
+
+    @patch("src.utils.warning_list.st")
+    def test_empty_flags_shows_info_message(self, mock_st):
+        """Verify empty flags list displays an info message."""
+        render_warning_controls([])
         
+        mock_st.info.assert_called_once_with("No plagiarism warnings to display.")
+        mock_st.expander.assert_not_called()
+
+    @patch("src.utils.warning_list.st")
+    def test_single_flag_renders_expander(self, mock_st):
+        """Verify single flag creates one expander with correct header."""
+        flags = [
+            {"doc_a": "essay1.pdf", "doc_b": "essay2.pdf", "similarity": 0.85}
+        ]
+        
+        render_warning_controls(flags, threshold=0.59)
+        
+        # Verify header was created
+        mock_st.markdown.assert_any_call("### 🚨 1 Plagiarism Warning Detected")
+        
+        # Verify expander was created
+        mock_st.expander.assert_called_once()
+        call_args = mock_st.expander.call_args
+        assert "essay1.pdf" in call_args[0][0]
+        assert "essay2.pdf" in call_args[0][0]
+        assert "High" in call_args[0][0]  # 0.85 >= 0.80
+
+    @patch("src.utils.warning_list.st")
+    def test_multiple_flags_render_multiple_expanders(self, mock_st):
+        """Verify multiple flags create multiple expanders."""
+        flags = [
+            {"doc_a": "a.pdf", "doc_b": "b.pdf", "similarity": 0.85},
+            {"doc_a": "c.pdf", "doc_b": "d.pdf", "similarity": 0.65},
+            {"doc_a": "e.pdf", "doc_b": "f.pdf", "similarity": 0.45},
+        ]
+        
+        render_warning_controls(flags)
+        
+        # Verify plural header
+        mock_st.markdown.assert_any_call("### 🚨 3 Plagiarism Warnings Detected")
+        
+        # Verify 3 expanders were created
+        assert mock_st.expander.call_count == 3
+
+    @patch("src.utils.warning_list.st")
+    def test_severity_classification_high(self, mock_st):
+        """Verify similarity >= 0.80 is classified as High severity."""
+        flags = [{"doc_a": "a.pdf", "doc_b": "b.pdf", "similarity": 0.85}]
+        
+        render_warning_controls(flags)
+        
+        expander_call = mock_st.expander.call_args
+        header = expander_call[0][0]
+        assert "High" in header
+        assert "#ef4444" in header  # Red color
+
+    @patch("src.utils.warning_list.st")
+    def test_severity_classification_medium(self, mock_st):
+        """Verify 0.50 <= similarity < 0.80 is classified as Medium severity."""
+        flags = [{"doc_a": "a.pdf", "doc_b": "b.pdf", "similarity": 0.65}]
+        
+        render_warning_controls(flags)
+        
+        expander_call = mock_st.expander.call_args
+        header = expander_call[0][0]
+        assert "Medium" in header
+        assert "#f59e0b" in header  # Orange color
+
+    @patch("src.utils.warning_list.st")
+    def test_severity_classification_low(self, mock_st):
+        """Verify similarity < 0.50 is classified as Low severity."""
+        flags = [{"doc_a": "a.pdf", "doc_b": "b.pdf", "similarity": 0.45}]
+        
+        render_warning_controls(flags)
+        
+        expander_call = mock_st.expander.call_args
+        header = expander_call[0][0]
+        assert "Low" in header
+        assert "#10b981" in header  # Green color
+
+    @patch("src.utils.warning_list.st")
+    def test_ai_probabilities_displayed_when_provided(self, mock_st):
+        """Verify AI probabilities are displayed when ai_probabilities dict is provided."""
+        flags = [{"doc_a": "a.pdf", "doc_b": "b.pdf", "similarity": 0.75}]
+        ai_probs = {"a.pdf": 0.90, "b.pdf": 0.85}
+        
+        render_warning_controls(flags, ai_probabilities=ai_probs)
+        
+        # Verify AI probability markdown was called
+        markdown_calls = [call[0][0] for call in mock_st.markdown.call_args_list]
+        assert any("a.pdf AI Probability" in text for text in markdown_calls)
+        assert any("b.pdf AI Probability" in text for text in markdown_calls)
+
+    @patch("src.utils.warning_list.st")
+    def test_matched_chunks_displayed_when_available(self, mock_st):
+        """Verify matched chunks are displayed when available in flag data."""
+        flags = [{
+            "doc_a": "a.pdf",
+            "doc_b": "b.pdf",
+            "similarity": 0.75,
+            "matched_chunks": [
+                {"text": "This is a matching chunk."}
+            ]
+        }]
+        
+        render_warning_controls(flags)
+        
+        # Verify st.code was called for the chunk
+        mock_st.code.assert_called()
+
+    @patch("src.utils.warning_list.st")
+    def test_expanded_parameter_controls_default_state(self, mock_st):
+        """Verify expanded parameter controls expander default state."""
+        flags = [{"doc_a": "a.pdf", "doc_b": "b.pdf", "similarity": 0.75}]
+        
+        render_warning_controls(flags, expanded=True)
+        
+        expander_call = mock_st.expander.call_args
+        assert expander_call[1]["expanded"] is True
+
+    @patch("src.utils.warning_list.st")
+    def test_threshold_displayed_in_expander(self, mock_st):
+        """Verify threshold value is displayed inside the expander."""
+        flags = [{"doc_a": "a.pdf", "doc_b": "b.pdf", "similarity": 0.75}]
+        
+        render_warning_controls(flags, threshold=0.59)
+        
+        markdown_calls = [call[0][0] for call in mock_st.markdown.call_args_list]
+        assert any("Threshold: 59.0%" in text for text in markdown_calls)
+
+
+class TestRenderCopyButton:
+    """Test suite for render_copy_button() function."""
+
+    @patch("src.utils.warning_list.st")
+    def test_renders_code_block_with_text(self, mock_st):
+        """Verify st.code is called with the provided text."""
+        text = "Suspicious text snippet"
+        
+        render_copy_button(text)
+        
+        mock_st.code.assert_called_once_with(text, language=None)
+
+    @patch("src.utils.warning_list.st")
+    def test_empty_text_returns_early(self, mock_st):
+        """Verify empty text does not render any components."""
+        render_copy_button("")
+        
+        mock_st.code.assert_not_called()
+
+    @patch("src.utils.warning_list.st")
+    def test_none_text_returns_early(self, mock_st):
+        """Verify None text does not render any components."""
+        render_copy_button(None)
+        
+        mock_st.code.assert_not_called()
+
+
