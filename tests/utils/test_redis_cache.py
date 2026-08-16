@@ -873,3 +873,101 @@ def test_redis_fallback_exceptions():
     import src.utils.redis_cache as rc
     importlib.reload(rc)
 
+
+
+# ── Issue #2320: REDIS_URL password injection ──────────────────
+
+
+class TestRedisUrlPasswordInjection:
+    """Tests for REDIS_URL construction with REDIS_PASSWORD (Issue #2320)."""
+
+    def test_redis_url_includes_password_when_set(self, monkeypatch):
+        """When REDIS_PASSWORD is set, it must be injected into the URL."""
+        import importlib
+        import src.utils.redis_cache as redis_cache_module
+
+        monkeypatch.setenv("REDIS_HOST", "myhost.example.com")
+        monkeypatch.setenv("REDIS_PORT", "6380")
+        monkeypatch.setenv("REDIS_DB", "2")
+        monkeypatch.setenv("REDIS_PASSWORD", "s3cr3tP@ss")
+        # Remove REDIS_URL so the fallback is used.
+        monkeypatch.delenv("REDIS_URL", raising=False)
+
+        importlib.reload(redis_cache_module)
+
+        assert redis_cache_module.REDIS_URL == (
+            "redis://:s3cr3tP@ss@myhost.example.com:6380/2"
+        )
+
+    def test_redis_url_omits_password_when_not_set(self, monkeypatch):
+        """When REDIS_PASSWORD is not set, the URL must not include credentials."""
+        import importlib
+        import src.utils.redis_cache as redis_cache_module
+
+        monkeypatch.setenv("REDIS_HOST", "localhost")
+        monkeypatch.setenv("REDIS_PORT", "6379")
+        monkeypatch.setenv("REDIS_DB", "0")
+        monkeypatch.delenv("REDIS_PASSWORD", raising=False)
+        monkeypatch.delenv("REDIS_URL", raising=False)
+
+        importlib.reload(redis_cache_module)
+
+        assert redis_cache_module.REDIS_URL == "redis://localhost:6379/0"
+        # No @ symbol means no credentials in the URL.
+        assert "@" not in redis_cache_module.REDIS_URL
+
+    def test_redis_url_respects_explicit_env_var(self, monkeypatch):
+        """If REDIS_URL is set explicitly in the env, it takes precedence."""
+        import importlib
+        import src.utils.redis_cache as redis_cache_module
+
+        monkeypatch.setenv("REDIS_HOST", "ignored.example.com")
+        monkeypatch.setenv("REDIS_PORT", "9999")
+        monkeypatch.setenv("REDIS_DB", "9")
+        monkeypatch.setenv("REDIS_PASSWORD", "ignored_password")
+        monkeypatch.setenv(
+            "REDIS_URL", "rediss://user:pass@explicit.redis.com:6380/3"
+        )
+
+        importlib.reload(redis_cache_module)
+
+        assert redis_cache_module.REDIS_URL == (
+            "rediss://user:pass@explicit.redis.com:6380/3"
+        )
+
+    def test_redis_url_with_special_chars_in_password(self, monkeypatch):
+        """Passwords with special characters are included as-is."""
+        import importlib
+        import src.utils.redis_cache as redis_cache_module
+
+        monkeypatch.setenv("REDIS_HOST", "redis.example.com")
+        monkeypatch.setenv("REDIS_PORT", "6379")
+        monkeypatch.setenv("REDIS_DB", "0")
+        monkeypatch.setenv("REDIS_PASSWORD", "p@ss:w0rd#123")
+        monkeypatch.delenv("REDIS_URL", raising=False)
+
+        importlib.reload(redis_cache_module)
+
+        # The password is inserted as-is (URL encoding is the caller's
+        # responsibility — redis-py handles it via from_url).
+        assert "p@ss:w0rd#123" in redis_cache_module.REDIS_URL
+        assert redis_cache_module.REDIS_URL.startswith("redis://:p@ss:w0rd#123@")
+
+    def test_redis_url_empty_password_falls_back_to_no_auth(self, monkeypatch):
+        """An empty REDIS_PASSWORD string should be treated as 'no password'."""
+        import importlib
+        import src.utils.redis_cache as redis_cache_module
+
+        monkeypatch.setenv("REDIS_HOST", "localhost")
+        monkeypatch.setenv("REDIS_PORT", "6379")
+        monkeypatch.setenv("REDIS_DB", "0")
+        monkeypatch.setenv("REDIS_PASSWORD", "")
+        monkeypatch.delenv("REDIS_URL", raising=False)
+
+        importlib.reload(redis_cache_module)
+
+        assert redis_cache_module.REDIS_URL == "redis://localhost:6379/0"
+        assert "@" not in redis_cache_module.REDIS_URL
+
+
+
