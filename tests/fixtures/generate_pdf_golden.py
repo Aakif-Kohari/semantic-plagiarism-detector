@@ -1,4 +1,5 @@
 """Generate the golden PDF fixture for snapshot testing."""
+
 import hashlib
 import json
 import os
@@ -21,9 +22,21 @@ INPUTS = {
     "overall_similarity": 0.873,
     "threshold": 0.60,
     "top_pairs": [
-        ("The mitochondria is the powerhouse of the cell and plays a crucial role in energy production.", "The mitochondria serves as the cell's primary energy generator through ATP synthesis.", 0.94),
-        ("Photosynthesis converts light energy into chemical energy stored in glucose molecules.", "Plants transform sunlight into chemical energy via the process of photosynthesis.", 0.91),
-        ("DNA replication occurs during the S phase of the cell cycle before mitosis begins.", "The cell replicates its DNA in the synthesis phase prior to mitotic division.", 0.88),
+        (
+            "The mitochondria is the powerhouse of the cell and plays a crucial role in energy production.",
+            "The mitochondria serves as the cell's primary energy generator through ATP synthesis.",
+            0.94,
+        ),
+        (
+            "Photosynthesis converts light energy into chemical energy stored in glucose molecules.",
+            "Plants transform sunlight into chemical energy via the process of photosynthesis.",
+            0.91,
+        ),
+        (
+            "DNA replication occurs during the S phase of the cell cycle before mitosis begins.",
+            "The cell replicates its DNA in the synthesis phase prior to mitotic division.",
+            0.88,
+        ),
     ],
 }
 

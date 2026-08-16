@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import sqlite3
 
-
 from src.db.migrations import (
     AUTH_MIGRATIONS,
     AUTH_SCHEMA_VERSION,
@@ -23,10 +22,10 @@ from src.db.migrations import (
     table_exists,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _connect() -> sqlite3.Connection:
     """Open a fresh in-memory SQLite database."""
@@ -45,6 +44,7 @@ def _apply_up_to(conn: sqlite3.Connection, migrations: dict, version: int) -> in
 # Corpus migration flow — step-by-step assertions
 # ---------------------------------------------------------------------------
 
+
 class TestCorpusMigrationFlow:
     """Incremental integration tests for corpus.db schema upgrades."""
 
@@ -59,7 +59,13 @@ class TestCorpusMigrationFlow:
             for col in ("id", "filename", "file_hash", "upload_date"):
                 assert column_exists(conn, "documents", col), f"Missing column: {col}"
             # Core columns on chunks
-            for col in ("vector_id", "filename", "chunk_index", "chunk_text", "embedding"):
+            for col in (
+                "vector_id",
+                "filename",
+                "chunk_index",
+                "chunk_text",
+                "embedding",
+            ):
                 assert column_exists(conn, "chunks", col), f"Missing column: {col}"
         finally:
             conn.close()
@@ -101,7 +107,9 @@ class TestCorpusMigrationFlow:
                 "date_flagged",
                 "last_seen",
             ):
-                assert column_exists(conn, "plagiarism_incidents", col), f"Missing: {col}"
+                assert column_exists(
+                    conn, "plagiarism_incidents", col
+                ), f"Missing: {col}"
             assert index_exists(conn, "idx_incidents_status")
         finally:
             conn.close()
@@ -122,7 +130,9 @@ class TestCorpusMigrationFlow:
         try:
             _apply_up_to(conn, CORPUS_MIGRATIONS, 6)
             assert get_user_version(conn) == 6
-            assert column_exists(conn, "plagiarism_incidents", "threshold_at_time_of_flag")
+            assert column_exists(
+                conn, "plagiarism_incidents", "threshold_at_time_of_flag"
+            )
         finally:
             conn.close()
 
@@ -164,6 +174,31 @@ class TestCorpusMigrationFlow:
         finally:
             conn.close()
 
+    def test_version_10_backfills_default_owner_for_preexisting_rows(self):
+        """Documents inserted before migration 10 ever ran must not end up
+        with a NULL owner -- ALTER TABLE ... DEFAULT 'system' backfills
+        every pre-existing row at migration time (see acceptance criteria
+        of the 'owner column missing DEFAULT' issue)."""
+        conn = _connect()
+        try:
+            _apply_up_to(conn, CORPUS_MIGRATIONS, 9)
+            conn.execute(
+                "INSERT INTO documents (filename, file_hash, upload_date) "
+                "VALUES (?, ?, ?)",
+                ("legacy_doc.pdf", "legacy_hash", "2023-01-01T00:00:00"),
+            )
+            conn.commit()
+
+            _apply_up_to(conn, CORPUS_MIGRATIONS, 10)
+
+            row = conn.execute(
+                "SELECT owner FROM documents WHERE filename = ?",
+                ("legacy_doc.pdf",),
+            ).fetchone()
+            assert row[0] == "system"
+        finally:
+            conn.close()
+
     def test_version_11_adds_documents_created_at_index(self):
         conn = _connect()
         try:
@@ -173,7 +208,6 @@ class TestCorpusMigrationFlow:
             assert index_exists(conn, "idx_documents_created_at")
         finally:
             conn.close()
-
 
     def test_full_corpus_flow_reaches_latest_version(self):
         """Single end-to-end pass: v0 → CORPUS_SCHEMA_VERSION via migrate_corpus_database."""
@@ -187,19 +221,33 @@ class TestCorpusMigrationFlow:
             assert get_user_version(conn) == CORPUS_SCHEMA_VERSION
 
             # Tables
-            for tbl in ("documents", "chunks", "plagiarism_incidents", "false_positives"):
+            for tbl in (
+                "documents",
+                "chunks",
+                "plagiarism_incidents",
+                "false_positives",
+            ):
                 assert table_exists(conn, tbl), f"Missing table: {tbl}"
 
             # All expected columns on documents
             for col in (
-                "id", "filename", "file_hash", "upload_date",
-                "class_section", "student_name", "assignment_title",
-                "detected_language", "owner", "created_at",
+                "id",
+                "filename",
+                "file_hash",
+                "upload_date",
+                "class_section",
+                "student_name",
+                "assignment_title",
+                "detected_language",
+                "owner",
+                "created_at",
             ):
                 assert column_exists(conn, "documents", col), f"Missing column: {col}"
 
             # plagiarism_incidents final shape
-            assert column_exists(conn, "plagiarism_incidents", "threshold_at_time_of_flag")
+            assert column_exists(
+                conn, "plagiarism_incidents", "threshold_at_time_of_flag"
+            )
 
             # Indexes
             for idx in (
@@ -231,8 +279,9 @@ class TestCorpusMigrationFlow:
             )
             conn.commit()
 
-
-            run_migrations(conn, migrations=CORPUS_MIGRATIONS, target_version=CORPUS_SCHEMA_VERSION)
+            run_migrations(
+                conn, migrations=CORPUS_MIGRATIONS, target_version=CORPUS_SCHEMA_VERSION
+            )
 
             row = conn.execute(
                 "SELECT filename, file_hash, upload_date FROM documents WHERE filename = ?",
@@ -252,6 +301,7 @@ class TestCorpusMigrationFlow:
 # ---------------------------------------------------------------------------
 # Auth migration flow — step-by-step assertions
 # ---------------------------------------------------------------------------
+
 
 class TestAuthMigrationFlow:
     """Incremental integration tests for users.db schema upgrades."""
@@ -359,9 +409,17 @@ class TestAuthMigrationFlow:
             assert table_exists(conn, "security_audit_log")
 
             for col in (
-                "id", "username", "password", "role",
-                "tour_completed", "otp_secret", "two_factor_enabled",
-                "preferences", "is_active", "theme", "last_login_at",
+                "id",
+                "username",
+                "password",
+                "role",
+                "tour_completed",
+                "otp_secret",
+                "two_factor_enabled",
+                "preferences",
+                "is_active",
+                "theme",
+                "last_login_at",
             ):
                 assert column_exists(conn, "users", col), f"Missing column: {col}"
 
@@ -382,7 +440,9 @@ class TestAuthMigrationFlow:
             )
             conn.commit()
 
-            run_migrations(conn, migrations=AUTH_MIGRATIONS, target_version=AUTH_SCHEMA_VERSION)
+            run_migrations(
+                conn, migrations=AUTH_MIGRATIONS, target_version=AUTH_SCHEMA_VERSION
+            )
 
             row = conn.execute(
                 "SELECT username, password, role FROM users WHERE username = ?",
@@ -396,6 +456,7 @@ class TestAuthMigrationFlow:
 # ---------------------------------------------------------------------------
 # Cross-cutting: column defaults after migration
 # ---------------------------------------------------------------------------
+
 
 class TestMigrationColumnDefaults:
     """Verify that migrated columns carry the correct default values."""
@@ -497,8 +558,16 @@ class TestMigrationColumnDefaults:
                      severity_rank, review_status, date_flagged, last_seen)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                ("inc-001", "doc_a.pdf", "doc_b.pdf", 0.95, "High", "Pending",
-                 "2026-07-01", "2026-07-01"),
+                (
+                    "inc-001",
+                    "doc_a.pdf",
+                    "doc_b.pdf",
+                    0.95,
+                    "High",
+                    "Pending",
+                    "2026-07-01",
+                    "2026-07-01",
+                ),
             )
             conn.commit()
             row = conn.execute(

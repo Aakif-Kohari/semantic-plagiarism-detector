@@ -1,13 +1,30 @@
-from src.utils.text_stats import (format_text_stats, get_char_count,
-                                   get_reading_time_minutes, get_word_count,
-                                   get_sentence_count, get_syllable_count,
-                                   get_readability_metrics, get_text_stats)
+from src.utils.text_stats import (
+    count_syllables_in_word,
+    count_words,
+    format_text_stats,
+    get_char_count,
+    get_readability_metrics,
+    get_reading_time_minutes,
+    get_sentence_count,
+    get_syllable_count,
+    get_text_stats,
+)
 
 
-def test_get_word_count():
-    assert get_word_count("This is a test.") == 4
-    assert get_word_count("") == 0
-    assert get_word_count("   Spaces   ") == 1
+def test_count_syllables_in_word():
+    assert count_syllables_in_word("apple") == 2
+    assert count_syllables_in_word("table") == 2
+    assert count_syllables_in_word("blue") == 1
+    assert count_syllables_in_word("the") == 1
+
+
+def test_count_words():
+    assert count_words("This is a test.") == 4
+    assert count_words("") == 0
+    assert count_words("   Spaces   ") == 1
+    assert count_words("hello,world") == 2
+    assert count_words("hello-world") == 2
+    assert count_words("HELLO hello") == 2
 
 
 def test_get_char_count():

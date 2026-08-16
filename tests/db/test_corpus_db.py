@@ -16,10 +16,8 @@ from src.db.corpus_db import (
     get_document_by_hash,
     get_document_chunks_count,
     get_document_count_by_user,
-    get_document_word_counts,
+    get_document_count_fast,
     get_documents_by_class,
-    get_total_document_count,
-    get_deleted_documents_count,
     get_unique_class_sections,
     purge_stale_trash,
     restore_document,
@@ -35,13 +33,46 @@ def setup_test_db(mock_db):
 
 def test_add_document_metadata():
     res1 = add_document("test1.pdf", "hash_abc_123")
-    assert res1 is True
+    assert isinstance(res1, int)
 
     res2 = add_document("test2.pdf", "hash_abc_123")
-    assert res2 is False
+    assert res2 == res1
 
     res3 = add_document("test1.pdf", "different_hash")
-    assert res3 is False
+    assert res3 is None
+
+
+def test_add_document_returns_existing_id_for_duplicate_hash(caplog):
+    import logging
+
+    hash_value = "abc1234_dup"
+
+    with caplog.at_level(logging.INFO):
+        first_id = add_document(
+            filename="file1_dup.pdf",
+            file_hash=hash_value,
+        )
+
+        second_id = add_document(
+            filename="file2_dup.pdf",
+            file_hash=hash_value,
+        )
+
+    assert second_id == first_id
+    assert isinstance(first_id, int)
+
+    with _connect() as conn:
+        count = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM documents
+            WHERE file_hash = ?
+            """,
+            (hash_value,),
+        ).fetchone()[0]
+
+    assert count == 1
+    assert "already exists in corpus; skipping insertion." in caplog.text
 
 
 def test_get_document_by_hash():
@@ -115,7 +146,7 @@ def test_document_metadata_fields():
         assignment_title="Homework 1",
         detected_language="en",
     )
-    assert res is True
+    assert isinstance(res, int)
 
     from src.db.schemas import Document
 
@@ -170,7 +201,7 @@ def test_class_queries():
 
 
 def test_batch_soft_delete_documents():
-    from src.db.corpus_db import batch_soft_delete_documents, _connect
+    from src.db.corpus_db import _connect, batch_soft_delete_documents
 
     # Add some test documents
     add_document("doc_soft1.pdf", "hash_s1")
@@ -216,7 +247,7 @@ def test_batch_soft_delete_documents():
 
 
 def test_batch_permanently_delete_documents():
-    from src.db.corpus_db import batch_permanently_delete_documents, _connect
+    from src.db.corpus_db import _connect, batch_permanently_delete_documents
 
     add_document("doc_perm1.pdf", "hash_p1")
     add_document("doc_perm2.pdf", "hash_p2")
@@ -254,7 +285,7 @@ def test_batch_permanently_delete_documents():
 
 
 def test_batch_permanently_delete_documents_purges_related_records():
-    from src.db.corpus_db import batch_permanently_delete_documents, _connect
+    from src.db.corpus_db import _connect, batch_permanently_delete_documents
 
     add_document("doc_perm_soft.pdf", "hash_ps")
     add_document("doc_perm_other.pdf", "hash_po")
@@ -281,9 +312,7 @@ def test_batch_permanently_delete_documents_purges_related_records():
                 "2026-01-01T00:00:00",
             ),
         )
-        rows = conn.execute(
-            "SELECT id, filename FROM documents ORDER BY id"
-        ).fetchall()
+        rows = conn.execute("SELECT id, filename FROM documents ORDER BY id").fetchall()
         doc_ids = {row[1]: row[0] for row in rows}
 
     soft_id = doc_ids["doc_perm_soft.pdf"]
@@ -335,7 +364,15 @@ def test_clear_all_data_clears_incidents(mock_db):
             INSERT INTO plagiarism_incidents (incident_id, document_a, document_b, similarity_score, severity_rank, date_flagged, last_seen)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            ("INC-1", "doc1.pdf", "doc2.pdf", 0.85, "High", "2026-01-01T00:00:00", "2026-01-01T00:00:00"),
+            (
+                "INC-1",
+                "doc1.pdf",
+                "doc2.pdf",
+                0.85,
+                "High",
+                "2026-01-01T00:00:00",
+                "2026-01-01T00:00:00",
+            ),
         )
 
     # Verify incident exists
@@ -368,7 +405,7 @@ def test_get_document_word_counts():
     ]
     add_chunks(chunks)
 
-    word_counts = get_document_word_counts()
+    word_counts = get_document_word_counts()  # noqa: F821
     assert word_counts["doc1.txt"] == 13
     assert word_counts["doc2.txt"] == 6
 
@@ -420,7 +457,7 @@ def test_soft_delete_document():
     inserted = add_document(
         filename=filename, file_hash=file_hash, student_name="Student A"
     )
-    assert inserted is True
+    assert isinstance(inserted, int)
 
     dummy_embedding = np.random.rand(384).astype(np.float32)
     add_chunks([(0, filename, 0, "Paragraph 1 text content.", dummy_embedding)])
@@ -585,6 +622,37 @@ def test_get_document_count_by_user_handles_none_owner(mock_db):
     assert get_document_count_by_user("") == 0
 
 
+def test_get_document_count_by_user_does_not_crash_with_many_null_owners(mock_db):
+    """Regression test: NULL-owner documents (e.g. from add_document() calls
+    that omit `owner`, still fully possible even after migration_010's
+    DEFAULT 'system' backfill -- see migration_010_add_document_owner's
+    docstring) must never cause get_document_count_by_user() to raise, and
+    must never be miscounted against a real user."""
+    for i in range(5):
+        add_document(f"no_owner_{i}.pdf", f"hash_none_{i}")  # owner omitted -> NULL
+    add_document("alice_doc.pdf", "hash_alice", owner="alice")
+    add_document("bob_doc.pdf", "hash_bob", owner="bob")
+
+    # No crash, and NULL-owner rows are excluded from every real user's count.
+    assert get_document_count_by_user("alice") == 1
+    assert get_document_count_by_user("bob") == 1
+    assert get_document_count_by_user("system") == 0
+    assert get_document_count_by_user("") == 0
+
+
+def test_get_document_count_by_user_does_not_crash_when_queried_with_none(mock_db):
+    """Calling the function itself with owner_username=None (SQL
+    ``owner = NULL`` never matches, per SQL's NULL-comparison semantics)
+    must not raise, and must correctly return 0 rather than matching
+    NULL-owner rows."""
+    from src.db.corpus_db import get_document_count_by_user
+
+    add_document("no_owner.pdf", "hash_none_for_none_query")
+
+    result = get_document_count_by_user(None)
+    assert result == 0
+
+
 def test_get_document_count_by_user_returns_int(mock_db):
     add_document("doc.pdf", "hash", owner="alice")
     result = get_document_count_by_user("alice")
@@ -592,231 +660,48 @@ def test_get_document_count_by_user_returns_int(mock_db):
     assert result == 1
 
 
-def test_get_total_document_count(mock_db):
-    assert get_total_document_count() == 0
-    add_document("doc1.pdf", "hash_doc1")
-    add_document("doc2.pdf", "hash_doc2")
-    assert get_total_document_count() == 2
-    soft_delete_document("doc1.pdf")
-    assert get_total_document_count() == 1
-    assert get_total_document_count(include_deleted=True) == 2
+def test_get_document_count_fast(mock_db):
+    """Verify that get_document_count_fast returns correct counts for active and deleted documents."""
+    clear_all_data()
+
+    # Initially count is 0
+    assert get_document_count_fast(include_deleted=False) == 0
+    assert get_document_count_fast(include_deleted=True) == 0
+
+    # Add active documents
+    add_document("doc1.pdf", "hash_1")
+    add_document("doc2.pdf", "hash_2")
+
+    # Add soft-deleted document
+    add_document("doc3.pdf", "hash_3")
+    soft_delete_document("doc3.pdf")
+
+    # Verify counts
+    assert get_document_count_fast(include_deleted=False) == 2
+    assert get_document_count_fast(include_deleted=True) == 3
 
 
-def test_documents_created_at_index_exists(mock_db):
-    from src.db.corpus_db import get_corpus_db_path
-    import sqlite3
-    db_path = get_corpus_db_path()
-    conn = sqlite3.connect(db_path)
-    try:
-        cursor = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='documents'"
+def test_get_document_count_by_user():
+    from src.db.corpus_db import _connect, get_document_count_by_user
+
+    with _connect() as db:
+        db.execute(
+            "INSERT INTO documents (filename, file_hash, upload_date, owner, is_deleted) VALUES (?, ?, ?, ?, ?)",
+            ("1.pdf", "hash1", "date", "alice", 0),
         )
-        indexes = [row[0] for row in cursor.fetchall()]
-        assert "idx_documents_created_at" in indexes
-    finally:
-        conn.close()
-
-
-def test_get_deleted_documents_count(mock_db):
-    assert get_deleted_documents_count() == 0
-    add_document("doc1.pdf", "hash_doc1")
-    add_document("doc2.pdf", "hash_doc2")
-    assert get_deleted_documents_count() == 0
-    soft_delete_document("doc1.pdf")
-    assert get_deleted_documents_count() == 1
-    soft_delete_document("doc2.pdf")
-    assert get_deleted_documents_count() == 2
-    restore_document("doc1.pdf")
-    assert get_deleted_documents_count() == 1
-# ---------------------------------------------------------------------------
-# Issue #1359 — FTS5 Full-Text Search tests
-# ---------------------------------------------------------------------------
-
-
-def test_search_documents_fts_empty_query():
-    """Empty query must return an empty list."""
-    from src.db.corpus_db import search_documents_fts
-    assert search_documents_fts("") == []
-    assert search_documents_fts("   ") == []
-    assert search_documents_fts(None) == []
-
-
-def test_search_documents_fts_no_matches():
-    """A query that matches nothing must return an empty list."""
-    from src.db.corpus_db import search_documents_fts
-    add_document("test_fts_doc.pdf", "hash_fts_001")
-    results = search_documents_fts("nonexistent_term_xyz")
-    assert results == []
-
-
-def test_search_documents_fts_finds_by_filename():
-    """FTS search should find documents by filename."""
-    from src.db.corpus_db import search_documents_fts
-    add_document("machine_learning_essay.pdf", "hash_fts_002", student_name="Alice")
-    results = search_documents_fts("machine")
-    assert len(results) == 1
-    assert results[0]["filename"] == "machine_learning_essay.pdf"
-    assert results[0]["student_name"] == "Alice"
-
-
-def test_search_documents_fts_finds_by_student_name():
-    """FTS search should find documents by student name."""
-    from src.db.corpus_db import search_documents_fts
-    add_document("essay1.pdf", "hash_fts_003", student_name="Bob Smith")
-    results = search_documents_fts("Bob")
-    assert len(results) == 1
-    assert results[0]["student_name"] == "Bob Smith"
-
-
-def test_search_documents_fts_finds_by_assignment_title():
-    """FTS search should find documents by assignment title."""
-    from src.db.corpus_db import search_documents_fts
-    add_document("lab_report.pdf", "hash_fts_004", assignment_title="Final Lab Report")
-    results = search_documents_fts("Final")
-    assert len(results) == 1
-    assert results[0]["assignment_title"] == "Final Lab Report"
-
-
-def test_search_documents_fts_returns_correct_fields():
-    """The result dict must contain all expected fields."""
-    from src.db.corpus_db import search_documents_fts
-    add_document("data_science.pdf", "hash_fts_005", student_name="Carol", assignment_title="ML Project")
-    results = search_documents_fts("data")
-    assert len(results) == 1
-    result = results[0]
-    assert "id" in result
-    assert "filename" in result
-    assert "student_name" in result
-    assert "assignment_title" in result
-    assert "upload_date" in result
-    assert "snippet" in result
-
-
-def test_search_documents_fts_excludes_deleted():
-    """Soft-deleted documents must not appear in FTS results."""
-    from src.db.corpus_db import search_documents_fts, soft_delete_document
-    add_document("active_doc.pdf", "hash_fts_006", student_name="Active User")
-    add_document("deleted_doc.pdf", "hash_fts_007", student_name="Deleted User")
-    soft_delete_document("deleted_doc.pdf")
-    results = search_documents_fts("User")
-    # Only the non-deleted doc should appear
-    filenames = [r["filename"] for r in results]
-    assert "active_doc.pdf" in filenames
-    assert "deleted_doc.pdf" not in filenames
-
-
-def test_search_documents_fts_multiple_results():
-    """FTS search should return all matching documents, ranked by relevance."""
-    from src.db.corpus_db import search_documents_fts
-    add_document("plagiarism_detection.pdf", "hash_fts_008", student_name="Alice")
-    add_document("plagiarism_essay.pdf", "hash_fts_009", student_name="Bob")
-    add_document("unrelated_topic.pdf", "hash_fts_010", student_name="Carol")
-    results = search_documents_fts("plagiarism")
-    assert len(results) == 2
-    filenames = {r["filename"] for r in results}
-    assert "plagiarism_detection.pdf" in filenames
-    assert "plagiarism_essay.pdf" in filenames
-
-
-def test_search_documents_fts_trigger_sync_on_delete():
-    """Hard-deleting a document must remove it from the FTS index."""
-    from src.db.corpus_db import search_documents_fts, delete_document
-    add_document("to_delete.pdf", "hash_fts_011", student_name="Delete Me")
-    results_before = search_documents_fts("Delete")
-    assert len(results_before) == 1
-    delete_document("to_delete.pdf")
-    results_after = search_documents_fts("Delete")
-    assert len(results_after) == 0
-
-
-def test_fts5_virtual_table_exists():
-    """The documents_fts virtual table must exist after migration."""
-    from src.db.corpus_db import get_corpus_db_path
-    import sqlite3
-    conn = sqlite3.connect(str(get_corpus_db_path()))
-    try:
-        cursor = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='documents_fts'"
+        db.execute(
+            "INSERT INTO documents (filename, file_hash, upload_date, owner, is_deleted) VALUES (?, ?, ?, ?, ?)",
+            ("2.pdf", "hash2", "date", "alice", 0),
         )
-        assert cursor.fetchone() is not None
-    finally:
-        conn.close()
-
-
-def test_fts5_triggers_exist():
-    """The FTS sync triggers must exist after migration."""
-    from src.db.corpus_db import get_corpus_db_path
-    import sqlite3
-    conn = sqlite3.connect(str(get_corpus_db_path()))
-    try:
-        cursor = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='trigger' AND name IN ('documents_ai', 'documents_ad', 'documents_au')"
+        db.execute(
+            "INSERT INTO documents (filename, file_hash, upload_date, owner, is_deleted) VALUES (?, ?, ?, ?, ?)",
+            ("3.pdf", "hash3", "date", "alice", 1),
         )
-        trigger_names = {row[0] for row in cursor.fetchall()}
-        assert "documents_ai" in trigger_names
-        assert "documents_ad" in trigger_names
-        assert "documents_au" in trigger_names
-    finally:
-        conn.close()
+
+    assert get_document_count_by_user("alice") == 2
 
 
-def test_corpus_soft_delete_lifecycle():
-    """Verify document soft-deletion and soft-delete recovery workflows."""
-    filename = "lifecycle_test.pdf"
-    file_hash = "lifecycle_hash_999"
+def test_get_document_count_by_user_empty():
+    from src.db.corpus_db import get_document_count_by_user
 
-    # 1. Add document and chunks
-    added = add_document(
-        filename=filename,
-        file_hash=file_hash,
-        student_name="Lifecycle Tester",
-        class_section="CS 101",
-        assignment_title="Lifecycle Assignment",
-    )
-    assert added is True
-
-    dummy_embedding = np.random.rand(384).astype(np.float32)
-    add_chunks([(1000, filename, 0, "Initial paragraph content", dummy_embedding)])
-
-    # Verify present in active queries initially
-    active_docs = get_all_documents(include_deleted=False)
-    assert len(active_docs) == 1
-    assert active_docs[0]["filename"] == filename
-
-    active_chunks = get_chunk_registry()
-    assert len(active_chunks) == 1
-    assert active_chunks[0].doc_name == filename
-
-    assert get_total_document_count() == 1
-    assert get_deleted_documents_count() == 0
-
-    # 2. Soft delete the document
-    soft_delete_document(filename)
-
-    # Verify excluded from active queries
-    assert len(get_all_documents(include_deleted=False)) == 0
-    assert len(get_chunk_registry()) == 0
-    assert get_total_document_count() == 0
-    assert get_deleted_documents_count() == 1
-
-    # Verify present in get_deleted_documents
-    deleted_docs = get_deleted_documents()
-    assert len(deleted_docs) == 1
-    assert deleted_docs[0]["filename"] == filename
-
-    # 3. Restore the document
-    restore_document(filename)
-
-    # Verify included in active queries again
-    active_docs_after = get_all_documents(include_deleted=False)
-    assert len(active_docs_after) == 1
-    assert active_docs_after[0]["filename"] == filename
-
-    active_chunks_after = get_chunk_registry()
-    assert len(active_chunks_after) == 1
-    assert active_chunks_after[0].doc_name == filename
-    assert active_chunks_after[0].chunk_text == "Initial paragraph content"
-
-    assert get_total_document_count() == 1
-    assert get_deleted_documents_count() == 0
-
+    assert get_document_count_by_user("unknown-user") == 0

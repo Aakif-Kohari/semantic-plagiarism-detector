@@ -4,6 +4,12 @@
 (explain the app scores every document pair using two independent signals —
  lexical and semantic — then blends them into one hybrid score)
 
+## Document Chunking (src/core/text_chunking.py)
+Before embedding, documents are split into smaller chunks. See
+[CHUNKING_STRATEGIES.md](CHUNKING_STRATEGIES.md) for a full comparison of the
+three available chunking strategies (`chunk_text`, `chunk_by_sentences`,
+`chunk_text_dynamic`), their parameters, and when to use each.
+
 ## Lexical Similarity (src/core/lexical_similarity.py)
 - Jaccard similarity formula: |A ∩ B| / |A ∪ B| over stop-word-filtered
   token sets (see jaccard_similarity())

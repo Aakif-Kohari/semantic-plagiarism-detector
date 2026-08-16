@@ -16,9 +16,9 @@ from typing import Generator
 
 import pandas as pd
 from openpyxl import Workbook
+from openpyxl.comments import Comment
 from openpyxl.formatting.rule import ColorScaleRule
 from openpyxl.styles import Alignment, Font, PatternFill
-from openpyxl.comments import Comment
 
 
 def _create_managed_temp_file(suffix: str = ".xlsx", prefix: str = "temp_") -> str:
@@ -37,45 +37,106 @@ def _create_managed_temp_file(suffix: str = ".xlsx", prefix: str = "temp_") -> s
     return temp_path
 
 
-def _truncate_title(title: str, max_length: int = 60) -> str:
+# Characters that make a spreadsheet application treat a cell as a formula
+# rather than as text. Excel, LibreOffice Calc and Google Sheets all evaluate a
+# cell whose content starts with one of these.
+FORMULA_TRIGGER_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+# Control characters stripped from cell values. Embedded newlines and tabs can
+# be used to shift the formula trigger past a naive prefix check.
+_CONTROL_CHARACTERS = dict.fromkeys(range(0, 32))
+
+
+def sanitize_spreadsheet_value(value):
+    """Neutralise spreadsheet formula injection in a cell value.
+
+    Document labels come from uploaded filenames, which are user-controlled.
+    A file named ``=HYPERLINK("https://attacker.example","Open")`` becomes a
+    live formula when the exported report is opened, so any string starting
+    with a formula trigger is prefixed with a single quote -- the standard
+    spreadsheet escape that forces the cell to be read as text.
+
+    Non-string values (the float similarity scores) are returned unchanged so
+    numeric cells keep their type and number formatting.
+
+    Args:
+        value: The cell value to sanitize.
+
+    Returns:
+        The sanitized value. Strings may gain a leading apostrophe; anything
+        that is not a string is returned as-is.
+
+    Examples:
+        >>> sanitize_spreadsheet_value("=1+1")
+        "'=1+1"
+        >>> sanitize_spreadsheet_value("essay.docx")
+        'essay.docx'
+        >>> sanitize_spreadsheet_value(0.85)
+        0.85
+    """
+    if not isinstance(value, str):
+        return value
+
+    # Strip control characters first: a value such as "\r\n=cmd()" would
+    # otherwise slip past the prefix check while still being parsed as a
+    # formula once the spreadsheet normalises the line endings.
+    cleaned = value.translate(_CONTROL_CHARACTERS)
+
+    if cleaned.startswith(FORMULA_TRIGGER_PREFIXES):
+        return f"'{cleaned}"
+
+    return cleaned
+
+
+def _truncate_title(title, max_length: int = 60) -> str:
     """
     Truncate a title to max_length characters, appending '...' if truncated.
 
     Args:
-        title: The title to truncate
+        title: The title to truncate. Coerced to str, so a non-string
+            DataFrame index (e.g. an integer document ID) does not raise.
         max_length: Maximum length before truncation (default: 60)
 
     Returns:
         Truncated title with '...' suffix if original was longer
     """
+    title = str(title)
     if len(title) <= max_length:
         return title
     return title[: max_length - 3] + "..."
 
 
-def build_similarity_workbook(
-    df: pd.DataFrame, threshold: float = 0.59
-) -> Workbook:
+def build_similarity_workbook(df: pd.DataFrame, threshold: float = 0.59) -> Workbook:
     """Helper function that builds and styles the openpyxl Workbook."""
     wb = Workbook()
     ws = wb.active
     ws.title = "Similarity Matrix"
 
-    # Write headers and index labels with truncated titles, preserving full names in comments
+    # Write headers and index labels with truncated titles, preserving full names in comments.
+    # Labels originate from uploaded filenames, so they are sanitized before
+    # being written to prevent formula injection in the exported workbook.
     ws.cell(row=1, column=1, value="Document")
     for col_idx, col_name in enumerate(df.columns, start=2):
         truncated_name = _truncate_title(col_name)
-        cell = ws.cell(row=1, column=col_idx, value=truncated_name)
+        cell = ws.cell(
+            row=1, column=col_idx, value=sanitize_spreadsheet_value(truncated_name)
+        )
         # Add full title as comment if truncated
-        if len(col_name) > 60:
-            cell.comment = Comment(col_name, "Excel Export")
+        if len(str(col_name)) > 60:
+            cell.comment = Comment(
+                sanitize_spreadsheet_value(str(col_name)), "Excel Export"
+            )
 
     for row_idx, (index_label, row) in enumerate(df.iterrows(), start=2):
         truncated_label = _truncate_title(index_label)
-        cell = ws.cell(row=row_idx, column=1, value=truncated_label)
+        cell = ws.cell(
+            row=row_idx, column=1, value=sanitize_spreadsheet_value(truncated_label)
+        )
         # Add full title as comment if truncated
-        if len(index_label) > 60:
-            cell.comment = Comment(index_label, "Excel Export")
+        if len(str(index_label)) > 60:
+            cell.comment = Comment(
+                sanitize_spreadsheet_value(str(index_label)), "Excel Export"
+            )
 
         for col_idx, val in enumerate(row, start=2):
             cell = ws.cell(row=row_idx, column=col_idx, value=float(val))
@@ -172,8 +233,10 @@ def generate_csv_matrix_stream(matrix_df: pd.DataFrame) -> Generator[str, None, 
     buffer = io.StringIO()
     writer = csv.writer(buffer)
 
-    # Yield header row
-    header = ["Document"] + list(matrix_df.columns)
+    # Yield header row. Column labels are sanitized for the same reason as in
+    # build_similarity_workbook(): a CSV opened in Excel evaluates formulas too,
+    # so the streaming route must not be a way around the protection.
+    header = ["Document"] + [sanitize_spreadsheet_value(c) for c in matrix_df.columns]
     writer.writerow(header)
     yield buffer.getvalue()
     buffer.seek(0)
@@ -181,7 +244,10 @@ def generate_csv_matrix_stream(matrix_df: pd.DataFrame) -> Generator[str, None, 
 
     # Yield data rows line by line
     for index, row in matrix_df.iterrows():
-        writer.writerow([index] + row.tolist())
+        writer.writerow(
+            [sanitize_spreadsheet_value(index)]
+            + [sanitize_spreadsheet_value(v) for v in row.tolist()]
+        )
         yield buffer.getvalue()
         buffer.seek(0)
         buffer.truncate(0)

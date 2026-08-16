@@ -46,7 +46,9 @@ def test_mock_db_provides_isolated_schema(mock_db):
     auth_cursor = auth_conn.cursor()
 
     # Check that users table exists (from init_auth_db)
-    auth_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+    auth_cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='users'"
+    )
     assert auth_cursor.fetchone() is not None
 
     # 3. Verify emptiness

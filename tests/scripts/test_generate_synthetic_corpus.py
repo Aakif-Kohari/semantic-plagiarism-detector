@@ -13,10 +13,10 @@ Validates:
 """
 
 import json
+import random
 import sys
 from pathlib import Path
 from unittest.mock import patch
-import random
 
 import pytest
 
@@ -27,7 +27,6 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import generate_synthetic_corpus as gen_corpus
-
 
 # ─── Mutation Function Tests ──────────────────────────────────────────────────
 
@@ -198,8 +197,6 @@ def test_generate_corpus_plagiarized_has_source(tmp_path):
         plagiarism_ratio=1.0,  # All plagiarized
         output_dir=tmp_path,
     )
-
-    filenames = {m["filename"] for m in manifest}
 
     for entry in manifest:
         assert entry["type"] == "plagiarized"

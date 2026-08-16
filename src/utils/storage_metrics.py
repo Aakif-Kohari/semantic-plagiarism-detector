@@ -2,34 +2,54 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+logger = logging.getLogger(__name__)
 
-def get_sqlite_db_paths() -> List[Path]:
-    """Retrieve unique paths of SQLite database files in standard application locations."""
+
+def _deduplicate_paths(paths: List[Path]) -> List[Path]:
+    """Remove duplicate paths by comparing their resolved absolute form."""
+    unique_paths: List[Path] = []
+    seen: set[Path] = set()
+    for p in paths:
+        try:
+            resolved = p.resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                unique_paths.append(p)
+        except Exception as e:
+            logger.debug("Could not resolve path: %s", e)
+    return unique_paths
+
+
+def get_sqlite_db_paths() -> List[Path]:    """Retrieve unique paths of SQLite database files in standard application locations."""
     paths: List[Path] = []
 
     # 1. Corpus DB path
     try:
         from src.db.corpus_db import get_corpus_db_path
+
         paths.append(get_corpus_db_path())
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Could not resolve path: %s", e)
 
     # 2. Auth DB path
     try:
-        from src.db.auth import _DB_PATH as auth_db_path
-        paths.append(Path(auth_db_path))
-    except Exception:
-        pass
+        from src.db.auth import get_auth_db_path
+
+        paths.append(get_auth_db_path())
+    except Exception as e:
+        logger.debug("Could not resolve path: %s", e)
 
     # 3. Incidents DB path
     try:
         from src.db.incidents import DEFAULT_DB_PATH as incidents_db_path
+
         paths.append(Path(incidents_db_path))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Could not resolve path: %s", e)
 
     # 4. Search root and data directories for additional .db files
     base_dir = Path(__file__).resolve().parents[2]
@@ -39,23 +59,11 @@ def get_sqlite_db_paths() -> List[Path]:
             for file_path in folder.glob("*.db"):
                 paths.append(file_path)
 
-    # Deduplicate resolved absolute paths
-    unique_paths: List[Path] = []
-    seen: set[Path] = set()
-    for p in paths:
-        try:
-            resolved = p.resolve()
-            if resolved not in seen:
-                seen.add(resolved)
-                unique_paths.append(p)
-        except Exception:
-            pass
-
-    return unique_paths
+# Deduplicate resolved absolute paths
+    return _deduplicate_paths(paths)
 
 
-def get_faiss_index_paths() -> List[Path]:
-    """Retrieve unique paths of FAISS index files in standard application locations."""
+def get_faiss_index_paths() -> List[Path]:    """Retrieve unique paths of FAISS index files in standard application locations."""
     paths: List[Path] = []
 
     base_dir = Path(__file__).resolve().parents[2]
@@ -70,19 +78,7 @@ def get_faiss_index_paths() -> List[Path]:
             for file_path in folder.glob("*.index"):
                 paths.append(file_path)
 
-    unique_paths: List[Path] = []
-    seen: set[Path] = set()
-    for p in paths:
-        try:
-            resolved = p.resolve()
-            if resolved not in seen:
-                seen.add(resolved)
-                unique_paths.append(p)
-        except Exception:
-            pass
-
-    return unique_paths
-
+return _deduplicate_paths(paths)
 
 def calculate_storage_usage(
     db_paths: Optional[List[Path]] = None,
@@ -101,6 +97,8 @@ def calculate_storage_usage(
             - 'formatted_total': str (formatted total string e.g. "1.25 MB")
             - 'formatted_sqlite': str (formatted SQLite size)
             - 'formatted_faiss': str (formatted FAISS index size)
+            - 'sqlite_file_count': int (number of SQLite files found)
+            - 'faiss_file_count': int (number of FAISS index files found)
     """
     if db_paths is None:
         db_paths = get_sqlite_db_paths()
@@ -108,20 +106,24 @@ def calculate_storage_usage(
         index_paths = get_faiss_index_paths()
 
     sqlite_bytes = 0
+    sqlite_file_count = 0
     for db_path in db_paths:
         try:
             if db_path.exists() and db_path.is_file():
                 sqlite_bytes += db_path.stat().st_size
-        except OSError:
-            pass
+                sqlite_file_count += 1
+        except OSError as e:
+            logger.debug("Could not resolve path: %s", e)
 
     faiss_bytes = 0
+    faiss_file_count = 0
     for idx_path in index_paths:
         try:
             if idx_path.exists() and idx_path.is_file():
                 faiss_bytes += idx_path.stat().st_size
-        except OSError:
-            pass
+                faiss_file_count += 1
+        except OSError as e:
+            logger.debug("Could not resolve path: %s", e)
 
     total_bytes = sqlite_bytes + faiss_bytes
 
@@ -139,4 +141,6 @@ def calculate_storage_usage(
         "formatted_total": f"{total_mb:.2f} MB",
         "formatted_sqlite": f"{sqlite_mb:.2f} MB",
         "formatted_faiss": f"{faiss_mb:.2f} MB",
+        "sqlite_file_count": sqlite_file_count,
+        "faiss_file_count": faiss_file_count,
     }
