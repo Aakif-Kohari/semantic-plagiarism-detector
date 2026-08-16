@@ -13,14 +13,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --upgrade pip && \
+COPY requirements.txt .RUN pip install --upgrade pip && \
     pip install -r requirements.txt
 
 COPY . .
 
-EXPOSE 8501
+RUN chown -R appuser:appuser /app
 
+EXPOSE 8501
 # Orchestrators (Docker Compose, Kubernetes) use this to know when the
 # Streamlit app is actually ready to serve traffic.
 #
@@ -33,5 +33,7 @@ EXPOSE 8501
 # and actually reachable.
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD curl --fail http://localhost:8501/_stcore/health || exit 1
+
+USER appuser
 
 CMD ["streamlit", "run", "src/asgi_app.py", "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]
