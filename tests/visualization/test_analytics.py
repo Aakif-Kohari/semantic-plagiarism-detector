@@ -986,6 +986,76 @@ class TestGetTopSimilarPairs:
         df = pd.DataFrame([[1.0]], index=["A"], columns=["A"])
         assert get_top_similar_pairs(df) == []
 
+    def test_top_pairs_empty_df(self):
+        """Verify get_top_similar_pairs returns empty list for empty DataFrame."""
+        df = pd.DataFrame()
+        assert get_top_similar_pairs(df) == []
+
+    def test_top_pairs_single_doc(self):
+        """Verify get_top_similar_pairs returns empty list for single document."""
+        df = pd.DataFrame([[1.0]], index=["A"], columns=["A"])
+        assert get_top_similar_pairs(df) == []
+
+    def test_top_pairs_returns_sorted_desc(self):
+        """Verify get_top_similar_pairs returns pairs sorted by highest similarity first."""
+        df = pd.DataFrame(
+            [[1.0, 0.3, 0.9], [0.3, 1.0, 0.6], [0.9, 0.6, 1.0]],
+            index=["DocA", "DocB", "DocC"],
+            columns=["DocA", "DocB", "DocC"],
+        )
+        pairs = get_top_similar_pairs(df, top_n=5)
+        assert len(pairs) == 3
+        assert pairs[0][2] >= pairs[1][2] >= pairs[2][2]
+        assert pairs[0][2] == 0.9
+
+    def test_top_pairs_respects_top_n(self):
+        """Verify get_top_similar_pairs respects top_n clamp (top_n=2 returns at most 2)."""
+        df = pd.DataFrame(
+            [[1.0, 0.3, 0.9], [0.3, 1.0, 0.6], [0.9, 0.6, 1.0]],
+            index=["DocA", "DocB", "DocC"],
+            columns=["DocA", "DocB", "DocC"],
+        )
+        pairs = get_top_similar_pairs(df, top_n=2)
+        assert len(pairs) == 2
+
+
+def test_top_pairs_empty_df():
+    """Verify get_top_similar_pairs returns empty list for empty DataFrame."""
+    df = pd.DataFrame()
+    assert get_top_similar_pairs(df) == []
+
+
+def test_top_pairs_single_doc():
+    """Verify get_top_similar_pairs returns empty list for single document."""
+    df = pd.DataFrame([[1.0]], index=["A"], columns=["A"])
+    assert get_top_similar_pairs(df) == []
+
+
+def test_top_pairs_returns_sorted_desc():
+    """Verify get_top_similar_pairs returns pairs sorted by highest similarity first."""
+    df = pd.DataFrame(
+        [[1.0, 0.3, 0.9], [0.3, 1.0, 0.6], [0.9, 0.6, 1.0]],
+        index=["DocA", "DocB", "DocC"],
+        columns=["DocA", "DocB", "DocC"],
+    )
+    pairs = get_top_similar_pairs(df, top_n=5)
+    assert len(pairs) == 3
+    assert pairs[0][2] >= pairs[1][2] >= pairs[2][2]
+    assert pairs[0][2] == 0.9
+    assert pairs[1][2] == 0.6
+    assert pairs[2][2] == 0.3
+
+
+def test_top_pairs_respects_top_n():
+    """Verify get_top_similar_pairs respects top_n clamp (top_n=2 returns at most 2)."""
+    df = pd.DataFrame(
+        [[1.0, 0.3, 0.9], [0.3, 1.0, 0.6], [0.9, 0.6, 1.0]],
+        index=["DocA", "DocB", "DocC"],
+        columns=["DocA", "DocB", "DocC"],
+    )
+    pairs = get_top_similar_pairs(df, top_n=2)
+    assert len(pairs) == 2
+
 
 class TestEmptyChartHelper:
     """Test suite for the _empty_chart() placeholder generator."""
@@ -995,9 +1065,9 @@ class TestEmptyChartHelper:
         fig = _empty_chart(
             title="Test Title",
             message="No data available",
-            theme_colors=get_chart_theme_colors("Light")
+            theme_colors=get_chart_theme_colors("Light"),
         )
-        
+
         assert fig.layout.title.text == "Test Title"
         assert len(fig.layout.annotations) == 1
         assert fig.layout.annotations[0].text == "No data available"
@@ -1008,39 +1078,39 @@ class TestEmptyChartHelper:
         fig = _empty_chart(
             title="Test",
             message="Test",
-            theme_colors=dark_colors
+            theme_colors=dark_colors,
         )
-        
+
         assert fig.layout.paper_bgcolor == "#1e293b"
 
 
 def test_get_top_similar_pairs_vectorized_matches_loop():
     """Verify vectorized np.triu_indices implementation matches old nested loop logic."""
-    import pandas as pd
     import numpy as np
+    import pandas as pd
     from src.visualization.analytics import get_top_similar_pairs
-    
+
     # Create a 10x10 similarity matrix to test performance and correctness
     np.random.seed(42)
     data = np.random.rand(10, 10)
     # Make symmetric and set diagonal to 1.0
     data = (data + data.T) / 2
     np.fill_diagonal(data, 1.0)
-    
+
     doc_names = [f"doc_{chr(65+i)}" for i in range(10)]
     df = pd.DataFrame(data, index=doc_names, columns=doc_names)
-    
+
     result = get_top_similar_pairs(df, top_n=5)
-    
+
     assert len(result) == 5
     # Verify descending order
     for i in range(len(result) - 1):
-        assert result[i][2] >= result[i+1][2]
-    
+        assert result[i][2] >= result[i + 1][2]
+
     # Verify no self-pairs (diagonal exclusion)
     for doc_a, doc_b, score in result:
         assert doc_a != doc_b
-        
+
     # Verify scores are within valid range
     for doc_a, doc_b, score in result:
         assert 0.0 <= score <= 1.0
