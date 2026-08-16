@@ -37,6 +37,11 @@ def test_chunk_documents_passes_parameters():
     assert len(chunked["doc1.txt"]) > 0
 
 
+def test_chunk_documents_empty_dictionary():
+    """Empty input should return an empty dict without error."""
+    assert chunk_documents({}) == {}
+
+
 def test_min_words_filters_short_chunks():
     # "42" and "Page 1" are ultra-short; only the long sentence should survive
     text = "42\n\nPage 1\n\nThis is a sufficiently long sentence with many words in it."
