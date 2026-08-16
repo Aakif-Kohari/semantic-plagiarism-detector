@@ -16,6 +16,7 @@ import json
 import logging
 from pathlib import Path
 
+from src.core.config import severity_from_score
 from src.errors import (
     EXPORT_GENERATION_IO_FAILED,
     EXPORT_WRITE_FAILED,
@@ -97,12 +98,13 @@ class LMSExportEngine:
 
     @staticmethod
     def _calculate_severity(sim_score: float) -> str:
-        """Classify severity from a numeric similarity score."""
-        if sim_score > 0.90:
-            return "CRITICAL"
-        if sim_score > 0.80:
-            return "HIGH"
-        return "MODERATE"
+        """Classify severity from a numeric similarity score.
+
+        Delegates to the shared severity logic so the export reports stay in
+        sync with the UI when the similarity thresholds are adjusted
+        (Issue #2443).
+        """
+        return severity_from_score(sim_score)
 
     @staticmethod
     def _safe_document_name(value: object) -> str:

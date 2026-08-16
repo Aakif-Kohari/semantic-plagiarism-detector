@@ -204,12 +204,16 @@ def get_char_count(text: str) -> int:
     return len(text)
 
 
-def get_reading_time_minutes(text: str) -> int:
-    # Average reading speed is roughly 200-250 words per minute.
-    # We'll use 200 for a conservative estimate.
+def get_reading_time_minutes(text: str) -> float:
+    """Estimate reading time in minutes.
+
+    Average reading speed is roughly 200-250 words per minute; 200 is used as
+    a conservative estimate. The result is rounded to one decimal place and
+    floored at 0.1 so that any non-empty text reports a visible duration
+    rather than "0 min".
+    """
     word_count = count_words(text)
-    minutes = max(1, round(word_count / 200))
-    return minutes
+    return max(0.1, round(word_count / 200, 1))
 
 
 def format_text_stats(text: str) -> str:
@@ -240,7 +244,11 @@ def count_syllables_in_word(word: str) -> int:
         is_prev_vowel = is_vowel
 
     if word.endswith("e"):
-        count -= 1
+        is_consonant_le = (
+            len(word) >= 3 and word.endswith("le") and word[-3] not in vowels
+        )
+        if not is_consonant_le:
+            count -= 1
 
     if count <= 0:
         count = 1
@@ -254,9 +262,6 @@ def get_syllable_count(text: str) -> int:
     return sum(count_syllables_in_word(w) for w in words)
 
 
-# get_sentence_count is aliased to count_sentences above
-
-
 def get_readability_metrics(text: str) -> tuple[float, float]:
     """Calculate Flesch Reading Ease and Flesch-Kincaid Grade Level.
 
@@ -264,8 +269,6 @@ def get_readability_metrics(text: str) -> tuple[float, float]:
     """
     words = count_words(text)
     sentences = get_sentence_count(text)
-    words = get_word_count(text)
-    sentences = count_sentences(text)
     syllables = get_syllable_count(text)
 
     if words == 0 or sentences == 0:
