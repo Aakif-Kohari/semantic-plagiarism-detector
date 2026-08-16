@@ -72,8 +72,7 @@ def test_highlight_overlap_markdown_escaping():
     assert "\\[" in html_a
 
 
-def test_highlight_overlap_empty_inputs():
-    """Verify that empty inputs are handled gracefully without crashing."""
+def test_highlight_overlap_empty_inputs():    """Verify that empty inputs are handled gracefully without crashing."""
     html_a, html_b = highlight_overlap("", "some text")
     assert html_a == ""
     assert html_b == "some text"
