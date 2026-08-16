@@ -202,6 +202,29 @@ def test_chunk_by_sentences_produces_multiple_chunks_for_long_text():
     assert len(chunks) > 1
 
 
+def test_chunk_by_sentences_decimal_and_ellipsis():
+    """Verify chunk_by_sentences handles decimals and ellipses properly."""
+    text = (
+        "The software version 3.14 was released today. "
+        "We are currently loading... done! "
+        "This is the final sentence."
+    )
+    chunks = chunk_by_sentences(text, max_chunk_size=50)
+
+    # They should be split as three separate chunks
+    assert len(chunks) == 3
+    
+    assert "version 3.14" in chunks[0]
+    assert "loading... done!" in chunks[1]
+    assert "final sentence" in chunks[2]
+
+    # Ensure no split happened strictly inside the decimal or ellipsis
+    for chunk in chunks:
+        assert not chunk.strip().endswith("version 3.")
+        assert not chunk.strip().endswith("loading.")
+        assert not chunk.strip().endswith("loading..")
+
+
 def test_chunk_text_percentage_overlap():
     """Verify overlap_percentage correctly derives chunk_overlap from chunk_size."""
     text = "Word " * 200
