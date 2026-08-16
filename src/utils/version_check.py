@@ -32,12 +32,12 @@ from typing import Optional
 
 import httpx
 
+from src.version import version as APP_VERSION
+
 logger = logging.getLogger(__name__)
 
 # ── Local version ──────────────────────────────────────────────────────────────
-# Bump this constant in lock-step with CHANGELOG.md when cutting a new release.
-APP_VERSION: str = "1.0.0"
-
+# Sourced from src/version.py — see CONTRIBUTING.md for the bump process.
 # ── GitHub repository coordinates ─────────────────────────────────────────────
 GITHUB_OWNER: str = "Ganesh-403"
 GITHUB_REPO: str = "semantic-plagiarism-detector"

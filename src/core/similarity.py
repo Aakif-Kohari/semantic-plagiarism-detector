@@ -250,9 +250,9 @@ def hybrid_similarity_matrix(
     Combine semantic and lexical similarity matrices using a weighted formula.
     """
     if not (0.0 <= w <= 1.0):
-        from src.errors import sim_weight_out_of_range
+        from src.errors import SIM_WEIGHT_OUT_OF_RANGE
 
-        raise ValueError(sim_weight_out_of_range(w))
+        raise ValueError(SIM_WEIGHT_OUT_OF_RANGE.format(w=w))
 
     if semantic_df.shape != lexical_df.shape:
         from src.errors import SIM_SHAPE_MISMATCH
@@ -353,9 +353,9 @@ def compute_hybrid_similarity(
         float: Hybrid similarity score strictly bounded in [0.0, 1.0].
     """
     if not (0.0 <= alpha <= 1.0):
-        from src.errors import sim_weight_out_of_range
+        from src.errors import SIM_WEIGHT_OUT_OF_RANGE
 
-        raise ValueError(sim_weight_out_of_range(alpha))
+        raise ValueError(SIM_WEIGHT_OUT_OF_RANGE.format(w=alpha))
 
     bm25_score = _compute_bm25_similarity(doc_a, doc_b)
     hybrid_score = alpha * vector_sim + (1.0 - alpha) * bm25_score

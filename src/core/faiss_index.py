@@ -54,6 +54,10 @@ class ChunkRecord:
         return f"ChunkRecord({self.doc_name!r}, idx={self.chunk_index}, '{preview}…')"
 
 
+FaissChunkRecord = ChunkRecord
+
+
+
 def build_index(
     embeddings: Dict[str, np.ndarray],
     chunked_docs: Dict[str, List[str]],
@@ -514,9 +518,9 @@ def load_or_rebuild_index(filepath: str) -> Tuple[faiss.Index, List[ChunkRecord]
     n_registry = len(registry)
 
     if n_matrix != n_registry:
-        from src.errors import faiss_emb_registry_mismatch
+        from src.errors import FAISS_EMB_REGISTRY_MISMATCH
 
-        raise ValueError(faiss_emb_registry_mismatch(n_matrix, n_registry))
+        raise ValueError(FAISS_EMB_REGISTRY_MISMATCH.format(emb_count=n_matrix, reg_count=n_registry))
 
     if os.path.exists(filepath):
         try:

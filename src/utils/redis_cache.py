@@ -18,13 +18,7 @@ from enum import Enum
 from typing import Any, Optional
 
 
-class CacheKeyPrefix(str, Enum):
-    LOGIN_ATTEMPTS = "login_attempts:"
-    UPLOAD_COUNT = "upload_count:"
-    SIMILARITY_RESULT = "similarity:"
-    DOCUMENT_CACHE = "doc:"
-    LEGACY_UPLOADS_PREFIX = UPLOAD_COUNT
-
+# CacheKeyPrefix has been consolidated into CacheNamespace below
 
 try:
     import redis
@@ -40,26 +34,39 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-_RedisErr = getattr(redis, "RedisError", Exception)
+class DummyRedisError(Exception):
+    pass
+
+
+class DummyRedisConnectionError(DummyRedisError):
+    pass
+
+
+class DummyRedisTimeoutError(DummyRedisError):
+    pass
+
+
+_RedisErr = getattr(redis, "RedisError", DummyRedisError)
 RedisError = (
     _RedisErr
     if isinstance(_RedisErr, type) and issubclass(_RedisErr, BaseException)
-    else Exception
+    else DummyRedisError
 )
 
-_ConnErr = getattr(redis, "ConnectionError", ConnectionError)
+_ConnErr = getattr(redis, "ConnectionError", DummyRedisConnectionError)
 RedisConnectionError = (
     _ConnErr
     if isinstance(_ConnErr, type) and issubclass(_ConnErr, BaseException)
-    else ConnectionError
+    else DummyRedisConnectionError
 )
 
-_TimeoutErr = getattr(redis, "TimeoutError", TimeoutError)
+_TimeoutErr = getattr(redis, "TimeoutError", DummyRedisTimeoutError)
 RedisTimeoutError = (
     _TimeoutErr
     if isinstance(_TimeoutErr, type) and issubclass(_TimeoutErr, BaseException)
-    else TimeoutError
+    else DummyRedisTimeoutError
 )
+
 
 
 # Redis connection configuration
@@ -67,16 +74,29 @@ REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 REDIS_DB = int(os.getenv("REDIS_DB", "0"))
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", None)
-REDIS_URL = os.getenv("REDIS_URL", f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}")
+# Construct REDIS_URL with password if provided (Issue #2320).
+# Format: redis://:{password}@{host}:{port}/{db}
+# When no password is set, falls back to: redis://{host}:{port}/{db}
+if REDIS_PASSWORD:
+    REDIS_URL = os.getenv(
+        "REDIS_URL",
+        f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}",
+    )
+else:
+    REDIS_URL = os.getenv(
+        "REDIS_URL",
+        f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}",
+    )
 REDIS_TIMEOUT_SECONDS = float(os.getenv("REDIS_TIMEOUT_SECONDS", "2.0"))
 
-# TTL settings (in seconds)
-SESSION_TTL = 15 * 60  # 15 minutes for session state
-FAISS_INDEX_TTL = 24 * 60 * 60  # 24 hours for FAISS index cache
-ANALYSIS_RESULTS_TTL = 2 * 60 * 60  # 2 hours for analysis results
-LOGIN_LOCKOUT_TTL = 15 * 60  # 15 minutes for login lockout
-UPLOAD_RATE_TTL = 60 * 60  # 1 hour for upload rate limiting
-DEFAULT_TTL = 24 * 60 * 60  # 24 hours fallback for keys without explicit TTL
+# TTL settings (in seconds) - Configurable via environment variables (Issue #2323)
+# Defaults are preserved for backward compatibility when env vars are not set
+SESSION_TTL = int(os.getenv("SESSION_TTL", str(15 * 60)))  # 15 minutes for session state
+FAISS_INDEX_TTL = int(os.getenv("FAISS_INDEX_TTL", str(24 * 60 * 60)))  # 24 hours for FAISS index cache
+ANALYSIS_RESULTS_TTL = int(os.getenv("ANALYSIS_RESULTS_TTL", str(2 * 60 * 60)))  # 2 hours for analysis results
+LOGIN_LOCKOUT_TTL = int(os.getenv("LOGIN_LOCKOUT_TTL", str(15 * 60)))  # 15 minutes for login lockout
+UPLOAD_RATE_TTL = int(os.getenv("UPLOAD_RATE_TTL", str(60 * 60)))  # 1 hour for upload rate limiting
+DEFAULT_TTL = int(os.getenv("DEFAULT_TTL", str(24 * 60 * 60)))  # 24 hours fallback for keys without explicit TTL
 
 
 # ============================================================================
@@ -204,6 +224,16 @@ class CacheNamespace(str, Enum):
     LOGIN_ATTEMPTS = "spd:v1:login_attempts"
     UPLOADS = "spd:v1:uploads"
 
+    # Legacy/Old namespaces merged from CacheKeyPrefix
+    LEGACY_LOGIN_ATTEMPTS = "login_attempts:"
+    LEGACY_UPLOAD_COUNT = "upload_count:"
+    LEGACY_SIMILARITY_RESULT = "similarity:"
+    LEGACY_DOCUMENT_CACHE = "doc:"
+    LEGACY_UPLOADS_PREFIX = "upload_count:"
+    LEGACY_FAISS_INDEX = "faiss_index"
+    LEGACY_ANALYSIS_PATTERN = "analysis:*"
+    LEGACY_ANALYSIS_PREFIX = "analysis:"
+
     def build_key(self, *parts: str) -> str:
         """Construct a standardized cache key with namespace prefix."""
         return ":".join([self.value] + list(parts))
@@ -238,6 +268,26 @@ class RedisCache:
             with self._lock:
                 if self._client is None:
                     self._connect()
+
+    @classmethod
+    def get_instance(cls) -> "RedisCache":
+        """Thread-safe accessor for the RedisCache singleton instance.
+        
+        Provides an explicit method for acquiring the singleton in highly
+        concurrent environments, ensuring only one Redis connection pool
+        is created even under heavy thread contention. Uses double-checked
+        locking to minimize lock acquisition overhead after initialization.
+        
+        Returns:
+            The global RedisCache singleton instance.
+        """
+        if cls._instance is None:
+            with cls._lock:
+                # Double-check inside the lock to prevent race conditions
+                # where two threads passed the first check simultaneously
+                if cls._instance is None:
+                    cls._instance = cls()
+        return cls._instance
 
     @property
     def fallback_cache(self) -> dict:

@@ -174,6 +174,31 @@ class TestCorpusMigrationFlow:
         finally:
             conn.close()
 
+    def test_version_10_backfills_default_owner_for_preexisting_rows(self):
+        """Documents inserted before migration 10 ever ran must not end up
+        with a NULL owner -- ALTER TABLE ... DEFAULT 'system' backfills
+        every pre-existing row at migration time (see acceptance criteria
+        of the 'owner column missing DEFAULT' issue)."""
+        conn = _connect()
+        try:
+            _apply_up_to(conn, CORPUS_MIGRATIONS, 9)
+            conn.execute(
+                "INSERT INTO documents (filename, file_hash, upload_date) "
+                "VALUES (?, ?, ?)",
+                ("legacy_doc.pdf", "legacy_hash", "2023-01-01T00:00:00"),
+            )
+            conn.commit()
+
+            _apply_up_to(conn, CORPUS_MIGRATIONS, 10)
+
+            row = conn.execute(
+                "SELECT owner FROM documents WHERE filename = ?",
+                ("legacy_doc.pdf",),
+            ).fetchone()
+            assert row[0] == "system"
+        finally:
+            conn.close()
+
     def test_version_11_adds_documents_created_at_index(self):
         conn = _connect()
         try:
