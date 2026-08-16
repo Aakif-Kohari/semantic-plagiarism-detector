@@ -1,4 +1,10 @@
+from src.utils.text_stats import (format_text_stats, get_char_count,
+                                   get_reading_time_minutes, count_words, count_sentences,
+                                   get_sentence_count, get_syllable_count,
+                                   get_readability_metrics, get_text_stats)
 from src.utils.text_stats import (
+    count_syllables_in_word,
+    count_words,
     format_text_stats,
     get_char_count,
     get_readability_metrics,
@@ -6,14 +12,23 @@ from src.utils.text_stats import (
     get_sentence_count,
     get_syllable_count,
     get_text_stats,
-    get_word_count,
 )
 
 
-def test_get_word_count():
-    assert get_word_count("This is a test.") == 4
-    assert get_word_count("") == 0
-    assert get_word_count("   Spaces   ") == 1
+
+def test_count_syllables_in_word():
+    assert count_syllables_in_word("apple") == 2
+    assert count_syllables_in_word("table") == 2
+    assert count_syllables_in_word("blue") == 1
+    assert count_syllables_in_word("the") == 1
+
+def test_count_words():
+    assert count_words("This is a test.") == 4
+    assert count_words("") == 0
+    assert count_words("   Spaces   ") == 1
+    assert count_words("hello,world") == 2
+    assert count_words("hello-world") == 2
+    assert count_words("HELLO hello") == 2
 
 
 def test_get_char_count():
@@ -22,15 +37,16 @@ def test_get_char_count():
 
 
 def test_get_reading_time_minutes():
-    assert get_reading_time_minutes("word " * 100) == 1
-    assert get_reading_time_minutes("word " * 400) == 2
-    assert get_reading_time_minutes("") == 1
+    assert get_reading_time_minutes("word " * 100) == 0.5
+    assert get_reading_time_minutes("word " * 400) == 2.0.0
+    assert get_reading_time_minutes("") == 0.1
 
 
 def test_get_sentence_count():
     assert get_sentence_count("Hello world. How are you? Fine!") == 3
     assert get_sentence_count("") == 0
-    assert get_sentence_count("No punctuation") == 1
+    assert get_sentence_count("No punctuation") == 0
+    assert get_sentence_count("Dr. Smith arrived. He stayed.") == 2
 
 
 def test_get_syllable_count():

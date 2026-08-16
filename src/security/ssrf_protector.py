@@ -24,6 +24,7 @@ import logging
 import socket
 import time
 import urllib.parse
+from collections import OrderedDict
 from typing import Dict, Tuple, Optional
 
 import requests
@@ -112,12 +113,48 @@ class SSRFProtector:
     """
     Core security module designed to prevent Server-Side Request Forgery (SSRF)
     attacks via the Webhook feature. Includes DNS rebinding protection caching.
+
+    Security Model:
+        This module implements a multi-layer defense-in-depth approach:
+
+        1. **Scheme Enforcement**: Only HTTPS URLs are permitted
+        2. **Domain Allowlist** (Optional): When configured, restricts to approved domains
+        3. **DNS Resolution**: Resolves hostnames to IP addresses with caching
+        4. **IP Validation**: Blocks private, loopback, link-local, and multicast ranges
+        5. **Redirect Chain Validation**: Follows and validates each redirect hop
+
+    Allowlist Behavior (Critical Security Note):
+        When `allowed_domains` is empty or None, the domain allowlist check is
+        SKIPPED, permitting ANY external domain. This is intentional to support
+        deployments that rely solely on IP-level restrictions (private/loopback
+        blocking) without maintaining a domain whitelist.
+
+        **Security Implications:**
+        - Empty allowlist = Permit all external domains (subject to IP checks)
+        - Non-empty allowlist = Restrict to explicitly listed domains only
+        - Private IP ranges (10.x, 172.16-31.x, 192.168.x) are ALWAYS blocked
+        - Loopback (127.x) and link-local (169.254.x) are ALWAYS blocked
+
+        **Recommendation:**
+        Production deployments SHOULD configure `ALLOWED_WEBHOOK_DOMAINS` to
+        restrict webhooks to known, trusted endpoints (e.g., Slack, Discord).
+        Empty allowlists should only be used in development/testing environments
+        or when IP-level restrictions are deemed sufficient.
     """
 
-    # Simple in-memory cache to prevent repeated DNS lookups and mitigate
+    # Bounded LRU cache to prevent repeated DNS lookups and mitigate
     # slow-DNS denial of service attacks. (Format: {hostname: (ip_str, timestamp)})
-    _dns_cache: Dict[str, tuple[str, float]] = {}
+    #
+    # Backed by OrderedDict rather than a plain dict: a plain dict grows
+    # without limit, so a malicious actor hitting webhook validation with
+    # thousands of unique randomly generated subdomains could exhaust
+    # memory over time. OrderedDict lets us cheaply track recency
+    # (move_to_end on every hit/write) and evict the least-recently-used
+    # entry once the cache exceeds DNS_CACHE_MAX_SIZE, capping memory
+    # usage regardless of how many distinct hostnames are ever queried.
+    _dns_cache: "OrderedDict[str, tuple[str, float]]" = OrderedDict()
     DNS_CACHE_TTL_SECONDS = 300  # 5 minutes
+    DNS_CACHE_MAX_SIZE = 1000
     RESTRICTED_IPV4_CIDR_BLOCKS = RESTRICTED_IPV4_CIDR_BLOCKS
     MAX_REDIRECT_DEPTH = 5
     DEFAULT_USER_AGENT = DEFAULT_USER_AGENT
@@ -133,7 +170,12 @@ class SSRFProtector:
         if hostname in cls._dns_cache:
             cached_ip, timestamp = cls._dns_cache[hostname]
             if current_time - timestamp < cls.DNS_CACHE_TTL_SECONDS:
+                # Mark as most-recently-used so it survives future evictions.
+                cls._dns_cache.move_to_end(hostname)
                 return cached_ip
+            # Entry expired -- drop it so the lookup below writes a fresh
+            # value with a clean recency position.
+            del cls._dns_cache[hostname]
 
         # Cache miss or expired, perform DNS resolution
         try:
@@ -145,6 +187,11 @@ class SSRFProtector:
 
             ip_str = addr_info[0][4][0]
             cls._dns_cache[hostname] = (ip_str, current_time)
+            cls._dns_cache.move_to_end(hostname)
+            if len(cls._dns_cache) > cls.DNS_CACHE_MAX_SIZE:
+                # Evict the least-recently-used entry to keep the cache
+                # bounded no matter how many distinct hostnames are seen.
+                cls._dns_cache.popitem(last=False)
             return ip_str
 
         except socket.gaierror as e:
@@ -165,11 +212,25 @@ class SSRFProtector:
         outbound HTTP request, so it is safe to call before deciding whether
         a URL may be contacted at all.
 
+        Args:
+            url: The URL to validate.
+            allowed_domains: Optional list of allowed domain hostnames. When
+                           None or empty, the domain allowlist check is skipped,
+                           permitting any external domain (subject to IP-level
+                           restrictions). This supports flexible deployment
+                           scenarios where domain whitelisting is not required.
+
         Returns:
             The resolved IP address of the URL's host.
 
         Raises:
             SSRFSecurityException: If the URL is malicious or unapproved.
+
+        Security Note:
+            An empty `allowed_domains` list intentionally permits all external
+            domains. This is NOT a security bypass - private IP ranges, loopback
+            addresses, and link-local addresses are still blocked regardless of
+            the allowlist configuration.
         """
         if not url:
             raise SSRFSecurityException(SSRF_WEBHOOK_URL_EMPTY)
@@ -184,13 +245,17 @@ class SSRFProtector:
         if not hostname:
             raise SSRFSecurityException(SSRF_MISSING_HOSTNAME)
 
-        # Domain whitelist validation
+        # Domain whitelist validation (Issue #2434: Documented empty allowlist behavior)
+        # CRITICAL: When allowed_domains is None or empty, this check is SKIPPED,
+        # permitting ANY external domain. This is intentional for flexible deployments.
+        # Private IP ranges are still enforced below regardless of allowlist state.
         if allowed_domains is None:
             from src.core.app_config import get_allowed_webhook_domains
 
             allowed_domains = get_allowed_webhook_domains()
 
         if allowed_domains:
+            # Non-empty allowlist: Restrict to explicitly approved domains only
             host_lower = hostname.lower()
             allowed = False
             for domain in allowed_domains:
@@ -202,6 +267,14 @@ class SSRFProtector:
                 raise SSRFSecurityException(
                     SSRF_DOMAIN_NOT_ALLOWED.format(hostname=hostname)
                 )
+        else:
+            # Empty allowlist: Permit all external domains (IP restrictions still apply)
+            # This supports deployments that don't require domain whitelisting
+            logger.debug(
+                "Domain allowlist is empty. Permitting all external domains for %s. "
+                "Private IP ranges will still be enforced.",
+                hostname,
+            )
 
         # DNS Resolution
         ip_str = cls._resolve_hostname(hostname)
@@ -211,18 +284,16 @@ class SSRFProtector:
         except ValueError as e:
             raise SSRFSecurityException(SSRF_INVALID_IP_FORMAT.format(error=e))
 
+        # IP-level restrictions (ALWAYS enforced, regardless of allowlist state)
         if isinstance(ip, ipaddress.IPv4Address):
             for cidr_block in cls.RESTRICTED_IPV4_CIDR_BLOCKS:
                 if is_ip_in_cidr_block(ip_str, cidr_block):
-                    if is_ip_in_cidr_block(
-                        ip_str,
-                        "127.0.0.0/8",
-                    ):
+                    if is_ip_in_cidr_block(ip_str, "127.0.0.0/8"):
                         raise SSRFSecurityException(
                             SSRF_BLOCKED_LOOPBACK.format(ip=ip_str)
                         )
                     raise SSRFSecurityException(SSRF_BLOCKED_PRIVATE.format(ip=ip_str))
-                    
+
         if ip.is_loopback:
             raise SSRFSecurityException(SSRF_BLOCKED_LOOPBACK.format(ip=ip_str))
         if ip.is_link_local:
@@ -246,29 +317,28 @@ class SSRFProtector:
         timeout: float,
     ) -> requests.Response:
         """Make an outgoing HTTP validation request with User-Agent header.
-        
+
         Attempts a HEAD request first for efficiency. If the server rejects
         HEAD with 405 Method Not Allowed or 501 Not Implemented, falls back
         to a GET request (Issue #2212).
-        
+
         Args:
             url: The URL to validate.
             user_agent: User-Agent header value to attach.
             timeout: Request timeout in seconds.
-            
+
         Returns:
             The HTTP response object.
-            
+
         Raises:
             requests.RequestException: If both HEAD and GET fail.
         """
         headers = {"User-Agent": user_agent}
-        
+
         logger.debug(
-            "Making validation request to %s with User-Agent: %s",
-            url, user_agent
+            "Making validation request to %s with User-Agent: %s", url, user_agent
         )
-        
+
         try:
             # Try HEAD first (more efficient, no body download)
             response = requests.head(
@@ -277,12 +347,13 @@ class SSRFProtector:
                 timeout=timeout,
                 allow_redirects=False,
             )
-            
+
             # If server rejects HEAD, fall back to GET
             if response.status_code in HEAD_REJECTION_STATUS_CODES:
                 logger.debug(
                     "Server rejected HEAD with %d, falling back to GET for %s",
-                    response.status_code, url
+                    response.status_code,
+                    url,
                 )
                 response = requests.get(
                     url,
@@ -291,9 +362,9 @@ class SSRFProtector:
                     allow_redirects=False,
                     stream=True,  # Don't download body
                 )
-                
+
             return response
-            
+
         except requests.RequestException as exc:
             logger.debug(f"Validation request failed for {url}: {exc}")
             raise
@@ -308,7 +379,7 @@ class SSRFProtector:
     ) -> bool:
         """
         Validates that a provided webhook URL is safe to dispatch.
-        
+
         Ensures the URL uses HTTPS, its domain is in ALLOWED_WEBHOOK_DOMAINS,
         does not resolve to any internal network IP, and sends an outgoing
         HTTP validation check with explicit User-Agent header (Issue #2212).
@@ -356,7 +427,7 @@ class SSRFProtector:
         cls._validate_url_target(current_url, allowed_domains=allowed_domains)
 
         response = cls._make_validation_request(current_url, user_agent, timeout)
-        
+
         if response.status_code in REDIRECT_STATUS_CODES:
             location = response.headers.get("Location")
             if location:

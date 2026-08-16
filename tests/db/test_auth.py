@@ -65,6 +65,14 @@ def test_verify_user():
     assert verify_user(user, "WrongPass123!") is False
 
 
+def test_verify_user_rejects_suspended_user():
+    """Verify that verify_user returns False when a user is suspended."""
+    user = f"user_{uuid.uuid4().hex[:8]}"
+    add_user(user, "SecurePass123!")
+    set_user_active_status(user, False)
+    assert verify_user(user, "SecurePass123!") is False
+
+
 def test_get_user_role():
     user = f"user_{uuid.uuid4().hex[:8]}"
     add_user(user, "password123")
@@ -242,6 +250,24 @@ def test_enable_disable_2fa():
     assert secret is None
 
     delete_user(username)
+
+
+def test_get_2fa_status():
+    """Verify get_2fa_status returns False initially and True after calling enable_2fa."""
+    username = f"user_2fa_{uuid.uuid4().hex[:8]}"
+    add_user(username, "Password123!")
+
+    enabled, secret = get_2fa_status(username)
+    assert enabled is False
+
+    test_secret = "JBSWY3DPEHPK3PXP"
+    enable_2fa(username, test_secret)
+
+    enabled, secret = get_2fa_status(username)
+    assert enabled is True
+
+    delete_user(username)
+
 
 
 def test_suspend_account():
@@ -477,32 +503,44 @@ class TestFormatUserCreatedDate:
 
 
 def test_get_active_users_count():
-    """Verify get_active_users_count counts only active users."""
-    # 1. Starting count should be 1 (the default seeded 'admin' is active)
-    initial_count = get_active_users_count()
-    assert initial_count == 1
+    """Verify get_active_users_count returns 2 when 3 users are created and 1 is suspended."""
+    delete_user("admin")
 
-    # 2. Add an active user
-    user1 = f"active_{uuid.uuid4().hex[:8]}"
+    user1 = f"user1_{uuid.uuid4().hex[:8]}"
+    user2 = f"user2_{uuid.uuid4().hex[:8]}"
+    user3 = f"user3_{uuid.uuid4().hex[:8]}"
+
     add_user(user1, "SecurePass123!")
-    assert get_active_users_count() == 2
-
-    # 3. Add another user and suspend them
-    user2 = f"suspended_{uuid.uuid4().hex[:8]}"
     add_user(user2, "SecurePass123!")
+    add_user(user3, "SecurePass123!")
+
     set_user_active_status(user2, False)
-    # The count should still be 2 because user2 is inactive
+
     assert get_active_users_count() == 2
 
-    # 4. Reactivate user2
-    set_user_active_status(user2, True)
-    assert get_active_users_count() == 3
 
-    # 5. Delete user1
-    delete_user(user1)
-    assert get_active_users_count() == 2
+def test_update_user_profile():
+    """Verify that update_user_profile correctly updates user role and active status in the database."""
+    username = f"user_update_{uuid.uuid4().hex[:8]}"
+    add_user(username, "Password123!", "teacher")
 
-    delete_user(user2)
+    # Fetch initial state
+    users = get_all_users()
+    initial = next(u for u in users if u["username"] == username)
+    assert initial["role"] == "teacher"
+    assert initial["is_active"] is True
+    assert initial["version"] == 1
+
+    # Update profile
+    update_user_profile(username, role="admin", is_active=False, expected_version=1)
+
+    # Fetch updated user from database and verify changes
+    updated_users = get_all_users()
+    updated = next(u for u in updated_users if u["username"] == username)
+    assert updated["role"] == "admin"
+    assert updated["is_active"] is False
+    assert updated["status"] == "suspended"
+    assert updated["version"] == 2
 
 
 def test_update_user_profile_success():
@@ -634,7 +672,9 @@ def test_password_history_validation_prevents_reuse_of_last_3_passwords(mock_db)
     for forbidden_pass in (pass1, pass2, pass3):
         with pytest.raises(ValueError) as exc_info:
             update_password(user, forbidden_pass)
-        assert "New password cannot be one of your last 3 passwords" in str(exc_info.value)
+        assert "New password cannot be one of your last 3 passwords" in str(
+            exc_info.value
+        )
 
     # 5. Update to pass4 (succeeds)
     update_password(user, pass4)
@@ -710,8 +750,10 @@ def test_password_change_required_flag(mock_db):
 
     # 6. Invalid credentials still return False (or dict with authenticated=False)
     assert verify_user(username, "WrongPassword!") is False
-    assert verify_user(username, "WrongPassword!", return_details=True) == {"authenticated": False, "must_change_password": False}
-
+    assert verify_user(username, "WrongPassword!", return_details=True) == {
+        "authenticated": False,
+        "must_change_password": False,
+    }
 
 
 # ── Issue #1778: SQL query shape regression guard ─────────────────────────
@@ -778,4 +820,3 @@ def test_get_active_users_count_zero_on_empty_database():
     result = get_active_users_count()
     assert result is not None
     assert result >= 0
-

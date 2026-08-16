@@ -365,10 +365,12 @@ def verify_webhook_signature(  # noqa: F811
     return is_valid
 
 
+
 def send_plagiarism_alert(
     doc_a: str,
     doc_b: str,
     similarity: float,
+    webhook_url: str | None = None,  # Added parameter for override (Issue #1995)
 ) -> tuple[bool, int]:
     """Send a plagiarism alert to the configured webhook with retry logic.
 
@@ -381,6 +383,10 @@ def send_plagiarism_alert(
         doc_a: Name of the first student document.
         doc_b: Name of the second student document.
         similarity: Cosine similarity score between 0.0 and 1.0.
+        webhook_url: Optional explicit webhook URL. If provided, this overrides
+                     the PLAGIARISM_WEBHOOK_URL environment variable. This is
+                     useful for routing alerts to different endpoints based on
+                     severity or tenant configuration.
 
     Returns:
         A tuple of `(success, total_attempts)` where `success` is a boolean
@@ -390,10 +396,15 @@ def send_plagiarism_alert(
     # Reset the thread-local counter before starting a new delivery sequence
     _reset_attempt_counter()
 
-    webhook_url = os.getenv("PLAGIARISM_WEBHOOK_URL")
+    # Issue #1995: Use explicit webhook_url if provided, otherwise fallback to env var
+    if webhook_url is None:
+        webhook_url = os.getenv("PLAGIARISM_WEBHOOK_URL")
 
     if not webhook_url:
-        logger.warning("PLAGIARISM_WEBHOOK_URL is not configured in the environment.")
+        logger.warning(
+            "PLAGIARISM_WEBHOOK_URL is not configured in the environment and "
+            "no explicit webhook_url was provided."
+        )
         return False, 0
 
     base_url = os.getenv(
@@ -445,6 +456,33 @@ def send_plagiarism_alert(
         attempts,
     )
     return True, attempts
+
+
+def dispatch_plagiarism_alert(
+    doc_a: str,
+    doc_b: str,
+    similarity: float,
+    webhook_url: str | None = None,
+) -> bool:
+    """Dispatch a plagiarism alert payload to the configured webhook endpoint.
+    
+    Args:
+        doc_a: Name of the first student document.
+        doc_b: Name of the second student document.
+        similarity: Cosine similarity score between 0.0 and 1.0.
+        webhook_url: Optional explicit webhook URL to override the environment variable.
+        
+    Returns:
+        True if the alert was successfully delivered, False otherwise.
+    """
+    # Issue #1995: Pass webhook_url through to send_plagiarism_alert
+    success, _ = send_plagiarism_alert(
+        doc_a=doc_a, 
+        doc_b=doc_b, 
+        similarity=similarity,
+        webhook_url=webhook_url  # Explicitly pass the override parameter
+    )
+    return success
 
 
 def dispatch_plagiarism_alert(

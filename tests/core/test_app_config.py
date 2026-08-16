@@ -100,12 +100,23 @@ class TestBrandingConfigDataclass:
         """Verify all fields have sensible default values."""
         config = BrandingConfig()
 
-        assert config.app_name == "Semantic Plagiarism Detector"
+        assert config.app_name == "Semantic Plagiarism Detection System"
         assert config.tagline == "Advanced AI-Powered Academic Integrity Tool"
         assert config.primary_color == "#2563EB"
         assert config.secondary_color == "#1E40AF"
         assert config.logo_path == "assets/logo.png"
         assert "©" in config.footer_text
+
+    def test_app_name_default_is_a_single_source_of_truth_with_default_app_title(self):
+        """Regression test: BrandingConfig.app_name previously hardcoded its
+        own literal ("Semantic Plagiarism Detector") independently of
+        DEFAULT_APP_TITLE ("Semantic Plagiarism Detection System"), so the
+        displayed app name silently differed depending on which config
+        route a caller used. app_name must be defined in terms of
+        DEFAULT_APP_TITLE, not merely happen to equal the same string."""
+        config = BrandingConfig()
+
+        assert config.app_name == DEFAULT_APP_TITLE
 
     def test_custom_initialization(self):
         """Verify fields can be overridden during initialization."""
@@ -122,7 +133,7 @@ class TestBrandingConfigDataclass:
         data = config.to_dict()
 
         assert isinstance(data, dict)
-        assert data["app_name"] == "Semantic Plagiarism Detector"
+        assert data["app_name"] == "Semantic Plagiarism Detection System"
         assert "primary_color" in data
 
 
@@ -159,7 +170,7 @@ class TestLoadBrandingConfig:
         config = load_branding_config(missing_file)
 
         # Should return default config
-        assert config.app_name == "Semantic Plagiarism Detector"
+        assert config.app_name == "Semantic Plagiarism Detection System"
         assert config.primary_color == "#2563EB"
 
     def test_fallback_on_invalid_json(self, tmp_path):
@@ -169,7 +180,7 @@ class TestLoadBrandingConfig:
 
         config = load_branding_config(config_file)
 
-        assert config.app_name == "Semantic Plagiarism Detector"
+        assert config.app_name == "Semantic Plagiarism Detection System"
 
     def test_fallback_on_non_dict_json(self, tmp_path):
         """Verify loader returns defaults when JSON root is not an object."""
@@ -178,7 +189,7 @@ class TestLoadBrandingConfig:
 
         config = load_branding_config(config_file)
 
-        assert config.app_name == "Semantic Plagiarism Detector"
+        assert config.app_name == "Semantic Plagiarism Detection System"
 
     def test_ignores_unknown_keys(self, tmp_path):
         """Verify loader ignores JSON keys that don't map to dataclass fields."""
@@ -207,7 +218,7 @@ class TestLoadBrandingConfig:
         config = load_branding_config(config_file)
 
         # app_name should retain default because 12345 is not a string
-        assert config.app_name == "Semantic Plagiarism Detector"
+        assert config.app_name == "Semantic Plagiarism Detection System"
         assert config.primary_color == "#FF0000"
 
     def test_handles_empty_json_object(self, tmp_path):
@@ -218,8 +229,36 @@ class TestLoadBrandingConfig:
         config = load_branding_config(config_file)
 
         # All fields should be defaults
-        assert config.app_name == "Semantic Plagiarism Detector"
+        assert config.app_name == "Semantic Plagiarism Detection System"
         assert config.primary_color == "#2563EB"
+
+    def test_keeps_existing_logo_path(self, tmp_path):
+        """Verify a custom logo_path pointing at a real file is preserved."""
+        logo_file = tmp_path / "custom_logo.png"
+        logo_file.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+        config_file = tmp_path / "branding_config.json"
+        config_file.write_text(
+            json.dumps({"logo_path": str(logo_file)}), encoding="utf-8"
+        )
+
+        config = load_branding_config(config_file)
+
+        assert config.logo_path == str(logo_file)
+
+    def test_falls_back_to_default_when_logo_missing(self, tmp_path, caplog):
+        """Verify a missing logo file logs a warning and falls back to default."""
+        config_file = tmp_path / "branding_config.json"
+        config_file.write_text(
+            json.dumps({"logo_path": str(tmp_path / "nonexistent_logo.png")}),
+            encoding="utf-8",
+        )
+
+        with caplog.at_level("WARNING", logger="src.core.app_config"):
+            config = load_branding_config(config_file)
+
+        assert config.logo_path == "assets/logo.png"
+        assert "Falling back to default logo" in caplog.text
 
 
 # ---------------------------------------------------------------------------

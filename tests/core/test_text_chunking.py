@@ -37,12 +37,20 @@ def test_chunk_documents_passes_parameters():
     assert len(chunked["doc1.txt"]) > 0
 
 
+def test_chunk_documents_empty_dictionary():
+    """Empty input should return an empty dict without error."""
+    assert chunk_documents({}) == {}
+
+
 def test_min_words_filters_short_chunks():
     # "42" and "Page 1" are ultra-short; only the long sentence should survive
-    text = "42\n\nPage 1\n\nThis is a sufficiently long sentence with many words in it."
-    chunks = chunk_text(text, chunk_size=500, chunk_overlap=0, min_words=5)
+    text = "42\n\nPage 1\n\nThis is a sufficiently long sentence with many words in it. Here is a second sentence to add enough text. This is a third sentence to ensure we have enough text for overlap to potentially trigger."
+    chunks = chunk_text(text, chunk_size=100, chunk_overlap=50, min_words=5)
+    assert len(chunks) > 0
     assert all(len(c.split()) >= 5 for c in chunks)
     assert any("sufficiently" in c for c in chunks)
+    assert not any("42" in c for c in chunks)
+    assert not any("Page 1" in c for c in chunks)
 
 
 def test_min_words_default_is_five():
@@ -102,17 +110,19 @@ def test_chunk_text_emoji_only():
 
 
 def test_chunk_overlap_boundaries():
-    """Verify consecutive chunks preserve configured overlap boundaries."""
-    text = "Sentence one. Sentence two. Sentence three. Sentence four. Sentence five."
-    chunk_size = 30
-    chunk_overlap = 10
+    """Verify consecutive chunks share the exact configured overlap substring."""
+    # Use CJK text so chunking is character-based and overlap is a precise substring.
+    text = "这是一个关于人工智能和神经网络的测试文本。" * 20
+    chunk_size = 100
+    chunk_overlap = 20
 
-    chunks = chunk_text(text, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    chunks = chunk_text(
+        text, chunk_size=chunk_size, chunk_overlap=chunk_overlap, min_words=1
+    )
 
-    if len(chunks) > 1:
-        # Check that consecutive chunks share overlapping content
-        for i in range(len(chunks) - 1):
-            assert len(chunks[i]) <= chunk_size
+    assert len(chunks) > 1
+    overlap = chunks[0][-chunk_overlap:]
+    assert chunks[1].startswith(overlap)
 
 
 # ── Sentence-Boundary Chunking Tests (#919) ──────────────────────────────────
@@ -200,6 +210,29 @@ def test_chunk_by_sentences_produces_multiple_chunks_for_long_text():
 
     chunks = chunk_by_sentences(text, max_chunk_size=150)
     assert len(chunks) > 1
+
+
+def test_chunk_by_sentences_decimal_and_ellipsis():
+    """Verify chunk_by_sentences handles decimals and ellipses properly."""
+    text = (
+        "The software version 3.14 was released today. "
+        "We are currently loading... done! "
+        "This is the final sentence."
+    )
+    chunks = chunk_by_sentences(text, max_chunk_size=50)
+
+    # They should be split as three separate chunks
+    assert len(chunks) == 3
+    
+    assert "version 3.14" in chunks[0]
+    assert "loading... done!" in chunks[1]
+    assert "final sentence" in chunks[2]
+
+    # Ensure no split happened strictly inside the decimal or ellipsis
+    for chunk in chunks:
+        assert not chunk.strip().endswith("version 3.")
+        assert not chunk.strip().endswith("loading.")
+        assert not chunk.strip().endswith("loading..")
 
 
 def test_chunk_text_percentage_overlap():

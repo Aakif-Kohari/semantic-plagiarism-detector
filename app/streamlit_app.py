@@ -399,7 +399,11 @@ from src.visualization.heatmap import (
 from src.visualization.network_graph import plot_similarity_network
 
 try:
-    from src.utils.warning_list import render_copy_button, render_warning_controls
+    from src.utils.warning_list import (
+        render_copy_button,
+        render_warning_controls,
+        reset_warning_page,
+    )
     from src.visualization.analytics import (
         plot_high_severity_trends,
         plot_most_plagiarized_documents,
@@ -409,6 +413,7 @@ try:
 except ImportError:
     render_warning_controls = None
     render_copy_button = None
+    reset_warning_page = None
     plot_high_severity_trends = None
     plot_most_plagiarized_documents = None
     plot_processing_time_breakdown = None
@@ -1739,7 +1744,65 @@ if has_enough_files:
                     == selected_assignment
                 ]
 
-            st.write(f"**{len(existing_docs)}** documents in database")
+            # ── File Extension Filter Dropdown (Issue #1883) ─────────────────────
+            # Extract unique file extensions from the currently filtered documents
+            # to dynamically populate the dropdown, while ensuring standard types
+            # are always available for user convenience.
+            from pathlib import Path
+            
+            # Define standard extensions that should always appear in the filter
+            standard_extensions = ["All", ".pdf", ".docx", ".txt", ".csv", ".md"]
+            
+            # Extract extensions from the current document list
+            available_extensions = set()
+            for doc in existing_docs:
+                fn = (
+                    doc.filename
+                    if hasattr(doc, "filename")
+                    else (doc.get("filename") if isinstance(doc, dict) else str(doc))
+                )
+                ext = Path(fn).suffix.lower()
+                if ext:
+                    available_extensions.add(ext)
+            
+            # Combine standard and available extensions, maintaining order
+            filter_options = ["All"]
+            for ext in standard_extensions[1:]:
+                if ext in available_extensions or ext in [".pdf", ".docx", ".txt", ".csv", ".md"]:
+                    filter_options.append(ext)
+            
+            # Add any non-standard extensions found in the database
+            for ext in sorted(list(available_extensions)):
+                if ext not in filter_options:
+                    filter_options.append(ext)
+            
+            # Render the selectbox with a unique key to prevent state collisions
+            selected_file_type = st.selectbox(
+                "Filter by File Type",
+                options=filter_options,
+                index=0,
+                key="corpus_file_type_filter_selectbox",
+                help="Filter the document corpus table to show only specific file extensions.",
+            )
+            
+            # Apply the file extension filter to the existing_docs list
+            if selected_file_type != "All":
+                existing_docs = [
+                    doc for doc in existing_docs
+                    if Path(
+                        doc.filename if hasattr(doc, "filename") 
+                        else (doc.get("filename") if isinstance(doc, dict) else str(doc))
+                    ).suffix.lower() == selected_file_type
+                ]
+            
+            # ── End File Extension Filter (Issue #1883) ──────────────────────────
+
+            # Update the document count display to reflect BOTH assignment and file type filters
+            st.write(
+                f"**{len(existing_docs)}** documents in database"
+                + (f" (Filtered by: {selected_file_type})" if selected_file_type != "All" else "")
+                + (f" | Assignment: {selected_assignment}" if selected_assignment != "All Assignments" else "")
+            )
 
             import pandas as pd
 
@@ -2395,8 +2458,17 @@ with tab_warnings:
     if not flags:
         st.info("No plagiarism incidents detected above configured threshold.")
     elif render_warning_controls is not None:
+        if "warning_page" not in st.session_state:
+            st.session_state.warning_page = reset_warning_page()
+
+        def _set_warning_page(page: int) -> None:
+            st.session_state.warning_page = page
+
         render_warning_controls(
-            flags, threshold=threshold, ai_probabilities=ai_probabilities
+            flags,
+            threshold=threshold,
+            ai_probabilities=ai_probabilities,
+            set_warning_page=_set_warning_page,
         )
 
         button_label = (
@@ -2774,7 +2846,60 @@ if user_role == "admin":
     st.markdown("### 📁 Document Management & Bulk Export")
     existing_docs = get_all_documents()
     if existing_docs:
-        st.write(f"**{len(existing_docs)}** documents in database")
+        # ── File Extension Filter Dropdown (Issue #1883) ─────────────────────
+        from pathlib import Path
+        
+        # Define standard extensions that should always appear in the filter
+        standard_extensions = ["All", ".pdf", ".docx", ".txt", ".csv", ".md"]
+        
+        # Extract extensions from the current document list
+        available_extensions = set()
+        for doc in existing_docs:
+            fn = (
+                doc.filename
+                if hasattr(doc, "filename")
+                else (doc.get("filename") if isinstance(doc, dict) else str(doc))
+            )
+            ext = Path(fn).suffix.lower()
+            if ext:
+                available_extensions.add(ext)
+        
+        # Combine standard and available extensions, maintaining order
+        filter_options = ["All"]
+        for ext in standard_extensions[1:]:
+            if ext in available_extensions or ext in [".pdf", ".docx", ".txt", ".csv", ".md"]:
+                filter_options.append(ext)
+        
+        # Add any non-standard extensions found in the database
+        for ext in sorted(list(available_extensions)):
+            if ext not in filter_options:
+                filter_options.append(ext)
+        
+        # Render the selectbox with a unique key to prevent state collisions
+        selected_file_type = st.selectbox(
+            "Filter by File Type",
+            options=filter_options,
+            index=0,
+            key="corpus_file_type_filter_selectbox_footer",
+            help="Filter the document corpus table to show only specific file extensions.",
+        )
+        
+        # Apply the file extension filter to the existing_docs list
+        if selected_file_type != "All":
+            existing_docs = [
+                doc for doc in existing_docs
+                if Path(
+                    doc.filename if hasattr(doc, "filename") 
+                    else (doc.get("filename") if isinstance(doc, dict) else str(doc))
+                ).suffix.lower() == selected_file_type
+            ]
+        
+        # ── End File Extension Filter (Issue #1883) ──────────────────────────
+
+        st.write(
+            f"**{len(existing_docs)}** documents in database"
+            + (f" (Filtered by: {selected_file_type})" if selected_file_type != "All" else "")
+        )
 
         # Bulk selection and export logic
         import pandas as pd
@@ -3025,10 +3150,10 @@ def compute_hybrid_similarity_score(
 
 
 def get_hybrid_similarity_stats(
-    semantic_scores: List[float],  # noqa: F821
-    lexical_scores: List[float],  # noqa: F821
+    semantic_scores: list[float],
+    lexical_scores: list[float],
     alpha: float = 0.7
-) -> Dict[str, Any]:  # noqa: F821
+) -> dict[str, any]:
     """
     Get statistics about hybrid similarity distribution.
     

@@ -49,7 +49,7 @@ def count_sentences(text: str) -> int:
     Returns:
         Number of sentences in the text
     """
-    if not text:
+    if not text or not text.strip():
         return 0
 
     # Common abbreviations that end with period but aren't sentence ends
@@ -97,7 +97,11 @@ def count_sentences(text: str) -> int:
 
     # Count sentence-ending punctuation
     sentence_endings = re.findall(r"[.!?]+", text_lower)
-    return len(sentence_endings)
+    return max(1, len(sentence_endings))
+
+
+# Alias get_sentence_count to count_sentences for backward compatibility
+get_sentence_count = count_sentences
 
 
 def count_unique_words(text: str) -> int:
@@ -195,24 +199,23 @@ def format_stats_for_pdf(stats: Dict[str, float]) -> List[List[str]]:
 logger = logging.getLogger(__name__)
 
 
-def get_word_count(text: str) -> int:
-    return len(re.findall(r"\w+", text))
-
 
 def get_char_count(text: str) -> int:
     return len(text)
 
 
-def get_reading_time_minutes(text: str) -> int:
+def get_reading_time_minutes(text: str) -> float:
     # Average reading speed is roughly 200-250 words per minute.
     # We'll use 200 for a conservative estimate.
     word_count = get_word_count(text)
+    minutes = max(0.1, round(word_count / 200, 1))
+    word_count = count_words(text)
     minutes = max(1, round(word_count / 200))
     return minutes
 
 
 def format_text_stats(text: str) -> str:
-    words = get_word_count(text)
+    words = count_words(text)
     chars = get_char_count(text)
     time = get_reading_time_minutes(text)
     reading_ease, grade_level = get_readability_metrics(text)
@@ -239,7 +242,11 @@ def count_syllables_in_word(word: str) -> int:
         is_prev_vowel = is_vowel
 
     if word.endswith("e"):
-        count -= 1
+        is_consonant_le = (
+            len(word) >= 3 and word.endswith("le") and word[-3] not in vowels
+        )
+        if not is_consonant_le:
+            count -= 1
 
     if count <= 0:
         count = 1
@@ -255,8 +262,8 @@ def get_syllable_count(text: str) -> int:
 
 def get_sentence_count(text: str) -> int:
     """Return the total sentence count for the text."""
-    sentences = [s for s in re.split(r"[.!?]+(?:\s+|$)", text) if s.strip()]
-    return max(1, len(sentences)) if text.strip() else 0
+    return count_sentences(text)
+# get_sentence_count is aliased to count_sentences above
 
 
 def get_readability_metrics(text: str) -> tuple[float, float]:
@@ -264,8 +271,11 @@ def get_readability_metrics(text: str) -> tuple[float, float]:
 
     Returns (flesch_reading_ease, flesch_kincaid_grade).
     """
-    words = get_word_count(text)
+    words = count_words(text)
     sentences = get_sentence_count(text)
+
+    words = get_word_count(text)
+    sentences = count_sentences(text)
     syllables = get_syllable_count(text)
 
     if words == 0 or sentences == 0:
@@ -298,9 +308,9 @@ def get_text_stats(text: str) -> dict[str, int | float]:
             "reading_time": 0,
         }
 
-    words = get_word_count(text)
+    words = count_words(text)
     chars = get_char_count(text)
-    sentences = get_sentence_count(text)
+    sentences = count_sentences(text)
     syllables = get_syllable_count(text)
     reading_ease, grade_level = get_readability_metrics(text)
     reading_time = get_reading_time_minutes(text)
