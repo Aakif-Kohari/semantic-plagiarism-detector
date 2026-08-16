@@ -102,17 +102,19 @@ def test_chunk_text_emoji_only():
 
 
 def test_chunk_overlap_boundaries():
-    """Verify consecutive chunks preserve configured overlap boundaries."""
-    text = "Sentence one. Sentence two. Sentence three. Sentence four. Sentence five."
-    chunk_size = 30
-    chunk_overlap = 10
+    """Verify consecutive chunks share the exact configured overlap substring."""
+    # Use CJK text so chunking is character-based and overlap is a precise substring.
+    text = "这是一个关于人工智能和神经网络的测试文本。" * 20
+    chunk_size = 100
+    chunk_overlap = 20
 
-    chunks = chunk_text(text, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    chunks = chunk_text(
+        text, chunk_size=chunk_size, chunk_overlap=chunk_overlap, min_words=1
+    )
 
-    if len(chunks) > 1:
-        # Check that consecutive chunks share overlapping content
-        for i in range(len(chunks) - 1):
-            assert len(chunks[i]) <= chunk_size
+    assert len(chunks) > 1
+    overlap = chunks[0][-chunk_overlap:]
+    assert chunks[1].startswith(overlap)
 
 
 # ── Sentence-Boundary Chunking Tests (#919) ──────────────────────────────────
