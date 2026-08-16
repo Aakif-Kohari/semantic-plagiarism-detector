@@ -48,6 +48,8 @@ def test_search_matches_either_document_case_insensitively():
 
 def test_empty_search_returns_everything():
     assert len(filter_warnings(WARNINGS, " ")) == 4
+    assert len(filter_warnings(WARNINGS, "")) == 4
+    assert len(filter_warnings(WARNINGS, None)) == 4
 
 
 def test_search_query_is_truncated_to_max_length():
