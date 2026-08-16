@@ -48,50 +48,6 @@ _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 DEFAULT_APP_TITLE: Final[str] = "Semantic Plagiarism Detection System"
 DEFAULT_PDF_FOOTER_TEXT: Final[str] = ""
 
-# ─── Search tunables ───────────────────────────────────────────────────────
-DEFAULT_FUZZY_THRESHOLD: Final[int] = 75
-
-
-def _read_fuzzy_threshold() -> int:
-    """Read ``FUZZY_SEARCH_THRESHOLD`` as an int, tolerating bad values.
-
-    This backs a module-level constant in a module that virtually everything
-    imports, so a malformed value must not raise at import time -- that would
-    stop the whole application from starting. Unset, blank and non-numeric
-    values all fall back to :data:`DEFAULT_FUZZY_THRESHOLD`, matching how
-    :func:`get_lock_timeout` and :func:`get_backup_idle_timeout` behave.
-
-    The value is a ``thefuzz`` match score, so it is clamped to 0-100.
-    """
-    raw = os.getenv("FUZZY_SEARCH_THRESHOLD", "").strip()
-    if not raw:
-        return DEFAULT_FUZZY_THRESHOLD
-
-    try:
-        threshold = int(raw)
-    except ValueError:
-        logger.warning(
-            "FUZZY_SEARCH_THRESHOLD=%r is not an integer; falling back to %d.",
-            raw,
-            DEFAULT_FUZZY_THRESHOLD,
-        )
-        return DEFAULT_FUZZY_THRESHOLD
-
-    if not 0 <= threshold <= 100:
-        logger.warning(
-            "FUZZY_SEARCH_THRESHOLD=%d is outside the valid 0-100 range; "
-            "falling back to %d.",
-            threshold,
-            DEFAULT_FUZZY_THRESHOLD,
-        )
-        return DEFAULT_FUZZY_THRESHOLD
-
-    return threshold
-
-
-#: Minimum ``thefuzz`` score for a fuzzy warning-list search hit (default 75).
-FUZZY_THRESHOLD: Final[int] = _read_fuzzy_threshold()
-
 SUPPORTED_OCR_LANGUAGES = {
     "eng": "English",
     "spa": "Spanish",
@@ -168,6 +124,31 @@ def get_welcome_message() -> str:
     return os.getenv("APP_WELCOME_MESSAGE", "").strip()
 
 
+def get_api_support_contact() -> dict[str, str]:
+    """Return the OpenAPI `contact` object, driven by configuration.
+
+    Different universities deploying their own instance should show
+    their own local IT support contact in the generated API docs rather
+    than a hardcoded placeholder. Reads ``API_SUPPORT_EMAIL`` and
+    ``API_SUPPORT_URL`` from the environment; each key is included in
+    the returned dict only when its corresponding environment variable
+    is set to a non-blank value, matching the OpenAPI Contact Object's
+    spec where ``name``, ``url``, and ``email`` are all optional. If
+    neither is configured, only ``name`` is returned.
+    """
+    contact_info: dict[str, str] = {"name": "API Support"}
+
+    support_url = os.getenv("API_SUPPORT_URL", "").strip()
+    if support_url:
+        contact_info["url"] = support_url
+
+    support_email = os.getenv("API_SUPPORT_EMAIL", "").strip()
+    if support_email:
+        contact_info["email"] = support_email
+
+    return contact_info
+
+
 def get_lock_timeout() -> int:
     """Return the configured lock timeout in seconds (default 30)."""
     try:
@@ -218,7 +199,7 @@ class BrandingConfig:
         footer_text: Copyright or attribution text displayed in the footer.
     """
 
-    app_name: str = DEFAULT_APP_TITLE
+    app_name: str = "Semantic Plagiarism Detector"
     tagline: str = "Advanced AI-Powered Academic Integrity Tool"
     primary_color: str = "#2563EB"
     secondary_color: str = "#1E40AF"
@@ -248,7 +229,7 @@ def load_branding_config(config_path: Path | str | None = None) -> BrandingConfi
     Examples:
         >>> config = load_branding_config()
         >>> print(config.app_name)
-        'Semantic Plagiarism Detection System'
+        'Semantic Plagiarism Detector'
     """
     # Determine default path if none provided
     if config_path is None:
@@ -295,18 +276,6 @@ def load_branding_config(config_path: Path | str | None = None) -> BrandingConfi
                     )
             else:
                 logger.debug("Ignoring unknown branding config key: %s", key)
-
-        # Validate the configured logo file (Issue #2450): log a warning and
-        # fall back to the default if the logo file is missing.
-        if not Path(config.logo_path).exists():
-            default_logo_path = BrandingConfig().logo_path
-            logger.warning(
-                "Branding logo file not found at %s. "
-                "Falling back to default logo %s.",
-                config.logo_path,
-                default_logo_path,
-            )
-            config.logo_path = default_logo_path
 
         logger.info("Successfully loaded branding config from %s", config_path)
         return config
