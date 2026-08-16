@@ -901,3 +901,35 @@ def test_redis_payload_compression_threshold_configurable(monkeypatch):
     assert PayloadCompressor.get_threshold() == 512 * 1024
 
 
+def test_payload_compressor_exact_threshold_boundary():
+    """Verify compression boundary behavior at exactly COMPRESSION_THRESHOLD_BYTES (512 * 1024 bytes).
+
+    Protects against off-by-one errors (incorrect >= vs > threshold evaluation).
+    Payloads of size >= COMPRESSION_THRESHOLD_BYTES must be compressed with MAGIC_HEADER,
+    while payloads of size COMPRESSION_THRESHOLD_BYTES - 1 must remain uncompressed.
+    """
+    from src.utils.redis_cache import PayloadCompressor
+
+    threshold = PayloadCompressor.COMPRESSION_THRESHOLD_BYTES
+    assert threshold == 512 * 1024
+
+    # 1. Payload exactly at the threshold (512 * 1024 bytes) MUST be compressed
+    exact_threshold_data = b"B" * threshold
+    assert len(exact_threshold_data) == 512 * 1024
+
+    compressed_exact = PayloadCompressor.compress(exact_threshold_data)
+    assert compressed_exact.startswith(PayloadCompressor.MAGIC_HEADER)
+    assert len(compressed_exact) < len(exact_threshold_data)
+    assert PayloadCompressor.decompress(compressed_exact) == exact_threshold_data
+
+    # 2. Payload 1 byte below the threshold (512 * 1024 - 1 bytes) MUST remain uncompressed
+    below_threshold_data = b"B" * (threshold - 1)
+    assert len(below_threshold_data) == (512 * 1024 - 1)
+
+    compressed_below = PayloadCompressor.compress(below_threshold_data)
+    assert not compressed_below.startswith(PayloadCompressor.MAGIC_HEADER)
+    assert compressed_below == below_threshold_data
+    assert PayloadCompressor.decompress(compressed_below) == below_threshold_data
+
+
+
