@@ -680,4 +680,21 @@ def test_severity_tier_boundary_just_below_high():
 def test_severity_tier_boundary_at_high():
     """A score of 0.80 is classified as high."""
     assert severity_tier(0.80, 0.50) == "high"
+# sanitize_hex_color edge-case tests (Issue #2352)
+# ==============================================================================
+
+
+def test_sanitize_hex_color_valid():
+    """Valid six-digit uppercase hex colors are returned unchanged."""
+    assert sanitize_hex_color("#FF0000") == "#FF0000"
+
+
+def test_sanitize_hex_color_missing_hash():
+    """Hex values without the leading hash fall back to the default."""
+    assert sanitize_hex_color("FF0000") == "#000000"
+
+
+def test_sanitize_hex_color_invalid():
+    """Invalid/non-hex values use the configured fallback."""
+    assert sanitize_hex_color("not-a-color", fallback="#FFFFFF") == "#FFFFFF"
 

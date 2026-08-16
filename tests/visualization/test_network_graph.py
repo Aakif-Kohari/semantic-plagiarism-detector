@@ -84,6 +84,22 @@ def test_build_network_data_structure():
     assert len(net_data["shapes"]) == 1
 
 
+def test_build_network_data_hides_isolated_nodes():
+    """Verify show_isolated=False removes unconnected/isolated nodes such as doc3."""
+    data = {
+        "doc1": [1.0, 0.85, 0.20],
+        "doc2": [0.85, 1.0, 0.10],
+        "doc3": [0.20, 0.10, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2", "doc3"])
+
+    net_data = build_network_data(df, threshold=0.75, show_isolated=False)
+
+    assert len(net_data["graph"].nodes()) == 2
+    assert "doc3" not in net_data["graph"].nodes()
+    assert set(net_data["graph"].nodes()) == {"doc1", "doc2"}
+
+
 def test_build_network_data_with_theme_colors():
     """Verify build_network_data applies custom theme colors correctly."""
     data = {
@@ -1085,6 +1101,17 @@ def test_plot_plagiarism_network_graph_accepts_max_nodes():
     assert len(fig.data[1].customdata) == 2
     assert "3 nodes hidden" in fig.layout.annotations[0].text
 
+def test_get_cluster_count_returns_two_for_two_disjoint_pairs():
+    """Verify get_cluster_count counts connected components correctly."""
+    graph = nx.Graph()
+    graph.add_edges_from(
+        [
+            ("A", "B"),
+            ("C", "D"),
+        ]
+    )
+
+    assert get_cluster_count(graph) == 2
 def test_export_network_to_gexf_valid_xml():
     """Verify GEXF export returns well-formed XML with a GEXF root."""
     data = {

@@ -30,7 +30,7 @@ def get_memory_usage() -> Dict[str, Any]:
         }
 
 
-def log_memory_usage(tag: str = "") -> None:
+def log_memory_usage(tag: str = "") -> Dict[str, Any]:
     """Log current memory usage with a tag."""
     usage = get_memory_usage()
     logger.info(f"[Memory] {tag} - RSS: {usage['rss_mb']:.1f}MB, "

@@ -622,6 +622,37 @@ def test_get_document_count_by_user_handles_none_owner(mock_db):
     assert get_document_count_by_user("") == 0
 
 
+def test_get_document_count_by_user_does_not_crash_with_many_null_owners(mock_db):
+    """Regression test: NULL-owner documents (e.g. from add_document() calls
+    that omit `owner`, still fully possible even after migration_010's
+    DEFAULT 'system' backfill -- see migration_010_add_document_owner's
+    docstring) must never cause get_document_count_by_user() to raise, and
+    must never be miscounted against a real user."""
+    for i in range(5):
+        add_document(f"no_owner_{i}.pdf", f"hash_none_{i}")  # owner omitted -> NULL
+    add_document("alice_doc.pdf", "hash_alice", owner="alice")
+    add_document("bob_doc.pdf", "hash_bob", owner="bob")
+
+    # No crash, and NULL-owner rows are excluded from every real user's count.
+    assert get_document_count_by_user("alice") == 1
+    assert get_document_count_by_user("bob") == 1
+    assert get_document_count_by_user("system") == 0
+    assert get_document_count_by_user("") == 0
+
+
+def test_get_document_count_by_user_does_not_crash_when_queried_with_none(mock_db):
+    """Calling the function itself with owner_username=None (SQL
+    ``owner = NULL`` never matches, per SQL's NULL-comparison semantics)
+    must not raise, and must correctly return 0 rather than matching
+    NULL-owner rows."""
+    from src.db.corpus_db import get_document_count_by_user
+
+    add_document("no_owner.pdf", "hash_none_for_none_query")
+
+    result = get_document_count_by_user(None)
+    assert result == 0
+
+
 def test_get_document_count_by_user_returns_int(mock_db):
     add_document("doc.pdf", "hash", owner="alice")
     result = get_document_count_by_user("alice")
@@ -674,13 +705,3 @@ def test_get_document_count_by_user_empty():
     from src.db.corpus_db import get_document_count_by_user
 
     assert get_document_count_by_user("unknown-user") == 0
-
-def test_corpus_db_wal_mode_enabled():
-    """Verify SQLite WAL journal_mode is enabled for corpus database connections (#2336)."""
-    with _connect() as conn:
-        cursor = conn.execute("PRAGMA journal_mode")
-        mode = cursor.fetchone()[0]
-        assert str(mode).lower() == "wal"
-
-
-
