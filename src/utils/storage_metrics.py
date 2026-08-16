@@ -9,8 +9,22 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
-def get_sqlite_db_paths() -> List[Path]:
-    """Retrieve unique paths of SQLite database files in standard application locations."""
+def _deduplicate_paths(paths: List[Path]) -> List[Path]:
+    """Remove duplicate paths by comparing their resolved absolute form."""
+    unique_paths: List[Path] = []
+    seen: set[Path] = set()
+    for p in paths:
+        try:
+            resolved = p.resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                unique_paths.append(p)
+        except Exception as e:
+            logger.debug("Could not resolve path: %s", e)
+    return unique_paths
+
+
+def get_sqlite_db_paths() -> List[Path]:    """Retrieve unique paths of SQLite database files in standard application locations."""
     paths: List[Path] = []
 
     # 1. Corpus DB path
@@ -45,23 +59,11 @@ def get_sqlite_db_paths() -> List[Path]:
             for file_path in folder.glob("*.db"):
                 paths.append(file_path)
 
-    # Deduplicate resolved absolute paths
-    unique_paths: List[Path] = []
-    seen: set[Path] = set()
-    for p in paths:
-        try:
-            resolved = p.resolve()
-            if resolved not in seen:
-                seen.add(resolved)
-                unique_paths.append(p)
-        except Exception as e:
-            logger.debug("Could not resolve path: %s", e)
-
-    return unique_paths
+# Deduplicate resolved absolute paths
+    return _deduplicate_paths(paths)
 
 
-def get_faiss_index_paths() -> List[Path]:
-    """Retrieve unique paths of FAISS index files in standard application locations."""
+def get_faiss_index_paths() -> List[Path]:    """Retrieve unique paths of FAISS index files in standard application locations."""
     paths: List[Path] = []
 
     base_dir = Path(__file__).resolve().parents[2]
@@ -76,19 +78,7 @@ def get_faiss_index_paths() -> List[Path]:
             for file_path in folder.glob("*.index"):
                 paths.append(file_path)
 
-    unique_paths: List[Path] = []
-    seen: set[Path] = set()
-    for p in paths:
-        try:
-            resolved = p.resolve()
-            if resolved not in seen:
-                seen.add(resolved)
-                unique_paths.append(p)
-        except Exception as e:
-            logger.debug("Could not resolve path: %s", e)
-
-    return unique_paths
-
+return _deduplicate_paths(paths)
 
 def calculate_storage_usage(
     db_paths: Optional[List[Path]] = None,
