@@ -771,4 +771,10 @@ class TestEmptyAllowedDomainsBehavior:
                 )
 
 
+def test_is_ip_in_cidr_block_ipv4_mapped_ipv6_loopback():
+    """Verify that is_ip_in_cidr_block correctly matches IPv4-mapped IPv6 localhost address to the loopback CIDR block."""
+    assert is_ip_in_cidr_block("::ffff:127.0.0.1", "127.0.0.0/8") is True
+
+
+
 
