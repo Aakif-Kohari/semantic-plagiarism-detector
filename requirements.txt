@@ -34,7 +34,6 @@ plotly>=5.20.0                   # Interactive heatmap with hover values
 deep-translator>=1.11.4          # Translation alignment for cross-lingual support
 streamlit-tour>=1.1.0            # Interactive guided tour component
 streamlit-plotly-events==0.0.6
-python-pptx>=0.6.21
 
 # ── Data & ML ─────────────────────────────────────────────────────────────────
 numpy>=2.0.0
@@ -51,6 +50,7 @@ networkx>=3.0                     # Plagiarism cluster detection
 # ── Development & Testing ─────────────────────────────────────────────────────
 faker>=20.0.0                   # Fake data generation for mock essay utility (#255)
 hypothesis>=6.100.0             # Property-based testing for filename sanitization (#963)
+jsonschema>=4.20.0               # JSON Schema validation for API error-response tests
 
 # ── Caching & Session Management ───────────────────────────────────────────────
 
