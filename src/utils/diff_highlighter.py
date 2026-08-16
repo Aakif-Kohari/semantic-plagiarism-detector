@@ -70,6 +70,25 @@ def _escape_text(text: str) -> str:
     return escaped
 
 
+def _sanitize_color(color: str, fallback: str = "rgba(250, 204, 21, 0.3)") -> str:
+    """Sanitize CSS color value to prevent HTML/CSS/JS injection."""
+    if not isinstance(color, str):
+        return fallback
+    color_trimmed = color.strip()
+    if any(c in color_trimmed for c in ("'", '"', ";", "<", ">")):
+        return fallback
+    if re.match(
+        r"^rgba?\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*(?:,\s*[\d\.]+%?)?\s*\)$",
+        color_trimmed,
+    ):
+        return color_trimmed
+    if any(c in color_trimmed for c in ("(", ")")):
+        return fallback
+    if re.match(r"^#(?:[0-9a-fA-F]{3}){1,2}$|^[a-zA-Z]+$", color_trimmed):
+        return color_trimmed
+    return fallback
+
+
 def _build_html(
     tokens: list[str],
     highlight_mask: list[bool],
@@ -84,11 +103,12 @@ def _build_html(
 
         if should_highlight:
             if not in_highlight:
-                highlight_bg = (
+                raw_bg = (
                     theme_colors.get("warning_soft", "rgba(250, 204, 21, 0.3)")
                     if theme_colors
                     else "rgba(250, 204, 21, 0.3)"
                 )
+                highlight_bg = _sanitize_color(raw_bg)
 
                 parts.append(
                     f"<mark style='background-color: {highlight_bg}; "
