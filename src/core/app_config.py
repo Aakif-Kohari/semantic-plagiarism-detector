@@ -1,6 +1,3 @@
-import os
-
-FUZZY_THRESHOLD = int(os.getenv("FUZZY_SEARCH_THRESHOLD", 75))
 """Application-level environment configuration.
 
 This module is the single source of truth for paths and tunables that
@@ -50,6 +47,50 @@ _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 # ─── Application display config (pre-existing) ─────────────────────────────
 DEFAULT_APP_TITLE: Final[str] = "Semantic Plagiarism Detection System"
 DEFAULT_PDF_FOOTER_TEXT: Final[str] = ""
+
+# ─── Search tunables ───────────────────────────────────────────────────────
+DEFAULT_FUZZY_THRESHOLD: Final[int] = 75
+
+
+def _read_fuzzy_threshold() -> int:
+    """Read ``FUZZY_SEARCH_THRESHOLD`` as an int, tolerating bad values.
+
+    This backs a module-level constant in a module that virtually everything
+    imports, so a malformed value must not raise at import time -- that would
+    stop the whole application from starting. Unset, blank and non-numeric
+    values all fall back to :data:`DEFAULT_FUZZY_THRESHOLD`, matching how
+    :func:`get_lock_timeout` and :func:`get_backup_idle_timeout` behave.
+
+    The value is a ``thefuzz`` match score, so it is clamped to 0-100.
+    """
+    raw = os.getenv("FUZZY_SEARCH_THRESHOLD", "").strip()
+    if not raw:
+        return DEFAULT_FUZZY_THRESHOLD
+
+    try:
+        threshold = int(raw)
+    except ValueError:
+        logger.warning(
+            "FUZZY_SEARCH_THRESHOLD=%r is not an integer; falling back to %d.",
+            raw,
+            DEFAULT_FUZZY_THRESHOLD,
+        )
+        return DEFAULT_FUZZY_THRESHOLD
+
+    if not 0 <= threshold <= 100:
+        logger.warning(
+            "FUZZY_SEARCH_THRESHOLD=%d is outside the valid 0-100 range; "
+            "falling back to %d.",
+            threshold,
+            DEFAULT_FUZZY_THRESHOLD,
+        )
+        return DEFAULT_FUZZY_THRESHOLD
+
+    return threshold
+
+
+#: Minimum ``thefuzz`` score for a fuzzy warning-list search hit (default 75).
+FUZZY_THRESHOLD: Final[int] = _read_fuzzy_threshold()
 
 SUPPORTED_OCR_LANGUAGES = {
     "eng": "English",
