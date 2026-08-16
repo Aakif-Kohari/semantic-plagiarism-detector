@@ -188,6 +188,60 @@ def test_dns_cache_expired(mock_getaddrinfo):
 
 
 @patch("src.security.ssrf_protector.socket.getaddrinfo")
+def test_dns_cache_is_bounded_and_evicts_oldest_entries(mock_getaddrinfo):
+    """Regression test for the unbounded-cache memory-leak issue: a
+    malicious actor hitting webhook validation with thousands of unique
+    randomly generated subdomains must not grow _dns_cache without limit.
+    Once DNS_CACHE_MAX_SIZE is exceeded, the least-recently-used entries
+    must be evicted."""
+    mock_getaddrinfo.return_value = [(2, 1, 6, "", ("142.250.190.46", 443))]
+
+    flood_size = SSRFProtector.DNS_CACHE_MAX_SIZE + 500
+    for i in range(flood_size):
+        SSRFProtector._resolve_hostname(f"malicious-{i}.example.com")
+
+    assert len(SSRFProtector._dns_cache) == SSRFProtector.DNS_CACHE_MAX_SIZE
+
+    # The earliest-inserted (now least-recently-used) hostnames must have
+    # been evicted, not merely left to grow the dict indefinitely.
+    assert "malicious-0.example.com" not in SSRFProtector._dns_cache
+    assert "malicious-1.example.com" not in SSRFProtector._dns_cache
+
+    # The most recently inserted hostname must still be cached.
+    assert f"malicious-{flood_size - 1}.example.com" in SSRFProtector._dns_cache
+
+
+@patch("src.security.ssrf_protector.socket.getaddrinfo")
+def test_dns_cache_eviction_is_lru_not_fifo(mock_getaddrinfo):
+    """Re-accessing an older cache entry must protect it from eviction --
+    confirming genuine least-recently-used semantics rather than a simple
+    insertion-order cap that would evict a hostname still being actively
+    (re-)validated."""
+    mock_getaddrinfo.return_value = [(2, 1, 6, "", ("1.2.3.4", 443))]
+
+    original_max_size = SSRFProtector.DNS_CACHE_MAX_SIZE
+    SSRFProtector.DNS_CACHE_MAX_SIZE = 3
+    try:
+        SSRFProtector._resolve_hostname("a.example.com")
+        SSRFProtector._resolve_hostname("b.example.com")
+        SSRFProtector._resolve_hostname("c.example.com")
+
+        # Re-access "a" so it becomes the most-recently-used entry.
+        SSRFProtector._resolve_hostname("a.example.com")
+
+        # A 4th unique hostname should now evict "b" (the true LRU entry),
+        # not "a" (which was just re-accessed).
+        SSRFProtector._resolve_hostname("d.example.com")
+
+        assert "a.example.com" in SSRFProtector._dns_cache
+        assert "b.example.com" not in SSRFProtector._dns_cache
+        assert "c.example.com" in SSRFProtector._dns_cache
+        assert "d.example.com" in SSRFProtector._dns_cache
+    finally:
+        SSRFProtector.DNS_CACHE_MAX_SIZE = original_max_size
+
+
+@patch("src.security.ssrf_protector.socket.getaddrinfo")
 def test_empty_dns_resolution(mock_getaddrinfo):
     mock_getaddrinfo.return_value = []
     with pytest.raises(SSRFSecurityException, match="No addresses found for hostname"):
