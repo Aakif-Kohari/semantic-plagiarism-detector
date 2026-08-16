@@ -532,6 +532,24 @@ def render_network_plotly(
             )
         )
 
+    # Issue #2350: If the graph is completely empty (no nodes/traces),
+    # add a fallback annotation so the user sees a message rather than
+    # a blank canvas.
+    if not traces and not shapes:
+        annotations.append(
+            dict(
+                text="No documents or plagiarism connections to display.",
+                showarrow=False,
+                xref="paper",
+                yref="paper",
+                x=0.5,
+                y=0.5,
+                xanchor="center",
+                yanchor="middle",
+                font=dict(size=16, color=ink_color),
+            )
+        )
+
     fig = go.Figure(
         data=traces,
         layout=go.Layout(

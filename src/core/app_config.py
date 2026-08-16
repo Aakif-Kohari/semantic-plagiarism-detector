@@ -1,3 +1,6 @@
+import os
+
+FUZZY_THRESHOLD = int(os.getenv("FUZZY_SEARCH_THRESHOLD", 75))
 """Application-level environment configuration.
 
 This module is the single source of truth for paths and tunables that
@@ -142,35 +145,6 @@ def get_backup_idle_timeout() -> int:
         return 30 * 60
 
 
-def get_rescan_interval_minutes() -> int:
-    """Return the configured scheduled plagiarism-rescan interval in minutes.
-
-    Continuous background rescanning (see ``src.core.scheduler``) is an
-    explicit opt-in: this returns ``0`` (disabled) unless
-    ``RESCAN_INTERVAL_MINUTES`` is set in the environment to a positive
-    integer.
-    """
-    try:
-        minutes = int(os.getenv("RESCAN_INTERVAL_MINUTES", "0"))
-        return max(0, minutes)
-    except ValueError:
-        return 0
-
-
-def get_rescan_grace_period_minutes() -> int:
-    """Return how far back (in minutes) a scheduled rescan looks for
-    "recently added" documents to re-check against the rest of the corpus.
-
-    Defaults to 60 minutes. Configurable via
-    ``RESCAN_GRACE_PERIOD_MINUTES``.
-    """
-    try:
-        minutes = int(os.getenv("RESCAN_GRACE_PERIOD_MINUTES", "60"))
-        return max(1, minutes)
-    except ValueError:
-        return 60
-
-
 def get_allowed_webhook_domains() -> list[str]:
     """Return the list of allowed webhook domain hostnames.
 
@@ -203,7 +177,7 @@ class BrandingConfig:
         footer_text: Copyright or attribution text displayed in the footer.
     """
 
-    app_name: str = "Semantic Plagiarism Detector"
+    app_name: str = DEFAULT_APP_TITLE
     tagline: str = "Advanced AI-Powered Academic Integrity Tool"
     primary_color: str = "#2563EB"
     secondary_color: str = "#1E40AF"
@@ -233,7 +207,7 @@ def load_branding_config(config_path: Path | str | None = None) -> BrandingConfi
     Examples:
         >>> config = load_branding_config()
         >>> print(config.app_name)
-        'Semantic Plagiarism Detector'
+        'Semantic Plagiarism Detection System'
     """
     # Determine default path if none provided
     if config_path is None:
@@ -280,6 +254,18 @@ def load_branding_config(config_path: Path | str | None = None) -> BrandingConfi
                     )
             else:
                 logger.debug("Ignoring unknown branding config key: %s", key)
+
+        # Validate the configured logo file (Issue #2450): log a warning and
+        # fall back to the default if the logo file is missing.
+        if not Path(config.logo_path).exists():
+            default_logo_path = BrandingConfig().logo_path
+            logger.warning(
+                "Branding logo file not found at %s. "
+                "Falling back to default logo %s.",
+                config.logo_path,
+                default_logo_path,
+            )
+            config.logo_path = default_logo_path
 
         logger.info("Successfully loaded branding config from %s", config_path)
         return config

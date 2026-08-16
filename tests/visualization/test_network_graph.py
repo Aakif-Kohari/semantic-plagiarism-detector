@@ -84,6 +84,22 @@ def test_build_network_data_structure():
     assert len(net_data["shapes"]) == 1
 
 
+def test_build_network_data_hides_isolated_nodes():
+    """Verify show_isolated=False removes unconnected/isolated nodes such as doc3."""
+    data = {
+        "doc1": [1.0, 0.85, 0.20],
+        "doc2": [0.85, 1.0, 0.10],
+        "doc3": [0.20, 0.10, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2", "doc3"])
+
+    net_data = build_network_data(df, threshold=0.75, show_isolated=False)
+
+    assert len(net_data["graph"].nodes()) == 2
+    assert "doc3" not in net_data["graph"].nodes()
+    assert set(net_data["graph"].nodes()) == {"doc1", "doc2"}
+
+
 def test_build_network_data_with_theme_colors():
     """Verify build_network_data applies custom theme colors correctly."""
     data = {
@@ -1085,6 +1101,17 @@ def test_plot_plagiarism_network_graph_accepts_max_nodes():
     assert len(fig.data[1].customdata) == 2
     assert "3 nodes hidden" in fig.layout.annotations[0].text
 
+def test_get_cluster_count_returns_two_for_two_disjoint_pairs():
+    """Verify get_cluster_count counts connected components correctly."""
+    graph = nx.Graph()
+    graph.add_edges_from(
+        [
+            ("A", "B"),
+            ("C", "D"),
+        ]
+    )
+
+    assert get_cluster_count(graph) == 2
 def test_export_network_to_gexf_valid_xml():
     """Verify GEXF export returns well-formed XML with a GEXF root."""
     data = {
@@ -1104,4 +1131,76 @@ def test_export_network_to_gexf_valid_xml():
     root = ET.fromstring(gexf_bytes)
 
     assert root.tag.endswith("gexf")
+
+
+
+
+# ── Issue #2350: Empty state rendering for plot_plagiarism_network_graph ────
+
+
+def test_issue_2350_plot_plagiarism_network_graph_empty_dataframe():
+    """plot_plagiarism_network_graph must return a go.Figure and not crash
+    when given a completely empty DataFrame (Issue #2350).
+    """
+    empty_df = pd.DataFrame()
+
+    fig = plot_plagiarism_network_graph(empty_df, threshold=0.75)
+
+    assert isinstance(fig, go.Figure)
+    assert len(fig.layout.shapes) == 0
+
+
+def test_issue_2350_plot_plagiarism_network_graph_empty_matrix():
+    """plot_plagiarism_network_graph must return a go.Figure when given an
+    empty NxN similarity matrix (0 rows, 0 columns).
+    """
+    empty_matrix = pd.DataFrame()
+
+    fig = plot_plagiarism_network_graph(similarity_df=empty_matrix)
+
+    assert isinstance(fig, go.Figure)
+
+
+def test_issue_2350_plot_plagiarism_network_graph_no_nodes():
+    """plot_plagiarism_network_graph must return a go.Figure when the
+    DataFrame has no columns (no documents).
+    """
+    df = pd.DataFrame({"col": []})
+
+    fig = plot_plagiarism_network_graph(df)
+
+    assert isinstance(fig, go.Figure)
+
+
+def test_issue_2350_empty_state_has_fallback_annotation():
+    """When the graph is empty, the figure must include a fallback
+    annotation message (Issue #2350).
+    """
+    empty_df = pd.DataFrame()
+
+    fig = plot_plagiarism_network_graph(empty_df)
+
+    assert isinstance(fig, go.Figure)
+    assert len(fig.layout.annotations) >= 1
+    assert any(
+        "No documents" in ann.text or "No data" in ann.text
+        for ann in fig.layout.annotations
+    ), f"Expected fallback annotation, got: {[ann.text for ann in fig.layout.annotations]}"
+
+
+def test_issue_2350_empty_state_does_not_raise():
+    """Passing an empty DataFrame to plot_plagiarism_network_graph must
+    not raise any exception (Issue #2350).
+    """
+    empty_df = pd.DataFrame()
+
+    try:
+        fig = plot_plagiarism_network_graph(empty_df)
+        assert isinstance(fig, go.Figure)
+    except Exception as exc:
+        pytest.fail(
+            f"plot_plagiarism_network_graph raised an exception on empty input: {exc}"
+        )
+
+
 

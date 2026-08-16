@@ -141,6 +141,18 @@ def filter_warnings(
     *,
     already_normalized: bool = False,
 ) -> list[dict[str, Any]]:
+    from src.core.app_config import FUZZY_THRESHOLD
+    
+    try:
+        from thefuzz import fuzz
+    except ImportError:
+        try:
+            from fuzzywuzzy import fuzz
+        except ImportError:
+            fuzz = None
+
+    normalised = [_normalise_warning(item) for item in warnings]
+    query = search_query.strip().casefold()
     """Filter normalized warnings using functional predicate matching."""
     normalised = [_normalise_warning(item, already_normalized=already_normalized) for item in warnings]
 
@@ -156,6 +168,7 @@ def filter_warnings(
         return normalised
 
     filtered = []
+    for item in normalised:
     remaining_indices = []
     choices_a: dict[int, str] = {}
     choices_b: dict[int, str] = {}
@@ -167,6 +180,16 @@ def filter_warnings(
 
         if query in doc_a or query in doc_b:
             filtered.append(item)
+            continue
+
+        if fuzz is not None:
+            score_a = max(fuzz.partial_ratio(query, doc_a), fuzz.token_set_ratio(query, doc_a))
+            score_b = max(fuzz.partial_ratio(query, doc_b), fuzz.token_set_ratio(query, doc_b))
+
+            if score_a >= FUZZY_THRESHOLD or score_b >= FUZZY_THRESHOLD:
+                filtered.append(item)
+
+    return filtered
         else:
             remaining_indices.append(i)
             choices_a[i] = doc_a
@@ -267,8 +290,9 @@ def prepare_warning_page(
     )
 
 
-def _reset_page() -> None:
-    st.session_state.warning_page = 1
+def reset_warning_page() -> int:
+    """Return the page index to use after search/sort/filter widgets change."""
+    return 1
 
 
 def render_copy_button(
@@ -456,13 +480,14 @@ def render_warning_controls(
     ai_probabilities: dict[str, dict[str, Any]] | None = None,
     lang_code: str = "en",
     expanded: bool = False,
+    set_warning_page: Callable[[int], None],
 ) -> None:
-    if "warning_page" not in st.session_state:
-        st.session_state.warning_page = 1
-        
+    def _on_filters_changed() -> None:
+        set_warning_page(reset_warning_page())
+
     if SessionKeys.COMPACT_VIEW not in st.session_state:
         st.session_state[SessionKeys.COMPACT_VIEW] = False
-        
+
     from src.core.config import DEFAULT_THRESHOLDS
 
     st.caption(
@@ -618,7 +643,7 @@ def render_warning_controls(
             get_text("warn_search_label", lang=lang_code),
             placeholder=get_text("warn_search_placeholder", lang=lang_code),
             key="warning_search",
-            on_change=_reset_page,
+            on_change=_on_filters_changed,
         )
         search_query = _truncate_search_query(search_query)
 
@@ -633,7 +658,7 @@ def render_warning_controls(
             "Compact View",
             key=SessionKeys.COMPACT_VIEW,
             help="Show warnings as compact single-line rows",
-            on_change=_reset_page,
+            on_change=_on_filters_changed,
         )
         
     with size_col:
@@ -641,7 +666,7 @@ def render_warning_controls(
             get_text("warn_per_page", lang=lang_code),
             [10, 25, 50],
             key="warning_page_size",
-            on_change=_reset_page,
+            on_change=_on_filters_changed,
         )
 
     min_match_length = st.slider(
@@ -651,7 +676,7 @@ def render_warning_controls(
         value=0,
         step=5,
         key="warning_min_match_length",
-        on_change=_reset_page,
+        on_change=_on_filters_changed,
     )
 
     sort_fields = _sort_display_names(lang_code)
@@ -670,7 +695,7 @@ def render_warning_controls(
             f"{get_text('warn_primary_sort', lang=lang_code)} {p_arrow}",
             list(sort_fields),
             key="warning_primary_sort",
-            on_change=_reset_page,
+            on_change=_on_filters_changed,
         )
 
     with d1:
@@ -681,7 +706,7 @@ def render_warning_controls(
                 get_text("warn_ascending", lang=lang_code),
             ],
             key="warning_primary_direction",
-            on_change=_reset_page,
+            on_change=_on_filters_changed,
         )
 
     with p2:
@@ -690,7 +715,7 @@ def render_warning_controls(
             list(sort_fields),
             index=1,
             key="warning_secondary_sort",
-            on_change=_reset_page,
+            on_change=_on_filters_changed,
         )
 
     with d2:
@@ -701,7 +726,7 @@ def render_warning_controls(
                 get_text("warn_descending", lang=lang_code),
             ],
             key="warning_secondary_direction",
-            on_change=_reset_page,
+            on_change=_on_filters_changed,
         )
 
     # Normalize once at the entry point of render_warning_controls()
@@ -723,7 +748,7 @@ def render_warning_controls(
         already_normalized=True,
     )
     if current_page.page != st.session_state.warning_page:
-        st.session_state.warning_page = current_page.page
+        set_warning_page(current_page.page)
 
     export_df = pd.DataFrame(
         [
@@ -871,7 +896,7 @@ def render_warning_controls(
             disabled=current_page.page <= 1,
             key="warning_previous_page",
         ):
-            st.session_state.warning_page = current_page.page - 1
+            set_warning_page(current_page.page - 1)
             st.rerun()
 
     with page_col:
@@ -884,7 +909,7 @@ def render_warning_controls(
             label_visibility="collapsed",
         )
         if selected_page != current_page.page:
-            st.session_state.warning_page = selected_page
+            set_warning_page(selected_page)
             st.rerun()
 
     with next_col:
@@ -894,7 +919,7 @@ def render_warning_controls(
             disabled=current_page.page >= current_page.total_pages,
             key="warning_next_page",
         ):
-            st.session_state.warning_page = current_page.page + 1
+            set_warning_page(current_page.page + 1)
             st.rerun()
 
 

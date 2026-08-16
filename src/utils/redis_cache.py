@@ -74,7 +74,19 @@ REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 REDIS_DB = int(os.getenv("REDIS_DB", "0"))
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", None)
-REDIS_URL = os.getenv("REDIS_URL", f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}")
+# Construct REDIS_URL with password if provided (Issue #2320).
+# Format: redis://:{password}@{host}:{port}/{db}
+# When no password is set, falls back to: redis://{host}:{port}/{db}
+if REDIS_PASSWORD:
+    REDIS_URL = os.getenv(
+        "REDIS_URL",
+        f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}",
+    )
+else:
+    REDIS_URL = os.getenv(
+        "REDIS_URL",
+        f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}",
+    )
 REDIS_TIMEOUT_SECONDS = float(os.getenv("REDIS_TIMEOUT_SECONDS", "2.0"))
 
 # TTL settings (in seconds) - Configurable via environment variables (Issue #2323)

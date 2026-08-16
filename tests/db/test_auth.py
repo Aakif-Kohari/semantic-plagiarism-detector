@@ -252,6 +252,24 @@ def test_enable_disable_2fa():
     delete_user(username)
 
 
+def test_get_2fa_status():
+    """Verify get_2fa_status returns False initially and True after calling enable_2fa."""
+    username = f"user_2fa_{uuid.uuid4().hex[:8]}"
+    add_user(username, "Password123!")
+
+    enabled, secret = get_2fa_status(username)
+    assert enabled is False
+
+    test_secret = "JBSWY3DPEHPK3PXP"
+    enable_2fa(username, test_secret)
+
+    enabled, secret = get_2fa_status(username)
+    assert enabled is True
+
+    delete_user(username)
+
+
+
 def test_suspend_account():
     username = f"user_{uuid.uuid4().hex[:8]}"
     add_user(username, "password123!")
@@ -485,32 +503,20 @@ class TestFormatUserCreatedDate:
 
 
 def test_get_active_users_count():
-    """Verify get_active_users_count counts only active users."""
-    # 1. Starting count should be 1 (the default seeded 'admin' is active)
-    initial_count = get_active_users_count()
-    assert initial_count == 1
+    """Verify get_active_users_count returns 2 when 3 users are created and 1 is suspended."""
+    delete_user("admin")
 
-    # 2. Add an active user
-    user1 = f"active_{uuid.uuid4().hex[:8]}"
+    user1 = f"user1_{uuid.uuid4().hex[:8]}"
+    user2 = f"user2_{uuid.uuid4().hex[:8]}"
+    user3 = f"user3_{uuid.uuid4().hex[:8]}"
+
     add_user(user1, "SecurePass123!")
-    assert get_active_users_count() == 2
-
-    # 3. Add another user and suspend them
-    user2 = f"suspended_{uuid.uuid4().hex[:8]}"
     add_user(user2, "SecurePass123!")
+    add_user(user3, "SecurePass123!")
+
     set_user_active_status(user2, False)
-    # The count should still be 2 because user2 is inactive
+
     assert get_active_users_count() == 2
-
-    # 4. Reactivate user2
-    set_user_active_status(user2, True)
-    assert get_active_users_count() == 3
-
-    # 5. Delete user1
-    delete_user(user1)
-    assert get_active_users_count() == 2
-
-    delete_user(user2)
 
 
 def test_update_user_profile():

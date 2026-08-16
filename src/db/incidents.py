@@ -1197,3 +1197,11 @@ def log_incident(
         if res.incident_id == target_id:
             return res
     return results[0]
+
+
+def get_incidents_repo(db_path: str | Path | None = None) -> IncidentsRepository:
+    """Helper to instantiate an IncidentsRepository."""
+    if db_path is None:
+        return IncidentsRepository()
+    return IncidentsRepository(db_path)
+
