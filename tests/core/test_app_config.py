@@ -221,6 +221,34 @@ class TestLoadBrandingConfig:
         assert config.app_name == "Semantic Plagiarism Detector"
         assert config.primary_color == "#2563EB"
 
+    def test_keeps_existing_logo_path(self, tmp_path):
+        """Verify a custom logo_path pointing at a real file is preserved."""
+        logo_file = tmp_path / "custom_logo.png"
+        logo_file.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+        config_file = tmp_path / "branding_config.json"
+        config_file.write_text(
+            json.dumps({"logo_path": str(logo_file)}), encoding="utf-8"
+        )
+
+        config = load_branding_config(config_file)
+
+        assert config.logo_path == str(logo_file)
+
+    def test_falls_back_to_default_when_logo_missing(self, tmp_path, caplog):
+        """Verify a missing logo file logs a warning and falls back to default."""
+        config_file = tmp_path / "branding_config.json"
+        config_file.write_text(
+            json.dumps({"logo_path": str(tmp_path / "nonexistent_logo.png")}),
+            encoding="utf-8",
+        )
+
+        with caplog.at_level("WARNING", logger="src.core.app_config"):
+            config = load_branding_config(config_file)
+
+        assert config.logo_path == "assets/logo.png"
+        assert "Falling back to default logo" in caplog.text
+
 
 # ---------------------------------------------------------------------------
 # Tests for get_branding_config Cache
