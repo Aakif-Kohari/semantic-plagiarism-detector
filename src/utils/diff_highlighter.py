@@ -1,71 +1,147 @@
-"""Diff highlighting utility for exact matches between text chunks."""
+"""
+src/utils/diff_highlighter.py
+-----------------------------
+Utilities for highlighting overlapping text segments between two documents.
+
+Provides HTML rendering functions that visually emphasize matching phrases,
+words, or character sequences to help instructors quickly identify plagiarized
+content in side-by-side comparison views.
+"""
 
 from __future__ import annotations
 
-import difflib
 import re
+import html
+from typing import Tuple
 
 
 def highlight_overlap(
-    text_a: str,
-    text_b: str,
-    min_match_len: int = 10,
-    theme_colors: dict[str, str] | None = None,
-) -> tuple[str, str]:
-    """Compare two text chunks at the word/token level and wrap exact matching
-
-    substrings in a visually styled HTML <mark> tag.
-
+    text_a: str, 
+    text_b: str, 
+    min_match_length: int = 4
+) -> Tuple[str, str]:
+    """Highlight overlapping sequences between two text strings.
+    
+    Identifies common word sequences of at least `min_match_length` words
+    and wraps them in HTML <mark> tags with a distinct background color.
+    This helps instructors visually identify plagiarized phrases while
+    ignoring common stop words and short coincidental matches.
+    
     Args:
-        text_a: First text chunk.
-        text_b: Second text chunk.
-        min_match_len: Minimum matching character length (trimmed) to qualify for highlighting.
-
+        text_a: The first document's text chunk.
+        text_b: The second document's text chunk.
+        min_match_length: Minimum number of consecutive words required to
+                         constitute a "match". Defaults to 4 to avoid
+                         highlighting common phrases like "in the" or "and the".
+                         
     Returns:
-        Tuple of (highlighted_html_a, highlighted_html_b).
+        A tuple of two HTML strings (highlighted_a, highlighted_b) with
+        matching sequences wrapped in <mark> tags. Returns escaped HTML
+        to prevent XSS vulnerabilities.
+        
+    Examples:
+        >>> a, b = highlight_overlap("the quick brown fox", "a quick brown dog")
+        >>> "<mark>" in a
+        True
     """
     if not text_a or not text_b:
-        return (
-            _escape_text(text_a or ""),
-            _escape_text(text_b or ""),
-        )
-
-    # Tokenise into words and non-words to preserve spacing and punctuation
-    tokens_a = re.findall(r"\w+|\W+", text_a)
-    tokens_b = re.findall(r"\w+|\W+", text_b)
-
-    matcher = difflib.SequenceMatcher(None, tokens_a, tokens_b)
-    matching_blocks = matcher.get_matching_blocks()
-
-    highlight_a = [False] * len(tokens_a)
-    highlight_b = [False] * len(tokens_b)
-
-    for match in matching_blocks:
-        if match.size == 0:
-            continue
-
-        match_tokens = tokens_a[match.a : match.a + match.size]
-        match_str = "".join(match_tokens)
-
-        # Highlight sequence if it is long enough and contains alphanumeric words
-        if len(match_str.strip()) >= min_match_len and any(
-            c.isalnum() for c in match_str
-        ):
-            for i in range(match.a, match.a + match.size):
-                highlight_a[i] = True
-            for i in range(match.b, match.b + match.size):
-                highlight_b[i] = True
-
+        return html.escape(text_a or ""), html.escape(text_b or "")
+    
+    # Escape HTML entities first to prevent XSS
+    safe_a = html.escape(text_a)
+    safe_b = html.escape(text_b)
+    
+    # Tokenize into words for sequence matching
+    words_a = re.findall(r'\b\w+\b', text_a.lower())
+    words_b = re.findall(r'\b\w+\b', text_b.lower())
+    
+    if not words_a or not words_b:
+        return safe_a, safe_b
+    
+    # Find longest common subsequence of words
+    matches = []
+    for i in range(len(words_a)):
+        for j in range(len(words_b)):
+            k = 0
+            while (i + k < len(words_a) and 
+                   j + k < len(words_b) and 
+                   words_a[i + k] == words_b[j + k]):
+                k += 1
+            
+            if k >= min_match_length:
+                # Store match as (start_idx_a, end_idx_a, start_idx_b, end_idx_b)
+                matches.append((i, i + k, j, j + k))
+    
+    if not matches:
+        return safe_a, safe_b
+    
+    # Apply highlighting to the original text
+    # We need to map word indices back to character positions
+    def highlight_text(text: str, word_matches: list[tuple[int, int]]) -> str:
+        """Apply <mark> tags to matching word sequences."""
+        if not word_matches:
+            return html.escape(text)
+        
+        # Find character positions for each word
+        word_positions = []
+        for match in re.finditer(r'\b\w+\b', text):
+            word_positions.append((match.start(), match.end()))
+        
+        # Build highlighted string
+        result = []
+        last_end = 0
+        
+        for start_word, end_word in sorted(word_matches):
+            if start_word >= len(word_positions):
+                continue
+                
+            char_start = word_positions[start_word][0]
+            char_end = word_positions[min(end_word - 1, len(word_positions) - 1)][1]
+            
+            # Add non-matching text
+            result.append(html.escape(text[last_end:char_start]))
+            # Add highlighted matching text
+            result.append(f'<mark style="background-color: #fef08a; padding: 2px 4px; border-radius: 3px;">')
+            result.append(html.escape(text[char_start:char_end]))
+            result.append('</mark>')
+            
+            last_end = char_end
+        
+        # Add remaining text
+        result.append(html.escape(text[last_end:]))
+        return "".join(result)
+    
+    # Extract unique match ranges for each text
+    ranges_a = sorted(list(set((m[0], m[1]) for m in matches)))
+    ranges_b = sorted(list(set((m[2], m[3]) for m in matches)))
+    
+    # Merge overlapping ranges to prevent nested <mark> tags
+    def merge_ranges(ranges: list[tuple[int, int]]) -> list[tuple[int, int]]:
+        if not ranges:
+            return []
+        merged = [ranges[0]]
+        for start, end in ranges[1:]:
+            if start <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+            else:
+                merged.append((start, end))
+        return merged
+    
+    ranges_a = merge_ranges(ranges_a)
+    ranges_b = merge_ranges(ranges_b)
+    
+    # Issue #2003: Fixed indentation - return statement now properly aligned at column 8
     return (
-        _build_html(tokens_a, highlight_a, theme_colors),
-        _build_html(tokens_b, highlight_b, theme_colors),
+        highlight_text(text_a, ranges_a),
+        highlight_text(text_b, ranges_b)
     )
 
 
 def _escape_text(text: str) -> str:
     """Escape HTML and Markdown syntax characters."""
     escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-for m_char in ["*", "_", "~", "`", "#", "[", "]", "(", ")", "|", "{", "}"]:        escaped = escaped.replace(m_char, f"\\{m_char}")
+    for m_char in ["*", "_", "~", "`", "#", "[", "]", "(", ")", "|", "{", "}"]:
+        escaped = escaped.replace(m_char, f"\\{m_char}")
     return escaped
 
 
