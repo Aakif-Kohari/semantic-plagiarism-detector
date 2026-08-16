@@ -65,8 +65,7 @@ def highlight_overlap(
 def _escape_text(text: str) -> str:
     """Escape HTML and Markdown syntax characters."""
     escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    for m_char in ["*", "_", "~", "`", "#", "[", "]", "(", ")"]:
-        escaped = escaped.replace(m_char, f"\\{m_char}")
+for m_char in ["*", "_", "~", "`", "#", "[", "]", "(", ")", "|", "{", "}"]:        escaped = escaped.replace(m_char, f"\\{m_char}")
     return escaped
 
 
