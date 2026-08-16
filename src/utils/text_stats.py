@@ -205,13 +205,15 @@ def get_char_count(text: str) -> int:
 
 
 def get_reading_time_minutes(text: str) -> float:
-    # Average reading speed is roughly 200-250 words per minute.
-    # We'll use 200 for a conservative estimate.
-    word_count = get_word_count(text)
-    minutes = max(0.1, round(word_count / 200, 1))
+    """Estimate reading time in minutes.
+
+    Average reading speed is roughly 200-250 words per minute; 200 is used as
+    a conservative estimate. The result is rounded to one decimal place and
+    floored at 0.1 so that any non-empty text reports a visible duration
+    rather than "0 min".
+    """
     word_count = count_words(text)
-    minutes = max(1, round(word_count / 200))
-    return minutes
+    return max(0.1, round(word_count / 200, 1))
 
 
 def format_text_stats(text: str) -> str:
@@ -273,9 +275,6 @@ def get_readability_metrics(text: str) -> tuple[float, float]:
     """
     words = count_words(text)
     sentences = get_sentence_count(text)
-
-    words = get_word_count(text)
-    sentences = count_sentences(text)
     syllables = get_syllable_count(text)
 
     if words == 0 or sentences == 0:
