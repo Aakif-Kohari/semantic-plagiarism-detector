@@ -16,13 +16,21 @@ from src.core.cross_lingual import prepare_text_for_embedding
 from src.core.document_parser import DEFAULT_OCR_DPI, DEFAULT_OCR_LANGUAGE, extract_text
 from src.core.embedding_model import embed_documents
 from src.core.logging_config import setup_logging
-from src.core.similarity import document_similarity_matrix, flag_plagiarism
+from src.core.similarity import (
+    PLAGIARISM_THRESHOLD,
+    document_similarity_matrix,
+    flag_plagiarism,
+)
 from src.core.synchronization import verify_and_repair_index
 from src.core.text_chunking import chunk_documents
 from src.db.database_backup import optimize_database
 
 
-def run_scan(folder_path: str, threshold: float, output_format: str = "text") -> int:
+def run_scan(
+    folder_path: str,
+    threshold: float = PLAGIARISM_THRESHOLD,
+    output_format: str = "text",
+) -> int:
     """
     Scans a folder, processes the documents, runs plagiarism detection,
     and prints the report in the requested output format to stdout.
@@ -356,8 +364,8 @@ def main() -> None:
     scan_parser.add_argument(
         "--threshold",
         type=float,
-        default=0.59,
-        help="Similarity threshold for flagging (default: 0.59)",
+        default=PLAGIARISM_THRESHOLD,
+        help=f"Similarity threshold for flagging (default: {PLAGIARISM_THRESHOLD})",
     )
     scan_parser.add_argument(
         "--output-format",
