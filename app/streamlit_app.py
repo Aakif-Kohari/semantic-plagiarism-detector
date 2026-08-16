@@ -399,7 +399,11 @@ from src.visualization.heatmap import (
 from src.visualization.network_graph import plot_similarity_network
 
 try:
-    from src.utils.warning_list import render_copy_button, render_warning_controls
+    from src.utils.warning_list import (
+        render_copy_button,
+        render_warning_controls,
+        reset_warning_page,
+    )
     from src.visualization.analytics import (
         plot_high_severity_trends,
         plot_most_plagiarized_documents,
@@ -409,6 +413,7 @@ try:
 except ImportError:
     render_warning_controls = None
     render_copy_button = None
+    reset_warning_page = None
     plot_high_severity_trends = None
     plot_most_plagiarized_documents = None
     plot_processing_time_breakdown = None
@@ -2395,8 +2400,17 @@ with tab_warnings:
     if not flags:
         st.info("No plagiarism incidents detected above configured threshold.")
     elif render_warning_controls is not None:
+        if "warning_page" not in st.session_state:
+            st.session_state.warning_page = reset_warning_page()
+
+        def _set_warning_page(page: int) -> None:
+            st.session_state.warning_page = page
+
         render_warning_controls(
-            flags, threshold=threshold, ai_probabilities=ai_probabilities
+            flags,
+            threshold=threshold,
+            ai_probabilities=ai_probabilities,
+            set_warning_page=_set_warning_page,
         )
 
         button_label = (
