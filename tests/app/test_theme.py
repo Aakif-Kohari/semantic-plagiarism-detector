@@ -656,3 +656,45 @@ def test_render_session_status_banner():
     ) as mock_caption_past:
         render_session_status_banner()
         mock_caption_past.assert_called_once_with("Active Session: 45 mins")
+
+# ==============================================================================
+# Issue #2353: severity_tier threshold boundary tests
+# ==============================================================================
+
+
+def test_severity_tier_boundary_just_below_medium():
+    """A score of 0.49 is classified as low."""
+    assert severity_tier(0.49, 0.50) == "low"
+
+
+def test_severity_tier_boundary_at_medium():
+    """A score of 0.50 is classified as medium."""
+    assert severity_tier(0.50, 0.50) == "medium"
+
+
+def test_severity_tier_boundary_just_below_high():
+    """A score of 0.79 remains medium."""
+    assert severity_tier(0.79, 0.50) == "medium"
+
+
+def test_severity_tier_boundary_at_high():
+    """A score of 0.80 is classified as high."""
+    assert severity_tier(0.80, 0.50) == "high"
+# sanitize_hex_color edge-case tests (Issue #2352)
+# ==============================================================================
+
+
+def test_sanitize_hex_color_valid():
+    """Valid six-digit uppercase hex colors are returned unchanged."""
+    assert sanitize_hex_color("#FF0000") == "#FF0000"
+
+
+def test_sanitize_hex_color_missing_hash():
+    """Hex values without the leading hash fall back to the default."""
+    assert sanitize_hex_color("FF0000") == "#000000"
+
+
+def test_sanitize_hex_color_invalid():
+    """Invalid/non-hex values use the configured fallback."""
+    assert sanitize_hex_color("not-a-color", fallback="#FFFFFF") == "#FFFFFF"
+

@@ -54,6 +54,10 @@ class ChunkRecord:
         return f"ChunkRecord({self.doc_name!r}, idx={self.chunk_index}, '{preview}…')"
 
 
+FaissChunkRecord = ChunkRecord
+
+
+
 def build_index(
     embeddings: Dict[str, np.ndarray],
     chunked_docs: Dict[str, List[str]],

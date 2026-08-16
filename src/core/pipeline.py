@@ -44,6 +44,10 @@ class ChunkRecord:
         self.metadata = metadata or {}
 
 
+PipelineChunkRecord = ChunkRecord
+
+
+
 # ============================================================================
 # CROSS-LINGUAL INTEGRATION
 # ============================================================================
