@@ -1,3 +1,6 @@
+import os
+
+FUZZY_THRESHOLD = int(os.getenv("FUZZY_SEARCH_THRESHOLD", 75))
 """Application-level environment configuration.
 
 This module is the single source of truth for paths and tunables that

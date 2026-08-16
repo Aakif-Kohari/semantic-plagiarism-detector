@@ -141,6 +141,18 @@ def filter_warnings(
     *,
     already_normalized: bool = False,
 ) -> list[dict[str, Any]]:
+    from src.core.app_config import FUZZY_THRESHOLD
+    
+    try:
+        from thefuzz import fuzz
+    except ImportError:
+        try:
+            from fuzzywuzzy import fuzz
+        except ImportError:
+            fuzz = None
+
+    normalised = [_normalise_warning(item) for item in warnings]
+    query = search_query.strip().casefold()
     """Filter normalized warnings using functional predicate matching."""
     normalised = [_normalise_warning(item, already_normalized=already_normalized) for item in warnings]
 
@@ -156,6 +168,7 @@ def filter_warnings(
         return normalised
 
     filtered = []
+    for item in normalised:
     remaining_indices = []
     choices_a: dict[int, str] = {}
     choices_b: dict[int, str] = {}
@@ -167,6 +180,16 @@ def filter_warnings(
 
         if query in doc_a or query in doc_b:
             filtered.append(item)
+            continue
+
+        if fuzz is not None:
+            score_a = max(fuzz.partial_ratio(query, doc_a), fuzz.token_set_ratio(query, doc_a))
+            score_b = max(fuzz.partial_ratio(query, doc_b), fuzz.token_set_ratio(query, doc_b))
+
+            if score_a >= FUZZY_THRESHOLD or score_b >= FUZZY_THRESHOLD:
+                filtered.append(item)
+
+    return filtered
         else:
             remaining_indices.append(i)
             choices_a[i] = doc_a
