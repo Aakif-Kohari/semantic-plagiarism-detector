@@ -1,19 +1,22 @@
+import logging
 import os
 import secrets
 import urllib.parse
 
+from dotenv import load_dotenv
 import requests
-import logging
 
 logger = logging.getLogger(__name__)
-from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
+
+def _load_env() -> None:
+    """Lazily load environment variables from .env file."""
+    load_dotenv()
 
 
 def get_google_auth_url() -> tuple[str, str]:
     """Return the Google OAuth authorization URL and state."""
+    _load_env()
     client_id = os.getenv("GOOGLE_CLIENT_ID")
     if not client_id:
         raise ValueError("GOOGLE_CLIENT_ID environment variable is not configured")
@@ -25,17 +28,18 @@ def get_google_auth_url() -> tuple[str, str]:
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "scope": "email profile",
-        "state": state
+        "state": state,
     }
-    
+
     encoded_args = urllib.parse.urlencode(query_params)
     url = f"https://accounts.google.com/o/oauth2/v2/auth?{encoded_args}"
-    
+
     return url, state
 
 
 def exchange_google_code(code: str) -> dict | None:
     """Exchange code for access token and fetch user info."""
+    _load_env()
     client_id = os.getenv("GOOGLE_CLIENT_ID")
     if not client_id:
         raise ValueError("GOOGLE_CLIENT_ID environment variable is not configured")
@@ -83,6 +87,7 @@ def exchange_google_code(code: str) -> dict | None:
 
 def get_github_auth_url() -> tuple[str, str]:
     """Return the GitHub OAuth authorization URL and state."""
+    _load_env()
     client_id = os.getenv("GITHUB_CLIENT_ID")
     if not client_id:
         raise ValueError("GITHUB_CLIENT_ID environment variable is not configured")
@@ -93,17 +98,18 @@ def get_github_auth_url() -> tuple[str, str]:
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "scope": "user:email",
-        "state": state
+        "state": state,
     }
-    
+
     encoded_args = urllib.parse.urlencode(query_params)
     url = f"https://github.com/login/oauth/authorize?{encoded_args}"
-    
+
     return url, state
 
 
 def exchange_github_code(code: str) -> dict | None:
     """Exchange code for access token and fetch user info."""
+    _load_env()
     client_id = os.getenv("GITHUB_CLIENT_ID")
     if not client_id:
         raise ValueError("GITHUB_CLIENT_ID environment variable is not configured")

@@ -176,7 +176,17 @@ def test_github_oauth_user_request_timeout(mock_post, mock_get, monkeypatch):
 
     result = exchange_github_code("valid_code")
     assert result is None
-    
+
     mock_get.assert_called_once()
     _, kwargs = mock_get.call_args
     assert kwargs.get("timeout") == 10
+
+
+def test_sso_does_not_load_dotenv_at_import():
+    """Verify load_dotenv is not called during module import."""
+    import importlib
+    with patch("src.utils.sso.load_dotenv") as mock_load_dotenv:
+        import src.utils.sso as sso_mod
+        importlib.reload(sso_mod)
+        mock_load_dotenv.assert_not_called()
+
