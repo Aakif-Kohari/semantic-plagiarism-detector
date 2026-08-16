@@ -10,7 +10,7 @@ def highlight_overlap(
     text_a: str,
     text_b: str,
     min_match_len: int = 10,
-    theme_colors: dict | None = None,
+    theme_colors: dict[str, str] | None = None,
 ) -> tuple[str, str]:
     """Compare two text chunks at the word/token level and wrap exact matching
 
@@ -73,7 +73,7 @@ def _escape_text(text: str) -> str:
 def _build_html(
     tokens: list[str],
     highlight_mask: list[bool],
-    theme_colors: dict | None = None,
+    theme_colors: dict[str, str] | None = None,
 ) -> str:
     """Build the final HTML string by grouping highlighted tokens inside <mark> tags."""
     parts = []
