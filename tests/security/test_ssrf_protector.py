@@ -645,3 +645,130 @@ class TestRedirectChainValidation:
         
         with pytest.raises(SSRFSecurityException, match="circular"):
             SSRFProtector.validate_url_safety("https://example.com/a")
+
+
+
+class TestEmptyAllowedDomainsBehavior:
+    """Test suite for empty allowed_domains behavior (Issue #2434).
+    
+    Verifies that when allowed_domains is empty or None, the SSRF protector
+    permits all external domains while still enforcing private IP restrictions.
+    This is critical security behavior that must be explicitly tested.
+    """
+
+    @patch.object(SSRFProtector, "_resolve_hostname", return_value="93.184.216.34")
+    def test_empty_list_permits_any_external_domain(self, mock_resolve):
+        """Verify empty allowed_domains list permits random external domains."""
+        # Pass an empty list explicitly
+        ip = SSRFProtector._validate_url_target(
+            "https://random-external-domain.com/webhook",
+            allowed_domains=[]
+        )
+        
+        # Should succeed and return the resolved IP
+        assert ip == "93.184.216.34"
+        mock_resolve.assert_called_once_with("random-external-domain.com")
+
+    @patch.object(SSRFProtector, "_resolve_hostname", return_value="104.16.132.229")
+    def test_none_permits_any_external_domain(self, mock_resolve):
+        """Verify None allowed_domains permits any external domain."""
+        # Pass None explicitly (will trigger get_allowed_webhook_domains fallback)
+        with patch("src.security.ssrf_protector.get_allowed_webhook_domains", return_value=[]):
+            ip = SSRFProtector._validate_url_target(
+                "https://another-random-domain.com/webhook",
+                allowed_domains=None
+            )
+            
+            assert ip == "104.16.132.229"
+
+    @patch.object(SSRFProtector, "_resolve_hostname", return_value="127.0.0.1")
+    def test_empty_list_still_blocks_loopback(self, mock_resolve):
+        """Verify empty allowlist still blocks loopback addresses (127.0.0.1)."""
+        # Even with empty allowlist, loopback should be blocked
+        with pytest.raises(SSRFSecurityException, match="loopback"):
+            SSRFProtector._validate_url_target(
+                "https://localhost/webhook",
+                allowed_domains=[]
+            )
+
+    @patch.object(SSRFProtector, "_resolve_hostname", return_value="192.168.1.100")
+    def test_empty_list_still_blocks_private_ips(self, mock_resolve):
+        """Verify empty allowlist still blocks private IP ranges (192.168.x.x)."""
+        # Even with empty allowlist, private IPs should be blocked
+        with pytest.raises(SSRFSecurityException, match="private"):
+            SSRFProtector._validate_url_target(
+                "https://internal.local/webhook",
+                allowed_domains=[]
+            )
+
+    @patch.object(SSRFProtector, "_resolve_hostname", return_value="10.0.0.5")
+    def test_empty_list_still_blocks_10_network(self, mock_resolve):
+        """Verify empty allowlist still blocks 10.0.0.0/8 private range."""
+        with pytest.raises(SSRFSecurityException, match="private"):
+            SSRFProtector._validate_url_target(
+                "https://internal.corp/webhook",
+                allowed_domains=[]
+            )
+
+    @patch.object(SSRFProtector, "_resolve_hostname", return_value="172.16.0.100")
+    def test_empty_list_still_blocks_172_16_network(self, mock_resolve):
+        """Verify empty allowlist still blocks 172.16.0.0/12 private range."""
+        with pytest.raises(SSRFSecurityException, match="private"):
+            SSRFProtector._validate_url_target(
+                "https://internal.vpc/webhook",
+                allowed_domains=[]
+            )
+
+    @patch.object(SSRFProtector, "_resolve_hostname", return_value="169.254.1.1")
+    def test_empty_list_still_blocks_link_local(self, mock_resolve):
+        """Verify empty allowlist still blocks link-local addresses (169.254.x.x)."""
+        with pytest.raises(SSRFSecurityException, match="link-local"):
+            SSRFProtector._validate_url_target(
+                "https://linklocal/webhook",
+                allowed_domains=[]
+            )
+
+    @patch.object(SSRFProtector, "_resolve_hostname", return_value="93.184.216.34")
+    def test_nonempty_list_restricts_to_approved_domains(self, mock_resolve):
+        """Verify non-empty allowlist restricts to approved domains only."""
+        # Should succeed for approved domain
+        ip = SSRFProtector._validate_url_target(
+            "https://slack.com/webhook",
+            allowed_domains=["slack.com", "discord.com"]
+        )
+        assert ip == "93.184.216.34"
+        
+        # Should fail for non-approved domain
+        with pytest.raises(SSRFSecurityException, match="not in the allowed domains"):
+            SSRFProtector._validate_url_target(
+                "https://malicious.com/webhook",
+                allowed_domains=["slack.com", "discord.com"]
+            )
+
+    @patch.object(SSRFProtector, "_resolve_hostname", return_value="93.184.216.34")
+    def test_subdomain_matching_with_empty_list(self, mock_resolve):
+        """Verify subdomains work correctly with empty allowlist."""
+        # Any subdomain should be permitted when allowlist is empty
+        ip = SSRFProtector._validate_url_target(
+            "https://api.random-service.com/webhook",
+            allowed_domains=[]
+        )
+        assert ip == "93.184.216.34"
+
+    def test_empty_list_logs_debug_message(self, caplog):
+        """Verify empty allowlist logs a debug message for audit trail."""
+        with patch.object(SSRFProtector, "_resolve_hostname", return_value="93.184.216.34"):
+            with caplog.at_level("DEBUG"):
+                SSRFProtector._validate_url_target(
+                    "https://example.com/webhook",
+                    allowed_domains=[]
+                )
+                
+                # Should log that allowlist is empty
+                assert any(
+                    "Domain allowlist is empty" in record.message
+                    for record in caplog.records
+                )
+
+
+
