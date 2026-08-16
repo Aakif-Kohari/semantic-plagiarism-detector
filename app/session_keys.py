@@ -1,8 +1,10 @@
 """Centralized Session State Keys for the Streamlit Application."""
 
+from enum import Enum
 
-class SessionKeys:
-    SESSION_ID = "session_id"
+
+class SessionKeys(str, Enum):    SESSION_ID = "session_id"
+SESSION_ID = "session_id"
     AUTHENTICATED = "authenticated"
     USERNAME = "username"
     ROLE = "role"
@@ -40,3 +42,6 @@ class SessionKeys:
     FORCE_DARK_CHARTS = "force_dark_charts"
     SESSION_START_TIME = "session_start_time"
     COMPACT_VIEW = "compact_view"
+
+    def __str__(self) -> str:  # pragma: no cover - convenience for f-strings/logging
+        return self.value
