@@ -169,3 +169,15 @@ def test_build_download_response_falls_back_for_unexpected_content_type():
 
     assert headers["Content-Type"] == "application/octet-stream"
     assert headers["X-Content-Type-Options"] == "nosniff"
+
+
+def test_build_download_response_exact_headers_issue_2457():
+    """Verify that build_download_response sets browser-safe headers including Content-Type and X-Content-Type-Options for CSV."""
+    _, headers = LMSExportEngine.build_download_response(
+        "dummy content",
+        filename="report.csv",
+        content_type="text/csv",
+    )
+    assert headers["Content-Type"] == "text/csv; charset=utf-8"
+    assert headers["X-Content-Type-Options"] == "nosniff"
+
