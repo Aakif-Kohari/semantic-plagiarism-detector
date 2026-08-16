@@ -1132,3 +1132,75 @@ def test_export_network_to_gexf_valid_xml():
 
     assert root.tag.endswith("gexf")
 
+
+
+
+# ── Issue #2350: Empty state rendering for plot_plagiarism_network_graph ────
+
+
+def test_issue_2350_plot_plagiarism_network_graph_empty_dataframe():
+    """plot_plagiarism_network_graph must return a go.Figure and not crash
+    when given a completely empty DataFrame (Issue #2350).
+    """
+    empty_df = pd.DataFrame()
+
+    fig = plot_plagiarism_network_graph(empty_df, threshold=0.75)
+
+    assert isinstance(fig, go.Figure)
+    assert len(fig.layout.shapes) == 0
+
+
+def test_issue_2350_plot_plagiarism_network_graph_empty_matrix():
+    """plot_plagiarism_network_graph must return a go.Figure when given an
+    empty NxN similarity matrix (0 rows, 0 columns).
+    """
+    empty_matrix = pd.DataFrame()
+
+    fig = plot_plagiarism_network_graph(similarity_df=empty_matrix)
+
+    assert isinstance(fig, go.Figure)
+
+
+def test_issue_2350_plot_plagiarism_network_graph_no_nodes():
+    """plot_plagiarism_network_graph must return a go.Figure when the
+    DataFrame has no columns (no documents).
+    """
+    df = pd.DataFrame({"col": []})
+
+    fig = plot_plagiarism_network_graph(df)
+
+    assert isinstance(fig, go.Figure)
+
+
+def test_issue_2350_empty_state_has_fallback_annotation():
+    """When the graph is empty, the figure must include a fallback
+    annotation message (Issue #2350).
+    """
+    empty_df = pd.DataFrame()
+
+    fig = plot_plagiarism_network_graph(empty_df)
+
+    assert isinstance(fig, go.Figure)
+    assert len(fig.layout.annotations) >= 1
+    assert any(
+        "No documents" in ann.text or "No data" in ann.text
+        for ann in fig.layout.annotations
+    ), f"Expected fallback annotation, got: {[ann.text for ann in fig.layout.annotations]}"
+
+
+def test_issue_2350_empty_state_does_not_raise():
+    """Passing an empty DataFrame to plot_plagiarism_network_graph must
+    not raise any exception (Issue #2350).
+    """
+    empty_df = pd.DataFrame()
+
+    try:
+        fig = plot_plagiarism_network_graph(empty_df)
+        assert isinstance(fig, go.Figure)
+    except Exception as exc:
+        pytest.fail(
+            f"plot_plagiarism_network_graph raised an exception on empty input: {exc}"
+        )
+
+
+
