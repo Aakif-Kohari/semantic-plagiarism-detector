@@ -12,6 +12,7 @@ from .core import (
     build_index,
     build_index_from_matrix,
     calculate_paragraph_similarity_breakdown,
+    check_ocr_dependencies,
     chunk_by_sentences,
     chunk_document,
     chunk_documents,

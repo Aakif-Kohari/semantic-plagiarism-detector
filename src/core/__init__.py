@@ -5,6 +5,7 @@ from .config import (
     reload_branding_config,
 )
 from .document_parser import (
+    check_ocr_dependencies,
     extract_text,
     extract_text_from_pdf,
     extract_texts,
@@ -57,6 +58,7 @@ __all__ = [
     "extract_texts_from_pdfs",
     "extract_text",
     "extract_texts",
+    "check_ocr_dependencies",
     "chunk_document",
     "chunk_documents",
     "chunk_by_sentences",
