@@ -471,8 +471,9 @@ class TestEmailTemplateHelpers:
 
     def test_build_severity_section_html_empty(self):
         """Test severity section generation with no incidents."""
-        html = build_severity_section_html("Medium", [])
-        assert "No medium severity incidents detected" in html
+        html = build_severity_section_html("High", [])
+        assert "No high severity incidents" in html
+        assert "<table>" not in html
         assert "<table" not in html
 
     def test_build_severity_section_html_populated(self):
