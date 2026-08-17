@@ -150,3 +150,30 @@ def test_telemetry_force_refresh():
         mock_get_user_count.assert_called_once()
         mock_get_doc_count_fast.assert_called_once()
         assert mock_set_cache.call_count == 2
+
+
+# ---------------------------------------------------------
+# Test Clear Telemetry Data
+# ---------------------------------------------------------
+
+
+def test_telemetry_clear_telemetry_data():
+    """
+    Test that clear_telemetry_data calls delete_cache for both telemetry keys without AttributeError.
+    """
+    with patch("src.utils.redis_cache.delete_cache") as mock_delete_cache:
+        TelemetryService.clear_telemetry_data()
+
+        assert mock_delete_cache.call_count == 2
+        mock_delete_cache.assert_any_call(TelemetryService.CACHE_KEY_USER_COUNT)
+        mock_delete_cache.assert_any_call(TelemetryService.CACHE_KEY_DOC_COUNT)
+
+
+def test_telemetry_clear_telemetry_data_exception_handling(caplog):
+    """
+    Test that clear_telemetry_data handles exceptions from delete_cache gracefully.
+    """
+    with patch("src.utils.redis_cache.delete_cache", side_effect=Exception("Redis offline")):
+        TelemetryService.clear_telemetry_data()
+
+    assert "Failed to clear telemetry cache key" in caplog.text
