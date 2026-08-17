@@ -5,6 +5,7 @@ Headless command-line interface for plagiarism detection automation.
 """
 
 import argparse
+import concurrent.futures
 import json
 import logging
 import os
@@ -29,6 +30,25 @@ from src.db.database_backup import optimize_database
 from src.core.export_engine import LMSExportEngine
 
 logger = logging.getLogger(__name__)
+
+
+def _process_single_file(filepath: str) -> tuple[str, str | None, str | None]:
+    filename = os.path.basename(filepath)
+    try:
+        with open(filepath, "rb") as f:
+            file_bytes = f.read()
+        text = extract_text(
+            BytesIO(file_bytes),
+            filename,
+            ocr_language=DEFAULT_OCR_LANGUAGE,
+            ocr_dpi=DEFAULT_OCR_DPI,
+        )
+        if text.strip():
+            return filename, text, None
+        else:
+            return filename, None, f"Warning: Extracted text from '{filename}' is empty.\n"
+    except Exception as e:
+        return filename, None, f"Warning: Failed to parse '{filename}': {e}\n"
 
 
 def run_scan(
@@ -76,18 +96,9 @@ def run_scan(
     files.sort()
 
     raw_texts = {}
-    for filepath in files:
-        filename = os.path.basename(filepath)
-        try:
-            with open(filepath, "rb") as f:
-                file_bytes = f.read()
-            text = extract_text(
-                BytesIO(file_bytes),
-                filename,
-                ocr_language=DEFAULT_OCR_LANGUAGE,
-                ocr_dpi=DEFAULT_OCR_DPI,
-            )
-            if text.strip():
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        for filename, text, err in executor.map(_process_single_file, files):
+            if text:
                 raw_texts[filename] = text
             else:
                 sys.stderr.write(
