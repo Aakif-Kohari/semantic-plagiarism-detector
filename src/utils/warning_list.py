@@ -237,28 +237,96 @@ def build_key_extractor(field: str) -> Callable[[Mapping[str, Any]], Any]:
     return extract_key
 
 
+import logging
+from typing import Any, List, Optional
+
+logger = logging.getLogger(__name__)
+
+# Valid fields that can be used for sorting warnings
+VALID_SORT_FIELDS = {"similarity", "doc_a", "doc_b", "severity", "timestamp"}
+
 def sort_warnings(
-    warnings: Iterable[Mapping[str, Any]],
-    *,
+    warnings: List[dict[str, Any]],
     primary_field: str = "similarity",
-    primary_descending: bool = True,
     secondary_field: str = "doc_a",
-    secondary_descending: bool = False,
-    already_normalized: bool = False,
-) -> list[dict[str, Any]]:
-    """Sort warning items using secondary and primary sorting keys."""
-    items = [
-        _normalise_warning(item, already_normalized=already_normalized)
-        for item in warnings
-    ]
-    allowed = {"similarity", "doc_a", "doc_b", "severity_rank"}
+    primary_desc: bool = True,
+    secondary_desc: bool = False,
+) -> List[dict[str, Any]]:
+    """Sort a list of plagiarism warnings using a two-pass stable sort.
+    
+    Performs a multi-column sort by first sorting on the secondary field,
+    then sorting on the primary field. Because Python's `sorted()` function
+    is guaranteed to be stable, this two-pass approach correctly groups
+    items with equal primary values by their secondary values.
+    
+    Args:
+        warnings: List of warning dictionaries to sort.
+        primary_field: The primary key to sort by. Defaults to "similarity".
+                      If an invalid field is passed, falls back to "similarity".
+        secondary_field: The secondary key to sort by when primary values are equal.
+                        Defaults to "doc_a". If invalid, falls back to "doc_a".
+        primary_desc: Whether to sort the primary field in descending order.
+                     Defaults to True (highest similarity first).
+        secondary_desc: Whether to sort the secondary field in descending order.
+                       Defaults to False (alphabetical A-Z for doc names).
+                       
+    Returns:
+        A new sorted list of warning dictionaries. The original list is not modified.
+        
+    Examples:
+        >>> warnings = [
+        ...     {"doc_a": "b.pdf", "similarity": 0.9},
+        ...     {"doc_a": "a.pdf", "similarity": 0.9},
+        ...     {"doc_a": "c.pdf", "similarity": 0.8}
+        ... ]
+        >>> sort_warnings(warnings)
+        [{"doc_a": "a.pdf", "similarity": 0.9}, ...]
+    """
+    if not warnings:
+        return []
+        
+    # Validate fields and fallback to defaults if invalid (Issue #2122 requirement)
+    if primary_field not in VALID_SORT_FIELDS:
+        logger.warning(
+            "sort_warnings: Invalid primary_field '%s'. Falling back to 'similarity'.",
+            primary_field
+        )
+        primary_field = "similarity"
+        
+    if secondary_field not in VALID_SORT_FIELDS:
+        logger.warning(
+            "sort_warnings: Invalid secondary_field '%s'. Falling back to 'doc_a'.",
+            secondary_field
+        )
+        secondary_field = "doc_a"
 
-    p_field = primary_field if primary_field in allowed else "similarity"
-    s_field = secondary_field if secondary_field in allowed else "doc_a"
+    # Helper to safely extract sort keys with type-appropriate defaults
+    def get_secondary_key(item: dict) -> str:
+        val = item.get(secondary_field, "")
+        return str(val).lower() if val is not None else ""
 
-    items.sort(key=build_key_extractor(s_field), reverse=secondary_descending)
-    items.sort(key=build_key_extractor(p_field), reverse=primary_descending)
-    return items
+    def get_primary_key(item: dict) -> float:
+        val = item.get(primary_field, 0.0)
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return 0.0
+
+    # Pass 1: Sort by secondary field (stable sort preserves this order for ties in Pass 2)
+    pass1 = sorted(
+        warnings, 
+        key=get_secondary_key, 
+        reverse=secondary_desc
+    )
+    
+    # Pass 2: Sort by primary field (stable sort keeps secondary order for equal primary values)
+    pass2 = sorted(
+        pass1, 
+        key=get_primary_key, 
+        reverse=primary_desc
+    )
+    
+    return pass2
 
 
 def paginate_warnings(
