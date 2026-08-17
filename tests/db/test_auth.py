@@ -200,6 +200,17 @@ def test_get_security_audit_log_count(mock_audit_db):
     assert get_security_audit_log_count(event_type="logout") == 1
 
 
+def test_get_security_audit_log_count_dropped_table(mock_audit_db):
+    """Ensure get_security_audit_log_count re-raises sqlite3.Error if the table is dropped."""
+    from src.db.auth import _connect
+
+    with _connect() as conn:
+        conn.execute("DROP TABLE security_audit_log")
+
+    with pytest.raises(sqlite3.Error):
+        get_security_audit_log_count()
+
+
 def test_get_distinct_audit_event_types(mock_audit_db):
     events = get_distinct_audit_event_types()
     assert set(events) == {"login", "logout"}
