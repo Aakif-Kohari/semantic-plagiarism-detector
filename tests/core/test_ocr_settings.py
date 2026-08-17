@@ -63,3 +63,31 @@ def test_language_mapping_matches_issue_scope():
 def test_dpi_bounds_match_issue_scope():
     assert MIN_OCR_DPI == 150
     assert MAX_OCR_DPI == 400
+
+
+def test_validate_ocr_languages_against_mocked_tesseract():
+    """Verify that all 3-letter language codes in SUPPORTED_OCR_LANGUAGES are recognized by Tesseract."""
+    import pytesseract
+    from unittest.mock import patch
+
+    mock_languages = ["eng", "spa", "fra", "deu", "por", "ita", "osd"]
+    with patch("pytesseract.get_languages", return_value=mock_languages):
+        installed_languages = pytesseract.get_languages()
+        for code in SUPPORTED_OCR_LANGUAGES:
+            assert len(code) == 3, f"Language code '{code}' must be a 3-letter ISO code"
+            assert code in installed_languages, f"Language code '{code}' is not recognized by Tesseract"
+
+
+def test_validate_ocr_languages_against_tesseract_binary():
+    """Verify 3-letter codes against installed Tesseract binary if available on system PATH."""
+    import pytesseract
+
+    try:
+        installed_languages = pytesseract.get_languages()
+    except (pytesseract.TesseractNotFoundError, FileNotFoundError, Exception):
+        pytest.skip("Tesseract binary is not installed on system PATH")
+
+    for code in SUPPORTED_OCR_LANGUAGES:
+        assert len(code) == 3, f"Language code '{code}' must be a 3-letter ISO code"
+        assert code in installed_languages, f"Language code '{code}' is not recognized by Tesseract binary"
+

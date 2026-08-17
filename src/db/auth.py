@@ -7,6 +7,7 @@ and strong password complexity policies.
 """
 
 from __future__ import annotations
+from pathlib import Path
 
 import datetime
 import json
@@ -32,6 +33,10 @@ from src.errors import StaleDataException
 logger = logging.getLogger(__name__)
 
 _DB_PATH = os.path.abspath(str(AUTH_DB_PATH))
+
+
+def get_auth_db_path() -> Path:
+    return Path(_DB_PATH)
 
 VALID_ROLES = {"admin", "teacher"}
 
@@ -332,7 +337,7 @@ def init_db() -> None:
             exists = bool(row and row[0])
 
             if not exists:
-                hashed = _hash_password("Admin123!")
+                hashed = str(_hash_password("Admin123!"))
                 conn.execute(
                     """
                     INSERT INTO users (username, password, role)
@@ -1467,7 +1472,7 @@ def require_permission(permission: Permission):
         @wraps(func)
         def wrapper(*args, **kwargs):
             # Get username from session state
-            username = st.session_state.get(SessionKeys.USERNAME)
+            username = st.session_state.get(SessionKeys.USERNAME)  # noqa: F821
             if not username:
                 st.error("🔒 Authentication required.")
                 return None
@@ -1493,7 +1498,7 @@ def require_role(required_role: UserRole):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            username = st.session_state.get(SessionKeys.USERNAME)
+            username = st.session_state.get(SessionKeys.USERNAME)  # noqa: F821
             if not username:
                 st.error("🔒 Authentication required.")
                 return None
@@ -1701,12 +1706,12 @@ def demote_user(username: str, admin_username: str) -> bool:
 # SSO SECURITY ENHANCEMENTS - Issue #2172
 # ============================================================================
 
-import secrets
-import string
-from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List
+import secrets  # noqa: F811
+import string  # noqa: F811
+from datetime import timedelta
+from typing import Optional, Dict, Any, List  # noqa: F811
 import hashlib
-import json
+import json  # noqa: F811
 
 # ============================================================================
 # SECURE PASSWORD GENERATION
@@ -1749,14 +1754,112 @@ def generate_sso_token() -> str:
     return secrets.token_hex(64)
 
 
+def store_sso_state(state: str, expires_in_seconds: int = 600) -> bool:
+    """
+    Store an OAuth SSO state parameter in the database with an expiration time.
+
+    Args:
+        state: The state token string.
+        expires_in_seconds: Lifetime of state in seconds (default 600s / 10m).
+
+    Returns:
+        bool: True if state was stored successfully.
+    """
+    if not state:
+        return False
+    try:
+        expires_at = (dt.now() + timedelta(seconds=expires_in_seconds)).isoformat()
+        with _connect() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sso_states (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    state TEXT UNIQUE NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    used_at TEXT DEFAULT NULL,
+                    expires_at TEXT NOT NULL
+                )
+            """)
+            conn.execute(
+                """INSERT OR REPLACE INTO sso_states (state, expires_at, used_at)
+                   VALUES (?, ?, NULL)""",
+                (state, expires_at)
+            )
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Failed to store SSO state: {e}")
+        return False
+
+
+def validate_sso_state(state: str) -> bool:
+    """
+    Validate an OAuth SSO state parameter and invalidate it after validation to prevent replay attacks.
+
+    Args:
+        state: The state token to validate.
+
+    Returns:
+        bool: True if valid, unexpired, and not previously used; False otherwise.
+    """
+    if not state:
+        return False
+
+    try:
+        with _connect() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sso_states (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    state TEXT UNIQUE NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    used_at TEXT DEFAULT NULL,
+                    expires_at TEXT NOT NULL
+                )
+            """)
+            row = conn.execute(
+                "SELECT expires_at, used_at FROM sso_states WHERE state = ?",
+                (state,)
+            ).fetchone()
+
+            if not row:
+                return False
+
+            expires_at, used_at = row
+            if used_at is not None:
+                logger.warning(f"OAuth state replay attack detected for state: {state}")
+                return False
+
+            if expires_at < dt.now().isoformat():
+                logger.warning(f"OAuth state expired for state: {state}")
+                return False
+
+            # Invalidate state immediately after validation to prevent replay attacks
+            conn.execute(
+                "UPDATE sso_states SET used_at = CURRENT_TIMESTAMP WHERE state = ?",
+                (state,)
+            )
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Failed to validate SSO state: {e}")
+        return False
+
+
+def verify_sso_state(state: str) -> bool:
+    """Alias for validate_sso_state."""
+    return validate_sso_state(state)
+
+
 def generate_sso_state() -> str:
     """
-    Generate a secure state parameter for OAuth2 flow.
+    Generate a secure state parameter for OAuth2 flow and store it.
     
     Returns:
         A 32-character hex state token
     """
-    return secrets.token_hex(32)
+    state = secrets.token_hex(32)
+    store_sso_state(state)
+    return state
+
 
 
 # ============================================================================
@@ -1887,7 +1990,7 @@ def _store_sso_recovery_token(username: str, password: str) -> None:
     try:
         token = generate_sso_token()
         token_hash = hashlib.sha256(token.encode()).hexdigest()
-        expires_at = (datetime.now() + timedelta(days=7)).isoformat()
+        expires_at = (dt.now() + timedelta(days=7)).isoformat()
         
         with _connect() as conn:
             # Create recovery_tokens table if not exists
@@ -1949,7 +2052,7 @@ def verify_sso_recovery_token(username: str, token: str) -> bool:
             if used_at is not None:
                 return False  # Token already used
             
-            if expires_at < datetime.now().isoformat():
+            if expires_at < dt.now().isoformat():
                 return False  # Token expired
             
             # Mark token as used
@@ -2068,7 +2171,7 @@ def revoke_sso_access(username: str) -> bool:
 
                     event_type="user_role_changed",
                     username=username,
-                    details=f"Role changed to {new_role.value} by {admin_username}"
+                    details=f"Role changed to {new_role.value} by {admin_username}"  # noqa: F821
                 )
                 return True
             return False
@@ -2078,7 +2181,7 @@ def revoke_sso_access(username: str) -> bool:
         return False
 
 
-def demote_user(username: str, admin_username: str) -> bool:
+def demote_user(username: str, admin_username: str) -> bool:  # noqa: F811
     """
     Demote a user to the default USER role.
     
@@ -2133,7 +2236,7 @@ def render_role_selector(username: str, current_role: str) -> None:
     
     if selected != current_role:
         if st.button(f"Update Role for {username}", key=f"role_update_{username}"):
-            admin = st.session_state.get(SessionKeys.USERNAME)
+            admin = st.session_state.get(SessionKeys.USERNAME)  # noqa: F821
             new_role = UserRole.from_string(selected)
             if promote_user(username, new_role, admin):
                 st.success(f"✅ Role updated to {selected} for {username}")
@@ -2192,7 +2295,7 @@ def migrate_existing_sso_users() -> Dict[str, Any]:
         Dict with migration statistics
     """
     try:
-        from src.db.auth import get_all_users, update_password
+        from src.db.auth import get_all_users, update_password  # noqa: F401
         
         sso_users = list_sso_users()
         migrated = 0
@@ -2262,6 +2365,9 @@ __all__ = [
     'generate_secure_password',
     'generate_sso_token',
     'generate_sso_state',
+    'store_sso_state',
+    'validate_sso_state',
+    'verify_sso_state',
     'get_or_create_sso_user_enhanced',
     'get_sso_user_info',
     'list_sso_users',

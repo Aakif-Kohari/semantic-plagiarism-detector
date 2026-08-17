@@ -43,7 +43,7 @@ class TestCosineSimilarityMatrix:
 
 
 class TestAlignSemanticSequences:
-    """Tests for the banded DP alignment algorithm."""
+    """Tests for the banded DP alignment algorithm and edge cases (Issue #2029)."""
 
     def test_exact_match_alignment(self):
         """Identical sequences should align perfectly with 'match' type."""
@@ -73,19 +73,63 @@ class TestAlignSemanticSequences:
         types = [op["type"] for op in alignment]
         assert "insert_a" in types or "insert_b" in types
 
-    def test_empty_sequences(self):
-        """Empty inputs should return empty alignment."""
-        assert align_semantic_sequences([], [], np.array([]), np.array([])) == []
+    def test_both_inputs_empty(self):
+        """Empty inputs ([], []) should return an empty alignment."""
+        alignment = align_semantic_sequences([], [], np.array([]), np.array([]))
+        assert alignment == []
 
-    def test_one_empty_sequence(self):
-        """If one sequence is empty, all items in the other should be insertions."""
-        chunks_a = ["A1", "A2"]
-        emb_a = np.array([[1.0, 0.0], [0.0, 1.0]])
+    def test_only_a_empty(self):
+        """Aligning ([], ['chunk']) should produce 'insert_b' operations for sequence B."""
+        chunks_b = ["chunk"]
+        emb_b = np.array([[1.0, 0.0]])
+
+        alignment = align_semantic_sequences([], chunks_b, np.array([]), emb_b)
+
+        assert len(alignment) == 1
+        assert alignment[0]["type"] == "insert_b"
+        assert alignment[0]["chunk_b"] == "chunk"
+
+    def test_only_b_empty(self):
+        """Aligning (['chunk'], []) should produce 'insert_a' operations for sequence A."""
+        chunks_a = ["chunk"]
+        emb_a = np.array([[1.0, 0.0]])
 
         alignment = align_semantic_sequences(chunks_a, [], emb_a, np.array([]))
 
-        assert len(alignment) == 2
-        assert all(op["type"] == "insert_a" for op in alignment)
+        assert len(alignment) == 1
+        assert alignment[0]["type"] == "insert_a"
+        assert alignment[0]["chunk_a"] == "chunk"
+
+    def test_single_chunk_inputs_match(self):
+        """Aligning single identical chunks should produce a 'match' operation."""
+        chunks_a = ["a"]
+        chunks_b = ["a"]
+        emb_a = np.array([[1.0, 0.0]])
+        emb_b = np.array([[1.0, 0.0]])
+
+        alignment = align_semantic_sequences(
+            chunks_a, chunks_b, emb_a, emb_b, match_threshold=0.5
+        )
+
+        assert len(alignment) == 1
+        assert alignment[0]["type"] == "match"
+        assert alignment[0]["chunk_a"] == "a"
+        assert alignment[0]["chunk_b"] == "a"
+
+    def test_single_chunk_inputs_mismatch(self):
+        """Aligning single distinct chunks (['a'], ['b']) should handle mismatch gracefully."""
+        chunks_a = ["a"]
+        chunks_b = ["b"]
+        emb_a = np.array([[1.0, 0.0]])
+        emb_b = np.array([[0.0, 1.0]])
+
+        alignment = align_semantic_sequences(
+            chunks_a, chunks_b, emb_a, emb_b, match_threshold=0.5
+        )
+
+        assert len(alignment) > 0
+        valid_types = {"match", "mismatch", "insert_a", "insert_b"}
+        assert all(op["type"] in valid_types for op in alignment)
 
 
 class TestMemoryAllocationGuard:
@@ -165,3 +209,4 @@ class TestMemoryAllocationGuard:
 
         alignment = align_semantic_sequences(chunks_a, chunks_b, emb_a, emb_b)
         assert len(alignment) > 0
+        

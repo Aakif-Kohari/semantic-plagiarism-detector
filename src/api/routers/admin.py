@@ -9,7 +9,7 @@ import psutil
 from fastapi import APIRouter, Request, Security, status
 from fastapi.responses import JSONResponse, PlainTextResponse
 
-from src.api.dependencies import get_current_user
+from src.api.middleware import get_current_user
 from src.api.schemas import (
     HealthCheckResponse,
     HealthzResponse,

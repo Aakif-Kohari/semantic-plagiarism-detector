@@ -24,6 +24,7 @@ import hashlib
 import logging
 import re
 from dataclasses import asdict, dataclass
+from collections import OrderedDict
 from threading import RLock
 from typing import Callable, Iterable, Optional
 
@@ -45,13 +46,13 @@ MIN_DETECTION_CHARACTERS = 20
 # Target language for back-translation (primary corpus language)
 TARGET_LANGUAGE = "en"
 
-# ── Lightweight Language Detection Heuristics (Issue #1956) ──────────────────
+# ── Lightweight Language Detection Heuristics (Issue #1956, #2222) ────────────
 
 # Regex patterns for common stop words and character ranges.
 # Avoids heavy dependencies like langdetect for fast chunk-level detection.
 _LANGUAGE_HEURISTICS = {
     "es": re.compile(
-        r"\b(el|la|los|las|de|del|en|y|a|que|es|por|con|para|se|su)\b",
+        r"\b(el|la|los|las|de|del|en|que|es|por|con|para|se|su)\b",
         re.IGNORECASE,
     ),
     "fr": re.compile(
@@ -60,6 +61,14 @@ _LANGUAGE_HEURISTICS = {
     ),
     "de": re.compile(
         r"\b(der|die|das|und|ist|von|zu|den|mit|sich|des|auf|für|ein|eine)\b",
+        re.IGNORECASE,
+    ),
+    "it": re.compile(
+        r"\b(il|la|le|di|e|che|un|una|in|per|con|da|si|del)\b",
+        re.IGNORECASE,
+    ),
+    "pt": re.compile(
+        r"\b(o|a|os|as|de|do|da|em|um|uma|e|que|para|por|com)\b",
         re.IGNORECASE,
     ),
     "zh": re.compile(r"[\u4e00-\u9fff]"),  # CJK Unified Ideographs
@@ -106,8 +115,8 @@ def detect_chunk_language(text: str) -> str:
     # Find the language with the highest stop word density
     if matches:
         best_lang = max(matches, key=matches.get)
-        # Require at least 10% of words to be stop words to avoid false positives
-        if matches[best_lang] / total_words > 0.10:
+        # Require at least 15% of words to be stop words to avoid false positives
+        if matches[best_lang] / total_words > 0.15:
             return best_lang
 
     return TARGET_LANGUAGE
@@ -124,8 +133,8 @@ def back_translate_chunk(
     """Translate a text chunk back to the target language (English).
 
     This function first checks the SQLite translation cache to avoid
-    redundant API/model calls. If not cached, it performs the translation
-    (currently a mock/passthrough for local testing) and saves the result.
+    redundant API/model calls. If not cached, it calls the real translation
+    service via translate_text() and saves the result to cache.
 
     Args:
         text: The source text chunk to translate.
@@ -134,6 +143,7 @@ def back_translate_chunk(
 
     Returns:
         The back-translated text string in the target language.
+        Falls back to original text if translation fails.
     """
     if not text or not isinstance(text, str):
         return ""
@@ -154,19 +164,52 @@ def back_translate_chunk(
             )
             return cached
 
-    # Perform translation
-    # In a production environment, this would call a local model (e.g., MarianMT)
-    # or a cached API. For this implementation, we use a mock passthrough with
-    # a prefix to simulate translation for testing purposes.
+    # Perform real translation using translate_text() (Issue #2219)
     logger.info(
         "Translating chunk from %s to %s (Cache miss, executing translation).",
         source_lang,
         TARGET_LANGUAGE,
     )
 
-    # Mock translation: In reality, this would be:
-    # translated = translator_model.translate(text, src=source_lang, tgt=TARGET_LANGUAGE)
-    translated_text = f"[Translated from {source_lang}] {text}"
+    try:
+        translated_text = translate_text(
+            text,
+            target_lang=TARGET_LANGUAGE,
+            source_lang=source_lang,
+        )
+        
+        # Validate translation result
+        if not translated_text or not isinstance(translated_text, str):
+            logger.warning(
+                "Translation returned empty or invalid result for %s -> %s. "
+                "Falling back to original text.",
+                source_lang,
+                TARGET_LANGUAGE,
+            )
+            return text
+            
+        translated_text = translated_text.strip()
+        
+        # Check if translation is suspiciously identical to source
+        # (could indicate translation service failure)
+        if translated_text == text.strip() and source_lang != TARGET_LANGUAGE:
+            logger.warning(
+                "Translation service returned identical text for %s -> %s. "
+                "This may indicate a translation failure.",
+                source_lang,
+                TARGET_LANGUAGE,
+            )
+        
+    except Exception as exc:
+        # Graceful fallback: return original text if translation fails
+        logger.error(
+            "Translation failed for %s -> %s: %s. Falling back to original text.",
+            source_lang,
+            TARGET_LANGUAGE,
+            exc,
+            exc_info=True,
+        )
+        return text
 
     # Save to cache
     if use_cache:
@@ -220,22 +263,28 @@ def verify_semantic_fidelity(
 
 
 class TranslationMemoryCache:
-    """Thread-safe in-memory cache for translated sentences.
+    """Thread-safe in-memory LRU cache for translated sentences.
 
     Cache keys are SHA-256 hashes of the source language, target language,
     and exact source sentence. Including both language codes prevents a
     translation produced for one language pair from being reused for another.
+
+    A configurable *maxsize* (default 512) caps memory usage by evicting the
+    least-recently-used entry whenever the cache is full (Issue #2221).
     """
 
-    def __init__(self) -> None:
-        self._translations: dict[str, str] = {}
+    def __init__(self, maxsize: int = 512) -> None:
+        if maxsize < 1:
+            raise ValueError("maxsize must be a positive integer")
+        self._translations: OrderedDict[str, str] = OrderedDict()
+        self._maxsize = maxsize
         self._lock = RLock()
 
     @staticmethod
     def _build_key(
         sentence: str,
-        source_lang: str,
-        target_lang: str,
+        source_lang: str = "auto",
+        target_lang: str = "en",
     ) -> str:
         """Return a deterministic SHA-256 key for a translation request."""
         payload = (
@@ -249,29 +298,42 @@ class TranslationMemoryCache:
         self,
         sentence: str,
         *,
-        source_lang: str,
-        target_lang: str,
+        source_lang: str = "auto",
+        target_lang: str = "en",
     ) -> str | None:
-        """Return a cached translation or ``None`` when absent."""
+        """Return a cached translation or ``None`` when absent.
+
+        Moves the accessed entry to the most-recently-used position.
+        """
         key = self._build_key(sentence, source_lang, target_lang)
         with self._lock:
-            return self._translations.get(key)
+            if key not in self._translations:
+                return None
+            self._translations.move_to_end(key)
+            return self._translations[key]
 
     def set(
         self,
         sentence: str,
         translation: str,
         *,
-        source_lang: str,
-        target_lang: str,
+        source_lang: str = "auto",
+        target_lang: str = "en",
     ) -> None:
-        """Store a successful non-empty translation."""
+        """Store a successful non-empty translation.
+
+        Evicts the least-recently-used entry when the cache is at capacity.
+        """
         normalized_translation = str(translation or "").strip()
         if not normalized_translation:
             return
-
         key = self._build_key(sentence, source_lang, target_lang)
         with self._lock:
+            if key in self._translations:
+                self._translations.move_to_end(key)
+            else:
+                if len(self._translations) >= self._maxsize:
+                    self._translations.popitem(last=False)
             self._translations[key] = normalized_translation
 
     def clear(self) -> None:
@@ -389,9 +451,9 @@ def prepare_text_for_embedding(
         else:
             detected_lang = res
         language = _normalise_language_code(detected_lang)
-    except Exception:
+    except (LangDetectException, ValueError, TypeError) as exc:
+        logger.warning("Language detection failed, defaulting to 'en': %s", exc)
         language = "en"
-
     if language in ENGLISH_CODES or language == "unknown":
         return PreparedText(
             original_text=original_text,
@@ -424,11 +486,12 @@ def prepare_text_for_embedding(
                     original_text,
                     target_lang=target_language,
                 )
-            except Exception:
+            except (TypeError, ValueError, ConnectionError) as exc:
+                logger.warning("Fallback translation call failed: %s", exc)
                 translated_text = ""
-        except Exception:
+        except (TypeError, ValueError, ConnectionError) as exc:
+            logger.warning("Translation call failed: %s", exc)
             translated_text = ""
-
     translated_text = str(translated_text or "").strip()
     translation_failed = not translated_text or translated_text.lower().startswith(
         "(translation error"

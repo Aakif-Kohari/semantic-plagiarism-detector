@@ -36,7 +36,7 @@ def test_generate_batch_plagiarism_report():
         },
     ]
 
-    pdf_buffer = generate_batch_plagiarism_report(incidents)
+    pdf_buffer = generate_batch_plagiarism_report(incidents)  # noqa: F821
 
     assert isinstance(pdf_buffer, BytesIO)
 

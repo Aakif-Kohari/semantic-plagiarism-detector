@@ -8,8 +8,10 @@ import pytest
 from src.core.document_parser import (
     OCRDependencyError,
     _has_meaningful_text,
+    check_ocr_dependencies,
     extract_text_from_pdf,
 )
+
 
 
 class FakePage:
@@ -99,9 +101,8 @@ def test_ocr_dependency_error_is_not_hidden(mock_ocr, mock_pdf_open):
         extract_text_from_pdf(io.BytesIO(b"%PDF-fake-pdf"))
 
 
-@patch("src.core.document_parser.pytesseract.image_to_string")
-@patch("src.core.document_parser.fitz.open")
-def test_ocr_pdf_page_oom(mock_fitz_open, mock_image_to_string):
+@patch("src.core.document_parser.check_ocr_dependencies")
+def test_ocr_pdf_page_oom(mock_check_ocr):
     from src.core.document_parser import _ocr_pdf_page
 
     mock_doc = MagicMock()
@@ -112,24 +113,58 @@ def test_ocr_pdf_page_oom(mock_fitz_open, mock_image_to_string):
     mock_pixmap.width = 1
     mock_pixmap.height = 1
     mock_page.get_pixmap.return_value = mock_pixmap
-    mock_fitz_open.return_value.__enter__.return_value = mock_doc
-
-    mock_image_to_string.side_effect = MemoryError("Out of memory mock error")
-
-    # Call with fake PDF bytes
-    res = _ocr_pdf_page(b"%PDF-1.4", 0)
-    assert "[OCR extraction failed for page 0]" in res
+    mock_fitz = MagicMock()
+    mock_fitz.open.return_value.__enter__.return_value = mock_doc
+    mock_pytesseract = MagicMock()
+    mock_pytesseract.TesseractNotFoundError = type("TesseractNotFoundError", (Exception,), {})
+    mock_pytesseract.image_to_string.side_effect = MemoryError("Out of memory mock error")
 
 
-@patch("src.core.document_parser.pytesseract.image_to_string")
-@patch("src.core.document_parser.Image.open")
-def test_extract_text_from_image_oom(mock_image_open, mock_image_to_string):
+    with patch.dict("sys.modules", {"fitz": mock_fitz, "pytesseract": mock_pytesseract, "PIL": MagicMock(), "PIL.Image": MagicMock()}):
+        res = _ocr_pdf_page(b"%PDF-1.4", 0)
+        assert "[OCR extraction failed for page 0]" in res
+
+
+@patch("src.core.document_parser.check_ocr_dependencies")
+def test_extract_text_from_image_oom(mock_check_ocr):
     from src.core.document_parser import extract_text_from_image
 
     mock_img = MagicMock()
-    mock_image_open.return_value = mock_img
+    mock_image = MagicMock()
+    mock_image.open.return_value = mock_img
+    mock_pytesseract = MagicMock()
+    mock_pytesseract.image_to_string.side_effect = MemoryError("Out of memory mock error")
 
-    mock_image_to_string.side_effect = MemoryError("Out of memory mock error")
+    with patch.dict("sys.modules", {"pytesseract": mock_pytesseract, "PIL": MagicMock(), "PIL.Image": mock_image}):
+        res = extract_text_from_image(b"fake image bytes")
+        assert "[OCR extraction failed for the file]" in res
 
-    res = extract_text_from_image(b"fake image bytes")
-    assert "[OCR extraction failed for the file]" in res
+
+
+def test_check_ocr_dependencies_success():
+    """Verify check_ocr_dependencies passes when packages and tesseract version check succeed."""
+    mock_pytesseract = MagicMock()
+    mock_pytesseract.get_tesseract_version.return_value = "5.0.0"
+
+    with patch.dict("sys.modules", {"fitz": MagicMock(), "pytesseract": mock_pytesseract, "PIL": MagicMock(), "PIL.Image": MagicMock()}):
+        check_ocr_dependencies()
+
+
+def test_check_ocr_dependencies_missing_package():
+    """Verify check_ocr_dependencies raises OCRDependencyError when an import fails."""
+    with patch.dict("sys.modules", {"fitz": None, "pytesseract": None, "PIL": None}):
+        with pytest.raises(OCRDependencyError, match="OCR dependencies are missing"):
+            check_ocr_dependencies()
+
+
+def test_check_ocr_dependencies_missing_tesseract_binary():
+    """Verify check_ocr_dependencies raises OCRDependencyError when Tesseract binary is missing."""
+    mock_pytesseract = MagicMock()
+    mock_pytesseract.TesseractNotFoundError = Exception
+    mock_pytesseract.get_tesseract_version.side_effect = Exception("Tesseract not found")
+
+    with patch.dict("sys.modules", {"fitz": MagicMock(), "pytesseract": mock_pytesseract, "PIL": MagicMock(), "PIL.Image": MagicMock()}):
+        with pytest.raises(OCRDependencyError, match="Tesseract OCR was not found"):
+            check_ocr_dependencies()
+
+

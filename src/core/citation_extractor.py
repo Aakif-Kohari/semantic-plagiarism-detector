@@ -40,7 +40,7 @@ _MLA_PATTERN = re.compile(
 def _normalize_text(text: str) -> str:
     """Lowercase, strip punctuation, and collapse whitespace for hashing."""
     text = text.lower()
-    text = re.sub(r"[^\w\s]", "", text)
+    text = re.sub(r"[^\w\s-]", "", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
@@ -55,9 +55,10 @@ def _generate_citation_hash(author: str, year: str, title: str) -> str:
     norm_author = _normalize_text(author)
     norm_title = _normalize_text(title)
 
-    # Fuzzy matching: Use first 50 chars of title and first author name
-    # to handle minor variations in how students copy references.
-    key = f"{norm_author[:50]}|{year}|{norm_title[:80]}"
+    # Fuzzy matching: Use first 120 chars of author and first 80 chars of title
+    # to handle minor variations in how students copy references, while avoiding
+    # collisions for co-authored papers.
+    key = f"{norm_author[:120]}|{year}|{norm_title[:80]}"
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
@@ -82,7 +83,7 @@ def extract_citations(raw_text: str) -> List[Dict[str, str]]:
 
     # Split by common bibliography delimiters (newlines with hanging indents)
     # For simplicity, we process line by line or block by block.
-    lines = [l.strip() for l in raw_text.split("\n") if l.strip()]
+    lines = [l.strip() for l in raw_text.split("\n") if l.strip()]  # noqa: E741
 
     for line in lines:
         author, year, title = None, None, None

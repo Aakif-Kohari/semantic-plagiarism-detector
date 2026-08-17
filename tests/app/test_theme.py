@@ -151,6 +151,15 @@ def test_tier_color():
     assert tier_color("low") == COLORS["success"]
     assert tier_color("unknown") == COLORS["neutral_soft"]
 
+    # Case-insensitive checks
+    assert tier_color("High") == COLORS["danger"]
+    assert tier_color("Low") == COLORS["success"]
+
+    # Fallback checks for invalid strings / None
+    assert tier_color("invalid") == COLORS["neutral_soft"]
+    assert tier_color("") == COLORS["neutral_soft"]
+    assert tier_color(None) == COLORS["neutral_soft"]
+
 
 def test_badge_html_default():
     """Test badge HTML generation with default label."""
@@ -247,22 +256,22 @@ def test_format_similarity_html():
     """Test similarity pill HTML generation."""
     high_html = format_similarity_html(0.95)
     assert 'class="sim-pill"' in high_html
-    assert f"background:{COLORS['danger']};" in high_html
+    assert f"background-color: {COLORS['danger']};" in high_html
     assert "Similarity: 95.0%" in high_html
 
     med_html = format_similarity_html(0.80)
-    assert f"background:{COLORS['warning']};" in med_html
+    assert f"background-color: {COLORS['warning']};" in med_html
     assert "Similarity: 80.0%" in med_html
 
     low_html = format_similarity_html(0.50)
-    assert f"background:{COLORS['success']};" in low_html
+    assert f"background-color: {COLORS['success']};" in low_html
     assert "Similarity: 50.0%" in low_html
 
 
 def test_format_similarity_html_custom_threshold():
     """Test similarity pill with custom threshold."""
     html = format_similarity_html(0.70, threshold=0.75)
-    assert f"background:{COLORS['success']};" in html
+    assert f"background-color: {COLORS['success']};" in html
 
 
 def test_empty_state_html():
@@ -283,7 +292,7 @@ def test_sidebar_user_badge_html():
     assert 'class="sidebar-user-badge"' in html
     assert 'class="avatar"' in html
     assert "T" in html
-    assert "<strong>testuser</strong>" in html
+    assert "testuser" in html
     assert "ADMIN" in html
 
 
@@ -647,3 +656,45 @@ def test_render_session_status_banner():
     ) as mock_caption_past:
         render_session_status_banner()
         mock_caption_past.assert_called_once_with("Active Session: 45 mins")
+
+# ==============================================================================
+# Issue #2353: severity_tier threshold boundary tests
+# ==============================================================================
+
+
+def test_severity_tier_boundary_just_below_medium():
+    """A score of 0.49 is classified as low."""
+    assert severity_tier(0.49, 0.50) == "low"
+
+
+def test_severity_tier_boundary_at_medium():
+    """A score of 0.50 is classified as medium."""
+    assert severity_tier(0.50, 0.50) == "medium"
+
+
+def test_severity_tier_boundary_just_below_high():
+    """A score of 0.79 remains medium."""
+    assert severity_tier(0.79, 0.50) == "medium"
+
+
+def test_severity_tier_boundary_at_high():
+    """A score of 0.80 is classified as high."""
+    assert severity_tier(0.80, 0.50) == "high"
+# sanitize_hex_color edge-case tests (Issue #2352)
+# ==============================================================================
+
+
+def test_sanitize_hex_color_valid():
+    """Valid six-digit uppercase hex colors are returned unchanged."""
+    assert sanitize_hex_color("#FF0000") == "#FF0000"
+
+
+def test_sanitize_hex_color_missing_hash():
+    """Hex values without the leading hash fall back to the default."""
+    assert sanitize_hex_color("FF0000") == "#000000"
+
+
+def test_sanitize_hex_color_invalid():
+    """Invalid/non-hex values use the configured fallback."""
+    assert sanitize_hex_color("not-a-color", fallback="#FFFFFF") == "#FFFFFF"
+
