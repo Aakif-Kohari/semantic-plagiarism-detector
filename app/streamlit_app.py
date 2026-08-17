@@ -14,6 +14,7 @@ import os
 import sys
 import time
 from datetime import date, datetime, timedelta, timezone
+from src.core.hybrid_scorer import HybridScorer, HybridConfig
 from pathlib import Path
 
 import numpy as np
@@ -2084,6 +2085,43 @@ with st.sidebar:
                 step=25,
                 key=SessionKeys.OCR_DPI_SLIDER,
             )
+
+        # ── Hybrid Scoring Settings ────────────────────────────────────────────────
+        with st.sidebar.expander("🔀 Hybrid Scoring", expanded=False):
+            st.markdown("""
+            **Hybrid scoring** combines lexical and semantic similarity for more accurate detection.
+            """)
+            
+            use_hybrid = st.checkbox(
+                "Enable Hybrid Scoring",
+                value=False,
+                key="use_hybrid_scoring",
+                help="Combines lexical (TF-IDF/Jaccard) and semantic (BERT) similarity"
+            )
+            
+            if use_hybrid:
+                alpha = st.slider(
+                    "Semantic Weight (α)",
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=0.7,
+                    step=0.05,
+                    help="Higher = more semantic, Lower = more lexical"
+                )
+                
+                lexical_method = st.selectbox(
+                    "Lexical Method",
+                    ["tfidf", "jaccard", "dice", "overlap", "ngram", "char_ngram"],
+                    index=0,
+                    help="Method for lexical similarity"
+                )
+                
+                if lexical_method == "ngram":
+                    ngram_n = st.slider("N-gram Size", 2, 5, 3)
+                elif lexical_method == "char_ngram":
+                    char_ngram_n = st.slider("Char N-gram Size", 3, 7, 5)
+                
+                st.info(f"Currently using: {lexical_method} + semantic (α={alpha:.2f})")
     else:
         threshold = PLAGIARISM_THRESHOLD
         use_chunk_matrix = False
