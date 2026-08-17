@@ -175,6 +175,15 @@ from app.components.api_gateway import (
     WebhookStatus,
     ServiceType,
 )
+    from sklearn.cluster import AgglomerativeClustering, KMeans
+    from sklearn.decomposition import NMF, LatentDirichletAllocation
+    from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
+    from sklearn.manifold import TSNE
+    from sklearn.metrics import silhouette_score, davies_bouldin_score
+    from sklearn.preprocessing import StandardScaler
+    import scipy.cluster.hierarchy as sch
+    from scipy.spatial.distance import squareform
+    from scipy.cluster.hierarchy import fcluster
 # ── Collaboration Hub Imports ────────────────────────────────────────────
 from app.components.collaboration_hub import (
     render_collaboration_hub,
