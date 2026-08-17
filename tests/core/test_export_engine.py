@@ -181,3 +181,16 @@ def test_build_download_response_exact_headers_issue_2457():
     assert headers["Content-Type"] == "text/csv; charset=utf-8"
     assert headers["X-Content-Type-Options"] == "nosniff"
 
+
+def test_build_download_response_instance_call():
+    """Verify that build_download_response works when called via an instance of LMSExportEngine."""
+    engine = LMSExportEngine()
+    payload, headers = engine.build_download_response(
+        "hello",
+        filename="report.csv",
+        content_type="text/csv",
+    )
+    assert payload == b"hello"
+    assert headers["Content-Type"] == "text/csv; charset=utf-8"
+
+
