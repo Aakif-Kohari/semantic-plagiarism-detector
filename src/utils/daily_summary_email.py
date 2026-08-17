@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import smtplib
+import time
 from datetime import datetime, timedelta, timezone
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
@@ -264,19 +265,6 @@ def send_email(
     Returns:
         True if email sent successfully, False otherwise
     """
-    smtp_server = os.getenv("SMTP_SERVER")
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
-    smtp_username = os.getenv("SMTP_USERNAME")
-    smtp_password = os.getenv("SMTP_PASSWORD")
-    from_email = os.getenv("FROM_EMAIL", smtp_username)
-
-    if not all([smtp_server, smtp_username, smtp_password]):
-        msg = "SMTP configuration incomplete. Please set SMTP_SERVER, SMTP_USERNAME, and SMTP_PASSWORD."
-        logger.error(msg)
-        if status_callback:
-            status_callback(False, msg)
-        return False
-
     if not to_emails:
         msg = "No recipients configured for daily summary email."
         logger.warning(msg)
@@ -292,59 +280,96 @@ def send_email(
     if reply_to and not email_pattern.match(reply_to):
         raise ValueError(f"Invalid reply-to email address: {reply_to}")
 
-    try:
-        msg_obj = MIMEMultipart("alternative")
-        msg_obj["Subject"] = subject
-        msg_obj["From"] = from_email
-        msg_obj["To"] = ", ".join(to_emails)
+    smtp_server = os.getenv("SMTP_SERVER")
+    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    smtp_username = os.getenv("SMTP_USERNAME")
+    smtp_password = os.getenv("SMTP_PASSWORD")
+    from_email = os.getenv("FROM_EMAIL", smtp_username)
 
-        if reply_to:
-            msg_obj["Reply-To"] = reply_to
-
-        html_part = MIMEText(html_body, "html")
-        msg_obj.attach(html_part)
-        attachment = MIMEApplication(b"", _subtype="csv")
-        attachment.add_header(
-          "Content-Disposition",
-          "attachment",
-          filename=attachment_filename,
-      )
-        msg_obj.attach(attachment)
-
-        if smtp_port == 465:
-            logger.debug(
-                "Using SMTP_SSL (implicit SSL) on port %d with timeout %.1fs",
-                smtp_port,
-                timeout,
-            )
-            with smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=timeout) as server:
-                server.login(smtp_username, smtp_password)
-                server.send_message(msg_obj)
-        else:
-            logger.debug(
-                "Using SMTP with STARTTLS on port %d with timeout %.1fs",
-                smtp_port,
-                timeout,
-            )
-            with smtplib.SMTP(smtp_server, smtp_port, timeout=timeout) as server:
-                server.starttls()
-                server.login(smtp_username, smtp_password)
-                server.send_message(msg_obj)
-
-        success_msg = (
-            f"Daily summary email sent successfully to {len(to_emails)} recipients."
-        )
-        logger.info(success_msg)
+    if not all([smtp_server, smtp_username, smtp_password]):
+        msg = "SMTP configuration incomplete. Please set SMTP_SERVER, SMTP_USERNAME, and SMTP_PASSWORD."
+        logger.error(msg)
         if status_callback:
-            status_callback(True, success_msg)
-        return True
-
-    except Exception as e:
-        error_msg = f"Failed to send daily summary email: {e}"
-        logger.error(error_msg)
-        if status_callback:
-            status_callback(False, error_msg)
+            status_callback(False, msg)
         return False
+
+
+
+    max_retries = 3
+    for attempt in range(max_retries + 1):
+        try:
+            msg_obj = MIMEMultipart("alternative")
+            msg_obj["Subject"] = subject
+            msg_obj["From"] = from_email
+            msg_obj["To"] = ", ".join(to_emails)
+
+            if reply_to:
+                msg_obj["Reply-To"] = reply_to
+
+            html_part = MIMEText(html_body, "html")
+            msg_obj.attach(html_part)
+            attachment = MIMEApplication(b"", _subtype="csv")
+            attachment.add_header(
+              "Content-Disposition",
+              "attachment",
+              filename=attachment_filename,
+          )
+            msg_obj.attach(attachment)
+
+            if smtp_port == 465:
+                logger.debug(
+                    "Using SMTP_SSL (implicit SSL) on port %d with timeout %.1fs (attempt %d/%d)",
+                    smtp_port,
+                    timeout,
+                    attempt + 1,
+                    max_retries + 1,
+                )
+                with smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=timeout) as server:
+                    server.login(smtp_username, smtp_password)
+                    server.send_message(msg_obj)
+            else:
+                logger.debug(
+                    "Using SMTP with STARTTLS on port %d with timeout %.1fs (attempt %d/%d)",
+                    smtp_port,
+                    timeout,
+                    attempt + 1,
+                    max_retries + 1,
+                )
+                with smtplib.SMTP(smtp_server, smtp_port, timeout=timeout) as server:
+                    server.starttls()
+                    server.login(smtp_username, smtp_password)
+                    server.send_message(msg_obj)
+
+            success_msg = (
+                f"Daily summary email sent successfully to {len(to_emails)} recipients."
+            )
+            logger.info(success_msg)
+            if status_callback:
+                status_callback(True, success_msg)
+            return True
+
+        except (ConnectionError, TimeoutError, smtplib.SMTPConnectError, smtplib.SMTPException, OSError) as e:
+            # We catch connection/socket/SMTP related issues.
+            # OSError covers socket.timeout and low-level socket errors.
+            is_last_attempt = (attempt == max_retries)
+            attempt_msg = f"Attempt {attempt + 1} failed: {e}."
+            if not is_last_attempt:
+                backoff_time = 2 ** attempt
+                logger.warning(f"{attempt_msg} Retrying in {backoff_time}s...")
+                time.sleep(backoff_time)
+            else:
+                error_msg = f"Failed to send daily summary email after {max_retries + 1} attempts: {e}"
+                logger.error(error_msg)
+                if status_callback:
+                    status_callback(False, error_msg)
+                return False
+        except Exception as e:
+            # For non-network/validation exceptions, fail immediately
+            error_msg = f"Failed to send daily summary email: {e}"
+            logger.error(error_msg)
+            if status_callback:
+                status_callback(False, error_msg)
+            return False
 
 
 def send_daily_summary(
