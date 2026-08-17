@@ -62,3 +62,26 @@ def test_ssrf_circular_redirect_loop_value_unchanged():
     from src.errors import SSRF_CIRCULAR_REDIRECT_LOOP
 
     assert SSRF_CIRCULAR_REDIRECT_LOOP == "Circular HTTP redirect loop detected"
+
+
+def test_ocr_file_batch_error_formatting():
+    """Test OCRFileBatchError message formatting logic with empty and non-empty failure_details."""
+    from src.errors import OCRFileBatchError
+
+    # Test instantiation with failed_files but empty failure_details
+    err_empty_details = OCRFileBatchError(failed_files=["a.pdf"], failure_details=[])
+    assert (
+        str(err_empty_details)
+        == "OCR extraction failed for 1 file(s): a.pdf"
+    )
+
+    # Test instantiation with multiple details provided
+    err_multiple_details = OCRFileBatchError(
+        failed_files=["a.pdf", "b.pdf"],
+        failure_details=["a.pdf: Timeout", "b.pdf: Corrupt image"],
+    )
+    assert (
+        str(err_multiple_details)
+        == "OCR extraction failed for 2 file(s): a.pdf: Timeout; b.pdf: Corrupt image"
+    )
+
