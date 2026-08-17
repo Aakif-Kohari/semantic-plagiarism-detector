@@ -27,6 +27,7 @@ def test_count_syllables_in_word():
     assert count_syllables_in_word("blue") == 1
     assert count_syllables_in_word("the") == 1
 
+
 def test_count_words():
     assert count_words("This is a test.") == 4
     assert count_words("") == 0
@@ -64,6 +65,10 @@ def test_get_sentence_count():
     # terminator is still one sentence. Only empty/whitespace text scores 0.
     assert get_sentence_count("No punctuation") == 1
     assert get_sentence_count("Dr. Smith arrived. He stayed.") == 2
+
+
+def test_count_sentence_without_ending_punctuation():
+    assert get_sentence_count("The cat sat on the mat") == 1
 
 
 def test_get_syllable_count():

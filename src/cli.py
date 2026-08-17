@@ -7,14 +7,16 @@ Headless command-line interface for plagiarism detection automation.
 import argparse
 import concurrent.futures
 import json
+import logging
 import os
 import sys
+import time
 from io import BytesIO
 from pathlib import Path
 
 from src.core.app_config import FAISS_INDEX_PATH
 from src.core.cross_lingual import prepare_text_for_embedding
-from src.core.document_parser import DEFAULT_OCR_DPI, DEFAULT_OCR_LANGUAGE, extract_text
+from src.core.document_parser import DEFAULT_OCR_DPI, DEFAULT_OCR_LANGUAGE, extract_text, OCRDependencyError
 from src.core.embedding_model import embed_documents
 from src.core.logging_config import setup_logging
 from src.core.similarity import (
@@ -26,6 +28,8 @@ from src.core.synchronization import verify_and_repair_index
 from src.core.text_chunking import chunk_documents
 from src.db.database_backup import optimize_database
 from src.core.export_engine import LMSExportEngine
+
+logger = logging.getLogger(__name__)
 
 
 def _process_single_file(filepath: str) -> tuple[str, str | None, str | None]:
@@ -56,6 +60,14 @@ def run_scan(
     Scans a folder, processes the documents, runs plagiarism detection,
     and prints the report in the requested output format to stdout.
     """
+    start_time = time.time()
+
+    if output_format not in ("json", "csv", "text", "html"):
+        sys.stderr.write(
+            f"Error: Invalid output format '{output_format}'. Supported formats are: json, csv, text, html.\n"
+        )
+        return 1
+
     if not os.path.exists(folder_path):
         sys.stderr.write(f"Error: Folder '{folder_path}' does not exist.\n")
         return 1
@@ -88,8 +100,15 @@ def run_scan(
         for filename, text, err in executor.map(_process_single_file, files):
             if text:
                 raw_texts[filename] = text
-            if err:
-                sys.stderr.write(err)
+            else:
+                sys.stderr.write(
+                    f"Warning: Extracted text from '{filename}' is empty.\n"
+                )
+        except OCRDependencyError as e:
+            sys.stderr.write(f"Fatal Error: {e}\n")
+            sys.exit(1)
+        except Exception as e:
+            sys.stderr.write(f"Warning: Failed to parse '{filename}': {e}\n")
 
     num_processed = len(raw_texts)
     matches = []
@@ -122,10 +141,13 @@ def run_scan(
             sys.stderr.write(f"Error during plagiarism detection pipeline: {e}\n")
             return 1
 
+    execution_time_seconds = time.time() - start_time
+
     report = {
         "documents_processed": num_processed,
         "threshold": threshold,
         "matches": matches,
+        "execution_time_seconds": execution_time_seconds,
     }
 
     if output_format == "html":
@@ -152,6 +174,7 @@ def run_scan(
     else:  # text
         print(f"Documents Processed: {num_processed}")
         print(f"Similarity Threshold: {threshold}")
+        print(f"Execution Time: {execution_time_seconds:.2f} seconds")
         if matches:
             print("Matches Found:")
             for m in matches:
@@ -260,9 +283,7 @@ def run_prewarm(folder_path: str | None = None) -> int:
                 else:
                     redis_status = "fallback_in_memory"
             except Exception as cache_err:
-                sys.stderr.write(
-                    f"Warning: Redis cache population skipped: {cache_err}\n"
-                )
+                logger.warning("Redis cache population skipped: %s", cache_err)
 
             # Refresh telemetry cache
             try:

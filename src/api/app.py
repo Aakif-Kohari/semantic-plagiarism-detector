@@ -23,6 +23,7 @@ from src.api.routers import (
     auth_router,
     corpus_router,
 )
+from src.utils.tracing import get_tracer
 from src.core.app_config import get_api_support_contact
 
 # Re-exports for backward compatibility with existing tests and scripts
@@ -65,6 +66,31 @@ app.add_middleware(
 
 # SlowAPI Rate Limiting setup
 app.state.limiter = limiter
+
+
+@app.middleware("http")
+async def otel_tracing_middleware(request: Request, call_next):
+    """Middleware to create an OpenTelemetry root span for every HTTP request."""
+    tracer = get_tracer()
+    request_id = request.headers.get("X-Request-ID", "unknown")
+    user_id = getattr(request.state, "user_id", "anonymous")
+
+    span_name = f"HTTP {request.method} {request.url.path}"
+    with tracer.start_as_current_span(span_name) as span:
+        span.set_attribute("http.method", request.method)
+        span.set_attribute("http.url", str(request.url))
+        span.set_attribute("http.route", request.url.path)
+        span.set_attribute("http.request_id", request_id)
+        span.set_attribute("user.id", user_id)
+
+        try:
+            response = await call_next(request)
+            span.set_attribute("http.status_code", response.status_code)
+            return response
+        except Exception as exc:
+            span.record_exception(exc)
+            span.set_attribute("http.status_code", 500)
+            raise
 
 
 @app.exception_handler(RequestValidationError)

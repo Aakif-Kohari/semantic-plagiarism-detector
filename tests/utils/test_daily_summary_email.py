@@ -222,6 +222,67 @@ def test_send_email_no_recipients():
     assert result is False
 
 
+@patch("smtplib.SMTP")
+@patch("time.sleep")
+@patch.dict(
+    "os.environ",
+    {
+        "SMTP_SERVER": "smtp.example.com",
+        "SMTP_PORT": "587",
+        "SMTP_USERNAME": "test@example.com",
+        "SMTP_PASSWORD": "password",
+    },
+)
+def test_send_email_retry_success(mock_sleep, mock_smtp):
+    """Test send_email retries on connection error and eventually succeeds."""
+    mock_server = MagicMock()
+    
+    # smtplib.SMTP is used as a context manager: mock_smtp() returns mock_conn
+    # mock_conn.__enter__() returns mock_server.
+    mock_conn_fail = MagicMock()
+    mock_conn_fail.__enter__.side_effect = ConnectionError("Connection timed out")
+    
+    mock_conn_success = MagicMock()
+    mock_conn_success.__enter__.return_value = mock_server
+
+    mock_smtp.side_effect = [mock_conn_fail, mock_conn_success]
+
+    result = send_email(["recipient@example.com"], "Test Subject", "<p>Test Body</p>")
+
+    assert result is True
+    assert mock_smtp.call_count == 2
+    mock_sleep.assert_called_once_with(1)  # 2 ** 0 = 1s sleep for first backoff
+
+
+@patch("smtplib.SMTP")
+@patch("time.sleep")
+@patch.dict(
+    "os.environ",
+    {
+        "SMTP_SERVER": "smtp.example.com",
+        "SMTP_PORT": "587",
+        "SMTP_USERNAME": "test@example.com",
+        "SMTP_PASSWORD": "password",
+    },
+)
+def test_send_email_retry_exhausted(mock_sleep, mock_smtp):
+    """Test send_email retries up to max limit and fails when errors persist."""
+    mock_conn_fail = MagicMock()
+    mock_conn_fail.__enter__.side_effect = ConnectionError("Failed")
+
+    mock_smtp.side_effect = [mock_conn_fail, mock_conn_fail, mock_conn_fail, mock_conn_fail]
+
+    result = send_email(["recipient@example.com"], "Test Subject", "<p>Test Body</p>")
+
+    assert result is False
+    assert mock_smtp.call_count == 4
+    # Sleep should be called 3 times with exponential backoff: 1s, 2s, 4s
+    assert mock_sleep.call_count == 3
+    mock_sleep.assert_any_call(1)
+    mock_sleep.assert_any_call(2)
+    mock_sleep.assert_any_call(4)
+
+
 @patch("src.utils.daily_summary_email.send_email")
 @patch("src.utils.daily_summary_email.get_admin_emails")
 @patch("src.utils.daily_summary_email.get_incidents_last_24h")
@@ -293,7 +354,7 @@ def test_send_email_ssl_port_465(mock_smtp_ssl):
     result = send_email(["recipient@example.com"], "Test Subject", "<p>Body</p>")
 
     assert result is True
-    mock_smtp_ssl.assert_called_once_with("smtp.example.com", 465)
+    mock_smtp_ssl.assert_called_once_with("smtp.example.com", 465, timeout=10.0)
     mock_server.starttls.assert_not_called()
     mock_server.login.assert_called_once_with("test@example.com", "password")
     mock_server.send_message.assert_called_once()
@@ -318,7 +379,7 @@ def test_send_email_starttls_custom_port_2525(mock_smtp):
     result = send_email(["recipient@example.com"], "Test Subject", "<p>Body</p>")
 
     assert result is True
-    mock_smtp.assert_called_once_with("smtp.example.com", 2525)
+    mock_smtp.assert_called_once_with("smtp.example.com", 2525, timeout=10.0)
     mock_server.starttls.assert_called_once()
     mock_server.login.assert_called_once_with("test@example.com", "password")
     mock_server.send_message.assert_called_once()
@@ -342,7 +403,7 @@ def test_send_email_starttls_default_port_587(mock_smtp):
     result = send_email(["recipient@example.com"], "Test Subject", "<p>Body</p>")
 
     assert result is True
-    mock_smtp.assert_called_once_with("smtp.example.com", 587)
+    mock_smtp.assert_called_once_with("smtp.example.com", 587, timeout=10.0)
     mock_server.starttls.assert_called_once()
     mock_server.login.assert_called_once_with("test@example.com", "password")
     mock_server.send_message.assert_called_once()
@@ -430,6 +491,31 @@ class TestEmailTemplateHelpers:
         assert "<table" in html
         assert "border-collapse: collapse" in html
         assert "A" in html
+
+    def test_build_incident_row_html_with_incident_link(self):
+        """Test build_incident_row_html wraps Document A with anchor tag when incident_id exists."""
+        inc = {
+            "incident_id": 42,
+            "document_a": "DocA.txt",
+            "document_b": "DocB.txt",
+            "similarity_score": 0.85,
+            "date_flagged": "2026-08-17"
+        }
+        html = build_incident_row_html(inc)
+        assert '<a href="http://localhost:8501/incident/42"' in html
+        assert "DocA.txt" in html
+
+    def test_build_incident_row_html_without_incident_link(self):
+        """Test build_incident_row_html outputs plaintext Document A when incident_id is missing."""
+        inc = {
+            "document_a": "DocA.txt",
+            "document_b": "DocB.txt",
+            "similarity_score": 0.85,
+            "date_flagged": "2026-08-17"
+        }
+        html = build_incident_row_html(inc)
+        assert "<a href=" not in html
+        assert "DocA.txt" in html
 
     def test_build_incident_row_html_missing_fields(self):
         """Test row generation handles missing dictionary keys gracefully."""
