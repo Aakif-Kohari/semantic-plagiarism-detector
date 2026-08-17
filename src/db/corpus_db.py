@@ -158,7 +158,8 @@ def init_corpus_db() -> None:
                 filename TEXT NOT NULL,
                 chunk_index INTEGER NOT NULL,
                 chunk_text TEXT NOT NULL,
-                embedding BLOB NOT NULL
+                embedding BLOB NOT NULL,
+                deleted_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
             """)
 
@@ -217,6 +218,11 @@ def init_corpus_db() -> None:
         for col_name, col_type in columns_to_ensure:
             if not column_exists(conn, "documents", col_name):
                 conn.execute(f"ALTER TABLE documents ADD COLUMN {col_name} {col_type}")
+
+        if not column_exists(conn, "deleted_chunks", "deleted_at"):
+            conn.execute(
+                "ALTER TABLE deleted_chunks ADD COLUMN deleted_at TEXT DEFAULT CURRENT_TIMESTAMP"
+            )
 
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at)"
