@@ -13,7 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY requirements.txt .RUN pip install --upgrade pip && \
+COPY requirements.txt .
+RUN pip install pip==24.0 && \
     pip install -r requirements.txt
 
 COPY . .
