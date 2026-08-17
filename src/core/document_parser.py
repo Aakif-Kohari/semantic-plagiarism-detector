@@ -1544,7 +1544,7 @@ def extract_text_from_epub(file: PDFInput) -> str:
     """Extract plain text from an EPUB file."""
     try:
         from bs4 import BeautifulSoup
-        from ebooklib import epub  # type: ignore
+        from ebooklib import ITEM_DOCUMENT, epub  # type: ignore
 
         epub_file = io.BytesIO(file) if isinstance(file, bytes) else file
 
@@ -1553,18 +1553,20 @@ def extract_text_from_epub(file: PDFInput) -> str:
         text_parts = []
 
         for item in book.get_items():
-            if item.get_type() == 9:
+            if item.get_type() == ITEM_DOCUMENT or item.get_type() == 9:
                 soup = BeautifulSoup(
                     item.get_content(),
                     "html.parser",
                 )
-
-                text_parts.append(soup.get_text(" ", strip=True))
+                text = soup.get_text(" ", strip=True)
+                if text:
+                    text_parts.append(text)
 
         return "\n\n".join(text_parts).strip()
 
     except (ValueError, TypeError, OSError, KeyError) as exc:
-        print(f"[document_parser] Error reading EPUB: {exc}")
+        logger.error(f"[document_parser] Error reading EPUB: {exc}")
+        return ""
     except Exception as exc:
         logger.error(f"[document_parser] Error reading EPUB: {exc}")
         return ""
