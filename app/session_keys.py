@@ -1,7 +1,20 @@
 """Centralized Session State Keys for the Streamlit Application."""
 
+from enum import Enum
 
-class SessionKeys:
+
+class SessionKeys(str, Enum):
+    """Every key this application stores in ``st.session_state``.
+
+    The enum subclasses :class:`str` so a member can be used anywhere a plain
+    string key is expected -- ``st.session_state[SessionKeys.LANG]`` and
+    ``st.session_state["lang"]`` address the same slot, and a member can be
+    passed straight to a widget's ``key=`` argument.
+
+    Member values are the lower-cased member names, which keeps the mapping
+    obvious and makes the migration from the old bare-string keys mechanical.
+    """
+
     SESSION_ID = "session_id"
     AUTHENTICATED = "authenticated"
     USERNAME = "username"
@@ -39,3 +52,7 @@ class SessionKeys:
     AUDIT_LOG_PAGE = "audit_log_page"
     FORCE_DARK_CHARTS = "force_dark_charts"
     SESSION_START_TIME = "session_start_time"
+    COMPACT_VIEW = "compact_view"
+
+    def __str__(self) -> str:  # pragma: no cover - convenience for f-strings/logging
+        return self.value

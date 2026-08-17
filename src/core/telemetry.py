@@ -86,12 +86,11 @@ class TelemetryService:
         perform a fresh lookup from the database. Safe to call even
         when Redis is unavailable.
         """
-        from src.utils.redis_cache import get_cache
+        from src.utils.redis_cache import delete_cache
 
-        cache = get_cache()
         for key in (cls.CACHE_KEY_USER_COUNT, cls.CACHE_KEY_DOC_COUNT):
             try:
-                cache.delete(key)
+                delete_cache(key)
             except Exception as e:
                 logger.warning("Failed to clear telemetry cache key '%s': %s", key, e)
 

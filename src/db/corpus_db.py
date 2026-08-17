@@ -80,13 +80,18 @@ def _connect():
         path = str(FALLBACK_CORPUS_DB_PATH)
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
-    try:
-        conn = sqlite3.connect(path, check_same_thread=False)
-    except sqlite3.OperationalError:
-        path = str(FALLBACK_CORPUS_DB_PATH)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        conn = sqlite3.connect(path, check_same_thread=False)
-    conn.execute("PRAGMA foreign_keys = ON")
+    pool = _pool()
+    conn = pool.get(path)
+    if conn is None:
+        try:
+            conn = sqlite3.connect(path, check_same_thread=False)
+        except sqlite3.OperationalError:
+            path = str(FALLBACK_CORPUS_DB_PATH)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            conn = sqlite3.connect(path, check_same_thread=False)
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA journal_mode=WAL")
+        pool[path] = conn
 
     try:
         yield conn
@@ -101,8 +106,8 @@ def _connect():
             pass
 
 
-def close_connections() -> None:
-    """Close all pooled corpus connections for the current thread."""
+def close_connections(all_threads: bool = False) -> None:
+    """Close all pooled corpus connections for the current thread (or all threads if specified)."""
     pool = getattr(_connection_pool, "connections", {})
     for conn in pool.values():
         conn.close()
@@ -215,6 +220,9 @@ def init_corpus_db() -> None:
 
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_incidents_date ON plagiarism_incidents(date_flagged)"
         )
 
         # Issue #1359: Create FTS5 virtual table + sync triggers for full-text
@@ -706,6 +714,69 @@ def get_documents_by_class(class_section: str) -> list:
             "SELECT filename FROM documents WHERE class_section = ?", (class_section,)
         ).fetchall()
         return [r[0] for r in rows]
+
+
+def get_documents_since(since_iso: str) -> list[str]:
+    """Return filenames of non-deleted documents uploaded at/after ``since_iso``.
+
+    Used by the scheduled rescan job (``src.core.processing.rescan_recent_documents``)
+    to find documents added within the configured grace period so they can
+    be re-checked against the full corpus, rather than rescanning everything.
+
+    ``upload_date`` is stored as an ISO-8601 string (see ``add_document``),
+    so a lexicographic comparison is sufficient.
+    """
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT filename FROM documents
+            WHERE upload_date >= ?
+              AND (is_deleted IS NULL OR is_deleted = 0)
+            ORDER BY upload_date ASC
+            """,
+            (since_iso,),
+        ).fetchall()
+        return [r[0] for r in rows]
+
+
+def get_chunks_for_documents(
+    filenames: list[str],
+) -> dict[str, tuple[list[str], np.ndarray]]:
+    """Load chunk texts and embeddings for a set of documents, grouped by filename.
+
+    Returns a dict mapping ``filename -> (chunk_texts, embeddings)`` where
+    ``chunk_texts`` is ordered by ``chunk_index`` and ``embeddings`` is a
+    ``(num_chunks, 384)`` float32 array in the same order — matching the
+    ``chunked_docs`` / ``embeddings`` shapes expected by
+    ``src.core.similarity`` and ``src.core.faiss_index``.
+
+    Documents with no stored chunks are omitted from the result.
+    """
+    if not filenames:
+        return {}
+
+    placeholders = ",".join("?" for _ in filenames)
+    with _connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT filename, chunk_text, embedding
+            FROM chunks
+            WHERE filename IN ({placeholders})
+            ORDER BY filename ASC, chunk_index ASC
+            """,
+            tuple(filenames),
+        ).fetchall()
+
+    grouped: dict[str, tuple[list[str], list[np.ndarray]]] = {}
+    for filename, chunk_text, embedding_blob in rows:
+        texts, vectors = grouped.setdefault(filename, ([], []))
+        texts.append(chunk_text)
+        vectors.append(np.frombuffer(embedding_blob, dtype=np.float32))
+
+    result: dict[str, tuple[list[str], np.ndarray]] = {}
+    for filename, (texts, vectors) in grouped.items():
+        result[filename] = (texts, np.vstack(vectors) if vectors else np.empty((0, 384), dtype=np.float32))
+    return result
 
 
 def get_document_count_fast(include_deleted: bool = False) -> int:

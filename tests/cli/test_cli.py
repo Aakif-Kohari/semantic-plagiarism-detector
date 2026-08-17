@@ -61,6 +61,13 @@ def test_cli_scan_success(mock_embed, mock_model_info, temp_assignments_dir, cap
     assert match["similarity_score"] == 1.0
 
 
+@patch(
+    "src.core.embedding_model.get_embedding_model_info",
+    return_value=("all-MiniLM-L6-v2", 384),
+)
+@patch(
+    "src.core.embedding_model.embed_chunks", side_effect=MockDataFactory.embed_chunks
+)
 def test_cli_scan_success_text_format(
     mock_embed, mock_model_info, temp_assignments_dir, capsys
 ):
@@ -76,6 +83,13 @@ def test_cli_scan_success_text_format(
     assert "- doc1.txt <-> doc2.txt: 1.0000" in captured.out
 
 
+@patch(
+    "src.core.embedding_model.get_embedding_model_info",
+    return_value=("all-MiniLM-L6-v2", 384),
+)
+@patch(
+    "src.core.embedding_model.embed_chunks", side_effect=MockDataFactory.embed_chunks
+)
 def test_cli_scan_success_csv_format(
     mock_embed, mock_model_info, temp_assignments_dir, capsys
 ):
@@ -104,13 +118,14 @@ def test_cli_scan_empty_folder(tmp_path, capsys):
     d = tmp_path / "empty"
     d.mkdir()
 
-    exit_code = run_scan(str(d), threshold=0.8)
+    exit_code = run_scan(str(d), threshold=0.8, output_format="json")
     assert exit_code == 0
 
     captured = capsys.readouterr()
     report = json.loads(captured.out)
     assert report["documents_processed"] == 0
     assert len(report["matches"]) == 0
+
 
 
 @patch(
@@ -185,6 +200,24 @@ def test_cli_main_invalid_threshold():
         with pytest.raises(SystemExit) as excinfo:
             main()
         assert excinfo.value.code == 1
+
+
+def test_cli_scan_default_threshold(temp_assignments_dir):
+    """Test that run_scan defaults to PLAGIARISM_THRESHOLD when threshold argument is omitted."""
+    from src.core.similarity import PLAGIARISM_THRESHOLD
+
+    with patch("src.cli.run_scan") as mock_run_scan:
+        mock_run_scan.return_value = 0
+        with patch("sys.argv", ["cli.py", "scan", str(temp_assignments_dir)]):
+            with pytest.raises(SystemExit) as excinfo:
+                main()
+            assert excinfo.value.code == 0
+            mock_run_scan.assert_called_once_with(
+                str(temp_assignments_dir),
+                PLAGIARISM_THRESHOLD,
+                output_format="text",
+            )
+
 
 
 def test_cli_main_invalid_command():

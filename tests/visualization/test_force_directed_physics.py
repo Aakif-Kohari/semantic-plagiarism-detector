@@ -136,6 +136,20 @@ def test_calculate_force_directed_layout_standalone_function():
         assert len(pos[i]) == 2
 
 
+def test_force_directed_layout_returns_valid_coords():
+    """Verify force-directed layout returns finite coordinates for disconnected nodes."""
+    G = nx.Graph()
+    G.add_nodes_from(range(5))
+
+    pos = calculate_force_directed_layout(G)
+
+    assert len(pos) == 5
+    for coord in pos.values():
+        assert len(coord) == 2
+        assert np.isfinite(coord[0])
+        assert np.isfinite(coord[1])
+
+
 @pytest.mark.parametrize("invalid_k", [-0.5, 0.0, None])
 def test_force_directed_physics_fallback_invalid_spring_k(invalid_k):
     """Verify invalid or zero spring_k falls back safely to default heuristic calculation."""

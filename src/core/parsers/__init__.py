@@ -42,8 +42,10 @@ from src.core.parsers.docx_parser import (
 )
 from src.core.parsers.ocr_parser import (
     OCRDependencyError,
+    check_ocr_dependencies,
     extract_text_from_image,
 )
+
 from src.core.parsers.pdf_parser import (
     count_pdf_images,
     extract_pdf_metadata,
@@ -73,6 +75,7 @@ __all__ = [
     "ParsedDocxText",
     "CorruptedArchiveError",
     "OCRDependencyError",
+    "check_ocr_dependencies",
     "check_batch_rate_limit",
     "validate_ocr_dpi",
     "validate_ocr_language",

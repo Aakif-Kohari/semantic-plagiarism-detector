@@ -9,7 +9,9 @@ import logging
 import os
 import re
 import smtplib
+import time
 from datetime import datetime, timedelta, timezone
+from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any, Callable, Dict, List, Optional
@@ -87,10 +89,17 @@ def build_incident_row_html(inc: Dict[str, Any]) -> str:
     doc_b = inc.get("document_b", "Unknown")
     similarity = inc.get("similarity_score", 0.0)
     date_flagged = inc.get("date_flagged", "Unknown")
+    incident_id = inc.get("incident_id")
+    app_base_url = os.getenv("APP_BASE_URL", "http://localhost:8501").rstrip("/")
+
+    if incident_id:
+        doc_a_display = f'<a href="{app_base_url}/incident/{incident_id}" style="color: #007bff; text-decoration: none;">{doc_a}</a>'
+    else:
+        doc_a_display = doc_a
 
     return f"""
     <tr>
-        <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #333333;">{doc_a}</td>
+        <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #333333;">{doc_a_display}</td>
         <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #333333;">{doc_b}</td>
         <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #333333; font-weight: bold;">{similarity:.2%}</td>
         <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #666666;">{date_flagged}</td>
@@ -239,13 +248,155 @@ def format_daily_summary(
     )
 
 
+def generate_daily_summary_html(stats: Dict[str, Any]) -> str:
+    """Generate the HTML content for the daily plagiarism summary email.
+
+    Creates a responsive, email-client-safe HTML email with modern system
+    font stacks for optimal readability across all devices and email clients.
+
+    Args:
+        stats: Dictionary containing daily statistics:
+            - total_scans: int
+            - flagged_incidents: int
+            - avg_similarity: float
+            - top_pairs: List[Dict]
+
+    Returns:
+        Complete HTML string ready for email delivery.
+    """
+    total_scans = stats.get("total_scans", 0)
+    flagged_incidents = stats.get("flagged_incidents", 0)
+    avg_similarity = stats.get("avg_similarity", 0.0)
+    top_pairs = stats.get("top_pairs", [])
+
+    # Format date for the email header
+    report_date = datetime.now().strftime("%B %d, %Y")
+
+    # Build top pairs HTML rows
+    top_pairs_html = ""
+    for pair in top_pairs[:5]:  # Limit to top 5
+        doc_a = pair.get("doc_a", "Unknown")
+        doc_b = pair.get("doc_b", "Unknown")
+        similarity = pair.get("similarity", 0.0)
+
+        top_pairs_html += f"""
+        <tr>
+            <td style="padding: 12px; border-bottom: 1px solid #e2e8f0;">{doc_a}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #e2e8f0;">{doc_b}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #e2e8f0; font-weight: bold; color: #ef4444;">{similarity:.1%}</td>
+        </tr>
+        """
+
+    if not top_pairs_html:
+        top_pairs_html = """
+        <tr>
+            <td colspan="3" style="padding: 20px; text-align: center; color: #64748b;">
+                No high-similarity pairs detected today.
+            </td>
+        </tr>
+        """
+
+    # Issue #2576: Use robust system font stack for modern email clients
+    # Replaced "Arial, sans-serif" with comprehensive system font stack
+    # This ensures native rendering on macOS, iOS, Windows, Android, and Linux
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Daily Plagiarism Summary</title>
+    </head>
+    <body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8fafc;">
+            <tr>
+                <td align="center" style="padding: 40px 20px;">
+                    <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+                        
+                        <!-- Header -->
+                        <tr>
+                            <td style="background-color: #2563eb; padding: 30px; border-radius: 8px 8px 0 0; text-align: center;">
+                                <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+                                    📊 Daily Plagiarism Summary
+                                </h1>
+                                <p style="color: #bfdbfe; margin: 10px 0 0 0; font-size: 14px;">
+                                    {report_date}
+                                </p>
+                            </td>
+                        </tr>
+                        
+                        <!-- Stats Grid -->
+                        <tr>
+                            <td style="padding: 30px;">
+                                <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                                    <tr>
+                                        <td width="33%" style="padding: 15px; text-align: center; background-color: #f1f5f9; border-radius: 6px;">
+                                            <div style="font-size: 28px; font-weight: bold; color: #0f172a;">{total_scans:,}</div>
+                                            <div style="font-size: 12px; color: #64748b; text-transform: uppercase; margin-top: 5px;">Total Scans</div>
+                                        </td>
+                                        <td width="33%" style="padding: 15px; text-align: center; background-color: #fef2f2; border-radius: 6px;">
+                                            <div style="font-size: 28px; font-weight: bold; color: #ef4444;">{flagged_incidents:,}</div>
+                                            <div style="font-size: 12px; color: #64748b; text-transform: uppercase; margin-top: 5px;">Flagged</div>
+                                        </td>
+                                        <td width="33%" style="padding: 15px; text-align: center; background-color: #f0fdf4; border-radius: 6px;">
+                                            <div style="font-size: 28px; font-weight: bold; color: #16a34a;">{avg_similarity:.1%}</div>
+                                            <div style="font-size: 12px; color: #64748b; text-transform: uppercase; margin-top: 5px;">Avg Similarity</div>
+                                        </td>
+                                    </tr>
+                                </table>
+                            </td>
+                        </tr>
+                        
+                        <!-- Top Pairs Table -->
+                        <tr>
+                            <td style="padding: 0 30px 30px 30px;">
+                                <h2 style="font-size: 18px; color: #0f172a; margin-bottom: 15px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+                                    🔝 Top Flagged Pairs
+                                </h2>
+                                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden;">
+                                    <thead>
+                                        <tr style="background-color: #f8fafc;">
+                                            <th style="padding: 12px; text-align: left; font-size: 12px; color: #64748b; text-transform: uppercase;">Document A</th>
+                                            <th style="padding: 12px; text-align: left; font-size: 12px; color: #64748b; text-transform: uppercase;">Document B</th>
+                                            <th style="padding: 12px; text-align: left; font-size: 12px; color: #64748b; text-transform: uppercase;">Similarity</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {top_pairs_html}
+                                    </tbody>
+                                </table>
+                            </td>
+                        </tr>
+                        
+                        <!-- Footer -->
+                        <tr>
+                            <td style="padding: 20px 30px; background-color: #f8fafc; border-radius: 0 0 8px 8px; text-align: center;">
+                                <p style="margin: 0; font-size: 12px; color: #94a3b8;">
+                                    This is an automated message from the Semantic Plagiarism Detection System.
+                                </p>
+                            </td>
+                        </tr>
+                        
+                    </table>
+                </td>
+            </tr>
+        </table>
+    </body>
+    </html>
+    """
+
+    return html_content
+
+
 def send_email(
     to_emails: List[str],
     subject: str,
     html_body: str,
     status_callback: Optional[Callable[[bool, str], None]] = None,
+    attachment_filename: str = "daily_plagiarism_summary.csv",
     timeout: float = 10.0,
     reply_to: Optional[str] = None,
+
 ) -> bool:
     """
     Send an email using SMTP.
@@ -261,19 +412,6 @@ def send_email(
     Returns:
         True if email sent successfully, False otherwise
     """
-    smtp_server = os.getenv("SMTP_SERVER")
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
-    smtp_username = os.getenv("SMTP_USERNAME")
-    smtp_password = os.getenv("SMTP_PASSWORD")
-    from_email = os.getenv("FROM_EMAIL", smtp_username)
-
-    if not all([smtp_server, smtp_username, smtp_password]):
-        msg = "SMTP configuration incomplete. Please set SMTP_SERVER, SMTP_USERNAME, and SMTP_PASSWORD."
-        logger.error(msg)
-        if status_callback:
-            status_callback(False, msg)
-        return False
-
     if not to_emails:
         msg = "No recipients configured for daily summary email."
         logger.warning(msg)
@@ -289,52 +427,104 @@ def send_email(
     if reply_to and not email_pattern.match(reply_to):
         raise ValueError(f"Invalid reply-to email address: {reply_to}")
 
-    try:
-        msg_obj = MIMEMultipart("alternative")
-        msg_obj["Subject"] = subject
-        msg_obj["From"] = from_email
-        msg_obj["To"] = ", ".join(to_emails)
+    smtp_server = os.getenv("SMTP_SERVER")
+    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    smtp_username = os.getenv("SMTP_USERNAME")
+    smtp_password = os.getenv("SMTP_PASSWORD")
+    from_email = os.getenv("FROM_EMAIL", smtp_username)
 
-        if reply_to:
-            msg_obj["Reply-To"] = reply_to
-
-        html_part = MIMEText(html_body, "html")
-        msg_obj.attach(html_part)
-
-        if smtp_port == 465:
-            logger.debug(
-                "Using SMTP_SSL (implicit SSL) on port %d with timeout %.1fs",
-                smtp_port,
-                timeout,
-            )
-            with smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=timeout) as server:
-                server.login(smtp_username, smtp_password)
-                server.send_message(msg_obj)
-        else:
-            logger.debug(
-                "Using SMTP with STARTTLS on port %d with timeout %.1fs",
-                smtp_port,
-                timeout,
-            )
-            with smtplib.SMTP(smtp_server, smtp_port, timeout=timeout) as server:
-                server.starttls()
-                server.login(smtp_username, smtp_password)
-                server.send_message(msg_obj)
-
-        success_msg = (
-            f"Daily summary email sent successfully to {len(to_emails)} recipients."
-        )
-        logger.info(success_msg)
+    if not all([smtp_server, smtp_username, smtp_password]):
+        msg = "SMTP configuration incomplete. Please set SMTP_SERVER, SMTP_USERNAME, and SMTP_PASSWORD."
+        logger.error(msg)
         if status_callback:
-            status_callback(True, success_msg)
-        return True
-
-    except Exception as e:
-        error_msg = f"Failed to send daily summary email: {e}"
-        logger.error(error_msg)
-        if status_callback:
-            status_callback(False, error_msg)
+            status_callback(False, msg)
         return False
+
+
+
+    max_retries = 3
+    for attempt in range(max_retries + 1):
+        try:
+            msg_obj = MIMEMultipart("alternative")
+            msg_obj["Subject"] = subject
+            msg_obj["From"] = from_email
+            msg_obj["To"] = ", ".join(to_emails)
+
+            if reply_to:
+                msg_obj["Reply-To"] = reply_to
+
+            html_part = MIMEText(html_body, "html")
+            msg_obj.attach(html_part)
+            attachment = MIMEApplication(b"", _subtype="csv")
+            attachment.add_header(
+                "Content-Disposition",
+                "attachment",
+                filename=attachment_filename,
+            )
+            msg_obj.attach(attachment)
+
+            if smtp_port == 465:
+                logger.debug(
+                    "Using SMTP_SSL (implicit SSL) on port %d with timeout %.1fs (attempt %d/%d)",
+                    smtp_port,
+                    timeout,
+                    attempt + 1,
+                    max_retries + 1,
+                )
+                with smtplib.SMTP_SSL(
+                    smtp_server, smtp_port, timeout=timeout
+                ) as server:
+                    server.login(smtp_username, smtp_password)
+                    server.send_message(msg_obj)
+            else:
+                logger.debug(
+                    "Using SMTP with STARTTLS on port %d with timeout %.1fs (attempt %d/%d)",
+                    smtp_port,
+                    timeout,
+                    attempt + 1,
+                    max_retries + 1,
+                )
+                with smtplib.SMTP(smtp_server, smtp_port, timeout=timeout) as server:
+                    server.starttls()
+                    server.login(smtp_username, smtp_password)
+                    server.send_message(msg_obj)
+
+            success_msg = (
+                f"Daily summary email sent successfully to {len(to_emails)} recipients."
+            )
+            logger.info(success_msg)
+            if status_callback:
+                status_callback(True, success_msg)
+            return True
+
+        except (
+            ConnectionError,
+            TimeoutError,
+            smtplib.SMTPConnectError,
+            smtplib.SMTPException,
+            OSError,
+        ) as e:
+            # We catch connection/socket/SMTP related issues.
+            # OSError covers socket.timeout and low-level socket errors.
+            is_last_attempt = attempt == max_retries
+            attempt_msg = f"Attempt {attempt + 1} failed: {e}."
+            if not is_last_attempt:
+                backoff_time = 2**attempt
+                logger.warning(f"{attempt_msg} Retrying in {backoff_time}s...")
+                time.sleep(backoff_time)
+            else:
+                error_msg = f"Failed to send daily summary email after {max_retries + 1} attempts: {e}"
+                logger.error(error_msg)
+                if status_callback:
+                    status_callback(False, error_msg)
+                return False
+        except Exception as e:
+            # For non-network/validation exceptions, fail immediately
+            error_msg = f"Failed to send daily summary email: {e}"
+            logger.error(error_msg)
+            if status_callback:
+                status_callback(False, error_msg)
+            return False
 
 
 def send_daily_summary(

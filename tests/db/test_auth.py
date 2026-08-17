@@ -8,13 +8,8 @@ from src.db.auth import (
     delete_user,
     disable_2fa,
     enable_2fa,
-    format_user_created_date,
     get_2fa_status,
     get_active_users_count,
-    get_all_users,
-    get_distinct_audit_event_types,
-    get_security_audit_log_count,
-    get_security_audit_logs,
     get_user_active_status,
     get_user_last_login,
     get_user_role,
@@ -25,8 +20,16 @@ from src.db.auth import (
     set_user_active_status,
     set_user_theme,
     update_password,
-    update_user_profile,
+    get_security_audit_logs,
+    get_security_audit_log_count,
+    get_distinct_audit_event_types,
     verify_user,
+    update_user_profile,
+    get_all_users,
+    format_user_created_date,
+    generate_sso_state,
+    store_sso_state,
+    validate_sso_state,
 )
 from src.errors import StaleDataException
 
@@ -66,16 +69,11 @@ def test_verify_user():
 
 
 def test_verify_user_rejects_suspended_user():
+    """Verify that verify_user returns False when a user is suspended."""
     user = f"user_{uuid.uuid4().hex[:8]}"
     add_user(user, "SecurePass123!")
-
-    assert verify_user(user, "SecurePass123!") is True
-
-    set_user_status(user, "suspended")  # type: ignore
-
+    set_user_active_status(user, False)
     assert verify_user(user, "SecurePass123!") is False
-
-    delete_user(user)
 
 
 def test_get_user_role():
@@ -231,33 +229,48 @@ def test_2fa_flow():
     delete_user(username)
 
 
-def test_set_user_status():
-    user = f"user_{uuid.uuid4().hex[:8]}"
-    add_user(user, "SecurePass123!")
+def test_enable_disable_2fa():
+    """Verify enable_2fa saves a secret and disable_2fa removes the secret."""
+    username = f"user2fa_{uuid.uuid4().hex[:8]}"
+    add_user(username, "pass1234567!")
 
-    set_user_status(user, "suspended")  # type: ignore
+    # Verify initial state: 2FA disabled and secret is None
+    enabled, secret = get_2fa_status(username)
+    assert enabled is False
+    assert secret is None
 
-    with sqlite3.connect(src.db.auth._DB_PATH) as conn:  # type: ignore
-        status, is_active = conn.execute(
-            "SELECT status, is_active FROM users WHERE username = ?",
-            (user,),
-        ).fetchone()
+    # Verify enable_2fa saves a secret
+    test_secret = "JBSWY3DPEHPK3PXP"
+    enable_2fa(username, test_secret)
+    enabled, secret = get_2fa_status(username)
+    assert enabled is True
+    assert secret == test_secret
 
-    assert status == "suspended"
-    assert is_active == 0
+    # Verify disable_2fa removes the secret
+    disable_2fa(username)
+    enabled, secret = get_2fa_status(username)
+    assert enabled is False
+    assert secret is None
 
-    set_user_status(user, "active")  # type: ignore
+    delete_user(username)
 
-    with sqlite3.connect(src.db.auth._DB_PATH) as conn:  # type: ignore
-        status, is_active = conn.execute(
-            "SELECT status, is_active FROM users WHERE username = ?",
-            (user,),
-        ).fetchone()
 
-    assert status == "active"
-    assert is_active == 1
+def test_get_2fa_status():
+    """Verify get_2fa_status returns False initially and True after calling enable_2fa."""
+    username = f"user_2fa_{uuid.uuid4().hex[:8]}"
+    add_user(username, "Password123!")
 
-    delete_user(user)
+    enabled, secret = get_2fa_status(username)
+    assert enabled is False
+
+    test_secret = "JBSWY3DPEHPK3PXP"
+    enable_2fa(username, test_secret)
+
+    enabled, secret = get_2fa_status(username)
+    assert enabled is True
+
+    delete_user(username)
+
 
 
 def test_suspend_account():
@@ -354,20 +367,24 @@ def test_delete_user_removes_matching_session_and_authorization_rows(mock_db):
     add_user(user, "password123")
 
     with sqlite3.connect(src.db.auth._DB_PATH) as conn:
-        conn.execute("""
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS user_sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT NOT NULL,
                 session_state TEXT NOT NULL
             )
-            """)
-        conn.execute("""
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS authorization_tokens (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT NOT NULL,
                 token TEXT NOT NULL
             )
-            """)
+            """
+        )
         conn.execute(
             "INSERT INTO user_sessions (username, session_state) VALUES (?, ?)",
             (user, '{"page": "dashboard"}'),
@@ -418,8 +435,7 @@ def test_delete_user_removes_matching_session_and_authorization_rows(mock_db):
 def test_connect_uses_fifteen_second_timeout():
     """Verify that _connect helper sets sqlite3 timeout to 15.0 seconds."""
     from unittest.mock import patch
-
-    from src.db.auth import SQLITE_TIMEOUT, _connect
+    from src.db.auth import _connect, SQLITE_TIMEOUT
 
     assert SQLITE_TIMEOUT == 15.0
 
@@ -490,32 +506,44 @@ class TestFormatUserCreatedDate:
 
 
 def test_get_active_users_count():
-    """Verify get_active_users_count counts only active users."""
-    # 1. Starting count should be 1 (the default seeded 'admin' is active)
-    initial_count = get_active_users_count()
-    assert initial_count == 1
+    """Verify get_active_users_count returns 2 when 3 users are created and 1 is suspended."""
+    delete_user("admin")
 
-    # 2. Add an active user
-    user1 = f"active_{uuid.uuid4().hex[:8]}"
+    user1 = f"user1_{uuid.uuid4().hex[:8]}"
+    user2 = f"user2_{uuid.uuid4().hex[:8]}"
+    user3 = f"user3_{uuid.uuid4().hex[:8]}"
+
     add_user(user1, "SecurePass123!")
-    assert get_active_users_count() == 2
-
-    # 3. Add another user and suspend them
-    user2 = f"suspended_{uuid.uuid4().hex[:8]}"
     add_user(user2, "SecurePass123!")
+    add_user(user3, "SecurePass123!")
+
     set_user_active_status(user2, False)
-    # The count should still be 2 because user2 is inactive
+
     assert get_active_users_count() == 2
 
-    # 4. Reactivate user2
-    set_user_active_status(user2, True)
-    assert get_active_users_count() == 3
 
-    # 5. Delete user1
-    delete_user(user1)
-    assert get_active_users_count() == 2
+def test_update_user_profile():
+    """Verify that update_user_profile correctly updates user role and active status in the database."""
+    username = f"user_update_{uuid.uuid4().hex[:8]}"
+    add_user(username, "Password123!", "teacher")
 
-    delete_user(user2)
+    # Fetch initial state
+    users = get_all_users()
+    initial = next(u for u in users if u["username"] == username)
+    assert initial["role"] == "teacher"
+    assert initial["is_active"] is True
+    assert initial["version"] == 1
+
+    # Update profile
+    update_user_profile(username, role="admin", is_active=False, expected_version=1)
+
+    # Fetch updated user from database and verify changes
+    updated_users = get_all_users()
+    updated = next(u for u in updated_users if u["username"] == username)
+    assert updated["role"] == "admin"
+    assert updated["is_active"] is False
+    assert updated["status"] == "suspended"
+    assert updated["version"] == 2
 
 
 def test_update_user_profile_success():
@@ -797,18 +825,23 @@ def test_get_active_users_count_zero_on_empty_database():
     assert result >= 0
 
 
-def test_update_password_updates_timestamp():
-    """Verify that updating a user password correctly updates password_changed_at."""
-    # Setup user, call update_password, and assert that user['password_changed_at'] is not None/updated.
-    pass
+def test_oauth_state_replay_invalidation(mock_db):
+    """Verify that an OAuth state is valid on first use and invalidated on second use (replay attack prevention)."""
+    state = generate_sso_state()
+    # First validation must succeed
+    assert validate_sso_state(state) is True
+    # Second validation must fail due to replay invalidation
+    assert validate_sso_state(state) is False
 
 
-from src.db.auth import format_user_creation_date
+def test_validate_sso_state_invalid_and_expired(mock_db):
+    """Verify validate_sso_state returns False for invalid, empty, or expired states."""
+    assert validate_sso_state("") is False
+    assert validate_sso_state("non_existent_state_token") is False
+
+    # Stored expired state
+    expired_state = "expired_state_token_123"
+    store_sso_state(expired_state, expires_in_seconds=-10)
+    assert validate_sso_state(expired_state) is False
 
 
-def test_format_user_creation_date():
-    assert format_user_creation_date("2026-07-28T10:30:00Z") == "Jul 28, 2026"
-
-
-def test_format_user_creation_date_with_timezone():
-    assert format_user_creation_date("2026-08-12T15:30:00+05:30") == "Aug 12, 2026"

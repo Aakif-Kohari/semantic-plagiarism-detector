@@ -110,5 +110,12 @@ def faiss_write_lock(lock_path: str = "corpus.index.lock", timeout: int = None):
 # with_sqlite_retry now lives in src/db/common.py — re-exported here so
 # existing callers (`from src.core.concurrency import with_sqlite_retry`
 # and `from src.core import with_sqlite_retry`) keep working without a
-# second, drifting copy of the same retry logic.
-from src.db.common import with_sqlite_retry  # noqa: E402,F401
+# second, drifting copy of the same retry logic. A lazy re-export avoids a
+# circular import when src.db is imported first (src.db -> src.core ->
+# src.db.common).
+def __getattr__(name):
+    if name == "with_sqlite_retry":
+        from src.db.common import with_sqlite_retry
+
+        return with_sqlite_retry
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
