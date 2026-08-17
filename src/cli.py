@@ -6,6 +6,7 @@ Headless command-line interface for plagiarism detection automation.
 
 import argparse
 import json
+import logging
 import os
 import sys
 from io import BytesIO
@@ -25,6 +26,8 @@ from src.core.synchronization import verify_and_repair_index
 from src.core.text_chunking import chunk_documents
 from src.db.database_backup import optimize_database
 from src.core.export_engine import LMSExportEngine
+
+logger = logging.getLogger(__name__)
 
 
 def run_scan(
@@ -253,9 +256,7 @@ def run_prewarm(folder_path: str | None = None) -> int:
                 else:
                     redis_status = "fallback_in_memory"
             except Exception as cache_err:
-                sys.stderr.write(
-                    f"Warning: Redis cache population skipped: {cache_err}\n"
-                )
+                logger.warning("Redis cache population skipped: %s", cache_err)
 
             # Refresh telemetry cache
             try:
