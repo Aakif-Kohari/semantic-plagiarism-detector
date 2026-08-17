@@ -248,6 +248,146 @@ def format_daily_summary(
     )
 
 
+def generate_daily_summary_html(stats: Dict[str, Any]) -> str:
+    """Generate the HTML content for the daily plagiarism summary email.
+
+    Creates a responsive, email-client-safe HTML email with modern system
+    font stacks for optimal readability across all devices and email clients.
+
+    Args:
+        stats: Dictionary containing daily statistics:
+            - total_scans: int
+            - flagged_incidents: int
+            - avg_similarity: float
+            - top_pairs: List[Dict]
+
+    Returns:
+        Complete HTML string ready for email delivery.
+    """
+    total_scans = stats.get("total_scans", 0)
+    flagged_incidents = stats.get("flagged_incidents", 0)
+    avg_similarity = stats.get("avg_similarity", 0.0)
+    top_pairs = stats.get("top_pairs", [])
+
+    # Format date for the email header
+    report_date = datetime.now().strftime("%B %d, %Y")
+
+    # Build top pairs HTML rows
+    top_pairs_html = ""
+    for pair in top_pairs[:5]:  # Limit to top 5
+        doc_a = pair.get("doc_a", "Unknown")
+        doc_b = pair.get("doc_b", "Unknown")
+        similarity = pair.get("similarity", 0.0)
+
+        top_pairs_html += f"""
+        <tr>
+            <td style="padding: 12px; border-bottom: 1px solid #e2e8f0;">{doc_a}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #e2e8f0;">{doc_b}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #e2e8f0; font-weight: bold; color: #ef4444;">{similarity:.1%}</td>
+        </tr>
+        """
+
+    if not top_pairs_html:
+        top_pairs_html = """
+        <tr>
+            <td colspan="3" style="padding: 20px; text-align: center; color: #64748b;">
+                No high-similarity pairs detected today.
+            </td>
+        </tr>
+        """
+
+    # Issue #2576: Use robust system font stack for modern email clients
+    # Replaced "Arial, sans-serif" with comprehensive system font stack
+    # This ensures native rendering on macOS, iOS, Windows, Android, and Linux
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Daily Plagiarism Summary</title>
+    </head>
+    <body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8fafc;">
+            <tr>
+                <td align="center" style="padding: 40px 20px;">
+                    <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+                        
+                        <!-- Header -->
+                        <tr>
+                            <td style="background-color: #2563eb; padding: 30px; border-radius: 8px 8px 0 0; text-align: center;">
+                                <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+                                    📊 Daily Plagiarism Summary
+                                </h1>
+                                <p style="color: #bfdbfe; margin: 10px 0 0 0; font-size: 14px;">
+                                    {report_date}
+                                </p>
+                            </td>
+                        </tr>
+                        
+                        <!-- Stats Grid -->
+                        <tr>
+                            <td style="padding: 30px;">
+                                <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                                    <tr>
+                                        <td width="33%" style="padding: 15px; text-align: center; background-color: #f1f5f9; border-radius: 6px;">
+                                            <div style="font-size: 28px; font-weight: bold; color: #0f172a;">{total_scans:,}</div>
+                                            <div style="font-size: 12px; color: #64748b; text-transform: uppercase; margin-top: 5px;">Total Scans</div>
+                                        </td>
+                                        <td width="33%" style="padding: 15px; text-align: center; background-color: #fef2f2; border-radius: 6px;">
+                                            <div style="font-size: 28px; font-weight: bold; color: #ef4444;">{flagged_incidents:,}</div>
+                                            <div style="font-size: 12px; color: #64748b; text-transform: uppercase; margin-top: 5px;">Flagged</div>
+                                        </td>
+                                        <td width="33%" style="padding: 15px; text-align: center; background-color: #f0fdf4; border-radius: 6px;">
+                                            <div style="font-size: 28px; font-weight: bold; color: #16a34a;">{avg_similarity:.1%}</div>
+                                            <div style="font-size: 12px; color: #64748b; text-transform: uppercase; margin-top: 5px;">Avg Similarity</div>
+                                        </td>
+                                    </tr>
+                                </table>
+                            </td>
+                        </tr>
+                        
+                        <!-- Top Pairs Table -->
+                        <tr>
+                            <td style="padding: 0 30px 30px 30px;">
+                                <h2 style="font-size: 18px; color: #0f172a; margin-bottom: 15px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+                                    🔝 Top Flagged Pairs
+                                </h2>
+                                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden;">
+                                    <thead>
+                                        <tr style="background-color: #f8fafc;">
+                                            <th style="padding: 12px; text-align: left; font-size: 12px; color: #64748b; text-transform: uppercase;">Document A</th>
+                                            <th style="padding: 12px; text-align: left; font-size: 12px; color: #64748b; text-transform: uppercase;">Document B</th>
+                                            <th style="padding: 12px; text-align: left; font-size: 12px; color: #64748b; text-transform: uppercase;">Similarity</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {top_pairs_html}
+                                    </tbody>
+                                </table>
+                            </td>
+                        </tr>
+                        
+                        <!-- Footer -->
+                        <tr>
+                            <td style="padding: 20px 30px; background-color: #f8fafc; border-radius: 0 0 8px 8px; text-align: center;">
+                                <p style="margin: 0; font-size: 12px; color: #94a3b8;">
+                                    This is an automated message from the Semantic Plagiarism Detection System.
+                                </p>
+                            </td>
+                        </tr>
+                        
+                    </table>
+                </td>
+            </tr>
+        </table>
+    </body>
+    </html>
+    """
+
+    return html_content
+
+
 def send_email(
     to_emails: List[str],
     subject: str,
@@ -317,10 +457,10 @@ def send_email(
             msg_obj.attach(html_part)
             attachment = MIMEApplication(b"", _subtype="csv")
             attachment.add_header(
-              "Content-Disposition",
-              "attachment",
-              filename=attachment_filename,
-          )
+                "Content-Disposition",
+                "attachment",
+                filename=attachment_filename,
+            )
             msg_obj.attach(attachment)
 
             if smtp_port == 465:
@@ -331,7 +471,9 @@ def send_email(
                     attempt + 1,
                     max_retries + 1,
                 )
-                with smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=timeout) as server:
+                with smtplib.SMTP_SSL(
+                    smtp_server, smtp_port, timeout=timeout
+                ) as server:
                     server.login(smtp_username, smtp_password)
                     server.send_message(msg_obj)
             else:
@@ -355,13 +497,19 @@ def send_email(
                 status_callback(True, success_msg)
             return True
 
-        except (ConnectionError, TimeoutError, smtplib.SMTPConnectError, smtplib.SMTPException, OSError) as e:
+        except (
+            ConnectionError,
+            TimeoutError,
+            smtplib.SMTPConnectError,
+            smtplib.SMTPException,
+            OSError,
+        ) as e:
             # We catch connection/socket/SMTP related issues.
             # OSError covers socket.timeout and low-level socket errors.
-            is_last_attempt = (attempt == max_retries)
+            is_last_attempt = attempt == max_retries
             attempt_msg = f"Attempt {attempt + 1} failed: {e}."
             if not is_last_attempt:
-                backoff_time = 2 ** attempt
+                backoff_time = 2**attempt
                 logger.warning(f"{attempt_msg} Retrying in {backoff_time}s...")
                 time.sleep(backoff_time)
             else:
