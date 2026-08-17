@@ -88,10 +88,17 @@ def build_incident_row_html(inc: Dict[str, Any]) -> str:
     doc_b = inc.get("document_b", "Unknown")
     similarity = inc.get("similarity_score", 0.0)
     date_flagged = inc.get("date_flagged", "Unknown")
+    incident_id = inc.get("incident_id")
+    app_base_url = os.getenv("APP_BASE_URL", "http://localhost:8501").rstrip("/")
+
+    if incident_id:
+        doc_a_display = f'<a href="{app_base_url}/incident/{incident_id}" style="color: #007bff; text-decoration: none;">{doc_a}</a>'
+    else:
+        doc_a_display = doc_a
 
     return f"""
     <tr>
-        <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #333333;">{doc_a}</td>
+        <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #333333;">{doc_a_display}</td>
         <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #333333;">{doc_b}</td>
         <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #333333; font-weight: bold;">{similarity:.2%}</td>
         <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #666666;">{date_flagged}</td>

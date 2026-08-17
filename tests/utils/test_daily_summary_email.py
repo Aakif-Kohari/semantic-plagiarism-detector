@@ -431,6 +431,31 @@ class TestEmailTemplateHelpers:
         assert "border-collapse: collapse" in html
         assert "A" in html
 
+    def test_build_incident_row_html_with_incident_link(self):
+        """Test build_incident_row_html wraps Document A with anchor tag when incident_id exists."""
+        inc = {
+            "incident_id": 42,
+            "document_a": "DocA.txt",
+            "document_b": "DocB.txt",
+            "similarity_score": 0.85,
+            "date_flagged": "2026-08-17"
+        }
+        html = build_incident_row_html(inc)
+        assert '<a href="http://localhost:8501/incident/42"' in html
+        assert "DocA.txt" in html
+
+    def test_build_incident_row_html_without_incident_link(self):
+        """Test build_incident_row_html outputs plaintext Document A when incident_id is missing."""
+        inc = {
+            "document_a": "DocA.txt",
+            "document_b": "DocB.txt",
+            "similarity_score": 0.85,
+            "date_flagged": "2026-08-17"
+        }
+        html = build_incident_row_html(inc)
+        assert "<a href=" not in html
+        assert "DocA.txt" in html
+
     def test_build_incident_row_html_missing_fields(self):
         """Test row generation handles missing dictionary keys gracefully."""
         inc = {"document_a": "OnlyDocA"}
