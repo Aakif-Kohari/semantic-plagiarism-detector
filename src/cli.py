@@ -8,6 +8,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from io import BytesIO
 from pathlib import Path
 
@@ -36,6 +37,8 @@ def run_scan(
     Scans a folder, processes the documents, runs plagiarism detection,
     and prints the report in the requested output format to stdout.
     """
+    start_time = time.time()
+
     if not os.path.exists(folder_path):
         sys.stderr.write(f"Error: Folder '{folder_path}' does not exist.\n")
         return 1
@@ -115,10 +118,13 @@ def run_scan(
             sys.stderr.write(f"Error during plagiarism detection pipeline: {e}\n")
             return 1
 
+    execution_time_seconds = time.time() - start_time
+
     report = {
         "documents_processed": num_processed,
         "threshold": threshold,
         "matches": matches,
+        "execution_time_seconds": execution_time_seconds,
     }
 
     if output_format == "html":
@@ -145,6 +151,7 @@ def run_scan(
     else:  # text
         print(f"Documents Processed: {num_processed}")
         print(f"Similarity Threshold: {threshold}")
+        print(f"Execution Time: {execution_time_seconds:.2f} seconds")
         if matches:
             print("Matches Found:")
             for m in matches:
