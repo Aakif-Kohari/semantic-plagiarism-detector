@@ -58,6 +58,12 @@ class IncidentsRepository(BaseRepository):
 incidents_repo = IncidentsRepository(DEFAULT_DB_PATH)
 
 
+def get_incidents_repo() -> IncidentsRepository:
+    """Return singleton instance of IncidentsRepository."""
+    return incidents_repo
+
+
+
 def configure_db_path(db_path: str | Path) -> None:
     """Configure the SQLite database path used by the incidents module."""
     global DEFAULT_DB_PATH
@@ -93,8 +99,23 @@ def _severity_rank(flag: Mapping[str, Any]) -> str:
 
 
 def build_incident_id(doc_a: str, doc_b: str) -> str:
+    """Build a deterministic, order-independent incident ID for a document pair.
+
+    .. warning::
+        **Breaking change**: prior to this fix, the hash input used a bare
+        ``"0"`` digit as the separator between filenames (``f"{first}0{second}"``).
+        Because filenames may themselves contain digits, this created hash
+        collisions between distinct document pairs — e.g. ``("doc10", "doc2")``
+        and ``("doc1", "0doc2")`` both hashed the input ``"doc100doc2"``.
+        The separator is now ``"||"``, a sequence very unlikely to appear in
+        a real filename. This changes the resulting ``INC-...`` ID for every
+        existing incident: any incident ID computed with the old separator
+        will no longer match one computed with the same document pair going
+        forward. Existing stored incident records are not automatically
+        migrated by this change.
+    """
     first, second = _normalise_pair(doc_a, doc_b)
-    digest = hashlib.sha256(f"{first}0{second}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(f"{first}||{second}".encode("utf-8")).hexdigest()
     return f"INC-{digest[:12].upper()}"
 
 
@@ -1176,3 +1197,11 @@ def log_incident(
         if res.incident_id == target_id:
             return res
     return results[0]
+
+
+def get_incidents_repo(db_path: str | Path | None = None) -> IncidentsRepository:
+    """Helper to instantiate an IncidentsRepository."""
+    if db_path is None:
+        return IncidentsRepository()
+    return IncidentsRepository(db_path)
+

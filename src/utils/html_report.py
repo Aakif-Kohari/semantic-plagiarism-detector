@@ -2,9 +2,32 @@
 
 from typing import Any, Mapping, Sequence
 
+from src.core.config import severity_from_score
 
-def generate_html_report(incidents: Sequence[Mapping[str, Any]]) -> str:
-    """Generate a clean, standardized HTML report for plagiarism incidents."""
+
+def generate_html_report(
+    incidents: Sequence[Mapping[str, Any]],
+    *,
+    min_match_length: int = 0,
+) -> str:
+    """Generate a clean, standardized HTML report for plagiarism incidents.
+
+    Args:
+        incidents: A sequence of incident dictionaries (or mappings).
+        min_match_length: If > 0, only incidents with a ``matched_length``
+            field greater than or equal to this value are included in the
+            report. This ensures the exported HTML matches the UI view when
+            the user has applied a min-match-length filter (Issue #2474).
+
+    Returns:
+        A string containing the complete HTML document.
+    """
+    if min_match_length > 0:
+        incidents = [
+            i for i in incidents
+            if int(i.get("matched_length", 0) or 0) >= min_match_length
+        ]
+
     if not incidents:
         return "<p>No plagiarism incidents to report.</p>"
 
@@ -14,16 +37,14 @@ def generate_html_report(incidents: Sequence[Mapping[str, Any]]) -> str:
         doc_b = incident.get("doc_b", "Unknown")
         similarity = incident.get("similarity", 0.0)
 
-        # Calculate severity rank
-        if similarity > 0.90:
-            severity = "CRITICAL"
-            color = "#ff4b4b"
-        elif similarity > 0.80:
-            severity = "HIGH"
-            color = "#ffa500"
-        else:
-            severity = "MODERATE"
-            color = "#21c55d"
+        # Use the shared severity logic so the report stays in sync with the
+        # UI when the similarity thresholds are adjusted (Issue #2443).
+        severity = severity_from_score(similarity)
+        color = {
+            "High": "#ff4b4b",
+            "Medium": "#ffa500",
+            "Low": "#21c55d",
+        }.get(severity, "#21c55d")
 
         rows.append(
             f"<tr>"

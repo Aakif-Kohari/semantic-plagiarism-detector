@@ -25,7 +25,7 @@ networkx>=3.0                    # Plagiarism network graphs
 argon2-cffi>=23.1.0              # Password hashing
 
 # ── Web UI ────────────────────────────────────────────────────────────────────
-streamlit>=1.60.0                # Dashboard framework
+streamlit>=1.61.1                # Dashboard framework
 bcrypt>=4.0.0                    # Password hashing for auth
 pyotp>=2.10.0                     # TOTP generator/verifier for 2FA
 qrcode>=7.4.2                    # Local QR code generator for 2FA setup
@@ -50,6 +50,7 @@ networkx>=3.0                     # Plagiarism cluster detection
 # ── Development & Testing ─────────────────────────────────────────────────────
 faker>=20.0.0                   # Fake data generation for mock essay utility (#255)
 hypothesis>=6.100.0             # Property-based testing for filename sanitization (#963)
+jsonschema>=4.20.0               # JSON Schema validation for API error-response tests
 
 # ── Caching & Session Management ───────────────────────────────────────────────
 
@@ -83,3 +84,5 @@ hiredis>=2.3.0                  # C-extension Redis parser for faster RQ job deq
 slowapi
 
 streamlit-autorefresh>=1.0.1
+
+

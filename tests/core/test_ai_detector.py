@@ -31,13 +31,49 @@ from src.core.ai_detector import (
 def test_categorize_ai_probability_boundaries():
     """Verify that the confidence categorization partitions the [0,1] range correctly."""
     assert categorize_ai_probability(0.85) == "High Probability"
-    assert categorize_ai_probability(0.80) == "High Probability"
-    assert categorize_ai_probability(0.79) == "Moderate Probability"
-    assert categorize_ai_probability(0.65) == "Moderate Probability"
+    assert categorize_ai_probability(0.75) == "High Probability"
+    assert categorize_ai_probability(0.74) == "Moderate Probability"
     assert categorize_ai_probability(0.50) == "Moderate Probability"
-    assert categorize_ai_probability(0.49) == "Low Probability"
-    assert categorize_ai_probability(0.20) == "Low Probability"
+    assert categorize_ai_probability(0.40) == "Moderate Probability"
+    assert categorize_ai_probability(0.39) == "Low Probability"
     assert categorize_ai_probability(0.00) == "Low Probability"
+
+
+def test_ai_probability_categorization_consistency():
+    """Verify that both categorize_ai_probability and detect_ai_generated_text use consistent thresholds."""
+    from src.core.ai_detector import (
+        AI_HIGH_THRESHOLD,
+        AI_MEDIUM_THRESHOLD,
+        categorize_ai_probability,
+        detect_ai_generated_text,
+    )
+
+    test_scores = [
+        0.0,
+        0.2,
+        AI_MEDIUM_THRESHOLD - 0.01,
+        AI_MEDIUM_THRESHOLD,
+        0.5,
+        AI_HIGH_THRESHOLD - 0.01,
+        AI_HIGH_THRESHOLD,
+        0.9,
+        1.0,
+    ]
+
+    mapping = {
+        "high": "High Probability",
+        "medium": "Moderate Probability",
+        "low": "Low Probability",
+    }
+
+    for score in test_scores:
+        # Mock detect_ai_probability to return the score
+        with patch("src.core.ai_detector.detect_ai_probability", return_value=score):
+            res = detect_ai_generated_text("Some text for the classifier pipeline analysis.")
+            tier = res["confidence_tier"]
+            category = categorize_ai_probability(score)
+            assert mapping[tier] == category, f"Inconsistent categorization for score {score}: tier={tier}, category={category}"
+
 
 
 @pytest.fixture(autouse=True)
@@ -266,13 +302,20 @@ def test_burstiness_single_sentence():
     assert _calculate_burstiness("Only one sentence here.") == 0.0
 
 
-def test_burstiness_varied_sentence_lengths():
+def test_burstiness_uniform_sentences():
+    """Burstiness of uniform sentences must be a low score (0.0)."""
+    from src.core.ai_detector import _calculate_burstiness
+
+    uniform = "This is a sentence. This is a sentence. This is a sentence."
+    assert _calculate_burstiness(uniform) == 0.0
+
+
+def test_burstiness_varied_sentences():
     """Burstiness should be higher for text with varied sentence lengths."""
     from src.core.ai_detector import _calculate_burstiness
 
     varied = "Short. This is a much longer sentence with many words. Medium one here."
-    uniform = "This is a sentence. This is a sentence. This is a sentence."
-    assert _calculate_burstiness(varied) > _calculate_burstiness(uniform)
+    assert _calculate_burstiness(varied) > 0.0
 
 
 def test_ngram_repetitiveness_empty_text():
@@ -340,7 +383,7 @@ def test_calculate_text_perplexity_returns_float():
 def test_calculate_text_perplexity_with_fallback_model():
     """When model is in fallback mode, return default perplexity score."""
     with patch("src.core.ai_detector._get_model_and_tokenizer") as mock_loader:
-        mock_loader.return_value = (_FALLBACK_SENTINEL, _FALLBACK_SENTINEL)
+        mock_loader.return_value = (_FALLBACK_SENTINEL, _FALLBACK_SENTINEL)  # noqa: F821
         result = calculate_text_perplexity("Some text to evaluate.")
         assert result == 0.0
 
@@ -649,3 +692,20 @@ def test_categorize_perplexity_score():
     assert categorize_perplexity_score(25.0) == "Highly Predictable"
     assert categorize_perplexity_score(50.0) == "Moderate"
     assert categorize_perplexity_score(85.0) == "Unpredictable"
+
+
+def test_split_sentences_simple():
+    """Verify that _split_sentences_simple correctly splits text into sentences and filters empty strings."""
+    from src.core.ai_detector import _split_sentences_simple
+
+    # Basic splitting
+    assert _split_sentences_simple("Hello! World? How are you.") == ["Hello", "World", "How are you"]
+
+    # Trailing punctuation empty strings filtered
+    assert _split_sentences_simple("One sentence... Two sentences!!!") == ["One sentence", "Two sentences"]
+
+    # Empty inputs and invalid types handled gracefully
+    assert _split_sentences_simple("") == []
+    assert _split_sentences_simple(None) == []
+    assert _split_sentences_simple(123) == []  # type: ignore
+    

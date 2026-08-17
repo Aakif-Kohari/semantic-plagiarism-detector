@@ -14,15 +14,15 @@ Features:
 
 import json
 import time
-import uuid
+import uuid  # noqa: F401
 from pathlib import Path
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Set, Tuple
+from datetime import datetime, timedelta  # noqa: F401
+from typing import Dict, List, Any, Optional, Set, Tuple  # noqa: F401
 from dataclasses import dataclass, field, asdict
 from enum import Enum
-from collections import defaultdict, Counter
+from collections import defaultdict, Counter  # noqa: F401
 import streamlit as st
-import pandas as pd
+import pandas as pd  # noqa: F401
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -536,7 +536,7 @@ def render_case_management(hub: CollaborationHub, user: str):
             with col2:
                 # Actions
                 if case.assigned_to is None:
-                    if st.button(f"📋 Assign to me", key=f"assign_{case.id}"):
+                    if st.button(f"📋 Assign to me", key=f"assign_{case.id}"):  # noqa: F541
                         hub.assign_case(case.id, user)
                         st.rerun()
                 
@@ -547,13 +547,13 @@ def render_case_management(hub: CollaborationHub, user: str):
                         status_options,
                         key=f"status_{case.id}"
                     )
-                    if st.button(f"Update", key=f"update_{case.id}"):
+                    if st.button(f"Update", key=f"update_{case.id}"):  # noqa: F541
                         hub.update_case_status(case.id, CaseStatus(new_status))
                         st.rerun()
                 
                 # Add comment
                 comment = st.text_area("Add Comment", key=f"comment_{case.id}", placeholder="Enter comment...")
-                if st.button(f"💬 Add Comment", key=f"add_comment_{case.id}"):
+                if st.button(f"💬 Add Comment", key=f"add_comment_{case.id}"):  # noqa: F541
                     if comment:
                         hub.add_comment(case.id, comment, user)
                         st.rerun()
@@ -585,7 +585,7 @@ def render_discussion_forum(hub: CollaborationHub, user: str):
             
             # Add message
             new_message = st.text_area("Type your message", key=f"msg_{disc_id}", placeholder="Enter message...")
-            if st.button(f"📤 Send", key=f"send_{disc_id}"):
+            if st.button(f"📤 Send", key=f"send_{disc_id}"):  # noqa: F541
                 if new_message:
                     hub.add_message_to_discussion(disc_id, new_message, user)
                     st.rerun()
@@ -690,7 +690,7 @@ def render_queue_management(hub: CollaborationHub):
             if available_cases:
                 case_options = [f"{c.title} ({c.id})" for c in available_cases]
                 selected = st.selectbox("Add case to queue", case_options, key=f"add_to_{queue.id}")
-                if st.button(f"➕ Add", key=f"add_{queue.id}"):
+                if st.button(f"➕ Add", key=f"add_{queue.id}"):  # noqa: F541
                     case_id = selected.split("(")[-1].replace(")", "")
                     hub.add_to_queue(queue.id, case_id)
                     st.rerun()

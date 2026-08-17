@@ -42,7 +42,7 @@ except ImportError:
     BAYES_OPT_AVAILABLE = False
 
 try:
-    from scipy import stats
+    from scipy import stats  # noqa: F401
 
     SCIPY_AVAILABLE = True
 except ImportError:
@@ -260,8 +260,8 @@ class AutoMLOptimizer:
         # Evaluate
         y_pred = self.classifier.predict(X_test)
         accuracy = accuracy_score(y_test, y_pred)
-        precision = precision_score(y_test, y_pred, zero_division=0)
-        recall = recall_score(y_test, y_pred, zero_division=0)
+        precision = precision_score(y_test, y_pred, zero_division=0)  # noqa: F841
+        recall = recall_score(y_test, y_pred, zero_division=0)  # noqa: F841
         f1 = f1_score(y_test, y_pred, zero_division=0)
 
         print(f"Model trained - Accuracy: {accuracy:.3f}, F1: {f1:.3f}")
@@ -699,10 +699,10 @@ class AutoOptimizationIntegration:
         predictions = upper_tri > threshold
 
         # Calculate metrics
-        tp = np.sum((predictions == True) & (ground_truth == True))
-        fp = np.sum((predictions == True) & (ground_truth == False))
-        fn = np.sum((predictions == False) & (ground_truth == True))
-        tn = np.sum((predictions == False) & (ground_truth == False))
+        tp = np.sum((predictions == True) & (ground_truth == True))  # noqa: E712
+        fp = np.sum((predictions == True) & (ground_truth == False))  # noqa: E712
+        fn = np.sum((predictions == False) & (ground_truth == True))  # noqa: E712
+        tn = np.sum((predictions == False) & (ground_truth == False))  # noqa: E712
 
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0
         recall = tp / (tp + fn) if (tp + fn) > 0 else 0

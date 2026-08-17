@@ -1,13 +1,15 @@
 import json
 import pytest
-from pathlib import Path
-from unittest.mock import patch, mock_open
+from pathlib import Path  # noqa: F401
+from unittest.mock import patch, mock_open  # noqa: F401
 
 from src.core.app_config import (
     DEFAULT_APP_TITLE,
     BrandingConfig,
     clear_branding_config_cache,
+    get_api_support_contact,
     get_app_title,
+    get_backup_idle_timeout,
     get_branding_config,
     get_lock_timeout,
     load_branding_config,
@@ -264,3 +266,115 @@ class TestGetBrandingConfigCache:
 
             get_branding_config()
             assert mock_load.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# Tests for get_api_support_contact
+# ---------------------------------------------------------------------------
+
+
+def test_api_support_contact_omits_url_and_email_when_unset(monkeypatch):
+    """Acceptance criteria: falls back to empty/omitted if unset -- only
+    'name' should be present when neither env var is configured."""
+    monkeypatch.delenv("API_SUPPORT_URL", raising=False)
+    monkeypatch.delenv("API_SUPPORT_EMAIL", raising=False)
+
+    contact = get_api_support_contact()
+
+    assert contact == {"name": "API Support"}
+    assert "url" not in contact
+    assert "email" not in contact
+
+
+def test_api_support_contact_uses_configured_email(monkeypatch):
+    monkeypatch.delenv("API_SUPPORT_URL", raising=False)
+    monkeypatch.setenv("API_SUPPORT_EMAIL", "ithelp@stanford.edu")
+
+    contact = get_api_support_contact()
+
+    assert contact["email"] == "ithelp@stanford.edu"
+    assert "url" not in contact
+
+
+def test_api_support_contact_uses_configured_url(monkeypatch):
+    monkeypatch.setenv("API_SUPPORT_URL", "https://it.stanford.edu/support")
+    monkeypatch.delenv("API_SUPPORT_EMAIL", raising=False)
+
+    contact = get_api_support_contact()
+
+    assert contact["url"] == "https://it.stanford.edu/support"
+    assert "email" not in contact
+
+
+def test_api_support_contact_uses_both_when_configured(monkeypatch):
+    monkeypatch.setenv("API_SUPPORT_URL", "https://it.stanford.edu/support")
+    monkeypatch.setenv("API_SUPPORT_EMAIL", "ithelp@stanford.edu")
+
+    contact = get_api_support_contact()
+
+    assert contact == {
+        "name": "API Support",
+        "url": "https://it.stanford.edu/support",
+        "email": "ithelp@stanford.edu",
+    }
+
+
+def test_api_support_contact_treats_whitespace_only_as_unset(monkeypatch):
+    monkeypatch.setenv("API_SUPPORT_URL", "   ")
+    monkeypatch.setenv("API_SUPPORT_EMAIL", "   ")
+
+    contact = get_api_support_contact()
+
+    assert contact == {"name": "API Support"}
+
+
+def test_api_support_contact_no_longer_hardcodes_example_dot_com(monkeypatch):
+    """Regression test: the previous hardcoded placeholder
+    ('support@example.com' / 'http://example.com/support') must never be
+    returned -- every deployment's contact info must come from its own
+    environment configuration, not a shared example.com fallback."""
+    monkeypatch.delenv("API_SUPPORT_URL", raising=False)
+    monkeypatch.delenv("API_SUPPORT_EMAIL", raising=False)
+
+    contact = get_api_support_contact()
+
+    assert contact.get("email") != "support@example.com"
+    assert contact.get("url") != "http://example.com/support"
+
+
+# ---------------------------------------------------------------------------
+# Tests for get_backup_idle_timeout
+# ---------------------------------------------------------------------------
+
+
+def test_get_backup_idle_timeout_default(monkeypatch):
+    monkeypatch.delenv("BACKUP_IDLE_TIMEOUT_MINUTES", raising=False)
+    assert get_backup_idle_timeout() == 30 * 60
+
+
+def test_get_backup_idle_timeout_valid(monkeypatch):
+    monkeypatch.setenv("BACKUP_IDLE_TIMEOUT_MINUTES", "45")
+    assert get_backup_idle_timeout() == 45 * 60
+
+
+def test_get_backup_idle_timeout_negative_logs_warning_and_defaults_to_30(
+    monkeypatch, caplog
+):
+    monkeypatch.setenv("BACKUP_IDLE_TIMEOUT_MINUTES", "-10")
+    with caplog.at_level("WARNING"):
+        result = get_backup_idle_timeout()
+
+    assert result == 30 * 60
+    assert "Invalid backup timeout -10, defaulting to 30" in caplog.text
+
+
+def test_get_backup_idle_timeout_zero_logs_warning_and_defaults_to_30(
+    monkeypatch, caplog
+):
+    monkeypatch.setenv("BACKUP_IDLE_TIMEOUT_MINUTES", "0")
+    with caplog.at_level("WARNING"):
+        result = get_backup_idle_timeout()
+
+    assert result == 30 * 60
+    assert "Invalid backup timeout 0, defaulting to 30" in caplog.text
+

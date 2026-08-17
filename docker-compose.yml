@@ -19,6 +19,10 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - REDIS_HOST=redis
       - APP_BASE_URL=http://localhost:8501
+      # Scheduled plagiarism rescan (disabled unless set > 0). See
+      # src/core/scheduler.py and .env.example for details.
+      - RESCAN_INTERVAL_MINUTES=${RESCAN_INTERVAL_MINUTES:-0}
+      - RESCAN_GRACE_PERIOD_MINUTES=${RESCAN_GRACE_PERIOD_MINUTES:-60}
     volumes:
       - ./.streamlit:/app/.streamlit
     depends_on:

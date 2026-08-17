@@ -590,6 +590,16 @@ Each upgrade:
 Existing database files should not be deleted during an application upgrade.
 
 ---
+## Linting
+
+Before submitting a pull request, run the linting checks to ensure the code follows the project's formatting and type-checking standards.
+
+Run all lint checks with:
+
+```bash
+make lint
+```
+
 
 ## Documentation
 
@@ -597,6 +607,7 @@ Existing database files should not be deleted during an application upgrade.
 - [API Reference](docs/API.md)
 - [Document Parsing & Formats](docs/PARSING.md)
 - [NLP Architecture & Similarity Algorithm Guide](docs/ALGORITHMS.md)
+- [Single Sign-On (SSO) Setup](docs/SSO_SETUP.md)
 
 
 - [Bulk Export Formats & Data Fields](docs/EXPORTS.md)

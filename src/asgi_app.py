@@ -11,12 +11,16 @@ import os
 import time
 import uuid
 from collections.abc import Iterable
+from contextlib import asynccontextmanager
 
 import streamlit as st
 from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
+
+from src.core.scheduler import start_scheduler, stop_scheduler
+from src.utils.tracing import init_tracer_provider, _tracer_provider
 
 DEFAULT_MAX_REQUEST_BYTES = 52_428_800
 JSON_API_PREFIX = "/api/"
@@ -332,6 +336,26 @@ class TokenBucketRateLimiter(BaseHTTPMiddleware):
         )
 
 
+@asynccontextmanager
+async def _lifespan(app):
+    """Start/stop the scheduled plagiarism-rescan background job and OpenTelemetry provider.
+
+    Wraps ``src.core.scheduler.RescanScheduler``, which re-checks recently
+    uploaded documents against the full corpus on a configurable interval
+    so cross-submission plagiarism that only becomes apparent once a later
+    document is uploaded still gets caught (and reviewers get notified via
+    the existing webhook layer).
+    """
+    init_tracer_provider()
+    await start_scheduler()
+    try:
+        yield
+    finally:
+        await stop_scheduler()
+        if _tracer_provider and hasattr(_tracer_provider, "shutdown"):
+            _tracer_provider.shutdown()
+
+
 app = st.App(
     "app/streamlit_app.py",
     middleware=[
@@ -342,4 +366,5 @@ app = st.App(
         Middleware(JSONContentTypeMiddleware),
         Middleware(TokenBucketRateLimiter),
     ],
+    lifespan=_lifespan,
 )

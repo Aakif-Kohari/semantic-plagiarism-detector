@@ -69,8 +69,12 @@ OPTIMIZE_TIMEOUT_SECONDS: float = 5.0
 CHECKPOINT_TIMEOUT_SECONDS: float = 10.0
 
 
-class BackupRestoreSecurityError(ValueError):
-    """Raised when a backup fails pre-restore security validation."""
+class BackupRestoreSecurityError(Exception):
+    """Raised when a backup fails pre-restore security validation.
+
+    Inherits from Exception (not ValueError) so callers catching ValueError
+    do not accidentally suppress security errors.
+    """
 
 
 _ALLOWED_DB_DIR = Path(__file__).parent.parent.parent.resolve()

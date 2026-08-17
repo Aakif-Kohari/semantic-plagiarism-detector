@@ -152,9 +152,27 @@ def migration_010_add_document_owner(
     The ``owner`` column stores the username of the account that uploaded the
     document, enabling ``get_document_count_by_user()`` analytics without
     requiring a join against the users table.
+
+    Uses ``DEFAULT 'system'`` rather than leaving new rows NULL: SQLite
+    backfills that default into every pre-existing row at the moment this
+    ``ALTER TABLE`` runs, so a database migrating from an older schema
+    version won't end up with a mix of NULL and populated owners for its
+    existing documents.
+
+    Note this default only applies retroactively to rows that exist at
+    migration time (and to any future INSERT that omits the ``owner``
+    column entirely). ``add_document()`` always explicitly includes
+    ``owner`` in its INSERT statement and will still pass through
+    ``None`` -> SQL NULL for callers that don't supply one, so
+    NULL owners remain a real, ongoing possibility going forward. See
+    ``get_document_count_by_user()`` in ``src/db/corpus_db.py``, which is
+    NULL-safe by construction (``WHERE owner = ?`` never matches a NULL
+    row, so it simply excludes them rather than crashing).
     """
     if not column_exists(connection, "documents", "owner"):
-        connection.execute("ALTER TABLE documents ADD COLUMN owner TEXT")
+        connection.execute(
+            "ALTER TABLE documents ADD COLUMN owner TEXT DEFAULT 'system'"
+        )
     # Index for fast per-user COUNT queries
     connection.execute("""
         CREATE INDEX IF NOT EXISTS idx_documents_owner

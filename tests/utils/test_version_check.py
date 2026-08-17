@@ -198,6 +198,36 @@ class TestCheckForUpdateSync:
             result = check_for_update_sync(local_version="1.0.0")
         assert result is None
 
+    def test_uses_asyncio_run_and_no_event_loop_leak(self) -> None:
+        """Verify that check_for_update_sync executes via asyncio.run without leaking event loops."""
+        with patch.object(
+            _vc_mod, "fetch_latest_github_version", new=AsyncMock(return_value="v9.9.9")
+        ):
+            result = check_for_update_sync(local_version="1.0.0")
+
+        assert result == "v9.9.9"
+        try:
+            loop = asyncio.get_running_loop()
+            assert not loop.is_running()
+        except RuntimeError:
+            pass
+
+    def test_no_event_loop_leak_on_exception(self) -> None:
+        """Verify event loop cleanup occurs automatically even when fetch raises an error."""
+        with patch.object(
+            _vc_mod,
+            "fetch_latest_github_version",
+            new=AsyncMock(side_effect=RuntimeError("async failure")),
+        ):
+            result = check_for_update_sync(local_version="1.0.0")
+
+        assert result is None
+        try:
+            loop = asyncio.get_running_loop()
+            assert not loop.is_running()
+        except RuntimeError:
+            pass
+
 
 # ── Module-level constants ─────────────────────────────────────────────────────
 

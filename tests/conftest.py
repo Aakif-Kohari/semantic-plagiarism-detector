@@ -353,3 +353,13 @@ def clear_streamlit_singletons():
         _dg_singleton._instance = None
     except ImportError:
         pass
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_corpus_db_connections():
+    yield
+    try:
+        from src.db.corpus_db import close_connections
+        close_connections(all_threads=True)
+    except ImportError:
+        pass
