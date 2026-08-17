@@ -24,6 +24,7 @@ from src.core.similarity import (
 from src.core.synchronization import verify_and_repair_index
 from src.core.text_chunking import chunk_documents
 from src.db.database_backup import optimize_database
+from src.core.export_engine import LMSExportEngine
 
 
 def run_scan(
@@ -120,7 +121,14 @@ def run_scan(
         "matches": matches,
     }
 
-    if output_format == "json":
+    if output_format == "html":
+        incidents = [
+            {"doc_a": m["document_1"], "doc_b": m["document_2"], "similarity": m["similarity_score"]}
+            for m in matches
+        ]
+        html = LMSExportEngine.generate_incident_html(incidents)
+        print(html or "")
+    elif output_format == "json":
         print(json.dumps(report, indent=2))
     elif output_format == "csv":
         import csv
@@ -302,7 +310,6 @@ def run_db_status(
         sys.stderr.write(f"Error: Unable to inspect database migration status: {exc}\n")
         return 1
 
-    if output_format == "json":
         print(json.dumps(status, indent=2))
     else:
         pending = status["pending_migrations"]
@@ -369,7 +376,7 @@ def main() -> None:
     )
     scan_parser.add_argument(
         "--output-format",
-        choices=["json", "csv", "text"],
+        choices=["json", "csv", "text", "html"],
         default="text",
         help="Output format for scan results (default: text)",
     )
