@@ -253,6 +253,32 @@ def test_extract_from_docx_plain_paragraph_unchanged():
     assert not result.startswith("#")
 
 
+def test_extract_text_from_docx_with_embedded_images():
+    """Verify extract_text_from_docx extracts text and gracefully ignores embedded images (#2358)."""
+    import io
+    import docx
+    from PIL import Image
+
+    img_buffer = io.BytesIO()
+    image = Image.new("RGB", (100, 100), color="blue")
+    image.save(img_buffer, format="PNG")
+    img_buffer.seek(0)
+
+    doc = docx.Document()
+    doc.add_paragraph("Paragraph before image.")
+    doc.add_picture(img_buffer, width=docx.shared.Inches(1))
+    doc.add_paragraph("Paragraph after image.")
+
+    docx_stream = io.BytesIO()
+    doc.save(docx_stream)
+    docx_bytes = docx_stream.getvalue()
+
+    extracted_text = extract_text_from_docx(docx_bytes)
+    assert isinstance(extracted_text, str)
+    assert "Paragraph before image." in extracted_text
+    assert "Paragraph after image." in extracted_text
+
+
 def test_extract_text_routing_docx_with_headings():
     """Verify heading markers survive the full extract_text routing pipeline."""
     docx_bytes = _make_docx_with_headings()
