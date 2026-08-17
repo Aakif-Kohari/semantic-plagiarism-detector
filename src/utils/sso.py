@@ -154,6 +154,10 @@ def exchange_github_code(code: str) -> dict | None:
 
     user_data = user_info_resp.json()
 
+    # Filter out users.noreply.github.com email in user profile info
+    if user_data.get("email") and user_data["email"].endswith("@users.noreply.github.com"):
+        user_data["email"] = None
+
     # GitHub might not return email in /user if it's private, fetch explicitly
     if not user_data.get("email"):
         try:
@@ -168,8 +172,22 @@ def exchange_github_code(code: str) -> dict | None:
             
         if emails_resp and emails_resp.ok:
             emails = emails_resp.json()
-            primary_email = next((e["email"] for e in emails if e.get("primary")), None)
+            # Filter emails: must be verified and not a noreply address
+            valid_emails = [
+                e for e in emails 
+                if e.get("verified") and not e["email"].endswith("@users.noreply.github.com")
+            ]
+            # Try primary first, then fallback to first available valid email
+            primary_email = next((e["email"] for e in valid_emails if e.get("primary")), None)
             if primary_email:
                 user_data["email"] = primary_email
+            elif valid_emails:
+                user_data["email"] = valid_emails[0]["email"]
+            else:
+                user_data["email"] = None
+
+    if not user_data.get("email"):
+        # We raise a ValueError to reject login with message requesting a public email.
+        raise ValueError("GitHub login failed: A verified public email is required. Please update your GitHub settings.")
 
     return user_data
