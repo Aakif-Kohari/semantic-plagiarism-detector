@@ -98,7 +98,11 @@ def is_ip_in_cidr_block(
         return False
 
     if ip_address.version != network.version:
-        return False
+        # Handle IPv4-mapped IPv6 address (e.g. ::ffff:127.0.0.1) when checked against IPv4 CIDRs
+        if network.version == 4 and ip_address.version == 6 and getattr(ip_address, "ipv4_mapped", None) is not None:
+            ip_address = ip_address.ipv4_mapped
+        else:
+            return False
 
     return ip_address in network
 
@@ -283,6 +287,11 @@ class SSRFProtector:
             ip = ipaddress.ip_address(ip_str)
         except ValueError as e:
             raise SSRFSecurityException(SSRF_INVALID_IP_FORMAT.format(error=e))
+
+        # Handle IPv4-mapped IPv6 address (e.g., ::ffff:127.0.0.1)
+        if ip.version == 6 and getattr(ip, "ipv4_mapped", None) is not None:
+            ip = ip.ipv4_mapped
+            ip_str = str(ip)
 
         # IP-level restrictions (ALWAYS enforced, regardless of allowlist state)
         if isinstance(ip, ipaddress.IPv4Address):
