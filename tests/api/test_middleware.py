@@ -11,7 +11,7 @@ import logging
 import os
 from unittest.mock import patch
 
-from src.api.middleware import get_valid_tokens
+from src.api.middleware import _is_public_path, get_valid_tokens
 
 
 class TestGetValidTokens:
@@ -165,3 +165,43 @@ class TestGetValidTokens:
         assert result["admin_token_xyz"] == ["admin", "read", "write", "delete"]
         assert result["readonly_token_abc"] == ["read"]
         assert result["limited_token_123"] == ["read", "write"]
+
+
+class TestIsPublicPath:
+    """Test public API path matching."""
+
+    def test_exact_public_paths(self):
+        """Verify configured public paths are accessible."""
+        assert _is_public_path("/health")
+        assert _is_public_path("/metrics")
+        assert _is_public_path("/metrics/json")
+        assert _is_public_path("/api/v1/auth/login")
+        assert _is_public_path("/api/v1/auth/refresh")
+        assert _is_public_path("/api/v1/auth/revoke")
+        assert _is_public_path("/api/v1/healthz")
+        assert _is_public_path("/api/v1/status")
+        assert _is_public_path("/api/v1/usage")
+        assert _is_public_path("/docs")
+        assert _is_public_path("/redoc")
+        assert _is_public_path("/openapi.json")
+
+    def test_public_paths_allow_trailing_slashes(self):
+        """Verify public paths remain accessible with trailing slashes."""
+        assert _is_public_path("/health/")
+        assert _is_public_path("/metrics/")
+        assert _is_public_path("/metrics/json/")
+        assert _is_public_path("/api/v1/auth/login/")
+        assert _is_public_path("/api/v1/healthz/")
+        assert _is_public_path("/api/v1/status/")
+        assert _is_public_path("/docs/")
+
+    def test_unprotected_paths_are_not_public(self):
+        """Verify protected API endpoints are not treated as public."""
+        assert not _is_public_path("/api/v1/scan")
+        assert not _is_public_path("/api/v1/incidents")
+
+    def test_similar_prefixes_do_not_match(self):
+        """Verify partial prefix matches do not bypass authentication."""
+        assert not _is_public_path("/healthcheck")
+        assert not _is_public_path("/api/v1/authentication")
+        assert not _is_public_path("/api/v1/status-private")
