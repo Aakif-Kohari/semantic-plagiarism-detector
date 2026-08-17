@@ -9,6 +9,7 @@ from src.core.app_config import (
     clear_branding_config_cache,
     get_api_support_contact,
     get_app_title,
+    get_backup_idle_timeout,
     get_branding_config,
     get_lock_timeout,
     load_branding_config,
@@ -339,3 +340,41 @@ def test_api_support_contact_no_longer_hardcodes_example_dot_com(monkeypatch):
 
     assert contact.get("email") != "support@example.com"
     assert contact.get("url") != "http://example.com/support"
+
+
+# ---------------------------------------------------------------------------
+# Tests for get_backup_idle_timeout
+# ---------------------------------------------------------------------------
+
+
+def test_get_backup_idle_timeout_default(monkeypatch):
+    monkeypatch.delenv("BACKUP_IDLE_TIMEOUT_MINUTES", raising=False)
+    assert get_backup_idle_timeout() == 30 * 60
+
+
+def test_get_backup_idle_timeout_valid(monkeypatch):
+    monkeypatch.setenv("BACKUP_IDLE_TIMEOUT_MINUTES", "45")
+    assert get_backup_idle_timeout() == 45 * 60
+
+
+def test_get_backup_idle_timeout_negative_logs_warning_and_defaults_to_30(
+    monkeypatch, caplog
+):
+    monkeypatch.setenv("BACKUP_IDLE_TIMEOUT_MINUTES", "-10")
+    with caplog.at_level("WARNING"):
+        result = get_backup_idle_timeout()
+
+    assert result == 30 * 60
+    assert "Invalid backup timeout -10, defaulting to 30" in caplog.text
+
+
+def test_get_backup_idle_timeout_zero_logs_warning_and_defaults_to_30(
+    monkeypatch, caplog
+):
+    monkeypatch.setenv("BACKUP_IDLE_TIMEOUT_MINUTES", "0")
+    with caplog.at_level("WARNING"):
+        result = get_backup_idle_timeout()
+
+    assert result == 30 * 60
+    assert "Invalid backup timeout 0, defaulting to 30" in caplog.text
+
