@@ -751,6 +751,28 @@ def test_password_change_required_flag(mock_db):
     with pytest.raises(ValueError):
         set_password_change_required("nonexistent_user_xyz", required=True)
 
+    # 5b. Invalid/empty username raises ValueError
+    with pytest.raises(ValueError, match="Username cannot be empty"):
+        set_password_change_required("", required=True)
+
+    with pytest.raises(ValueError, match="Username cannot be empty"):
+        set_password_change_required("   ", required=True)
+
+    with pytest.raises(ValueError, match="Username cannot be empty"):
+        set_password_change_required(None, required=True)  # type: ignore
+
+
+def test_validate_username_rules():
+    """Verify _validate_username enforces string type, non-emptiness, and normalizes."""
+    from src.db.auth import _validate_username
+
+    assert _validate_username("  Alice  ") == "alice"
+    assert _validate_username("BOB") == "bob"
+
+    for invalid in [None, "", "   ", 123, [], {}]:
+        with pytest.raises(ValueError, match="Username cannot be empty"):
+            _validate_username(invalid)  # type: ignore
+
     # 6. Invalid credentials still return False (or dict with authenticated=False)
     assert verify_user(username, "WrongPassword!") is False
     assert verify_user(username, "WrongPassword!", return_details=True) == {

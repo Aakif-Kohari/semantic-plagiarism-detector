@@ -147,6 +147,20 @@ async def not_found_handler(request, exc: StarletteHTTPException):
     )
 
 
+@app.exception_handler(ValueError)
+async def value_error_handler(request: Request, exc: ValueError):
+    """Handle ValueError exceptions by returning a standardized 400 Bad Request JSON response."""
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content={
+            "error": True,
+            "code": status.HTTP_400_BAD_REQUEST,
+            "message": str(exc),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """Catch-all handler that returns a standardized JSON error payload for any unhandled exception."""
