@@ -137,14 +137,14 @@ def test_calculate_force_directed_layout_standalone_function():
 
 
 def test_force_directed_layout_returns_valid_coords():
-    """Verify force-directed layout returns finite X/Y coordinates for disconnected nodes."""
+    """Verify force-directed layout returns finite coordinates for disconnected nodes."""
     G = nx.Graph()
     G.add_nodes_from(range(5))
 
     pos = calculate_force_directed_layout(G)
 
     assert len(pos) == 5
-    for node, coord in pos.items():
+    for coord in pos.values():
         assert len(coord) == 2
         assert np.isfinite(coord[0])
         assert np.isfinite(coord[1])
