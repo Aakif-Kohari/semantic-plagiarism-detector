@@ -519,3 +519,76 @@ class TestRenderCopyButton:
         mock_st.code.assert_not_called()
 
 
+# ── Exact Substring Filtering Tests ───────────────────────────────────────────
+
+
+class TestFilterWarningsExact:
+    """Test suite for exact substring filtering."""
+
+    def test_filter_empty_query_returns_all(self):
+        """Verify empty query returns all warnings."""
+        warnings = [{"doc_a": "a.pdf", "doc_b": "b.pdf"}]
+        assert filter_warnings(warnings, "") == warnings
+        assert filter_warnings(warnings, None) == warnings
+        assert filter_warnings(warnings, "   ") == warnings
+
+    def test_filter_exact_match_doc_a(self):
+        """Verify exact substring match in doc_a includes the warning."""
+        warnings = [
+            {"doc_a": "alice_essay.pdf", "doc_b": "bob_essay.pdf"},
+            {"doc_a": "charlie.pdf", "doc_b": "dave.pdf"}
+        ]
+        
+        result = filter_warnings(warnings, "alice", use_fuzzy=False)
+        assert len(result) == 1
+        assert result[0]["doc_a"] == "alice_essay.pdf"
+
+    def test_filter_exact_match_doc_b(self):
+        """Verify exact substring match in doc_b includes the warning."""
+        warnings = [
+            {"doc_a": "alice.pdf", "doc_b": "bob_essay.pdf"}
+        ]
+        
+        result = filter_warnings(warnings, "bob", use_fuzzy=False)
+        assert len(result) == 1
+
+    def test_filter_case_insensitive(self):
+        """Verify filtering is case-insensitive."""
+        warnings = [{"doc_a": "Alice_Essay.PDF", "doc_b": "bob.pdf"}]
+        
+        result = filter_warnings(warnings, "alice", use_fuzzy=False)
+        assert len(result) == 1
+        
+        result_upper = filter_warnings(warnings, "ALICE", use_fuzzy=False)
+        assert len(result_upper) == 1
+
+    def test_filter_no_match_returns_empty(self):
+        """Verify no match returns an empty list."""
+        warnings = [{"doc_a": "alice.pdf", "doc_b": "bob.pdf"}]
+        
+        result = filter_warnings(warnings, "charlie", use_fuzzy=False)
+        assert len(result) == 0
+
+    def test_filter_multiple_matches(self):
+        """Verify multiple warnings can match the same query."""
+        warnings = [
+            {"doc_a": "essay_1.pdf", "doc_b": "source.pdf"},
+            {"doc_a": "essay_2.pdf", "doc_b": "essay_1.pdf"},
+            {"doc_a": "random.pdf", "doc_b": "other.pdf"}
+        ]
+        
+        result = filter_warnings(warnings, "essay", use_fuzzy=False)
+        assert len(result) == 2
+
+    def test_filter_handles_missing_keys(self):
+        """Verify filtering handles warnings with missing doc_a/doc_b keys."""
+        warnings = [
+            {"doc_a": "alice.pdf"},  # Missing doc_b
+            {"doc_b": "bob.pdf"},   # Missing doc_a
+            {}                      # Missing both
+        ]
+        
+        result = filter_warnings(warnings, "alice", use_fuzzy=False)
+        assert len(result) == 1
+
+

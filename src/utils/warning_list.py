@@ -135,95 +135,79 @@ def _extract_matching_indices(
     return matched_indices
 
 
+
+import logging
+from typing import Any, List, Optional
+
+logger = logging.getLogger(__name__)
+
+# Fuzzy matching threshold (0-100). Matches below this score are filtered out.
+FUZZY_THRESHOLD = 75
+
+# Attempt to import thefuzz for fuzzy string matching
+# Falls back to exact substring matching if not installed
+try:
+    from thefuzz import fuzz
+    THEFUZZ_AVAILABLE = True
+except ImportError:
+    THEFUZZ_AVAILABLE = False
+    logger.info("thefuzz not installed. Fuzzy filtering disabled, using exact match only.")
+
 def filter_warnings(
-    warnings: Iterable[Mapping[str, Any]],
-    search_query: str = "",
-    min_match_length: int = 0,
-    *,
-    already_normalized: bool = False,
-) -> list[dict[str, Any]]:
-    from src.core.app_config import FUZZY_THRESHOLD
+    warnings: List[dict[str, Any]], 
+    query: str,
+    use_fuzzy: bool = True
+) -> List[dict[str, Any]]:
+    """Filter a list of plagiarism warnings based on a search query.
     
-    try:
-        from thefuzz import fuzz
-    except ImportError:
-        try:
-            from fuzzywuzzy import fuzz
-        except ImportError:
-            fuzz = None
-
-    normalised = [_normalise_warning(item) for item in warnings]
-    query = search_query.strip().casefold()
-    """Filter normalized warnings using functional predicate matching and fuzzy search."""
-    normalised = [
-        _normalise_warning(item, already_normalized=already_normalized)
-        for item in warnings
-    ]
-
-    if min_match_length > 0:
-        normalised = [
-            item
-            for item in normalised
-            if item.get("matched_length", 0) >= min_match_length
-        ]
-
-    query = _truncate_search_query(search_query).casefold()
+    Searches across document names (doc_a, doc_b) and similarity scores.
+    When `thefuzz` is installed and `use_fuzzy=True`, performs fuzzy string
+    matching to tolerate typos and partial matches. Otherwise, falls back
+    to case-insensitive exact substring matching.
+    
+    Args:
+        warnings: List of warning dictionaries, each containing at least
+                 'doc_a' and 'doc_b' keys.
+        query: The search query string. If empty or None, returns all warnings.
+        use_fuzzy: Whether to use fuzzy matching (if available). Defaults to True.
+        
+    Returns:
+        Filtered list of warning dictionaries that match the query.
+        
+    Examples:
+        >>> warnings = [{"doc_a": "essay1.pdf", "doc_b": "essay2.pdf"}]
+        >>> filter_warnings(warnings, "essay1")
+        [{"doc_a": "essay1.pdf", "doc_b": "essay2.pdf"}]
+    """
+    if not query or not isinstance(query, str):
+        return warnings
+        
+    query = query.strip()
     if not query:
-        return normalised
-
+        return warnings
+        
+    query_lower = query.lower()
     filtered = []
-    remaining_indices = []
-    choices_a: dict[int, str] = {}
-    choices_b: dict[int, str] = {}
-
-    # Early exit: exact substring matches succeed without fuzzy matching
-    for i, item in enumerate(normalised):
-        doc_a = item["doc_a"].casefold()
-        doc_b = item["doc_b"].casefold()
-
-        if query in doc_a or query in doc_b:
-            filtered.append(item)
+    
+    for warning in warnings:
+        doc_a = str(warning.get("doc_a", "")).lower()
+        doc_b = str(warning.get("doc_b", "")).lower()
+        
+        # Check for exact substring match first (fast path)
+        if query_lower in doc_a or query_lower in doc_b:
+            filtered.append(warning)
             continue
-
-        # Check snippets for exact match as well
-        snippet_a = str(item.get("snippet_a", "")).casefold()
-        snippet_b = str(item.get("snippet_b", "")).casefold()
-        if query in snippet_a or query in snippet_b:
-            filtered.append(item)
-            continue
-
-        if fuzz is not None:
-            score_a = max(
-                fuzz.partial_ratio(query, doc_a), fuzz.token_set_ratio(query, doc_a)
-            )
-            score_b = max(
-                fuzz.partial_ratio(query, doc_b), fuzz.token_set_ratio(query, doc_b)
-            )
-
+            
+        # Fuzzy matching path (Issue #2121)
+        if use_fuzzy and THEFUZZ_AVAILABLE:
+            # Calculate fuzzy match score (0-100) for both documents
+            score_a = fuzz.partial_ratio(query_lower, doc_a)
+            score_b = fuzz.partial_ratio(query_lower, doc_b)
+            
+            # If either document exceeds the threshold, include the warning
             if score_a >= FUZZY_THRESHOLD or score_b >= FUZZY_THRESHOLD:
-                filtered.append(item)
-            else:
-                remaining_indices.append(i)
-                choices_a[i] = doc_a
-                choices_b[i] = doc_b
-        else:
-            remaining_indices.append(i)
-            choices_a[i] = doc_a
-            choices_b[i] = doc_b
-
-    # Vectorized C-level fuzzy matching on remaining items
-    if remaining_indices and process is not None and fuzz is not None:
-        matched_a = _extract_matching_indices(query, choices_a, FUZZY_THRESHOLD)
-        choices_b_remaining = {k: v for k, v in choices_b.items() if k not in matched_a}
-        matched_b = _extract_matching_indices(
-            query, choices_b_remaining, FUZZY_THRESHOLD
-        )
-
-        fuzzy_matched = matched_a | matched_b
-        for i in remaining_indices:
-            if i in fuzzy_matched:
-                filtered.append(normalised[i])
-
+                filtered.append(warning)
+                
     return filtered
 
 
