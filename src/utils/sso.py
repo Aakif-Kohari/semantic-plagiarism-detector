@@ -14,13 +14,18 @@ def _load_env() -> None:
     load_dotenv()
 
 
+def _get_redirect_uri() -> str:
+    """Return the configured OAuth redirect URI."""
+    return os.getenv("APP_BASE_URL", "http://localhost:8501")
+
+
 def get_google_auth_url() -> tuple[str, str]:
     """Return the Google OAuth authorization URL and state."""
     _load_env()
     client_id = os.getenv("GOOGLE_CLIENT_ID")
     if not client_id:
         raise ValueError("GOOGLE_CLIENT_ID environment variable is not configured")
-    redirect_uri = os.getenv("APP_BASE_URL", "http://localhost:8501")
+    redirect_uri = _get_redirect_uri()
     state = f"google_{secrets.token_urlsafe(16)}"
 
     query_params = {
@@ -46,7 +51,7 @@ def exchange_google_code(code: str) -> dict | None:
     client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
     if not client_secret:
         raise ValueError("GOOGLE_CLIENT_SECRET environment variable is not configured")
-    redirect_uri = os.getenv("APP_BASE_URL", "http://localhost:8501")
+    redirect_uri = _get_redirect_uri()
 
     try:
         token_resp = requests.post(
@@ -91,7 +96,7 @@ def get_github_auth_url() -> tuple[str, str]:
     client_id = os.getenv("GITHUB_CLIENT_ID")
     if not client_id:
         raise ValueError("GITHUB_CLIENT_ID environment variable is not configured")
-    redirect_uri = os.getenv("APP_BASE_URL", "http://localhost:8501")
+    redirect_uri = _get_redirect_uri()
     state = f"github_{secrets.token_urlsafe(16)}"
 
     query_params = {
@@ -116,7 +121,7 @@ def exchange_github_code(code: str) -> dict | None:
     client_secret = os.getenv("GITHUB_CLIENT_SECRET")
     if not client_secret:
         raise ValueError("GITHUB_CLIENT_SECRET environment variable is not configured")
-    redirect_uri = os.getenv("APP_BASE_URL", "http://localhost:8501")
+    redirect_uri = _get_redirect_uri()
 
     try:
         token_resp = requests.post(
