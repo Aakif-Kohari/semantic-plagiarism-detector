@@ -591,4 +591,18 @@ class TestFilterWarningsExact:
         result = filter_warnings(warnings, "alice", use_fuzzy=False)
         assert len(result) == 1
 
+def test_paginate_warnings_negative_page_clamps_to_first_page():
+    """Negative page numbers must resolve to page 1."""
+    page = paginate_warnings(WARNINGS, page=-1, page_size=2)
+
+    assert page.page == 1
+    assert page.items == [dict(WARNINGS[0]), dict(WARNINGS[1])]
+
+
+def test_paginate_warnings_zero_page_clamps_to_first_page():
+    """Page zero must resolve to page 1."""
+    page = paginate_warnings(WARNINGS, page=0, page_size=2)
+
+    assert page.page == 1
+    assert page.items == [dict(WARNINGS[0]), dict(WARNINGS[1])]
 
