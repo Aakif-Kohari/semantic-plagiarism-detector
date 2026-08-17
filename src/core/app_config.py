@@ -162,7 +162,13 @@ def get_backup_idle_timeout() -> int:
     """Return the configured backup idle timeout in seconds (default 30 minutes)."""
     try:
         timeout_minutes = int(os.getenv("BACKUP_IDLE_TIMEOUT_MINUTES", "30"))
-        return max(1, timeout_minutes) * 60
+        if timeout_minutes < 1:
+            logger.warning(
+                "Invalid backup timeout %d, defaulting to 30",
+                timeout_minutes,
+            )
+            return 30 * 60
+        return timeout_minutes * 60
     except ValueError:
         return 30 * 60
 
