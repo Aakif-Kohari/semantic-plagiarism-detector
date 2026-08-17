@@ -1155,6 +1155,44 @@ with st.sidebar:
                 step=25,
                 key=SessionKeys.OCR_DPI_SLIDER,
             )
+
+
+        # ── Multilingual Support ──────────────────────────────────────────────────
+        with st.sidebar.expander("🌍 Multilingual Support", expanded=False):
+            st.markdown("""
+            **Multilingual support** enables plagiarism detection for non-Latin scripts
+            (Arabic, Devanagari, Cyrillic, etc.)
+            """)
+            
+            enable_multilingual = st.checkbox(
+                "Enable Multilingual Support",
+                value=False,
+                key="enable_multilingual",
+                help="Enables normalization for Arabic, Devanagari, Cyrillic scripts"
+            )
+            
+            if enable_multilingual:
+                st.info("✅ Arabic, Devanagari, Cyrillic normalization enabled")
+                
+                with st.expander("📖 Supported Scripts", expanded=False):
+                    st.markdown("""
+                    - **Arabic**: Diacritic removal, letter normalization, ligature handling
+                    - **Devanagari**: Matra normalization, consonant normalization
+                    - **Cyrillic**: Letter normalization (ё→е, й→и, etc.)
+                    - **Latin**: Basic Unicode normalization
+                    """)
+                
+                # Show detected script for current text
+                if 'raw_texts' in locals() and raw_texts:
+                    from src.core.script_normalizer import ScriptDetector
+                    detector = ScriptDetector()
+                    scripts = {}
+                    for doc, text in raw_texts.items():
+                        scripts[doc] = detector.detect(text)
+                    
+                    st.caption("Detected Scripts:")
+                    for doc, script in scripts.items():
+                        st.caption(f"- {doc}: {script}")
     else:
         threshold = PLAGIARISM_THRESHOLD
         use_chunk_matrix = False
