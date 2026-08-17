@@ -203,6 +203,23 @@ from app.components.document_version_control import (
     integrate_version_control_with_analysis,
     migrate_existing_documents_to_version_control,
 )
+# ── Collaboration System Imports ──────────────────────────────────────────
+from app.components.collaboration_system import (
+    DocumentAnnotation,
+    ReviewWorkflow,
+    UserSession,
+    AnnotationManager,
+    WorkflowManager,
+    ActivityManager,
+    ReviewSystem,
+    render_annotation_ui,
+    render_workflow_ui,
+    render_review_dashboard,
+    render_activity_ui,
+    render_decision_history,
+    render_collaboration_dashboard,
+    initialize_review_system,
+)
 # ── Collaboration Hub Imports ────────────────────────────────────────────
 from app.components.collaboration_hub import (
     render_collaboration_hub,
