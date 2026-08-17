@@ -65,3 +65,5 @@ CREATE TABLE IF NOT EXISTS scan_history (
     flagged_count INTEGER NOT NULL,
     threshold_used REAL NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_incidents_date ON plagiarism_incidents(date_flagged);
