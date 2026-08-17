@@ -42,6 +42,12 @@ def run_scan(
     """
     start_time = time.time()
 
+    if output_format not in ("json", "csv", "text", "html"):
+        sys.stderr.write(
+            f"Error: Invalid output format '{output_format}'. Supported formats are: json, csv, text, html.\n"
+        )
+        return 1
+
     if not os.path.exists(folder_path):
         sys.stderr.write(f"Error: Folder '{folder_path}' does not exist.\n")
         return 1

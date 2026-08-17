@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from src.core.faiss_index import build_index_from_matrix, load_index, save_index
-from src.core.lock import faiss_write_lock
+from src.core.concurrency import faiss_write_lock
 from src.db.corpus_db import get_all_embeddings, get_embedding_count
 
 logger = logging.getLogger(__name__)
