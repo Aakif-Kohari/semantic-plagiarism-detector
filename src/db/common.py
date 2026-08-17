@@ -58,28 +58,39 @@ def with_sqlite_retry(
     return decorator
 
 
+def _retry_loop(
+    func: Callable,
+    max_retries: int,
+    initial_delay: float,
+    backoff_factor: float,
+    *args: Any,
+    **kwargs: Any,
+) -> Any:
+    current_delay = initial_delay
+    for attempt in range(max_retries + 1):
+        try:
+            return func(*args, **kwargs)
+        except sqlite3.OperationalError as exc:
+            err_msg = str(exc).lower()
+            is_locked_err = "locked" in err_msg or "busy" in err_msg
+            if is_locked_err and attempt < max_retries:
+                func_name = getattr(func, "__name__", str(func))
+                logger.warning(
+                    f"SQLite database locked/busy in '{func_name}' "
+                    f"(attempt {attempt + 1}/{max_retries}). Retrying in {current_delay:.2f}s..."
+                )
+                time.sleep(current_delay)
+                current_delay *= backoff_factor
+            else:
+                raise
+
+
 def _make_wrapper(
     func: Callable, max_retries: int, delay: float, backoff: float
 ) -> Callable:
     @functools.wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
-        current_delay = delay
-        for attempt in range(max_retries + 1):
-            try:
-                return func(*args, **kwargs)
-            except sqlite3.OperationalError as exc:
-                err_msg = str(exc).lower()
-                is_locked_err = "locked" in err_msg or "busy" in err_msg
-                if is_locked_err and attempt < max_retries:
-                    func_name = getattr(func, "__name__", str(func))
-                    logger.warning(
-                        f"SQLite database locked/busy in '{func_name}' "
-                        f"(attempt {attempt + 1}/{max_retries}). Retrying in {current_delay:.2f}s..."
-                    )
-                    time.sleep(current_delay)
-                    current_delay *= backoff
-                else:
-                    raise
+        return _retry_loop(func, max_retries, delay, backoff, *args, **kwargs)
 
     return wrapper
 
