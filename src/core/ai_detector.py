@@ -21,6 +21,10 @@ _FALLBACK_SENTINEL = object()
 # A score of 0.0 indicates the function could not compute a valid perplexity.
 _DEFAULT_PERPLEXITY_SCORE = 0.0
 
+# Shared AI probability thresholds
+AI_HIGH_THRESHOLD = 0.75
+AI_MEDIUM_THRESHOLD = 0.40
+
 
 def _get_model_name() -> str:
     """Return the configured AI detection model name."""
@@ -358,6 +362,14 @@ def detect_documents_ai_probability(
     return results
 
 
+def _split_sentences_simple(text: str) -> List[str]:
+    """Split text into sentences using common punctuation delimiters and filter empty strings."""
+    if not text or not isinstance(text, str):
+        return []
+    sentences = re.split(r"[.!?]+", text.strip())
+    return [s.strip() for s in sentences if s.strip()]
+
+
 def _calculate_burstiness(text: str) -> float:
     """Calculate the burstiness score of a text.
 
@@ -371,8 +383,8 @@ def _calculate_burstiness(text: str) -> float:
         return 0.0
 
     # Split into sentences using a simple regex
-    sentences = re.split(r"[.!?]+", text.strip())
-    sentence_lengths = [len(s.split()) for s in sentences if s.strip()]
+    sentences = _split_sentences_simple(text)
+    sentence_lengths = [len(s.split()) for s in sentences]
 
     if len(sentence_lengths) < 2:
         return 0.0
@@ -483,16 +495,13 @@ def extract_stylometric_features(text: str) -> dict[str, float]:
 
     # 3. & 4. Sentence Length Metrics
     # Split text into sentences using common punctuation delimiters
-    sentences = re.split(r"[.!?]+", text.strip())
-    # Filter out empty strings that result from trailing punctuation
-    sentences = [s.strip() for s in sentences if s.strip()]
+    sentences = _split_sentences_simple(text)
 
     if not sentences:
         # If no sentences detected (e.g., text is just a fragment without punctuation),
         # treat the entire text as a single sentence for length calculations
         sentences = [text.strip()]
 
-    sentence_lengths = [len(re.findall(r'\b\w+\b', s)) for s in sentences]
     sentence_lengths = [len(re.findall(r"\b\w+\b", s)) for s in sentences]
 
     avg_sentence_length = float(np.mean(sentence_lengths)) if sentence_lengths else 0.0
@@ -591,9 +600,9 @@ def detect_ai_generated_text(text: str) -> Dict[str, Any]:
     burstiness_score = _calculate_burstiness(text)
     ngram_repetitiveness = _calculate_ngram_repetitiveness(text)
 
-    if ai_probability >= 0.75:
+    if ai_probability >= AI_HIGH_THRESHOLD:
         confidence_tier = "high"
-    elif ai_probability >= 0.40:
+    elif ai_probability >= AI_MEDIUM_THRESHOLD:
         confidence_tier = "medium"
     else:
         confidence_tier = "low"
@@ -616,13 +625,13 @@ def categorize_ai_probability(score: float) -> str:
         score: AI probability score between 0.0 and 1.0.
 
     Returns:
-        "High Probability" for score >= 0.8,
-        "Moderate Probability" for 0.5 <= score < 0.8,
-        "Low Probability" for score < 0.5.
+        "High Probability" for score >= AI_HIGH_THRESHOLD,
+        "Moderate Probability" for AI_MEDIUM_THRESHOLD <= score < AI_HIGH_THRESHOLD,
+        "Low Probability" for score < AI_MEDIUM_THRESHOLD.
     """
-    if score >= 0.8:
+    if score >= AI_HIGH_THRESHOLD:
         return "High Probability"
-    elif score >= 0.5:
+    elif score >= AI_MEDIUM_THRESHOLD:
         return "Moderate Probability"
     else:
         return "Low Probability"

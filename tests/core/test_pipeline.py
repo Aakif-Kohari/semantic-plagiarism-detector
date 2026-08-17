@@ -144,3 +144,60 @@ def test_run_full_pipeline(
     # ---------- Flags ----------
 
     assert isinstance(flags, list)
+
+
+def test_run_full_pipeline_psutil_missing(sample_documents, monkeypatch, caplog):
+    """Assert pipeline runs smoothly and logs debug message when psutil is missing."""
+    import sys
+
+    monkeypatch.setattr(
+        "src.core.processing.embed_documents",
+        fake_embed_documents,
+    )
+    monkeypatch.setattr(
+        "src.core.processing.build_index",
+        fake_build_index,
+    )
+    monkeypatch.setattr(
+        "src.core.processing.detect_documents_ai_probability",
+        fake_ai_detector,
+    )
+
+    # Simulate missing psutil
+    monkeypatch.setitem(sys.modules, "psutil", None)
+
+    with caplog.at_level("DEBUG"):
+        result = run_full_pipeline(sample_documents)
+
+    assert result is not None
+    assert "psutil is not installed" in caplog.text
+
+
+def test_run_full_pipeline_psutil_high_memory_warning(sample_documents, monkeypatch, caplog):
+    """Assert pipeline logs warning when psutil reports high memory usage."""
+    import sys
+    from unittest.mock import MagicMock
+
+    monkeypatch.setattr(
+        "src.core.processing.embed_documents",
+        fake_embed_documents,
+    )
+    monkeypatch.setattr(
+        "src.core.processing.build_index",
+        fake_build_index,
+    )
+    monkeypatch.setattr(
+        "src.core.processing.detect_documents_ai_probability",
+        fake_ai_detector,
+    )
+
+    mock_psutil = MagicMock()
+    mock_psutil.virtual_memory.return_value = MagicMock(percent=90)
+    monkeypatch.setitem(sys.modules, "psutil", mock_psutil)
+
+    with caplog.at_level("WARNING"):
+        result = run_full_pipeline(sample_documents)
+
+    assert result is not None
+    assert "High memory usage detected (90%)" in caplog.text
+

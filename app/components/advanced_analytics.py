@@ -727,7 +727,7 @@ class PerformanceMonitor:
         stats = {}
         for name, measurements in self.metrics.items():
             if measurements:
-                sorted_measurements = sorted(measurements)
+                sorted_measurements = sorted(measurements)  # noqa: F841
                 stats[name] = {
                     "avg": sum(measurements) / len(measurements),
                     "min": min(measurements),

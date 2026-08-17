@@ -21,7 +21,7 @@ def get_memory_usage() -> Dict[str, Any]:
             "cpu_percent": process.cpu_percent(interval=0.1)
         }
     except Exception as e:
-        logger.error(f"Failed to get memory usage: {e}")
+        logger.error("Failed to get memory usage: %s", e)
         return {
             "rss_mb": 0,
             "vms_mb": 0,
@@ -30,10 +30,9 @@ def get_memory_usage() -> Dict[str, Any]:
         }
 
 
-def log_memory_usage(tag: str = "") -> None:
+def log_memory_usage(tag: str = "") -> Dict[str, Any]:
     """Log current memory usage with a tag."""
     usage = get_memory_usage()
-    logger.info(f"[Memory] {tag} - RSS: {usage['rss_mb']:.1f}MB, "
-                f"VMS: {usage['vms_mb']:.1f}MB, "
-                f"Process: {usage['percent']:.1f}%")
+    logger.info("[Memory] %s - RSS: %.1fMB, VMS: %.1fMB, Process: %.1f%%", tag, usage['rss_mb'], usage['vms_mb'], usage['percent'])
     return usage
+

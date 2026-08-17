@@ -12,19 +12,7 @@ PDFInput = Union[str, Path, bytes, BinaryIO, io.BytesIO]
 DEFAULT_OCR_DPI = 250
 DEFAULT_OCR_LANGUAGE = "eng"
 
-SUPPORTED_OCR_LANGUAGES: dict[str, str] = {
-    "eng": "English",
-    "spa": "Spanish",
-    "fra": "French",
-    "deu": "German",
-    "ita": "Italian",
-    "por": "Portuguese",
-    "rus": "Russian",
-    "chi_sim": "Chinese (Simplified)",
-    "jpn": "Japanese",
-    "hin": "Hindi",
-    "ara": "Arabic",
-}
+from src.core.app_config import SUPPORTED_OCR_LANGUAGES
 
 # In-memory session scan counters for rate limiting
 _session_scan_counters: dict[str, int] = {}

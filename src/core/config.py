@@ -272,6 +272,69 @@ def validate_thresholds(
 DEFAULT_THRESHOLDS: Final[SimilarityThresholds] = SimilarityThresholds()
 PLAGIARISM_THRESHOLD: Final[float] = DEFAULT_THRESHOLDS.plagiarism
 
+# Default location of an optional on-disk threshold config (Issue #2267).
+# When present, load_threshold_config() reads recommended boundaries from it;
+# when absent (the default), behavior is unchanged and DEFAULT_THRESHOLDS is used.
+THRESHOLD_CONFIG_PATH: Final[str] = os.path.join(
+    os.path.dirname(__file__),
+    "..",
+    "..",
+    "config",
+    "thresholds.json",
+)
+
+
+def load_threshold_config(
+    config_path: Optional[str] = None,
+) -> SimilarityThresholds:
+    """Load recommended similarity thresholds from a JSON config file.
+
+    Reads a JSON object with optional ``plagiarism``, ``medium`` and ``high``
+    keys (each in the inclusive ``[0.0, 1.0]`` range) and returns a validated
+    :class:`SimilarityThresholds` instance.
+
+    When *config_path* is ``None`` the environment variable
+    ``THRESHOLD_CONFIG_PATH`` (falling back to ``config/thresholds.json``
+    relative to the repo root) is used.
+
+    If the file is missing, unreadable, or contains invalid values the
+    defaults are returned unchanged, so supplying no calibration config never
+    alters existing detection behavior.
+
+    Args:
+        config_path: Optional explicit path to the threshold JSON file.
+
+    Returns:
+        The validated thresholds from the file, or ``DEFAULT_THRESHOLDS``.
+    """
+    if config_path is None:
+        config_path = os.getenv("THRESHOLD_CONFIG_PATH", THRESHOLD_CONFIG_PATH)
+
+    if not os.path.exists(config_path):
+        return DEFAULT_THRESHOLDS
+
+    try:
+        with open(config_path, "r", encoding="utf-8") as stream:
+            data = json.load(stream)
+        if not isinstance(data, dict):
+            logger.warning(
+                "Threshold config %s is not a JSON object. Using defaults.",
+                config_path,
+            )
+            return DEFAULT_THRESHOLDS
+        return SimilarityThresholds(
+            plagiarism=data.get("plagiarism", DEFAULT_THRESHOLDS.plagiarism),
+            medium=data.get("medium", DEFAULT_THRESHOLDS.medium),
+            high=data.get("high", DEFAULT_THRESHOLDS.high),
+        )
+    except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        logger.warning(
+            "Failed to load threshold config from %s: %s. Using defaults.",
+            config_path,
+            exc,
+        )
+        return DEFAULT_THRESHOLDS
+
 
 def normalize_score(score: Real) -> float:
     """Return a finite score clamped to the inclusive [0, 1] range."""
@@ -371,7 +434,7 @@ def get_offline_config() -> Dict[str, Any]:
 
 def test_branding_config_path_exists():
     """Test that BRANDING_CONFIG_PATH resolves to an existing file."""
-    config_path = config_module.BRANDING_CONFIG_PATH
+    config_path = config_module.BRANDING_CONFIG_PATH  # noqa: F821
 
     assert os.path.isfile(config_path)
 

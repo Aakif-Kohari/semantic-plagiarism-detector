@@ -45,6 +45,40 @@ def test_build_incident_id_same_pair_different_order():
     assert id1 == id2
 
 
+def test_build_incident_id_no_collision_between_distinct_pairs():
+    """Regression test: build_incident_id() previously joined the two
+    normalised filenames with a bare "0" digit before hashing
+    (f"{first}0{second}"). Because filenames can themselves contain
+    digits, two genuinely different document pairs could produce the
+    exact same hash input string once joined, e.g.:
+
+        normalised pair A: ("0doc20", "doc20") -> old input "0doc200doc20"
+        normalised pair B: ("0doc2", "0doc20")  -> old input "0doc200doc20"
+
+    (Note: the pair given in the issue description, ("doc10", "doc2") vs
+    ("doc1", "0doc2"), does NOT actually collide once you account for
+    _normalise_pair()'s alphabetical sorting of the two filenames before
+    hashing — the pair above is a real, reproducing collision under the
+    old "0" separator, verified directly against the sorted output.)
+
+    The fix joins with "||" instead, which is not a valid character in
+    either filename here, so the two pairs must now hash differently.
+    """
+    id1 = build_incident_id("0doc20", "doc20")
+    id2 = build_incident_id("0doc2", "0doc20")
+
+    assert id1 != id2
+
+
+def test_build_incident_id_no_collision_for_issue_example_pair():
+    """As requested in the issue: verify no collision between
+    ("doc10", "doc2") and ("doc1", "0doc2")."""
+    id1 = build_incident_id("doc10", "doc2")
+    id2 = build_incident_id("doc1", "0doc2")
+
+    assert id1 != id2
+
+
 def test_get_incidents_by_date_range_filters_correctly(test_db):
     sync_flagged_incidents(
         [{"doc_a": "old1.pdf", "doc_b": "old2.pdf", "similarity": 0.9}],

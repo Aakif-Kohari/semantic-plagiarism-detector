@@ -204,8 +204,23 @@ Example:
 
 When a new version is released, the maintainer will rename `[Unreleased]` to the version number and date (e.g. `## [1.1.0] - 2026-08-15`) and open a fresh `[Unreleased]` section above it.
 
-## Reporting Issues
+## Bumping the Version
 
+The application version is defined in a single place: `src/version.py`
+(the `version` string). `src/utils/version_check.py` imports `APP_VERSION`
+from that file, so there is only one place to update.
+
+To release a new version:
+
+1. Update `version` in `src/version.py` (e.g. `"1.0.0"` → `"1.1.0"`).
+2. Update `CHANGELOG.md` as described above, renaming `[Unreleased]` to the
+   new version and date.
+3. Commit both changes together in the same PR.
+
+Do not hardcode the version anywhere else — always import it from
+`src.version`.
+
+## Reporting Issues
 When opening bug reports or feature requests:
 
 - Search existing issues first to avoid duplicates
