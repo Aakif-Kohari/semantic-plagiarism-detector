@@ -175,15 +175,34 @@ from app.components.api_gateway import (
     WebhookStatus,
     ServiceType,
 )
-    from sklearn.cluster import AgglomerativeClustering, KMeans
-    from sklearn.decomposition import NMF, LatentDirichletAllocation
-    from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
-    from sklearn.manifold import TSNE
-    from sklearn.metrics import silhouette_score, davies_bouldin_score
-    from sklearn.preprocessing import StandardScaler
-    import scipy.cluster.hierarchy as sch
-    from scipy.spatial.distance import squareform
-    from scipy.cluster.hierarchy import fcluster
+from sklearn.cluster import AgglomerativeClustering, KMeans
+from sklearn.decomposition import NMF, LatentDirichletAllocation
+from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
+from sklearn.manifold import TSNE
+from sklearn.metrics import silhouette_score, davies_bouldin_score
+from sklearn.preprocessing import StandardScaler
+import scipy.cluster.hierarchy as sch
+from scipy.spatial.distance import squareform
+from scipy.cluster.hierarchy import fcluster
+
+# ── Document Version Control Imports ─────────────────────────────────────
+from app.components.document_version_control import (
+    render_version_control_ui,
+    initialize_version_control,
+    VersionManager,
+    ChangeTracker,
+    DocumentVersion,
+    VersionDiffGenerator,
+    VersionStorageManager,
+    PlagiarismEvolutionAnalyzer,
+    SmartChangePatternDetector,
+    render_plagiarism_evolution_ui,
+    render_smart_detection_ui,
+    render_global_version_dashboard,
+    render_version_control_dashboard,
+    integrate_version_control_with_analysis,
+    migrate_existing_documents_to_version_control,
+)
 # ── Collaboration Hub Imports ────────────────────────────────────────────
 from app.components.collaboration_hub import (
     render_collaboration_hub,
