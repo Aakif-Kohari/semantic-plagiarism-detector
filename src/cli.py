@@ -13,7 +13,7 @@ from pathlib import Path
 
 from src.core.app_config import FAISS_INDEX_PATH
 from src.core.cross_lingual import prepare_text_for_embedding
-from src.core.document_parser import DEFAULT_OCR_DPI, DEFAULT_OCR_LANGUAGE, extract_text
+from src.core.document_parser import DEFAULT_OCR_DPI, DEFAULT_OCR_LANGUAGE, extract_text, OCRDependencyError
 from src.core.embedding_model import embed_documents
 from src.core.logging_config import setup_logging
 from src.core.similarity import (
@@ -81,6 +81,9 @@ def run_scan(
                 sys.stderr.write(
                     f"Warning: Extracted text from '{filename}' is empty.\n"
                 )
+        except OCRDependencyError as e:
+            sys.stderr.write(f"Fatal Error: {e}\n")
+            sys.exit(1)
         except Exception as e:
             sys.stderr.write(f"Warning: Failed to parse '{filename}': {e}\n")
 
