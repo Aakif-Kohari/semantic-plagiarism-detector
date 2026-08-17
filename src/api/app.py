@@ -8,6 +8,7 @@ from fastapi import Depends, FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Request, status
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -95,7 +96,28 @@ async def otel_tracing_middleware(request: Request, call_next):
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """Return a standardized JSON response for request validation errors."""
+    """Handle Pydantic validation errors from malformed API requests.
+    
+    Logs the detailed validation errors via logger.warning to help backend
+    engineers debug malformed requests from the frontend or third-party LMS
+    platforms, then returns a standardized JSON error response to the client.
+    
+    Args:
+        request: The incoming FastAPI Request object.
+        exc: The RequestValidationError containing Pydantic validation details.
+        
+    Returns:
+        JSONResponse with 422 status code and structured error details.
+    """
+    # Issue #2564: Log the detailed validation errors for backend debugging
+    # This helps identify malformed payloads from LMS integrations or frontend bugs
+    logger.warning(
+        "Request validation failed for %s %s: %s",
+        request.method,
+        request.url.path,
+        exc.errors()
+    )
+    
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={
@@ -111,7 +133,6 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             ],
         },
     )
-
 
 @app.exception_handler(404)
 async def not_found_handler(request, exc: StarletteHTTPException):
