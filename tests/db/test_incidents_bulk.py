@@ -105,3 +105,53 @@ def test_sync_flagged_incidents_bulk_invalid():
     conn.close()
 
     assert len(incidents) == 0
+
+
+def test_sync_flagged_incidents_validates_date_flagged_format():
+    """Ensure valid ISO 8601 strings are preserved while invalid/missing dates fallback to current timestamp."""
+    valid_iso = "2024-05-10T14:30:00+00:00"
+    valid_z_iso = "2024-06-15T09:00:00Z"
+    flags = [
+        {
+            "doc_a": "doc1.pdf",
+            "doc_b": "doc2.pdf",
+            "similarity": 0.85,
+            "date_flagged": valid_iso,
+        },
+        {
+            "doc_a": "doc2.pdf",
+            "doc_b": "doc3.pdf",
+            "similarity": 0.75,
+            "date_flagged": valid_z_iso,
+        },
+        {
+            "doc_a": "doc1.pdf",
+            "doc_b": "doc3.pdf",
+            "similarity": 0.90,
+            "date_flagged": "invalid-non-iso-date",
+        },
+        {
+            "doc_a": "doc3.pdf",
+            "doc_b": "doc4.pdf",
+            "similarity": 0.65,
+            # date_flagged missing
+        },
+    ]
+
+    results = sync_flagged_incidents(flags)
+    assert len(results) == 4
+
+    result_by_pair = {f"{r['document_a']}-{r['document_b']}": r for r in results}
+
+    # Valid ISO strings preserved
+    assert result_by_pair["doc1.pdf-doc2.pdf"]["date_flagged"] == valid_iso
+    assert result_by_pair["doc2.pdf-doc3.pdf"]["date_flagged"] == valid_z_iso
+
+    # Invalid / missing dates auto-populated with valid ISO timestamp
+    invalid_date = result_by_pair["doc1.pdf-doc3.pdf"]["date_flagged"]
+    missing_date = result_by_pair["doc3.pdf-doc4.pdf"]["date_flagged"]
+
+    assert invalid_date != "invalid-non-iso-date"
+    assert "T" in invalid_date
+    assert "T" in missing_date
+
