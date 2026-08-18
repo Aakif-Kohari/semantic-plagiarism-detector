@@ -11,24 +11,8 @@ import logging
 import os
 from unittest.mock import patch
 
- fix/optimize-daily-summary-incidents
- fix/optimize-daily-summary-incidents
- fix/optimize-daily-summary-incidents
-
- fix/bearer-token-exception-handling
 import pytest
-
- main
-
- fix/cache-valid-tokens
- main
-import pytest
-
-from src.api.middleware import get_valid_tokens
-
- main
 from src.api.middleware import _is_public_path, get_valid_tokens
- main
 
 
 class TestGetValidTokens:
@@ -187,15 +171,6 @@ class TestGetValidTokens:
         assert result["readonly_token_abc"] == ["read"]
         assert result["limited_token_123"] == ["read", "write"]
 
- fix/optimize-daily-summary-incidents
- fix/optimize-daily-summary-incidents
- fix/optimize-daily-summary-incidents
-
- fix/bearer-token-exception-handling
- main
-
- fix/cache-valid-tokens
- main
     def test_lru_cache_behavior(self):
         """Verify get_valid_tokens caches result with lru_cache."""
         get_valid_tokens.cache_clear()
@@ -212,9 +187,7 @@ class TestGetValidTokens:
         assert info.hits >= 1
         assert info.maxsize == 1
 
- fix/bearer-token-exception-handling
 
- fix/optimize-daily-summary-incidents
 class TestVerifyBearerToken:
     """Test suite for verify_bearer_token() exception handling."""
 
@@ -286,11 +259,6 @@ class TestVerifyBearerToken:
 
         asyncio.run(_test())
 
-
-
- main
-
- main
 
 class TestIsPublicPath:
     """Test public API path matching."""
@@ -330,7 +298,6 @@ class TestIsPublicPath:
         assert not _is_public_path("/healthcheck")
         assert not _is_public_path("/api/v1/authentication")
         assert not _is_public_path("/api/v1/status-private")
- fix/bearer-token-exception-handling
 
 
 class TestVerifyBearerToken:
@@ -404,5 +371,22 @@ class TestVerifyBearerToken:
 
         asyncio.run(_test())
 
- main
- main
+
+def test_get_current_user_jwt_without_scopes_defaults_to_empty_list():
+    """Verify JWT token without explicit scopes claim defaults to [] instead of read/write."""
+    import asyncio
+    from fastapi.security import SecurityScopes
+    from src.api.middleware import get_current_user
+
+    async def _test():
+        security_scopes = SecurityScopes(scopes=[])
+        token = "jwt_without_scopes"
+
+        payload = {"sub": "user123"}  # No "scopes" claim
+        with patch("src.security.jwt_utils.verify_access_token", return_value=payload):
+            with patch("src.api.middleware.get_valid_tokens", return_value={}):
+                res = await get_current_user(security_scopes, token=token)
+                assert res["scopes"] == []
+
+    asyncio.run(_test())
+

@@ -214,7 +214,7 @@ async def get_current_user(
 
         try:
             payload = verify_access_token(token)
-            token_scopes = payload.get("scopes", ["read", "write"])
+            token_scopes = payload.get("scopes", [])
         except Exception:
             token_scopes = []
 
