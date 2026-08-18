@@ -29,6 +29,7 @@ from src.db.base import BaseRepository
 from src.db.common import with_sqlite_retry
 from src.db.migrations import migrate_auth_database, table_exists
 from src.errors import StaleDataException
+from src.db.security_audit import log_security_event, count_recent_failed_logins
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,44 @@ _ph = PasswordHasher(
     memory_cost=65536,
     parallelism=4,
 )
+
+# Configuration for account lockout (Issue #2704)
+MAX_FAILED_ATTEMPTS = 5
+LOCKOUT_WINDOW_MINUTES = 15
+
+
+def is_account_locked(
+    username: str, 
+    max_attempts: int = MAX_FAILED_ATTEMPTS,
+    window_minutes: int = LOCKOUT_WINDOW_MINUTES
+) -> bool:
+    """Check if an account is temporarily locked due to too many failed login attempts.
+    
+    Args:
+        username: The username to check.
+        max_attempts: Maximum allowed failed attempts before lockout.
+        window_minutes: Time window in minutes for counting attempts.
+        
+    Returns:
+        True if the account is locked, False otherwise.
+    """
+    if not username:
+        return False
+        
+    failed_count = count_recent_failed_logins(
+        username, 
+        window_minutes=window_minutes
+    )
+    
+    is_locked = failed_count >= max_attempts
+    
+    if is_locked:
+        logger.warning(
+            "Account lockout triggered for %s: %d failed attempts in last %d minutes.",
+            username, failed_count, window_minutes
+        )
+        
+    return is_locked
 
 
 class AuthRepository(BaseRepository):
@@ -462,6 +501,9 @@ def verify_user(
     If return_details is True, returns a dict
     ``{"authenticated": bool, "must_change_password": bool}``.
     Otherwise returns a boolean (True on success, False on failure).
+    
+    Implements account lockout protection (Issue #2704) by checking for
+    recent failed login attempts before verifying the password hash.
     """
     try:
         username = _validate_username(username)
@@ -470,6 +512,7 @@ def verify_user(
         if return_details:
             return {"authenticated": False, "must_change_password": False}
         return False
+    
     try:
         with _connect() as conn:
             row = conn.execute(
@@ -484,6 +527,17 @@ def verify_user(
 
         stored_hash, status, is_active, must_change_password = row
         if status == "suspended" or not is_active:
+            if return_details:
+                return {"authenticated": False, "must_change_password": False}
+            return False
+
+        # Issue #2704: Check for account lockout before doing expensive password hashing
+        if is_account_locked(username):
+            log_security_event(
+                event_type="login_blocked_lockout",
+                username=username,
+                details=f"Login attempt blocked due to lockout ({MAX_FAILED_ATTEMPTS} failures in {LOCKOUT_WINDOW_MINUTES}m)"
+            )
             if return_details:
                 return {"authenticated": False, "must_change_password": False}
             return False
