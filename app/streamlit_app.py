@@ -64,6 +64,14 @@ from src.core.lexical_similarity import (
     compute_char_ngram_similarity,
     render_report_generator_ui
 )
+def integrate_pattern_recognition():
+    """Initialize and integrate pattern recognition"""
+    if 'pattern_engine' not in st.session_state:
+        st.session_state['pattern_engine'] = PatternRecognitionEngine()
+    
+    # Add pattern recognition tab to main app
+    render_pattern_recognition_ui(st.session_state['pattern_engine'])
+
 
 
 from app.components.cross_lingual_ui import (
