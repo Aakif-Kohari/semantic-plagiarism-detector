@@ -256,6 +256,7 @@ def test_extract_from_docx_plain_paragraph_unchanged():
 def test_extract_text_from_docx_with_embedded_images():
     """Verify extract_text_from_docx extracts text and gracefully ignores embedded images (#2358)."""
     import io
+
     import docx
     from PIL import Image
 
@@ -1116,8 +1117,13 @@ def test_resolve_process_pool_workers():
 
 def test_extract_pptx_text_mocked(tmp_path):
     """Test that .pptx files are successfully parsed when using python-pptx."""
-    from pptx import Presentation # type: ignore
-    from src.core.document_parser import _allowed_file, _extract_pptx_text, ALLOWED_EXTENSIONS
+    from pptx import Presentation  # type: ignore
+
+    from src.core.document_parser import (
+        ALLOWED_EXTENSIONS,
+        _allowed_file,
+        _extract_pptx_text,
+    )
     
     assert ".pptx" in ALLOWED_EXTENSIONS
     assert _allowed_file("presentation.pptx") is True
@@ -1133,3 +1139,16 @@ def test_extract_pptx_text_mocked(tmp_path):
         extracted = _extract_pptx_text(f)
     
     assert "Hello PowerPoint" in extracted
+
+
+def test_markdown_extension_routing_consolidation():
+    """Ensure extract_text routes .md, .markdown, and .mdown files identically to Markdown extraction."""
+    from src.core.document_parser import extract_text
+
+    markdown_content = b"# Document Title\n\nThis is **bold** text."
+    expected_text = extract_text(markdown_content, "doc.md")
+
+    assert expected_text != ""
+    assert extract_text(markdown_content, "doc.markdown") == expected_text
+    assert extract_text(markdown_content, "doc.mdown") == expected_text
+

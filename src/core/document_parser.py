@@ -6,14 +6,12 @@ import io
 import ipaddress
 import logging
 import os
-import time
-
-from src.core.parse_durations import record_parse_duration
 import re
 import shutil
 import socket
 import subprocess
 import tempfile
+import time
 import xml.etree.ElementTree
 import zipfile
 from collections import Counter
@@ -21,6 +19,8 @@ from pathlib import Path
 from typing import BinaryIO, Dict, List, Optional, Union
 
 import defusedxml
+
+from src.core.parse_durations import record_parse_duration
 
 try:
     import defusedxml.lxml
@@ -701,9 +701,9 @@ def check_ocr_dependencies() -> None:
             or Tesseract binary are missing/unavailable.
     """
     try:
-        import fitz  # PyMuPDF
+        import fitz  # noqa: F401 # PyMuPDF
         import pytesseract
-        from PIL import Image
+        from PIL import Image  # noqa: F401
     except ImportError as exc:
         from src.errors import OCR_DEPENDENCIES_MISSING
 
@@ -2063,12 +2063,13 @@ def extract_texts(
 
     return results
 import io
+
 try:
     from pptx import Presentation  # type: ignore # Ensure python-pptx is imported
 except ImportError:
     Presentation = None
 
-ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt", ".pptx"}
+ALLOWED_EXTENSIONS.add(".pptx")
 
 def _extract_pptx_text(file_obj) -> str:
     """Extract text from a PowerPoint (.pptx) file object."""
