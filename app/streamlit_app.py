@@ -2098,6 +2098,7 @@ with st.sidebar:
 
 
 
+
         # ── Multilingual Support ──────────────────────────────────────────────────
         with st.sidebar.expander("🌍 Multilingual Support", expanded=False):
             st.markdown("""
@@ -2135,6 +2136,32 @@ with st.sidebar:
                     for doc, script in scripts.items():
                         st.caption(f"- {doc}: {script}")
 
+        # ── Cross-Lingual Detection ──────────────────────────────────────────────────
+        with st.sidebar.expander("🌐 Cross-Lingual Detection", expanded=False):
+            st.markdown("""
+            **Cross-lingual detection** identifies plagiarism across different languages
+            using translation and multilingual embeddings.
+            """)
+            
+            enable_cross_lingual = st.checkbox(
+                "Enable Cross-Lingual Detection",
+                value=False,
+                key="enable_cross_lingual",
+                help="Detect plagiarism across different languages"
+            )
+            
+            if enable_cross_lingual:
+                cross_lingual_method = st.selectbox(
+                    "Detection Method",
+                    ["hybrid", "embedding", "translation"],
+                    index=0,
+                    help="Hybrid = translation + embeddings (best), Embedding = LaBSE only, Translation = translation only"
+                )
+                
+                cross_lingual_threshold = st.slider(
+                    "Cross-Lingual Threshold",
+
+
         # ── AI Plagiarism Detection ────────────────────────────────────────────────
         with st.sidebar.expander("🤖 AI Plagiarism Detection", expanded=False):
             st.markdown("""
@@ -2152,10 +2179,17 @@ with st.sidebar:
             if enable_ai_detection:
                 ai_threshold = st.slider(
                     "AI Detection Threshold",
+
                     min_value=0.30,
                     max_value=0.90,
                     value=0.65,
                     step=0.05,
+
+                    help="Similarity threshold for cross-lingual flagging"
+                )
+                
+                st.info(f"Method: {cross_lingual_method} | Threshold: {cross_lingual_threshold:.2f}")
+
                     help="Higher = stricter AI detection"
                 )
                 
