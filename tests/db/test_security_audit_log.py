@@ -74,6 +74,26 @@ def test_log_security_event_stores_optional_details():
     assert row[0] == "Password updated successfully."
 
 
+def test_log_security_event_with_details_none():
+    """Ensure that calling log_security_event with details=None correctly inserts NULL in database."""
+    username = f"user_{uuid.uuid4().hex[:8]}"
+    add_user(username, "Password1!")
+    log_security_event(
+        event_type="login_failure",
+        username=username,
+        details=None,
+    )
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT event_type, username, details FROM security_audit_log WHERE username = ? AND event_type = ?",
+            (username, "login_failure"),
+        ).fetchone()
+    assert row is not None
+    assert row[0] == "login_failure"
+    assert row[1] == username
+    assert row[2] is None
+
+
 def test_log_security_event_insertion():
     """log_security_event() must commit a real row against the actual
     migrated SQLite schema, verifiable from an independent connection.
