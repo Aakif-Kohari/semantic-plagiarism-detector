@@ -2086,6 +2086,12 @@ with st.sidebar:
                 key=SessionKeys.OCR_DPI_SLIDER,
             )
 
+
+        # ── Stopword Manager ────────────────────────────────────────────────────────
+        with st.sidebar.expander("🛑 Stopword Manager", expanded=False):
+            from app.components.stopword_manager_ui import render_stopword_manager_ui
+            render_stopword_manager_ui()
+
         # ── Hybrid Scoring Settings ────────────────────────────────────────────────
         with st.sidebar.expander("🔀 Hybrid Scoring", expanded=False):
             st.markdown("""
@@ -2122,6 +2128,7 @@ with st.sidebar:
                     char_ngram_n = st.slider("Char N-gram Size", 3, 7, 5)
                 
                 st.info(f"Currently using: {lexical_method} + semantic (α={alpha:.2f})")
+
     else:
         threshold = PLAGIARISM_THRESHOLD
         use_chunk_matrix = False
