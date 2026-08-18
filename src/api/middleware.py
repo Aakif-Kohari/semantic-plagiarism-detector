@@ -7,6 +7,22 @@ from typing import Dict, List, Optional
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, SecurityScopes
 
+# Expected JWT verification exceptions
+_JWT_EXCEPTIONS = [ValueError]
+try:
+    import jwt
+    _JWT_EXCEPTIONS.append(jwt.PyJWTError)
+except ImportError:
+    pass
+
+try:
+    from jose import JWTError
+    _JWT_EXCEPTIONS.append(JWTError)
+except ImportError:
+    pass
+
+JWT_EXCEPTIONS = tuple(_JWT_EXCEPTIONS)
+
 logger = logging.getLogger(__name__)
 
 # auto_error=False prevents FastAPI from automatically returning 403 when the header is missing,
@@ -145,7 +161,10 @@ async def verify_bearer_token(
         try:
             verify_access_token(credentials.credentials)
             is_valid = True
+        except JWT_EXCEPTIONS:
+            is_valid = False
         except Exception:
+            logger.error("Unexpected error while verifying bearer token", exc_info=True)
             is_valid = False
 
     if not credentials or not is_valid:
