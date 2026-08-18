@@ -73,10 +73,44 @@ app.state.limiter = limiter
 @app.middleware("http")
 async def otel_tracing_middleware(request: Request, call_next):
     """Middleware to create an OpenTelemetry root span for every HTTP request."""
-    tracer = get_tracer()
-    request_id = request.headers.get("X-Request-ID", "unknown")
-    user_id = getattr(request.state, "user_id", "anonymous")
+    # 1. Check if user_id was pre-set on request.state
+    user_id = getattr(request.state, "user_id", None)
 
+    # 2. If missing, attempt to extract token from Authorization header
+    if not user_id:
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.lower().startswith("bearer "):
+            token = auth_header[7:].strip()
+            if token:
+                try:
+                    from src.security.jwt_utils import verify_access_token
+
+                    payload = verify_access_token(token)
+                    user_id = str(
+                        payload.get("sub")
+                        or payload.get("user_id")
+                        or payload.get("username")
+                        or ""
+                    )
+                except Exception:
+                    pass
+
+    if not user_id:
+        user_id = "anonymous"
+
+    request.state.user_id = user_id
+
+    try:
+        from src.utils.tracing import get_tracer
+
+        tracer = get_tracer()
+    except Exception:
+        tracer = None
+
+    if not tracer:
+        return await call_next(request)
+
+    request_id = request.headers.get("X-Request-ID", "unknown")
     span_name = f"HTTP {request.method} {request.url.path}"
     with tracer.start_as_current_span(span_name) as span:
         span.set_attribute("http.method", request.method)
@@ -88,6 +122,10 @@ async def otel_tracing_middleware(request: Request, call_next):
         try:
             response = await call_next(request)
             span.set_attribute("http.status_code", response.status_code)
+            # Update user.id if set or modified by route handler/dependencies
+            final_user_id = getattr(request.state, "user_id", user_id)
+            if final_user_id:
+                span.set_attribute("user.id", str(final_user_id))
             return response
         except Exception as exc:
             span.record_exception(exc)
