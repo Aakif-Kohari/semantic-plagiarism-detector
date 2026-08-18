@@ -586,6 +586,27 @@ def test_get_recent_incidents_caching_and_invalidation(test_db):
     assert len(incidents_3) == 2
 
 
+def test_get_recent_incidents_with_cutoff_time(test_db):
+    """Test get_recent_incidents filters incidents by date_flagged cutoff_time in SQL."""
+    get_recent_incidents.cache_clear()
+
+    now_dt = datetime.now(timezone.utc)
+    recent_date = (now_dt - timedelta(hours=2)).isoformat()
+    old_date = (now_dt - timedelta(hours=30)).isoformat()
+
+    recent_flag = [{"doc_a": "rec1.pdf", "doc_b": "rec2.pdf", "similarity": 0.85}]
+    sync_flagged_incidents(recent_flag, test_db, now=recent_date)
+
+    old_flag = [{"doc_a": "old1.pdf", "doc_b": "old2.pdf", "similarity": 0.90}]
+    sync_flagged_incidents(old_flag, test_db, now=old_date)
+
+    cutoff = (now_dt - timedelta(hours=24)).isoformat()
+    filtered = get_recent_incidents(cutoff_time=cutoff, db_path=test_db)
+
+    assert len(filtered) == 1
+    assert filtered[0]["document_a"] == "rec1.pdf"
+
+
 def test_archive_old_incidents_moves_rows_to_archive_table(test_db):
     """Test that archive_old_incidents copies old rows and removes them."""
     import sqlite3
