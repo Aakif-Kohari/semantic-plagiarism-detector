@@ -2,6 +2,7 @@
 
 import logging
 import os
+import sqlite3
 from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, Request, status
@@ -156,6 +157,27 @@ async def value_error_handler(request: Request, exc: ValueError):
             "error": True,
             "code": status.HTTP_400_BAD_REQUEST,
             "message": str(exc),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
+
+@app.exception_handler(sqlite3.OperationalError)
+async def sqlite_operational_error_handler(request: Request, exc: sqlite3.OperationalError):
+    """Handle sqlite3.OperationalError, particularly database is locked, returning 503 Service Unavailable."""
+    err_msg = str(exc)
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE if "locked" in err_msg.lower() or "busy" in err_msg.lower() else status.HTTP_500_INTERNAL_SERVER_ERROR
+    message = "Service busy, please retry" if status_code == status.HTTP_503_SERVICE_UNAVAILABLE else f"Database error: {err_msg}"
+
+    is_production = os.getenv("APP_ENVIRONMENT", "production").lower() == "production"
+    logger.error(f"SQLite operational error: {exc}", exc_info=not is_production)
+
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": True,
+            "code": status_code,
+            "message": message,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         },
     )

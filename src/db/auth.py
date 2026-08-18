@@ -40,7 +40,7 @@ def get_auth_db_path() -> Path:
 
 VALID_ROLES = {"admin", "teacher"}
 
-SQLITE_TIMEOUT: float = 15.0
+SQLITE_TIMEOUT: float = 5.0
 """float: Busy timeout in seconds (15.0s) for SQLite database connections in the authentication module.
 
 Architecture & High-Concurrency System Rationale:
