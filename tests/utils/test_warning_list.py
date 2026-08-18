@@ -1,4 +1,7 @@
-from unittest.mock import patch
+import base64
+from unittest.mock import patch, MagicMock, call
+
+import pytest
 
 from src.utils.warning_list import (
     build_key_extractor,
@@ -6,6 +9,8 @@ from src.utils.warning_list import (
     paginate_warnings,
     prepare_warning_page,
     render_copy_button,
+    render_warning_controls,
+    reset_warning_page,
     sort_warnings,
 )
 
@@ -47,6 +52,8 @@ def test_search_matches_either_document_case_insensitively():
 
 def test_empty_search_returns_everything():
     assert len(filter_warnings(WARNINGS, " ")) == 4
+    assert len(filter_warnings(WARNINGS, "")) == 4
+    assert len(filter_warnings(WARNINGS, None)) == 4
 
 
 def test_search_query_is_truncated_to_max_length():
@@ -136,6 +143,10 @@ def test_filtering_occurs_before_pagination():
     assert len(filtered) == 12
     assert len(page.items) == 2
     assert page.total_pages == 2
+
+
+def test_reset_warning_page_returns_first_page():
+    assert reset_warning_page() == 1
 
 
 def test_filter_warnings_by_minimum_match_length():

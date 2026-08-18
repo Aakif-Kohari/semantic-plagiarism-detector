@@ -55,46 +55,43 @@ class IncidentsRepository(BaseRepository):
         init_incident_db(self._db_path)
 
 
-_incidents_repo_singleton: IncidentsRepository | None = None
+incidents_repo = IncidentsRepository(DEFAULT_DB_PATH)
 
 
 def get_incidents_repo() -> IncidentsRepository:
-    """Return the process-wide :class:`IncidentsRepository` singleton.
+    """Return singleton instance of IncidentsRepository."""
+    return incidents_repo
 
-    The instance is created lazily on first call rather than eagerly at
-    module import time. Eager module-level instantiation could fail in a
-    fresh clone (e.g. before ``data/`` exists on disk), so construction is
-    deferred until a caller actually needs the repository.
-    """
-    global _incidents_repo_singleton
-    if _incidents_repo_singleton is None:
-        _incidents_repo_singleton = IncidentsRepository(DEFAULT_DB_PATH)
-    return _incidents_repo_singleton
-
-
-def __getattr__(name: str):
-    """PEP 562 module-level lazy attribute access.
-
-    Preserves ``from src.db.incidents import incidents_repo`` and
-    ``src.db.incidents.incidents_repo`` for existing callers without
-    eagerly constructing ``IncidentsRepository`` at import time — the
-    singleton is only created the first time ``incidents_repo`` is
-    actually accessed.
-    """
-    if name == "incidents_repo":
-        return get_incidents_repo()
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def configure_db_path(db_path: str | Path) -> None:
     """Configure the SQLite database path used by the incidents module."""
     global DEFAULT_DB_PATH
     DEFAULT_DB_PATH = Path(os.path.abspath(str(db_path)))
-    get_incidents_repo().configure_db_path(DEFAULT_DB_PATH)
+    incidents_repo.configure_db_path(DEFAULT_DB_PATH)
 
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _validate_iso_timestamp(val: Any) -> str | None:
+    """Validate that val is a valid ISO 8601 string and return it, or return None."""
+    if not val or not isinstance(val, str):
+        return None
+    clean_val = val.strip()
+    if not clean_val:
+        return None
+    try:
+        norm_val = (
+            clean_val.replace("Z", "+00:00")
+            if clean_val.endswith("Z")
+            else clean_val
+        )
+        datetime.fromisoformat(norm_val)
+        return clean_val
+    except (ValueError, TypeError):
+        return None
 
 
 def _normalise_pair(doc_a: str, doc_b: str) -> tuple[str, str]:
@@ -121,8 +118,23 @@ def _severity_rank(flag: Mapping[str, Any]) -> str:
 
 
 def build_incident_id(doc_a: str, doc_b: str) -> str:
+    """Build a deterministic, order-independent incident ID for a document pair.
+
+    .. warning::
+        **Breaking change**: prior to this fix, the hash input used a bare
+        ``"0"`` digit as the separator between filenames (``f"{first}0{second}"``).
+        Because filenames may themselves contain digits, this created hash
+        collisions between distinct document pairs — e.g. ``("doc10", "doc2")``
+        and ``("doc1", "0doc2")`` both hashed the input ``"doc100doc2"``.
+        The separator is now ``"||"``, a sequence very unlikely to appear in
+        a real filename. This changes the resulting ``INC-...`` ID for every
+        existing incident: any incident ID computed with the old separator
+        will no longer match one computed with the same document pair going
+        forward. Existing stored incident records are not automatically
+        migrated by this change.
+    """
     first, second = _normalise_pair(doc_a, doc_b)
-    digest = hashlib.sha256(f"{first}0{second}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(f"{first}||{second}".encode("utf-8")).hexdigest()
     return f"INC-{digest[:12].upper()}"
 
 
@@ -277,7 +289,7 @@ def sync_flagged_incidents(
     if db_path is None:
         db_path = DEFAULT_DB_PATH
     init_incident_db(db_path)
-    timestamp = now or _utc_now_iso()
+    timestamp = _validate_iso_timestamp(now) or _utc_now_iso()
 
     with closing(_get_connection(db_path)) as conn:
         conn.row_factory = sqlite3.Row
@@ -293,6 +305,16 @@ def sync_flagged_incidents(
 
                 first, second = _normalise_pair(doc_a, doc_b)
 
+                flag_date = (
+                    _validate_iso_timestamp(flag.get("date_flagged"))
+                    or _validate_iso_timestamp(flag.get("timestamp"))
+                    or timestamp
+                )
+                flag_last_seen = (
+                    _validate_iso_timestamp(flag.get("last_seen"))
+                    or timestamp
+                )
+
                 bulk_records.append(
                     (
                         build_incident_id(first, second),
@@ -300,8 +322,8 @@ def sync_flagged_incidents(
                         second,
                         _normalise_score(flag.get("similarity", 0.0)),
                         _severity_rank(flag),
-                        timestamp,
-                        timestamp,
+                        flag_date,
+                        flag_last_seen,
                         _normalise_score(
                             flag.get("threshold_at_time_of_flag", threshold or 0.0)
                         ),
@@ -1206,128 +1228,9 @@ def log_incident(
     return results[0]
 
 
-# ── Scheduled rescan support (continuous monitoring) ───────────────────────
-#
-# Supports the scheduled/event-driven rescan pipeline in
-# ``src.core.scheduler`` / ``src.core.processing.rescan_recent_documents``:
-# it needs to know, *before* writing anything, whether a given (doc_a, doc_b)
-# pair is a brand-new incident (so a webhook alert fires) or one that was
-# already known (so re-running the scheduler never re-notifies reviewers).
-
-
-def incident_exists(
-    doc_a: str,
-    doc_b: str,
-    db_path: str | Path | None = None,
-) -> bool:
-    """Return whether an incident already exists for the ``(doc_a, doc_b)`` pair.
-
-    Uses the same pair-normalisation and id derivation as
-    :func:`sync_flagged_incidents`/:func:`build_incident_id`, so this check
-    agrees with what a subsequent sync would (re)write.
-    """
+def get_incidents_repo(db_path: str | Path | None = None) -> IncidentsRepository:
+    """Helper to instantiate an IncidentsRepository."""
     if db_path is None:
-        db_path = DEFAULT_DB_PATH
-    init_incident_db(db_path)
+        return IncidentsRepository()
+    return IncidentsRepository(db_path)
 
-    incident_id = build_incident_id(doc_a, doc_b)
-    with closing(_get_connection(db_path)) as conn:
-        row = conn.execute(
-            "SELECT 1 FROM plagiarism_incidents WHERE incident_id = ? LIMIT 1",
-            (incident_id,),
-        ).fetchone()
-    return row is not None
-
-
-def get_existing_incident_pairs(
-    db_path: str | Path | None = None,
-) -> set[str]:
-    """Return the set of all existing incident ids.
-
-    Intended for bulk membership checks (e.g. checking many candidate pairs
-    from a single rescan pass) without one round-trip per pair.
-    """
-    if db_path is None:
-        db_path = DEFAULT_DB_PATH
-    init_incident_db(db_path)
-
-    with closing(_get_connection(db_path)) as conn:
-        rows = conn.execute("SELECT incident_id FROM plagiarism_incidents").fetchall()
-    return {row[0] for row in rows}
-
-
-@with_sqlite_retry
-def record_scheduler_run(
-    job_name: str,
-    db_path: str | Path | None = None,
-    *,
-    now: str | None = None,
-    documents_scanned: int = 0,
-    new_incidents: int = 0,
-) -> None:
-    """Persist the last-completed run of a named background job.
-
-    Used by :mod:`src.core.scheduler` so the scheduled rescan job is
-    restart-safe: on process restart it can consult
-    :func:`get_last_scheduler_run` instead of assuming no rescan has ever
-    happened.
-    """
-    if db_path is None:
-        db_path = DEFAULT_DB_PATH
-    init_incident_db(db_path)
-    timestamp = now or _utc_now_iso()
-
-    with closing(_get_connection(db_path)) as conn:
-        try:
-            conn.execute(
-                """
-                INSERT INTO scheduler_runs (
-                    job_name, last_run_at, documents_scanned, new_incidents
-                )
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(job_name) DO UPDATE SET
-                    last_run_at = excluded.last_run_at,
-                    documents_scanned = excluded.documents_scanned,
-                    new_incidents = excluded.new_incidents
-                """,
-                (job_name, timestamp, int(documents_scanned), int(new_incidents)),
-            )
-            conn.commit()
-        except sqlite3.Error as exc:
-            conn.rollback()
-            raise sqlite3.Error(f"Failed to record scheduler run: {exc}") from exc
-
-
-def get_last_scheduler_run(
-    job_name: str,
-    db_path: str | Path | None = None,
-) -> dict[str, Any] | None:
-    """Return the last recorded run of a named background job, if any.
-
-    Returns a dict with ``last_run_at``, ``documents_scanned``, and
-    ``new_incidents`` keys, or ``None`` if the job has never completed a
-    run (e.g. on a fresh database, or before the first scheduled tick).
-    """
-    if db_path is None:
-        db_path = DEFAULT_DB_PATH
-    init_incident_db(db_path)
-
-    with closing(_get_connection(db_path)) as conn:
-        conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            """
-            SELECT job_name, last_run_at, documents_scanned, new_incidents
-            FROM scheduler_runs
-            WHERE job_name = ?
-            """,
-            (job_name,),
-        ).fetchone()
-
-    if row is None:
-        return None
-    return {
-        "job_name": row["job_name"],
-        "last_run_at": row["last_run_at"],
-        "documents_scanned": row["documents_scanned"],
-        "new_incidents": row["new_incidents"],
-    }

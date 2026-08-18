@@ -18,30 +18,36 @@ class TagManager:
     """
 
     @staticmethod
-    def parse_tags(raw_input: str) -> str:
+    def normalize_tags(raw_input: str) -> List[str]:
         """
-        Parses a comma-separated or space-separated string of tags into a normalized,
-        comma-separated string for DB storage.
+        Parses a comma-separated or space-separated string of tags into a sorted
+        list of individual normalized tags.
 
         Tags are converted to lowercase and stripped of any non-alphanumeric
-        characters (except the '#' prefix). If a '#' is missing, it is automatically
-        prepended. Duplicate tags are removed, and the output is sorted alphabetically
-        for consistent hashing and indexing.
+        characters (except the leading '#'). If a '#' is missing, it is
+        automatically prepended. Duplicates are removed and the result is sorted
+        alphabetically for consistent hashing and indexing.
+
+        This is the canonical form. Callers that need to store the value in the
+        single-column tags field should join it themselves, or use
+        ``parse_tags()``; callers that operate on tags one at a time — applying
+        or removing them — must use this method, because a single string cannot
+        be compared against the individual entries of a document's tag list.
 
         Args:
             raw_input (str): The raw user input string containing tags.
 
         Returns:
-            str: A clean, sorted, comma-separated string of normalized tags.
-                 Returns an empty string if the input is invalid or empty.
+            List[str]: Sorted, deduplicated, individually normalized tags.
+                       Empty if the input is invalid or contains no valid tag.
 
         Example:
-            >>> TagManager.parse_tags("#hw1, FINAL,   #draft")
-            '#draft,#final,#hw1'
+            >>> TagManager.normalize_tags("#hw1, FINAL,   #draft")
+            ['#draft', '#final', '#hw1']
         """
         if not raw_input or not isinstance(raw_input, str):
             logger.debug(f"TagManager received empty or invalid input: {raw_input}")
-            return ""
+            return []
 
         # Split by comma or space using regex to handle multiple spaces/commas gracefully
         tokens = re.split(r"[,\s]+", raw_input)
@@ -57,23 +63,46 @@ class TagManager:
             # This prevents SQL injection payloads or weird UI rendering issues
             clean_token = re.sub(r"[^a-z0-9#]", "", token)
 
-            # If after stripping the token is empty or just a hash, skip it
-            if not clean_token or clean_token == "#":
+            # A hash is only meaningful as a prefix. Leaving interior ones in
+            # place produced tags like "#hw1#final" that no filter can match.
+            clean_token = clean_token.lstrip("#").replace("#", "")
+
+            # If after stripping the token is empty, skip it
+            if not clean_token:
                 continue
 
             # Skip purely numeric or non-alpha tokens (must contain at least one alphabetic character)
             if not re.sub(r"[^a-z]", "", clean_token):
                 continue
 
-            # Ensure it starts with a hash prefix
-            if not clean_token.startswith("#"):
-                clean_token = "#" + clean_token
+            normalized_tags.add("#" + clean_token)
 
-            normalized_tags.add(clean_token)
-
-        final_tags = ",".join(sorted(normalized_tags))
-        logger.debug(f"TagManager parsed '{raw_input}' into '{final_tags}'")
+        final_tags = sorted(normalized_tags)
+        logger.debug(f"TagManager parsed '{raw_input}' into {final_tags}")
         return final_tags
+
+    @staticmethod
+    def parse_tags(raw_input: str) -> str:
+        """
+        Parses a comma-separated or space-separated string of tags into a normalized,
+        comma-separated string for DB storage.
+
+        This is the storage representation of ``normalize_tags()``. Because the
+        result may hold several tags, it must not be compared against a single
+        entry of a document's tag list — use ``normalize_tags()`` for that.
+
+        Args:
+            raw_input (str): The raw user input string containing tags.
+
+        Returns:
+            str: A clean, sorted, comma-separated string of normalized tags.
+                 Returns an empty string if the input is invalid or empty.
+
+        Example:
+            >>> TagManager.parse_tags("#hw1, FINAL,   #draft")
+            '#draft,#final,#hw1'
+        """
+        return ",".join(TagManager.normalize_tags(raw_input))
 
     @staticmethod
     def extract_unique_tags(db_tags_column: List[str]) -> List[str]:
@@ -92,11 +121,9 @@ class TagManager:
             return []
 
         for tag_str in db_tags_column:
-            if tag_str and isinstance(tag_str, str):
-                individual_tags = [t.strip() for t in tag_str.split(",") if t.strip()]
-                unique_tags.update(individual_tags)
+            unique_tags.update(TagManager._split_tags(tag_str))
 
-        return sorted(list(unique_tags))
+        return sorted(unique_tags)
 
     @staticmethod
     def has_matching_tag(doc_tags_str: str, filter_tag: str) -> bool:
@@ -120,69 +147,74 @@ class TagManager:
             return False
 
         # Split document tags and check for exact inclusion
-        doc_tags = [t.strip() for t in doc_tags_str.split(",") if t.strip()]
-        return filter_tag in doc_tags
+        return filter_tag in TagManager._split_tags(doc_tags_str)
 
     @classmethod
     def apply_tag(cls, document_ids: List[str], tag: str) -> None:
         """
-        Applies a specific tag to a list of documents.
-        Skips documents that already have the tag.
+        Applies one or more tags to a list of documents.
+        Documents that already carry every requested tag are left untouched.
 
         Args:
             document_ids (List[str]): The IDs (filenames) of documents.
-            tag (str): The tag to apply.
+            tag (str): The tag or tags to apply. Accepts the same
+                comma/space-separated input as ``normalize_tags()``.
         """
         from src.db.corpus_db import get_document_tags, update_document_tags
 
-        normalized_tag = cls.parse_tags(tag)
-        if not normalized_tag:
+        # normalize_tags(), not parse_tags(): the input may name several tags,
+        # and each has to be added to the document's list on its own. Adding the
+        # joined string instead stored "#final,#hw1" as a single entry, which no
+        # filter could ever match and which corrupted the column on the next
+        # write, when the entry was split back apart at the commas.
+        new_tags = cls.normalize_tags(tag)
+        if not new_tags:
             return
 
         for doc_id in document_ids:
             current_tags_str = get_document_tags(doc_id)
-            if not current_tags_str:
-                new_tags_str = normalized_tag
-            else:
-                individual_tags = [
-                    t.strip() for t in current_tags_str.split(",") if t.strip()
-                ]
-                if normalized_tag in individual_tags:
-                    continue
-                individual_tags.append(normalized_tag)
-                new_tags_str = ",".join(sorted(set(individual_tags)))
+            existing_tags = cls._split_tags(current_tags_str)
 
-            update_document_tags(doc_id, new_tags_str)
+            missing_tags = [t for t in new_tags if t not in existing_tags]
+            if not missing_tags:
+                continue
+
+            merged = sorted(set(existing_tags) | set(new_tags))
+            update_document_tags(doc_id, ",".join(merged))
 
     @classmethod
     def remove_tag(cls, document_ids: List[str], tag: str) -> None:
         """
-        Removes a specific tag from a list of documents.
-        Ignores documents that don't have the tag.
+        Removes one or more tags from a list of documents.
+        Documents that carry none of the requested tags are left untouched.
 
         Args:
             document_ids (List[str]): The IDs (filenames) of documents.
-            tag (str): The tag to remove.
+            tag (str): The tag or tags to remove. Accepts the same
+                comma/space-separated input as ``normalize_tags()``.
         """
         from src.db.corpus_db import get_document_tags, update_document_tags
 
-        normalized_tag = cls.parse_tags(tag)
-        if not normalized_tag:
+        doomed_tags = set(cls.normalize_tags(tag))
+        if not doomed_tags:
             return
 
         for doc_id in document_ids:
             current_tags_str = get_document_tags(doc_id)
-            if not current_tags_str:
-                continue
-            individual_tags = [
-                t.strip() for t in current_tags_str.split(",") if t.strip()
-            ]
-            if normalized_tag not in individual_tags:
+            existing_tags = cls._split_tags(current_tags_str)
+
+            if not doomed_tags.intersection(existing_tags):
                 continue
 
-            updated_tags = [t for t in individual_tags if t != normalized_tag]
-            new_tags_str = ",".join(sorted(set(updated_tags))) if updated_tags else ""
-            update_document_tags(doc_id, new_tags_str)
+            remaining = sorted({t for t in existing_tags if t not in doomed_tags})
+            update_document_tags(doc_id, ",".join(remaining))
+
+    @staticmethod
+    def _split_tags(tags_str: str) -> List[str]:
+        """Split a stored tags column into its individual, trimmed entries."""
+        if not tags_str or not isinstance(tags_str, str):
+            return []
+        return [t.strip() for t in tags_str.split(",") if t.strip()]
 
     @staticmethod
     def sanitize_tag_name(tag: str) -> str:

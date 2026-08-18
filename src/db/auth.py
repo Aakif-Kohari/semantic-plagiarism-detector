@@ -201,7 +201,7 @@ def get_security_audit_log_count(
             return row[0] if row else 0
     except sqlite3.Error as e:
         logger.error(f"Failed to count security audit logs: {e}")
-        return 0
+        raise
 
 
 def get_distinct_audit_event_types() -> list[str]:
@@ -274,11 +274,18 @@ def _verify_password_hash(password: str, stored_hash: str) -> bool:
     return False
 
 
-def _validate_username(username: str) -> str:
-    username = str(username).strip().lower()
-    if not username:
+def _validate_username(username: Any) -> str:
+    """Validate and sanitize a username string.
+
+    Raises:
+        ValueError: If username is None, not a string, or empty/whitespace.
+    """
+    if username is None or not isinstance(username, str):
         raise ValueError("Username cannot be empty.")
-    return username
+    normalized = username.strip().lower()
+    if not normalized:
+        raise ValueError("Username cannot be empty.")
+    return normalized
 
 
 def _validate_password(password: str) -> str:
@@ -337,7 +344,7 @@ def init_db() -> None:
             exists = bool(row and row[0])
 
             if not exists:
-                hashed = _hash_password("Admin123!")
+                hashed = str(_hash_password("Admin123!"))
                 conn.execute(
                     """
                     INSERT INTO users (username, password, role)
@@ -1708,7 +1715,7 @@ def demote_user(username: str, admin_username: str) -> bool:
 
 import secrets  # noqa: F811
 import string  # noqa: F811
-from datetime import datetime, timedelta  # noqa: F811
+from datetime import timedelta
 from typing import Optional, Dict, Any, List  # noqa: F811
 import hashlib
 import json  # noqa: F811
@@ -1754,14 +1761,112 @@ def generate_sso_token() -> str:
     return secrets.token_hex(64)
 
 
+def store_sso_state(state: str, expires_in_seconds: int = 600) -> bool:
+    """
+    Store an OAuth SSO state parameter in the database with an expiration time.
+
+    Args:
+        state: The state token string.
+        expires_in_seconds: Lifetime of state in seconds (default 600s / 10m).
+
+    Returns:
+        bool: True if state was stored successfully.
+    """
+    if not state:
+        return False
+    try:
+        expires_at = (dt.now() + timedelta(seconds=expires_in_seconds)).isoformat()
+        with _connect() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sso_states (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    state TEXT UNIQUE NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    used_at TEXT DEFAULT NULL,
+                    expires_at TEXT NOT NULL
+                )
+            """)
+            conn.execute(
+                """INSERT OR REPLACE INTO sso_states (state, expires_at, used_at)
+                   VALUES (?, ?, NULL)""",
+                (state, expires_at)
+            )
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Failed to store SSO state: {e}")
+        return False
+
+
+def validate_sso_state(state: str) -> bool:
+    """
+    Validate an OAuth SSO state parameter and invalidate it after validation to prevent replay attacks.
+
+    Args:
+        state: The state token to validate.
+
+    Returns:
+        bool: True if valid, unexpired, and not previously used; False otherwise.
+    """
+    if not state:
+        return False
+
+    try:
+        with _connect() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sso_states (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    state TEXT UNIQUE NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    used_at TEXT DEFAULT NULL,
+                    expires_at TEXT NOT NULL
+                )
+            """)
+            row = conn.execute(
+                "SELECT expires_at, used_at FROM sso_states WHERE state = ?",
+                (state,)
+            ).fetchone()
+
+            if not row:
+                return False
+
+            expires_at, used_at = row
+            if used_at is not None:
+                logger.warning(f"OAuth state replay attack detected for state: {state}")
+                return False
+
+            if expires_at < dt.now().isoformat():
+                logger.warning(f"OAuth state expired for state: {state}")
+                return False
+
+            # Invalidate state immediately after validation to prevent replay attacks
+            conn.execute(
+                "UPDATE sso_states SET used_at = CURRENT_TIMESTAMP WHERE state = ?",
+                (state,)
+            )
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Failed to validate SSO state: {e}")
+        return False
+
+
+def verify_sso_state(state: str) -> bool:
+    """Alias for validate_sso_state."""
+    return validate_sso_state(state)
+
+
 def generate_sso_state() -> str:
     """
-    Generate a secure state parameter for OAuth2 flow.
+    Generate a secure state parameter for OAuth2 flow and store it.
     
     Returns:
         A 32-character hex state token
     """
-    return secrets.token_hex(32)
+    state = secrets.token_hex(32)
+    store_sso_state(state)
+    return state
+
 
 
 # ============================================================================
@@ -1892,7 +1997,7 @@ def _store_sso_recovery_token(username: str, password: str) -> None:
     try:
         token = generate_sso_token()
         token_hash = hashlib.sha256(token.encode()).hexdigest()
-        expires_at = (datetime.now() + timedelta(days=7)).isoformat()
+        expires_at = (dt.now() + timedelta(days=7)).isoformat()
         
         with _connect() as conn:
             # Create recovery_tokens table if not exists
@@ -1954,7 +2059,7 @@ def verify_sso_recovery_token(username: str, token: str) -> bool:
             if used_at is not None:
                 return False  # Token already used
             
-            if expires_at < datetime.now().isoformat():
+            if expires_at < dt.now().isoformat():
                 return False  # Token expired
             
             # Mark token as used
@@ -2267,6 +2372,9 @@ __all__ = [
     'generate_secure_password',
     'generate_sso_token',
     'generate_sso_state',
+    'store_sso_state',
+    'validate_sso_state',
+    'verify_sso_state',
     'get_or_create_sso_user_enhanced',
     'get_sso_user_info',
     'list_sso_users',

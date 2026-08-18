@@ -25,6 +25,9 @@ _SUPPORTED_LANGUAGES = {
     "es": "Español",
     "fr": "Français",
     "de": "Deutsch",
+    "pt": "Português",
+    "zh": "中文",
+
 }
 LANGUAGE_DISPLAY = _SUPPORTED_LANGUAGES
 DISPLAY_TO_CODE = {

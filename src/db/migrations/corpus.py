@@ -6,7 +6,7 @@ import sqlite3
 
 from .common import column_exists, run_migrations
 
-CORPUS_SCHEMA_VERSION = 15
+CORPUS_SCHEMA_VERSION = 14
 
 
 def migration_001_create_base_schema(
@@ -152,9 +152,27 @@ def migration_010_add_document_owner(
     The ``owner`` column stores the username of the account that uploaded the
     document, enabling ``get_document_count_by_user()`` analytics without
     requiring a join against the users table.
+
+    Uses ``DEFAULT 'system'`` rather than leaving new rows NULL: SQLite
+    backfills that default into every pre-existing row at the moment this
+    ``ALTER TABLE`` runs, so a database migrating from an older schema
+    version won't end up with a mix of NULL and populated owners for its
+    existing documents.
+
+    Note this default only applies retroactively to rows that exist at
+    migration time (and to any future INSERT that omits the ``owner``
+    column entirely). ``add_document()`` always explicitly includes
+    ``owner`` in its INSERT statement and will still pass through
+    ``None`` -> SQL NULL for callers that don't supply one, so
+    NULL owners remain a real, ongoing possibility going forward. See
+    ``get_document_count_by_user()`` in ``src/db/corpus_db.py``, which is
+    NULL-safe by construction (``WHERE owner = ?`` never matches a NULL
+    row, so it simply excludes them rather than crashing).
     """
     if not column_exists(connection, "documents", "owner"):
-        connection.execute("ALTER TABLE documents ADD COLUMN owner TEXT")
+        connection.execute(
+            "ALTER TABLE documents ADD COLUMN owner TEXT DEFAULT 'system'"
+        )
     # Index for fast per-user COUNT queries
     connection.execute("""
         CREATE INDEX IF NOT EXISTS idx_documents_owner
@@ -266,27 +284,6 @@ def migration_013_add_incident_archive_table(
         """)
 
 
-def migration_015_add_scheduler_runs(
-    connection: sqlite3.Connection,
-) -> None:
-    """Create the scheduler_runs table.
-
-    Tracks the last-completed run of background scheduled jobs (e.g. the
-    scheduled plagiarism rescan job — see ``src.core.scheduler`` and
-    ``src.core.processing.rescan_recent_documents``) so a process restart
-    does not lose track of when a job last ran. Keyed by ``job_name`` so
-    multiple scheduled jobs can share this table.
-    """
-    connection.execute("""
-        CREATE TABLE IF NOT EXISTS scheduler_runs (
-            job_name           TEXT PRIMARY KEY,
-            last_run_at        TEXT NOT NULL,
-            documents_scanned  INTEGER NOT NULL DEFAULT 0,
-            new_incidents      INTEGER NOT NULL DEFAULT 0
-        )
-        """)
-
-
 CORPUS_MIGRATIONS = {
     1: migration_001_create_base_schema,
     2: migration_002_add_document_metadata,
@@ -302,7 +299,6 @@ CORPUS_MIGRATIONS = {
     12: migration_012_add_fts5_index,
     13: migration_013_add_incident_archive_table,
     14: migration_013_add_incident_severity_idx,
-    15: migration_015_add_scheduler_runs,
 }
 
 

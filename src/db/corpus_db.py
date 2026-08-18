@@ -80,13 +80,18 @@ def _connect():
         path = str(FALLBACK_CORPUS_DB_PATH)
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
-    try:
-        conn = sqlite3.connect(path, check_same_thread=False)
-    except sqlite3.OperationalError:
-        path = str(FALLBACK_CORPUS_DB_PATH)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        conn = sqlite3.connect(path, check_same_thread=False)
-    conn.execute("PRAGMA foreign_keys = ON")
+    pool = _pool()
+    conn = pool.get(path)
+    if conn is None:
+        try:
+            conn = sqlite3.connect(path, check_same_thread=False)
+        except sqlite3.OperationalError:
+            path = str(FALLBACK_CORPUS_DB_PATH)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            conn = sqlite3.connect(path, check_same_thread=False)
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA journal_mode=WAL")
+        pool[path] = conn
 
     try:
         yield conn
@@ -101,8 +106,8 @@ def _connect():
             pass
 
 
-def close_connections() -> None:
-    """Close all pooled corpus connections for the current thread."""
+def close_connections(all_threads: bool = False) -> None:
+    """Close all pooled corpus connections for the current thread (or all threads if specified)."""
     pool = getattr(_connection_pool, "connections", {})
     for conn in pool.values():
         conn.close()
@@ -215,6 +220,9 @@ def init_corpus_db() -> None:
 
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_incidents_date ON plagiarism_incidents(date_flagged)"
         )
 
         # Issue #1359: Create FTS5 virtual table + sync triggers for full-text

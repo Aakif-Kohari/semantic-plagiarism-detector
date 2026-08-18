@@ -22,7 +22,8 @@ logger = logging.getLogger(__name__)
 # Regex patterns for common citation formats
 # APA: Author, A. A. (Year). Title. Journal, Vol(Issue), Pages.
 _APA_PATTERN = re.compile(
-    r"^(?P<authors>[^.]+?)\s*\((?P<year>\d{4})\)\.\s*(?P<title>[^.]+)\.", re.MULTILINE
+    r"^(?P<authors>.+?)\s*\((?P<year>\d{4})\)\.\s*(?P<title>[^.]+)\.",
+    re.MULTILINE,
 )
 
 # IEEE: [1] A. Author, "Title," Journal, vol. X, no. Y, pp. Z, Year.
