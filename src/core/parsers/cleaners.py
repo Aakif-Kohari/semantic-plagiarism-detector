@@ -187,7 +187,23 @@ _PERSON_PATTERNS = [
 
 
 def load_custom_stopwords(file_path: Optional[str] = None) -> frozenset:
-    """Load custom stopwords from a file (one word per line)."""
+    """Load custom domain-specific stopwords from a text file (one word per line).
+
+    Error Recovery & Fault Tolerance:
+    --------------------------------
+    If `file_path` is not explicitly provided, the system checks the `STOPWORDS_FILE` environment variable.
+    If `STOPWORDS_FILE` is not set or points to an empty string, an empty `frozenset()` is returned.
+
+    If `STOPWORDS_FILE` points to a non-existent file or raises an `OSError` (e.g. permission denied, missing file,
+    broken file descriptor), the error is caught, a warning is logged, and an empty `frozenset()` is returned
+    to ensure the text extraction and cleaning pipeline does not crash.
+
+    Args:
+        file_path: Optional path to custom stopwords file. If None, reads from STOPWORDS_FILE environment variable.
+
+    Returns:
+        frozenset: Lowercase custom stopwords loaded from file, or empty frozenset on missing file or read failure.
+    """
     path = file_path if file_path is not None else os.environ.get("STOPWORDS_FILE")
 
     if not path:
