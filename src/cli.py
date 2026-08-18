@@ -231,10 +231,8 @@ def run_prewarm(folder_path: str | None = None) -> int:
         for filepath in files:
             filename = os.path.basename(filepath)
             try:
-                with open(filepath, "rb") as f:
-                    file_bytes = f.read()
                 text = extract_text(
-                    BytesIO(file_bytes),
+                    filepath,
                     filename,
                     ocr_language=DEFAULT_OCR_LANGUAGE,
                     ocr_dpi=DEFAULT_OCR_DPI,
