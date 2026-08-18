@@ -7,18 +7,18 @@ and strong password complexity policies.
 """
 
 from __future__ import annotations
-from pathlib import Path
 
 import datetime
 import json
 import logging
 import os
 import re
+import secrets
 import sqlite3
+import string
 from datetime import datetime as dt
 from datetime import timezone
-import secrets
-import string
+from pathlib import Path
 
 import bcrypt
 from argon2 import PasswordHasher
@@ -94,6 +94,7 @@ def log_security_event(
 ) -> None:
     """Record a security-relevant event in the security_audit_log table."""
     timestamp = datetime.datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    clean_username = username.lower() if username else ""
     try:
         with _connect() as conn:
             conn.execute(
@@ -101,14 +102,14 @@ def log_security_event(
                 INSERT INTO security_audit_log (event_type, username, timestamp, details)
                 VALUES (?, ?, ?, ?)
                 """,
-                (event_type, username, timestamp, details),
+                (event_type, clean_username, timestamp, details),
             )
             conn.commit()
     except Exception as exc:
         logger.warning(
             "Failed to write security audit log entry [%s, %s]: %s",
             event_type,
-            username,
+            clean_username,
             exc,
         )
 
@@ -1265,10 +1266,10 @@ def format_user_creation_date(iso_str: str) -> str:
 # ============================================================================
 
 from enum import Enum
-from typing import Set, List, Optional, Dict, Any
 from functools import wraps
-import streamlit as st
+from typing import Any, Dict, List, Optional, Set
 
+import streamlit as st
 
 # ============================================================================
 # ROLE DEFINITIONS
@@ -1713,12 +1714,12 @@ def demote_user(username: str, admin_username: str) -> bool:
 # SSO SECURITY ENHANCEMENTS - Issue #2172
 # ============================================================================
 
+import hashlib
+import json  # noqa: F811
 import secrets  # noqa: F811
 import string  # noqa: F811
 from datetime import timedelta
-from typing import Optional, Dict, Any, List  # noqa: F811
-import hashlib
-import json  # noqa: F811
+from typing import Any, Dict, List, Optional  # noqa: F811
 
 # ============================================================================
 # SECURE PASSWORD GENERATION
