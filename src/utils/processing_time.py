@@ -14,6 +14,7 @@ from collections import defaultdict
 from collections.abc import Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass
+from html import escape
 from numbers import Real
 from typing import Any, Dict, List, Optional
 
@@ -98,8 +99,12 @@ class ProcessingTimer:
             self._active_stack.pop()
             self._active_timers -= 1
 
-            if parent is None:
-                self.durations.append(span.duration)
+            # Record every span, nested or not. Only appending root spans meant
+            # a stage timed inside another stage never reached `durations`, so
+            # callers reading that list saw the outer total and none of the
+            # breakdown. Spans are appended as they close, so the list is
+            # ordered innermost-first, matching the order the blocks finished.
+            self.durations.append(span.duration)
 
             self._aggregate_stats[name] += span.duration
 
@@ -228,8 +233,15 @@ class TimingUIRenderer:
 
             for name, duration in sorted_items:
                 percentage = (duration / total_time) * 100 if total_time > 0 else 0
+                # Stage names come from time_block() callers and can carry a
+                # filename or another piece of document-derived text. This table
+                # is rendered with unsafe_allow_html=True, so anything unescaped
+                # here is parsed as markup and can break the table apart.
+                safe_name = escape(str(name))
                 html_rows.append(
-                    f"<tr><td>{name}</td><td>{duration:.3f}s</td><td>{percentage:.1f}%</td></tr>"
+                    f"<tr><td>{safe_name}</td>"
+                    f"<td>{duration:.3f}s</td>"
+                    f"<td>{percentage:.1f}%</td></tr>"
                 )
 
             html_table = f"""
@@ -243,7 +255,7 @@ class TimingUIRenderer:
                         <td>Total Measured</td>
                         <td>{total_time:.3f}s</td>
                         <td>100.0%</td>
-                    </tr8>
+                    </tr>
                 </tbody>
             </table>
             """
@@ -341,15 +353,27 @@ def format_processing_duration(seconds: int) -> str:
         minute_unit = "minute" if minutes == 1 else "minutes"
         if remaining_seconds == 0:
             return f"{minutes} {minute_unit}"
-        return f"{minutes} {minute_unit} {remaining_seconds} seconds"
+        second_unit = "second" if remaining_seconds == 1 else "seconds"
+        return f"{minutes} {minute_unit} {remaining_seconds} {second_unit}"
 
     hours, remaining_minutes = divmod(minutes, 60)
     hour_unit = "hour" if hours == 1 else "hours"
-    if remaining_minutes == 0:
-        return f"{hours} {hour_unit}"
 
-    minute_unit = "minute" if remaining_minutes == 1 else "minutes"
-    return f"{hours} {hour_unit} {remaining_minutes} {minute_unit}"
+    # Build the parts that are actually non-zero. The seconds component belongs
+    # here just as much as it does below the hour mark: dropping it turned
+    # "1 hour 1 minute 5 seconds" into "1 hour 1 minute" and made the ETA
+    # disagree with itself either side of the 60-minute boundary.
+    parts = [f"{hours} {hour_unit}"]
+
+    if remaining_minutes:
+        minute_unit = "minute" if remaining_minutes == 1 else "minutes"
+        parts.append(f"{remaining_minutes} {minute_unit}")
+
+    if remaining_seconds:
+        second_unit = "second" if remaining_seconds == 1 else "seconds"
+        parts.append(f"{remaining_seconds} {second_unit}")
+
+    return " ".join(parts)
 
 
 def processing_eta_text(

@@ -2,6 +2,7 @@
 
 import logging
 import os
+import sqlite3
 from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, Request, status
@@ -72,10 +73,44 @@ app.state.limiter = limiter
 @app.middleware("http")
 async def otel_tracing_middleware(request: Request, call_next):
     """Middleware to create an OpenTelemetry root span for every HTTP request."""
-    tracer = get_tracer()
-    request_id = request.headers.get("X-Request-ID", "unknown")
-    user_id = getattr(request.state, "user_id", "anonymous")
+    # 1. Check if user_id was pre-set on request.state
+    user_id = getattr(request.state, "user_id", None)
 
+    # 2. If missing, attempt to extract token from Authorization header
+    if not user_id:
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.lower().startswith("bearer "):
+            token = auth_header[7:].strip()
+            if token:
+                try:
+                    from src.security.jwt_utils import verify_access_token
+
+                    payload = verify_access_token(token)
+                    user_id = str(
+                        payload.get("sub")
+                        or payload.get("user_id")
+                        or payload.get("username")
+                        or ""
+                    )
+                except Exception:
+                    pass
+
+    if not user_id:
+        user_id = "anonymous"
+
+    request.state.user_id = user_id
+
+    try:
+        from src.utils.tracing import get_tracer
+
+        tracer = get_tracer()
+    except Exception:
+        tracer = None
+
+    if not tracer:
+        return await call_next(request)
+
+    request_id = request.headers.get("X-Request-ID", "unknown")
     span_name = f"HTTP {request.method} {request.url.path}"
     with tracer.start_as_current_span(span_name) as span:
         span.set_attribute("http.method", request.method)
@@ -87,6 +122,10 @@ async def otel_tracing_middleware(request: Request, call_next):
         try:
             response = await call_next(request)
             span.set_attribute("http.status_code", response.status_code)
+            # Update user.id if set or modified by route handler/dependencies
+            final_user_id = getattr(request.state, "user_id", user_id)
+            if final_user_id:
+                span.set_attribute("user.id", str(final_user_id))
             return response
         except Exception as exc:
             span.record_exception(exc)
@@ -143,6 +182,41 @@ async def not_found_handler(request, exc: StarletteHTTPException):
             "error": True,
             "code": 404,
             "message": "API endpoint or resource not found",
+        },
+    )
+
+
+@app.exception_handler(ValueError)
+async def value_error_handler(request: Request, exc: ValueError):
+    """Handle ValueError exceptions by returning a standardized 400 Bad Request JSON response."""
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content={
+            "error": True,
+            "code": status.HTTP_400_BAD_REQUEST,
+            "message": str(exc),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
+
+@app.exception_handler(sqlite3.OperationalError)
+async def sqlite_operational_error_handler(request: Request, exc: sqlite3.OperationalError):
+    """Handle sqlite3.OperationalError, particularly database is locked, returning 503 Service Unavailable."""
+    err_msg = str(exc)
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE if "locked" in err_msg.lower() or "busy" in err_msg.lower() else status.HTTP_500_INTERNAL_SERVER_ERROR
+    message = "Service busy, please retry" if status_code == status.HTTP_503_SERVICE_UNAVAILABLE else f"Database error: {err_msg}"
+
+    is_production = os.getenv("APP_ENVIRONMENT", "production").lower() == "production"
+    logger.error(f"SQLite operational error: {exc}", exc_info=not is_production)
+
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": True,
+            "code": status_code,
+            "message": message,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         },
     )
 

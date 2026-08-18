@@ -791,7 +791,7 @@ def test_resolve_hostname_caching_behavior(mock_getaddrinfo):
     assert ip2 == "93.184.216.34"
     assert mock_getaddrinfo.call_count == 1
 
-
-
-
+def test_is_ip_in_cidr_block_strips_padded_ip():
+    """Whitespace-padded private IPs must still match the CIDR block."""
+    assert is_ip_in_cidr_block(" 127.0.0.1 ", "127.0.0.0/8") is True
 
