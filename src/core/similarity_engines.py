@@ -337,9 +337,9 @@ class HybridSimilarityEngine(BaseSimilarityEngine):
             alpha: Weight of the semantic engine (0.0 <= alpha <= 1.0).
         """
         if not (0.0 <= alpha <= 1.0):
-            from src.errors import sim_weight_out_of_range
+            from src.errors import SIM_WEIGHT_OUT_OF_RANGE
 
-            raise ValueError(sim_weight_out_of_range(alpha))
+            raise ValueError(SIM_WEIGHT_OUT_OF_RANGE.format(w=alpha))
 
         self.semantic_engine = semantic_engine
         self.lexical_engine = lexical_engine

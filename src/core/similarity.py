@@ -250,9 +250,9 @@ def hybrid_similarity_matrix(
     Combine semantic and lexical similarity matrices using a weighted formula.
     """
     if not (0.0 <= w <= 1.0):
-        from src.errors import sim_weight_out_of_range
+        from src.errors import SIM_WEIGHT_OUT_OF_RANGE
 
-        raise ValueError(sim_weight_out_of_range(w))
+        raise ValueError(SIM_WEIGHT_OUT_OF_RANGE.format(w=w))
 
     if semantic_df.shape != lexical_df.shape:
         from src.errors import SIM_SHAPE_MISMATCH
@@ -353,9 +353,9 @@ def compute_hybrid_similarity(
         float: Hybrid similarity score strictly bounded in [0.0, 1.0].
     """
     if not (0.0 <= alpha <= 1.0):
-        from src.errors import sim_weight_out_of_range
+        from src.errors import SIM_WEIGHT_OUT_OF_RANGE
 
-        raise ValueError(sim_weight_out_of_range(alpha))
+        raise ValueError(SIM_WEIGHT_OUT_OF_RANGE.format(w=alpha))
 
     bm25_score = _compute_bm25_similarity(doc_a, doc_b)
     hybrid_score = alpha * vector_sim + (1.0 - alpha) * bm25_score
@@ -980,3 +980,48 @@ def detect_plagiarism_clusters(
         "suspicious_groups": suspicious_groups,
         "total_clusters": len(clusters),
     }
+
+# ============================================================================
+# HYBRID SIMILARITY INTEGRATION - Issue #2676
+# ============================================================================
+
+from src.core.hybrid_scorer import HybridScorer, HybridConfig, compute_hybrid_plagiarism_flags
+
+def compute_hybrid_similarity_df(
+    semantic_df: pd.DataFrame,
+    texts: Dict[str, str],
+    alpha: float = 0.7,
+    lexical_method: str = "tfidf",
+) -> pd.DataFrame:
+    """
+    Compute hybrid similarity DataFrame combining semantic and lexical scores.
+    
+    Args:
+        semantic_df: Semantic similarity DataFrame
+        texts: Document texts
+        alpha: Semantic weight (0.7 = 70% semantic, 30% lexical)
+        lexical_method: Lexical method to use
+    
+    Returns:
+        Hybrid similarity DataFrame
+    """
+    scorer = HybridScorer(HybridConfig(alpha=alpha, lexical_method=lexical_method))
+    return scorer.compute_hybrid_matrix(texts, semantic_df, alpha, lexical_method)
+
+
+def flag_plagiarism_hybrid(
+    hybrid_df: pd.DataFrame,
+    threshold: float = PLAGIARISM_THRESHOLD,
+) -> List[Dict]:
+    """
+    Flag plagiarism using hybrid similarity scores.
+    
+    Args:
+        hybrid_df: Hybrid similarity DataFrame
+        threshold: Flagging threshold
+    
+    Returns:
+        List of flagged pairs
+    """
+    scorer = HybridScorer()
+    return scorer.flag_plagiarism_hybrid(hybrid_df, threshold)

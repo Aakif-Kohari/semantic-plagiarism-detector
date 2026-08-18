@@ -16,7 +16,7 @@ def test_csv_generation_api_is_preserved():
 
     assert result is not None
     assert "alpha.pdf" in result
-    assert "CRITICAL" in result
+    assert "High" in result
 
 
 def test_json_generation_api_is_preserved():

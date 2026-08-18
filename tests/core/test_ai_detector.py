@@ -302,13 +302,20 @@ def test_burstiness_single_sentence():
     assert _calculate_burstiness("Only one sentence here.") == 0.0
 
 
-def test_burstiness_varied_sentence_lengths():
+def test_burstiness_uniform_sentences():
+    """Burstiness of uniform sentences must be a low score (0.0)."""
+    from src.core.ai_detector import _calculate_burstiness
+
+    uniform = "This is a sentence. This is a sentence. This is a sentence."
+    assert _calculate_burstiness(uniform) == 0.0
+
+
+def test_burstiness_varied_sentences():
     """Burstiness should be higher for text with varied sentence lengths."""
     from src.core.ai_detector import _calculate_burstiness
 
     varied = "Short. This is a much longer sentence with many words. Medium one here."
-    uniform = "This is a sentence. This is a sentence. This is a sentence."
-    assert _calculate_burstiness(varied) > _calculate_burstiness(uniform)
+    assert _calculate_burstiness(varied) > 0.0
 
 
 def test_ngram_repetitiveness_empty_text():
@@ -701,4 +708,4 @@ def test_split_sentences_simple():
     assert _split_sentences_simple("") == []
     assert _split_sentences_simple(None) == []
     assert _split_sentences_simple(123) == []  # type: ignore
-
+    

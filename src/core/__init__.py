@@ -1,3 +1,5 @@
+from typing import TYPE_CHECKING
+
 from .config import (
     BrandingConfig,
     get_branding_config,
@@ -5,6 +7,7 @@ from .config import (
     reload_branding_config,
 )
 from .document_parser import (
+    check_ocr_dependencies,
     extract_text,
     extract_text_from_pdf,
     extract_texts,
@@ -14,6 +17,7 @@ from .document_parser import (
 from .embedding_model import embed_chunks, embed_documents, get_document_embedding
 from .faiss_index import (
     ChunkRecord,
+    FaissChunkRecord,
     build_index,
     build_index_from_matrix,
     find_plagiarised_chunks,
@@ -23,7 +27,11 @@ from .faiss_index import (
     save_index,
     search_similar_chunks,
 )
-from .pipeline import run_extraction_pipeline, run_pipeline
+from .pipeline import (
+    PipelineChunkRecord,
+    run_extraction_pipeline,
+    run_pipeline,
+)
 from .similarity import (
     PLAGIARISM_THRESHOLD,
     calculate_paragraph_similarity_breakdown,
@@ -45,51 +53,60 @@ from .text_chunking import chunk_by_sentences, chunk_document, chunk_documents
 from .translator import translate_text
 from .webhook import dispatch_plagiarism_alert, send_plagiarism_alert
 
+# TYPE_CHECKING block for lazy imports (Issue #2363)
+# This satisfies static analysis tools (mypy, pylance) that would otherwise
+# complain that src.core has no attribute 'with_sqlite_retry', even though
+# it's dynamically resolved via __getattr__ and listed in __all__.
+if TYPE_CHECKING:
+    from .concurrency import with_sqlite_retry
+
 __all__ = [
     "BaseSimilarityEngine",
-    "SemanticSimilarityEngine",
-    "LexicalSimilarityEngine",
+    "BrandingConfig",
+    "ChunkRecord",
+    "FaissChunkRecord",
     "HybridSimilarityEngine",
+    "LexicalSimilarityEngine",
+    "PLAGIARISM_THRESHOLD",
+    "PipelineChunkRecord",
+    "SemanticSimilarityEngine",
     "SimilarityEngineFactory",
-    "with_sqlite_retry",
-    "manhattan_similarity",
-    "extract_text_from_pdf",
-    "extract_texts_from_pdfs",
-    "extract_text",
-    "extract_texts",
+    "TagManager",
+    "build_index",
+    "build_index_from_matrix",
+    "calculate_paragraph_similarity_breakdown",
+    "chunk_by_sentences",
     "chunk_document",
     "chunk_documents",
-    "chunk_by_sentences",
+    "chunk_similarity_matrix",
+    "dispatch_plagiarism_alert",
+    "document_similarity_matrix",
     "embed_chunks",
     "embed_documents",
-    "get_document_embedding",
-    "document_similarity_matrix",
-    "chunk_similarity_matrix",
-    "flag_plagiarism",
+    "extract_text",
+    "extract_text_from_pdf",
+    "extract_texts",
+    "extract_texts_from_pdfs",
     "find_most_similar_chunks",
-    "calculate_paragraph_similarity_breakdown",
-    "PLAGIARISM_THRESHOLD",
-    "build_index",
-    "search_similar_chunks",
     "find_plagiarised_chunks",
-    "get_faiss_index_memory_bytes",
+    "flag_plagiarism",
     "format_faiss_memory_badge",
-    "save_index",
-    "load_index",
-    "ChunkRecord",
-    "build_index_from_matrix",
-    "translate_text",
-    "send_plagiarism_alert",
-    "BrandingConfig",
     "get_branding_config",
-    "reload_branding_config",
+    "get_document_embedding",
+    "get_faiss_index_memory_bytes",
     "load_branding_config",
-    "dispatch_plagiarism_alert",
-    "sanitize_zero_width_characters",
-    "TagManager",
-    "sanitize_tag_name",
-    "run_pipeline",
+    "load_index",
+    "manhattan_similarity",
+    "reload_branding_config",
     "run_extraction_pipeline",
+    "run_pipeline",
+    "sanitize_tag_name",
+    "sanitize_zero_width_characters",
+    "save_index",
+    "search_similar_chunks",
+    "send_plagiarism_alert",
+    "translate_text",
+    "with_sqlite_retry",
 ]
 
 

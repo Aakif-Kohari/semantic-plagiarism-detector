@@ -124,6 +124,31 @@ def get_welcome_message() -> str:
     return os.getenv("APP_WELCOME_MESSAGE", "").strip()
 
 
+def get_api_support_contact() -> dict[str, str]:
+    """Return the OpenAPI `contact` object, driven by configuration.
+
+    Different universities deploying their own instance should show
+    their own local IT support contact in the generated API docs rather
+    than a hardcoded placeholder. Reads ``API_SUPPORT_EMAIL`` and
+    ``API_SUPPORT_URL`` from the environment; each key is included in
+    the returned dict only when its corresponding environment variable
+    is set to a non-blank value, matching the OpenAPI Contact Object's
+    spec where ``name``, ``url``, and ``email`` are all optional. If
+    neither is configured, only ``name`` is returned.
+    """
+    contact_info: dict[str, str] = {"name": "API Support"}
+
+    support_url = os.getenv("API_SUPPORT_URL", "").strip()
+    if support_url:
+        contact_info["url"] = support_url
+
+    support_email = os.getenv("API_SUPPORT_EMAIL", "").strip()
+    if support_email:
+        contact_info["email"] = support_email
+
+    return contact_info
+
+
 def get_lock_timeout() -> int:
     """Return the configured lock timeout in seconds (default 30)."""
     try:
@@ -137,38 +162,15 @@ def get_backup_idle_timeout() -> int:
     """Return the configured backup idle timeout in seconds (default 30 minutes)."""
     try:
         timeout_minutes = int(os.getenv("BACKUP_IDLE_TIMEOUT_MINUTES", "30"))
-        return max(1, timeout_minutes) * 60
+        if timeout_minutes < 1:
+            logger.warning(
+                "Invalid backup timeout %d, defaulting to 30",
+                timeout_minutes,
+            )
+            return 30 * 60
+        return timeout_minutes * 60
     except ValueError:
         return 30 * 60
-
-
-def get_rescan_interval_minutes() -> int:
-    """Return the configured scheduled plagiarism-rescan interval in minutes.
-
-    Continuous background rescanning (see ``src.core.scheduler``) is an
-    explicit opt-in: this returns ``0`` (disabled) unless
-    ``RESCAN_INTERVAL_MINUTES`` is set in the environment to a positive
-    integer.
-    """
-    try:
-        minutes = int(os.getenv("RESCAN_INTERVAL_MINUTES", "0"))
-        return max(0, minutes)
-    except ValueError:
-        return 0
-
-
-def get_rescan_grace_period_minutes() -> int:
-    """Return how far back (in minutes) a scheduled rescan looks for
-    "recently added" documents to re-check against the rest of the corpus.
-
-    Defaults to 60 minutes. Configurable via
-    ``RESCAN_GRACE_PERIOD_MINUTES``.
-    """
-    try:
-        minutes = int(os.getenv("RESCAN_GRACE_PERIOD_MINUTES", "60"))
-        return max(1, minutes)
-    except ValueError:
-        return 60
 
 
 def get_allowed_webhook_domains() -> list[str]:
