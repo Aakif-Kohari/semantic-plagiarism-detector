@@ -176,11 +176,11 @@ def run_scan(
 
         output = io.StringIO()
         writer = csv.DictWriter(
-            output, fieldnames=["document_1", "document_2", "similarity_score"]
+            output, fieldnames=["doc_a", "doc_b", "similarity_score"]
         )
         writer.writeheader()
         for m in matches:
-            writer.writerow(m)
+            writer.writerow({"doc_a": m["document_1"], "doc_b": m["document_2"], "similarity_score": m["similarity_score"]})
         print(output.getvalue().strip())
     else:  # text
         print(f"Documents Processed: {num_processed}")

@@ -100,7 +100,7 @@ def test_cli_scan_success_csv_format(
     captured = capsys.readouterr()
 
     lines = captured.out.strip().split("\n")
-    assert lines[0] == "document_1,document_2,similarity_score"
+    assert lines[0] == "doc_a,doc_b,similarity_score"
     assert lines[1] == "doc1.txt,doc2.txt,1.0"
 
 
