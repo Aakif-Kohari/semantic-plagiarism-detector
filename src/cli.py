@@ -65,6 +65,9 @@ def run_scan(
     """
     start_time = time.time()
 
+    if not (0.0 <= threshold <= 1.0): 
+        return 1
+
     if output_format not in ("json", "csv", "text", "html"):
         sys.stderr.write(
             f"Error: Invalid output format '{output_format}'. Supported formats are: json, csv, text, html.\n"
