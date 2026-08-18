@@ -62,6 +62,7 @@ from src.core.lexical_similarity import (
     n_gram_overlap,
     scale_lexical_score,
     compute_char_ngram_similarity,
+    render_report_generator_ui
 )
 
 
