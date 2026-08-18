@@ -72,7 +72,13 @@ def integrate_pattern_recognition():
     # Add pattern recognition tab to main app
     render_pattern_recognition_ui(st.session_state['pattern_engine'])
 
-
+def integrate_preprocessing():
+    """Initialize and integrate preprocessing engine"""
+    if 'preprocessor' not in st.session_state:
+        st.session_state['preprocessor'] = DocumentPreprocessor()
+    
+    # Add preprocessing tab to main app
+    render_preprocessing_ui(st.session_state['preprocessor'])
 
 from app.components.cross_lingual_ui import (
     render_cross_lingual_settings,
