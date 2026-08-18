@@ -46,6 +46,16 @@ ALLOWED_MIME_TYPES: dict[str, list[str]] = {
         "text/plain",
         "application/octet-stream",
     ],
+    "markdown": [
+        "text/markdown",
+        "text/plain",
+        "application/octet-stream",
+    ],
+    "mdown": [
+        "text/markdown",
+        "text/plain",
+        "application/octet-stream",
+    ],
     "rtf": ["application/rtf", "text/rtf", "text/plain"],
     "epub": [
         "application/epub+zip",

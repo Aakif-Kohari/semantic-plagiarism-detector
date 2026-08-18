@@ -174,6 +174,31 @@ class TestCorpusMigrationFlow:
         finally:
             conn.close()
 
+    def test_version_10_backfills_default_owner_for_preexisting_rows(self):
+        """Documents inserted before migration 10 ever ran must not end up
+        with a NULL owner -- ALTER TABLE ... DEFAULT 'system' backfills
+        every pre-existing row at migration time (see acceptance criteria
+        of the 'owner column missing DEFAULT' issue)."""
+        conn = _connect()
+        try:
+            _apply_up_to(conn, CORPUS_MIGRATIONS, 9)
+            conn.execute(
+                "INSERT INTO documents (filename, file_hash, upload_date) "
+                "VALUES (?, ?, ?)",
+                ("legacy_doc.pdf", "legacy_hash", "2023-01-01T00:00:00"),
+            )
+            conn.commit()
+
+            _apply_up_to(conn, CORPUS_MIGRATIONS, 10)
+
+            row = conn.execute(
+                "SELECT owner FROM documents WHERE filename = ?",
+                ("legacy_doc.pdf",),
+            ).fetchone()
+            assert row[0] == "system"
+        finally:
+            conn.close()
+
     def test_version_11_adds_documents_created_at_index(self):
         conn = _connect()
         try:
@@ -360,12 +385,14 @@ class TestAuthMigrationFlow:
         finally:
             conn.close()
 
-    def test_version_9_adds_last_login_at(self):
+    def test_version_16_adds_audit_log_indexes(self):
         conn = _connect()
         try:
-            _apply_up_to(conn, AUTH_MIGRATIONS, 9)
-            assert get_user_version(conn) == 9
-            assert column_exists(conn, "users", "last_login_at")
+            # We apply up to version 16 (includes migration 8 creating log and version 16 creating indexes)
+            _apply_up_to(conn, AUTH_MIGRATIONS, 16)
+            assert get_user_version(conn) == 16
+            assert index_exists(conn, "idx_audit_log_username")
+            assert index_exists(conn, "idx_audit_log_event_type")
         finally:
             conn.close()
 

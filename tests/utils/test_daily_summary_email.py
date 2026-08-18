@@ -6,6 +6,7 @@ Tests for daily summary email functionality and HTML template generation.
 
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
+import re
 
 import pytest
 
@@ -14,6 +15,7 @@ from src.utils.daily_summary_email import (
     build_incident_row_html,
     build_severity_section_html,
     format_daily_summary,
+    generate_daily_summary_html,
     get_admin_emails,
     get_incidents_last_24h,
     send_daily_summary,
@@ -165,6 +167,8 @@ def test_send_email_success(mock_smtp):
     mock_server.starttls.assert_called_once()
     mock_server.login.assert_called_once_with("test@example.com", "password")
     mock_server.send_message.assert_called_once()
+
+
 @patch("smtplib.SMTP")
 @patch.dict(
     "os.environ",
@@ -200,6 +204,8 @@ def test_send_email_custom_attachment_filename(mock_smtp):
 
     assert len(attachments) == 1
     assert attachments[0].get_filename() == "custom_report.csv"
+
+
 @patch.dict("os.environ", {}, clear=True)
 def test_send_email_missing_config():
     """Test email sending with missing SMTP configuration."""
@@ -222,6 +228,72 @@ def test_send_email_no_recipients():
     result = send_email([], "Test Subject", "<p>Test Body</p>")
 
     assert result is False
+
+
+@patch("smtplib.SMTP")
+@patch("time.sleep")
+@patch.dict(
+    "os.environ",
+    {
+        "SMTP_SERVER": "smtp.example.com",
+        "SMTP_PORT": "587",
+        "SMTP_USERNAME": "test@example.com",
+        "SMTP_PASSWORD": "password",
+    },
+)
+def test_send_email_retry_success(mock_sleep, mock_smtp):
+    """Test send_email retries on connection error and eventually succeeds."""
+    mock_server = MagicMock()
+
+    # smtplib.SMTP is used as a context manager: mock_smtp() returns mock_conn
+    # mock_conn.__enter__() returns mock_server.
+    mock_conn_fail = MagicMock()
+    mock_conn_fail.__enter__.side_effect = ConnectionError("Connection timed out")
+
+    mock_conn_success = MagicMock()
+    mock_conn_success.__enter__.return_value = mock_server
+
+    mock_smtp.side_effect = [mock_conn_fail, mock_conn_success]
+
+    result = send_email(["recipient@example.com"], "Test Subject", "<p>Test Body</p>")
+
+    assert result is True
+    assert mock_smtp.call_count == 2
+    mock_sleep.assert_called_once_with(1)  # 2 ** 0 = 1s sleep for first backoff
+
+
+@patch("smtplib.SMTP")
+@patch("time.sleep")
+@patch.dict(
+    "os.environ",
+    {
+        "SMTP_SERVER": "smtp.example.com",
+        "SMTP_PORT": "587",
+        "SMTP_USERNAME": "test@example.com",
+        "SMTP_PASSWORD": "password",
+    },
+)
+def test_send_email_retry_exhausted(mock_sleep, mock_smtp):
+    """Test send_email retries up to max limit and fails when errors persist."""
+    mock_conn_fail = MagicMock()
+    mock_conn_fail.__enter__.side_effect = ConnectionError("Failed")
+
+    mock_smtp.side_effect = [
+        mock_conn_fail,
+        mock_conn_fail,
+        mock_conn_fail,
+        mock_conn_fail,
+    ]
+
+    result = send_email(["recipient@example.com"], "Test Subject", "<p>Test Body</p>")
+
+    assert result is False
+    assert mock_smtp.call_count == 4
+    # Sleep should be called 3 times with exponential backoff: 1s, 2s, 4s
+    assert mock_sleep.call_count == 3
+    mock_sleep.assert_any_call(1)
+    mock_sleep.assert_any_call(2)
+    mock_sleep.assert_any_call(4)
 
 
 @patch("src.utils.daily_summary_email.send_email")
@@ -295,7 +367,7 @@ def test_send_email_ssl_port_465(mock_smtp_ssl):
     result = send_email(["recipient@example.com"], "Test Subject", "<p>Body</p>")
 
     assert result is True
-    mock_smtp_ssl.assert_called_once_with("smtp.example.com", 465)
+    mock_smtp_ssl.assert_called_once_with("smtp.example.com", 465, timeout=10.0)
     mock_server.starttls.assert_not_called()
     mock_server.login.assert_called_once_with("test@example.com", "password")
     mock_server.send_message.assert_called_once()
@@ -320,7 +392,7 @@ def test_send_email_starttls_custom_port_2525(mock_smtp):
     result = send_email(["recipient@example.com"], "Test Subject", "<p>Body</p>")
 
     assert result is True
-    mock_smtp.assert_called_once_with("smtp.example.com", 2525)
+    mock_smtp.assert_called_once_with("smtp.example.com", 2525, timeout=10.0)
     mock_server.starttls.assert_called_once()
     mock_server.login.assert_called_once_with("test@example.com", "password")
     mock_server.send_message.assert_called_once()
@@ -344,7 +416,7 @@ def test_send_email_starttls_default_port_587(mock_smtp):
     result = send_email(["recipient@example.com"], "Test Subject", "<p>Body</p>")
 
     assert result is True
-    mock_smtp.assert_called_once_with("smtp.example.com", 587)
+    mock_smtp.assert_called_once_with("smtp.example.com", 587, timeout=10.0)
     mock_server.starttls.assert_called_once()
     mock_server.login.assert_called_once_with("test@example.com", "password")
     mock_server.send_message.assert_called_once()
@@ -412,8 +484,9 @@ class TestEmailTemplateHelpers:
 
     def test_build_severity_section_html_empty(self):
         """Test severity section generation with no incidents."""
-        html = build_severity_section_html("Medium", [])
-        assert "No medium severity incidents detected" in html
+        html = build_severity_section_html("High", [])
+        assert "No high severity incidents" in html
+        assert "<table>" not in html
         assert "<table" not in html
 
     def test_build_severity_section_html_populated(self):
@@ -432,6 +505,31 @@ class TestEmailTemplateHelpers:
         assert "<table" in html
         assert "border-collapse: collapse" in html
         assert "A" in html
+
+    def test_build_incident_row_html_with_incident_link(self):
+        """Test build_incident_row_html wraps Document A with anchor tag when incident_id exists."""
+        inc = {
+            "incident_id": 42,
+            "document_a": "DocA.txt",
+            "document_b": "DocB.txt",
+            "similarity_score": 0.85,
+            "date_flagged": "2026-08-17",
+        }
+        html = build_incident_row_html(inc)
+        assert '<a href="http://localhost:8501/incident/42"' in html
+        assert "DocA.txt" in html
+
+    def test_build_incident_row_html_without_incident_link(self):
+        """Test build_incident_row_html outputs plaintext Document A when incident_id is missing."""
+        inc = {
+            "document_a": "DocA.txt",
+            "document_b": "DocB.txt",
+            "similarity_score": 0.85,
+            "date_flagged": "2026-08-17",
+        }
+        html = build_incident_row_html(inc)
+        assert "<a href=" not in html
+        assert "DocA.txt" in html
 
     def test_build_incident_row_html_missing_fields(self):
         """Test row generation handles missing dictionary keys gracefully."""
@@ -660,3 +758,214 @@ def test_send_daily_summary_passes_reply_to(
     mock_send_email.assert_called_once()
     _, kwargs = mock_send_email.call_args
     assert kwargs.get("reply_to") == "support@example.com"
+
+
+# ---------------------------------------------------------------------------
+# Tests for generate_daily_summary_html (Issue #2576)
+# ---------------------------------------------------------------------------
+
+
+class TestEmailFontStack:
+    """Test suite for the system font stack implementation (Issue #2576)."""
+
+    def test_body_contains_system_font_stack(self):
+        """Verify the body tag uses the modern system font stack."""
+        stats = {"total_scans": 10, "flagged_incidents": 2, "avg_similarity": 0.45}
+        html = generate_daily_summary_html(stats)
+
+        # The exact font stack required by Issue #2576
+        expected_stack = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+
+        # Check if the font stack is present in the body style
+        assert expected_stack in html, "Body tag must use the robust system font stack"
+
+    def test_headings_use_system_font_stack(self):
+        """Verify h1 and h2 tags also use the system font stack for consistency."""
+        stats = {
+            "total_scans": 10,
+            "flagged_incidents": 2,
+            "avg_similarity": 0.45,
+            "top_pairs": [],
+        }
+        html = generate_daily_summary_html(stats)
+
+        expected_stack = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+
+        # Count occurrences - should be in body, h1, and h2 at minimum
+        assert html.count(expected_stack) >= 3
+
+    def test_no_standalone_arial_sans_serif(self):
+        """Verify the old 'Arial, sans-serif' is completely replaced."""
+        stats = {"total_scans": 10, "flagged_incidents": 2, "avg_similarity": 0.45}
+        html = generate_daily_summary_html(stats)
+
+        # Regex to find "font-family: Arial, sans-serif;" NOT preceded by the system stack
+        # We want to ensure the old hardcoded string is gone
+        old_pattern = re.compile(r"font-family:\s*Arial,\s*sans-serif\s*;")
+
+        # If the old pattern exists, it should ONLY be as part of the larger system stack
+        # Let's just assert the exact old string without the system prefix is not there
+        assert "font-family: Arial, sans-serif;" not in html
+
+    def test_font_stack_includes_apple_system(self):
+        """Verify -apple-system is the first font for macOS/iOS optimization."""
+        stats = {"total_scans": 1}
+        html = generate_daily_summary_html(stats)
+
+        # Extract font-family declarations
+        font_families = re.findall(r"font-family:\s*([^;]+);", html)
+
+        for family in font_families:
+            # Every font-family declaration should start with -apple-system
+            assert family.strip().startswith(
+                "-apple-system"
+            ), f"Font stack should start with -apple-system, got: {family}"
+
+    def test_font_stack_includes_segoe_ui(self):
+        """Verify 'Segoe UI' is included for Windows optimization."""
+        stats = {"total_scans": 1}
+        html = generate_daily_summary_html(stats)
+
+        assert "Segoe UI" in html
+
+    def test_font_stack_includes_roboto(self):
+        """Verify 'Roboto' is included for Android optimization."""
+        stats = {"total_scans": 1}
+        html = generate_daily_summary_html(stats)
+
+        assert "Roboto" in html
+
+
+class TestEmailDataInterpolation:
+    """Test suite for correct data rendering in the email template."""
+
+    def test_total_scans_rendered_with_commas(self):
+        """Verify large numbers are formatted with comma separators."""
+        stats = {"total_scans": 1234567, "flagged_incidents": 0, "avg_similarity": 0.0}
+        html = generate_daily_summary_html(stats)
+
+        assert "1,234,567" in html
+
+    def test_flagged_incidents_rendered(self):
+        """Verify flagged incidents count is rendered correctly."""
+        stats = {"total_scans": 100, "flagged_incidents": 42, "avg_similarity": 0.5}
+        html = generate_daily_summary_html(stats)
+
+        assert ">42<" in html or ">42\n" in html
+
+    def test_avg_similarity_rendered_as_percentage(self):
+        """Verify average similarity is formatted as a percentage."""
+        stats = {"total_scans": 10, "flagged_incidents": 1, "avg_similarity": 0.854}
+        html = generate_daily_summary_html(stats)
+
+        assert "85.4%" in html
+
+    def test_top_pairs_rendered_in_table(self):
+        """Verify top pairs are rendered as table rows."""
+        stats = {
+            "total_scans": 10,
+            "flagged_incidents": 2,
+            "avg_similarity": 0.75,
+            "top_pairs": [
+                {"doc_a": "essay1.pdf", "doc_b": "wiki.pdf", "similarity": 0.95},
+                {"doc_a": "essay2.pdf", "doc_b": "source.docx", "similarity": 0.88},
+            ],
+        }
+        html = generate_daily_summary_html(stats)
+
+        assert "essay1.pdf" in html
+        assert "wiki.pdf" in html
+        assert "95.0%" in html
+        assert "essay2.pdf" in html
+        assert "88.0%" in html
+
+    def test_empty_top_pairs_shows_fallback_message(self):
+        """Verify fallback message is shown when no top pairs exist."""
+        stats = {
+            "total_scans": 10,
+            "flagged_incidents": 0,
+            "avg_similarity": 0.10,
+            "top_pairs": [],
+        }
+        html = generate_daily_summary_html(stats)
+
+        assert "No high-similarity pairs detected today" in html
+
+    def test_top_pairs_limited_to_five(self):
+        """Verify only the top 5 pairs are rendered even if more are provided."""
+        top_pairs = [
+            {
+                "doc_a": f"doc{i}.pdf",
+                "doc_b": f"src{i}.pdf",
+                "similarity": 0.99 - (i * 0.01),
+            }
+            for i in range(10)
+        ]
+        stats = {
+            "total_scans": 100,
+            "flagged_incidents": 10,
+            "avg_similarity": 0.90,
+            "top_pairs": top_pairs,
+        }
+        html = generate_daily_summary_html(stats)
+
+        # First 5 should be present
+        for i in range(5):
+            assert f"doc{i}.pdf" in html
+
+        # 6th through 10th should NOT be present
+        for i in range(5, 10):
+            assert f"doc{i}.pdf" not in html
+
+
+class TestEmailStructureAndAccessibility:
+    """Test suite for HTML structure, roles, and accessibility."""
+
+    def test_tables_have_presentation_role(self):
+        """Verify layout tables use role='presentation' for screen readers."""
+        stats = {
+            "total_scans": 10,
+            "flagged_incidents": 1,
+            "avg_similarity": 0.5,
+            "top_pairs": [],
+        }
+        html = generate_daily_summary_html(stats)
+
+        # All layout tables should have role="presentation"
+        # The data table for top pairs should NOT have it (or should have role="table")
+        presentation_count = html.count('role="presentation"')
+        assert presentation_count >= 3  # Main wrapper, stats grid, etc.
+
+    def test_html_has_lang_attribute(self):
+        """Verify the html tag has lang='en' for accessibility."""
+        stats = {"total_scans": 1}
+        html = generate_daily_summary_html(stats)
+
+        assert '<html lang="en">' in html
+
+    def test_meta_viewport_present(self):
+        """Verify viewport meta tag is present for mobile responsiveness."""
+        stats = {"total_scans": 1}
+        html = generate_daily_summary_html(stats)
+
+        assert 'name="viewport"' in html
+        assert "width=device-width" in html
+
+    def test_report_date_rendered(self):
+        """Verify the current date is rendered in the header."""
+        stats = {"total_scans": 1}
+        html = generate_daily_summary_html(stats)
+
+        # Should contain the current year at minimum
+        current_year = str(datetime.now().year)
+        assert current_year in html
+
+    def test_missing_stats_keys_default_to_zero(self):
+        """Verify missing keys in stats dict default to 0/empty gracefully."""
+        # Pass completely empty dict
+        html = generate_daily_summary_html({})
+
+        assert ">0<" in html or ">0\n" in html
+        assert "0.0%" in html
+        assert "No high-similarity pairs detected today" in html
+

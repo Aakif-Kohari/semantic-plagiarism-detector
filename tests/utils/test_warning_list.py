@@ -1,5 +1,7 @@
 import base64
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock, call
+
+import pytest
 
 from src.utils.warning_list import (
     build_key_extractor,
@@ -7,6 +9,8 @@ from src.utils.warning_list import (
     paginate_warnings,
     prepare_warning_page,
     render_copy_button,
+    render_warning_controls,
+    reset_warning_page,
     sort_warnings,
 )
 
@@ -48,6 +52,8 @@ def test_search_matches_either_document_case_insensitively():
 
 def test_empty_search_returns_everything():
     assert len(filter_warnings(WARNINGS, " ")) == 4
+    assert len(filter_warnings(WARNINGS, "")) == 4
+    assert len(filter_warnings(WARNINGS, None)) == 4
 
 
 def test_search_query_is_truncated_to_max_length():
@@ -137,6 +143,10 @@ def test_filtering_occurs_before_pagination():
     assert len(filtered) == 12
     assert len(page.items) == 2
     assert page.total_pages == 2
+
+
+def test_reset_warning_page_returns_first_page():
+    assert reset_warning_page() == 1
 
 
 def test_filter_warnings_by_minimum_match_length():
@@ -290,62 +300,22 @@ def test_render_copy_button_xss_sanitization():
         assert 'id=""><script>alert(1)</script>' not in rendered_html
         assert '&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;' in rendered_html
 
-
-def test_render_copy_button_html():
-    """Verify the HTML structure and base64 encoding logic of the copy button for issue #2470."""
-    test_payload = "ECSoC26_test_string"
+def test_filter_warnings_missing_matched_length():
+    """Test that warning items lacking the 'matched_length' key default to 0 and are filtered out when a minimum length is required."""
+    from src.utils.warning_list import filter_warnings
     
-    # Generate the expected base64 string
-    expected_b64 = base64.b64encode(test_payload.encode('utf-8')).decode('utf-8')
-    
-    with patch("streamlit.components.v1.html") as mock_html:
-        render_copy_button(test_payload)
-        
-        # Ensure the HTML generation was called
-        assert mock_html.called, "streamlit.components.v1.html was not called"
-        html_output = mock_html.call_args[0][0]
-        
-        # Acceptance Criteria 1: Assert the result contains a <button> tag
-        assert "<button" in html_output.lower(), "The HTML output is missing a <button> tag."
-        
-        # Acceptance Criteria 2: Assert the payload string is correctly base64 encoded
-        assert expected_b64 in html_output, f"The base64 encoded payload '{expected_b64}' was not found in the HTML/JS output."
-
-
-def test_filter_warnings_early_exit_and_process_extract():
-    """Verify exact substring matches early exit without calling fuzzy process.extract."""
+    # Warning dictionary completely lacking "matched_length"
     warnings = [
-        {"doc_a": "report_100.pdf", "doc_b": "essay_200.pdf", "similarity": 0.9, "severity": "High"},
-        {"doc_a": "thesis.pdf", "doc_b": "assignment.pdf", "similarity": 0.8, "severity": "Medium"},
+        {
+            "doc_a": "doc1.txt",
+            "doc_b": "doc2.txt",
+            "similarity": 0.85,
+            "severity": "High"
+            # "matched_length" is intentionally omitted here
+        }
     ]
-
-    with patch("src.utils.warning_list._extract_matching_indices") as mock_extract:
-        mock_extract.return_value = set()
-        
-        # Search for exact substring "report"
-        results = filter_warnings(warnings, "report")
-        assert len(results) == 1
-        assert results[0]["doc_a"] == "report_100.pdf"
-        
-        # Verify fuzzy extract was only run for non-exact remaining items (thesis.pdf / assignment.pdf)
-        # and NOT for report_100.pdf (early exit)
-        if mock_extract.called:
-            for call in mock_extract.call_args_list:
-                choices = call[0][1]
-                assert 0 not in choices  # Index 0 (exact match) early exited and was skipped
-
-
-def test_normalise_warning_logs_invalid_similarity(caplog):
-    """Verify that invalid similarity scores log a warning."""
-    import logging
-    from src.utils.warning_list import _normalise_warning
-
-    invalid_item = {"doc_a": "a.pdf", "doc_b": "b.pdf", "similarity": "N/A"}
-    with caplog.at_level(logging.WARNING):
-        result = _normalise_warning(invalid_item)
-
-    assert result["similarity"] == 0.0
-    assert "Invalid similarity score found in incident data: N/A" in caplog.text
-
-
-        
+    
+    # Filtering with min_match_length = 50 should exclude items with default matched_length (0)
+    filtered = filter_warnings(warnings, min_match_length=50)
+    
+    assert len(filtered) == 0

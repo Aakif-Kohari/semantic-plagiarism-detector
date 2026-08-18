@@ -106,8 +106,13 @@ def _connect():
             pass
 
 
+ fix/optimize-daily-summary-incidents
 def close_connections(*args, **kwargs) -> None:
     """Close all pooled corpus connections for the current thread."""
+
+def close_connections(all_threads: bool = False) -> None:
+    """Close all pooled corpus connections for the current thread (or all threads if specified)."""
+ main
     pool = getattr(_connection_pool, "connections", {})
     for conn in pool.values():
         conn.close()
@@ -158,7 +163,8 @@ def init_corpus_db() -> None:
                 filename TEXT NOT NULL,
                 chunk_index INTEGER NOT NULL,
                 chunk_text TEXT NOT NULL,
-                embedding BLOB NOT NULL
+                embedding BLOB NOT NULL,
+                deleted_at TEXT DEFAULT CURRENT_TIMESTAMP
             )
             """)
 
@@ -218,8 +224,16 @@ def init_corpus_db() -> None:
             if not column_exists(conn, "documents", col_name):
                 conn.execute(f"ALTER TABLE documents ADD COLUMN {col_name} {col_type}")
 
+        if not column_exists(conn, "deleted_chunks", "deleted_at"):
+            conn.execute(
+                "ALTER TABLE deleted_chunks ADD COLUMN deleted_at TEXT DEFAULT CURRENT_TIMESTAMP"
+            )
+
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_incidents_date ON plagiarism_incidents(date_flagged)"
         )
 
         # Issue #1359: Create FTS5 virtual table + sync triggers for full-text

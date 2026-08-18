@@ -47,7 +47,7 @@ class TestNormalizeEncoding:
             # French / German
             ("frÃ¨re", "frère"),
             ("fÃªte", "fête"),
-            ("naÃ¯ve", "naîve"),  # Note: ï is not in our map, but î is
+            ("naÃ¯ve", "naïve"),
             ("hÃ´tel", "hôtel"),
             ("aoÃ»t", "août"),
             ("StraÃŸe", "Straße"),

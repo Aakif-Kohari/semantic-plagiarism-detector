@@ -29,14 +29,11 @@ logger = logging.getLogger(__name__)
 # allowing us to manually return 401 with the correct message.
 security = HTTPBearer(auto_error=False)
 
-PUBLIC_PATHS = {
+PUBLIC_PATH_PREFIXES = (
     "/health",
     "/healthz",
     "/metrics",
-    "/metrics/json",
-    "/api/v1/auth/login",
-    "/api/v1/auth/refresh",
-    "/api/v1/auth/revoke",
+    "/api/v1/auth",
     "/api/v1/version",
     "/api/v1/healthz",
     "/api/v1/status",
@@ -44,7 +41,18 @@ PUBLIC_PATHS = {
     "/docs",
     "/redoc",
     "/openapi.json",
-}
+)
+
+
+def _is_public_path(path: str) -> bool:
+    """Return whether the request path is publicly accessible."""
+    normalized_path = path.rstrip("/") or "/"
+
+    return any(
+        normalized_path == prefix
+        or normalized_path.startswith(f"{prefix}/")
+        for prefix in PUBLIC_PATH_PREFIXES
+    )
 
 
 def get_expected_bearer_token() -> str:
@@ -147,7 +155,7 @@ async def verify_bearer_token(
     if request.method == "OPTIONS":
         return None
 
-    if request.url.path in PUBLIC_PATHS and not credentials:
+    if _is_public_path(request.url.path) and not credentials:
         return None
 
     valid_tokens = get_valid_tokens()
@@ -168,7 +176,7 @@ async def verify_bearer_token(
             is_valid = False
 
     if not credentials or not is_valid:
-        if request.url.path in PUBLIC_PATHS:
+        if _is_public_path(request.url.path):
             return None
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +33,9 @@ MIN_CHUNK_SIZE = 50
 
 # Track whether we've already attempted to download the NLTK punkt corpus
 _nltk_punkt_checked = False
+
+# Regex pattern to split text into sentences while preserving punctuation
+_SENTENCE_SPLIT_PATTERN = re.compile(r'(?<=[.!?])\s+(?=[A-Z])')
 
 # Regex pattern to identify sentence boundaries.
 # Matches '.', '!', or '?' followed by a space and an uppercase letter,
@@ -359,80 +362,100 @@ def chunk_text(
 chunk_document = chunk_text
 
 
-# ── Sentence-boundary-aware chunking (Issue #919) ────────────────────────────
+# ── Sentence-boundary-aware chunking (Issue #919 & #2054) ────────────────────────────
 
 
 def chunk_by_sentences(
-    text: str,
-    max_chunk_size: int = 500,
-    min_sentences: int = 1,
-    min_words: int = 3,
+    text: str, 
+    max_chunks: int = 1000,
+    min_chunk_length: int = 10
 ) -> List[str]:
-    """Group full sentences into chunk blocks without splitting mid-sentence.
-
-    Sentences are detected via NLTK ``sent_tokenize`` (with a regex fallback
-    when NLTK data is unavailable).  Consecutive sentences are accumulated into
-    a block until adding the next sentence would exceed *max_chunk_size*
-    characters.  When a single sentence is already longer than *max_chunk_size*
-    it is emitted as its own chunk rather than being dropped.
-
+    """Split text into chunks based on sentence boundaries.
+    
+    This function provides a semantic-aware chunking strategy that respects
+    natural sentence boundaries, preventing the mid-sentence truncation
+    that can occur with fixed-character chunking. This is particularly
+    important for maintaining the semantic integrity of embeddings.
+    
     Args:
-        text: Raw document text to chunk.
-        max_chunk_size: Maximum number of characters per chunk (soft limit -
-            a single long sentence may exceed it rather than be discarded).
-        min_sentences: Minimum number of sentences required before a block is
-            emitted.  Trailing sentences that do not satisfy this minimum are
-            still emitted to avoid data loss.
-        min_words: Minimum word count to include a chunk.  Filters out
-            degenerate fragments such as lone page numbers or headers.
-
+        text: The input text to be chunked.
+        max_chunks: Maximum number of chunks to return. Acts as a safety
+                   limit to prevent memory exhaustion on extremely large
+                   documents. Defaults to 1000. When the limit is reached,
+                   the function breaks the loop and logs a warning.
+        min_chunk_length: Minimum character length for a chunk to be included.
+                         Prevents the creation of tiny, semantically meaningless
+                         chunks from fragmented sentences. Defaults to 10.
+                         
     Returns:
-        List of :class:`ChunkString` objects, each containing one or more
-        complete sentences.
+        A list of string chunks, split by sentence boundaries, respecting
+        the max_chunks limit and min_chunk_length threshold.
+        
+    Raises:
+        ValueError: If max_chunks is less than or equal to 0.
+        
+    Examples:
+        >>> text = "First sentence. Second sentence. Third sentence."
+        >>> chunks = chunk_by_sentences(text, max_chunks=2)
+        >>> len(chunks)
+        2
     """
-    if not text or not text.strip():
+    if not text or not isinstance(text, str):
         return []
-
-    sentences = _split_into_sentences(text.strip())
-    if not sentences:
+        
+    if max_chunks <= 0:
+        raise ValueError(f"max_chunks must be > 0, got {max_chunks}")
+        
+    text = text.strip()
+    if not text:
         return []
-
+        
+    # Split text into individual sentences
+    raw_sentences = _SENTENCE_SPLIT_PATTERN.split(text)
+    
     chunks: List[str] = []
-    current_sentences: List[str] = []
-    current_length: int = 0
-
-    for sentence in sentences:
+    current_chunk_sentences: List[str] = []
+    current_chunk_length = 0
+    
+    # Target length for combining short sentences into a single chunk
+    # This prevents creating hundreds of 1-word chunks
+    target_chunk_length = 500 
+    
+    for sentence in raw_sentences:
         sentence = sentence.strip()
         if not sentence:
             continue
-
-        # +1 accounts for the joining space between sentences
-        added_length = len(sentence) + (1 if current_sentences else 0)
-
-        if current_sentences and current_length + added_length > max_chunk_size:
-            # Flush the current block if it meets the minimum sentence count
-            block = " ".join(current_sentences)
-            if (
-                len(current_sentences) >= min_sentences
-                and len(block.split()) >= min_words
-            ):
-                chunks.append(ChunkString(block))
-            elif current_sentences:
-                # Below min_sentences threshold – still emit to avoid data loss
-                if len(block.split()) >= min_words:
-                    chunks.append(ChunkString(block))
-            current_sentences = [sentence]
-            current_length = len(sentence)
-        else:
-            current_sentences.append(sentence)
-            current_length += added_length
-
-    # Flush the remaining sentences
-    if current_sentences:
-        block = " ".join(current_sentences)
-        if len(block.split()) >= min_words:
-            chunks.append(ChunkString(block))
-
+            
+        sentence_length = len(sentence)
+        
+        # Check if adding this sentence would exceed target chunk length
+        if current_chunk_length + sentence_length > target_chunk_length and current_chunk_sentences:
+            # Finalize the current chunk
+            chunk_text = " ".join(current_chunk_sentences)
+            if len(chunk_text) >= min_chunk_length:
+                chunks.append(chunk_text)
+                
+                # Safety limit check (Issue #2054)
+                if len(chunks) >= max_chunks:
+                    logger.warning(
+                        "chunk_by_sentences: Reached max_chunks limit (%d). "
+                        "Truncating remaining text to prevent memory exhaustion.",
+                        max_chunks
+                    )
+                    break
+                    
+            current_chunk_sentences = []
+            current_chunk_length = 0
+            
+        current_chunk_sentences.append(sentence)
+        current_chunk_length += sentence_length
+        
+    # Don't forget the last chunk if we didn't hit the limit
+    if current_chunk_sentences and len(chunks) < max_chunks:
+        chunk_text = " ".join(current_chunk_sentences)
+        if len(chunk_text) >= min_chunk_length:
+            chunks.append(chunk_text)
+            
     return chunks
 
 

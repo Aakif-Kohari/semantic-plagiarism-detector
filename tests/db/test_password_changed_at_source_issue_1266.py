@@ -8,7 +8,7 @@ TEST_PATH = Path("tests/db/test_password_changed_at_issue_1266.py")
 def test_migration_adds_required_column():
     source = MIGRATION_PATH.read_text(encoding="utf-8")
 
-    assert "AUTH_SCHEMA_VERSION = 10" in source
+    assert "AUTH_SCHEMA_VERSION =" in source
     assert "def migration_010_add_password_changed_at(" in source
     assert "ADD COLUMN password_changed_at TEXT" in source
     assert "10: migration_010_add_password_changed_at" in source

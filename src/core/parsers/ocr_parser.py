@@ -16,10 +16,45 @@ class OCRDependencyError(RuntimeError):
 
 
 def _configure_tesseract(pytesseract_module) -> None:
-    """Use an optional explicit Tesseract path on Windows or other systems."""
+    """Configure Tesseract binary location dynamically from system environment variables.
+
+    Supports custom `TESSERACT_CMD` environment settings as well as standard Windows/Linux default paths
+    (e.g., `C:\\Program Files\\Tesseract-OCR\\tesseract.exe` or `/usr/bin/tesseract`).
+    """
     configured_path = os.getenv("TESSERACT_CMD", "").strip()
     if configured_path:
         pytesseract_module.pytesseract.tesseract_cmd = configured_path
+    elif os.name == "nt":
+        default_win_path = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+        if os.path.exists(default_win_path):
+            pytesseract_module.pytesseract.tesseract_cmd = default_win_path
+
+
+def check_ocr_dependencies() -> None:
+    """Check that required OCR Python packages and Tesseract executable are available.
+
+    Raises:
+        OCRDependencyError: If required Python packages (pytesseract, PyMuPDF, Pillow)
+            or Tesseract binary are missing/unavailable.
+    """
+    try:
+        import fitz  # PyMuPDF
+        import pytesseract
+        from PIL import Image
+    except ImportError as exc:
+        from src.errors import OCR_DEPENDENCIES_MISSING
+
+        raise OCRDependencyError(OCR_DEPENDENCIES_MISSING) from exc
+
+    _configure_tesseract(pytesseract)
+
+    try:
+        pytesseract.get_tesseract_version()
+    except (pytesseract.TesseractNotFoundError, EnvironmentError, Exception) as exc:
+        from src.errors import OCR_TESSERACT_NOT_FOUND
+
+        raise OCRDependencyError(OCR_TESSERACT_NOT_FOUND) from exc
+
 
 
 def _is_blank_scanned_page(
@@ -74,16 +109,11 @@ def _ocr_pdf_page(
     language: str = DEFAULT_OCR_LANGUAGE,
 ) -> str:
     """Render one PDF page and extract text with Tesseract."""
-    try:
-        import fitz  # PyMuPDF
-        import pytesseract
-        from PIL import Image
-    except ImportError as exc:
-        from src.errors import OCR_DEPENDENCIES_MISSING
+    check_ocr_dependencies()
 
-        raise OCRDependencyError(OCR_DEPENDENCIES_MISSING) from exc
-
-    _configure_tesseract(pytesseract)
+    import fitz  # PyMuPDF
+    import pytesseract
+    from PIL import Image
 
     try:
         with fitz.open(stream=pdf_bytes, filetype="pdf") as document:
@@ -108,31 +138,100 @@ def _ocr_pdf_page(
         return ""
 
 
-def extract_text_from_image(
-    file: PDFInput, *, ocr_language: str = DEFAULT_OCR_LANGUAGE
-) -> str:
-    """Extract text from an image (PNG, JPG) using Tesseract OCR."""
+def preprocess_image_for_ocr(image):
+    """Preprocess standalone images (contrast enhancement, binarization, noise reduction) prior to OCR.
+
+    Parameters
+    ----------
+    image : PIL.Image.Image
+        Input PIL Image object.
+
+    Returns
+    -------
+    PIL.Image.Image
+        Preprocessed image ready for pytesseract.image_to_string.
+    """
     try:
-        import pytesseract
-        from PIL import Image
-    except ImportError as exc:
-        from src.errors import OCR_DEPENDENCIES_MISSING
+        from PIL import ImageEnhance, ImageFilter
 
-        raise OCRDependencyError(OCR_DEPENDENCIES_MISSING) from exc
+        # Convert palette/RGBA modes to RGB for uniform channel processing
+        if image.mode in ("RGBA", "LA") or (image.mode == "P" and "transparency" in image.info):
+            bg = Image.new("RGB", image.size, (255, 255, 255))
+            if image.mode == "P":
+                image = image.convert("RGBA")
+            bg.paste(image, mask=image.split()[-1])
+            image = bg
+        elif image.mode != "RGB":
+            image = image.convert("RGB")
 
-    _configure_tesseract(pytesseract)
+        # Convert to grayscale for OCR optimization
+        gray = image.convert("L")
 
+        # Contrast enhancement to sharpen scanned text against background noise
+        enhancer = ImageEnhance.Contrast(gray)
+        enhanced = enhancer.enhance(1.8)
+
+        # Subtle median filter for noise suppression
+        filtered = enhanced.filter(ImageFilter.MedianFilter(size=3))
+        return filtered
+    except Exception as exc:
+        logger.debug(f"[ocr_parser] Image preprocessing fallback: {exc}")
+        return image
+
+
+def extract_text_from_image(
+    file: PDFInput,
+    *,
+    ocr_language: str = DEFAULT_OCR_LANGUAGE,
+    preprocess: bool = True,
+) -> str:
+    """Extract native text directly from standalone image files (.png, .jpg, .jpeg) using Tesseract OCR.
+
+    Feature Issue #2720:
+    --------------------
+    Extends plagiarism detection pipeline capabilities beyond PDF embedded images to natively ingest and
+    process standalone screenshot uploads, essay photos, and scanned page images.
+
+    Preprocessing Pipeline:
+    - Normalizes RGBA/palette images onto a solid white background.
+    - Applies grayscale conversion, contrast enhancement (1.8x factor), and median filtering.
+    - Routes preprocessed image data to `pytesseract.image_to_string` with OEM engine 3 and PSM mode 3.
+
+    Parameters
+    ----------
+    file : PDFInput
+        Bytes, file path, or buffer containing raw PNG/JPG image data.
+    ocr_language : str
+        Tesseract language code (default: 'eng').
+    preprocess : bool
+        If True, applies contrast enhancement and noise reduction prior to OCR.
+
+    Returns
+    -------
+    str
+        Extracted text string stripped of leading/trailing whitespace.
+    """
+    check_ocr_dependencies()
+
+    import pytesseract
+    from PIL import Image
     from src.core.parsers.pdf_parser import _read_pdf_bytes
 
     file_bytes = _read_pdf_bytes(file)
     try:
         image = Image.open(io.BytesIO(file_bytes))
+        if preprocess:
+            processed_img = preprocess_image_for_ocr(image)
+        else:
+            processed_img = image
+
         try:
-            return pytesseract.image_to_string(
-                image,
+            extracted_text = pytesseract.image_to_string(
+                processed_img,
                 lang=ocr_language,
                 config="--oem 3 --psm 3",
             ).strip()
+            return extracted_text
         except (MemoryError, Exception) as exc:
             if isinstance(exc, MemoryError):
                 logger.warning(
@@ -146,5 +245,5 @@ def extract_text_from_image(
 
         raise OCRDependencyError(OCR_TESSERACT_NOT_FOUND) from exc
     except Exception as exc:
-        logger.error(f"[document_parser] Error reading image: {exc}")
+        logger.error(f"[document_parser] Error reading standalone image: {exc}")
         return ""

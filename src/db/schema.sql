@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS deleted_chunks (
     filename TEXT NOT NULL,
     chunk_index INTEGER NOT NULL,
     chunk_text TEXT NOT NULL,
-    embedding BLOB NOT NULL
+    embedding BLOB NOT NULL,
+    deleted_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS plagiarism_incidents (
@@ -65,3 +66,5 @@ CREATE TABLE IF NOT EXISTS scan_history (
     flagged_count INTEGER NOT NULL,
     threshold_used REAL NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_incidents_date ON plagiarism_incidents(date_flagged);

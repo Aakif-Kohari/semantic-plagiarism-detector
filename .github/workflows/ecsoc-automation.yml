@@ -169,7 +169,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: issue.number,
-              body: `🎉 Hi @${claimer}, thanks for your interest in contributing under *ECSoC'26*! I've assigned this issue to you. Please follow the contribution guidelines, work on a separate branch, and link your PR using Fixes #<issue_number>. You're allowed to work on only 5 issues at a time.Wishing you the best—looking forward to reviewing your contribution! Happy coding! :)`
+              body: `🎉 Hi @${claimer}, thanks for your interest in contributing under *ECSoC'26*! I've assigned this issue to you. Please follow the contribution guidelines, work on a separate branch, and link your PR using Fixes #<issue_number>. You're allowed to work on only 5 issues at a time in a span of 24 hours. Wishing you the best, looking forward to reviewing your contribution! Happy coding! :)`
             });
 
   issue-auto-label:

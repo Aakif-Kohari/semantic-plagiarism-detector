@@ -44,6 +44,42 @@ def test_fresh_corpus_database_reaches_latest_version(tmp_path):
         assert index_exists(connection, "idx_incidents_severity_time")
 
 
+def test_corpus_migrations_apply_from_empty_database():
+    """Verify that applying the full corpus migration chain from a blank
+    in-memory database succeeds and creates all expected tables and columns."""
+    conn = sqlite3.connect(":memory:")
+
+    try:
+        migrate_corpus_database(conn)
+
+        tables = {
+            row[0]
+            for row in conn.execute(
+                """
+                SELECT name
+                FROM sqlite_master
+                WHERE type = 'table'
+                """
+            )
+        }
+
+        assert {
+            "documents",
+            "chunks",
+            "plagiarism_incidents",
+            "false_positives",
+            "incidents_archive",
+        }.issubset(tables)
+
+        documents_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(documents)")
+        }
+
+        assert "is_deleted" in documents_columns
+    finally:
+        conn.close()
+
+
 def test_fresh_auth_database_reaches_latest_version(tmp_path):
     with connect(tmp_path / "fresh-users.db") as connection:
         version = migrate_auth_database(connection)
@@ -56,6 +92,8 @@ def test_fresh_auth_database_reaches_latest_version(tmp_path):
         assert column_exists(connection, "users", "two_factor_enabled")
         assert column_exists(connection, "users", "is_active")
         assert index_exists(connection, "idx_users_role")
+        assert index_exists(connection, "idx_audit_log_username")
+        assert index_exists(connection, "idx_audit_log_event_type")
 
 
 def test_empty_existing_databases_upgrade_safely(tmp_path):
@@ -296,7 +334,9 @@ def test_successful_migration_logs_info_message(tmp_path, caplog):
             "Database migration from version 0 to 1 completed successfully."
             in record.message
             for record in caplog.records
-        ), f"Expected migration log message not found in: {[r.message for r in caplog.records]}"
+        ), (
+            f"Expected migration log message not found in: {[r.message for r in caplog.records]}"
+        )
     finally:
         connection.close()
 
@@ -311,7 +351,9 @@ def test_corpus_migration_logs_info_message(tmp_path, caplog):
 
         assert any(
             "completed successfully" in record.message for record in caplog.records
-        ), f"Expected migration log message not found in: {[r.message for r in caplog.records]}"
+        ), (
+            f"Expected migration log message not found in: {[r.message for r in caplog.records]}"
+        )
 
 
 def test_auth_migration_logs_info_message(tmp_path, caplog):
@@ -324,7 +366,9 @@ def test_auth_migration_logs_info_message(tmp_path, caplog):
 
         assert any(
             "completed successfully" in record.message for record in caplog.records
-        ), f"Expected migration log message not found in: {[r.message for r in caplog.records]}"
+        ), (
+            f"Expected migration log message not found in: {[r.message for r in caplog.records]}"
+        )
 
 
 def test_no_log_when_already_at_target_version(tmp_path, caplog):
@@ -378,7 +422,9 @@ def test_migration_duration_logging(tmp_path, caplog):
         assert any(
             "Migration [migration_dummy_test_func] executed in" in record.message
             for record in caplog.records
-        ), f"Expected duration log message not found in: {[r.message for r in caplog.records]}"
+        ), (
+            f"Expected duration log message not found in: {[r.message for r in caplog.records]}"
+        )
     finally:
         connection.close()
 

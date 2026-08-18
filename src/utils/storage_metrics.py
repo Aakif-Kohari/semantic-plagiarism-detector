@@ -9,8 +9,36 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
+def _deduplicate_paths(paths: List[Path]) -> List[Path]:
+    """Remove duplicate paths by comparing their resolved absolute form."""
+    unique_paths: List[Path] = []
+    seen: set[Path] = set()
+    for p in paths:
+        try:
+            resolved = p.resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                unique_paths.append(p)
+        except Exception as e:
+            logger.debug("Could not resolve path: %s", e)
+    return unique_paths
+
+
 def get_sqlite_db_paths() -> List[Path]:
-    """Retrieve unique paths of SQLite database files in standard application locations."""
+    """Retrieve unique paths of SQLite database files in standard locations.
+
+    Collects the three configured application databases (corpus, auth and
+    incidents) plus any additional ``*.db`` files sitting in the repository
+    root or in ``data/``.
+
+    Each configured path is resolved independently and a failure to resolve
+    one is logged at debug level and skipped, so a partially installed
+    environment still reports usage for the databases it can see.
+
+    Returns:
+        List[Path]: Existing-or-not database paths, de-duplicated by their
+        resolved absolute form. Paths are returned in discovery order.
+    """
     paths: List[Path] = []
 
     # 1. Corpus DB path
@@ -46,22 +74,21 @@ def get_sqlite_db_paths() -> List[Path]:
                 paths.append(file_path)
 
     # Deduplicate resolved absolute paths
-    unique_paths: List[Path] = []
-    seen: set[Path] = set()
-    for p in paths:
-        try:
-            resolved = p.resolve()
-            if resolved not in seen:
-                seen.add(resolved)
-                unique_paths.append(p)
-        except Exception as e:
-            logger.debug("Could not resolve path: %s", e)
-
-    return unique_paths
+    return _deduplicate_paths(paths)
 
 
 def get_faiss_index_paths() -> List[Path]:
-    """Retrieve unique paths of FAISS index files in standard application locations."""
+    """Retrieve unique paths of FAISS index files in standard locations.
+
+    Always includes the two default ``corpus.index`` locations (repository
+    root and ``data/``) so a caller can report "0 bytes" for an index that has
+    not been built yet, then adds any other ``*.index`` files found alongside
+    them.
+
+    Returns:
+        List[Path]: Existing-or-not index paths, de-duplicated by their
+        resolved absolute form. Paths are returned in discovery order.
+    """
     paths: List[Path] = []
 
     base_dir = Path(__file__).resolve().parents[2]
@@ -76,18 +103,7 @@ def get_faiss_index_paths() -> List[Path]:
             for file_path in folder.glob("*.index"):
                 paths.append(file_path)
 
-    unique_paths: List[Path] = []
-    seen: set[Path] = set()
-    for p in paths:
-        try:
-            resolved = p.resolve()
-            if resolved not in seen:
-                seen.add(resolved)
-                unique_paths.append(p)
-        except Exception as e:
-            logger.debug("Could not resolve path: %s", e)
-
-    return unique_paths
+    return _deduplicate_paths(paths)
 
 
 def calculate_storage_usage(
