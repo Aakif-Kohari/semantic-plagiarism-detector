@@ -1732,11 +1732,11 @@ if not st.session_state.get(SessionKeys.AUTHENTICATED, False):
         from src.db.auth import get_or_create_sso_user
         from src.utils.sso import exchange_github_code, exchange_google_code
 
-        _user_info = None
+        _user_info, _error_msg = None, None
         if _state.startswith("google_"):
-            _user_info = exchange_google_code(_code)
+            _user_info, _error_msg = exchange_google_code(_code)
         elif _state.startswith("github_"):
-            _user_info = exchange_github_code(_code)
+            _user_info, _error_msg = exchange_github_code(_code)
 
         if _user_info and _user_info.get("email"):
             _email = _user_info["email"]
@@ -1758,7 +1758,8 @@ if not st.session_state.get(SessionKeys.AUTHENTICATED, False):
                 st.query_params.clear()
                 st.rerun()
         else:
-            st.error("🚨 SSO authentication failed. Could not retrieve your email.")
+            _err = _error_msg or "Could not retrieve your email."
+            st.error(f"🚨 SSO authentication failed: {_err}")
             st.query_params.clear()
 
 # Render Login UI if not authenticated

@@ -11,9 +11,18 @@ import logging
 import os
 from unittest.mock import patch
 
+ fix/bearer-token-exception-handling
 import pytest
 
+
+ fix/cache-valid-tokens
+import pytest
+
+from src.api.middleware import get_valid_tokens
+
+ main
 from src.api.middleware import _is_public_path, get_valid_tokens
+ main
 
 
 class TestGetValidTokens:
@@ -172,6 +181,10 @@ class TestGetValidTokens:
         assert result["readonly_token_abc"] == ["read"]
         assert result["limited_token_123"] == ["read", "write"]
 
+ fix/bearer-token-exception-handling
+
+ fix/cache-valid-tokens
+ main
     def test_lru_cache_behavior(self):
         """Verify get_valid_tokens caches result with lru_cache."""
         get_valid_tokens.cache_clear()
@@ -188,6 +201,10 @@ class TestGetValidTokens:
         assert info.hits >= 1
         assert info.maxsize == 1
 
+ fix/bearer-token-exception-handling
+
+
+ main
 
 class TestIsPublicPath:
     """Test public API path matching."""
@@ -227,6 +244,7 @@ class TestIsPublicPath:
         assert not _is_public_path("/healthcheck")
         assert not _is_public_path("/api/v1/authentication")
         assert not _is_public_path("/api/v1/status-private")
+ fix/bearer-token-exception-handling
 
 
 class TestVerifyBearerToken:
@@ -299,3 +317,6 @@ class TestVerifyBearerToken:
                 )
 
         asyncio.run(_test())
+
+ main
+ main
