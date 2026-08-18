@@ -10,7 +10,8 @@ import pytest
 import src.db.auth
 from src.db.auth import (
     _connect,
-    _ph,
+    _validate_password,
+    _validate_password_complexity,
     add_user,
     init_db,
     log_security_event,
