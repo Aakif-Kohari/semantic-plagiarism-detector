@@ -7,18 +7,18 @@ and strong password complexity policies.
 """
 
 from __future__ import annotations
-from pathlib import Path
 
 import datetime
 import json
 import logging
 import os
 import re
+import secrets
 import sqlite3
+import string
 from datetime import datetime as dt
 from datetime import timezone
-import secrets
-import string
+from pathlib import Path
 
 import bcrypt
 from argon2 import PasswordHasher
@@ -43,7 +43,7 @@ VALID_ROLES = {"admin", "teacher"}
 SQLITE_TIMEOUT: float = 15.0
 
 PASSWORD_COMPLEXITY_REGEX = re.compile(
-    r"^(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\])[A-Za-z\d@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\]{8,}$"
+    r"^(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\])[A-Za-z\d@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\]{8,128}$"
 )
 
 _ph = PasswordHasher()
@@ -293,6 +293,8 @@ def _validate_password(password: str) -> str:
     password = str(password)
     if not password:
         raise ValueError("Password cannot be empty.")
+    if len(password) > 128:
+        raise ValueError("Password cannot exceed 128 characters.")
     return password
 
 
@@ -301,6 +303,8 @@ def _validate_password_complexity(password: str) -> str:
     password = str(password)
     if len(password) < 8:
         raise ValueError("Password must be at least 8 characters long.")
+    if len(password) > 128:
+        raise ValueError("Password cannot exceed 128 characters.")
     if not re.search(r"[A-Z]", password):
         raise ValueError("Password must contain at least one uppercase letter.")
     if not re.search(r"\d", password):
@@ -1265,10 +1269,10 @@ def format_user_creation_date(iso_str: str) -> str:
 # ============================================================================
 
 from enum import Enum
-from typing import Set, List, Optional, Dict, Any
 from functools import wraps
-import streamlit as st
+from typing import Any, Dict, List, Optional, Set
 
+import streamlit as st
 
 # ============================================================================
 # ROLE DEFINITIONS
@@ -1713,12 +1717,12 @@ def demote_user(username: str, admin_username: str) -> bool:
 # SSO SECURITY ENHANCEMENTS - Issue #2172
 # ============================================================================
 
+import hashlib
+import json  # noqa: F811
 import secrets  # noqa: F811
 import string  # noqa: F811
 from datetime import timedelta
-from typing import Optional, Dict, Any, List  # noqa: F811
-import hashlib
-import json  # noqa: F811
+from typing import Any, Dict, List, Optional  # noqa: F811
 
 # ============================================================================
 # SECURE PASSWORD GENERATION

@@ -10,6 +10,8 @@ import pytest
 import src.db.auth
 from src.db.auth import (
     _connect,
+    _validate_password,
+    _validate_password_complexity,
     add_user,
     init_db,
     log_security_event,
@@ -178,3 +180,13 @@ def test_update_password_logs_multiple_changes():
             (username,),
         ).fetchone()[0]
     assert count >= 2
+
+
+def test_long_password_rejected():
+    """Passwords exceeding 128 characters should raise ValueError."""
+    long_password = "A1!" + "a" * 126  # 129 characters total
+    with pytest.raises(ValueError, match="128 characters"):
+        _validate_password(long_password)
+    with pytest.raises(ValueError, match="128 characters"):
+        _validate_password_complexity(long_password)
+
