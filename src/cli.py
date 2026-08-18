@@ -55,6 +55,7 @@ def run_scan(
     folder_path: str,
     threshold: float = PLAGIARISM_THRESHOLD,
     output_format: str = "text",
+    recursive: bool = False,
 ) -> int:
     """
     Scans a folder, processes the documents, runs plagiarism detection,
@@ -80,14 +81,23 @@ def run_scan(
     files = []
 
     try:
-        for entry in os.scandir(folder_path):
-            if entry.is_file():
-                # Skip hidden files
-                if entry.name.startswith("."):
-                    continue
-                ext = os.path.splitext(entry.name)[1].lower()
-                if ext in supported_extensions:
-                    files.append(entry.path)
+        entries = (
+            Path(folder_path).rglob("*")
+            if recursive
+            else Path(folder_path).iterdir()
+        )
+
+        for entry in entries:
+            if not entry.is_file():
+                continue
+
+            # Skip hidden files
+            if entry.name.startswith("."):
+                continue
+
+            ext = entry.suffix.lower()
+            if ext in supported_extensions:
+                files.append(str(entry))
     except Exception as e:
         sys.stderr.write(f"Error reading folder contents: {e}\n")
         return 1
@@ -97,13 +107,14 @@ def run_scan(
 
     raw_texts = {}
     with concurrent.futures.ProcessPoolExecutor() as executor:
-        for filename, text, err in executor.map(_process_single_file, files):
-            if text:
-                raw_texts[filename] = text
-            else:
-                sys.stderr.write(
-                    f"Warning: Extracted text from '{filename}' is empty.\n"
-                )
+        try:
+            for filename, text, err in executor.map(_process_single_file, files):
+                if text:
+                    raw_texts[filename] = text
+                else:
+                    sys.stderr.write(
+                        f"Warning: Extracted text from '{filename}' is empty.\n"
+                    )
         except OCRDependencyError as e:
             sys.stderr.write(f"Fatal Error: {e}\n")
             sys.exit(1)
@@ -408,6 +419,11 @@ def main() -> None:
         default="text",
         help="Output format for scan results (default: text)",
     )
+    scan_parser.add_argument(
+        "--recursive",
+        action="store_true",
+        help="Recursively scan documents in subdirectories",
+    )
 
     subparsers.add_parser(
         "sync-index", help="Verify and repair FAISS index sync with SQLite database."
@@ -496,7 +512,10 @@ def main() -> None:
             sys.exit(1)
 
         exit_code = run_scan(
-            args.folder, args.threshold, output_format=args.output_format
+            args.folder,
+            args.threshold,
+            output_format=args.output_format,
+            recursive=args.recursive,
         )
         sys.exit(exit_code)
 

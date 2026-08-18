@@ -557,6 +557,36 @@ def test_cli_main_verify_schema_success(tmp_path, capsys):
     captured = capsys.readouterr()
     assert "PASSED" in captured.out
 
+@patch(
+    "src.core.embedding_model.get_embedding_model_info",
+    return_value=("all-MiniLM-L6-v2", 384),
+)
+@patch(
+    "src.core.embedding_model.embed_chunks",
+    side_effect=MockDataFactory.embed_chunks,
+)
+def test_cli_scan_recursive(
+    mock_embed, mock_model_info, temp_assignments_dir, capsys
+):
+    """Test scanning documents in nested subdirectories."""
+    nested_dir = temp_assignments_dir / "student_1" / "assignment"
+    nested_dir.mkdir(parents=True)
+
+    (nested_dir / "doc3.txt").write_text("This is nested assignment one.")
+    (nested_dir / "doc4.txt").write_text("This is nested assignment two.")
+
+    exit_code = run_scan(
+        str(temp_assignments_dir),
+        threshold=0.8,
+        output_format="json",
+        recursive=True,
+    )
+
+    assert exit_code == 0
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["documents_processed"] == 4
+
 
 def test_cli_main_verify_schema_failure(tmp_path, capsys):
     """Test main CLI invocation with --verify-schema flag on an invalid DB."""
@@ -597,3 +627,23 @@ def test_cli_main_verify_schema_cannot_combine_with_subcommand(tmp_path):
             main()
         # argparse exits with 2 for argument errors
         assert excinfo.value.code == 2
+
+def test_cli_main_scan_recursive(temp_assignments_dir):
+    """Test the --recursive CLI flag."""
+    with patch("src.cli.run_scan") as mock_run_scan:
+        mock_run_scan.return_value = 0
+
+        with patch(
+            "sys.argv",
+            ["cli.py", "scan", str(temp_assignments_dir), "--recursive"],
+        ):
+            with pytest.raises(SystemExit) as excinfo:
+                main()
+
+            assert excinfo.value.code == 0
+            mock_run_scan.assert_called_once_with(
+                str(temp_assignments_dir),
+                PLAGIARISM_THRESHOLD,
+                output_format="text",
+                recursive=True,
+            )
