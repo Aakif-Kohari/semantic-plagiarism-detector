@@ -201,7 +201,7 @@ def get_security_audit_log_count(
             return row[0] if row else 0
     except sqlite3.Error as e:
         logger.error(f"Failed to count security audit logs: {e}")
-        return 0
+        raise
 
 
 def get_distinct_audit_event_types() -> list[str]:
