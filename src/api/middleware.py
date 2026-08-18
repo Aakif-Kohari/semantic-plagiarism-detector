@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+from functools import lru_cache
 from typing import Dict, List, Optional
 
 from fastapi import Depends, HTTPException, Request, status
@@ -56,6 +57,7 @@ def get_expected_bearer_token() -> str:
     return token
 
 
+@lru_cache(maxsize=1)
 def get_valid_tokens() -> Dict[str, List[str]]:
     """Parse and return the API bearer tokens mapping from environment.
 
