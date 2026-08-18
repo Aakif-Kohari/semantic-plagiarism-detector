@@ -71,7 +71,13 @@ def integrate_pattern_recognition():
     
     # Add pattern recognition tab to main app
     render_pattern_recognition_ui(st.session_state['pattern_engine'])
-
+def integrate_text_analysis():
+    """Initialize and integrate text analysis engine"""
+    if 'text_analyzer' not in st.session_state:
+        st.session_state['text_analyzer'] = TextAnalysisEngine()
+    
+    # Add text analysis tab to main app
+    render_text_analysis_ui(st.session_state['text_analyzer'])
 def integrate_preprocessing():
     """Initialize and integrate preprocessing engine"""
     if 'preprocessor' not in st.session_state:
