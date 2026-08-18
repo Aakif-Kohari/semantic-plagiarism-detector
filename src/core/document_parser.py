@@ -690,8 +690,88 @@ def _read_pdf_bytes(file: PDFInput) -> bytes:
     return data
 
 
-def _has_meaningful_text(text: str) -> bool:
-    """Decide whether native extraction returned enough useful text."""
+def _calculate_document_image_coverage(images: list, page_width: float, page_height: float) -> tuple[float, bool]:
+    """Calculate total bounding box image area ratio relative to document page geometry.
+
+    Args:
+        images: List of embedded image objects or metadata tuples.
+        page_width: Width of the page in points.
+        page_height: Height of the page in points.
+
+    Returns:
+        tuple[float, bool]: (coverage_ratio, has_large_image_dimensions)
+    """
+    if not images or page_width <= 0 or page_height <= 0:
+        return 0.0, False
+
+    page_area = page_width * page_height
+    total_image_area = 0.0
+    has_large_dim = False
+
+    for img in images:
+        img_w = 0.0
+        img_h = 0.0
+        if isinstance(img, dict):
+            img_w = float(img.get("width", 0))
+            img_h = float(img.get("height", 0))
+        elif isinstance(img, (list, tuple)) and len(img) >= 4:
+            img_w = float(img[2]) if len(img) > 2 else 0.0
+            img_h = float(img[3]) if len(img) > 3 else 0.0
+
+        img_area = img_w * img_h
+        total_image_area += img_area
+
+        if img_w >= 200.0 and img_h >= 200.0:
+            has_large_dim = True
+
+    ratio = total_image_area / page_area if page_area > 0 else 0.0
+    return ratio, has_large_dim
+
+
+def _has_meaningful_text(text: str, page=None) -> bool:
+    """Decide whether native extraction returned enough useful text or requires Tesseract OCR fallback.
+
+    Fix for Issue #2710:
+    --------------------
+    In mixed-media PDF pages containing short native headers (e.g. 10 native text words) combined with massive
+    scanned images of essays or handwritten assignments, standard native word count checks (`len(words) >= 8`)
+    erroneously bypassed OCR.
+
+    This enhanced heuristic calculates the text-to-image coverage ratio and inspects embedded image geometry:
+    - If the combined area of embedded images exceeds 20% of the total page surface area, OCR is forced.
+    - If any single embedded image has dimensions >= 200x200 pixels, OCR is forced.
+    - Otherwise, native text word count (>= 15 words) and alphanumeric character count (>= 30) are evaluated.
+
+    Args:
+        text: Native text extracted from the page.
+        page: pdfplumber.Page or fitz.Page object representing the current PDF page.
+
+    Returns:
+        bool: True if native text is sufficient and OCR can be safely skipped; False to force OCR fallback.
+    """
+    if page is not None:
+        try:
+            images = getattr(page, "images", None)
+            if images is None and hasattr(page, "get_images"):
+                images = page.get_images()
+
+            if images:
+                p_width = float(getattr(page, "width", 0))
+                p_height = float(getattr(page, "height", 0))
+
+                coverage_ratio, has_large_dim = _calculate_document_image_coverage(
+                    images, p_width, p_height
+                )
+
+                if coverage_ratio >= 0.20 or has_large_dim:
+                    logger.debug(
+                        f"[document_parser] Forcing OCR due to high image area coverage "
+                        f"({coverage_ratio:.2%}) or large dimensions (large_dim={has_large_dim})."
+                    )
+                    return False
+        except Exception as exc:
+            logger.debug(f"[document_parser] Exception during page image inspection: {exc}")
+
     words = re.findall(r"\b[\w'-]+\b", text or "", flags=re.UNICODE)
     alphanumeric_chars = sum(char.isalnum() for char in text or "")
     return len(words) >= MIN_NATIVE_WORDS_PER_PAGE and alphanumeric_chars >= 30
@@ -886,7 +966,7 @@ def _parse_pdf_page(
                 text_page = text_page.outside_bbox(table.bbox)
             native_text = (text_page.extract_text() or "").strip()
 
-            if not _has_meaningful_text(native_text):
+            if not _has_meaningful_text(native_text, page=page):
                 if _is_blank_scanned_page(pdf_bytes, page_index, dpi=ocr_dpi):
                     return []
 
@@ -904,7 +984,7 @@ def _parse_pdf_page(
 
             selected_text = combined_text
 
-            if not _has_meaningful_text(selected_text):
+            if not _has_meaningful_text(selected_text, page=page):
                 selected_text = _ocr_pdf_page(
                     pdf_bytes,
                     page_index,
@@ -1204,7 +1284,7 @@ def extract_text_from_pdf(
                         page = pdf.pages[page_index]
                         native_text = (page.extract_text() or "").strip()
                         selected_text = native_text
-                        if not _has_meaningful_text(native_text):
+                        if not _has_meaningful_text(native_text, page=page):
                             selected_text = _ocr_pdf_page(
                                 pdf_bytes,
                                 page_index,
@@ -1218,7 +1298,7 @@ def extract_text_from_pdf(
                     page = pdf.pages[page_index]
                     native_text = (page.extract_text() or "").strip()
                     selected_text = native_text
-                    if not _has_meaningful_text(native_text):
+                    if not _has_meaningful_text(native_text, page=page):
                         selected_text = _ocr_pdf_page(
                             pdf_bytes,
                             page_index,
