@@ -65,6 +65,21 @@ def test_exchange_google_code_success(mock_post, mock_get, monkeypatch):
     mock_get.assert_called_once()
 
 
+@patch("src.utils.sso.requests.post")
+def test_exchange_google_code_unauthorized(mock_post, monkeypatch):
+    """Test Google OAuth returns None when authorization code is rejected."""
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "dummy_client_id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "dummy_secret")
+
+    mock_post.return_value.ok = False
+    mock_post.return_value.status_code = 401
+
+    result = exchange_google_code("bad_code")
+
+    assert result is None
+    mock_post.assert_called_once()
+
+
 def test_get_github_auth_url_missing_client_id(monkeypatch):
     monkeypatch.delenv("GITHUB_CLIENT_ID", raising=False)
     with pytest.raises(
