@@ -88,6 +88,8 @@ def is_ip_in_cidr_block(
         ``True`` when the address is contained in the network; otherwise
         ``False``.
     """
+    ip_str = ip_str.strip()
+
     try:
         ip_address = ipaddress.ip_address(ip_str)
         network = ipaddress.ip_network(
