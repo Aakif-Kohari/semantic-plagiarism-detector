@@ -227,6 +227,9 @@ def init_corpus_db() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at)"
         )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_incidents_date ON plagiarism_incidents(date_flagged)"
+        )
 
         # Issue #1359: Create FTS5 virtual table + sync triggers for full-text
         # search. Also created by migration_012, but we create it here too

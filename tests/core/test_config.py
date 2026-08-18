@@ -182,3 +182,12 @@ def test_get_allowed_webhook_domains(monkeypatch):
         "discord.com",
         "example.org",
     ]
+def test_load_branding_config_missing_file_fallback():
+    """Test that load_branding_config returns default BrandingConfig when the JSON file is missing."""
+    from src.core.config import load_branding_config, BrandingConfig
+    
+    # Call with a non-existent file path
+    result = load_branding_config("nonexistent_path_123.json")
+    
+    # Assert no FileNotFoundError is raised (handled implicitly by successful execution) and returns defaults
+    assert result == BrandingConfig()

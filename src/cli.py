@@ -5,6 +5,7 @@ Headless command-line interface for plagiarism detection automation.
 """
 
 import argparse
+import concurrent.futures
 import json
 import logging
 import os
@@ -31,10 +32,30 @@ from src.core.export_engine import LMSExportEngine
 logger = logging.getLogger(__name__)
 
 
+def _process_single_file(filepath: str) -> tuple[str, str | None, str | None]:
+    filename = os.path.basename(filepath)
+    try:
+        with open(filepath, "rb") as f:
+            file_bytes = f.read()
+        text = extract_text(
+            BytesIO(file_bytes),
+            filename,
+            ocr_language=DEFAULT_OCR_LANGUAGE,
+            ocr_dpi=DEFAULT_OCR_DPI,
+        )
+        if text.strip():
+            return filename, text, None
+        else:
+            return filename, None, f"Warning: Extracted text from '{filename}' is empty.\n"
+    except Exception as e:
+        return filename, None, f"Warning: Failed to parse '{filename}': {e}\n"
+
+
 def run_scan(
     folder_path: str,
     threshold: float = PLAGIARISM_THRESHOLD,
     output_format: str = "text",
+    recursive: bool = False,
 ) -> int:
     """
     Scans a folder, processes the documents, runs plagiarism detection,
@@ -60,14 +81,23 @@ def run_scan(
     files = []
 
     try:
-        for entry in os.scandir(folder_path):
-            if entry.is_file():
-                # Skip hidden files
-                if entry.name.startswith("."):
-                    continue
-                ext = os.path.splitext(entry.name)[1].lower()
-                if ext in supported_extensions:
-                    files.append(entry.path)
+        entries = (
+            Path(folder_path).rglob("*")
+            if recursive
+            else Path(folder_path).iterdir()
+        )
+
+        for entry in entries:
+            if not entry.is_file():
+                continue
+
+            # Skip hidden files
+            if entry.name.startswith("."):
+                continue
+
+            ext = entry.suffix.lower()
+            if ext in supported_extensions:
+                files.append(str(entry))
     except Exception as e:
         sys.stderr.write(f"Error reading folder contents: {e}\n")
         return 1
@@ -76,23 +106,15 @@ def run_scan(
     files.sort()
 
     raw_texts = {}
-    for filepath in files:
-        filename = os.path.basename(filepath)
+    with concurrent.futures.ProcessPoolExecutor() as executor:
         try:
-            with open(filepath, "rb") as f:
-                file_bytes = f.read()
-            text = extract_text(
-                BytesIO(file_bytes),
-                filename,
-                ocr_language=DEFAULT_OCR_LANGUAGE,
-                ocr_dpi=DEFAULT_OCR_DPI,
-            )
-            if text.strip():
-                raw_texts[filename] = text
-            else:
-                sys.stderr.write(
-                    f"Warning: Extracted text from '{filename}' is empty.\n"
-                )
+            for filename, text, err in executor.map(_process_single_file, files):
+                if text:
+                    raw_texts[filename] = text
+                else:
+                    sys.stderr.write(
+                        f"Warning: Extracted text from '{filename}' is empty.\n"
+                    )
         except OCRDependencyError as e:
             sys.stderr.write(f"Fatal Error: {e}\n")
             sys.exit(1)
@@ -154,11 +176,11 @@ def run_scan(
 
         output = io.StringIO()
         writer = csv.DictWriter(
-            output, fieldnames=["document_1", "document_2", "similarity_score"]
+            output, fieldnames=["doc_a", "doc_b", "similarity_score"]
         )
         writer.writeheader()
         for m in matches:
-            writer.writerow(m)
+            writer.writerow({"doc_a": m["document_1"], "doc_b": m["document_2"], "similarity_score": m["similarity_score"]})
         print(output.getvalue().strip())
     else:  # text
         print(f"Documents Processed: {num_processed}")
@@ -209,10 +231,8 @@ def run_prewarm(folder_path: str | None = None) -> int:
         for filepath in files:
             filename = os.path.basename(filepath)
             try:
-                with open(filepath, "rb") as f:
-                    file_bytes = f.read()
                 text = extract_text(
-                    BytesIO(file_bytes),
+                    filepath,
                     filename,
                     ocr_language=DEFAULT_OCR_LANGUAGE,
                     ocr_dpi=DEFAULT_OCR_DPI,
@@ -397,6 +417,11 @@ def main() -> None:
         default="text",
         help="Output format for scan results (default: text)",
     )
+    scan_parser.add_argument(
+        "--recursive",
+        action="store_true",
+        help="Recursively scan documents in subdirectories",
+    )
 
     subparsers.add_parser(
         "sync-index", help="Verify and repair FAISS index sync with SQLite database."
@@ -485,7 +510,10 @@ def main() -> None:
             sys.exit(1)
 
         exit_code = run_scan(
-            args.folder, args.threshold, output_format=args.output_format
+            args.folder,
+            args.threshold,
+            output_format=args.output_format,
+            recursive=args.recursive,
         )
         sys.exit(exit_code)
 

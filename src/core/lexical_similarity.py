@@ -27,6 +27,7 @@ import numpy as np
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from src.core.stopwords import get_stopword_manager, filter_stopwords, tokenize_filtered
 
 # ── Stop-word handling (issue #222) ───────────────────────────────────────────
 
@@ -331,40 +332,31 @@ def n_gram_overlap(
 def jaccard_similarity(
     text_a: str,
     text_b: str,
-    stopwords: Optional[Iterable[str]] = None,
+    stopwords: Optional[Set[str]] = None,
+    use_stopwords: bool = True,
 ) -> float:
-    """Compute Jaccard similarity index over stop-word-filtered token sets.
-
-    Mathematical Formula
-    --------------------
-    .. math::
-
-        J(A, B) = \\frac{|A \\cap B|}{|A \\cup B|} = \\frac{|A \\cap B|}{|A| + |B| - |A \\cap B|}
-
-    where A and B are sets of unique non-stop-word tokens from text_a and text_b.
-
-    Parameters
-    ----------
-    text_a : str
-        First document text string.
-    text_b : str
-        Second document text string.
-    stopwords : Optional[Iterable[str]], default=None
-        Optional iterable of stop-words to exclude during tokenization.
-
-    Returns
-    -------
-    float
-        Jaccard similarity index bounded between 0.0 and 1.0.
-    """
-    set_a: Set[str] = tokenize(text_a, stopwords=stopwords)
-    set_b: Set[str] = tokenize(text_b, stopwords=stopwords)
+    """Compute Jaccard similarity with optional stopword filtering."""
+    if not text_a or not text_b:
+        return 0.0
+    
+    if use_stopwords:
+        if stopwords is None:
+            stopwords = get_stopword_manager().get_stopwords()
+        set_a = tokenize_filtered(text_a, stopwords)
+        set_b = tokenize_filtered(text_b, stopwords)
+    else:
+        from src.core.lexical_similarity import tokenize
+        set_a = tokenize(text_a, stopwords)
+        set_b = tokenize(text_b, stopwords)
+    
     if not set_a and not set_b:
+        return 1.0
+    if not set_a or not set_b:
         return 0.0
-    union: Set[str] = set_a | set_b
-    if not union:
-        return 0.0
-    return float(len(set_a & set_b) / len(union))
+    
+    intersection = len(set_a & set_b)
+    union = len(set_a | set_b)
+    return intersection / union if union > 0 else 0.0
 
 
 def jaccard_index(

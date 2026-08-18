@@ -200,6 +200,17 @@ def test_get_security_audit_log_count(mock_audit_db):
     assert get_security_audit_log_count(event_type="logout") == 1
 
 
+def test_get_security_audit_log_count_dropped_table(mock_audit_db):
+    """Ensure get_security_audit_log_count re-raises sqlite3.Error if the table is dropped."""
+    from src.db.auth import _connect
+
+    with _connect() as conn:
+        conn.execute("DROP TABLE security_audit_log")
+
+    with pytest.raises(sqlite3.Error):
+        get_security_audit_log_count()
+
+
 def test_get_distinct_audit_event_types(mock_audit_db):
     events = get_distinct_audit_event_types()
     assert set(events) == {"login", "logout"}
@@ -750,6 +761,28 @@ def test_password_change_required_flag(mock_db):
     # 5. Setting flag on non-existent user raises ValueError
     with pytest.raises(ValueError):
         set_password_change_required("nonexistent_user_xyz", required=True)
+
+    # 5b. Invalid/empty username raises ValueError
+    with pytest.raises(ValueError, match="Username cannot be empty"):
+        set_password_change_required("", required=True)
+
+    with pytest.raises(ValueError, match="Username cannot be empty"):
+        set_password_change_required("   ", required=True)
+
+    with pytest.raises(ValueError, match="Username cannot be empty"):
+        set_password_change_required(None, required=True)  # type: ignore
+
+
+def test_validate_username_rules():
+    """Verify _validate_username enforces string type, non-emptiness, and normalizes."""
+    from src.db.auth import _validate_username
+
+    assert _validate_username("  Alice  ") == "alice"
+    assert _validate_username("BOB") == "bob"
+
+    for invalid in [None, "", "   ", 123, [], {}]:
+        with pytest.raises(ValueError, match="Username cannot be empty"):
+            _validate_username(invalid)  # type: ignore
 
     # 6. Invalid credentials still return False (or dict with authenticated=False)
     assert verify_user(username, "WrongPassword!") is False

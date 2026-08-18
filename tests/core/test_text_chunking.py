@@ -223,7 +223,7 @@ def test_chunk_by_sentences_decimal_and_ellipsis():
 
     # They should be split as three separate chunks
     assert len(chunks) == 3
-    
+
     assert "version 3.14" in chunks[0]
     assert "loading... done!" in chunks[1]
     assert "final sentence" in chunks[2]
@@ -710,3 +710,95 @@ def test_sentence_boundary_forward():
     result = _find_sentence_boundary(text, index, max_search=5)
     assert result != index
     assert text[result - 1] in ".!?"
+
+
+# ── Comprehensive Sentence-Aware Chunking Tests ─────────────────────────────
+
+
+class TestChunkBySentencesBasic:
+    """Test suite for basic sentence-aware chunking behavior."""
+
+    def test_empty_string_returns_empty_list(self):
+        """Verify empty input returns an empty list."""
+        assert chunk_by_sentences("") == []
+        assert chunk_by_sentences("   ") == []
+
+    def test_none_input_returns_empty_list(self):
+        """Verify None input is handled gracefully."""
+        assert chunk_by_sentences(None) == []
+
+    def test_single_sentence_returns_single_chunk(self):
+        """Verify a single sentence is returned as one chunk."""
+        text = "This is a single sentence."
+        chunks = chunk_by_sentences(text)
+        assert len(chunks) == 1
+        assert chunks[0] == text
+
+    def test_multiple_sentences_combined_into_chunks(self):
+        """Verify short sentences are combined to meet target chunk length."""
+        text = "First. Second. Third. Fourth. Fifth."
+        chunks = chunk_by_sentences(text, min_chunk_length=5)
+        # Should combine short sentences rather than returning 5 tiny chunks
+        assert len(chunks) < 5
+        assert all(len(c) >= 5 for c in chunks)
+
+    def test_long_sentence_not_split(self):
+        """Verify a single long sentence is not split mid-sentence."""
+        long_sentence = "This is a very long sentence " * 50
+        text = long_sentence + ". Another sentence."
+        chunks = chunk_by_sentences(text)
+        # The long sentence should remain intact in the first chunk
+        assert long_sentence.strip() in chunks[0]
+
+    def test_min_chunk_length_filters_tiny_chunks(self):
+        """Verify chunks shorter than min_chunk_length are filtered out."""
+        text = "Ok. This is a much longer sentence that should be kept."
+        chunks = chunk_by_sentences(text, min_chunk_length=20)
+        assert len(chunks) == 1
+        assert "Ok" not in chunks[0]
+
+
+class TestChunkBySentencesLimits:
+    """Test suite for max_chunks safety limit (Issue #2054)."""
+
+    def test_max_chunks_default_is_1000(self):
+        """Verify the default max_chunks parameter is 1000."""
+        # Generate text with > 1000 sentences
+        text = ". ".join([f"Sentence {i}" for i in range(1500)]) + "."
+        chunks = chunk_by_sentences(text, min_chunk_length=1)
+        assert len(chunks) <= 1000
+
+    def test_max_chunks_custom_limit_respected(self):
+        """Verify custom max_chunks limit is strictly enforced."""
+        text = ". ".join([f"Sentence {i}" for i in range(100)]) + "."
+        chunks = chunk_by_sentences(text, max_chunks=10, min_chunk_length=1)
+        assert len(chunks) == 10
+
+    def test_max_chunks_zero_raises_value_error(self):
+        """Verify max_chunks=0 raises ValueError."""
+        with pytest.raises(ValueError, match="max_chunks must be > 0"):
+            chunk_by_sentences("Some text.", max_chunks=0)
+
+    def test_max_chunks_negative_raises_value_error(self):
+        """Verify negative max_chunks raises ValueError."""
+        with pytest.raises(ValueError, match="max_chunks must be > 0"):
+            chunk_by_sentences("Some text.", max_chunks=-5)
+
+    def test_max_chunks_logs_warning_on_truncation(self, caplog):
+        """Verify a warning is logged when the max_chunks limit is reached."""
+        import logging
+
+        text = ". ".join([f"Sentence {i}" for i in range(50)]) + "."
+
+        with caplog.at_level(logging.WARNING):
+            chunk_by_sentences(text, max_chunks=5, min_chunk_length=1)
+
+        assert any(
+            "Reached max_chunks limit" in record.message for record in caplog.records
+        )
+
+    def test_text_shorter_than_max_chunks_not_truncated(self):
+        """Verify text with fewer sentences than max_chunks is not truncated."""
+        text = "First. Second. Third."
+        chunks = chunk_by_sentences(text, max_chunks=100, min_chunk_length=1)
+        assert len(chunks) <= 3  # Depends on combining logic, but definitely <= 100

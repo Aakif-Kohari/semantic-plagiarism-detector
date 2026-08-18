@@ -1115,3 +1115,43 @@ def test_get_top_similar_pairs_vectorized_matches_loop():
     for doc_a, doc_b, score in result:
         assert 0.0 <= score <= 1.0
 
+
+def test_apply_theme_colors_mutates_layout():
+    """Verify _apply_theme_colors actually mutates figure layout paper_bgcolor, plot_bgcolor, and font.color."""
+    import plotly.graph_objects as go
+    from src.visualization.analytics import _apply_theme_colors
+
+    fig = go.Figure()
+    theme_colors = {
+        "background": "#1e293b",
+        "surface": "#0f172a",
+        "ink": "#f8fafc",
+        "border": "#334155",
+    }
+
+    _apply_theme_colors(fig, theme_colors, theme_override="dark")
+
+    assert fig.layout.paper_bgcolor == "#1e293b"
+    assert fig.layout.plot_bgcolor == "#0f172a"
+    assert fig.layout.font.color == "#f8fafc"
+
+
+def test_plot_similarity_boxplot_by_group_applies_theme():
+    """Verify plot_similarity_boxplot_by_group applies theme colors to layout."""
+    from src.visualization.analytics import plot_similarity_boxplot_by_group
+
+    scores_dict = {"Assignment 1": [0.2, 0.5, 0.8]}
+    theme_colors = {
+        "background": "#1e293b",
+        "surface": "#0f172a",
+        "ink": "#f8fafc",
+        "border": "#334155",
+    }
+
+    fig = plot_similarity_boxplot_by_group(scores_dict, theme_colors=theme_colors)
+
+    assert fig.layout.paper_bgcolor == "#1e293b"
+    assert fig.layout.plot_bgcolor == "#0f172a"
+    assert fig.layout.font.color == "#f8fafc"
+
+

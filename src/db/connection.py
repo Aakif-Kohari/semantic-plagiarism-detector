@@ -11,6 +11,44 @@ from typing import Generator
 logger = logging.getLogger(__name__)
 
 DEFAULT_SQLITE_TIMEOUT: float = 15.0
+"""float: Default busy timeout in seconds (15.0s) for centralized SQLite database connection initialization.
+
+Architecture & High-Concurrency System Rationale:
+-------------------------------------------------
+This unusually long timeout (15.0 seconds) is intentionally configured to accommodate SQLite's single-writer
+concurrency model under peak load in the semantic plagiarism detection platform.
+
+Although SQLite WAL (Write-Ahead Logging) mode permits concurrent readers alongside a single active writer,
+multiple concurrent write transactions—or long-running bulk operations—cause write lock contention.
+When a write lock is held, other writing processes or threads attempting to execute write transactions
+will block and wait for up to `DEFAULT_SQLITE_TIMEOUT` seconds before raising an exception.
+
+Specific High-Throughput Scenarios Requiring a 15.0-Second Busy Timeout:
+-----------------------------------------------------------------------
+1. **Bulk FAISS Vector Index Synchronization & Embedding Database Persistence:**
+   During large document collection ingestions, background worker processes execute multi-threaded batch commits
+   to write high-dimensional vector embeddings, document chunk mappings, and metadata into SQLite database files.
+   Bulk transaction commits can hold exclusive write locks for several seconds.
+
+2. **Parallel PDF & Multi-Format Document Processing Workloads:**
+   When multiple documents are analyzed concurrently via `ProcessPoolExecutor` or async API route handlers,
+   parser workers continuously write extracted text metadata, citation graph links, and security audit logs
+   to `users.db` and main database files.
+
+3. **WAL Mode Checkpoint Sweeps & Passive Flushing:**
+   SQLite's internal Write-Ahead Log auto-checkpoint mechanism periodically flushes pages from `.db-wal` back to the
+   main `.db` file. During heavy write bursts, checkpoint operations temporarily hold exclusive locks on database pages.
+
+4. **Background Security Audit Logging & User Session Verification:**
+   High-frequency authentication token verifications, user role validations, and audit log persistence in `src/db/auth.py`
+   run concurrently with background vector indexing pipeline tasks.
+
+⚠️ WARNING FOR DEVELOPERS:
+------------------------
+Arbitrarily lowering `DEFAULT_SQLITE_TIMEOUT` below 15.0 seconds will cause concurrent batch operations, background FAISS
+synchronizations, and parallel document parsing tasks to fail prematurely with unhandled `sqlite3.OperationalError: database is locked`
+exceptions.
+"""
 
 # Lower bound for the busy timeout actually handed to SQLite. A caller may ask
 # for a very small timeout, but anything under ~100 ms means a lock contended by

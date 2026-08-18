@@ -153,8 +153,10 @@ def _apply_theme_colors(
     elif theme_override == "dark":
         fig.update_layout(template="plotly_dark")
 
-    if not theme_colors:
+    if not theme_colors or not isinstance(theme_colors, dict):
         return
+
+    apply_plotly_theme(fig, theme_colors)
 
 
 def calculate_severity_ratios(incidents: list[dict[str, Any]]) -> dict[str, float]:

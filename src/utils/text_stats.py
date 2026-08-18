@@ -36,12 +36,96 @@ def count_words(text: str) -> int:
     return len(words)
 
 
+# Common abbreviations whose trailing period does not end a sentence. Matched
+# whole-word only — see ``_ABBREVIATION_RE`` for why that matters.
+ABBREVIATIONS = (
+    "mr",
+    "mrs",
+    "ms",
+    "dr",
+    "prof",
+    "sr",
+    "jr",
+    "vs",
+    "etc",
+    "inc",
+    "ltd",
+    "corp",
+    "co",
+    "fig",
+    "tbl",
+    "art",
+    "no",
+    "pp",
+    "vol",
+    "jan",
+    "feb",
+    "mar",
+    "apr",
+    "jun",
+    "jul",
+    "aug",
+    "sep",
+    "oct",
+    "nov",
+    "dec",
+)
+
+# An abbreviation only counts when the letters before the period form a whole
+# word. Without the leading boundary, "co." matches inside "disco." and "no."
+# inside "casino.", which swallows the real sentence break that follows.
+_ABBREVIATION_RE = re.compile(
+    r"\b(?:" + "|".join(ABBREVIATIONS) + r")\.",
+    re.IGNORECASE,
+)
+
+# Dotted acronyms such as "U.S.", "e.u." or "N.A.V.O." — any run of two or more
+# single letters each followed by a period. Written generically so the list
+# above does not need an entry per acronym.
+_DOTTED_ACRONYM_RE = re.compile(r"\b(?:[A-Za-z]\.){2,}")
+
+# A period between two digits is a decimal point ("3.14", "v2.5"), never a
+# sentence break.
+_DECIMAL_POINT_RE = re.compile(r"(?<=\d)\.(?=\d)")
+
+# Placeholder substituted for periods that must not be counted. A private-use
+# code point is used so it cannot collide with anything in the document, and so
+# masking never joins two words together the way deleting the period would.
+_PROTECTED_PERIOD = "\ue000"
+
+_SENTENCE_ENDING_RE = re.compile(r"[.!?]+")
+
+
+def _mask_non_terminal_periods(text: str) -> str:
+    """Replace periods that do not end a sentence with a placeholder.
+
+    Covers abbreviations, dotted acronyms and decimal points. The surrounding
+    letters are preserved so that word boundaries elsewhere in the text are
+    unaffected — only the period itself is swapped out.
+    """
+    masked = _DECIMAL_POINT_RE.sub(_PROTECTED_PERIOD, text)
+    masked = _DOTTED_ACRONYM_RE.sub(
+        lambda match: match.group(0).replace(".", _PROTECTED_PERIOD),
+        masked,
+    )
+    masked = _ABBREVIATION_RE.sub(
+        lambda match: match.group(0).replace(".", _PROTECTED_PERIOD),
+        masked,
+    )
+    return masked
+
+
 def count_sentences(text: str) -> int:
     """
     Count the number of sentences in the given text.
 
     Sentences are identified by periods, exclamation marks, and question marks.
-    Also handles common abbreviations to avoid over-counting.
+    Periods belonging to common abbreviations ("Dr."), dotted acronyms ("U.S.")
+    and decimal numbers ("3.14") are excluded so they do not inflate the count.
+
+    Non-empty text always counts as at least one sentence, so a run of words
+    with no terminal punctuation is reported as a single sentence rather than
+    none.
 
     Args:
         text: The text to analyze
@@ -52,51 +136,11 @@ def count_sentences(text: str) -> int:
     if not text or not text.strip():
         return 0
 
-    # Common abbreviations that end with period but aren't sentence ends
-    abbreviations = [
-        "mr.",
-        "mrs.",
-        "ms.",
-        "dr.",
-        "prof.",
-        "sr.",
-        "jr.",
-        "vs.",
-        "etc.",
-        "inc.",
-        "ltd.",
-        "corp.",
-        "co.",
-        "fig.",
-        "tbl.",
-        "art.",
-        "no.",
-        "pp.",
-        "vol.",
-        "jan.",
-        "feb.",
-        "mar.",
-        "apr.",
-        "jun.",
-        "jul.",
-        "aug.",
-        "sep.",
-        "oct.",
-        "nov.",
-        "dec.",
-        "u.s.",
-        "u.k.",
-        "e.u.",
-        "n.a.v.o.",
-    ]
+    masked = _mask_non_terminal_periods(text)
 
-    # Replace abbreviations temporarily
-    text_lower = text.lower()
-    for abbr in abbreviations:
-        text_lower = text_lower.replace(abbr, abbr.replace(".", ""))
-
-    # Count sentence-ending punctuation
-    sentence_endings = re.findall(r"[.!?]+", text_lower)
+    # Count sentence-ending punctuation. Consecutive marks ("?!", "...") are a
+    # single break because the pattern matches them as one run.
+    sentence_endings = _SENTENCE_ENDING_RE.findall(masked)
     return max(1, len(sentence_endings))
 
 
@@ -197,7 +241,6 @@ def format_stats_for_pdf(stats: Dict[str, float]) -> List[List[str]]:
 
 
 logger = logging.getLogger(__name__)
-
 
 
 def get_char_count(text: str) -> int:
