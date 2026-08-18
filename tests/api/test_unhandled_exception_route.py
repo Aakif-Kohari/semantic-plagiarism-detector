@@ -92,3 +92,26 @@ def test_unhandled_runtime_error_surfaces_message_outside_production(monkeypatch
     body = response.json()
     assert body["error"] is True
     assert body["message"] == "Boom"
+
+
+import sqlite3
+
+TEST_SQLITE_LOCKED_PATH = "/api/v1/_test/raise-sqlite-locked"
+
+
+@app.get(TEST_SQLITE_LOCKED_PATH, include_in_schema=False)
+def _raise_sqlite_locked_for_testing():
+    """Deliberately raise a sqlite3.OperationalError database is locked unhandled exception."""
+    raise sqlite3.OperationalError("database is locked")
+
+
+def test_sqlite_locked_returns_503_service_unavailable():
+    """Verify that a sqlite3.OperationalError with 'locked' returns 503 Service Unavailable and a 'Service busy, please retry' message."""
+    response = client.get(TEST_SQLITE_LOCKED_PATH)
+    assert response.status_code == 503
+    body = response.json()
+    assert body["error"] is True
+    assert body["code"] == 503
+    assert body["message"] == "Service busy, please retry"
+    assert "timestamp" in body
+

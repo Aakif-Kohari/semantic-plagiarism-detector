@@ -40,7 +40,7 @@ def get_auth_db_path() -> Path:
 
 VALID_ROLES = {"admin", "teacher"}
 
-SQLITE_TIMEOUT: float = 15.0
+SQLITE_TIMEOUT: float = 5.0
 """float: Busy timeout in seconds (15.0s) for SQLite database connections in the authentication module.
 
 Architecture & High-Concurrency System Rationale:
@@ -73,10 +73,14 @@ Do NOT reduce `SQLITE_TIMEOUT` below 15.0 seconds. Lowering this value risks rai
 """
 
 PASSWORD_COMPLEXITY_REGEX = re.compile(
-    r"^(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\])[A-Za-z\d@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\]{8,}$"
+    r"^(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\])[A-Za-z\d@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\]{8,128}$"
 )
 
-_ph = PasswordHasher()
+_ph = PasswordHasher(
+    time_cost=3,
+    memory_cost=65536,
+    parallelism=4,
+)
 
 
 class AuthRepository(BaseRepository):
@@ -375,6 +379,8 @@ def _validate_password(password: str) -> str:
     password = str(password)
     if not password:
         raise ValueError("Password cannot be empty.")
+    if len(password) > 128:
+        raise ValueError("Password cannot exceed 128 characters.")
     return password
 
 
@@ -383,6 +389,8 @@ def _validate_password_complexity(password: str) -> str:
     password = str(password)
     if len(password) < 8:
         raise ValueError("Password must be at least 8 characters long.")
+    if len(password) > 128:
+        raise ValueError("Password cannot exceed 128 characters.")
     if not re.search(r"[A-Z]", password):
         raise ValueError("Password must contain at least one uppercase letter.")
     if not re.search(r"\d", password):

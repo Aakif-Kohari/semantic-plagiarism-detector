@@ -6,9 +6,7 @@ import sqlite3
 
 from .common import column_exists, run_migrations
 
-AUTH_SCHEMA_VERSION = 13
-
-AUTH_SCHEMA_VERSION = 14
+AUTH_SCHEMA_VERSION = 16
 
 
 def migration_001_create_users(
@@ -212,6 +210,20 @@ def migration_013_add_user_status(
         """)
 
 
+def migration_015_add_audit_log_indexes(
+    connection: sqlite3.Connection,
+) -> None:
+    """Create indexes on security_audit_log(username) and security_audit_log(event_type)."""
+    connection.execute("""
+        CREATE INDEX IF NOT EXISTS idx_audit_log_username
+        ON security_audit_log(username)
+        """)
+    connection.execute("""
+        CREATE INDEX IF NOT EXISTS idx_audit_log_event_type
+        ON security_audit_log(event_type)
+        """)
+
+
 AUTH_MIGRATIONS = {
     1: migration_001_create_users,
     2: migration_002_add_onboarding_state,
@@ -228,6 +240,7 @@ AUTH_MIGRATIONS = {
     13: migration_013_add_user_status,
     14: migration_013_create_password_history_table,
     15: migration_014_add_must_change_password,
+    16: migration_015_add_audit_log_indexes,
 }
 
 
