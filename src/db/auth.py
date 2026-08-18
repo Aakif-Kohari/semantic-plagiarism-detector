@@ -93,6 +93,152 @@ class AuthRepository(BaseRepository):
         """Create or upgrade users.db and seed default administrator accounts."""
         init_db()
 
+    def log_security_event(
+        self,
+        event_type: str,
+        username: str,
+        details: str | None = None,
+    ) -> None:
+        """Record a security-relevant event in the security_audit_log table."""
+        timestamp = datetime.datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        try:
+            with self.connection() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO security_audit_log (event_type, username, timestamp, details)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (event_type, username, timestamp, details),
+                )
+                conn.commit()
+        except Exception as exc:
+            logger.warning(
+                "Failed to write security audit log entry [%s, %s]: %s",
+                event_type,
+                username,
+                exc,
+            )
+
+    def _build_audit_log_query_conditions(
+        self,
+        username: str | None = None,
+        event_type: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> tuple[str, list]:
+        """Build WHERE clause snippet (if any) and parameters list for security audit log queries."""
+        conditions: list[str] = []
+        params: list = []
+
+        if username:
+            conditions.append("username = ?")
+            params.append(username.lower())
+        if event_type:
+            conditions.append("event_type = ?")
+            params.append(event_type)
+        if start_date:
+            conditions.append("timestamp >= ?")
+            params.append(start_date)
+        if end_date:
+            conditions.append("timestamp <= ?")
+            params.append(end_date)
+
+        where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+        return where_clause, params
+
+    def get_security_audit_logs(
+        self,
+        username: str | None = None,
+        event_type: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict]:
+        """Retrieve security audit log entries with limit, offset, and optional filters (username, event_type, start_date, end_date)."""
+        if limit < 0 or offset < 0:
+            raise ValueError("Limit and offset must be non-negative integers.")
+
+        where_clause, params = self._build_audit_log_query_conditions(
+            username=username,
+            event_type=event_type,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        query = (
+            f"SELECT id, event_type, username, timestamp, details FROM security_audit_log{where_clause}"
+            " ORDER BY id DESC LIMIT ? OFFSET ?"
+        )
+        params.extend([limit, offset])
+
+        try:
+            with self.connection(read_only=True) as conn:
+                rows = conn.execute(query, params).fetchall()
+                return [
+                    {
+                        "id": r[0],
+                        "event_type": r[1],
+                        "username": r[2],
+                        "timestamp": r[3],
+                        "details": r[4],
+                    }
+                    for r in rows
+                ]
+        except sqlite3.Error as e:
+            logger.error(f"Failed to query security audit logs: {e}")
+            return []
+
+    def get_security_audit_log_count(
+        self,
+        username: str | None = None,
+        event_type: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> int:
+        """Return total number of matching security audit log entries."""
+        where_clause, params = self._build_audit_log_query_conditions(
+            username=username,
+            event_type=event_type,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        query = f"SELECT COUNT(*) FROM security_audit_log{where_clause}"
+
+        try:
+            with self.connection(read_only=True) as conn:
+                row = conn.execute(query, params).fetchone()
+                return row[0] if row else 0
+        except sqlite3.Error as e:
+            logger.error(f"Failed to count security audit logs: {e}")
+            raise
+
+    def get_distinct_audit_event_types(self) -> list[str]:
+        """Return a list of all distinct event_type values from security_audit_log."""
+        try:
+            with self.connection(read_only=True) as conn:
+                rows = conn.execute(
+                    "SELECT DISTINCT event_type FROM security_audit_log ORDER BY event_type"
+                ).fetchall()
+                return [r[0] for r in rows if r[0]]
+        except sqlite3.Error:
+            return []
+
+    def get_recent_audit_events(self, limit: int = 20) -> list[dict]:
+        """Fetch the N most recent security audit events across all accounts."""
+        if limit < 0:
+            raise ValueError("Limit must be a non-negative integer.")
+
+        try:
+            with self.connection(read_only=True) as conn:
+                rows = conn.execute(
+                    "SELECT * FROM security_audit_log ORDER BY timestamp DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+                return [dict(row) for row in rows]
+        except sqlite3.Error as e:
+            logger.error(f"Failed to query recent security audit events: {e}")
+            return []
+
 
 auth_repo = AuthRepository(_DB_PATH)
 
@@ -127,52 +273,7 @@ def log_security_event(
     details: str | None = None,
 ) -> None:
     """Record a security-relevant event in the security_audit_log table."""
-    timestamp = datetime.datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    clean_username = username.lower() if username else ""
-    try:
-        with _connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO security_audit_log (event_type, username, timestamp, details)
-                VALUES (?, ?, ?, ?)
-                """,
-                (event_type, clean_username, timestamp, details),
-            )
-            conn.commit()
-    except Exception as exc:
-        logger.warning(
-            "Failed to write security audit log entry [%s, %s]: %s",
-            event_type,
-            clean_username,
-            exc,
-        )
-
-
-def _build_audit_log_query_conditions(
-    username: str | None = None,
-    event_type: str | None = None,
-    start_date: str | None = None,
-    end_date: str | None = None,
-) -> tuple[str, list]:
-    """Build WHERE clause snippet (if any) and parameters list for security audit log queries."""
-    conditions: list[str] = []
-    params: list = []
-
-    if username:
-        conditions.append("username = ?")
-        params.append(username.lower())
-    if event_type:
-        conditions.append("event_type = ?")
-        params.append(event_type)
-    if start_date:
-        conditions.append("timestamp >= ?")
-        params.append(start_date)
-    if end_date:
-        conditions.append("timestamp <= ?")
-        params.append(end_date)
-
-    where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
-    return where_clause, params
+    auth_repo.log_security_event(event_type, username, details)
 
 
 def get_security_audit_logs(
@@ -184,37 +285,14 @@ def get_security_audit_logs(
     offset: int = 0,
 ) -> list[dict]:
     """Retrieve security audit log entries with limit, offset, and optional filters (username, event_type, start_date, end_date)."""
-    if limit < 0 or offset < 0:
-        raise ValueError("Limit and offset must be non-negative integers.")
-
-    where_clause, params = _build_audit_log_query_conditions(
+    return auth_repo.get_security_audit_logs(
         username=username,
         event_type=event_type,
         start_date=start_date,
         end_date=end_date,
+        limit=limit,
+        offset=offset,
     )
-    query = (
-        f"SELECT id, event_type, username, timestamp, details FROM security_audit_log{where_clause}"
-        " ORDER BY id DESC LIMIT ? OFFSET ?"
-    )
-    params.extend([limit, offset])
-
-    try:
-        with _connect() as conn:
-            rows = conn.execute(query, params).fetchall()
-            return [
-                {
-                    "id": r[0],
-                    "event_type": r[1],
-                    "username": r[2],
-                    "timestamp": r[3],
-                    "details": r[4],
-                }
-                for r in rows
-            ]
-    except sqlite3.Error as e:
-        logger.error(f"Failed to query security audit logs: {e}")
-        return []
 
 
 def get_security_audit_log_count(
@@ -224,51 +302,22 @@ def get_security_audit_log_count(
     end_date: str | None = None,
 ) -> int:
     """Return total number of matching security audit log entries."""
-    where_clause, params = _build_audit_log_query_conditions(
+    return auth_repo.get_security_audit_log_count(
         username=username,
         event_type=event_type,
         start_date=start_date,
         end_date=end_date,
     )
-    query = f"SELECT COUNT(*) FROM security_audit_log{where_clause}"
-
-    try:
-        with _connect() as conn:
-            row = conn.execute(query, params).fetchone()
-            return row[0] if row else 0
-    except sqlite3.Error as e:
-        logger.error(f"Failed to count security audit logs: {e}")
-        raise
 
 
 def get_distinct_audit_event_types() -> list[str]:
     """Return a list of all distinct event_type values from security_audit_log."""
-    try:
-        with _connect() as conn:
-            rows = conn.execute(
-                "SELECT DISTINCT event_type FROM security_audit_log ORDER BY event_type"
-            ).fetchall()
-            return [r[0] for r in rows if r[0]]
-    except sqlite3.Error:
-        return []
+    return auth_repo.get_distinct_audit_event_types()
 
 
 def get_recent_audit_events(limit: int = 20) -> list[dict]:
     """Fetch the N most recent security audit events across all accounts."""
-    if limit < 0:
-        raise ValueError("Limit must be a non-negative integer.")
-
-    try:
-        with _connect() as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                "SELECT * FROM security_audit_log ORDER BY timestamp DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-            return [dict(row) for row in rows]
-    except sqlite3.Error as e:
-        logger.error(f"Failed to query recent security audit events: {e}")
-        return []
+    return auth_repo.get_recent_audit_events(limit=limit)
 
 
 def _hash_password(password: str) -> str:
