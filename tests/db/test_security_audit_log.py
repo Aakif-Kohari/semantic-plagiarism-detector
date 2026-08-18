@@ -7,12 +7,11 @@ import uuid
 
 import pytest
 
-import src.db.auth
 from src.db.auth import (
     _connect,
     add_user,
+    auth_repo,
     init_db,
-    log_security_event,
     update_password,
 )
 
@@ -28,7 +27,7 @@ def test_log_security_event_inserts_row():
     """log_security_event should write a row into security_audit_log."""
     username = f"user_{uuid.uuid4().hex[:8]}"
     add_user(username, "Password1!")
-    log_security_event(event_type="password_change", username=username)
+    auth_repo.log_security_event(event_type="password_change", username=username)
     with _connect() as conn:
         row = conn.execute(
             "SELECT event_type, username FROM security_audit_log WHERE username = ?",
@@ -43,7 +42,7 @@ def test_log_security_event_stores_timestamp():
     """log_security_event should store a non-empty ISO 8601 UTC timestamp."""
     username = f"user_{uuid.uuid4().hex[:8]}"
     add_user(username, "Password1!")
-    log_security_event(event_type="password_change", username=username)
+    auth_repo.log_security_event(event_type="password_change", username=username)
     with _connect() as conn:
         row = conn.execute(
             "SELECT timestamp FROM security_audit_log WHERE username = ?",
@@ -60,7 +59,7 @@ def test_log_security_event_stores_optional_details():
     """log_security_event should persist the details field when provided."""
     username = f"user_{uuid.uuid4().hex[:8]}"
     add_user(username, "Password1!")
-    log_security_event(
+    auth_repo.log_security_event(
         event_type="password_change",
         username=username,
         details="Password updated successfully.",
@@ -78,7 +77,7 @@ def test_log_security_event_with_details_none():
     """Ensure that calling log_security_event with details=None correctly inserts NULL in database."""
     username = f"user_{uuid.uuid4().hex[:8]}"
     add_user(username, "Password1!")
-    log_security_event(
+    auth_repo.log_security_event(
         event_type="login_failure",
         username=username,
         details=None,
@@ -109,7 +108,7 @@ def test_log_security_event_insertion():
     username = f"user_{uuid.uuid4().hex[:8]}"
     add_user(username, "Password1!")
 
-    log_security_event(
+    auth_repo.log_security_event(
         event_type="login_success",
         username=username,
         details="Insertion test event",
@@ -118,7 +117,7 @@ def test_log_security_event_insertion():
     # Independent connection, opened fresh against the real DB file/schema
     # created by init_db() (via the migration pipeline), not the
     # connection log_security_event() itself used.
-    conn = sqlite3.connect(src.db.auth._DB_PATH)
+    conn = sqlite3.connect(str(auth_repo.db_path))
     try:
         row = conn.execute(
             "SELECT event_type, username, timestamp, details "

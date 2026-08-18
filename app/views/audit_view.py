@@ -11,11 +11,7 @@ import pandas as pd
 import streamlit as st
 
 from app.session_keys import SessionKeys
-from src.db.auth import (
-    get_distinct_audit_event_types,
-    get_security_audit_log_count,
-    get_security_audit_logs,
-)
+from src.db.auth import auth_repo
 from src.i18n.translator import get_text
 
 
@@ -51,7 +47,7 @@ def render_audit_view(user_role: str, lang_code: str):
                 end_date_str = date_range[1].strftime("%Y-%m-%d") + "T23:59:59Z"
 
         with filter_col2:
-            distinct_events = get_distinct_audit_event_types()
+            distinct_events = auth_repo.get_distinct_audit_event_types()
             event_type_options = ["All Event Types"] + distinct_events
             selected_event_type = st.selectbox(
                 "🏷️ Event Type",
@@ -81,7 +77,7 @@ def render_audit_view(user_role: str, lang_code: str):
                 key="audit_per_page_select",
             )
 
-        total_records = get_security_audit_log_count(
+        total_records = auth_repo.get_security_audit_log_count(
             username=username_filter,
             event_type=event_type_filter,
             start_date=start_date_str,
@@ -100,7 +96,7 @@ def render_audit_view(user_role: str, lang_code: str):
 
         offset = (current_page - 1) * per_page
 
-        logs = get_security_audit_logs(
+        logs = auth_repo.get_security_audit_logs(
             username=username_filter,
             event_type=event_type_filter,
             start_date=start_date_str,
@@ -190,7 +186,7 @@ def render_audit_view(user_role: str, lang_code: str):
 
             st.divider()
 
-            export_all_logs = get_security_audit_logs(
+            export_all_logs = auth_repo.get_security_audit_logs(
                 username=username_filter,
                 event_type=event_type_filter,
                 start_date=start_date_str,
