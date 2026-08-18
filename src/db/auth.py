@@ -274,11 +274,18 @@ def _verify_password_hash(password: str, stored_hash: str) -> bool:
     return False
 
 
-def _validate_username(username: str) -> str:
-    username = str(username).strip().lower()
-    if not username:
+def _validate_username(username: Any) -> str:
+    """Validate and sanitize a username string.
+
+    Raises:
+        ValueError: If username is None, not a string, or empty/whitespace.
+    """
+    if username is None or not isinstance(username, str):
         raise ValueError("Username cannot be empty.")
-    return username
+    normalized = username.strip().lower()
+    if not normalized:
+        raise ValueError("Username cannot be empty.")
+    return normalized
 
 
 def _validate_password(password: str) -> str:
