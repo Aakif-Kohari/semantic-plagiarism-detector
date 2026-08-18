@@ -124,6 +124,7 @@ def log_security_event(
 ) -> None:
     """Record a security-relevant event in the security_audit_log table."""
     timestamp = datetime.datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    clean_username = username.lower() if username else ""
     try:
         with _connect() as conn:
             conn.execute(
@@ -131,14 +132,14 @@ def log_security_event(
                 INSERT INTO security_audit_log (event_type, username, timestamp, details)
                 VALUES (?, ?, ?, ?)
                 """,
-                (event_type, username, timestamp, details),
+                (event_type, clean_username, timestamp, details),
             )
             conn.commit()
     except Exception as exc:
         logger.warning(
             "Failed to write security audit log entry [%s, %s]: %s",
             event_type,
-            username,
+            clean_username,
             exc,
         )
 
