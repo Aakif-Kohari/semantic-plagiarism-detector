@@ -4,9 +4,9 @@ test_daily_summary_email.py
 Tests for daily summary email functionality and HTML template generation.
 """
 
+import re
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
-import re
 
 import pytest
 
@@ -18,6 +18,7 @@ from src.utils.daily_summary_email import (
     generate_daily_summary_html,
     get_admin_emails,
     get_incidents_last_24h,
+    is_valid_email,
     send_daily_summary,
     send_email,
 )
@@ -92,33 +93,106 @@ def test_get_incidents_last_24h(mock_get_all, mock_incidents, mock_old_incident)
     assert all(inc["incident_id"] != "INC-OLD" for inc in recent)
 
 
+def test_is_valid_email():
+    """Test email format validation helper."""
+    # Invalid emails
+    assert not is_valid_email(None)
+    assert not is_valid_email("")
+    assert not is_valid_email("john")
+    assert not is_valid_email("john@")
+    assert not is_valid_email("john@example")
+    assert not is_valid_email("john@localhost")
+    assert not is_valid_email("@example.com")
+
+    # Valid emails
+    assert is_valid_email("john@example.com")
+    assert is_valid_email("admin@company.org")
+    assert is_valid_email("user@university.edu")
+
+
 @patch("src.utils.daily_summary_email.get_all_users")
-def test_get_admin_emails(mock_get_users):
-    """Test retrieving admin email addresses."""
+@patch.dict("os.environ", {}, clear=True)
+def test_get_admin_emails_valid_db_email(mock_get_users):
+    """Test 1: Valid DB email returns valid emails from DB."""
     mock_get_users.return_value = [
-        {"id": 1, "username": "admin1", "role": "admin"},
-        {"id": 2, "username": "teacher1", "role": "teacher"},
-        {"id": 3, "username": "admin2", "role": "admin"},
+        {"id": 1, "username": "admin1", "role": "admin", "email": "admin1@example.com"},
+        {"id": 2, "username": "teacher1", "role": "teacher", "email": "teacher1@example.com"},
+        {"id": 3, "username": "admin2", "role": "admin", "email": "admin2@example.com"},
     ]
 
     emails = get_admin_emails()
 
-    assert len(emails) == 2
-    assert "admin1@localhost" in emails
-    assert "admin2@localhost" in emails
-    assert "teacher1@localhost" not in emails
+    assert emails == ["admin1@example.com", "admin2@example.com"]
 
 
 @patch("src.utils.daily_summary_email.get_all_users")
 @patch.dict("os.environ", {"ADMIN_EMAIL": "fallback@example.com"})
-def test_get_admin_emails_fallback(mock_get_users):
-    """Test fallback to environment variable when no admins exist."""
-    mock_get_users.return_value = [{"id": 1, "username": "teacher1", "role": "teacher"}]
+def test_get_admin_emails_missing_db_email(mock_get_users):
+    """Test 2: Missing DB email falls back to ADMIN_EMAIL and not username@localhost."""
+    mock_get_users.return_value = [
+        {"id": 1, "username": "admin1", "role": "admin", "email": None},
+    ]
 
     emails = get_admin_emails()
 
-    assert len(emails) == 1
-    assert emails[0] == "fallback@example.com"
+    assert emails == ["fallback@example.com"]
+    assert "admin1@localhost" not in emails
+
+
+@patch("src.utils.daily_summary_email.get_all_users")
+@patch.dict("os.environ", {"ADMIN_EMAIL": "fallback@example.com"})
+def test_get_admin_emails_invalid_db_email(mock_get_users):
+    """Test 3: Invalid DB email (no TLD) falls back to ADMIN_EMAIL."""
+    mock_get_users.return_value = [
+        {"id": 1, "username": "admin1", "role": "admin", "email": "admin@example"},
+    ]
+
+    emails = get_admin_emails()
+
+    assert emails == ["fallback@example.com"]
+
+
+@patch("src.utils.daily_summary_email.get_all_users")
+@patch.dict("os.environ", {}, clear=True)
+def test_get_admin_emails_mixed_valid_and_invalid(mock_get_users):
+    """Test 4: Mixed valid and invalid DB emails filters out invalid ones."""
+    mock_get_users.return_value = [
+        {"id": 1, "username": "admin1", "role": "admin", "email": "admin1@example.com"},
+        {"id": 2, "username": "admin2", "role": "admin", "email": "admin2@example"},
+        {"id": 3, "username": "admin3", "role": "admin", "email": "admin3@example.org"},
+    ]
+
+    emails = get_admin_emails()
+
+    assert emails == ["admin1@example.com", "admin3@example.org"]
+
+
+@patch("src.utils.daily_summary_email.get_all_users")
+@patch.dict("os.environ", {"ADMIN_EMAIL": "fallback@example.com"})
+def test_get_admin_emails_no_valid_db_emails(mock_get_users):
+    """Test 5: No valid DB emails falls back to valid ADMIN_EMAIL."""
+    mock_get_users.return_value = [
+        {"id": 1, "username": "admin1", "role": "admin", "email": "admin1@example"},
+        {"id": 2, "username": "admin2", "role": "admin", "email": "admin2@localhost"},
+        {"id": 3, "username": "admin3", "role": "admin", "email": None},
+    ]
+
+    emails = get_admin_emails()
+
+    assert emails == ["fallback@example.com"]
+
+
+@patch("src.utils.daily_summary_email.get_all_users")
+@patch.dict("os.environ", {"ADMIN_EMAIL": "invalid-admin-email"}, clear=True)
+def test_get_admin_emails_no_valid_db_or_env_email(mock_get_users):
+    """Test 6: No valid DB emails and invalid/missing ADMIN_EMAIL returns empty list."""
+    mock_get_users.return_value = [
+        {"id": 1, "username": "admin1", "role": "admin", "email": "admin1@localhost"},
+    ]
+
+    emails = get_admin_emails()
+
+    assert emails == []
 
 
 def test_format_daily_summary_with_incidents(mock_incidents):

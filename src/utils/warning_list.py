@@ -321,11 +321,12 @@ def paginate_warnings(
 ) -> WarningPage:
     """Return a clamped page of warning dictionaries."""
     normalized_warnings = [dict(item) for item in warnings]
+    safe_page = max(1, page)
+    safe_page_size = min(max(1, page_size), 100)
     return paginate_items(
         normalized_warnings,
-        page=page,
-        page_size=page_size,
-        max_page_size=100,
+        page_size=safe_page_size,
+        current_page=safe_page,
     )
 
 

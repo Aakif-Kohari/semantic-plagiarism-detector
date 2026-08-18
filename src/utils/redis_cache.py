@@ -239,6 +239,10 @@ class CacheNamespace(str, Enum):
         return ":".join([self.value] + list(parts))
 
 
+# Alias for backward compatibility with legacy imports
+CacheKeyPrefix = CacheNamespace
+
+
 # ============================================================================
 # MAIN REDIS CACHE MANAGER
 # ============================================================================
