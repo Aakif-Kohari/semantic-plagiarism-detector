@@ -11,6 +11,8 @@ import logging
 import os
 import sys
 import time
+import csv
+import io
 from io import BytesIO
 from pathlib import Path
 
@@ -171,9 +173,6 @@ def run_scan(
     elif output_format == "json":
         print(json.dumps(report, indent=2))
     elif output_format == "csv":
-        import csv
-        import io
-
         output = io.StringIO()
         writer = csv.DictWriter(
             output, fieldnames=["doc_a", "doc_b", "similarity_score"]
