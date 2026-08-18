@@ -11,11 +11,22 @@ import logging
 import os
 from unittest.mock import patch
 
+ fix/optimize-daily-summary-incidents
+ fix/optimize-daily-summary-incidents
+ fix/optimize-daily-summary-incidents
+
+ fix/bearer-token-exception-handling
+import pytest
+
+ main
+
  fix/cache-valid-tokens
+ main
 import pytest
 
 from src.api.middleware import get_valid_tokens
 
+ main
 from src.api.middleware import _is_public_path, get_valid_tokens
  main
 
@@ -176,7 +187,15 @@ class TestGetValidTokens:
         assert result["readonly_token_abc"] == ["read"]
         assert result["limited_token_123"] == ["read", "write"]
 
+ fix/optimize-daily-summary-incidents
+ fix/optimize-daily-summary-incidents
+ fix/optimize-daily-summary-incidents
+
+ fix/bearer-token-exception-handling
+ main
+
  fix/cache-valid-tokens
+ main
     def test_lru_cache_behavior(self):
         """Verify get_valid_tokens caches result with lru_cache."""
         get_valid_tokens.cache_clear()
@@ -193,7 +212,85 @@ class TestGetValidTokens:
         assert info.hits >= 1
         assert info.maxsize == 1
 
+ fix/bearer-token-exception-handling
 
+ fix/optimize-daily-summary-incidents
+class TestVerifyBearerToken:
+    """Test suite for verify_bearer_token() exception handling."""
+
+    def test_valid_token_verification(self):
+        """Verify valid token passes verification."""
+        import asyncio
+        from unittest.mock import MagicMock
+        from fastapi.security import HTTPAuthorizationCredentials
+        from src.api.middleware import verify_bearer_token
+
+        async def _test():
+            request = MagicMock()
+            request.method = "GET"
+            request.url.path = "/api/v1/protected"
+            creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="valid_token_123")
+
+            with patch("src.db.auth.is_token_revoked", return_value=False):
+                with patch("src.security.jwt_utils.verify_access_token", return_value={"sub": "user"}):
+                    token = await verify_bearer_token(request, creds)
+                    assert token == "valid_token_123"
+
+        asyncio.run(_test())
+
+    def test_jwt_verification_failure_returns_401(self):
+        """Verify ValueError during verification raises 401 without logging unexpected error."""
+        import asyncio
+        from unittest.mock import MagicMock
+        from fastapi import HTTPException
+        from fastapi.security import HTTPAuthorizationCredentials
+        from src.api.middleware import verify_bearer_token
+
+        async def _test():
+            request = MagicMock()
+            request.method = "GET"
+            request.url.path = "/api/v1/protected"
+            creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="invalid_token")
+
+            with patch("src.security.jwt_utils.verify_access_token", side_effect=ValueError("Invalid signature")):
+                with pytest.raises(HTTPException) as exc_info:
+                    await verify_bearer_token(request, creds)
+                assert exc_info.value.status_code == 401
+
+        asyncio.run(_test())
+
+    def test_unexpected_exception_logs_error_and_returns_401(self, caplog):
+        """Verify unexpected Exception during verification logs error with exc_info and raises 401."""
+        import asyncio
+        from unittest.mock import MagicMock
+        from fastapi import HTTPException
+        from fastapi.security import HTTPAuthorizationCredentials
+        from src.api.middleware import verify_bearer_token
+
+        async def _test():
+            request = MagicMock()
+            request.method = "GET"
+            request.url.path = "/api/v1/protected"
+            creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="some_token")
+
+            with patch("src.security.jwt_utils.verify_access_token", side_effect=RuntimeError("Corrupted secret key configuration")):
+                with caplog.at_level(logging.ERROR):
+                    with pytest.raises(HTTPException) as exc_info:
+                        await verify_bearer_token(request, creds)
+
+                assert exc_info.value.status_code == 401
+                assert any(
+                    "Unexpected error while verifying bearer token" in record.message
+                    for record in caplog.records
+                )
+
+        asyncio.run(_test())
+
+
+
+ main
+
+ main
 
 class TestIsPublicPath:
     """Test public API path matching."""
@@ -233,4 +330,79 @@ class TestIsPublicPath:
         assert not _is_public_path("/healthcheck")
         assert not _is_public_path("/api/v1/authentication")
         assert not _is_public_path("/api/v1/status-private")
+ fix/bearer-token-exception-handling
+
+
+class TestVerifyBearerToken:
+    """Test suite for verify_bearer_token() exception handling."""
+
+    def test_valid_token_verification(self):
+        """Verify valid token passes verification."""
+        import asyncio
+        from unittest.mock import MagicMock
+        from fastapi.security import HTTPAuthorizationCredentials
+        from src.api.middleware import verify_bearer_token
+
+        async def _test():
+            request = MagicMock()
+            request.method = "GET"
+            request.url.path = "/api/v1/protected"
+            creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="valid_token_123")
+
+            with patch("src.db.auth.is_token_revoked", return_value=False):
+                with patch("src.security.jwt_utils.verify_access_token", return_value={"sub": "user"}):
+                    token = await verify_bearer_token(request, creds)
+                    assert token == "valid_token_123"
+
+        asyncio.run(_test())
+
+    def test_jwt_verification_failure_returns_401(self):
+        """Verify ValueError during verification raises 401 without logging unexpected error."""
+        import asyncio
+        from unittest.mock import MagicMock
+        from fastapi import HTTPException
+        from fastapi.security import HTTPAuthorizationCredentials
+        from src.api.middleware import verify_bearer_token
+
+        async def _test():
+            request = MagicMock()
+            request.method = "GET"
+            request.url.path = "/api/v1/protected"
+            creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="invalid_token")
+
+            with patch("src.security.jwt_utils.verify_access_token", side_effect=ValueError("Invalid signature")):
+                with pytest.raises(HTTPException) as exc_info:
+                    await verify_bearer_token(request, creds)
+                assert exc_info.value.status_code == 401
+
+        asyncio.run(_test())
+
+    def test_unexpected_exception_logs_error_and_returns_401(self, caplog):
+        """Verify unexpected Exception during verification logs error with exc_info and raises 401."""
+        import asyncio
+        from unittest.mock import MagicMock
+        from fastapi import HTTPException
+        from fastapi.security import HTTPAuthorizationCredentials
+        from src.api.middleware import verify_bearer_token
+
+        async def _test():
+            request = MagicMock()
+            request.method = "GET"
+            request.url.path = "/api/v1/protected"
+            creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="some_token")
+
+            with patch("src.security.jwt_utils.verify_access_token", side_effect=RuntimeError("Corrupted secret key configuration")):
+                with caplog.at_level(logging.ERROR):
+                    with pytest.raises(HTTPException) as exc_info:
+                        await verify_bearer_token(request, creds)
+
+                assert exc_info.value.status_code == 401
+                assert any(
+                    "Unexpected error while verifying bearer token" in record.message
+                    for record in caplog.records
+                )
+
+        asyncio.run(_test())
+
+ main
  main

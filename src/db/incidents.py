@@ -1186,13 +1186,67 @@ def archive_old_incidents(
 
 @lru_cache(maxsize=128)
 def get_recent_incidents(
-    limit: int = 5,
+    cutoff_time: str | datetime | None = None,
+    limit: int | None = None,
     db_path: str | Path | None = None,
 ) -> list[MatchResult]:
-    """Fetch recent visible plagiarism incidents, cached for performance."""
+    """Fetch recent visible plagiarism incidents filtered by cutoff time, cached for performance."""
+    if isinstance(cutoff_time, int) and limit is None:
+        limit = cutoff_time
+        cutoff_time = None
+
     if db_path is None:
         db_path = DEFAULT_DB_PATH
-    return get_all_incidents(db_path=db_path, limit=limit, offset=0)
+
+    cutoff_str: str | None = None
+    if isinstance(cutoff_time, datetime):
+        cutoff_str = cutoff_time.isoformat()
+    elif isinstance(cutoff_time, str) and cutoff_time.strip():
+        cutoff_str = cutoff_time.strip()
+
+    init_incident_db(db_path)
+    query = """
+        SELECT pi.incident_id, pi.document_a, pi.document_b,
+               pi.similarity_score, pi.severity_rank,
+               pi.review_status, pi.date_flagged, pi.last_seen,
+               pi.threshold_at_time_of_flag
+        FROM plagiarism_incidents pi
+        LEFT JOIN documents da ON pi.document_a = da.filename
+        LEFT JOIN documents db ON pi.document_b = db.filename
+        WHERE (da.is_deleted IS NULL OR da.is_deleted = 0)
+          AND (db.is_deleted IS NULL OR db.is_deleted = 0)
+    """
+    params: list[Any] = []
+    if cutoff_str:
+        query += " AND pi.date_flagged >= ?"
+        params.append(cutoff_str)
+
+    query += " ORDER BY pi.date_flagged DESC, pi.incident_id ASC"
+
+    if limit is not None and limit > 0:
+        query += " LIMIT ?"
+        params.append(limit)
+
+    with closing(_get_connection(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(query, params).fetchall()
+
+    from src.db.schemas import MatchResult
+
+    return [
+        MatchResult(
+            incident_id=_parse_incident_id(row["incident_id"]),
+            document_a=row["document_a"],
+            document_b=row["document_b"],
+            similarity_score=row["similarity_score"],
+            severity_rank=row["severity_rank"],
+            review_status=row["review_status"],
+            date_flagged=row["date_flagged"],
+            last_seen=row["last_seen"],
+            threshold_at_time_of_flag=row["threshold_at_time_of_flag"],
+        )
+        for row in rows
+    ]
 
 
 @with_sqlite_retry
