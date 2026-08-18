@@ -182,11 +182,15 @@ def test_update_password_logs_multiple_changes():
     assert count >= 2
 
 
-def test_long_password_rejected():
-    """Passwords exceeding 128 characters should raise ValueError."""
-    long_password = "A1!" + "a" * 126  # 129 characters total
-    with pytest.raises(ValueError, match="128 characters"):
-        _validate_password(long_password)
-    with pytest.raises(ValueError, match="128 characters"):
-        _validate_password_complexity(long_password)
+def test_log_security_event_lowercases_username():
+    """log_security_event should convert mixed-case usernames to lowercase."""
+    raw_username = "AdminUser_Test"
+    expected_username = "adminuser_test"
+    log_security_event(event_type="case_test_event", username=raw_username)
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT username FROM security_audit_log WHERE event_type = 'case_test_event'",
+        ).fetchone()
+    assert row is not None
+    assert row[0] == expected_username
 

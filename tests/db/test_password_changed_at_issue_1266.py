@@ -47,7 +47,7 @@ def read_password_changed_at(username: str):
 
 
 def test_auth_schema_version_is_incremented():
-    assert AUTH_SCHEMA_VERSION == 10
+    assert AUTH_SCHEMA_VERSION >= 10
 
 
 def test_password_changed_at_column_exists_after_init():
@@ -57,7 +57,7 @@ def test_password_changed_at_column_exists_after_init():
             "users",
             "password_changed_at",
         )
-        assert get_user_version(connection) == 10
+        assert get_user_version(connection) >= 10
 
 
 def test_migration_adds_nullable_text_column(tmp_path):

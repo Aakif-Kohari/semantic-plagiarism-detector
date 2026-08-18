@@ -186,6 +186,11 @@ def test_get_security_audit_logs_invalid_limit_offset(mock_audit_db):
         get_security_audit_logs(offset=-1)
 
 
+def test_get_security_audit_logs_negative_limit(mock_audit_db):
+    with pytest.raises(ValueError):
+        get_security_audit_logs(limit=-1)
+
+
 def test_get_security_audit_logs_date_filter(mock_audit_db):
     logs = get_security_audit_logs(
         start_date="2023-01-02 00:00:00", end_date="2023-01-02 23:59:59"

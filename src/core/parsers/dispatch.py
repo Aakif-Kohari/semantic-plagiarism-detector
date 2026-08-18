@@ -50,6 +50,9 @@ ALLOWED_EXTENSIONS = {
     ".mdown",
     ".rtf",
     ".txt",
+    ".png",
+    ".jpg",
+    ".jpeg",
 }
 
 

@@ -97,6 +97,11 @@ def test_sync_flagged_incidents_bulk_invalid():
     flags = [
         {"doc_a": "doc1.pdf", "doc_b": "doc1.pdf", "similarity": 1.0},  # Same doc
         {"doc_a": "", "doc_b": "doc2.pdf", "similarity": 0.8},  # Missing doc A
+        {
+            "doc_a": "doc1.pdf",
+            "doc_b": "doc2.pdf",
+            "similarity": 0.85,
+        },  # Valid incident
     ]
     sync_flagged_incidents(flags)
 
@@ -104,7 +109,9 @@ def test_sync_flagged_incidents_bulk_invalid():
     incidents = _fetch_all_incidents(conn)
     conn.close()
 
-    assert len(incidents) == 0
+    assert len(incidents) == 1
+    assert incidents[0]["document_a"] == "doc1.pdf"
+    assert incidents[0]["document_b"] == "doc2.pdf"
 
 
 def test_sync_flagged_incidents_validates_date_flagged_format():
