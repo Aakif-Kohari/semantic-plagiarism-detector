@@ -17,6 +17,7 @@ from src.api.schemas import (
 )
 from src.core.app_config import HEALTHZ_DB_PATHS
 from src.db.corpus_db import _connect
+from src.version import APP_VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ def health_check():
     return {
         "status": "healthy",
         "service": "Semantic Plagiarism Detector API",
-        "version": "1.0.0",
+        "version": APP_VERSION,
     }
 
 
@@ -53,7 +54,7 @@ def get_service_status(request: Request):
     logger.debug("Service status requested")
     return {
         "status": "online",
-        "version": getattr(request.app, "version", "1.0.0"),
+        "version": getattr(request.app, "version", APP_VERSION),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -168,6 +169,6 @@ def get_rate_limit(_user: dict = Security(get_current_user, scopes=["read"])):
 def get_version(request: Request):
     """Return the lightweight API version."""
     return {
-        "version": getattr(request.app, "version", "1.0.0"),
+        "version": getattr(request.app, "version", APP_VERSION),
         "status": "active",
     }

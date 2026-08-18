@@ -25,8 +25,12 @@ from src.api.routers import (
     auth_router,
     corpus_router,
 )
+<<<<<<< Updated upstream
 from src.utils.tracing import get_tracer
 from src.core.app_config import get_api_support_contact
+=======
+from src.version import APP_VERSION
+>>>>>>> Stashed changes
 
 # Re-exports for backward compatibility with existing tests and scripts
 
@@ -37,8 +41,12 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="Semantic Plagiarism Detector API",
     description="REST API for programmatically checking documents for semantic plagiarism.",
-    version="1.0.0",
-    contact=get_api_support_contact(),
+    version=APP_VERSION,
+    contact={
+        "name": "API Support",
+        "url": "http://example.com/support",
+        "email": "support@example.com",
+    },
     openapi_tags=[
         {"name": "Authentication", "description": "Authenticate user"},
         {"name": "Plagiarism Detection", "description": "Scanning operations"},

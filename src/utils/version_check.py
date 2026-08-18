@@ -32,12 +32,10 @@ from typing import Optional
 
 import httpx
 
-from src.version import version as APP_VERSION
+from src.version import APP_VERSION
 
 logger = logging.getLogger(__name__)
 
-# ── Local version ──────────────────────────────────────────────────────────────
-# Sourced from src/version.py — see CONTRIBUTING.md for the bump process.
 # ── GitHub repository coordinates ─────────────────────────────────────────────
 GITHUB_OWNER: str = "Ganesh-403"
 GITHUB_REPO: str = "semantic-plagiarism-detector"

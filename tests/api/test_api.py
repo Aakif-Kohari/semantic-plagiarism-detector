@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from src.api.app import app
 from src.api.middleware import get_expected_bearer_token
+from src.version import APP_VERSION
 
 client = TestClient(app)
 
@@ -44,7 +45,7 @@ def test_version_endpoint():
     response = client.get("/api/v1/version")
     assert response.status_code == 200
     data = response.json()
-    assert data["version"] == "1.0.0"
+    assert data["version"] == APP_VERSION
     assert data["status"] == "active"
 
 
