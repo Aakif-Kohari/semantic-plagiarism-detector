@@ -79,6 +79,9 @@ ALLOWED_EXTENSIONS = {
     ".mdown",
     ".rtf",
     ".txt",
+    ".png",
+    ".jpg",
+    ".jpeg",
 }
 ZERO_WIDTH_CHARS_PATTERN = re.compile(r"[\u200B\u200C\u200D\uFEFF\u2060\u200E\u200F]")
 
@@ -1941,6 +1944,9 @@ ALLOWED_EXTENSIONS = {
     ".mdown",
     ".rtf",
     ".txt",
+    ".png",
+    ".jpg",
+    ".jpeg",
 }
 
 
@@ -2068,7 +2074,7 @@ try:
 except ImportError:
     Presentation = None
 
-ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt", ".pptx"}
+ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt", ".pptx", ".png", ".jpg", ".jpeg"}
 
 def _extract_pptx_text(file_obj) -> str:
     """Extract text from a PowerPoint (.pptx) file object."""
