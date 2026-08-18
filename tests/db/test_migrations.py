@@ -92,6 +92,8 @@ def test_fresh_auth_database_reaches_latest_version(tmp_path):
         assert column_exists(connection, "users", "two_factor_enabled")
         assert column_exists(connection, "users", "is_active")
         assert index_exists(connection, "idx_users_role")
+        assert index_exists(connection, "idx_audit_log_username")
+        assert index_exists(connection, "idx_audit_log_event_type")
 
 
 def test_empty_existing_databases_upgrade_safely(tmp_path):
