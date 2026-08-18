@@ -5,7 +5,7 @@ import os
 import sqlite3
 from datetime import datetime, timezone
 
-from fastapi import Depends, FastAPI, Request, status
+from fastapi import Depends, FastAPI, Query, Request, Security, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -16,6 +16,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.api.dependencies import (
     custom_rate_limit_exceeded_handler,
+    get_current_user,
     limiter,
 )
 from src.api.middleware import verify_bearer_token
@@ -281,6 +282,50 @@ app.include_router(auth_router)
 app.include_router(analysis_router)
 app.include_router(corpus_router)
 app.include_router(admin_router)
+
+# ── Audit Events Endpoint (Issue #2732) ───────────────────────────────────────
+
+@app.get(
+    "/api/v1/audit/events",
+    tags=["System Administration"],
+    summary="Get paginated security audit events",
+    status_code=status.HTTP_200_OK,
+)
+def get_audit_events_api(
+    limit: int = Query(default=20, ge=1, le=100, description="Max events per page"),
+    offset: int = Query(default=0, ge=0, description="Number of events to skip (pagination)"),
+    event_type: str | None = Query(default=None, description="Filter by event type"),
+    username: str | None = Query(default=None, description="Filter by username"),
+    _user: dict = Security(get_current_user, scopes=["admin"])
+):
+    """Retrieve paginated security audit events.
+    
+    Supports pagination via limit and offset parameters (Issue #2732).
+    """
+    from src.db.auth import get_security_audit_logs, get_security_audit_log_count
+    
+    events = get_security_audit_logs(
+        limit=limit,
+        offset=offset,
+        event_type=event_type,
+        username=username
+    )
+    
+    total_count = get_security_audit_log_count(
+        event_type=event_type,
+        username=username
+    )
+    
+    return {
+        "events": events,
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "total_count": total_count,
+            "total_pages": (total_count + limit - 1) // limit if limit > 0 else 0
+        }
+    }
+
 """src/api/app.py - FastAPI REST API for LMS integration."""
 
 import logging
@@ -315,157 +360,43 @@ logger = logging.getLogger(__name__)
 
 # ── API Initialization ────────────────────────────────────────────────────────
 
-app = FastAPI(
-    title="Semantic Plagiarism Detector API",
-    description="REST API for programmatically checking documents for semantic plagiarism.",
-    version="1.0.0",
-    contact=get_api_support_contact(),
-    openapi_tags=[
-        {"name": "Authentication", "description": "Authenticate user"},
-        {"name": "Plagiarism Detection", "description": "Scanning operations"},
-        {"name": "System Administration", "description": "Admin operations"},
-        {"name": "Health", "description": "Health checks"},
-    ],
-    dependencies=[Depends(verify_bearer_token)],
+@app.get(
+    "/api/v1/audit/events",
+    tags=["System Administration"],
+    summary="Get paginated security audit events",
+    status_code=status.HTTP_200_OK,
 )
-
-# Enable CORS for external LMS frontends
-origins = os.getenv("CORS_ALLOWED_ORIGINS", "*")
-if origins.strip() == "*":
-    allowed_origins = ["*"]
-else:
-    allowed_origins = [
-        origin.strip() for origin in origins.split(",") if origin.strip()
-    ]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    max_age=3600,
-)
-
-# SlowAPI Rate Limiting setup
-app.state.limiter = limiter
-
-
-@app.middleware("http")
-async def otel_tracing_middleware(request: Request, call_next):
-    """Middleware to create an OpenTelemetry root span for every HTTP request."""
-    tracer = get_tracer()
-    request_id = request.headers.get("X-Request-ID", "unknown")
-    user_id = getattr(request.state, "user_id", "anonymous")
-
-    span_name = f"HTTP {request.method} {request.url.path}"
-    with tracer.start_as_current_span(span_name) as span:
-        span.set_attribute("http.method", request.method)
-        span.set_attribute("http.url", str(request.url))
-        span.set_attribute("http.route", request.url.path)
-        span.set_attribute("http.request_id", request_id)
-        span.set_attribute("user.id", user_id)
-
-        try:
-            response = await call_next(request)
-            span.set_attribute("http.status_code", response.status_code)
-            return response
-        except Exception as exc:
-            span.record_exception(exc)
-            span.set_attribute("http.status_code", 500)
-            raise
-
-
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """Return a standardized JSON response for request validation errors."""
-    return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={
-            "error": True,
-            "message": "Validation failed.",
-            "details": [
-                {
-                    "field": ".".join(map(str, err["loc"])),
-                    "message": err["msg"],
-                    "type": err["type"],
-                }
-                for err in exc.errors()
-            ],
-        },
+def get_audit_events_api(
+    limit: int = Query(default=20, ge=1, le=100, description="Max events per page"),
+    offset: int = Query(default=0, ge=0, description="Number of events to skip (pagination)"),
+    event_type: str | None = Query(default=None, description="Filter by event type"),
+    username: str | None = Query(default=None, description="Filter by username"),
+    _user: dict = Security(get_current_user, scopes=["admin"])
+):
+    """Retrieve paginated security audit events.
+    
+    Supports pagination via limit and offset parameters (Issue #2732).
+    """
+    from src.db.auth import get_security_audit_logs, get_security_audit_log_count
+    
+    events = get_security_audit_logs(
+        limit=limit,
+        offset=offset,
+        event_type=event_type,
+        username=username
     )
-
-
-@app.exception_handler(404)
-async def not_found_handler(request, exc: StarletteHTTPException):
-    """Custom exception handler for HTTP 404 errors."""
-    return JSONResponse(
-        status_code=404,
-        content={
-            "error": True,
-            "code": 404,
-            "message": "API endpoint or resource not found",
-        },
+    
+    total_count = get_security_audit_log_count(
+        event_type=event_type,
+        username=username
     )
-
-
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """Catch-all handler that returns a standardized JSON error payload for any unhandled exception."""
-    status_code = getattr(exc, "status_code", status.HTTP_500_INTERNAL_SERVER_ERROR)
-    is_production = os.getenv("APP_ENVIRONMENT", "production").lower() == "production"
-
-    logging.getLogger(__name__).error(
-        f"Unhandled exception: {exc}", exc_info=True
-    )
-
-    message = "An internal server error occurred." if is_production else str(exc)
-
-    return JSONResponse(
-        status_code=status_code,
-        content={
-            "error": True,
-            "code": status_code,
-            "message": message,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        },
-    )
-
-
-@app.exception_handler(StarletteHTTPException)
-async def custom_http_exception_handler(request: Request, exc: StarletteHTTPException):
-    """Custom exception handler for HTTP errors to return standardized JSON payloads."""
-    status_code = exc.status_code
-    if status_code == 404:
-        message = "API endpoint or resource not found"
-    else:
-        message = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
-
-    log_level = logging.WARNING if 400 <= status_code < 500 else logging.ERROR
-    logger.log(
-        log_level,
-        "HTTP %d error on %s %s: %s",
-        status_code,
-        request.method,
-        request.url.path,
-        message,
-    )
-
-    return JSONResponse(
-        status_code=status_code,
-        content={
-            "error": True,
-            "code": status_code,
-            "message": message,
-        },
-    )
-
-
-app.add_exception_handler(RateLimitExceeded, custom_rate_limit_exceeded_handler)
-app.add_middleware(SlowAPIMiddleware)
-
-# ── Register Sub-Routers ──────────────────────────────────────────────────────
-app.include_router(auth_router)
-app.include_router(analysis_router)
-app.include_router(corpus_router)
-app.include_router(admin_router)
+    
+    return {
+        "events": events,
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "total_count": total_count,
+            "total_pages": (total_count + limit - 1) // limit if limit > 0 else 0
+        }
+    }
