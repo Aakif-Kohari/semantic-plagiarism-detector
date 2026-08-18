@@ -2,6 +2,8 @@
 
 from typing import Any, Mapping, Sequence
 
+from src.core.config import severity_from_score
+
 
 def generate_html_report(
     incidents: Sequence[Mapping[str, Any]],
@@ -35,16 +37,14 @@ def generate_html_report(
         doc_b = incident.get("doc_b", "Unknown")
         similarity = incident.get("similarity", 0.0)
 
-        # Calculate severity rank
-        if similarity > 0.90:
-            severity = "CRITICAL"
-            color = "#ff4b4b"
-        elif similarity > 0.80:
-            severity = "HIGH"
-            color = "#ffa500"
-        else:
-            severity = "MODERATE"
-            color = "#21c55d"
+        # Use the shared severity logic so the report stays in sync with the
+        # UI when the similarity thresholds are adjusted (Issue #2443).
+        severity = severity_from_score(similarity)
+        color = {
+            "High": "#ff4b4b",
+            "Medium": "#ffa500",
+            "Low": "#21c55d",
+        }.get(severity, "#21c55d")
 
         rows.append(
             f"<tr>"

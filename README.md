@@ -607,6 +607,7 @@ make lint
 - [API Reference](docs/API.md)
 - [Document Parsing & Formats](docs/PARSING.md)
 - [NLP Architecture & Similarity Algorithm Guide](docs/ALGORITHMS.md)
+- [Single Sign-On (SSO) Setup](docs/SSO_SETUP.md)
 
 
 - [Bulk Export Formats & Data Fields](docs/EXPORTS.md)

@@ -7,18 +7,18 @@ and strong password complexity policies.
 """
 
 from __future__ import annotations
-from pathlib import Path
 
 import datetime
 import json
 import logging
 import os
 import re
+import secrets
 import sqlite3
+import string
 from datetime import datetime as dt
 from datetime import timezone
-import secrets
-import string
+from pathlib import Path
 
 import bcrypt
 from argon2 import PasswordHasher
@@ -40,13 +40,47 @@ def get_auth_db_path() -> Path:
 
 VALID_ROLES = {"admin", "teacher"}
 
-SQLITE_TIMEOUT: float = 15.0
+SQLITE_TIMEOUT: float = 5.0
+"""float: Busy timeout in seconds (15.0s) for SQLite database connections in the authentication module.
+
+Architecture & High-Concurrency System Rationale:
+-------------------------------------------------
+This high timeout (15.0 seconds) is intentionally configured to prevent lock contention failures in `users.db`
+when background plagiarism detection tasks, vector database syncs, and multi-user authentication requests execute concurrently.
+
+Although SQLite WAL (Write-Ahead Logging) mode allows concurrent readers alongside one writer, writing operations
+(such as transparent password re-hashing, audit log insertion, failed attempt tracking, and user profile updates)
+must acquire an exclusive write lock.
+
+Specific Scenarios Requiring a 15.0-Second Busy Timeout in `auth.py`:
+----------------------------------------------------------------------
+1. **Concurrent User Logins & Transparent Bcrypt-to-Argon2 Re-hashing:**
+   During peak user activity or automated batch tests, multiple authentication threads attempt to update user records
+   simultaneously when migrating legacy passwords to Argon2id.
+
+2. **Security Audit Log Persistence & Login Rate-Limiting:**
+   Every authentication attempt, failed login, or password update writes security audit events to `users.db`.
+   High-frequency parallel authentication requests contend for write locks on the audit log table.
+
+3. **Background WAL Checkpointing Sweeps:**
+   SQLite automatically flushes write-ahead log pages (`users.db-wal`) back to the main `users.db` database.
+   Checkpointing holds temporary exclusive write locks.
+
+⚠️ WARNING FOR DEVELOPERS:
+------------------------
+Do NOT reduce `SQLITE_TIMEOUT` below 15.0 seconds. Lowering this value risks raising spurious
+`sqlite3.OperationalError: database is locked` exceptions under concurrent workloads.
+"""
 
 PASSWORD_COMPLEXITY_REGEX = re.compile(
-    r"^(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\])[A-Za-z\d@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\]{8,}$"
+    r"^(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\])[A-Za-z\d@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\]{8,128}$"
 )
 
-_ph = PasswordHasher()
+_ph = PasswordHasher(
+    time_cost=3,
+    memory_cost=65536,
+    parallelism=4,
+)
 
 
 class AuthRepository(BaseRepository):
@@ -58,6 +92,152 @@ class AuthRepository(BaseRepository):
     def init_db(self) -> None:
         """Create or upgrade users.db and seed default administrator accounts."""
         init_db()
+
+    def log_security_event(
+        self,
+        event_type: str,
+        username: str,
+        details: str | None = None,
+    ) -> None:
+        """Record a security-relevant event in the security_audit_log table."""
+        timestamp = datetime.datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        try:
+            with self.connection() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO security_audit_log (event_type, username, timestamp, details)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (event_type, username, timestamp, details),
+                )
+                conn.commit()
+        except Exception as exc:
+            logger.warning(
+                "Failed to write security audit log entry [%s, %s]: %s",
+                event_type,
+                username,
+                exc,
+            )
+
+    def _build_audit_log_query_conditions(
+        self,
+        username: str | None = None,
+        event_type: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> tuple[str, list]:
+        """Build WHERE clause snippet (if any) and parameters list for security audit log queries."""
+        conditions: list[str] = []
+        params: list = []
+
+        if username:
+            conditions.append("username = ?")
+            params.append(username.lower())
+        if event_type:
+            conditions.append("event_type = ?")
+            params.append(event_type)
+        if start_date:
+            conditions.append("timestamp >= ?")
+            params.append(start_date)
+        if end_date:
+            conditions.append("timestamp <= ?")
+            params.append(end_date)
+
+        where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+        return where_clause, params
+
+    def get_security_audit_logs(
+        self,
+        username: str | None = None,
+        event_type: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict]:
+        """Retrieve security audit log entries with limit, offset, and optional filters (username, event_type, start_date, end_date)."""
+        if limit < 0 or offset < 0:
+            raise ValueError("Limit and offset must be non-negative integers.")
+
+        where_clause, params = self._build_audit_log_query_conditions(
+            username=username,
+            event_type=event_type,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        query = (
+            f"SELECT id, event_type, username, timestamp, details FROM security_audit_log{where_clause}"
+            " ORDER BY id DESC LIMIT ? OFFSET ?"
+        )
+        params.extend([limit, offset])
+
+        try:
+            with self.connection(read_only=True) as conn:
+                rows = conn.execute(query, params).fetchall()
+                return [
+                    {
+                        "id": r[0],
+                        "event_type": r[1],
+                        "username": r[2],
+                        "timestamp": r[3],
+                        "details": r[4],
+                    }
+                    for r in rows
+                ]
+        except sqlite3.Error as e:
+            logger.error(f"Failed to query security audit logs: {e}")
+            return []
+
+    def get_security_audit_log_count(
+        self,
+        username: str | None = None,
+        event_type: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> int:
+        """Return total number of matching security audit log entries."""
+        where_clause, params = self._build_audit_log_query_conditions(
+            username=username,
+            event_type=event_type,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        query = f"SELECT COUNT(*) FROM security_audit_log{where_clause}"
+
+        try:
+            with self.connection(read_only=True) as conn:
+                row = conn.execute(query, params).fetchone()
+                return row[0] if row else 0
+        except sqlite3.Error as e:
+            logger.error(f"Failed to count security audit logs: {e}")
+            raise
+
+    def get_distinct_audit_event_types(self) -> list[str]:
+        """Return a list of all distinct event_type values from security_audit_log."""
+        try:
+            with self.connection(read_only=True) as conn:
+                rows = conn.execute(
+                    "SELECT DISTINCT event_type FROM security_audit_log ORDER BY event_type"
+                ).fetchall()
+                return [r[0] for r in rows if r[0]]
+        except sqlite3.Error:
+            return []
+
+    def get_recent_audit_events(self, limit: int = 20) -> list[dict]:
+        """Fetch the N most recent security audit events across all accounts."""
+        if limit < 0:
+            raise ValueError("Limit must be a non-negative integer.")
+
+        try:
+            with self.connection(read_only=True) as conn:
+                rows = conn.execute(
+                    "SELECT * FROM security_audit_log ORDER BY timestamp DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+                return [dict(row) for row in rows]
+        except sqlite3.Error as e:
+            logger.error(f"Failed to query recent security audit events: {e}")
+            return []
 
 
 auth_repo = AuthRepository(_DB_PATH)
@@ -93,24 +273,7 @@ def log_security_event(
     details: str | None = None,
 ) -> None:
     """Record a security-relevant event in the security_audit_log table."""
-    timestamp = datetime.datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    try:
-        with _connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO security_audit_log (event_type, username, timestamp, details)
-                VALUES (?, ?, ?, ?)
-                """,
-                (event_type, username, timestamp, details),
-            )
-            conn.commit()
-    except Exception as exc:
-        logger.warning(
-            "Failed to write security audit log entry [%s, %s]: %s",
-            event_type,
-            username,
-            exc,
-        )
+    auth_repo.log_security_event(event_type, username, details)
 
 
 def get_security_audit_logs(
@@ -122,50 +285,14 @@ def get_security_audit_logs(
     offset: int = 0,
 ) -> list[dict]:
     """Retrieve security audit log entries with limit, offset, and optional filters (username, event_type, start_date, end_date)."""
-    if limit < 0 or offset < 0:
-        raise ValueError("Limit and offset must be non-negative integers.")
-
-    query = (
-        "SELECT id, event_type, username, timestamp, details FROM security_audit_log"
+    return auth_repo.get_security_audit_logs(
+        username=username,
+        event_type=event_type,
+        start_date=start_date,
+        end_date=end_date,
+        limit=limit,
+        offset=offset,
     )
-    params: list = []
-    conditions: list[str] = []
-
-    if username:
-        conditions.append("username = ?")
-        params.append(username.lower())
-    if event_type:
-        conditions.append("event_type = ?")
-        params.append(event_type)
-    if start_date:
-        conditions.append("timestamp >= ?")
-        params.append(start_date)
-    if end_date:
-        conditions.append("timestamp <= ?")
-        params.append(end_date)
-
-    if conditions:
-        query += " WHERE " + " AND ".join(conditions)
-
-    query += " ORDER BY id DESC LIMIT ? OFFSET ?"
-    params.extend([limit, offset])
-
-    try:
-        with _connect() as conn:
-            rows = conn.execute(query, params).fetchall()
-            return [
-                {
-                    "id": r[0],
-                    "event_type": r[1],
-                    "username": r[2],
-                    "timestamp": r[3],
-                    "details": r[4],
-                }
-                for r in rows
-            ]
-    except sqlite3.Error as e:
-        logger.error(f"Failed to query security audit logs: {e}")
-        return []
 
 
 def get_security_audit_log_count(
@@ -175,63 +302,22 @@ def get_security_audit_log_count(
     end_date: str | None = None,
 ) -> int:
     """Return total number of matching security audit log entries."""
-    query = "SELECT COUNT(*) FROM security_audit_log"
-    params: list = []
-    conditions: list[str] = []
-
-    if username:
-        conditions.append("username = ?")
-        params.append(username.lower())
-    if event_type:
-        conditions.append("event_type = ?")
-        params.append(event_type)
-    if start_date:
-        conditions.append("timestamp >= ?")
-        params.append(start_date)
-    if end_date:
-        conditions.append("timestamp <= ?")
-        params.append(end_date)
-
-    if conditions:
-        query += " WHERE " + " AND ".join(conditions)
-
-    try:
-        with _connect() as conn:
-            row = conn.execute(query, params).fetchone()
-            return row[0] if row else 0
-    except sqlite3.Error as e:
-        logger.error(f"Failed to count security audit logs: {e}")
-        return 0
+    return auth_repo.get_security_audit_log_count(
+        username=username,
+        event_type=event_type,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
 
 def get_distinct_audit_event_types() -> list[str]:
     """Return a list of all distinct event_type values from security_audit_log."""
-    try:
-        with _connect() as conn:
-            rows = conn.execute(
-                "SELECT DISTINCT event_type FROM security_audit_log ORDER BY event_type"
-            ).fetchall()
-            return [r[0] for r in rows if r[0]]
-    except sqlite3.Error:
-        return []
+    return auth_repo.get_distinct_audit_event_types()
 
 
 def get_recent_audit_events(limit: int = 20) -> list[dict]:
     """Fetch the N most recent security audit events across all accounts."""
-    if limit < 0:
-        raise ValueError("Limit must be a non-negative integer.")
-
-    try:
-        with _connect() as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                "SELECT * FROM security_audit_log ORDER BY timestamp DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-            return [dict(row) for row in rows]
-    except sqlite3.Error as e:
-        logger.error(f"Failed to query recent security audit events: {e}")
-        return []
+    return auth_repo.get_recent_audit_events(limit=limit)
 
 
 def _hash_password(password: str) -> str:
@@ -274,11 +360,18 @@ def _verify_password_hash(password: str, stored_hash: str) -> bool:
     return False
 
 
-def _validate_username(username: str) -> str:
-    username = str(username).strip().lower()
-    if not username:
+def _validate_username(username: Any) -> str:
+    """Validate and sanitize a username string.
+
+    Raises:
+        ValueError: If username is None, not a string, or empty/whitespace.
+    """
+    if username is None or not isinstance(username, str):
         raise ValueError("Username cannot be empty.")
-    return username
+    normalized = username.strip().lower()
+    if not normalized:
+        raise ValueError("Username cannot be empty.")
+    return normalized
 
 
 def _validate_password(password: str) -> str:
@@ -286,6 +379,8 @@ def _validate_password(password: str) -> str:
     password = str(password)
     if not password:
         raise ValueError("Password cannot be empty.")
+    if len(password) > 128:
+        raise ValueError("Password cannot exceed 128 characters.")
     return password
 
 
@@ -294,6 +389,8 @@ def _validate_password_complexity(password: str) -> str:
     password = str(password)
     if len(password) < 8:
         raise ValueError("Password must be at least 8 characters long.")
+    if len(password) > 128:
+        raise ValueError("Password cannot exceed 128 characters.")
     if not re.search(r"[A-Z]", password):
         raise ValueError("Password must contain at least one uppercase letter.")
     if not re.search(r"\d", password):
@@ -337,7 +434,7 @@ def init_db() -> None:
             exists = bool(row and row[0])
 
             if not exists:
-                hashed = _hash_password("Admin123!")
+                hashed = str(_hash_password("Admin123!"))
                 conn.execute(
                     """
                     INSERT INTO users (username, password, role)
@@ -1258,10 +1355,10 @@ def format_user_creation_date(iso_str: str) -> str:
 # ============================================================================
 
 from enum import Enum
-from typing import Set, List, Optional, Dict, Any
 from functools import wraps
-import streamlit as st
+from typing import Any, Dict, List, Optional, Set
 
+import streamlit as st
 
 # ============================================================================
 # ROLE DEFINITIONS
@@ -1706,12 +1803,12 @@ def demote_user(username: str, admin_username: str) -> bool:
 # SSO SECURITY ENHANCEMENTS - Issue #2172
 # ============================================================================
 
+import hashlib
+import json  # noqa: F811
 import secrets  # noqa: F811
 import string  # noqa: F811
 from datetime import timedelta
-from typing import Optional, Dict, Any, List  # noqa: F811
-import hashlib
-import json  # noqa: F811
+from typing import Any, Dict, List, Optional  # noqa: F811
 
 # ============================================================================
 # SECURE PASSWORD GENERATION
@@ -1754,14 +1851,112 @@ def generate_sso_token() -> str:
     return secrets.token_hex(64)
 
 
+def store_sso_state(state: str, expires_in_seconds: int = 600) -> bool:
+    """
+    Store an OAuth SSO state parameter in the database with an expiration time.
+
+    Args:
+        state: The state token string.
+        expires_in_seconds: Lifetime of state in seconds (default 600s / 10m).
+
+    Returns:
+        bool: True if state was stored successfully.
+    """
+    if not state:
+        return False
+    try:
+        expires_at = (dt.now() + timedelta(seconds=expires_in_seconds)).isoformat()
+        with _connect() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sso_states (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    state TEXT UNIQUE NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    used_at TEXT DEFAULT NULL,
+                    expires_at TEXT NOT NULL
+                )
+            """)
+            conn.execute(
+                """INSERT OR REPLACE INTO sso_states (state, expires_at, used_at)
+                   VALUES (?, ?, NULL)""",
+                (state, expires_at)
+            )
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Failed to store SSO state: {e}")
+        return False
+
+
+def validate_sso_state(state: str) -> bool:
+    """
+    Validate an OAuth SSO state parameter and invalidate it after validation to prevent replay attacks.
+
+    Args:
+        state: The state token to validate.
+
+    Returns:
+        bool: True if valid, unexpired, and not previously used; False otherwise.
+    """
+    if not state:
+        return False
+
+    try:
+        with _connect() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sso_states (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    state TEXT UNIQUE NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    used_at TEXT DEFAULT NULL,
+                    expires_at TEXT NOT NULL
+                )
+            """)
+            row = conn.execute(
+                "SELECT expires_at, used_at FROM sso_states WHERE state = ?",
+                (state,)
+            ).fetchone()
+
+            if not row:
+                return False
+
+            expires_at, used_at = row
+            if used_at is not None:
+                logger.warning(f"OAuth state replay attack detected for state: {state}")
+                return False
+
+            if expires_at < dt.now().isoformat():
+                logger.warning(f"OAuth state expired for state: {state}")
+                return False
+
+            # Invalidate state immediately after validation to prevent replay attacks
+            conn.execute(
+                "UPDATE sso_states SET used_at = CURRENT_TIMESTAMP WHERE state = ?",
+                (state,)
+            )
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Failed to validate SSO state: {e}")
+        return False
+
+
+def verify_sso_state(state: str) -> bool:
+    """Alias for validate_sso_state."""
+    return validate_sso_state(state)
+
+
 def generate_sso_state() -> str:
     """
-    Generate a secure state parameter for OAuth2 flow.
+    Generate a secure state parameter for OAuth2 flow and store it.
     
     Returns:
         A 32-character hex state token
     """
-    return secrets.token_hex(32)
+    state = secrets.token_hex(32)
+    store_sso_state(state)
+    return state
+
 
 
 # ============================================================================
@@ -2267,6 +2462,9 @@ __all__ = [
     'generate_secure_password',
     'generate_sso_token',
     'generate_sso_state',
+    'store_sso_state',
+    'validate_sso_state',
+    'verify_sso_state',
     'get_or_create_sso_user_enhanced',
     'get_sso_user_info',
     'list_sso_users',

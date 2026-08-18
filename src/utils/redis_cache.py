@@ -18,13 +18,7 @@ from enum import Enum
 from typing import Any, Optional
 
 
-class CacheKeyPrefix(str, Enum):
-    LOGIN_ATTEMPTS = "login_attempts:"
-    UPLOAD_COUNT = "upload_count:"
-    SIMILARITY_RESULT = "similarity:"
-    DOCUMENT_CACHE = "doc:"
-    LEGACY_UPLOADS_PREFIX = UPLOAD_COUNT
-
+# CacheKeyPrefix has been consolidated into CacheNamespace below
 
 try:
     import redis
@@ -40,26 +34,39 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-_RedisErr = getattr(redis, "RedisError", Exception)
+class DummyRedisError(Exception):
+    pass
+
+
+class DummyRedisConnectionError(DummyRedisError):
+    pass
+
+
+class DummyRedisTimeoutError(DummyRedisError):
+    pass
+
+
+_RedisErr = getattr(redis, "RedisError", DummyRedisError)
 RedisError = (
     _RedisErr
     if isinstance(_RedisErr, type) and issubclass(_RedisErr, BaseException)
-    else Exception
+    else DummyRedisError
 )
 
-_ConnErr = getattr(redis, "ConnectionError", ConnectionError)
+_ConnErr = getattr(redis, "ConnectionError", DummyRedisConnectionError)
 RedisConnectionError = (
     _ConnErr
     if isinstance(_ConnErr, type) and issubclass(_ConnErr, BaseException)
-    else ConnectionError
+    else DummyRedisConnectionError
 )
 
-_TimeoutErr = getattr(redis, "TimeoutError", TimeoutError)
+_TimeoutErr = getattr(redis, "TimeoutError", DummyRedisTimeoutError)
 RedisTimeoutError = (
     _TimeoutErr
     if isinstance(_TimeoutErr, type) and issubclass(_TimeoutErr, BaseException)
-    else TimeoutError
+    else DummyRedisTimeoutError
 )
+
 
 
 # Redis connection configuration
@@ -67,7 +74,19 @@ REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 REDIS_DB = int(os.getenv("REDIS_DB", "0"))
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", None)
-REDIS_URL = os.getenv("REDIS_URL", f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}")
+# Construct REDIS_URL with password if provided (Issue #2320).
+# Format: redis://:{password}@{host}:{port}/{db}
+# When no password is set, falls back to: redis://{host}:{port}/{db}
+if REDIS_PASSWORD:
+    REDIS_URL = os.getenv(
+        "REDIS_URL",
+        f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}",
+    )
+else:
+    REDIS_URL = os.getenv(
+        "REDIS_URL",
+        f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}",
+    )
 REDIS_TIMEOUT_SECONDS = float(os.getenv("REDIS_TIMEOUT_SECONDS", "2.0"))
 
 # TTL settings (in seconds) - Configurable via environment variables (Issue #2323)
@@ -205,9 +224,23 @@ class CacheNamespace(str, Enum):
     LOGIN_ATTEMPTS = "spd:v1:login_attempts"
     UPLOADS = "spd:v1:uploads"
 
+    # Legacy/Old namespaces merged from CacheKeyPrefix
+    LEGACY_LOGIN_ATTEMPTS = "login_attempts:"
+    LEGACY_UPLOAD_COUNT = "upload_count:"
+    LEGACY_SIMILARITY_RESULT = "similarity:"
+    LEGACY_DOCUMENT_CACHE = "doc:"
+    LEGACY_UPLOADS_PREFIX = "upload_count:"
+    LEGACY_FAISS_INDEX = "faiss_index"
+    LEGACY_ANALYSIS_PATTERN = "analysis:*"
+    LEGACY_ANALYSIS_PREFIX = "analysis:"
+
     def build_key(self, *parts: str) -> str:
         """Construct a standardized cache key with namespace prefix."""
         return ":".join([self.value] + list(parts))
+
+
+# Alias for backward compatibility with legacy imports
+CacheKeyPrefix = CacheNamespace
 
 
 # ============================================================================

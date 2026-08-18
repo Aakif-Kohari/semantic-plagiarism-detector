@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from src.core.faiss_index import build_index_from_matrix, load_index, save_index
+from src.core.concurrency import faiss_write_lock
 from src.db.corpus_db import get_all_embeddings, get_embedding_count
 
 logger = logging.getLogger(__name__)
@@ -41,7 +42,8 @@ def verify_and_repair_index(index_path: str) -> None:
             logger.warning(
                 f"FAISS index missing at {index_path}. Rebuilding from database."
             )
-            _rebuild_index(index_path)
+            with faiss_write_lock(index_path + ".lock"):
+                _rebuild_index(index_path)
             return
 
         # 2. Load FAISS and get count
@@ -59,7 +61,8 @@ def verify_and_repair_index(index_path: str) -> None:
                 f"FAISS desync detected! FAISS has {faiss_count} vectors, DB has {db_count}. Forcing rebuild."
             )
             _backup_corrupted_index(index_path)
-            _rebuild_index(index_path)
+            with faiss_write_lock(index_path + ".lock"):
+                _rebuild_index(index_path)
 
     except Exception as e:
         logger.error(
@@ -68,7 +71,8 @@ def verify_and_repair_index(index_path: str) -> None:
         try:
             if os.path.exists(index_path):
                 _backup_corrupted_index(index_path)
-            _rebuild_index(index_path)
+            with faiss_write_lock(index_path + ".lock"):
+                _rebuild_index(index_path)
         except Exception as rebuild_err:
             logger.critical(
                 f"FATAL: Database and FAISS are out of sync and rebuild failed: {rebuild_err}"

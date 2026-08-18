@@ -82,8 +82,8 @@ def fetch_audit_logs(
 ) -> List[Dict[str, Any]]:
     """Fetch audit logs from the database with filters."""
     try:
-        from src.db.auth import get_security_audit_logs
-        return get_security_audit_logs(
+        from src.db.auth import auth_repo
+        return auth_repo.get_security_audit_logs(
             username=username,
             event_type=event_type,
             start_date=start_date,
@@ -104,8 +104,8 @@ def count_audit_logs(
 ) -> int:
     """Count total audit logs matching filters."""
     try:
-        from src.db.auth import get_security_audit_log_count
-        return get_security_audit_log_count(
+        from src.db.auth import auth_repo
+        return auth_repo.get_security_audit_log_count(
             username=username,
             event_type=event_type,
             start_date=start_date,
@@ -119,8 +119,8 @@ def count_audit_logs(
 def get_distinct_event_types() -> List[str]:
     """Get all distinct event types from audit logs."""
     try:
-        from src.db.auth import get_distinct_audit_event_types
-        return get_distinct_audit_event_types()
+        from src.db.auth import auth_repo
+        return auth_repo.get_distinct_audit_event_types()
     except Exception as e:
         logger.error(f"Failed to get distinct event types: {e}")
         return []

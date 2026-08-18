@@ -75,6 +75,25 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def _validate_iso_timestamp(val: Any) -> str | None:
+    """Validate that val is a valid ISO 8601 string and return it, or return None."""
+    if not val or not isinstance(val, str):
+        return None
+    clean_val = val.strip()
+    if not clean_val:
+        return None
+    try:
+        norm_val = (
+            clean_val.replace("Z", "+00:00")
+            if clean_val.endswith("Z")
+            else clean_val
+        )
+        datetime.fromisoformat(norm_val)
+        return clean_val
+    except (ValueError, TypeError):
+        return None
+
+
 def _normalise_pair(doc_a: str, doc_b: str) -> tuple[str, str]:
     return tuple(sorted((str(doc_a).strip(), str(doc_b).strip())))  # type: ignore[return-value]
 
@@ -270,7 +289,7 @@ def sync_flagged_incidents(
     if db_path is None:
         db_path = DEFAULT_DB_PATH
     init_incident_db(db_path)
-    timestamp = now or _utc_now_iso()
+    timestamp = _validate_iso_timestamp(now) or _utc_now_iso()
 
     with closing(_get_connection(db_path)) as conn:
         conn.row_factory = sqlite3.Row
@@ -286,6 +305,16 @@ def sync_flagged_incidents(
 
                 first, second = _normalise_pair(doc_a, doc_b)
 
+                flag_date = (
+                    _validate_iso_timestamp(flag.get("date_flagged"))
+                    or _validate_iso_timestamp(flag.get("timestamp"))
+                    or timestamp
+                )
+                flag_last_seen = (
+                    _validate_iso_timestamp(flag.get("last_seen"))
+                    or timestamp
+                )
+
                 bulk_records.append(
                     (
                         build_incident_id(first, second),
@@ -293,8 +322,8 @@ def sync_flagged_incidents(
                         second,
                         _normalise_score(flag.get("similarity", 0.0)),
                         _severity_rank(flag),
-                        timestamp,
-                        timestamp,
+                        flag_date,
+                        flag_last_seen,
                         _normalise_score(
                             flag.get("threshold_at_time_of_flag", threshold or 0.0)
                         ),
@@ -1197,3 +1226,11 @@ def log_incident(
         if res.incident_id == target_id:
             return res
     return results[0]
+
+
+def get_incidents_repo(db_path: str | Path | None = None) -> IncidentsRepository:
+    """Helper to instantiate an IncidentsRepository."""
+    if db_path is None:
+        return IncidentsRepository()
+    return IncidentsRepository(db_path)
+

@@ -5,6 +5,14 @@ All notable changes to the **Semantic Plagiarism Detection System** will be docu
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Added `--recursive` support to the CLI scan command for scanning documents in nested subdirectories.
+
+### Changed
+- Warning list pagination no longer writes `st.session_state` directly; page updates are applied via a view-layer callback (`src/utils/warning_list.py`).
+
 ## [1.0.0] - 2026-07-21
 
 ### Added

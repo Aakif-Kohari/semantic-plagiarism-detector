@@ -151,7 +151,10 @@ class TestProcessingThroughput:
             (2048, 2.0, 1.0),  # 2 KB in 2 seconds
             (1048576, 1.0, 1024.0),  # 1 MB in 1 second -> 1024 KB/s
             (512, 0.5, 1.0),  # 0.5 KB in 0.5 seconds
-            (10240, 3.33, 3.08),  # 10 KB in 3.33 seconds (rounded)
+            # 10240 bytes is 10 KB against the module's BYTES_PER_KB of 1024,
+            # so 10 / 3.33 = 3.0. The previous expectation of 3.08 came from
+            # dividing by 1000 instead, which no other row in this table does.
+            (10240, 3.33, 3.0),  # 10 KB in 3.33 seconds (rounded)
             (0, 5.0, 0.0),  # 0 bytes processed
         ],
     )

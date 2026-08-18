@@ -18,9 +18,14 @@ except ImportError:
     st_autorefresh = None
 
 try:
-    from src.utils.warning_list import render_warning_controls
+    from src.utils.warning_list import render_warning_controls, reset_warning_page
 except ImportError:
     render_warning_controls = None
+    reset_warning_page = None
+
+
+def _set_warning_page(page: int) -> None:
+    st.session_state.warning_page = page
 
 
 def get_date_range_preset(preset: str) -> tuple[date, date]:
@@ -94,8 +99,14 @@ def render_warnings_view(
     if not flags:
         st.info("No plagiarism incidents detected above configured threshold.")
     elif render_warning_controls is not None:
+        if "warning_page" not in st.session_state:
+            _set_warning_page(reset_warning_page())
+
         render_warning_controls(
-            flags, threshold=threshold, ai_probabilities=ai_probabilities
+            flags,
+            threshold=threshold,
+            ai_probabilities=ai_probabilities,
+            set_warning_page=_set_warning_page,
         )
 
         button_label = (
@@ -115,4 +126,5 @@ def render_warnings_view(
             threshold=threshold,
             ai_probabilities=ai_probabilities,
             expanded=st.session_state[SessionKeys.WARNINGS_EXPAND_ALL],
+            set_warning_page=_set_warning_page,
         )
