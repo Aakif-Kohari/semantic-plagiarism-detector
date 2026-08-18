@@ -288,4 +288,23 @@ def test_render_copy_button_xss_sanitization():
         # Assert no unescaped/raw <script> tag from button_id appears
         assert 'id=""><script>alert(1)</script>' not in rendered_html
         assert '&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;' in rendered_html
-        
+
+def test_filter_warnings_missing_matched_length():
+    """Test that warning items lacking the 'matched_length' key default to 0 and are filtered out when a minimum length is required."""
+    from src.utils.warning_list import filter_warnings
+    
+    # Warning dictionary completely lacking "matched_length"
+    warnings = [
+        {
+            "doc_a": "doc1.txt",
+            "doc_b": "doc2.txt",
+            "similarity": 0.85,
+            "severity": "High"
+            # "matched_length" is intentionally omitted here
+        }
+    ]
+    
+    # Filtering with min_match_length = 50 should exclude items with default matched_length (0)
+    filtered = filter_warnings(warnings, min_match_length=50)
+    
+    assert len(filtered) == 0
