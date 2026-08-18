@@ -58,10 +58,13 @@ else:
         origin.strip() for origin in origins.split(",") if origin.strip()
     ]
 
+# Browser spec: allow_credentials cannot be True when wildcard '*' is used in allowed_origins
+allow_credentials = False if "*" in allowed_origins else True
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=True,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
     max_age=3600,
@@ -400,3 +403,4 @@ def get_audit_events_api(
             "total_pages": (total_count + limit - 1) // limit if limit > 0 else 0
         }
     }
+app.include_router(admin_router)
