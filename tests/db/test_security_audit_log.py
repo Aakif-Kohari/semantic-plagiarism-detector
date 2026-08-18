@@ -10,6 +10,7 @@ import pytest
 import src.db.auth
 from src.db.auth import (
     _connect,
+    _ph,
     add_user,
     init_db,
     log_security_event,
@@ -178,3 +179,11 @@ def test_update_password_logs_multiple_changes():
             (username,),
         ).fetchone()[0]
     assert count >= 2
+
+
+def test_argon2_password_hasher_parameters():
+    """_ph PasswordHasher should be instantiated with explicit OWASP security parameters."""
+    assert _ph.time_cost == 3
+    assert _ph.memory_cost == 65536
+    assert _ph.parallelism == 4
+
