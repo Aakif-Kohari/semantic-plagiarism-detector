@@ -18,7 +18,7 @@ from typing import Any, Callable, Dict, List, Optional
 from dotenv import load_dotenv
 
 from src.db.auth import get_all_users
-from src.db.incidents import DEFAULT_DB_PATH, get_all_incidents
+from src.db.incidents import DEFAULT_DB_PATH, get_recent_incidents
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -44,12 +44,7 @@ def get_incidents_last_24h(db_path: str = DEFAULT_DB_PATH) -> List[Dict[str, Any
         .isoformat()
     )
 
-    all_incidents = get_all_incidents(db_path)
-    recent_incidents = [
-        inc for inc in all_incidents if inc.get("date_flagged", "") >= cutoff_time
-    ]
-
-    return recent_incidents
+    return get_recent_incidents(cutoff_time=cutoff_time, db_path=db_path)
 
 
 def get_admin_emails() -> List[str]:

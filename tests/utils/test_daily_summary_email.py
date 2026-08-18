@@ -79,15 +79,17 @@ def mock_old_incident():
     }
 
 
-@patch("src.utils.daily_summary_email.get_all_incidents")
-def test_get_incidents_last_24h(mock_get_all, mock_incidents, mock_old_incident):
-    """Test filtering incidents from last 24 hours."""
-    mock_get_all.return_value = mock_incidents + [mock_old_incident]
+@patch("src.utils.daily_summary_email.get_recent_incidents")
+def test_get_incidents_last_24h(mock_get_recent, mock_incidents):
+    """Test retrieving incidents from last 24 hours via get_recent_incidents."""
+    mock_get_recent.return_value = mock_incidents
 
     recent = get_incidents_last_24h()
 
     assert len(recent) == 3
-    assert all(inc["incident_id"] != "INC-OLD" for inc in recent)
+    mock_get_recent.assert_called_once()
+    kwargs = mock_get_recent.call_args.kwargs
+    assert "cutoff_time" in kwargs
 
 
 @patch("src.utils.daily_summary_email.get_all_users")
