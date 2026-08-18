@@ -288,4 +288,11 @@ def test_render_copy_button_xss_sanitization():
         # Assert no unescaped/raw <script> tag from button_id appears
         assert 'id=""><script>alert(1)</script>' not in rendered_html
         assert '&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;' in rendered_html
-        
+
+def test_truncate_search_query_numeric():
+    """Test that _truncate_search_query converts int/float search inputs to strings instead of returning empty."""
+    from src.utils.warning_list import _truncate_search_query
+    
+    assert _truncate_search_query(12345) == "12345"
+    assert _truncate_search_query(98.6) == "98.6"
+    assert _truncate_search_query(None) == ""
