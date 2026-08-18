@@ -38,6 +38,7 @@ _DB_PATH = os.path.abspath(str(AUTH_DB_PATH))
 def get_auth_db_path() -> Path:
     return Path(_DB_PATH)
 
+
 VALID_ROLES = {"admin", "teacher"}
 
 SQLITE_TIMEOUT: float = 5.0
@@ -460,7 +461,7 @@ def verify_user(
     """Authenticate a user and return auth status.
 
     If return_details is True, returns a dict
-    ``{"authenticated": bool, "must_change_password": bool}``.
+    ``{"authenticated": bool, "must_change_password": bool, "password_expired": bool}``.
     Otherwise returns a boolean (True on success, False on failure).
     """
     try:
@@ -522,12 +523,30 @@ def verify_user(
             except Exception:
                 authenticated = False
 
+        # Check password expiration after successful authentication (Issue #2716)
+        password_expired = False
+        if authenticated:
+            password_expired = is_password_expired(username)
+            if password_expired:
+                log_security_event(
+                    event_type="login_success_password_expired",
+                    username=username,
+                    details="Successful login but password requires rotation"
+                )
+            else:
+                log_security_event(
+                    event_type="login_success",
+                    username=username,
+                    details="Successful authentication"
+                )
+        
         if return_details:
             return {
                 "authenticated": authenticated,
                 "must_change_password": (
                     bool(must_change_password) if authenticated else False
                 ),
+                "password_expired": password_expired if authenticated else False,
             }
         return authenticated
     except sqlite3.Error as e:
@@ -543,10 +562,10 @@ authenticate_user = verify_user
 def get_user_role(username: str) -> str:
     """
     Return the role of a user, or 'user' as default if not found.
-    
+
     Args:
         username: The username to look up
-        
+
     Returns:
         str: The user's role (admin, teacher, or user)
     """
@@ -563,14 +582,15 @@ def get_user_role(username: str) -> str:
         logger.error(f"Failed to retrieve user role for {username}: {e}")
         return "user"  # Safe fallback
 
+
 def get_user_role_safe(username: str, default: str = "user") -> str:
     """
     Safely get user role with a custom default.
-    
+
     Args:
         username: The username to look up
         default: Default role if user not found (default: "user")
-    
+
     Returns:
         str: The user's role or the default
     """
@@ -584,10 +604,10 @@ def get_user_role_safe(username: str, default: str = "user") -> str:
 def is_admin(username: str) -> bool:
     """
     Check if a user is an admin.
-    
+
     Args:
         username: The username to check
-    
+
     Returns:
         bool: True if user is admin, False otherwise
     """
@@ -597,10 +617,10 @@ def is_admin(username: str) -> bool:
 def is_teacher(username: str) -> bool:
     """
     Check if a user is a teacher.
-    
+
     Args:
         username: The username to check
-    
+
     Returns:
         bool: True if user is teacher, False otherwise
     """
@@ -897,6 +917,111 @@ def clear_login_attempts(username: str) -> None:
     redis_clear_login_attempts(username.lower())
 
 
+# ============================================================================
+# PASSWORD EXPIRATION - Issue #2716
+# ============================================================================
+
+DEFAULT_PASSWORD_LIFETIME_DAYS = 90
+
+
+def is_password_expired(username: str) -> bool:
+    """Check if a user's password has expired based on password_expires_at.
+
+    Args:
+        username: The username to check.
+
+    Returns:
+        True if the password is expired, False if still valid or if
+        expiration is not configured (NULL).
+    """
+    if not username:
+        return False
+
+    try:
+        username = _validate_username(username)
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT password_expires_at FROM users WHERE username = ?", (username,)
+            ).fetchone()
+
+            if not row or not row[0]:
+                # No expiration set means password never expires
+                return False
+
+            expires_at_str = row[0]
+            expires_at = dt.fromisoformat(expires_at_str.replace("Z", "+00:00"))
+
+            # Compare with current UTC time
+            now_utc = dt.now(timezone.utc)
+            is_expired = now_utc >= expires_at
+
+            if is_expired:
+                logger.info(
+                    "Password expired for user %s (expired at %s)",
+                    username,
+                    expires_at_str,
+                )
+
+            return is_expired
+
+    except sqlite3.Error as e:
+        logger.error("Failed to check password expiration for %s: %s", username, e)
+        # Fail open: don't block login if we can't read the expiration date
+        return False
+    except ValueError as e:
+        logger.error(
+            "Invalid date format in password_expires_at for %s: %s", username, e
+        )
+        return False
+
+
+@with_sqlite_retry
+def set_password_expiration(
+    username: str, days_until_expiration: int = DEFAULT_PASSWORD_LIFETIME_DAYS
+) -> bool:
+    """Set or update the password expiration date for a user.
+
+    Args:
+        username: The username to update.
+        days_until_expiration: Number of days until the password expires.
+
+    Returns:
+        True if the update was successful, False otherwise.
+    """
+    if not username or days_until_expiration < 0:
+        return False
+
+    try:
+        username = _validate_username(username)
+        expiration_date = (
+            dt.now(timezone.utc) + timedelta(days=days_until_expiration)
+        ).isoformat()
+
+        with _connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE users 
+                SET password_expires_at = ? 
+                WHERE username = ?
+                """,
+                (expiration_date, username),
+            )
+            conn.commit()
+
+            if cursor.rowcount == 0:
+                logger.warning("set_password_expiration: User %s not found", username)
+                return False
+
+            logger.info(
+                "Set password expiration for %s to %s", username, expiration_date
+            )
+            return True
+
+    except sqlite3.Error as e:
+        logger.error("Failed to set password expiration for %s: %s", username, e)
+        return False
+
+
 def get_user_preferences(username: str) -> dict:
     """Return user preferences as a dictionary, or empty dict if none exist."""
     username = username.lower()
@@ -993,15 +1118,16 @@ def set_user_theme(username: str, theme: str) -> None:
 def _generate_secure_password(length: int = 32) -> str:
     """
     Generate a cryptographically secure random password.
-    
+
     Args:
         length: Length of the password (default: 32 characters)
-    
+
     Returns:
         A secure random password containing uppercase, lowercase, digits, and symbols
     """
     alphabet = string.ascii_letters + string.digits + string.punctuation
-    return ''.join(secrets.choice(alphabet) for _ in range(length))
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
 
 def get_or_create_sso_user(email: str, default_role: str = "teacher") -> str:
     """
@@ -1260,14 +1386,16 @@ def revoke_token(token: str, details: str | None = None) -> None:
 
     try:
         with _connect() as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS revoked_tokens (
                     id         INTEGER PRIMARY KEY AUTOINCREMENT,
                     token_signature TEXT UNIQUE NOT NULL,
                     revoked_at TEXT NOT NULL,
                     details    TEXT DEFAULT NULL
                 )
-                """)
+                """
+            )
             conn.execute(
                 """
                 INSERT OR IGNORE INTO revoked_tokens (token_signature, revoked_at, details)
@@ -1348,8 +1476,6 @@ def format_user_creation_date(iso_str: str) -> str:
     return date.strftime("%b %d, %Y")
 
 
-
-
 # ============================================================================
 # ROLE-BASED ACCESS CONTROL (RBAC) ENHANCEMENTS - Issue #2171
 # ============================================================================
@@ -1364,14 +1490,15 @@ import streamlit as st
 # ROLE DEFINITIONS
 # ============================================================================
 
+
 class UserRole(Enum):
     """User roles with hierarchical permissions."""
-    
+
     USER = "user"
     TEACHER = "teacher"
     ADMIN = "admin"
     SUPER_ADMIN = "super_admin"
-    
+
     @classmethod
     def from_string(cls, role: str) -> "UserRole":
         """Convert string to UserRole enum."""
@@ -1379,7 +1506,7 @@ class UserRole(Enum):
             return cls(role.lower())
         except ValueError:
             return cls.USER
-    
+
     def level(self) -> int:
         """Get role hierarchy level (higher = more permissions)."""
         levels = {
@@ -1389,7 +1516,7 @@ class UserRole(Enum):
             UserRole.SUPER_ADMIN: 3,
         }
         return levels.get(self, 0)
-    
+
     def has_permission(self, required_role: "UserRole") -> bool:
         """Check if this role has permission for a required role."""
         return self.level() >= required_role.level()
@@ -1399,33 +1526,34 @@ class UserRole(Enum):
 # PERMISSION DEFINITIONS
 # ============================================================================
 
+
 class Permission(Enum):
     """Available permissions in the system."""
-    
+
     # User permissions
     VIEW_DASHBOARD = "view_dashboard"
     VIEW_PROFILE = "view_profile"
     EDIT_PROFILE = "edit_profile"
-    
+
     # Document permissions
     UPLOAD_DOCUMENTS = "upload_documents"
     VIEW_DOCUMENTS = "view_documents"
     DELETE_DOCUMENTS = "delete_documents"
     EXPORT_DOCUMENTS = "export_documents"
-    
+
     # Analysis permissions
     RUN_ANALYSIS = "run_analysis"
     VIEW_ANALYSIS = "view_analysis"
     DELETE_ANALYSIS = "delete_analysis"
     EXPORT_ANALYSIS = "export_analysis"
-    
+
     # User management permissions
     VIEW_USERS = "view_users"
     CREATE_USERS = "create_users"
     EDIT_USERS = "edit_users"
     DELETE_USERS = "delete_users"
     MANAGE_ROLES = "manage_roles"
-    
+
     # System permissions
     VIEW_LOGS = "view_logs"
     VIEW_SETTINGS = "view_settings"
@@ -1506,13 +1634,14 @@ _ROLE_PERMISSIONS: Dict[UserRole, Set[Permission]] = {
         Permission.VIEW_AUDIT_LOGS,
         Permission.MANAGE_BACKUPS,
         Permission.VIEW_SYSTEM_HEALTH,
-    }
+    },
 }
 
 
 # ============================================================================
 # PERMISSION CHECK FUNCTIONS
 # ============================================================================
+
 
 def get_role_permissions(role: UserRole) -> Set[Permission]:
     """Get all permissions for a role."""
@@ -1522,11 +1651,11 @@ def get_role_permissions(role: UserRole) -> Set[Permission]:
 def has_permission(username: str, permission: Permission) -> bool:
     """
     Check if a user has a specific permission.
-    
+
     Args:
         username: The username to check
         permission: The permission to check for
-    
+
     Returns:
         bool: True if user has the permission
     """
@@ -1559,12 +1688,13 @@ def has_all_permissions(username: str, *permissions: Permission) -> bool:
 def require_permission(permission: Permission):
     """
     Decorator to require a specific permission for a function.
-    
+
     Usage:
         @require_permission(Permission.VIEW_AUDIT_LOGS)
         def admin_function():
             pass
     """
+
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -1573,25 +1703,28 @@ def require_permission(permission: Permission):
             if not username:
                 st.error("🔒 Authentication required.")
                 return None
-            
+
             if not has_permission(username, permission):
                 st.error(f"🔒 Permission denied. Requires: {permission.value}")
                 return None
-            
+
             return func(*args, **kwargs)
+
         return wrapper
+
     return decorator
 
 
 def require_role(required_role: UserRole):
     """
     Decorator to require a specific role for a function.
-    
+
     Usage:
         @require_role(UserRole.ADMIN)
         def admin_function():
             pass
     """
+
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -1599,16 +1732,18 @@ def require_role(required_role: UserRole):
             if not username:
                 st.error("🔒 Authentication required.")
                 return None
-            
+
             role_str = get_user_role(username)
             role = UserRole.from_string(role_str)
-            
+
             if not role.has_permission(required_role):
                 st.error(f"🔒 Role required: {required_role.value}")
                 return None
-            
+
             return func(*args, **kwargs)
+
         return wrapper
+
     return decorator
 
 
@@ -1616,17 +1751,18 @@ def require_role(required_role: UserRole):
 # RBAC HELPERS
 # ============================================================================
 
+
 def get_user_role_enhanced(username: str) -> Dict[str, Any]:
     """
     Get enhanced user role information.
-    
+
     Returns:
         Dict with role, level, permissions, and hierarchy info
     """
     role_str = get_user_role(username)
     role = UserRole.from_string(role_str)
     permissions = get_role_permissions(role)
-    
+
     return {
         "username": username,
         "role": role_str,
@@ -1642,10 +1778,7 @@ def get_user_role_enhanced(username: str) -> Dict[str, Any]:
 
 def get_roles_hierarchy() -> Dict[str, int]:
     """Get the hierarchy levels for all roles."""
-    return {
-        role.value: role.level()
-        for role in UserRole
-    }
+    return {role.value: role.level() for role in UserRole}
 
 
 def get_available_permissions() -> List[str]:
@@ -1669,15 +1802,16 @@ def get_roles_summary() -> Dict[str, Dict[str, Any]]:
 def get_users_by_role(role: UserRole) -> List[str]:
     """
     Get all users with a specific role.
-    
+
     Args:
         role: The role to filter by
-    
+
     Returns:
         List of usernames with the specified role
     """
     try:
         from src.db.auth import get_all_users
+
         users = get_all_users()
         return [
             user["username"]
@@ -1692,15 +1826,16 @@ def get_users_by_role(role: UserRole) -> List[str]:
 def get_users_by_permission(permission: Permission) -> List[str]:
     """
     Get all users who have a specific permission.
-    
+
     Args:
         permission: The permission to check
-    
+
     Returns:
         List of usernames with the permission
     """
     try:
         from src.db.auth import get_all_users
+
         users = get_all_users()
         return [
             user["username"]
@@ -1715,31 +1850,31 @@ def get_users_by_permission(permission: Permission) -> List[str]:
 def promote_user(username: str, new_role: UserRole, admin_username: str) -> bool:
     """
     Promote a user to a new role.
-    
+
     Args:
         username: The user to promote
         new_role: The new role
         admin_username: The admin performing the promotion
-    
+
     Returns:
         bool: True if promotion was successful
     """
     try:
         username = _validate_username(username)
         admin_role = UserRole.from_string(get_user_role(admin_username))
-        
+
         # Only admins can promote users
         if not admin_role.has_permission(UserRole.ADMIN):
             raise PermissionError("Only admins can promote users")
-        
+
         # Cannot promote to higher than admin
         if new_role.level() > UserRole.ADMIN.level():
             raise ValueError("Cannot promote users to Super Admin")
-        
+
         with _connect() as conn:
             cursor = conn.execute(
                 "UPDATE users SET role = ? WHERE username = ?",
-                (new_role.value, username)
+                (new_role.value, username),
             )
             affected = cursor.rowcount
             conn.commit()
@@ -1748,7 +1883,7 @@ def promote_user(username: str, new_role: UserRole, admin_username: str) -> bool
                 log_security_event(
                     event_type="user_role_changed",
                     username=username,
-                    details=f"Role changed to {new_role.value} by {admin_username}"
+                    details=f"Role changed to {new_role.value} by {admin_username}",
                 )
                 return True
             return False
@@ -1780,7 +1915,7 @@ def demote_user(username: str, admin_username: str) -> bool:
         with _connect() as conn:
             cursor = conn.execute(
                 "UPDATE users SET role = ? WHERE username = ?",
-                (UserRole.MEMBER.value, username)
+                (UserRole.MEMBER.value, username),
             )
             affected = cursor.rowcount
             conn.commit()
@@ -1789,7 +1924,7 @@ def demote_user(username: str, admin_username: str) -> bool:
                 log_security_event(
                     event_type="user_role_changed",
                     username=username,
-                    details=f"Role changed to {UserRole.MEMBER.value} by {admin_username}"
+                    details=f"Role changed to {UserRole.MEMBER.value} by {admin_username}",
                 )
                 return True
             return False
@@ -1814,37 +1949,38 @@ from typing import Any, Dict, List, Optional  # noqa: F811
 # SECURE PASSWORD GENERATION
 # ============================================================================
 
+
 def generate_secure_password(length: int = 32) -> str:
     """
     Generate a cryptographically secure random password.
-    
+
     Args:
         length: Length of the password (default: 32 characters)
-    
+
     Returns:
         A secure random password containing uppercase, lowercase, digits, and symbols
-    
+
     Examples:
         >>> generate_secure_password(16)
         'K#9mP$2vL&8qR!x4'
     """
     if length < 12:
         raise ValueError("Password length must be at least 12 characters for security.")
-    
+
     alphabet = string.ascii_letters + string.digits + string.punctuation
-    password = ''.join(secrets.choice(alphabet) for _ in range(length))
-    
+    password = "".join(secrets.choice(alphabet) for _ in range(length))
+
     # Ensure password meets complexity requirements
     while not _validate_password_complexity(password):
-        password = ''.join(secrets.choice(alphabet) for _ in range(length))
-    
+        password = "".join(secrets.choice(alphabet) for _ in range(length))
+
     return password
 
 
 def generate_sso_token() -> str:
     """
     Generate a secure token for SSO session management.
-    
+
     Returns:
         A 64-character hex token
     """
@@ -1867,7 +2003,8 @@ def store_sso_state(state: str, expires_in_seconds: int = 600) -> bool:
     try:
         expires_at = (dt.now() + timedelta(seconds=expires_in_seconds)).isoformat()
         with _connect() as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS sso_states (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     state TEXT UNIQUE NOT NULL,
@@ -1875,11 +2012,12 @@ def store_sso_state(state: str, expires_in_seconds: int = 600) -> bool:
                     used_at TEXT DEFAULT NULL,
                     expires_at TEXT NOT NULL
                 )
-            """)
+            """
+            )
             conn.execute(
                 """INSERT OR REPLACE INTO sso_states (state, expires_at, used_at)
                    VALUES (?, ?, NULL)""",
-                (state, expires_at)
+                (state, expires_at),
             )
             conn.commit()
             return True
@@ -1903,7 +2041,8 @@ def validate_sso_state(state: str) -> bool:
 
     try:
         with _connect() as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS sso_states (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     state TEXT UNIQUE NOT NULL,
@@ -1911,10 +2050,10 @@ def validate_sso_state(state: str) -> bool:
                     used_at TEXT DEFAULT NULL,
                     expires_at TEXT NOT NULL
                 )
-            """)
+            """
+            )
             row = conn.execute(
-                "SELECT expires_at, used_at FROM sso_states WHERE state = ?",
-                (state,)
+                "SELECT expires_at, used_at FROM sso_states WHERE state = ?", (state,)
             ).fetchone()
 
             if not row:
@@ -1932,7 +2071,7 @@ def validate_sso_state(state: str) -> bool:
             # Invalidate state immediately after validation to prevent replay attacks
             conn.execute(
                 "UPDATE sso_states SET used_at = CURRENT_TIMESTAMP WHERE state = ?",
-                (state,)
+                (state,),
             )
             conn.commit()
             return True
@@ -1949,7 +2088,7 @@ def verify_sso_state(state: str) -> bool:
 def generate_sso_state() -> str:
     """
     Generate a secure state parameter for OAuth2 flow and store it.
-    
+
     Returns:
         A 32-character hex state token
     """
@@ -1958,117 +2097,117 @@ def generate_sso_state() -> str:
     return state
 
 
-
 # ============================================================================
 # SSO USER MANAGEMENT
 # ============================================================================
 
+
 def get_or_create_sso_user_enhanced(
-    email: str,
-    provider: str,
-    provider_user_id: str,
-    default_role: str = "teacher"
+    email: str, provider: str, provider_user_id: str, default_role: str = "teacher"
 ) -> Dict[str, Any]:
     """
     Enhanced SSO user creation with security features.
-    
+
     This function:
     1. Checks if user exists
     2. Updates SSO provider info if needed
     3. Creates user with secure random password
     4. Logs security events
     5. Returns user info with security status
-    
+
     Args:
         email: User's email address
         provider: SSO provider (github, google, etc.)
         provider_user_id: User ID from the provider
         default_role: Default role for new users
-    
+
     Returns:
         Dict containing user info and security status
     """
     username = _validate_username(email)
     provider = provider.lower()
-    
+
     if provider not in ["github", "google", "microsoft", "gitlab"]:
         raise ValueError(f"Unsupported SSO provider: {provider}")
-    
+
     with _connect() as conn:
         # Check if user exists
         row = conn.execute(
             "SELECT id, role, sso_provider, sso_provider_user_id FROM users WHERE username = ?",
             (username,),
         ).fetchone()
-        
+
         if row:
             user_id, role, existing_provider, existing_provider_id = row
-            
+
             # Update provider info if changed
-            if existing_provider != provider or existing_provider_id != provider_user_id:
+            if (
+                existing_provider != provider
+                or existing_provider_id != provider_user_id
+            ):
                 conn.execute(
                     """UPDATE users 
                        SET sso_provider = ?, 
                            sso_provider_user_id = ?,
                            updated_at = CURRENT_TIMESTAMP
                        WHERE username = ?""",
-                    (provider, provider_user_id, username)
+                    (provider, provider_user_id, username),
                 )
                 conn.commit()
-                
+
                 log_security_event(
                     event_type="sso_provider_updated",
                     username=username,
-                    details=f"SSO provider updated from {existing_provider} to {provider}"
+                    details=f"SSO provider updated from {existing_provider} to {provider}",
                 )
-            
+
             # Log successful SSO login
             log_security_event(
                 event_type="sso_login_success",
                 username=username,
-                details=f"SSO login via {provider} (user_id: {user_id})"
+                details=f"SSO login via {provider} (user_id: {user_id})",
             )
-            
+
             return {
                 "username": username,
                 "role": role,
                 "user_id": user_id,
                 "is_new_user": False,
                 "provider": provider,
-                "sso_enabled": True
+                "sso_enabled": True,
             }
-        
+
         # New user - generate secure random password
         secure_password = generate_secure_password(32)
         hashed = _hash_password(secure_password)
         role = _validate_role(default_role)
-        
+
         # Insert new user with SSO info
         cursor = conn.execute(
             """INSERT INTO users 
                (username, password, role, sso_provider, sso_provider_user_id, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
-            (username, hashed, role, provider, provider_user_id)
+            (username, hashed, role, provider, provider_user_id),
         )
         user_id = cursor.lastrowid
         conn.commit()
-        
+
         # Store secure password in a separate table for recovery (optional)
         _store_sso_recovery_token(username, secure_password)
-        
+
         # Log security events
         log_security_event(
             event_type="sso_user_created",
             username=username,
-            details=f"SSO user created via {provider} with role: {role}"
+            details=f"SSO user created via {provider} with role: {role}",
         )
-        
+
         log_security_event(
             event_type="user_created",
             username=username,
-            details=f"User created via SSO ({provider}) with secure random password"
+            details=f"User created via SSO ({provider}) with secure random password",
         )
-        
+
         return {
             "username": username,
             "role": role,
@@ -2076,7 +2215,7 @@ def get_or_create_sso_user_enhanced(
             "is_new_user": True,
             "provider": provider,
             "sso_enabled": True,
-            "secure_password_set": True
+            "secure_password_set": True,
         }
 
 
@@ -2088,10 +2227,11 @@ def _store_sso_recovery_token(username: str, password: str) -> None:
         token = generate_sso_token()
         token_hash = hashlib.sha256(token.encode()).hexdigest()
         expires_at = (dt.now() + timedelta(days=7)).isoformat()
-        
+
         with _connect() as conn:
             # Create recovery_tokens table if not exists
-            conn.execute("""
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS sso_recovery_tokens (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT NOT NULL,
@@ -2101,21 +2241,22 @@ def _store_sso_recovery_token(username: str, password: str) -> None:
                     used_at TEXT DEFAULT NULL,
                     FOREIGN KEY (username) REFERENCES users(username)
                 )
-            """)
-            
+            """
+            )
+
             # Store recovery token
             conn.execute(
                 """INSERT INTO sso_recovery_tokens (username, token_hash, expires_at)
                    VALUES (?, ?, ?)""",
-                (username, token_hash, expires_at)
+                (username, token_hash, expires_at),
             )
             conn.commit()
-            
+
             # Log for security
             log_security_event(
                 event_type="sso_recovery_token_created",
                 username=username,
-                details="SSO recovery token created"
+                details="SSO recovery token created",
             )
     except Exception as e:
         logger.error(f"Failed to store SSO recovery token: {e}")
@@ -2124,42 +2265,42 @@ def _store_sso_recovery_token(username: str, password: str) -> None:
 def verify_sso_recovery_token(username: str, token: str) -> bool:
     """
     Verify an SSO recovery token.
-    
+
     Args:
         username: The username
         token: The recovery token to verify
-    
+
     Returns:
         True if token is valid and not expired
     """
     try:
         token_hash = hashlib.sha256(token.encode()).hexdigest()
-        
+
         with _connect() as conn:
             row = conn.execute(
                 """SELECT expires_at, used_at FROM sso_recovery_tokens 
                    WHERE username = ? AND token_hash = ?""",
-                (username, token_hash)
+                (username, token_hash),
             ).fetchone()
-            
+
             if not row:
                 return False
-            
+
             expires_at, used_at = row
             if used_at is not None:
                 return False  # Token already used
-            
+
             if expires_at < dt.now().isoformat():
                 return False  # Token expired
-            
+
             # Mark token as used
             conn.execute(
                 "UPDATE sso_recovery_tokens SET used_at = CURRENT_TIMESTAMP WHERE username = ? AND token_hash = ?",
-                (username, token_hash)
+                (username, token_hash),
             )
             conn.commit()
             return True
-            
+
     except Exception as e:
         logger.error(f"Failed to verify SSO recovery token: {e}")
         return False
@@ -2168,10 +2309,10 @@ def verify_sso_recovery_token(username: str, token: str) -> bool:
 def get_sso_user_info(username: str) -> Optional[Dict[str, Any]]:
     """
     Get SSO user information.
-    
+
     Args:
         username: The username to lookup
-    
+
     Returns:
         Dict with SSO info or None if not an SSO user
     """
@@ -2182,12 +2323,12 @@ def get_sso_user_info(username: str) -> Optional[Dict[str, Any]]:
                 """SELECT id, username, role, sso_provider, sso_provider_user_id, 
                           created_at, updated_at, is_active
                    FROM users WHERE username = ? AND sso_provider IS NOT NULL""",
-                (username,)
+                (username,),
             ).fetchone()
-            
+
             if not row:
                 return None
-            
+
             return {
                 "user_id": row[0],
                 "username": row[1],
@@ -2197,7 +2338,7 @@ def get_sso_user_info(username: str) -> Optional[Dict[str, Any]]:
                 "created_at": row[5],
                 "updated_at": row[6],
                 "is_active": bool(row[7]),
-                "is_sso_user": True
+                "is_sso_user": True,
             }
     except Exception as e:
         logger.error(f"Failed to get SSO user info: {e}")
@@ -2207,7 +2348,7 @@ def get_sso_user_info(username: str) -> Optional[Dict[str, Any]]:
 def list_sso_users() -> List[Dict[str, Any]]:
     """
     List all SSO users in the system.
-    
+
     Returns:
         List of SSO user info dicts
     """
@@ -2219,7 +2360,7 @@ def list_sso_users() -> List[Dict[str, Any]]:
                    FROM users WHERE sso_provider IS NOT NULL
                    ORDER BY created_at DESC"""
             ).fetchall()
-            
+
             return [
                 {
                     "user_id": row[0],
@@ -2229,7 +2370,7 @@ def list_sso_users() -> List[Dict[str, Any]]:
                     "sso_provider_user_id": row[4],
                     "created_at": row[5],
                     "updated_at": row[6],
-                    "is_active": bool(row[7])
+                    "is_active": bool(row[7]),
                 }
                 for row in rows
             ]
@@ -2241,10 +2382,10 @@ def list_sso_users() -> List[Dict[str, Any]]:
 def revoke_sso_access(username: str) -> bool:
     """
     Revoke SSO access for a user.
-    
+
     Args:
         username: The username to revoke access for
-    
+
     Returns:
         True if successfully revoked
     """
@@ -2257,22 +2398,20 @@ def revoke_sso_access(username: str) -> bool:
                        sso_provider_user_id = NULL,
                        updated_at = CURRENT_TIMESTAMP
                    WHERE username = ?""",
-                (username,)
-
+                (username,),
             )
             affected = cursor.rowcount
             conn.commit()
-            
+
             if affected > 0:
                 log_security_event(
-
                     event_type="user_role_changed",
                     username=username,
-                    details=f"Role changed to {new_role.value} by {admin_username}"  # noqa: F821
+                    details=f"Role changed to {new_role.value} by {admin_username}",  # noqa: F821
                 )
                 return True
             return False
-            
+
     except Exception as e:
         logger.error(f"Failed to promote user {username}: {e}")
         return False
@@ -2281,11 +2420,11 @@ def revoke_sso_access(username: str) -> bool:
 def demote_user(username: str, admin_username: str) -> bool:  # noqa: F811
     """
     Demote a user to the default USER role.
-    
+
     Args:
         username: The user to demote
         admin_username: The admin performing the demotion
-    
+
     Returns:
         bool: True if demotion was successful
     """
@@ -2296,13 +2435,14 @@ def demote_user(username: str, admin_username: str) -> bool:  # noqa: F811
 # STREAMLIT UI HELPERS
 # ============================================================================
 
+
 def render_role_badge(role: str) -> str:
     """
     Render a role badge HTML.
-    
+
     Args:
         role: The role string
-    
+
     Returns:
         HTML string for the role badge
     """
@@ -2318,7 +2458,7 @@ def render_role_badge(role: str) -> str:
 def render_role_selector(username: str, current_role: str) -> None:
     """
     Render a role selector dropdown for admin users.
-    
+
     Args:
         username: The user to change role for
         current_role: The current role
@@ -2328,9 +2468,9 @@ def render_role_selector(username: str, current_role: str) -> None:
         f"Role for {username}",
         options=roles,
         index=roles.index(current_role) if current_role in roles else 0,
-        key=f"role_select_{username}"
+        key=f"role_select_{username}",
     )
-    
+
     if selected != current_role:
         if st.button(f"Update Role for {username}", key=f"role_update_{username}"):
             admin = st.session_state.get(SessionKeys.USERNAME)  # noqa: F821
@@ -2345,17 +2485,17 @@ def render_role_selector(username: str, current_role: str) -> None:
 def render_permission_checklist(username: str) -> None:
     """
     Render a checklist of permissions for a user.
-    
+
     Args:
         username: The user to display permissions for
     """
     role_str = get_user_role(username)
     role = UserRole.from_string(role_str)
     permissions = get_role_permissions(role)
-    
+
     st.markdown(f"### Permissions for {username}")
     st.caption(f"Role: {role_str} (Level {role.level()})")
-    
+
     cols = st.columns(3)
     for idx, permission in enumerate(sorted(permissions, key=lambda x: x.value)):
         col_idx = idx % 3
@@ -2366,7 +2506,7 @@ def render_permission_checklist(username: str) -> None:
 def get_sso_users_count() -> int:
     """
     Get the total number of SSO users.
-    
+
     Returns:
         Count of SSO users
     """
@@ -2384,20 +2524,20 @@ def get_sso_users_count() -> int:
 def migrate_existing_sso_users() -> Dict[str, Any]:
     """
     Migrate existing SSO users to secure passwords.
-    
+
     This function finds all SSO users with weak passwords and
     upgrades them to secure random passwords.
-    
+
     Returns:
         Dict with migration statistics
     """
     try:
         from src.db.auth import get_all_users, update_password  # noqa: F401
-        
+
         sso_users = list_sso_users()
         migrated = 0
         failed = 0
-        
+
         for user in sso_users:
             try:
                 username = user["username"]
@@ -2406,23 +2546,23 @@ def migrate_existing_sso_users() -> Dict[str, Any]:
                 # Update password
                 update_password(username, new_password)
                 migrated += 1
-                
+
                 log_security_event(
                     event_type="sso_password_upgraded",
                     username=username,
-                    details="SSO user password upgraded from weak to secure"
+                    details="SSO user password upgraded from weak to secure",
                 )
             except Exception as e:
                 logger.error(f"Failed to upgrade password for {username}: {e}")
                 failed += 1
-        
+
         return {
             "total_sso_users": len(sso_users),
             "migrated": migrated,
             "failed": failed,
-            "success": failed == 0
+            "success": failed == 0,
         }
-        
+
     except Exception as e:
         logger.error(f"Failed to migrate SSO users: {e}")
         return {
@@ -2430,7 +2570,7 @@ def migrate_existing_sso_users() -> Dict[str, Any]:
             "migrated": 0,
             "failed": 1,
             "success": False,
-            "error": str(e)
+            "error": str(e),
         }
 
 
@@ -2439,39 +2579,37 @@ def migrate_existing_sso_users() -> Dict[str, Any]:
 # ============================================================================
 
 __all__ = [
-
-    'UserRole',
-    'Permission',
-    'get_role_permissions',
-    'has_permission',
-    'has_any_permission',
-    'has_all_permissions',
-    'require_permission',
-    'require_role',
-    'get_user_role_enhanced',
-    'get_roles_hierarchy',
-    'get_available_permissions',
-    'get_roles_summary',
-    'get_users_by_role',
-    'get_users_by_permission',
-    'promote_user',
-    'demote_user',
-    'render_role_badge',
-    'render_role_selector',
-    'render_permission_checklist',
-    'generate_secure_password',
-    'generate_sso_token',
-    'generate_sso_state',
-    'store_sso_state',
-    'validate_sso_state',
-    'verify_sso_state',
-    'get_or_create_sso_user_enhanced',
-    'get_sso_user_info',
-    'list_sso_users',
-    'revoke_sso_access',
-    'is_sso_user',
-    'get_sso_users_count',
-    'migrate_existing_sso_users',
-    'verify_sso_recovery_token',
+    "UserRole",
+    "Permission",
+    "get_role_permissions",
+    "has_permission",
+    "has_any_permission",
+    "has_all_permissions",
+    "require_permission",
+    "require_role",
+    "get_user_role_enhanced",
+    "get_roles_hierarchy",
+    "get_available_permissions",
+    "get_roles_summary",
+    "get_users_by_role",
+    "get_users_by_permission",
+    "promote_user",
+    "demote_user",
+    "render_role_badge",
+    "render_role_selector",
+    "render_permission_checklist",
+    "generate_secure_password",
+    "generate_sso_token",
+    "generate_sso_state",
+    "store_sso_state",
+    "validate_sso_state",
+    "verify_sso_state",
+    "get_or_create_sso_user_enhanced",
+    "get_sso_user_info",
+    "list_sso_users",
+    "revoke_sso_access",
+    "is_sso_user",
+    "get_sso_users_count",
+    "migrate_existing_sso_users",
+    "verify_sso_recovery_token",
 ]
-
