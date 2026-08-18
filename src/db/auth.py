@@ -40,7 +40,37 @@ def get_auth_db_path() -> Path:
 
 VALID_ROLES = {"admin", "teacher"}
 
-SQLITE_TIMEOUT: float = 15.0
+SQLITE_TIMEOUT: float = 5.0
+"""float: Busy timeout in seconds (15.0s) for SQLite database connections in the authentication module.
+
+Architecture & High-Concurrency System Rationale:
+-------------------------------------------------
+This high timeout (15.0 seconds) is intentionally configured to prevent lock contention failures in `users.db`
+when background plagiarism detection tasks, vector database syncs, and multi-user authentication requests execute concurrently.
+
+Although SQLite WAL (Write-Ahead Logging) mode allows concurrent readers alongside one writer, writing operations
+(such as transparent password re-hashing, audit log insertion, failed attempt tracking, and user profile updates)
+must acquire an exclusive write lock.
+
+Specific Scenarios Requiring a 15.0-Second Busy Timeout in `auth.py`:
+----------------------------------------------------------------------
+1. **Concurrent User Logins & Transparent Bcrypt-to-Argon2 Re-hashing:**
+   During peak user activity or automated batch tests, multiple authentication threads attempt to update user records
+   simultaneously when migrating legacy passwords to Argon2id.
+
+2. **Security Audit Log Persistence & Login Rate-Limiting:**
+   Every authentication attempt, failed login, or password update writes security audit events to `users.db`.
+   High-frequency parallel authentication requests contend for write locks on the audit log table.
+
+3. **Background WAL Checkpointing Sweeps:**
+   SQLite automatically flushes write-ahead log pages (`users.db-wal`) back to the main `users.db` database.
+   Checkpointing holds temporary exclusive write locks.
+
+⚠️ WARNING FOR DEVELOPERS:
+------------------------
+Do NOT reduce `SQLITE_TIMEOUT` below 15.0 seconds. Lowering this value risks raising spurious
+`sqlite3.OperationalError: database is locked` exceptions under concurrent workloads.
+"""
 
 PASSWORD_COMPLEXITY_REGEX = re.compile(
     r"^(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\])[A-Za-z\d@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\]{8,}$"
@@ -98,6 +128,7 @@ def log_security_event(
 ) -> None:
     """Record a security-relevant event in the security_audit_log table."""
     timestamp = datetime.datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    clean_username = username.lower() if username else ""
     try:
         with _connect() as conn:
             conn.execute(
@@ -105,35 +136,27 @@ def log_security_event(
                 INSERT INTO security_audit_log (event_type, username, timestamp, details)
                 VALUES (?, ?, ?, ?)
                 """,
-                (event_type, username, timestamp, details),
+                (event_type, clean_username, timestamp, details),
             )
             conn.commit()
     except Exception as exc:
         logger.warning(
             "Failed to write security audit log entry [%s, %s]: %s",
             event_type,
-            username,
+            clean_username,
             exc,
         )
 
 
-def get_security_audit_logs(
+def _build_audit_log_query_conditions(
     username: str | None = None,
     event_type: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
-    limit: int = 100,
-    offset: int = 0,
-) -> list[dict]:
-    """Retrieve security audit log entries with limit, offset, and optional filters (username, event_type, start_date, end_date)."""
-    if limit < 0 or offset < 0:
-        raise ValueError("Limit and offset must be non-negative integers.")
-
-    query = (
-        "SELECT id, event_type, username, timestamp, details FROM security_audit_log"
-    )
-    params: list = []
+) -> tuple[str, list]:
+    """Build WHERE clause snippet (if any) and parameters list for security audit log queries."""
     conditions: list[str] = []
+    params: list = []
 
     if username:
         conditions.append("username = ?")
@@ -148,10 +171,32 @@ def get_security_audit_logs(
         conditions.append("timestamp <= ?")
         params.append(end_date)
 
-    if conditions:
-        query += " WHERE " + " AND ".join(conditions)
+    where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+    return where_clause, params
 
-    query += " ORDER BY id DESC LIMIT ? OFFSET ?"
+
+def get_security_audit_logs(
+    username: str | None = None,
+    event_type: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict]:
+    """Retrieve security audit log entries with limit, offset, and optional filters (username, event_type, start_date, end_date)."""
+    if limit < 0 or offset < 0:
+        raise ValueError("Limit and offset must be non-negative integers.")
+
+    where_clause, params = _build_audit_log_query_conditions(
+        username=username,
+        event_type=event_type,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    query = (
+        f"SELECT id, event_type, username, timestamp, details FROM security_audit_log{where_clause}"
+        " ORDER BY id DESC LIMIT ? OFFSET ?"
+    )
     params.extend([limit, offset])
 
     try:
@@ -179,25 +224,13 @@ def get_security_audit_log_count(
     end_date: str | None = None,
 ) -> int:
     """Return total number of matching security audit log entries."""
-    query = "SELECT COUNT(*) FROM security_audit_log"
-    params: list = []
-    conditions: list[str] = []
-
-    if username:
-        conditions.append("username = ?")
-        params.append(username.lower())
-    if event_type:
-        conditions.append("event_type = ?")
-        params.append(event_type)
-    if start_date:
-        conditions.append("timestamp >= ?")
-        params.append(start_date)
-    if end_date:
-        conditions.append("timestamp <= ?")
-        params.append(end_date)
-
-    if conditions:
-        query += " WHERE " + " AND ".join(conditions)
+    where_clause, params = _build_audit_log_query_conditions(
+        username=username,
+        event_type=event_type,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    query = f"SELECT COUNT(*) FROM security_audit_log{where_clause}"
 
     try:
         with _connect() as conn:

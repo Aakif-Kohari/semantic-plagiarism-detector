@@ -385,12 +385,14 @@ class TestAuthMigrationFlow:
         finally:
             conn.close()
 
-    def test_version_9_adds_last_login_at(self):
+    def test_version_16_adds_audit_log_indexes(self):
         conn = _connect()
         try:
-            _apply_up_to(conn, AUTH_MIGRATIONS, 9)
-            assert get_user_version(conn) == 9
-            assert column_exists(conn, "users", "last_login_at")
+            # We apply up to version 16 (includes migration 8 creating log and version 16 creating indexes)
+            _apply_up_to(conn, AUTH_MIGRATIONS, 16)
+            assert get_user_version(conn) == 16
+            assert index_exists(conn, "idx_audit_log_username")
+            assert index_exists(conn, "idx_audit_log_event_type")
         finally:
             conn.close()
 

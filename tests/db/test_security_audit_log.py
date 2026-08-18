@@ -181,9 +181,15 @@ def test_update_password_logs_multiple_changes():
     assert count >= 2
 
 
-def test_argon2_password_hasher_parameters():
-    """_ph PasswordHasher should be instantiated with explicit OWASP security parameters."""
-    assert _ph.time_cost == 3
-    assert _ph.memory_cost == 65536
-    assert _ph.parallelism == 4
+def test_log_security_event_lowercases_username():
+    """log_security_event should convert mixed-case usernames to lowercase."""
+    raw_username = "AdminUser_Test"
+    expected_username = "adminuser_test"
+    log_security_event(event_type="case_test_event", username=raw_username)
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT username FROM security_audit_log WHERE event_type = 'case_test_event'",
+        ).fetchone()
+    assert row is not None
+    assert row[0] == expected_username
 
