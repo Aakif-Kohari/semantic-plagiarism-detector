@@ -7,18 +7,18 @@ and strong password complexity policies.
 """
 
 from __future__ import annotations
-from pathlib import Path
 
 import datetime
 import json
 import logging
 import os
 import re
+import secrets
 import sqlite3
+import string
 from datetime import datetime as dt
 from datetime import timezone
-import secrets
-import string
+from pathlib import Path
 
 import bcrypt
 from argon2 import PasswordHasher
@@ -113,23 +113,15 @@ def log_security_event(
         )
 
 
-def get_security_audit_logs(
+def _build_audit_log_query_conditions(
     username: str | None = None,
     event_type: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
-    limit: int = 100,
-    offset: int = 0,
-) -> list[dict]:
-    """Retrieve security audit log entries with limit, offset, and optional filters (username, event_type, start_date, end_date)."""
-    if limit < 0 or offset < 0:
-        raise ValueError("Limit and offset must be non-negative integers.")
-
-    query = (
-        "SELECT id, event_type, username, timestamp, details FROM security_audit_log"
-    )
-    params: list = []
+) -> tuple[str, list]:
+    """Build WHERE clause snippet (if any) and parameters list for security audit log queries."""
     conditions: list[str] = []
+    params: list = []
 
     if username:
         conditions.append("username = ?")
@@ -144,10 +136,32 @@ def get_security_audit_logs(
         conditions.append("timestamp <= ?")
         params.append(end_date)
 
-    if conditions:
-        query += " WHERE " + " AND ".join(conditions)
+    where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+    return where_clause, params
 
-    query += " ORDER BY id DESC LIMIT ? OFFSET ?"
+
+def get_security_audit_logs(
+    username: str | None = None,
+    event_type: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict]:
+    """Retrieve security audit log entries with limit, offset, and optional filters (username, event_type, start_date, end_date)."""
+    if limit < 0 or offset < 0:
+        raise ValueError("Limit and offset must be non-negative integers.")
+
+    where_clause, params = _build_audit_log_query_conditions(
+        username=username,
+        event_type=event_type,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    query = (
+        f"SELECT id, event_type, username, timestamp, details FROM security_audit_log{where_clause}"
+        " ORDER BY id DESC LIMIT ? OFFSET ?"
+    )
     params.extend([limit, offset])
 
     try:
@@ -175,25 +189,13 @@ def get_security_audit_log_count(
     end_date: str | None = None,
 ) -> int:
     """Return total number of matching security audit log entries."""
-    query = "SELECT COUNT(*) FROM security_audit_log"
-    params: list = []
-    conditions: list[str] = []
-
-    if username:
-        conditions.append("username = ?")
-        params.append(username.lower())
-    if event_type:
-        conditions.append("event_type = ?")
-        params.append(event_type)
-    if start_date:
-        conditions.append("timestamp >= ?")
-        params.append(start_date)
-    if end_date:
-        conditions.append("timestamp <= ?")
-        params.append(end_date)
-
-    if conditions:
-        query += " WHERE " + " AND ".join(conditions)
+    where_clause, params = _build_audit_log_query_conditions(
+        username=username,
+        event_type=event_type,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    query = f"SELECT COUNT(*) FROM security_audit_log{where_clause}"
 
     try:
         with _connect() as conn:
@@ -1265,10 +1267,10 @@ def format_user_creation_date(iso_str: str) -> str:
 # ============================================================================
 
 from enum import Enum
-from typing import Set, List, Optional, Dict, Any
 from functools import wraps
-import streamlit as st
+from typing import Any, Dict, List, Optional, Set
 
+import streamlit as st
 
 # ============================================================================
 # ROLE DEFINITIONS
@@ -1713,12 +1715,12 @@ def demote_user(username: str, admin_username: str) -> bool:
 # SSO SECURITY ENHANCEMENTS - Issue #2172
 # ============================================================================
 
+import hashlib
+import json  # noqa: F811
 import secrets  # noqa: F811
 import string  # noqa: F811
 from datetime import timedelta
-from typing import Optional, Dict, Any, List  # noqa: F811
-import hashlib
-import json  # noqa: F811
+from typing import Any, Dict, List, Optional  # noqa: F811
 
 # ============================================================================
 # SECURE PASSWORD GENERATION
