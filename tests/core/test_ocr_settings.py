@@ -91,3 +91,30 @@ def test_validate_ocr_languages_against_tesseract_binary():
         assert len(code) == 3, f"Language code '{code}' must be a 3-letter ISO code"
         assert code in installed_languages, f"Language code '{code}' is not recognized by Tesseract binary"
 
+
+def test_multi_language_ocr_support():
+    """Verify that validate_ocr_language supports '+' separated language lists."""
+    assert validate_ocr_language("eng+spa") == "eng+spa"
+    assert validate_ocr_language(" eng + spa ") == "eng+spa"
+    assert validate_ocr_language("eng+fra+deu") == "eng+fra+deu"
+    assert validate_ocr_language("eng+spa+eng") == "eng+spa"
+
+
+def test_multi_language_ocr_rejection():
+    """Verify that invalid language codes in a '+' separated list are rejected."""
+    with pytest.raises(ValueError, match="Unsupported OCR language"):
+        validate_ocr_language("eng+xyz")
+
+    with pytest.raises(ValueError, match="Unsupported OCR language"):
+        validate_ocr_language("spa+")
+
+
+def test_common_parser_multi_language_support():
+    """Verify common parser validate_ocr_language handles '+' separated language lists."""
+    from src.core.parsers.common import validate_ocr_language as common_validate
+
+    assert common_validate("eng+spa") == "eng+spa"
+    assert common_validate(" eng + spa ") == "eng+spa"
+    assert common_validate("eng+xyz") == "eng"
+
+

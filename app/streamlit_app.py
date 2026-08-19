@@ -2097,11 +2097,12 @@ with st.sidebar:
                 for code, display_name in SUPPORTED_OCR_LANGUAGES.items()
             }
             language_names = list(ocr_language_labels)
-            default_language_name = SUPPORTED_OCR_LANGUAGES[DEFAULT_OCR_LANGUAGE]
+            default_language_name = SUPPORTED_OCR_LANGUAGES.get(DEFAULT_OCR_LANGUAGE, "English")
+            default_index = language_names.index(default_language_name) if default_language_name in language_names else 0
             selected_ocr_language_name = st.selectbox(
                 "OCR Language",
                 options=language_names,
-                index=language_names.index(default_language_name),
+                index=default_index,
                 key=SessionKeys.OCR_LANGUAGE_SELECTOR,
             )
             ocr_language = ocr_language_labels[selected_ocr_language_name]
