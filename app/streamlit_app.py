@@ -3965,6 +3965,95 @@ with tab_history:
 # ══ TAB 10: SECURITY AUDIT LOGS ═════════════════════════════════════════════
 with tab_audit:
     update_page_title("Security Audit Logs")
+    st.subheader(get_text("tab_audit_logs", lang=lang_code))
+
+    if user_role != "admin":
+        st.error("🔒 Access Denied: Administrator privileges required.")
+    else:
+        st.markdown("### 📜 System Security Audit Trail")
+
+        # ... [existing filters] ...
+        
+        # Issue #2732: Pagination controls
+        EVENTS_PER_PAGE = 20
+        
+        if "audit_page_offset" not in st.session_state:
+            st.session_state.audit_page_offset = 0
+            
+        current_offset = st.session_state.audit_page_offset
+        
+        # Fetch records for current page
+        from src.db.security_audit import get_recent_audit_events, get_audit_events_count
+        
+        logs = get_recent_audit_events(
+            limit=EVENTS_PER_PAGE,
+            offset=current_offset,
+            username=username_filter,
+            event_type=event_type_filter
+        )
+        
+        total_records = get_audit_events_count(
+            username=username_filter,
+            event_type=event_type_filter
+        )
+        
+        total_pages = max(1, (total_records + EVENTS_PER_PAGE - 1) // EVENTS_PER_PAGE)
+        current_page = (current_offset // EVENTS_PER_PAGE) + 1
+
+        # Summary Metrics
+        m1, m2, m3 = st.columns(3)
+        m1.metric("📋 Total Log Entries", total_records)
+        m2.metric("🏷️ Active Filter", selected_event_type or "All")
+        m3.metric("📑 Page", f"{current_page} / {total_pages}")
+
+        st.divider()
+
+        # Display Data Table
+        if logs:
+            df = pd.DataFrame(logs)
+            # ... [existing dataframe formatting] ...
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+            # Pagination Controls (Issue #2732)
+            nav_col1, nav_col2, nav_col3 = st.columns([1, 2, 1])
+            
+            with nav_col1:
+                if st.button(
+                    "← Previous Page",
+                    disabled=(current_offset == 0),
+                    key="audit_prev_page_btn",
+                    use_container_width=True
+                ):
+                    st.session_state.audit_page_offset = max(0, current_offset - EVENTS_PER_PAGE)
+                    st.rerun()
+
+            with nav_col2:
+                st.caption(
+                    f"Showing {current_offset + 1} - {min(current_offset + EVENTS_PER_PAGE, total_records)} of {total_records} logs"
+                )
+
+            with nav_col3:
+                if st.button(
+                    "Next Page →",
+                    disabled=(current_offset + EVENTS_PER_PAGE >= total_records),
+                    key="audit_next_page_btn",
+                    use_container_width=True
+                ):
+                    st.session_state.audit_page_offset = current_offset + EVENTS_PER_PAGE
+                    st.rerun()
+        else:
+            st.info("ℹ️ No security audit log records found matching the specified filters.")
+            
+        # Reset offset when filters change
+        if "last_audit_filter" not in st.session_state:
+            st.session_state.last_audit_filter = (username_filter, event_type_filter)
+            
+        current_filter = (username_filter, event_type_filter)
+        if st.session_state.last_audit_filter != current_filter:
+            st.session_state.audit_page_offset = 0
+            st.session_state.last_audit_filter = current_filter
+            st.rerun()
+
     # ========== USE THE NEW MODULE ==========
     render_audit_view(user_role, lang_code)
     

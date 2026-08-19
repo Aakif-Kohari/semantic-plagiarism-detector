@@ -5,7 +5,7 @@ import os
 import sqlite3
 from datetime import datetime, timezone
 
-from fastapi import Depends, FastAPI, Request, status
+from fastapi import Depends, FastAPI, Query, Request, Security, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -16,6 +16,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.api.dependencies import (
     custom_rate_limit_exceeded_handler,
+    get_current_user,
     limiter,
 )
 from src.api.middleware import verify_bearer_token
@@ -288,4 +289,126 @@ app.add_exception_handler(RateLimitExceeded, custom_rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
 # ── Register Sub-Routers ──────────────────────────────────────────────────────
+app.include_router(auth_router)
+app.include_router(analysis_router)
+app.include_router(corpus_router)
+app.include_router(admin_router)
+
+# ── Audit Events Endpoint (Issue #2732) ───────────────────────────────────────
+
+@app.get(
+    "/api/v1/audit/events",
+    tags=["System Administration"],
+    summary="Get paginated security audit events",
+    status_code=status.HTTP_200_OK,
+)
+def get_audit_events_api(
+    limit: int = Query(default=20, ge=1, le=100, description="Max events per page"),
+    offset: int = Query(default=0, ge=0, description="Number of events to skip (pagination)"),
+    event_type: str | None = Query(default=None, description="Filter by event type"),
+    username: str | None = Query(default=None, description="Filter by username"),
+    _user: dict = Security(get_current_user, scopes=["admin"])
+):
+    """Retrieve paginated security audit events.
+    
+    Supports pagination via limit and offset parameters (Issue #2732).
+    """
+    from src.db.auth import get_security_audit_logs, get_security_audit_log_count
+    
+    events = get_security_audit_logs(
+        limit=limit,
+        offset=offset,
+        event_type=event_type,
+        username=username
+    )
+    
+    total_count = get_security_audit_log_count(
+        event_type=event_type,
+        username=username
+    )
+    
+    return {
+        "events": events,
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "total_count": total_count,
+            "total_pages": (total_count + limit - 1) // limit if limit > 0 else 0
+        }
+    }
+
+"""src/api/app.py - FastAPI REST API for LMS integration."""
+
+import logging
+import os
+from datetime import datetime, timezone
+
+from fastapi import Depends, FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from src.api.dependencies import (
+    custom_rate_limit_exceeded_handler,
+    limiter,
+)
+from src.api.middleware import verify_bearer_token
+from src.api.routers import (
+    admin_router,
+    analysis_router,
+    auth_router,
+    corpus_router,
+)
+from src.utils.tracing import get_tracer
+from src.core.app_config import get_api_support_contact
+
+# Re-exports for backward compatibility with existing tests and scripts
+
+logger = logging.getLogger(__name__)
+
+# ── API Initialization ────────────────────────────────────────────────────────
+
+@app.get(
+    "/api/v1/audit/events",
+    tags=["System Administration"],
+    summary="Get paginated security audit events",
+    status_code=status.HTTP_200_OK,
+)
+def get_audit_events_api(
+    limit: int = Query(default=20, ge=1, le=100, description="Max events per page"),
+    offset: int = Query(default=0, ge=0, description="Number of events to skip (pagination)"),
+    event_type: str | None = Query(default=None, description="Filter by event type"),
+    username: str | None = Query(default=None, description="Filter by username"),
+    _user: dict = Security(get_current_user, scopes=["admin"])
+):
+    """Retrieve paginated security audit events.
+    
+    Supports pagination via limit and offset parameters (Issue #2732).
+    """
+    from src.db.auth import get_security_audit_logs, get_security_audit_log_count
+    
+    events = get_security_audit_logs(
+        limit=limit,
+        offset=offset,
+        event_type=event_type,
+        username=username
+    )
+    
+    total_count = get_security_audit_log_count(
+        event_type=event_type,
+        username=username
+    )
+    
+    return {
+        "events": events,
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "total_count": total_count,
+            "total_pages": (total_count + limit - 1) // limit if limit > 0 else 0
+        }
+    }
 app.include_router(admin_router)

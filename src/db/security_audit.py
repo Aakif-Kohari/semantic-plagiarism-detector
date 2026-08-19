@@ -1,14 +1,14 @@
 """
 src/db/security_audit.py
 ------------------------
-Security audit logging and account lockout mechanism.
+Security audit logging, account lockout mechanism, and audit-event pagination.
 
-Tracks failed login attempts and provides utilities to enforce
-account lockout policies to prevent brute-force attacks (Issue #2704).
+Tracks security-related events, provides utilities to enforce account lockout
+policies, and supports paginated retrieval of audit events.
 """
 
-import sqlite3
 import logging
+import sqlite3
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -38,7 +38,6 @@ def log_security_event(
 
     try:
         with sqlite3.connect(db_path) as conn:
-            # Ensure table exists
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS security_audit_log (
@@ -48,12 +47,14 @@ def log_security_event(
                     username TEXT,
                     details TEXT
                 )
-            """
+                """
             )
 
             conn.execute(
                 """
-                INSERT INTO security_audit_log (timestamp, event_type, username, details)
+                INSERT INTO security_audit_log (
+                    timestamp, event_type, username, details
+                )
                 VALUES (?, ?, ?, ?)
                 """,
                 (timestamp, event_type, username, details),
@@ -65,22 +66,19 @@ def log_security_event(
 
 
 def count_recent_failed_logins(
-    username: str, window_minutes: int = 15, db_path: Optional[str] = None
+    username: str,
+    window_minutes: int = 15,
+    db_path: Optional[str] = None,
 ) -> int:
-    """Count the number of failed login attempts for a user within a time window.
-
-    Queries the security_audit_log table for events of type 'login_failed'
-    associated with the given username that occurred within the last
-    `window_minutes`. This is used to enforce account lockout policies
-    and prevent brute-force attacks.
+    """Count failed login attempts for a user within a time window.
 
     Args:
         username: The username to check for failed attempts.
-        window_minutes: The time window in minutes to look back. Defaults to 15.
-        db_path: Optional path to the SQLite database. If None, uses the default auth DB.
+        window_minutes: Time window in minutes. Defaults to 15.
+        db_path: Optional path to the SQLite database.
 
     Returns:
-        The number of failed login attempts within the specified window.
+        Number of failed login attempts within the specified window.
         Returns 0 if the username is empty or an error occurs.
     """
     if not username or not isinstance(username, str):
@@ -91,26 +89,139 @@ def count_recent_failed_logins(
 
         db_path = str(get_auth_db_path())
 
-    cutoff_time = (datetime.utcnow() - timedelta(minutes=window_minutes)).isoformat()
+    cutoff_time = (
+        datetime.utcnow() - timedelta(minutes=window_minutes)
+    ).isoformat()
 
     try:
         with sqlite3.connect(db_path) as conn:
             cursor = conn.execute(
                 """
-                SELECT COUNT(*) 
-                FROM security_audit_log 
-                WHERE event_type = 'login_failed' 
-                  AND username = ? 
+                SELECT COUNT(*)
+                FROM security_audit_log
+                WHERE event_type = 'login_failed'
+                  AND username = ?
                   AND timestamp >= ?
                 """,
                 (username.strip().lower(), cutoff_time),
             )
+
             result = cursor.fetchone()
             return result[0] if result else 0
 
     except sqlite3.Error as e:
-        logger.error("Failed to count recent failed logins for %s: %s", username, e)
-        # Fail open: if we can't read the audit log, don't lock the user out
-        # but log the error for investigation. In high-security environments,
-        # this might be changed to fail closed (return infinity).
+        logger.error(
+            "Failed to count recent failed logins for %s: %s",
+            username,
+            e,
+        )
+        # Fail open: if we can't read the audit log, don't lock the user out.
+        return 0
+
+
+def get_recent_audit_events(
+    limit: int = 20,
+    offset: int = 0,
+    event_type: str | None = None,
+    username: str | None = None,
+    db_path: str | None = None,
+) -> list[dict]:
+    """Fetch recent security audit events with pagination support.
+
+    Retrieves audit log entries ordered by timestamp descending (most recent
+    first). Supports filtering by event type and username, as well as
+    pagination via limit and offset parameters.
+
+    Args:
+        limit: Maximum number of events to return. Defaults to 20.
+        offset: Number of events to skip. Defaults to 0.
+        event_type: Optional filter for a specific event type.
+        username: Optional filter for a specific username.
+        db_path: Optional path to the SQLite database.
+
+    Returns:
+        List of dictionaries representing audit events.
+    """
+    if limit < 1:
+        limit = 20
+
+    if offset < 0:
+        offset = 0
+
+    if db_path is None:
+        from src.db.auth import get_auth_db_path
+
+        db_path = str(get_auth_db_path())
+
+    query = """
+        SELECT id, timestamp, event_type, username, details
+        FROM security_audit_log
+        WHERE 1=1
+    """
+    params: list = []
+
+    if event_type:
+        query += " AND event_type = ?"
+        params.append(event_type)
+
+    if username:
+        query += " AND username = ?"
+        params.append(username.strip().lower())
+
+    query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
+
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(query, params)
+            return [dict(row) for row in cursor.fetchall()]
+
+    except sqlite3.Error as e:
+        logger.error("Failed to fetch audit events: %s", e)
+        return []
+
+
+def get_audit_events_count(
+    event_type: str | None = None,
+    username: str | None = None,
+    db_path: str | None = None,
+) -> int:
+    """Get the total count of audit events matching the filters.
+
+    Used in conjunction with get_recent_audit_events to calculate total
+    pages for paginated UIs.
+
+    Args:
+        event_type: Optional filter for a specific event type.
+        username: Optional filter for a specific username.
+        db_path: Optional path to the SQLite database.
+
+    Returns:
+        Total number of matching audit events.
+    """
+    if db_path is None:
+        from src.db.auth import get_auth_db_path
+
+        db_path = str(get_auth_db_path())
+
+    query = "SELECT COUNT(*) FROM security_audit_log WHERE 1=1"
+    params: list = []
+
+    if event_type:
+        query += " AND event_type = ?"
+        params.append(event_type)
+
+    if username:
+        query += " AND username = ?"
+        params.append(username.strip().lower())
+
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.execute(query, params)
+            result = cursor.fetchone()
+            return result[0] if result else 0
+
+    except sqlite3.Error as e:
+        logger.error("Failed to count audit events: %s", e)
         return 0
