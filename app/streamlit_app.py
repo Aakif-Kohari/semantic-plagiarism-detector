@@ -21,6 +21,7 @@ import numpy as np
 import pandas as pd
 import psutil
 import streamlit as st
+from src.errors import UI_SESSION_EXPIRED, EmptyDocumentError
 
 # 1. Fix Streamlit import paths FIRST so 'app' can be found
 FILE_PATH = Path(__file__).resolve()
@@ -3296,10 +3297,36 @@ if user_role == "admin":
 
         progress_bar = st.progress(0, text="Preparing files…")
         raw_texts = {}
+        failed_documents = []
+        
         for i, (name, data) in enumerate(file_bytes_dict.items()):
-            raw_texts[name] = extract_text(
-                _io.BytesIO(data), name, ocr_language=ocr_language, ocr_dpi=ocr_dpi
-            )
+            try:
+                extracted = extract_text(
+                    _io.BytesIO(data), name, ocr_language=ocr_language, ocr_dpi=ocr_dpi
+                )
+                raw_texts[name] = extracted
+                
+            except EmptyDocumentError as ede:
+                # Issue #2724: Catch empty documents and log them as warnings
+                # instead of crashing the entire analysis pipeline
+                logger.warning("Skipping empty document %s: %s", name, ede)
+                failed_documents.append({
+                    "filename": name,
+                    "error": str(ede),
+                    "type": "empty_document"
+                })
+                st.warning(f"⚠️ **{name}**: {ede}")
+                
+            except Exception as e:
+                # Catch other extraction errors
+                logger.error("Failed to extract text from %s: %s", name, e)
+                failed_documents.append({
+                    "filename": name,
+                    "error": str(e),
+                    "type": "extraction_error"
+                })
+                st.error(f"❌ **{name}**: Failed to extract text. {e}")
+                
             fraction = (i + 1) / file_count
             remaining_bytes = total_bytes * (file_count - i - 1) // max(1, file_count)
             remaining_est = estimate_processing_seconds(remaining_bytes)
@@ -3312,6 +3339,18 @@ if user_role == "admin":
                 fraction,
                 text=f"Processing file {i + 1} of {file_count} (ETA: {eta})",
             )
+
+        # Filter out failed documents from further processing
+        if failed_documents:
+            st.session_state["failed_documents"] = failed_documents
+            st.info(f"Skipped {len(failed_documents)} file(s) due to extraction errors.")
+            
+        # Only proceed if we have enough valid texts
+        if len(raw_texts) < 2:
+            st.error("Not enough valid documents remaining for comparison after filtering errors.")
+            st.session_state[SessionKeys.SCANNING] = False
+            progress_bar.empty()
+            st.stop()
 
         raw_texts_tuple = tuple(sorted(raw_texts.items()))
         (
