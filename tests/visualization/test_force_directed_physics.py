@@ -50,8 +50,12 @@ def test_force_directed_physics_spring_k_scaling_impact():
     """Verify varying spring_k parameter significantly alters node positions."""
     df = _create_sample_similarity_matrix(6)
 
-    data_small_k = build_network_data(df, threshold=0.60, spring_k=0.01, show_isolated=True)
-    data_large_k = build_network_data(df, threshold=0.60, spring_k=1.50, show_isolated=True)
+    data_small_k = build_network_data(
+        df, threshold=0.60, spring_k=0.01, show_isolated=True
+    )
+    data_large_k = build_network_data(
+        df, threshold=0.60, spring_k=1.50, show_isolated=True
+    )
 
     pos_small = data_small_k["pos"]
     pos_large = data_large_k["pos"]
@@ -67,8 +71,12 @@ def test_force_directed_physics_iterations_convergence():
     """Verify layout positioning differs between 1 iteration and 100 iterations."""
     df = _create_sample_similarity_matrix(6)
 
-    data_1_iter = build_network_data(df, threshold=0.60, iterations=1, show_isolated=True)
-    data_100_iter = build_network_data(df, threshold=0.60, iterations=100, show_isolated=True)
+    data_1_iter = build_network_data(
+        df, threshold=0.60, iterations=1, show_isolated=True
+    )
+    data_100_iter = build_network_data(
+        df, threshold=0.60, iterations=100, show_isolated=True
+    )
 
     pos_1 = data_1_iter["pos"]
     pos_100 = data_100_iter["pos"]
@@ -82,13 +90,20 @@ def test_force_directed_physics_repulsion_factor():
     """Verify repulsion factor changes node separation distances."""
     df = _create_sample_similarity_matrix(5)
 
-    data_rep1 = build_network_data(df, threshold=0.60, repulsion=1.0, show_isolated=True)
-    data_rep5 = build_network_data(df, threshold=0.60, repulsion=5.0, show_isolated=True)
+    data_rep1 = build_network_data(
+        df, threshold=0.60, repulsion=1.0, show_isolated=True
+    )
+    data_rep5 = build_network_data(
+        df, threshold=0.60, repulsion=5.0, show_isolated=True
+    )
 
     pos_rep1 = data_rep1["pos"]
     pos_rep5 = data_rep5["pos"]
 
-    assert pos_rep1["doc_1"][0] != pos_rep5["doc_1"][0] or pos_rep1["doc_1"][1] != pos_rep5["doc_1"][1]
+    assert (
+        pos_rep1["doc_1"][0] != pos_rep5["doc_1"][0]
+        or pos_rep1["doc_1"][1] != pos_rep5["doc_1"][1]
+    )
 
 
 def test_plot_plagiarism_network_graph_exposes_physics_parameters():
@@ -111,7 +126,9 @@ def test_plot_plagiarism_network_graph_exposes_physics_parameters():
 def test_calculate_force_directed_layout_standalone_function():
     """Verify calculate_force_directed_layout operates directly on NetworkX graphs."""
     G = nx.complete_graph(5)
-    pos = calculate_force_directed_layout(G, spring_k=0.15, iterations=50, repulsion=1.0)
+    pos = calculate_force_directed_layout(
+        G, spring_k=0.15, iterations=50, repulsion=1.0
+    )
 
     assert len(pos) == 5
     for i in range(5):
@@ -119,11 +136,27 @@ def test_calculate_force_directed_layout_standalone_function():
         assert len(pos[i]) == 2
 
 
+def test_force_directed_layout_returns_valid_coords():
+    """Verify force-directed layout returns finite coordinates for disconnected nodes."""
+    G = nx.Graph()
+    G.add_nodes_from(range(5))
+
+    pos = calculate_force_directed_layout(G)
+
+    assert len(pos) == 5
+    for coord in pos.values():
+        assert len(coord) == 2
+        assert np.isfinite(coord[0])
+        assert np.isfinite(coord[1])
+
+
 @pytest.mark.parametrize("invalid_k", [-0.5, 0.0, None])
 def test_force_directed_physics_fallback_invalid_spring_k(invalid_k):
     """Verify invalid or zero spring_k falls back safely to default heuristic calculation."""
     df = _create_sample_similarity_matrix(4)
-    data = build_network_data(df, threshold=0.60, spring_k=invalid_k, show_isolated=True)
+    data = build_network_data(
+        df, threshold=0.60, spring_k=invalid_k, show_isolated=True
+    )
 
     assert len(data["pos"]) == 4
 
@@ -132,7 +165,9 @@ def test_force_directed_physics_fallback_invalid_spring_k(invalid_k):
 def test_force_directed_physics_fallback_invalid_iterations(invalid_iter):
     """Verify non-positive iteration parameters fall back safely to minimum 1 iteration."""
     df = _create_sample_similarity_matrix(4)
-    data = build_network_data(df, threshold=0.60, iterations=invalid_iter, show_isolated=True)
+    data = build_network_data(
+        df, threshold=0.60, iterations=invalid_iter, show_isolated=True
+    )
 
     assert len(data["pos"]) == 4
 

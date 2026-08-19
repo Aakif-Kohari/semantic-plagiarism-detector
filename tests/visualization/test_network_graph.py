@@ -1,3 +1,5 @@
+import xml.etree.ElementTree as ET
+
 """
 tests/visualization/test_network_graph.py
 -------------------------------------------
@@ -54,6 +56,11 @@ def test_export_network_adjacency_csv_empty_graph():
     assert csv_output.strip() == "Source,Target,Weight"
 
 
+from src.visualization.network_graph import (
+    NETWORK_GRAPH_CONFIG,
+)
+
+
 def test_build_network_data_structure():
     """Verify build_network_data returns expected keys, NetworkX graph, and Plotly traces."""
     data = {
@@ -76,6 +83,22 @@ def test_build_network_data_structure():
     assert len(net_data["graph"].nodes()) == 3
     assert len(net_data["graph"].edges()) == 1
     assert len(net_data["shapes"]) == 1
+
+
+def test_build_network_data_hides_isolated_nodes():
+    """Verify show_isolated=False removes unconnected/isolated nodes such as doc3."""
+    data = {
+        "doc1": [1.0, 0.85, 0.20],
+        "doc2": [0.85, 1.0, 0.10],
+        "doc3": [0.20, 0.10, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2", "doc3"])
+
+    net_data = build_network_data(df, threshold=0.75, show_isolated=False)
+
+    assert len(net_data["graph"].nodes()) == 2
+    assert "doc3" not in net_data["graph"].nodes()
+    assert set(net_data["graph"].nodes()) == {"doc1", "doc2"}
 
 
 def test_build_network_data_with_theme_colors():
@@ -134,6 +157,11 @@ def test_build_network_data_node_color_severity():
     assert net_data["node_trace"].marker.color[1] == "#ff0000"
     # doc_success has max_score=0.8 -> #ffff00
     assert net_data["node_trace"].marker.color[2] == "#ffff00"
+
+
+def test_network_graph_config_enables_scroll_zoom():
+    """Verify Plotly network graph configuration enables scroll zoom."""
+    assert NETWORK_GRAPH_CONFIG["scrollZoom"] is True
 
 
 def test_render_network_plotly_construction():
@@ -678,7 +706,7 @@ def test_build_network_data_empty_clustering():
 
 
 def test_export_network_centrality_csv():
-    """Verify export_network_centrality_csv computes degree centrality and returns correct CSV format."""
+    """Verify degree centrality and PageRank are exported correctly."""
     graph = nx.Graph()
     graph.add_edge("doc1", "doc2", similarity=0.9)
     graph.add_edge("doc1", "doc3", similarity=0.8)
@@ -686,18 +714,119 @@ def test_export_network_centrality_csv():
     csv_str = export_network_centrality_csv(graph)
 
     lines = csv_str.strip().splitlines()
-    assert lines[0] == "Document_Name,Degree,Centrality_Score"
+    assert lines[0] == (
+        "Document_Name,Degree,Centrality_Score,PageRank_Score"
+    )
     assert len(lines) == 4  # Header + 3 nodes
 
-    # Parse CSV lines to verify content
     rows = [line.split(",") for line in lines[1:]]
-    row_dict = {row[0]: (int(row[1]), float(row[2])) for row in rows}
+    row_dict = {
+        row[0]: (int(row[1]), float(row[2]), float(row[3]))
+        for row in rows
+    }
 
     assert "doc1" in row_dict
-    assert row_dict["doc1"][0] == 2  # Degree 2
-    assert (
-        row_dict["doc1"][1] == 1.0
-    )  # Centrality score for connected graph of 3 nodes: 2 / (3 - 1) = 1.0
+    assert row_dict["doc1"][0] == 2
+    assert row_dict["doc1"][1] == 1.0
+    assert 0.0 < row_dict["doc1"][2] < 1.0
+
+
+def test_export_network_centrality_csv_star_graph_center_ranks_highest():
+    """Verify the center of a five-leaf star has the highest degree and PageRank."""
+    graph = nx.star_graph(4)
+    nx.relabel_nodes(
+        graph,
+        {
+            0: "center",
+            1: "leaf1",
+            2: "leaf2",
+            3: "leaf3",
+            4: "leaf4",
+        },
+        copy=False,
+    )
+
+    csv_str = export_network_centrality_csv(graph)
+    lines = csv_str.strip().splitlines()
+
+    assert lines[0] == (
+        "Document_Name,Degree,Centrality_Score,PageRank_Score"
+    )
+
+    rows = [line.split(",") for line in lines[1:]]
+    values = {
+        row[0]: {
+            "degree": int(row[1]),
+            "centrality": float(row[2]),
+            "pagerank": float(row[3]),
+        }
+        for row in rows
+    }
+
+    center = values["center"]
+
+    assert center["degree"] == 4
+    assert center["centrality"] == 1.0
+    assert center["pagerank"] == max(
+        item["pagerank"] for item in values.values()
+    )
+    assert center["pagerank"] > values["leaf1"]["pagerank"]
+
+
+# ==============================================================================
+# Max Connected Nodes Filter (Issue #1797)
+# ==============================================================================
+
+
+def _star_similarity_matrix(n: int = 6) -> pd.DataFrame:
+    """Star graph: center doc0 linked to all others; a few leaf-leaf edges raise mid-tier degrees."""
+    labels = [f"doc{i}" for i in range(n)]
+    matrix = numpy.eye(n, dtype=float)
+    for i in range(1, n):
+        matrix[0, i] = matrix[i, 0] = 0.9
+    matrix[1, 2] = matrix[2, 1] = 0.85
+    matrix[1, 3] = matrix[3, 1] = 0.85
+    return pd.DataFrame(matrix, index=labels, columns=labels)
+
+
+def test_build_network_data_keeps_top_max_nodes_by_degree():
+    """When node count exceeds max_nodes, retain only the highest-degree documents."""
+    df = _star_similarity_matrix(6)
+
+    net_data = build_network_data(df, threshold=0.75, show_isolated=True, max_nodes=3)
+
+    assert len(net_data["graph"].nodes()) == 3
+    assert net_data["hidden_nodes"] == 3
+    # doc0 (deg 5) and doc1 (deg 3) must be kept; third slot is the next-highest degree
+    assert "doc0" in net_data["graph"].nodes()
+    assert "doc1" in net_data["graph"].nodes()
+
+
+def test_build_network_data_no_filter_when_under_max_nodes():
+    """Graphs at or below max_nodes keep every node and report zero hidden."""
+    df = _three_doc_matrix()
+
+    net_data = build_network_data(df, threshold=0.75, show_isolated=True, max_nodes=50)
+
+    assert len(net_data["graph"].nodes()) == 3
+    assert net_data["hidden_nodes"] == 0
+
+
+def test_plot_plagiarism_network_graph_max_nodes_caption():
+    """plot_plagiarism_network_graph accepts max_nodes and captions hidden node count."""
+    df = _star_similarity_matrix(6)
+
+    fig = plot_plagiarism_network_graph(
+        similarity_df=df,
+        threshold=0.75,
+        show_isolated=True,
+        max_nodes=3,
+    )
+
+    assert isinstance(fig, go.Figure)
+    assert len(fig.data[1].customdata) == 3
+    caption_texts = [ann.text for ann in (fig.layout.annotations or [])]
+    assert "3 nodes hidden" in caption_texts
 
 
 # ─── Tests for get_cluster_count (Issue #1793) ────────────────────────────────
@@ -863,3 +992,216 @@ class TestNetworkExport:
         assert "doc1" in lines[1]
         assert "doc2" in lines[1]
         assert "0.8" in lines[1]
+
+
+# ==============================================================================
+# Max Connected Nodes Filter Tests (Issue #1278)
+# ==============================================================================
+
+
+def _max_nodes_matrix():
+    labels = ["hub", "mid", "leaf1", "leaf2", "isolated"]
+    return pd.DataFrame(
+        [
+            [1.0, 0.9, 0.9, 0.9, 0.1],
+            [0.9, 1.0, 0.8, 0.1, 0.1],
+            [0.9, 0.8, 1.0, 0.1, 0.1],
+            [0.9, 0.1, 0.1, 1.0, 0.1],
+            [0.1, 0.1, 0.1, 0.1, 1.0],
+        ],
+        index=labels,
+        columns=labels,
+    )
+
+
+def test_build_network_data_keeps_top_highest_degree_nodes():
+    data = build_network_data(
+        _max_nodes_matrix(),
+        threshold=0.75,
+        show_isolated=True,
+        max_nodes=3,
+    )
+    assert set(data["graph"].nodes()) == {"hub", "mid", "leaf1"}
+    assert data["hidden_node_count"] == 2
+
+
+def test_max_nodes_tie_breaking_follows_original_order():
+    labels = ["A", "B", "C", "D"]
+    df = pd.DataFrame(
+        [
+            [1.0, 0.9, 0.9, 0.9],
+            [0.9, 1.0, 0.1, 0.1],
+            [0.9, 0.1, 1.0, 0.1],
+            [0.9, 0.1, 0.1, 1.0],
+        ],
+        index=labels,
+        columns=labels,
+    )
+    data = build_network_data(
+        df,
+        threshold=0.75,
+        show_isolated=True,
+        max_nodes=2,
+    )
+    assert list(data["graph"].nodes()) == ["A", "B"]
+    assert data["hidden_node_count"] == 2
+
+
+def test_max_nodes_does_not_filter_small_graph():
+    data = build_network_data(
+        _max_nodes_matrix(),
+        threshold=0.75,
+        show_isolated=True,
+        max_nodes=10,
+    )
+    assert len(data["graph"]) == 5
+    assert data["hidden_node_count"] == 0
+
+
+@pytest.mark.parametrize("max_nodes", [0, -1])
+def test_max_nodes_rejects_non_positive_values(max_nodes):
+    with pytest.raises(ValueError, match="max_nodes must be at least 1"):
+        build_network_data(
+            _max_nodes_matrix(),
+            show_isolated=True,
+            max_nodes=max_nodes,
+        )
+
+
+@pytest.mark.parametrize("max_nodes", [True, 1.5, "50", None])
+def test_max_nodes_rejects_non_integer_values(max_nodes):
+    with pytest.raises(TypeError, match="max_nodes must be an integer"):
+        build_network_data(
+            _max_nodes_matrix(),
+            show_isolated=True,
+            max_nodes=max_nodes,
+        )
+
+
+def test_render_network_plotly_displays_hidden_node_caption():
+    data = build_network_data(
+        _max_nodes_matrix(),
+        threshold=0.75,
+        show_isolated=True,
+        max_nodes=3,
+    )
+    fig = render_network_plotly(data)
+    assert len(fig.layout.annotations) == 1
+    assert (
+        fig.layout.annotations[0].text == "2 nodes hidden to keep the network readable."
+    )
+
+
+def test_plot_plagiarism_network_graph_accepts_max_nodes():
+    fig = plot_plagiarism_network_graph(
+        _max_nodes_matrix(),
+        threshold=0.75,
+        show_isolated=True,
+        max_nodes=2,
+    )
+    assert len(fig.data[1].customdata) == 2
+    assert "3 nodes hidden" in fig.layout.annotations[0].text
+
+def test_get_cluster_count_returns_two_for_two_disjoint_pairs():
+    """Verify get_cluster_count counts connected components correctly."""
+    graph = nx.Graph()
+    graph.add_edges_from(
+        [
+            ("A", "B"),
+            ("C", "D"),
+        ]
+    )
+
+    assert get_cluster_count(graph) == 2
+def test_export_network_to_gexf_valid_xml():
+    """Verify GEXF export returns well-formed XML with a GEXF root."""
+    data = {
+        "doc1": [1.0, 0.95],
+        "doc2": [0.95, 1.0],
+    }
+    df = pd.DataFrame(data, index=["doc1", "doc2"])
+
+    gexf_bytes = export_network_to_gexf_bytes(
+        df,
+        threshold=0.75,
+    )
+
+    assert isinstance(gexf_bytes, bytes)
+    assert gexf_bytes
+
+    root = ET.fromstring(gexf_bytes)
+
+    assert root.tag.endswith("gexf")
+
+
+
+
+# ── Issue #2350: Empty state rendering for plot_plagiarism_network_graph ────
+
+
+def test_issue_2350_plot_plagiarism_network_graph_empty_dataframe():
+    """plot_plagiarism_network_graph must return a go.Figure and not crash
+    when given a completely empty DataFrame (Issue #2350).
+    """
+    empty_df = pd.DataFrame()
+
+    fig = plot_plagiarism_network_graph(empty_df, threshold=0.75)
+
+    assert isinstance(fig, go.Figure)
+    assert len(fig.layout.shapes) == 0
+
+
+def test_issue_2350_plot_plagiarism_network_graph_empty_matrix():
+    """plot_plagiarism_network_graph must return a go.Figure when given an
+    empty NxN similarity matrix (0 rows, 0 columns).
+    """
+    empty_matrix = pd.DataFrame()
+
+    fig = plot_plagiarism_network_graph(similarity_df=empty_matrix)
+
+    assert isinstance(fig, go.Figure)
+
+
+def test_issue_2350_plot_plagiarism_network_graph_no_nodes():
+    """plot_plagiarism_network_graph must return a go.Figure when the
+    DataFrame has no columns (no documents).
+    """
+    df = pd.DataFrame({"col": []})
+
+    fig = plot_plagiarism_network_graph(df)
+
+    assert isinstance(fig, go.Figure)
+
+
+def test_issue_2350_empty_state_has_fallback_annotation():
+    """When the graph is empty, the figure must include a fallback
+    annotation message (Issue #2350).
+    """
+    empty_df = pd.DataFrame()
+
+    fig = plot_plagiarism_network_graph(empty_df)
+
+    assert isinstance(fig, go.Figure)
+    assert len(fig.layout.annotations) >= 1
+    assert any(
+        "No documents" in ann.text or "No data" in ann.text
+        for ann in fig.layout.annotations
+    ), f"Expected fallback annotation, got: {[ann.text for ann in fig.layout.annotations]}"
+
+
+def test_issue_2350_empty_state_does_not_raise():
+    """Passing an empty DataFrame to plot_plagiarism_network_graph must
+    not raise any exception (Issue #2350).
+    """
+    empty_df = pd.DataFrame()
+
+    try:
+        fig = plot_plagiarism_network_graph(empty_df)
+        assert isinstance(fig, go.Figure)
+    except Exception as exc:
+        pytest.fail(
+            f"plot_plagiarism_network_graph raised an exception on empty input: {exc}"
+        )
+
+
+

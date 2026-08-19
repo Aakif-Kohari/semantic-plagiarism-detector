@@ -7,6 +7,7 @@ from pathlib import Path
 SRC_DIR = Path(__file__).resolve().parent.parent / "src"
 COVERAGE_THRESHOLD = 85
 
+
 def find_python_files():
     """Return all Python source files under src/."""
 
@@ -18,6 +19,7 @@ def find_python_files():
         python_files.append(file)
 
     return python_files
+
 
 def check_file(file_path):
     """Inspect a Python file and return docstring statistics."""
@@ -66,6 +68,7 @@ def check_file(file_path):
 
     return total_functions, documented_functions, missing_functions
 
+
 def calculate_coverage(total_functions, documented_functions):
     """Calculate docstring coverage percentage."""
 
@@ -73,6 +76,7 @@ def calculate_coverage(total_functions, documented_functions):
         return 100.0
 
     return (documented_functions / total_functions) * 100
+
 
 def main():
     files = find_python_files()
@@ -110,15 +114,13 @@ def main():
             print()
 
     print(f"Docstring coverage: {coverage:.2f}%")
-    print(
-        f"Documented {documented_functions} of {total_functions} public functions."
-    )
+    print(f"Documented {documented_functions} of {total_functions} public functions.")
 
     if coverage >= COVERAGE_THRESHOLD:
         sys.exit(0)
 
     sys.exit(1)
 
+
 if __name__ == "__main__":
     main()
-

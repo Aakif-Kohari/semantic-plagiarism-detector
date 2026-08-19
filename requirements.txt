@@ -25,7 +25,7 @@ networkx>=3.0                    # Plagiarism network graphs
 argon2-cffi>=23.1.0              # Password hashing
 
 # ── Web UI ────────────────────────────────────────────────────────────────────
-streamlit>=1.60.0                # Dashboard framework
+streamlit>=1.61.1                # Dashboard framework
 bcrypt>=4.0.0                    # Password hashing for auth
 pyotp>=2.10.0                     # TOTP generator/verifier for 2FA
 qrcode>=7.4.2                    # Local QR code generator for 2FA setup
@@ -40,18 +40,17 @@ numpy>=2.0.0
 pandas>=2.2.0
 scikit-learn>=1.4.0              # cosine_similarity utility
 openpyxl>=3.1.5                  # Engine for exporting DataFrames to Excel
+networkx>=3.0                     # Plagiarism cluster detection
 
 # ── Visualisation ─────────────────────────────────────────────────────────────
 matplotlib>=3.8.0
 seaborn>=0.13.0
-
-# ── Code Quality ──────────────────────────────────────────────────────────────
-ruff>=0.15.22
-pylint>=3.0.0
+networkx>=3.0                     # Plagiarism cluster detection
 
 # ── Development & Testing ─────────────────────────────────────────────────────
 faker>=20.0.0                   # Fake data generation for mock essay utility (#255)
 hypothesis>=6.100.0             # Property-based testing for filename sanitization (#963)
+jsonschema>=4.20.0               # JSON Schema validation for API error-response tests
 
 # ── Caching & Session Management ───────────────────────────────────────────────
 
@@ -68,6 +67,7 @@ uvicorn>=0.27.0                 # ASGI server implementation
 python-multipart>=0.0.6         # Multipart form parsing for file uploads
 httpx>=0.26.0                   # Async HTTP client for API testing
 
+qrcode>=7.4.2
 # ── Observability & Monitoring ────────────────────────────────────────────────
 prometheus-client>=0.26.0       # Prometheus metrics export for production monitoring
 # ── Code Formatting & Linting ──────────────────────────────────────────────────
@@ -87,3 +87,5 @@ hiredis>=2.3.0                  # C-extension Redis parser for faster RQ job deq
 slowapi
 
 streamlit-autorefresh>=1.0.1
+
+

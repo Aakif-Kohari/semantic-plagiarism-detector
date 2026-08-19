@@ -17,25 +17,26 @@ parameters to ensure deterministic output.
 """
 
 import argparse
-import sys
 import io
+import sys
 from pathlib import Path
+
+from reportlab.lib import colors
+from reportlab.lib.colors import HexColor
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
 # We'll use reportlab directly to generate the PDF
 from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
-from reportlab.lib.colors import HexColor
 from reportlab.platypus import (
-    SimpleDocTemplate,
+    PageBreak,
     Paragraph,
+    SimpleDocTemplate,
     Spacer,
     Table,
     TableStyle,
-    PageBreak,
 )
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
-from reportlab.lib import colors
 
 
 def get_similarity_color(score: float) -> HexColor:
@@ -320,9 +321,11 @@ def main():
     # Check if file exists
     if output_path.exists():
         if not args.force:
-            response = input(
-                f"File '{output_path}' already exists. Overwrite? [y/N]: "
-            ).strip().lower()
+            response = (
+                input(f"File '{output_path}' already exists. Overwrite? [y/N]: ")
+                .strip()
+                .lower()
+            )
             if response != "y":
                 print("Aborted.")
                 sys.exit(0)

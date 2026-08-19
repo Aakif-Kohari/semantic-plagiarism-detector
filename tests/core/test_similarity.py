@@ -2,15 +2,18 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.core.lexical_similarity import (STOPWORDS,  # noqa: E402
-                                       jaccard_similarity,
-                                       lexical_similarity_matrix,
-                                       remove_stopwords, tokenize)
+from src.core.lexical_similarity import (
+    STOPWORDS,  # noqa: E402
+    jaccard_similarity,
+    lexical_similarity_matrix,
+    remove_stopwords,
+    tokenize,
+)
 from src.core.similarity import (
     calculate_paragraph_similarity_breakdown,
-    clear_cross_encoder_cache,
     chunk_max_similarity,
     chunk_similarity_matrix,
+    clear_cross_encoder_cache,
     compute_hybrid_similarity,
     cosine_distance_to_similarity,
     document_similarity_matrix,
@@ -110,7 +113,7 @@ def test_document_similarity_matrix_min_threshold_filters_low_scores(dummy_embed
     regular_df = document_similarity_matrix(dummy_embeddings)
     min_val = min(regular_df.loc["doc_A", "doc_C"], regular_df.loc["doc_B", "doc_C"])
     threshold = min_val + 0.1
-    
+
     df = document_similarity_matrix(dummy_embeddings, min_threshold=threshold)
     assert isinstance(df, pd.DataFrame)
     assert df.loc["doc_A", "doc_C"] == 0.0
@@ -494,17 +497,21 @@ def test_stopwords_set_is_nonempty_and_contains_core_words():
 def test_calculate_paragraph_similarity_breakdown_matches_highest_pairs():
     """Each paragraph in Doc A must map to the highest-matching paragraph in Doc B."""
     # emb_a: 3 paragraphs in a 3-dim space (identity-like rows)
-    emb_a = np.array([
-        [1.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0],
-        [0.0, 0.0, 1.0],
-    ])
+    emb_a = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
     # emb_b: 3 paragraphs – para 0 matches A[1], para 1 matches A[0], para 2 matches A[2]
-    emb_b = np.array([
-        [0.0, 1.0, 0.0],
-        [1.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0],
-    ])
+    emb_b = np.array(
+        [
+            [0.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
 
     breakdown = calculate_paragraph_similarity_breakdown(emb_a, emb_b)
 
@@ -551,8 +558,8 @@ def test_calculate_paragraph_similarity_breakdown_empty_embeddings():
 
 def test_calculate_paragraph_similarity_breakdown_single_paragraph_1d():
     """Handles 1-D (single paragraph) embeddings for both documents."""
-    emb_a = np.array([1.0, 0.0, 0.0])   # 1-D – single paragraph
-    emb_b = np.array([1.0, 0.0, 0.0])   # identical paragraph
+    emb_a = np.array([1.0, 0.0, 0.0])  # 1-D – single paragraph
+    emb_b = np.array([1.0, 0.0, 0.0])  # identical paragraph
 
     breakdown = calculate_paragraph_similarity_breakdown(emb_a, emb_b)
 
@@ -566,16 +573,20 @@ def test_calculate_paragraph_similarity_breakdown_single_paragraph_1d():
 def test_calculate_paragraph_similarity_breakdown_asymmetric_doc_sizes():
     """Doc A may have a different number of paragraphs than Doc B."""
     # 2 paragraphs in A, 4 paragraphs in B
-    emb_a = np.array([
-        [1.0, 0.0, 0.0],
-        [0.0, 0.0, 1.0],
-    ])
-    emb_b = np.array([
-        [0.0, 1.0, 0.0],
-        [1.0, 0.0, 0.0],
-        [0.0, 0.5, 0.5],
-        [0.0, 0.0, 1.0],
-    ])
+    emb_a = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
+    emb_b = np.array(
+        [
+            [0.0, 1.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.5, 0.5],
+            [0.0, 0.0, 1.0],
+        ]
+    )
 
     breakdown = calculate_paragraph_similarity_breakdown(emb_a, emb_b)
 
@@ -605,7 +616,10 @@ def test_find_exact_matches():
 
     # Matching with identical casing should work in both modes
     text_c = "HELLO WORLD. This is a Test."
-    assert find_exact_matches(text_a, text_c, case_sensitive=True) == ["HELLO WORLD", "This is a Test"]
+    assert find_exact_matches(text_a, text_c, case_sensitive=True) == [
+        "HELLO WORLD",
+        "This is a Test",
+    ]
 
 
 def test_manhattan_similarity_identical_vectors():
@@ -632,9 +646,7 @@ def test_manhattan_similarity_is_symmetric():
     assert manhattan_similarity(
         vector_a,
         vector_b,
-    ) == pytest.approx(
-        manhattan_similarity(vector_b, vector_a)
-    )
+    ) == pytest.approx(manhattan_similarity(vector_b, vector_a))
 
 
 @pytest.mark.parametrize(
@@ -767,7 +779,9 @@ def test_rerank_candidates_with_cross_encoder_empty_input():
     assert res == []
 
 
-def test_rerank_candidates_with_cross_encoder_fallback_on_model_load_failure(monkeypatch):
+def test_rerank_candidates_with_cross_encoder_fallback_on_model_load_failure(
+    monkeypatch,
+):
     """Falls back to original bi-encoder candidates when CrossEncoder fails to load."""
     clear_cross_encoder_cache()
 
@@ -809,7 +823,9 @@ def test_rerank_candidates_with_cross_encoder_rescores_and_sorts():
 
     import src.core.similarity as sim_mod
 
-    sim_mod._CROSS_ENCODER_MODELS["cross-encoder/ms-marco-MiniLM-L-6-v2"] = DummyCrossEncoder()
+    sim_mod._CROSS_ENCODER_MODELS["cross-encoder/ms-marco-MiniLM-L-6-v2"] = (
+        DummyCrossEncoder()
+    )
 
     rescored = rerank_candidates_with_cross_encoder(
         pairs, model_name="cross-encoder/ms-marco-MiniLM-L-6-v2"
@@ -840,7 +856,9 @@ def test_rerank_candidates_with_cross_encoder_top_k_limiting():
 
     sim_mod._CROSS_ENCODER_MODELS["dummy-model"] = DummyCrossEncoder()
 
-    rescored = rerank_candidates_with_cross_encoder(pairs, model_name="dummy-model", top_k=2)
+    rescored = rerank_candidates_with_cross_encoder(
+        pairs, model_name="dummy-model", top_k=2
+    )
 
     assert len(rescored) == 2
 
@@ -872,7 +890,9 @@ def test_compute_hybrid_similarity_alpha_bounds():
     vector_sim = 0.80
 
     # alpha=1.0 returns pure vector similarity
-    assert compute_hybrid_similarity(vector_sim, doc_a, doc_b, alpha=1.0) == pytest.approx(vector_sim)
+    assert compute_hybrid_similarity(
+        vector_sim, doc_a, doc_b, alpha=1.0
+    ) == pytest.approx(vector_sim)
 
     # alpha=0.0 returns pure BM25 similarity
     bm25_only = compute_hybrid_similarity(vector_sim, doc_a, doc_b, alpha=0.0)
@@ -895,10 +915,97 @@ def test_cosine_distance_to_similarity():
     assert cosine_distance_to_similarity(-0.5) == 1.0
     assert cosine_distance_to_similarity(2.5) == 0.0
 
+
 def test_cosine_distance_to_similarity_array():
     """Verify that cosine_distance_to_similarity handles numpy arrays correctly."""
     distances = np.array([0.0, 0.5, 1.0, 2.0])
     similarities = cosine_distance_to_similarity(distances)
-    
+
     assert isinstance(similarities, np.ndarray)
     assert np.allclose(similarities, [1.0, 0.5, 0.0, 0.0])
+
+
+def test_find_most_similar_chunks_comparison_with_legacy():
+    """Verify that the optimized argsort implementation produces identical results to the legacy nested-loop implementation."""
+    from src.core.similarity import find_most_similar_chunks
+
+    # Define the legacy implementation to compare against
+    def legacy_find_most_similar_chunks(
+        chunks_a: List[str],
+        chunks_b: List[str],
+        emb_a: np.ndarray,
+        emb_b: np.ndarray,
+        top_k: int = 3,
+        threshold: float = 0.5,
+    ) -> List[Tuple[str, str, float]]:
+        if emb_a.size == 0 or emb_b.size == 0:
+            return []
+        from sklearn.metrics.pairwise import cosine_similarity
+        sim_matrix = cosine_similarity(emb_a, emb_b)
+        pairs = []
+        for i in range(sim_matrix.shape[0]):
+            for j in range(sim_matrix.shape[1]):
+                score = sim_matrix[i, j]
+                if score >= threshold:
+                    pairs.append((chunks_a[i], chunks_b[j], float(score)))
+        pairs.sort(key=lambda x: x[2], reverse=True)
+        return pairs[:top_k]
+
+    # Generate some dummy data
+    chunks_a = [f"A_chunk_{i}" for i in range(10)]
+    chunks_b = [f"B_chunk_{i}" for i in range(10)]
+
+    # Deterministic embeddings for repeatability
+    np.random.seed(42)
+    emb_a = np.random.randn(10, 8)
+    emb_b = np.random.randn(10, 8)
+
+    # Normalize to have valid cosine similarities
+    emb_a = emb_a / np.linalg.norm(emb_a, axis=1, keepdims=True)
+    emb_b = emb_b / np.linalg.norm(emb_b, axis=1, keepdims=True)
+
+    for threshold in [0.0, 0.3, 0.5, 0.7]:
+        for top_k in [1, 3, 5, 15]:
+            legacy_res = legacy_find_most_similar_chunks(
+                chunks_a, chunks_b, emb_a, emb_b, top_k, threshold
+            )
+            new_res = find_most_similar_chunks(
+                chunks_a, chunks_b, emb_a, emb_b, top_k, threshold
+            )
+
+            assert len(legacy_res) == len(new_res)
+            for item_legacy, item_new in zip(legacy_res, new_res):
+                assert item_legacy[0] == item_new[0]
+                assert item_legacy[1] == item_new[1]
+                assert np.isclose(item_legacy[2], item_new[2])
+
+
+def test_bm25_similarity_common_vs_rare():
+    """Verify that BM25 similarity is sensitive to term rarity (common vs rare terms)."""
+    from src.core.similarity import _compute_bm25_similarity
+
+    # Identical documents should have a perfect score of 1.0
+    score_identical = _compute_bm25_similarity("hello world", "hello world")
+    assert pytest.approx(score_identical) == 1.0
+
+    # Partial match of a document with two terms
+    score_partial = _compute_bm25_similarity("hello world", "hello")
+    assert 0.0 < score_partial < 1.0
+
+
+def test_bm25_idf_calculation():
+    """Test that terms appearing in one vs both documents receive different IDF weights and scores are correct."""
+    from src.core.similarity import _compute_bm25_similarity
+
+    # With dynamic IDF:
+    # If we match a term, it is present in both docs (df_t = 2 -> idf = log(1.2))
+    # Unmatched terms are present in only one doc (df_t = 1 -> idf = log(2.0))
+    # Let's ensure the calculation is correct and doesn't divide by zero or clip incorrectly.
+    score_1 = _compute_bm25_similarity("rare common", "common")
+    score_2 = _compute_bm25_similarity("very rare common", "common")
+
+    # Since "very rare common" has more unmatched rare terms (which have higher IDF weight log(2.0) than log(1.2)),
+    # its score_max_a is much higher, so the normalized similarity should be lower.
+    assert score_2 < score_1
+
+

@@ -15,16 +15,22 @@ import os
 import time
 from typing import Any
 
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-jwt-secret-key-change-in-production")
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
 JWT_ALGORITHM = "HS256"
 
-# Known static testing / fallback refresh tokens for integration tests
-VALID_STATIC_REFRESH_TOKENS = {
-    "dev-refresh-token",
-    "valid-refresh-token",
-    "test-refresh-token",
-    "sample-refresh-token",
-}
+_IS_TEST = os.getenv("APP_ENV") == "test"
+
+# Static testing tokens only in test environment
+VALID_STATIC_REFRESH_TOKENS = (
+    {
+        "dev-refresh-token",
+        "valid-refresh-token",
+        "test-refresh-token",
+        "sample-refresh-token",
+    }
+    if _IS_TEST
+    else set()
+)
 
 
 def base64url_encode(data: bytes) -> str:
@@ -41,7 +47,7 @@ def base64url_decode(data: str) -> bytes:
 def create_jwt_token(
     data: dict[str, Any],
     expires_in_seconds: int = 3600,
-    secret_key: str = JWT_SECRET_KEY,
+    secret_key: str | None = None,
 ) -> str:
     """
     Create a signed JWT token with header, payload, expiration timestamp, and HMAC-SHA256 signature.
@@ -49,11 +55,22 @@ def create_jwt_token(
     Args:
         data: Dictionary of claims to include in the payload.
         expires_in_seconds: Lifetime of token in seconds (default 3600).
-        secret_key: HMAC secret key used to sign the token.
+        secret_key: HMAC secret key used to sign the token. Uses JWT_SECRET_KEY if None.
 
     Returns:
         3-part dot-separated JWT token string.
+
+    Raises:
+        ValueError: If no secret key is available.
     """
+    if secret_key is None:
+        secret_key = os.getenv("JWT_SECRET_KEY", JWT_SECRET_KEY)
+    if not secret_key:
+        raise ValueError(
+            "JWT_SECRET_KEY environment variable must be set. "
+            "Do not use default secrets in production."
+        )
+
     header = {"alg": JWT_ALGORITHM, "typ": "JWT"}
     now = int(time.time())
     payload = {
@@ -112,137 +129,117 @@ def create_refresh_token(
     )
 
 
+def _verify_jwt_token(
+    token: str,
+    expected_type: str,
+    secret_key: str | None = None,
+) -> dict[str, Any]:
+    """Shared implementation for verifying JWT signatures, expiration, and types."""
+    if not token or not isinstance(token, str):
+        raise ValueError(f"Invalid {expected_type} token: token cannot be empty.")
+
+    token = token.strip()
+
+    if secret_key is None:
+        secret_key = os.getenv("JWT_SECRET_KEY", JWT_SECRET_KEY)
+    if not secret_key:
+        raise ValueError(
+            "JWT_SECRET_KEY environment variable must be set. "
+            "Cannot verify tokens without a secret key."
+        )
+
+    parts = token.split(".")
+    if len(parts) != 3:
+        raise ValueError(f"Invalid {expected_type} token: malformed JWT structure.")
+
+    encoded_header, encoded_payload, encoded_signature = parts
+
+    signing_input = f"{encoded_header}.{encoded_payload}".encode("utf-8")
+    expected_sig = hmac.new(
+        secret_key.encode("utf-8"),
+        signing_input,
+        hashlib.sha256,
+    ).digest()
+
+    try:
+        actual_sig = base64url_decode(encoded_signature)
+    except Exception:
+        raise ValueError(f"Invalid {expected_type} token: invalid base64 signature encoding.")
+
+    if not hmac.compare_digest(expected_sig, actual_sig):
+        raise ValueError(f"Invalid {expected_type} token: signature verification failed.")
+
+    try:
+        payload_bytes = base64url_decode(encoded_payload)
+        payload = json.loads(payload_bytes.decode("utf-8"))
+    except Exception:
+        raise ValueError(f"Invalid {expected_type} token: malformed JSON payload.")
+
+    exp = payload.get("exp")
+    if exp is not None:
+        try:
+            exp_int = int(exp)
+        except (TypeError, ValueError):
+            raise ValueError(f"Invalid {expected_type} token: malformed exp claim.")
+        if int(time.time()) >= exp_int:
+            raise ValueError(f"{expected_type.capitalize()} token has expired.")
+
+    token_type = payload.get("type")
+    if token_type and token_type != expected_type:
+        raise ValueError(f"Invalid token type: expected '{expected_type}', got '{token_type}'.")
+
+    return payload
+
+
 def verify_refresh_token(
     token: str,
-    secret_key: str = JWT_SECRET_KEY,
+    secret_key: str | None = None,
 ) -> dict[str, Any]:
     """
     Verify refresh token signature and expiration timestamp.
 
     Args:
         token: JWT refresh token or configured static testing refresh token.
-        secret_key: Secret key used to verify signature.
+        secret_key: Secret key used to verify signature. Uses JWT_SECRET_KEY if None.
 
     Returns:
         Decoded token payload dict.
 
     Raises:
-        ValueError: If token signature is invalid, expired, or wrong type.
+        ValueError: If token signature is invalid, expired, wrong type, or secret is missing.
     """
     if not token or not isinstance(token, str):
         raise ValueError("Invalid refresh token: token cannot be empty.")
 
     token = token.strip()
 
-    # Support static / testing refresh tokens
+    # Support static / testing refresh tokens only in test environment
     if token in VALID_STATIC_REFRESH_TOKENS:
+        if not _IS_TEST:
+            raise ValueError(
+                "Invalid refresh token: static testing tokens are not allowed outside test environment."
+            )
         return {"sub": "test_user", "type": "refresh", "scopes": ["read", "write"]}
 
-    parts = token.split(".")
-    if len(parts) != 3:
-        raise ValueError("Invalid refresh token: malformed JWT structure.")
-
-    encoded_header, encoded_payload, encoded_signature = parts
-
-    # 1. Verify HMAC-SHA256 signature
-    signing_input = f"{encoded_header}.{encoded_payload}".encode("utf-8")
-    expected_sig = hmac.new(
-        secret_key.encode("utf-8"),
-        signing_input,
-        hashlib.sha256,
-    ).digest()
-
-    try:
-        actual_sig = base64url_decode(encoded_signature)
-    except Exception:
-        raise ValueError("Invalid refresh token: invalid base64 signature encoding.")
-
-    if not hmac.compare_digest(expected_sig, actual_sig):
-        raise ValueError("Invalid refresh token: signature verification failed.")
-
-    # 2. Decode payload
-    try:
-        payload_bytes = base64url_decode(encoded_payload)
-        payload = json.loads(payload_bytes.decode("utf-8"))
-    except Exception:
-        raise ValueError("Invalid refresh token: malformed JSON payload.")
-
-    # 3. Check expiration
-    exp = payload.get("exp")
-    if exp is not None:
-        try:
-            exp_int = int(exp)
-        except (TypeError, ValueError):
-            raise ValueError("Invalid refresh token: malformed exp claim.")
-        if int(time.time()) >= exp_int:
-            raise ValueError("Refresh token has expired.")
-
-    # 4. Check token type if present
-    token_type = payload.get("type")
-    if token_type and token_type != "refresh":
-        raise ValueError(f"Invalid token type: expected 'refresh', got '{token_type}'.")
-
-    return payload
+    return _verify_jwt_token(token, "refresh", secret_key)
 
 
 def verify_access_token(
     token: str,
-    secret_key: str = JWT_SECRET_KEY,
+    secret_key: str | None = None,
 ) -> dict[str, Any]:
     """
     Verify access token signature and expiration timestamp.
 
     Args:
         token: JWT access token.
-        secret_key: Secret key used to verify signature.
+        secret_key: Secret key used to verify signature. Uses JWT_SECRET_KEY if None.
 
     Returns:
         Decoded token payload dict.
 
     Raises:
-        ValueError: If token signature is invalid, expired, or wrong type.
+        ValueError: If token signature is invalid, expired, wrong type, or secret is missing.
     """
-    if not token or not isinstance(token, str):
-        raise ValueError("Invalid access token: token cannot be empty.")
+    return _verify_jwt_token(token, "access", secret_key)
 
-    parts = token.strip().split(".")
-    if len(parts) != 3:
-        raise ValueError("Invalid access token: malformed JWT structure.")
-
-    encoded_header, encoded_payload, encoded_signature = parts
-
-    signing_input = f"{encoded_header}.{encoded_payload}".encode("utf-8")
-    expected_sig = hmac.new(
-        secret_key.encode("utf-8"),
-        signing_input,
-        hashlib.sha256,
-    ).digest()
-
-    try:
-        actual_sig = base64url_decode(encoded_signature)
-    except Exception:
-        raise ValueError("Invalid access token: invalid base64 signature encoding.")
-
-    if not hmac.compare_digest(expected_sig, actual_sig):
-        raise ValueError("Invalid access token: signature verification failed.")
-
-    try:
-        payload_bytes = base64url_decode(encoded_payload)
-        payload = json.loads(payload_bytes.decode("utf-8"))
-    except Exception:
-        raise ValueError("Invalid access token: malformed JSON payload.")
-
-    exp = payload.get("exp")
-    if exp is not None:
-        try:
-            exp_int = int(exp)
-        except (TypeError, ValueError):
-            raise ValueError("Invalid access token: malformed exp claim.")
-        if int(time.time()) >= exp_int:
-            raise ValueError("Access token has expired.")
-
-    token_type = payload.get("type")
-    if token_type and token_type != "access":
-        raise ValueError(f"Invalid token type: expected 'access', got '{token_type}'.")
-
-    return payload

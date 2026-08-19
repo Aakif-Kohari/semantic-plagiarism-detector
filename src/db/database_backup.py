@@ -51,18 +51,31 @@ from contextlib import closing
 from pathlib import Path
 from typing import Dict, Optional, Union
 
-from src.db.corpus_db import get_corpus_db_path
+from src.db.connection import apply_busy_timeout
+from src.core.app_config import BACKUP_DIR, get_backup_dir
 
 # ── Logger Configuration ───────────────────────────────────────────────────────
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 SQLITE_HEADER = b"SQLite format 3\x00"
-DEFAULT_BACKUP_DIRECTORY = Path("backups")
+DEFAULT_BACKUP_DIRECTORY = get_backup_dir()
+
+# Maintenance operations open their own connections rather than going through
+# src.db.connection.create_connection(), because they need isolation_level=None
+# for VACUUM. They still share the busy-timeout helper so that the timeout a
+# connection is opened with is the timeout SQLite actually enforces.
+OPTIMIZE_TIMEOUT_SECONDS: float = 5.0
+CHECKPOINT_TIMEOUT_SECONDS: float = 10.0
 
 
-class BackupRestoreSecurityError(ValueError):
-    """Raised when a backup fails pre-restore security validation."""
+class BackupRestoreSecurityError(Exception):
+    """Raised when a backup fails pre-restore security validation.
+
+    Inherits from Exception (not ValueError) so callers catching ValueError
+    do not accidentally suppress security errors.
+    """
+
 
 _ALLOWED_DB_DIR = Path(__file__).parent.parent.parent.resolve()
 
@@ -640,9 +653,12 @@ def cleanup_old_backups(
             "bytes_freed": 0,
         }
 
-    db_files = list(backup_path.glob("*.db"))
+    db_files = [
+        f for f in backup_path.iterdir()
+        if f.is_file() and (f.name.endswith(".db") or f.name.endswith(".db.gz"))
+    ]
     if not db_files:
-        logger.info("No .db backup files found to clean up.")
+        logger.info("No backup files (.db or .db.gz) found to clean up.")
         return {
             "files_deleted": 0,
             "bytes_freed": 0,
@@ -756,11 +772,11 @@ def optimize_database(db_path: str | Path) -> bool:
         with closing(
             sqlite3.connect(
                 str(target_path),
-                timeout=5.0,
+                timeout=OPTIMIZE_TIMEOUT_SECONDS,
                 isolation_level=None,
             )
         ) as connection:
-            connection.execute("PRAGMA busy_timeout = 5000")
+            apply_busy_timeout(connection, OPTIMIZE_TIMEOUT_SECONDS)
             connection.execute("PRAGMA auto_vacuum = INCREMENTAL")
 
             quick_check = connection.execute("PRAGMA quick_check").fetchone()
@@ -853,11 +869,11 @@ def checkpoint_wal_log(db_path: str | Path) -> bool:
         with closing(
             sqlite3.connect(
                 str(target_path),
-                timeout=10.0,
+                timeout=CHECKPOINT_TIMEOUT_SECONDS,
                 isolation_level=None,
             )
         ) as connection:
-            connection.execute("PRAGMA busy_timeout = 5000")
+            apply_busy_timeout(connection, CHECKPOINT_TIMEOUT_SECONDS)
             connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
         wal_size_after = wal_path.stat().st_size if wal_path.exists() else 0
@@ -882,4 +898,3 @@ def checkpoint_wal_log(db_path: str | Path) -> bool:
             exc,
         )
         return False
-    

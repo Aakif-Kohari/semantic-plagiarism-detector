@@ -10,23 +10,24 @@ Includes tests for:
 - Temp directory size calculation (Issue #1251)
 """
 
+import logging
 import os
 import shutil
 import tempfile
-import logging
 from unittest.mock import patch
 
 from src.utils.temp_manager import (
+    _REGISTERED_TEMP_PATHS,
+    check_temp_disk_space,
     cleanup_registered_temp_paths,
     cleanup_temp_files,
-    create_managed_temp_file,
     create_managed_temp_dir,
+    create_managed_temp_file,
     get_temp_directory_size_bytes,
     purge_expired_temp_files,
     register_temp_path,
     unregister_temp_path,
     verify_available_temp_space,
-    _REGISTERED_TEMP_PATHS,
 )
 
 
@@ -209,6 +210,7 @@ def test_purge_expired_temp_files_returns_int():
     assert isinstance(result, int)
     assert result >= 0
 
+
 def test_verify_available_temp_space_raises_when_insufficient():
     """Should raise OSError when free temp space is less than required."""
 
@@ -221,6 +223,7 @@ def test_verify_available_temp_space_raises_when_insufficient():
             match="Insufficient free disk space in temp directory",
         ):
             verify_available_temp_space(200)
+
 
 # ─── Tests for get_temp_directory_size_bytes (Issue #1251) ────────────────────
 
@@ -295,15 +298,18 @@ def test_get_temp_directory_size_bytes_handles_nonexistent_dir():
 
 def test_get_temp_directory_size_bytes_handles_non_dir():
     """If temp path is not a directory, return 0."""
-    with patch("src.utils.temp_manager.os.path.exists", return_value=True), \
-         patch("src.utils.temp_manager.os.path.isdir", return_value=False):
+    with patch("src.utils.temp_manager.os.path.exists", return_value=True), patch(
+        "src.utils.temp_manager.os.path.isdir", return_value=False
+    ):
         result = get_temp_directory_size_bytes()
         assert result == 0
 
 
 def test_get_temp_directory_size_bytes_handles_permission_error():
     """If os.walk raises OSError, return whatever was accumulated."""
-    with patch("src.utils.temp_manager.os.walk", side_effect=OSError("Permission denied")):
+    with patch(
+        "src.utils.temp_manager.os.walk", side_effect=OSError("Permission denied")
+    ):
         result = get_temp_directory_size_bytes()
         assert isinstance(result, int)
         assert result >= 0
@@ -379,12 +385,14 @@ def test_get_temp_directory_size_bytes_multiple_files():
                 pass
 
 
-
 # ─── Tests for rotate_backup_files (Issue #1572) ──────────────────────────────
 
 import time
-from src.utils.temp_manager import rotate_backup_files
+
 import pytest
+
+from src.utils.temp_manager import rotate_backup_files
+
 
 class TestRotateBackupFiles:
     """Comprehensive test suite for backup file rotation and retention policies."""
@@ -403,11 +411,11 @@ class TestRotateBackupFiles:
         deleted = rotate_backup_files(tmp_path, keep_count=2)
 
         assert deleted == 3
-        
+
         # Verify the 2 newest files (backup_0 and backup_1) remain
         assert (tmp_path / "backup_0.db").exists()
         assert (tmp_path / "backup_1.db").exists()
-        
+
         # Verify the 3 oldest files are deleted
         assert not (tmp_path / "backup_2.db").exists()
         assert not (tmp_path / "backup_3.db").exists()
@@ -420,7 +428,7 @@ class TestRotateBackupFiles:
 
         deleted = rotate_backup_files(tmp_path, keep_count=5)
         assert deleted == 0
-        
+
         # All files should still exist
         assert len(list(tmp_path.glob("*.db"))) == 3
 
@@ -449,11 +457,11 @@ class TestRotateBackupFiles:
         (tmp_path / "subdir" / "nested.txt").write_text("nested")
 
         deleted = rotate_backup_files(tmp_path, keep_count=0)
-        
+
         # Only the .db file should be deleted
         assert deleted == 1
         assert not (tmp_path / "backup_1.db").exists()
-        
+
         # Subdirectory and its contents should remain
         assert (tmp_path / "subdir").is_dir()
         assert (tmp_path / "subdir" / "nested.txt").exists()
@@ -461,7 +469,7 @@ class TestRotateBackupFiles:
     def test_nonexistent_directory_raises_filenotfound(self, tmp_path):
         """A non-existent directory should raise FileNotFoundError."""
         missing_dir = tmp_path / "nonexistent"
-        
+
         with pytest.raises(FileNotFoundError):
             rotate_backup_files(missing_dir, keep_count=5)
 
@@ -469,7 +477,7 @@ class TestRotateBackupFiles:
         """A file path instead of a directory should raise NotADirectoryError."""
         file_path = tmp_path / "not_a_dir.txt"
         file_path.write_text("I am a file")
-        
+
         with pytest.raises(NotADirectoryError):
             rotate_backup_files(file_path, keep_count=5)
 
@@ -486,7 +494,7 @@ class TestRotateBackupFiles:
     def test_handles_oserror_during_deletion_gracefully(self, tmp_path, caplog):
         """If os.remove fails (e.g., permission denied), it should log and continue."""
         import src.utils.temp_manager as temp_manager_module
-        
+
         # Create 3 files
         for i in range(3):
             (tmp_path / f"backup_{i}.db").write_text("data")
@@ -495,6 +503,7 @@ class TestRotateBackupFiles:
 
         # Mock os.remove to fail for the oldest file
         original_remove = os.remove
+
         def mock_remove(path):
             if "backup_2.db" in str(path):
                 raise OSError("Permission denied")
@@ -513,7 +522,7 @@ class TestRotateBackupFiles:
     def test_accepts_string_path(self, tmp_path):
         """The function should accept string paths as well as Path objects."""
         (tmp_path / "backup.db").write_text("data")
-        
+
         # Pass string instead of Path
         deleted = rotate_backup_files(str(tmp_path), keep_count=0)
         assert deleted == 1
@@ -522,7 +531,7 @@ class TestRotateBackupFiles:
         """Symlinks should not be counted or deleted to prevent accidental data loss."""
         real_file = tmp_path / "real.db"
         real_file.write_text("real data")
-        
+
         link_path = tmp_path / "link.db"
         try:
             os.symlink(real_file, link_path)
@@ -530,7 +539,7 @@ class TestRotateBackupFiles:
             pytest.skip("Symlinks not supported on this platform")
 
         deleted = rotate_backup_files(tmp_path, keep_count=0)
-        
+
         # Only the real file should be deleted
         assert deleted == 1
         assert not real_file.exists()
@@ -542,17 +551,17 @@ class TestRotateBackupFiles:
         # Create files with names that would sort differently than their mtime
         file_a = tmp_path / "z_newest.db"
         file_b = tmp_path / "a_oldest.db"
-        
+
         file_a.write_text("new")
         file_b.write_text("old")
-        
+
         # Make 'a_oldest' actually older
         old_time = time.time() - 100
         os.utime(file_b, (old_time, old_time))
 
         # Keep 1 file. Should keep z_newest because it's newer, despite 'a' < 'z'
         deleted = rotate_backup_files(tmp_path, keep_count=1)
-        
+
         assert deleted == 1
         assert file_a.exists()  # Newest kept
         assert not file_b.exists()  # Oldest deleted
@@ -606,3 +615,28 @@ def test_cleanup_temp_files_retention(tmp_path):
     # Cleanup remaining new items to prevent test leakage
     cleanup_registered_temp_paths()
 
+
+def test_check_temp_disk_space_success():
+    """Verify that check_temp_disk_space returns True when free space is sufficient."""
+    with patch(
+        "src.utils.temp_manager.shutil.disk_usage",
+        return_value=(1000 * 1024 * 1024, 200 * 1024 * 1024, 800 * 1024 * 1024),
+    ):
+        # 800 MB is free, min required is 100 MB, should succeed
+        assert check_temp_disk_space(min_free_mb=100) is True
+
+
+def test_check_temp_disk_space_failure():
+    """Verify that check_temp_disk_space raises OSError when free space is below safety threshold."""
+    import pytest
+
+    with patch(
+        "src.utils.temp_manager.shutil.disk_usage",
+        return_value=(1000 * 1024 * 1024, 950 * 1024 * 1024, 50 * 1024 * 1024),
+    ):
+        # 50 MB is free, min required is 100 MB, should raise OSError
+        with pytest.raises(
+            OSError,
+            match="Disk space in temp directory below safety threshold",
+        ):
+            check_temp_disk_space(min_free_mb=100)

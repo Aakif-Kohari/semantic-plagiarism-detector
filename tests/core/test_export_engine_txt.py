@@ -28,10 +28,10 @@ def test_generate_incident_txt_formats_flagged_pairs():
     assert "Document A: student1.pdf" in report
     assert "Document B: student2.pdf" in report
     assert "Similarity: 95.0% (0.9500)" in report
-    assert "Severity: CRITICAL" in report
+    assert "Severity: High" in report
     assert "Incident #2" in report
     assert "Similarity: 82.0% (0.8200)" in report
-    assert "Severity: HIGH" in report
+    assert "Severity: Medium" in report
     assert report.endswith("End of report\n")
 
 
@@ -48,7 +48,7 @@ def test_generate_incident_txt_handles_missing_keys():
     assert "Document A: known.pdf" in report
     assert "Document B: Unknown" in report
     assert "Similarity: 0.0% (0.0000)" in report
-    assert "Severity: MODERATE" in report
+    assert "Severity: Low" in report
 
 
 def test_generate_incident_txt_includes_optional_details():

@@ -20,6 +20,7 @@ from src.core.config import (
     normalize_severity_label,
     severity_from_score,
 )
+from src.db.base import BaseRepository
 from src.db.migrations import migrate_corpus_database, table_exists
 from src.db.migrations.common import column_exists
 from src.db.schemas import MatchResult
@@ -43,8 +44,54 @@ CSV_COLUMNS = [
 ]
 
 
+class IncidentsRepository(BaseRepository):
+    """Data access repository for plagiarism incidents, filtering, and export."""
+
+    def __init__(self, db_path: str | Path = DEFAULT_DB_PATH) -> None:
+        super().__init__(db_path)
+
+    def init_incident_db(self) -> None:
+        """Create or upgrade the shared corpus/incident database."""
+        init_incident_db(self._db_path)
+
+
+incidents_repo = IncidentsRepository(DEFAULT_DB_PATH)
+
+
+def get_incidents_repo() -> IncidentsRepository:
+    """Return singleton instance of IncidentsRepository."""
+    return incidents_repo
+
+
+
+def configure_db_path(db_path: str | Path) -> None:
+    """Configure the SQLite database path used by the incidents module."""
+    global DEFAULT_DB_PATH
+    DEFAULT_DB_PATH = Path(os.path.abspath(str(db_path)))
+    incidents_repo.configure_db_path(DEFAULT_DB_PATH)
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _validate_iso_timestamp(val: Any) -> str | None:
+    """Validate that val is a valid ISO 8601 string and return it, or return None."""
+    if not val or not isinstance(val, str):
+        return None
+    clean_val = val.strip()
+    if not clean_val:
+        return None
+    try:
+        norm_val = (
+            clean_val.replace("Z", "+00:00")
+            if clean_val.endswith("Z")
+            else clean_val
+        )
+        datetime.fromisoformat(norm_val)
+        return clean_val
+    except (ValueError, TypeError):
+        return None
 
 
 def _normalise_pair(doc_a: str, doc_b: str) -> tuple[str, str]:
@@ -71,9 +118,40 @@ def _severity_rank(flag: Mapping[str, Any]) -> str:
 
 
 def build_incident_id(doc_a: str, doc_b: str) -> str:
+    """Build a deterministic, order-independent incident ID for a document pair.
+
+    .. warning::
+        **Breaking change**: prior to this fix, the hash input used a bare
+        ``"0"`` digit as the separator between filenames (``f"{first}0{second}"``).
+        Because filenames may themselves contain digits, this created hash
+        collisions between distinct document pairs — e.g. ``("doc10", "doc2")``
+        and ``("doc1", "0doc2")`` both hashed the input ``"doc100doc2"``.
+        The separator is now ``"||"``, a sequence very unlikely to appear in
+        a real filename. This changes the resulting ``INC-...`` ID for every
+        existing incident: any incident ID computed with the old separator
+        will no longer match one computed with the same document pair going
+        forward. Existing stored incident records are not automatically
+        migrated by this change.
+    """
     first, second = _normalise_pair(doc_a, doc_b)
-    digest = hashlib.sha256(f"{first}0{second}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(f"{first}||{second}".encode("utf-8")).hexdigest()
     return f"INC-{digest[:12].upper()}"
+
+
+def _parse_incident_id(val: str | int | None) -> int | None:
+    if val is None:
+        return None
+    if isinstance(val, int):
+        return val
+    val_str = str(val).strip()
+    if val_str.isdigit():
+        return int(val_str)
+    if val_str.startswith("INC-"):
+        try:
+            return int(val_str[4:], 16)
+        except ValueError:
+            pass
+    return None
 
 
 def _get_connection(db_path: str | Path) -> sqlite3.Connection:
@@ -184,7 +262,7 @@ def _fetch_all_incidents(
 
     return [
         MatchResult(
-            incident_id=row["incident_id"],
+            incident_id=_parse_incident_id(row["incident_id"]),
             document_a=row["document_a"],
             document_b=row["document_b"],
             similarity_score=row["similarity_score"],
@@ -211,7 +289,7 @@ def sync_flagged_incidents(
     if db_path is None:
         db_path = DEFAULT_DB_PATH
     init_incident_db(db_path)
-    timestamp = now or _utc_now_iso()
+    timestamp = _validate_iso_timestamp(now) or _utc_now_iso()
 
     with closing(_get_connection(db_path)) as conn:
         conn.row_factory = sqlite3.Row
@@ -227,6 +305,16 @@ def sync_flagged_incidents(
 
                 first, second = _normalise_pair(doc_a, doc_b)
 
+                flag_date = (
+                    _validate_iso_timestamp(flag.get("date_flagged"))
+                    or _validate_iso_timestamp(flag.get("timestamp"))
+                    or timestamp
+                )
+                flag_last_seen = (
+                    _validate_iso_timestamp(flag.get("last_seen"))
+                    or timestamp
+                )
+
                 bulk_records.append(
                     (
                         build_incident_id(first, second),
@@ -234,8 +322,8 @@ def sync_flagged_incidents(
                         second,
                         _normalise_score(flag.get("similarity", 0.0)),
                         _severity_rank(flag),
-                        timestamp,
-                        timestamp,
+                        flag_date,
+                        flag_last_seen,
                         _normalise_score(
                             flag.get("threshold_at_time_of_flag", threshold or 0.0)
                         ),
@@ -262,8 +350,7 @@ def sync_flagged_incidents(
                 conn.commit()
                 get_recent_incidents.cache_clear()
 
-            rows = conn.execute(
-                """
+            rows = conn.execute("""
                 SELECT pi.incident_id, pi.document_a, pi.document_b,
                        pi.similarity_score, pi.severity_rank,
                        pi.review_status, pi.date_flagged, pi.last_seen,
@@ -274,12 +361,11 @@ def sync_flagged_incidents(
                 WHERE (da.is_deleted IS NULL OR da.is_deleted = 0)
                   AND (db.is_deleted IS NULL OR db.is_deleted = 0)
                 ORDER BY pi.date_flagged DESC, pi.incident_id ASC
-                """
-            ).fetchall()
+                """).fetchall()
 
             return [
                 MatchResult(
-                    incident_id=row["incident_id"],
+                    incident_id=_parse_incident_id(row["incident_id"]),
                     document_a=row["document_a"],
                     document_b=row["document_b"],
                     similarity_score=row["similarity_score"],
@@ -339,16 +425,14 @@ def get_total_incidents_count(
     """
     init_incident_db(db_path)
     with closing(_get_connection(db_path)) as conn:
-        row = conn.execute(
-            """
+        row = conn.execute("""
             SELECT COUNT(*)
             FROM plagiarism_incidents pi
             LEFT JOIN documents da ON pi.document_a = da.filename
             LEFT JOIN documents db ON pi.document_b = db.filename
             WHERE (da.is_deleted IS NULL OR da.is_deleted = 0)
               AND (db.is_deleted IS NULL OR db.is_deleted = 0)
-            """
-        ).fetchone()
+            """).fetchone()
     return int(row[0]) if row is not None else 0
 
 
@@ -596,9 +680,11 @@ def get_incidents_by_user(
         # Mirrors the dual-path strategy used by get_incidents_by_assignment
         # so older deployments (and tests that pre-populate the legacy
         # table) keep working with the exact SQL from the issue spec.
-        if table_exists(conn, "incidents") \
-                and column_exists(conn, "incidents", "owner") \
-                and column_exists(conn, "incidents", "timestamp"):
+        if (
+            table_exists(conn, "incidents")
+            and column_exists(conn, "incidents", "owner")
+            and column_exists(conn, "incidents", "timestamp")
+        ):
             rows = conn.execute(
                 """
                 SELECT * FROM incidents
@@ -786,8 +872,7 @@ def get_incidents_count_by_date(
     init_incident_db(db_path)
     with closing(_get_connection(db_path)) as conn:
         conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            """
+        rows = conn.execute("""
             SELECT
                 DATE(pi.date_flagged) as date,
                 COUNT(*) as count
@@ -798,8 +883,7 @@ def get_incidents_count_by_date(
               AND (db.is_deleted IS NULL OR db.is_deleted = 0)
             GROUP BY DATE(pi.date_flagged)
             ORDER BY date ASC
-            """
-        ).fetchall()
+            """).fetchall()
         return [dict(row) for row in rows]
 
 
@@ -994,7 +1078,7 @@ def query_incidents_paginated(
         return PaginatedIncidents(
             items=[
                 MatchResult(
-                    incident_id=row["incident_id"],
+                    incident_id=_parse_incident_id(row["incident_id"]),
                     document_a=row["document_a"],
                     document_b=row["document_b"],
                     similarity_score=row["similarity_score"],
@@ -1102,13 +1186,67 @@ def archive_old_incidents(
 
 @lru_cache(maxsize=128)
 def get_recent_incidents(
-    limit: int = 5,
+    cutoff_time: str | datetime | None = None,
+    limit: int | None = None,
     db_path: str | Path | None = None,
 ) -> list[MatchResult]:
-    """Fetch recent visible plagiarism incidents, cached for performance."""
+    """Fetch recent visible plagiarism incidents filtered by cutoff time, cached for performance."""
+    if isinstance(cutoff_time, int) and limit is None:
+        limit = cutoff_time
+        cutoff_time = None
+
     if db_path is None:
         db_path = DEFAULT_DB_PATH
-    return get_all_incidents(db_path=db_path, limit=limit, offset=0)
+
+    cutoff_str: str | None = None
+    if isinstance(cutoff_time, datetime):
+        cutoff_str = cutoff_time.isoformat()
+    elif isinstance(cutoff_time, str) and cutoff_time.strip():
+        cutoff_str = cutoff_time.strip()
+
+    init_incident_db(db_path)
+    query = """
+        SELECT pi.incident_id, pi.document_a, pi.document_b,
+               pi.similarity_score, pi.severity_rank,
+               pi.review_status, pi.date_flagged, pi.last_seen,
+               pi.threshold_at_time_of_flag
+        FROM plagiarism_incidents pi
+        LEFT JOIN documents da ON pi.document_a = da.filename
+        LEFT JOIN documents db ON pi.document_b = db.filename
+        WHERE (da.is_deleted IS NULL OR da.is_deleted = 0)
+          AND (db.is_deleted IS NULL OR db.is_deleted = 0)
+    """
+    params: list[Any] = []
+    if cutoff_str:
+        query += " AND pi.date_flagged >= ?"
+        params.append(cutoff_str)
+
+    query += " ORDER BY pi.date_flagged DESC, pi.incident_id ASC"
+
+    if limit is not None and limit > 0:
+        query += " LIMIT ?"
+        params.append(limit)
+
+    with closing(_get_connection(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(query, params).fetchall()
+
+    from src.db.schemas import MatchResult
+
+    return [
+        MatchResult(
+            incident_id=_parse_incident_id(row["incident_id"]),
+            document_a=row["document_a"],
+            document_b=row["document_b"],
+            similarity_score=row["similarity_score"],
+            severity_rank=row["severity_rank"],
+            review_status=row["review_status"],
+            date_flagged=row["date_flagged"],
+            last_seen=row["last_seen"],
+            threshold_at_time_of_flag=row["threshold_at_time_of_flag"],
+        )
+        for row in rows
+    ]
 
 
 @with_sqlite_retry
@@ -1142,3 +1280,11 @@ def log_incident(
         if res.incident_id == target_id:
             return res
     return results[0]
+
+
+def get_incidents_repo(db_path: str | Path | None = None) -> IncidentsRepository:
+    """Helper to instantiate an IncidentsRepository."""
+    if db_path is None:
+        return IncidentsRepository()
+    return IncidentsRepository(db_path)
+
