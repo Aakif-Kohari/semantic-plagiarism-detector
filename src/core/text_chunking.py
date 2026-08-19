@@ -102,8 +102,36 @@ class ChunkString(str):
 # ── Character-level fallback (CJK / emoji / long-word texts) ─────────────────
 
 
+def _find_length_capped_end(
+    text: str, start: int, limit: int, count_bytes: bool
+) -> int:
+    """Return the end index so that text[start:end] does not exceed *limit*.
+
+    When count_bytes is True, *limit* is enforced in UTF-8 bytes, so
+    multi-byte characters (e.g. emoji, which can be 4 bytes each) are
+    measured accurately instead of being undercounted by plain len().
+    Otherwise, *limit* is enforced in Unicode code points (previous
+    behavior).
+    """
+    n = len(text)
+    if not count_bytes:
+        return min(start + limit, n)
+
+    end = start
+    byte_total = 0
+    while end < n:
+        char_bytes = len(text[end].encode("utf-8"))
+        if byte_total + char_bytes > limit:
+            break
+        byte_total += char_bytes
+        end += 1
+    if end == start and start < n:
+        end = start + 1
+    return end
+
+
 def _character_fallback_chunking(
-    text: str, chunk_size: int, chunk_overlap: int
+    text: str, chunk_size: int, chunk_overlap: int, count_bytes: bool = False
 ) -> List[str]:
     """Fallback character-based chunking for non-space or single-token texts (CJK, emojis, long words)."""
     text = text.strip()
@@ -113,14 +141,13 @@ def _character_fallback_chunking(
     chunks = []
     step = max(1, chunk_size - chunk_overlap)
     for start in range(0, len(text), step):
-        end = min(len(text), start + chunk_size)
+        end = _find_length_capped_end(text, start, chunk_size, count_bytes)
         chunk = text[start:end]
         if chunk:
             chunks.append(ChunkString(chunk))
         if end >= len(text):
             break
     return chunks
-
 
 # ── Sentence boundary search helper (Issue #1480) ────────────────────────────
 
@@ -182,6 +209,7 @@ def chunk_text(
     overlap_percentage: float | None = None,
     max_chunks: int = 1000,
     sentence_padding: bool = True,
+    count_bytes: bool = False,
 ) -> List[str]:
     """Split text into chunks of a target character length with overlapping boundaries.
 
@@ -191,7 +219,7 @@ def chunk_text(
 
     Args:
         text: The input text to chunk.
-        chunk_size: Target character length per chunk.
+        chunk_size: Target length per chunk (see *count_bytes* for units).
         chunk_overlap: Number of characters to overlap between chunks.
         min_words: Minimum word count for a chunk to be included. Chunks with
             fewer words are filtered out to reduce noise from headers/page numbers.
@@ -202,11 +230,14 @@ def chunk_text(
             spikes on extremely large documents.
         sentence_padding: If True, extends chunk boundaries to the nearest
             sentence terminator to preserve semantic context (Issue #1480).
+        count_bytes: If True, *chunk_size* is enforced using UTF-8 byte
+            length (len(text.encode('utf-8'))) instead of Unicode code
+            points. This gives accurate, strict size enforcement for
+            multi-byte characters such as emoji (Issue #2435).
 
     Returns:
         List of chunk strings.
-    """
-    if chunk_size <= 0:
+    """    if chunk_size <= 0:
         raise ValueError("chunk_size must be a positive integer > 0")
 
     if overlap_percentage is not None:
@@ -243,7 +274,7 @@ def chunk_text(
         start = 0
 
         while start < text_len:
-            end = min(start + chunk_size, text_len)
+            end = _find_length_capped_end(text, start, chunk_size, count_bytes)
 
             # Adjust end to the nearest forward sentence boundary
             if end < text_len:
@@ -251,10 +282,11 @@ def chunk_text(
                     text, end, direction="forward", max_search=100
                 )
                 # Hard cap to prevent chunks from growing too large for embedding models
-                max_allowed_end = min(start + (chunk_size * 2), text_len)
+                max_allowed_end = _find_length_capped_end(
+                    text, start, chunk_size * 2, count_bytes
+                )
                 if end > max_allowed_end:
                     end = max_allowed_end
-
             chunk = text[start:end].strip()
             if chunk and len(chunk.split()) >= min_words:
                 chunks.append(ChunkString(chunk))
@@ -287,8 +319,9 @@ def chunk_text(
 
         # Fallback to character-based chunking if no valid chunks were formed
         if not chunks:
-            chunks = _character_fallback_chunking(text, chunk_size, chunk_overlap)
-
+            chunks = _character_fallback_chunking(
+                text, chunk_size, chunk_overlap, count_bytes=count_bytes
+            )
         return [c for c in chunks if len(c.split()) >= min_words]
 
     # ── Original word-boundary path (sentence_padding=False) ─────────────
