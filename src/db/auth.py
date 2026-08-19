@@ -9,6 +9,7 @@ and strong password complexity policies.
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import logging
 import os
@@ -17,8 +18,9 @@ import secrets
 import sqlite3
 import string
 from datetime import datetime as dt
-from datetime import timezone
+from datetime import timedelta, timezone
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 import bcrypt
 from argon2 import PasswordHasher
@@ -1994,13 +1996,6 @@ def demote_user(username: str, admin_username: str) -> bool:
 # ============================================================================
 # SSO SECURITY ENHANCEMENTS - Issue #2172
 # ============================================================================
-
-import hashlib
-import json  # noqa: F811
-import secrets  # noqa: F811
-import string  # noqa: F811
-from datetime import timedelta
-from typing import Any, Dict, List, Optional  # noqa: F811
 
 # ============================================================================
 # SECURE PASSWORD GENERATION
