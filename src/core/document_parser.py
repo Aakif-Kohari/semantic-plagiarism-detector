@@ -18,6 +18,8 @@ from collections import Counter
 from pathlib import Path
 from typing import BinaryIO, Dict, List, Optional, Union
 
+logger = logging.getLogger(__name__)
+
 import defusedxml
 
 from src.core.parse_durations import record_parse_duration
@@ -31,7 +33,9 @@ try:
 
     defusedxml.lxml.monkey_patch()
 except (AttributeError, ImportError):
-    pass
+    logger.critical(
+        "defusedxml.lxml is unavailable; falling back to standard XML parsing, which is insecure and vulnerable to XXE attacks."
+    )
 from urllib.parse import urlparse
 
 import docx
@@ -46,7 +50,6 @@ except ImportError:
         return rtf_text
 
 
-logger = logging.getLogger(__name__)
 import string
 import unicodedata
 
