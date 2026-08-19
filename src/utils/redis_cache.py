@@ -72,7 +72,13 @@ RedisTimeoutError = (
 # Redis connection configuration
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
-REDIS_DB = int(os.getenv("REDIS_DB", "0"))
+try:
+    REDIS_DB = int(os.getenv("REDIS_DB", "0"))
+except ValueError:
+    logger.warning(
+        f"Invalid REDIS_DB configuration '{os.getenv('REDIS_DB')}'. Defaulting to 0."
+    )
+    REDIS_DB = 0
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", None)
 # Construct REDIS_URL with password if provided (Issue #2320).
 # Format: redis://:{password}@{host}:{port}/{db}
