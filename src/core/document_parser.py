@@ -72,7 +72,13 @@ DEFAULT_OCR_DPI = 250
 MIN_OCR_DPI = 150
 MAX_OCR_DPI = 400
 DEFAULT_OCR_LANGUAGE = "eng"
-MAX_BATCH_SIZE = 50
+try:
+    MAX_BATCH_SIZE = int(os.getenv("PARSER_MAX_BATCH_SIZE", 50))
+    if MAX_BATCH_SIZE <= 0:
+        MAX_BATCH_SIZE = 50
+except (ValueError, TypeError):
+    MAX_BATCH_SIZE = 50
+
 
 # File extensions supported by the extraction pipeline, exposed for UI display
 ALLOWED_EXTENSIONS = {
