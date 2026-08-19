@@ -124,20 +124,35 @@ class PayloadCompressor:
     """
 
     # Threshold above which data is compressed (e.g., 512KB)
-    COMPRESSION_THRESHOLD_BYTES = 512 * 1024
+    COMPRESSION_THRESHOLD_BYTES: int = 512 * 1024
+    _raw_threshold = os.getenv("REDIS_COMPRESSION_THRESHOLD", "").strip()
+    if _raw_threshold:
+        try:
+            COMPRESSION_THRESHOLD_BYTES = int(_raw_threshold)
+        except ValueError:
+            pass
 
-    @classmethod
-    def get_threshold(cls) -> int:
-        raw_threshold = os.getenv("REDIS_COMPRESSION_THRESHOLD", "").strip()
-        if raw_threshold:
-            try:
-                return int(raw_threshold)
-            except ValueError:
-                pass
-        return cls.COMPRESSION_THRESHOLD_BYTES
+    # Compression level initialized once at module load
+    COMPRESSION_LEVEL: int = zlib.Z_BEST_SPEED
+    _raw_level = os.getenv("REDIS_COMPRESSION_LEVEL", "").strip()
+    if _raw_level:
+        try:
+            COMPRESSION_LEVEL = int(_raw_level)
+        except ValueError:
+            _consts = {
+                "Z_BEST_SPEED": zlib.Z_BEST_SPEED,
+                "Z_BEST_COMPRESSION": zlib.Z_BEST_COMPRESSION,
+                "Z_DEFAULT_COMPRESSION": zlib.Z_DEFAULT_COMPRESSION,
+                "Z_NO_COMPRESSION": zlib.Z_NO_COMPRESSION,
+            }
+            COMPRESSION_LEVEL = _consts.get(_raw_level.upper(), zlib.Z_BEST_SPEED)
 
     # Magic header bytes to distinguish compressed vs uncompressed payloads in Redis
     MAGIC_HEADER = b"ZLIB_COMPRESSED_V1::"
+
+    @classmethod
+    def get_threshold(cls) -> int:
+        return cls.COMPRESSION_THRESHOLD_BYTES
 
     @classmethod
     def compress(cls, data: bytes) -> bytes:
@@ -155,21 +170,7 @@ class PayloadCompressor:
 
         try:
             start_time = time.perf_counter()
-            raw_level = os.getenv("REDIS_COMPRESSION_LEVEL", "").strip()
-            compression_level = zlib.Z_BEST_SPEED
-            if raw_level:
-                try:
-                    compression_level = int(raw_level)
-                except ValueError:
-                    consts = {
-                        "Z_BEST_SPEED": zlib.Z_BEST_SPEED,
-                        "Z_BEST_COMPRESSION": zlib.Z_BEST_COMPRESSION,
-                        "Z_DEFAULT_COMPRESSION": zlib.Z_DEFAULT_COMPRESSION,
-                        "Z_NO_COMPRESSION": zlib.Z_NO_COMPRESSION,
-                    }
-                    compression_level = consts.get(raw_level.upper(), zlib.Z_BEST_SPEED)
-
-            compressed_data = zlib.compress(data, level=compression_level)
+            compressed_data = zlib.compress(data, level=cls.COMPRESSION_LEVEL)
             compression_ratio = len(data) / max(1, len(compressed_data))
 
             logger.debug(
@@ -213,7 +214,7 @@ class PayloadCompressor:
                 logger.error(
                     f"[CacheCompression] zlib decompression failed: {e}. Corrupted payload?"
                 )
-                raise e
+                return None
 
         return data
 
@@ -229,16 +230,6 @@ class CacheNamespace(str, Enum):
     ANALYSIS = "spd:v1:analysis"
     LOGIN_ATTEMPTS = "spd:v1:login_attempts"
     UPLOADS = "spd:v1:uploads"
-
-    # Legacy/Old namespaces merged from CacheKeyPrefix
-    LEGACY_LOGIN_ATTEMPTS = "login_attempts:"
-    LEGACY_UPLOAD_COUNT = "upload_count:"
-    LEGACY_SIMILARITY_RESULT = "similarity:"
-    LEGACY_DOCUMENT_CACHE = "doc:"
-    LEGACY_UPLOADS_PREFIX = "upload_count:"
-    LEGACY_FAISS_INDEX = "faiss_index"
-    LEGACY_ANALYSIS_PATTERN = "analysis:*"
-    LEGACY_ANALYSIS_PREFIX = "analysis:"
 
     def build_key(self, *parts: str) -> str:
         """Construct a standardized cache key with namespace prefix."""
@@ -265,19 +256,23 @@ class RedisCache:
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._fallback_cache = {}
-                    cls._instance._hits = 0
-                    cls._instance._misses = 0
+                    instance = super().__new__(cls)
+                    instance._fallback_cache = {}
+                    instance._hits = 0
+                    instance._misses = 0
+                    instance._client = None
+                    instance._initialized = False
+                    cls._instance = instance
         return cls._instance
 
     def __init__(self):
         if not hasattr(self, "_fallback_cache") or self._fallback_cache is None:
             self._fallback_cache = {}
-        if self._client is None:
+        if not getattr(self, "_initialized", False):
             with self._lock:
-                if self._client is None:
+                if not getattr(self, "_initialized", False):
                     self._connect()
+                    self._initialized = True
 
     @classmethod
     def get_instance(cls) -> "RedisCache":
