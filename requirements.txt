@@ -70,6 +70,9 @@ httpx>=0.26.0                   # Async HTTP client for API testing
 qrcode>=7.4.2
 # ── Observability & Monitoring ────────────────────────────────────────────────
 prometheus-client>=0.26.0       # Prometheus metrics export for production monitoring
+# ── Code Formatting & Linting ──────────────────────────────────────────────────
+pre-commit>=3.6.0               # Client-side Git hooks manager
+isort>=5.13.0                   # Import sorting library
 
 # ── Google Integration ─────────────────────────────────────────────────────────
 google-api-python-client>=2.198.0
