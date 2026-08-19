@@ -653,9 +653,12 @@ def cleanup_old_backups(
             "bytes_freed": 0,
         }
 
-    db_files = list(backup_path.glob("*.db"))
+    db_files = [
+        f for f in backup_path.iterdir()
+        if f.is_file() and (f.name.endswith(".db") or f.name.endswith(".db.gz"))
+    ]
     if not db_files:
-        logger.info("No .db backup files found to clean up.")
+        logger.info("No backup files (.db or .db.gz) found to clean up.")
         return {
             "files_deleted": 0,
             "bytes_freed": 0,

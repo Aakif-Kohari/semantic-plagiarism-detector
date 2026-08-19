@@ -212,6 +212,7 @@ def _run_backup_daemon():
             ):
                 from src.db.corpus_db import get_corpus_db_path
                 from src.db.database_backup import (
+                    cleanup_old_backups,
                     create_corpus_database_snapshot,
                 )
 
@@ -228,6 +229,7 @@ def _run_backup_daemon():
                 filename.write_bytes(snapshot)
 
                 logger.info(f"Backup created: {filename}")
+                cleanup_old_backups(backup_dir, max_backups=10, max_age_days=30)
 
                 last_backup_time = now
                 cache.set(
