@@ -1,5 +1,6 @@
 import sqlite3
 
+
 def get_recent_audit_events(db_connection: sqlite3.Connection):
     """
     Retrieves recent audit events using sqlite3.Row and dict conversion.

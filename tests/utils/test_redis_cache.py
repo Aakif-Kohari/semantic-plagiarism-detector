@@ -12,6 +12,7 @@ import redis
 
 from src.utils.redis_cache import (
     CacheKeyPrefix,
+    CacheNamespace,
     PayloadCompressor,
     RedisCache,
     RedisError,
@@ -843,6 +844,7 @@ def test_redis_fallback_exceptions():
     with patch.dict(sys.modules, {"redis": None}):
         # Reload redis_cache module to trigger the except ImportError block
         import importlib
+
         import src.utils.redis_cache as rc
         importlib.reload(rc)
 
@@ -871,6 +873,7 @@ def test_redis_fallback_exceptions():
 
     # Finally, reload the module one more time to restore it to the default environment state
     import importlib
+
     import src.utils.redis_cache as rc
     importlib.reload(rc)
 
@@ -885,6 +888,7 @@ class TestRedisUrlPasswordInjection:
     def test_redis_url_includes_password_when_set(self, monkeypatch):
         """When REDIS_PASSWORD is set, it must be injected into the URL."""
         import importlib
+
         import src.utils.redis_cache as redis_cache_module
 
         monkeypatch.setenv("REDIS_HOST", "myhost.example.com")
@@ -903,6 +907,7 @@ class TestRedisUrlPasswordInjection:
     def test_redis_url_omits_password_when_not_set(self, monkeypatch):
         """When REDIS_PASSWORD is not set, the URL must not include credentials."""
         import importlib
+
         import src.utils.redis_cache as redis_cache_module
 
         monkeypatch.setenv("REDIS_HOST", "localhost")
@@ -920,6 +925,7 @@ class TestRedisUrlPasswordInjection:
     def test_redis_url_respects_explicit_env_var(self, monkeypatch):
         """If REDIS_URL is set explicitly in the env, it takes precedence."""
         import importlib
+
         import src.utils.redis_cache as redis_cache_module
 
         monkeypatch.setenv("REDIS_HOST", "ignored.example.com")
@@ -939,6 +945,7 @@ class TestRedisUrlPasswordInjection:
     def test_redis_url_with_special_chars_in_password(self, monkeypatch):
         """Passwords with special characters are included as-is."""
         import importlib
+
         import src.utils.redis_cache as redis_cache_module
 
         monkeypatch.setenv("REDIS_HOST", "redis.example.com")
@@ -957,6 +964,7 @@ class TestRedisUrlPasswordInjection:
     def test_redis_url_empty_password_falls_back_to_no_auth(self, monkeypatch):
         """An empty REDIS_PASSWORD string should be treated as 'no password'."""
         import importlib
+
         import src.utils.redis_cache as redis_cache_module
 
         monkeypatch.setenv("REDIS_HOST", "localhost")
@@ -1014,6 +1022,7 @@ class TestPayloadCompressor:
     def test_compression_level_env_int(self, monkeypatch):
         """Verify integer REDIS_COMPRESSION_LEVEL is parsed into COMPRESSION_LEVEL."""
         import importlib
+
         import src.utils.redis_cache as rc
 
         monkeypatch.setenv("REDIS_COMPRESSION_LEVEL", "9")
@@ -1028,6 +1037,7 @@ class TestPayloadCompressor:
         """Verify named constant REDIS_COMPRESSION_LEVEL is parsed into COMPRESSION_LEVEL."""
         import importlib
         import zlib
+
         import src.utils.redis_cache as rc
 
         monkeypatch.setenv("REDIS_COMPRESSION_LEVEL", "Z_BEST_COMPRESSION")
@@ -1042,6 +1052,7 @@ class TestPayloadCompressor:
         """Verify invalid REDIS_COMPRESSION_LEVEL falls back to Z_BEST_SPEED."""
         import importlib
         import zlib
+
         import src.utils.redis_cache as rc
 
         monkeypatch.setenv("REDIS_COMPRESSION_LEVEL", "INVALID_OPTION")
@@ -1055,6 +1066,7 @@ class TestPayloadCompressor:
     def test_compression_threshold_env_custom(self, monkeypatch):
         """Verify custom REDIS_COMPRESSION_THRESHOLD is parsed into COMPRESSION_THRESHOLD_BYTES."""
         import importlib
+
         import src.utils.redis_cache as rc
 
         monkeypatch.setenv("REDIS_COMPRESSION_THRESHOLD", "2048")
@@ -1069,6 +1081,7 @@ class TestPayloadCompressor:
     def test_compression_threshold_env_invalid(self, monkeypatch):
         """Verify invalid REDIS_COMPRESSION_THRESHOLD falls back to default 512 KiB."""
         import importlib
+
         import src.utils.redis_cache as rc
 
         monkeypatch.setenv("REDIS_COMPRESSION_THRESHOLD", "not_a_number")

@@ -5,11 +5,12 @@ Unit tests for the analytics visualization functions.
 """
 
 import numpy as np
-import pandas as pd
+import pandas as pd  # noqa: F811
 import plotly.graph_objects as go
 import pytest
-import pandas as pd  # noqa: F811
+
 from src.visualization.analytics import plot_similarity_distribution
+
 
 def test_plot_similarity_distribution_xaxis_label():
     sim_df = pd.DataFrame(
@@ -23,6 +24,7 @@ def test_plot_similarity_distribution_xaxis_label():
 from src.visualization.analytics import (
     calculate_severity_ratios,
     plot_high_severity_trends,
+    plot_monthly_incident_trends,
     plot_severity_donut_chart,
     plot_similarity_boxplot,
     plot_similarity_boxplot_by_group,
@@ -765,14 +767,13 @@ def test_severity_ratios_fallback_key():
 
 # ── Added tests for theme synchronization and helper utilities ─────────────
 
-from unittest.mock import patch, MagicMock  # noqa: F401
+from unittest.mock import MagicMock, patch  # noqa: F401
+
 from src.visualization.analytics import (
-    get_chart_theme_colors,
-    apply_plotly_theme,
-    calculate_severity_ratios,
-    get_top_similar_pairs,
-    plot_similarity_boxplot_by_group,
     _empty_chart,
+    apply_plotly_theme,
+    get_chart_theme_colors,
+    get_top_similar_pairs,
 )
 
 
@@ -1088,6 +1089,7 @@ def test_get_top_similar_pairs_vectorized_matches_loop():
     """Verify vectorized np.triu_indices implementation matches old nested loop logic."""
     import numpy as np
     import pandas as pd
+
     from src.visualization.analytics import get_top_similar_pairs
 
     # Create a 10x10 similarity matrix to test performance and correctness
@@ -1119,6 +1121,7 @@ def test_get_top_similar_pairs_vectorized_matches_loop():
 def test_apply_theme_colors_mutates_layout():
     """Verify _apply_theme_colors actually mutates figure layout paper_bgcolor, plot_bgcolor, and font.color."""
     import plotly.graph_objects as go
+
     from src.visualization.analytics import _apply_theme_colors
 
     fig = go.Figure()

@@ -5,9 +5,10 @@ Provides UI for managing stopword lists in the plagiarism detector.
 Users can view, add, remove, and toggle stopword lists.
 """
 
+
 import streamlit as st
-from typing import List, Set, Optional
-from src.core.stopwords import get_stopword_manager, StopwordManager
+
+from src.core.stopwords import get_stopword_manager
 
 
 def render_stopword_manager_ui() -> None:

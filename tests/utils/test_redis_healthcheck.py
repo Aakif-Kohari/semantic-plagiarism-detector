@@ -5,6 +5,7 @@ Unit tests for RedisCache.ping() health check method.
 """
 
 from unittest.mock import MagicMock
+
 from src.utils.redis_cache import RedisCache
 
 

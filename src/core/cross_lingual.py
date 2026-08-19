@@ -23,8 +23,8 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-from dataclasses import asdict, dataclass
 from collections import OrderedDict
+from dataclasses import asdict, dataclass
 from threading import RLock
 from typing import Callable, Iterable, Optional
 

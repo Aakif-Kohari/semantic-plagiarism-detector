@@ -13,7 +13,6 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
-
 _DEFAULT_BG = "#FFFFFF"
 _DEFAULT_INK = "#0F172A"
 _DEFAULT_PRIMARY = "#3B82F6"

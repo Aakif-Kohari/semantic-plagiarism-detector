@@ -8,7 +8,7 @@ and cross-lingual plagiarism detection.
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple  # noqa: F401
+from typing import Any, Dict, List, Optional, Tuple  # noqa: F401
 
 import numpy as np
 import pandas as pd

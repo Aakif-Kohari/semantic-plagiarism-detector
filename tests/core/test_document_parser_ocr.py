@@ -13,7 +13,6 @@ from src.core.document_parser import (
 )
 
 
-
 class FakePage:
     def __init__(self, text):
         self._text = text

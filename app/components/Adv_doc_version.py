@@ -2,18 +2,19 @@
 # ── SECTION: ADVANCED DOCUMENT VERSION CONTROL & CHANGE TRACKING 
 # ───────────────────────────────────────────────────────────────────────────────
 
-import hashlib
 import difflib
-import zlib
+import hashlib
 import json
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, Any
+import zlib
 from collections import defaultdict
-import pandas as pd
+from datetime import datetime
+from typing import Dict, List, Optional
+
 import numpy as np
-import streamlit as st
+import pandas as pd
 import plotly.graph_objects as go
-import plotly.express as px
+import streamlit as st
+
 
 # ── Document Version Class ──────────────────────────────────────────────────
 class DocumentVersion:

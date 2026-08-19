@@ -12,20 +12,21 @@ Features:
 - Version comparison
 """
 
+import difflib
+import hashlib
 import json
 import time
-import hashlib
-import difflib
-from pathlib import Path
-from datetime import datetime, timedelta  # noqa: F401
-from typing import Dict, List, Any, Optional, Tuple, Set  # noqa: F401
-from dataclasses import dataclass, field, asdict
 from collections import defaultdict
-import streamlit as st
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta  # noqa: F401
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple  # noqa: F401
+
+import numpy as np  # noqa: F401
 import pandas as pd
 import plotly.graph_objects as go
+import streamlit as st
 from plotly.subplots import make_subplots
-import numpy as np  # noqa: F401
 
 # ==============================================================================
 # DATA CLASSES

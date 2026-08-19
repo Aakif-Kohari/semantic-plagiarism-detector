@@ -59,7 +59,6 @@ import pandas as pd  # noqa: E402
 from src.core.calibration import (  # noqa: E402
     as_label,
     best_evaluation,
-    best_threshold,
     build_recommendation,
     evaluate_thresholds,
     write_recommended_config,
@@ -246,8 +245,9 @@ def compute_semantic_scores(df: pd.DataFrame) -> List[float]:
         )
 
     try:
-        from src.core.embedding_model import embed_chunks
         from sklearn.metrics.pairwise import cosine_similarity
+
+        from src.core.embedding_model import embed_chunks
     except ImportError as exc:
         raise SystemExit(
             "Error: could not import the embedding pipeline required by "

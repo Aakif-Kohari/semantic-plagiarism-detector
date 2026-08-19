@@ -5,12 +5,12 @@ Provides UI elements for displaying hybrid similarity scores,
 lexical vs semantic comparison charts, and settings controls.
 """
 
-import streamlit as st
-import pandas as pd
-import numpy as np
-import plotly.graph_objects as go
-from typing import Dict, List, Any, Optional, Tuple  # noqa: F401
+from typing import Any, Dict, List, Optional, Tuple  # noqa: F401
 
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
 
 # ============================================================================
 # HYBRID SIMILARITY DISPLAY
@@ -353,7 +353,10 @@ def compute_and_display_hybrid_scores(
     Returns:
         Tuple of (hybrid_matrix, statistics)
     """
-    from src.core.lexical_similarity import lexical_similarity_matrix, scale_lexical_matrix
+    from src.core.lexical_similarity import (
+        lexical_similarity_matrix,
+        scale_lexical_matrix,
+    )
     
     doc_names = list(texts.keys())
     

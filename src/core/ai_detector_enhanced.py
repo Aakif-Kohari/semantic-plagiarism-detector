@@ -8,13 +8,14 @@ Detects LLM-generated text using multiple techniques:
 4. Statistical footprint analysis
 """
 
-import re
+import logging
 import math
-import numpy as np
-from typing import List, Dict, Any, Optional, Tuple
+import re
 from collections import Counter
 from dataclasses import dataclass, field
-import logging
+from typing import Any, Dict, List, Tuple
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 

@@ -4,7 +4,7 @@ Defines the abstract base similarity computation engine using the Strategy patte
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Union
+from typing import Dict, List, Union
 
 import numpy as np
 

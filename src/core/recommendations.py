@@ -8,9 +8,8 @@ system to deliver alerts.
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 

@@ -184,7 +184,7 @@ def test_get_allowed_webhook_domains(monkeypatch):
     ]
 def test_load_branding_config_missing_file_fallback():
     """Test that load_branding_config returns default BrandingConfig when the JSON file is missing."""
-    from src.core.config import load_branding_config, BrandingConfig
+    from src.core.config import BrandingConfig, load_branding_config
     
     # Call with a non-existent file path
     result = load_branding_config("nonexistent_path_123.json")

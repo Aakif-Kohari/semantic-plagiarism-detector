@@ -32,7 +32,10 @@ except ImportError:
         from thefuzz import fuzz, process
     except ImportError:
         try:
-            from fuzzywuzzy import fuzz, process  # type: ignore[import-untyped,reportMissingImports]
+            from fuzzywuzzy import (  # type: ignore[import-untyped,reportMissingImports]
+                fuzz,
+                process,
+            )
         except ImportError:
             fuzz = None
             process = None
@@ -137,7 +140,7 @@ def _extract_matching_indices(
 
 
 import logging
-from typing import Any, List, Optional
+from typing import Any, List
 
 logger = logging.getLogger(__name__)
 
@@ -222,7 +225,7 @@ def build_key_extractor(field: str) -> Callable[[Mapping[str, Any]], Any]:
 
 
 import logging
-from typing import Any, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 

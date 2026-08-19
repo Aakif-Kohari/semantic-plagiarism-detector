@@ -2,26 +2,17 @@
 # ── SECTION: AUTOMATED REPORT GENERATION SYSTEM (Issue #2000) ────────────────
 # ───────────────────────────────────────────────────────────────────────────────
 
-import os
 import json
 import uuid
-import base64
-from io import BytesIO
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass, asdict, field
-from collections import defaultdict, Counter
-import pandas as pd
-import numpy as np
-import streamlit as st
-import plotly.graph_objects as go
-import plotly.express as px
-from plotly.subplots import make_subplots
-import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
-import hashlib
-import re
+from collections import Counter, defaultdict
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from enum import Enum
+from io import BytesIO
+from typing import Any, Dict, List, Optional
+
+import pandas as pd
+import streamlit as st
 
 # ── Data Models ─────────────────────────────────────────────────────────────
 
@@ -652,7 +643,7 @@ class ReportGenerator:
                     id=str(uuid.uuid4()),
                     report_id="",
                     type='risk',
-                    title=f'Critical Risk Detected',
+                    title='Critical Risk Detected',
                     description=f'{critical} critical risk items found requiring immediate attention',
                     severity='critical',
                     confidence=0.95,
@@ -664,7 +655,7 @@ class ReportGenerator:
                     id=str(uuid.uuid4()),
                     report_id="",
                     type='risk',
-                    title=f'High Risk Items',
+                    title='High Risk Items',
                     description=f'{high} high risk items detected. Review recommended.',
                     severity='high',
                     confidence=0.85,
@@ -838,7 +829,7 @@ class ReportGenerator:
             job.status = ReportStatus.COMPLETED
             
             return report
-        except Exception as e:
+        except Exception:
             job.status = ReportStatus.FAILED
             return None
     
@@ -1120,7 +1111,7 @@ def render_history_tab(report_generator: ReportGenerator):
                         st.markdown(f"- [{insight.severity.upper()}] {insight.title}: {insight.description}")
                 
                 # Export button
-                if st.button(f"📥 Export", key=f"export_{report.id}"):
+                if st.button("📥 Export", key=f"export_{report.id}"):
                     report_bytes = report_generator.export_report(report.id, report.format)
                     st.download_button(
                         label=f"Download {report.format.value.upper()}",

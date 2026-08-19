@@ -6,7 +6,8 @@ for batched deletions in a single network round-trip (Issue #2816).
 """
 
 from unittest.mock import MagicMock, patch
-from src.utils.redis_cache import RedisCache, clear_session, clear_all_large_data
+
+from src.utils.redis_cache import RedisCache, clear_all_large_data, clear_session
 
 
 def test_clear_pattern_uses_redis_pipeline():

@@ -5,12 +5,13 @@ Provides UI elements for displaying language badges, translation metadata,
 and cross-lingual match indicators in the Streamlit dashboard.
 """
 
-import streamlit as st
-from typing import Dict, List, Any, Optional, Tuple  # noqa: F401
+from typing import Any, Dict, List, Optional, Tuple  # noqa: F401
+
 import pandas as pd
+import streamlit as st
+
 from src.core.translator import get_language_name
 from src.i18n.translator import _SUPPORTED_LANGUAGES
-
 
 # ============================================================================
 # LANGUAGE BADGE RENDERERS
