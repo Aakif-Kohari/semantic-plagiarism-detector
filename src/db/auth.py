@@ -162,6 +162,16 @@ class AuthRepository(BaseRepository):
                 username,
                 exc,
             )
+            try:
+                from src.db.security_audit import _emit_audit_log_failure_alert
+
+                _emit_audit_log_failure_alert(
+                    event_type=event_type, username=username, error=exc
+                )
+            except Exception as alert_exc:
+                logger.warning(
+                    "Failed to trigger audit log failure alert: %s", alert_exc
+                )
 
     def _build_audit_log_query_conditions(
         self,

@@ -7,12 +7,78 @@ Tracks security-related events, provides utilities to enforce account lockout
 policies, and supports paginated retrieval of audit events.
 """
 
+import json
 import logging
+import os
 import sqlite3
+import urllib.request
 from datetime import datetime, timedelta
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+try:
+    from opentelemetry import metrics
+
+    _meter = metrics.get_meter("semantic_plagiarism_detector.security_audit")
+    _audit_failure_counter = _meter.create_counter(
+        name="security_audit_log.failures",
+        unit="1",
+        description="Count of security audit log write failures",
+    )
+except Exception:
+    _audit_failure_counter = None
+
+
+def _emit_audit_log_failure_alert(
+    event_type: str,
+    username: Optional[str],
+    error: Exception,
+) -> None:
+    """Emit an OpenTelemetry metric and/or fire an alert webhook when writing to security audit log fails (Issue #2729)."""
+    if _audit_failure_counter is not None:
+        try:
+            _audit_failure_counter.add(
+                1,
+                {
+                    "event_type": str(event_type),
+                    "error_type": error.__class__.__name__,
+                },
+            )
+        except Exception as otel_exc:
+            logger.warning(
+                "Failed to emit OpenTelemetry metric for security log failure: %s",
+                otel_exc,
+            )
+
+    webhook_url = os.getenv("SECURITY_AUDIT_ALERT_WEBHOOK_URL") or os.getenv(
+        "ALERT_WEBHOOK_URL"
+    )
+    if webhook_url:
+        try:
+            payload = json.dumps(
+                {
+                    "alert": "SecurityAuditLogWriteFailure",
+                    "event_type": event_type,
+                    "username": username,
+                    "error": str(error),
+                    "error_type": error.__class__.__name__,
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+            ).encode("utf-8")
+            req = urllib.request.Request(
+                webhook_url,
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=5):
+                pass
+        except Exception as webhook_exc:
+            logger.warning(
+                "Failed to fire alert webhook for security log failure: %s",
+                webhook_exc,
+            )
 
 
 def log_security_event(
@@ -61,8 +127,9 @@ def log_security_event(
             )
             conn.commit()
 
-    except sqlite3.Error as e:
+    except Exception as e:
         logger.error("Failed to log security event %s: %s", event_type, e)
+        _emit_audit_log_failure_alert(event_type=event_type, username=username, error=e)
 
 
 def count_recent_failed_logins(
