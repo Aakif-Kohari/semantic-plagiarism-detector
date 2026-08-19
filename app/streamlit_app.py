@@ -2374,6 +2374,19 @@ with st.sidebar:
                 st.markdown("• **Auth DB:** 🔴 Error")
                 st.caption(f"  {db_err}")
 
+            try:
+                from src.utils.redis_cache import get_cache
+
+                cache_inst = get_cache()
+                redis_online, latency = cache_inst.ping()
+                if redis_online:
+                    lat_str = f" ({latency} ms)" if latency is not None else ""
+                    st.markdown(f"• **Cache Backend:** 🟢 Redis{lat_str}")
+                else:
+                    st.markdown("• **Cache Backend:** 🟡 In-Memory")
+            except Exception:
+                st.markdown("• **Cache Backend:** 🟡 In-Memory")
+
             st.divider()
             cpu_percent = psutil.cpu_percent(interval=0.1)
             cpu_count = psutil.cpu_count(logical=True)

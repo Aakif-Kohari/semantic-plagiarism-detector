@@ -150,6 +150,19 @@ def render_sidebar(user_role: str, root_dir: str, faiss_index=None):
             total_scans_sidebar = 0
 
         st.markdown(f"Total Scans Processed: {total_scans_sidebar:,}")
+
+        try:
+            from src.utils.redis_cache import get_cache
+
+            cache_inst = get_cache()
+            redis_online, _ = cache_inst.ping()
+            if redis_online:
+                st.caption("🟢 Cache: Redis")
+            else:
+                st.caption("🟡 Cache: In-Memory")
+        except Exception:
+            st.caption("🟡 Cache: In-Memory")
+
         st.markdown("### ⚙️ Settings")
 
         lang_options = list(_SUPPORTED_LANGUAGES.values())
