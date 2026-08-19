@@ -253,8 +253,8 @@ def init_backup_daemon():
 
 def init_session_state():
     """Initialize session state keys and global background services."""
-    if SessionKeys.SESSION_ID not in st.session_state:
-        st.session_state[SessionKeys.SESSION_ID] = str(uuid.uuid4())
+    from app.session_manager import initialize_and_verify_session
+    st.session_state[SessionKeys.SESSION_ID] = initialize_and_verify_session()
 
     if SessionKeys.AUTHENTICATED not in st.session_state:
         st.session_state[SessionKeys.AUTHENTICATED] = False

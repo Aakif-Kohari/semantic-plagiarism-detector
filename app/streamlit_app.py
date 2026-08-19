@@ -1509,10 +1509,8 @@ if not getattr(app_config, "_backup_daemon_started", False):
     ).start()
 
 # Generate unique session ID for this Streamlit session
-if SessionKeys.SESSION_ID not in st.session_state:
-    import uuid
-
-    st.session_state[SessionKeys.SESSION_ID] = str(uuid.uuid4())
+from app.session_manager import initialize_and_verify_session
+st.session_state[SessionKeys.SESSION_ID] = initialize_and_verify_session()
 
 SESSION_ID = st.session_state[SessionKeys.SESSION_ID]
 
