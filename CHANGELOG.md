@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `--recursive` support to the CLI scan command for scanning documents in nested subdirectories.
 
 ### Fixed
-- Handled invalid non-integer `REDIS_DB` configurations gracefully by catching `ValueError`, logging a warning, and defaulting to database 0 (`src/utils/redis_cache.py`).
+- Robust claim parsing in `.github/workflows/ecsoc-automation.yml` using structured hidden HTML comments to prevent breaking on greeting message variations.
 
 ### Changed
 - Optimized `clear_session` and `clear_pattern` with Redis pipelining to batch deletions into a single network round-trip (`src/utils/redis_cache.py`).
