@@ -13,6 +13,7 @@ import os
 import pickle
 import threading
 import time
+import urllib.parse
 import zlib
 from enum import Enum
 from typing import Any, Optional
@@ -79,13 +80,14 @@ except ValueError:
     )
     REDIS_DB = 0
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", None)
-# Construct REDIS_URL with password if provided (Issue #2320).
+# Construct REDIS_URL with password if provided (Issue #2320, Issue #2799).
 # Format: redis://:{password}@{host}:{port}/{db}
 # When no password is set, falls back to: redis://{host}:{port}/{db}
 if REDIS_PASSWORD:
+    encoded_password = urllib.parse.quote_plus(REDIS_PASSWORD)
     REDIS_URL = os.getenv(
         "REDIS_URL",
-        f"redis://:{REDIS_PASSWORD}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}",
+        f"redis://:{encoded_password}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}",
     )
 else:
     REDIS_URL = os.getenv(
