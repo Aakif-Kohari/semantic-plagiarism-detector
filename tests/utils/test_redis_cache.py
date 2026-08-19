@@ -1204,4 +1204,24 @@ def test_payload_compressor_exact_threshold_boundary():
     assert PayloadCompressor.decompress(compressed_below) == below_threshold_data
 
 
+def test_redis_password_special_characters_escaped(monkeypatch):
+    """Verify REDIS_PASSWORD with special characters (@, /, #, :) is safely URL-encoded (Issue #2799)."""
+    import importlib
+    import urllib.parse
+    import src.utils.redis_cache
+
+    monkeypatch.setenv("REDIS_PASSWORD", "p@ss/word#123:secret")
+    monkeypatch.setenv("REDIS_HOST", "localhost")
+    monkeypatch.setenv("REDIS_PORT", "6379")
+    monkeypatch.setenv("REDIS_DB", "0")
+    monkeypatch.delenv("REDIS_URL", raising=False)
+
+    importlib.reload(src.utils.redis_cache)
+
+    expected_encoded = urllib.parse.quote_plus("p@ss/word#123:secret")
+    assert expected_encoded in src.utils.redis_cache.REDIS_URL
+    assert f":{expected_encoded}@localhost:6379/0" in src.utils.redis_cache.REDIS_URL
+
+
+
 
