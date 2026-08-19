@@ -263,12 +263,6 @@ class TestRedisCache:
         assert (
             safe_key_a != safe_key_b
         ), "Full-digest keys must be distinct for different queries."
-        assert (
-            safe_key_a == f"{CacheKeyPrefix.LEGACY_ANALYSIS_PREFIX.value}{full_hash_a}"
-        )
-        assert (
-            safe_key_b == f"{CacheKeyPrefix.LEGACY_ANALYSIS_PREFIX.value}{full_hash_b}"
-        )
         assert safe_key_a == CacheNamespace.ANALYSIS.build_key(full_hash_a)
         assert safe_key_b == CacheNamespace.ANALYSIS.build_key(full_hash_b)
 
