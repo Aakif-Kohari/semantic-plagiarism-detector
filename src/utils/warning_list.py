@@ -79,36 +79,22 @@ def filter_warnings(
 
     if min_match_length > 0:
         normalised = [
-            item for item in normalised if item.get("matched_length", 0) >= min_match_length
+            item
+            for item in normalised
+            if item.get("matched_length", 0) >= min_match_length
         ]
 
-    query = _truncate_search_query(search_query).casefold()
-    if not query:
-        return normalised
-
-    filtered = []
-    for item in normalised:
-        doc_a = item["doc_a"].casefold()
-        doc_b = item["doc_b"].casefold()
-
-        if query in doc_a or query in doc_b:
-            filtered.append(item)
-            continue
-
-        if fuzz is not None:
-            score_a = max(fuzz.partial_ratio(query, doc_a), fuzz.token_set_ratio(query, doc_a))
-            score_b = max(fuzz.partial_ratio(query, doc_b), fuzz.token_set_ratio(query, doc_b))
-            if score_a >= FUZZY_THRESHOLD or score_b >= FUZZY_THRESHOLD:
-                filtered.append(item)
-
-    return filtered
+    predicate = matches_query_predicate(search_query)
+    return [item for item in normalised if predicate(item)]
 
 
 def build_key_extractor(field: str) -> Callable[[Mapping[str, Any]], Any]:
     """Return a key extraction function suitable for sorting warning items."""
+
     def extract_key(item: Mapping[str, Any]) -> Any:
         val = item.get(field, "")
         return val.casefold() if isinstance(val, str) else val
+
     return extract_key
 
 
@@ -181,7 +167,13 @@ def _reset_page() -> None:
     st.session_state.warning_page = 1
 
 
-def render_copy_button(text_to_copy: str, button_id: str = "copy-btn", copy_label: str = "📋 Copy", copied_label: str = "✅ Copied!", height: int = 45) -> None:
+def render_copy_button(
+    text_to_copy: str,
+    button_id: str = "copy-btn",
+    copy_label: str = "📋 Copy",
+    copied_label: str = "✅ Copied!",
+    height: int = 45,
+) -> None:
     escaped_text = (
         text_to_copy.replace("\\", "\\\\")
         .replace('"', '\\"')
@@ -343,7 +335,7 @@ def render_warning_controls(
             {
                 "key": "clear_threshold",
                 "label": get_text("warn_filter_threshold", lang=lang_code).format(
-                    pct=f"{threshold*100:.0f}"
+                    pct=f"{threshold * 100:.0f}"
                 ),
                 "action": "threshold",
             }
@@ -629,8 +621,6 @@ def render_warning_controls(
             )
         markdown_text = "\n".join(markdown_lines)
 
-
-
     left, middle, right = st.columns([3, 2, 2])
     with left:
         if current_page.total_items:
@@ -648,7 +638,7 @@ def render_warning_controls(
             text_to_copy=markdown_text,
             button_id="copy-summary-btn",
             copy_label="📋 Copy Summary",
-            copied_label="✅ Copied!"
+            copied_label="✅ Copied!",
         )
     with right:
         st.download_button(
@@ -666,9 +656,7 @@ def render_warning_controls(
     # with a transition so re-filtered/re-sorted results animate smoothly
     # instead of snapping instantly.
     with st.container(key="warning_list_container"):
-
         for flag in current_page.items:
-
             if compact_view:
                 render_compact_warning_row(flag)
                 st.markdown(
@@ -771,22 +759,29 @@ def render_warning_controls(
         ):
             st.session_state.warning_page = current_page.page + 1
             st.rerun()
-def matches_query_predicate(flag: dict, search_query: str) -> bool:
-    """
-    Check if a flagged incident matches a search query across document names or text snippets.
-    """
-    if not search_query or not search_query.strip():
-        return True
 
-    query = search_query.strip().lower()
-    doc_a = str(flag.get("doc_a", "")).lower()
-    doc_b = str(flag.get("doc_b", "")).lower()
-    snippet_a = str(flag.get("snippet_a", "")).lower()
-    snippet_b = str(flag.get("snippet_b", "")).lower()
 
-    return (
-        query in doc_a
-        or query in doc_b
-        or query in snippet_a
-        or query in snippet_b
-    )
+def matches_query_predicate(search_query: str) -> Callable[[Mapping[str, Any]], bool]:
+    """
+    Return a predicate that checks whether a warning matches the given search query.
+    """
+    query = _truncate_search_query(search_query).casefold()
+
+    def predicate(flag: Mapping[str, Any]) -> bool:
+        if not query:
+            return True
+        doc_a = str(flag.get("doc_a", "")).casefold()
+        doc_b = str(flag.get("doc_b", "")).casefold()
+        if query in doc_a or query in doc_b:
+            return True
+        if fuzz is not None:
+            score_a = max(
+                fuzz.partial_ratio(query, doc_a), fuzz.token_set_ratio(query, doc_a)
+            )
+            score_b = max(
+                fuzz.partial_ratio(query, doc_b), fuzz.token_set_ratio(query, doc_b)
+            )
+            return score_a >= FUZZY_THRESHOLD or score_b >= FUZZY_THRESHOLD
+        return False
+
+    return predicate

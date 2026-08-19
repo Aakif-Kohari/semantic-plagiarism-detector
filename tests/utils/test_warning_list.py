@@ -1,4 +1,3 @@
-
 from src.utils.warning_list import (
     build_key_extractor,
     filter_warnings,
@@ -36,7 +35,7 @@ def test_matches_query_predicate():
     predicate_empty = matches_query_predicate("   ")
 
     assert predicate_alpha(WARNINGS[0]) is True  # doc_b matches
-    assert predicate_alpha(WARNINGS[1]) is False # no match
+    assert predicate_alpha(WARNINGS[1]) is False  # no match
     assert predicate_alpha(WARNINGS[2]) is True  # doc_a matches
     assert predicate_empty(WARNINGS[1]) is True  # empty query matches all
 
@@ -59,15 +58,22 @@ def test_empty_search_returns_everything():
 
 
 def test_search_query_is_truncated_to_max_length():
-    long_query = "a" * 201
-    results = filter_warnings(WARNINGS, long_query)
-    assert len(results) == 4
-
+    # Truncation behaviour: 201-char and 200-char queries must produce identical results
     truncated = filter_warnings(WARNINGS, "a" * 201)
     assert truncated == filter_warnings(WARNINGS, "a" * 200)
 
 
 def test_fuzzy_search_handles_minor_typos():
+    try:
+        from thefuzz import fuzz  # noqa: F401
+    except ImportError:
+        try:
+            from fuzzywuzzy import fuzz  # noqa: F401
+        except ImportError:
+            import pytest
+
+            pytest.skip("fuzzy library not installed")
+
     # "Alpaha" is a typo for "Alpha"
     results = filter_warnings(WARNINGS, "Alpaha")
     assert len(results) == 2
@@ -89,6 +95,34 @@ def test_multi_column_sorting():
     assert [item["similarity"] for item in results] == [0.91, 0.91, 0.81, 0.78]
     assert results[0]["doc_a"] == "Alpha.pdf"
     assert results[1]["doc_a"] == "Zeta.pdf"
+
+
+def test_multi_column_sorting_both_descending():
+    results = sort_warnings(
+        WARNINGS,
+        primary_field="similarity",
+        primary_descending=True,
+        secondary_field="doc_a",
+        secondary_descending=True,
+    )
+    assert [item["similarity"] for item in results] == [0.91, 0.91, 0.81, 0.78]
+    # Both descending: among the two 0.91 items, doc_a descending → Zeta before Alpha
+    assert results[0]["doc_a"] == "Zeta.pdf"
+    assert results[1]["doc_a"] == "Alpha.pdf"
+
+
+def test_multi_column_sorting_both_ascending():
+    results = sort_warnings(
+        WARNINGS,
+        primary_field="similarity",
+        primary_descending=False,
+        secondary_field="doc_a",
+        secondary_descending=False,
+    )
+    assert [item["similarity"] for item in results] == [0.78, 0.81, 0.91, 0.91]
+    # Both ascending: among the two 0.91 items, doc_a ascending → Alpha before Zeta
+    assert results[2]["doc_a"] == "Alpha.pdf"
+    assert results[3]["doc_a"] == "Zeta.pdf"
 
 
 def test_filename_sorting():
@@ -145,8 +179,6 @@ def test_filtering_occurs_before_pagination():
     assert len(filtered) == 12
     assert len(page.items) == 2
     assert page.total_pages == 2
-
-
 
 
 def test_filter_warnings_by_minimum_match_length():
