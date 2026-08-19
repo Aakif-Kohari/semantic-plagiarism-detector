@@ -230,16 +230,6 @@ class CacheNamespace(str, Enum):
     LOGIN_ATTEMPTS = "spd:v1:login_attempts"
     UPLOADS = "spd:v1:uploads"
 
-    # Legacy/Old namespaces merged from CacheKeyPrefix
-    LEGACY_LOGIN_ATTEMPTS = "login_attempts:"
-    LEGACY_UPLOAD_COUNT = "upload_count:"
-    LEGACY_SIMILARITY_RESULT = "similarity:"
-    LEGACY_DOCUMENT_CACHE = "doc:"
-    LEGACY_UPLOADS_PREFIX = "upload_count:"
-    LEGACY_FAISS_INDEX = "faiss_index"
-    LEGACY_ANALYSIS_PATTERN = "analysis:*"
-    LEGACY_ANALYSIS_PREFIX = "analysis:"
-
     def build_key(self, *parts: str) -> str:
         """Construct a standardized cache key with namespace prefix."""
         return ":".join([self.value] + list(parts))

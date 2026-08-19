@@ -71,12 +71,16 @@ if "sentence_transformers" not in sys.modules:
 
 if "torch" not in sys.modules:
     torch_stub = types.ModuleType("torch")
+    torch_stub.__path__ = []
 
     class Tensor:
         pass
 
     torch_stub.Tensor = Tensor  # type: ignore
+    torch_quant_stub = types.ModuleType("torch.quantization")
+    torch_stub.quantization = torch_quant_stub
     sys.modules["torch"] = torch_stub
+    sys.modules["torch.quantization"] = torch_quant_stub
 
 
 import importlib.util

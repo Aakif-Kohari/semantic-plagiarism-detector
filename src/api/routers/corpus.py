@@ -10,7 +10,7 @@ from src.api.schemas import ClearDataResponse, ErrorResponse
 from src.core.app_config import FAISS_INDEX_PATH
 from src.db.auth import get_user_role
 from src.db.corpus_db import clear_all_data
-from src.utils.redis_cache import CacheKeyPrefix, get_cache
+from src.utils.redis_cache import CacheNamespace, get_cache
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +56,8 @@ async def clear_all_documents(
         try:
             cache = get_cache()
             if cache.is_available():
-                cache.delete(CacheKeyPrefix.LEGACY_FAISS_INDEX.value)
-                cache.clear_pattern(CacheKeyPrefix.LEGACY_ANALYSIS_PATTERN.value)
+                cache.clear_pattern(CacheNamespace.FAISS.build_key("*"))
+                cache.clear_pattern(CacheNamespace.ANALYSIS.build_key("*"))
         except Exception as e:
             logger.error(f"Failed to clear Redis cache: {e}")
 
