@@ -102,3 +102,36 @@ class TestBackupDaemonSafety:
 
             # Snapshot must NOT be called because active_sessions was -1
             mock_snapshot.assert_not_called()
+
+    def test_backup_daemon_executes_cleanup_rotation(self, tmp_path):
+        """Verify backup daemon calls cleanup_old_backups after writing snapshot."""
+        from app.state_manager import _run_backup_daemon
+
+        mock_cache = Mock()
+        mock_cache.get.side_effect = lambda k: {
+            "spd:v1:global:last_backup_time": 0.0,
+            "spd:v1:global:last_activity": time.time() - 3600,
+        }.get(k, None)
+
+        fake_db = tmp_path / "corpus.db"
+        fake_db.write_bytes(b"mock_db")
+
+        with patch("app.state_manager.get_cache", return_value=mock_cache), patch(
+            "app.state_manager.get_active_sessions_count", return_value=0
+        ), patch("src.core.app_config.get_backup_idle_timeout", return_value=1800), patch(
+            "src.db.corpus_db.get_corpus_db_path", return_value=fake_db
+        ), patch(
+            "src.db.database_backup.create_corpus_database_snapshot", return_value=b"snapshot_data"
+        ), patch(
+            "src.db.database_backup.cleanup_old_backups"
+        ) as mock_cleanup, patch(
+            "time.sleep", side_effect=InterruptedError("Stop loop")
+        ):
+            try:
+                _run_backup_daemon()
+            except InterruptedError:
+                pass
+
+            mock_cleanup.assert_called_once_with(
+                tmp_path / "backups", max_backups=10, max_age_days=30
+            )
