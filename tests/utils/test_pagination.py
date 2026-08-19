@@ -12,7 +12,7 @@ import doctest
 import pytest
 
 from src.utils import pagination
-from src.utils.pagination import PaginationPage, paginate_items, _coerce_integer
+from src.utils.pagination import PaginationPage, _coerce_integer, paginate_items
 
 
 class TestPaginationPageReprClassName:

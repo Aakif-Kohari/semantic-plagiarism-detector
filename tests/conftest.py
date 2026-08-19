@@ -370,8 +370,10 @@ def _cleanup_corpus_db_connections():
 
 
 import sqlite3
-import pytest
 from pathlib import Path
+
+import pytest
+
 
 @pytest.fixture
 def db_connection(tmp_path: Path) -> sqlite3.Connection:

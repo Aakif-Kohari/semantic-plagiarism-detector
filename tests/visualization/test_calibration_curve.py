@@ -8,7 +8,6 @@ the automated threshold calibration & backtest harness (Issue #2267).
 from __future__ import annotations
 
 import plotly.graph_objects as go
-import pytest
 
 from src.core.calibration import evaluate_thresholds
 from src.visualization.analytics import plot_precision_recall_curve

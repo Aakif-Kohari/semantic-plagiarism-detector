@@ -6,7 +6,8 @@ upon mid-session connection drop without dropping user uploaded files (Issue #28
 """
 
 import pickle
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
+
 from src.utils.redis_cache import RedisCache, RedisConnectionError
 
 

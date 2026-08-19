@@ -15,24 +15,24 @@ This suite ensures 100% test coverage for:
 7. Integration with `get_stopwords()` and `clean_text(remove_stopwords=True)`.
 """
 
-import os
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
+from src.core.document_parser import (
+    get_stopwords as doc_parser_get_stopwords,
+)
+from src.core.document_parser import (
+    load_custom_stopwords as doc_parser_load_custom_stopwords,
+)
 from src.core.parsers.cleaners import (
     ENGLISH_STOPWORDS,
     clean_text,
     get_stopwords,
+)
+from src.core.parsers.cleaners import (
     load_custom_stopwords as cleaners_load_custom_stopwords,
 )
-from src.core.document_parser import (
-    load_custom_stopwords as doc_parser_load_custom_stopwords,
-    get_stopwords as doc_parser_get_stopwords,
-)
-
 
 # ---------------------------------------------------------------------------
 # Section 1: Non-Existent File & Missing Environment Variable Recovery Tests

@@ -5,12 +5,13 @@ Provides UI elements for displaying language badges, translation metadata,
 and cross-lingual match indicators in the Streamlit dashboard.
 """
 
-import streamlit as st
-from typing import Dict, List, Any, Optional, Tuple  # noqa: F401
+from typing import Any, Dict, List, Optional, Tuple  # noqa: F401
+
 import pandas as pd
+import streamlit as st
+
 from src.core.translator import get_language_name
 from src.i18n.translator import _SUPPORTED_LANGUAGES
-
 
 # ============================================================================
 # LANGUAGE BADGE RENDERERS
@@ -422,24 +423,27 @@ def render_cross_lingual_ui_in_drilldown(
         chunk_index: Chunk index
         metadata: Translation metadata
     """
-    if not is_cross_lingual_enabled() or not metadata:
-        return
-    
-    if doc_name not in metadata:
-        return
-    
-    doc_metadata = metadata[doc_name]
-    if not doc_metadata or chunk_index >= len(doc_metadata):
-        return
-    
-    chunk_meta = doc_metadata[chunk_index]
-    lang = chunk_meta.get("detected_language", "en")
-    is_translated = chunk_meta.get("translated", False)
-    
-    if lang != "en" or is_translated:
-        st.markdown(render_language_badge(lang), unsafe_allow_html=True)
-        if is_translated:
-            st.caption(f"🔄 Translated from {get_language_name(lang)} to English")
+    try:
+        if not is_cross_lingual_enabled() or not metadata:
+            return
+        
+        if doc_name not in metadata:
+            return
+        
+        doc_metadata = metadata[doc_name]
+        if not doc_metadata or chunk_index >= len(doc_metadata):
+            return
+        
+        chunk_meta = doc_metadata[chunk_index]
+        lang = chunk_meta.get("detected_language", "en")
+        is_translated = chunk_meta.get("translated", False)
+        
+        if lang != "en" or is_translated:
+            st.markdown(render_language_badge(lang), unsafe_allow_html=True)
+            if is_translated:
+                st.caption(f"🔄 Translated from {get_language_name(lang)} to English")
+    except Exception:
+        st.warning("Translation service temporarily unavailable.")
 
 
 # ============================================================================

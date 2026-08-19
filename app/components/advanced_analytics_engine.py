@@ -12,28 +12,24 @@ Features:
 - Automated reporting with insights
 """
 
-import json
 import time
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import Any, Dict, List, Tuple
+
 import numpy as np
 import pandas as pd
-from pathlib import Path
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Tuple, Union
-from dataclasses import dataclass, field, asdict
-from enum import Enum
-from collections import defaultdict, Counter
-import streamlit as st
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import plotly.express as px
+import streamlit as st
 
 # ML Libraries
 try:
-    from sklearn.ensemble import RandomForestRegressor, IsolationForest
-    from sklearn.preprocessing import StandardScaler
-    from sklearn.metrics import mean_absolute_error, r2_score
-    from sklearn.cluster import DBSCAN
     import scipy.stats as stats
+    from sklearn.cluster import DBSCAN
+    from sklearn.ensemble import IsolationForest, RandomForestRegressor
+    from sklearn.metrics import mean_absolute_error, r2_score
+    from sklearn.preprocessing import StandardScaler
     SKLEARN_AVAILABLE = True
 except ImportError:
     SKLEARN_AVAILABLE = False

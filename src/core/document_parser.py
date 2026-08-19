@@ -11,14 +11,17 @@ import shutil
 import socket
 import subprocess
 import tempfile
-import time
 import xml.etree.ElementTree
 import zipfile
 from collections import Counter
 from pathlib import Path
 from typing import BinaryIO, Dict, List, Optional, Union
 
+logger = logging.getLogger(__name__)
+
 import defusedxml
+
+ fix/ui-label-regex-2796
 
 from src.core.parse_durations import record_parse_duration
 from src.core.parsers.text_parser import (
@@ -26,12 +29,15 @@ from src.core.parsers.text_parser import (
     _rtf_content_within_limit,
 )
 
+ main
 try:
     import defusedxml.lxml
 
     defusedxml.lxml.monkey_patch()
 except (AttributeError, ImportError):
-    pass
+    logger.critical(
+        "defusedxml.lxml is unavailable; falling back to standard XML parsing, which is insecure and vulnerable to XXE attacks."
+    )
 from urllib.parse import urlparse
 
 import docx
@@ -46,12 +52,10 @@ except ImportError:
         return rtf_text
 
 
-logger = logging.getLogger(__name__)
 import string
 import unicodedata
 
 from src.core.translator import translate_text
-
 from src.errors import EmptyDocumentError
 
 # OCR dependencies are imported lazily so TXT/DOCX and normal text PDFs still
@@ -441,16 +445,25 @@ def validate_ocr_dpi(value: int) -> int:
 
 def validate_ocr_language(value: str) -> str:
     """Validate a Tesseract OCR language code exposed by the UI."""
-    language = str(value or "").strip().lower()
+    raw_val = str(value or "").strip().lower()
+    parts = [p.strip() for p in raw_val.split("+")]
 
-    if language not in SUPPORTED_OCR_LANGUAGES:
+    if not parts or any(not p for p in parts):
         supported = ", ".join(sorted(SUPPORTED_OCR_LANGUAGES))
         raise ValueError(
-            f"Unsupported OCR language '{language or value}'. "
+            f"Unsupported OCR language '{value}'. "
             f"Supported values: {supported}."
         )
 
-    return language
+    for part in parts:
+        if part not in SUPPORTED_OCR_LANGUAGES:
+            supported = ", ".join(sorted(SUPPORTED_OCR_LANGUAGES))
+            raise ValueError(
+                f"Unsupported OCR language '{part}'. "
+                f"Supported values: {supported}."
+            )
+
+    return "+".join(dict.fromkeys(parts))
 
 
 def normalize_ocr_settings(

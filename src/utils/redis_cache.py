@@ -17,7 +17,6 @@ import zlib
 from enum import Enum
 from typing import Any, Optional
 
-
 # CacheKeyPrefix has been consolidated into CacheNamespace below
 
 try:
@@ -120,11 +119,11 @@ class PayloadCompressor:
         Uncompressed payloads: raw serialized bytes.
 
     Payloads are compressed when their serialized size is at least
-    COMPRESSION_THRESHOLD_BYTES (512 KiB).
+    COMPRESSION_THRESHOLD_BYTES (64 KiB).
     """
 
-    # Threshold above which data is compressed (e.g., 512KB)
-    COMPRESSION_THRESHOLD_BYTES: int = 512 * 1024
+    # Threshold above which data is compressed (e.g., 64KB)
+    COMPRESSION_THRESHOLD_BYTES: int = 64 * 1024
     _raw_threshold = os.getenv("REDIS_COMPRESSION_THRESHOLD", "").strip()
     if _raw_threshold:
         try:
@@ -763,8 +762,8 @@ def _cleanup_redis() -> None:
 atexit.register(_cleanup_redis)
 
 
-import zlib  # noqa: F811
 import pickle  # noqa: F811
+import zlib  # noqa: F811
 
 
 def store_large_data(key: str, data: Any, ttl: int = 1800) -> None:

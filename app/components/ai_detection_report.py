@@ -4,10 +4,12 @@ AI Detection Report Component
 Generates detailed reports for AI-generated text detection.
 """
 
-import streamlit as st
+from typing import Dict
+
 import pandas as pd
 import plotly.graph_objects as go
-from typing import Dict, Any, List
+import streamlit as st
+
 from src.core.ai_detector_enhanced import AIDetectionResult
 
 

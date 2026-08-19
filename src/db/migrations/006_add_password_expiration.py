@@ -6,8 +6,8 @@ will naturally expire, supporting 90-day rotation policies common
 in academic IT environments (Issue #2716).
 """
 
-import sqlite3
 import logging
+import sqlite3
 from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)

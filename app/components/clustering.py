@@ -4,15 +4,15 @@
 
 # ── Imports for Clustering and Topic Analysis ─────────────────────────────
 try:
+    import scipy.cluster.hierarchy as sch
+    from scipy.cluster.hierarchy import fcluster
+    from scipy.spatial.distance import squareform
     from sklearn.cluster import AgglomerativeClustering, KMeans
     from sklearn.decomposition import NMF, LatentDirichletAllocation
     from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
     from sklearn.manifold import TSNE
-    from sklearn.metrics import silhouette_score, davies_bouldin_score
+    from sklearn.metrics import davies_bouldin_score, silhouette_score
     from sklearn.preprocessing import StandardScaler
-    import scipy.cluster.hierarchy as sch
-    from scipy.spatial.distance import squareform
-    from scipy.cluster.hierarchy import fcluster
     CLUSTERING_AVAILABLE = True
 except ImportError as e:
     CLUSTERING_AVAILABLE = False
@@ -990,7 +990,7 @@ def render_evolution_tab():
                 col2.metric("Avg Similarity", f"{pattern['avg_similarity']:.2%}")
                 col3.metric("First Seen", pattern['first_seen'].strftime('%Y-%m-%d'))
                 
-                st.info(f"⚠️ This pair appears repeatedly in scans. Consider investigating further.")
+                st.info("⚠️ This pair appears repeatedly in scans. Consider investigating further.")
     
     # Pattern history
     with st.expander("📋 Pattern History"):

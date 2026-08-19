@@ -1463,13 +1463,15 @@ def _run_backup_daemon():
             ):
                 from src.db.corpus_db import get_corpus_db_path
                 from src.db.database_backup import (
+                    cleanup_old_backups,
                     create_corpus_database_snapshot,
                 )
 
+                from src.core.app_config import get_backup_dir
+
                 snapshot = create_corpus_database_snapshot()
 
-                db_path = get_corpus_db_path()
-                backup_dir = db_path.parent / "backups"
+                backup_dir = get_backup_dir()
                 backup_dir.mkdir(parents=True, exist_ok=True)
 
                 filename = (
@@ -1480,6 +1482,7 @@ def _run_backup_daemon():
                 filename.write_bytes(snapshot)
 
                 logger.info(f"Backup created: {filename}")
+                cleanup_old_backups(backup_dir, max_backups=10, max_age_days=30)
 
                 last_backup_time = now
                 cache.set(
@@ -1499,10 +1502,8 @@ if not getattr(app_config, "_backup_daemon_started", False):
     ).start()
 
 # Generate unique session ID for this Streamlit session
-if SessionKeys.SESSION_ID not in st.session_state:
-    import uuid
-
-    st.session_state[SessionKeys.SESSION_ID] = str(uuid.uuid4())
+from app.session_manager import initialize_and_verify_session
+st.session_state[SessionKeys.SESSION_ID] = initialize_and_verify_session()
 
 SESSION_ID = st.session_state[SessionKeys.SESSION_ID]
 
@@ -2087,11 +2088,12 @@ with st.sidebar:
                 for code, display_name in SUPPORTED_OCR_LANGUAGES.items()
             }
             language_names = list(ocr_language_labels)
-            default_language_name = SUPPORTED_OCR_LANGUAGES[DEFAULT_OCR_LANGUAGE]
+            default_language_name = SUPPORTED_OCR_LANGUAGES.get(DEFAULT_OCR_LANGUAGE, "English")
+            default_index = language_names.index(default_language_name) if default_language_name in language_names else 0
             selected_ocr_language_name = st.selectbox(
                 "OCR Language",
                 options=language_names,
-                index=language_names.index(default_language_name),
+                index=default_index,
                 key=SessionKeys.OCR_LANGUAGE_SELECTOR,
             )
             ocr_language = ocr_language_labels[selected_ocr_language_name]
@@ -3060,10 +3062,14 @@ if user_role == "admin":
                 st.info(f"Loaded and validated the existing FAISS index with {faiss_index.ntotal} vectors.")
 
     from src.utils.redis_cache import store_large_data, get_large_data, clear_large_data
+    from src.utils.similarity_cache import build_similarity_cache_key
+
+    analysis_cache_key = build_similarity_cache_key(SESSION_ID, use_hybrid=use_hybrid)
+    analysis_metadata_key = f"{analysis_cache_key}_metadata"
 
     if SessionKeys.ANALYSIS_RESULTS not in st.session_state:
         # Store only metadata in session state
-        cached_metadata = get_large_data(f"{SESSION_ID}:analysis_metadata")
+        cached_metadata = get_large_data(analysis_metadata_key)
         if cached_metadata is not None:
             st.session_state[SessionKeys.ANALYSIS_RESULTS] = cached_metadata
         else:
@@ -3075,11 +3081,11 @@ if user_role == "admin":
             }
     
     # Check if we have cached results
-    cached_results = get_large_data(f"{SESSION_ID}:analysis_results")
+    cached_results = get_large_data(analysis_cache_key)
     if cached_results is not None:
         st.session_state[SessionKeys.ANALYSIS_RESULTS]["has_results"] = True
         st.session_state[SessionKeys.ANALYSIS_RESULTS]["doc_count"] = cached_results.get("doc_count", 0)
-        st.session_state[SessionKeys.ANALYSIS_RESULTS]["cache_key"] = f"{SESSION_ID}:analysis_results"
+        st.session_state[SessionKeys.ANALYSIS_RESULTS]["cache_key"] = analysis_cache_key
 
     if SessionKeys.ANALYSIS_FILE_SIGNATURE not in st.session_state:
         st.session_state[SessionKeys.ANALYSIS_FILE_SIGNATURE] = None
@@ -3386,21 +3392,21 @@ if user_role == "admin":
             "timestamp": time.time()
         }
         
-        store_large_data(f"{SESSION_ID}:analysis_results", large_results, ttl=1800)
+        store_large_data(analysis_cache_key, large_results, ttl=1800)
         
         # Update session state with metadata only
         st.session_state[SessionKeys.ANALYSIS_RESULTS] = {
             "has_results": True,
             "doc_count": len(chunked_docs),
             "timestamp": time.time(),
-            "cache_key": f"{SESSION_ID}:analysis_results"
+            "cache_key": analysis_cache_key
         }
         
-        store_large_data(f"{SESSION_ID}:analysis_metadata", {
+        store_large_data(analysis_metadata_key, {
             "has_results": True,
             "doc_count": len(chunked_docs),
             "timestamp": time.time(),
-            "cache_key": f"{SESSION_ID}:analysis_results"
+            "cache_key": analysis_cache_key
         }, ttl=1800)
         # ===================================
         

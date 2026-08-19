@@ -212,13 +212,15 @@ def _run_backup_daemon():
             ):
                 from src.db.corpus_db import get_corpus_db_path
                 from src.db.database_backup import (
+                    cleanup_old_backups,
                     create_corpus_database_snapshot,
                 )
 
+                from src.core.app_config import get_backup_dir
+
                 snapshot = create_corpus_database_snapshot()
 
-                db_path = get_corpus_db_path()
-                backup_dir = db_path.parent / "backups"
+                backup_dir = get_backup_dir()
                 backup_dir.mkdir(parents=True, exist_ok=True)
 
                 filename = (
@@ -228,6 +230,7 @@ def _run_backup_daemon():
                 filename.write_bytes(snapshot)
 
                 logger.info(f"Backup created: {filename}")
+                cleanup_old_backups(backup_dir, max_backups=10, max_age_days=30)
 
                 last_backup_time = now
                 cache.set(
@@ -253,8 +256,8 @@ def init_backup_daemon():
 
 def init_session_state():
     """Initialize session state keys and global background services."""
-    if SessionKeys.SESSION_ID not in st.session_state:
-        st.session_state[SessionKeys.SESSION_ID] = str(uuid.uuid4())
+    from app.session_manager import initialize_and_verify_session
+    st.session_state[SessionKeys.SESSION_ID] = initialize_and_verify_session()
 
     if SessionKeys.AUTHENTICATED not in st.session_state:
         st.session_state[SessionKeys.AUTHENTICATED] = False

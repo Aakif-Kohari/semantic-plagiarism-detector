@@ -12,6 +12,7 @@ import os
 from unittest.mock import patch
 
 import pytest
+
 from src.api.middleware import _is_public_path, get_valid_tokens
 
 
@@ -195,7 +196,9 @@ class TestVerifyBearerToken:
         """Verify valid token passes verification."""
         import asyncio
         from unittest.mock import MagicMock
+
         from fastapi.security import HTTPAuthorizationCredentials
+
         from src.api.middleware import verify_bearer_token
 
         async def _test():
@@ -215,8 +218,10 @@ class TestVerifyBearerToken:
         """Verify ValueError during verification raises 401 without logging unexpected error."""
         import asyncio
         from unittest.mock import MagicMock
+
         from fastapi import HTTPException
         from fastapi.security import HTTPAuthorizationCredentials
+
         from src.api.middleware import verify_bearer_token
 
         async def _test():
@@ -236,8 +241,10 @@ class TestVerifyBearerToken:
         """Verify unexpected Exception during verification logs error with exc_info and raises 401."""
         import asyncio
         from unittest.mock import MagicMock
+
         from fastapi import HTTPException
         from fastapi.security import HTTPAuthorizationCredentials
+
         from src.api.middleware import verify_bearer_token
 
         async def _test():
@@ -307,7 +314,9 @@ class TestVerifyBearerToken:
         """Verify valid token passes verification."""
         import asyncio
         from unittest.mock import MagicMock
+
         from fastapi.security import HTTPAuthorizationCredentials
+
         from src.api.middleware import verify_bearer_token
 
         async def _test():
@@ -327,8 +336,10 @@ class TestVerifyBearerToken:
         """Verify ValueError during verification raises 401 without logging unexpected error."""
         import asyncio
         from unittest.mock import MagicMock
+
         from fastapi import HTTPException
         from fastapi.security import HTTPAuthorizationCredentials
+
         from src.api.middleware import verify_bearer_token
 
         async def _test():
@@ -348,8 +359,10 @@ class TestVerifyBearerToken:
         """Verify unexpected Exception during verification logs error with exc_info and raises 401."""
         import asyncio
         from unittest.mock import MagicMock
+
         from fastapi import HTTPException
         from fastapi.security import HTTPAuthorizationCredentials
+
         from src.api.middleware import verify_bearer_token
 
         async def _test():
@@ -375,7 +388,9 @@ class TestVerifyBearerToken:
 def test_get_current_user_jwt_without_scopes_defaults_to_empty_list():
     """Verify JWT token without explicit scopes claim defaults to [] instead of read/write."""
     import asyncio
+
     from fastapi.security import SecurityScopes
+
     from src.api.middleware import get_current_user
 
     async def _test():

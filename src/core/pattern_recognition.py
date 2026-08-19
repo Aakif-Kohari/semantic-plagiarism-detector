@@ -8,12 +8,10 @@ and track technique evolution over time.
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
-import math
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import pandas as pd

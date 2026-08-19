@@ -27,7 +27,8 @@ import numpy as np
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-from src.core.stopwords import get_stopword_manager, filter_stopwords, tokenize_filtered
+
+from src.core.stopwords import get_stopword_manager, tokenize_filtered
 
 # ── Stop-word handling (issue #222) ───────────────────────────────────────────
 

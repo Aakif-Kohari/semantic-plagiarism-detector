@@ -5,14 +5,14 @@ Provides functionality to run the plagiarism detection system without
 external dependencies like Redis, external APIs, and online model downloads.
 """
 
-import os
 import json
 import logging
-import time
-from pathlib import Path
-from typing import Any, Dict, Optional, List  # noqa: F401
-from dataclasses import dataclass, field  # noqa: F401
+import os
 import threading
+import time
+from dataclasses import dataclass, field  # noqa: F401
+from pathlib import Path
+from typing import Any, Dict, List, Optional  # noqa: F401
 
 logger = logging.getLogger(__name__)
 

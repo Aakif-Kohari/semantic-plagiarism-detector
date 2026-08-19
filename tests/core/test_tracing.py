@@ -1,8 +1,9 @@
 import pytest
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-from src.utils.tracing import init_tracer_provider, get_tracer
+
 from src.core.processing import run_full_pipeline
+from src.utils.tracing import get_tracer, init_tracer_provider
+
 
 @pytest.fixture
 def memory_exporter():
