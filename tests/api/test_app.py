@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from src.api.app import app
+from src.version import APP_VERSION
 
 client = TestClient(app)
 
@@ -270,7 +271,7 @@ def test_api_v1_status_returns_online_payload():
     assert "application/json" in response.headers["content-type"]
     data = response.json()
     assert data["status"] == "online"
-    assert data["version"] == "1.0.0"
+    assert data["version"] == APP_VERSION
 
 
 def test_api_v1_status_timestamp_is_iso_utc():
