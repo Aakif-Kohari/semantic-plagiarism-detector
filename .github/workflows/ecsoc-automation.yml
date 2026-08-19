@@ -178,14 +178,14 @@ jobs:
             };
 
             const ensureLabelsExist = async (labels) => {
-              for (const labelName of labels) {
+              const labelPromises = labels.map(async (labelName) => {
                 try {
                   await github.rest.issues.getLabel({
                     owner: context.repo.owner,
                     repo: context.repo.repo,
                     name: labelName
                   });
-                } catch (err) {
+                }catch (err) {
                   if (err.status === 404) {
                     try {
                       const meta = labelMetaData[labelName] || { color: '0e8a16', description: '' };
@@ -203,6 +203,8 @@ jobs:
                   }
                 }
               }
+                await Promise.all(labelPromises);
+            });
             };
 
             const processIssue = async (issue) => {
