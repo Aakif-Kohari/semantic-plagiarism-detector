@@ -1004,6 +1004,44 @@ class TestPayloadCompressor:
         decompressed = PayloadCompressor.decompress(compressed)
         assert decompressed == small_payload
 
+    def test_compress_empty_byte_string(self):
+        """Verify that compressing an empty byte string returns empty bytes and does not fail."""
+        empty_data = b""
+        compressed = PayloadCompressor.compress(empty_data)
+        assert compressed == b""
+        assert not compressed.startswith(PayloadCompressor.MAGIC_HEADER)
+        assert PayloadCompressor.decompress(compressed) == b""
+
+    def test_compress_one_byte_smaller_than_threshold(self):
+        """Verify that compressing a payload exactly 1 byte smaller than the threshold remains uncompressed."""
+        threshold = PayloadCompressor.get_threshold()
+        payload = b"A" * (threshold - 1)
+        assert len(payload) == threshold - 1
+
+        compressed = PayloadCompressor.compress(payload)
+        assert not compressed.startswith(PayloadCompressor.MAGIC_HEADER)
+        assert compressed == payload
+        assert PayloadCompressor.decompress(compressed) == payload
+
+    def test_decompress_garbage_data_with_magic_header_safe_fallback(self):
+        """Verify that feeding garbage data prefixed with the magic header safely falls back to None."""
+        garbage_payload = PayloadCompressor.MAGIC_HEADER + b"this_is_not_valid_zlib_compressed_data_9999"
+        result = PayloadCompressor.decompress(garbage_payload)
+        assert result is None
+
+    def test_decompress_truncated_zlib_stream_safe_fallback(self):
+        """Verify that a truncated or invalid zlib stream with magic header returns None safely."""
+        # A partial/corrupted zlib payload
+        truncated_payload = PayloadCompressor.MAGIC_HEADER + b"\x78\x9c\x01\x00\x00"
+        result = PayloadCompressor.decompress(truncated_payload)
+        assert result is None
+
+    def test_decompress_non_bytes_passthrough(self):
+        """Verify that passing non-bytes to decompress returns the original input safely."""
+        assert PayloadCompressor.decompress(None) is None
+        assert PayloadCompressor.decompress("string_input") == "string_input"
+        assert PayloadCompressor.decompress(12345) == 12345
+
 
 
 def test_payload_compressor_exact_threshold_boundary():
