@@ -159,7 +159,6 @@ FAISS_STORED_EMB_DIM_INVALID = "Stored embeddings must be two-dimensional."
 FAISS_EMB_REGISTRY_MISMATCH = "Corpus embedding count does not match chunk registry count: {emb_count} != {reg_count}"
 
 
-
 # Incident Database Errors
 INCIDENT_DB_INIT_FAILED = "Failed to initialize incident database: {error}"
 INCIDENT_SYNC_FAILED = "Failed to synchronize incidents: {error}"
@@ -267,3 +266,28 @@ class StaleDataException(Exception):
     """Raised when an update fails because the version has changed (optimistic locking)."""
 
     pass
+
+
+class EmptyDocumentError(ValueError):
+    """Raised when a document contains no extractable or readable text.
+
+    This specific exception allows the UI and CLI to differentiate between
+    a file that failed to parse due to corruption/format issues and a file
+    that is simply blank or contains only images without OCR text.
+
+    Attributes:
+        filename: The name of the file that was empty.
+        message: Explanation of the error.
+    """
+
+    def __init__(self, filename: str, message: str | None = None):
+        self.filename = filename
+        if message is None:
+            self.message = f"The document '{filename}' contains no readable text."
+        else:
+            self.message = message
+
+        super().__init__(self.message)
+
+    def __str__(self) -> str:
+        return self.message

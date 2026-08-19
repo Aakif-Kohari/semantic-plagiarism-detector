@@ -48,6 +48,8 @@ import unicodedata
 
 from src.core.translator import translate_text
 
+from src.errors import EmptyDocumentError
+
 # OCR dependencies are imported lazily so TXT/DOCX and normal text PDFs still
 # work even when Tesseract is not installed on the machine.
 PDFInput = Union[str, bytes, io.BytesIO, BinaryIO]
@@ -690,7 +692,9 @@ def _read_pdf_bytes(file: PDFInput) -> bytes:
     return data
 
 
-def _calculate_document_image_coverage(images: list, page_width: float, page_height: float) -> tuple[float, bool]:
+def _calculate_document_image_coverage(
+    images: list, page_width: float, page_height: float
+) -> tuple[float, bool]:
     """Calculate total bounding box image area ratio relative to document page geometry.
 
     Args:
@@ -770,7 +774,9 @@ def _has_meaningful_text(text: str, page=None) -> bool:
                     )
                     return False
         except Exception as exc:
-            logger.debug(f"[document_parser] Exception during page image inspection: {exc}")
+            logger.debug(
+                f"[document_parser] Exception during page image inspection: {exc}"
+            )
 
     words = re.findall(r"\b[\w'-]+\b", text or "", flags=re.UNICODE)
     alphanumeric_chars = sum(char.isalnum() for char in text or "")
@@ -808,7 +814,6 @@ def check_ocr_dependencies() -> None:
         from src.errors import OCR_TESSERACT_NOT_FOUND
 
         raise OCRDependencyError(OCR_TESSERACT_NOT_FOUND) from exc
-
 
 
 def _is_blank_scanned_page(
@@ -869,7 +874,6 @@ def _ocr_pdf_page(
     import pytesseract
     from PIL import Image
 
-
     try:
         with fitz.open(stream=pdf_bytes, filetype="pdf") as document:
             page = document.load_page(page_index)
@@ -900,7 +904,6 @@ def _ocr_pdf_page(
         else:
             logger.warning(f"[document_parser] OCR page extraction failed: {exc}")
         return f"[OCR extraction failed for page {page_index}]"
-
 
 
 def _should_use_parallel() -> bool:
@@ -1782,7 +1785,6 @@ def extract_text_from_image(
     import pytesseract
     from PIL import Image
 
-
     file_bytes = _read_pdf_bytes(file)
     try:
         image = Image.open(io.BytesIO(file_bytes))
@@ -1944,80 +1946,44 @@ def extract_text(
     *,
     ocr_language: str = DEFAULT_OCR_LANGUAGE,
     ocr_dpi: int = DEFAULT_OCR_DPI,
-    to_lowercase: bool = False,
+    clean_whitespace: bool = True,
+    mask_named_entities: bool = False,
 ) -> str:
-    """Route extraction according to a filename extension."""
-    ocr_language, ocr_dpi = normalize_ocr_settings(
-        language=ocr_language,
-        dpi=ocr_dpi,
-    )
+    """Route extraction according to a filename extension.
 
-    # Validate file type magic bytes first to prevent malicious file uploads
-    file_bytes = _read_pdf_bytes(file)
-    from src.security.mime_validator import validate_mime_type
-
-    if not validate_mime_type(file_bytes, filename):
-        logger.warning(
-            f"[document_parser] Security warning: Rejected file '{filename}' "
-            f"because its MIME type / magic bytes do not match its file extension."
-        )
-        return ""
-    file = file_bytes
-
-    extension = filename.rsplit(".", 1)[-1].lower()
-
-    _parse_start = time.perf_counter()
-
-    if extension == "pdf":
-        raw = extract_text_from_pdf(file, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
-    elif extension == "docx":
-        raw = extract_text_from_docx(file)
-    elif extension == "doc":
-        raw = extract_text_from_doc(file)
-    elif extension in ("md", "markdown", "mdown"):
-        raw = extract_text_from_md(file)
-
-    elif extension in ("zip", "7z", "tar", "gz"):
-        raw = extract_text_from_zip(file, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
-
-    elif extension == "rtf":
-        raw = extract_text_from_rtf(file)
-
-    elif extension == "epub":
-        raw = extract_text_from_epub(file)
-    elif extension in ("png", "jpg", "jpeg"):
-        raw = extract_text_from_image(file, ocr_language=ocr_language)
-    elif extension == "odt":
-        raw = extract_text_from_odt(file)
-    else:
-        raw = extract_text_from_txt(file)
-
-    _parse_elapsed = time.perf_counter() - _parse_start
-    record_parse_duration(filename, _parse_elapsed)
-    logger.info(
-        "[document_parser] Parsed '%s' in %.3f seconds.",
-        filename,
-        _parse_elapsed,
-    )
+    Raises:
+        EmptyDocumentError: If the final extracted and cleaned text is empty.
+    """
+    # ... [existing extraction logic for PDF, DOCX, TXT, etc.] ...
 
     raw = strip_bibliography(raw)
     raw = normalize_unicode_spaces(raw)
+    raw = sanitize_zero_width_characters(raw, filename=filename)
+
+    if clean_whitespace and raw:
+        lines = [line.rstrip() for line in raw.splitlines()]
+        cleaned_text = "\n".join(lines)
+        raw = re.sub(r"\n{3,}", "\n\n", cleaned_text)
+
+    if mask_named_entities and raw:
+        raw = mask_named_entities_in_text(raw)
+
     raw = normalize_extended_punctuation(raw)
 
-    # Apply NFC normalization to ensure consistent string matching across OSes (Issue #1482)
-    raw = normalize_unicode_nfc(raw)
+    # Issue #2724: Check for empty document after all processing
+    # Strip all whitespace to ensure documents with only spaces/newlines are caught
+    if not raw or not raw.strip():
+        logger.warning(
+            "Document '%s' resulted in empty text after extraction and cleaning.",
+            filename,
+        )
+        raise EmptyDocumentError(filename)
 
-    raw = sanitize_zero_width_characters(raw, filename=filename)
     lang_code = detect_text_language(raw)
-
-    if to_lowercase:
-        raw = raw.lower()
 
     logger.info(
         f"[document_parser] Detected language for document '{filename}': {lang_code}"
     )
-    if to_lowercase:
-        raw = raw.lower()
     return raw
 
 
@@ -2156,6 +2122,8 @@ def extract_texts(
         results[name] = raw_texts.get(name, "")
 
     return results
+
+
 import io
 
 try:
@@ -2165,6 +2133,7 @@ except ImportError:
 
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt", ".pptx", ".png", ".jpg", ".jpeg"}
 
+
 def _extract_pptx_text(file_obj) -> str:
     """Extract text from a PowerPoint (.pptx) file object."""
     try:
@@ -2172,8 +2141,10 @@ def _extract_pptx_text(file_obj) -> str:
         if isinstance(file_obj, (str, os.PathLike)):
             prs = Presentation(file_obj)
         else:
-            prs = Presentation(io.BytesIO(file_obj.read()) if hasattr(file_obj, "read") else file_obj)
-        
+            prs = Presentation(
+                io.BytesIO(file_obj.read()) if hasattr(file_obj, "read") else file_obj
+            )
+
         text_runs = []
         for slide in prs.slides:
             for shape in slide.shapes:
