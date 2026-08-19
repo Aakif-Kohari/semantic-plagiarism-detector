@@ -21,6 +21,10 @@ from typing import BinaryIO, Dict, List, Optional, Union
 import defusedxml
 
 from src.core.parse_durations import record_parse_duration
+from src.core.parsers.text_parser import (
+    RTF_MAX_FILE_SIZE_BYTES,
+    _rtf_content_within_limit,
+)
 
 try:
     import defusedxml.lxml
@@ -1403,9 +1407,20 @@ def extract_text_from_txt(file: PDFInput) -> str:
 
 
 def extract_text_from_rtf(file: PDFInput) -> str:
-    """Extract plain text from an RTF file using striprtf."""
+    """Extract plain text from an RTF file using striprtf.
+
+    RTF inputs are capped at 10 MB to prevent oversized documents from being
+    handed to striprtf and causing avoidable memory spikes.
+    """
     text = ""
     try:
+        if not _rtf_content_within_limit(file):
+            logger.warning(
+                "[document_parser] Rejected RTF input larger than %d bytes",
+                RTF_MAX_FILE_SIZE_BYTES,
+            )
+            return ""
+
         if isinstance(file, str):
             with open(file, "r", encoding="utf-8", errors="ignore") as handle:
                 content = handle.read()
