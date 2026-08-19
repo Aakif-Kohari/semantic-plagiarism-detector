@@ -42,6 +42,9 @@ jobs:
             const commenterType = comment.user.type;
             const repoOwner = context.repo.owner;
             const issueAuthor = issue.user ? issue.user.login : null;
+            // ECSoC claims are intentionally single-assignee; make the policy explicit
+            // rather than relying on the repository's native multi-assignee capacity.
+            const MAX_ISSUE_ASSIGNEES = 1;
 
             // Helper to check if a comment is from a bot
             const isBotComment = (c) => c.user && (c.user.type === 'Bot' || (c.user.login && c.user.login.endsWith('[bot]')));
@@ -62,9 +65,11 @@ jobs:
               return;
             }
 
-            // 4. Ignore any comments once issue is assigned (natively via assignees OR via existing bot claim)
-            if (issue.assignees && issue.assignees.length > 0) {
-              console.log("Issue already assigned natively. Ignoring comment.");
+            // 4. Enforce the workflow's single-assignee claim policy.
+            // GitHub supports multiple native assignees, but ECSoC claims do not.
+            const assigneeCount = issue.assignees ? issue.assignees.length : 0;
+            if (assigneeCount >= MAX_ISSUE_ASSIGNEES) {
+              console.log(`Issue already has ${assigneeCount} assignee(s), which meets the ECSoC maximum of ${MAX_ISSUE_ASSIGNEES}. Ignoring comment.`);
               return;
             }
 
