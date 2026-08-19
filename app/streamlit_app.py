@@ -3068,10 +3068,14 @@ if user_role == "admin":
                 st.info(f"Loaded and validated the existing FAISS index with {faiss_index.ntotal} vectors.")
 
     from src.utils.redis_cache import store_large_data, get_large_data, clear_large_data
+    from src.utils.similarity_cache import build_similarity_cache_key
+
+    analysis_cache_key = build_similarity_cache_key(SESSION_ID, use_hybrid=use_hybrid)
+    analysis_metadata_key = f"{analysis_cache_key}_metadata"
 
     if SessionKeys.ANALYSIS_RESULTS not in st.session_state:
         # Store only metadata in session state
-        cached_metadata = get_large_data(f"{SESSION_ID}:analysis_metadata")
+        cached_metadata = get_large_data(analysis_metadata_key)
         if cached_metadata is not None:
             st.session_state[SessionKeys.ANALYSIS_RESULTS] = cached_metadata
         else:
@@ -3083,11 +3087,11 @@ if user_role == "admin":
             }
     
     # Check if we have cached results
-    cached_results = get_large_data(f"{SESSION_ID}:analysis_results")
+    cached_results = get_large_data(analysis_cache_key)
     if cached_results is not None:
         st.session_state[SessionKeys.ANALYSIS_RESULTS]["has_results"] = True
         st.session_state[SessionKeys.ANALYSIS_RESULTS]["doc_count"] = cached_results.get("doc_count", 0)
-        st.session_state[SessionKeys.ANALYSIS_RESULTS]["cache_key"] = f"{SESSION_ID}:analysis_results"
+        st.session_state[SessionKeys.ANALYSIS_RESULTS]["cache_key"] = analysis_cache_key
 
     if SessionKeys.ANALYSIS_FILE_SIGNATURE not in st.session_state:
         st.session_state[SessionKeys.ANALYSIS_FILE_SIGNATURE] = None
@@ -3394,21 +3398,21 @@ if user_role == "admin":
             "timestamp": time.time()
         }
         
-        store_large_data(f"{SESSION_ID}:analysis_results", large_results, ttl=1800)
+        store_large_data(analysis_cache_key, large_results, ttl=1800)
         
         # Update session state with metadata only
         st.session_state[SessionKeys.ANALYSIS_RESULTS] = {
             "has_results": True,
             "doc_count": len(chunked_docs),
             "timestamp": time.time(),
-            "cache_key": f"{SESSION_ID}:analysis_results"
+            "cache_key": analysis_cache_key
         }
         
-        store_large_data(f"{SESSION_ID}:analysis_metadata", {
+        store_large_data(analysis_metadata_key, {
             "has_results": True,
             "doc_count": len(chunked_docs),
             "timestamp": time.time(),
-            "cache_key": f"{SESSION_ID}:analysis_results"
+            "cache_key": analysis_cache_key
         }, ttl=1800)
         # ===================================
         
