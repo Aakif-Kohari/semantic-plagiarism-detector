@@ -121,7 +121,7 @@ jobs:
                 if (issBotComments.length > 0) {
                   const lastBotComment = issBotComments[issBotComments.length - 1];
                   if (!lastBotComment.body.includes("open for anyone to claim")) {
-                    const match = lastBotComment.body.match(/Hi @([a-zA-Z0-9-]+)/);
+                    const match = lastBotComment.body.match(/<!--\s*ecsoc-claim-user:\s*([a-zA-Z0-9-]+)\s*-->/) || lastBotComment.body.match(/Hi @([a-zA-Z0-9-]+)/);
                     if (match && match[1].toLowerCase() === claimer.toLowerCase()) {
                       activeCount++;
                     }
@@ -169,7 +169,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: issue.number,
-              body: `🎉 Hi @${claimer}, thanks for your interest in contributing under *ECSoC'26*! I've assigned this issue to you. Please follow the contribution guidelines, work on a separate branch, and link your PR using Fixes #<issue_number>. You're allowed to work on only 5 issues at a time in a span of 24 hours. Wishing you the best, looking forward to reviewing your contribution! Happy coding! :)`
+              body: `🎉 Hi @${claimer}, thanks for your interest in contributing under *ECSoC'26*! I've assigned this issue to you. Please follow the contribution guidelines, work on a separate branch, and link your PR using Fixes #<issue_number>. You're allowed to work on only 5 issues at a time in a span of 24 hours. Wishing you the best, looking forward to reviewing your contribution! Happy coding! :)\n\n<!-- ecsoc-claim-user: ${claimer} -->`
             });
 
   issue-auto-label:
@@ -408,7 +408,7 @@ jobs:
               if (botComments.length > 0) {
                 const lastBotComment = botComments[botComments.length - 1];
                 if (!lastBotComment.body.includes("open for anyone to claim")) {
-                  const match = lastBotComment.body.match(/Hi @([a-zA-Z0-9-]+)/);
+                  const match = lastBotComment.body.match(/<!--\s*ecsoc-claim-user:\s*([a-zA-Z0-9-]+)\s*-->/) || lastBotComment.body.match(/Hi @([a-zA-Z0-9-]+)/);
                   if (match) {
                     claimer = match[1];
                     claimDate = new Date(lastBotComment.created_at);
@@ -504,7 +504,7 @@ jobs:
                 if (!lastBotComment.body.includes("open for anyone to claim")) {
                   const claimDate = new Date(lastBotComment.created_at);
                   const ageMs = now - claimDate;
-                  const match = lastBotComment.body.match(/Hi @([a-zA-Z0-9-]+)/);
+                  const match = lastBotComment.body.match(/<!--\s*ecsoc-claim-user:\s*([a-zA-Z0-9-]+)\s*-->/) || lastBotComment.body.match(/Hi @([a-zA-Z0-9-]+)/);
                   const claimer = match ? match[1] : (issue.assignees[0] ? issue.assignees[0].login : null);
 
                   if (!claimer) continue;
