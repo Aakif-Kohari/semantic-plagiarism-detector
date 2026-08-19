@@ -72,7 +72,6 @@ httpx>=0.26.0                   # Async HTTP client for API testing
 prometheus-client>=0.26.0       # Prometheus metrics export for production monitoring
 # ── Code Formatting & Linting ──────────────────────────────────────────────────
 pre-commit>=3.6.0               # Client-side Git hooks manager
-black>=24.1.0                   # Opinionated Python code formatter
 isort>=5.13.0                   # Import sorting library
 
 # ── Google Integration ─────────────────────────────────────────────────────────
