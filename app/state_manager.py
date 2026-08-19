@@ -138,8 +138,8 @@ def _start_api_server():
 
     uvicorn.run(
         fastapi_app,
-        host="0.0.0.0",
-        port=8000,
+        host= os.getenv("API_HOST", "0.0.0.0"),
+        port= int(os.getenv("API_PORT", 8000)),
         log_level="warning",
     )
 
