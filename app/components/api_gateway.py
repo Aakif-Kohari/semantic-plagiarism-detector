@@ -12,20 +12,20 @@ Features:
 - Endpoint exposure
 """
 
-import json
-import time
 import hashlib
+import json
 import secrets
-from pathlib import Path
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Union, Callable
-from dataclasses import dataclass, field, asdict
-from enum import Enum
+import time
 from collections import defaultdict
-import streamlit as st
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
+from enum import Enum
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
+
 import pandas as pd
-import plotly.graph_objects as go
 import requests
+import streamlit as st
 
 # ==============================================================================
 # ENUMS AND DATA CLASSES
@@ -459,7 +459,7 @@ class ApiGateway:
                 self._save_data()
                 return False
                 
-        except Exception as e:
+        except Exception:
             webhook.status = WebhookStatus.FAILED
             webhook.retry_count += 1
             self._save_data()
@@ -795,7 +795,7 @@ def render_api_key_management(gateway: ApiGateway):
                     st.markdown(f"**Rate Limit:** {key.rate_limit}/min")
                     st.markdown(f"**Permissions:** {', '.join(key.permissions)}")
                 
-                if not key.is_active and st.button(f"🗑️ Delete", key=f"del_{key.id}"):
+                if not key.is_active and st.button("🗑️ Delete", key=f"del_{key.id}"):
                     gateway.api_keys.pop(key.id, None)
                     gateway._save_data()
                     st.rerun()
@@ -857,7 +857,7 @@ def render_webhook_management(gateway: ApiGateway):
                         st.caption(f"Last Triggered: {datetime.fromtimestamp(webhook.last_triggered).strftime('%Y-%m-%d %H:%M')}")
                 
                 # Test webhook
-                if st.button(f"📡 Test Webhook", key=f"test_{webhook.id}"):
+                if st.button("📡 Test Webhook", key=f"test_{webhook.id}"):
                     result = gateway.trigger_webhook(webhook.id, "test", {"test": True})
                     if result:
                         st.success("✅ Webhook triggered successfully")

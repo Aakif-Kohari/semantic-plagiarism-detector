@@ -13,7 +13,7 @@ from tests.conftest import MockDataFactory
 sys.modules["transformers"] = MagicMock()
 sys.modules["sentence_transformers"] = MagicMock()
 
-from src.cli import main, run_prewarm, run_scan  # noqa: E402
+from src.cli import _natural_sort_key, main, run_prewarm, run_scan  # noqa: E402
 
 
 @pytest.fixture
@@ -647,3 +647,39 @@ def test_cli_main_scan_recursive(temp_assignments_dir):
                 output_format="text",
                 recursive=True,
             )
+
+
+class TestNaturalSorting:
+    """Test suite for natural file ordering in the CLI."""
+
+    def test_natural_sort_key_orders_numeric_files(self):
+        """Verify doc10 sorts after doc2, not before (lexicographical behaviour)."""
+        files = ["doc10.pdf", "doc2.pdf", "doc1.pdf"]
+        assert sorted(files, key=_natural_sort_key) == [
+            "doc1.pdf",
+            "doc2.pdf",
+            "doc10.pdf",
+        ]
+
+    def test_natural_sort_key_mixed_paths(self):
+        """Verify natural sorting works on full file paths."""
+        files = [
+            "/tmp/submission/doc20.txt",
+            "/tmp/submission/doc3.txt",
+            "/tmp/submission/doc10.txt",
+        ]
+        assert sorted(files, key=_natural_sort_key) == [
+            "/tmp/submission/doc3.txt",
+            "/tmp/submission/doc10.txt",
+            "/tmp/submission/doc20.txt",
+        ]
+
+    def test_natural_sort_key_case_insensitive(self):
+        """Verify sorting is case-insensitive for the text portions."""
+        files = ["B.txt", "a.txt", "c.txt"]
+        assert sorted(files, key=_natural_sort_key) == ["a.txt", "B.txt", "c.txt"]
+
+    def test_natural_sort_key_stable_for_non_numeric(self):
+        """Verify behaviour matches lexicographical order for non-numeric names."""
+        files = ["readme.md", "report.pdf", "notes.txt"]
+        assert sorted(files, key=_natural_sort_key) == sorted(files)

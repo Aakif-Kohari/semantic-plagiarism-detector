@@ -1,4 +1,6 @@
 import pytest
+
+opentelemetry = pytest.importorskip("opentelemetry")
 from fastapi.testclient import TestClient
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
@@ -6,6 +8,7 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from src.api.app import app
+
 
 @pytest.fixture(autouse=True)
 def memory_exporter():
@@ -60,3 +63,39 @@ def test_otel_middleware_records_exception(memory_exporter):
     
     assert exception_event.attributes.get("exception.type") == "ValueError"
     assert "Intentional error for testing" in exception_event.attributes.get("exception.message", "")
+
+
+def test_otel_middleware_extracts_user_id_from_bearer_token(memory_exporter):
+    """Test that otel_tracing_middleware extracts user ID from Authorization Bearer token."""
+    from src.security.jwt_utils import create_access_token
+
+    token = create_access_token(sub="alice_user_123")
+    client = TestClient(app)
+
+    @app.get("/_test_user_id")
+    async def test_user():
+        return {"status": "ok"}
+
+    client.get("/_test_user_id", headers={"Authorization": f"Bearer {token}"})
+
+    spans = memory_exporter.get_finished_spans()
+    http_span = next((s for s in spans if s.name == "HTTP GET /_test_user_id"), None)
+    assert http_span is not None
+    assert http_span.attributes.get("user.id") == "alice_user_123"
+
+
+def test_otel_middleware_anonymous_user_id_fallback(memory_exporter):
+    """Test that otel_tracing_middleware defaults user.id to 'anonymous' when unauthenticated."""
+    client = TestClient(app)
+
+    @app.get("/_test_anon_user")
+    async def test_anon():
+        return {"status": "ok"}
+
+    client.get("/_test_anon_user")
+
+    spans = memory_exporter.get_finished_spans()
+    http_span = next((s for s in spans if s.name == "HTTP GET /_test_anon_user"), None)
+    assert http_span is not None
+    assert http_span.attributes.get("user.id") == "anonymous"
+

@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from src.api.app import app
+from src.version import APP_VERSION
 
 client = TestClient(app)
 
@@ -270,7 +271,7 @@ def test_api_v1_status_returns_online_payload():
     assert "application/json" in response.headers["content-type"]
     data = response.json()
     assert data["status"] == "online"
-    assert data["version"] == "1.0.0"
+    assert data["version"] == APP_VERSION
 
 
 def test_api_v1_status_timestamp_is_iso_utc():
@@ -1019,3 +1020,50 @@ def test_request_id_middleware_ignores_invalid_oversized_id():
     assert request_id != oversized_id
     assert len(request_id) > 0
     assert response.json()["request_id"] == request_id
+
+
+def test_custom_http_exception_handler_dictionary_detail():
+    from src.api.app import custom_http_exception_handler
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+    import asyncio
+    from unittest.mock import Mock
+    
+    mock_request = Mock()
+    mock_request.method = "GET"
+    mock_request.url.path = "/test"
+    
+    dict_detail = {"key": "value", "reason": "invalid request"}
+    exc = StarletteHTTPException(status_code=400, detail=dict_detail)
+    
+    response = asyncio.run(custom_http_exception_handler(mock_request, exc))
+    
+    import json
+    body = json.loads(response.body)
+    
+    assert response.status_code == 400
+    assert body["error"] is True
+    assert body["code"] == 400
+    assert body["message"] == dict_detail
+    assert body["message"]["key"] == "value"
+    assert "timestamp" not in body
+
+def test_custom_http_exception_handler_string_detail():
+    from src.api.app import custom_http_exception_handler
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+    import asyncio
+    from unittest.mock import Mock
+    
+    mock_request = Mock()
+    mock_request.method = "GET"
+    mock_request.url.path = "/test"
+    
+    exc = StarletteHTTPException(status_code=400, detail="string error")
+    
+    response = asyncio.run(custom_http_exception_handler(mock_request, exc))
+    
+    import json
+    body = json.loads(response.body)
+    
+    assert response.status_code == 400
+    assert body["message"] == "string error"
+

@@ -10,8 +10,6 @@ Asserts that the context manager overhead is negligible:
 
 import time
 
-import pytest
-
 from src.utils.processing_time import ProcessingTimer
 
 

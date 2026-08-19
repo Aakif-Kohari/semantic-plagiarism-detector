@@ -82,17 +82,26 @@ def validate_ocr_language(value: str) -> str:
         )
         return DEFAULT_OCR_LANGUAGE
 
-    cleaned = value.strip().lower()
-    if cleaned not in SUPPORTED_OCR_LANGUAGES:
+    parts = [p.strip().lower() for p in value.split("+")]
+    if not parts or any(not p for p in parts):
         logger.warning(
-            "Unsupported OCR language '%s'. Defaulting to '%s'. "
-            "Supported languages: %s",
-            cleaned,
+            "Invalid ocr_language %r. Defaulting to '%s'.",
+            value,
             DEFAULT_OCR_LANGUAGE,
-            ", ".join(sorted(SUPPORTED_OCR_LANGUAGES.keys())),
         )
         return DEFAULT_OCR_LANGUAGE
-    return cleaned
+
+    for part in parts:
+        if part not in SUPPORTED_OCR_LANGUAGES:
+            logger.warning(
+                "Unsupported OCR language '%s'. Defaulting to '%s'. "
+                "Supported languages: %s",
+                part,
+                DEFAULT_OCR_LANGUAGE,
+                ", ".join(sorted(SUPPORTED_OCR_LANGUAGES.keys())),
+            )
+            return DEFAULT_OCR_LANGUAGE
+    return "+".join(dict.fromkeys(parts))
 
 
 def normalize_ocr_settings(

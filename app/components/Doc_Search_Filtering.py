@@ -3,15 +3,13 @@
 # ───────────────────────────────────────────────────────────────────────────────
 
 import re
-import json
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Set, Tuple, Any
 from collections import defaultdict
-import pandas as pd
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Tuple
+
 import numpy as np
-from difflib import SequenceMatcher
+import pandas as pd
 import streamlit as st
-import plotly.graph_objects as go
 
 # ── Search Data Models ─────────────────────────────────────────────────────
 
@@ -641,7 +639,7 @@ def render_search_results(results: List[SearchResult]):
                 st.metric("Status", "✅" if result.score > 0.7 else "🔄 Review")
             
             # Snippet
-            st.markdown(f"**Snippet:**")
+            st.markdown("**Snippet:**")
             st.markdown(f"<div style='background:#f5f5f5;padding:10px;border-radius:5px;'>{result.snippet}</div>",
                        unsafe_allow_html=True)
             

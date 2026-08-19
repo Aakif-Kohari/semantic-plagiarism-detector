@@ -2,8 +2,6 @@
 
 import asyncio
 
-import pytest
-
 from src.api_gateway.gateway import (
     APIGateway,
     InvalidAPIKeyException,

@@ -83,7 +83,9 @@ def test_non_docx_no_headings():
 
 def test_extract_text_from_docx_with_tables():
     """Verify that extract_text_from_docx extracts text from tables inside DOCX documents."""
-    from src.core.parsers.docx_parser import extract_text_from_docx as parser_extract_docx
+    from src.core.parsers.docx_parser import (
+        extract_text_from_docx as parser_extract_docx,
+    )
     # Create an in-memory DOCX file with a 2x2 table
     doc = docx.Document()
     table = doc.add_table(rows=2, cols=2)

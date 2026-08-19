@@ -5,31 +5,28 @@ import pytest
 
 from src.db.auth import (
     add_user,
+    auth_repo,
     delete_user,
     disable_2fa,
     enable_2fa,
+    format_user_created_date,
+    generate_sso_state,
     get_2fa_status,
     get_active_users_count,
+    get_all_users,
     get_user_active_status,
     get_user_last_login,
     get_user_role,
     get_user_theme,
     init_db,
     is_user_active,
-    log_security_event,
     set_user_active_status,
     set_user_theme,
-    update_password,
-    get_security_audit_logs,
-    get_security_audit_log_count,
-    get_distinct_audit_event_types,
-    verify_user,
-    update_user_profile,
-    get_all_users,
-    format_user_created_date,
-    generate_sso_state,
     store_sso_state,
+    update_password,
+    update_user_profile,
     validate_sso_state,
+    verify_user,
 )
 from src.errors import StaleDataException
 
@@ -151,7 +148,7 @@ def mock_audit_db():
 
 
 def test_get_security_audit_logs_default(mock_audit_db):
-    logs = get_security_audit_logs()
+    logs = auth_repo.get_security_audit_logs()
     assert len(logs) == 3
     # Order by timestamp DESC
     assert logs[0]["username"] == "alice"
@@ -161,33 +158,38 @@ def test_get_security_audit_logs_default(mock_audit_db):
 
 
 def test_get_security_audit_logs_pagination(mock_audit_db):
-    logs = get_security_audit_logs(limit=1, offset=1)
+    logs = auth_repo.get_security_audit_logs(limit=1, offset=1)
     assert len(logs) == 1
     # 2nd in desc order is bob
     assert logs[0]["username"] == "bob"
 
 
 def test_get_security_audit_logs_username_filter(mock_audit_db):
-    logs = get_security_audit_logs(username="alice")
+    logs = auth_repo.get_security_audit_logs(username="alice")
     assert len(logs) == 2
     assert logs[0]["event_type"] == "logout"
     assert logs[1]["event_type"] == "login"
 
 
 def test_get_security_audit_logs_empty(mock_audit_db):
-    logs = get_security_audit_logs(username="charlie")
+    logs = auth_repo.get_security_audit_logs(username="charlie")
     assert len(logs) == 0
 
 
 def test_get_security_audit_logs_invalid_limit_offset(mock_audit_db):
     with pytest.raises(ValueError):
-        get_security_audit_logs(limit=-1)
+         auth_repo.get_security_audit_logs(limit=-1)
     with pytest.raises(ValueError):
-        get_security_audit_logs(offset=-1)
+         auth_repo.get_security_audit_logs(offset=-1)
+
+
+def test_get_security_audit_logs_negative_limit(mock_audit_db):
+    with pytest.raises(ValueError):
+        get_security_audit_logs(limit=-1)
 
 
 def test_get_security_audit_logs_date_filter(mock_audit_db):
-    logs = get_security_audit_logs(
+    logs = auth_repo.get_security_audit_logs(
         start_date="2023-01-02 00:00:00", end_date="2023-01-02 23:59:59"
     )
     assert len(logs) == 1
@@ -195,9 +197,9 @@ def test_get_security_audit_logs_date_filter(mock_audit_db):
 
 
 def test_get_security_audit_log_count(mock_audit_db):
-    assert get_security_audit_log_count() == 3
-    assert get_security_audit_log_count(username="alice") == 2
-    assert get_security_audit_log_count(event_type="logout") == 1
+    assert auth_repo.get_security_audit_log_count() == 3
+    assert auth_repo.get_security_audit_log_count(username="alice") == 2
+    assert auth_repo.get_security_audit_log_count(event_type="logout") == 1
 
 
 def test_get_security_audit_log_count_dropped_table(mock_audit_db):
@@ -208,12 +210,51 @@ def test_get_security_audit_log_count_dropped_table(mock_audit_db):
         conn.execute("DROP TABLE security_audit_log")
 
     with pytest.raises(sqlite3.Error):
-        get_security_audit_log_count()
+         auth_repo.get_security_audit_log_count()
 
 
-def test_get_distinct_audit_event_types(mock_audit_db):
-    events = get_distinct_audit_event_types()
-    assert set(events) == {"login", "logout"}
+def test_get_distinct_audit_event_types_caching_and_invalidation():
+    """Verify distinct audit event types are cached and properly invalidated (Issue #2687)."""
+    from src.db.auth import (
+        clear_distinct_audit_event_types_cache,
+        get_distinct_audit_event_types,
+        log_security_event,
+    )
+
+    clear_distinct_audit_event_types_cache()
+
+    # 1. Add initial events
+    log_security_event("login", "alice", "login success")
+    log_security_event("logout", "alice", "logout")
+
+    events1 = get_distinct_audit_event_types()
+    assert set(events1) >= {"login", "logout"}
+
+    # 2. Insert new event type directly into DB table (bypassing repo cache)
+    with auth_repo.connection() as conn:
+        conn.execute(
+            "INSERT INTO security_audit_log (event_type, username, timestamp, details) VALUES (?, ?, ?, ?)",
+            ("direct_db_insert", "user1", "2026-08-19T00:00:00Z", "test"),
+        )
+        conn.commit()
+
+    # Cached query without refresh should still return cached event types
+    events_cached = get_distinct_audit_event_types()
+    assert "direct_db_insert" not in events_cached
+
+    # Query with force_refresh=True should fetch latest from DB
+    events_refreshed = get_distinct_audit_event_types(force_refresh=True)
+    assert "direct_db_insert" in events_refreshed
+
+    # 3. log_security_event updates the cache in-place
+    log_security_event("password_reset", "user2", "reset password")
+    events_after_log = get_distinct_audit_event_types()
+    assert "password_reset" in events_after_log
+
+    # 4. clear_distinct_audit_event_types_cache clears cache state
+    clear_distinct_audit_event_types_cache()
+    assert auth_repo._cached_event_types is None
+
 
 
 def test_2fa_flow():
@@ -342,16 +383,15 @@ def test_user_theme(mock_db):
 
 def test_delete_user_removes_user_row_and_audit_log(mock_db):
     """delete_user() must remove the user row and associated security_audit_log entries."""
-    import src.db.auth
 
     user = f"user_{uuid.uuid4().hex[:8]}"
     add_user(user, "password123")
 
     # Seed an audit log entry for this user
-    log_security_event("password_change", user, "test entry")
+    auth_repo.log_security_event("password_change", user, "test entry")
 
     # Confirm the audit entry exists before deletion
-    with sqlite3.connect(src.db.auth._DB_PATH) as conn:
+    with sqlite3.connect(str(auth_repo.db_path)) as conn:
         audit_before = conn.execute(
             "SELECT COUNT(*) FROM security_audit_log WHERE username = ?", (user,)
         ).fetchone()[0]
@@ -363,7 +403,7 @@ def test_delete_user_removes_user_row_and_audit_log(mock_db):
     assert get_user_role(user) is None
 
     # Audit log entries for the deleted user must also be removed
-    with sqlite3.connect(src.db.auth._DB_PATH) as conn:
+    with sqlite3.connect(str(auth_repo.db_path)) as conn:
         audit_after = conn.execute(
             "SELECT COUNT(*) FROM security_audit_log WHERE username = ?", (user,)
         ).fetchone()[0]
@@ -446,7 +486,8 @@ def test_delete_user_removes_matching_session_and_authorization_rows(mock_db):
 def test_connect_uses_fifteen_second_timeout():
     """Verify that _connect helper sets sqlite3 timeout to 15.0 seconds."""
     from unittest.mock import patch
-    from src.db.auth import _connect, SQLITE_TIMEOUT
+
+    from src.db.auth import SQLITE_TIMEOUT, _connect
 
     assert SQLITE_TIMEOUT == 15.0
 
@@ -701,13 +742,12 @@ def test_password_history_validation_prevents_reuse_of_last_3_passwords(mock_db)
 
 def test_get_recent_audit_events(mock_db):
     """Verify get_recent_audit_events returns recent audit entries ordered by timestamp DESC up to limit."""
-    from src.db.auth import get_recent_audit_events, log_security_event
 
-    log_security_event("login_success", "alice", "Alice logged in")
-    log_security_event("login_failure", "bob", "Bob failed login")
-    log_security_event("password_change", "charlie", "Charlie updated password")
+    auth_repo.log_security_event("login_success", "alice", "Alice logged in")
+    auth_repo.log_security_event("login_failure", "bob", "Bob failed login")
+    auth_repo.log_security_event("password_change", "charlie", "Charlie updated password")
 
-    events = get_recent_audit_events(limit=2)
+    events = auth_repo.get_recent_audit_events(limit=2)
     assert len(events) == 2
     assert isinstance(events, list)
     assert isinstance(events[0], dict)
@@ -721,12 +761,12 @@ def test_get_recent_audit_events(mock_db):
         assert "details" in event
 
     # Default limit=20 returns all logged events
-    all_recent = get_recent_audit_events(limit=20)
+    all_recent = auth_repo.get_recent_audit_events(limit=20)
     assert len(all_recent) >= 3
 
     # Negative limit raises ValueError
     with pytest.raises(ValueError):
-        get_recent_audit_events(limit=-5)
+         auth_repo.get_recent_audit_events(limit=-5)
 
 
 def test_password_change_required_flag(mock_db):
@@ -876,5 +916,17 @@ def test_validate_sso_state_invalid_and_expired(mock_db):
     expired_state = "expired_state_token_123"
     store_sso_state(expired_state, expires_in_seconds=-10)
     assert validate_sso_state(expired_state) is False
+
+
+def test_role_validation_with_allowed_user_roles_override(monkeypatch):
+    """Verify _validate_role respects ALLOWED_USER_ROLES environment variable."""
+    from src.db.auth import _validate_role
+
+    monkeypatch.setenv("ALLOWED_USER_ROLES", "admin, teacher, teaching_assistant")
+    assert _validate_role("teaching_assistant") == "teaching_assistant"
+
+    with pytest.raises(ValueError, match="Role must be one of"):
+        _validate_role("invalid_role")
+
 
 

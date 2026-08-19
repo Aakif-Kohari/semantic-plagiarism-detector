@@ -27,6 +27,7 @@ def test_validation_error_format():
 def test_value_error_returns_400_bad_request():
     """Verify that a ValueError in request handling returns HTTP 400 Bad Request."""
     from fastapi import APIRouter
+
     from src.api.app import app
 
     test_router = APIRouter()

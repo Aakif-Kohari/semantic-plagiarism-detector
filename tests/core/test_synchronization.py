@@ -168,6 +168,7 @@ def test_backup_corrupted_index_retention_cap(tmp_path):
 def test_atexit_graceful_shutdown_registered():
     """Verify that background_tasks.shutdown is registered with atexit."""
     import atexit
+
     from src.core.synchronization import background_tasks
     
     found = False

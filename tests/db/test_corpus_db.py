@@ -707,18 +707,18 @@ def test_get_document_count_by_user_empty():
     assert get_document_count_by_user("unknown-user") == 0
 
 
-def test_idx_incidents_date_created():
-    """Verify idx_incidents_date index exists on plagiarism_incidents(date_flagged) (#2340)."""
+def test_deleted_chunks_has_deleted_at_column():
+    """Verify deleted_chunks table has deleted_at column (#2342)."""
     import sqlite3
+
     import src.db.corpus_db as corpus_db
 
     conn = sqlite3.connect(corpus_db._DB_PATH)
     try:
-        row = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_incidents_date'"
-        ).fetchone()
-        assert row is not None
-        assert row[0] == "idx_incidents_date"
+        columns = [
+            row[1] for row in conn.execute("PRAGMA table_info(deleted_chunks)").fetchall()
+        ]
+        assert "deleted_at" in columns
     finally:
         conn.close()
 

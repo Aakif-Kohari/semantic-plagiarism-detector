@@ -12,28 +12,24 @@ Features:
 - Automated reporting with insights
 """
 
-import json
 import time
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import Any, Dict, List, Tuple
+
 import numpy as np
 import pandas as pd
-from pathlib import Path
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Tuple, Union
-from dataclasses import dataclass, field, asdict
-from enum import Enum
-from collections import defaultdict, Counter
-import streamlit as st
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import plotly.express as px
+import streamlit as st
 
 # ML Libraries
 try:
-    from sklearn.ensemble import RandomForestRegressor, IsolationForest
-    from sklearn.preprocessing import StandardScaler
-    from sklearn.metrics import mean_absolute_error, r2_score
-    from sklearn.cluster import DBSCAN
     import scipy.stats as stats
+    from sklearn.cluster import DBSCAN
+    from sklearn.ensemble import IsolationForest, RandomForestRegressor
+    from sklearn.metrics import mean_absolute_error, r2_score
+    from sklearn.preprocessing import StandardScaler
     SKLEARN_AVAILABLE = True
 except ImportError:
     SKLEARN_AVAILABLE = False
@@ -719,8 +715,11 @@ class InsightGenerator:
 class RiskScorer:
     """
     Calculate and assess plagiarism risks.
+
+    Delegates to the real ML risk model when available,
+    falls back to heuristic scoring otherwise.
     """
-    
+
     def __init__(self):
         self.weights = {
             'similarity_score': 0.4,
@@ -729,58 +728,65 @@ class RiskScorer:
             'author_history': 0.15,
             'anomaly_score': 0.1
         }
-    
+        self._engine = None
+        self._try_load_engine()
+
+    def _try_load_engine(self):
+        try:
+            from src.core.pattern_recognition import PatternDetectionEngine
+            from src.db.pattern_repository import PatternRepository
+            repo = PatternRepository()
+            self._engine = PatternDetectionEngine(repository=repo)
+        except ImportError:
+            self._engine = None
+
     def assess_risk(
         self,
         document_id: str,
         data: Dict[str, Any]
     ) -> RiskAssessment:
-        """
-        Assess risk for a document.
-        
-        Args:
-            document_id: Document identifier
-            data: Document data
-            
-        Returns:
-            RiskAssessment: Risk assessment result
-        """
-        # Calculate risk score
+        if self._engine is not None:
+            return self._assess_risk_ml(document_id, data)
+        return self._assess_risk_heuristic(document_id, data)
+
+    def _assess_risk_ml(self, document_id: str, data: Dict[str, Any]) -> RiskAssessment:
+        try:
+            result = self._engine.score_document_risk(document_id, data)
+            return RiskAssessment(
+                document_id=document_id,
+                risk_score=result["risk_score"],
+                risk_level=RiskLevel(result["risk_level"].lower()) if result["risk_level"].lower() in [e.value for e in RiskLevel] else RiskLevel.MEDIUM,
+                contributing_factors=result["contributing_factors"],
+                mitigation_steps=self._generate_mitigation(result["risk_level"]),
+                timestamp=time.time(),
+                metadata={"model_version": result.get("model_version", "unknown"), "method": "ml"}
+            )
+        except Exception as e:
+            print(f"ML risk assessment error: {e}")
+            return self._assess_risk_heuristic(document_id, data)
+
+    def _assess_risk_heuristic(self, document_id: str, data: Dict[str, Any]) -> RiskAssessment:
         risk_score = 0
-        
-        # 1. Similarity score
         similarity = data.get('similarity', 0)
         risk_score += similarity * self.weights['similarity_score']
-        
-        # 2. Recent activity
         days_since_upload = data.get('days_since_upload', 30)
         if days_since_upload < 7:
             risk_score += 1.0 * self.weights['recent_activity']
         elif days_since_upload < 14:
             risk_score += 0.5 * self.weights['recent_activity']
-        
-        # 3. Document volume
         doc_count = data.get('document_count', 1)
         if doc_count > 10:
             risk_score += 1.0 * self.weights['document_volume']
         elif doc_count > 5:
             risk_score += 0.5 * self.weights['document_volume']
-        
-        # 4. Author history
         past_incidents = data.get('past_incidents', 0)
         if past_incidents > 3:
             risk_score += 1.0 * self.weights['author_history']
         elif past_incidents > 1:
             risk_score += 0.5 * self.weights['author_history']
-        
-        # 5. Anomaly score
         anomaly_score = data.get('anomaly_score', 0)
         risk_score += anomaly_score * self.weights['anomaly_score']
-        
-        # Normalize risk score
         risk_score = min(1.0, risk_score)
-        
-        # Determine risk level
         if risk_score > 0.8:
             risk_level = RiskLevel.CRITICAL
         elif risk_score > 0.6:
@@ -791,8 +797,6 @@ class RiskScorer:
             risk_level = RiskLevel.LOW
         else:
             risk_level = RiskLevel.NEGLIGIBLE
-        
-        # Identify contributing factors
         factors = []
         if similarity > 0.7:
             factors.append("High similarity score")
@@ -802,23 +806,7 @@ class RiskScorer:
             factors.append("Past incidents")
         if anomaly_score > 0.5:
             factors.append("Anomaly detected")
-        
-        # Generate mitigation steps
-        mitigation = []
-        if risk_level in [RiskLevel.CRITICAL, RiskLevel.HIGH]:
-            mitigation.extend([
-                "Immediate document review required",
-                "Notify academic integrity office",
-                "Block further submissions",
-                "Schedule investigation meeting"
-            ])
-        elif risk_level == RiskLevel.MEDIUM:
-            mitigation.extend([
-                "Schedule document review",
-                "Contact author for clarification",
-                "Monitor future submissions"
-            ])
-        
+        mitigation = self._generate_mitigation(risk_level.value.title())
         return RiskAssessment(
             document_id=document_id,
             risk_score=risk_score,
@@ -829,6 +817,23 @@ class RiskScorer:
             metadata=data
         )
 
+    @staticmethod
+    def _generate_mitigation(risk_level: str) -> list:
+        if risk_level in ("Critical", "High"):
+            return [
+                "Immediate document review required",
+                "Notify academic integrity office",
+                "Block further submissions",
+                "Schedule investigation meeting"
+            ]
+        if risk_level == "Medium":
+            return [
+                "Schedule document review",
+                "Contact author for clarification",
+                "Monitor future submissions"
+            ]
+        return []
+
 
 # ==============================================================================
 # PATTERN RECOGNIZER
@@ -837,30 +842,64 @@ class RiskScorer:
 class PatternRecognizer:
     """
     Recognize emerging patterns in plagiarism data.
+
+    Delegates to the real ML pattern recognition engine when available,
+    falls back to basic frequency analysis otherwise.
     """
     
     def __init__(self):
         self.patterns = {}
         self.pattern_history = []
-    
+        self._engine = None
+        self._try_load_engine()
+
+    def _try_load_engine(self):
+        try:
+            from src.core.pattern_recognition import PatternDetectionEngine
+            from src.db.pattern_repository import PatternRepository
+            repo = PatternRepository()
+            self._engine = PatternDetectionEngine(repository=repo)
+        except ImportError:
+            self._engine = None
+
     def recognize_patterns(
         self,
         data: pd.DataFrame,
         min_frequency: int = 3
     ) -> Dict[str, Any]:
-        """
-        Recognize emerging patterns.
-        
-        Args:
-            data: Data to analyze
-            min_frequency: Minimum pattern frequency
-            
-        Returns:
-            Dict[str, Any]: Recognized patterns
-        """
+        if self._engine is not None:
+            return self._recognize_patterns_ml(data, min_frequency)
+        return self._recognize_patterns_basic(data, min_frequency)
+
+    def _recognize_patterns_ml(self, data: pd.DataFrame, min_frequency: int) -> Dict[str, Any]:
+        try:
+            from src.db.incidents import get_all_incidents, get_total_incidents_count
+            total = get_total_incidents_count()
+            incidents = get_all_incidents(limit=total, offset=0) if total > 0 else []
+            if not incidents:
+                return {}
+            patterns = self._engine.detect_recurring_patterns(incidents, min_occurrence=min_frequency)
+            result = {}
+            for p in patterns:
+                ptype = p.get("pattern_type", "unknown")
+                result[f"{ptype}_{p['pattern_id'][:8]}"] = {
+                    "pattern_id": p["pattern_id"],
+                    "type": ptype,
+                    "count": p.get("occurrence_count", 0),
+                    "avg_similarity": p.get("avg_similarity", 0),
+                    "confidence": p.get("confidence_score", 0),
+                    "severity": p.get("severity", "Low"),
+                    "documents": p.get("document_group", []),
+                    "description": p.get("description", ""),
+                }
+            self.patterns = result
+            return result
+        except Exception as e:
+            print(f"ML pattern recognition error: {e}")
+            return self._recognize_patterns_basic(data, min_frequency)
+
+    def _recognize_patterns_basic(self, data: pd.DataFrame, min_frequency: int) -> Dict[str, Any]:
         patterns = {}
-        
-        # Pattern 1: Document pairs with high similarity
         if 'doc_a' in data.columns and 'doc_b' in data.columns and 'similarity' in data.columns:
             high_sim_pairs = data[data['similarity'] > 0.75]
             if len(high_sim_pairs) >= min_frequency:
@@ -870,8 +909,6 @@ class PatternRecognizer:
                     'avg_similarity': high_sim_pairs['similarity'].mean(),
                     'emerged_at': datetime.now().isoformat()
                 }
-        
-        # Pattern 2: Author patterns
         if 'author' in data.columns:
             author_counts = data['author'].value_counts()
             prolific_authors = author_counts[author_counts >= min_frequency]
@@ -882,8 +919,6 @@ class PatternRecognizer:
                     'avg_documents_per_author': author_counts.mean(),
                     'emerged_at': datetime.now().isoformat()
                 }
-        
-        # Pattern 3: Temporal patterns
         if 'date' in data.columns:
             data['date'] = pd.to_datetime(data['date'])
             daily_counts = data.groupby(data['date'].dt.date).size()
@@ -895,18 +930,14 @@ class PatternRecognizer:
                     'avg_activity': daily_counts.mean(),
                     'emerged_at': datetime.now().isoformat()
                 }
-        
-        # Pattern 3: Similarity range patterns
         if 'similarity' in data.columns:
             similarity_ranges = pd.cut(data['similarity'], bins=[0, 0.3, 0.5, 0.7, 0.85, 1.0])
             range_counts = similarity_ranges.value_counts()
-            
             patterns['similarity_distribution'] = {
                 'ranges': range_counts.to_dict(),
                 'most_common_range': range_counts.index[0].__str__(),
                 'emerged_at': datetime.now().isoformat()
             }
-        
         self.patterns = patterns
         return patterns
 
@@ -1238,32 +1269,31 @@ def render_risk_assessment(engine: Dict):
 
 
 def render_pattern_recognition(engine: Dict):
-    """Render pattern recognition UI."""
-    st.markdown("#### 🧩 Pattern Recognition")
-    
-    # Get data
+    """Render pattern recognition UI — delegates to the dedicated component when available."""
+    try:
+        from app.components.pattern_recognition_ui import render_pattern_recognition
+        render_pattern_recognition()
+    except Exception:
+        # Fallback to the inline basic implementation
+        _render_pattern_recognition_basic(engine)
+
+
+def _render_pattern_recognition_basic(engine: Dict):
+    """Fallback inline pattern recognition when the dedicated UI is unavailable."""
+    st.markdown("#### Pattern Recognition")
     data = st.session_state.get("flags")
-    
     if not data:
         st.warning("No data available for pattern recognition")
         return
-    
-    # Convert to DataFrame
     df = pd.DataFrame(data)
-    
     if df.empty:
         st.warning("No data available")
         return
-    
-    # Recognize patterns
     recognizer = engine['patterns']
     patterns = recognizer.recognize_patterns(df)
-    
     if not patterns:
         st.info("No significant patterns detected")
         return
-    
-    # Display patterns
     for pattern_name, pattern_data in patterns.items():
         with st.expander(f"Pattern: {pattern_name.replace('_', ' ').title()}", expanded=False):
             st.json(pattern_data)

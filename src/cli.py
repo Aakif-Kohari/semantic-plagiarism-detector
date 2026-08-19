@@ -5,10 +5,12 @@ Headless command-line interface for plagiarism detection automation.
 """
 
 import argparse
-import concurrent.futures
+import csv
+import io
 import json
 import logging
 import os
+import re
 import sys
 import time
 from io import BytesIO
@@ -16,8 +18,13 @@ from pathlib import Path
 
 from src.core.app_config import FAISS_INDEX_PATH
 from src.core.cross_lingual import prepare_text_for_embedding
-from src.core.document_parser import DEFAULT_OCR_DPI, DEFAULT_OCR_LANGUAGE, extract_text, OCRDependencyError
+from src.core.document_parser import (
+    DEFAULT_OCR_DPI,
+    DEFAULT_OCR_LANGUAGE,
+    extract_text,
+)
 from src.core.embedding_model import embed_documents
+from src.core.export_engine import LMSExportEngine
 from src.core.logging_config import setup_logging
 from src.core.similarity import (
     PLAGIARISM_THRESHOLD,
@@ -27,9 +34,29 @@ from src.core.similarity import (
 from src.core.synchronization import verify_and_repair_index
 from src.core.text_chunking import chunk_documents
 from src.db.database_backup import optimize_database
-from src.core.export_engine import LMSExportEngine
+from src.errors import EmptyDocumentError
 
 logger = logging.getLogger(__name__)
+
+
+def _natural_sort_key(filepath: str) -> list:
+    """
+    Return a natural-sort key so that embedded numbers sort numerically.
+
+    For example, 'doc10.pdf' sorts after 'doc2.pdf' (natural order) instead of
+    before it (lexicographical order), which is easier for human operators to read.
+
+    Args:
+        filepath: The file path to build a sort key for.
+
+    Returns:
+        A list of alternating (type, value) tuples used for stable comparison.
+    """
+    filename = os.path.basename(filepath)
+    return [
+        (0, int(part)) if part.isdigit() else (1, part.casefold())
+        for part in re.split(r"(\d+)", filename)
+    ]
 
 
 def _process_single_file(filepath: str) -> tuple[str, str | None, str | None]:
@@ -51,6 +78,7 @@ def _process_single_file(filepath: str) -> tuple[str, str | None, str | None]:
         return filename, None, f"Warning: Failed to parse '{filename}': {e}\n"
 
 
+
 def run_scan(
     folder_path: str,
     threshold: float = PLAGIARISM_THRESHOLD,
@@ -62,6 +90,9 @@ def run_scan(
     and prints the report in the requested output format to stdout.
     """
     start_time = time.time()
+
+    if not (0.0 <= threshold <= 1.0): 
+        return 1
 
     if output_format not in ("json", "csv", "text", "html"):
         sys.stderr.write(
@@ -102,24 +133,38 @@ def run_scan(
         sys.stderr.write(f"Error reading folder contents: {e}\n")
         return 1
 
-    # Sort files to ensure deterministic ordering
-    files.sort()
+    # Sort files using natural order (doc2.pdf before doc10.pdf)
+    files.sort(key=_natural_sort_key)
 
     raw_texts = {}
-    with concurrent.futures.ProcessPoolExecutor() as executor:
+    skipped_files = []
+    
+    for file_path in valid_files:
+        filename = file_path.name
         try:
-            for filename, text, err in executor.map(_process_single_file, files):
-                if text:
-                    raw_texts[filename] = text
-                else:
-                    sys.stderr.write(
-                        f"Warning: Extracted text from '{filename}' is empty.\n"
-                    )
-        except OCRDependencyError as e:
-            sys.stderr.write(f"Fatal Error: {e}\n")
-            sys.exit(1)
+            with open(file_path, "rb") as f:
+                file_bytes = f.read()
+                
+            extracted = extract_text(
+                file_bytes, 
+                filename=filename, 
+                language=ocr_language, 
+                dpi=ocr_dpi
+            )
+            raw_texts[filename] = extracted
+            
+        except EmptyDocumentError as ede:
+            # Issue #2724: Handle empty documents gracefully in CLI
+            sys.stderr.write(f"⚠️  Warning: {ede}\n")
+            skipped_files.append(filename)
+            
         except Exception as e:
-            sys.stderr.write(f"Warning: Failed to parse '{filename}': {e}\n")
+            sys.stderr.write(f"❌ Error processing {filename}: {e}\n")
+            skipped_files.append(filename)
+
+    if not raw_texts:
+        sys.stderr.write("Error: No valid documents found to process.\n")
+        return 1
 
     num_processed = len(raw_texts)
     matches = []
@@ -171,9 +216,6 @@ def run_scan(
     elif output_format == "json":
         print(json.dumps(report, indent=2))
     elif output_format == "csv":
-        import csv
-        import io
-
         output = io.StringIO()
         writer = csv.DictWriter(
             output, fieldnames=["doc_a", "doc_b", "similarity_score"]
@@ -227,7 +269,7 @@ def run_prewarm(folder_path: str | None = None) -> int:
             sys.stderr.write(f"Error reading folder contents: {e}\n")
             return 1
 
-        files.sort()
+        files.sort(key=_natural_sort_key)
         for filepath in files:
             filename = os.path.basename(filepath)
             try:

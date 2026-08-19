@@ -985,7 +985,8 @@ def detect_plagiarism_clusters(
 # HYBRID SIMILARITY INTEGRATION - Issue #2676
 # ============================================================================
 
-from src.core.hybrid_scorer import HybridScorer, HybridConfig, compute_hybrid_plagiarism_flags
+from src.core.hybrid_scorer import HybridConfig, HybridScorer
+
 
 def compute_hybrid_similarity_df(
     semantic_df: pd.DataFrame,

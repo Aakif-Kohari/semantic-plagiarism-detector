@@ -19,7 +19,7 @@ from typing import Any, Callable, Dict, List, Optional
 from dotenv import load_dotenv
 
 from src.db.auth import get_all_users
-from src.db.incidents import DEFAULT_DB_PATH, get_all_incidents
+from src.db.incidents import DEFAULT_DB_PATH, get_recent_incidents
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -45,34 +45,49 @@ def get_incidents_last_24h(db_path: str = DEFAULT_DB_PATH) -> List[Dict[str, Any
         .isoformat()
     )
 
-    all_incidents = get_all_incidents(db_path)
-    recent_incidents = [
-        inc for inc in all_incidents if inc.get("date_flagged", "") >= cutoff_time
-    ]
+    return get_recent_incidents(cutoff_time=cutoff_time, db_path=db_path)
 
-    return recent_incidents
+
+def is_valid_email(email: Optional[str]) -> bool:
+    """
+    Validate email address format requiring an @ and valid TLD domain.
+
+    Args:
+        email: Email string to validate.
+
+    Returns:
+        bool: True if valid, False otherwise.
+    """
+    if not email or not isinstance(email, str):
+        return False
+    return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email.strip()))
 
 
 def get_admin_emails() -> List[str]:
     """
-    Retrieve email addresses for all admin users.
+    Retrieve email addresses for all admin users with valid email formats.
+    Falls back to ADMIN_EMAIL environment variable if no DB admin users have valid emails.
 
     Returns:
-        List of admin email addresses
+        List of valid admin email addresses
     """
     users = get_all_users()
     admin_emails = []
 
     for user in users:
         if user.get("role") == "admin":
-            admin_emails.append(f"{user['username']}@localhost")
+            email = user.get("email")
+            if is_valid_email(email):
+                admin_emails.append(email.strip())
 
-    if not admin_emails:
-        env_email = os.getenv("ADMIN_EMAIL")
-        if env_email:
-            admin_emails.append(env_email)
+    if admin_emails:
+        return admin_emails
 
-    return admin_emails
+    env_email = os.getenv("ADMIN_EMAIL")
+    if env_email and is_valid_email(env_email):
+        return [env_email.strip()]
+
+    return []
 
 
 def build_incident_row_html(inc: Dict[str, Any]) -> str:

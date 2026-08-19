@@ -7,9 +7,11 @@ Requires thefuzz library. Tests verify fuzzy matching behavior, threshold
 cutoffs, and fallback to exact matching when thefuzz is unavailable.
 """
 
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import patch, MagicMock
-from src.utils.warning_list import filter_warnings, FUZZY_THRESHOLD, THEFUZZ_AVAILABLE
+
+from src.utils.warning_list import FUZZY_THRESHOLD, THEFUZZ_AVAILABLE, filter_warnings
 
 # Skip all fuzzy tests if thefuzz is not installed
 pytestmark = pytest.mark.skipif(

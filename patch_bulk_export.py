@@ -37,6 +37,7 @@ def export_incidents_csv(
 """
 
 import re
+
 content = re.sub(r"def export_incidents_csv\([\s\S]*?    \)", sanitize_func, content)
 # wait, my regex above would delete the whole function body? No, just until the closing paren.
 # let me replace the whole function.

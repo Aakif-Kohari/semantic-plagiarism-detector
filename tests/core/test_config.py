@@ -182,3 +182,36 @@ def test_get_allowed_webhook_domains(monkeypatch):
         "discord.com",
         "example.org",
     ]
+def test_load_branding_config_missing_file_fallback():
+    """Test that load_branding_config returns default BrandingConfig when the JSON file is missing."""
+    from src.core.config import BrandingConfig, load_branding_config
+    
+    # Call with a non-existent file path
+    result = load_branding_config("nonexistent_path_123.json")
+    
+    # Assert no FileNotFoundError is raised (handled implicitly by successful execution) and returns defaults
+    assert result == BrandingConfig()
+
+
+def test_get_valid_roles_default_and_override(monkeypatch):
+    """Test get_valid_roles returns defaults and supports ALLOWED_USER_ROLES override."""
+    from src.core.app_config import get_valid_roles
+
+    # Unset env -> returns default {"admin", "teacher"}
+    monkeypatch.delenv("ALLOWED_USER_ROLES", raising=False)
+    assert get_valid_roles() == {"admin", "teacher"}
+
+    # Empty string -> falls back to default
+    monkeypatch.setenv("ALLOWED_USER_ROLES", "   ")
+    assert get_valid_roles() == {"admin", "teacher"}
+
+    # Overridden with custom roles
+    monkeypatch.setenv(
+        "ALLOWED_USER_ROLES", "admin, teacher, teaching_assistant, STUDENT"
+    )
+    assert get_valid_roles() == {
+        "admin",
+        "teacher",
+        "teaching_assistant",
+        "student",
+    }

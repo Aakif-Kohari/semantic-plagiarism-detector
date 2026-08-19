@@ -12,22 +12,20 @@ Features:
 - External system integration
 """
 
-import json
-import time
-import threading
-import queue
 import hashlib
-from pathlib import Path
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Union, Callable, Set, Tuple
-from dataclasses import dataclass, field, asdict
+import json
+import queue
+import threading
+import time
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from enum import Enum
-from collections import defaultdict, deque
-import streamlit as st
-import pandas as pd
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
+
 import plotly.graph_objects as go
+import streamlit as st
 from plotly.subplots import make_subplots
-import networkx as nx
 
 # ==============================================================================
 # ENUMS AND DATA CLASSES
@@ -956,22 +954,22 @@ def render_workflow_list(engine: WorkflowEngine):
             
             with col2:
                 if workflow.status == WorkflowStatus.PENDING:
-                    if st.button(f"▶️ Execute", key=f"exec_{workflow.id}"):
+                    if st.button("▶️ Execute", key=f"exec_{workflow.id}"):
                         engine.execute_workflow(workflow.id)
                         st.rerun()
                 
                 if workflow.status == WorkflowStatus.RUNNING:
-                    if st.button(f"⏸️ Pause", key=f"pause_{workflow.id}"):
+                    if st.button("⏸️ Pause", key=f"pause_{workflow.id}"):
                         engine.pause_workflow(workflow.id)
                         st.rerun()
                 
                 if workflow.status == WorkflowStatus.PAUSED:
-                    if st.button(f"▶️ Resume", key=f"resume_{workflow.id}"):
+                    if st.button("▶️ Resume", key=f"resume_{workflow.id}"):
                         engine.resume_workflow(workflow.id)
                         st.rerun()
                 
                 if workflow.status in [WorkflowStatus.PENDING, WorkflowStatus.RUNNING, WorkflowStatus.PAUSED]:
-                    if st.button(f"⏹️ Cancel", key=f"cancel_{workflow.id}"):
+                    if st.button("⏹️ Cancel", key=f"cancel_{workflow.id}"):
                         engine.cancel_workflow(workflow.id)
                         st.rerun()
             
@@ -1005,7 +1003,7 @@ def render_template_management(engine: WorkflowEngine):
                 st.caption(f"Created: {datetime.fromtimestamp(template.created_at).strftime('%Y-%m-%d')}")
                 st.caption(f"Usage: {template.usage_count} times")
                 
-                if st.button(f"📋 Use Template", key=f"use_{template.id}"):
+                if st.button("📋 Use Template", key=f"use_{template.id}"):
                     st.session_state.template_to_use = template.id
                     st.rerun()
     else:
@@ -1090,11 +1088,11 @@ def render_approval_management(engine: WorkflowEngine):
                     if user in approval.approvers:
                         comment = st.text_area("Comment", key=f"comment_{approval.id}", placeholder="Add comment...")
                         
-                        if st.button(f"✅ Approve", key=f"approve_{approval.id}"):
+                        if st.button("✅ Approve", key=f"approve_{approval.id}"):
                             engine.approve_approval(approval.id, user, comment)
                             st.rerun()
                         
-                        if st.button(f"❌ Reject", key=f"reject_{approval.id}"):
+                        if st.button("❌ Reject", key=f"reject_{approval.id}"):
                             engine.reject_approval(approval.id, user, comment)
                             st.rerun()
                     else:
@@ -1127,20 +1125,20 @@ def render_workflow_creation(engine: WorkflowEngine):
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                task_name = st.text_input(f"Task Name", f"Task {i+1}", key=f"task_name_{i}")
+                task_name = st.text_input("Task Name", f"Task {i+1}", key=f"task_name_{i}")
                 task_function = st.selectbox(
-                    f"Function",
+                    "Function",
                     ["plagiarism_check", "document_processing", "report_generation", "notification", "approval", "export", "cleanup"],
                     key=f"task_func_{i}"
                 )
             
             with col2:
-                task_description = st.text_input(f"Description", "", key=f"task_desc_{i}")
-                task_timeout = st.number_input(f"Timeout (seconds)", 60, 3600, 300, key=f"task_timeout_{i}")
+                task_description = st.text_input("Description", "", key=f"task_desc_{i}")
+                task_timeout = st.number_input("Timeout (seconds)", 60, 3600, 300, key=f"task_timeout_{i}")
             
             with col3:
-                task_max_retries = st.number_input(f"Max Retries", 0, 5, 3, key=f"task_retry_{i}")
-                dependencies = st.text_input(f"Dependencies (task IDs, comma separated)", "", key=f"task_dep_{i}")
+                task_max_retries = st.number_input("Max Retries", 0, 5, 3, key=f"task_retry_{i}")
+                dependencies = st.text_input("Dependencies (task IDs, comma separated)", "", key=f"task_dep_{i}")
             
             tasks.append({
                 "id": f"task_{i}_{int(time.time())}",

@@ -21,6 +21,7 @@ import numpy as np
 import pandas as pd
 import psutil
 import streamlit as st
+from src.errors import UI_SESSION_EXPIRED, EmptyDocumentError
 
 # 1. Fix Streamlit import paths FIRST so 'app' can be found
 FILE_PATH = Path(__file__).resolve()
@@ -62,8 +63,29 @@ from src.core.lexical_similarity import (
     n_gram_overlap,
     scale_lexical_score,
     compute_char_ngram_similarity,
+    render_report_generator_ui
 )
-
+def integrate_pattern_recognition():
+    """Initialize and integrate pattern recognition"""
+    if 'pattern_engine' not in st.session_state:
+        st.session_state['pattern_engine'] = PatternRecognitionEngine()
+    
+    # Add pattern recognition tab to main app
+    render_pattern_recognition_ui(st.session_state['pattern_engine'])
+def integrate_text_analysis():
+    """Initialize and integrate text analysis engine"""
+    if 'text_analyzer' not in st.session_state:
+        st.session_state['text_analyzer'] = TextAnalysisEngine()
+    
+    # Add text analysis tab to main app
+    render_text_analysis_ui(st.session_state['text_analyzer'])
+def integrate_preprocessing():
+    """Initialize and integrate preprocessing engine"""
+    if 'preprocessor' not in st.session_state:
+        st.session_state['preprocessor'] = DocumentPreprocessor()
+    
+    # Add preprocessing tab to main app
+    render_preprocessing_ui(st.session_state['preprocessor'])
 
 from app.components.cross_lingual_ui import (
     render_cross_lingual_settings,
@@ -175,16 +197,6 @@ from app.components.api_gateway import (
     ApiStatus,
     WebhookStatus,
     ServiceType,
-)
-from sklearn.cluster import AgglomerativeClustering, KMeans
-from sklearn.decomposition import NMF, LatentDirichletAllocation
-from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
-from sklearn.manifold import TSNE
-from sklearn.metrics import silhouette_score, davies_bouldin_score
-from sklearn.preprocessing import StandardScaler
-import scipy.cluster.hierarchy as sch
-from scipy.spatial.distance import squareform
-from scipy.cluster.hierarchy import fcluster
 
 # ── Document Version Control Imports ─────────────────────────────────────
 from app.components.document_version_control import (
@@ -1087,6 +1099,12 @@ from app.components.batch_processor_enhanced import (
     JobStatus,
 )
 
+
+# AI Detection Settings
+enable_ai_detection = st.session_state.get("enable_ai_detection", True)
+ai_threshold = st.session_state.get("ai_threshold", 0.65)
+
+
 # ── Audit Logs View Import ──────────────────────────────────────────────
 from app.views.audit_logs import render_audit_view
 
@@ -1445,13 +1463,15 @@ def _run_backup_daemon():
             ):
                 from src.db.corpus_db import get_corpus_db_path
                 from src.db.database_backup import (
+                    cleanup_old_backups,
                     create_corpus_database_snapshot,
                 )
 
+                from src.core.app_config import get_backup_dir
+
                 snapshot = create_corpus_database_snapshot()
 
-                db_path = get_corpus_db_path()
-                backup_dir = db_path.parent / "backups"
+                backup_dir = get_backup_dir()
                 backup_dir.mkdir(parents=True, exist_ok=True)
 
                 filename = (
@@ -1462,6 +1482,7 @@ def _run_backup_daemon():
                 filename.write_bytes(snapshot)
 
                 logger.info(f"Backup created: {filename}")
+                cleanup_old_backups(backup_dir, max_backups=10, max_age_days=30)
 
                 last_backup_time = now
                 cache.set(
@@ -1481,10 +1502,8 @@ if not getattr(app_config, "_backup_daemon_started", False):
     ).start()
 
 # Generate unique session ID for this Streamlit session
-if SessionKeys.SESSION_ID not in st.session_state:
-    import uuid
-
-    st.session_state[SessionKeys.SESSION_ID] = str(uuid.uuid4())
+from app.session_manager import initialize_and_verify_session
+st.session_state[SessionKeys.SESSION_ID] = initialize_and_verify_session()
 
 SESSION_ID = st.session_state[SessionKeys.SESSION_ID]
 
@@ -1732,11 +1751,11 @@ if not st.session_state.get(SessionKeys.AUTHENTICATED, False):
         from src.db.auth import get_or_create_sso_user
         from src.utils.sso import exchange_github_code, exchange_google_code
 
-        _user_info = None
+        _user_info, _error_msg = None, None
         if _state.startswith("google_"):
-            _user_info = exchange_google_code(_code)
+            _user_info, _error_msg = exchange_google_code(_code)
         elif _state.startswith("github_"):
-            _user_info = exchange_github_code(_code)
+            _user_info, _error_msg = exchange_github_code(_code)
 
         if _user_info and _user_info.get("email"):
             _email = _user_info["email"]
@@ -1758,7 +1777,8 @@ if not st.session_state.get(SessionKeys.AUTHENTICATED, False):
                 st.query_params.clear()
                 st.rerun()
         else:
-            st.error("🚨 SSO authentication failed. Could not retrieve your email.")
+            _err = _error_msg or "Could not retrieve your email."
+            st.error(f"🚨 SSO authentication failed: {_err}")
             st.query_params.clear()
 
 # Render Login UI if not authenticated
@@ -2068,11 +2088,12 @@ with st.sidebar:
                 for code, display_name in SUPPORTED_OCR_LANGUAGES.items()
             }
             language_names = list(ocr_language_labels)
-            default_language_name = SUPPORTED_OCR_LANGUAGES[DEFAULT_OCR_LANGUAGE]
+            default_language_name = SUPPORTED_OCR_LANGUAGES.get(DEFAULT_OCR_LANGUAGE, "English")
+            default_index = language_names.index(default_language_name) if default_language_name in language_names else 0
             selected_ocr_language_name = st.selectbox(
                 "OCR Language",
                 options=language_names,
-                index=language_names.index(default_language_name),
+                index=default_index,
                 key=SessionKeys.OCR_LANGUAGE_SELECTOR,
             )
             ocr_language = ocr_language_labels[selected_ocr_language_name]
@@ -2087,10 +2108,121 @@ with st.sidebar:
             )
 
 
+
+
+
+
+        # ── Multilingual Support ──────────────────────────────────────────────────
+        with st.sidebar.expander("🌍 Multilingual Support", expanded=False):
+            st.markdown("""
+            **Multilingual support** enables plagiarism detection for non-Latin scripts
+            (Arabic, Devanagari, Cyrillic, etc.)
+            """)
+            
+            enable_multilingual = st.checkbox(
+                "Enable Multilingual Support",
+                value=False,
+                key="enable_multilingual",
+                help="Enables normalization for Arabic, Devanagari, Cyrillic scripts"
+            )
+            
+            if enable_multilingual:
+                st.info("✅ Arabic, Devanagari, Cyrillic normalization enabled")
+                
+                with st.expander("📖 Supported Scripts", expanded=False):
+                    st.markdown("""
+                    - **Arabic**: Diacritic removal, letter normalization, ligature handling
+                    - **Devanagari**: Matra normalization, consonant normalization
+                    - **Cyrillic**: Letter normalization (ё→е, й→и, etc.)
+                    - **Latin**: Basic Unicode normalization
+                    """)
+                
+                # Show detected script for current text
+                if 'raw_texts' in locals() and raw_texts:
+                    from src.core.script_normalizer import ScriptDetector
+                    detector = ScriptDetector()
+                    scripts = {}
+                    for doc, text in raw_texts.items():
+                        scripts[doc] = detector.detect(text)
+                    
+                    st.caption("Detected Scripts:")
+                    for doc, script in scripts.items():
+                        st.caption(f"- {doc}: {script}")
+
+        # ── Cross-Lingual Detection ──────────────────────────────────────────────────
+        with st.sidebar.expander("🌐 Cross-Lingual Detection", expanded=False):
+            st.markdown("""
+            **Cross-lingual detection** identifies plagiarism across different languages
+            using translation and multilingual embeddings.
+            """)
+            
+            enable_cross_lingual = st.checkbox(
+                "Enable Cross-Lingual Detection",
+                value=False,
+                key="enable_cross_lingual",
+                help="Detect plagiarism across different languages"
+            )
+            
+            if enable_cross_lingual:
+                cross_lingual_method = st.selectbox(
+                    "Detection Method",
+                    ["hybrid", "embedding", "translation"],
+                    index=0,
+                    help="Hybrid = translation + embeddings (best), Embedding = LaBSE only, Translation = translation only"
+                )
+                
+                cross_lingual_threshold = st.slider(
+                    "Cross-Lingual Threshold",
+
+
+        # ── AI Plagiarism Detection ────────────────────────────────────────────────
+        with st.sidebar.expander("🤖 AI Plagiarism Detection", expanded=False):
+            st.markdown("""
+            **AI Detection** identifies text generated by LLMs (ChatGPT, Claude, etc.)
+            using multiple statistical techniques.
+            """)
+            
+            enable_ai_detection = st.checkbox(
+                "Enable AI Detection",
+                value=True,
+                key="enable_ai_detection",
+                help="Detect AI-generated text in documents"
+            )
+            
+            if enable_ai_detection:
+                ai_threshold = st.slider(
+                    "AI Detection Threshold",
+
+                    min_value=0.30,
+                    max_value=0.90,
+                    value=0.65,
+                    step=0.05,
+
+                    help="Similarity threshold for cross-lingual flagging"
+                )
+                
+                st.info(f"Method: {cross_lingual_method} | Threshold: {cross_lingual_threshold:.2f}")
+
+                    help="Higher = stricter AI detection"
+                )
+                
+                st.info(f"Documents with AI probability > {ai_threshold:.2f} will be flagged")
+                
+                # Show detection methods
+                with st.expander("🔍 Detection Methods", expanded=False):
+                    st.markdown("""
+                    - **Perplexity**: AI text is more predictable
+                    - **Burstiness**: Human text has more variation
+                    - **Pattern Analysis**: Detects repetitive AI patterns
+                    - **Sentence Variability**: AI text has less variety
+                    """)
+
+
         # ── Stopword Manager ────────────────────────────────────────────────────────
         with st.sidebar.expander("🛑 Stopword Manager", expanded=False):
             from app.components.stopword_manager_ui import render_stopword_manager_ui
             render_stopword_manager_ui()
+
 
         # ── Hybrid Scoring Settings ────────────────────────────────────────────────
         with st.sidebar.expander("🔀 Hybrid Scoring", expanded=False):
@@ -2234,6 +2366,19 @@ with st.sidebar:
                 st.markdown("• **Auth DB:** 🔴 Error")
                 st.caption(f"  {db_err}")
 
+            try:
+                from src.utils.redis_cache import get_cache
+
+                cache_inst = get_cache()
+                redis_online, latency = cache_inst.ping()
+                if redis_online:
+                    lat_str = f" ({latency} ms)" if latency is not None else ""
+                    st.markdown(f"• **Cache Backend:** 🟢 Redis{lat_str}")
+                else:
+                    st.markdown("• **Cache Backend:** 🟡 In-Memory")
+            except Exception:
+                st.markdown("• **Cache Backend:** 🟡 In-Memory")
+
             st.divider()
             cpu_percent = psutil.cpu_percent(interval=0.1)
             cpu_count = psutil.cpu_count(logical=True)
@@ -2288,6 +2433,11 @@ with col3:
     st.metric("Flagged Incidents", f"{flagged_incidents:,}")
 with col4:
     st.metric("Corpus Size", f"{corpus_size:,}")
+if enable_ai_detection and 'ai_probabilities' in locals() and ai_probabilities:
+    suspicious_count = sum(1 for p in ai_probabilities.values() if p > ai_threshold)
+    st.metric("🤖 AI Generated", suspicious_count, delta=f"of {len(ai_probabilities)} docs")
+else:
+    st.metric("🤖 AI Generated", "0")
 
 st.markdown("---")
 
@@ -2912,10 +3062,14 @@ if user_role == "admin":
                 st.info(f"Loaded and validated the existing FAISS index with {faiss_index.ntotal} vectors.")
 
     from src.utils.redis_cache import store_large_data, get_large_data, clear_large_data
+    from src.utils.similarity_cache import build_similarity_cache_key
+
+    analysis_cache_key = build_similarity_cache_key(SESSION_ID, use_hybrid=use_hybrid)
+    analysis_metadata_key = f"{analysis_cache_key}_metadata"
 
     if SessionKeys.ANALYSIS_RESULTS not in st.session_state:
         # Store only metadata in session state
-        cached_metadata = get_large_data(f"{SESSION_ID}:analysis_metadata")
+        cached_metadata = get_large_data(analysis_metadata_key)
         if cached_metadata is not None:
             st.session_state[SessionKeys.ANALYSIS_RESULTS] = cached_metadata
         else:
@@ -2927,11 +3081,11 @@ if user_role == "admin":
             }
     
     # Check if we have cached results
-    cached_results = get_large_data(f"{SESSION_ID}:analysis_results")
+    cached_results = get_large_data(analysis_cache_key)
     if cached_results is not None:
         st.session_state[SessionKeys.ANALYSIS_RESULTS]["has_results"] = True
         st.session_state[SessionKeys.ANALYSIS_RESULTS]["doc_count"] = cached_results.get("doc_count", 0)
-        st.session_state[SessionKeys.ANALYSIS_RESULTS]["cache_key"] = f"{SESSION_ID}:analysis_results"
+        st.session_state[SessionKeys.ANALYSIS_RESULTS]["cache_key"] = analysis_cache_key
 
     if SessionKeys.ANALYSIS_FILE_SIGNATURE not in st.session_state:
         st.session_state[SessionKeys.ANALYSIS_FILE_SIGNATURE] = None
@@ -3122,6 +3276,17 @@ if user_role == "admin":
         faiss_index, registry = build_index(embeddings, chunked_docs)
         ai_probabilities = detect_documents_ai_probability(chunked_docs)
 
+        # ========== ADD AI DETECTION HERE ==========
+        if enable_ai_detection:
+            from src.core.ai_detector_enhanced import detect_ai_probability_enhanced
+            ai_probabilities = detect_ai_probability_enhanced(
+                chunked_docs if chunked_docs else {},
+                threshold=ai_threshold
+            )
+        else:
+            ai_probabilities = {}
+        # ==========================================
+
         return (
             chunked_docs,
             embeddings,
@@ -3132,6 +3297,8 @@ if user_role == "admin":
             ai_probabilities,
         )
 
+        
+
     if has_enough_files:
         st.session_state[SessionKeys.SCANNING] = True
         total_bytes = sum(len(data) for data in file_bytes_dict.values())
@@ -3139,10 +3306,36 @@ if user_role == "admin":
 
         progress_bar = st.progress(0, text="Preparing files…")
         raw_texts = {}
+        failed_documents = []
+        
         for i, (name, data) in enumerate(file_bytes_dict.items()):
-            raw_texts[name] = extract_text(
-                _io.BytesIO(data), name, ocr_language=ocr_language, ocr_dpi=ocr_dpi
-            )
+            try:
+                extracted = extract_text(
+                    _io.BytesIO(data), name, ocr_language=ocr_language, ocr_dpi=ocr_dpi
+                )
+                raw_texts[name] = extracted
+                
+            except EmptyDocumentError as ede:
+                # Issue #2724: Catch empty documents and log them as warnings
+                # instead of crashing the entire analysis pipeline
+                logger.warning("Skipping empty document %s: %s", name, ede)
+                failed_documents.append({
+                    "filename": name,
+                    "error": str(ede),
+                    "type": "empty_document"
+                })
+                st.warning(f"⚠️ **{name}**: {ede}")
+                
+            except Exception as e:
+                # Catch other extraction errors
+                logger.error("Failed to extract text from %s: %s", name, e)
+                failed_documents.append({
+                    "filename": name,
+                    "error": str(e),
+                    "type": "extraction_error"
+                })
+                st.error(f"❌ **{name}**: Failed to extract text. {e}")
+                
             fraction = (i + 1) / file_count
             remaining_bytes = total_bytes * (file_count - i - 1) // max(1, file_count)
             remaining_est = estimate_processing_seconds(remaining_bytes)
@@ -3155,6 +3348,18 @@ if user_role == "admin":
                 fraction,
                 text=f"Processing file {i + 1} of {file_count} (ETA: {eta})",
             )
+
+        # Filter out failed documents from further processing
+        if failed_documents:
+            st.session_state["failed_documents"] = failed_documents
+            st.info(f"Skipped {len(failed_documents)} file(s) due to extraction errors.")
+            
+        # Only proceed if we have enough valid texts
+        if len(raw_texts) < 2:
+            st.error("Not enough valid documents remaining for comparison after filtering errors.")
+            st.session_state[SessionKeys.SCANNING] = False
+            progress_bar.empty()
+            st.stop()
 
         raw_texts_tuple = tuple(sorted(raw_texts.items()))
         (
@@ -3187,21 +3392,21 @@ if user_role == "admin":
             "timestamp": time.time()
         }
         
-        store_large_data(f"{SESSION_ID}:analysis_results", large_results, ttl=1800)
+        store_large_data(analysis_cache_key, large_results, ttl=1800)
         
         # Update session state with metadata only
         st.session_state[SessionKeys.ANALYSIS_RESULTS] = {
             "has_results": True,
             "doc_count": len(chunked_docs),
             "timestamp": time.time(),
-            "cache_key": f"{SESSION_ID}:analysis_results"
+            "cache_key": analysis_cache_key
         }
         
-        store_large_data(f"{SESSION_ID}:analysis_metadata", {
+        store_large_data(analysis_metadata_key, {
             "has_results": True,
             "doc_count": len(chunked_docs),
             "timestamp": time.time(),
-            "cache_key": f"{SESSION_ID}:analysis_results"
+            "cache_key": analysis_cache_key
         }, ttl=1800)
         # ===================================
         
@@ -3254,6 +3459,7 @@ st.divider()
     tab_drill,
     tab_compare,
     tab_analytics,
+    tab_patterns,
     tab_users,
     tab_settings,
     tab_history,
@@ -3267,6 +3473,7 @@ st.divider()
         get_text("tab_drill", lang=lang_code),
         "🔬 Comparison",
         get_text("tab_analytics", lang=lang_code),
+        "🧠 Patterns",
         get_text("tab_users", lang=lang_code),
         get_text("tab_settings", lang=lang_code),
         "📊 History",
@@ -3325,6 +3532,37 @@ with tab_warnings:
             st.caption("🔴 Live — refreshing every 30 seconds.")
     else:
         st.caption("⚪ Live feed paused — toggle on to auto-refresh.")
+
+    # ── AI Detection Results ──────────────────────────────────────────────────
+    if enable_ai_detection and ai_probabilities:
+        st.markdown("### 🤖 AI-Generated Text Detection")
+        
+        # Summary metrics
+        ai_col1, ai_col2, ai_col3 = st.columns(3)
+        
+        suspicious_count = sum(1 for p in ai_probabilities.values() if p > ai_threshold)
+        avg_ai_prob = sum(ai_probabilities.values()) / len(ai_probabilities) if ai_probabilities else 0
+        
+        with ai_col1:
+            st.metric("Documents Analyzed", len(ai_probabilities))
+        with ai_col2:
+            st.metric("Suspicious (AI)", suspicious_count)
+        with ai_col3:
+            st.metric("Avg AI Probability", f"{avg_ai_prob * 100:.1f}%")
+        
+        # Display AI probabilities for each document
+        if ai_probabilities:
+            import pandas as pd
+            ai_df = pd.DataFrame([
+                {"Document": doc, "AI Probability": f"{prob * 100:.1f}%", "Status": "⚠️ AI" if prob > ai_threshold else "✅ Human"}
+                for doc, prob in ai_probabilities.items()
+            ])
+            st.dataframe(ai_df, use_container_width=True, hide_index=True)
+            
+            # Highlight suspicious documents
+            for doc, prob in ai_probabilities.items():
+                if prob > ai_threshold:
+                    st.warning(f"⚠️ **{doc}**: {prob * 100:.1f}% AI probability")
 
     st.divider()
 
@@ -3708,7 +3946,18 @@ with tab_analytics:
         timings=st.session_state.get("last_stage_timings", {})
     )
 
-# ══ TAB 8: USERS ══════════════════════════════════════════════════════════
+# ══ TAB 8: PATTERNS (Issue #2840) ═════════════════════════════════════════
+with tab_patterns:
+    update_page_title("Pattern Recognition")
+    try:
+        from app.components.pattern_recognition_ui import render_pattern_recognition
+
+        render_pattern_recognition()
+    except Exception as exc:
+        logger.error("Failed to render pattern recognition: %s", exc)
+        st.error("Pattern recognition system unavailable.")
+
+# ══ TAB 9: USERS ══════════════════════════════════════════════════════════
 with tab_users:
     update_page_title("Users")
     render_users_view()
@@ -3725,6 +3974,95 @@ with tab_history:
 # ══ TAB 10: SECURITY AUDIT LOGS ═════════════════════════════════════════════
 with tab_audit:
     update_page_title("Security Audit Logs")
+    st.subheader(get_text("tab_audit_logs", lang=lang_code))
+
+    if user_role != "admin":
+        st.error("🔒 Access Denied: Administrator privileges required.")
+    else:
+        st.markdown("### 📜 System Security Audit Trail")
+
+        # ... [existing filters] ...
+        
+        # Issue #2732: Pagination controls
+        EVENTS_PER_PAGE = 20
+        
+        if "audit_page_offset" not in st.session_state:
+            st.session_state.audit_page_offset = 0
+            
+        current_offset = st.session_state.audit_page_offset
+        
+        # Fetch records for current page
+        from src.db.security_audit import get_recent_audit_events, get_audit_events_count
+        
+        logs = get_recent_audit_events(
+            limit=EVENTS_PER_PAGE,
+            offset=current_offset,
+            username=username_filter,
+            event_type=event_type_filter
+        )
+        
+        total_records = get_audit_events_count(
+            username=username_filter,
+            event_type=event_type_filter
+        )
+        
+        total_pages = max(1, (total_records + EVENTS_PER_PAGE - 1) // EVENTS_PER_PAGE)
+        current_page = (current_offset // EVENTS_PER_PAGE) + 1
+
+        # Summary Metrics
+        m1, m2, m3 = st.columns(3)
+        m1.metric("📋 Total Log Entries", total_records)
+        m2.metric("🏷️ Active Filter", selected_event_type or "All")
+        m3.metric("📑 Page", f"{current_page} / {total_pages}")
+
+        st.divider()
+
+        # Display Data Table
+        if logs:
+            df = pd.DataFrame(logs)
+            # ... [existing dataframe formatting] ...
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+            # Pagination Controls (Issue #2732)
+            nav_col1, nav_col2, nav_col3 = st.columns([1, 2, 1])
+            
+            with nav_col1:
+                if st.button(
+                    "← Previous Page",
+                    disabled=(current_offset == 0),
+                    key="audit_prev_page_btn",
+                    use_container_width=True
+                ):
+                    st.session_state.audit_page_offset = max(0, current_offset - EVENTS_PER_PAGE)
+                    st.rerun()
+
+            with nav_col2:
+                st.caption(
+                    f"Showing {current_offset + 1} - {min(current_offset + EVENTS_PER_PAGE, total_records)} of {total_records} logs"
+                )
+
+            with nav_col3:
+                if st.button(
+                    "Next Page →",
+                    disabled=(current_offset + EVENTS_PER_PAGE >= total_records),
+                    key="audit_next_page_btn",
+                    use_container_width=True
+                ):
+                    st.session_state.audit_page_offset = current_offset + EVENTS_PER_PAGE
+                    st.rerun()
+        else:
+            st.info("ℹ️ No security audit log records found matching the specified filters.")
+            
+        # Reset offset when filters change
+        if "last_audit_filter" not in st.session_state:
+            st.session_state.last_audit_filter = (username_filter, event_type_filter)
+            
+        current_filter = (username_filter, event_type_filter)
+        if st.session_state.last_audit_filter != current_filter:
+            st.session_state.audit_page_offset = 0
+            st.session_state.last_audit_filter = current_filter
+            st.rerun()
+
     # ========== USE THE NEW MODULE ==========
     render_audit_view(user_role, lang_code)
     
