@@ -480,6 +480,7 @@ class RedisCache:
                 ConnectionRefusedError,
                 ConnectionResetError,
                 pickle.PickleError,
+                Exception,
             ) as e:
                 print(
                     f"[RedisCache] Error setting key {key}: {e}. Falling back to in-memory."
@@ -508,6 +509,7 @@ class RedisCache:
                 ConnectionResetError,
                 pickle.PickleError,
                 zlib.error,
+                Exception,
             ) as e:
                 print(
                     f"[RedisCache] Error getting key {key}: {e}. Falling back to in-memory."
