@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Redis cache health status indicator in Streamlit sidebar and System Health expander (`app/views/corpus_view.py`, `app/streamlit_app.py`).
 - Added `--recursive` support to the CLI scan command for scanning documents in nested subdirectories.
 
 ### Changed

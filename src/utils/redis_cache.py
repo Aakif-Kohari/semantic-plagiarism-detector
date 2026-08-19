@@ -403,6 +403,14 @@ class RedisCache:
             return False
 
     def ping(self) -> tuple[bool, Optional[float]]:
+        """Ping the Redis server to check connectivity and measure round-trip latency.
+
+        Returns:
+            tuple[bool, Optional[float]]: A tuple containing:
+                - bool: True if Redis server responded successfully, False otherwise.
+                - Optional[float]: Latency in milliseconds (rounded to 1 decimal place),
+                  or None if the server is unreachable or client is not initialized.
+        """
         if self._client is None:
             return False, None
 
