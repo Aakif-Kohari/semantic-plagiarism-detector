@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import sqlite3
 
-from .common import column_exists, run_migrations
+from .common import column_exists, run_migrations, table_exists
 
-CORPUS_SCHEMA_VERSION = 14
+CORPUS_SCHEMA_VERSION = 15
 
 
 def migration_001_create_base_schema(
@@ -284,6 +284,78 @@ def migration_013_add_incident_archive_table(
         """)
 
 
+def migration_015_pattern_recognition(
+    connection: sqlite3.Connection,
+) -> None:
+    """Create pattern recognition tables for the intelligent detection system (issue #2840)."""
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS plagiarism_patterns (
+            pattern_id TEXT PRIMARY KEY,
+            pattern_type TEXT NOT NULL,
+            description TEXT,
+            document_group TEXT NOT NULL,
+            author_group TEXT,
+            assignment_title TEXT,
+            class_section TEXT,
+            avg_similarity REAL NOT NULL,
+            occurrence_count INTEGER NOT NULL DEFAULT 1,
+            confidence_score REAL NOT NULL DEFAULT 0.0,
+            severity TEXT NOT NULL DEFAULT 'Medium',
+            first_seen TEXT NOT NULL,
+            last_seen TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active'
+        )
+    """)
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_patterns_type ON plagiarism_patterns(pattern_type)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_patterns_status ON plagiarism_patterns(status)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_patterns_severity ON plagiarism_patterns(severity)")
+
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS pattern_evolution (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pattern_id TEXT NOT NULL,
+            snapshot_date TEXT NOT NULL,
+            occurrence_count INTEGER NOT NULL,
+            avg_similarity REAL NOT NULL,
+            confidence_score REAL NOT NULL,
+            drift_score REAL DEFAULT 0.0,
+            FOREIGN KEY (pattern_id) REFERENCES plagiarism_patterns(pattern_id) ON DELETE CASCADE
+        )
+    """)
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_evolution_pattern ON pattern_evolution(pattern_id)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_evolution_date ON pattern_evolution(snapshot_date)")
+
+    if not table_exists(connection, "document_risk_scores"):
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS document_risk_scores (
+                document_name TEXT PRIMARY KEY,
+                risk_score REAL NOT NULL,
+                risk_level TEXT NOT NULL,
+                contributing_factors TEXT,
+                model_version TEXT,
+                scored_at TEXT NOT NULL
+            )
+        """)
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_risk_level ON document_risk_scores(risk_level)")
+
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS proactive_recommendations (
+            recommendation_id TEXT PRIMARY KEY,
+            pattern_id TEXT,
+            recommendation_type TEXT NOT NULL,
+            priority INTEGER NOT NULL DEFAULT 2,
+            target TEXT NOT NULL,
+            message TEXT NOT NULL,
+            action_items TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (pattern_id) REFERENCES plagiarism_patterns(pattern_id) ON DELETE SET NULL
+        )
+    """)
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_recommendations_status ON proactive_recommendations(status)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_recommendations_priority ON proactive_recommendations(priority)")
+
+
 CORPUS_MIGRATIONS = {
     1: migration_001_create_base_schema,
     2: migration_002_add_document_metadata,
@@ -299,6 +371,7 @@ CORPUS_MIGRATIONS = {
     12: migration_012_add_fts5_index,
     13: migration_013_add_incident_archive_table,
     14: migration_013_add_incident_severity_idx,
+    15: migration_015_pattern_recognition,
 }
 
 

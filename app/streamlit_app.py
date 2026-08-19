@@ -3450,6 +3450,7 @@ st.divider()
     tab_drill,
     tab_compare,
     tab_analytics,
+    tab_patterns,
     tab_users,
     tab_settings,
     tab_history,
@@ -3463,6 +3464,7 @@ st.divider()
         get_text("tab_drill", lang=lang_code),
         "🔬 Comparison",
         get_text("tab_analytics", lang=lang_code),
+        "🧠 Patterns",
         get_text("tab_users", lang=lang_code),
         get_text("tab_settings", lang=lang_code),
         "📊 History",
@@ -3935,7 +3937,18 @@ with tab_analytics:
         timings=st.session_state.get("last_stage_timings", {})
     )
 
-# ══ TAB 8: USERS ══════════════════════════════════════════════════════════
+# ══ TAB 8: PATTERNS (Issue #2840) ═════════════════════════════════════════
+with tab_patterns:
+    update_page_title("Pattern Recognition")
+    try:
+        from app.components.pattern_recognition_ui import render_pattern_recognition
+
+        render_pattern_recognition()
+    except Exception as exc:
+        logger.error("Failed to render pattern recognition: %s", exc)
+        st.error("Pattern recognition system unavailable.")
+
+# ══ TAB 9: USERS ══════════════════════════════════════════════════════════
 with tab_users:
     update_page_title("Users")
     render_users_view()
