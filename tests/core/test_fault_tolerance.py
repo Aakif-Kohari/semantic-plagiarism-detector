@@ -202,6 +202,54 @@ class TestRedisFaultTolerance:
             # Should retrieve from fallback cache
             assert result == "fallback_value"
 
+    def test_redis_connection_drop_mid_session_failover(
+        self, reset_redis_cache, mock_redis_module
+    ):
+        """
+        Verify seamless failover to in-memory fallback when Redis drops mid-session (#2817).
+
+        Simulates a redis.exceptions.ConnectionError on the second .get() call,
+        ensuring the application recovers without crashing and subsequent .set() calls
+        safely store user uploaded files/data into in-memory fallback cache.
+        """
+        import pickle
+
+        cache = RedisCache()
+        mock_client = MagicMock()
+        mock_client.ping.return_value = True
+
+        uploaded_doc1 = {"doc_id": "doc_101", "content": "Sample student essay text", "user": "alice"}
+        uploaded_doc2 = {"doc_id": "doc_102", "content": "Sample secondary essay text", "user": "alice"}
+
+        # First call succeeds returning doc1 from Redis
+        # Second call raises ConnectionError (simulating connection drop mid-session)
+        mock_client.get.side_effect = [
+            pickle.dumps(uploaded_doc1),
+            mock_redis_module.ConnectionError("Connection dropped by peer mid-session"),
+        ]
+
+        cache._client = mock_client
+
+        # 1. First get() succeeds from Redis
+        result_doc1 = cache.get("spd:v1:upload:doc_101")
+        assert result_doc1 == uploaded_doc1
+
+        # 2. Second get() encounters ConnectionError, seamlessly recovers and falls back
+        result_doc2_initial = cache.get("spd:v1:upload:doc_102")
+        assert result_doc2_initial is None
+
+        # 3. Subsequent set() should succeed by storing into memory without dropping data
+        mock_client.set.side_effect = mock_redis_module.ConnectionError("Connection refused")
+        mock_client.setex.side_effect = mock_redis_module.ConnectionError("Connection refused")
+        set_result = cache.set("spd:v1:upload:doc_102", uploaded_doc2, ttl=300)
+        assert set_result is True
+
+        # 4. Subsequent get() successfully returns stored upload from fallback in-memory cache
+        mock_client.get.side_effect = mock_redis_module.ConnectionError("Connection refused")
+        recovered_doc2 = cache.get("spd:v1:upload:doc_102")
+        assert recovered_doc2 == uploaded_doc2
+        assert recovered_doc2["content"] == "Sample secondary essay text"
+
     def test_redis_connection_refused_error_type(self, reset_redis_cache):
         """
         Verify that RedisConnectionError is properly aliased and catchable.
