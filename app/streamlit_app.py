@@ -1477,10 +1477,11 @@ def _run_backup_daemon():
                     create_corpus_database_snapshot,
                 )
 
+                from src.core.app_config import get_backup_dir
+
                 snapshot = create_corpus_database_snapshot()
 
-                db_path = get_corpus_db_path()
-                backup_dir = db_path.parent / "backups"
+                backup_dir = get_backup_dir()
                 backup_dir.mkdir(parents=True, exist_ok=True)
 
                 filename = (
