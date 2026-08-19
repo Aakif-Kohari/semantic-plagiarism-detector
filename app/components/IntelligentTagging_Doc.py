@@ -4,6 +4,7 @@
 
 import re
 import json
+import hashlib
 import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Set, Tuple, Any
@@ -381,6 +382,15 @@ class TagManager:
 
 # ── Auto-Categorizer ──────────────────────────────────────────────────────
 
+@st.cache_data(show_spinner=False)
+def _categorize_content(content: str) -> Tuple[List[Tuple[str, float]], str, float]:
+    """Cache the CPU-heavy tagging/category analysis for immutable document content."""
+    generator = IntelligentTagGenerator()
+    tags = generator.generate_tags(content)
+    category, confidence = generator.generate_categories(content)
+    return tags, category, confidence
+
+
 class AutoCategorizer:
     """Automatically categorizes documents"""
     
@@ -395,11 +405,8 @@ class AutoCategorizer:
         if not content:
             return {'status': 'failed', 'reason': 'No content'}
         
-        # Generate tags
-        tags = self.tag_generator.generate_tags(content)
-        
-        # Detect category
-        category, confidence = self.tag_generator.generate_categories(content)
+        # Cache the CPU-heavy analysis so repeated categorization does not block the UI.
+        tags, category, confidence = _categorize_content(content)
         
         # Assign tags
         assigned = []
