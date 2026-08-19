@@ -33,6 +33,8 @@ from src.errors import StaleDataException
 
 logger = logging.getLogger(__name__)
 
+from src.core.app_config import AUTH_DB_PATH, get_valid_roles
+
 _DB_PATH = os.path.abspath(str(AUTH_DB_PATH))
 
 
@@ -40,7 +42,7 @@ def get_auth_db_path() -> Path:
     return Path(_DB_PATH)
 
 
-VALID_ROLES = {"admin", "teacher"}
+VALID_ROLES = get_valid_roles()
 
 SQLITE_TIMEOUT: float = 5.0
 """float: Busy timeout in seconds (15.0s) for SQLite database connections in the authentication module.
@@ -444,8 +446,9 @@ def _validate_password_complexity(password: str) -> str:
 
 def _validate_role(role: str) -> str:
     role = str(role).strip().lower()
-    if role not in VALID_ROLES:
-        raise ValueError(f"Role must be one of: {', '.join(sorted(VALID_ROLES))}")
+    valid_roles = get_valid_roles()
+    if role not in valid_roles:
+        raise ValueError(f"Role must be one of: {', '.join(sorted(valid_roles))}")
     return role
 
 

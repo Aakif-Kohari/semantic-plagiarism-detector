@@ -48,6 +48,24 @@ _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 DEFAULT_APP_TITLE: Final[str] = "Semantic Plagiarism Detection System"
 DEFAULT_PDF_FOOTER_TEXT: Final[str] = ""
 
+DEFAULT_VALID_ROLES: Final[set[str]] = {"admin", "teacher"}
+
+
+def get_valid_roles() -> set[str]:
+    """Return the set of valid user roles.
+
+    Configured via the ``ALLOWED_USER_ROLES`` environment variable as a
+    comma-separated string (e.g. ``ALLOWED_USER_ROLES="admin,teacher,teaching_assistant"``).
+    If not set or empty, falls back to ``{"admin", "teacher"}``.
+    Role names are normalized to lowercase and stripped of leading/trailing whitespace.
+    """
+    raw = os.getenv("ALLOWED_USER_ROLES", "").strip()
+    if not raw:
+        return set(DEFAULT_VALID_ROLES)
+    roles = {role.strip().lower() for role in raw.split(",") if role.strip()}
+    return roles or set(DEFAULT_VALID_ROLES)
+
+
 SUPPORTED_OCR_LANGUAGES = {
     "eng": "English",
     "spa": "Spanish",
@@ -329,3 +347,9 @@ def clear_branding_config_cache() -> None:
     """
     global _BRANDING_CONFIG_CACHE
     _BRANDING_CONFIG_CACHE = None
+
+
+def __getattr__(name: str):
+    if name == "VALID_ROLES":
+        return get_valid_roles()
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

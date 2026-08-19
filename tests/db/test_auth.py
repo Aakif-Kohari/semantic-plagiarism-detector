@@ -879,3 +879,15 @@ def test_validate_sso_state_invalid_and_expired(mock_db):
     assert validate_sso_state(expired_state) is False
 
 
+def test_role_validation_with_allowed_user_roles_override(monkeypatch):
+    """Verify _validate_role respects ALLOWED_USER_ROLES environment variable."""
+    from src.db.auth import _validate_role
+
+    monkeypatch.setenv("ALLOWED_USER_ROLES", "admin, teacher, teaching_assistant")
+    assert _validate_role("teaching_assistant") == "teaching_assistant"
+
+    with pytest.raises(ValueError, match="Role must be one of"):
+        _validate_role("invalid_role")
+
+
+
