@@ -1,24 +1,12 @@
-"""Search, multi-column sorting, pagination, and expandable details for plagiarism warnings."""
+"""Search, multi-column sorting, and pagination for plagiarism warnings."""
 
 from __future__ import annotations
 
-import html
-import logging
-import sys
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
-logger = logging.getLogger(__name__)
-
 import pandas as pd
+import streamlit as st
 
-if "pytest" not in sys.modules:
-    import streamlit as st
-else:
-    from unittest.mock import MagicMock
-
-    st = MagicMock()
-
-from app.session_keys import SessionKeys
 from app.theme import badge_html, tier_from_severity_label
 from src.core.config import normalize_severity_label, severity_from_score, severity_rank
 from src.db.incidents import _normalise_pair, add_false_positive, get_false_positives
@@ -26,20 +14,12 @@ from src.i18n.translator import get_text
 from src.utils.pagination import PaginationPage, paginate_items
 
 try:
-    from rapidfuzz import fuzz, process
+    from thefuzz import fuzz
 except ImportError:
     try:
-        from thefuzz import fuzz, process
+        from fuzzywuzzy import fuzz  # type: ignore[import-untyped,reportMissingImports]
     except ImportError:
-        try:
-            from fuzzywuzzy import (  # type: ignore[import-untyped,reportMissingImports]
-                fuzz,
-                process,
-            )
-        except ImportError:
-            fuzz = None
-            process = None
-
+        fuzz = None
 FUZZY_THRESHOLD = 75
 MAX_SEARCH_QUERY_LENGTH = 200
 
@@ -60,19 +40,10 @@ WarningPage = PaginationPage[dict[str, Any]]
 
 def _normalise_warning(
     warning: Mapping[str, Any],
-    *,
-    already_normalized: bool = False,
 ) -> dict[str, Any]:
-    if already_normalized:
-        return dict(warning)
-
     try:
         similarity = float(warning.get("similarity", 0.0))
     except (TypeError, ValueError):
-        logger.warning(
-            "Invalid similarity score found in incident data: %s",
-            warning.get("similarity"),
-        )
         similarity = 0.0
 
     raw_severity = str(warning.get("severity", "")).strip()
@@ -98,120 +69,23 @@ def _truncate_search_query(search_query: str) -> str:
     return search_query[:MAX_SEARCH_QUERY_LENGTH].strip()
 
 
-def _extract_matching_indices(
-    query: str,
-    choices: dict[int, str],
-    threshold: int = FUZZY_THRESHOLD,
-) -> set[int]:
-    """Extract keys of items in choices matching query with score >= threshold using process.extract."""
-    if not choices or process is None or fuzz is None:
-        return set()
-
-    matched_indices: set[int] = set()
-
-    for scorer in (fuzz.partial_ratio, fuzz.token_set_ratio):
-        try:
-            results = process.extract(
-                query,
-                choices,
-                scorer=scorer,
-                score_cutoff=threshold,
-                limit=None,
-            )
-        except (TypeError, ValueError):
-            try:
-                results = process.extract(
-                    query,
-                    choices,
-                    scorer=scorer,
-                    limit=None,
-                )
-            except Exception:
-                results = []
-
-        for item in results:
-            if len(item) >= 3:
-                score, key = item[1], item[2]
-                if score >= threshold:
-                    matched_indices.add(key)
-
-    return matched_indices
-
-
-
-import logging
-from typing import Any, List
-
-logger = logging.getLogger(__name__)
-
-# Fuzzy matching threshold (0-100). Matches below this score are filtered out.
-FUZZY_THRESHOLD = 75
-
-# Attempt to import thefuzz for fuzzy string matching
-# Falls back to exact substring matching if not installed
-try:
-    from thefuzz import fuzz
-    THEFUZZ_AVAILABLE = True
-except ImportError:
-    THEFUZZ_AVAILABLE = False
-    logger.info("thefuzz not installed. Fuzzy filtering disabled, using exact match only.")
-
 def filter_warnings(
-    warnings: List[dict[str, Any]], 
-    query: str,
-    use_fuzzy: bool = True
-) -> List[dict[str, Any]]:
-    """Filter a list of plagiarism warnings based on a search query.
-    
-    Searches across document names (doc_a, doc_b) and similarity scores.
-    When `thefuzz` is installed and `use_fuzzy=True`, performs fuzzy string
-    matching to tolerate typos and partial matches. Otherwise, falls back
-    to case-insensitive exact substring matching.
-    
-    Args:
-        warnings: List of warning dictionaries, each containing at least
-                 'doc_a' and 'doc_b' keys.
-        query: The search query string. If empty or None, returns all warnings.
-        use_fuzzy: Whether to use fuzzy matching (if available). Defaults to True.
-        
-    Returns:
-        Filtered list of warning dictionaries that match the query.
-        
-    Examples:
-        >>> warnings = [{"doc_a": "essay1.pdf", "doc_b": "essay2.pdf"}]
-        >>> filter_warnings(warnings, "essay1")
-        [{"doc_a": "essay1.pdf", "doc_b": "essay2.pdf"}]
-    """
-    if not query or not isinstance(query, str):
-        return warnings
-        
-    query = query.strip()
-    if not query:
-        return warnings
-        
-    query_lower = query.lower()
-    filtered = []
-    
-    for warning in warnings:
-        doc_a = str(warning.get("doc_a", "")).lower()
-        doc_b = str(warning.get("doc_b", "")).lower()
-        
-        # Check for exact substring match first (fast path)
-        if query_lower in doc_a or query_lower in doc_b:
-            filtered.append(warning)
-            continue
-            
-        # Fuzzy matching path (Issue #2121)
-        if use_fuzzy and THEFUZZ_AVAILABLE:
-            # Calculate fuzzy match score (0-100) for both documents
-            score_a = fuzz.partial_ratio(query_lower, doc_a)
-            score_b = fuzz.partial_ratio(query_lower, doc_b)
-            
-            # If either document exceeds the threshold, include the warning
-            if score_a >= FUZZY_THRESHOLD or score_b >= FUZZY_THRESHOLD:
-                filtered.append(warning)
-                
-    return filtered
+    warnings: Iterable[Mapping[str, Any]],
+    search_query: str = "",
+    min_match_length: int = 0,
+) -> list[dict[str, Any]]:
+    """Filter normalized warnings using functional predicate matching."""
+    normalised = [_normalise_warning(item) for item in warnings]
+
+    if min_match_length > 0:
+        normalised = [
+            item
+            for item in normalised
+            if item.get("matched_length", 0) >= min_match_length
+        ]
+
+    predicate = matches_query_predicate(search_query)
+    return [item for item in normalised if predicate(item)]
 
 
 def build_key_extractor(field: str) -> Callable[[Mapping[str, Any]], Any]:
@@ -224,96 +98,24 @@ def build_key_extractor(field: str) -> Callable[[Mapping[str, Any]], Any]:
     return extract_key
 
 
-import logging
-from typing import Any
-
-logger = logging.getLogger(__name__)
-
-# Valid fields that can be used for sorting warnings
-VALID_SORT_FIELDS = {"similarity", "doc_a", "doc_b", "severity", "timestamp"}
-
 def sort_warnings(
-    warnings: List[dict[str, Any]],
+    warnings: Iterable[Mapping[str, Any]],
+    *,
     primary_field: str = "similarity",
+    primary_descending: bool = True,
     secondary_field: str = "doc_a",
-    primary_desc: bool = True,
-    secondary_desc: bool = False,
-) -> List[dict[str, Any]]:
-    """Sort a list of plagiarism warnings using a two-pass stable sort.
-    
-    Performs a multi-column sort by first sorting on the secondary field,
-    then sorting on the primary field. Because Python's `sorted()` function
-    is guaranteed to be stable, this two-pass approach correctly groups
-    items with equal primary values by their secondary values.
-    
-    Args:
-        warnings: List of warning dictionaries to sort.
-        primary_field: The primary key to sort by. Defaults to "similarity".
-                      If an invalid field is passed, falls back to "similarity".
-        secondary_field: The secondary key to sort by when primary values are equal.
-                        Defaults to "doc_a". If invalid, falls back to "doc_a".
-        primary_desc: Whether to sort the primary field in descending order.
-                     Defaults to True (highest similarity first).
-        secondary_desc: Whether to sort the secondary field in descending order.
-                       Defaults to False (alphabetical A-Z for doc names).
-                       
-    Returns:
-        A new sorted list of warning dictionaries. The original list is not modified.
-        
-    Examples:
-        >>> warnings = [
-        ...     {"doc_a": "b.pdf", "similarity": 0.9},
-        ...     {"doc_a": "a.pdf", "similarity": 0.9},
-        ...     {"doc_a": "c.pdf", "similarity": 0.8}
-        ... ]
-        >>> sort_warnings(warnings)
-        [{"doc_a": "a.pdf", "similarity": 0.9}, ...]
-    """
-    if not warnings:
-        return []
-        
-    # Validate fields and fallback to defaults if invalid (Issue #2122 requirement)
-    if primary_field not in VALID_SORT_FIELDS:
-        logger.warning(
-            "sort_warnings: Invalid primary_field '%s'. Falling back to 'similarity'.",
-            primary_field
-        )
-        primary_field = "similarity"
-        
-    if secondary_field not in VALID_SORT_FIELDS:
-        logger.warning(
-            "sort_warnings: Invalid secondary_field '%s'. Falling back to 'doc_a'.",
-            secondary_field
-        )
-        secondary_field = "doc_a"
+    secondary_descending: bool = False,
+) -> list[dict[str, Any]]:
+    """Sort warning items using secondary and primary sorting keys."""
+    items = [_normalise_warning(item) for item in warnings]
+    allowed = {"similarity", "doc_a", "doc_b", "severity_rank"}
 
-    # Helper to safely extract sort keys with type-appropriate defaults
-    def get_secondary_key(item: dict) -> str:
-        val = item.get(secondary_field, "")
-        return str(val).lower() if val is not None else ""
+    p_field = primary_field if primary_field in allowed else "similarity"
+    s_field = secondary_field if secondary_field in allowed else "doc_a"
 
-    def get_primary_key(item: dict) -> float:
-        val = item.get(primary_field, 0.0)
-        try:
-            return float(val)
-        except (TypeError, ValueError):
-            return 0.0
-
-    # Pass 1: Sort by secondary field (stable sort preserves this order for ties in Pass 2)
-    pass1 = sorted(
-        warnings, 
-        key=get_secondary_key, 
-        reverse=secondary_desc
-    )
-    
-    # Pass 2: Sort by primary field (stable sort keeps secondary order for equal primary values)
-    pass2 = sorted(
-        pass1, 
-        key=get_primary_key, 
-        reverse=primary_desc
-    )
-    
-    return pass2
+    items.sort(key=build_key_extractor(s_field), reverse=secondary_descending)
+    items.sort(key=build_key_extractor(p_field), reverse=primary_descending)
+    return items
 
 
 def paginate_warnings(
@@ -324,12 +126,11 @@ def paginate_warnings(
 ) -> WarningPage:
     """Return a clamped page of warning dictionaries."""
     normalized_warnings = [dict(item) for item in warnings]
-    safe_page = max(1, page)
-    safe_page_size = min(max(1, page_size), 100)
     return paginate_items(
         normalized_warnings,
-        page_size=safe_page_size,
-        current_page=safe_page,
+        page=page,
+        page_size=page_size,
+        max_page_size=100,
     )
 
 
@@ -344,13 +145,9 @@ def prepare_warning_page(
     secondary_descending: bool = False,
     page: int = 1,
     page_size: int = 10,
-    already_normalized: bool = False,
 ) -> tuple[list[dict[str, Any]], WarningPage]:
     filtered = filter_warnings(
-        warnings,
-        search_query,
-        min_match_length=min_match_length,
-        already_normalized=already_normalized,
+        warnings, search_query, min_match_length=min_match_length
     )
     sorted_items = sort_warnings(
         filtered,
@@ -358,7 +155,6 @@ def prepare_warning_page(
         primary_descending=primary_descending,
         secondary_field=secondary_field,
         secondary_descending=secondary_descending,
-        already_normalized=True,
     )
     return sorted_items, paginate_warnings(
         sorted_items,
@@ -367,9 +163,8 @@ def prepare_warning_page(
     )
 
 
-def reset_warning_page() -> int:
-    """Return the page index to use after search/sort/filter widgets change."""
-    return 1
+def _reset_page() -> None:
+    st.session_state.warning_page = 1
 
 
 def render_copy_button(
@@ -377,11 +172,8 @@ def render_copy_button(
     button_id: str = "copy-btn",
     copy_label: str = "📋 Copy",
     copied_label: str = "✅ Copied!",
-    failed_label: str = "❌ Copy failed",
     height: int = 45,
 ) -> None:
-    safe_button_id = html.escape(button_id)
-    safe_failed_label = html.escape(failed_label)
     escaped_text = (
         text_to_copy.replace("\\", "\\\\")
         .replace('"', '\\"')
@@ -397,7 +189,7 @@ def render_copy_button(
             overflow: hidden;
         }}
     </style>
-    <button id="{safe_button_id}" style="
+    <button id="{button_id}" style="
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -420,70 +212,33 @@ def render_copy_button(
         {copy_label}
     </button>
     <script>
-        document.getElementById("{safe_button_id}").addEventListener("click", function() {{
+        document.getElementById("{button_id}").addEventListener("click", function() {{
             const text = "{escaped_text}";
-            const btn = document.getElementById("{safe_button_id}");
-
-            function showCopied() {{
-                btn.innerHTML = "{copied_label}";
-                btn.style.borderColor = "#28a745";
-                btn.style.color = "#28a745";
-                setTimeout(function() {{
-                    btn.innerHTML = "{copy_label}";
-                    btn.style.borderColor = "#d6d6d8";
-                    btn.style.color = "#31333f";
-                }}, 2000);
-            }}
-
-            function showFailed() {{
-                btn.innerHTML = "{safe_failed_label}";
-                btn.style.borderColor = "#dc3545";
-                btn.style.color = "#dc3545";
-                setTimeout(function() {{
-                    btn.innerHTML = "{copy_label}";
-                    btn.style.borderColor = "#d6d6d8";
-                    btn.style.color = "#31333f";
-                }}, 2000);
-            }}
-
-            // Fallback for older browsers (e.g. legacy Safari/Firefox) that
-            // don't implement the async Clipboard API. Only used when
-            // navigator.clipboard.writeText is unavailable or rejects.
-            function legacyCopyFallback() {{
-                const textArea = document.createElement("textarea");
-                textArea.value = text;
-                textArea.style.position = "fixed";
-                textArea.style.top = "0";
-                textArea.style.left = "0";
-                textArea.style.opacity = "0";
-                document.body.appendChild(textArea);
-                textArea.focus();
-                textArea.select();
-                try {{
-                    const successful = document.execCommand('copy');
-                    if (successful) {{
-                        showCopied();
-                    }} else {{
-                        showFailed();
-                    }}
-                }} catch (err) {{
-                    console.error("Legacy copy fallback failed: ", err);
-                    showFailed();
-                }} finally {{
-                    document.body.removeChild(textArea);
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            textArea.style.top = "0";
+            textArea.style.left = "0";
+            textArea.style.position = "fixed";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {{
+                const successful = document.execCommand('copy');
+                if (successful) {{
+                    const btn = document.getElementById("{button_id}");
+                    btn.innerHTML = "{copied_label}";
+                    btn.style.borderColor = "#28a745";
+                    btn.style.color = "#28a745";
+                    setTimeout(function() {{
+                        btn.innerHTML = "{copy_label}";
+                        btn.style.borderColor = "#d6d6d8";
+                        btn.style.color = "#31333f";
+                    }}, 2000);
                 }}
+            }} catch (err) {{
+                console.error("Could not copy: ", err);
             }}
-
-            if (navigator.clipboard && navigator.clipboard.writeText) {{
-                navigator.clipboard.writeText(text).then(function() {{
-                    showCopied();
-                }}).catch(function(err) {{
-                    console.error("navigator.clipboard.writeText failed, falling back: ", err);
-                    legacyCopyFallback();
-                }});
-            }} else {{
-                legacyCopyFallback();
-            }}
+            document.body.removeChild(textArea);
         }});
     </script>
     """
@@ -497,14 +252,11 @@ def _has_exact_match(doc_a: str, doc_b: str) -> bool:
         or st.session_state.analysis_results is None
     ):
         return False
-    results = st.session_state.analysis_results
-    if hasattr(results, "chunked_docs"):
-        chunked_docs = results.chunked_docs
-    else:
-        chunked_docs = results[1]
+    chunked_docs = st.session_state.analysis_results[1]
     chunks_a = chunked_docs.get(doc_a, [])
     chunks_b = chunked_docs.get(doc_b, [])
 
+    # Normalize chunks by removing all whitespace
     norm_a = {"".join(c.split()) for c in chunks_a if c.strip()}
     norm_b = {"".join(c.split()) for c in chunks_b if c.strip()}
 
@@ -512,7 +264,10 @@ def _has_exact_match(doc_a: str, doc_b: str) -> bool:
 
 
 def render_compact_warning_row(flag: Mapping[str, Any]) -> None:
-    """Render warning in compact single-line format."""
+    """
+    Render warning in compact single-line format.
+    """
+
     doc_a = flag["doc_a"]
     doc_b = flag["doc_b"]
 
@@ -523,6 +278,7 @@ def render_compact_warning_row(flag: Mapping[str, Any]) -> None:
 
     with col1:
         exact_badge = ""
+
         if _has_exact_match(doc_a, doc_b):
             exact_badge = (
                 " <span style='color:#2E7D32;font-weight:bold;'>✓ Exact</span>"
@@ -555,44 +311,22 @@ def render_compact_warning_row(flag: Mapping[str, Any]) -> None:
 def render_warning_controls(
     flags: Sequence[Mapping[str, Any]],
     *,
-    threshold: float = 0.59,
+    threshold: float,
     ai_probabilities: dict[str, dict[str, Any]] | None = None,
     lang_code: str = "en",
     expanded: bool = False,
-    set_warning_page: Callable[[int], None] | None = None,
 ) -> None:
-    """Render an expandable list of plagiarism warnings with detailed comparisons.
-
-    Displays each flagged document pair with:
-    - Similarity score and severity badge (High/Medium/Low)
-    - Expandable sections showing matched text chunks
-    - Optional AI detection probability indicators
-    - Copy-to-clipboard buttons for flagged snippets
-
-    Args:
-        flags: List of flag dictionaries from flag_plagiarism().
-        threshold: The similarity threshold used for flagging.
-        ai_probabilities: Optional dict mapping document names to AI detection probabilities.
-        lang_code: Language code for translations.
-        expanded: Whether to expand all warning sections by default.
-        set_warning_page: Callback to update pagination state when filters change.
-    """
-    # Fallback for missing callback
-    if set_warning_page is None:
-
-        def set_warning_page(page: int) -> None:
-            st.session_state.warning_page = page
-
-    def _on_filters_changed() -> None:
-        set_warning_page(reset_warning_page())
-
-    if SessionKeys.COMPACT_VIEW not in st.session_state:
-        st.session_state[SessionKeys.COMPACT_VIEW] = False
+    if "warning_page" not in st.session_state:
+        st.session_state.warning_page = 1
+    if "compact_view" not in st.session_state:
+        st.session_state.compact_view = False
 
     from src.core.config import DEFAULT_THRESHOLDS
 
     st.caption(
-        get_text("warn_pairs_caption", lang=lang_code, threshold=f"{threshold:.2f}")
+        get_text("warn_pairs_caption", lang=lang_code).format(
+            threshold=f"{threshold:.2f}"
+        )
     )
 
     active_filters = []
@@ -600,20 +334,18 @@ def render_warning_controls(
         active_filters.append(
             {
                 "key": "clear_threshold",
-                "label": get_text(
-                    "warn_filter_threshold",
-                    lang=lang_code,
-                    pct=f"{threshold*100:.0f}",
+                "label": get_text("warn_filter_threshold", lang=lang_code).format(
+                    pct=f"{threshold * 100:.0f}"
                 ),
                 "action": "threshold",
             }
         )
 
-    if st.session_state.get(SessionKeys.COMPACT_VIEW, False):
+    if st.session_state.get("compact_view", False):
         active_filters.append(
             {
                 "key": "clear_compact_view",
-                "label": "Compact View ⓧ",
+                "label": "Compact View \u24e7",
                 "action": "compact_view",
             }
         )
@@ -635,8 +367,8 @@ def render_warning_controls(
         active_filters.append(
             {
                 "key": "clear_warning_search",
-                "label": get_text(
-                    "warn_filter_search", lang=lang_code, query=display_search
+                "label": get_text("warn_filter_search", lang=lang_code).format(
+                    query=display_search
                 ),
                 "action": "warning_search",
             }
@@ -652,8 +384,8 @@ def render_warning_controls(
         active_filters.append(
             {
                 "key": "clear_document_filter",
-                "label": get_text(
-                    "warn_filter_document", lang=lang_code, doc=display_doc
+                "label": get_text("warn_filter_document", lang=lang_code).format(
+                    doc=display_doc
                 ),
                 "action": "selected_document_id",
             }
@@ -667,8 +399,8 @@ def render_warning_controls(
         active_filters.append(
             {
                 "key": "clear_class_filter",
-                "label": get_text(
-                    "warn_filter_class", lang=lang_code, class_name=display_class
+                "label": get_text("warn_filter_class", lang=lang_code).format(
+                    class_name=display_class
                 ),
                 "action": "class_filter",
             }
@@ -679,8 +411,8 @@ def render_warning_controls(
         active_filters.append(
             {
                 "key": "clear_min_match_length",
-                "label": get_text(
-                    "warn_filter_min_words", lang=lang_code, count=min_match_len_val
+                "label": get_text("warn_filter_min_words", lang=lang_code).format(
+                    count=min_match_len_val
                 ),
                 "action": "min_match_length",
             }
@@ -689,6 +421,7 @@ def render_warning_controls(
     if active_filters:
         st.markdown(
             """<style>
+            /* Make buttons look like small pills */
             div[data-testid="column"] button {
                 border-radius: 16px !important;
                 padding: 2px 12px !important;
@@ -710,6 +443,7 @@ def render_warning_controls(
                         )
                         if "last_seen_threshold_query" in st.session_state:
                             del st.session_state["last_seen_threshold_query"]
+                        # In Streamlit >= 1.30, st.query_params is dict-like
                         if "threshold" in st.query_params:
                             del st.query_params["threshold"]
                     elif f["action"] == "hide_low_severity":
@@ -723,8 +457,8 @@ def render_warning_controls(
                     elif f["action"] == "min_match_length":
                         st.session_state.warning_min_match_length = 0
                     elif f["action"] == "compact_view":
-                        st.session_state[SessionKeys.COMPACT_VIEW] = False
-                        st.rerun()
+                        st.session_state.compact_view = False
+                    st.rerun()
 
     dismissed_pairs = get_false_positives()
     filtered_flags = [
@@ -744,7 +478,7 @@ def render_warning_controls(
             get_text("warn_search_label", lang=lang_code),
             placeholder=get_text("warn_search_placeholder", lang=lang_code),
             key="warning_search",
-            on_change=_on_filters_changed,
+            on_change=_reset_page,
         )
         search_query = _truncate_search_query(search_query)
 
@@ -753,21 +487,19 @@ def render_warning_controls(
             get_text("warn_hide_low_severity", lang=lang_code),
             key="hide_low_severity",
         )
-
     with compact_col:
         compact_view = st.checkbox(
             "Compact View",
-            key=SessionKeys.COMPACT_VIEW,
+            key="compact_view",
             help="Show warnings as compact single-line rows",
-            on_change=_on_filters_changed,
+            on_change=_reset_page,
         )
-
     with size_col:
         page_size = st.selectbox(
             get_text("warn_per_page", lang=lang_code),
             [10, 25, 50],
             key="warning_page_size",
-            on_change=_on_filters_changed,
+            on_change=_reset_page,
         )
 
     min_match_length = st.slider(
@@ -777,7 +509,7 @@ def render_warning_controls(
         value=0,
         step=5,
         key="warning_min_match_length",
-        on_change=_on_filters_changed,
+        on_change=_reset_page,
     )
 
     sort_fields = _sort_display_names(lang_code)
@@ -796,7 +528,7 @@ def render_warning_controls(
             f"{get_text('warn_primary_sort', lang=lang_code)} {p_arrow}",
             list(sort_fields),
             key="warning_primary_sort",
-            on_change=_on_filters_changed,
+            on_change=_reset_page,
         )
 
     with d1:
@@ -807,7 +539,7 @@ def render_warning_controls(
                 get_text("warn_ascending", lang=lang_code),
             ],
             key="warning_primary_direction",
-            on_change=_on_filters_changed,
+            on_change=_reset_page,
         )
 
     with p2:
@@ -816,7 +548,7 @@ def render_warning_controls(
             list(sort_fields),
             index=1,
             key="warning_secondary_sort",
-            on_change=_on_filters_changed,
+            on_change=_reset_page,
         )
 
     with d2:
@@ -827,10 +559,10 @@ def render_warning_controls(
                 get_text("warn_descending", lang=lang_code),
             ],
             key="warning_secondary_direction",
-            on_change=_on_filters_changed,
+            on_change=_reset_page,
         )
 
-    # Normalize once at the entry point of render_warning_controls()
+    # Hide low severity warnings when checkbox is enabled
     display_flags = [_normalise_warning(flag) for flag in filtered_flags]
 
     if hide_low_severity:
@@ -844,12 +576,11 @@ def render_warning_controls(
         primary_descending=primary_direction == _desc_text,
         secondary_field=sort_fields[secondary_label],
         secondary_descending=secondary_direction == _desc_text,
-        page=st.session_state.get("warning_page", 1),
+        page=st.session_state.warning_page,
         page_size=page_size,
-        already_normalized=True,
     )
-    if current_page.page != st.session_state.get("warning_page", 1):
-        set_warning_page(current_page.page)
+    if current_page.page != st.session_state.warning_page:
+        st.session_state.warning_page = current_page.page
 
     export_df = pd.DataFrame(
         [
@@ -863,10 +594,11 @@ def render_warning_controls(
         ]
     )
 
+    # Generate Markdown Summary of all High & Medium warnings
     summary_flags = [
-        nf
+        _normalise_warning(flag)
         for flag in flags
-        if (nf := _normalise_warning(flag))["severity"] in ("High", "Medium")
+        if _normalise_warning(flag)["severity"] in ("High", "Medium")
     ]
     if not summary_flags:
         markdown_text = get_text("warn_no_summary", lang=lang_code)
@@ -879,8 +611,8 @@ def render_warning_controls(
             matched_words = flag.get("matched_length", 0)
             sim_label = get_text("warn_summary_similarity_label", lang=lang_code)
             sev_label = get_text("warn_summary_severity_label", lang=lang_code)
-            words_text = get_text(
-                "warn_summary_words_matched", lang=lang_code, count=matched_words
+            words_text = get_text("warn_summary_words_matched", lang=lang_code).format(
+                count=matched_words
             )
             markdown_lines.append(
                 f"{idx}. **{flag['doc_a']}** ↔ **{flag['doc_b']}** — "
@@ -893,9 +625,7 @@ def render_warning_controls(
     with left:
         if current_page.total_items:
             st.markdown(
-                get_text(
-                    "warn_showing",
-                    lang=lang_code,
+                get_text("warn_showing", lang=lang_code).format(
                     start=current_page.start_index,
                     end=current_page.end_index,
                     total=current_page.total_items,
@@ -905,9 +635,10 @@ def render_warning_controls(
             st.info(get_text("warn_no_match", lang=lang_code))
     with middle:
         render_copy_button(
-            text=markdown_text,
-            label="📋 Copy Summary",
-            key="copy-summary-btn",
+            text_to_copy=markdown_text,
+            button_id="copy-summary-btn",
+            copy_label="📋 Copy Summary",
+            copied_label="✅ Copied!",
         )
     with right:
         st.download_button(
@@ -919,6 +650,11 @@ def render_warning_controls(
             disabled=export_df.empty,
         )
 
+    # ── Warning list container (#369) ────────────────────────────────
+    # A stable `key` makes Streamlit attach a `st-key-warning_list_container`
+    # class to this container's wrapping div, which theme.py's CSS targets
+    # with a transition so re-filtered/re-sorted results animate smoothly
+    # instead of snapping instantly.
     with st.container(key="warning_list_container"):
         for flag in current_page.items:
             if compact_view:
@@ -927,109 +663,65 @@ def render_warning_controls(
                     "<hr style='margin:4px 0;border:0;border-top:1px solid #eee;'>",
                     unsafe_allow_html=True,
                 )
+
             else:
                 tier = tier_from_severity_label(flag["severity"])
-                doc_a = flag["doc_a"]
-                doc_b = flag["doc_b"]
-                similarity = flag["similarity"]
 
-                with st.expander(
-                    f"**{doc_a}** ↔ **{doc_b}** — {similarity:.1%} | {flag['severity']}",
-                    expanded=expanded,
-                ):
-                    # Display similarity score and threshold
-                    st.markdown(
-                        f"**Similarity Score:** {similarity:.1%} (Threshold: {threshold:.1%})"
-                    )
-
-                    # Display severity badge
-                    st.markdown(
-                        badge_html(tier, flag["severity"]),
-                        unsafe_allow_html=True,
-                    )
-
-                    # Display AI probability if available
-                    if ai_probabilities:
-                        ai_a = (
-                            ai_probabilities.get(doc_a, {}).get("overall", 0.0)
-                            if isinstance(ai_probabilities.get(doc_a), dict)
-                            else ai_probabilities.get(doc_a, 0.0)
-                        )
-                        ai_b = (
-                            ai_probabilities.get(doc_b, {}).get("overall", 0.0)
-                            if isinstance(ai_probabilities.get(doc_b), dict)
-                            else ai_probabilities.get(doc_b, 0.0)
-                        )
-
-                        if ai_a > 0 or ai_b > 0:
-                            st.caption(
-                                get_text(
-                                    "warn_ai_prob",
-                                    lang=lang_code,
-                                    doc_a=doc_a,
-                                    ai_a=ai_a,
-                                    doc_b=doc_b,
-                                    ai_b=ai_b,
-                                )
+                with st.container(border=True):
+                    c1, c2, c3 = st.columns([3, 1, 1])
+                    with c1:
+                        exact_match_label = get_text("warn_exact_match", lang=lang_code)
+                        if _has_exact_match(flag["doc_a"], flag["doc_b"]):
+                            exact_badge = f" <span style='background-color: #E8F5E9; color: #2E7D32; border: 1px solid #2E7D32; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: bold; margin-left: 8px; vertical-align: middle;'>{exact_match_label}</span>"
+                            st.markdown(
+                                f"**{flag['doc_a']}** ↔ **{flag['doc_b']}**{exact_badge}",
+                                unsafe_allow_html=True,
                             )
-
-                    # Display matched chunks if available
-                    matched_chunks = flag.get("matched_chunks", [])
-                    if matched_chunks:
-                        st.markdown("#### Matched Text Chunks")
-                        for chunk_idx, chunk in enumerate(matched_chunks, start=1):
-                            chunk_text = (
-                                chunk.get("text", "No text available")
-                                if isinstance(chunk, dict)
-                                else str(chunk)
-                            )
-                            st.markdown(f"**Chunk {chunk_idx}:**")
-                            render_copy_button(
-                                text=chunk_text,
-                                label=f"📋 Copy Chunk {chunk_idx}",
-                                key=f"copy_chunk_{doc_a}_{doc_b}_{chunk_idx}",
-                            )
-                    else:
-                        # Fallback to snippet display if no structured chunks
-                        snippet_a = flag.get("snippet_a", "")
-                        snippet_b = flag.get("snippet_b", "")
-
-                        if snippet_a or snippet_b:
-                            st.markdown("#### Flagged Snippets")
-                            c_a, c_b = st.columns(2)
-                            with c_a:
-                                st.markdown(f"**{doc_a}**")
-                                if snippet_a:
-                                    render_copy_button(
-                                        text=snippet_a,
-                                        label="📋 Copy Snippet A",
-                                        key=f"copy_snippet_a_{doc_a}_{doc_b}",
-                                    )
-                                else:
-                                    st.info("No snippet available")
-                            with c_b:
-                                st.markdown(f"**{doc_b}**")
-                                if snippet_b:
-                                    render_copy_button(
-                                        text=snippet_b,
-                                        label="📋 Copy Snippet B",
-                                        key=f"copy_snippet_b_{doc_a}_{doc_b}",
-                                    )
-                                else:
-                                    st.info("No snippet available")
                         else:
-                            st.info(
-                                "No detailed chunk matches available for this pair."
-                            )
+                            st.markdown(f"**{flag['doc_a']}** ↔ **{flag['doc_b']}**")
 
-                    # Dismiss button inside expander
-                    st.divider()
-                    if st.button(
-                        get_text("warn_dismiss", lang=lang_code),
-                        key=f"dismiss_expanded_{doc_a}_{doc_b}",
-                    ):
-                        add_false_positive(doc_a, doc_b)
-                        st.rerun()
+                        # Replaced the standard similarity text with your matched length display logic
+                        matched_words = flag.get("matched_length", 0)
+                        display_text = get_text(
+                            "warn_similarity_progress", lang=lang_code
+                        ).format(
+                            pct=f"{flag['similarity'] * 100:.1f}",
+                            words=matched_words,
+                        )
+                        st.progress(
+                            min(1.0, max(0.0, float(flag["similarity"]))),
+                            text=display_text,
+                        )
+
+                        # Display AI probabilities if available
+                        if ai_probabilities:
+                            ai_a = ai_probabilities.get(flag["doc_a"], {}).get(
+                                "overall", 0.0
+                            )
+                            ai_b = ai_probabilities.get(flag["doc_b"], {}).get(
+                                "overall", 0.0
+                            )
+                            if ai_a > 0 or ai_b > 0:
+                                st.caption(
+                                    get_text("warn_ai_prob", lang=lang_code).format(
+                                        doc_a=flag["doc_a"],
+                                        ai_a=ai_a,
+                                        doc_b=flag["doc_b"],
+                                        ai_b=ai_b,
+                                    )
+                                )
+                    with c2:
+                        st.markdown(
+                            f"<div style='text-align:right;'>{badge_html(tier, flag['severity'])}</div>",
+                            unsafe_allow_html=True,
+                        )
+                    with c3:
+                        if st.button(
+                            get_text("warn_dismiss", lang=lang_code),
+                            key=f"dismiss_{flag['doc_a']}_{flag['doc_b']}",
+                        ):
+                            add_false_positive(flag["doc_a"], flag["doc_b"])
+                            st.rerun()
 
     if current_page.total_items == 0:
         return
@@ -1042,7 +734,7 @@ def render_warning_controls(
             disabled=current_page.page <= 1,
             key="warning_previous_page",
         ):
-            set_warning_page(current_page.page - 1)
+            st.session_state.warning_page = current_page.page - 1
             st.rerun()
 
     with page_col:
@@ -1055,7 +747,7 @@ def render_warning_controls(
             label_visibility="collapsed",
         )
         if selected_page != current_page.page:
-            set_warning_page(selected_page)
+            st.session_state.warning_page = selected_page
             st.rerun()
 
     with next_col:
@@ -1065,19 +757,31 @@ def render_warning_controls(
             disabled=current_page.page >= current_page.total_pages,
             key="warning_next_page",
         ):
-            set_warning_page(current_page.page + 1)
+            st.session_state.warning_page = current_page.page + 1
             st.rerun()
 
 
-def matches_query_predicate(flag: dict, search_query: str) -> bool:
-    """Check if a flagged incident matches a search query across document names or text snippets."""
-    if not search_query or not search_query.strip():
-        return True
+def matches_query_predicate(search_query: str) -> Callable[[Mapping[str, Any]], bool]:
+    """
+    Return a predicate that checks whether a warning matches the given search query.
+    """
+    query = _truncate_search_query(search_query).casefold()
 
-    query = search_query.strip().lower()
-    doc_a = str(flag.get("doc_a", "")).lower()
-    doc_b = str(flag.get("doc_b", "")).lower()
-    snippet_a = str(flag.get("snippet_a", "")).lower()
-    snippet_b = str(flag.get("snippet_b", "")).lower()
+    def predicate(flag: Mapping[str, Any]) -> bool:
+        if not query:
+            return True
+        doc_a = str(flag.get("doc_a", "")).casefold()
+        doc_b = str(flag.get("doc_b", "")).casefold()
+        if query in doc_a or query in doc_b:
+            return True
+        if fuzz is not None:
+            score_a = max(
+                fuzz.partial_ratio(query, doc_a), fuzz.token_set_ratio(query, doc_a)
+            )
+            score_b = max(
+                fuzz.partial_ratio(query, doc_b), fuzz.token_set_ratio(query, doc_b)
+            )
+            return score_a >= FUZZY_THRESHOLD or score_b >= FUZZY_THRESHOLD
+        return False
 
-    return query in doc_a or query in doc_b or query in snippet_a or query in snippet_b
+    return predicate
