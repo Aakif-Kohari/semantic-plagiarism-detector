@@ -18,7 +18,8 @@ Recent Additions (Issue #2001):
 """
 
 import logging
-from typing import List, Dict, Any, Optional  # noqa: F401
+from typing import Any, Dict, List, Optional  # noqa: F401
+
 import numpy as np
 
 logger = logging.getLogger(__name__)

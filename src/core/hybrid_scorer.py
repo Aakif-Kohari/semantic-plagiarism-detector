@@ -5,20 +5,22 @@ Combines lexical (TF-IDF, Jaccard) and semantic (Sentence-BERT) similarity
 for more robust plagiarism detection.
 """
 
+import logging
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
+
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Tuple, Optional, Any
-from dataclasses import dataclass, field
-import logging
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+
 from src.core.lexical_similarity import (
-    jaccard_similarity,
-    dice_coefficient,
-    overlap_coefficient,
-    n_gram_overlap,
-    compute_char_ngram_similarity,
     STOPWORDS,
+    compute_char_ngram_similarity,
+    dice_coefficient,
+    jaccard_similarity,
+    n_gram_overlap,
+    overlap_coefficient,
 )
 
 logger = logging.getLogger(__name__)

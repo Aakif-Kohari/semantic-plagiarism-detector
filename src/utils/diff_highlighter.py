@@ -10,8 +10,8 @@ content in side-by-side comparison views.
 
 from __future__ import annotations
 
-import re
 import html
+import re
 from typing import Tuple
 
 
@@ -101,7 +101,7 @@ def highlight_overlap(
             # Add non-matching text
             result.append(html.escape(text[last_end:char_start]))
             # Add highlighted matching text
-            result.append(f'<mark style="background-color: #fef08a; padding: 2px 4px; border-radius: 3px;">')
+            result.append('<mark style="background-color: #fef08a; padding: 2px 4px; border-radius: 3px;">')
             result.append(html.escape(text[char_start:char_end]))
             result.append('</mark>')
             

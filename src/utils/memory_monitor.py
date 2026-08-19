@@ -1,9 +1,10 @@
 """Memory monitoring utility for detecting leaks."""
 
-import psutil
-import os
 import logging
-from typing import Dict, Any
+import os
+from typing import Any, Dict
+
+import psutil
 
 logger = logging.getLogger(__name__)
 

@@ -4,16 +4,17 @@ Offline Mode UI Components.
 Provides UI elements for configuring and monitoring offline mode.
 """
 
-import streamlit as st
-from typing import Dict, Any  # noqa: F401
 import time
 from pathlib import Path  # noqa: F401
+from typing import Any, Dict  # noqa: F401
+
+import streamlit as st
 
 from src.core.offline_mode import (
     OfflineConfig,  # noqa: F401
     get_offline_manager,
-    is_offline_mode,
     initialize_offline_mode,
+    is_offline_mode,
 )
 
 

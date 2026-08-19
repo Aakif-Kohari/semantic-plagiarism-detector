@@ -8,19 +8,18 @@ within a configured time window, and that successful logins are blocked
 during the lockout period.
 """
 
-import pytest
 import sqlite3
-import time
 from datetime import datetime, timedelta
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
+
+import pytest
 
 from src.db.auth import (
+    MAX_FAILED_ATTEMPTS,
     authenticate_user,
     is_account_locked,
-    MAX_FAILED_ATTEMPTS,
-    LOCKOUT_WINDOW_MINUTES,
 )
-from src.db.security_audit import count_recent_failed_logins, log_security_event
+from src.db.security_audit import count_recent_failed_logins
 
 
 @pytest.fixture

@@ -17,7 +17,6 @@ import zlib
 from enum import Enum
 from typing import Any, Optional
 
-
 # CacheKeyPrefix has been consolidated into CacheNamespace below
 
 try:
@@ -763,8 +762,8 @@ def _cleanup_redis() -> None:
 atexit.register(_cleanup_redis)
 
 
-import zlib  # noqa: F811
 import pickle  # noqa: F811
+import zlib  # noqa: F811
 
 
 def store_large_data(key: str, data: Any, ttl: int = 1800) -> None:

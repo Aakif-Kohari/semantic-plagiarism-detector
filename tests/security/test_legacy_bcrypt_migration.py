@@ -6,23 +6,17 @@ from legacy bcrypt hashes ($2b$, $2a$, $2y$) to modern Argon2id hashes during us
 """
 
 import os
-import sqlite3
 import tempfile
-import pytest
+
 import bcrypt
+import pytest
 
 from src.db.auth import (
+    _connect,
+    _verify_password_hash,
     configure_db_path,
     init_db,
     verify_user,
-    _connect,
-    get_user_role,
-    set_password_change_required,
-    delete_user,
-    add_user,
-    update_password,
-    _hash_password,
-    _verify_password_hash,
 )
 
 

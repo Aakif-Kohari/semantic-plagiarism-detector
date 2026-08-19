@@ -8,7 +8,6 @@ Fixes #2250
 
 from __future__ import annotations
 
-import pytest
 from src.core.cross_lingual import detect_chunk_language
 
 

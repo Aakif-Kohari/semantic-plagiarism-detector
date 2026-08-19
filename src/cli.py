@@ -5,22 +5,26 @@ Headless command-line interface for plagiarism detection automation.
 """
 
 import argparse
-import concurrent.futures
+import csv
+import io
 import json
 import logging
 import os
 import re
 import sys
 import time
-import csv
-import io
 from io import BytesIO
 from pathlib import Path
 
 from src.core.app_config import FAISS_INDEX_PATH
 from src.core.cross_lingual import prepare_text_for_embedding
-from src.core.document_parser import DEFAULT_OCR_DPI, DEFAULT_OCR_LANGUAGE, extract_text, OCRDependencyError
+from src.core.document_parser import (
+    DEFAULT_OCR_DPI,
+    DEFAULT_OCR_LANGUAGE,
+    extract_text,
+)
 from src.core.embedding_model import embed_documents
+from src.core.export_engine import LMSExportEngine
 from src.core.logging_config import setup_logging
 from src.core.similarity import (
     PLAGIARISM_THRESHOLD,
@@ -30,7 +34,6 @@ from src.core.similarity import (
 from src.core.synchronization import verify_and_repair_index
 from src.core.text_chunking import chunk_documents
 from src.db.database_backup import optimize_database
-from src.core.export_engine import LMSExportEngine
 from src.errors import EmptyDocumentError
 
 logger = logging.getLogger(__name__)

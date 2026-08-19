@@ -6,7 +6,6 @@ Core CRUD operation tests for the plagiarism incidents database.
 Utilizes the centralized db_connection pytest fixture (Issue #2725).
 """
 
-import pytest
 import sqlite3
 from datetime import datetime
 

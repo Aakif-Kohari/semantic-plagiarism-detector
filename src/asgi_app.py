@@ -20,7 +20,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from src.core.scheduler import start_scheduler, stop_scheduler
-from src.utils.tracing import init_tracer_provider, _tracer_provider
+from src.utils.tracing import _tracer_provider, init_tracer_provider
 
 DEFAULT_MAX_REQUEST_BYTES = 52_428_800
 JSON_API_PREFIX = "/api/"

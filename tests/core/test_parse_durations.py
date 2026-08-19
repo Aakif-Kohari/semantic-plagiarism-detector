@@ -5,11 +5,11 @@ Unit tests for the parse duration registry (Issue #1728).
 """
 
 from src.core.parse_durations import (
-    record_parse_duration,
-    get_parse_duration,
-    get_all_parse_durations,
     clear_parse_durations,
     format_duration,
+    get_all_parse_durations,
+    get_parse_duration,
+    record_parse_duration,
 )
 
 

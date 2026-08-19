@@ -5,28 +5,28 @@ import pytest
 
 from src.db.auth import (
     add_user,
+    auth_repo,
     delete_user,
     disable_2fa,
     enable_2fa,
+    format_user_created_date,
+    generate_sso_state,
     get_2fa_status,
     get_active_users_count,
+    get_all_users,
     get_user_active_status,
     get_user_last_login,
     get_user_role,
     get_user_theme,
-    auth_repo,
     init_db,
     is_user_active,
     set_user_active_status,
     set_user_theme,
-    update_password,
-    verify_user,
-    update_user_profile,
-    get_all_users,
-    format_user_created_date,
-    generate_sso_state,
     store_sso_state,
+    update_password,
+    update_user_profile,
     validate_sso_state,
+    verify_user,
 )
 from src.errors import StaleDataException
 
@@ -447,7 +447,8 @@ def test_delete_user_removes_matching_session_and_authorization_rows(mock_db):
 def test_connect_uses_fifteen_second_timeout():
     """Verify that _connect helper sets sqlite3 timeout to 15.0 seconds."""
     from unittest.mock import patch
-    from src.db.auth import _connect, SQLITE_TIMEOUT
+
+    from src.db.auth import SQLITE_TIMEOUT, _connect
 
     assert SQLITE_TIMEOUT == 15.0
 

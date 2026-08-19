@@ -8,7 +8,6 @@ Verifies that exports only contain items meeting the length threshold.
 from src.core.export_engine import LMSExportEngine
 from src.utils.html_report import generate_html_report
 
-
 INCIDENTS = [
     {
         "doc_a": "doc1.pdf",

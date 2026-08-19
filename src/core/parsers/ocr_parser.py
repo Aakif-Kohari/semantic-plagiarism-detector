@@ -215,6 +215,7 @@ def extract_text_from_image(
 
     import pytesseract
     from PIL import Image
+
     from src.core.parsers.pdf_parser import _read_pdf_bytes
 
     file_bytes = _read_pdf_bytes(file)

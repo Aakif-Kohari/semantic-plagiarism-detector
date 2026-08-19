@@ -9,6 +9,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 
 from src.api.app import app
 
+
 @pytest.fixture(autouse=True)
 def memory_exporter():
     exporter = InMemorySpanExporter()

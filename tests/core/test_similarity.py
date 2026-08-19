@@ -2,8 +2,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.core.lexical_similarity import STOPWORDS  # noqa: E402
 from src.core.lexical_similarity import (
+    STOPWORDS,  # noqa: E402
     jaccard_similarity,
     lexical_similarity_matrix,
     remove_stopwords,

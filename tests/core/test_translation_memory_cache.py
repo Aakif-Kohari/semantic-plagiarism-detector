@@ -1,6 +1,9 @@
 import threading
+
 import pytest  # noqa: F401
+
 from src.core.cross_lingual import TranslationMemoryCache
+
 
 def test_concurrent_translations_writing():
     """Test that spawns 10 threads writing different translations simultaneously and asserts correct storage."""

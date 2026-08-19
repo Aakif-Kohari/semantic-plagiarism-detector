@@ -32,7 +32,6 @@ from src.db.connection import (
     resolve_busy_timeout_ms,
 )
 
-
 # ---------------------------------------------------------------------------
 # Section 1: Constant & Configuration Assertions
 # ---------------------------------------------------------------------------

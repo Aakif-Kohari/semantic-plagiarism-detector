@@ -7,13 +7,12 @@ Detects plagiarism across different languages using:
 3. Cross-lingual similarity scoring
 """
 
-import time
 import hashlib
 import logging
-from typing import Dict, List, Optional, Tuple, Any
-from dataclasses import dataclass, field
-import numpy as np
+import time
 from collections import defaultdict
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -280,7 +279,6 @@ class CrossLingualDetector:
         """
         # If same language, use standard detection
         if lang_a == lang_b:
-            from src.core.similarity import cosine_similarity
             # Simple similarity for same language
             return CrossLingualResult(
                 source_text=text_a,
@@ -425,9 +423,8 @@ def detect_cross_lingual_plagiarism(
 # ENHANCED FEATURES - Additional functionality
 # ============================================================================
 
-import re
-from datetime import datetime
 import json
+from datetime import datetime
 
 
 def detect_language_with_confidence(text: str) -> Tuple[str, float, str]:

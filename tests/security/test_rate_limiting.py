@@ -6,14 +6,19 @@ Tests for rate limiting functionality (login and upload rate limits).
 
 import pytest
 
-from src.db.auth import check_login_rate_limit
+from src.db.auth import check_login_rate_limit, record_failed_login
 from src.db.auth import clear_login_attempts as auth_clear_login_attempts
-from src.db.auth import record_failed_login
-from src.utils.redis_cache import (CacheNamespace, clear_login_attempts,
-                                   get_cache, get_login_attempts,
-                                   get_upload_count, increment_login_attempts,
-                                   increment_upload_count,
-                                   is_login_locked_out, is_upload_rate_limited)
+from src.utils.redis_cache import (
+    CacheNamespace,
+    clear_login_attempts,
+    get_cache,
+    get_login_attempts,
+    get_upload_count,
+    increment_login_attempts,
+    increment_upload_count,
+    is_login_locked_out,
+    is_upload_rate_limited,
+)
 
 
 @pytest.fixture(autouse=True)

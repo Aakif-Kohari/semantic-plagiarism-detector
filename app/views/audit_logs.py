@@ -11,14 +11,15 @@ Provides a comprehensive security audit log viewer with:
 - Alert configurations
 """
 
+import base64
+import io  # noqa: F401
+import logging
 import time  # noqa: F401
+from datetime import datetime, timedelta, timezone  # noqa: F401
+from typing import Any, Dict, List, Optional
+
 import pandas as pd
 import streamlit as st
-from datetime import datetime, timedelta, timezone  # noqa: F401
-from typing import Optional, List, Dict, Any
-import logging
-import io  # noqa: F401
-import base64
 
 from app.session_keys import SessionKeys
 from app.theme import get_chart_colors  # noqa: F401

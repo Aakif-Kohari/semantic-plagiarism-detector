@@ -11,7 +11,6 @@ import shutil
 import socket
 import subprocess
 import tempfile
-import time
 import xml.etree.ElementTree
 import zipfile
 from collections import Counter
@@ -20,12 +19,15 @@ from typing import BinaryIO, Dict, List, Optional, Union
 
 import defusedxml
 
+ fix/ui-label-regex-2796
+
 from src.core.parse_durations import record_parse_duration
 from src.core.parsers.text_parser import (
     RTF_MAX_FILE_SIZE_BYTES,
     _rtf_content_within_limit,
 )
 
+ main
 try:
     import defusedxml.lxml
 
@@ -51,7 +53,6 @@ import string
 import unicodedata
 
 from src.core.translator import translate_text
-
 from src.errors import EmptyDocumentError
 
 # OCR dependencies are imported lazily so TXT/DOCX and normal text PDFs still

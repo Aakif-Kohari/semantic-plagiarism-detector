@@ -8,10 +8,11 @@ introduced in Issue #2052.
 """
 
 import pytest
+
 from src.core.encoding import (
-    normalize_encoding,
-    detect_mojibake,
     MOJIBAKE_REPLACEMENTS,
+    detect_mojibake,
+    normalize_encoding,
 )
 
 

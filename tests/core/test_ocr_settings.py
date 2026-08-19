@@ -67,8 +67,9 @@ def test_dpi_bounds_match_issue_scope():
 
 def test_validate_ocr_languages_against_mocked_tesseract():
     """Verify that all 3-letter language codes in SUPPORTED_OCR_LANGUAGES are recognized by Tesseract."""
-    import pytesseract
     from unittest.mock import patch
+
+    import pytesseract
 
     mock_languages = ["eng", "spa", "fra", "deu", "por", "ita", "osd"]
     with patch("pytesseract.get_languages", return_value=mock_languages):

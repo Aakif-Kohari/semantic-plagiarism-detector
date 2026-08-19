@@ -182,7 +182,6 @@ jobs:
         with:
           script: |
             const labelRules = [
-              { label: 'UI', keywords: ['ui', 'frontend', 'css', 'style', 'sidebar', 'theme', 'dark mode', 'color', 'button', 'design', 'layout', 'responsive', 'react', 'html', 'component', 'view'] },
               { label: 'Backend', keywords: ['backend', 'api', 'server', 'route', 'endpoint', 'database', 'db', 'sql', 'fastapi', 'flask', 'express', 'controller'] },
               { label: 'Docs', keywords: ['docs', 'documentation', 'readme', 'guide', 'tutorial', 'docstring', 'changelog'] },
               { label: 'Security', keywords: ['jwt', 'auth', 'security', 'token', 'password', 'login', 'permission', 'encryption', 'vulnerability', 'oauth', 'secret', 'cors'] },
@@ -232,6 +231,54 @@ jobs:
               if (!issue || issue.pull_request) return;
               const text = `${issue.title}\n${issue.body || ''}`.toLowerCase();
               const matchingLabels = ['ECSoC26'];
+
+              // Refined Multi-word / Strict matching arrays
+              const explicitUiPhrases = [
+                "css style", 
+                "ui design", 
+                "user interface", 
+                "frontend style",
+                "component color",
+                "theme color",
+                "dark mode"
+              ];
+              
+              const strictUiKeywords = [
+                "tailwind",
+                "css",
+                "flexbox",
+                "navbar"
+              ];
+
+              // Safety check: Explicitly skip if it matches backend style definitions
+              const isBackendStyleGuide = text.includes("coding style guide") || 
+                                          text.includes("code style") ||
+                                          text.includes("style guide");
+
+              let matchesUi = false;
+
+              // 1. Evaluate multi-word phrases
+              for (const phrase of explicitUiPhrases) {
+                if (text.includes(phrase)) {
+                  matchesUi = true;
+                  break;
+                }
+              }
+
+              // 2. Evaluate unambiguous strict keywords (only if not a backend style guide context)
+              if (!matchesUi && !isBackendStyleGuide) {
+                for (const keyword of strictUiKeywords) {
+                  if (text.includes(keyword)) {
+                    matchesUi = true;
+                    break;
+                  }
+                }
+              }
+
+              if (matchesUi) {
+                matchingLabels.push('UI');
+              }
+
               for (const rule of labelRules) {
                 const matched = rule.keywords.some(kw => new RegExp(`\\b${kw}\\b`, 'i').test(text));
                 if (matched) {
