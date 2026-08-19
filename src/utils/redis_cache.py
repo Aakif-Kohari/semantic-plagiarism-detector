@@ -585,15 +585,32 @@ class RedisCache:
         return self._fallback_exists(key)
 
     def clear_pattern(self, pattern: str) -> int:
+        """Clear all keys matching pattern using Redis pipeline for batch execution.
+
+        Uses pipeline batching to delete multiple keys in a single network
+        round-trip, preventing latency spikes when clearing sessions with many keys.
+        """
         redis_count = 0
         if self.is_available():
             try:
-                keys = self._client.keys(pattern)
+                if hasattr(self._client, "scan_iter"):
+                    keys = list(self._client.scan_iter(match=pattern, count=1000))
+                else:
+                    keys = self._client.keys(pattern)
+
                 if keys and not isinstance(keys, (list, set, tuple)):
                     keys = None
+
                 if keys:
-                    res = self._client.delete(*keys)
-                    redis_count = int(res) if isinstance(res, (int, float)) else 0
+                    pipeline = self._client.pipeline()
+                    chunk_size = 1000
+                    for i in range(0, len(keys), chunk_size):
+                        chunk = keys[i : i + chunk_size]
+                        pipeline.delete(*chunk)
+                    results = pipeline.execute()
+                    redis_count = sum(
+                        r for r in results if isinstance(r, (int, float))
+                    )
             except (
                 RedisError,
                 RedisConnectionError,
@@ -810,15 +827,23 @@ def clear_large_data(key: str) -> None:
 
 
 def clear_all_large_data(session_id: str) -> None:
-    """Clear all large data for a session."""
+    """Clear all large data for a session using pipelined deletion."""
     try:
         cache = get_cache()
         pattern = f"spd:v1:large:{session_id}:*"
-        
+
         if cache.is_available():
-            keys = cache._client.keys(pattern)
+            if hasattr(cache._client, "scan_iter"):
+                keys = list(cache._client.scan_iter(match=pattern, count=1000))
+            else:
+                keys = cache._client.keys(pattern)
             if keys:
-                cache._client.delete(*keys)
+                pipeline = cache._client.pipeline()
+                chunk_size = 1000
+                for i in range(0, len(keys), chunk_size):
+                    chunk = keys[i : i + chunk_size]
+                    pipeline.delete(*chunk)
+                pipeline.execute()
         else:
             keys_to_remove = [k for k in cache.fallback_cache.keys() if k.startswith(f"spd:v1:large:{session_id}:")]
             for key in keys_to_remove:
