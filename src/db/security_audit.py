@@ -174,7 +174,7 @@ def get_recent_audit_events(
     try:
         with sqlite3.connect(db_path) as conn:
             conn.row_factory = sqlite3.Row
-            cursor = conn.execute(query, params)
+            cursor = conn.execute(query, tuple(params))
             return [dict(row) for row in cursor.fetchall()]
 
     except sqlite3.Error as e:
@@ -218,7 +218,7 @@ def get_audit_events_count(
 
     try:
         with sqlite3.connect(db_path) as conn:
-            cursor = conn.execute(query, params)
+            cursor = conn.execute(query, tuple(params))
             result = cursor.fetchone()
             return result[0] if result else 0
 

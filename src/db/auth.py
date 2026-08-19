@@ -165,8 +165,8 @@ class AuthRepository(BaseRepository):
         event_type: str | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
-    ) -> tuple[str, list]:
-        """Build WHERE clause snippet (if any) and parameters list for security audit log queries."""
+    ) -> tuple[str, tuple]:
+        """Build WHERE clause snippet (if any) and parameters tuple for security audit log queries."""
         conditions: list[str] = []
         params: list = []
 
@@ -184,7 +184,7 @@ class AuthRepository(BaseRepository):
             params.append(end_date)
 
         where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
-        return where_clause, params
+        return where_clause, tuple(params)
 
     def get_security_audit_logs(
         self,
@@ -209,11 +209,11 @@ class AuthRepository(BaseRepository):
             f"SELECT id, event_type, username, timestamp, details FROM security_audit_log{where_clause}"
             " ORDER BY id DESC LIMIT ? OFFSET ?"
         )
-        params.extend([limit, offset])
+        query_params = params + (limit, offset)
 
         try:
             with self.connection(read_only=True) as conn:
-                rows = conn.execute(query, params).fetchall()
+                rows = conn.execute(query, query_params).fetchall()
                 return [
                     {
                         "id": r[0],
@@ -705,7 +705,7 @@ def get_user_roles(user_ids: list[int]) -> dict[int, str]:
         with _connect() as conn:
             rows = conn.execute(
                 f"SELECT id, role FROM users WHERE id IN ({placeholders})",
-                user_ids,
+                tuple(user_ids),
             ).fetchall()
             return {row[0]: row[1] for row in rows}
     except sqlite3.Error as e:
@@ -752,10 +752,10 @@ def get_all_users(role: str | None = None) -> list:
     """
     try:
         query = "SELECT id, username, role, is_active, version FROM users"
-        params: list = []
+        params: tuple = ()
         if role is not None:
             query += " WHERE role = ?"
-            params.append(role)
+            params = (role,)
         query += " ORDER BY id"
         with _connect() as conn:
             rows = conn.execute(query, params).fetchall()
