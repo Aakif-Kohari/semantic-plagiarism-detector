@@ -29,6 +29,15 @@ ROOT_DIR = FILE_PATH.parent.parent  # Points to semantic-plagiarism-detector/
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+# Issue #2781: Apply OS-specific asyncio patches via centralized utility
+# This replaces the inline `if sys.platform == "win32":` block that was
+# previously cluttering the main routing file.
+from src.utils.os_compat import apply_asyncio_patches
+apply_asyncio_patches()
+
+# 2. Now import centralized session state keys safely
+from app.session_keys import SessionKeys
+
 # Silence harmless Windows asyncio Proactor connection lost bugs
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
