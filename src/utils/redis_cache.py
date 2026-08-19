@@ -214,7 +214,7 @@ class PayloadCompressor:
                 logger.error(
                     f"[CacheCompression] zlib decompression failed: {e}. Corrupted payload?"
                 )
-                raise e
+                return None
 
         return data
 
