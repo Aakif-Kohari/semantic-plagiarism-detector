@@ -442,16 +442,25 @@ def validate_ocr_dpi(value: int) -> int:
 
 def validate_ocr_language(value: str) -> str:
     """Validate a Tesseract OCR language code exposed by the UI."""
-    language = str(value or "").strip().lower()
+    raw_val = str(value or "").strip().lower()
+    parts = [p.strip() for p in raw_val.split("+")]
 
-    if language not in SUPPORTED_OCR_LANGUAGES:
+    if not parts or any(not p for p in parts):
         supported = ", ".join(sorted(SUPPORTED_OCR_LANGUAGES))
         raise ValueError(
-            f"Unsupported OCR language '{language or value}'. "
+            f"Unsupported OCR language '{value}'. "
             f"Supported values: {supported}."
         )
 
-    return language
+    for part in parts:
+        if part not in SUPPORTED_OCR_LANGUAGES:
+            supported = ", ".join(sorted(SUPPORTED_OCR_LANGUAGES))
+            raise ValueError(
+                f"Unsupported OCR language '{part}'. "
+                f"Supported values: {supported}."
+            )
+
+    return "+".join(dict.fromkeys(parts))
 
 
 def normalize_ocr_settings(
