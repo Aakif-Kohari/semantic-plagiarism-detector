@@ -180,7 +180,7 @@ class EmbeddingModelManager:
             loaded_model = SentenceTransformer(primary, cache_folder=cache_dir)
             device = _detect_device(loaded_model)
             logger.info(
-                "Initializing SentenceTransformer model [%s] on device [%s]",
+                "SentenceTransformer model [%s] running on device [%s]",
                 primary,
                 device,
             )
@@ -194,7 +194,7 @@ class EmbeddingModelManager:
             loaded_model = SentenceTransformer(fallback, cache_folder=cache_dir)
             device = _detect_device(loaded_model)
             logger.info(
-                "Initializing SentenceTransformer model [%s] on device [%s]",
+                "SentenceTransformer model [%s] running on device [%s]",
                 fallback,
                 device,
             )

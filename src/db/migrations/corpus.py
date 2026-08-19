@@ -4,26 +4,24 @@ from __future__ import annotations
 
 import sqlite3
 
-from .common import column_exists, run_migrations
+from .common import column_exists, run_migrations, table_exists
 
-CORPUS_SCHEMA_VERSION = 14
+CORPUS_SCHEMA_VERSION = 15
+
 
 def migration_001_create_base_schema(
     connection: sqlite3.Connection,
 ) -> None:
     """Create the original documents and chunks tables."""
-    connection.execute(
-        """
+    connection.execute("""
         CREATE TABLE IF NOT EXISTS documents (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             filename    TEXT UNIQUE NOT NULL,
             file_hash   TEXT UNIQUE NOT NULL,
             upload_date TEXT NOT NULL
         )
-        """
-    )
-    connection.execute(
-        """
+        """)
+    connection.execute("""
         CREATE TABLE IF NOT EXISTS chunks (
             vector_id   INTEGER PRIMARY KEY,
             filename    TEXT NOT NULL,
@@ -34,8 +32,7 @@ def migration_001_create_base_schema(
                 REFERENCES documents(filename)
                 ON DELETE CASCADE
         )
-        """
-    )
+        """)
 
 
 def migration_002_add_document_metadata(
@@ -55,32 +52,25 @@ def migration_003_add_required_indexes(
     connection: sqlite3.Connection,
 ) -> None:
     """Add indexes used by corpus filtering and chunk lookups."""
-    connection.execute(
-        """
+    connection.execute("""
         CREATE INDEX IF NOT EXISTS idx_documents_upload_date
         ON documents(upload_date)
-        """
-    )
-    connection.execute(
-        """
+        """)
+    connection.execute("""
         CREATE INDEX IF NOT EXISTS idx_documents_class_section
         ON documents(class_section)
-        """
-    )
-    connection.execute(
-        """
+        """)
+    connection.execute("""
         CREATE INDEX IF NOT EXISTS idx_chunks_filename
         ON chunks(filename)
-        """
-    )
+        """)
 
 
 def migration_004_add_plagiarism_incidents(
     connection: sqlite3.Connection,
 ) -> None:
     """Create the incident-review schema stored in corpus.db."""
-    connection.execute(
-        """
+    connection.execute("""
         CREATE TABLE IF NOT EXISTS plagiarism_incidents (
             incident_id TEXT PRIMARY KEY,
             document_a TEXT NOT NULL,
@@ -92,35 +82,32 @@ def migration_004_add_plagiarism_incidents(
             date_flagged TEXT NOT NULL,
             last_seen TEXT NOT NULL
         )
-        """
-    )
-    connection.execute(
-        """
+        """)
+    connection.execute("""
         CREATE INDEX IF NOT EXISTS idx_incidents_status
         ON plagiarism_incidents(review_status)
-        """
-    )
+        """)
 
 
 def migration_005_add_false_positives(cursor):
     """Adds a table to track dismissed false-positive plagiarism pairs."""
-    cursor.execute(
-        """
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS false_positives (
             document_a TEXT,
             document_b TEXT,
             date_dismissed TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (document_a, document_b)
         )
-    """
-    )
+    """)
 
 
 def migration_006_add_incident_threshold_snapshot(
     connection: sqlite3.Connection,
 ) -> None:
     """Store the threshold that caused each incident to be flagged."""
-    if not column_exists(connection, "plagiarism_incidents", "threshold_at_time_of_flag"):
+    if not column_exists(
+        connection, "plagiarism_incidents", "threshold_at_time_of_flag"
+    ):
         connection.execute(
             "ALTER TABLE plagiarism_incidents "
             "ADD COLUMN threshold_at_time_of_flag REAL NOT NULL DEFAULT 0.0"
@@ -132,9 +119,7 @@ def migration_007_add_document_language(
 ) -> None:
     """Store the primary detected language code of each document."""
     if not column_exists(connection, "documents", "detected_language"):
-        connection.execute(
-            "ALTER TABLE documents ADD COLUMN detected_language TEXT"
-        )
+        connection.execute("ALTER TABLE documents ADD COLUMN detected_language TEXT")
 
 
 def migration_008_add_soft_delete(
@@ -146,21 +131,17 @@ def migration_008_add_soft_delete(
             "ALTER TABLE documents ADD COLUMN is_deleted INTEGER DEFAULT 0"
         )
     if not column_exists(connection, "documents", "deleted_at"):
-        connection.execute(
-            "ALTER TABLE documents ADD COLUMN deleted_at TEXT"
-        )
+        connection.execute("ALTER TABLE documents ADD COLUMN deleted_at TEXT")
 
 
 def migration_009_add_file_hash_index(
     connection: sqlite3.Connection,
 ) -> None:
     """Add index on the file_hash column in documents table."""
-    connection.execute(
-        """
+    connection.execute("""
         CREATE INDEX IF NOT EXISTS idx_documents_file_hash
         ON documents(file_hash)
-        """
-    )
+        """)
 
 
 def migration_010_add_document_owner(
@@ -171,18 +152,32 @@ def migration_010_add_document_owner(
     The ``owner`` column stores the username of the account that uploaded the
     document, enabling ``get_document_count_by_user()`` analytics without
     requiring a join against the users table.
+
+    Uses ``DEFAULT 'system'`` rather than leaving new rows NULL: SQLite
+    backfills that default into every pre-existing row at the moment this
+    ``ALTER TABLE`` runs, so a database migrating from an older schema
+    version won't end up with a mix of NULL and populated owners for its
+    existing documents.
+
+    Note this default only applies retroactively to rows that exist at
+    migration time (and to any future INSERT that omits the ``owner``
+    column entirely). ``add_document()`` always explicitly includes
+    ``owner`` in its INSERT statement and will still pass through
+    ``None`` -> SQL NULL for callers that don't supply one, so
+    NULL owners remain a real, ongoing possibility going forward. See
+    ``get_document_count_by_user()`` in ``src/db/corpus_db.py``, which is
+    NULL-safe by construction (``WHERE owner = ?`` never matches a NULL
+    row, so it simply excludes them rather than crashing).
     """
     if not column_exists(connection, "documents", "owner"):
         connection.execute(
-            "ALTER TABLE documents ADD COLUMN owner TEXT"
+            "ALTER TABLE documents ADD COLUMN owner TEXT DEFAULT 'system'"
         )
     # Index for fast per-user COUNT queries
-    connection.execute(
-        """
+    connection.execute("""
         CREATE INDEX IF NOT EXISTS idx_documents_owner
         ON documents(owner)
-        """
-    )
+        """)
 
 
 def migration_011_add_documents_created_at_index(
@@ -190,15 +185,12 @@ def migration_011_add_documents_created_at_index(
 ) -> None:
     """Add created_at column and its index to documents table to optimize query performance."""
     if not column_exists(connection, "documents", "created_at"):
-        connection.execute(
-            "ALTER TABLE documents ADD COLUMN created_at TEXT"
-        )
-    connection.execute(
-        """
+        connection.execute("ALTER TABLE documents ADD COLUMN created_at TEXT")
+    connection.execute("""
         CREATE INDEX IF NOT EXISTS idx_documents_created_at
         ON documents(created_at)
-        """
-    )
+        """)
+
 
 def migration_012_add_fts5_index(
     connection: sqlite3.Connection,
@@ -216,8 +208,7 @@ def migration_012_add_fts5_index(
       - ``documents_au`` — after UPDATE, delete+insert in FTS
     """
     # Create the FTS5 virtual table (external content table pointing at documents)
-    connection.execute(
-        """
+    connection.execute("""
         CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
             filename,
             student_name,
@@ -225,61 +216,51 @@ def migration_012_add_fts5_index(
             content='documents',
             content_rowid='id'
         )
-        """
-    )
+        """)
 
     # Trigger: after INSERT into documents, insert into FTS
-    connection.execute(
-        """
+    connection.execute("""
         CREATE TRIGGER IF NOT EXISTS documents_ai AFTER INSERT ON documents BEGIN
             INSERT INTO documents_fts(rowid, filename, student_name, assignment_title)
             VALUES (new.id, new.filename, new.student_name, new.assignment_title);
         END
-        """
-    )
+        """)
 
     # Trigger: after DELETE from documents, delete from FTS
-    connection.execute(
-        """
+    connection.execute("""
         CREATE TRIGGER IF NOT EXISTS documents_ad AFTER DELETE ON documents BEGIN
             INSERT INTO documents_fts(documents_fts, rowid, filename, student_name, assignment_title)
             VALUES ('delete', old.id, old.filename, old.student_name, old.assignment_title);
         END
-        """
-    )
+        """)
 
     # Trigger: after UPDATE on documents, update FTS (delete old + insert new)
-    connection.execute(
-        """
+    connection.execute("""
         CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents BEGIN
             INSERT INTO documents_fts(documents_fts, rowid, filename, student_name, assignment_title)
             VALUES ('delete', old.id, old.filename, old.student_name, old.assignment_title);
             INSERT INTO documents_fts(rowid, filename, student_name, assignment_title)
             VALUES (new.id, new.filename, new.student_name, new.assignment_title);
         END
-        """
-    )
+        """)
 
     # Backfill existing rows into the FTS index (for databases that already
     # have documents before this migration runs).
-    connection.execute(
-        """
+    connection.execute("""
         INSERT INTO documents_fts(documents_fts)
         VALUES ('rebuild')
-        """
-    )
+        """)
+
 
 def migration_013_add_incident_severity_idx(
     connection: sqlite3.Connection,
 ) -> None:
     """Add index on severity_rank and date_flagged to speed up
     severity-filtered incident analytics queries (issue #1487)."""
-    connection.execute(
-        """
+    connection.execute("""
         CREATE INDEX IF NOT EXISTS idx_incidents_severity_time
         ON plagiarism_incidents(severity_rank, date_flagged DESC)
-        """
-    )
+        """)
 
 
 def migration_013_add_incident_archive_table(
@@ -287,8 +268,7 @@ def migration_013_add_incident_archive_table(
 ) -> None:
     """Create incidents_archive table for archived plagiarism incidents
     (issue #1492)."""
-    connection.execute(
-        """
+    connection.execute("""
         CREATE TABLE IF NOT EXISTS incidents_archive (
             incident_id TEXT PRIMARY KEY,
             document_a TEXT NOT NULL,
@@ -301,11 +281,83 @@ def migration_013_add_incident_archive_table(
             threshold_at_time_of_flag REAL NOT NULL DEFAULT 0.0,
             archived_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
-        """
-    )
+        """)
 
 
-CORPUS_MIGRATIONS = {   1: migration_001_create_base_schema,
+def migration_015_pattern_recognition(
+    connection: sqlite3.Connection,
+) -> None:
+    """Create pattern recognition tables for the intelligent detection system (issue #2840)."""
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS plagiarism_patterns (
+            pattern_id TEXT PRIMARY KEY,
+            pattern_type TEXT NOT NULL,
+            description TEXT,
+            document_group TEXT NOT NULL,
+            author_group TEXT,
+            assignment_title TEXT,
+            class_section TEXT,
+            avg_similarity REAL NOT NULL,
+            occurrence_count INTEGER NOT NULL DEFAULT 1,
+            confidence_score REAL NOT NULL DEFAULT 0.0,
+            severity TEXT NOT NULL DEFAULT 'Medium',
+            first_seen TEXT NOT NULL,
+            last_seen TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active'
+        )
+    """)
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_patterns_type ON plagiarism_patterns(pattern_type)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_patterns_status ON plagiarism_patterns(status)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_patterns_severity ON plagiarism_patterns(severity)")
+
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS pattern_evolution (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pattern_id TEXT NOT NULL,
+            snapshot_date TEXT NOT NULL,
+            occurrence_count INTEGER NOT NULL,
+            avg_similarity REAL NOT NULL,
+            confidence_score REAL NOT NULL,
+            drift_score REAL DEFAULT 0.0,
+            FOREIGN KEY (pattern_id) REFERENCES plagiarism_patterns(pattern_id) ON DELETE CASCADE
+        )
+    """)
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_evolution_pattern ON pattern_evolution(pattern_id)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_evolution_date ON pattern_evolution(snapshot_date)")
+
+    if not table_exists(connection, "document_risk_scores"):
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS document_risk_scores (
+                document_name TEXT PRIMARY KEY,
+                risk_score REAL NOT NULL,
+                risk_level TEXT NOT NULL,
+                contributing_factors TEXT,
+                model_version TEXT,
+                scored_at TEXT NOT NULL
+            )
+        """)
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_risk_level ON document_risk_scores(risk_level)")
+
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS proactive_recommendations (
+            recommendation_id TEXT PRIMARY KEY,
+            pattern_id TEXT,
+            recommendation_type TEXT NOT NULL,
+            priority INTEGER NOT NULL DEFAULT 2,
+            target TEXT NOT NULL,
+            message TEXT NOT NULL,
+            action_items TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (pattern_id) REFERENCES plagiarism_patterns(pattern_id) ON DELETE SET NULL
+        )
+    """)
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_recommendations_status ON proactive_recommendations(status)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_recommendations_priority ON proactive_recommendations(priority)")
+
+
+CORPUS_MIGRATIONS = {
+    1: migration_001_create_base_schema,
     2: migration_002_add_document_metadata,
     3: migration_003_add_required_indexes,
     4: migration_004_add_plagiarism_incidents,
@@ -316,10 +368,12 @@ CORPUS_MIGRATIONS = {   1: migration_001_create_base_schema,
     9: migration_009_add_file_hash_index,
     10: migration_010_add_document_owner,
     11: migration_011_add_documents_created_at_index,
-12: migration_012_add_fts5_index,
+    12: migration_012_add_fts5_index,
     13: migration_013_add_incident_archive_table,
     14: migration_013_add_incident_severity_idx,
+    15: migration_015_pattern_recognition,
 }
+
 
 def migrate_corpus_database(
     connection: sqlite3.Connection,

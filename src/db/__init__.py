@@ -1,8 +1,11 @@
 from .auth import (
+    AuthRepository,
     add_user,
+    auth_repo,
     delete_user,
     disable_2fa,
     enable_2fa,
+    generate_sso_state,
     get_2fa_status,
     get_all_users,
     get_recent_audit_events,
@@ -13,15 +16,22 @@ from .auth import (
     is_user_active,
     set_password_change_required,
     set_user_active_status,
+    store_sso_state,
     update_password,
     update_user_profile,
+    validate_sso_state,
+    verify_sso_state,
     verify_user,
 )
+from .base import BaseRepository
 from .common import get_read_connection
+from .connection import create_connection, get_connection
 from .corpus_db import (
+    CorpusRepository,
     add_chunks,
     add_document,
     clear_all_data,
+    corpus_repo,
     delete_document,
     get_all_documents,
     get_all_embeddings,
@@ -34,10 +44,25 @@ from .corpus_db import (
     get_unique_class_sections,
     init_corpus_db,
 )
-from .incidents import get_incidents_by_assignment, get_recent_incidents, log_incident
-
+from .incidents import (
+    IncidentsRepository,
+    get_incidents_by_assignment,
+    get_incidents_repo,
+    get_recent_incidents,
+    log_incident,
+)
 
 __all__ = [
+    "BaseRepository",
+    "AuthRepository",
+    "CorpusRepository",
+    "IncidentsRepository",
+    "create_connection",
+    "get_connection",
+    "auth_repo",
+    "corpus_repo",
+    "get_incidents_repo",
+    "incidents_repo",
     "get_read_connection",
     "init_db",
     "verify_user",
@@ -53,7 +78,6 @@ __all__ = [
     "get_user_active_status",
     "set_user_active_status",
     "is_user_active",
-    "update_user_profile",
     "set_password_change_required",
     "get_recent_audit_events",
     "get_user_last_login",
@@ -71,12 +95,10 @@ __all__ = [
     "clear_all_data",
     "get_document_chunks_count",
     "get_unique_class_sections",
-    "get_documents_by_class",
     "get_incidents_by_assignment",
     "get_recent_incidents",
     "log_incident",
 ]
-
 
 from .migrations import AUTH_SCHEMA_VERSION as AUTH_SCHEMA_VERSION  # noqa: F401
 from .migrations import CORPUS_SCHEMA_VERSION as CORPUS_SCHEMA_VERSION
@@ -99,3 +121,16 @@ __all__.extend(
         "table_exists",
     ]
 )
+
+
+def __getattr__(name: str):
+    """PEP 562 module-level lazy attribute access.
+
+    Preserves ``from src.db import incidents_repo`` for existing callers
+    without eagerly constructing ``IncidentsRepository`` at package import
+    time — forwards to :func:`src.db.incidents.get_incidents_repo`, which
+    creates the singleton lazily on first actual access.
+    """
+    if name == "incidents_repo":
+        return get_incidents_repo()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

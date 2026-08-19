@@ -54,6 +54,10 @@ class ChunkRecord:
         return f"ChunkRecord({self.doc_name!r}, idx={self.chunk_index}, '{preview}…')"
 
 
+FaissChunkRecord = ChunkRecord
+
+
+
 def build_index(
     embeddings: Dict[str, np.ndarray],
     chunked_docs: Dict[str, List[str]],
@@ -179,6 +183,43 @@ def search_similar_chunks(
             break
 
     return results
+
+
+def search_batch_vectors(
+    query_matrix: np.ndarray,
+    index: faiss.Index,
+    top_k: int = 5,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Search the FAISS index for a batch of query vectors.
+
+    Supports flexible parameter ordering for convenience: (query_matrix, index)
+    or (index, query_matrix).
+
+    Args:
+        query_matrix: 2D numpy array of shape (N, dim) containing query vectors.
+        index:        FAISS index built by build_index().
+        top_k:        Number of nearest neighbors to retrieve. Defaults to 5.
+
+    Returns:
+        (distances, indices) - Distance matrix and index ID matrix of shape (N, top_k).
+    """
+    if isinstance(query_matrix, faiss.Index) or (
+        not isinstance(query_matrix, np.ndarray) and hasattr(query_matrix, "search")
+    ):
+        index, query_matrix = query_matrix, index
+
+    if not isinstance(query_matrix, np.ndarray):
+        raise TypeError("query_matrix must be a numpy.ndarray")
+    if index is None or not hasattr(index, "search"):
+        raise ValueError("index must be a valid FAISS index")
+
+    queries = query_matrix.astype("float32")
+    if queries.ndim == 1:
+        queries = queries.reshape(1, -1)
+
+    distances, indices = index.search(queries, top_k)  # type: ignore[call-arg]
+    return distances, indices
 
 
 def find_plagiarised_chunks(
@@ -477,9 +518,9 @@ def load_or_rebuild_index(filepath: str) -> Tuple[faiss.Index, List[ChunkRecord]
     n_registry = len(registry)
 
     if n_matrix != n_registry:
-        from src.errors import faiss_emb_registry_mismatch
+        from src.errors import FAISS_EMB_REGISTRY_MISMATCH
 
-        raise ValueError(faiss_emb_registry_mismatch(n_matrix, n_registry))
+        raise ValueError(FAISS_EMB_REGISTRY_MISMATCH.format(emb_count=n_matrix, reg_count=n_registry))
 
     if os.path.exists(filepath):
         try:
@@ -540,7 +581,9 @@ def optimize_faiss_index(index_manager: Any, nlist: int = 100) -> bool:
 
         nlist_actual = max(4, min(nlist, count_before))
         quantizer = faiss.IndexFlatIP(dim)
-        ivf_index = faiss.IndexIVFFlat(quantizer, dim, nlist_actual, faiss.METRIC_INNER_PRODUCT)
+        ivf_index = faiss.IndexIVFFlat(
+            quantizer, dim, nlist_actual, faiss.METRIC_INNER_PRODUCT
+        )
         ivf_index.train(vectors)
 
         if isinstance(index, faiss.IndexIDMap):
@@ -557,10 +600,14 @@ def optimize_faiss_index(index_manager: Any, nlist: int = 100) -> bool:
             index_manager["index"] = new_index
 
         count_after = new_index.ntotal
-        logger.info(f"[faiss_index] Vector count after index optimization: {count_after}")
+        logger.info(
+            f"[faiss_index] Vector count after index optimization: {count_after}"
+        )
         return True
     else:
-        logger.info(f"[faiss_index] Vector count after index optimization: {count_before}")
+        logger.info(
+            f"[faiss_index] Vector count after index optimization: {count_before}"
+        )
         return True
 
 
@@ -603,7 +650,9 @@ def get_faiss_index_memory_bytes(index: Optional[Any] = None) -> int:
             ntotal = getattr(index, "ntotal", 0)
             dim = getattr(index, "d", 384)
             if ntotal > 0:
-                bytes_per_vec = dim * 4 + (8 if isinstance(index, faiss.IndexIDMap) else 0)
+                bytes_per_vec = dim * 4 + (
+                    8 if isinstance(index, faiss.IndexIDMap) else 0
+                )
                 return int(ntotal * bytes_per_vec)
         except Exception:
             pass
@@ -639,5 +688,3 @@ def format_faiss_memory_badge(index: Optional[Any] = None) -> str:
     if vector_count > 0:
         return f"FAISS Memory: {mb_val:.1f} MB ({vector_count:,} vectors)"
     return f"FAISS Memory: {mb_val:.1f} MB"
-
-

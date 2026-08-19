@@ -32,11 +32,9 @@ from typing import Optional
 
 import httpx
 
-logger = logging.getLogger(__name__)
+from src.version import APP_VERSION
 
-# ── Local version ──────────────────────────────────────────────────────────────
-# Bump this constant in lock-step with CHANGELOG.md when cutting a new release.
-APP_VERSION: str = "1.0.0"
+logger = logging.getLogger(__name__)
 
 # ── GitHub repository coordinates ─────────────────────────────────────────────
 GITHUB_OWNER: str = "Ganesh-403"
@@ -168,13 +166,9 @@ def check_for_update_sync(
         The newer tag string, or ``None``.
     """
     try:
-        loop = asyncio.new_event_loop()
-        try:
-            remote_tag = loop.run_until_complete(
-                fetch_latest_github_version(url=url, timeout=timeout)
-            )
-        finally:
-            loop.close()
+        remote_tag = asyncio.run(
+            fetch_latest_github_version(url=url, timeout=timeout)
+        )
     except Exception as exc:  # noqa: BLE001
         logger.debug("check_for_update_sync failed: %s", exc)
         return None

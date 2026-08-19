@@ -24,13 +24,9 @@ def get_read_connection(
     resolved_path = db_path.expanduser().resolve(strict=False)
 
     if not resolved_path.exists():
-        raise FileNotFoundError(
-            f"SQLite database does not exist: {resolved_path}"
-        )
+        raise FileNotFoundError(f"SQLite database does not exist: {resolved_path}")
     if not resolved_path.is_file():
-        raise IsADirectoryError(
-            f"SQLite database path is not a file: {resolved_path}"
-        )
+        raise IsADirectoryError(f"SQLite database path is not a file: {resolved_path}")
 
     database_uri = f"{resolved_path.as_uri()}?mode=ro"
     connection = sqlite3.connect(
@@ -55,36 +51,54 @@ def with_sqlite_retry(
         return _make_wrapper(fn, max_retries=3, delay=0.1, backoff=2.0)
 
     def decorator(func: Callable) -> Callable:
-        return _make_wrapper(func, max_retries=max_retries, delay=delay, backoff=backoff)
+        return _make_wrapper(
+            func, max_retries=max_retries, delay=delay, backoff=backoff
+        )
 
     return decorator
 
 
-def _make_wrapper(func: Callable, max_retries: int, delay: float, backoff: float) -> Callable:
+def _retry_loop(
+    func: Callable,
+    max_retries: int,
+    initial_delay: float,
+    backoff_factor: float,
+    *args: Any,
+    **kwargs: Any,
+) -> Any:
+    current_delay = initial_delay
+    for attempt in range(max_retries + 1):
+        try:
+            return func(*args, **kwargs)
+        except sqlite3.OperationalError as exc:
+            err_msg = str(exc).lower()
+            is_locked_err = "locked" in err_msg or "busy" in err_msg
+            if is_locked_err and attempt < max_retries:
+                func_name = getattr(func, "__name__", str(func))
+                logger.warning(
+                    f"SQLite database locked/busy in '{func_name}' "
+                    f"(attempt {attempt + 1}/{max_retries}). Retrying in {current_delay:.2f}s..."
+                )
+                time.sleep(current_delay)
+                current_delay *= backoff_factor
+            else:
+                raise
+
+
+def _make_wrapper(
+    func: Callable, max_retries: int, delay: float, backoff: float
+) -> Callable:
     @functools.wraps(func)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
-        current_delay = delay
-        for attempt in range(max_retries + 1):
-            try:
-                return func(*args, **kwargs)
-            except sqlite3.OperationalError as exc:
-                err_msg = str(exc).lower()
-                is_locked_err = "locked" in err_msg or "busy" in err_msg
-                if is_locked_err and attempt < max_retries:
-                    func_name = getattr(func, "__name__", str(func))
-                    logger.warning(
-                        f"SQLite database locked/busy in '{func_name}' "
-                        f"(attempt {attempt + 1}/{max_retries}). Retrying in {current_delay:.2f}s..."
-                    )
-                    time.sleep(current_delay)
-                    current_delay *= backoff
-                else:
-                    raise
+        return _retry_loop(func, max_retries, delay, backoff, *args, **kwargs)
+
     return wrapper
 
 
 @contextmanager
-def managed_connection(db_path: str | os.PathLike) -> Generator[sqlite3.Connection, None, None]:
+def managed_connection(
+    db_path: str | os.PathLike,
+) -> Generator[sqlite3.Connection, None, None]:
     """
     Context manager for SQLite connections that guarantees conn.close() on exit,
     preventing unclosed connection handle leaks (Issue #1707).

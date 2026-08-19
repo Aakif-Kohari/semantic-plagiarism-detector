@@ -77,10 +77,13 @@ def test_extensionless_file_is_rejected():
 
 
 def test_custom_allowed_extension_set_is_respected():
-    assert validate_document_extension(
-        "chapter.epub",
-        allowed_extensions={".epub"},
-    ) == ".epub"
+    assert (
+        validate_document_extension(
+            "chapter.epub",
+            allowed_extensions={".epub"},
+        )
+        == ".epub"
+    )
 
     with pytest.raises(InvalidFileExtensionError):
         validate_document_extension(
@@ -95,6 +98,6 @@ def test_validation_occurs_before_sanitization():
 
 
 def test_safe_filename_is_sanitized_after_validation():
-    assert sanitize_and_validate_filename(
-        "<b>Final Report</b>.PDF"
-    ) == "Final_Report.pdf"
+    assert (
+        sanitize_and_validate_filename("<b>Final Report</b>.PDF") == "Final_Report.pdf"
+    )

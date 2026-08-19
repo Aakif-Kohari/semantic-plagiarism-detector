@@ -9,14 +9,11 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any
-
 from datetime import datetime
 from io import BytesIO
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 from reportlab.lib import colors
-from src.core.app_config import get_pdf_footer_text
 from reportlab.lib.colors import HexColor
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import A4
@@ -25,13 +22,16 @@ from reportlab.lib.units import inch
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 from reportlab.platypus import (
+    PageBreak,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
     Table,
     TableStyle,
-    PageBreak,
 )
+
+from src.core.app_config import get_pdf_footer_text
+from src.utils.text_stats import compute_text_stats
 
 try:
     import fitz  # PyMuPDF
@@ -63,10 +63,11 @@ def load_branding_logo() -> bytes | None:
         return None
 
 
+
 def compute_text_stats(text: str) -> dict:
     """Computes basic text statistics for document summary tables."""
     words = text.split() if text else []
-    sentences = [s for s in text.split('.') if s.strip()] if text else []
+    sentences = [s for s in text.split(".") if s.strip()] if text else []
     unique_words = set(w.lower() for w in words)
     word_count = len(words)
     unique_count = len(unique_words)
@@ -77,8 +78,6 @@ def compute_text_stats(text: str) -> dict:
         "unique_word_count": unique_count,
         "unique_word_ratio": ratio,
     }
-
-
 
 def truncate_filename(filename: str, max_len: int = 30) -> str:
     """
@@ -225,6 +224,7 @@ def generate_plagiarism_report(
     report_title: str = "Plagiarism Detection Report",
     logo_image: Optional[bytes] = None,
     brand_color: Optional[str] = None,
+    incident_id: Optional[str] = None,
     dark_mode: Optional[bool] = None,
     language: str = "en",
 ) -> BytesIO:
@@ -290,7 +290,6 @@ def generate_plagiarism_report(
         bottomMargin=40,
     )
 
-
     # Get custom styles
 
     title_style = ParagraphStyle(
@@ -321,12 +320,11 @@ def generate_plagiarism_report(
         textColor=HexColor("#FFFFFF") if dark_mode else HexColor("#31333f"),
     )
 
-
-
     # ── Header / footer callback for logo ──
 
     def _draw_header(canvas_obj, _doc):
         canvas_obj.saveState()
+
         if dark_mode:
             canvas_obj.setFillColor(HexColor("#0F172A"))
             canvas_obj.rect(
@@ -357,6 +355,44 @@ def generate_plagiarism_report(
             except Exception:
                 pass
 
+        if incident_id:
+            try:
+                import qrcode
+
+                base_url = os.getenv("APP_BASE_URL", "http://localhost:8501").rstrip(
+                    "/"
+                )
+                verify_url = f"{base_url}/verify/{incident_id}"
+
+                qr = qrcode.QRCode(version=1, box_size=4, border=0)
+                qr.add_data(verify_url)
+                qr.make(fit=True)
+                img = qr.make_image(fill_color="black", back_color="white")
+
+                img_byte_arr = BytesIO()
+                img.save(img_byte_arr, format="PNG")
+                img_byte_arr.seek(0)
+
+                qr_reader = ImageReader(img_byte_arr)
+                qr_w, qr_h = qr_reader.getSize()
+
+                qr_display_w = 1.0 * inch
+                qr_display_h = qr_display_w * qr_h / qr_w
+
+                qr_x = _doc.pagesize[0] - _doc.rightMargin - qr_display_w
+                qr_y = _doc.pagesize[1] - 36 - qr_display_h
+
+                canvas_obj.drawImage(
+                    qr_reader,
+                    qr_x,
+                    qr_y,
+                    width=qr_display_w,
+                    height=qr_display_h,
+                    preserveAspectRatio=True,
+                    mask="auto",
+                )
+            except Exception:
+                pass
         footer_text = get_pdf_footer_text()
         if footer_text:
             canvas_obj.setFont("Helvetica", 9)
@@ -369,8 +405,6 @@ def generate_plagiarism_report(
             )
 
         canvas_obj.restoreState()
-
-
 
         if footer_text:
             canvas_obj.saveState()
@@ -443,11 +477,27 @@ def generate_plagiarism_report(
 
         # Create statistics table
         stats_data = [
-            ['', doc_a, doc_b],
-            ['Word Count', str(doc_a_stats['word_count']) if doc_a_stats else 'N/A', str(doc_b_stats['word_count']) if doc_b_stats else 'N/A'],
-            ['Sentence Count', str(doc_a_stats['sentence_count']) if doc_a_stats else 'N/A', str(doc_b_stats['sentence_count']) if doc_b_stats else 'N/A'],
-            ['Unique Words', str(doc_a_stats['unique_word_count']) if doc_a_stats else 'N/A', str(doc_b_stats['unique_word_count']) if doc_b_stats else 'N/A'],
-            ['Unique Word Ratio', f"{doc_a_stats['unique_word_ratio']:.2%}" if doc_a_stats else 'N/A', f"{doc_b_stats['unique_word_ratio']:.2%}" if doc_b_stats else 'N/A'],
+            ["", doc_a, doc_b],
+            [
+                "Word Count",
+                str(doc_a_stats["word_count"]) if doc_a_stats else "N/A",
+                str(doc_b_stats["word_count"]) if doc_b_stats else "N/A",
+            ],
+            [
+                "Sentence Count",
+                str(doc_a_stats["sentence_count"]) if doc_a_stats else "N/A",
+                str(doc_b_stats["sentence_count"]) if doc_b_stats else "N/A",
+            ],
+            [
+                "Unique Words",
+                str(doc_a_stats["unique_word_count"]) if doc_a_stats else "N/A",
+                str(doc_b_stats["unique_word_count"]) if doc_b_stats else "N/A",
+            ],
+            [
+                "Unique Word Ratio",
+                f"{doc_a_stats['unique_word_ratio']:.2%}" if doc_a_stats else "N/A",
+                f"{doc_b_stats['unique_word_ratio']:.2%}" if doc_b_stats else "N/A",
+            ],
         ]
 
         # Calculate column widths - give more space to document names
@@ -644,7 +694,6 @@ def generate_plagiarism_report(
         )
     )
 
-
     doc.build(story, onFirstPage=_draw_header, onLaterPages=_draw_header)
     buffer.seek(0)
     return buffer
@@ -718,10 +767,19 @@ def generate_audit_summary_html(
     eval_pairs = metrics.get("evaluated_pairs", 0)
     flagged_cnt = metrics.get("flagged_incidents", len(top_flagged_pairs))
     threshold_pct = f"{metrics.get('threshold', 0.59):.0%}"
-    
-    high_cnt = metrics.get("high_severity_count", sum(1 for p in top_flagged_pairs if p.get("similarity", 0) >= 0.90))
-    med_cnt = metrics.get("medium_severity_count", sum(1 for p in top_flagged_pairs if 0.75 <= p.get("similarity", 0) < 0.90))
-    low_cnt = metrics.get("low_severity_count", sum(1 for p in top_flagged_pairs if p.get("similarity", 0) < 0.75))
+
+    high_cnt = metrics.get(
+        "high_severity_count",
+        sum(1 for p in top_flagged_pairs if p.get("similarity", 0) >= 0.90),
+    )
+    med_cnt = metrics.get(
+        "medium_severity_count",
+        sum(1 for p in top_flagged_pairs if 0.75 <= p.get("similarity", 0) < 0.90),
+    )
+    low_cnt = metrics.get(
+        "low_severity_count",
+        sum(1 for p in top_flagged_pairs if p.get("similarity", 0) < 0.75),
+    )
 
     table_rows_html = ""
     if not top_flagged_pairs:
@@ -981,7 +1039,7 @@ def generate_audit_summary_pdf(
 
     story = []
     story.append(Paragraph(report_title, title_style))
-    
+
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     threshold_str = f"{metrics.get('threshold', 0.59):.0%}"
     meta_text = f"<b>Generated:</b> {timestamp} UTC &nbsp;|&nbsp; <b>Section:</b> {class_section} &nbsp;|&nbsp; <b>Threshold:</b> {threshold_str}"
@@ -991,13 +1049,18 @@ def generate_audit_summary_pdf(
     total_docs = metrics.get("total_documents", 0)
     eval_pairs = metrics.get("evaluated_pairs", 0)
     flagged_cnt = metrics.get("flagged_incidents", len(top_flagged_pairs))
-    high_cnt = metrics.get("high_severity_count", sum(1 for p in top_flagged_pairs if p.get("similarity", 0) >= 0.90))
+    high_cnt = metrics.get(
+        "high_severity_count",
+        sum(1 for p in top_flagged_pairs if p.get("similarity", 0) >= 0.90),
+    )
 
     summary_data = [
         ["Total Documents", str(total_docs), "Evaluated Pairs", str(eval_pairs)],
         ["Flagged Incidents", str(flagged_cnt), "High Severity (≥90%)", str(high_cnt)],
     ]
-    summary_table = Table(summary_data, colWidths=[1.8 * inch, 1.2 * inch, 1.8 * inch, 1.2 * inch])
+    summary_table = Table(
+        summary_data, colWidths=[1.8 * inch, 1.2 * inch, 1.8 * inch, 1.2 * inch]
+    )
     summary_table.setStyle(
         TableStyle(
             [
@@ -1017,7 +1080,7 @@ def generate_audit_summary_pdf(
     story.append(Spacer(1, 0.2 * inch))
 
     story.append(Paragraph("Top Flagged Document Pairs", heading_style))
-    
+
     table_data = [["#", "Document A", "Document B", "Similarity", "Severity"]]
     for idx, item in enumerate(top_flagged_pairs[:20], 1):
         doc_a = item.get("doc_a", item.get("document_a", "Doc A"))
@@ -1049,7 +1112,10 @@ def generate_audit_summary_pdf(
     if len(table_data) == 1:
         table_data.append(["-", "No flagged incidents found", "-", "-", "-"])
 
-    pairs_table = Table(table_data, colWidths=[0.4 * inch, 2.3 * inch, 2.3 * inch, 1.0 * inch, 1.0 * inch])
+    pairs_table = Table(
+        table_data,
+        colWidths=[0.4 * inch, 2.3 * inch, 2.3 * inch, 1.0 * inch, 1.0 * inch],
+    )
     pairs_table.setStyle(
         TableStyle(
             [
@@ -1076,6 +1142,133 @@ def generate_audit_summary_pdf(
         "requires instructor evaluation."
     )
     story.append(Paragraph(notes_text, body_style))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+
+def generate_batch_plagiarism_report(
+    incidents: list[dict[str, Any]],
+    *,
+    report_title: str = "Batch Plagiarism Investigation Report",
+) -> BytesIO:
+    """Generate one consolidated PDF containing all flagged incidents."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.lib.units import inch
+    from reportlab.platypus import (
+        PageBreak,
+        Paragraph,
+        SimpleDocTemplate,
+        Spacer,
+        Table,
+        TableStyle,
+    )
+
+    buffer = BytesIO()
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=40,
+        leftMargin=40,
+        topMargin=40,
+        bottomMargin=40,
+    )
+
+    styles = getSampleStyleSheet()
+    story = []
+
+    story.append(Paragraph(report_title, styles["Title"]))
+    story.append(Spacer(1, 12))
+
+    total_incidents = len(incidents)
+
+    severity_counts: dict[str, int] = {}
+    for incident in incidents:
+        severity = str(incident.get("severity_rank", "Unknown"))
+        severity_counts[severity] = severity_counts.get(severity, 0) + 1
+
+    story.append(Paragraph("Summary Statistics", styles["Heading2"]))
+    story.append(
+        Paragraph(
+            f"Total flagged incidents: {total_incidents}",
+            styles["BodyText"],
+        )
+    )
+    story.append(Spacer(1, 10))
+
+    severity_rows = [["Severity", "Count"]]
+    severity_rows.extend(
+        [severity, str(count)] for severity, count in severity_counts.items()
+    )
+
+    severity_table = Table(severity_rows)
+    severity_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                ("PADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+
+    story.append(severity_table)
+    story.append(PageBreak())
+
+    story.append(Paragraph("Flagged Plagiarism Cases", styles["Heading2"]))
+    story.append(Spacer(1, 10))
+
+    for index, incident in enumerate(incidents, start=1):
+        document_a = str(incident.get("document_a", "Unknown"))
+        document_b = str(incident.get("document_b", "Unknown"))
+        severity = str(incident.get("severity_rank", "Unknown"))
+
+        similarity = incident.get("similarity_score", 0)
+        try:
+            similarity_text = f"{float(similarity):.1%}"
+        except (TypeError, ValueError):
+            similarity_text = str(similarity)
+
+        story.append(
+            Paragraph(
+                f"Case {index}: {document_a} ↔ {document_b}",
+                styles["Heading3"],
+            )
+        )
+
+        case_rows = [
+            ["Field", "Value"],
+            ["Document A", document_a],
+            ["Document B", document_b],
+            ["Similarity", similarity_text],
+            ["Severity", severity],
+        ]
+
+        case_table = Table(
+            case_rows,
+            colWidths=[1.5 * inch, 4.5 * inch],
+        )
+        case_table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                    ("PADDING", (0, 0), (-1, -1), 6),
+                ]
+            )
+        )
+
+        story.append(case_table)
+        story.append(Spacer(1, 15))
+
+        if index < len(incidents):
+            story.append(PageBreak())
 
     doc.build(story)
     buffer.seek(0)
@@ -1112,4 +1305,3 @@ def generate_audit_summary_report(
             class_section=class_section,
         )
         return pdf_buf.getvalue()
-

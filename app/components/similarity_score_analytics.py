@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 from typing import Any, Dict, List
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -21,11 +22,13 @@ logger = logging.getLogger(__name__)
 
 # ── CACHED DATA LOADING ───────────────────────────────────────────────────────
 
+
 @st.cache_data(ttl=60)
 def _load_incidents_data() -> List[Any]:
     """Fetch all plagiarism incidents from the database, cached for performance."""
     try:
         from src.db.incidents import get_all_incidents
+
         # Retrieve incidents with a sufficiently large limit
         return get_all_incidents(limit=100000)
     except Exception as e:
@@ -34,6 +37,7 @@ def _load_incidents_data() -> List[Any]:
 
 
 # ── HELPER FUNCTIONS ──────────────────────────────────────────────────────────
+
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
     """Safely convert a value to float, handling exceptions."""
@@ -177,9 +181,27 @@ def _prepare_dataframe(incidents: List[Any]) -> pd.DataFrame:
         if score is None:
             score = _get_val("similarity")
 
-        rows.append({
-            "similarity_score": _safe_float(score, default=0.0)
-        })
+        # Also support source/target names if available for heatmap/matrix summaries
+        source = (
+            _get_val("source_document")
+            or _get_val("source")
+            or _get_val("document_a")
+            or "Doc A"
+        )
+        target = (
+            _get_val("target_document")
+            or _get_val("target")
+            or _get_val("document_b")
+            or "Doc B"
+        )
+
+        rows.append(
+            {
+                "similarity_score": _safe_float(score, default=0.0),
+                "source_document": str(source),
+                "target_document": str(target),
+            }
+        )
 
     return pd.DataFrame(rows)
 
@@ -189,7 +211,7 @@ def _render_metric_card(
     value: str | int | float,
     icon: str,
     description: str,
-    accent_color_var: str
+    accent_color_var: str,
 ) -> None:
     """Render a styled KPI metric card using custom HTML/CSS."""
     card_html = f"""
@@ -205,7 +227,9 @@ def _render_metric_card(
     st.markdown(card_html, unsafe_allow_html=True)
 
 
-def _apply_plotly_theme(fig: go.Figure, title: str, theme_colors: Dict[str, str], margin_left: int = 50) -> None:
+def _apply_plotly_theme(
+    fig: go.Figure, title: str, theme_colors: Dict[str, str], margin_left: int = 50
+) -> None:
     """Style Plotly figures layout to match active light or dark themes."""
     fig.update_layout(
         title=dict(
@@ -213,43 +237,40 @@ def _apply_plotly_theme(fig: go.Figure, title: str, theme_colors: Dict[str, str]
             font=dict(
                 family="'Inter', sans-serif",
                 size=16,
-                color=theme_colors.get("ink", "#0F172A")
+                color=theme_colors.get("ink", "#0F172A"),
             ),
-            x=0.02
+            x=0.02,
         ),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         font=dict(
-            family="'Inter', sans-serif",
-            color=theme_colors.get("ink", "#0F172A")
+            family="'Inter', sans-serif", color=theme_colors.get("ink", "#0F172A")
         ),
         margin=dict(l=margin_left, r=30, t=60, b=40),
         legend=dict(
             font=dict(color=theme_colors.get("muted", "#64748B")),
-            bgcolor="rgba(0,0,0,0)"
+            bgcolor="rgba(0,0,0,0)",
         ),
         xaxis=dict(
             gridcolor=theme_colors.get("border", "#E2E8F0"),
             tickfont=dict(color=theme_colors.get("muted", "#64748B")),
-            titlefont=dict(color=theme_colors.get("ink", "#0F172A"))
+            titlefont=dict(color=theme_colors.get("ink", "#0F172A")),
         ),
         yaxis=dict(
             gridcolor=theme_colors.get("border", "#E2E8F0"),
             tickfont=dict(color=theme_colors.get("muted", "#64748B")),
-            titlefont=dict(color=theme_colors.get("ink", "#0F172A"))
-        )
+            titlefont=dict(color=theme_colors.get("ink", "#0F172A")),
+        ),
     )
 
 
 def _render_histogram(
-    scores: pd.Series,
-    bins: int,
-    show_density: bool,
-    show_mean_line: bool
+    scores: pd.Series, bins: int, show_density: bool, show_mean_line: bool
 ) -> None:
     """Render an interactive Plotly histogram."""
     try:
         from app.theme import get_chart_colors
+
         colors = get_chart_colors()
     except Exception:
         colors = {}
@@ -266,12 +287,9 @@ def _render_histogram(
             name="Similarity Scores",
             marker=dict(
                 color=colors.get("accent", "#0D9488"),
-                line=dict(
-                    color=colors.get("card", "#FFFFFF"),
-                    width=1
-                )
+                line=dict(color=colors.get("card", "#FFFFFF"), width=1),
             ),
-            hovertemplate="Score Range: %{x}<br>" + f"{y_title}: %{{y}}<extra></extra>"
+            hovertemplate="Score Range: %{x}<br>" + f"{y_title}: %{{y}}<extra></extra>",
         )
     )
 
@@ -283,20 +301,14 @@ def _render_histogram(
             line_color=colors.get("danger", "#FF4B4B"),
             annotation_text=f"Mean: {mean_val:.4f}",
             annotation_position="top right",
-            annotation_font=dict(color=colors.get("danger", "#FF4B4B"))
+            annotation_font=dict(color=colors.get("danger", "#FF4B4B")),
         )
 
     _apply_plotly_theme(
-        fig,
-        title="Similarity Score Distribution Histogram",
-        theme_colors=colors
+        fig, title="Similarity Score Distribution Histogram", theme_colors=colors
     )
 
-    fig.update_layout(
-        xaxis_title="Similarity Score",
-        yaxis_title=y_title,
-        bargap=0.05
-    )
+    fig.update_layout(xaxis_title="Similarity Score", yaxis_title=y_title, bargap=0.05)
 
     st.plotly_chart(fig, use_container_width=True)
 
@@ -305,6 +317,7 @@ def _render_boxplot(scores: pd.Series) -> None:
     """Render an interactive Plotly box plot."""
     try:
         from app.theme import get_chart_colors
+
         colors = get_chart_colors()
     except Exception:
         colors = {}
@@ -316,34 +329,29 @@ def _render_boxplot(scores: pd.Series) -> None:
             name="Similarity Score",
             marker_color=colors.get("accent", "#0D9488"),
             boxpoints="outliers",
-            hovertemplate="Value: %{y}<extra></extra>"
+            hovertemplate="Value: %{y}<extra></extra>",
         )
     )
 
-    _apply_plotly_theme(
-        fig,
-        title="Similarity Score Box Plot",
-        theme_colors=colors
-    )
+    _apply_plotly_theme(fig, title="Similarity Score Box Plot", theme_colors=colors)
 
-    fig.update_layout(
-        yaxis_title="Similarity Score",
-        xaxis=dict(showticklabels=False)
-    )
+    fig.update_layout(yaxis_title="Similarity Score", xaxis=dict(showticklabels=False))
 
     st.plotly_chart(fig, use_container_width=True)
 
 
 def _render_percentile_table(percentiles: Dict[str, float]) -> None:
     """Render a styled Streamlit table showing percentiles."""
-    df = pd.DataFrame([
-        {
-            "Percentile": k,
-            "Similarity Score": f"{v:.4f}",
-            "Percentage Equivalent": f"{v * 100.0:.2f}%"
-        }
-        for k, v in percentiles.items()
-    ])
+    df = pd.DataFrame(
+        [
+            {
+                "Percentile": k,
+                "Similarity Score": f"{v:.4f}",
+                "Percentage Equivalent": f"{v * 100.0:.2f}%",
+            }
+            for k, v in percentiles.items()
+        ]
+    )
     st.table(df)
 
 
@@ -356,7 +364,7 @@ def _render_outlier_summary(outliers_info: Dict[str, Any]) -> None:
             value=f"{outliers_info['total_outliers']}",
             icon="🚨",
             description="Number of detected outliers",
-            accent_color_var="--danger"
+            accent_color_var="--danger",
         )
     with col2:
         _render_metric_card(
@@ -364,7 +372,7 @@ def _render_outlier_summary(outliers_info: Dict[str, Any]) -> None:
             value=f"{outliers_info['outlier_percentage']:.2f}%",
             icon="📊",
             description="Percentage of all samples",
-            accent_color_var="--danger"
+            accent_color_var="--danger",
         )
     with col3:
         _render_metric_card(
@@ -372,7 +380,7 @@ def _render_outlier_summary(outliers_info: Dict[str, Any]) -> None:
             value=f"{outliers_info['highest_outlier']:.4f}",
             icon="⬆️",
             description="Maximum outlier value",
-            accent_color_var="--accent"
+            accent_color_var="--accent",
         )
     with col4:
         _render_metric_card(
@@ -380,20 +388,53 @@ def _render_outlier_summary(outliers_info: Dict[str, Any]) -> None:
             value=f"{outliers_info['lowest_outlier']:.4f}",
             icon="⬇️",
             description="Minimum outlier value",
-            accent_color_var="--accent"
+            accent_color_var="--accent",
         )
 
 
-def _render_download_buttons(stats: Dict[str, Any], percentiles: Dict[str, float]) -> None:
+def _render_heatmap_data_summary(df: pd.DataFrame) -> None:
+    """Render text summary of top 5 highest similarity matrix cells inside an st.code block."""
+    st.markdown("### Top 5 Similarity Matrix Summary")
+    st.markdown(
+        "Quick text summary of the highest similarity matrix data points for copying:"
+    )
+
+    if df.empty or "similarity_score" not in df.columns:
+        st.code("No similarity data available.", language="text")
+        return
+
+    # Sort descending by similarity score and take top 5
+    top_df = df.sort_values(by="similarity_score", ascending=False).head(5)
+
+    summary_lines = ["TOP 5 SIMILARITY MATRIX CELLS SUMMARY:", "-" * 40]
+    for idx, row in enumerate(top_df.itertupless(), start=1):
+        score = getattr(row, "similarity_score", 0.0)
+        source = getattr(row, "source_document", "Doc A")
+        target = getattr(row, "target_document", "Doc B")
+        summary_lines.append(
+            f"{idx}. Source: {source} | Target: {target} | Score: {score:.4f}"
+        )
+
+    summary_text = "\n".join(summary_lines)
+
+    # Render inside st.code block which provides built-in 1-click clipboard copy button
+    st.code(summary_text, language="text")
+
+
+def _render_download_buttons(
+    stats: Dict[str, Any], percentiles: Dict[str, float]
+) -> None:
     """Render download buttons for statistics and percentiles."""
     # Prepare statistics data
     stats_df = pd.DataFrame([{"Metric": k, "Value": v} for k, v in stats.items()])
-    stats_csv = stats_df.to_csv(index=False).encode('utf-8')
-    stats_json = json.dumps(stats, indent=4).encode('utf-8')
+    stats_csv = stats_df.to_csv(index=False).encode("utf-8")
+    stats_json = json.dumps(stats, indent=4).encode("utf-8")
 
     # Prepare percentile data
-    pct_df = pd.DataFrame([{"Percentile": k, "Value": v} for k, v in percentiles.items()])
-    pct_csv = pct_df.to_csv(index=False).encode('utf-8')
+    pct_df = pd.DataFrame(
+        [{"Percentile": k, "Value": v} for k, v in percentiles.items()]
+    )
+    pct_csv = pct_df.to_csv(index=False).encode("utf-8")
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -402,7 +443,7 @@ def _render_download_buttons(stats: Dict[str, Any], percentiles: Dict[str, float
             data=stats_csv,
             file_name="similarity_statistics.csv",
             mime="text/csv",
-            use_container_width=True
+            use_container_width=True,
         )
     with col2:
         st.download_button(
@@ -410,7 +451,7 @@ def _render_download_buttons(stats: Dict[str, Any], percentiles: Dict[str, float
             data=stats_json,
             file_name="similarity_statistics.json",
             mime="application/json",
-            use_container_width=True
+            use_container_width=True,
         )
     with col3:
         st.download_button(
@@ -418,11 +459,12 @@ def _render_download_buttons(stats: Dict[str, Any], percentiles: Dict[str, float
             data=pct_csv,
             file_name="similarity_percentiles.csv",
             mime="text/csv",
-            use_container_width=True
+            use_container_width=True,
         )
 
 
 # ── MAIN COMPONENT ENTRYPOINT ─────────────────────────────────────────────────
+
 
 def render_similarity_score_analytics() -> None:
     """Entrypoint function to render the similarity score distribution analytics page."""
@@ -526,7 +568,7 @@ def render_similarity_score_analytics() -> None:
             <p class="analytics-subtitle">Analyze the statistical distribution of plagiarism similarity scores.</p>
         </div>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
     try:
@@ -538,7 +580,11 @@ def render_similarity_score_analytics() -> None:
     df = _prepare_dataframe(raw_incidents)
 
     # SECTION 9: Empty State
-    if df.empty or "similarity_score" not in df.columns or len(df["similarity_score"]) == 0:
+    if (
+        df.empty
+        or "similarity_score" not in df.columns
+        or len(df["similarity_score"]) == 0
+    ):
         st.markdown(
             """
             <div class="empty-state">
@@ -547,7 +593,7 @@ def render_similarity_score_analytics() -> None:
                 <div class="empty-desc">Upload documents to begin analysis.</div>
             </div>
             """,
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
         return
 
@@ -565,7 +611,7 @@ def render_similarity_score_analytics() -> None:
             value=f"{stats['total_samples']}",
             icon="🔢",
             description="Total count of similarity scores",
-            accent_color_var="--accent"
+            accent_color_var="--accent",
         )
     with col2:
         _render_metric_card(
@@ -573,7 +619,7 @@ def render_similarity_score_analytics() -> None:
             value=f"{stats['mean']:.4f}",
             icon="⚖️",
             description="Average similarity score",
-            accent_color_var="--accent"
+            accent_color_var="--accent",
         )
     with col3:
         _render_metric_card(
@@ -581,7 +627,7 @@ def render_similarity_score_analytics() -> None:
             value=f"{stats['median']:.4f}",
             icon="🎯",
             description="Middle similarity score",
-            accent_color_var="--accent"
+            accent_color_var="--accent",
         )
     with col4:
         _render_metric_card(
@@ -589,7 +635,7 @@ def render_similarity_score_analytics() -> None:
             value=f"{stats['std_dev']:.4f}",
             icon="📐",
             description="Standard deviation of scores",
-            accent_color_var="--accent"
+            accent_color_var="--accent",
         )
 
     # Row 2
@@ -600,7 +646,7 @@ def render_similarity_score_analytics() -> None:
             value=f"{stats['variance']:.4f}",
             icon="📊",
             description="Variance of similarity scores",
-            accent_color_var="--accent"
+            accent_color_var="--accent",
         )
     with col6:
         _render_metric_card(
@@ -608,7 +654,7 @@ def render_similarity_score_analytics() -> None:
             value=f"{stats['min_val']:.4f}",
             icon="⬇️",
             description="Lowest similarity score recorded",
-            accent_color_var="--accent"
+            accent_color_var="--accent",
         )
     with col7:
         _render_metric_card(
@@ -616,7 +662,7 @@ def render_similarity_score_analytics() -> None:
             value=f"{stats['max_val']:.4f}",
             icon="⬆️",
             description="Highest similarity score recorded",
-            accent_color_var="--accent"
+            accent_color_var="--accent",
         )
     with col8:
         _render_metric_card(
@@ -624,7 +670,7 @@ def render_similarity_score_analytics() -> None:
             value=f"{stats['range_val']:.4f}",
             icon="↔️",
             description="Difference between Max and Min",
-            accent_color_var="--accent"
+            accent_color_var="--accent",
         )
 
     st.markdown("---")
@@ -634,11 +680,28 @@ def render_similarity_score_analytics() -> None:
     with chart_tab1:
         c1, c2, c3 = st.columns([2, 1, 1])
         with c1:
-            bins = st.slider("Number of Bins", min_value=5, max_value=100, value=20, step=1, key="hist_bins")
+            bins = st.slider(
+                "Number of Bins",
+                min_value=5,
+                max_value=100,
+                value=20,
+                step=1,
+                key="hist_bins",
+            )
         with c2:
-            show_density = st.checkbox("Show Density", value=False, key="hist_density", help="Show probability density instead of count.")
+            show_density = st.checkbox(
+                "Show Density",
+                value=False,
+                key="hist_density",
+                help="Show probability density instead of count.",
+            )
         with c3:
-            show_mean = st.checkbox("Show Mean Line", value=True, key="hist_mean", help="Show vertical line representing the mean score.")
+            show_mean = st.checkbox(
+                "Show Mean Line",
+                value=True,
+                key="hist_mean",
+                help="Show vertical line representing the mean score.",
+            )
 
         _render_histogram(scores, bins, show_density, show_mean)
 
@@ -667,8 +730,13 @@ def render_similarity_score_analytics() -> None:
             Thresholds: Lower bound = {outliers_info['lower_bound']:.4f}, Upper bound = {outliers_info['upper_bound']:.4f}.
         </div>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
+
+    st.markdown("---")
+
+    # NEW SECTION: Heatmap Data Summary with st.code and clipboard copy button (#1731)
+    _render_heatmap_data_summary(df)
 
     st.markdown("---")
 

@@ -14,4 +14,3 @@ def test_static_faiss_result_loop_is_removed():
     source = APP_PATH.read_text(encoding="utf-8")
     assert "for rec, score in results:" not in source
     assert "st.caption(rec.chunk_text)" not in source
-

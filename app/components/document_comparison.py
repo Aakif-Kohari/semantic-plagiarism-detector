@@ -6,13 +6,16 @@ Provides a clear confirmation popover to prevent accidental data loss.
 """
 
 import streamlit as st
+
 from src.utils.diff_highlighter import highlight_overlap
 
 
 def render_document_comparison():
     """Render the side-by-side Document Comparison View with Clear Comparison popover."""
     st.subheader("🔬 Custom Document Comparison")
-    st.caption("Paste the contents of two documents below to perform a side-by-side similarity highlighting comparison.")
+    st.caption(
+        "Paste the contents of two documents below to perform a side-by-side similarity highlighting comparison."
+    )
 
     # Initialize session state for the document inputs
     if "comp_doc_a" not in st.session_state:
@@ -46,7 +49,9 @@ def render_document_comparison():
     # Add confirmation popover st.popover("Clear Comparison")
     with st.popover("Clear Comparison"):
         st.write("⚠️ Are you sure you want to clear staged documents?")
-        if st.button("Yes, Clear", key="confirm_clear_comp_btn", use_container_width=True):
+        if st.button(
+            "Yes, Clear", key="confirm_clear_comp_btn", use_container_width=True
+        ):
             st.session_state["comp_doc_a"] = ""
             st.session_state["comp_doc_b"] = ""
             # Reset values inside the text_area widgets

@@ -6,10 +6,11 @@ import time
 
 import pytest
 
-from src.utils.processing_time import (
+from src.utils.processing_time import (  # ============================================================================
     BYTES_PER_MB,
     ProcessingTimer,
     calculate_average_latency,
+    calculate_kb_per_second,
     calculate_mb_per_minute,
     calculate_page_throughput,
     calculate_processing_throughput,
@@ -21,7 +22,6 @@ from src.utils.processing_time import (
     uploaded_files_total_bytes,
 )
 
-# ============================================================================
 # Page Throughput Tests
 # ============================================================================
 
@@ -151,7 +151,10 @@ class TestProcessingThroughput:
             (2048, 2.0, 1.0),  # 2 KB in 2 seconds
             (1048576, 1.0, 1024.0),  # 1 MB in 1 second -> 1024 KB/s
             (512, 0.5, 1.0),  # 0.5 KB in 0.5 seconds
-            (10240, 3.33, 3.08),  # 10 KB in 3.33 seconds (rounded)
+            # 10240 bytes is 10 KB against the module's BYTES_PER_KB of 1024,
+            # so 10 / 3.33 = 3.0. The previous expectation of 3.08 came from
+            # dividing by 1000 instead, which no other row in this table does.
+            (10240, 3.33, 3.0),  # 10 KB in 3.33 seconds (rounded)
             (0, 5.0, 0.0),  # 0 bytes processed
         ],
     )
@@ -376,3 +379,19 @@ def test_calculate_mb_per_minute():
 
     # Test zero bytes processed
     assert calculate_mb_per_minute(0, 60.0) == 0.0
+
+
+def test_calculate_kb_per_second():
+    # Test normal calculation: 100 KB (102400 bytes) in 5.0 seconds = 20.0 KB/sec
+    assert calculate_kb_per_second(102400, 5.0) == 20.0
+
+    # Test rounding to 2 decimal places: 100 KB in 3.0 seconds = 33.33 KB/sec
+    assert calculate_kb_per_second(102400, 3.0) == 33.33
+
+    # Test zero or negative elapsed time returns 0.0
+    assert calculate_kb_per_second(102400, 0.0) == 0.0
+    assert calculate_kb_per_second(102400, -2.5) == 0.0
+
+    # Test zero or negative bytes processed
+    assert calculate_kb_per_second(0, 5.0) == 0.0
+    assert calculate_kb_per_second(-1024, 5.0) == 0.0
