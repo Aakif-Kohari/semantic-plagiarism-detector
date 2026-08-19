@@ -1004,6 +1004,93 @@ class TestPayloadCompressor:
         decompressed = PayloadCompressor.decompress(compressed)
         assert decompressed == small_payload
 
+    def test_class_level_attributes_default(self):
+        """Verify default class-level attributes initialized on module load."""
+        import zlib
+        assert PayloadCompressor.COMPRESSION_LEVEL == zlib.Z_BEST_SPEED
+        assert PayloadCompressor.COMPRESSION_THRESHOLD_BYTES == 512 * 1024
+        assert PayloadCompressor.get_threshold() == 512 * 1024
+
+    def test_compression_level_env_int(self, monkeypatch):
+        """Verify integer REDIS_COMPRESSION_LEVEL is parsed into COMPRESSION_LEVEL."""
+        import importlib
+        import src.utils.redis_cache as rc
+
+        monkeypatch.setenv("REDIS_COMPRESSION_LEVEL", "9")
+        importlib.reload(rc)
+        try:
+            assert rc.PayloadCompressor.COMPRESSION_LEVEL == 9
+        finally:
+            monkeypatch.delenv("REDIS_COMPRESSION_LEVEL", raising=False)
+            importlib.reload(rc)
+
+    def test_compression_level_env_named(self, monkeypatch):
+        """Verify named constant REDIS_COMPRESSION_LEVEL is parsed into COMPRESSION_LEVEL."""
+        import importlib
+        import zlib
+        import src.utils.redis_cache as rc
+
+        monkeypatch.setenv("REDIS_COMPRESSION_LEVEL", "Z_BEST_COMPRESSION")
+        importlib.reload(rc)
+        try:
+            assert rc.PayloadCompressor.COMPRESSION_LEVEL == zlib.Z_BEST_COMPRESSION
+        finally:
+            monkeypatch.delenv("REDIS_COMPRESSION_LEVEL", raising=False)
+            importlib.reload(rc)
+
+    def test_compression_level_env_invalid(self, monkeypatch):
+        """Verify invalid REDIS_COMPRESSION_LEVEL falls back to Z_BEST_SPEED."""
+        import importlib
+        import zlib
+        import src.utils.redis_cache as rc
+
+        monkeypatch.setenv("REDIS_COMPRESSION_LEVEL", "INVALID_OPTION")
+        importlib.reload(rc)
+        try:
+            assert rc.PayloadCompressor.COMPRESSION_LEVEL == zlib.Z_BEST_SPEED
+        finally:
+            monkeypatch.delenv("REDIS_COMPRESSION_LEVEL", raising=False)
+            importlib.reload(rc)
+
+    def test_compression_threshold_env_custom(self, monkeypatch):
+        """Verify custom REDIS_COMPRESSION_THRESHOLD is parsed into COMPRESSION_THRESHOLD_BYTES."""
+        import importlib
+        import src.utils.redis_cache as rc
+
+        monkeypatch.setenv("REDIS_COMPRESSION_THRESHOLD", "2048")
+        importlib.reload(rc)
+        try:
+            assert rc.PayloadCompressor.COMPRESSION_THRESHOLD_BYTES == 2048
+            assert rc.PayloadCompressor.get_threshold() == 2048
+        finally:
+            monkeypatch.delenv("REDIS_COMPRESSION_THRESHOLD", raising=False)
+            importlib.reload(rc)
+
+    def test_compression_threshold_env_invalid(self, monkeypatch):
+        """Verify invalid REDIS_COMPRESSION_THRESHOLD falls back to default 512 KiB."""
+        import importlib
+        import src.utils.redis_cache as rc
+
+        monkeypatch.setenv("REDIS_COMPRESSION_THRESHOLD", "not_a_number")
+        importlib.reload(rc)
+        try:
+            assert rc.PayloadCompressor.COMPRESSION_THRESHOLD_BYTES == 512 * 1024
+            assert rc.PayloadCompressor.get_threshold() == 512 * 1024
+        finally:
+            monkeypatch.delenv("REDIS_COMPRESSION_THRESHOLD", raising=False)
+            importlib.reload(rc)
+
+    def test_compress_does_not_call_os_getenv(self):
+        """Verify that compress() does not perform any os.getenv lookups during execution."""
+        threshold = PayloadCompressor.COMPRESSION_THRESHOLD_BYTES
+        large_payload = b"PlagiarismDetectorTestData" * ((threshold // 20) + 100)
+
+        with patch("os.getenv") as mock_getenv:
+            compressed = PayloadCompressor.compress(large_payload)
+            assert compressed.startswith(PayloadCompressor.MAGIC_HEADER)
+            mock_getenv.assert_not_called()
+
+
 
 
 def test_payload_compressor_exact_threshold_boundary():
