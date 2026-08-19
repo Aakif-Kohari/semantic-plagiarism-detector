@@ -34,8 +34,7 @@ from src.db.common import with_sqlite_retry
 from src.db.connection import get_connection
 from src.db.migrations import migrate_auth_database, table_exists
 from src.db.security_audit import count_recent_failed_logins, log_security_event
-from src.errors import StaleDataException
-
+from src.exceptions import StaleDataException
 logger = logging.getLogger(__name__)
 
 from src.core.app_config import AUTH_DB_PATH, get_valid_roles

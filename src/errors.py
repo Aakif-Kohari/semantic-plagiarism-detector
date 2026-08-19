@@ -90,13 +90,9 @@ __all__ = [
     "CLI_PIPELINE_FAILED",
     "CLI_THRESHOLD_INVALID",
     "CLI_INVALID_COMMAND",
-    "ExportFailedError",
-    "OCRFileBatchError",
     "EXPORT_WRITE_FAILED",
     "EXPORT_GENERATION_IO_FAILED",
-    "StaleDataException",
-]
-# Authentication Errors
+]# Authentication Errors
 AUTH_USERNAME_EMPTY = "Username cannot be empty."
 AUTH_PASSWORD_TOO_SHORT = "Password must be at least 6 characters long."
 AUTH_INVALID_ROLE = "Role must be one of: {roles}"
@@ -233,26 +229,7 @@ CLI_THRESHOLD_INVALID = "Error: Threshold must be a float between 0.0 and 1.0.\n
 CLI_INVALID_COMMAND = "Error: Invalid command '{command}'.\n"
 
 
-class ExportFailedError(RuntimeError):
-    """Raised when an export cannot be generated or written safely."""
-
-
-class OCRFileBatchError(Exception):
-    """Raised when OCR extraction fails on one or more files in a batch."""
-
-    def __init__(self, failed_files: list, failure_details: list) -> None:
-        self.failed_files = failed_files
-        self.failure_details = failure_details
-        joined = (
-            "; ".join(failure_details) if failure_details else ", ".join(failed_files)
-        )
-        super().__init__(
-            f"OCR extraction failed for {len(failed_files)} file(s): {joined}"
-        )
-
-
-EXPORT_WRITE_FAILED = (
-    "Unable to write the {format_name} export to '{destination}'. "
+EXPORT_WRITE_FAILED = (    "Unable to write the {format_name} export to '{destination}'. "
     "Check the destination permissions and available disk space, then try again."
 )
 
@@ -262,14 +239,7 @@ EXPORT_GENERATION_IO_FAILED = (
 )
 
 
-class StaleDataException(Exception):
-    """Raised when an update fails because the version has changed (optimistic locking)."""
-
-    pass
-
-
-class EmptyDocumentError(ValueError):
-    """Raised when a document contains no extractable or readable text.
+class EmptyDocumentError(ValueError):    """Raised when a document contains no extractable or readable text.
 
     This specific exception allows the UI and CLI to differentiate between
     a file that failed to parse due to corruption/format issues and a file
