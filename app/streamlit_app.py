@@ -21,6 +21,7 @@ import numpy as np
 import pandas as pd
 import psutil
 import streamlit as st
+from src.errors import UI_SESSION_EXPIRED, EmptyDocumentError
 
 # 1. Fix Streamlit import paths FIRST so 'app' can be found
 FILE_PATH = Path(__file__).resolve()
@@ -2373,6 +2374,19 @@ with st.sidebar:
                 st.markdown("• **Auth DB:** 🔴 Error")
                 st.caption(f"  {db_err}")
 
+            try:
+                from src.utils.redis_cache import get_cache
+
+                cache_inst = get_cache()
+                redis_online, latency = cache_inst.ping()
+                if redis_online:
+                    lat_str = f" ({latency} ms)" if latency is not None else ""
+                    st.markdown(f"• **Cache Backend:** 🟢 Redis{lat_str}")
+                else:
+                    st.markdown("• **Cache Backend:** 🟡 In-Memory")
+            except Exception:
+                st.markdown("• **Cache Backend:** 🟡 In-Memory")
+
             st.divider()
             cpu_percent = psutil.cpu_percent(interval=0.1)
             cpu_count = psutil.cpu_count(logical=True)
@@ -3296,10 +3310,36 @@ if user_role == "admin":
 
         progress_bar = st.progress(0, text="Preparing files…")
         raw_texts = {}
+        failed_documents = []
+        
         for i, (name, data) in enumerate(file_bytes_dict.items()):
-            raw_texts[name] = extract_text(
-                _io.BytesIO(data), name, ocr_language=ocr_language, ocr_dpi=ocr_dpi
-            )
+            try:
+                extracted = extract_text(
+                    _io.BytesIO(data), name, ocr_language=ocr_language, ocr_dpi=ocr_dpi
+                )
+                raw_texts[name] = extracted
+                
+            except EmptyDocumentError as ede:
+                # Issue #2724: Catch empty documents and log them as warnings
+                # instead of crashing the entire analysis pipeline
+                logger.warning("Skipping empty document %s: %s", name, ede)
+                failed_documents.append({
+                    "filename": name,
+                    "error": str(ede),
+                    "type": "empty_document"
+                })
+                st.warning(f"⚠️ **{name}**: {ede}")
+                
+            except Exception as e:
+                # Catch other extraction errors
+                logger.error("Failed to extract text from %s: %s", name, e)
+                failed_documents.append({
+                    "filename": name,
+                    "error": str(e),
+                    "type": "extraction_error"
+                })
+                st.error(f"❌ **{name}**: Failed to extract text. {e}")
+                
             fraction = (i + 1) / file_count
             remaining_bytes = total_bytes * (file_count - i - 1) // max(1, file_count)
             remaining_est = estimate_processing_seconds(remaining_bytes)
@@ -3312,6 +3352,18 @@ if user_role == "admin":
                 fraction,
                 text=f"Processing file {i + 1} of {file_count} (ETA: {eta})",
             )
+
+        # Filter out failed documents from further processing
+        if failed_documents:
+            st.session_state["failed_documents"] = failed_documents
+            st.info(f"Skipped {len(failed_documents)} file(s) due to extraction errors.")
+            
+        # Only proceed if we have enough valid texts
+        if len(raw_texts) < 2:
+            st.error("Not enough valid documents remaining for comparison after filtering errors.")
+            st.session_state[SessionKeys.SCANNING] = False
+            progress_bar.empty()
+            st.stop()
 
         raw_texts_tuple = tuple(sorted(raw_texts.items()))
         (
@@ -3411,6 +3463,7 @@ st.divider()
     tab_drill,
     tab_compare,
     tab_analytics,
+    tab_patterns,
     tab_users,
     tab_settings,
     tab_history,
@@ -3424,6 +3477,7 @@ st.divider()
         get_text("tab_drill", lang=lang_code),
         "🔬 Comparison",
         get_text("tab_analytics", lang=lang_code),
+        "🧠 Patterns",
         get_text("tab_users", lang=lang_code),
         get_text("tab_settings", lang=lang_code),
         "📊 History",
@@ -3896,7 +3950,18 @@ with tab_analytics:
         timings=st.session_state.get("last_stage_timings", {})
     )
 
-# ══ TAB 8: USERS ══════════════════════════════════════════════════════════
+# ══ TAB 8: PATTERNS (Issue #2840) ═════════════════════════════════════════
+with tab_patterns:
+    update_page_title("Pattern Recognition")
+    try:
+        from app.components.pattern_recognition_ui import render_pattern_recognition
+
+        render_pattern_recognition()
+    except Exception as exc:
+        logger.error("Failed to render pattern recognition: %s", exc)
+        st.error("Pattern recognition system unavailable.")
+
+# ══ TAB 9: USERS ══════════════════════════════════════════════════════════
 with tab_users:
     update_page_title("Users")
     render_users_view()
@@ -3913,6 +3978,95 @@ with tab_history:
 # ══ TAB 10: SECURITY AUDIT LOGS ═════════════════════════════════════════════
 with tab_audit:
     update_page_title("Security Audit Logs")
+    st.subheader(get_text("tab_audit_logs", lang=lang_code))
+
+    if user_role != "admin":
+        st.error("🔒 Access Denied: Administrator privileges required.")
+    else:
+        st.markdown("### 📜 System Security Audit Trail")
+
+        # ... [existing filters] ...
+        
+        # Issue #2732: Pagination controls
+        EVENTS_PER_PAGE = 20
+        
+        if "audit_page_offset" not in st.session_state:
+            st.session_state.audit_page_offset = 0
+            
+        current_offset = st.session_state.audit_page_offset
+        
+        # Fetch records for current page
+        from src.db.security_audit import get_recent_audit_events, get_audit_events_count
+        
+        logs = get_recent_audit_events(
+            limit=EVENTS_PER_PAGE,
+            offset=current_offset,
+            username=username_filter,
+            event_type=event_type_filter
+        )
+        
+        total_records = get_audit_events_count(
+            username=username_filter,
+            event_type=event_type_filter
+        )
+        
+        total_pages = max(1, (total_records + EVENTS_PER_PAGE - 1) // EVENTS_PER_PAGE)
+        current_page = (current_offset // EVENTS_PER_PAGE) + 1
+
+        # Summary Metrics
+        m1, m2, m3 = st.columns(3)
+        m1.metric("📋 Total Log Entries", total_records)
+        m2.metric("🏷️ Active Filter", selected_event_type or "All")
+        m3.metric("📑 Page", f"{current_page} / {total_pages}")
+
+        st.divider()
+
+        # Display Data Table
+        if logs:
+            df = pd.DataFrame(logs)
+            # ... [existing dataframe formatting] ...
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+            # Pagination Controls (Issue #2732)
+            nav_col1, nav_col2, nav_col3 = st.columns([1, 2, 1])
+            
+            with nav_col1:
+                if st.button(
+                    "← Previous Page",
+                    disabled=(current_offset == 0),
+                    key="audit_prev_page_btn",
+                    use_container_width=True
+                ):
+                    st.session_state.audit_page_offset = max(0, current_offset - EVENTS_PER_PAGE)
+                    st.rerun()
+
+            with nav_col2:
+                st.caption(
+                    f"Showing {current_offset + 1} - {min(current_offset + EVENTS_PER_PAGE, total_records)} of {total_records} logs"
+                )
+
+            with nav_col3:
+                if st.button(
+                    "Next Page →",
+                    disabled=(current_offset + EVENTS_PER_PAGE >= total_records),
+                    key="audit_next_page_btn",
+                    use_container_width=True
+                ):
+                    st.session_state.audit_page_offset = current_offset + EVENTS_PER_PAGE
+                    st.rerun()
+        else:
+            st.info("ℹ️ No security audit log records found matching the specified filters.")
+            
+        # Reset offset when filters change
+        if "last_audit_filter" not in st.session_state:
+            st.session_state.last_audit_filter = (username_filter, event_type_filter)
+            
+        current_filter = (username_filter, event_type_filter)
+        if st.session_state.last_audit_filter != current_filter:
+            st.session_state.audit_page_offset = 0
+            st.session_state.last_audit_filter = current_filter
+            st.rerun()
+
     # ========== USE THE NEW MODULE ==========
     render_audit_view(user_role, lang_code)
     
