@@ -52,14 +52,14 @@ from pathlib import Path
 from typing import Dict, Optional, Union
 
 from src.db.connection import apply_busy_timeout
-from src.db.corpus_db import get_corpus_db_path
+from src.core.app_config import BACKUP_DIR, get_backup_dir
 
 # ── Logger Configuration ───────────────────────────────────────────────────────
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 SQLITE_HEADER = b"SQLite format 3\x00"
-DEFAULT_BACKUP_DIRECTORY = Path("backups")
+DEFAULT_BACKUP_DIRECTORY = get_backup_dir()
 
 # Maintenance operations open their own connections rather than going through
 # src.db.connection.create_connection(), because they need isolation_level=None

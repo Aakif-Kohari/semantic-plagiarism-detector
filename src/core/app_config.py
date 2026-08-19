@@ -109,6 +109,29 @@ FALLBACK_DATA_DIR: Final[Path] = (
 )
 FALLBACK_CORPUS_DB_PATH: Final[Path] = FALLBACK_DATA_DIR / "corpus.db"
 
+# Backup directory configuration (issue #2790).
+# Loads BACKUP_DIR environment variable, defaulting to an absolute path
+# completely outside the repository/web root (e.g., /var/backups/spd/).
+_DEFAULT_BACKUP_DIR_STR: Final[str] = "/var/backups/spd"
+
+
+def get_backup_dir() -> Path:
+    """Return the resolved absolute Path for storing database backups.
+
+    Configured via the ``BACKUP_DIR`` environment variable.
+    Ensures default location is an absolute path completely outside the repository/web root (Issue #2790).
+    """
+    raw_val = os.getenv("BACKUP_DIR", "").strip()
+    if raw_val:
+        return Path(raw_val).resolve()
+    default_path = Path(_DEFAULT_BACKUP_DIR_STR)
+    if not default_path.is_absolute():
+        default_path = default_path.resolve()
+    return default_path
+
+
+BACKUP_DIR: Final[Path] = get_backup_dir()
+
 
 # ─── Application display accessors (pre-existing) ──────────────────────────
 
