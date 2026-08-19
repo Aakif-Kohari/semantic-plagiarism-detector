@@ -334,6 +334,42 @@ class TestRedisCache:
         cache2 = get_cache()
         assert cache1 is cache2
 
+    def test_get_instance_method_singleton(self):
+        """Test that RedisCache.get_instance() returns the singleton instance."""
+        instance1 = RedisCache.get_instance()
+        instance2 = RedisCache.get_instance()
+        instance3 = RedisCache()
+        assert instance1 is instance2
+        assert instance1 is instance3
+        assert instance1 is get_cache()
+
+    def test_redis_cache_lock_exists(self):
+        """Verify that RedisCache defines a threading.Lock for singleton thread safety."""
+        import threading
+        assert hasattr(RedisCache, "_lock")
+        assert isinstance(RedisCache._lock, type(threading.Lock()))
+
+    def test_redis_cache_concurrent_instantiation(self):
+        """Verify that concurrent threads calling RedisCache() / get_instance() receive the exact same singleton instance."""
+        import threading
+
+        instances = []
+
+        def worker():
+            for _ in range(50):
+                instances.append(RedisCache.get_instance())
+                instances.append(RedisCache())
+
+        threads = [threading.Thread(target=worker) for _ in range(20)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(instances) == 2000
+        first = instances[0]
+        assert all(inst is first for inst in instances)
+
     def test_redis_url_without_ssl_redis_scheme(self):
         """Test that redis:// URL (without SSL) is handled correctly."""
         test_url = "redis://localhost:6379/0"
