@@ -213,7 +213,7 @@ class PayloadCompressor:
                 logger.error(
                     f"[CacheCompression] zlib decompression failed: {e}. Corrupted payload?"
                 )
-                raise e
+                return None
 
         return data
 
@@ -229,16 +229,6 @@ class CacheNamespace(str, Enum):
     ANALYSIS = "spd:v1:analysis"
     LOGIN_ATTEMPTS = "spd:v1:login_attempts"
     UPLOADS = "spd:v1:uploads"
-
-    # Legacy/Old namespaces merged from CacheKeyPrefix
-    LEGACY_LOGIN_ATTEMPTS = "login_attempts:"
-    LEGACY_UPLOAD_COUNT = "upload_count:"
-    LEGACY_SIMILARITY_RESULT = "similarity:"
-    LEGACY_DOCUMENT_CACHE = "doc:"
-    LEGACY_UPLOADS_PREFIX = "upload_count:"
-    LEGACY_FAISS_INDEX = "faiss_index"
-    LEGACY_ANALYSIS_PATTERN = "analysis:*"
-    LEGACY_ANALYSIS_PREFIX = "analysis:"
 
     def build_key(self, *parts: str) -> str:
         """Construct a standardized cache key with namespace prefix."""
@@ -265,19 +255,23 @@ class RedisCache:
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._fallback_cache = {}
-                    cls._instance._hits = 0
-                    cls._instance._misses = 0
+                    instance = super().__new__(cls)
+                    instance._fallback_cache = {}
+                    instance._hits = 0
+                    instance._misses = 0
+                    instance._client = None
+                    instance._initialized = False
+                    cls._instance = instance
         return cls._instance
 
     def __init__(self):
         if not hasattr(self, "_fallback_cache") or self._fallback_cache is None:
             self._fallback_cache = {}
-        if self._client is None:
+        if not getattr(self, "_initialized", False):
             with self._lock:
-                if self._client is None:
+                if not getattr(self, "_initialized", False):
                     self._connect()
+                    self._initialized = True
 
     @classmethod
     def get_instance(cls) -> "RedisCache":
