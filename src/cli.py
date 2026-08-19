@@ -9,6 +9,7 @@ import concurrent.futures
 import json
 import logging
 import os
+import re
 import sys
 import time
 from io import BytesIO
@@ -30,6 +31,26 @@ from src.db.database_backup import optimize_database
 from src.core.export_engine import LMSExportEngine
 
 logger = logging.getLogger(__name__)
+
+
+def _natural_sort_key(filepath: str) -> list:
+    """
+    Return a natural-sort key so that embedded numbers sort numerically.
+
+    For example, 'doc10.pdf' sorts after 'doc2.pdf' (natural order) instead of
+    before it (lexicographical order), which is easier for human operators to read.
+
+    Args:
+        filepath: The file path to build a sort key for.
+
+    Returns:
+        A list of alternating (type, value) tuples used for stable comparison.
+    """
+    filename = os.path.basename(filepath)
+    return [
+        (0, int(part)) if part.isdigit() else (1, part.casefold())
+        for part in re.split(r"(\d+)", filename)
+    ]
 
 
 def _process_single_file(filepath: str) -> tuple[str, str | None, str | None]:
@@ -102,8 +123,8 @@ def run_scan(
         sys.stderr.write(f"Error reading folder contents: {e}\n")
         return 1
 
-    # Sort files to ensure deterministic ordering
-    files.sort()
+    # Sort files using natural order (doc2.pdf before doc10.pdf)
+    files.sort(key=_natural_sort_key)
 
     raw_texts = {}
     with concurrent.futures.ProcessPoolExecutor() as executor:
@@ -227,7 +248,7 @@ def run_prewarm(folder_path: str | None = None) -> int:
             sys.stderr.write(f"Error reading folder contents: {e}\n")
             return 1
 
-        files.sort()
+        files.sort(key=_natural_sort_key)
         for filepath in files:
             filename = os.path.basename(filepath)
             try:
