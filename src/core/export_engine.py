@@ -50,6 +50,7 @@ class LMSExportEngine:
         except Exception as exception:
             logger.error("Failed to format incident data as HTML: %s", exception)
             return None
+
     def build_download_response(
         data: str | bytes,
         *,
@@ -172,6 +173,14 @@ class LMSExportEngine:
                             matched_text,
                         ]
                     )
+
+                date_flagged = row.get("date_flagged")
+                if date_flagged not in (None, ""):
+                    lines.append(f"Date flagged: {date_flagged}")
+
+                threshold_used = row.get("threshold_at_time_of_flag")
+                if threshold_used not in (None, ""):
+                    lines.append(f"Threshold at time of flag: {threshold_used}")
 
                 lines.append("")
 
