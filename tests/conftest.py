@@ -363,3 +363,101 @@ def _cleanup_corpus_db_connections():
         close_connections(all_threads=True)
     except ImportError:
         pass
+
+
+import sqlite3
+import pytest
+from pathlib import Path
+
+@pytest.fixture
+def db_connection(tmp_path: Path) -> sqlite3.Connection:
+    """Provide a clean, initialized SQLite database connection for testing.
+    
+    This fixture creates a temporary SQLite database in the pytest tmp_path,
+    initializes the required schema (incidents, documents, etc.), yields the
+    active connection for the test to use, and automatically closes the
+    connection during teardown.
+    
+    This eliminates the need for manual sqlite3.connect() and conn.close()
+    calls in every test function (Issue #2725).
+    
+    Yields:
+        sqlite3.Connection: An active, initialized database connection.
+    """
+    db_path = tmp_path / "test_plagiarism.db"
+    
+    # Create connection with row factory for dictionary-like access
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    
+    # Initialize schema (simplified for test environment)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS documents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT UNIQUE NOT NULL,
+            file_hash TEXT UNIQUE,
+            upload_date TEXT NOT NULL,
+            class_section TEXT,
+            student_name TEXT,
+            is_deleted INTEGER DEFAULT 0
+        );
+        
+        CREATE TABLE IF NOT EXISTS plagiarism_incidents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            incident_id TEXT UNIQUE NOT NULL,
+            document_a TEXT NOT NULL,
+            document_b TEXT NOT NULL,
+            similarity REAL NOT NULL,
+            severity TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            threshold_at_time_of_flag REAL,
+            review_status TEXT DEFAULT 'Pending'
+        );
+        
+        CREATE INDEX IF NOT EXISTS idx_incidents_docs 
+        ON plagiarism_incidents(document_a, document_b);
+    """)
+    conn.commit()
+    
+    # Yield the connection to the test
+    yield conn
+    
+    # Teardown: Close the connection
+    conn.close()
+
+
+@pytest.fixture
+def populated_db_connection(db_connection: sqlite3.Connection) -> sqlite3.Connection:
+    """Provide a database connection pre-populated with sample incident data.
+    
+    Builds on the base db_connection fixture by inserting 50 sample
+    plagiarism incidents with varying severities and similarities.
+    """
+    sample_incidents = []
+    for i in range(50):
+        sim = 0.50 + (i * 0.01)
+        severity = "High" if sim >= 0.80 else ("Medium" if sim >= 0.60 else "Low")
+        sample_incidents.append((
+            f"INC-{i:04d}",
+            f"student_{i}_a.pdf",
+            f"student_{i}_b.pdf",
+            sim,
+            severity,
+            f"2024-01-{(i % 28) + 1:02d}T10:00:00",
+            0.59,
+            "Pending"
+        ))
+        
+    db_connection.executemany(
+        """
+        INSERT INTO plagiarism_incidents 
+        (incident_id, document_a, document_b, similarity, severity, timestamp, threshold_at_time_of_flag, review_status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        sample_incidents
+    )
+    db_connection.commit()
+    
+    yield db_connection
+
+

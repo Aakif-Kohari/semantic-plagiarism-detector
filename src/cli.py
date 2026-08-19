@@ -30,6 +30,7 @@ from src.core.synchronization import verify_and_repair_index
 from src.core.text_chunking import chunk_documents
 from src.db.database_backup import optimize_database
 from src.core.export_engine import LMSExportEngine
+from src.errors import EmptyDocumentError
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,7 @@ def _process_single_file(filepath: str) -> tuple[str, str | None, str | None]:
             return filename, None, f"Warning: Extracted text from '{filename}' is empty.\n"
     except Exception as e:
         return filename, None, f"Warning: Failed to parse '{filename}': {e}\n"
+
 
 
 def run_scan(
@@ -111,20 +113,34 @@ def run_scan(
     files.sort()
 
     raw_texts = {}
-    with concurrent.futures.ProcessPoolExecutor() as executor:
+    skipped_files = []
+    
+    for file_path in valid_files:
+        filename = file_path.name
         try:
-            for filename, text, err in executor.map(_process_single_file, files):
-                if text:
-                    raw_texts[filename] = text
-                else:
-                    sys.stderr.write(
-                        f"Warning: Extracted text from '{filename}' is empty.\n"
-                    )
-        except OCRDependencyError as e:
-            sys.stderr.write(f"Fatal Error: {e}\n")
-            sys.exit(1)
+            with open(file_path, "rb") as f:
+                file_bytes = f.read()
+                
+            extracted = extract_text(
+                file_bytes, 
+                filename=filename, 
+                language=ocr_language, 
+                dpi=ocr_dpi
+            )
+            raw_texts[filename] = extracted
+            
+        except EmptyDocumentError as ede:
+            # Issue #2724: Handle empty documents gracefully in CLI
+            sys.stderr.write(f"⚠️  Warning: {ede}\n")
+            skipped_files.append(filename)
+            
         except Exception as e:
-            sys.stderr.write(f"Warning: Failed to parse '{filename}': {e}\n")
+            sys.stderr.write(f"❌ Error processing {filename}: {e}\n")
+            skipped_files.append(filename)
+
+    if not raw_texts:
+        sys.stderr.write("Error: No valid documents found to process.\n")
+        return 1
 
     num_processed = len(raw_texts)
     matches = []
