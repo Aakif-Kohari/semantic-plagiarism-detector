@@ -14,7 +14,6 @@ from src.utils.daily_summary_email import (
     build_email_html_body,
     build_incident_row_html,
     build_severity_section_html,
-    format_daily_summary,
     generate_daily_summary_html,
     get_admin_emails,
     get_incidents_last_24h,
@@ -197,9 +196,9 @@ def test_get_admin_emails_no_valid_db_or_env_email(mock_get_users):
     assert emails == []
 
 
-def test_format_daily_summary_with_incidents(mock_incidents):
+def test_build_email_html_body_with_incidents_legacy_args(mock_incidents):
     """Test formatting daily summary with incidents."""
-    html = format_daily_summary(mock_incidents)
+    html = build_email_html_body(incidents_data=mock_incidents, total_scans=0)
 
     assert "Daily Plagiarism Summary" in html
     assert "<strong>Total new incidents:</strong> 3" in html
@@ -211,9 +210,9 @@ def test_format_daily_summary_with_incidents(mock_incidents):
     assert "95.00%" in html
 
 
-def test_format_daily_summary_empty():
+def test_build_email_html_body_empty_legacy_args():
     """Test formatting daily summary with no incidents."""
-    html = format_daily_summary([])
+    html = build_email_html_body(incidents_data=[], total_scans=0)
 
     assert "Daily Plagiarism Summary" in html
     assert "No new plagiarism incidents detected" in html
@@ -613,13 +612,6 @@ class TestEmailTemplateHelpers:
         assert "OnlyDocA" in html
         assert "Unknown" in html
         assert "0.00%" in html
-
-    def test_format_daily_summary_backward_compatibility(self):
-        """Test that the legacy wrapper still functions correctly."""
-        incidents = [{"severity_rank": "Low"}]
-        html = format_daily_summary(incidents)
-        assert "Daily Plagiarism Summary" in html
-        assert "<strong>Total scans processed:</strong> 0" in html
 
     def test_build_email_html_body_inline_css_compatibility(self):
         """Test that critical inline CSS properties are present for email clients."""
