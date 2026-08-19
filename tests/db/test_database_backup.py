@@ -12,6 +12,7 @@ from src.db.database_backup import (
     get_database_file_size_bytes,
 )
 
+
 def create_test_database(path):
     with closing(sqlite3.connect(path)) as connection:
         connection.execute(

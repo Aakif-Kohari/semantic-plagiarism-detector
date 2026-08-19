@@ -1,0 +1,9 @@
+--- a/add_index_to_upload_date
+@@ -10,6 +10,7 @@
+ def create_documents_table(cursor):
+     cursor.execute("""
+         CREATE TABLE documents (
++            upload_date DATE,
+             id SERIAL PRIMARY KEY,
+             title VARCHAR(255),
+             content TEXT

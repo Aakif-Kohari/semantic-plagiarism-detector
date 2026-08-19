@@ -28,25 +28,132 @@ import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
+from src.core.stopwords import get_stopword_manager, tokenize_filtered
+
 # ── Stop-word handling (issue #222) ───────────────────────────────────────────
 
 _TOKEN_RE: re.Pattern[str] = re.compile(r"[a-z0-9]+(?:'[a-z]+)?")
 
 # Compact fallback list — covers high-frequency English function words.
 _FALLBACK_STOPWORDS: Set[str] = {
-    "a", "an", "the", "and", "or", "but", "if", "then", "else", "when",
-    "at", "by", "for", "with", "about", "against", "between", "into",
-    "through", "during", "before", "after", "above", "below", "to", "from",
-    "up", "down", "in", "out", "on", "off", "over", "under", "again",
-    "further", "is", "are", "was", "were", "be", "been", "being", "am",
-    "have", "has", "had", "having", "do", "does", "did", "doing", "will",
-    "would", "shall", "should", "can", "could", "may", "might", "must",
-    "of", "as", "it", "its", "this", "that", "these", "those", "i", "you",
-    "he", "she", "we", "they", "them", "his", "her", "their", "our", "my",
-    "your", "me", "him", "us", "so", "than", "too", "very", "s", "t",
-    "just", "also", "not", "no", "nor", "only", "own", "same", "such",
-    "more", "most", "other", "some", "any", "each", "few", "both", "all",
-    "there", "here", "where", "why", "how", "what", "which", "who", "whom",
+    "a",
+    "an",
+    "the",
+    "and",
+    "or",
+    "but",
+    "if",
+    "then",
+    "else",
+    "when",
+    "at",
+    "by",
+    "for",
+    "with",
+    "about",
+    "against",
+    "between",
+    "into",
+    "through",
+    "during",
+    "before",
+    "after",
+    "above",
+    "below",
+    "to",
+    "from",
+    "up",
+    "down",
+    "in",
+    "out",
+    "on",
+    "off",
+    "over",
+    "under",
+    "again",
+    "further",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "being",
+    "am",
+    "have",
+    "has",
+    "had",
+    "having",
+    "do",
+    "does",
+    "did",
+    "doing",
+    "will",
+    "would",
+    "shall",
+    "should",
+    "can",
+    "could",
+    "may",
+    "might",
+    "must",
+    "of",
+    "as",
+    "it",
+    "its",
+    "this",
+    "that",
+    "these",
+    "those",
+    "i",
+    "you",
+    "he",
+    "she",
+    "we",
+    "they",
+    "them",
+    "his",
+    "her",
+    "their",
+    "our",
+    "my",
+    "your",
+    "me",
+    "him",
+    "us",
+    "so",
+    "than",
+    "too",
+    "very",
+    "s",
+    "t",
+    "just",
+    "also",
+    "not",
+    "no",
+    "nor",
+    "only",
+    "own",
+    "same",
+    "such",
+    "more",
+    "most",
+    "other",
+    "some",
+    "any",
+    "each",
+    "few",
+    "both",
+    "all",
+    "there",
+    "here",
+    "where",
+    "why",
+    "how",
+    "what",
+    "which",
+    "who",
+    "whom",
 }
 
 
@@ -87,7 +194,9 @@ def _get_combined_stopwords(
     """
     combined: Set[str] = set(STOPWORDS)
     if custom_stopwords:
-        combined.update(w.lower().strip() for w in custom_stopwords if isinstance(w, str))
+        combined.update(
+            w.lower().strip() for w in custom_stopwords if isinstance(w, str)
+        )
     return combined
 
 
@@ -112,7 +221,9 @@ def remove_stopwords(
     if not text or not isinstance(text, str):
         return ""
     stop_set: Set[str] = set(stopwords) if stopwords is not None else STOPWORDS
-    tokens: List[str] = [tok for tok in _TOKEN_RE.findall(text.lower()) if tok not in stop_set]
+    tokens: List[str] = [
+        tok for tok in _TOKEN_RE.findall(text.lower()) if tok not in stop_set
+    ]
     return " ".join(tokens)
 
 
@@ -168,7 +279,9 @@ def get_ngrams(
     if not text or not isinstance(text, str) or n < 1:
         return set()
     stop_set: Set[str] = set(stopwords) if stopwords is not None else STOPWORDS
-    tokens: List[str] = [tok for tok in _TOKEN_RE.findall(text.lower()) if tok not in stop_set]
+    tokens: List[str] = [
+        tok for tok in _TOKEN_RE.findall(text.lower()) if tok not in stop_set
+    ]
     if len(tokens) < n:
         return set()
     return {tuple(tokens[i : i + n]) for i in range(len(tokens) - n + 1)}
@@ -220,40 +333,31 @@ def n_gram_overlap(
 def jaccard_similarity(
     text_a: str,
     text_b: str,
-    stopwords: Optional[Iterable[str]] = None,
+    stopwords: Optional[Set[str]] = None,
+    use_stopwords: bool = True,
 ) -> float:
-    """Compute Jaccard similarity index over stop-word-filtered token sets.
-
-    Mathematical Formula
-    --------------------
-    .. math::
-
-        J(A, B) = \\frac{|A \\cap B|}{|A \\cup B|} = \\frac{|A \\cap B|}{|A| + |B| - |A \\cap B|}
-
-    where A and B are sets of unique non-stop-word tokens from text_a and text_b.
-
-    Parameters
-    ----------
-    text_a : str
-        First document text string.
-    text_b : str
-        Second document text string.
-    stopwords : Optional[Iterable[str]], default=None
-        Optional iterable of stop-words to exclude during tokenization.
-
-    Returns
-    -------
-    float
-        Jaccard similarity index bounded between 0.0 and 1.0.
-    """
-    set_a: Set[str] = tokenize(text_a, stopwords=stopwords)
-    set_b: Set[str] = tokenize(text_b, stopwords=stopwords)
+    """Compute Jaccard similarity with optional stopword filtering."""
+    if not text_a or not text_b:
+        return 0.0
+    
+    if use_stopwords:
+        if stopwords is None:
+            stopwords = get_stopword_manager().get_stopwords()
+        set_a = tokenize_filtered(text_a, stopwords)
+        set_b = tokenize_filtered(text_b, stopwords)
+    else:
+        from src.core.lexical_similarity import tokenize
+        set_a = tokenize(text_a, stopwords)
+        set_b = tokenize(text_b, stopwords)
+    
     if not set_a and not set_b:
+        return 1.0
+    if not set_a or not set_b:
         return 0.0
-    union: Set[str] = set_a | set_b
-    if not union:
-        return 0.0
-    return float(len(set_a & set_b) / len(union))
+    
+    intersection = len(set_a & set_b)
+    union = len(set_a | set_b)
+    return intersection / union if union > 0 else 0.0
 
 
 def jaccard_index(
@@ -420,7 +524,12 @@ def compute_tfidf_lexical_similarity(
     float
         Normalized similarity score bounded strictly between 0.0 and 1.0.
     """
-    if not doc_a or not doc_b or not isinstance(doc_a, str) or not isinstance(doc_b, str):
+    if (
+        not doc_a
+        or not doc_b
+        or not isinstance(doc_a, str)
+        or not isinstance(doc_b, str)
+    ):
         return 0.0
     if not doc_a.strip() or not doc_b.strip():
         return 0.0
@@ -439,7 +548,6 @@ def compute_tfidf_lexical_similarity(
         return float(np.clip(sim, 0.0, 1.0))
     except ValueError:
         return 0.0
-
 
 
 def _make_documents_hash(
@@ -497,7 +605,9 @@ def _cached_lexical_similarity_matrix(
 
     texts: List[str] = [documents[name] for name in doc_names]
     stop_words_list: List[str] = list(
-        _get_combined_stopwords(set(custom_stopwords_tuple) if custom_stopwords_tuple else None)
+        _get_combined_stopwords(
+            set(custom_stopwords_tuple) if custom_stopwords_tuple else None
+        )
     )
 
     try:
@@ -542,7 +652,9 @@ def lexical_similarity_matrix(
     pd.DataFrame
         Square N x N pandas DataFrame containing similarity scores in range [0.0, 1.0].
     """
-    custom_tuple: Tuple[str, ...] = tuple(sorted(custom_stopwords)) if custom_stopwords else ()
+    custom_tuple: Tuple[str, ...] = (
+        tuple(sorted(custom_stopwords)) if custom_stopwords else ()
+    )
 
     if use_cache:
         documents_tuple: Tuple[Tuple[str, str], ...] = tuple(sorted(documents.items()))
@@ -780,7 +892,7 @@ def compute_char_ngram_similarity(text_a: str, text_b: str, n: int = 5) -> float
         return 0.0
 
     similarity = float(intersection_len / union_len)
-    
+
     logger.debug(
         "compute_char_ngram_similarity: computed char %d-gram similarity=%.4f "
         "(intersection=%d, union=%d)",

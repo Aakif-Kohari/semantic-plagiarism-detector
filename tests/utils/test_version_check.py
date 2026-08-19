@@ -13,12 +13,35 @@ import asyncio
 import importlib.util
 import pathlib
 import sys
+import types
 from unittest.mock import AsyncMock, MagicMock, patch
 
 # ---------------------------------------------------------------------------
 # Import version_check directly to avoid pulling in the heavy src/__init__.py
 # chain (which transitively requires docx, faiss, etc.)
 # ---------------------------------------------------------------------------
+# version_check.py imports `APP_VERSION` from `src.version` (the
+# centralized single-source-of-truth version module). Resolving that
+# import still requires a `src` package to exist in sys.modules -- so a
+# lightweight namespace stub is registered here (mirroring version_check
+# itself being hand-loaded below) rather than letting Python fall through
+# to the real src/__init__.py, which is exactly the heavy chain this
+# test file exists to avoid.
+if "src" not in sys.modules:
+    _src_stub = types.ModuleType("src")
+    _src_stub.__path__ = [str(pathlib.Path(__file__).parent.parent.parent / "src")]
+    sys.modules["src"] = _src_stub
+
+_VERSION_MOD_PATH = (
+    pathlib.Path(__file__).parent.parent.parent / "src" / "version.py"
+)
+_version_spec = importlib.util.spec_from_file_location(
+    "src.version", _VERSION_MOD_PATH
+)
+_version_mod = importlib.util.module_from_spec(_version_spec)  # type: ignore[arg-type]
+sys.modules.setdefault("src.version", _version_mod)
+_version_spec.loader.exec_module(_version_mod)  # type: ignore[union-attr]
+
 _MOD_PATH = (
     pathlib.Path(__file__).parent.parent.parent / "src" / "utils" / "version_check.py"
 )
@@ -197,6 +220,36 @@ class TestCheckForUpdateSync:
         ):
             result = check_for_update_sync(local_version="1.0.0")
         assert result is None
+
+    def test_uses_asyncio_run_and_no_event_loop_leak(self) -> None:
+        """Verify that check_for_update_sync executes via asyncio.run without leaking event loops."""
+        with patch.object(
+            _vc_mod, "fetch_latest_github_version", new=AsyncMock(return_value="v9.9.9")
+        ):
+            result = check_for_update_sync(local_version="1.0.0")
+
+        assert result == "v9.9.9"
+        try:
+            loop = asyncio.get_running_loop()
+            assert not loop.is_running()
+        except RuntimeError:
+            pass
+
+    def test_no_event_loop_leak_on_exception(self) -> None:
+        """Verify event loop cleanup occurs automatically even when fetch raises an error."""
+        with patch.object(
+            _vc_mod,
+            "fetch_latest_github_version",
+            new=AsyncMock(side_effect=RuntimeError("async failure")),
+        ):
+            result = check_for_update_sync(local_version="1.0.0")
+
+        assert result is None
+        try:
+            loop = asyncio.get_running_loop()
+            assert not loop.is_running()
+        except RuntimeError:
+            pass
 
 
 # ── Module-level constants ─────────────────────────────────────────────────────

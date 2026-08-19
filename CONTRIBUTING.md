@@ -28,8 +28,12 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 ```bash
 pip install -r requirements.txt
+pip install -r requirements-dev.txt
 pip install pytest-cov
 ```
+
+`requirements-dev.txt` contains development-only tools (ruff, pylint, black,
+isort, pre-commit) and is not needed for deployment.
 
 ### Run the project
 ## 5. Run the project
@@ -114,6 +118,10 @@ src/core/parser.py
 tests/core/test_parser.py
 ```
 
+### Architecture Decisions
+
+If your contribution introduces major architectural changes, please document them by writing an Architecture Decision Record (ADR). Follow the format defined in the [ADR Template](docs/adr/adr-template.md).
+
 ---
 
 # 📌 Issue Assignment Policy
@@ -167,8 +175,52 @@ The project uses pytest with configuration in `pytest.ini`. Tests are located in
 - Run `ruff check .` and `ruff format .` to maintain code quality
 - Respond to review feedback promptly and make requested changes
 
-## Reporting Issues
+## Changelog
 
+This project maintains `CHANGELOG.md` following the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+If your PR changes behavior, adds a feature, or fixes a bug, add an entry under the `## [Unreleased]` section at the top of `CHANGELOG.md` (create this section if it doesn't exist yet, directly below the file header). Use these subsections as needed:
+
+- `### Added` - new features
+- `### Changed` - changes to existing functionality
+- `### Fixed` - bug fixes
+
+Each entry should be a short bullet describing the change, referencing the relevant module or file path where helpful. Skip the changelog for purely internal changes with no user-facing or API impact (e.g. test-only additions, typo fixes in comments).
+
+Example:
+
+```markdown
+## [Unreleased]
+
+### Added
+- Support for `.rtf` file uploads in the document parser (`src/core/document_parser.py`).
+
+### Changed
+- Increased default similarity threshold from 0.55 to 0.59 for improved precision.
+
+### Fixed
+- Corrected off-by-one error in paragraph chunk indexing (`src/core/text_chunking.py`).
+```
+
+When a new version is released, the maintainer will rename `[Unreleased]` to the version number and date (e.g. `## [1.1.0] - 2026-08-15`) and open a fresh `[Unreleased]` section above it.
+
+## Bumping the Version
+
+The application version is defined in a single place: `src/version.py`
+(the `version` string). `src/utils/version_check.py` imports `APP_VERSION`
+from that file, so there is only one place to update.
+
+To release a new version:
+
+1. Update `version` in `src/version.py` (e.g. `"1.0.0"` → `"1.1.0"`).
+2. Update `CHANGELOG.md` as described above, renaming `[Unreleased]` to the
+   new version and date.
+3. Commit both changes together in the same PR.
+
+Do not hardcode the version anywhere else — always import it from
+`src.version`.
+
+## Reporting Issues
 When opening bug reports or feature requests:
 
 - Search existing issues first to avoid duplicates

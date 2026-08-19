@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 SIMILARITY_PATH = Path("src/core/similarity.py")
 TEST_PATH = Path("tests/core/test_similarity.py")
 
@@ -25,15 +24,6 @@ def test_similarity_uses_normalized_manhattan_formula():
 def test_unit_tests_are_added_to_requested_file():
     source = TEST_PATH.read_text(encoding="utf-8")
 
-    assert (
-        "test_manhattan_similarity_identical_vectors"
-        in source
-    )
-    assert (
-        "test_manhattan_similarity_rejects_shape_mismatch"
-        in source
-    )
-    assert (
-        "test_manhattan_similarity_remains_bounded"
-        in source
-    )
+    assert "test_manhattan_similarity_identical_vectors" in source
+    assert "test_manhattan_similarity_rejects_shape_mismatch" in source
+    assert "test_manhattan_similarity_remains_bounded" in source

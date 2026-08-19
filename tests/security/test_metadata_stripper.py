@@ -108,6 +108,19 @@ def test_strip_image_metadata_dimension_exactly_at_limit():
     assert len(result) > 0
 
 
+def test_strip_image_metadata_memory_footprint_exceeds_limit():
+    # 6000 x 6000 RGBA image (4 bytes/pixel) = 144 MB > 100 MB safety limit
+    img = Image.new("RGBA", (6000, 6000), color=(255, 0, 0, 255))
+    img_bytes = io.BytesIO()
+    img.save(img_bytes, format="PNG")
+
+    with pytest.raises(ValueError) as excinfo:
+        strip_exif_metadata(img_bytes.getvalue(), "test.png")
+    assert "Decompressed image memory footprint exceeds 100 MB safety limit" in str(
+        excinfo.value
+    )
+
+
 def test_strip_image_metadata_decompressed_memory_exceeds_limit(monkeypatch):
     # 10000 x 10000 RGB pixels -> 10000 * 10000 * 3 = 300 MB, which exceeds
     # the 100 MB decompressed memory safety limit.
@@ -177,6 +190,22 @@ def test_strip_palette_image_preserves_colors():
         assert out_image.mode == "RGBA"
         pixel = out_image.getpixel((5, 5))
     assert pixel == (7, 0, 248, 255)
+
+
+@pytest.mark.parametrize("mode", ["I", "F", "I;16"])
+def test_strip_high_bit_depth_image_converts_to_rgb(mode):
+    # 16-bit / 32-bit float or integer images should be converted to standard 8-bit RGB
+    img = Image.new(mode, (10, 10), 100)
+    img_bytes = io.BytesIO()
+    # Save TIFF format as TIFF supports high bit depth mode headers
+    img.save(img_bytes, format="TIFF")
+
+    result = strip_exif_metadata(img_bytes.getvalue(), "test.png")
+
+    with Image.open(io.BytesIO(result)) as out_image:
+        assert out_image.mode == "RGB"
+        assert isinstance(result, bytes)
+        assert len(result) > 0
 
 
 def test_strip_image_metadata_decompression_bomb(monkeypatch):

@@ -3,19 +3,20 @@ Unit tests for src.db.migrations.common helpers.
 """
 
 import sqlite3
-import pytest
 from unittest.mock import patch
 
+import pytest
+
 from src.db.migrations.common import (
+    column_exists,
     enable_wal_mode,
     get_journal_mode,
+    get_user_version,
+    index_exists,
     perform_wal_checkpoint,
     quote_identifier,
-    table_exists,
-    column_exists,
-    index_exists,
-    get_user_version,
     set_user_version,
+    table_exists,
 )
 
 
@@ -49,7 +50,7 @@ class TestWalModeHelpers:
 
     def test_enable_wal_mode_handles_error(self, in_memory_db):
         """Test that enable_wal_mode raises sqlite3.Error on failure."""
-        with patch.object(in_memory_db, 'cursor') as mock_cursor:
+        with patch.object(in_memory_db, "cursor") as mock_cursor:
             mock_cursor.return_value.execute.side_effect = sqlite3.Error("DB locked")
             with pytest.raises(sqlite3.Error):
                 enable_wal_mode(in_memory_db)
@@ -62,7 +63,7 @@ class TestWalModeHelpers:
 
     def test_get_journal_mode_handles_error(self, in_memory_db):
         """Test that get_journal_mode returns 'unknown' on error."""
-        with patch.object(in_memory_db, 'cursor') as mock_cursor:
+        with patch.object(in_memory_db, "cursor") as mock_cursor:
             mock_cursor.return_value.execute.side_effect = sqlite3.Error("DB error")
             assert get_journal_mode(in_memory_db) == "unknown"
 
