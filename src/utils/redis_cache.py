@@ -120,11 +120,11 @@ class PayloadCompressor:
         Uncompressed payloads: raw serialized bytes.
 
     Payloads are compressed when their serialized size is at least
-    COMPRESSION_THRESHOLD_BYTES (512 KiB).
+    COMPRESSION_THRESHOLD_BYTES (64 KiB).
     """
 
-    # Threshold above which data is compressed (e.g., 512KB)
-    COMPRESSION_THRESHOLD_BYTES: int = 512 * 1024
+    # Threshold above which data is compressed (e.g., 64KB)
+    COMPRESSION_THRESHOLD_BYTES: int = 64 * 1024
     _raw_threshold = os.getenv("REDIS_COMPRESSION_THRESHOLD", "").strip()
     if _raw_threshold:
         try:
