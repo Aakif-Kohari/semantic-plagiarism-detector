@@ -11,24 +11,19 @@ Features:
 - Integration hooks and webhooks
 """
 
-import json
-import csv
 import io
-import os
+import json
+import threading
 import time
 import xml.etree.ElementTree as ET
-from pathlib import Path
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Union, Callable
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
 import pandas as pd
-import numpy as np
 import streamlit as st
-import requests
-import base64
-import zipfile
-import threading
 
 # ==============================================================================
 # ENUMS AND DATA CLASSES
@@ -383,7 +378,7 @@ class ExportManager:
     
     def _generate_markdown(self, df: pd.DataFrame, metadata: Dict) -> bytes:
         """Generate Markdown file."""
-        md = f"# Plagiarism Report\n\n"
+        md = "# Plagiarism Report\n\n"
         md += f"Exported: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
         
         # Metadata
@@ -428,8 +423,14 @@ class ExportManager:
         try:
             from reportlab.lib import colors
             from reportlab.lib.pagesizes import letter
-            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
             from reportlab.lib.styles import getSampleStyleSheet
+            from reportlab.platypus import (
+                Paragraph,
+                SimpleDocTemplate,
+                Spacer,
+                Table,
+                TableStyle,
+            )
             
             buffer = io.BytesIO()
             doc = SimpleDocTemplate(buffer, pagesize=letter)
@@ -965,7 +966,7 @@ def render_export_bulk():
                         filename = f"{export_name}.zip"
                     
                     st.download_button(
-                        label=f"⬇️ Download Bulk Export",
+                        label="⬇️ Download Bulk Export",
                         data=file_data,
                         file_name=filename,
                         mime="application/zip" if compress else f"application/{export_format}",

@@ -1,5 +1,7 @@
 import pytest
+
 from src import database  # Adjust based on your module structure
+
 
 @pytest.fixture(autouse=True)
 def setup_teardown(monkeypatch, tmp_path):

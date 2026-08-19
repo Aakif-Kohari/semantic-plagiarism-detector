@@ -45,7 +45,6 @@ from src.core.parsers.ocr_parser import (
     check_ocr_dependencies,
     extract_text_from_image,
 )
-
 from src.core.parsers.pdf_parser import (
     count_pdf_images,
     extract_pdf_metadata,

@@ -13,20 +13,21 @@ Features:
 """
 
 import json
-import time
-import smtplib  # noqa: F401
-import requests  # noqa: F401
-from pathlib import Path
-from datetime import datetime, timedelta  # noqa: F401
-from typing import Dict, List, Any, Optional, Callable, Set  # noqa: F401
-from dataclasses import dataclass, field, asdict
-from enum import Enum
-from collections import defaultdict, deque  # noqa: F401
-import threading
 import queue
-import streamlit as st
+import smtplib  # noqa: F401
+import threading
+import time
+from collections import defaultdict, deque  # noqa: F401
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta  # noqa: F401
+from enum import Enum
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Set  # noqa: F401
+
 import pandas as pd  # noqa: F401
 import plotly.graph_objects as go
+import requests  # noqa: F401
+import streamlit as st
 
 # ==============================================================================
 # ENUMS AND DATA CLASSES

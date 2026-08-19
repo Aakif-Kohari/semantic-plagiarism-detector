@@ -244,5 +244,5 @@ For deeper configuration details and troubleshooting, consult the official Redis
 - **Compressed payloads:** `MAGIC_HEADER + zlib_compressed_data`
 - **Uncompressed payloads:** raw serialized bytes
 - `MAGIC_HEADER` is `b"ZLIB_COMPRESSED_V1::"` and identifies compressed entries.
-- Compression is applied when the serialized payload size is at least `COMPRESSION_THRESHOLD_BYTES`, which is **512 KiB (`512 * 1024` bytes)**.
+- Compression is applied when the serialized payload size is at least `COMPRESSION_THRESHOLD_BYTES`, which is **64 KiB (`64 * 1024` bytes)**.
 - Consumers reading Redis entries directly should check for `MAGIC_HEADER` before attempting zlib decompression.

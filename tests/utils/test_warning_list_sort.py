@@ -8,9 +8,11 @@ invalid fields, and correct ordering for various data types and edge cases.
 Addresses Issue #2122.
 """
 
-import pytest
 import logging
-from src.utils.warning_list import sort_warnings, VALID_SORT_FIELDS
+
+import pytest
+
+from src.utils.warning_list import VALID_SORT_FIELDS, sort_warnings
 
 
 class TestSortWarningsPrimary:

@@ -9,6 +9,7 @@ and strong password complexity policies.
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import logging
 import os
@@ -17,8 +18,9 @@ import secrets
 import sqlite3
 import string
 from datetime import datetime as dt
-from datetime import timezone
+from datetime import timedelta, timezone
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 import bcrypt
 from argon2 import PasswordHasher
@@ -28,10 +30,12 @@ from src.core.app_config import AUTH_DB_PATH
 from src.db.base import BaseRepository
 from src.db.common import with_sqlite_retry
 from src.db.migrations import migrate_auth_database, table_exists
+from src.db.security_audit import count_recent_failed_logins, log_security_event
 from src.errors import StaleDataException
-from src.db.security_audit import log_security_event, count_recent_failed_logins
 
 logger = logging.getLogger(__name__)
+
+from src.core.app_config import AUTH_DB_PATH, get_valid_roles
 
 _DB_PATH = os.path.abspath(str(AUTH_DB_PATH))
 
@@ -40,7 +44,7 @@ def get_auth_db_path() -> Path:
     return Path(_DB_PATH)
 
 
-VALID_ROLES = {"admin", "teacher"}
+VALID_ROLES = get_valid_roles()
 
 SQLITE_TIMEOUT: float = 5.0
 """float: Busy timeout in seconds (15.0s) for SQLite database connections in the authentication module.
@@ -158,6 +162,16 @@ class AuthRepository(BaseRepository):
                 username,
                 exc,
             )
+            try:
+                from src.db.security_audit import _emit_audit_log_failure_alert
+
+                _emit_audit_log_failure_alert(
+                    event_type=event_type, username=username, error=exc
+                )
+            except Exception as alert_exc:
+                logger.warning(
+                    "Failed to trigger audit log failure alert: %s", alert_exc
+                )
 
     def _build_audit_log_query_conditions(
         self,
@@ -165,8 +179,8 @@ class AuthRepository(BaseRepository):
         event_type: str | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
-    ) -> tuple[str, list]:
-        """Build WHERE clause snippet (if any) and parameters list for security audit log queries."""
+    ) -> tuple[str, tuple]:
+        """Build WHERE clause snippet (if any) and parameters tuple for security audit log queries."""
         conditions: list[str] = []
         params: list = []
 
@@ -184,7 +198,7 @@ class AuthRepository(BaseRepository):
             params.append(end_date)
 
         where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
-        return where_clause, params
+        return where_clause, tuple(params)
 
     def get_security_audit_logs(
         self,
@@ -209,11 +223,11 @@ class AuthRepository(BaseRepository):
             f"SELECT id, event_type, username, timestamp, details FROM security_audit_log{where_clause}"
             " ORDER BY id DESC LIMIT ? OFFSET ?"
         )
-        params.extend([limit, offset])
+        query_params = params + (limit, offset)
 
         try:
             with self.connection(read_only=True) as conn:
-                rows = conn.execute(query, params).fetchall()
+                rows = conn.execute(query, query_params).fetchall()
                 return [
                     {
                         "id": r[0],
@@ -444,8 +458,9 @@ def _validate_password_complexity(password: str) -> str:
 
 def _validate_role(role: str) -> str:
     role = str(role).strip().lower()
-    if role not in VALID_ROLES:
-        raise ValueError(f"Role must be one of: {', '.join(sorted(VALID_ROLES))}")
+    valid_roles = get_valid_roles()
+    if role not in valid_roles:
+        raise ValueError(f"Role must be one of: {', '.join(sorted(valid_roles))}")
     return role
 
 
@@ -705,7 +720,7 @@ def get_user_roles(user_ids: list[int]) -> dict[int, str]:
         with _connect() as conn:
             rows = conn.execute(
                 f"SELECT id, role FROM users WHERE id IN ({placeholders})",
-                user_ids,
+                tuple(user_ids),
             ).fetchall()
             return {row[0]: row[1] for row in rows}
     except sqlite3.Error as e:
@@ -752,10 +767,10 @@ def get_all_users(role: str | None = None) -> list:
     """
     try:
         query = "SELECT id, username, role, is_active, version FROM users"
-        params: list = []
+        params: tuple = ()
         if role is not None:
             query += " WHERE role = ?"
-            params.append(role)
+            params = (role,)
         query += " ORDER BY id"
         with _connect() as conn:
             rows = conn.execute(query, params).fetchall()
@@ -1991,13 +2006,6 @@ def demote_user(username: str, admin_username: str) -> bool:
 # ============================================================================
 # SSO SECURITY ENHANCEMENTS - Issue #2172
 # ============================================================================
-
-import hashlib
-import json  # noqa: F811
-import secrets  # noqa: F811
-import string  # noqa: F811
-from datetime import timedelta
-from typing import Any, Dict, List, Optional  # noqa: F811
 
 # ============================================================================
 # SECURE PASSWORD GENERATION

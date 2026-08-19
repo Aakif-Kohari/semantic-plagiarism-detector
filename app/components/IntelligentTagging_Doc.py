@@ -6,15 +6,13 @@ import re
 import json
 import hashlib
 import uuid
+from collections import Counter, defaultdict
+from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import Dict, List, Optional, Set, Tuple, Any
-from collections import defaultdict, Counter
-from dataclasses import dataclass, asdict
+from typing import Dict, List, Optional, Tuple
+
 import pandas as pd
-import numpy as np
 import streamlit as st
-import plotly.graph_objects as go
-import plotly.express as px
 
 # ── Data Models ─────────────────────────────────────────────────────────────
 
@@ -543,7 +541,7 @@ def render_tag_management_ui(tag_manager: TagManager, document_name: str = None)
                             unsafe_allow_html=True
                         )
                         
-                        if st.button(f"❌", key=f"remove_{tag.id}_{document_name}"):
+                        if st.button("❌", key=f"remove_{tag.id}_{document_name}"):
                             tag_manager.unassign_tag(document_name, tag.name)
                             st.rerun()
             else:

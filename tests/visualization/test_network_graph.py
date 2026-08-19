@@ -1,4 +1,5 @@
 import xml.etree.ElementTree as ET
+
 """
 tests/visualization/test_network_graph.py
 -------------------------------------------

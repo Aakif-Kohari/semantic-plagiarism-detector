@@ -5,11 +5,10 @@ Provides normalization for Arabic script, Devanagari, Cyrillic, and other
 non-Latin scripts to improve cross-script plagiarism detection.
 """
 
-import re
-import unicodedata
-from typing import Dict, List, Optional, Tuple, Set
-from collections import defaultdict
 import logging
+import unicodedata
+from collections import defaultdict
+from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 

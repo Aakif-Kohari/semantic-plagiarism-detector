@@ -5,12 +5,11 @@ Provides language-specific preprocessing for non-Latin scripts
 including Arabic, Devanagari, Cyrillic, and more.
 """
 
-import re
-import unicodedata
-from typing import Dict, List, Optional, Set, Tuple
-from collections import defaultdict
 import logging
-from src.core.script_normalizer import get_script_normalizer, ScriptDetector
+from collections import defaultdict
+from typing import Dict, List, Optional, Set
+
+from src.core.script_normalizer import ScriptDetector, get_script_normalizer
 
 logger = logging.getLogger(__name__)
 

@@ -25,7 +25,7 @@ import socket
 import time
 import urllib.parse
 from collections import OrderedDict
-from typing import Dict, Tuple, Optional
+from typing import Tuple
 
 import requests
 

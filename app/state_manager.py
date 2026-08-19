@@ -64,33 +64,48 @@ def update_global_activity():
 
 
 def get_active_sessions_count() -> int:
-    """Return the number of active Streamlit sessions."""
+    """Return the number of active Streamlit sessions, or -1 on failure."""
     try:
         cache = get_cache()
+        if cache is None:
+            return -1
+
         now = time.time()
         active_count = 0
         keys = []
+        scan_failed = False
 
         if cache.is_available():
             try:
-                raw_keys = cache._client.keys("spd:v1:session:*:last_interaction")
+                if hasattr(cache._client, "scan_iter"):
+                    raw_keys = list(cache._client.scan_iter("spd:v1:session:*:last_interaction", count=1000))
+                else:
+                    raw_keys = cache._client.keys("spd:v1:session:*:last_interaction")
                 keys = [
                     k.decode("utf-8") if isinstance(k, bytes) else k for k in raw_keys
                 ]
             except Exception as e:
                 logger.error(f"Failed to scan Redis session keys: {e}")
+                scan_failed = True
 
         try:
-            fallback_keys = [
-                k
-                for k in cache.fallback_cache.keys()
-                if k.startswith("spd:v1:session:") and k.endswith(":last_interaction")
-            ]
-            for k in fallback_keys:
-                if k not in keys:
-                    keys.append(k)
+            fallback_dict = getattr(cache, "fallback_cache", {})
+            if fallback_dict is not None:
+                fallback_keys = [
+                    k
+                    for k in fallback_dict.keys()
+                    if k.startswith("spd:v1:session:") and k.endswith(":last_interaction")
+                ]
+                for k in fallback_keys:
+                    if k not in keys:
+                        keys.append(k)
         except Exception as e:
             logger.error(f"Failed to scan fallback cache session keys: {e}")
+            if not cache.is_available() or scan_failed:
+                return -1
+
+        if scan_failed and not keys:
+            return -1
 
         for key in keys:
             try:
@@ -113,7 +128,7 @@ def get_active_sessions_count() -> int:
 
     except Exception as e:
         logger.error(f"Error in get_active_sessions_count: {e}")
-        return 0
+        return -1
 
 
 def _start_api_server():
@@ -182,20 +197,30 @@ def _run_backup_daemon():
             now = time.time()
             idle = now - last_activity
 
+            active_sessions = get_active_sessions_count()
+            if active_sessions < 0:
+                logger.warning(
+                    "Skipping automated database backup due to active sessions count failure (%d).",
+                    active_sessions,
+                )
+                continue
+
             if (
-                get_active_sessions_count() == 0
+                active_sessions == 0
                 and idle >= timeout
                 and last_activity > last_backup_time
             ):
                 from src.db.corpus_db import get_corpus_db_path
                 from src.db.database_backup import (
+                    cleanup_old_backups,
                     create_corpus_database_snapshot,
                 )
 
+                from src.core.app_config import get_backup_dir
+
                 snapshot = create_corpus_database_snapshot()
 
-                db_path = get_corpus_db_path()
-                backup_dir = db_path.parent / "backups"
+                backup_dir = get_backup_dir()
                 backup_dir.mkdir(parents=True, exist_ok=True)
 
                 filename = (
@@ -205,6 +230,7 @@ def _run_backup_daemon():
                 filename.write_bytes(snapshot)
 
                 logger.info(f"Backup created: {filename}")
+                cleanup_old_backups(backup_dir, max_backups=10, max_age_days=30)
 
                 last_backup_time = now
                 cache.set(
@@ -230,8 +256,8 @@ def init_backup_daemon():
 
 def init_session_state():
     """Initialize session state keys and global background services."""
-    if SessionKeys.SESSION_ID not in st.session_state:
-        st.session_state[SessionKeys.SESSION_ID] = str(uuid.uuid4())
+    from app.session_manager import initialize_and_verify_session
+    st.session_state[SessionKeys.SESSION_ID] = initialize_and_verify_session()
 
     if SessionKeys.AUTHENTICATED not in st.session_state:
         st.session_state[SessionKeys.AUTHENTICATED] = False

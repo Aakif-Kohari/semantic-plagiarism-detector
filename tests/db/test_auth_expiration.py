@@ -8,16 +8,16 @@ migration correctly sets initial expiration dates, and that the login
 flow properly flags expired passwords.
 """
 
-import pytest
 import sqlite3
 from datetime import datetime, timedelta
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
+
+import pytest
 
 from src.db.auth import (
+    authenticate_user,
     is_password_expired,
     set_password_expiration,
-    authenticate_user,
-    DEFAULT_PASSWORD_LIFETIME_DAYS,
 )
 
 

@@ -5,28 +5,28 @@ import pytest
 
 from src.db.auth import (
     add_user,
+    auth_repo,
     delete_user,
     disable_2fa,
     enable_2fa,
+    format_user_created_date,
+    generate_sso_state,
     get_2fa_status,
     get_active_users_count,
+    get_all_users,
     get_user_active_status,
     get_user_last_login,
     get_user_role,
     get_user_theme,
-    auth_repo,
     init_db,
     is_user_active,
     set_user_active_status,
     set_user_theme,
-    update_password,
-    verify_user,
-    update_user_profile,
-    get_all_users,
-    format_user_created_date,
-    generate_sso_state,
     store_sso_state,
+    update_password,
+    update_user_profile,
     validate_sso_state,
+    verify_user,
 )
 from src.errors import StaleDataException
 
@@ -447,7 +447,8 @@ def test_delete_user_removes_matching_session_and_authorization_rows(mock_db):
 def test_connect_uses_fifteen_second_timeout():
     """Verify that _connect helper sets sqlite3 timeout to 15.0 seconds."""
     from unittest.mock import patch
-    from src.db.auth import _connect, SQLITE_TIMEOUT
+
+    from src.db.auth import SQLITE_TIMEOUT, _connect
 
     assert SQLITE_TIMEOUT == 15.0
 
@@ -876,5 +877,17 @@ def test_validate_sso_state_invalid_and_expired(mock_db):
     expired_state = "expired_state_token_123"
     store_sso_state(expired_state, expires_in_seconds=-10)
     assert validate_sso_state(expired_state) is False
+
+
+def test_role_validation_with_allowed_user_roles_override(monkeypatch):
+    """Verify _validate_role respects ALLOWED_USER_ROLES environment variable."""
+    from src.db.auth import _validate_role
+
+    monkeypatch.setenv("ALLOWED_USER_ROLES", "admin, teacher, teaching_assistant")
+    assert _validate_role("teaching_assistant") == "teaching_assistant"
+
+    with pytest.raises(ValueError, match="Role must be one of"):
+        _validate_role("invalid_role")
+
 
 

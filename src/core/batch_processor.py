@@ -5,18 +5,23 @@ Provides parallel processing, incremental indexing, and progress tracking
 for handling 100+ documents efficiently.
 """
 
-import os
-import time
 import logging
-import threading
 import multiprocessing
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed  # noqa: F401
-from typing import Dict, List, Any, Optional, Tuple, Callable
+import os
+import threading
+import time
+from concurrent.futures import (  # noqa: F401
+    ProcessPoolExecutor,
+    ThreadPoolExecutor,
+    as_completed,
+)
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
 import numpy as np
 import pandas as pd  # noqa: F401
-from datetime import datetime
 import psutil
 
 logger = logging.getLogger(__name__)
@@ -157,10 +162,12 @@ class BatchProcessor:
         
         try:
             # Import here to avoid circular imports
-            from src.core.document_parser import extract_text
-            from src.core.text_chunking import chunk_documents
+            from src.core.document_parser import (
+                extract_text,
+                prepare_text_for_embedding,
+            )
             from src.core.embedding_model import embed_chunks
-            from src.core.document_parser import prepare_text_for_embedding
+            from src.core.text_chunking import chunk_documents
             
             # Extract text
             extracted_text = extract_text(

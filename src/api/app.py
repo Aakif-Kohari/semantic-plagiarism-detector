@@ -9,7 +9,6 @@ from fastapi import Depends, FastAPI, Query, Request, Security, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi import FastAPI, Request, status
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -26,12 +25,7 @@ from src.api.routers import (
     auth_router,
     corpus_router,
 )
-<<<<<<< Updated upstream
-from src.utils.tracing import get_tracer
-from src.core.app_config import get_api_support_contact
-=======
 from src.version import APP_VERSION
->>>>>>> Stashed changes
 
 # Re-exports for backward compatibility with existing tests and scripts
 
@@ -313,7 +307,7 @@ def get_audit_events_api(
     
     Supports pagination via limit and offset parameters (Issue #2732).
     """
-    from src.db.auth import get_security_audit_logs, get_security_audit_log_count
+    from src.db.auth import get_security_audit_log_count, get_security_audit_logs
     
     events = get_security_audit_logs(
         limit=limit,
@@ -341,12 +335,10 @@ def get_audit_events_api(
 
 import logging
 import os
-from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -362,8 +354,6 @@ from src.api.routers import (
     auth_router,
     corpus_router,
 )
-from src.utils.tracing import get_tracer
-from src.core.app_config import get_api_support_contact
 
 # Re-exports for backward compatibility with existing tests and scripts
 
@@ -388,7 +378,7 @@ def get_audit_events_api(
     
     Supports pagination via limit and offset parameters (Issue #2732).
     """
-    from src.db.auth import get_security_audit_logs, get_security_audit_log_count
+    from src.db.auth import get_security_audit_log_count, get_security_audit_logs
     
     events = get_security_audit_logs(
         limit=limit,

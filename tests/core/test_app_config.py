@@ -1,7 +1,8 @@
 import json
-import pytest
 from pathlib import Path  # noqa: F401
-from unittest.mock import patch, mock_open  # noqa: F401
+from unittest.mock import mock_open, patch  # noqa: F401
+
+import pytest
 
 from src.core.app_config import (
     DEFAULT_APP_TITLE,
@@ -14,7 +15,6 @@ from src.core.app_config import (
     get_lock_timeout,
     load_branding_config,
 )
-
 
 # ---------------------------------------------------------------------------
 # Tests for get_app_title

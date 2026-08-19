@@ -104,6 +104,32 @@ def test_get_chart_colors_defaults_to_active_theme_when_key_absent():
             assert get_chart_colors() == THEMES["Dark"]
 
 
+def test_get_chart_colors_defaults_to_light_active_theme_when_key_absent():
+    """Missing override key follows an active Light theme."""
+    mock_state: dict = {}
+    with patch("app.theme.st.session_state", mock_state):
+        with patch("app.theme.get_colors", return_value=THEMES["Light"]):
+            assert get_chart_colors() == THEMES["Light"]
+
+
+def test_get_chart_colors_does_not_mutate_session_state_when_key_absent():
+    """Reading chart colors without the override does not create session state."""
+    mock_state: dict = {}
+    with patch("app.theme.st.session_state", mock_state):
+        with patch("app.theme.get_colors", return_value=THEMES["Dark"]):
+            get_chart_colors()
+
+    assert mock_state == {}
+
+
+def test_get_chart_colors_explicit_false_still_uses_active_theme():
+    """An explicit disabled override follows the active theme rather than forcing Dark."""
+    mock_state: dict = {"force_dark_charts": False}
+    with patch("app.theme.st.session_state", mock_state):
+        with patch("app.theme.get_colors", return_value=THEMES["Dark"]):
+            assert get_chart_colors() == THEMES["Dark"]
+
+
 def test_severity_tier_high():
     """Test high severity tier detection."""
     assert severity_tier(0.95, 0.59) == "high"

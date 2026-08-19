@@ -4,9 +4,11 @@ tests/db/test_security_audit_pagination.py
 Unit tests for audit event pagination logic (Issue #2732).
 """
 
-import pytest
 import sqlite3
-from src.db.security_audit import get_recent_audit_events, get_audit_events_count
+
+import pytest
+
+from src.db.security_audit import get_audit_events_count, get_recent_audit_events
 
 
 @pytest.fixture

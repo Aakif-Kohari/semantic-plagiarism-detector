@@ -14,9 +14,6 @@ from io import BytesIO
 from typing import Any, List, Optional, Tuple
 
 from reportlab.lib import colors
-from src.core.app_config import get_pdf_footer_text
-from src.utils.text_stats import compute_text_stats
-
 from reportlab.lib.colors import HexColor
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import A4
@@ -34,6 +31,7 @@ from reportlab.platypus import (
 )
 
 from src.core.app_config import get_pdf_footer_text
+from src.utils.text_stats import compute_text_stats
 
 try:
     import fitz  # PyMuPDF

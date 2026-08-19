@@ -212,6 +212,7 @@ Customize behavior via a `.env` file in the project root or inline in
 | `SMTP_USERNAME` | | SMTP username |
 | `SMTP_PASSWORD` | | SMTP password |
 | `API_BEARER_TOKEN` | | Bearer token for REST API |
+| `BACKUP_IDLE_TIMEOUT_MINUTES` | `30` | Duration of zero user activity (in minutes) before automated DB backup runs |
 
 See `.env.example` for the full list.
 
@@ -284,6 +285,27 @@ You can manually trigger all hooks on all files in the repository at any time:
 ```bash
 pre-commit run --all-files
 ```
+
+---
+
+## 💾 Database Backups
+
+The system includes an automated background backup daemon that safely creates snapshots of the SQLite corpus database (`data/corpus.db`) during periods of inactivity.
+
+### Idle Trigger & Daemon Semantics
+- **Background Daemon:** A background thread polls every 30 seconds to monitor user session activity.
+- **Idle Threshold:** When all user sessions are idle and no active user requests occur for the configured duration (default: **30 minutes** of zero activity), the daemon creates a timestamped database snapshot.
+- **Rotation & Retention:** Automated backup rotation keeps only the **10 most recent backups** and automatically deletes backups older than **30 days** to prevent disk space exhaustion.
+
+### Configuration Keys (`.env`)
+
+| Key | Default | Description |
+|---|---|---|
+| `BACKUP_IDLE_TIMEOUT_MINUTES` | `30` | Duration of zero user activity (in minutes) required to trigger an automated database snapshot |
+
+### Storage Location
+- Automated backups are saved in the `data/backups/` directory (relative to the corpus database location).
+- Backup files are timestamped using the naming convention `corpus_backup_YYYYMMDD_HHMMSS.db`.
 
 ---
 

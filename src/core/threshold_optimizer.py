@@ -6,12 +6,13 @@ based on document characteristics, dataset homogeneity, and user feedback.
 """
 
 import logging
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
+
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Optional, Tuple, Any
-from dataclasses import dataclass, field
-from sklearn.metrics import precision_recall_curve, roc_curve, auc  # noqa: F401
 from scipy.optimize import minimize_scalar  # noqa: F401
+from sklearn.metrics import auc, precision_recall_curve, roc_curve  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
