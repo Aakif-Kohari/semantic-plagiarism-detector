@@ -187,15 +187,22 @@ class PayloadCompressor:
             return data
 
     @classmethod
-    def decompress(cls, data: bytes) -> bytes:
+    def decompress(cls, data: bytes) -> bytes | None:
         """
         Decompresses bytes if they contain the magic header.
+        
+        Issue #2801: If zlib decompression fails due to a corrupted payload,
+        this method now catches the zlib.error, logs a critical failure, and
+        returns None. This allows the calling cache retrieval methods to
+        treat the corrupted entry as a cache miss and safely recompute the
+        data instead of crashing the application.
 
         Args:
             data (bytes): Stored bytes retrieved from cache.
 
         Returns:
             bytes: Decompressed raw bytes.
+            None: If the payload is corrupted or decompression fails.
         """
         if not isinstance(data, bytes):
             return data
@@ -211,12 +218,28 @@ class PayloadCompressor:
                     f"Time: {(time.perf_counter()-start_time)*1000:.2f}ms"
                 )
                 return decompressed_data
+                
             except zlib.error as e:
-                logger.error(
-                    f"[CacheCompression] zlib decompression failed: {e}. Corrupted payload?"
+                # Issue #2801: Graceful handling of corrupted zlib payloads
+                logger.critical(
+                    "[CacheCompression] CRITICAL: zlib decompression failed due to "
+                    "corrupted payload. Treating as cache miss to prevent UI crash. "
+                    "Error: %s",
+                    e,
+                    exc_info=True
+                )
+                return None
+                
+            except Exception as e:
+                # Catch any other unexpected decompression errors
+                logger.critical(
+                    "[CacheCompression] CRITICAL: Unexpected error during decompression: %s",
+                    e,
+                    exc_info=True
                 )
                 return None
 
+        # If it doesn't start with the magic header, assume it's uncompressed raw bytes
         return data
 
 
@@ -488,32 +511,42 @@ class RedisCache:
         return self._fallback_set(key, value, ttl)
 
     def get(self, key: str) -> Optional[Any]:
-        """Retrieve a value from Redis with automatic decompression."""
+        """Retrieve a value from Redis with automatic decompression and deserialization."""
         if self.is_available():
             try:
                 data = self._client.get(key)
                 if data is not None:
-                    with self._lock:
-                        self._hits += 1
-                    # SECURITY WARNING: pickle.loads() can execute arbitrary code. Ensure Redis is access-controlled.
-                    return pickle.loads(data)
+                    # Decompress the payload
+                    decompressed = PayloadCompressor.decompress(data)
+                    
+                    # Issue #2801: If decompression returns None, the payload was corrupted.
+                    # We treat this as a cache miss, delete the corrupted key, and return None
+                    # so the application can safely recompute the matrix/data.
+                    if decompressed is None:
+                        logger.warning(
+                            "[RedisCache] Corrupted payload detected for key '%s'. "
+                            "Deleting key and treating as cache miss.",
+                            key
+                        )
+                        try:
+                            self._client.delete(key)
+                        except Exception:
+                            pass
+                        # Fall through to fallback cache or return None
+                        
+                    else:
+                        with self._lock:
+                            self._hits += 1
+                        # SECURITY WARNING: pickle.loads() can execute arbitrary code.
+                        return pickle.loads(decompressed)
+                        
             except (
-                RedisError,
-                RedisConnectionError,
-                RedisTimeoutError,
-                ConnectionRefusedError,
-                ConnectionResetError,
-                pickle.PickleError,
-                zlib.error,
-                Exception,
+                RedisError, RedisConnectionError, RedisTimeoutError,
+                ConnectionRefusedError, ConnectionResetError, pickle.PickleError,
             ) as e:
-                print(
-                    f"[RedisCache] Error getting key {key}: {e}. Falling back to in-memory."
-                )
-                logger.error(
-                    f"[RedisCache] Error getting key {key}: {e}. Falling back to in-memory."
-                )
+                logger.error(f"[RedisCache] Error getting key {key}: {e}. Falling back.")
 
+        # Check in-memory fallback cache
         val = self._fallback_get(key)
         if val is not None:
             with self._lock:
@@ -558,23 +591,28 @@ class RedisCache:
             try:
                 data = self._client.get(key)
                 if data is not None:
-                    with self._lock:
-                        self._hits += 1
-                    return json.loads(data)
+                    decompressed = PayloadCompressor.decompress(data)
+                    
+                    # Issue #2801: Handle corrupted JSON payloads gracefully
+                    if decompressed is None:
+                        logger.warning(
+                            "[RedisCache] Corrupted JSON payload for key '%s'. Deleting.",
+                            key
+                        )
+                        try:
+                            self._client.delete(key)
+                        except Exception:
+                            pass
+                    else:
+                        with self._lock:
+                            self._hits += 1
+                        return json.loads(decompressed.decode('utf-8'))
+                        
             except (
-                RedisError,
-                RedisConnectionError,
-                RedisTimeoutError,
-                ConnectionRefusedError,
-                ConnectionResetError,
-                json.JSONDecodeError,
+                RedisError, RedisConnectionError, RedisTimeoutError,
+                ConnectionRefusedError, ConnectionResetError, json.JSONDecodeError,
             ) as e:
-                print(
-                    f"[RedisCache] Error getting JSON key {key}: {e}. Falling back to in-memory."
-                )
-                logger.error(
-                    f"[RedisCache] Error getting JSON key {key}: {e}. Falling back to in-memory."
-                )
+                logger.error(f"[RedisCache] Error getting JSON key {key}: {e}.")
 
         val = self._fallback_get_json(key)
         if val is not None:
