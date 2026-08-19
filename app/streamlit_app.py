@@ -197,16 +197,6 @@ from app.components.api_gateway import (
     ApiStatus,
     WebhookStatus,
     ServiceType,
-)
-from sklearn.cluster import AgglomerativeClustering, KMeans
-from sklearn.decomposition import NMF, LatentDirichletAllocation
-from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
-from sklearn.manifold import TSNE
-from sklearn.metrics import silhouette_score, davies_bouldin_score
-from sklearn.preprocessing import StandardScaler
-import scipy.cluster.hierarchy as sch
-from scipy.spatial.distance import squareform
-from scipy.cluster.hierarchy import fcluster
 
 # ── Document Version Control Imports ─────────────────────────────────────
 from app.components.document_version_control import (
