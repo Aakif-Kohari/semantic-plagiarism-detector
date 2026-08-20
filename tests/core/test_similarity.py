@@ -1,3 +1,5 @@
+from typing import List, Tuple
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -17,6 +19,7 @@ from src.core.similarity import (
     compute_hybrid_similarity,
     cosine_distance_to_similarity,
     document_similarity_matrix,
+    find_candidate_pairs,
     find_exact_matches,
     find_most_similar_chunks,
     flag_plagiarism,
@@ -119,6 +122,67 @@ def test_document_similarity_matrix_min_threshold_filters_low_scores(dummy_embed
     assert df.loc["doc_A", "doc_C"] == 0.0
     assert df.loc["doc_C", "doc_A"] == 0.0
     assert df.loc["doc_A", "doc_B"] > 0.0
+
+
+def test_document_similarity_matrix_top_k_faiss_prefilter():
+    """Test that top_k pre-filters comparisons using FAISS."""
+    # Generate 5 normalized document vectors
+    np.random.seed(42)
+    dim = 64
+    doc_names = [f"doc_{i}" for i in range(5)]
+    doc_embs = {}
+    for name in doc_names:
+        v = np.random.randn(1, dim).astype("float32")
+        v = v / np.linalg.norm(v)
+        doc_embs[name] = v
+
+    # Full matrix
+    full_df = document_similarity_matrix(doc_embs)
+    assert full_df.shape == (5, 5)
+    # top_k = 2 matrix
+    filtered_df = document_similarity_matrix(doc_embs, top_k=2)
+
+    assert isinstance(filtered_df, pd.DataFrame)
+    assert filtered_df.shape == (5, 5)
+    # Diagonal is always 1.0
+    for name in doc_names:
+        assert np.isclose(filtered_df.loc[name, name], 1.0)
+
+    # For each row, non-zero off-diagonal entries should be at most top_k * 2 (due to symmetry)
+    for name in doc_names:
+        row = filtered_df.loc[name].drop(name)
+        assert (row > 0).sum() <= 4
+
+
+def test_document_similarity_matrix_with_candidate_pairs(dummy_embeddings):
+    """Test document_similarity_matrix with explicitly provided candidate_pairs."""
+    candidate_pairs = {("doc_A", "doc_B")}
+    df = document_similarity_matrix(dummy_embeddings, candidate_pairs=candidate_pairs)
+
+    assert isinstance(df, pd.DataFrame)
+    assert df.loc["doc_A", "doc_A"] == 1.0
+    assert df.loc["doc_A", "doc_B"] > 0.0
+    assert df.loc["doc_B", "doc_A"] > 0.0
+    # doc_C was not in candidate_pairs
+    assert df.loc["doc_A", "doc_C"] == 0.0
+    assert df.loc["doc_B", "doc_C"] == 0.0
+
+
+def test_find_candidate_pairs():
+    """Test finding candidate pairs with FAISS flat index."""
+    np.random.seed(42)
+    dim = 32
+    names = [f"doc_{i}" for i in range(6)]
+    vectors = [np.random.randn(dim).astype("float32") for _ in range(6)]
+    for i in range(len(vectors)):
+        vectors[i] = vectors[i] / np.linalg.norm(vectors[i])
+
+    pairs = find_candidate_pairs(names, vectors, top_k=2)
+    assert isinstance(pairs, set)
+    assert len(pairs) > 0
+    # When n <= top_k, all pairs returned
+    all_pairs = find_candidate_pairs(names[:3], vectors[:3], top_k=5)
+    assert len(all_pairs) == 3
 
 
 def test_chunk_similarity_matrix(dummy_embeddings):
