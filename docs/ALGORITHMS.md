@@ -48,6 +48,13 @@ three available chunking strategies (`chunk_text`, `chunk_by_sentences`,
 - Explain severity_from_score() logic: below plagiarism → Low (not flagged),
   plagiarism–medium → Low (flagged), medium–high → Medium, ≥ high → High
 
+## AI-Generated Text Detection (src/core/ai_detector.py)
+The app also scores text for likely AI generation, independent of the
+plagiarism-similarity pipeline above. See
+[AI_DETECTION.md](AI_DETECTION.md) for the full breakdown of the five
+metrics used, the confidence tier thresholds, and how the signals are
+combined.
+
 ## Extending the Algorithm
 (short code example: how to plug in a new similarity signal or change the
  hybrid weight w)
