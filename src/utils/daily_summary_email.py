@@ -252,16 +252,7 @@ def build_email_html_body(
     return html
 
 
-def format_daily_summary(
-    incidents: List[Dict[str, Any]], footer_note: Optional[str] = None
-) -> str:
-    """
-    Legacy wrapper for backward compatibility.
-    Delegates to the new build_email_html_body function.
-    """
-    return build_email_html_body(
-        incidents_data=incidents, total_scans=0, footer_note=footer_note
-    )
+
 
 
 def generate_daily_summary_html(stats: Dict[str, Any]) -> str:
