@@ -1,13 +1,17 @@
 import logging
 import os
+import random
 import time
 from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
+
 class ConcurrencyTimeoutError(Exception):
     """Raised when the FAISS lock cannot be acquired within the timeout threshold."""
+
     pass
+
 
 class FAISSLock:
     """
@@ -22,6 +26,7 @@ class FAISSLock:
     def __init__(self, lock_file: str = "faiss_rebuild.lock", timeout: int = None):
         if timeout is None:
             from src.core.app_config import get_lock_timeout
+
             timeout = get_lock_timeout()
 
         self.lock_file = lock_file
@@ -37,7 +42,7 @@ class FAISSLock:
                 return False
             mtime = os.path.getmtime(self.lock_file)
             age = time.time() - mtime
-            return age > self.timeout
+            return age > max(self.timeout * 2, 5.0)
         except OSError:
             # If we can't read the mtime, assume it's not stale to be safe
             return False
@@ -45,7 +50,9 @@ class FAISSLock:
     def _clear_stale_lock(self):
         """Attempts to aggressively clear a lock file if it is deemed stale."""
         try:
-            logger.warning(f"Detected stale FAISS lock: {self.lock_file}. Attempting aggressive clear.")
+            logger.warning(
+                f"Detected stale FAISS lock: {self.lock_file}. Attempting aggressive clear."
+            )
             os.remove(self.lock_file)
         except OSError as e:
             logger.error(f"Failed to clear stale FAISS lock: {e}")
@@ -65,12 +72,12 @@ class FAISSLock:
             except FileExistsError:
                 if self._is_stale():
                     self._clear_stale_lock()
-                    continue # Retry acquisition immediately
+                    continue  # Retry acquisition immediately
 
                 if time.time() - start_time >= self.timeout:
                     logger.error(f"Timeout ({self.timeout}s) waiting for FAISS lock.")
                     raise ConcurrencyTimeoutError("Failed to acquire FAISS lock.")
-                time.sleep(0.1) # Spin wait
+                time.sleep(0.1 + random.uniform(0, 0.05))  # Spin wait with randomized jitter
 
     def release(self):
         """Releases the atomic file lock."""
@@ -80,6 +87,7 @@ class FAISSLock:
                 logger.debug(f"Released FAISS index lock: {self.lock_file}")
         except OSError as e:
             logger.warning(f"Failed to release FAISS lock gracefully: {e}")
+
 
 @contextmanager
 def faiss_write_lock(lock_path: str = "corpus.index.lock", timeout: int = None):
@@ -97,3 +105,17 @@ def faiss_write_lock(lock_path: str = "corpus.index.lock", timeout: int = None):
         yield
     finally:
         lock.release()
+
+
+# with_sqlite_retry now lives in src/db/common.py — re-exported here so
+# existing callers (`from src.core.concurrency import with_sqlite_retry`
+# and `from src.core import with_sqlite_retry`) keep working without a
+# second, drifting copy of the same retry logic. A lazy re-export avoids a
+# circular import when src.db is imported first (src.db -> src.core ->
+# src.db.common).
+def __getattr__(name):
+    if name == "with_sqlite_retry":
+        from src.db.common import with_sqlite_retry
+
+        return with_sqlite_retry
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

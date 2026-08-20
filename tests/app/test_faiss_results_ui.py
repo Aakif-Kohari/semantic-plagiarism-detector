@@ -3,20 +3,14 @@ from pathlib import Path
 APP_PATH = Path("app/streamlit_app.py")
 
 
-def test_faiss_results_use_streamlit_dataframe():
+def test_faiss_results_use_interactive_ui():
+    """Verify that the interactive render_faiss_results_ui component is used to support chunk diff inspection."""
     source = APP_PATH.read_text(encoding="utf-8")
-    assert "results_df = faiss_results_dataframe(q_results)" in source
-    assert "st.dataframe(" in source
-    assert 'key="faiss_search_results_table"' in source
+    assert "render_faiss_results_ui(results," in source
 
 
 def test_static_faiss_result_loop_is_removed():
+    """Verify that raw print loops for FAISS results are removed in favor of the component."""
     source = APP_PATH.read_text(encoding="utf-8")
-    assert "for rec, score in q_results:" not in source
-
-
-def test_sortable_columns_are_configured():
-    source = APP_PATH.read_text(encoding="utf-8")
-    assert '"Similarity Score": (' in source
-    assert '"Target Document": (' in source
-    assert 'format="%.1f%%"' in source
+    assert "for rec, score in results:" not in source
+    assert "st.caption(rec.chunk_text)" not in source

@@ -1,38 +1,42 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
+
 from pydantic import BaseModel
 
 
 class DictLikeModel(BaseModel):
     """Base Pydantic model with support for dictionary-like subscripting and iteration."""
 
-    def __getitem__(self, item: str) -> any:
+    def __getitem__(self, item: str) -> Any:
         try:
             return getattr(self, item)
         except AttributeError:
             raise KeyError(item)
 
-    def get(self, item: str, default: any = None) -> any:
+    def get(self, item: str, default: Any = None) -> Any:
         return getattr(self, item, default)
 
-    def keys(self) -> any:
+    def keys(self) -> Any:
         return self.model_fields.keys()
 
-    def __iter__(self) -> any:
+    def __iter__(self) -> Any:
         return iter(self.model_fields.keys())
 
 
 class User(DictLikeModel):
     """Pydantic model representing a User record DTO."""
+
     id: Optional[int] = None
     username: str
     role: str
     is_active: bool = True
+    version: int = 1
 
 
 class Document(DictLikeModel):
     """Pydantic model representing a Document metadata DTO."""
+
     filename: str
     file_hash: str
     upload_date: str
@@ -48,7 +52,8 @@ class Document(DictLikeModel):
 
 class MatchResult(DictLikeModel):
     """Pydantic model representing a similarity PlagiarismIncident DTO."""
-    incident_id: Optional[str] = None
+
+    incident_id: Optional[int] = None
     document_a: str
     document_b: str
     similarity_score: float

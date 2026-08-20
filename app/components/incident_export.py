@@ -7,9 +7,14 @@ from typing import Any, Mapping, Sequence
 import pandas as pd
 import streamlit as st
 
-from src.db.incidents import (DEFAULT_DB_PATH, get_all_incidents,
-                              incidents_to_csv, sync_flagged_incidents,
-                              update_review_status)
+from src.db.incidents import (
+    DEFAULT_DB_PATH,
+    get_all_incidents,
+    incidents_to_csv,
+    sync_flagged_incidents,
+    update_review_status,
+)
+from src.utils.pdf_report import generate_batch_plagiarism_report
 
 
 def render_incident_export_panel(
@@ -22,6 +27,22 @@ def render_incident_export_panel(
         "Current warnings are synchronized into a persistent incident log. "
         "The first flagged date and review status are retained."
     )
+    
+    pdf_buffer = generate_batch_plagiarism_report(get_all_incidents(db_path))
+
+    pdf_filename = (
+        "plagiarism_batch_report_"
+        f"{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.pdf"
+    )
+
+    st.download_button(
+        "Download Consolidated Plagiarism PDF",
+        data=pdf_buffer.getvalue(),
+        file_name=pdf_filename,
+        mime="application/pdf",
+        use_container_width=True,
+    )
+
     incidents = sync_flagged_incidents(flags, db_path)
     if not incidents:
         st.info("No plagiarism incidents are currently available for export.")
@@ -72,6 +93,18 @@ def render_incident_export_panel(
         index=0 if current["review_status"] == "Pending" else 1,
         key="incident_review_status",
     )
+
+    # ── Copy Selected Incident Details (#1245) ───────────────────────────────
+    st.markdown("#### 📋 Copy Details")
+    sim_percent = f"{current['similarity_score'] * 100:.1f}%"
+    summary_text = (
+        f"Incident ID: #{current['incident_id']} | "
+        f"Similarity: {sim_percent} | "
+        f"Doc A: {current['document_a']} | "
+        f"Doc B: {current['document_b']}"
+    )
+    st.code(summary_text, language="text")
+
     if st.button("Save review status", type="primary"):
         update_review_status(incident_id, status, db_path)
         st.success(f"✅ {incident_id} marked as {status}.")

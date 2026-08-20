@@ -65,7 +65,7 @@ similarity, and **FAISS vector search**.
               └────────┘ └────────┘ └────────┘ └───────┘ └──────┘ └───────┘
 ```
 
->For a detailed explanation of the system components and data flow, see the [Architecture Guide](docs/ARCHITECTURE.md).
+> For a detailed explanation of the system components and data flow, see the [Architecture Guide](docs/ARCHITECTURE.md). To understand domain-specific terms (FAISS, Cosine Similarity, SSRF, WAL, TTR, etc.), reference the [Glossary](docs/GLOSSARY.md).
 
 ### Module Responsibilities
 
@@ -126,7 +126,10 @@ semantic_plagiarism_detector/
 
 ## 🚀 Setup & Running
 
+For a detailed local setup guide detailing virtual environment creation, native C dependencies (Tesseract and Poppler) installation, and running pytest, refer to the [Developer Setup Guide](docs/DEVELOPMENT.md).
+
 ### 1. Clone / download the project
+
 
 ```bash
 git clone https://github.com/your-org/semantic-plagiarism-detector.git
@@ -209,6 +212,7 @@ Customize behavior via a `.env` file in the project root or inline in
 | `SMTP_USERNAME` | | SMTP username |
 | `SMTP_PASSWORD` | | SMTP password |
 | `API_BEARER_TOKEN` | | Bearer token for REST API |
+| `BACKUP_IDLE_TIMEOUT_MINUTES` | `30` | Duration of zero user activity (in minutes) before automated DB backup runs |
 
 See `.env.example` for the full list.
 
@@ -241,181 +245,14 @@ Additional users can be created from the **User Management** page (admin only).
 
 ---
 
-
 ## 🛠️ Troubleshooting
 
-If you encounter issues while setting up or running the project locally, check the solutions below for some of the most common development errors.
+If you encounter issues while setting up the project locally, refer to the
+[Troubleshooting Guide](docs/TROUBLESHOOTING.md) for solutions to common problems including:
 
-### 1. `ModuleNotFoundError` or dependency installation errors
-
-**Error:**
-
-```text
-ModuleNotFoundError: No module named '<package>'
-```
-
-**Possible causes:**
-- Project dependencies have not been installed.
-- The virtual environment is not activated.
-- The dependency installation was interrupted or failed.
-
-**Solution:**
-
-Make sure your virtual environment is activated and install the required dependencies:
-
-```bash
-python -m venv venv
-```
-
-Activate it:
-
-```bash
-# Windows
-venv\Scripts\activate
-
-# macOS / Linux
-source venv/bin/activate
-```
-
-Then install the dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-If the missing module is related to OCR support, install the additional OCR dependencies:
-
-```bash
-python -m pip install pytesseract pymupdf pillow
-```
-
----
-
-### 2. Sentence Transformer model download or loading errors
-
-**Error:**
-
-The application may fail while loading `paraphrase-multilingual-MiniLM-L12-v2`, or the first startup may appear to hang while downloading the model.
-
-**Possible causes:**
-- The model has not been downloaded before.
-- The machine has limited or unstable internet connectivity.
-- There is not enough disk space for the model cache.
-
-**Solution:**
-
-Make sure you have an active internet connection during the first run. The application downloads the `paraphrase-multilingual-MiniLM-L12-v2` model (approximately 420 MB) and caches it locally.
-
-After the initial download, subsequent runs should use the cached model.
-
-If the model download fails, restart the application and try again. Also verify that sufficient disk space is available.
-
----
-
-### 3. SQLite `database is locked`
-
-**Error:**
-
-```text
-sqlite3.OperationalError: database is locked
-```
-
-**Possible causes:**
-- Another instance of the application is using the same SQLite database.
-- A previous application process is still running.
-- Multiple processes are attempting to write to the database simultaneously.
-
-**Solution:**
-
-1. Stop all running instances of the Streamlit application.
-2. Check that no other process is accessing `users.db` or `corpus.db`.
-3. Restart the application:
-
-```bash
-streamlit run app/streamlit_app.py
-```
-
-Avoid running multiple application instances that write to the same SQLite database files at the same time.
-
-> **Note:** Do not delete `users.db` or `corpus.db` as a first step. The project uses versioned SQLite migrations to preserve existing data during application upgrades.
-
----
-
-### 4. Tesseract OCR not found
-
-**Error:**
-
-Scanned or image-only PDFs may fail to process, or you may see an error indicating that Tesseract could not be found.
-
-**Possible causes:**
-- Tesseract OCR is not installed.
-- Tesseract is installed but is not available on the system `PATH`.
-- The `TESSERACT_CMD` environment variable is not configured.
-
-**Solution:**
-
-First, verify that Tesseract is installed:
-
-```powershell
-tesseract --version
-```
-
-On Windows, if Tesseract is installed but cannot be found, set the executable path:
-
-```powershell
-$env:TESSERACT_CMD="C:\Program Files\Tesseract-OCR\tesseract.exe"
-```
-
-Then restart the application.
-
-For OCR support, also make sure the required Python dependencies are installed:
-
-```bash
-python -m pip install pytesseract pymupdf pillow
-```
-
----
-
-### 5. Memory allocation or out-of-memory errors
-
-**Error:**
-
-The application may become slow, crash, or report memory allocation errors when processing a large number of documents or building FAISS indexes.
-
-**Possible causes:**
-- A large number of documents or text chunks are being processed at once.
-- Embedding generation requires more RAM than is currently available.
-- FAISS is indexing a large collection of vectors.
-- The embedding batch size is too high for the available hardware.
-
-**Solution:**
-
-Try the following:
-
-- Close other applications to free system memory.
-- Process fewer documents at a time.
-- Reduce the embedding batch size in `src/core/embedding_model.py`.
-- If using a GPU, make sure sufficient GPU memory is available.
-- Restart the application to clear unused memory.
-
-For larger collections, the application automatically switches from `IndexFlatIP` to `IndexIVFFlat` when the number of vectors reaches 5,000 or more.
-
-If the problem persists, reduce the batch size and try processing the documents again.
-
----
-
-### Still having issues?
-
-If the problem persists after trying the solutions above, check the project's documentation and existing GitHub issues before opening a new issue.
-
-When reporting a new problem, include:
-
-- A clear description of the error.
-- The complete error message or traceback.
-- Steps to reproduce the issue.
-- Your operating system and Python version.
-- The command you used to start the application.
-- Relevant logs or screenshots.
+- Tesseract OCR installation
+- PyTorch CPU vs CUDA installation
+- SQLite permission issues
 
 ---
 
@@ -448,6 +285,27 @@ You can manually trigger all hooks on all files in the repository at any time:
 ```bash
 pre-commit run --all-files
 ```
+
+---
+
+## 💾 Database Backups
+
+The system includes an automated background backup daemon that safely creates snapshots of the SQLite corpus database (`data/corpus.db`) during periods of inactivity.
+
+### Idle Trigger & Daemon Semantics
+- **Background Daemon:** A background thread polls every 30 seconds to monitor user session activity.
+- **Idle Threshold:** When all user sessions are idle and no active user requests occur for the configured duration (default: **30 minutes** of zero activity), the daemon creates a timestamped database snapshot.
+- **Rotation & Retention:** Automated backup rotation keeps only the **10 most recent backups** and automatically deletes backups older than **30 days** to prevent disk space exhaustion.
+
+### Configuration Keys (`.env`)
+
+| Key | Default | Description |
+|---|---|---|
+| `BACKUP_IDLE_TIMEOUT_MINUTES` | `30` | Duration of zero user activity (in minutes) required to trigger an automated database snapshot |
+
+### Storage Location
+- Automated backups are saved in the `data/backups/` directory (relative to the corpus database location).
+- Backup files are timestamped using the naming convention `corpus_backup_YYYYMMDD_HHMMSS.db`.
 
 ---
 
@@ -754,6 +612,16 @@ Each upgrade:
 Existing database files should not be deleted during an application upgrade.
 
 ---
+## Linting
+
+Before submitting a pull request, run the linting checks to ensure the code follows the project's formatting and type-checking standards.
+
+Run all lint checks with:
+
+```bash
+make lint
+```
+
 
 ## Documentation
 
@@ -761,6 +629,7 @@ Existing database files should not be deleted during an application upgrade.
 - [API Reference](docs/API.md)
 - [Document Parsing & Formats](docs/PARSING.md)
 - [NLP Architecture & Similarity Algorithm Guide](docs/ALGORITHMS.md)
+- [Single Sign-On (SSO) Setup](docs/SSO_SETUP.md)
 
 
 - [Bulk Export Formats & Data Fields](docs/EXPORTS.md)

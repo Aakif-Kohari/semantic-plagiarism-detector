@@ -2,51 +2,41 @@
 
 import logging
 import os
-import psutil
-import numpy as np
+import sqlite3
+from datetime import datetime, timezone
 
-from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status, Request
-from typing import Dict
-from fastapi import Request
-from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
+from fastapi import Depends, FastAPI, Query, Request, Security, status
 from fastapi.exceptions import RequestValidationError
-from slowapi import Limiter
-from slowapi.util import get_remote_address
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse, JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from src.api.dependencies import (
+    custom_rate_limit_exceeded_handler,
+    get_current_user,
+    limiter,
+)
 from src.api.middleware import verify_bearer_token
-from src.api.schemas import (
-    ClearDataResponse,
-    ErrorResponse,
-    HealthCheckResponse,
-    HealthzResponse,
-    LoginResponse,
-    SimilarityCheckResponse,
+from src.api.routers import (
+    admin_router,
+    analysis_router,
+    auth_router,
+    corpus_router,
 )
-from sklearn.metrics.pairwise import cosine_similarity
+from src.version import APP_VERSION
 
-from src.core.app_config import FAISS_INDEX_PATH, HEALTHZ_DB_PATHS
-from src.core.document_parser import extract_text
-from src.core.embedding_model import embed_chunks, get_document_embedding
-from src.core.similarity import (
-    PLAGIARISM_THRESHOLD,
-    chunk_max_similarity,
-    find_most_similar_chunks,
-)
-from src.core.text_chunking import chunk_document
-from src.db.auth import get_user_role
-from src.db.corpus_db import _connect, clear_all_data, init_corpus_db
-from src.utils.redis_cache import CacheKeyPrefix, get_cache
+# Re-exports for backward compatibility with existing tests and scripts
+
+logger = logging.getLogger(__name__)
 
 # ── API Initialization ────────────────────────────────────────────────────────
 
 app = FastAPI(
     title="Semantic Plagiarism Detector API",
     description="REST API for programmatically checking documents for semantic plagiarism.",
-    version="1.0.0",
+    version=APP_VERSION,
     contact={
         "name": "API Support",
         "url": "http://example.com/support",
@@ -67,444 +57,400 @@ if origins.strip() == "*":
     allowed_origins = ["*"]
 else:
     allowed_origins = [
-        origin.strip()
-        for origin in origins.split(",")
-        if origin.strip()
+        origin.strip() for origin in origins.split(",") if origin.strip()
     ]
+
+# Browser spec: allow_credentials cannot be True when wildcard '*' is used in allowed_origins
+allow_credentials = False if "*" in allowed_origins else True
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=True,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
+    max_age=3600,
 )
 
 # SlowAPI Rate Limiting setup
-limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 
 
-def custom_rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
-    response = JSONResponse(
-        {"detail": f"Rate limit exceeded: {exc.detail}"}, status_code=429
-    )
-    response = request.app.state.limiter._inject_headers(
-        response, request.state.view_rate_limit
-    )
-    return response
+@app.middleware("http")
+async def otel_tracing_middleware(request: Request, call_next):
+    """Middleware to create an OpenTelemetry root span for every HTTP request."""
+    # 1. Check if user_id was pre-set on request.state
+    user_id = getattr(request.state, "user_id", None)
+
+    # 2. If missing, attempt to extract token from Authorization header
+    if not user_id:
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.lower().startswith("bearer "):
+            token = auth_header[7:].strip()
+            if token:
+                try:
+                    from src.security.jwt_utils import verify_access_token
+
+                    payload = verify_access_token(token)
+                    user_id = str(
+                        payload.get("sub")
+                        or payload.get("user_id")
+                        or payload.get("username")
+                        or ""
+                    )
+                except Exception:
+                    pass
+
+    if not user_id:
+        user_id = "anonymous"
+
+    request.state.user_id = user_id
+
+    try:
+        from src.utils.tracing import get_tracer
+
+        tracer = get_tracer()
+    except Exception:
+        tracer = None
+
+    if not tracer:
+        return await call_next(request)
+
+    request_id = request.headers.get("X-Request-ID", "unknown")
+    span_name = f"HTTP {request.method} {request.url.path}"
+    with tracer.start_as_current_span(span_name) as span:
+        span.set_attribute("http.method", request.method)
+        span.set_attribute("http.url", str(request.url))
+        span.set_attribute("http.route", request.url.path)
+        span.set_attribute("http.request_id", request_id)
+        span.set_attribute("user.id", user_id)
+
+        try:
+            response = await call_next(request)
+            span.set_attribute("http.status_code", response.status_code)
+            # Update user.id if set or modified by route handler/dependencies
+            final_user_id = getattr(request.state, "user_id", user_id)
+            if final_user_id:
+                span.set_attribute("user.id", str(final_user_id))
+            return response
+        except Exception as exc:
+            span.record_exception(exc)
+            span.set_attribute("http.status_code", 500)
+            raise
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """
-    Return a standardized JSON response for request validation errors.
-    """
+    """Handle Pydantic validation errors from malformed API requests adhering to RFC 7807."""
+    # Issue #2564: Log the detailed validation errors for backend debugging
+    logger.warning(
+        "Request validation failed for %s %s: %s",
+        request.method,
+        request.url.path,
+        exc.errors(),
+    )
+    errors_list = [
+        {
+            "field": ".".join(map(str, err["loc"])),
+            "message": err["msg"],
+            "type": err["type"],
+        }
+        for err in exc.errors()
+    ]
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={
+            "type": "about:blank",
+            "title": "Unprocessable Entity",
+            "status": status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "detail": "Validation failed.",
+            "instance": getattr(getattr(request, "url", None), "path", None),
             "error": True,
             "message": "Validation failed.",
-            "details": [
-                {
-                    "field": ".".join(map(str, err["loc"])),
-                    "message": err["msg"],
-                    "type": err["type"],
-                }
-                for err in exc.errors()
-            ],
+            "details": errors_list,
+            "invalid_params": errors_list,
         },
+        media_type="application/problem+json",
+    )
+
+
+@app.exception_handler(404)
+async def not_found_handler(request: Request, exc: StarletteHTTPException):
+    """Custom exception handler for HTTP 404 errors adhering to RFC 7807."""
+    path = getattr(getattr(request, "url", None), "path", None)
+    return JSONResponse(
+        status_code=404,
+        content={
+            "type": "about:blank",
+            "title": "Not Found",
+            "status": 404,
+            "detail": "API endpoint or resource not found",
+            "instance": path,
+            "error": True,
+            "code": 404,
+            "message": "API endpoint or resource not found",
+        },
+        media_type="application/problem+json",
+    )
+
+
+@app.exception_handler(ValueError)
+async def value_error_handler(request: Request, exc: ValueError):
+    """Handle ValueError exceptions by returning an RFC 7807 400 Bad Request response."""
+    path = getattr(getattr(request, "url", None), "path", None)
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content={
+            "type": "about:blank",
+            "title": "Bad Request",
+            "status": status.HTTP_400_BAD_REQUEST,
+            "detail": str(exc),
+            "instance": path,
+            "error": True,
+            "code": status.HTTP_400_BAD_REQUEST,
+            "message": str(exc),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        },
+        media_type="application/problem+json",
+    )
+
+
+@app.exception_handler(sqlite3.OperationalError)
+async def sqlite_operational_error_handler(request: Request, exc: sqlite3.OperationalError):
+    """Handle sqlite3.OperationalError, particularly database is locked, returning RFC 7807 response."""
+    err_msg = str(exc)
+    status_code = (
+        status.HTTP_503_SERVICE_UNAVAILABLE
+        if "locked" in err_msg.lower() or "busy" in err_msg.lower()
+        else status.HTTP_500_INTERNAL_SERVER_ERROR
+    )
+    title = (
+        "Service Unavailable"
+        if status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+        else "Database Error"
+    )
+    message = (
+        "Service busy, please retry"
+        if status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+        else f"Database error: {err_msg}"
+    )
+
+    is_production = os.getenv("APP_ENVIRONMENT", "production").lower() == "production"
+    logger.error(f"SQLite operational error: {exc}", exc_info=not is_production)
+
+    path = getattr(getattr(request, "url", None), "path", None)
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "type": "about:blank",
+            "title": title,
+            "status": status_code,
+            "detail": message,
+            "instance": path,
+            "error": True,
+            "code": status_code,
+            "message": message,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        },
+        media_type="application/problem+json",
+    )
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Catch-all handler that returns an RFC 7807 problem details JSON payload for any unhandled exception."""
+    status_code = getattr(exc, "status_code", status.HTTP_500_INTERNAL_SERVER_ERROR)
+    is_production = os.getenv("APP_ENVIRONMENT", "production").lower() == "production"
+
+    logging.getLogger(__name__).error(
+        f"Unhandled exception: {exc}", exc_info=not is_production
+    )
+
+    message = "An internal server error occurred." if is_production else str(exc)
+    path = getattr(getattr(request, "url", None), "path", None)
+
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "type": "about:blank",
+            "title": "Internal Server Error",
+            "status": status_code,
+            "detail": message,
+            "instance": path,
+            "error": True,
+            "code": status_code,
+            "message": message,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        },
+        media_type="application/problem+json",
+    )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def custom_http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Custom exception handler for HTTP errors to return RFC 7807 problem details payloads."""
+    from http import HTTPStatus
+
+    status_code = exc.status_code
+    if status_code == 404:
+        title = "Not Found"
+        message = "API endpoint or resource not found"
+    else:
+        try:
+            title = HTTPStatus(status_code).phrase
+        except ValueError:
+            title = "HTTP Error"
+        message = exc.detail if isinstance(exc.detail, (str, dict)) else str(exc.detail)
+
+    log_level = logging.WARNING if 400 <= status_code < 500 else logging.ERROR
+    logger.log(
+        log_level,
+        "HTTP %d error on %s %s: %s",
+        status_code,
+        request.method,
+        request.url.path,
+        message,
+    )
+
+    path = getattr(getattr(request, "url", None), "path", None)
+    detail_str = message if isinstance(message, str) else str(message)
+
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "type": "about:blank",
+            "title": title,
+            "status": status_code,
+            "detail": detail_str,
+            "instance": path,
+            "error": True,
+            "code": status_code,
+            "message": message,
+        },
+        media_type="application/problem+json",
     )
 
 
 app.add_exception_handler(RateLimitExceeded, custom_rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 
-def validate_content_type(request: Request) -> None:
-    """Ensure the request is multipart/form-data before parsing."""
-    content_type = request.headers.get("content-type", "")
-    if "multipart/form-data" not in content_type:
-        raise HTTPException(
-            status_code=415,
-            detail="Unsupported Media Type: Request must be multipart/form-data"
-        )
+# ── Register Sub-Routers ──────────────────────────────────────────────────────
+app.include_router(auth_router)
+app.include_router(analysis_router)
+app.include_router(corpus_router)
+app.include_router(admin_router)
 
-
-# ── Database Helpers ───────────────────────────────────────────────────────────
-
-
-def get_corpus_documents_with_embeddings() -> Dict[str, Dict]:
-    """Load all stored corpus documents, text chunks, and chunk embeddings from SQLite."""
-    init_corpus_db()
-    corpus: Dict[str, Dict] = {}
-
-    with _connect() as conn:
-        rows = conn.execute(
-            "SELECT filename, chunk_index, chunk_text, embedding FROM chunks ORDER BY filename, chunk_index"
-        ).fetchall()
-
-    for filename, _chunk_index, chunk_text, embedding_blob in rows:
-        if filename not in corpus:
-            corpus[filename] = {"chunks": [], "embeddings": []}
-
-        vec = np.frombuffer(embedding_blob, dtype=np.float32)
-        corpus[filename]["chunks"].append(chunk_text)
-        corpus[filename]["embeddings"].append(vec)
-
-    # Convert list of vectors into stacked 2D numpy arrays
-    for filename in corpus:
-        vecs = corpus[filename]["embeddings"]
-        corpus[filename]["embeddings"] = (
-            np.vstack(vecs) if vecs else np.empty((0, 384), dtype=np.float32)
-        )
-
-    return corpus
-
-
-# ── API Endpoints ──────────────────────────────────────────────────────────────
-
-
-@app.post(
-    "/api/v1/auth/login",
-    tags=["Authentication"],
-    summary="Authenticate user",
-    response_model=LoginResponse,
-    status_code=status.HTTP_200_OK,
-    responses={
-        400: {"model": ErrorResponse, "description": "Bad Request"},
-        401: {"model": ErrorResponse, "description": "Unauthorized"},
-        500: {"model": ErrorResponse, "description": "Internal Server Error"},
-    },
-)
-@limiter.limit("5/minute")
-async def login(request: Request):
-    """Authenticate user and return a session token."""
-    return {"token": "dummy-token"}
-
+# ── Audit Events Endpoint (Issue #2732) ───────────────────────────────────────
 
 @app.get(
-    "/health",
-    tags=["Health"],
-    response_model=HealthCheckResponse,
-    status_code=status.HTTP_200_OK,
-)
-def health_check():
-    """Healthcheck endpoint for readiness and liveness probes."""
-    return {
-        "status": "healthy",
-        "service": "Semantic Plagiarism Detector API",
-        "version": "1.0.0",
-    }
-
-
-# ``HEALTHZ_DB_PATHS`` is centralized in app_config.  Keep a local alias as a
-# tuple of str for backward compatibility with the original implementation
-# (and so any code doing string comparison on these paths keeps working).
-_HEALTHZ_DB_PATHS = tuple(str(p) for p in HEALTHZ_DB_PATHS)
-
-
-@app.get("/metrics", tags=["Monitoring"], response_class=PlainTextResponse)
-def metrics_prometheus():
-    """Prometheus-format metrics export for production monitoring."""
-    from src.core.metrics import generate_latest as _gen
-
-    return PlainTextResponse(_gen().decode("utf-8"))
-
-
-@app.get("/metrics/json", tags=["Monitoring"])
-def metrics_json():
-    """JSON-format metrics export for non-Prometheus monitoring setups."""
-    from src.core.metrics import generate_metrics_json
-
-    return JSONResponse(generate_metrics_json())
-
-
-@app.get(
-    "/healthz",
-    tags=["Health"],
-    response_model=HealthzResponse,
-)
-def healthz():
-    """Health endpoint for container orchestration."""
-
-    try:
-        with _connect() as conn:
-            conn.execute("SELECT 1")
-
-        memory = psutil.virtual_memory()
-
-        if memory.available <= 0:
-            raise RuntimeError("Low memory")
-
-        return {
-            "status": "ok",
-            "db": "connected",
-            "memory": "ok",
-        }
-
-    except Exception:
-        return JSONResponse(
-            status_code=503,
-            content={
-                "status": "degraded",
-                "db": "disconnected",
-                "memory": "unavailable",
-            },
-        )
-
-
-@app.get(
-    "/api/v1/rate_limit",
+    "/api/v1/audit/events",
     tags=["System Administration"],
-    summary="Get current API rate limit status",
+    summary="Get paginated security audit events",
     status_code=status.HTTP_200_OK,
 )
-def get_rate_limit():
-    """
-    Return the current API rate limit information.
-    """
-    return {
-        "limit": 100,
-        "remaining": 85,
-        "reset_in_seconds": 45,
-    }
-
-
-@app.get(
-    "/api/v1/version",
-    tags=["System Administration"],
-    summary="Get API version",
-    status_code=status.HTTP_200_OK,
-)
-def get_version(request: Request):
-    """
-    Return the lightweight API version.
-    """
-    return {
-        "version": request.app.version,
-        "status": "active",
-    }
-
-
-@app.post(
-    "/api/v1/scan",
-    tags=["Plagiarism Detection"],
-    response_model=SimilarityCheckResponse,
-    status_code=status.HTTP_200_OK,
-    responses={
-        400: {"model": ErrorResponse, "description": "Bad Request"},
-        422: {"model": ErrorResponse, "description": "Unprocessable Entity"},
-        500: {"model": ErrorResponse, "description": "Internal Server Error"},
-    },
-)
-async def scan_document(
-    file: UploadFile = File(
-        ..., description="Document file to scan (.pdf, .docx, .txt)"
-    ),
-    threshold: float = Query(
-        default=PLAGIARISM_THRESHOLD,
-        ge=0.0,
-        le=1.0,
-        description="Similarity threshold for flagging plagiarism (default: 0.59)",
-    ),
-    top_k: int = Query(
-        default=3,
-        ge=1,
-        le=10,
-        description="Number of top matching paragraph pairs to include per matched document",
-    ),
-    _token: str = Depends(verify_bearer_token),
-    _content_type: None = Depends(validate_content_type),
+def get_audit_events_api(
+    limit: int = Query(default=20, ge=1, le=100, description="Max events per page"),
+    offset: int = Query(default=0, ge=0, description="Number of events to skip (pagination)"),
+    event_type: str | None = Query(default=None, description="Filter by event type"),
+    username: str | None = Query(default=None, description="Filter by username"),
+    _user: dict = Security(get_current_user, scopes=["admin"])
 ):
-    """Scan an uploaded document against the indexed corpus database for plagiarism."""
-    if not file.filename:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Filename must be provided.",
-        )
-
-    filename = file.filename
-    file_bytes = await file.read()
-
-    if len(file_bytes) == 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Uploaded file is empty (0 bytes)",
-        )
-
-    # Extract text from uploaded document
-    extracted_text = extract_text(file_bytes, filename)
-    if not extracted_text.strip():
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Failed to extract readable text from the uploaded file.",
-        )
-
-    words = extracted_text.split()
-    word_count = len(words)
-
-    # Split document into paragraph-level chunks
-    chunks = chunk_document(extracted_text)
-    if not chunks:
-        # Fallback if text is shorter than MIN_CHUNK_WORDS
-        chunks = [extracted_text[:1000]]
-
-    # Generate chunk embeddings
-    uploaded_embeddings = embed_chunks(chunks)
-
-    # Compute overall single document embedding
-    doc_embedding = get_document_embedding(uploaded_embeddings)
-
-    # Query corpus from SQLite database
-    corpus_docs = get_corpus_documents_with_embeddings()
-
-    matched_documents = []
-    max_overall_score = 0.0
-    max_chunk_overall_score = 0.0
-
-    for corpus_filename, corpus_data in corpus_docs.items():
-        # Avoid self-comparison if the same document is in the corpus
-        if corpus_filename == filename:
-            continue
-
-        c_embeddings = corpus_data["embeddings"]
-        c_chunks = corpus_data["chunks"]
-
-        if c_embeddings.size == 0:
-            continue
-
-        # Document-level mean similarity
-        c_doc_embedding = get_document_embedding(c_embeddings)
-        sim_doc = float(
-            np.clip(
-                cosine_similarity(
-                    doc_embedding.reshape(1, -1), c_doc_embedding.reshape(1, -1)
-                )[0, 0],
-                0.0,
-                1.0,
-            )
-        )
-
-        # Chunk-level max similarity
-        sim_chunk = chunk_max_similarity(uploaded_embeddings, c_embeddings)
-
-        combined_score = max(sim_doc, sim_chunk)
-        max_overall_score = max(max_overall_score, sim_doc)
-        max_chunk_overall_score = max(max_chunk_overall_score, sim_chunk)
-
-        if combined_score >= threshold:
-            severity = "🔴 High" if combined_score >= 0.90 else "🟡 Medium"
-
-            # Find top matching chunk pairs
-            similar_chunks = find_most_similar_chunks(
-                chunks_a=chunks,
-                chunks_b=c_chunks,
-                emb_a=uploaded_embeddings,
-                emb_b=c_embeddings,
-                top_k=top_k,
-                threshold=threshold,
-            )
-
-            flagged_chunks = [
-                {
-                    "uploaded_chunk": pair[0],
-                    "matched_chunk": pair[1],
-                    "similarity_score": round(float(pair[2]), 4),
-                }
-                for pair in similar_chunks
-            ]
-
-            matched_documents.append(
-                {
-                    "filename": corpus_filename,
-                    "document_similarity_score": round(sim_doc, 4),
-                    "max_chunk_similarity_score": round(sim_chunk, 4),
-                    "severity": severity,
-                    "flagged_chunks": flagged_chunks,
-                }
-            )
-
-    # Sort matches by max chunk similarity descending
-    matched_documents.sort(key=lambda x: x["max_chunk_similarity_score"], reverse=True)
-
-    is_flagged = len(matched_documents) > 0 or max_chunk_overall_score >= threshold
-
+    """Retrieve paginated security audit events.
+    
+    Supports pagination via limit and offset parameters (Issue #2732).
+    """
+    from src.db.auth import get_security_audit_log_count, get_security_audit_logs
+    
+    events = get_security_audit_logs(
+        limit=limit,
+        offset=offset,
+        event_type=event_type,
+        username=username
+    )
+    
+    total_count = get_security_audit_log_count(
+        event_type=event_type,
+        username=username
+    )
+    
     return {
-        "filename": filename,
-        "word_count": word_count,
-        "chunk_count": len(chunks),
-        "plagiarism_flagged": is_flagged,
-        "threshold_used": threshold,
-        "overall_document_similarity": round(max_overall_score, 4),
-        "max_chunk_similarity": round(max_chunk_overall_score, 4),
-        "matched_documents_count": len(matched_documents),
-        "matched_documents": matched_documents,
+        "events": events,
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "total_count": total_count,
+            "total_pages": (total_count + limit - 1) // limit if limit > 0 else 0
+        }
     }
 
+"""src/api/app.py - FastAPI REST API for LMS integration."""
 
-# ── System Administration ──────────────────────────────────────────────────────
+import logging
+import os
+
+from fastapi import Depends, FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from src.api.dependencies import (
+    custom_rate_limit_exceeded_handler,
+    limiter,
+)
+from src.api.middleware import verify_bearer_token
+from src.api.routers import (
+    admin_router,
+    analysis_router,
+    auth_router,
+    corpus_router,
+)
+
+# Re-exports for backward compatibility with existing tests and scripts
 
 logger = logging.getLogger(__name__)
-# Cast to str for consistency with callers that may pass it to faiss.*
-# or other C-extension APIs that require str paths.
-INDEX_PATH = str(FAISS_INDEX_PATH)
 
+# ── API Initialization ────────────────────────────────────────────────────────
 
-@app.post(
-    "/api/v1/clear",
+@app.get(
+    "/api/v1/audit/events",
     tags=["System Administration"],
-    response_model=ClearDataResponse,
+    summary="Get paginated security audit events",
     status_code=status.HTTP_200_OK,
-    responses={
-        403: {"model": ErrorResponse, "description": "Forbidden"},
-        500: {"model": ErrorResponse, "description": "Internal Server Error"},
-    },
 )
-async def clear_all_documents(
-    username: str = Query(
-        ..., description="Username of the administrator executing the operation"
-    ),
+def get_audit_events_api(
+    limit: int = Query(default=20, ge=1, le=100, description="Max events per page"),
+    offset: int = Query(default=0, ge=0, description="Number of events to skip (pagination)"),
+    event_type: str | None = Query(default=None, description="Filter by event type"),
+    username: str | None = Query(default=None, description="Filter by username"),
+    _user: dict = Security(get_current_user, scopes=["admin"])
 ):
+    """Retrieve paginated security audit events.
+    
+    Supports pagination via limit and offset parameters (Issue #2732).
     """
-    Remove all documents, text chunks, and plagiarism incidents from the SQLite database,
-    delete the FAISS index file, and clear the Redis cache. Restricted to administrators.
-    """
-    # 1. Verify administrator permissions
-    role = get_user_role(username)
-    if role != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Forbidden: Only administrators are authorized to clear all documents.",
-        )
-
-    try:
-        # 2. Clear SQLite database (documents, chunks, incidents)
-        clear_all_data()
-
-        # 3. Clear/reset the FAISS index file on disk
-        if os.path.exists(INDEX_PATH):
-            try:
-                os.remove(INDEX_PATH)
-            except OSError as e:
-                logger.error(f"Failed to remove FAISS index file: {e}")
-
-        # 4. Invalidate Redis cache
-        try:
-            cache = get_cache()
-            if cache.is_available():
-                cache.delete(CacheKeyPrefix.LEGACY_FAISS_INDEX.value)
-                cache.clear_pattern(CacheKeyPrefix.LEGACY_ANALYSIS_PATTERN.value)
-        except Exception as e:
-            logger.error(f"Failed to clear Redis cache: {e}")
-
-        return {
-            "status": "success",
-            "message": "All documents, chunks, and plagiarism incidents have been cleared, and the FAISS index reset successfully.",
+    from src.db.auth import get_security_audit_log_count, get_security_audit_logs
+    
+    events = get_security_audit_logs(
+        limit=limit,
+        offset=offset,
+        event_type=event_type,
+        username=username
+    )
+    
+    total_count = get_security_audit_log_count(
+        event_type=event_type,
+        username=username
+    )
+    
+    return {
+        "events": events,
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "total_count": total_count,
+            "total_pages": (total_count + limit - 1) // limit if limit > 0 else 0
         }
-
-    except Exception as e:
-        logger.error(f"Error during bulk clearing: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An error occurred while clearing the corpus: {str(e)}",
-        )
+    }
+app.include_router(admin_router)

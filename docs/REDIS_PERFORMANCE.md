@@ -236,3 +236,13 @@ For deeper configuration details and troubleshooting, consult the official Redis
 * [Redis Persistence Guide](https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/)
 * [Redis Command Reference](https://redis.io/docs/latest/commands/)
 * [Redis Administration Guide](https://redis.io/docs/latest/operate/oss_and_stack/management/admin/)
+
+### 6.1 Payload Compression Wire Format
+
+`PayloadCompressor` stores serialized cache payloads using the following wire format:
+
+- **Compressed payloads:** `MAGIC_HEADER + zlib_compressed_data`
+- **Uncompressed payloads:** raw serialized bytes
+- `MAGIC_HEADER` is `b"ZLIB_COMPRESSED_V1::"` and identifies compressed entries.
+- Compression is applied when the serialized payload size is at least `COMPRESSION_THRESHOLD_BYTES`, which is **64 KiB (`64 * 1024` bytes)**.
+- Consumers reading Redis entries directly should check for `MAGIC_HEADER` before attempting zlib decompression.

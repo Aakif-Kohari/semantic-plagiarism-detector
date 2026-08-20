@@ -11,10 +11,9 @@ Usage:
 """
 
 import ast
-import os
 import sys
 from pathlib import Path
-from typing import List, Tuple, Dict, Any
+from typing import Any, List, Tuple
 
 
 class DocstringVisitor(ast.NodeVisitor):

@@ -1,19 +1,16 @@
-import pytest
 from unittest.mock import patch
 
-
-from src.utils.filename import (_safe_extension, get_file_extension_sanitized,
-                                sanitize_filename, sanitize_filename_mapping,
-                                unique_filename)
+import pytest
 
 from src.utils.filename import (
     _safe_extension,
+    get_file_extension_sanitized,
     get_file_sha256_hash,
+    normalize_sha256_hash,
     sanitize_filename,
     sanitize_filename_mapping,
     unique_filename,
 )
-
 
 
 @pytest.mark.parametrize(
@@ -35,7 +32,6 @@ def test_sanitize_filename_security_cases(untrusted, expected):
     assert sanitize_filename(untrusted) == expected
 
 
-
 @pytest.mark.parametrize(
     ("filename", "expected"),
     [
@@ -51,13 +47,8 @@ def test_get_file_extension_sanitized(filename, expected):
     assert get_file_extension_sanitized(filename) == expected
 
 
-def test_sanitized_filename_contains_no_html_or_path_separators():    result = sanitize_filename(
-        '<svg/onload=alert(1)>../../evil "file".pdf'
-    )
-
 def test_sanitized_filename_contains_no_html_or_path_separators():
     result = sanitize_filename('<svg/onload=alert(1)>../../evil "file".pdf')
-
 
     assert "<" not in result
     assert ">" not in result
@@ -74,7 +65,7 @@ def test_extension_is_preserved_and_normalized():
 def test_long_filename_preserves_extension_and_limit():
     result = sanitize_filename("a" * 400 + ".pdf")
 
-    assert len(result) == 150
+    assert len(result) == 128
     assert result.endswith(".pdf")
 
 
@@ -85,8 +76,8 @@ def test_300_plus_character_filename_truncation_and_hash_uniqueness():
     sanitized1 = sanitize_filename(file1)
     sanitized2 = sanitize_filename(file2)
 
-    assert len(sanitized1) <= 150
-    assert len(sanitized2) <= 150
+    assert len(sanitized1) <= 128
+    assert len(sanitized2) <= 128
     assert sanitized1.endswith(".pdf")
     assert sanitized2.endswith(".pdf")
     assert sanitized1 != sanitized2
@@ -129,7 +120,7 @@ def test_mapping_preserves_entries_after_sanitization_collision():
         ("no_extension", ""),
     ],
 )
-def test_get_file_extension_sanitized(filename, expected):
+def test_internal_safe_extension(filename, expected):
     """get_file_extension_sanitized returns lowercase, well-formed extensions."""
     assert _safe_extension(filename) == expected
 
@@ -231,3 +222,86 @@ def test_get_file_sha256_hash_returns_64_character_hex_digest():
 
     assert len(digest) == 64
     assert digest == digest.lower()
+
+
+def test_200_character_filename_is_truncated_safely():
+    long_filename = "a" * 200 + ".pdf"
+
+    sanitized = sanitize_filename(long_filename)
+
+    assert len(sanitized) <= 128
+    assert sanitized.endswith(".pdf")
+
+
+from io import BytesIO
+
+from src.utils.filename import (
+    compute_file_hash_stream,
+)
+
+
+def test_compute_file_hash_stream_matches_byte_hash():
+    data = b"Hello World" * 1000
+    stream = BytesIO(data)
+
+    assert compute_file_hash_stream(stream) == get_file_sha256_hash(data)
+
+
+def test_normalize_sha256_hash_lowercases_mixed_case():
+    mixed_case = "A" * 32 + "b" * 32
+    assert normalize_sha256_hash(mixed_case) == mixed_case.lower()
+
+
+def test_normalize_sha256_hash_accepts_already_lowercase():
+    lower_hash = "a" * 64
+    assert normalize_sha256_hash(lower_hash) == lower_hash
+
+
+def test_normalize_sha256_hash_invalid_length_raises():
+    with pytest.raises(ValueError):
+        normalize_sha256_hash("abc123")
+
+
+def test_normalize_sha256_hash_invalid_characters_raises():
+    with pytest.raises(ValueError):
+        normalize_sha256_hash("z" * 64)
+
+
+from src.utils.filename import format_extension_badge
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected"),
+    [
+        ("report.pdf", "📄 PDF"),
+        ("REPORT.PDF", "📄 PDF"),
+        ("essay.docx", "📝 DOCX"),
+        ("legacy.doc", "📝 DOC"),
+        ("notes.txt", "📑 TXT"),
+        ("data.csv", "📊 CSV"),
+        ("Data.CSV", "📊 CSV"),
+        ("book.epub", "📚 EPUB"),
+        ("memo.rtf", "📃 RTF"),
+        ("archive.zip", "📦 ZIP"),
+    ],
+)
+def test_format_extension_badge_known_extensions(filename, expected):
+    assert format_extension_badge(filename) == expected
+
+
+def test_format_extension_badge_unknown_extension_uses_fallback():
+    assert format_extension_badge("script.py") == "📁 FILE"
+
+
+def test_format_extension_badge_no_extension_uses_fallback():
+    assert format_extension_badge("README") == "📁 FILE"
+
+
+def test_format_extension_badge_empty_filename_uses_fallback():
+    assert format_extension_badge("") == "📁 FILE"
+
+
+def test_format_extension_badge_ignores_double_extension_trick():
+    """A double extension like 'report.pdf.exe' must badge by its true
+    final extension, not an earlier one hidden inside the name."""
+    assert format_extension_badge("report.pdf.exe") == "📁 FILE"

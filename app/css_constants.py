@@ -74,6 +74,22 @@ PIPELINE_STEP_DONE = "pipeline-step done"
 PIPELINE_ARROW = "pipeline-arrow"
 """Arrow separator between pipeline steps."""
 
+PIPELINE_DONE = "done"
+"""Completed pipeline step state."""
+
+PIPELINE_ACTIVE = "active"
+"""Active pipeline step state."""
+
+PIPELINE_ETA = "pipeline-eta"
+"""Estimated processing time container."""
+
+DOC_ROW = "doc-row"
+"""Document listing row."""
+
+WELCOME_BANNER = "welcome-banner"
+"""Dashboard welcome banner."""
+
+
 # ── Mono text ──────────────────────────────────────────────────────────────────
 
 MONO_TEXT = "mono-text"
@@ -89,6 +105,12 @@ WARNING_CARD_MEDIUM = "warning-card-medium"
 
 WARNING_CARD_LOW = "warning-card-low"
 """Low severity warning card accent border."""
+
+LOW_CONFIDENCE_CARD = "low-confidence-card"
+"""Low confidence detection card amber accent border."""
+
+HIGH_SEVERITY_ROW = "high-severity-row"
+"""High severity plagiarism row accent border."""
 
 # ── Login container classes ────────────────────────────────────────────────────
 
@@ -175,34 +197,5 @@ ST_TABS = "stTabs"
 ST_TABS_BUTTON = "stTabs button"
 """Individual tab button."""
 
-ST_TABS_BUTTON_ACTIVE = "stTabs button[aria-selected=\"true\"]"
+ST_TABS_BUTTON_ACTIVE = 'stTabs button[aria-selected="true"]'
 """Active (selected) tab button."""
-CLASS_BADGE = "badge"
-CLASS_SIM_PILL = "sim-pill"
-
-CLASS_EMPTY_STATE = "empty-state"
-CLASS_EMPTY_ICON = "empty-icon"
-CLASS_EMPTY_TITLE = "empty-title"
-CLASS_EMPTY_DESC = "empty-desc"
-
-CLASS_SIDEBAR_USER_BADGE = "sidebar-user-badge"
-CLASS_AVATAR = "avatar"
-
-CLASS_PIPELINE_STEP = "pipeline-step"
-CLASS_PIPELINE_DONE = "done"
-CLASS_PIPELINE_ACTIVE = "active"
-CLASS_PIPELINE_ARROW = "pipeline-arrow"
-CLASS_PIPELINE_STEPS = "pipeline-steps"
-CLASS_PIPELINE_ETA = "pipeline-eta"
-
-CLASS_DOC_ROW = "doc-row"
-
-CLASS_WELCOME_BANNER = "welcome-banner"
-CLASS_SKELETON = "skeleton"
-CLASS_SKELETON_METRIC = "skeleton-metric"
-CLASS_SKELETON_TITLE = "skeleton-title"
-CLASS_SKELETON_TEXT = "skeleton-text"
-CLASS_SKELETON_TEXT_SHORT = "skeleton-text-short"
-CLASS_SKELETON_CHART = "skeleton-chart"
-CLASS_SKELETON_TABLE = "skeleton-table"
-CLASS_CLEAR_ALL_CONTAINER = "clear-all-container"

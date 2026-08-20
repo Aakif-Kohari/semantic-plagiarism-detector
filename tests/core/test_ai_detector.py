@@ -8,10 +8,12 @@ Includes tests for:
 - Confidence tier categorization
 - Document-level AI detection statistics
 - Text perplexity scoring helper (Issue #1154)
+- Perplexity score normalization function (Issue #1584)
 """
 
 import math
 from unittest.mock import MagicMock, patch
+
 import pytest
 
 from src.core.ai_detector import (
@@ -22,19 +24,85 @@ from src.core.ai_detector import (
     detect_ai_probability_batch,
     detect_document_ai_probability,
     detect_documents_ai_probability,
+    normalize_perplexity,
 )
 
 
 def test_categorize_ai_probability_boundaries():
     """Verify that the confidence categorization partitions the [0,1] range correctly."""
     assert categorize_ai_probability(0.85) == "High Probability"
-    assert categorize_ai_probability(0.80) == "High Probability"
-    assert categorize_ai_probability(0.79) == "Moderate Probability"
-    assert categorize_ai_probability(0.65) == "Moderate Probability"
+    assert categorize_ai_probability(0.75) == "High Probability"
+    assert categorize_ai_probability(0.74) == "Moderate Probability"
     assert categorize_ai_probability(0.50) == "Moderate Probability"
-    assert categorize_ai_probability(0.49) == "Low Probability"
-    assert categorize_ai_probability(0.20) == "Low Probability"
+    assert categorize_ai_probability(0.40) == "Moderate Probability"
+    assert categorize_ai_probability(0.39) == "Low Probability"
     assert categorize_ai_probability(0.00) == "Low Probability"
+
+
+def test_categorize_at_0_0():
+    """Score of 0.0 should be Low Probability."""
+    assert categorize_ai_probability(0.0) == "Low Probability"
+
+
+def test_categorize_at_0_49():
+    """Score of 0.49 should be Moderate Probability (>= AI_MEDIUM_THRESHOLD of 0.40)."""
+    assert categorize_ai_probability(0.49) == "Moderate Probability"
+
+
+def test_categorize_at_0_50():
+    """Score of 0.50 should be Moderate Probability."""
+    assert categorize_ai_probability(0.50) == "Moderate Probability"
+
+
+def test_categorize_at_0_79():
+    """Score of 0.79 should be High Probability (>= AI_HIGH_THRESHOLD of 0.75)."""
+    assert categorize_ai_probability(0.79) == "High Probability"
+
+
+def test_categorize_at_0_80():
+    """Score of 0.80 should be High Probability."""
+    assert categorize_ai_probability(0.80) == "High Probability"
+
+
+def test_categorize_at_1_0():
+    """Score of 1.0 should be High Probability."""
+    assert categorize_ai_probability(1.0) == "High Probability"
+
+
+def test_ai_probability_categorization_consistency():    """Verify that both categorize_ai_probability and detect_ai_generated_text use consistent thresholds."""
+    from src.core.ai_detector import (
+        AI_HIGH_THRESHOLD,
+        AI_MEDIUM_THRESHOLD,
+        categorize_ai_probability,
+        detect_ai_generated_text,
+    )
+
+    test_scores = [
+        0.0,
+        0.2,
+        AI_MEDIUM_THRESHOLD - 0.01,
+        AI_MEDIUM_THRESHOLD,
+        0.5,
+        AI_HIGH_THRESHOLD - 0.01,
+        AI_HIGH_THRESHOLD,
+        0.9,
+        1.0,
+    ]
+
+    mapping = {
+        "high": "High Probability",
+        "medium": "Moderate Probability",
+        "low": "Low Probability",
+    }
+
+    for score in test_scores:
+        # Mock detect_ai_probability to return the score
+        with patch("src.core.ai_detector.detect_ai_probability", return_value=score):
+            res = detect_ai_generated_text("Some text for the classifier pipeline analysis.")
+            tier = res["confidence_tier"]
+            category = categorize_ai_probability(score)
+            assert mapping[tier] == category, f"Inconsistent categorization for score {score}: tier={tier}, category={category}"
+
 
 
 @pytest.fixture(autouse=True)
@@ -119,7 +187,10 @@ def test_detect_ai_generated_text_empty():
     res = detect_ai_generated_text("")
     assert res["ai_probability"] == 0.0
     assert res["confidence_tier"] == "low"
-    assert res["perplexity_score"] == 150.0
+    assert res["perplexity_score"] == 0.0
+    assert res["burstiness_score"] == 0.0
+    assert res["ngram_repetitiveness"] == 0.0
+    assert res["classification_tier"] == "low"
 
 
 def test_detect_ai_generated_text_whitespace():
@@ -127,32 +198,188 @@ def test_detect_ai_generated_text_whitespace():
     res = detect_ai_generated_text("   \n\t  ")
     assert res["ai_probability"] == 0.0
     assert res["confidence_tier"] == "low"
-    assert res["perplexity_score"] == 150.0
+    assert res["perplexity_score"] == 0.0
+    assert res["burstiness_score"] == 0.0
+    assert res["ngram_repetitiveness"] == 0.0
 
 
 def test_detect_ai_generated_text_tiers():
-    """Verify that confidence categorizations partition correctly."""
-    with patch("src.core.ai_detector.detect_ai_probability") as mock_prob:
+    """Verify that confidence categorizations partition correctly with multi-metric scores."""
+    with patch("src.core.ai_detector.detect_ai_probability") as mock_prob, patch(
+        "src.core.ai_detector.calculate_text_perplexity"
+    ) as mock_perp, patch(
+        "src.core.ai_detector._calculate_burstiness"
+    ) as mock_burst, patch(
+        "src.core.ai_detector._calculate_ngram_repetitiveness"
+    ) as mock_ngram:
+
+        mock_perp.return_value = 50.0
+        mock_burst.return_value = 0.3
+        mock_ngram.return_value = 0.2
+
         # High confidence AI (>= 0.75)
         mock_prob.return_value = 0.85
         res = detect_ai_generated_text("Test AI text")
         assert res["ai_probability"] == 0.85
         assert res["confidence_tier"] == "high"
-        assert res["perplexity_score"] == float(150.0 - 110.0 * 0.85)
+        assert res["classification_tier"] == "high"
+        assert res["perplexity_score"] == 50.0
+        assert res["burstiness_score"] == 0.3
+        assert res["ngram_repetitiveness"] == 0.2
 
         # Medium confidence (0.40 <= prob < 0.75)
         mock_prob.return_value = 0.55
         res = detect_ai_generated_text("Test medium text")
         assert res["ai_probability"] == 0.55
         assert res["confidence_tier"] == "medium"
-        assert res["perplexity_score"] == float(150.0 - 110.0 * 0.55)
+        assert res["classification_tier"] == "medium"
 
         # Low confidence (< 0.40)
         mock_prob.return_value = 0.25
         res = detect_ai_generated_text("Test human text")
         assert res["ai_probability"] == 0.25
         assert res["confidence_tier"] == "low"
-        assert res["perplexity_score"] == float(150.0 - 110.0 * 0.25)
+        assert res["classification_tier"] == "low"
+
+
+# ─── Tests for multi-metric classifier (Issue #1356) ─────────────────────────
+
+
+HUMAN_TEXT = (
+    "The autumn leaves danced in the wind. A sudden chill crept through the valley, "
+    "reminding everyone that winter was coming. The old man sighed, pulling his coat "
+    "tighter. 'Another year gone,' he muttered to no one in particular. The children "
+    "playing in the distance didn't notice. They were too busy building a fort out of "
+    "branches and old blankets. Meanwhile, the baker across the street was already "
+    "preparing for the morning rush. The smell of fresh bread wafted through the air. "
+    "Life went on, as it always does, indifferent to the changing seasons."
+)
+
+AI_TEXT = (
+    "In today's rapidly evolving technological landscape, artificial intelligence has "
+    "become an integral part of our daily lives. From smartphones to smart homes, AI "
+    "technology is everywhere. Moreover, the impact of artificial intelligence extends "
+    "far beyond consumer applications. In the business world, companies are leveraging "
+    "AI to streamline operations and improve efficiency. Furthermore, the healthcare "
+    "industry has also embraced artificial intelligence for diagnostic purposes. In "
+    "conclusion, artificial intelligence will continue to shape our future in profound ways."
+)
+
+
+def test_multi_classifier_returns_all_metrics():
+    """detect_ai_generated_text must return all four metric fields."""
+    with patch("src.core.ai_detector.detect_ai_probability", return_value=0.7), patch(
+        "src.core.ai_detector.calculate_text_perplexity", return_value=42.0
+    ), patch("src.core.ai_detector._calculate_burstiness", return_value=0.5), patch(
+        "src.core.ai_detector._calculate_ngram_repetitiveness", return_value=0.3
+    ):
+        result = detect_ai_generated_text("Some test text for analysis.")
+
+    assert "ai_probability" in result
+    assert "perplexity_score" in result
+    assert "burstiness_score" in result
+    assert "ngram_repetitiveness" in result
+    assert "classification_tier" in result
+    assert "confidence_tier" in result
+
+
+def test_multi_classifier_synthetic_human_text():
+    """Human-like text (low AI prob, high burstiness) should classify as 'low'."""
+    with patch("src.core.ai_detector.detect_ai_probability", return_value=0.15), patch(
+        "src.core.ai_detector.calculate_text_perplexity", return_value=180.0
+    ), patch("src.core.ai_detector._calculate_burstiness", return_value=0.75), patch(
+        "src.core.ai_detector._calculate_ngram_repetitiveness", return_value=0.1
+    ):
+        result = detect_ai_generated_text(HUMAN_TEXT)
+
+    assert result["ai_probability"] < 0.4
+    assert result["confidence_tier"] == "low"
+    assert result["classification_tier"] == "low"
+    assert result["burstiness_score"] > 0.5  # human text is bursty
+    assert result["ngram_repetitiveness"] < 0.3  # human text is less repetitive
+
+
+def test_multi_classifier_synthetic_ai_text():
+    """AI-like text (high AI prob, low burstiness, high repetition) should classify as 'high'."""
+    with patch("src.core.ai_detector.detect_ai_probability", return_value=0.88), patch(
+        "src.core.ai_detector.calculate_text_perplexity", return_value=25.0
+    ), patch("src.core.ai_detector._calculate_burstiness", return_value=0.15), patch(
+        "src.core.ai_detector._calculate_ngram_repetitiveness", return_value=0.6
+    ):
+        result = detect_ai_generated_text(AI_TEXT)
+
+    assert result["ai_probability"] >= 0.75
+    assert result["confidence_tier"] == "high"
+    assert result["classification_tier"] == "high"
+    assert result["burstiness_score"] < 0.5  # AI text is uniform
+    assert result["ngram_repetitiveness"] > 0.3  # AI text is more repetitive
+
+
+def test_burstiness_empty_text():
+    """Burstiness of empty text must be 0.0."""
+    from src.core.ai_detector import _calculate_burstiness
+
+    assert _calculate_burstiness("") == 0.0
+    assert _calculate_burstiness(None) == 0.0
+    assert _calculate_burstiness("   ") == 0.0
+
+
+def test_burstiness_single_sentence():
+    """Burstiness of a single sentence must be 0.0 (no variation)."""
+    from src.core.ai_detector import _calculate_burstiness
+
+    assert _calculate_burstiness("Only one sentence here.") == 0.0
+
+
+def test_burstiness_uniform_sentences():
+    """Burstiness of uniform sentences must be a low score (0.0)."""
+    from src.core.ai_detector import _calculate_burstiness
+
+    uniform = "This is a sentence. This is a sentence. This is a sentence."
+    assert _calculate_burstiness(uniform) == 0.0
+
+
+def test_burstiness_varied_sentences():
+    """Burstiness should be higher for text with varied sentence lengths."""
+    from src.core.ai_detector import _calculate_burstiness
+
+    varied = "Short. This is a much longer sentence with many words. Medium one here."
+    assert _calculate_burstiness(varied) > 0.0
+
+
+def test_ngram_repetitiveness_empty_text():
+    """N-gram repetitiveness of empty text must be 0.0."""
+    from src.core.ai_detector import _calculate_ngram_repetitiveness
+
+    assert _calculate_ngram_repetitiveness("") == 0.0
+    assert _calculate_ngram_repetitiveness(None) == 0.0
+    assert _calculate_ngram_repetitiveness("   ") == 0.0
+
+
+def test_ngram_repetitiveness_short_text():
+    """N-gram repetitiveness of text shorter than n must be 0.0."""
+    from src.core.ai_detector import _calculate_ngram_repetitiveness
+
+    assert _calculate_ngram_repetitiveness("hi") == 0.0
+    assert _calculate_ngram_repetitiveness("one two") == 0.0
+
+
+def test_ngram_repetitiveness_no_repeats():
+    """Text with no repeated n-grams should return ~0.0."""
+    from src.core.ai_detector import _calculate_ngram_repetitiveness
+
+    unique = "the quick brown fox jumps over lazy dog runs fast today"
+    result = _calculate_ngram_repetitiveness(unique, n=3)
+    assert result < 0.1
+
+
+def test_ngram_repetitiveness_high_repetition():
+    """Text with repeated n-grams should return a high score."""
+    from src.core.ai_detector import _calculate_ngram_repetitiveness
+
+    repetitive = "the the the the the the the the the the"
+    result = _calculate_ngram_repetitiveness(repetitive, n=2)
+    assert result > 0.5
 
 
 # ─── Tests for calculate_text_perplexity (Issue #1154) ──────────────────────────
@@ -185,7 +412,7 @@ def test_calculate_text_perplexity_returns_float():
 def test_calculate_text_perplexity_with_fallback_model():
     """When model is in fallback mode, return default perplexity score."""
     with patch("src.core.ai_detector._get_model_and_tokenizer") as mock_loader:
-        mock_loader.return_value = ("fallback", "fallback")
+        mock_loader.return_value = (_FALLBACK_SENTINEL, _FALLBACK_SENTINEL)  # noqa: F821
         result = calculate_text_perplexity("Some text to evaluate.")
         assert result == 0.0
 
@@ -457,3 +684,57 @@ def test_calculate_text_perplexity_none_loss():
         finally:
             module._model = original_model
             module._tokenizer = original_tokenizer
+
+
+# ─── Tests for normalize_perplexity (Issue #1584) ─────────────────────────────
+
+
+def test_normalize_perplexity_basic():
+    """Test standard perplexity score normalization."""
+    # With scale_factor = 100.0: 100.0 -> 100 / (100 + 100) = 0.5
+    result = normalize_perplexity(100.0, scale_factor=100.0)
+    assert isinstance(result, float)
+    assert result == 0.5
+
+
+def test_normalize_perplexity_zero_and_negative():
+    """Zero or negative raw scores should map to 0.0."""
+    assert normalize_perplexity(0.0) == 0.0
+    assert normalize_perplexity(-10.0) == 0.0
+
+
+def test_normalize_perplexity_invalid_inputs():
+    """Non-numeric or None raw scores should return 0.0 safely."""
+    assert normalize_perplexity(None) == 0.0
+    assert normalize_perplexity("invalid") == 0.0  # type: ignore
+
+
+def test_normalize_perplexity_bounds():
+    """Normalized score must always be bounded between 0.0 and 1.0."""
+    assert 0.0 <= normalize_perplexity(1e6) <= 1.0
+    assert 0.0 <= normalize_perplexity(0.0) <= 1.0
+
+
+def test_categorize_perplexity_score():
+    from src.core.ai_detector import categorize_perplexity_score
+
+    assert categorize_perplexity_score(25.0) == "Highly Predictable"
+    assert categorize_perplexity_score(50.0) == "Moderate"
+    assert categorize_perplexity_score(85.0) == "Unpredictable"
+
+
+def test_split_sentences_simple():
+    """Verify that _split_sentences_simple correctly splits text into sentences and filters empty strings."""
+    from src.core.ai_detector import _split_sentences_simple
+
+    # Basic splitting
+    assert _split_sentences_simple("Hello! World? How are you.") == ["Hello", "World", "How are you"]
+
+    # Trailing punctuation empty strings filtered
+    assert _split_sentences_simple("One sentence... Two sentences!!!") == ["One sentence", "Two sentences"]
+
+    # Empty inputs and invalid types handled gracefully
+    assert _split_sentences_simple("") == []
+    assert _split_sentences_simple(None) == []
+    assert _split_sentences_simple(123) == []  # type: ignore
+    
