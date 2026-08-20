@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Pre-filtering matrix comparisons with ephemeral FAISS index (`top_k` / `candidate_pairs`) to reduce quadratic computation in large document sets (`src/core/similarity.py`).
 - Automated fault tolerance test for mid-session Redis connection drop and graceful in-memory failover (`tests/core/test_fault_tolerance.py`, `tests/utils/test_redis_fallback_failover.py`).
 - Added `--recursive` support to the CLI scan command for scanning documents in nested subdirectories.
 
