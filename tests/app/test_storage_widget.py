@@ -16,10 +16,10 @@ def test_storage_widget_inside_admin_sidebar_block():
     source = APP_PATH.read_text(encoding="utf-8")
 
     assert 'if user_role == "admin":' in source
-    assert '### 💾 Storage Space Used' in source
+    assert "### 💾 Storage Space Used" in source
     assert 'label="Total Storage Used"' in source
-    assert 'calculate_storage_usage()' in source
+    assert "calculate_storage_usage()" in source
 
     admin_pos = source.index('if user_role == "admin":')
-    storage_widget_pos = source.index('### 💾 Storage Space Used')
+    storage_widget_pos = source.index("### 💾 Storage Space Used")
     assert storage_widget_pos > admin_pos

@@ -6,7 +6,7 @@ APP_PATH = Path("app/streamlit_app.py")
 def test_session_timeout_warning_js_present():
     source = APP_PATH.read_text(encoding="utf-8")
     assert "id = 'session-warning-toast'" in source
-    assert 'warningTime = timeoutLimit - (2 * 60 * 1000)' in source
+    assert "warningTime = timeoutLimit - (2 * 60 * 1000)" in source
     assert "parentDoc.addEventListener('mousemove', resetTimer)" in source
 
 
@@ -33,7 +33,11 @@ def test_session_expiration_and_refresh():
 
     # 1. Test session refresh (non-expired)
     st = MagicMock()
-    st.session_state = {"authenticated": True, "role": "admin", "last_interaction": time.time() - 1000}
+    st.session_state = {
+        "authenticated": True,
+        "role": "admin",
+        "last_interaction": time.time() - 1000,
+    }
 
     timeout_limit = 30 * 60 if st.session_state.get("role") == "admin" else 15 * 60
     last_interaction = st.session_state["last_interaction"]
@@ -46,7 +50,11 @@ def test_session_expiration_and_refresh():
     assert st.session_state["last_interaction"] > last_interaction
 
     # 2. Test session expiration (expired admin)
-    st.session_state = {"authenticated": True, "role": "admin", "last_interaction": time.time() - 2000}
+    st.session_state = {
+        "authenticated": True,
+        "role": "admin",
+        "last_interaction": time.time() - 2000,
+    }
     timeout_limit = 30 * 60 if st.session_state.get("role") == "admin" else 15 * 60
     last_interaction = st.session_state["last_interaction"]
     elapsed_time = time.time() - last_interaction

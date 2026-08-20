@@ -22,8 +22,6 @@ def test_download_is_inside_admin_settings_block():
     source = APP_PATH.read_text(encoding="utf-8")
 
     admin_position = source.index('if user_role == "admin":')
-    download_position = source.index(
-        'label="⬇️ Download raw Database"'
-    )
+    download_position = source.index('label="⬇️ Download raw Database"')
 
     assert download_position > admin_position

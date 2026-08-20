@@ -13,16 +13,6 @@ Provides:
 """
 # -*- coding: utf-8 -*-
 
-from app.css_constants import (
-    BADGE,
-    EMPTY_STATE,
-    EMPTY_ICON,
-    EMPTY_TITLE,
-    EMPTY_DESC,
-    SIDEBAR_USER_BADGE,
-    AVATAR,
-    SIM_PILL,
-)
 
 """
 theme.py
@@ -40,6 +30,8 @@ Recent Additions (Issue #572):
 
 import re
 import secrets
+from datetime import datetime, timezone
+
 import streamlit as st
 
 
@@ -130,78 +122,79 @@ def sanitize_theme_colors(colors: dict) -> dict:
 
 try:
     from app.css_constants import (
-        CLASS_AVATAR,
-        CLASS_BADGE,
-        CLASS_EMPTY_DESC,
-        CLASS_EMPTY_ICON,
-        CLASS_EMPTY_STATE,
-        CLASS_EMPTY_TITLE,
-        CLASS_PIPELINE_ACTIVE,
-        CLASS_PIPELINE_ARROW,
-        CLASS_PIPELINE_DONE,
-        CLASS_PIPELINE_ETA,
-        CLASS_PIPELINE_STEP,
-        CLASS_PIPELINE_STEPS,
-        CLASS_SIDEBAR_USER_BADGE,
-        CLASS_SIM_PILL,
-        CLASS_WELCOME_BANNER,
+        AVATAR,
+        BADGE,
+        EMPTY_DESC,
+        EMPTY_ICON,
+        EMPTY_STATE,
+        EMPTY_TITLE,
+        PIPELINE_ACTIVE,
+        PIPELINE_ARROW,
+        PIPELINE_DONE,
+        PIPELINE_ETA,
+        PIPELINE_STEP,
+        PIPELINE_STEPS,
+        SIDEBAR_USER_BADGE,
+        SIM_PILL,
+        WELCOME_BANNER,
     )
 except ImportError:
     from css_constants import (
-        CLASS_AVATAR,
-        CLASS_BADGE,
-        CLASS_EMPTY_DESC,
-        CLASS_EMPTY_ICON,
-        CLASS_EMPTY_STATE,
-        CLASS_EMPTY_TITLE,
-        CLASS_PIPELINE_ACTIVE,
-        CLASS_PIPELINE_ARROW,
-        CLASS_PIPELINE_DONE,
-        CLASS_PIPELINE_ETA,
-        CLASS_PIPELINE_STEP,
-        CLASS_PIPELINE_STEPS,
-        CLASS_SIDEBAR_USER_BADGE,
-        CLASS_SIM_PILL,
-        CLASS_WELCOME_BANNER,
+        AVATAR,
+        BADGE,
+        EMPTY_DESC,
+        EMPTY_ICON,
+        EMPTY_STATE,
+        EMPTY_TITLE,
+        PIPELINE_ACTIVE,
+        PIPELINE_ARROW,
+        PIPELINE_DONE,
+        PIPELINE_ETA,
+        PIPELINE_STEP,
+        PIPELINE_STEPS,
+        SIDEBAR_USER_BADGE,
+        SIM_PILL,
+        WELCOME_BANNER,
     )
+
 from src.core.config import DEFAULT_THRESHOLDS, normalize_severity_label, severity_key
 
 # ── CSS Class Constants ────────────────────────────────────────────────────────
 try:
     from app.css_constants import (
-        CLASS_AVATAR,
-        CLASS_BADGE,
-        CLASS_EMPTY_DESC,
-        CLASS_EMPTY_ICON,
-        CLASS_EMPTY_STATE,
-        CLASS_EMPTY_TITLE,
-        CLASS_PIPELINE_ACTIVE,
-        CLASS_PIPELINE_ARROW,
-        CLASS_PIPELINE_DONE,
-        CLASS_PIPELINE_ETA,
-        CLASS_PIPELINE_STEP,
-        CLASS_PIPELINE_STEPS,
-        CLASS_SIDEBAR_USER_BADGE,
-        CLASS_SIM_PILL,
-        CLASS_WELCOME_BANNER,
+        AVATAR,
+        BADGE,
+        EMPTY_DESC,
+        EMPTY_ICON,
+        EMPTY_STATE,
+        EMPTY_TITLE,
+        PIPELINE_ACTIVE,
+        PIPELINE_ARROW,
+        PIPELINE_DONE,
+        PIPELINE_ETA,
+        PIPELINE_STEP,
+        PIPELINE_STEPS,
+        SIDEBAR_USER_BADGE,
+        SIM_PILL,
+        WELCOME_BANNER,
     )
 except ImportError:
     # Fallbacks for isolated testing
-    CLASS_AVATAR = "avatar-circle"
-    CLASS_BADGE = "severity-badge"
-    CLASS_EMPTY_DESC = "empty-desc"
-    CLASS_EMPTY_ICON = "empty-icon"
-    CLASS_EMPTY_STATE = "empty-state"
-    CLASS_EMPTY_TITLE = "empty-title"
-    CLASS_PIPELINE_ACTIVE = "pipeline-active"
-    CLASS_PIPELINE_ARROW = "pipeline-arrow"
-    CLASS_PIPELINE_DONE = "pipeline-done"
-    CLASS_PIPELINE_ETA = "pipeline-eta"
-    CLASS_PIPELINE_STEP = "pipeline-step"
-    CLASS_PIPELINE_STEPS = "pipeline-steps"
-    CLASS_SIDEBAR_USER_BADGE = "sidebar-user-badge"
-    CLASS_SIM_PILL = "sim-pill"
-    CLASS_WELCOME_BANNER = "welcome-banner"
+    AVATAR = "avatar-circle"
+    BADGE = "severity-badge"
+    EMPTY_DESC = "empty-desc"
+    EMPTY_ICON = "empty-icon"
+    EMPTY_STATE = "empty-state"
+    EMPTY_TITLE = "empty-title"
+    PIPELINE_ACTIVE = "pipeline-active"
+    PIPELINE_ARROW = "pipeline-arrow"
+    PIPELINE_DONE = "pipeline-done"
+    PIPELINE_ETA = "pipeline-eta"
+    PIPELINE_STEP = "pipeline-step"
+    PIPELINE_STEPS = "pipeline-steps"
+    SIDEBAR_USER_BADGE = "sidebar-user-badge"
+    SIM_PILL = "sim-pill"
+    WELCOME_BANNER = "welcome-banner"
 
 
 # ── Theme Definitions ──────────────────────────────────────────────────────────
@@ -250,6 +243,8 @@ UI_COLORMAP_OPTIONS = [
     "Viridis",
     "Cividis",
     "Plasma",
+    "Blues",
+    "RdYlGn",
     "Coolwarm",
     "YlOrRd",
 ]
@@ -258,6 +253,8 @@ MATPLOTLIB_CMAP_MAPPING: dict[str, str] = {
     "Viridis": "viridis",
     "Cividis": "cividis",
     "Plasma": "plasma",
+    "Blues": "Blues",
+    "RdYlGn": "RdYlGn",
     "Coolwarm": "coolwarm",
     "YlOrRd": "YlOrRd",
     "Legacy Red/Green": "RdYlGn_r",
@@ -267,6 +264,8 @@ PLOTLY_CMAP_MAPPING = {
     "Viridis": "Viridis",
     "Cividis": "Cividis",
     "Plasma": "Plasma",
+    "Blues": "Blues",
+    "RdYlGn": "RdYlGn",
     "Coolwarm": "RdBu_r",
     "YlOrRd": "YlOrRd",
     "Legacy Red/Green": "RdYlGn_r",
@@ -322,6 +321,26 @@ def get_colors() -> dict:
         return THEMES["Light"]
 
 
+def get_chart_colors() -> dict:
+    """Return the color palette Plotly chart builders should use.
+
+    Normally mirrors the app's active Light/Dark theme (via get_colors()).
+    If the user has enabled "Force Dark Mode Charts" in Settings, this
+    returns the Dark palette regardless of the app's overall theme, so
+    charts can be forced dark independently of the Streamlit UI theme.
+
+    Note: "force_dark_charts" must match SessionKeys.FORCE_DARK_CHARTS
+    (app/session_keys.py) — not imported directly here to avoid a
+    circular import between app.theme and app.session_keys.
+    """
+    try:
+        if st.session_state.get("force_dark_charts", False):
+            return THEMES["Dark"]
+    except Exception:
+        pass
+    return get_colors()
+
+
 def inject_css() -> None:
     """
     Inject CSS for the currently selected Light or Dark theme.
@@ -331,11 +350,16 @@ def inject_css() -> None:
     """
     colors = sanitize_theme_colors(get_colors())
 
-    css = f"""
-    <style>
+    main_css = f"""
         @import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;0,6..72,700;1,6..72,400&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
 
         :root {{
+            --primary-bg: {colors["background"]};
+            --secondary-bg: {colors["surface"]};
+            --text-color: {colors["ink"]};
+            --secondary-text-color: {colors["muted"]};
+            --border-color: {colors["border"]};
+            --accent-color: {colors["accent"]};
             --background: {colors["background"]};
             --surface: {colors["surface"]};
             --card: {colors["card"]};
@@ -360,16 +384,16 @@ def inject_css() -> None:
         }}
 
         .stApp {{
-            background-color: var(--background) !important;
-            color: var(--ink) !important;
+            background-color: var(--primary-bg) !important;
+            color: var(--text-color) !important;
         }}
 
         [data-testid="stHeader"] {{
-            background-color: var(--background) !important;
+            background-color: var(--primary-bg) !important;
         }}
 
         [data-testid="stToolbar"] {{
-            color: var(--ink) !important;
+            color: var(--text-color) !important;
         }}
 
         h1,
@@ -379,7 +403,7 @@ def inject_css() -> None:
         h5,
         h6 {{
             font-family: 'Newsreader', Georgia, serif !important;
-            color: var(--ink) !important;
+            color: var(--text-color) !important;
             font-weight: 700 !important;
         }}
 
@@ -389,19 +413,19 @@ def inject_css() -> None:
         li,
         [data-testid="stMarkdownContainer"],
         [data-testid="stWidgetLabel"] {{
-            color: var(--ink);
+            color: var(--text-color);
         }}
 
         [data-testid="stCaptionContainer"],
         .stCaption {{
-            color: var(--muted) !important;
+            color: var(--secondary-text-color) !important;
         }}
 
         .hero-kicker {{
             font-family: 'Inter', sans-serif;
             font-size: 0.8rem;
             font-weight: 700;
-            color: var(--accent);
+            color: var(--accent-color);
             text-transform: uppercase;
             letter-spacing: 0.12em;
             margin-bottom: 0.25rem;
@@ -410,19 +434,19 @@ def inject_css() -> None:
         /* ── Sidebar ────────────────────────────────────────────────── */
 
         [data-testid="stSidebar"] {{
-            background-color: var(--surface) !important;
-            border-right: 1px solid var(--border) !important;
+            background-color: var(--secondary-bg) !important;
+            border-right: 1px solid var(--border-color) !important;
         }}
 
         [data-testid="stSidebar"] * {{
-            color: var(--ink);
+            color: var(--text-color);
         }}
 
         .sidebar-brand-title {{
             font-family: 'Newsreader', serif;
             font-size: 1.5rem;
             font-weight: 700;
-            color: var(--ink);
+            color: var(--text-color);
             text-align: center;
             line-height: 1.2;
             margin-top: 0.25rem;
@@ -433,7 +457,7 @@ def inject_css() -> None:
             font-family: 'Inter', sans-serif;
             font-size: 0.7rem;
             font-weight: 700;
-            color: var(--accent);
+            color: var(--accent-color);
             text-transform: uppercase;
             letter-spacing: 0.1em;
             text-align: center;
@@ -444,12 +468,12 @@ def inject_css() -> None:
             font-family: 'Inter', sans-serif;
             font-size: 0.75rem;
             font-weight: 700;
-            color: var(--muted);
+            color: var(--secondary-text-color);
             text-transform: uppercase;
             letter-spacing: 0.05em;
             margin-top: 1rem;
             margin-bottom: 0.5rem;
-            border-bottom: 1px solid var(--border);
+            border-bottom: 1px solid var(--border-color);
             padding-bottom: 2px;
         }}
 
@@ -460,10 +484,10 @@ def inject_css() -> None:
             padding: 8px 12px;
             border-radius: 8px;
             background-color: var(--neutral-soft);
-            border: 1px solid var(--border);
+            border: 1px solid var(--border-color);
             font-size: 0.8rem;
             font-weight: 600;
-            color: var(--ink);
+            color: var(--text-color);
             margin-bottom: 0.75rem;
         }}
 
@@ -471,7 +495,7 @@ def inject_css() -> None:
             width: 28px;
             height: 28px;
             border-radius: 50%;
-            background-color: var(--accent);
+            background-color: var(--accent-color);
             color: white;
             display: flex;
             align-items: center;
@@ -500,8 +524,8 @@ def inject_css() -> None:
 
         div[data-testid="stMetric"] {{
             background-color: var(--card) !important;
-            border: 1px solid var(--border) !important;
-            border-top: 4px solid var(--accent) !important;
+            border: 1px solid var(--border-color) !important;
+            border-top: 4px solid var(--accent-color) !important;
             border-radius: 8px !important;
             padding: 14px 16px !important;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12) !important;
@@ -511,7 +535,7 @@ def inject_css() -> None:
             font-family: 'Inter', sans-serif !important;
             font-size: 0.75rem !important;
             font-weight: 700 !important;
-            color: var(--muted) !important;
+            color: var(--secondary-text-color) !important;
             text-transform: uppercase !important;
             letter-spacing: 0.05em !important;
         }}
@@ -520,7 +544,7 @@ def inject_css() -> None:
             font-family: 'IBM Plex Mono', monospace !important;
             font-size: 1.6rem !important;
             font-weight: 700 !important;
-            color: var(--ink) !important;
+            color: var(--text-color) !important;
         }}
 
         div[data-testid="stMetricDelta"] > div {{
@@ -543,12 +567,12 @@ def inject_css() -> None:
 
         .meta-chip {{
             background-color: var(--neutral-soft);
-            border: 1px solid var(--border);
+            border: 1px solid var(--border-color);
             border-radius: 6px;
             padding: 4px 10px;
             font-size: 0.8rem;
             font-weight: 600;
-            color: var(--ink);
+            color: var(--text-color);
             display: inline-flex;
             align-items: center;
             gap: 6px;
@@ -558,7 +582,7 @@ def inject_css() -> None:
             font-family: 'IBM Plex Mono', monospace !important;
             background: none !important;
             padding: 0 !important;
-            color: var(--accent) !important;
+            color: var(--accent-color) !important;
             font-weight: 700 !important;
         }}
 
@@ -566,7 +590,7 @@ def inject_css() -> None:
 
         .login-container {{
             background-color: var(--card) !important;
-            border: 1px solid var(--border) !important;
+            border: 1px solid var(--border-color) !important;
             border-radius: 12px !important;
             padding: 2.5rem !important;
             box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.18) !important;
@@ -590,18 +614,18 @@ def inject_css() -> None:
             font-family: 'Newsreader', serif;
             font-size: 1.5rem;
             font-weight: 700;
-            color: var(--ink);
+            color: var(--text-color);
             margin-bottom: 0.25rem;
         }}
 
         .login-container .login-subtitle {{
             font-size: 0.85rem;
-            color: var(--muted);
+            color: var(--secondary-text-color);
         }}
 
         .login-accent-bar {{
             height: 4px;
-            background: linear-gradient(90deg, var(--accent), transparent);
+            background: linear-gradient(90deg, var(--accent-color), transparent);
             border-radius: 2px;
             margin-bottom: 1.5rem;
         }}
@@ -629,6 +653,32 @@ def inject_css() -> None:
 
         .warning-card-low {{
             border-left: 4px solid var(--success) !important;
+        }}
+
+        /* ── Low-confidence detection card amber accent border (Issue #1726) ─ */
+
+        .low-confidence-card {{
+            border-left: 4px solid #f59e0b !important;
+        }}
+
+        /* ── High severity row accent border (Issue #1569) ───────────── */
+
+        .high-severity-row {{
+            border-left: 4px solid #ef4444 !important;
+            background-color: rgba(239, 68, 68, 0.05) !important;
+        }}
+
+        /* ── Soft-deleted document row styling (Issue #1732) ─────────── */
+
+        .trash-document-row {{
+            opacity: 0.6 !important;
+            color: #6b7280 !important;
+        }}
+
+        .trash-document-row .doc-title,
+        .trash-document-row title,
+        .trash-document-row .document-title {{
+            text-decoration: line-through !important;
         }}
 
         /* ── Warning list container animation (#369) ─────────────────
@@ -667,7 +717,7 @@ def inject_css() -> None:
             margin-bottom: 1rem;
             font-size: 0.8rem;
             font-weight: 500;
-            color: var(--muted);
+            color: var(--secondary-text-color);
         }}
 
         .legend-item {{
@@ -690,21 +740,21 @@ def inject_css() -> None:
         .stNumberInput input,
         [data-baseweb="select"] > div {{
             background-color: var(--input) !important;
-            color: var(--ink) !important;
-            border-color: var(--border) !important;
+            color: var(--text-color) !important;
+            border-color: var(--border-color) !important;
         }}
 
         [data-baseweb="popover"],
         [data-baseweb="menu"],
         [role="listbox"] {{
             background-color: var(--card) !important;
-            color: var(--ink) !important;
+            color: var(--text-color) !important;
         }}
 
         .stButton button,
         .stDownloadButton button,
         .stFormSubmitButton button {{
-            border-color: var(--border) !important;
+            border-color: var(--border-color) !important;
         }}
 
         .clear-all-container button {{
@@ -720,45 +770,45 @@ def inject_css() -> None:
             border-color: #ff3333 !important;
         }}
 
-        .{CLASS_WELCOME_BANNER} {{
-    background-color: {colors["surface"]};
-    border: 1px solid {colors["border"]};
+        .{WELCOME_BANNER} {{
+    background-color: var(--secondary-bg);
+    border: 1px solid var(--border-color);
     border-radius: 8px;
     padding: 12px 16px;
     margin-bottom: 16px;
-    color: {colors["ink"]};
+    color: var(--text-color);
     font-size: 0.95rem;
 }}
 
         [data-testid="stExpander"],
         [data-testid="stForm"] {{
             background-color: var(--card) !important;
-            border-color: var(--border) !important;
+            border-color: var(--border-color) !important;
         }}
 
         [data-testid="stDataFrame"],
         [data-testid="stTable"] {{
-            border-color: var(--border) !important;
+            border-color: var(--border-color) !important;
         }}
 
         [data-testid="stFileUploaderDropzone"] {{
-            background-color: var(--surface) !important;
-            border-color: var(--border) !important;
+            background-color: var(--secondary-bg) !important;
+            border-color: var(--border-color) !important;
         }}
 
         /* ── Tabs ───────────────────────────────────────────────────── */
 
         [data-testid="stTabs"] button {{
-            color: var(--muted) !important;
+            color: var(--secondary-text-color) !important;
         }}
 
         [data-testid="stTabs"] button[aria-selected="true"] {{
-            color: var(--accent) !important;
-            border-bottom-color: var(--accent) !important;
+            color: var(--accent-color) !important;
+            border-bottom-color: var(--accent-color) !important;
         }}
 
         hr {{
-            border-color: var(--border) !important;
+            border-color: var(--border-color) !important;
         }}
 
         /* ── Enhanced footer ────────────────────────────────────────── */
@@ -767,11 +817,11 @@ def inject_css() -> None:
             text-align: center;
             padding: 1rem 0 0.5rem;
             font-size: 0.78rem;
-            color: var(--muted);
+            color: var(--secondary-text-color);
         }}
 
         .app-footer a {{
-            color: var(--accent);
+            color: var(--accent-color);
             text-decoration: none;
         }}
 
@@ -784,7 +834,7 @@ def inject_css() -> None:
         .empty-state {{
             text-align: center;
             padding: 2.5rem 1rem;
-            color: var(--muted);
+            color: var(--secondary-text-color);
         }}
 
         .empty-state .empty-icon {{
@@ -797,7 +847,7 @@ def inject_css() -> None:
             font-family: 'Newsreader', serif;
             font-size: 1.15rem;
             font-weight: 700;
-            color: var(--ink);
+            color: var(--text-color);
             margin-bottom: 0.25rem;
         }}
 
@@ -827,14 +877,14 @@ def inject_css() -> None:
             font-size: 0.78rem;
             font-weight: 600;
             background-color: var(--neutral-soft);
-            color: var(--muted);
-            border: 1px solid var(--border);
+            color: var(--secondary-text-color);
+            border: 1px solid var(--border-color);
         }}
 
         .pipeline-step.active {{
-            background-color: var(--accent);
+            background-color: var(--accent-color);
             color: white;
-            border-color: var(--accent);
+            border-color: var(--accent-color);
             animation: pipelinePulse 1.2s ease-in-out infinite;
         }}
 
@@ -845,7 +895,7 @@ def inject_css() -> None:
         }}
 
         .pipeline-arrow {{
-            color: var(--muted);
+            color: var(--secondary-text-color);
             font-size: 0.7rem;
         }}
 
@@ -873,7 +923,7 @@ def inject_css() -> None:
             bottom: max(2rem, env(safe-area-inset-bottom, 2rem));
             right: max(2rem, env(safe-area-inset-right, 2rem));
             z-index: 9999;
-            background-color: var(--accent);
+            background-color: var(--accent-color);
             color: #fff;
             border: none;
             border-radius: 8px;
@@ -905,7 +955,7 @@ def inject_css() -> None:
         }}
 
         #back-to-top-btn:focus-visible {{
-            outline: 2px solid var(--accent);
+            outline: 2px solid var(--accent-color);
             outline-offset: 2px;
         }}
 
@@ -944,31 +994,31 @@ def inject_css() -> None:
                 max-width: 85vw !important;
             }}
         }}
-    """
+    """  # noqa: F821
     # Issue #572: File Uploader Drag-Zone Customization
     file_uploader_css = f"""
     /* File Uploader Drag-Zone Customization */
     .stFileUploader [data-testid="stFileUploaderDropzone"] {{
-        border: 2px dashed {colors['border']} !important;
+        border: 2px dashed var(--border-color) !important;
         border-radius: 8px !important;
-        background-color: {colors['surface']} !important;
+        background-color: var(--secondary-bg) !important;
         transition: all 0.2s ease-in-out !important;
         padding: 1.5rem !important;
     }}
 
     .stFileUploader [data-testid="stFileUploaderDropzone"]:hover {{
-        border-color: {colors['accent']} !important;
+        border-color: var(--accent-color) !important;
         background-color: {colors['neutral_soft']} !important;
         cursor: pointer !important;
     }}
 
     .stFileUploader [data-testid="stFileUploaderDropzone"] [data-testid="stFileUploaderInstruction"] {{
-        color: {colors['muted']} !important;
+        color: var(--secondary-text-color) !important;
         font-weight: 500 !important;
     }}
 
     .stFileUploader [data-testid="stFileUploaderDropzone"] [data-testid="stFileUploaderBrowseFiles"] {{
-        background-color: {colors['accent']} !important;
+        background-color: var(--accent-color) !important;
         color: #FFFFFF !important;
         border-radius: 4px !important;
         font-weight: 600 !important;
@@ -976,45 +1026,45 @@ def inject_css() -> None:
     }}
 
     .stFileUploader [data-testid="stFileUploaderDropzone"] [data-testid="stFileUploaderBrowseFiles"]:hover {{
-        background-color: {colors['ink']} !important;
+        background-color: var(--text-color) !important;
     }}
     """
 
     # Issue #1028: Active Sidebar Tab Accent Border Styling
-    sidebar_active_tab_css = f"""
+    sidebar_active_tab_css = """
     /* Active Sidebar Navigation Tab Highlight (Issue #1028) */
     section[data-testid="stSidebar"] .stButton button[data-selected="true"],
     section[data-testid="stSidebar"] [data-testid="stBaseButton-secondary"][aria-selected="true"],
     section[data-testid="stSidebar"] button[aria-selected="true"],
     section[data-testid="stSidebar"] .stButton button.st-active,
-    .stButton button[data-selected="true"] {{
+    .stButton button[data-selected="true"] {
         border-left: 4px solid #4f46e5 !important;
-        background-color: {colors.get('neutral_soft', '#F1F5F9')} !important;
-        color: {colors.get('accent', '#0D9488')} !important;
+        background-color: var(--neutral-soft) !important;
+        color: var(--accent-color) !important;
         font-weight: 700 !important;
         border-top-left-radius: 0 !important;
         border-bottom-left-radius: 0 !important;
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
         transition: border-left-color 0.2s ease, background-color 0.2s ease, color 0.2s ease !important;
-    }}
+    }
 
     section[data-testid="stSidebar"] .stButton button[data-selected="true"]:hover,
-    .stButton button[data-selected="true"]:hover {{
+    .stButton button[data-selected="true"]:hover {
         border-left: 4px solid #4f46e5 !important;
-        background-color: {colors.get('surface', '#F8FAFC')} !important;
-    }}
+        background-color: var(--secondary-bg) !important;
+    }
 
-    section[data-testid="stSidebar"] .stButton button:hover {{
+    section[data-testid="stSidebar"] .stButton button:hover {
         border-left: 4px solid #4f46e5;
         transition: border-left 0.2s ease !important;
-    }}
+    }
     """
 
     base_css = f"""
     /* Global Theme Overrides */
     .stApp {{
-        background-color: {colors['background']} !important;
-        color: {colors['ink']} !important;
+        background-color: var(--primary-bg) !important;
+        color: var(--text-color) !important;
     }}
 
     .block-container {{
@@ -1026,89 +1076,89 @@ def inject_css() -> None:
     }}
 
     .stCard {{
-        background-color: {colors['card']} !important;
-        border: 1px solid {colors['border']} !important;
+        background-color: var(--card) !important;
+        border: 1px solid var(--border-color) !important;
         border-radius: 8px !important;
     }}
 
     /* Empty State Styling */
-    .{CLASS_EMPTY_STATE} {{
+    .{EMPTY_STATE} {{
         text-align: center;
         padding: 2rem;
-        background-color: {colors['surface']};
+        background-color: var(--secondary-bg);
         border-radius: 8px;
-        border: 1px dashed {colors['border']};
+        border: 1px dashed var(--border-color);
     }}
 
-    .{CLASS_EMPTY_ICON} {{
+    .{EMPTY_ICON} {{
         font-size: 3rem;
         margin-bottom: 1rem;
-        color: {colors['muted']};
+        color: var(--secondary-text-color);
     }}
 
-    .{CLASS_EMPTY_TITLE} {{
+    .{EMPTY_TITLE} {{
         font-size: 1.25rem;
         font-weight: 600;
-        color: {colors['ink']};
+        color: var(--text-color);
         margin-bottom: 0.5rem;
     }}
 
-    .{CLASS_EMPTY_DESC} {{
-        color: {colors['muted']};
+    .{EMPTY_DESC} {{
+        color: var(--secondary-text-color);
         font-size: 0.95rem;
     }}
 
     /* Pipeline Progress Styling */
-    .{CLASS_PIPELINE_STEPS} {{
+    .{PIPELINE_STEPS} {{
         display: flex;
         align-items: center;
         justify-content: space-between;
         margin: 1.5rem 0;
     }}
 
-    .{CLASS_PIPELINE_STEP} {{
-        color: {colors['muted']};
+    .{PIPELINE_STEP} {{
+        color: var(--secondary-text-color);
         font-weight: 500;
         font-size: 0.9rem;
     }}
 
-    .{CLASS_PIPELINE_ACTIVE} {{
-        color: {colors['accent']};
+    .{PIPELINE_ACTIVE} {{
+        color: var(--accent-color);
         font-weight: 700;
     }}
 
-    .{CLASS_PIPELINE_DONE} {{
-        color: {colors['success']};
+    .{PIPELINE_DONE} {{
+        color: var(--success);
     }}
 
-    .{CLASS_PIPELINE_ARROW} {{
-        color: {colors['border']};
+    .{PIPELINE_ARROW} {{
+        color: var(--border-color);
         margin: 0 0.5rem;
     }}
 
-    .{CLASS_PIPELINE_ETA} {{
+    .{PIPELINE_ETA} {{
         font-size: 0.8rem;
-        color: {colors['muted']};
+        color: var(--secondary-text-color);
         margin-top: 0.5rem;
         font-style: italic;
     }}
 
     /* Sidebar User Badge */
-    .{CLASS_SIDEBAR_USER_BADGE} {{
+    .{SIDEBAR_USER_BADGE} {{
         display: flex;
         align-items: center;
         padding: 0.75rem;
-        background-color: {colors['surface']};
+        background-color: var(--secondary-bg);
         border-radius: 8px;
-        border: 1px solid {colors['border']};
+        border: 1px solid var(--border-color);
         margin-bottom: 1rem;
     }}
 
-    .{CLASS_AVATAR} {{
+    .{AVATAR} {{
         width: 32px;
         height: 32px;
         border-radius: 50%;
-        background-color: {colors['accent']};
+        background-color: var(--accent-color);
         color: #FFFFFF;
         display: flex;
         align-items: center;
@@ -1118,7 +1168,7 @@ def inject_css() -> None:
     }}
 
     /* Severity Badges */
-    .{CLASS_BADGE} {{
+    .{BADGE} {{
         display: inline-flex;
         align-items: center;
         padding: 0.25rem 0.75rem;
@@ -1127,7 +1177,7 @@ def inject_css() -> None:
         font-weight: 600;
     }}
 
-    .{CLASS_SIM_PILL} {{
+    .{SIM_PILL} {{
         display: inline-block;
         padding: 0.25rem 0.5rem;
         border-radius: 4px;
@@ -1135,16 +1185,22 @@ def inject_css() -> None:
         font-weight: 600;
     }}
 
-    .{CLASS_WELCOME_BANNER} {{
-        background: linear-gradient(135deg, {colors['accent']} 0%, {colors['success']} 100%);
+    .{WELCOME_BANNER} {{
+        background: linear-gradient(135deg, var(--accent-color) 0%, var(--success) 100%);
         color: #FFFFFF;
         padding: 1.5rem;
         border-radius: 8px;
         margin-bottom: 1.5rem;
     }}
+
+    /* High Severity Row Styling (Issue #1569) */
+    .high-severity-row {{
+        border-left: 4px solid #ef4444 !important;
+        background-color: rgba(239, 68, 68, 0.05) !important;
+    }}
     """
 
-    css = base_css + file_uploader_css + sidebar_active_tab_css
+    css = main_css + base_css + file_uploader_css + sidebar_active_tab_css
 
     if st.session_state.get("privacy_mode", False):
         css += """
@@ -1211,9 +1267,12 @@ def inject_css() -> None:
 
     st.markdown(css_html, unsafe_allow_html=True)
     st.markdown(hotkey_js, unsafe_allow_html=True)
+    st.markdown(back_to_top_html(), unsafe_allow_html=True)
 
 
 # ── Severity Helpers ───────────────────────────────────────────────────────────
+from typing import Any
+
 try:
     from src.core.config import (
         DEFAULT_THRESHOLDS,
@@ -1261,11 +1320,12 @@ def tier_from_severity_label(label: str) -> str:
 def tier_color(tier: str) -> str:
     """Returns color hex associated with a tier."""
     colors = get_colors()
-    if tier == "high":
+    tier_lower = tier.lower() if isinstance(tier, str) else ""
+    if tier_lower == "high":
         return colors["danger"]
-    elif tier == "medium":
+    elif tier_lower == "medium":
         return colors["warning"]
-    elif tier == "low":
+    elif tier_lower == "low":
         return colors["success"]
     return colors["neutral_soft"]
 
@@ -1273,10 +1333,10 @@ def tier_color(tier: str) -> str:
 def empty_state_html(icon: str, title: str, description: str) -> str:
     """Return styled empty-state HTML block."""
     return (
-        f'<div class="{CLASS_EMPTY_STATE}">'
-        f'<div class="{CLASS_EMPTY_ICON}">{icon}</div>'
-        f'<div class="{CLASS_EMPTY_TITLE}">{title}</div>'
-        f'<div class="{CLASS_EMPTY_DESC}">{description}</div>'
+        f'<div class="{EMPTY_STATE}">'
+        f'<div class="{EMPTY_ICON}">{icon}</div>'
+        f'<div class="{EMPTY_TITLE}">{title}</div>'
+        f'<div class="{EMPTY_DESC}">{description}</div>'
         f"</div>"
     )
 
@@ -1299,10 +1359,6 @@ def badge_html(tier: str, label: str = None) -> str:
 
     display_label = label if label is not None else default_label
 
-    return f'<span class="{BADGE}" style="background-color: {bg_color}; color: {text_color}; border: 1px solid {text_color};">{display_label}</span>'
-    return f'<span class="{CLASS_BADGE}" style="background-color: {bg_color}; color: {text_color}; border: 1px solid {text_color};">{display_label}</span>'
-    return f'<span class="{CLASS_BADGE}" style="color: {text_color}; background-color: {bg_color};">{display_label}</span>'
-
     tooltip_map = {
         "high": "Similarity >= 80%",
         "medium": "Similarity between 50% and 79%",
@@ -1312,13 +1368,24 @@ def badge_html(tier: str, label: str = None) -> str:
     tooltip = tooltip_map.get(tier, "Similarity score")
 
     return (
-        f'<span class="{CLASS_BADGE}" '
+        f'<span class="{BADGE}" '
         f'title="{tooltip}" '
         f'style="background-color: {bg_color}; '
         f"color: {text_color}; "
         f'border: 1px solid {text_color};">'
         f"{display_label}</span>"
     )
+
+
+def render_notification_badge(count: int) -> str:
+    """Render a red notification badge for unresolved incidents.
+
+    Returns an empty string when there are no unresolved incidents.
+    """
+    if count <= 0:
+        return ""
+
+    return '<span class="notification-badge">' f"{count}" "</span>"
 
 
 # ── UI helpers ────────────────────────────────────────────────────────────────
@@ -1340,27 +1407,7 @@ def format_similarity_html(
         bg = colors["success"]
         text = "#FFFFFF"
 
-    return (
-        f'<span class="{SIM_PILL}" style="background:{bg};">'
-        f'<span class="{CLASS_SIM_PILL}" style="background:{bg};">'
-        f"Similarity: {score * 100:.1f}%</span>"
-    )
-    return f'<span class="{CLASS_SIM_PILL}" style="background-color: {bg}; color: {text};">Similarity: {score * 100:.1f}%</span>'
-
-
-def empty_state_html(icon: str, title: str, description: str) -> str:
-    """Return styled empty-state HTML block."""
-    return (
-        f'<div class="{EMPTY_STATE}">'
-        f'<div class="{EMPTY_ICON}">{icon}</div>'
-        f'<div class="{EMPTY_TITLE}">{title}</div>'
-        f'<div class="{EMPTY_DESC}">{description}</div>'
-        f'<div class="{CLASS_EMPTY_STATE}">'
-        f'<div class="{CLASS_EMPTY_ICON}">{icon}</div>'
-        f'<div class="{CLASS_EMPTY_TITLE}">{title}</div>'
-        f'<div class="{CLASS_EMPTY_DESC}">{description}</div>'
-        f"</div>"
-    )
+    return f'<span class="{SIM_PILL}" style="background-color: {bg}; color: {text};">Similarity: {score * 100:.1f}%</span>'
 
 
 def sidebar_user_badge_html(username: str, role: str) -> str:
@@ -1369,9 +1416,6 @@ def sidebar_user_badge_html(username: str, role: str) -> str:
     return (
         f'<div class="{SIDEBAR_USER_BADGE}">'
         f'<div class="{AVATAR}">{initial}</div>'
-        f"<div><strong>{username}</strong><br>"
-        f'<div class="{CLASS_SIDEBAR_USER_BADGE}">'
-        f'<div class="{CLASS_AVATAR}">{initial}</div>'
         f"<div>"
         f'<div style="font-weight: 600;">{username}</div>'
         f'<div style="font-size: 0.8rem; color: {get_colors()["muted"]};">{role.upper()}</div>'
@@ -1387,21 +1431,21 @@ def pipeline_progress_html(
     parts = []
     for i, step in enumerate(steps):
         if active_index < 0:
-            cls = CLASS_PIPELINE_STEP
+            cls = PIPELINE_STEP
         elif i < active_index:
-            cls = f"{CLASS_PIPELINE_STEP} {CLASS_PIPELINE_DONE}"
+            cls = f"{PIPELINE_STEP} {PIPELINE_DONE}"
         elif i == active_index:
-            cls = f"{CLASS_PIPELINE_STEP} {CLASS_PIPELINE_ACTIVE}"
+            cls = f"{PIPELINE_STEP} {PIPELINE_ACTIVE}"
         else:
-            cls = CLASS_PIPELINE_STEP
+            cls = PIPELINE_STEP
 
         prefix = "✓ " if active_index >= 0 and i < active_index else ""
         parts.append(f'<span class="{cls}">{prefix}{step}</span>')
 
         if i < len(steps) - 1:
-            parts.append(f'<span class="{CLASS_PIPELINE_ARROW}">→</span>')
+            parts.append(f'<span class="{PIPELINE_ARROW}">→</span>')
 
-    progress = f'<div class="{CLASS_PIPELINE_STEPS}">{"".join(parts)}</div>'
+    progress = f'<div class="{PIPELINE_STEPS}">{"".join(parts)}</div>'
 
     if estimated_seconds is None:
         return progress
@@ -1413,7 +1457,7 @@ def pipeline_progress_html(
     except ImportError:
         duration = f"{estimated_seconds}s"
 
-    eta = f'<div class="{CLASS_PIPELINE_ETA}">Estimated processing time: about {duration}</div>'
+    eta = f'<div class="{PIPELINE_ETA}">Estimated processing time: about {duration}</div>'
     return f"{progress}{eta}"
 
 
@@ -1442,7 +1486,7 @@ title="Back to top">
         if (window.__backToTopInitialized) return;
         window.__backToTopInitialized = true;
 
-var SCROLL_THRESHOLD = {scroll_threshold};
+        var SCROLL_THRESHOLD = {scroll_threshold};
         /* Streamlit >= 1.28 scrolls inside the parent of
            [data-testid="block-container"], not the window. */
         var scrollContainer =
@@ -1461,7 +1505,7 @@ var SCROLL_THRESHOLD = {scroll_threshold};
 
         /* Re-query the button every scroll tick so the .visible class
            is always applied to the live element, not a detached one. */
-scrollContainer.addEventListener('scroll', function () {{
+        scrollContainer.addEventListener('scroll', function () {{
             var btn = document.getElementById('back-to-top-btn');
             var status = document.getElementById('back-to-top-status');
             if (!btn) return;
@@ -1506,45 +1550,6 @@ def version_check_widget_html(
     str
         A self-contained HTML string ready for ``st.markdown``.
     """
-
-
-def version_check_widget_html(
-    local_version: str,
-    latest_tag: str,
-    repo_url: str = "https://github.com/Ganesh-403/semantic-plagiarism-detector/releases/latest",
-) -> str:
-    """Return an HTML snippet that renders an update-available notification banner."""
-    colors = get_colors()
-    warning_color = colors["warning"]
-    warning_soft = colors["warning_soft"]
-    ink = colors["ink"]
-
-    return f"""
-<div id="spd-update-banner" style="
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 16px;
-    margin-top: 8px;
-    background: {warning_soft};
-    border: 1px solid {warning_color};
-    border-radius: 8px;
-    font-family: 'Inter', sans-serif;
-    font-size: 0.85rem;
-    color: {ink};
-">
-    <span style="font-size: 1.1rem;">🔔</span>
-    <span>
-        <strong>Update available:</strong>
-        v{local_version} &rarr; <strong>{latest_tag}</strong>.
-        &nbsp;
-        <a href="{repo_url}" target="_blank" rel="noopener noreferrer"
-           style="color: {warning_color}; font-weight: 600; text-decoration: underline;">
-            View release &rarr;
-        </a>
-    </span>
-</div>
-"""
 
 
 def active_tab_border_style(color: str = "#4f46e5", width: int = 4) -> str:
@@ -1704,7 +1709,7 @@ def generate_active_tab_theme_tokens(theme_name: str | None = None) -> dict[str,
     }
 
 
-def get_sidebar_navigation_config() -> dict[str, Any]:
+def get_sidebar_navigation_config() -> dict[str, Any]:  # type: ignore
     """Return central configuration parameters for sidebar active tab rendering.
 
     Returns:
@@ -1873,3 +1878,32 @@ def render_sidebar_navigation_menu(
         html_items.append(f'<li data-tab-id="{tab_id}">{badge}</li>')
 
     return f'<ul class="sidebar-nav-menu" style="list-style: none; padding: 0; margin: 0;">{"".join(html_items)}</ul>'
+
+
+def render_timezone_footer() -> str:
+    """Render current UTC server time and timezone label caption in the dashboard sidebar footer.
+
+    Returns:
+        Formatted server timezone caption string.
+    """
+    now_utc = datetime.now(timezone.utc)
+    time_str = now_utc.strftime("%H:%M")
+    caption_text = f"Server Time: {time_str} UTC"
+    st.sidebar.caption(f"🕒 {caption_text}")
+    return caption_text
+
+
+def render_session_status_banner() -> None:
+    """Render caption banner in dashboard footer displaying active session runtime."""
+    import time
+
+    from app.session_keys import SessionKeys
+
+    if SessionKeys.SESSION_START_TIME not in st.session_state:
+        st.session_state[SessionKeys.SESSION_START_TIME] = time.time()
+
+    start_time = st.session_state[SessionKeys.SESSION_START_TIME]
+    elapsed_seconds = time.time() - start_time
+    elapsed_minutes = int(elapsed_seconds // 60)
+
+    st.caption(f"Active Session: {elapsed_minutes} mins")

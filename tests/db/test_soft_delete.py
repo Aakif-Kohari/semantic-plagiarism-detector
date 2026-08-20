@@ -1,22 +1,24 @@
 import numpy as np
 import pytest
+
 from src.db.corpus_db import (
     add_chunks,
     add_document,
-    get_all_documents,
-    get_deleted_documents,
-    soft_delete_document,
-    restore_document,
-    permanently_delete_document,
     empty_trash,
+    get_all_documents,
+    get_all_embeddings,
     get_chunk_registry,
-    get_all_embeddings
+    get_deleted_documents,
+    permanently_delete_document,
+    restore_document,
+    soft_delete_document,
 )
 from src.db.incidents import (
     get_all_incidents,
+    get_all_incidents_above_threshold_for_export,
     sync_flagged_incidents,
-    get_all_incidents_above_threshold_for_export
 )
+
 
 @pytest.fixture(autouse=True)
 def setup_test_db(mock_db):
@@ -76,7 +78,13 @@ def test_soft_delete_and_restore():
 
 
 def test_permanent_delete_and_empty_trash(mock_db):
-    from src.db.incidents import sync_flagged_incidents, get_all_incidents, add_false_positive, get_false_positives
+    from src.db.incidents import (
+        add_false_positive,
+        get_all_incidents,
+        get_false_positives,
+        sync_flagged_incidents,
+    )
+
     add_document("doc1.pdf", "hash1")
     add_document("doc2.pdf", "hash2")
 
@@ -98,8 +106,11 @@ def test_permanent_delete_and_empty_trash(mock_db):
     assert len(get_all_incidents(db_path=mock_db)) == 0
     # But they are still physically present in the database tables
     import sqlite3
+
     with sqlite3.connect(mock_db) as conn:
-        assert conn.execute("SELECT COUNT(*) FROM plagiarism_incidents").fetchone()[0] == 1
+        assert (
+            conn.execute("SELECT COUNT(*) FROM plagiarism_incidents").fetchone()[0] == 1
+        )
         assert conn.execute("SELECT COUNT(*) FROM false_positives").fetchone()[0] == 1
 
     # Permanently delete doc1
@@ -109,12 +120,17 @@ def test_permanent_delete_and_empty_trash(mock_db):
 
     # Incidents and false positives involving doc1 should be physically removed
     with sqlite3.connect(mock_db) as conn:
-        assert conn.execute("SELECT COUNT(*) FROM plagiarism_incidents").fetchone()[0] == 0
+        assert (
+            conn.execute("SELECT COUNT(*) FROM plagiarism_incidents").fetchone()[0] == 0
+        )
         assert conn.execute("SELECT COUNT(*) FROM false_positives").fetchone()[0] == 0
 
     # Test empty_trash
     add_document("doc3.pdf", "hash3")
-    sync_flagged_incidents([{"doc_a": "doc2.pdf", "doc_b": "doc3.pdf", "similarity": 0.90}], db_path=mock_db)
+    sync_flagged_incidents(
+        [{"doc_a": "doc2.pdf", "doc_b": "doc3.pdf", "similarity": 0.90}],
+        db_path=mock_db,
+    )
     add_false_positive("doc2.pdf", "doc3.pdf", db_path=mock_db)
 
     # Soft delete doc2
@@ -123,7 +139,9 @@ def test_permanent_delete_and_empty_trash(mock_db):
     # They should be physically present but filtered from active incidents
     assert len(get_all_incidents(db_path=mock_db)) == 0
     with sqlite3.connect(mock_db) as conn:
-        assert conn.execute("SELECT COUNT(*) FROM plagiarism_incidents").fetchone()[0] == 1
+        assert (
+            conn.execute("SELECT COUNT(*) FROM plagiarism_incidents").fetchone()[0] == 1
+        )
         assert conn.execute("SELECT COUNT(*) FROM false_positives").fetchone()[0] == 1
 
     # Empty trash to delete remaining soft-deleted documents (doc2)
@@ -133,7 +151,9 @@ def test_permanent_delete_and_empty_trash(mock_db):
 
     # Incidents and false positives involving doc2 should be physically gone
     with sqlite3.connect(mock_db) as conn:
-        assert conn.execute("SELECT COUNT(*) FROM plagiarism_incidents").fetchone()[0] == 0
+        assert (
+            conn.execute("SELECT COUNT(*) FROM plagiarism_incidents").fetchone()[0] == 0
+        )
         assert conn.execute("SELECT COUNT(*) FROM false_positives").fetchone()[0] == 0
 
 
@@ -143,15 +163,27 @@ def test_incidents_filter_soft_deleted(mock_db):
     add_document("doc3.pdf", "hash3")
 
     dummy_emb = np.zeros(384, dtype=np.float32)
-    add_chunks([
-        (0, "doc1.pdf", 0, "Paragraph 1", dummy_emb),
-        (1, "doc2.pdf", 0, "Paragraph 2", dummy_emb),
-        (2, "doc3.pdf", 0, "Paragraph 3", dummy_emb),
-    ])
+    add_chunks(
+        [
+            (0, "doc1.pdf", 0, "Paragraph 1", dummy_emb),
+            (1, "doc2.pdf", 0, "Paragraph 2", dummy_emb),
+            (2, "doc3.pdf", 0, "Paragraph 3", dummy_emb),
+        ]
+    )
 
     flags = [
-        {"doc_a": "doc1.pdf", "doc_b": "doc2.pdf", "similarity": 0.90, "severity": "High"},
-        {"doc_b": "doc2.pdf", "doc_a": "doc3.pdf", "similarity": 0.85, "severity": "High"},
+        {
+            "doc_a": "doc1.pdf",
+            "doc_b": "doc2.pdf",
+            "similarity": 0.90,
+            "severity": "High",
+        },
+        {
+            "doc_b": "doc2.pdf",
+            "doc_a": "doc3.pdf",
+            "similarity": 0.85,
+            "severity": "High",
+        },
     ]
     # Pass db_path explicitly because the function's default parameter
     # captured the original DEFAULT_DB_PATH at import time, before mock.patch.

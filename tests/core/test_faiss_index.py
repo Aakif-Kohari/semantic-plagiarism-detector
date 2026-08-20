@@ -2,9 +2,16 @@ import faiss
 import numpy as np
 import pytest
 
-from src.core.faiss_index import (ChunkRecord, build_index,
-                                  find_plagiarised_chunks, load_index,
-                                  save_index, search_similar_chunks)
+from src.core.faiss_index import (
+    ChunkRecord,
+    build_index,
+    find_plagiarised_chunks,
+    load_index,
+    optimize_faiss_index,
+    save_index,
+    search_batch_vectors,
+    search_similar_chunks,
+)
 
 
 def _unit_vecs(n, dim=384):
@@ -192,6 +199,149 @@ def test_faiss_normalization_benchmark():
     # Print results and assert speedup (vectorized should be much faster than loop)
     print(f"\n[Benchmark] Loop-based L2 normalization: {loop_time:.6f}s")
     print(f"[Benchmark] Vectorized NumPy L2 normalization: {vec_time:.6f}s")
-    print(f"[Benchmark] Speedup factor: {loop_time / vec_time:.2f}x")
-
     assert vec_time < loop_time
+
+
+# ── FAISS Index Optimization Tests (#1354) ───────────────────────────────────
+
+
+def test_optimize_faiss_index_below_threshold(caplog):
+    """Below 5000 threshold, logs vector count and returns True without error."""
+    import logging
+
+    dim = 384
+    index = faiss.IndexFlatIP(dim)
+    vecs = _unit_vecs(10, dim=dim)
+    index.add(vecs)
+
+    class IndexManager:
+        def __init__(self, idx):
+            self.index = idx
+
+    manager = IndexManager(index)
+
+    with caplog.at_level(logging.INFO, logger="src.core.faiss_index"):
+        result = optimize_faiss_index(manager, nlist=10)
+
+    assert result is True
+    assert manager.index.ntotal == 10
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("Vector count before index optimization: 10" in m for m in messages)
+    assert any("Vector count after index optimization: 10" in m for m in messages)
+
+
+def test_optimize_faiss_index_converts_above_threshold(caplog, monkeypatch):
+    """Above 5000 threshold, converts flat index to IVF index and logs count."""
+    import logging
+
+    import src.core.faiss_index as faiss_mod
+
+    # Lower threshold temporarily for unit test speed
+    monkeypatch.setattr(faiss_mod, "_IVF_THRESHOLD", 5)
+
+    dim = 384
+    index = faiss.IndexFlatIP(dim)
+    vecs = _unit_vecs(10, dim=dim)
+    index.add(vecs)
+
+    manager = {"index": index}
+
+    with caplog.at_level(logging.INFO, logger="src.core.faiss_index"):
+        result = optimize_faiss_index(manager, nlist=4)
+
+    assert result is True
+    assert manager["index"].ntotal == 10
+    assert isinstance(manager["index"], (faiss.IndexIVFFlat, faiss.IndexIDMap))
+
+
+def test_get_faiss_index_memory_bytes_none_or_uninitialized():
+    """Verify get_faiss_index_memory_bytes returns 0 for None or empty index."""
+    from src.core.faiss_index import get_faiss_index_memory_bytes
+
+    assert get_faiss_index_memory_bytes(None) == 0
+    assert get_faiss_index_memory_bytes(faiss.IndexFlatIP(384)) == 0
+
+
+def test_get_faiss_index_memory_bytes_with_vectors():
+    """Verify get_faiss_index_memory_bytes returns byte size for populated index."""
+    from src.core.faiss_index import get_faiss_index_memory_bytes
+
+    dim = 384
+    index = faiss.IndexFlatIP(dim)
+    vecs = _unit_vecs(100, dim=dim)
+    index.add(vecs)
+
+    mem_bytes = get_faiss_index_memory_bytes(index)
+    assert isinstance(mem_bytes, int)
+    assert mem_bytes > 0
+
+    # Wrapped in dict
+    assert get_faiss_index_memory_bytes({"index": index}) == mem_bytes
+
+    # Wrapped in object attribute
+    class IndexManager:
+        def __init__(self, idx):
+            self.index = idx
+
+    assert get_faiss_index_memory_bytes(IndexManager(index)) == mem_bytes
+
+
+def test_format_faiss_memory_badge_formatting():
+    """Verify format_faiss_memory_badge text output for uninitialized and populated index."""
+    from src.core.faiss_index import format_faiss_memory_badge
+
+    # Uninitialized / None fallback
+    assert format_faiss_memory_badge(None) == "FAISS Memory: 0 MB"
+    assert format_faiss_memory_badge(faiss.IndexFlatIP(384)) == "FAISS Memory: 0 MB"
+
+    # Populated index
+    dim = 384
+    index = faiss.IndexFlatIP(dim)
+    vecs = _unit_vecs(1000, dim=dim)
+    index.add(vecs)
+
+    badge = format_faiss_memory_badge(index)
+    assert badge.startswith("FAISS Memory:")
+    assert "MB" in badge
+    assert "(1,000 vectors)" in badge
+
+
+def test_search_batch_vectors():
+    """Verify that search_batch_vectors successfully queries a batch of vectors and returns correct matrices."""
+    # 1. Create populated index
+    dim = 384
+    index = faiss.IndexFlatIP(dim)
+    vecs = _unit_vecs(10, dim=dim)
+    index.add(vecs)
+
+    # 2. Search a batch of 3 vectors
+    query_batch = _unit_vecs(3, dim=dim)
+    distances, indices = search_batch_vectors(query_batch, index, top_k=5)
+
+    # Check shapes
+    assert distances.shape == (3, 5)
+    assert indices.shape == (3, 5)
+
+    # Check types and basic properties
+    assert distances.dtype == np.float32
+    assert np.issubdtype(indices.dtype, np.integer)
+    assert np.all(indices >= 0)
+    assert np.all(indices < 10)
+
+    # 3. Test alternate argument order (index first, then query_matrix)
+    distances_alt, indices_alt = search_batch_vectors(index, query_batch, top_k=5)
+    assert np.array_equal(distances, distances_alt)
+    assert np.array_equal(indices, indices_alt)
+
+    # 4. Test single 1D vector (should be reshaped and searched)
+    single_vector = query_batch[0]
+    dist_single, ind_single = search_batch_vectors(single_vector, index, top_k=5)
+    assert dist_single.shape == (1, 5)
+    assert ind_single.shape == (1, 5)
+
+    # 5. Invalid arguments checking
+    with pytest.raises(TypeError):
+        search_batch_vectors("not-a-numpy-array", index)
+
+    with pytest.raises(ValueError):
+        search_batch_vectors(query_batch, "not-a-faiss-index")
