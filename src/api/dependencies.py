@@ -20,9 +20,22 @@ limiter = Limiter(key_func=get_remote_address)
 
 
 def custom_rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
-    """Custom exception handler for rate limit exceeded errors."""
+    """Custom exception handler for rate limit exceeded errors adhering to RFC 7807."""
+    detail = f"Rate limit exceeded: {exc.detail}"
+    path = getattr(getattr(request, "url", None), "path", None)
     response = JSONResponse(
-        {"detail": f"Rate limit exceeded: {exc.detail}"}, status_code=429
+        status_code=429,
+        content={
+            "type": "about:blank",
+            "title": "Too Many Requests",
+            "status": 429,
+            "detail": detail,
+            "instance": path,
+            "error": True,
+            "code": 429,
+            "message": detail,
+        },
+        media_type="application/problem+json",
     )
     response = request.app.state.limiter._inject_headers(
         response, request.state.view_rate_limit

@@ -237,7 +237,8 @@ def chunk_text(
 
     Returns:
         List of chunk strings.
-    """    if chunk_size <= 0:
+    """
+    if chunk_size <= 0:
         raise ValueError("chunk_size must be a positive integer > 0")
 
     if overlap_percentage is not None:
