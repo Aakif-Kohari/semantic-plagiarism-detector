@@ -24,6 +24,16 @@ FILE_PATH = Path(__file__).resolve()
 ROOT_DIR = FILE_PATH.parent.parent  # Points to semantic-plagiarism-detector/
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
+
+# Issue #2781: Apply OS-specific asyncio patches via centralized utility
+# This replaces the inline `if sys.platform == "win32":` block that was
+# previously cluttering the main routing file.
+from src.utils.os_compat import apply_asyncio_patches
+apply_asyncio_patches()
+
+# 2. Now import centralized session state keys safely
+from app.session_keys import SessionKeys
+
 # Silence harmless Windows asyncio Proactor connection lost bugs
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -249,6 +259,385 @@ from app.components.api_gateway import (
             return {
                 **asdict(self),
                 'created_at': self.created_at.isoformat()
+)
+
+# ── Document Version Control Imports ─────────────────────────────────────
+from app.components.document_version_control import (
+    render_version_control_ui,
+    initialize_version_control,
+    VersionManager,
+    ChangeTracker,
+    DocumentVersion,
+    VersionDiffGenerator,
+    VersionStorageManager,
+    PlagiarismEvolutionAnalyzer,
+    SmartChangePatternDetector,
+    render_plagiarism_evolution_ui,
+    render_smart_detection_ui,
+    render_global_version_dashboard,
+    render_version_control_dashboard,
+    integrate_version_control_with_analysis,
+    migrate_existing_documents_to_version_control,
+)
+# ── Collaboration System Imports ──────────────────────────────────────────
+from app.components.collaboration_system import (
+    DocumentAnnotation,
+    ReviewWorkflow,
+    UserSession,
+    AnnotationManager,
+    WorkflowManager,
+    ActivityManager,
+    ReviewSystem,
+    render_annotation_ui,
+    render_workflow_ui,
+    render_review_dashboard,
+    render_activity_ui,
+    render_decision_history,
+    render_collaboration_dashboard,
+    initialize_review_system,
+)
+# ───────────────────────────────────────────────────────────────────────────────
+# ── SECTION: INTELLIGENT DOCUMENT TAGGING & CATEGORIZATION (Issue #1988) ────
+# ───────────────────────────────────────────────────────────────────────────────
+
+import re
+import json
+import uuid
+from datetime import datetime
+from typing import Dict, List, Optional, Set, Tuple, Any
+from collections import defaultdict, Counter
+from dataclasses import dataclass, asdict
+import pandas as pd
+import numpy as np
+import streamlit as st
+import plotly.graph_objects as go
+import plotly.express as px
+
+# ── Data Models ─────────────────────────────────────────────────────────────
+
+@dataclass
+class DocumentCategory:
+    """Represents a document category"""
+    id: str
+    name: str
+    description: str
+    parent_id: Optional[str] = None
+    color: str = '#808080'
+    tags: List[str] = None
+    created_at: datetime = None
+    metadata: Dict = None
+    
+    def __post_init__(self):
+        if self.tags is None:
+            self.tags = []
+        if self.metadata is None:
+            self.metadata = {}
+        if self.created_at is None:
+            self.created_at = datetime.now()
+    
+    def to_dict(self) -> Dict:
+        return {
+            **asdict(self),
+            'created_at': self.created_at.isoformat()
+        }
+
+@dataclass
+class TagAssignment:
+    """Represents a tag assignment to a document"""
+    id: str
+    document_name: str
+    tag_id: str
+    assigned_at: datetime
+    assigned_by: str
+    is_auto: bool = False
+    
+    def to_dict(self) -> Dict:
+        return {
+            **asdict(self),
+            'assigned_at': self.assigned_at.isoformat()
+        }
+
+# ── Tag Generator ───────────────────────────────────────────────────────────
+
+class IntelligentTagGenerator:
+    """Generates intelligent tags from document content"""
+    
+    def __init__(self):
+        self.common_words = {
+            'plagiarism': ['academic', 'integrity', 'ethics', 'copying', 'similarity'],
+            'research': ['study', 'analysis', 'methodology', 'literature', 'review'],
+            'data': ['analysis', 'statistics', 'results', 'findings', 'visualization'],
+            'algorithm': ['code', 'implementation', 'performance', 'optimization'],
+            'machine learning': ['ai', 'neural', 'deep', 'training', 'model'],
+            'software': ['development', 'programming', 'system', 'application'],
+            'education': ['learning', 'teaching', 'curriculum', 'student', 'assessment'],
+            'ethics': ['privacy', 'security', 'compliance', 'policy', 'regulation']
+        }
+        
+        self.stopwords = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 
+                         'for', 'of', 'with', 'without', 'by', 'from', 'up', 'down',
+                         'is', 'are', 'was', 'were', 'be', 'been', 'being'}
+        
+        self.tag_cache = {}
+    
+    def generate_tags(self, content: str, max_tags: int = 10) -> List[Tuple[str, float]]:
+        """Generate tags from document content"""
+        if not content:
+            return []
+        
+        # Check cache
+        content_hash = hashlib.md5(content.encode()).hexdigest()
+        if content_hash in self.tag_cache:
+            return self.tag_cache[content_hash]
+        
+        # Extract keywords
+        keywords = self._extract_keywords(content)
+        
+        # Score tags
+        tags = self._score_tags(keywords, content)
+        
+        # Sort by confidence and limit
+        tags = sorted(tags, key=lambda x: x[1], reverse=True)[:max_tags]
+        
+        # Cache results
+        self.tag_cache[content_hash] = tags
+        
+        return tags
+    
+    def _extract_keywords(self, content: str) -> Dict[str, float]:
+        """Extract keywords from content with TF-IDF scoring"""
+        # Simple keyword extraction
+        words = re.findall(r'\b[a-zA-Z]{3,}\b', content.lower())
+        
+        # Remove stopwords
+        words = [w for w in words if w not in self.stopwords]
+        
+        # Count frequencies
+        freq = Counter(words)
+        total = len(words) or 1
+        
+        # Calculate scores (simple TF)
+        scores = {word: count/total for word, count in freq.items()}
+        
+        # Boost common topics
+        for topic, keywords in self.common_words.items():
+            for keyword in keywords:
+                if keyword in scores:
+                    scores[keyword] *= 1.5
+        
+        return scores
+    
+    def _score_tags(self, keywords: Dict[str, float], content: str) -> List[Tuple[str, float]]:
+        """Score potential tags"""
+        tags = []
+        
+        # Direct keywords
+        for word, score in keywords.items():
+            if score > 0.01 and len(word) > 2:
+                tags.append((word, min(score * 2, 1.0)))
+        
+        # Topic detection
+        topic_scores = self._detect_topics(content)
+        for topic, score in topic_scores:
+            tags.append((topic, min(score, 1.0)))
+        
+        # Remove duplicates
+        unique_tags = {}
+        for tag, score in tags:
+            if tag not in unique_tags or score > unique_tags[tag]:
+                unique_tags[tag] = score
+        
+        return list(unique_tags.items())
+    
+    def _detect_topics(self, content: str) -> List[Tuple[str, float]]:
+        """Detect topics in content using keyword matching"""
+        content_lower = content.lower()
+        topic_scores = []
+        
+        for topic, keywords in self.common_words.items():
+            matches = 0
+            total_keywords = len(keywords)
+            
+            for keyword in keywords:
+                if keyword in content_lower:
+                    matches += 1
+            
+            if matches > 0:
+                score = matches / total_keywords
+                topic_scores.append((topic, score))
+        
+        return topic_scores
+    
+    def generate_categories(self, content: str) -> Tuple[str, float]:
+        """Generate category prediction for document"""
+        if not content:
+            return 'Uncategorized', 0.0
+        
+        topic_scores = self._detect_topics(content)
+        
+        if topic_scores:
+            best_topic, best_score = max(topic_scores, key=lambda x: x[1])
+            if best_score > 0.3:
+                return best_topic.title(), best_score
+        
+        # Default categories
+        categories = ['Academic', 'Research', 'Technical', 'Review', 'Report']
+        for category in categories:
+            if category.lower() in content.lower():
+                return category, 0.6
+        
+        return 'Uncategorized', 0.3
+
+# ── Tag Manager ─────────────────────────────────────────────────────────────
+
+class TagManager:
+    """Manages document tags and categories"""
+    
+    def __init__(self):
+        self.tags: Dict[str, DocumentTag] = {}
+        self.categories: Dict[str, DocumentCategory] = {}
+        self.assignments: List[TagAssignment] = []
+        self.tag_counter = Counter()
+        self.tag_usage = defaultdict(int)
+        
+        # Initialize default categories
+        self._init_default_categories()
+    
+    def _init_default_categories(self):
+        """Initialize default categories"""
+        defaults = [
+            ('academic', 'Academic', 'Academic integrity and plagiarism related', '#4CAF50'),
+            ('research', 'Research', 'Research methodologies and findings', '#2196F3'),
+            ('technical', 'Technical', 'Technical documents and implementations', '#FF9800'),
+            ('review', 'Review', 'Document reviews and analysis', '#9C27B0'),
+            ('report', 'Report', 'Reports and summaries', '#F44336'),
+        ]
+        
+        for id, name, desc, color in defaults:
+            if id not in self.categories:
+                self.categories[id] = DocumentCategory(
+                    id=id,
+                    name=name,
+                    description=desc,
+                    color=color
+                )
+    
+    def add_tag(self, name: str, category: str = 'custom', 
+                confidence: float = 1.0, auto_generated: bool = False,
+                user_id: str = 'system') -> DocumentTag:
+        """Add a new tag"""
+        # Check if tag exists
+        existing = self.get_tag_by_name(name)
+        if existing:
+            return existing
+        
+        tag_id = str(uuid.uuid4())
+        tag = DocumentTag(
+            id=tag_id,
+            name=name,
+            category=category,
+            confidence=confidence,
+            created_at=datetime.now(),
+            created_by=user_id,
+            is_auto_generated=auto_generated
+        )
+        self.tags[tag_id] = tag
+        self.tag_counter[name] = 0
+        return tag
+    
+    def get_tag(self, tag_id: str) -> Optional[DocumentTag]:
+        """Get a tag by ID"""
+        return self.tags.get(tag_id)
+    
+    def get_tag_by_name(self, name: str) -> Optional[DocumentTag]:
+        """Get a tag by name"""
+        for tag in self.tags.values():
+            if tag.name == name:
+                return tag
+        return None
+    
+    def get_all_tags(self) -> List[DocumentTag]:
+        """Get all tags"""
+        return list(self.tags.values())
+    
+    def assign_tag(self, document_name: str, tag_name: str, 
+                   user_id: str = 'system', auto: bool = False) -> Optional[str]:
+        """Assign a tag to a document"""
+        tag = self.get_tag_by_name(tag_name)
+        if not tag:
+            tag = self.add_tag(tag_name, auto_generated=auto, user_id=user_id)
+        
+        assignment = TagAssignment(
+            id=str(uuid.uuid4()),
+            document_name=document_name,
+            tag_id=tag.id,
+            assigned_at=datetime.now(),
+            assigned_by=user_id,
+            is_auto=auto
+        )
+        self.assignments.append(assignment)
+        self.tag_counter[tag_name] += 1
+        self.tag_usage[tag_name] += 1
+        return assignment.id
+    
+    def unassign_tag(self, document_name: str, tag_name: str) -> bool:
+        """Remove a tag assignment"""
+        tag = self.get_tag_by_name(tag_name)
+        if not tag:
+            return False
+        
+        self.assignments = [
+            a for a in self.assignments 
+            if not (a.document_name == document_name and a.tag_id == tag.id)
+        ]
+        
+        if self.tag_counter[tag_name] > 0:
+            self.tag_counter[tag_name] -= 1
+        return True
+    
+    def get_document_tags(self, document_name: str) -> List[DocumentTag]:
+        """Get all tags for a document"""
+        doc_assignments = [a for a in self.assignments if a.document_name == document_name]
+        return [self.tags[a.tag_id] for a in doc_assignments if a.tag_id in self.tags]
+    
+    def get_documents_by_tag(self, tag_name: str) -> List[str]:
+        """Get all documents with a specific tag"""
+        tag = self.get_tag_by_name(tag_name)
+        if not tag:
+            return []
+        return [a.document_name for a in self.assignments if a.tag_id == tag.id]
+    
+    def add_category(self, name: str, description: str, parent_id: Optional[str] = None,
+                     color: str = '#808080') -> DocumentCategory:
+        """Add a new category"""
+        category_id = str(uuid.uuid4())
+        category = DocumentCategory(
+            id=category_id,
+            name=name,
+            description=description,
+            parent_id=parent_id,
+            color=color
+        )
+        self.categories[category_id] = category
+        return category
+    
+    def get_category(self, category_id: str) -> Optional[DocumentCategory]:
+        """Get a category by ID"""
+        return self.categories.get(category_id)
+    
+    def get_all_categories(self) -> List[DocumentCategory]:
+        """Get all categories"""
+        return list(self.categories.values())
+    
+    def get_tag_stats(self) -> Dict:
+        """Get tag statistics"""
+        return {
+            'total_tags': len(self.tags),
+            'total_assignments': len(self.assignments),
+            'most_used': self.tag_counter.most_common(10),
+            'categories': {
+                cat: len([t for t in self.tags.values() if t.category == cat])
+                for cat in set(t.category for t in self.tags.values())
             }
     @dataclass
     class DocumentCategory:
@@ -938,6 +1327,38 @@ from app.components.api_gateway import (
     ai_threshold = st.session_state.get("ai_threshold", 0.65)
     # ── Audit Logs View Import ──────────────────────────────────────────────
     from app.views.audit_logs import render_audit_view
+
+
+try:
+    from src.utils.google_drive import bulk_download_drive_folder
+except Exception:
+    bulk_download_drive_folder = None
+
+
+# Initialize databases
+init_corpus_db()
+init_db()
+
+# Purge stale temp files older than 2 hours on startup
+purge_expired_temp_files()
+# Start lightweight REST API server for /healthz endpoint in background
+import threading
+
+import uvicorn
+
+import src.core.app_config as app_config
+from src.api.app import app as fastapi_app
+
+# Issue #2782: Import domain models from the core layer instead of defining inline
+from src.core.models.categorization import (
+    DocumentTag,
+    TagCollection,
+    TagSource,
+    TagCategory,
+)
+
+def update_global_activity():
+    """Update the global last_activity timestamp."""
     try:
         from streamlit_plotly_events import plotly_events  # type: ignore
     except ImportError:  # pragma: no cover - optional dependency

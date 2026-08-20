@@ -12,6 +12,9 @@ from .text_stats import (
     get_unique_word_ratio,
 )
 
+# Issue #2781: OS compatibility patches
+from .os_compat import apply_asyncio_patches, get_os_platform
+
 __all__ = [
     "generate_plagiarism_report",
     "compute_text_stats",
@@ -20,4 +23,6 @@ __all__ = [
     "count_words",
     "format_stats_for_pdf",
     "get_unique_word_ratio",
+    "apply_asyncio_patches",
+    "get_os_platform",
 ]

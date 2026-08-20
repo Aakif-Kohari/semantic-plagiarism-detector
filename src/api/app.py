@@ -257,7 +257,7 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
     if status_code == 404:
         message = "API endpoint or resource not found"
     else:
-        message = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+        message = exc.detail if isinstance(exc.detail, (str, dict)) else str(exc.detail)
 
     log_level = logging.WARNING if 400 <= status_code < 500 else logging.ERROR
     logger.log(
