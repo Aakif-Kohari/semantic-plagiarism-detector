@@ -282,19 +282,35 @@ async def global_exception_handler(request: Request, exc: Exception):
     message = "An internal server error occurred." if is_production else str(exc)
     path = getattr(getattr(request, "url", None), "path", None)
 
+    request_id = request.headers.get("x-request-id")
+    trace_id = None
+    try:
+        from opentelemetry import trace
+        current_span = trace.get_current_span()
+        if current_span and current_span.get_span_context().is_valid:
+            trace_id = trace.format_trace_id(current_span.get_span_context().trace_id)
+    except Exception:
+        pass
+
+    content = {
+        "type": "about:blank",
+        "title": "Internal Server Error",
+        "status": status_code,
+        "detail": message,
+        "instance": path,
+        "error": True,
+        "code": status_code,
+        "message": message,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    if trace_id:
+        content["trace_id"] = trace_id
+    if request_id:
+        content["request_id"] = request_id
+
     return JSONResponse(
         status_code=status_code,
-        content={
-            "type": "about:blank",
-            "title": "Internal Server Error",
-            "status": status_code,
-            "detail": message,
-            "instance": path,
-            "error": True,
-            "code": status_code,
-            "message": message,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        },
+        content=content,
         media_type="application/problem+json",
     )
 
