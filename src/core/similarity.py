@@ -165,6 +165,7 @@ def document_similarity_matrix(
     batch_size: Optional[int] = None,
     min_threshold: float = 0.0,
     min_percentile: Optional[float] = None,
+    use_hnsw: bool = False,
 ) -> Union[pd.DataFrame, np.ndarray]:
     """
     Build an N×N cosine similarity matrix between all document pairs.
@@ -174,6 +175,7 @@ def document_similarity_matrix(
         batch_size: Optional number of documents to compare per batch.
         min_threshold: Minimum similarity score to keep; values below this will be 0.0.
         min_percentile: Optional percentile threshold for filtering.
+        use_hnsw: Optional boolean flag to enable HNSW index filtering for performance.
 
     Returns:
         Symmetric pandas DataFrame or numpy ndarray with similarity values.
@@ -182,9 +184,45 @@ def document_similarity_matrix(
         stacked = np.array(doc_embeddings)
         if stacked.ndim == 1 or stacked.size == 0:
             return np.array([[]])
+
+        if use_hnsw:
+            try:
+                import faiss
+                n = len(stacked)
+                d = stacked.shape[1]
+                norms = np.linalg.norm(stacked, axis=1, keepdims=True)
+                norms = np.where(norms == 0, 1.0, norms)
+                normalized_stacked = stacked / norms
+
+                index = faiss.IndexHNSWFlat(d, 32, faiss.METRIC_INNER_PRODUCT)
+                index.add(normalized_stacked)
+
+                k = min(50, n)
+                D, I = index.search(normalized_stacked, k)
+
+                sim = np.zeros((n, n))
+                for i in range(n):
+                    candidates = [c for c in I[i] if c != -1]
+                    if not candidates:
+                        continue
+                    vec_i = stacked[i : i + 1]
+                    vecs_candidates = stacked[candidates]
+                    scores = cosine_similarity(vec_i, vecs_candidates)[0]
+                    scores = np.clip(scores, 0.0, 1.0)
+                    for idx_in_candidates, candidate_idx in enumerate(candidates):
+                        val = scores[idx_in_candidates]
+                        if val >= min_threshold:
+                            sim[i, candidate_idx] = val
+                            sim[candidate_idx, i] = val
+                sim = np.where(sim < min_threshold, 0.0, sim)
+                return _apply_min_percentile_filter(sim, min_percentile)
+            except Exception as e:
+                logger.warning(f"HNSW indexing failed: {e}. Falling back to exact pairwise computation.")
+
         sim = np.clip(cosine_similarity(stacked), 0.0, 1.0)
         sim = np.where(sim < min_threshold, 0.0, sim)
         return _apply_min_percentile_filter(sim, min_percentile)
+
     doc_names = list(doc_embeddings.keys())
     n = len(doc_names)
 
@@ -206,6 +244,39 @@ def document_similarity_matrix(
     matrix = np.zeros((n, n))
     if doc_vectors:
         stacked = np.vstack(doc_vectors)
+        if use_hnsw:
+            try:
+                import faiss
+                d = stacked.shape[1]
+                norms = np.linalg.norm(stacked, axis=1, keepdims=True)
+                norms = np.where(norms == 0, 1.0, norms)
+                normalized_stacked = stacked / norms
+
+                index = faiss.IndexHNSWFlat(d, 32, faiss.METRIC_INNER_PRODUCT)
+                index.add(normalized_stacked)
+
+                k = min(50, n)
+                D, I = index.search(normalized_stacked, k)
+
+                for i in range(n):
+                    candidates = [c for c in I[i] if c != -1]
+                    if not candidates:
+                        continue
+                    vec_i = stacked[i : i + 1]
+                    vecs_candidates = stacked[candidates]
+                    scores = cosine_similarity(vec_i, vecs_candidates)[0]
+                    scores = np.clip(scores, 0.0, 1.0)
+                    for idx_in_candidates, candidate_idx in enumerate(candidates):
+                        val = scores[idx_in_candidates]
+                        if val >= min_threshold:
+                            matrix[i, candidate_idx] = val
+                            matrix[candidate_idx, i] = val
+                matrix = np.where(matrix < min_threshold, 0.0, matrix)
+                df = pd.DataFrame(matrix, index=doc_names, columns=doc_names)
+                return _apply_min_percentile_filter(df, min_percentile)
+            except Exception as e:
+                logger.warning(f"HNSW indexing failed: {e}. Falling back to exact pairwise computation.")
+
         safe_batch_size = _validated_batch_size(batch_size)
         if safe_batch_size is None:
             sim = cosine_similarity(stacked)
@@ -227,6 +298,7 @@ def compute_similarity_matrix(
     batch_size: Optional[int] = None,
     min_threshold: float = 0.0,
     min_percentile: Optional[float] = None,
+    use_hnsw: bool = False,
 ) -> Union[pd.DataFrame, np.ndarray]:
     """
     Direct alias/wrapper for document_similarity_matrix to maintain backwards compatibility
@@ -237,6 +309,7 @@ def compute_similarity_matrix(
         batch_size=batch_size,
         min_threshold=min_threshold,
         min_percentile=min_percentile,
+        use_hnsw=use_hnsw,
     )
 
 

@@ -1009,3 +1009,37 @@ def test_bm25_idf_calculation():
     assert score_2 < score_1
 
 
+def test_document_similarity_matrix_hnsw(dummy_embeddings):
+    """Test document_similarity_matrix with HNSW enabled (using FAISS) on dict embeddings."""
+    df = document_similarity_matrix(dummy_embeddings, use_hnsw=True)
+    assert isinstance(df, pd.DataFrame)
+    assert df.shape == (3, 3)
+    assert list(df.columns) == ["doc_A", "doc_B", "doc_C"]
+    assert np.isclose(df.loc["doc_A", "doc_A"], 1.0)
+    assert df.loc["doc_A", "doc_B"] > df.loc["doc_A", "doc_C"]
+
+
+def test_document_similarity_matrix_hnsw_ndarray(dummy_embeddings):
+    """Test document_similarity_matrix with HNSW enabled (using FAISS) on list/ndarray embeddings."""
+    embeddings_list = [dummy_embeddings["doc_A"][0], dummy_embeddings["doc_B"][0], dummy_embeddings["doc_C"][0]]
+    sim = document_similarity_matrix(embeddings_list, use_hnsw=True)
+    assert isinstance(sim, np.ndarray)
+    assert sim.shape == (3, 3)
+    assert np.isclose(sim[0, 0], 1.0)
+    assert sim[0, 1] > sim[0, 2]
+
+
+def test_document_similarity_matrix_hnsw_fallback(dummy_embeddings, monkeypatch):
+    """Verify that document_similarity_matrix falls back to exact computation when FAISS raises error."""
+    import sys
+    # Mock FAISS import failure
+    monkeypatch.setitem(sys.modules, "faiss", None)
+
+    df = document_similarity_matrix(dummy_embeddings, use_hnsw=True)
+    assert isinstance(df, pd.DataFrame)
+    assert df.shape == (3, 3)
+    assert np.isclose(df.loc["doc_A", "doc_A"], 1.0)
+    assert df.loc["doc_A", "doc_B"] > df.loc["doc_A", "doc_C"]
+
+
+
