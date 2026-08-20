@@ -1,20 +1,47 @@
 """
 src/utils/pagination.py
 -----------------------
-Pagination utilities for API list endpoints.
+Reusable, framework-independent sequence pagination.
 
 Provides a standardized dataclass for paginated responses with consistent
-structure across all API endpoints that return collections.
+structure across all API endpoints and UI views that render collections.
+
+The module exposes two layers:
+
+``PaginationPage``
+    An immutable description of one page. Callers that already know their
+    page geometry build it directly or through :meth:`PaginationPage.create`.
+
+``paginate_items``
+    The slicing entry point. It *clamps* rather than raises: a page number
+    past the end returns the last page, a nonsensical page size falls back to
+    a usable one, and a value that is not a number at all falls back to its
+    default. Pagination arguments usually arrive from a query string or a
+    Streamlit widget, so refusing to render is a worse answer than rendering
+    the nearest sensible page.
 
 Recent Additions (Issue #1998):
 - Added custom __repr__ for human-friendly debugging output
 - Verified __eq__ works correctly via dataclass frozen=True comparison
+
+Recent Fixes (Issue #3045):
+- Restored the keyword-only ``page`` / ``page_size`` / ``max_page_size``
+  contract that ``src/utils/warning_list.py`` calls, along with the
+  ``_coerce_integer`` helper and the ``start_index`` / ``end_index`` fields.
 """
 
-from dataclasses import dataclass
-from typing import Generic, List, Optional, TypeVar
+from dataclasses import dataclass, field
+from typing import Generic, List, Optional, Sequence, Tuple, TypeVar
 
 T = TypeVar("T")
+
+#: Fallback page size used when a caller supplies neither a usable
+#: ``page_size`` nor an explicit default.
+DEFAULT_PAGE_SIZE = 10
+
+#: Upper bound applied to ``page_size`` unless a caller overrides it. Keeps a
+#: hand-edited ``?per_page=100000`` from materialising the whole table.
+DEFAULT_MAX_PAGE_SIZE = 100
 
 
 @dataclass(frozen=True)
@@ -31,10 +58,19 @@ class PaginationPage(Generic[T]):
         total_pages: Total number of pages available
         total_items: Total number of items across all pages
         per_page: Number of items per page
+        start_index: One-based inclusive position of the first item on this
+            page within the full sequence. ``0`` when the page is empty.
+        end_index: One-based inclusive position of the last item on this
+            page within the full sequence. ``0`` when the page is empty.
 
     Recent Additions (Issue #1998):
         Custom __repr__ truncates large item lists for readability.
         __eq__ is automatically provided by @dataclass decorator.
+
+    Recent Fixes (Issue #3045):
+        ``start_index`` / ``end_index`` are back, and ``page_size`` is
+        available as an alias of ``per_page`` for callers that speak the
+        helper's vocabulary rather than the dataclass's.
     """
 
     items: List[T]
@@ -42,6 +78,22 @@ class PaginationPage(Generic[T]):
     total_pages: int
     total_items: int
     per_page: int
+    start_index: int = field(default=0)
+    end_index: int = field(default=0)
+
+    @property
+    def page_size(self) -> int:
+        """Alias for :attr:`per_page`.
+
+        ``paginate_items`` and its callers talk about a ``page_size``; the
+        dataclass field has always been named ``per_page``. Exposing both
+        names means neither vocabulary has to win, and no caller has to
+        remember which one this object speaks.
+
+        Returns:
+            The number of items one full page holds.
+        """
+        return self.per_page
 
     def __repr__(self) -> str:
         """Return a human-friendly string representation.
@@ -85,9 +137,9 @@ class PaginationPage(Generic[T]):
         """Check equality with another PaginationPage instance.
 
         Two PaginationPage instances are equal if and only if all their
-        fields (items, page, total_pages, total_items, per_page) are equal.
-        This is automatically handled by the @dataclass decorator when
-        frozen=True, but we document it explicitly for clarity.
+        fields (items, page, total_pages, total_items, per_page, start_index,
+        end_index) are equal. This is automatically handled by the @dataclass
+        decorator when frozen=True, but we document it explicitly for clarity.
 
         Args:
             other: Another object to compare against.
@@ -109,6 +161,39 @@ class PaginationPage(Generic[T]):
             and self.total_pages == other.total_pages
             and self.total_items == other.total_items
             and self.per_page == other.per_page
+            and self.start_index == other.start_index
+            and self.end_index == other.end_index
+        )
+
+    def __hash__(self) -> int:
+        """Hash consistently with :meth:`__eq__`.
+
+        ``@dataclass(frozen=True)`` generates a hash over every field, and
+        ``items`` is a ``list`` — so the generated hash raised
+        ``TypeError: unhashable type: 'list'`` for any page that carried
+        results. Hashing the items as a tuple keeps the invariant that equal
+        pages hash equally while letting a page be used as a dict key or set
+        member, which is what a frozen dataclass is for.
+
+        Returns:
+            A hash over the same fields ``__eq__`` compares.
+
+        Note:
+            The items themselves must be hashable. A page of dictionaries —
+            the shape ``warning_list`` builds — is still unhashable, and that
+            is the ordinary Python contract rather than something this class
+            can paper over.
+        """
+        return hash(
+            (
+                tuple(self.items),
+                self.page,
+                self.total_pages,
+                self.total_items,
+                self.per_page,
+                self.start_index,
+                self.end_index,
+            )
         )
 
     @classmethod
@@ -146,12 +231,20 @@ class PaginationPage(Generic[T]):
         # Calculate total pages, ensuring at least 1 page even if no items
         total_pages = max(1, (total_items + per_page - 1) // per_page)
 
+        start_index, end_index = _bounds_for(
+            page=page,
+            per_page=per_page,
+            item_count=len(items),
+        )
+
         return cls(
             items=items,
             page=page,
             total_pages=total_pages,
             total_items=total_items,
             per_page=per_page,
+            start_index=start_index,
+            end_index=end_index,
         )
 
     def has_next(self) -> bool:
@@ -198,33 +291,127 @@ class PaginationPage(Generic[T]):
             "total_pages": self.total_pages,
             "total_items": self.total_items,
             "per_page": self.per_page,
+            "start_index": self.start_index,
+            "end_index": self.end_index,
             "has_next": self.has_next(),
             "has_previous": self.has_previous(),
             "next_page": self.next_page(),
             "previous_page": self.previous_page(),
         }
 
+
+def _coerce_integer(value: object, default: int) -> int:
+    """Convert a pagination value to ``int``, or fall back to *default*.
+
+    Pagination numbers reach this module from query strings, session state and
+    widget callbacks, so ``"3"``, ``3.0`` and ``None`` all turn up where an
+    ``int`` is expected. Anything that will not survive ``int()`` yields the
+    caller's default rather than an exception.
+
+    Args:
+        value: The raw value to convert. May be a string, float, ``None`` or
+            any other object.
+        default: The value returned when *value* cannot be converted.
+
+    Returns:
+        The converted integer, or *default*.
+
+    Examples:
+        >>> _coerce_integer("10", 1)
+        10
+        >>> _coerce_integer("abc", 1)
+        1
+        >>> _coerce_integer(3.9, 1)
+        3
+    """
+    try:
+        return int(value)  # type: ignore[call-overload]
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def _bounds_for(*, page: int, per_page: int, item_count: int) -> Tuple[int, int]:
+    """Return the one-based inclusive ``(start, end)`` positions of a page.
+
+    Args:
+        page: The clamped, one-based page number.
+        per_page: The clamped page size.
+        item_count: How many items the page actually holds.
+
+    Returns:
+        ``(0, 0)`` for an empty page, otherwise the first and last positions
+        of its items within the full sequence.
+    """
+    if item_count <= 0:
+        return 0, 0
+
+    start_index = (page - 1) * per_page + 1
+    return start_index, start_index + item_count - 1
+
+
 def paginate_items(
-    items: List[T],
-    page_size: int = 10,
-    current_page: int = 1,
+    items: Sequence[T],
+    *,
+    page: int = 1,
+    page_size: int = DEFAULT_PAGE_SIZE,
+    max_page_size: Optional[int] = DEFAULT_MAX_PAGE_SIZE,
 ) -> PaginationPage[T]:
-    import math
-    if page_size < 1:
-        page_size = 10
-    if current_page < 1:
-        current_page = 1
-        
+    """Slice *items* into one clamped page.
+
+    Every argument is clamped rather than validated, because the values come
+    from user-controlled surfaces where refusing to render is a worse outcome
+    than rendering the nearest sensible page:
+
+    * a non-numeric ``page`` or ``page_size`` falls back to its default;
+    * ``page_size`` is clamped into ``[1, max_page_size]``;
+    * ``page`` is clamped into ``[1, total_pages]``, so a bookmarked
+      ``?page=9999`` lands on the last page instead of an empty one.
+
+    Args:
+        items: The full sequence to paginate. Not mutated.
+        page: One-based page number requested by the caller.
+        page_size: Requested number of items per page.
+        max_page_size: Upper bound for ``page_size``. Pass ``None`` to lift
+            the cap entirely.
+
+    Returns:
+        A :class:`PaginationPage` holding that slice, its clamped geometry,
+        and the one-based ``start_index`` / ``end_index`` of the slice.
+
+    Examples:
+        >>> paginate_items([1, 2, 3, 4, 5], page=9999, page_size=2).items
+        [5]
+        >>> paginate_items([1, 2, 3, 4, 5], page=9999, page_size=2).page
+        3
+        >>> paginate_items([], page=1, page_size=10).total_pages
+        1
+    """
+    safe_page_size = _coerce_integer(page_size, DEFAULT_PAGE_SIZE)
+    safe_page_size = max(1, safe_page_size)
+    if max_page_size is not None:
+        safe_page_size = min(safe_page_size, max(1, max_page_size))
+
     total_items = len(items)
-    total_pages = max(1, math.ceil(total_items / page_size))
-    
-    start_idx = (current_page - 1) * page_size
-    end_idx = start_idx + page_size
-    
+    total_pages = max(1, -(-total_items // safe_page_size))
+
+    safe_page = _coerce_integer(page, 1)
+    safe_page = min(max(1, safe_page), total_pages)
+
+    start = (safe_page - 1) * safe_page_size
+    page_items = list(items[start : start + safe_page_size])
+
+    start_index, end_index = _bounds_for(
+        page=safe_page,
+        per_page=safe_page_size,
+        item_count=len(page_items),
+    )
+
     return PaginationPage(
-        items=items[start_idx:end_idx],
-        page=current_page,
+        items=page_items,
+        page=safe_page,
         total_pages=total_pages,
         total_items=total_items,
-        per_page=page_size
+        per_page=safe_page_size,
+        start_index=start_index,
+        end_index=end_index,
     )
