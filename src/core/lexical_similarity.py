@@ -200,6 +200,31 @@ def _get_combined_stopwords(
     return combined
 
 
+@functools.lru_cache(maxsize=4096)
+def _get_base_tokens(text: str) -> list[str]:
+    """Extract and cache lower-cased base tokens from text, using nltk if available, or regex fallback."""
+    if not text or not isinstance(text, str):
+        return []
+
+    try:
+        from nltk.tokenize import word_tokenize as _nltk_word_tokenize
+        raw_tokens = _nltk_word_tokenize(text)
+        return [
+            tok.lower()
+            for tok in raw_tokens
+            if tok.isalnum() or (any(c.isalnum() for c in tok) and "'" in tok)
+        ]
+    except Exception:
+        return _TOKEN_RE.findall(text.lower())
+
+
+@functools.lru_cache(maxsize=4096)
+def _tokenize_cached(text: str, stopwords_frozenset: frozenset[str]) -> list[str]:
+    """Helper to tokenize and filter stopwords using cached base tokens."""
+    base_tokens = _get_base_tokens(text)
+    return [tok for tok in base_tokens if tok not in stopwords_frozenset]
+
+
 def remove_stopwords(
     text: str,
     stopwords: Optional[Iterable[str]] = None,
@@ -220,10 +245,8 @@ def remove_stopwords(
     """
     if not text or not isinstance(text, str):
         return ""
-    stop_set: Set[str] = set(stopwords) if stopwords is not None else STOPWORDS
-    tokens: List[str] = [
-        tok for tok in _TOKEN_RE.findall(text.lower()) if tok not in stop_set
-    ]
+    stop_set = frozenset(stopwords) if stopwords is not None else frozenset(STOPWORDS)
+    tokens = _tokenize_cached(text, stop_set)
     return " ".join(tokens)
 
 
@@ -247,8 +270,8 @@ def tokenize(
     """
     if not text or not isinstance(text, str):
         return set()
-    stop_set: Set[str] = set(stopwords) if stopwords is not None else STOPWORDS
-    return {tok for tok in _TOKEN_RE.findall(text.lower()) if tok not in stop_set}
+    stop_set = frozenset(stopwords) if stopwords is not None else frozenset(STOPWORDS)
+    return set(_tokenize_cached(text, stop_set))
 
 
 def get_ngrams(
@@ -278,10 +301,8 @@ def get_ngrams(
     """
     if not text or not isinstance(text, str) or n < 1:
         return set()
-    stop_set: Set[str] = set(stopwords) if stopwords is not None else STOPWORDS
-    tokens: List[str] = [
-        tok for tok in _TOKEN_RE.findall(text.lower()) if tok not in stop_set
-    ]
+    stop_set = frozenset(stopwords) if stopwords is not None else frozenset(STOPWORDS)
+    tokens = _tokenize_cached(text, stop_set)
     if len(tokens) < n:
         return set()
     return {tuple(tokens[i : i + n]) for i in range(len(tokens) - n + 1)}
