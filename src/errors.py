@@ -239,7 +239,8 @@ EXPORT_GENERATION_IO_FAILED = (
 )
 
 
-class EmptyDocumentError(ValueError):    """Raised when a document contains no extractable or readable text.
+class EmptyDocumentError(ValueError):
+    """Raised when a document contains no extractable or readable text.
 
     This specific exception allows the UI and CLI to differentiate between
     a file that failed to parse due to corruption/format issues and a file

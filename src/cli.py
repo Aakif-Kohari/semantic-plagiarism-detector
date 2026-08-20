@@ -404,6 +404,82 @@ def run_db_status(
     return 0
 
 
+def run_db_downgrade(
+    db_path: str | Path | None = None,
+    db_type: str = "corpus",
+    steps: int = 1,
+) -> int:
+    """
+    Revert the most recent applied migration based on the migration_history table.
+
+    Args:
+        db_path: Optional path to SQLite database file. Defaults to corpus or auth DB.
+        db_type: Database type ('auth' or 'corpus').
+        steps: Number of migrations to revert (default: 1).
+
+    Returns:
+        0 on success, 1 on failure.
+    """
+    import sqlite3
+    from src.db.migrations import (
+        AUTH_DOWN_MIGRATIONS,
+        CORPUS_DOWN_MIGRATIONS,
+        get_latest_applied_migration,
+        rollback_migration,
+    )
+
+    if db_path is None:
+        if db_type == "auth":
+            from src.core.app_config import AUTH_DB_PATH
+
+            path = AUTH_DB_PATH
+        else:
+            from src.core.app_config import CORPUS_DB_PATH
+
+            path = CORPUS_DB_PATH
+    else:
+        path = Path(db_path).expanduser().resolve()
+
+    if not path.exists():
+        sys.stderr.write(f"Error: Database file '{path}' does not exist.\n")
+        return 1
+
+    if not path.is_file():
+        sys.stderr.write(f"Error: Path '{path}' is not a file.\n")
+        return 1
+
+    down_migrations = (
+        AUTH_DOWN_MIGRATIONS if db_type == "auth" else CORPUS_DOWN_MIGRATIONS
+    )
+
+    try:
+        with sqlite3.connect(str(path)) as conn:
+            conn.execute("PRAGMA foreign_keys = ON")
+            latest_version = get_latest_applied_migration(conn)
+
+            if latest_version <= 0:
+                print(
+                    f"Database '{path}' is already at version 0. No migration to downgrade."
+                )
+                return 0
+
+            target_version = max(0, latest_version - steps)
+            print(
+                f"Reverting migration(s) on '{path}' from version {latest_version} to {target_version}..."
+            )
+
+            new_version = rollback_migration(
+                conn,
+                target_version,
+                down_migrations=down_migrations,
+            )
+            print(f"Successfully downgraded database to version {new_version}.")
+            return 0
+    except Exception as exc:
+        sys.stderr.write(f"Error: Failed to downgrade database: {exc}\n")
+        return 1
+
+
 def run_database_optimization(db_path: str) -> int:
     """Run SQLite maintenance for one database and return a CLI exit code."""
     if optimize_database(db_path):
@@ -423,6 +499,10 @@ def main() -> None:
     argv = sys.argv[1:]
     if argv and argv[0] == "--db-status":
         argv[0] = "db-status"
+    elif argv and argv[0] == "db-downgrade":
+        argv[0] = "db"
+        argv.insert(1, "downgrade")
+
     parser = argparse.ArgumentParser(
         description="Headless CLI Version for Plagiarism Detection Automation"
     )
@@ -499,6 +579,32 @@ def main() -> None:
         choices=["text", "json"],
         default="text",
         help="Status output format (default: text).",
+    )
+
+    db_parser = subparsers.add_parser("db", help="Database management commands")
+    db_subparsers = db_parser.add_subparsers(dest="db_action")
+
+    downgrade_parser = db_subparsers.add_parser(
+        "downgrade",
+        help="Revert the most recent applied migration based on migration_history table.",
+    )
+    downgrade_parser.add_argument(
+        "--database",
+        metavar="DB_PATH",
+        default=None,
+        help="Path to an existing SQLite database file.",
+    )
+    downgrade_parser.add_argument(
+        "--db-type",
+        choices=["auth", "corpus"],
+        default="corpus",
+        help="Migration set to revert (default: corpus).",
+    )
+    downgrade_parser.add_argument(
+        "--steps",
+        type=int,
+        default=1,
+        help="Number of migrations to revert (default: 1).",
     )
 
     args = parser.parse_args(argv)
@@ -581,6 +687,20 @@ def main() -> None:
             output_format=args.output_format,
         )
         sys.exit(exit_code)
+
+    elif args.command == "db":
+        if getattr(args, "db_action", None) == "downgrade":
+            exit_code = run_db_downgrade(
+                db_path=args.database,
+                db_type=args.db_type,
+                steps=args.steps,
+            )
+            sys.exit(exit_code)
+        else:
+            sys.stderr.write(
+                "Error: A valid db action (such as 'downgrade') is required.\n"
+            )
+            sys.exit(1)
 
     elif args.command == "prewarm":
         exit_code = run_prewarm(folder_path=args.folder)

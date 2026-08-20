@@ -1,5 +1,8 @@
 name: "ECSoC Automation"
 
+env:
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
+
 on:
   issue_comment:
     types: [created]
@@ -202,9 +205,8 @@ jobs:
                     }
                   }
                 }
-              }
-                await Promise.all(labelPromises);
-            });
+              });
+              await Promise.all(labelPromises);
             };
 
             const processIssue = async (issue) => {
