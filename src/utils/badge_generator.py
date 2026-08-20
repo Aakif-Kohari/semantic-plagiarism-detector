@@ -84,20 +84,35 @@ def generate_badge_png(
     student_name: str = "Student",
     date: Optional[str] = None,
     text_preview: str = "",
+    student_id: Optional[str] = None,
 ) -> BytesIO:
     """
     Generates a visually appealing PNG badge for plagiarism-free work.
+    Caches generated badges in Redis for 24 hours based on student ID/name and date (Issue #2941).
 
     Args:
         student_name: Name of the student (optional, defaults to "Student")
         date: Date string (optional, defaults to current date)
         text_preview: Preview of the verified text (optional)
+        student_id: Optional unique ID of the student for caching
 
     Returns:
         BytesIO buffer containing the PNG badge
     """
     if Image is None:
         raise ImportError("PIL/Pillow is required for PNG badge generation")
+
+    target_date = date if date is not None else datetime.now().strftime("%B %d, %Y")
+    ident = str(student_id if student_id is not None else student_name)
+
+    # Check Redis cache
+    from src.utils.redis_cache import BADGE_TTL, CacheNamespace, RedisCache
+
+    cache = RedisCache.get_instance()
+    cache_key = CacheNamespace.BADGES.build_key("png", ident, target_date)
+    cached_bytes = cache.get(cache_key)
+    if cached_bytes is not None and isinstance(cached_bytes, bytes):
+        return BytesIO(cached_bytes)
 
     # Badge dimensions
     width, height = 800, 600
@@ -222,6 +237,11 @@ def generate_badge_png(
     # Save to buffer
     buffer = BytesIO()
     img.save(buffer, format="PNG", quality=95)
+    png_bytes = buffer.getvalue()
+    try:
+        cache.set(cache_key, png_bytes, ttl=BADGE_TTL)
+    except Exception:
+        pass
     buffer.seek(0)
     return buffer
 
@@ -231,19 +251,34 @@ def generate_badge_pdf(
     date: Optional[str] = None,
     text_preview: str = "",
     brand_color: Optional[str] = None,
+    student_id: Optional[str] = None,
 ) -> BytesIO:
     """
     Generates a professional PDF certificate for plagiarism-free work.
+    Caches generated certificates in Redis for 24 hours based on student ID/name and date (Issue #2941).
 
     Args:
         student_name: Name of the student (optional, defaults to "Student")
         date: Date string (optional, defaults to current date)
         text_preview: Preview of the verified text (optional)
         brand_color: Optional hex color string for branding
+        student_id: Optional unique ID of the student for caching
 
     Returns:
         BytesIO buffer containing the PDF certificate
     """
+    target_date = date if date is not None else datetime.now().strftime("%B %d, %Y")
+    ident = str(student_id if student_id is not None else student_name)
+
+    # Check Redis cache
+    from src.utils.redis_cache import BADGE_TTL, CacheNamespace, RedisCache
+
+    cache = RedisCache.get_instance()
+    cache_key = CacheNamespace.BADGES.build_key("pdf", ident, target_date)
+    cached_bytes = cache.get(cache_key)
+    if cached_bytes is not None and isinstance(cached_bytes, bytes):
+        return BytesIO(cached_bytes)
+
     brand_hex = validate_hex_color(brand_color)
     brand_clr = HexColor(brand_hex)
     buffer = BytesIO()
@@ -406,4 +441,11 @@ def generate_badge_pdf(
     doc.build(story)
     from src.utils.pdf_report import compress_pdf_buffer
 
-    return compress_pdf_buffer(buffer)
+    result_buffer = compress_pdf_buffer(buffer)
+    pdf_bytes = result_buffer.getvalue()
+    try:
+        cache.set(cache_key, pdf_bytes, ttl=BADGE_TTL)
+    except Exception:
+        pass
+    result_buffer.seek(0)
+    return result_buffer
