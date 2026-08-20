@@ -13,6 +13,7 @@ import pytest
 from pypdf import PdfReader
 
 from src.utils.pdf_report import (
+    break_long_urls,
     generate_plagiarism_report,
     get_similarity_color,
     wrap_text,
@@ -666,3 +667,42 @@ def test_pdf_report_headers_french():
     assert "Nom du Document" in text
     assert "Score de Similarit" in text
     assert "Seuil de D" in text
+
+
+def test_break_long_urls():
+    """Test that break_long_urls inserts zero-width spaces into long URLs."""
+    url = "https://example.com/very/long/path/with/parameters?key=value&other=123#section"
+    broken = break_long_urls(url)
+    assert "\u200b" in broken
+    assert broken.replace("\u200b", "") == url
+
+    # Test plain text with URL embedded
+    text = "References: Please consult https://example.com/very/long/url for details."
+    broken_text = break_long_urls(text)
+    assert "\u200b" in broken_text
+    assert broken_text.replace("\u200b", "") == text
+
+    # Test non-string / empty string
+    assert break_long_urls("") == ""
+    assert break_long_urls(None) is None
+
+
+def test_pdf_report_with_long_url_generates_successfully():
+    """Test generating a PDF report containing long URLs in top_pairs without layout error."""
+    long_url_paragraph = (
+        "According to research found at "
+        "https://academic-repository.example.edu/department/computer-science/publications/2026/advanced-semantic-similarity-and-plagiarism-detection-benchmarks-and-algorithms.html?token=abcdef1234567890&session=xyz987654321 "
+        "the plagiarism score was high."
+    )
+    pdf_buffer = generate_plagiarism_report(
+        doc_a="paper_a.pdf",
+        doc_b="paper_b.pdf",
+        overall_similarity=0.92,
+        threshold=0.59,
+        top_pairs=[(long_url_paragraph, long_url_paragraph, 0.95)],
+    )
+    pdf_bytes = pdf_buffer.getvalue()
+    assert pdf_bytes.startswith(b"%PDF")
+    text = _read_text(pdf_bytes)
+    assert "paper_a.pdf" in text
+
