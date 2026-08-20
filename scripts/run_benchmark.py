@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-from __future__ import annotations
-
 """
 run_benchmark.py
 ----------------
@@ -17,6 +15,8 @@ Acceptance Criteria (Issue #955):
 - Support --num-docs, --chunks-per-doc, and --device flags.
 - Print formatted latency metrics table (ms/chunk, throughput docs/sec).
 """
+
+from __future__ import annotations
 
 import argparse
 import json

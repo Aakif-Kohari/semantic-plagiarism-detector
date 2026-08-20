@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 test_embedding_model.py
 -----------------------
@@ -12,6 +10,8 @@ Validates:
 - Document and chunk embedding shapes and types
 - Edge cases (empty inputs, single chunks, massive batches)
 """
+
+from __future__ import annotations
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch

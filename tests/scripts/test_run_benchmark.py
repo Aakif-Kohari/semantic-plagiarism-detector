@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 test_run_benchmark.py
 ---------------------
@@ -11,6 +9,8 @@ Validates:
 - Metrics calculation accuracy
 - Output formatting helpers
 """
+
+from __future__ import annotations
 
 import argparse
 import json
