@@ -257,6 +257,25 @@ def get_stopwords() -> frozenset:
     return ENGLISH_STOPWORDS | load_custom_stopwords()
 
 
+def reject_zero_width_characters(
+    text: str, filename: Optional[str] = None
+) -> str:
+    """Reject text containing zero-width Unicode characters."""
+    if not text:
+        return text
+
+    matches = ZERO_WIDTH_CHARS_PATTERN.findall(text)
+    if matches:
+        count = len(matches)
+        target = f"in file '{filename}'" if filename else "in document text"
+        raise ValueError(
+            f"Strict zero-width character rejection: found {count} "
+            f"zero-width unicode character(s) {target}."
+        )
+
+    return text
+
+
 def sanitize_zero_width_characters(text: str, filename: Optional[str] = None) -> str:
     """
     Strips zero-width unicode characters (e.g. \u200b) often used to bypass plagiarism checkers.
@@ -1989,7 +2008,7 @@ def extract_text(
 
     raw = strip_bibliography(raw)
     raw = normalize_unicode_spaces(raw)
-    raw = sanitize_zero_width_characters(raw, filename=filename)
+    raw = reject_zero_width_characters(raw, filename=filename)
 
     if clean_whitespace and raw:
         lines = [line.rstrip() for line in raw.splitlines()]
