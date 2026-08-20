@@ -28,8 +28,7 @@ from src.db.auth import (
     validate_sso_state,
     verify_user,
 )
-from src.errors import StaleDataException
-
+from src.exceptions import StaleDataException
 
 @pytest.fixture(autouse=True)
 def setup_test_db(mock_db):
