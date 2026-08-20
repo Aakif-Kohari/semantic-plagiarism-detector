@@ -428,3 +428,42 @@ def rotate_backup_files(backup_dir: Path, keep_count: int = 5) -> int:
     )
 
     return deleted_count
+
+
+from contextlib import contextmanager
+from typing import Generator
+
+
+@contextmanager
+def managed_ocr_temp_dir(prefix: str = "tesseract_ocr_") -> Generator[str, None, None]:
+    """Context manager for OCR processing that creates a dedicated temporary directory.
+
+    Ensures all temporary files created for OCR (rendered page PNGs, pytesseract
+    inputs/outputs, subprocess artifacts) are isolated within a Python
+    `tempfile.TemporaryDirectory()` context manager.
+
+    Guarantees that even if Tesseract crashes mid-execution, raises a MemoryError,
+    or throws an unhandled exception, Python's TemporaryDirectory() context manager
+    automatically purges the temporary folder and all contained artifacts upon exit,
+    preventing disk space accumulation in system /tmp.
+
+    Yields:
+        str: Absolute path to the created temporary directory.
+    """
+    with tempfile.TemporaryDirectory(prefix=prefix) as tmp_dir:
+        old_temp = tempfile.tempdir
+        tempfile.tempdir = tmp_dir
+        old_env = {k: os.environ.get(k) for k in ("TMPDIR", "TEMP", "TMP")}
+        os.environ["TMPDIR"] = tmp_dir
+        os.environ["TEMP"] = tmp_dir
+        os.environ["TMP"] = tmp_dir
+        try:
+            yield tmp_dir
+        finally:
+            tempfile.tempdir = old_temp
+            for k, v in old_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+

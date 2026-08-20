@@ -40,6 +40,8 @@ def ui_exception_handler(component_name: str):
         def wrapper(*args, **kwargs):
             try:
                 return func(*args, **kwargs)
+            except st.runtime.scriptrunner.StopException:
+                raise
             except Exception:
                 logger.error(
                     "Component '%s' failed to render:\n%s",
@@ -77,10 +79,11 @@ def get_active_sessions_count() -> int:
 
         if cache.is_available():
             try:
-                if hasattr(cache._client, "scan_iter"):
-                    raw_keys = list(cache._client.scan_iter("spd:v1:session:*:last_interaction", count=1000))
-                else:
-                    raw_keys = cache._client.keys("spd:v1:session:*:last_interaction")
+                raw_keys = list(
+                    cache._client.scan_iter(
+                        match="spd:v1:session:*:last_interaction"
+                    )
+                )
                 keys = [
                     k.decode("utf-8") if isinstance(k, bytes) else k for k in raw_keys
                 ]
