@@ -590,7 +590,7 @@ class TagManager:
             a for a in self.assignments 
             if not (a.document_name == document_name and a.tag_id == tag.id)
         ]
-        
+
         if self.tag_counter[tag_name] > 0:
             self.tag_counter[tag_name] -= 1
         return True
