@@ -405,3 +405,25 @@ def test_get_current_user_jwt_without_scopes_defaults_to_empty_list():
 
     asyncio.run(_test())
 
+
+def test_no_inline_imports_in_middleware_functions():
+    """Verify src/api/middleware.py has no inline imports inside function bodies (Issue #3016)."""
+    import ast
+    from pathlib import Path
+
+    middleware_path = Path(__file__).resolve().parent.parent.parent / "src" / "api" / "middleware.py"
+    tree = ast.parse(middleware_path.read_text(encoding="utf-8"))
+
+    # Traverse AST to ensure no Import or ImportFrom exists inside FunctionDef/AsyncFunctionDef
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for child in ast.walk(node):
+                if child is not node and isinstance(child, (ast.Import, ast.ImportFrom)):
+                    imported_names = [alias.name for alias in child.names]
+                    module_name = getattr(child, "module", "")
+                    pytest.fail(
+                        f"Found inline import '{module_name} -> {imported_names}' inside function "
+                        f"'{node.name}' at line {child.lineno} in {middleware_path.name}"
+                    )
+
+
