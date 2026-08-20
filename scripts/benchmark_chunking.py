@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-from __future__ import annotations
-
 """
 scripts/benchmark_chunking.py
 -----------------------------
@@ -17,6 +15,8 @@ Acceptance Criteria (Issue #1803):
 - Measure chunking throughput (sentences per second) across varying chunk sizes.
 - Print formatted timing results summary table.
 """
+
+from __future__ import annotations
 
 import argparse
 import logging

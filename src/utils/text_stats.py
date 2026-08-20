@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 text_stats.py
 -------------
@@ -9,6 +7,8 @@ Provides functions to compute various text metrics such as word count,
 sentence count, and unique word ratio. These metrics are used in
 plagiarism reports to provide additional context about compared documents.
 """
+
+from __future__ import annotations
 
 import logging
 import re
