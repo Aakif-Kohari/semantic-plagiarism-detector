@@ -10,6 +10,7 @@ avoids circular imports and keeps errors.py focused on message text.
 
 __all__ = [
     "ExportFailedError",
+    "ModelInitializationError",
     "OCRFileBatchError",
     "StaleDataException",
 ]
@@ -17,6 +18,10 @@ __all__ = [
 
 class ExportFailedError(RuntimeError):
     """Raised when an export cannot be generated or written safely."""
+
+
+class ModelInitializationError(RuntimeError):
+    """Raised when neither the primary nor fallback embedding model can load."""
 
 
 class OCRFileBatchError(Exception):
