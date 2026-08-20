@@ -640,3 +640,58 @@ def test_check_temp_disk_space_failure():
             match="Disk space in temp directory below safety threshold",
         ):
             check_temp_disk_space(min_free_mb=100)
+
+
+def test_managed_ocr_temp_dir_creates_and_purges_directory():
+    """Verify managed_ocr_temp_dir creates a temp directory and purges it on exit."""
+    from src.utils.temp_manager import managed_ocr_temp_dir
+
+    created_dir = None
+    created_file = None
+
+    with managed_ocr_temp_dir(prefix="test_ocr_dir_") as tmp_dir:
+        created_dir = tmp_dir
+        assert os.path.isdir(tmp_dir)
+
+        # Create temporary PNG and text file simulating Tesseract OCR output
+        created_file = os.path.join(tmp_dir, "tess_123.png")
+        with open(created_file, "w", encoding="utf-8") as f:
+            f.write("mock OCR image data")
+        assert os.path.exists(created_file)
+
+    # After exiting block, temp directory and files must be deleted
+    assert not os.path.exists(created_dir)
+    assert not os.path.exists(created_file)
+
+
+def test_managed_ocr_temp_dir_cleanup_on_exception():
+    """Verify managed_ocr_temp_dir purges all files even when an exception occurs."""
+    from src.utils.temp_manager import managed_ocr_temp_dir
+
+    created_dir = None
+
+    with pytest.raises(RuntimeError, match="Tesseract crash simulation"):
+        with managed_ocr_temp_dir(prefix="test_ocr_crash_") as tmp_dir:
+            created_dir = tmp_dir
+            # Write temp OCR files
+            with open(os.path.join(tmp_dir, "crash_test.txt"), "w") as f:
+                f.write("OCR text")
+            raise RuntimeError("Tesseract crash simulation")
+
+    assert not os.path.exists(created_dir)
+
+
+def test_managed_ocr_temp_dir_restores_environment_and_tempdir():
+    """Verify managed_ocr_temp_dir cleanly restores prior tempdir and environment variables."""
+    from src.utils.temp_manager import managed_ocr_temp_dir
+
+    orig_tempdir = tempfile.tempdir
+    orig_tmpdir_env = os.environ.get("TMPDIR")
+
+    with managed_ocr_temp_dir() as tmp_dir:
+        assert tempfile.tempdir == tmp_dir
+        assert os.environ.get("TMPDIR") == tmp_dir
+
+    assert tempfile.tempdir == orig_tempdir
+    assert os.environ.get("TMPDIR") == orig_tmpdir_env
+
