@@ -351,6 +351,19 @@ class TestEmbeddingModelQuantization:
             assert torch.nn.Linear in args[1]
             assert kwargs["dtype"] == torch.qint8
 
+    def test_dynamic_quantization_skips_mps(self, caplog):
+        """MPS models must bypass dynamic INT8 quantization."""
+        mock_model = MagicMock()
+        mock_model.device = "mps"
+
+        with patch("torch.quantization.quantize_dynamic") as mock_quantize:
+            with caplog.at_level("WARNING"):
+                result = _apply_dynamic_quantization(mock_model)
+
+        assert result is mock_model
+        mock_quantize.assert_not_called()
+        assert "disabled on MPS" in caplog.text
+
     def test_quantization_fallback_on_error(self, caplog):
         """If quantization fails, the original float32 model should be returned."""
         mock_model = MagicMock()

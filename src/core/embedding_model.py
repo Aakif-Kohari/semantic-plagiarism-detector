@@ -46,17 +46,25 @@ _quantized_model: SentenceTransformer | None = None
 def _apply_dynamic_quantization(model: SentenceTransformer) -> SentenceTransformer:
     """Apply PyTorch dynamic INT8 quantization to the model's Linear layers.
 
-    Dynamic quantization computes the quantization parameters (scale and zero-point)
-    for activations dynamically, just like static quantization, but the weights
-    are quantized statically. This significantly reduces memory footprint and
-    increases inference speed on CPU hosts without requiring a calibration dataset.
+    Dynamic quantization is intended for CPU inference. Apple Silicon's MPS
+    backend does not benefit from this INT8 path, so MPS models are returned
+    unchanged to preserve native floating-point performance.
 
     Args:
         model: The loaded SentenceTransformer model instance.
 
     Returns:
-        The quantized SentenceTransformer model.
+        The quantized SentenceTransformer model, or the original model when
+        running on MPS.
     """
+    device = _detect_device(model)
+    if device == "mps":
+        logger.warning(
+            "[embedding_model] Dynamic INT8 quantization is disabled on MPS; "
+            "using the unquantized floating-point model to preserve performance."
+        )
+        return model
+
     logger.info(
         "[embedding_model] Applying dynamic INT8 quantization to Linear layers..."
     )
