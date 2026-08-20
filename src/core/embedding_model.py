@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 embedding_model.py
 ------------------
@@ -22,6 +20,8 @@ Recent Additions (Issue #1580):
   cached SentenceTransformer weight files and automatically re-download
   the model when the cached copy is unusable.
 """
+
+from __future__ import annotations
 
 import gc
 import logging

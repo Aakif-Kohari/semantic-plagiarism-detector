@@ -1030,7 +1030,7 @@ def update_global_activity():
         from streamlit_plotly_events import plotly_events  # type: ignore
     except ImportError:  # pragma: no cover - optional dependency
         plotly_events = None
-    from src.core.logging_config import setup_logging
+    from src.core.logging_setup import setup_logging
     setup_logging()
     logger = logging.getLogger(__name__)
     # Validate required environment variables during application startup

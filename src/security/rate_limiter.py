@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """
 rate_limiter.py
 ---------------
 Security utility for API rate limiting with standard HTTP response headers.
 Tracks request counts per IP/user and returns appropriate headers when limits are exceeded.
 """
+
+from __future__ import annotations
 
 import logging
 import time

@@ -25,7 +25,7 @@ from src.core.document_parser import (
 )
 from src.core.embedding_model import embed_documents
 from src.core.export_engine import LMSExportEngine
-from src.core.logging_config import setup_logging
+from src.core.logging_setup import setup_logging
 from src.core.similarity import (
     PLAGIARISM_THRESHOLD,
     document_similarity_matrix,
