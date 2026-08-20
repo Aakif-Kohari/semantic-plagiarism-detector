@@ -892,7 +892,7 @@ class TestApplyPlotlyTheme:
         assert fig_grid.layout.xaxis.gridcolor == colors["border"]
         
         # Without grid
-        fig_no_grid = apply_plotly_theme(go.Figure(), theme_colors=colors, show_grid=False)
+        apply_plotly_theme(go.Figure(), theme_colors=colors, show_grid=False)
         # When show_grid=False, gridcolor shouldn't be explicitly set by our function
         # (Plotly defaults apply)
 
