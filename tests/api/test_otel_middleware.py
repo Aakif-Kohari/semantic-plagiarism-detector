@@ -119,3 +119,28 @@ def test_otel_middleware_groups_by_route_template(memory_exporter):
         assert span.attributes.get("http.route") == "/_test_users/{user_id}"
 
 
+def test_otel_middleware_injects_trace_id_in_global_exception_handler(memory_exporter, monkeypatch):
+    """Test that global_exception_handler injects the OpenTelemetry Trace ID into the error response payload when a trace is active."""
+    monkeypatch.setenv("APP_ENVIRONMENT", "production")
+    client = TestClient(app, raise_server_exceptions=False)
+
+    @app.get("/_test_unhandled_error")
+    async def raise_error():
+        raise RuntimeError("Test unhandled exception for trace ID injection")
+
+    response = client.get("/_test_unhandled_error")
+    assert response.status_code == 500
+    body = response.json()
+    assert body["error"] is True
+    assert "trace_id" in body
+    assert len(body["trace_id"]) == 32  # standard 32-character hex string for trace ID
+
+    # Ensure it matches the span trace ID
+    spans = memory_exporter.get_finished_spans()
+    span = next((s for s in spans if "/_test_unhandled_error" in s.name), None)
+    assert span is not None
+    span_trace_id = trace.format_trace_id(span.get_span_context().trace_id)
+    assert body["trace_id"] == span_trace_id
+
+
+
