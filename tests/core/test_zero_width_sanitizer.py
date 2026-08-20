@@ -53,3 +53,62 @@ def test_extract_text_sanitizes_zero_width_spaces(caplog):
         "Security warning: Found and stripped 2 zero-width unicode character(s)"
         in caplog.text
     )
+
+
+def test_sanitize_zero_width_characters_all_variations():
+    """Verify that a test string containing ZWSP (\\u200b), ZWNJ (\\u200c), ZWJ (\\u200d),
+    BOM (\\ufeff), and Word Joiner (\\u2060) is stripped of all zero-width characters while
+    leaving the surrounding text intact (Issue #2699)."""
+    # Create test string containing \u200b, \u200c, \u200d, \ufeff, and \u2060
+    dirty_text = "The\u200b quick\u200c brown\u200d fox\ufeff jumps\u2060 over the lazy dog."
+    cleaned = sanitize_zero_width_characters(dirty_text)
+
+    # Assert surrounding text is intact
+    assert cleaned == "The quick brown fox jumps over the lazy dog."
+
+    # Assert none of the zero-width character variations remain
+    for char in ["\u200b", "\u200c", "\u200d", "\ufeff", "\u2060"]:
+        assert char not in cleaned
+
+
+def test_sanitize_zero_width_characters_consecutive_and_word_splitting():
+    """Verify consecutive zero-width characters inside words and at boundaries are cleanly stripped."""
+    # Embedded inside a single word
+    embedded_word = "P\u200bl\u200ca\u200dg\ufeffi\u2060arism"
+    assert sanitize_zero_width_characters(embedded_word) == "Plagiarism"
+
+    # Consecutive cluster at boundaries
+    cluster_text = "\u200b\u200c\u200d\ufeff\u2060Header\u200b\u200c\u200d\ufeff\u2060 Body \u200b\u200c\u200d\ufeff\u2060Footer\u200b\u200c\u200d\ufeff\u2060"
+    assert sanitize_zero_width_characters(cluster_text) == "Header Body Footer"
+
+
+import pytest
+
+@pytest.mark.parametrize(
+    "char_code, char_name",
+    [
+        ("\u200b", "Zero-Width Space (ZWSP)"),
+        ("\u200c", "Zero-Width Non-Joiner (ZWNJ)"),
+        ("\u200d", "Zero-Width Joiner (ZWJ)"),
+        ("\ufeff", "Byte Order Mark / Zero-Width No-Break Space (BOM)"),
+        ("\u2060", "Word Joiner"),
+        ("\u200e", "Left-to-Right Mark"),
+        ("\u200f", "Right-to-Left Mark"),
+        ("\u202a", "Left-to-Right Embedding"),
+        ("\u202b", "Right-to-Left Embedding"),
+        ("\u202c", "Pop Directional Formatting"),
+        ("\u202d", "Left-to-Right Override"),
+        ("\u202e", "Right-to-Left Override"),
+        ("\u2061", "Function Application"),
+        ("\u2062", "Invisible Times"),
+        ("\u2063", "Invisible Separator"),
+        ("\u2064", "Invisible Plus"),
+    ],
+)
+def test_sanitize_zero_width_characters_individual_variations(char_code, char_name):
+    """Verify each individual zero-width and invisible formatting character is stripped."""
+    dirty_text = f"prefix{char_code}suffix"
+    cleaned = sanitize_zero_width_characters(dirty_text)
+    assert cleaned == "prefixsuffix"
+    assert char_code not in cleaned
+
