@@ -18,7 +18,7 @@ We take the security of the **Semantic Plagiarism Detection System** seriously. 
 
 **Please do NOT open a public GitHub issue for security vulnerabilities.** We request that you do not disclose the vulnerability publicly before a fix is released.
 
-Instead, send a detailed email to the project maintainers to report vulnerabilities privately with the following information:
+Instead, send a detailed email to our private security alias **[security@domain.com](mailto:security@domain.com)** to report vulnerabilities privately with the following information:
 
 1. Description of the vulnerability and potential impact.
 2. Step-by-step instructions to reproduce the issue (including sample input files or payload snippets).
@@ -88,4 +88,4 @@ To protect cache data, session states, and FAISS indices from unauthorized acces
 
 ## Security Contact
 
-For security vulnerabilities, please contact the project maintainer, [@Ganesh-403](https://github.com/Ganesh-403), privately through GitHub. Please do not disclose security vulnerabilities through public issues.
+For security vulnerabilities (such as SSRF, SQLi, or RCE), please email our dedicated security team at **[security@domain.com](mailto:security@domain.com)** or contact project maintainers privately. Please do not disclose security vulnerabilities through public GitHub issues.
