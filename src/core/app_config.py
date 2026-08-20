@@ -372,7 +372,17 @@ def clear_branding_config_cache() -> None:
     _BRANDING_CONFIG_CACHE = None
 
 
+def get_rescan_interval_minutes() -> int:
+    """Return the configured corpus rescan interval in minutes (default: 0 / disabled)."""
+    val = os.getenv("CORPUS_RESCAN_INTERVAL_MINUTES", "0")
+    try:
+        return max(0, int(val))
+    except (ValueError, TypeError):
+        return 0
+
+
 def __getattr__(name: str):
     if name == "VALID_ROLES":
         return get_valid_roles()
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+

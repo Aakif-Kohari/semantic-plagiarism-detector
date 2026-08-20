@@ -141,95 +141,124 @@ async def otel_tracing_middleware(request: Request, call_next):
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """Handle Pydantic validation errors from malformed API requests.
-    
-    Logs the detailed validation errors via logger.warning to help backend
-    engineers debug malformed requests from the frontend or third-party LMS
-    platforms, then returns a standardized JSON error response to the client.
-    
-    Args:
-        request: The incoming FastAPI Request object.
-        exc: The RequestValidationError containing Pydantic validation details.
-        
-    Returns:
-        JSONResponse with 422 status code and structured error details.
-    """
+    """Handle Pydantic validation errors from malformed API requests adhering to RFC 7807."""
     # Issue #2564: Log the detailed validation errors for backend debugging
-    # This helps identify malformed payloads from LMS integrations or frontend bugs
     logger.warning(
         "Request validation failed for %s %s: %s",
         request.method,
         request.url.path,
-        exc.errors()
+        exc.errors(),
     )
-    
+    errors_list = [
+        {
+            "field": ".".join(map(str, err["loc"])),
+            "message": err["msg"],
+            "type": err["type"],
+        }
+        for err in exc.errors()
+    ]
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={
+            "type": "about:blank",
+            "title": "Unprocessable Entity",
+            "status": status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "detail": "Validation failed.",
+            "instance": getattr(getattr(request, "url", None), "path", None),
             "error": True,
             "message": "Validation failed.",
-            "details": [
-                {
-                    "field": ".".join(map(str, err["loc"])),
-                    "message": err["msg"],
-                    "type": err["type"],
-                }
-                for err in exc.errors()
-            ],
+            "details": errors_list,
+            "invalid_params": errors_list,
         },
+        media_type="application/problem+json",
     )
 
+
 @app.exception_handler(404)
-async def not_found_handler(request, exc: StarletteHTTPException):
-    """Custom exception handler for HTTP 404 errors."""
+async def not_found_handler(request: Request, exc: StarletteHTTPException):
+    """Custom exception handler for HTTP 404 errors adhering to RFC 7807."""
+    path = getattr(getattr(request, "url", None), "path", None)
     return JSONResponse(
         status_code=404,
         content={
+            "type": "about:blank",
+            "title": "Not Found",
+            "status": 404,
+            "detail": "API endpoint or resource not found",
+            "instance": path,
             "error": True,
             "code": 404,
             "message": "API endpoint or resource not found",
         },
+        media_type="application/problem+json",
     )
 
 
 @app.exception_handler(ValueError)
 async def value_error_handler(request: Request, exc: ValueError):
-    """Handle ValueError exceptions by returning a standardized 400 Bad Request JSON response."""
+    """Handle ValueError exceptions by returning an RFC 7807 400 Bad Request response."""
+    path = getattr(getattr(request, "url", None), "path", None)
     return JSONResponse(
         status_code=status.HTTP_400_BAD_REQUEST,
         content={
+            "type": "about:blank",
+            "title": "Bad Request",
+            "status": status.HTTP_400_BAD_REQUEST,
+            "detail": str(exc),
+            "instance": path,
             "error": True,
             "code": status.HTTP_400_BAD_REQUEST,
             "message": str(exc),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         },
+        media_type="application/problem+json",
     )
 
 
 @app.exception_handler(sqlite3.OperationalError)
 async def sqlite_operational_error_handler(request: Request, exc: sqlite3.OperationalError):
-    """Handle sqlite3.OperationalError, particularly database is locked, returning 503 Service Unavailable."""
+    """Handle sqlite3.OperationalError, particularly database is locked, returning RFC 7807 response."""
     err_msg = str(exc)
-    status_code = status.HTTP_503_SERVICE_UNAVAILABLE if "locked" in err_msg.lower() or "busy" in err_msg.lower() else status.HTTP_500_INTERNAL_SERVER_ERROR
-    message = "Service busy, please retry" if status_code == status.HTTP_503_SERVICE_UNAVAILABLE else f"Database error: {err_msg}"
+    status_code = (
+        status.HTTP_503_SERVICE_UNAVAILABLE
+        if "locked" in err_msg.lower() or "busy" in err_msg.lower()
+        else status.HTTP_500_INTERNAL_SERVER_ERROR
+    )
+    title = (
+        "Service Unavailable"
+        if status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+        else "Database Error"
+    )
+    message = (
+        "Service busy, please retry"
+        if status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+        else f"Database error: {err_msg}"
+    )
 
     is_production = os.getenv("APP_ENVIRONMENT", "production").lower() == "production"
     logger.error(f"SQLite operational error: {exc}", exc_info=not is_production)
 
+    path = getattr(getattr(request, "url", None), "path", None)
     return JSONResponse(
         status_code=status_code,
         content={
+            "type": "about:blank",
+            "title": title,
+            "status": status_code,
+            "detail": message,
+            "instance": path,
             "error": True,
             "code": status_code,
             "message": message,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         },
+        media_type="application/problem+json",
     )
 
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Catch-all handler that returns a standardized JSON error payload for any unhandled exception."""
+    """Catch-all handler that returns an RFC 7807 problem details JSON payload for any unhandled exception."""
     status_code = getattr(exc, "status_code", status.HTTP_500_INTERNAL_SERVER_ERROR)
     is_production = os.getenv("APP_ENVIRONMENT", "production").lower() == "production"
 
@@ -238,25 +267,39 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
     message = "An internal server error occurred." if is_production else str(exc)
+    path = getattr(getattr(request, "url", None), "path", None)
 
     return JSONResponse(
         status_code=status_code,
         content={
+            "type": "about:blank",
+            "title": "Internal Server Error",
+            "status": status_code,
+            "detail": message,
+            "instance": path,
             "error": True,
             "code": status_code,
             "message": message,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         },
+        media_type="application/problem+json",
     )
 
 
 @app.exception_handler(StarletteHTTPException)
 async def custom_http_exception_handler(request: Request, exc: StarletteHTTPException):
-    """Custom exception handler for HTTP errors to return standardized JSON payloads."""
+    """Custom exception handler for HTTP errors to return RFC 7807 problem details payloads."""
+    from http import HTTPStatus
+
     status_code = exc.status_code
     if status_code == 404:
+        title = "Not Found"
         message = "API endpoint or resource not found"
     else:
+        try:
+            title = HTTPStatus(status_code).phrase
+        except ValueError:
+            title = "HTTP Error"
         message = exc.detail if isinstance(exc.detail, (str, dict)) else str(exc.detail)
 
     log_level = logging.WARNING if 400 <= status_code < 500 else logging.ERROR
@@ -269,13 +312,22 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
         message,
     )
 
+    path = getattr(getattr(request, "url", None), "path", None)
+    detail_str = message if isinstance(message, str) else str(message)
+
     return JSONResponse(
         status_code=status_code,
         content={
+            "type": "about:blank",
+            "title": title,
+            "status": status_code,
+            "detail": detail_str,
+            "instance": path,
             "error": True,
             "code": status_code,
             "message": message,
         },
+        media_type="application/problem+json",
     )
 
 
