@@ -1010,12 +1010,28 @@ class TestEmailStructureAndAccessibility:
         assert '<html lang="en">' in html
 
     def test_meta_viewport_present(self):
-        """Verify viewport meta tag is present for mobile responsiveness."""
+        """Verify viewport meta tag is present and prepended in <head> for mobile responsiveness."""
         stats = {"total_scans": 1}
         html = generate_daily_summary_html(stats)
 
         assert 'name="viewport"' in html
         assert "width=device-width" in html
+
+        head_content = html.split("<head>")[1].split("</head>")[0]
+        viewport_idx = head_content.find('<meta name="viewport"')
+        charset_idx = head_content.find('<meta charset=')
+        assert viewport_idx != -1, "Viewport meta tag must be in <head>"
+        assert viewport_idx < charset_idx, "Viewport meta tag must be prepended before charset in <head>"
+
+    def test_build_email_html_body_meta_viewport_prepended(self):
+        """Verify viewport meta tag is present and prepended in build_email_html_body <head>."""
+        html = build_email_html_body(incidents_data=[], total_scans=10)
+        assert '<meta name="viewport" content="width=device-width, initial-scale=1.0">' in html
+        head_content = html.split("<head>")[1].split("</head>")[0]
+        viewport_idx = head_content.find('<meta name="viewport"')
+        charset_idx = head_content.find('<meta charset=')
+        assert viewport_idx != -1
+        assert viewport_idx < charset_idx
 
     def test_report_date_rendered(self):
         """Verify the current date is rendered in the header."""
