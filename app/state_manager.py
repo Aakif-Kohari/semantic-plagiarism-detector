@@ -40,6 +40,8 @@ def ui_exception_handler(component_name: str):
         def wrapper(*args, **kwargs):
             try:
                 return func(*args, **kwargs)
+            except st.runtime.scriptrunner.StopException:
+                raise
             except Exception:
                 logger.error(
                     "Component '%s' failed to render:\n%s",
