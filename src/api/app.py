@@ -127,6 +127,14 @@ async def otel_tracing_middleware(request: Request, call_next):
 
         try:
             response = await call_next(request)
+            
+            # Use request.scope.get("route").path to extract generalized FastAPI route template for span name
+            route = request.scope.get("route")
+            if route and hasattr(route, "path"):
+                route_path = route.path
+                span.update_name(f"HTTP {request.method} {route_path}")
+                span.set_attribute("http.route", route_path)
+
             span.set_attribute("http.status_code", response.status_code)
             # Update user.id if set or modified by route handler/dependencies
             final_user_id = getattr(request.state, "user_id", user_id)
@@ -134,6 +142,11 @@ async def otel_tracing_middleware(request: Request, call_next):
                 span.set_attribute("user.id", str(final_user_id))
             return response
         except Exception as exc:
+            route = request.scope.get("route")
+            if route and hasattr(route, "path"):
+                route_path = route.path
+                span.update_name(f"HTTP {request.method} {route_path}")
+                span.set_attribute("http.route", route_path)
             span.record_exception(exc)
             span.set_attribute("http.status_code", 500)
             raise

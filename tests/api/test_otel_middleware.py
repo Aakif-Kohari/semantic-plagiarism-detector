@@ -99,3 +99,23 @@ def test_otel_middleware_anonymous_user_id_fallback(memory_exporter):
     assert http_span is not None
     assert http_span.attributes.get("user.id") == "anonymous"
 
+
+def test_otel_middleware_groups_by_route_template(memory_exporter):
+    """Test that otel_tracing_middleware uses the route template (generalized FastAPI path) for the span name to avoid cardinality explosion."""
+    client = TestClient(app)
+
+    @app.get("/_test_users/{user_id}")
+    async def get_test_user(user_id: int):
+        return {"user_id": user_id}
+
+    client.get("/_test_users/123")
+    client.get("/_test_users/456")
+
+    spans = memory_exporter.get_finished_spans()
+    user_spans = [s for s in spans if "/_test_users/" in s.name or "/_test_users/{" in s.name]
+    assert len(user_spans) == 2, "Should have 2 user spans recorded"
+    for span in user_spans:
+        assert span.name == "HTTP GET /_test_users/{user_id}"
+        assert span.attributes.get("http.route") == "/_test_users/{user_id}"
+
+
