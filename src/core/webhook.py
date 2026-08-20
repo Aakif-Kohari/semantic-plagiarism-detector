@@ -416,3 +416,188 @@ def dispatch_plagiarism_alert(
         webhook_url=webhook_url,  # Explicitly pass the override parameter
     )
     return success
+
+
+class EventDispatcher:
+    """Service for dispatching webhook events to registered external LMS systems.
+
+    Allows external LMS systems (Canvas, Blackboard, Moodle, custom REST clients)
+    that trigger background document analysis scans to receive POST notifications
+    with JSON payloads upon completion, eliminating the need for continuous polling.
+
+    Features:
+    - SSRF URL validation prior to HTTP dispatch (`SSRFProtector.validate_webhook_url`)
+    - Cryptographic HMAC-SHA256 payload signatures (`X-Plagiarism-Signature`)
+    - Transient-failure retries with exponential backoff
+    - LMS endpoint registry management
+    """
+
+    def __init__(
+        self,
+        default_webhook_url: Optional[str] = None,
+        secret_key: Optional[str] = None,
+    ) -> None:
+        self.default_webhook_url = (
+            default_webhook_url
+            or os.getenv("LMS_WEBHOOK_URL")
+            or os.getenv("PLAGIARISM_WEBHOOK_URL")
+        )
+        self.secret_key = secret_key or os.getenv("WEBHOOK_SECRET_KEY", "")
+        self._registry: dict[str, dict[str, str]] = {}
+
+    def register_lms_webhook(
+        self,
+        lms_id: str,
+        webhook_url: str,
+        secret_key: Optional[str] = None,
+    ) -> None:
+        """Register a webhook endpoint for a specific LMS tenant or system."""
+        SSRFProtector.validate_webhook_url(webhook_url)
+        self._registry[lms_id] = {
+            "webhook_url": webhook_url,
+            "secret_key": secret_key or self.secret_key or "",
+        }
+
+    def unregister_lms_webhook(self, lms_id: str) -> bool:
+        """Remove a registered LMS webhook endpoint."""
+        return self._registry.pop(lms_id, None) is not None
+
+    def get_registered_lms(self, lms_id: str) -> Optional[dict[str, str]]:
+        """Retrieve details of a registered LMS webhook endpoint."""
+        return self._registry.get(lms_id)
+
+    def dispatch(
+        self,
+        event_type: str,
+        payload: dict[str, Any],
+        webhook_url: Optional[str] = None,
+        secret_key: Optional[str] = None,
+        lms_id: Optional[str] = None,
+    ) -> tuple[bool, int]:
+        """Dispatch a webhook event payload to a target LMS webhook URL.
+
+        Args:
+            event_type: Name of the event (e.g. 'document.analysis.complete').
+            payload: JSON-serializable event data dictionary.
+            webhook_url: Explicit webhook URL target. If None, resolves from lms_id or default_webhook_url.
+            secret_key: Optional secret key for HMAC signature computation.
+            lms_id: Optional registered LMS tenant ID.
+
+        Returns:
+            Tuple of (success: bool, attempts: int).
+        """
+        target_url = webhook_url
+        target_secret = secret_key
+
+        if not target_url and lms_id and lms_id in self._registry:
+            reg_info = self._registry[lms_id]
+            target_url = reg_info.get("webhook_url")
+            if not target_secret:
+                target_secret = reg_info.get("secret_key")
+
+        if not target_url:
+            target_url = self.default_webhook_url
+
+        if not target_secret:
+            target_secret = self.secret_key or ""
+
+        if not target_url:
+            logger.warning(
+                "EventDispatcher.dispatch: No webhook URL configured or registered for event '%s'.",
+                event_type,
+            )
+            return False, 0
+
+        # Enforce SSRF validation
+        try:
+            SSRFProtector.validate_webhook_url(target_url)
+        except SSRFSecurityException as exc:
+            logger.error(
+                "EventDispatcher.dispatch SECURITY BLOCKED: Webhook URL '%s' failed SSRF validation: %s",
+                target_url,
+                exc,
+            )
+            return False, 0
+
+        # Standardized event envelope
+        full_payload = {
+            "event": event_type,
+            "timestamp": int(time.time()),
+            "data": payload,
+        }
+
+        _reset_attempt_counter()
+        old_secret = os.getenv("WEBHOOK_SECRET_KEY")
+        if target_secret:
+            os.environ["WEBHOOK_SECRET_KEY"] = target_secret
+        try:
+            _post_webhook(target_url, full_payload)
+            attempts = _get_attempt_counter()
+            logger.info(
+                "EventDispatcher: Successfully dispatched event '%s' to '%s' after %d attempt(s).",
+                event_type,
+                target_url,
+                attempts,
+            )
+            return True, attempts
+        except requests.exceptions.RequestException as exc:
+            attempts = _get_attempt_counter()
+            logger.error(
+                "EventDispatcher: Failed to dispatch event '%s' to '%s' after %d attempt(s): %s",
+                event_type,
+                target_url,
+                attempts,
+                exc,
+            )
+            return False, attempts
+        finally:
+            if old_secret is None:
+                os.environ.pop("WEBHOOK_SECRET_KEY", None)
+            else:
+                os.environ["WEBHOOK_SECRET_KEY"] = old_secret
+
+    def dispatch_analysis_complete(
+        self,
+        document_id: str,
+        filename: str,
+        similarity_score: float,
+        matches_count: int = 0,
+        status: str = "completed",
+        webhook_url: Optional[str] = None,
+        lms_id: Optional[str] = None,
+        extra_metadata: Optional[dict[str, Any]] = None,
+    ) -> tuple[bool, int]:
+        """Dispatch a 'document.analysis.complete' webhook notification once document analysis finishes.
+
+        Args:
+            document_id: Unique identifier for the analyzed document.
+            filename: Original filename of the processed document.
+            similarity_score: Highest similarity score detected (0.0 to 1.0).
+            matches_count: Total number of matching document/chunk pairs flagged.
+            status: Processing status ('completed', 'failed', 'flagged').
+            webhook_url: Optional target URL override.
+            lms_id: Optional LMS tenant ID.
+            extra_metadata: Optional dict of extra details to attach to the payload.
+
+        Returns:
+            Tuple of (success: bool, attempts: int).
+        """
+        payload = {
+            "document_id": str(document_id),
+            "filename": str(filename),
+            "status": status,
+            "similarity_score": float(similarity_score),
+            "similarity_percentage": round(float(similarity_score) * 100, 2),
+            "matches_count": int(matches_count),
+            "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        if extra_metadata:
+            payload["metadata"] = extra_metadata
+
+        return self.dispatch(
+            event_type="document.analysis.complete",
+            payload=payload,
+            webhook_url=webhook_url,
+            lms_id=lms_id,
+        )
+

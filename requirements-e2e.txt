@@ -1,0 +1,11 @@
+# requirements-e2e.txt
+# ------------------------------------------------------------------
+# E2E test dependencies for the Playwright critical-path suite (#3030).
+# Install with:
+#     pip install -r requirements-e2e.txt
+#     playwright install chromium
+#
+# These are intentionally kept OUT of requirements-dev.txt so that CI
+# unit-test jobs don't pull the (large) Chromium binary.
+playwright>=1.45.0
+pytest-playwright>=0.5.0

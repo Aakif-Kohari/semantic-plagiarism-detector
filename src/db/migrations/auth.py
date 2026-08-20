@@ -244,6 +244,106 @@ AUTH_MIGRATIONS = {
 }
 
 
+def _drop_column_if_exists(
+    connection: sqlite3.Connection, table_name: str, column_name: str
+) -> None:
+    if column_exists(connection, table_name, column_name):
+        try:
+            connection.execute(f'ALTER TABLE "{table_name}" DROP COLUMN "{column_name}"')
+        except sqlite3.OperationalError:
+            pass
+
+
+def down_001_create_users(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP TABLE IF EXISTS users")
+
+
+def down_002_add_onboarding_state(connection: sqlite3.Connection) -> None:
+    _drop_column_if_exists(connection, "users", "tour_completed")
+
+
+def down_003_add_two_factor_fields(connection: sqlite3.Connection) -> None:
+    _drop_column_if_exists(connection, "users", "otp_secret")
+    _drop_column_if_exists(connection, "users", "two_factor_enabled")
+
+
+def down_004_add_role_index(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP INDEX IF EXISTS idx_users_role")
+
+
+def down_005_add_preferences(connection: sqlite3.Connection) -> None:
+    _drop_column_if_exists(connection, "users", "preferences")
+
+
+def down_006_add_active_flag(connection: sqlite3.Connection) -> None:
+    _drop_column_if_exists(connection, "users", "is_active")
+
+
+def down_007_add_theme_preference(connection: sqlite3.Connection) -> None:
+    _drop_column_if_exists(connection, "users", "theme")
+
+
+def down_008_create_security_audit_log(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP INDEX IF EXISTS idx_audit_log_username")
+    connection.execute("DROP INDEX IF EXISTS idx_audit_log_event_type")
+    connection.execute("DROP TABLE IF EXISTS security_audit_log")
+
+
+def down_009_add_last_login_at(connection: sqlite3.Connection) -> None:
+    _drop_column_if_exists(connection, "users", "last_login_at")
+
+
+def down_010_add_password_changed_at(connection: sqlite3.Connection) -> None:
+    _drop_column_if_exists(connection, "users", "password_changed_at")
+
+
+def down_011_add_version_column(connection: sqlite3.Connection) -> None:
+    _drop_column_if_exists(connection, "users", "version")
+
+
+def down_012_create_revoked_tokens_table(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP INDEX IF EXISTS idx_revoked_tokens_signature")
+    connection.execute("DROP TABLE IF EXISTS revoked_tokens")
+
+
+def down_013_add_user_status(connection: sqlite3.Connection) -> None:
+    _drop_column_if_exists(connection, "users", "status")
+
+
+def down_014_create_password_history_table(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP INDEX IF EXISTS idx_password_history_username")
+    connection.execute("DROP TABLE IF EXISTS password_history")
+
+
+def down_015_add_must_change_password(connection: sqlite3.Connection) -> None:
+    _drop_column_if_exists(connection, "users", "must_change_password")
+
+
+def down_016_add_audit_log_indexes(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP INDEX IF EXISTS idx_audit_log_username")
+    connection.execute("DROP INDEX IF EXISTS idx_audit_log_event_type")
+
+
+AUTH_DOWN_MIGRATIONS = {
+    1: down_001_create_users,
+    2: down_002_add_onboarding_state,
+    3: down_003_add_two_factor_fields,
+    4: down_004_add_role_index,
+    5: down_005_add_preferences,
+    6: down_006_add_active_flag,
+    7: down_007_add_theme_preference,
+    8: down_008_create_security_audit_log,
+    9: down_009_add_last_login_at,
+    10: down_010_add_password_changed_at,
+    11: down_011_add_version_column,
+    12: down_012_create_revoked_tokens_table,
+    13: down_013_add_user_status,
+    14: down_014_create_password_history_table,
+    15: down_015_add_must_change_password,
+    16: down_016_add_audit_log_indexes,
+}
+
+
 def migrate_auth_database(
     connection: sqlite3.Connection,
 ) -> int:
