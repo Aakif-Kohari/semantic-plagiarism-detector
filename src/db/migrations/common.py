@@ -159,6 +159,68 @@ def migration_transaction(connection: sqlite3.Connection):
         raise
 
 
+from datetime import datetime, timezone
+
+def ensure_migration_history_table(connection: sqlite3.Connection) -> None:
+    """Ensure that the migration_history table exists."""
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS migration_history (
+            version INTEGER PRIMARY KEY,
+            applied_at TEXT NOT NULL,
+            description TEXT
+        )
+    """)
+
+
+def record_migration_applied(
+    connection: sqlite3.Connection, version: int, description: str = ""
+) -> None:
+    """Record an applied migration in migration_history table."""
+    ensure_migration_history_table(connection)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    connection.execute(
+        """
+        INSERT OR REPLACE INTO migration_history (version, applied_at, description)
+        VALUES (?, ?, ?)
+        """,
+        (version, now_iso, description),
+    )
+
+
+def record_migration_rolled_back(
+    connection: sqlite3.Connection, version: int
+) -> None:
+    """Remove a rolled-back migration from migration_history table."""
+    ensure_migration_history_table(connection)
+    connection.execute(
+        "DELETE FROM migration_history WHERE version = ?",
+        (version,),
+    )
+
+
+def get_latest_applied_migration(connection: sqlite3.Connection) -> int:
+    """Get the latest applied migration version from migration_history table (or PRAGMA user_version)."""
+    ensure_migration_history_table(connection)
+    cursor = connection.execute("SELECT MAX(version) FROM migration_history")
+    row = cursor.fetchone()
+    if row and row[0] is not None:
+        return int(row[0])
+
+    user_ver = get_user_version(connection)
+    if user_ver > 0:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        for v in range(1, user_ver + 1):
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO migration_history (version, applied_at, description)
+                VALUES (?, ?, ?)
+                """,
+                (v, now_iso, f"v{v}"),
+            )
+        return user_ver
+    return 0
+
+
 def run_migrations(
     connection: sqlite3.Connection,
     *,
@@ -183,15 +245,18 @@ def run_migrations(
         )
 
     if old_ver == new_ver:
+        ensure_migration_history_table(connection)
         return old_ver
 
     with migration_transaction(connection):
+        ensure_migration_history_table(connection)
         for version in range(old_ver + 1, new_ver + 1):
             migration_fn = migrations[version]
             migration_name = getattr(migration_fn, "__name__", f"v{version}")
             start_time = time.perf_counter()
             migration_fn(connection)
             elapsed_sec = time.perf_counter() - start_time
+            record_migration_applied(connection, version, migration_name)
             logger.info(
                 "Migration [%s] executed in %.3f seconds.",
                 migration_name,
@@ -254,6 +319,7 @@ def rollback_migration(
         )
 
     if old_ver == new_ver:
+        ensure_migration_history_table(conn)
         return old_ver
 
     versions_to_undo = range(old_ver, new_ver, -1)
@@ -267,12 +333,14 @@ def rollback_migration(
         )
 
     with migration_transaction(conn):
+        ensure_migration_history_table(conn)
         for version in versions_to_undo:
             down_fn = down_migrations[version]
             migration_name = getattr(down_fn, "__name__", f"v{version}_down")
             start_time = time.perf_counter()
             down_fn(conn)
             elapsed_sec = time.perf_counter() - start_time
+            record_migration_rolled_back(conn, version)
             logger.info(
                 "Rollback migration [%s] executed in %.3f seconds.",
                 migration_name,
