@@ -913,24 +913,27 @@ def _ocr_pdf_page(
     import pytesseract
     from PIL import Image
 
+    from src.utils.temp_manager import managed_ocr_temp_dir
+
     try:
-        with fitz.open(stream=pdf_bytes, filetype="pdf") as document:
-            page = document.load_page(page_index)
-            scale = dpi / 72
-            pixmap = page.get_pixmap(
-                matrix=fitz.Matrix(scale, scale),
-                alpha=False,
-            )
-            image = Image.frombytes(
-                "RGB",
-                (pixmap.width, pixmap.height),
-                pixmap.samples,
-            )
-            return pytesseract.image_to_string(
-                image,
-                lang=language,
-                config="--oem 3 --psm 3",
-            ).strip()
+        with managed_ocr_temp_dir(prefix=f"ocr_pdf_p{page_index}_") as tmp_dir:
+            with fitz.open(stream=pdf_bytes, filetype="pdf") as document:
+                page = document.load_page(page_index)
+                scale = dpi / 72
+                pixmap = page.get_pixmap(
+                    matrix=fitz.Matrix(scale, scale),
+                    alpha=False,
+                )
+                image = Image.frombytes(
+                    "RGB",
+                    (pixmap.width, pixmap.height),
+                    pixmap.samples,
+                )
+                return pytesseract.image_to_string(
+                    image,
+                    lang=language,
+                    config="--oem 3 --psm 3",
+                ).strip()
     except pytesseract.TesseractNotFoundError as exc:
         from src.errors import OCR_TESSERACT_NOT_FOUND
 
@@ -1835,28 +1838,26 @@ def extract_text_from_image(
     import pytesseract
     from PIL import Image
 
+    from src.utils.temp_manager import managed_ocr_temp_dir
+
     file_bytes = _read_pdf_bytes(file)
     try:
-        image = Image.open(io.BytesIO(file_bytes))
-        try:
-            return pytesseract.image_to_string(
-                image,
-                lang=ocr_language,
-                config="--oem 3 --psm 3",
-            ).strip()
-        except (MemoryError, Exception) as exc:
-            if isinstance(exc, MemoryError):
-                logger.warning(
-                    f"[document_parser] OCR image extraction failed due to memory exhaustion: {exc}"
-                )
-            else:
-                logger.warning(f"[document_parser] OCR image extraction failed: {exc}")
-            return "[OCR extraction failed for the file]"
-        return pytesseract.image_to_string(
-            image,
-            lang=ocr_language,
-            config="--oem 3 --psm 3",
-        ).strip()
+        with managed_ocr_temp_dir(prefix="ocr_image_") as tmp_dir:
+            image = Image.open(io.BytesIO(file_bytes))
+            try:
+                return pytesseract.image_to_string(
+                    image,
+                    lang=ocr_language,
+                    config="--oem 3 --psm 3",
+                ).strip()
+            except (MemoryError, Exception) as exc:
+                if isinstance(exc, MemoryError):
+                    logger.warning(
+                        f"[document_parser] OCR image extraction failed due to memory exhaustion: {exc}"
+                    )
+                else:
+                    logger.warning(f"[document_parser] OCR image extraction failed: {exc}")
+                return "[OCR extraction failed for the file]"
     except pytesseract.TesseractNotFoundError as exc:
         from src.errors import OCR_TESSERACT_NOT_FOUND
 
