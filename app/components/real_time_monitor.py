@@ -184,7 +184,11 @@ class MonitoringEngine:
 
             cache = get_cache()
             if cache.is_available():
-                keys = cache._client.keys("spd:v1:session:*:last_interaction")
+                keys = list(
+                    cache._client.scan_iter(
+                        match="spd:v1:session:*:last_interaction"
+                    )
+                )
                 active = 0
                 now = time.time()
                 for key in keys:
