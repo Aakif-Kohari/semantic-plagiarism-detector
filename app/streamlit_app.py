@@ -29,6 +29,15 @@ ROOT_DIR = FILE_PATH.parent.parent  # Points to semantic-plagiarism-detector/
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+# Issue #2781: Apply OS-specific asyncio patches via centralized utility
+# This replaces the inline `if sys.platform == "win32":` block that was
+# previously cluttering the main routing file.
+from src.utils.os_compat import apply_asyncio_patches
+apply_asyncio_patches()
+
+# 2. Now import centralized session state keys safely
+from app.session_keys import SessionKeys
+
 # Silence harmless Windows asyncio Proactor connection lost bugs
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
@@ -197,6 +206,7 @@ from app.components.api_gateway import (
     ApiStatus,
     WebhookStatus,
     ServiceType,
+)
 
 # ── Document Version Control Imports ─────────────────────────────────────
 from app.components.document_version_control import (
@@ -251,28 +261,6 @@ import plotly.graph_objects as go
 import plotly.express as px
 
 # ── Data Models ─────────────────────────────────────────────────────────────
-
-@dataclass
-class DocumentTag:
-    """Represents a tag associated with a document"""
-    id: str
-    name: str
-    category: str  # 'topic', 'type', 'status', 'custom'
-    confidence: float
-    created_at: datetime
-    created_by: str
-    is_auto_generated: bool = False
-    metadata: Dict = None
-    
-    def __post_init__(self):
-        if self.metadata is None:
-            self.metadata = {}
-    
-    def to_dict(self) -> Dict:
-        return {
-            **asdict(self),
-            'created_at': self.created_at.isoformat()
-        }
 
 @dataclass
 class DocumentCategory:
@@ -1325,6 +1313,13 @@ import uvicorn
 import src.core.app_config as app_config
 from src.api.app import app as fastapi_app
 
+# Issue #2782: Import domain models from the core layer instead of defining inline
+from src.core.models.categorization import (
+    DocumentTag,
+    TagCollection,
+    TagSource,
+    TagCategory,
+)
 
 def update_global_activity():
     """Update the global last_activity timestamp."""

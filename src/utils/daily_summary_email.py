@@ -18,6 +18,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from dotenv import load_dotenv
 
+from app.theme import COLORS
 from src.db.auth import get_all_users
 from src.db.incidents import DEFAULT_DB_PATH, get_recent_incidents
 
@@ -134,9 +135,9 @@ def build_severity_section_html(severity: str, incidents: List[Dict[str, Any]]) 
         str: HTML section with a table of incidents.
     """
     color_map = {
-        "High": "#d32f2f",
-        "Medium": "#f57c00",
-        "Low": "#388e3c",
+        "High": COLORS.get("danger", "#d32f2f"),
+        "Medium": COLORS.get("warning", "#f57c00"),
+        "Low": COLORS.get("success", "#388e3c"),
     }
     color = color_map.get(severity, "#666666")
 
@@ -251,16 +252,7 @@ def build_email_html_body(
     return html
 
 
-def format_daily_summary(
-    incidents: List[Dict[str, Any]], footer_note: Optional[str] = None
-) -> str:
-    """
-    Legacy wrapper for backward compatibility.
-    Delegates to the new build_email_html_body function.
-    """
-    return build_email_html_body(
-        incidents_data=incidents, total_scans=0, footer_note=footer_note
-    )
+
 
 
 def generate_daily_summary_html(stats: Dict[str, Any]) -> str:

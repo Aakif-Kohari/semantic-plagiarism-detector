@@ -62,10 +62,12 @@ def _normalise_warning(
     }
 
 
-def _truncate_search_query(search_query: str) -> str:
-    """Limit search input length to avoid expensive matching on oversized strings."""
-    if not isinstance(search_query, str):
+def _truncate_search_query(search_query: Any) -> str:
+    """Limit search input length to avoid expensive matching on oversized strings, safely casting numeric inputs."""
+    if search_query is None:
         return ""
+    if not isinstance(search_query, str):
+        search_query = str(search_query)
     return search_query[:MAX_SEARCH_QUERY_LENGTH].strip()
 
 
@@ -596,9 +598,8 @@ def render_warning_controls(
 
     # Generate Markdown Summary of all High & Medium warnings
     summary_flags = [
-        _normalise_warning(flag)
-        for flag in flags
-        if _normalise_warning(flag)["severity"] in ("High", "Medium")
+        nf for flag in flags
+        if (nf := _normalise_warning(flag))["severity"] in ("High", "Medium")
     ]
     if not summary_flags:
         markdown_text = get_text("warn_no_summary", lang=lang_code)

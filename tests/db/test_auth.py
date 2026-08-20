@@ -28,8 +28,7 @@ from src.db.auth import (
     validate_sso_state,
     verify_user,
 )
-from src.errors import StaleDataException
-
+from src.exceptions import StaleDataException
 
 @pytest.fixture(autouse=True)
 def setup_test_db(mock_db):
@@ -213,9 +212,48 @@ def test_get_security_audit_log_count_dropped_table(mock_audit_db):
          auth_repo.get_security_audit_log_count()
 
 
-def test_get_distinct_audit_event_types(mock_audit_db):
-    events = auth_repo.get_distinct_audit_event_types()
-    assert set(events) == {"login", "logout"}
+def test_get_distinct_audit_event_types_caching_and_invalidation():
+    """Verify distinct audit event types are cached and properly invalidated (Issue #2687)."""
+    from src.db.auth import (
+        clear_distinct_audit_event_types_cache,
+        get_distinct_audit_event_types,
+        log_security_event,
+    )
+
+    clear_distinct_audit_event_types_cache()
+
+    # 1. Add initial events
+    log_security_event("login", "alice", "login success")
+    log_security_event("logout", "alice", "logout")
+
+    events1 = get_distinct_audit_event_types()
+    assert set(events1) >= {"login", "logout"}
+
+    # 2. Insert new event type directly into DB table (bypassing repo cache)
+    with auth_repo.connection() as conn:
+        conn.execute(
+            "INSERT INTO security_audit_log (event_type, username, timestamp, details) VALUES (?, ?, ?, ?)",
+            ("direct_db_insert", "user1", "2026-08-19T00:00:00Z", "test"),
+        )
+        conn.commit()
+
+    # Cached query without refresh should still return cached event types
+    events_cached = get_distinct_audit_event_types()
+    assert "direct_db_insert" not in events_cached
+
+    # Query with force_refresh=True should fetch latest from DB
+    events_refreshed = get_distinct_audit_event_types(force_refresh=True)
+    assert "direct_db_insert" in events_refreshed
+
+    # 3. log_security_event updates the cache in-place
+    log_security_event("password_reset", "user2", "reset password")
+    events_after_log = get_distinct_audit_event_types()
+    assert "password_reset" in events_after_log
+
+    # 4. clear_distinct_audit_event_types_cache clears cache state
+    clear_distinct_audit_event_types_cache()
+    assert auth_repo._cached_event_types is None
+
 
 
 def test_2fa_flow():

@@ -66,8 +66,7 @@ def test_ssrf_circular_redirect_loop_value_unchanged():
 
 def test_ocr_file_batch_error_formatting():
     """Test OCRFileBatchError message formatting logic with empty and non-empty failure_details."""
-    from src.errors import OCRFileBatchError
-
+    from src.exceptions import OCRFileBatchError
     # Test instantiation with failed_files but empty failure_details
     err_empty_details = OCRFileBatchError(failed_files=["a.pdf"], failure_details=[])
     assert (

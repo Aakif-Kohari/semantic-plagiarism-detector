@@ -19,5 +19,10 @@ repos:
     rev: v0.2.1
     hooks:
       - id: ruff
-        args: ["--fix"]
       - id: ruff-format
+        stages: [pre-commit]
+      - id: ruff
+        alias: ruff-fix
+        name: ruff (fix, local only)
+        args: ["--fix"]
+        stages: [manual]
