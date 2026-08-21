@@ -12,9 +12,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+RUN pip install pip==24.0
+
 COPY requirements.txt .
-RUN pip install pip==24.0 && \
-    pip install -r requirements.txt && \
+RUN pip install -r requirements.txt && \
     python -m nltk.downloader punkt_tab
 
 COPY . .
