@@ -480,12 +480,20 @@ class TestVerifyModelCacheIntegrity:
     """Tests for verify_model_cache_integrity (issue #1580)."""
 
     def test_returns_true_for_healthy_weight_file(self, tmp_path):
-        """A cache with a non-zero pytorch_model.bin must be healthy."""
+        """A cache with a large enough pytorch_model.bin must be healthy."""
         snapshot = tmp_path / "models--demo--model" / "snapshots" / "abcdef1234"
         snapshot.mkdir(parents=True)
-        (snapshot / "pytorch_model.bin").write_bytes(b"\x00" * 4096)
+        (snapshot / "pytorch_model.bin").write_bytes(b"\x00" * (1024 * 1024 + 1))
 
         assert embedding_model.verify_model_cache_integrity(tmp_path) is True
+
+    def test_returns_false_for_small_file_1mb(self, tmp_path):
+        """A file exactly 1MB (or smaller) must be reported as corrupted."""
+        snapshot = tmp_path / "models--demo--model" / "snapshots" / "abcdef1234"
+        snapshot.mkdir(parents=True)
+        (snapshot / "pytorch_model.bin").write_bytes(b"\x00" * (1024 * 1024))
+
+        assert embedding_model.verify_model_cache_integrity(tmp_path) is False
 
     def test_returns_false_for_zero_byte_pytorch_model_bin(self, tmp_path):
         """A zero-byte pytorch_model.bin must be reported as corrupted."""
@@ -521,7 +529,7 @@ class TestVerifyModelCacheIntegrity:
         """A zero-byte non-weight file must not fail the integrity check."""
         snapshot = tmp_path / "models--demo--model" / "snapshots" / "abcdef1234"
         snapshot.mkdir(parents=True)
-        (snapshot / "pytorch_model.bin").write_bytes(b"\x00" * 4096)
+        (snapshot / "pytorch_model.bin").write_bytes(b"\x00" * (1024 * 1024 + 1))
         (snapshot / "config.json").write_bytes(b"")
 
         assert embedding_model.verify_model_cache_integrity(tmp_path) is True
@@ -530,7 +538,7 @@ class TestVerifyModelCacheIntegrity:
         """Both Path and str inputs must produce the same verdict."""
         snapshot = tmp_path / "models--demo--model" / "snapshots" / "abcdef1234"
         snapshot.mkdir(parents=True)
-        (snapshot / "pytorch_model.bin").write_bytes(b"\x00" * 4096)
+        (snapshot / "pytorch_model.bin").write_bytes(b"\x00" * (1024 * 1024 + 1))
 
         assert embedding_model.verify_model_cache_integrity(
             tmp_path
@@ -586,7 +594,7 @@ class TestGetModelRedownloadsCorruptedCache:
         model_cache_dir = tmp_path / "models--paraphrase-multilingual-MiniLM-L12-v2"
         snapshot = model_cache_dir / "snapshots" / "abcdef1234"
         snapshot.mkdir(parents=True)
-        (snapshot / "pytorch_model.bin").write_bytes(b"\x00" * 4096)
+        (snapshot / "pytorch_model.bin").write_bytes(b"\x00" * (1024 * 1024 + 1))
 
         monkeypatch.setenv("HF_HUB_CACHE", str(tmp_path))
         monkeypatch.setenv(
