@@ -1,5 +1,37 @@
 version: "3.9"
 
+# =============================================================================
+# Issue #3025 — Emphasize Docker Volume Persistence in Docs
+#
+# The app persists two SQLite databases:
+#
+#   - /app/data/corpus.db   (corpus DB — uploaded assignments + embeddings)
+#   - /app/users.db         (auth DB — user accounts, roles, password hashes)
+#   - /app/data/backups/    (automated backup snapshots of corpus.db)
+#
+# Without named volumes, `docker compose down` destroys the container's
+# writable layer — and with it, every user account and every uploaded
+# assignment. The fix below mounts THREE named volumes so data survives
+# `down` / `up` cycles. `docker compose down -v` is the only command
+# that wipes them; that's now called out in the README with a loud
+# warning.
+#
+# Volume layout (see the `volumes:` block at the bottom of this file):
+#
+#   plagiarism_data      → /app/data          (corpus.db + backups/ + corpus.index)
+#   plagiarism_users     → /app               (users.db at repo root)
+#   redis_data           → /data              (Redis dump only — unchanged)
+#
+# We mount `plagiarism_users` at `/app` rather than a single-file bind
+# because (a) SQLite creates `-wal` and `-shm` sidecar files that
+# must live next to the main DB, and (b) Docker named volumes can
+# only mount directories, not individual files. The container's
+# `/app` is still populated by the Dockerfile's `COPY . .` on first
+# start; subsequent starts reuse the volume's contents, so source
+# code changes require `docker compose build` to take effect — which
+# is the standard Docker workflow and already documented below.
+# =============================================================================
+
 services:
   nginx:
     image: nginx:alpine
@@ -24,7 +56,18 @@ services:
       - RESCAN_INTERVAL_MINUTES=${RESCAN_INTERVAL_MINUTES:-0}
       - RESCAN_GRACE_PERIOD_MINUTES=${RESCAN_GRACE_PERIOD_MINUTES:-60}
     volumes:
+      # Pass through the Streamlit config (theme, server settings).
       - ./.streamlit:/app/.streamlit
+      # ── Named volumes for the persistent SQLite DBs (Issue #3025) ──
+      # `plagiarism_data` survives `docker compose down`. Only
+      # `docker compose down -v` wipes it. See README →
+      # "⚠️ Data Persistence & Docker Volumes".
+      - plagiarism_data:/app/data
+      # `plagiarism_users` holds `users.db` (auth). Mounted at `/app`
+      # rather than a single file because Docker named volumes can
+      # only target directories, and SQLite's WAL sidecar files must
+      # live next to the main DB.
+      - plagiarism_users:/app
     depends_on:
       redis:
         condition: service_healthy
@@ -49,6 +92,16 @@ services:
       retries: 5
     restart: unless-stopped
 
+# ─── Named volumes (Issue #3025) ──────────────────────────────────
+# These volumes are managed by Docker and survive `docker compose down`.
+# They are only destroyed by `docker compose down -v` or an explicit
+# `docker volume rm <name>`. See the README's "Data Persistence"
+# section for the exact commands and the data-loss warning.
 volumes:
+  # Corpus DB + FAISS index + automated backups (lives at /app/data/).
+  plagiarism_data:
+  # Auth DB (lives at /app/users.db). Mounted at /app so the WAL
+  # sidecar files (-wal, -shm) are co-located with the main DB.
+  plagiarism_users:
+  # Redis dump (unchanged — was already a named volume).
   redis_data:
-  
