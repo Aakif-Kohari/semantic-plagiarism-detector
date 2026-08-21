@@ -16,6 +16,9 @@ Issue #2898: Fallback behavior for named colors in Badge Generator.
 import hashlib
 import html
 import logging
+import hashlib
+from datetime import datetime, timezonefrom io import BytesIO
+from typing import Optional, Tuple, Dict
 import re
 from datetime import datetime
 from io import BytesIO
@@ -208,10 +211,9 @@ def generate_badge_svg(
     """
     safe_color = validate_hex_color(accent_color, DEFAULT_BADGE_COLOR)
     if date is None:
-        date = datetime.now().strftime("%B %d, %Y")
+        date = datetime.now(timezone.utc).strftime("%B %d, %Y")
 
-    safe_name = html.escape(student_name)
-    safe_date = html.escape(date)
+    safe_name = html.escape(student_name)    safe_date = html.escape(date)
 
     safe_font = html.escape(font_family)
 
@@ -351,9 +353,8 @@ def generate_badge_png(
 
     # Date
     if date is None:
-        date = datetime.now().strftime("%B %d, %Y")
-    date_text = f"Date: {date}"
-    date_bbox = draw.textbbox((0, 0), date_text, font=body_font)
+        date = datetime.now(timezone.utc).strftime("%B %d, %Y")
+    date_text = f"Date: {date}"    date_bbox = draw.textbbox((0, 0), date_text, font=body_font)
     date_width = date_bbox[2] - date_bbox[0]
     date_x = (width - date_width) // 2
     draw.text((date_x, 380), date_text, fill="#e0e7ff", font=body_font)
