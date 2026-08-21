@@ -1,4 +1,4 @@
-from src.utils.text_stats import (format_text_stats, get_char_count,
+from src.utils.text_stats import (count_words,format_text_stats, get_char_count,
                                    get_reading_time_minutes, get_word_count,
                                    get_sentence_count, get_syllable_count,
                                    get_readability_metrics, get_text_stats)
@@ -8,6 +8,32 @@ def test_get_word_count():
     assert get_word_count("This is a test.") == 4
     assert get_word_count("") == 0
     assert get_word_count("   Spaces   ") == 1
+
+
+def test_get_word_count_matches_count_words():
+    """Regression test for #2005: get_word_count() is now an alias for
+    count_words() and both entry points must produce identical results,
+    including on edge cases (punctuation, contractions, mixed case,
+    numbers, hyphenation, empty/whitespace-only input)."""
+    cases = [
+        "",
+        "   ",
+        "This is a test.",
+        "   Spaces   ",
+        "Hello, world! How are you?",
+        "don't stop believin'",
+        "MiXeD CaSe Words HERE",
+        "line1\nline2\ttabbed",
+        "numbers 123 and 456 mixed",
+        "hyphenated-word another_one",
+        "...!!! ???",
+    ]
+    for text in cases:
+        assert get_word_count(text) == count_words(text), (
+            f"Mismatch for input {text!r}: "
+            f"get_word_count={get_word_count(text)}, "
+            f"count_words={count_words(text)}"
+        )
 
 
 def test_get_char_count():
