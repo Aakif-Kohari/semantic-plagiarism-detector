@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-from __future__ import annotations
-
 """
 generate_synthetic_corpus.py
 ----------------------------
@@ -20,6 +18,8 @@ Acceptance Criteria (Issue #1376):
 - Generate text files containing controlled paragraph mutations, synonym
   substitutions, and word reordering.
 """
+
+from __future__ import annotations
 
 import argparse
 import json

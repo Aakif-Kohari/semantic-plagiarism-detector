@@ -20,8 +20,8 @@ from src.core.config import severity_from_score
 from src.errors import (
     EXPORT_GENERATION_IO_FAILED,
     EXPORT_WRITE_FAILED,
-    ExportFailedError,
 )
+from src.exceptions import ExportFailedError
 
 logger = logging.getLogger(__name__)
 
@@ -188,13 +188,30 @@ class LMSExportEngine:
                     row.get("matched_text") or row.get("matching_text") or ""
                 ).strip()
                 if matched_text:
-                    buffer.write("Matching text:\n")
-                    buffer.write(f"{matched_text}\n")
+                    lines.extend(
+                        [
+                            "Matching text:",
+                            matched_text,
+                        ]
+                    )
 
-                buffer.write("\n")
+                date_flagged = row.get("date_flagged")
+                if date_flagged not in (None, ""):
+                    lines.append(f"Date flagged: {date_flagged}")
 
-            buffer.write(f"{'=' * 38}\n")
-            buffer.write("End of report\n\n")
+                threshold_used = row.get("threshold_at_time_of_flag")
+                if threshold_used not in (None, ""):
+                    lines.append(f"Threshold at time of flag: {threshold_used}")
+
+                lines.append("")
+
+            lines.extend(
+                [
+                    "=" * 38,
+                    "End of report",
+                    "",
+                ]
+            )
 
             report = buffer.getvalue()
         except OSError as exception:

@@ -12,7 +12,7 @@ import doctest
 import pytest
 
 from src.utils import pagination
-from src.utils.pagination import PaginationPage, paginate_items, _coerce_integer
+from src.utils.pagination import PaginationPage, _coerce_integer, paginate_items
 
 
 class TestPaginationPageReprClassName:
@@ -489,6 +489,7 @@ class TestPaginationPageSerialization:
 
 # --- NEW TESTS ADDED FOR ISSUE #2030 ---
 
+
 class TestCoerceInteger:
     """Test suite for _coerce_integer helper function."""
 
@@ -511,41 +512,198 @@ class TestCoerceInteger:
 
 
 class TestPaginateItemsBoundaryConditions:
-    """Test suite for paginate_items boundary conditions (Issue #2030)."""
+    """Test suite for paginate_items boundary conditions (Issue #2030).
+
+    These assertions used to compare the return value against a bare list.
+    ``paginate_items`` returns a ``PaginationPage`` — the page geometry is
+    the point of the helper — so they now read ``.items`` and additionally
+    pin the clamped page number, which is what Issue #3045 regressed.
+    """
 
     def test_empty_list(self):
         """Verify empty list returns empty list regardless of pagination."""
-        assert paginate_items([], page=1, page_size=10) == []
+        page = paginate_items([], page=1, page_size=10)
+
+        assert page.items == []
+        assert page.total_pages == 1
+        assert page.total_items == 0
+        assert page.start_index == 0
+        assert page.end_index == 0
 
     def test_page_zero(self):
         """Verify page=0 is clamped to 1."""
         items = [1, 2, 3, 4, 5]
-        assert paginate_items(items, page=0, page_size=2) == [1, 2]
+        page = paginate_items(items, page=0, page_size=2)
+
+        assert page.items == [1, 2]
+        assert page.page == 1
 
     def test_page_negative(self):
         """Verify page=-1 is clamped to 1."""
         items = [1, 2, 3, 4, 5]
-        assert paginate_items(items, page=-1, page_size=2) == [1, 2]
+        page = paginate_items(items, page=-1, page_size=2)
+
+        assert page.items == [1, 2]
+        assert page.page == 1
 
     def test_page_beyond_range(self):
         """Verify page=9999 is clamped to the last available page."""
         items = [1, 2, 3, 4, 5]
         # 5 items total, page_size=2 means 3 pages. The last page contains just [5].
-        assert paginate_items(items, page=9999, page_size=2) == [5]
+        page = paginate_items(items, page=9999, page_size=2)
+
+        assert page.items == [5]
+        assert page.page == 3
+        assert page.total_pages == 3
 
     def test_page_size_zero(self):
         """Verify page_size=0 is clamped to a minimum valid size (1)."""
         items = [1, 2, 3]
-        assert paginate_items(items, page=1, page_size=0) == [1]
+        page = paginate_items(items, page=1, page_size=0)
+
+        assert page.items == [1]
+        assert page.per_page == 1
 
     def test_page_size_negative(self):
         """Verify page_size=-5 is clamped to a minimum valid size (1)."""
         items = [1, 2, 3]
-        assert paginate_items(items, page=1, page_size=-5) == [1]
+        page = paginate_items(items, page=1, page_size=-5)
+
+        assert page.items == [1]
+        assert page.per_page == 1
 
     def test_page_string(self):
         """Verify string inputs for page are handled and coerced gracefully."""
         items = [1, 2, 3, 4, 5]
         # "abc" coercion fails, defaults to 1
-        assert paginate_items(items, page="abc", page_size=2) == [1, 2]
-        
+        assert paginate_items(items, page="abc", page_size=2).items == [1, 2]
+        # A numeric string is honoured rather than discarded.
+        assert paginate_items(items, page="3", page_size=2).items == [5]
+
+
+class TestPaginateItemsKeywordContract:
+    """Regression tests for the caller-facing signature (Issue #3045).
+
+    ``src/utils/warning_list.py`` calls
+    ``paginate_items(rows, page=..., page_size=..., max_page_size=100)``.
+    The helper was rewritten with a positional ``(items, page_size,
+    current_page)`` signature, so every one of those calls raised
+    ``TypeError: paginate_items() got an unexpected keyword argument 'page'``
+    and the plagiarism warnings list could not render at all.
+    """
+
+    def test_accepts_the_keyword_arguments_its_caller_uses(self):
+        page = paginate_items(
+            list(range(150)),
+            page=2,
+            page_size=200,
+            max_page_size=100,
+        )
+
+        assert page.page == 2
+        assert page.per_page == 100
+
+    def test_max_page_size_clamps_the_requested_size(self):
+        page = paginate_items(
+            list(range(150)), page=1, page_size=200, max_page_size=100
+        )
+
+        assert len(page.items) == 100
+        assert page.page_size == 100
+        assert page.total_pages == 2
+
+    def test_max_page_size_none_lifts_the_cap(self):
+        page = paginate_items(
+            list(range(150)), page=1, page_size=200, max_page_size=None
+        )
+
+        assert len(page.items) == 150
+        assert page.total_pages == 1
+
+    def test_page_size_alias_matches_per_page(self):
+        page = paginate_items(list(range(10)), page=1, page_size=4)
+
+        assert page.page_size == page.per_page == 4
+
+    def test_start_and_end_index_are_one_based_and_inclusive(self):
+        page = paginate_items(list(range(23)), page=2, page_size=10)
+
+        assert page.start_index == 11
+        assert page.end_index == 20
+
+    def test_start_and_end_index_are_zero_for_an_empty_sequence(self):
+        page = paginate_items([], page=1, page_size=10)
+
+        assert (page.start_index, page.end_index) == (0, 0)
+
+    def test_last_partial_page_reports_a_short_end_index(self):
+        page = paginate_items(list(range(23)), page=3, page_size=10)
+
+        assert len(page.items) == 3
+        assert page.start_index == 21
+        assert page.end_index == 23
+
+    def test_source_sequence_is_not_mutated(self):
+        items = [1, 2, 3, 4, 5]
+        paginate_items(items, page=1, page_size=2)
+
+        assert items == [1, 2, 3, 4, 5]
+
+    def test_accepts_a_tuple_without_choking_on_the_slice(self):
+        page = paginate_items((1, 2, 3, 4, 5), page=2, page_size=2)
+
+        assert page.items == [3, 4]
+
+    def test_non_numeric_page_size_falls_back_to_the_default(self):
+        page = paginate_items(list(range(50)), page=1, page_size=None)
+
+        assert page.per_page == 10
+
+
+class TestPaginationPageIndexFields:
+    """``start_index`` / ``end_index`` round-trip through the dataclass."""
+
+    def test_fields_default_to_zero_for_direct_construction(self):
+        page = PaginationPage(
+            items=[1, 2, 3], page=1, total_pages=1, total_items=3, per_page=10
+        )
+
+        assert page.start_index == 0
+        assert page.end_index == 0
+
+    def test_create_populates_the_index_fields(self):
+        page = PaginationPage.create(
+            items=[11, 12, 13], page=2, per_page=10, total_items=23
+        )
+
+        assert page.start_index == 11
+        assert page.end_index == 13
+
+    def test_to_dict_exposes_the_index_fields(self):
+        page = paginate_items(list(range(23)), page=2, page_size=10)
+        result = page.to_dict()
+
+        assert result["start_index"] == 11
+        assert result["end_index"] == 20
+
+    def test_pages_differing_only_by_index_fields_are_not_equal(self):
+        first = PaginationPage(
+            items=[1],
+            page=1,
+            total_pages=1,
+            total_items=1,
+            per_page=10,
+            start_index=1,
+            end_index=1,
+        )
+        second = PaginationPage(
+            items=[1],
+            page=1,
+            total_pages=1,
+            total_items=1,
+            per_page=10,
+            start_index=0,
+            end_index=0,
+        )
+
+        assert first != second

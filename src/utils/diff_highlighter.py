@@ -10,131 +10,185 @@ content in side-by-side comparison views.
 
 from __future__ import annotations
 
-import re
 import html
+import re
 from typing import Tuple
+
+#: Inline style applied to every highlighted run. Kept as a module constant so
+#: the markup is identical everywhere and testable without a regex.
+MARK_OPEN_TAG = (
+    '<mark style="background-color: #fef08a; ' 'padding: 2px 4px; border-radius: 3px;">'
+)
+
+_WORD_RE = re.compile(r"\b\w+\b")
+
+
+def _tokenize(text: str) -> list[str]:
+    """Split *text* into lowercased word tokens.
+
+    Args:
+        text: Raw document text.
+
+    Returns:
+        The word tokens, in order.
+    """
+    return _WORD_RE.findall(text.lower())
+
+
+def _covered_word_ranges(
+    words: list[str],
+    other_ngrams: set[tuple[str, ...]],
+    window: int,
+) -> list[tuple[int, int]]:
+    """Return the merged word ranges of *words* that also occur in the other text.
+
+    A word position is part of a match exactly when some window of ``window``
+    consecutive words containing it also appears in the other document. Testing
+    each window against a set of the other document's windows costs one hash
+    lookup, so the whole scan is linear in the number of words.
+
+    Args:
+        words: Tokens of the document being highlighted.
+        other_ngrams: Every ``window``-sized tuple of tokens from the other
+            document.
+        window: Match length in words.
+
+    Returns:
+        Half-open ``(start, end)`` word ranges, sorted and already merged, so
+        no two ranges touch or overlap and ``<mark>`` tags cannot nest.
+    """
+    ranges: list[tuple[int, int]] = []
+
+    for index in range(len(words) - window + 1):
+        if tuple(words[index : index + window]) not in other_ngrams:
+            continue
+
+        # Positions are visited left to right, so a new window either extends
+        # the range we are already inside or starts a fresh one.
+        if ranges and index <= ranges[-1][1]:
+            ranges[-1] = (ranges[-1][0], max(ranges[-1][1], index + window))
+        else:
+            ranges.append((index, index + window))
+
+    return ranges
+
+
+def _apply_marks(text: str, word_ranges: list[tuple[int, int]]) -> str:
+    """Wrap the given word ranges of *text* in ``<mark>`` tags.
+
+    Args:
+        text: The original, unescaped document text.
+        word_ranges: Half-open, sorted, non-overlapping word ranges.
+
+    Returns:
+        HTML-escaped text with the matching runs wrapped in ``<mark>``.
+    """
+    if not word_ranges:
+        return html.escape(text)
+
+    word_positions = [(m.start(), m.end()) for m in _WORD_RE.finditer(text)]
+    if not word_positions:
+        return html.escape(text)
+
+    result: list[str] = []
+    last_end = 0
+
+    for start_word, end_word in word_ranges:
+        if start_word >= len(word_positions):
+            continue
+
+        char_start = word_positions[start_word][0]
+        char_end = word_positions[min(end_word - 1, len(word_positions) - 1)][1]
+
+        result.append(html.escape(text[last_end:char_start]))
+        result.append(MARK_OPEN_TAG)
+        result.append(html.escape(text[char_start:char_end]))
+        result.append("</mark>")
+
+        last_end = char_end
+
+    result.append(html.escape(text[last_end:]))
+    return "".join(result)
 
 
 def highlight_overlap(
-    text_a: str, 
-    text_b: str, 
-    min_match_length: int = 4
+    text_a: str,
+    text_b: str,
+    min_match_length: int = 4,
 ) -> Tuple[str, str]:
     """Highlight overlapping sequences between two text strings.
-    
+
     Identifies common word sequences of at least `min_match_length` words
     and wraps them in HTML <mark> tags with a distinct background color.
     This helps instructors visually identify plagiarized phrases while
     ignoring common stop words and short coincidental matches.
-    
+
+    The previous implementation compared every start offset in one document
+    against every start offset in the other and then walked each pair forward,
+    which is cubic on the input this function exists for — two documents that
+    are largely the same. Two 3,000-word documents took 24 seconds and blocked
+    the Streamlit script thread for the whole time.
+
+    A word is now part of a match exactly when some window of
+    ``min_match_length`` consecutive words containing it also appears in the
+    other document. That is the same set of highlighted positions the old
+    nested scan produced once its overlapping ranges were merged — the merge
+    was already collapsing every redundant alignment — but it costs one hash
+    lookup per word instead of one walk per offset pair.
+
     Args:
         text_a: The first document's text chunk.
         text_b: The second document's text chunk.
         min_match_length: Minimum number of consecutive words required to
                          constitute a "match". Defaults to 4 to avoid
                          highlighting common phrases like "in the" or "and the".
-                         
+                         Values below 1 are treated as 1.
+
     Returns:
         A tuple of two HTML strings (highlighted_a, highlighted_b) with
         matching sequences wrapped in <mark> tags. Returns escaped HTML
         to prevent XSS vulnerabilities.
-        
+
     Examples:
+        Two shared words fall short of the four-word default, so nothing is
+        marked:
+
         >>> a, b = highlight_overlap("the quick brown fox", "a quick brown dog")
-        >>> "<mark>" in a
+        >>> "<mark" in a or "<mark" in b
+        False
+
+        Lowering the threshold picks the shared run up in both documents:
+
+        >>> a, b = highlight_overlap("the quick brown fox", "a quick brown dog", 2)
+        >>> "<mark" in a and "<mark" in b
+        True
+        >>> "quick brown" in a and "quick brown" in b
         True
     """
     if not text_a or not text_b:
         return html.escape(text_a or ""), html.escape(text_b or "")
-    
-    # Escape HTML entities first to prevent XSS
-    safe_a = html.escape(text_a)
-    safe_b = html.escape(text_b)
-    
-    # Tokenize into words for sequence matching
-    words_a = re.findall(r'\b\w+\b', text_a.lower())
-    words_b = re.findall(r'\b\w+\b', text_b.lower())
-    
+
+    words_a = _tokenize(text_a)
+    words_b = _tokenize(text_b)
+
     if not words_a or not words_b:
-        return safe_a, safe_b
-    
-    # Find longest common subsequence of words
-    matches = []
-    for i in range(len(words_a)):
-        for j in range(len(words_b)):
-            k = 0
-            while (i + k < len(words_a) and 
-                   j + k < len(words_b) and 
-                   words_a[i + k] == words_b[j + k]):
-                k += 1
-            
-            if k >= min_match_length:
-                # Store match as (start_idx_a, end_idx_a, start_idx_b, end_idx_b)
-                matches.append((i, i + k, j, j + k))
-    
-    if not matches:
-        return safe_a, safe_b
-    
-    # Apply highlighting to the original text
-    # We need to map word indices back to character positions
-    def highlight_text(text: str, word_matches: list[tuple[int, int]]) -> str:
-        """Apply <mark> tags to matching word sequences."""
-        if not word_matches:
-            return html.escape(text)
-        
-        # Find character positions for each word
-        word_positions = []
-        for match in re.finditer(r'\b\w+\b', text):
-            word_positions.append((match.start(), match.end()))
-        
-        # Build highlighted string
-        result = []
-        last_end = 0
-        
-        for start_word, end_word in sorted(word_matches):
-            if start_word >= len(word_positions):
-                continue
-                
-            char_start = word_positions[start_word][0]
-            char_end = word_positions[min(end_word - 1, len(word_positions) - 1)][1]
-            
-            # Add non-matching text
-            result.append(html.escape(text[last_end:char_start]))
-            # Add highlighted matching text
-            result.append(f'<mark style="background-color: #fef08a; padding: 2px 4px; border-radius: 3px;">')
-            result.append(html.escape(text[char_start:char_end]))
-            result.append('</mark>')
-            
-            last_end = char_end
-        
-        # Add remaining text
-        result.append(html.escape(text[last_end:]))
-        return "".join(result)
-    
-    # Extract unique match ranges for each text
-    ranges_a = sorted(list(set((m[0], m[1]) for m in matches)))
-    ranges_b = sorted(list(set((m[2], m[3]) for m in matches)))
-    
-    # Merge overlapping ranges to prevent nested <mark> tags
-    def merge_ranges(ranges: list[tuple[int, int]]) -> list[tuple[int, int]]:
-        if not ranges:
-            return []
-        merged = [ranges[0]]
-        for start, end in ranges[1:]:
-            if start <= merged[-1][1]:
-                merged[-1] = (merged[-1][0], max(merged[-1][1], end))
-            else:
-                merged.append((start, end))
-        return merged
-    
-    ranges_a = merge_ranges(ranges_a)
-    ranges_b = merge_ranges(ranges_b)
-    
-    # Issue #2003: Fixed indentation - return statement now properly aligned at column 8
-    return (
-        highlight_text(text_a, ranges_a),
-        highlight_text(text_b, ranges_b)
-    )
+        return html.escape(text_a), html.escape(text_b)
+
+    window = max(1, min_match_length)
+    if len(words_a) < window or len(words_b) < window:
+        return html.escape(text_a), html.escape(text_b)
+
+    ngrams_a = {
+        tuple(words_a[i : i + window]) for i in range(len(words_a) - window + 1)
+    }
+    ngrams_b = {
+        tuple(words_b[j : j + window]) for j in range(len(words_b) - window + 1)
+    }
+
+    ranges_a = _covered_word_ranges(words_a, ngrams_b, window)
+    ranges_b = _covered_word_ranges(words_b, ngrams_a, window)
+
+    return _apply_marks(text_a, ranges_a), _apply_marks(text_b, ranges_b)
 
 
 def _escape_text(text: str) -> str:

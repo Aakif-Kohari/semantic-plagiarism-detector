@@ -39,6 +39,7 @@ from __future__ import annotations
 import gzip
 import io
 import logging
+from src.db.corpus_db import get_corpus_db_path
 import os
 import re
 import shutil
@@ -51,15 +52,15 @@ from contextlib import closing
 from pathlib import Path
 from typing import Dict, Optional, Union
 
+from src.core.app_config import get_backup_dir
 from src.db.connection import apply_busy_timeout
-from src.db.corpus_db import get_corpus_db_path
 
 # ── Logger Configuration ───────────────────────────────────────────────────────
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 SQLITE_HEADER = b"SQLite format 3\x00"
-DEFAULT_BACKUP_DIRECTORY = Path("backups")
+DEFAULT_BACKUP_DIRECTORY = get_backup_dir()
 
 # Maintenance operations open their own connections rather than going through
 # src.db.connection.create_connection(), because they need isolation_level=None
@@ -653,9 +654,12 @@ def cleanup_old_backups(
             "bytes_freed": 0,
         }
 
-    db_files = list(backup_path.glob("*.db"))
+    db_files = [
+        f for f in backup_path.iterdir()
+        if f.is_file() and (f.name.endswith(".db") or f.name.endswith(".db.gz"))
+    ]
     if not db_files:
-        logger.info("No .db backup files found to clean up.")
+        logger.info("No backup files (.db or .db.gz) found to clean up.")
         return {
             "files_deleted": 0,
             "bytes_freed": 0,

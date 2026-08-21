@@ -12,20 +12,20 @@ Features:
 - Regulatory updates
 """
 
+import hashlib
 import json
 import time
-import hashlib
-from pathlib import Path
+from collections import Counter, defaultdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Union, Set, Tuple
-from dataclasses import dataclass, field, asdict
 from enum import Enum
-from collections import defaultdict, Counter
-import streamlit as st
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
 import pandas as pd
 import plotly.graph_objects as go
+import streamlit as st
 from plotly.subplots import make_subplots
-import plotly.express as px
 
 # ==============================================================================
 # ENUMS AND DATA CLASSES
@@ -1009,7 +1009,7 @@ def render_violation_management(engine: Dict):
                             key=f"action_{violation.id}",
                             placeholder="Describe action taken"
                         )
-                        if st.button(f"Resolve", key=f"resolve_{violation.id}"):
+                        if st.button("Resolve", key=f"resolve_{violation.id}"):
                             if resolution_action:
                                 audit_manager.resolve_violation(
                                     violation.id,

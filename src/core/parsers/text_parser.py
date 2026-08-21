@@ -2,6 +2,7 @@
 
 import io
 import logging
+import os
 import xml.etree.ElementTree
 import zipfile
 from urllib.parse import urlparse
@@ -18,6 +19,32 @@ from src.core.parsers.common import (
 from src.core.parsers.pdf_parser import _read_pdf_bytes
 
 logger = logging.getLogger(__name__)
+
+RTF_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
+
+
+def _rtf_content_within_limit(file: PDFInput) -> bool:
+    """Return whether an RTF input can be safely passed to striprtf.
+
+    Check known sizes before reading/decoding the payload so oversized RTF
+    files are rejected before striprtf can allocate parser state for them.
+    Seekable streams are inspected without consuming their current position.
+    """
+    if isinstance(file, str):
+        return os.path.getsize(file) <= RTF_MAX_FILE_SIZE_BYTES
+    if isinstance(file, bytes):
+        return len(file) <= RTF_MAX_FILE_SIZE_BYTES
+    if isinstance(file, io.BytesIO):
+        return file.getbuffer().nbytes <= RTF_MAX_FILE_SIZE_BYTES
+
+    try:
+        current = file.tell()
+        file.seek(0, 2)
+        size = file.tell()
+        file.seek(current)
+        return size <= RTF_MAX_FILE_SIZE_BYTES
+    except (AttributeError, OSError, ValueError):
+        return True
 
 
 class CorruptedArchiveError(RuntimeError):
@@ -64,9 +91,20 @@ def extract_text_from_txt(file: PDFInput) -> str:
 
 
 def extract_text_from_rtf(file: PDFInput) -> str:
-    """Extract plain text from an RTF file using striprtf."""
+    """Extract plain text from an RTF file using striprtf.
+
+    RTF inputs are capped at 10 MB to prevent oversized documents from being
+    handed to striprtf and causing avoidable memory spikes.
+    """
     text = ""
     try:
+        if not _rtf_content_within_limit(file):
+            logger.warning(
+                "[document_parser] Rejected RTF input larger than %d bytes",
+                RTF_MAX_FILE_SIZE_BYTES,
+            )
+            return ""
+
         from striprtf.striprtf import rtf_to_text
 
         if isinstance(file, str):

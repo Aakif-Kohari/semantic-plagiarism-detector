@@ -1,6 +1,7 @@
 import pytest
 from src.database import _connect  # Adjust import based on your project structure
 
+
 def test_sqlite_transaction_rollback_on_exception():
     """
     Verify that transactions are automatically rolled back when an exception

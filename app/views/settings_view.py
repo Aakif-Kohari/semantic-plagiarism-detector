@@ -107,12 +107,13 @@ def render_settings_view(user_role: str, lang_code: str, root_dir: str):
                 for code, display_name in SUPPORTED_OCR_LANGUAGES.items()
             }
             language_names = list(ocr_language_labels)
-            default_language_name = SUPPORTED_OCR_LANGUAGES[DEFAULT_OCR_LANGUAGE]
+            default_language_name = SUPPORTED_OCR_LANGUAGES.get(DEFAULT_OCR_LANGUAGE, "English")
+            default_index = language_names.index(default_language_name) if default_language_name in language_names else 0
 
             selected_ocr_language_name = st.selectbox(  # noqa: F841
                 "OCR Language",
                 options=language_names,
-                index=language_names.index(default_language_name),
+                index=default_index,
                 key=SessionKeys.OCR_LANGUAGE_SELECTOR,
             )
 
@@ -247,6 +248,27 @@ def render_settings_view(user_role: str, lang_code: str, root_dir: str):
                 pass
             st.success("✅ Application cache cleared successfully!")
             st.toast("✅ Session cache cleared successfully!")
+
+        st.markdown("")
+        if st.button(
+            "Flush Redis Cache",
+            key="flush_redis_cache_button",
+            use_container_width=True,
+            type="primary",
+            help="Execute FLUSHALL on the Redis server to clear all stale data across all databases."
+        ):
+            from src.utils.redis_cache import get_cache
+
+            try:
+                cache = get_cache()
+                if cache._client:
+                    cache._client.flushall()
+                elif hasattr(cache, "clear_pattern"):
+                    cache.clear_pattern("*")
+                st.success("Redis cache flushed successfully!")
+                st.toast("Redis cache flushed successfully!")
+            except Exception as e:
+                st.error(f"Failed to flush Redis: {e}")
 
         st.markdown("")
         if st.button(

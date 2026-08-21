@@ -1,19 +1,48 @@
+# Git & GitHub
+.git/
 .git
-.github
-.vscode
-.idea
+.github/
+
+# Virtual Environments
+.venv/
+.venv
+venv/
+venv
+env/
+env
+.Python
+
+# Environment variables & secrets
+.env
+.env.*
+.env.local
+
+# Databases & SQLite files
+*.sqlite
+*.sqlite3
+*.db
+
+# Python bytecode & caches
+__pycache__/
 __pycache__
 *.pyc
 *.pyo
 *.pyd
-.Python
-env
-venv
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+
+# IDEs & Editor configs
+.vscode/
+.idea/
+
+# Testing, documentation & evaluation
+tests/
+docs/
+evaluation/
+screenshots/
+data/
+
+# Logs & temp files
 *.log
-.env
-.env.*
-data
-evaluation
-tests
-docs
-screenshots

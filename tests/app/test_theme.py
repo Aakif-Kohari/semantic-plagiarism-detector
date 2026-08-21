@@ -104,6 +104,32 @@ def test_get_chart_colors_defaults_to_active_theme_when_key_absent():
             assert get_chart_colors() == THEMES["Dark"]
 
 
+def test_get_chart_colors_defaults_to_light_active_theme_when_key_absent():
+    """Missing override key follows an active Light theme."""
+    mock_state: dict = {}
+    with patch("app.theme.st.session_state", mock_state):
+        with patch("app.theme.get_colors", return_value=THEMES["Light"]):
+            assert get_chart_colors() == THEMES["Light"]
+
+
+def test_get_chart_colors_does_not_mutate_session_state_when_key_absent():
+    """Reading chart colors without the override does not create session state."""
+    mock_state: dict = {}
+    with patch("app.theme.st.session_state", mock_state):
+        with patch("app.theme.get_colors", return_value=THEMES["Dark"]):
+            get_chart_colors()
+
+    assert mock_state == {}
+
+
+def test_get_chart_colors_explicit_false_still_uses_active_theme():
+    """An explicit disabled override follows the active theme rather than forcing Dark."""
+    mock_state: dict = {"force_dark_charts": False}
+    with patch("app.theme.st.session_state", mock_state):
+        with patch("app.theme.get_colors", return_value=THEMES["Dark"]):
+            assert get_chart_colors() == THEMES["Dark"]
+
+
 def test_severity_tier_high():
     """Test high severity tier detection."""
     assert severity_tier(0.95, 0.59) == "high"
@@ -697,4 +723,45 @@ def test_sanitize_hex_color_missing_hash():
 def test_sanitize_hex_color_invalid():
     """Invalid/non-hex values use the configured fallback."""
     assert sanitize_hex_color("not-a-color", fallback="#FFFFFF") == "#FFFFFF"
+
+
+def get_luminance(hex_color: str) -> float:
+    """Calculate the relative luminance of a hex color."""
+    hex_color = hex_color.lstrip('#')
+    if len(hex_color) == 3:
+        hex_color = ''.join(c + c for c in hex_color)
+    
+    rgb = tuple(int(hex_color[i:i+2], 16) / 255.0 for i in (0, 2, 4))
+    
+    linear_rgb = []
+    for c in rgb:
+        if c <= 0.03928:
+            linear_rgb.append(c / 12.92)
+        else:
+            linear_rgb.append(((c + 0.055) / 1.055) ** 2.4)
+            
+    return 0.2126 * linear_rgb[0] + 0.7152 * linear_rgb[1] + 0.0722 * linear_rgb[2]
+
+
+def get_contrast_ratio(hex1: str, hex2: str) -> float:
+    """Calculate the WCAG contrast ratio between two hex colors."""
+    l1 = get_luminance(hex1)
+    l2 = get_luminance(hex2)
+    
+    lighter = max(l1, l2)
+    darker = min(l1, l2)
+    
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def test_theme_wcag_contrast():
+    """Verify primary text colors against background colors have a ratio of at least 4.5:1."""
+    for theme_name, theme in THEMES.items():
+        bg = theme.get("background")
+        ink = theme.get("ink")
+        
+        if bg and ink:
+            contrast = get_contrast_ratio(bg, ink)
+            assert contrast >= 4.5, f"{theme_name} theme contrast ratio {contrast:.2f} is below 4.5:1 (bg: {bg}, ink: {ink})"
+
 

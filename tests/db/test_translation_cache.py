@@ -320,3 +320,98 @@ def test_get_translation_cache_stats_empty(self, temp_db_path):
     """Test stats retrieval on an empty cache."""
     stats = translation_cache.get_translation_cache_stats()
     assert stats == {"total_entries": 0}
+
+
+def test_get_cached_translation_recovers_from_malformed_database(tmp_path, caplog):
+    """A malformed SQLite cache is replaced and its schema is recreated."""
+    cache_path = tmp_path / "translation_cache.db"
+    with sqlite3.connect(cache_path) as conn:
+        conn.execute("CREATE TABLE marker (value TEXT)")
+        conn.execute("INSERT INTO marker VALUES ('keep schema test')")
+
+    corrupted_bytes = bytearray(cache_path.read_bytes())
+    corrupted_bytes[100:120] = b"X" * 20
+    cache_path.write_bytes(corrupted_bytes)
+
+    with patch.object(translation_cache, "_CACHE_DB_PATH", cache_path):
+        with caplog.at_level("CRITICAL", logger=translation_cache.logger.name):
+            result = get_cached_translation("malformed-cache", "en", "fr")
+
+        assert result is None
+        assert "corrupted" in caplog.text.lower()
+        assert "deleting it and recreating the schema" in caplog.text
+
+        with sqlite3.connect(cache_path) as conn:
+            table = conn.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name='translation_cache'"
+            ).fetchone()
+
+        assert table == ("translation_cache",)
+
+
+def test_get_cached_translation_handles_non_corruption_database_error(tmp_path, caplog):
+    """Non-corruption DatabaseError instances remain ordinary cache misses."""
+    cache_path = tmp_path / "translation_cache.db"
+    cache_path.write_bytes(b"placeholder")
+
+    with patch.object(translation_cache, "_CACHE_DB_PATH", cache_path):
+        with patch.object(
+            translation_cache,
+            "_connect",
+            side_effect=sqlite3.DatabaseError("database is locked"),
+        ):
+            with caplog.at_level("ERROR", logger=translation_cache.logger.name):
+                result = get_cached_translation("locked-cache")
+
+    assert result is None
+    assert "Failed to query translation cache" in caplog.text
+    assert cache_path.read_bytes() == b"placeholder"
+
+
+def test_translation_cache_uses_lock_for_get_and_save():
+    """Verify that get_cached_translation and save_translation acquire the global _lock."""
+    from unittest.mock import MagicMock
+    from src.db.translation_cache import _lock, save_translation
+
+    mock_lock = MagicMock()
+    with patch("src.db.translation_cache._lock", mock_lock):
+        # Trigger get_cached_translation
+        get_cached_translation("test lock query text", "en", "es")
+        # Trigger save_translation
+        save_translation("test lock save text", "en", "es", "translation text")
+
+    # Assert that _lock was acquired (enter) and released (exit)
+    assert mock_lock.__enter__.call_count >= 2
+    assert mock_lock.__exit__.call_count >= 2
+
+
+def test_translation_cache_uses_provided_connection():
+    """Verify that get_cached_translation and save_translation use the provided connection and do not open a new one."""
+    from unittest.mock import MagicMock
+    from src.db.translation_cache import get_cached_translation, save_translation
+
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_cursor.fetchone.return_value = {"translated_text": "cached_val"}
+    mock_conn.execute.return_value = mock_cursor
+
+    with patch("src.db.translation_cache._connect") as mock_connect, \
+         patch("src.db.translation_cache._get_connection") as mock_get_conn:
+
+        # Call get_cached_translation with provided connection
+        result = get_cached_translation("source", "fr", "en", conn=mock_conn)
+        assert result == "cached_val"
+
+        # Call save_translation with provided connection
+        save_result = save_translation("source", "fr", "en", "target", conn=mock_conn)
+        assert save_result is True
+
+        # Assert that no new connections were spawned
+        mock_connect.assert_not_called()
+        mock_get_conn.assert_not_called()
+
+        # Assert that the provided connection was used
+        assert mock_conn.execute.call_count >= 2
+
+

@@ -9,17 +9,22 @@ edge-case bounding boxes, layout geometries, threshold limits, and OCR fallback 
 across both `src/core/parsers/pdf_parser.py` and `src/core/document_parser.py`.
 """
 
-import pytest
 from unittest.mock import MagicMock
-from src.core.parsers.pdf_parser import (
-    _has_meaningful_text as _has_meaningful_text_pdf,
-    _calculate_image_area_coverage as _calculate_image_area_coverage_pdf,
+
+import pytest
+
+from src.core.document_parser import (
+    _calculate_document_image_coverage as _calculate_document_image_coverage_doc,
 )
 from src.core.document_parser import (
     _has_meaningful_text as _has_meaningful_text_doc,
-    _calculate_document_image_coverage as _calculate_document_image_coverage_doc,
 )
-
+from src.core.parsers.pdf_parser import (
+    _calculate_image_area_coverage as _calculate_image_area_coverage_pdf,
+)
+from src.core.parsers.pdf_parser import (
+    _has_meaningful_text as _has_meaningful_text_pdf,
+)
 
 # ---------------------------------------------------------------------------
 # Section 1: Core Heuristic Base Rules & Text Density Checks

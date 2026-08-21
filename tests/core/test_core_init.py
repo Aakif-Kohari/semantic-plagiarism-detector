@@ -22,9 +22,9 @@ def test_with_sqlite_retry_in_all_list():
 
 def test_invalid_attribute_raises_attribute_error():
     """Verify accessing non-existent attributes raises AttributeError."""
-    from src import core
-
     import pytest
+
+    from src import core
 
     with pytest.raises(AttributeError, match="has no attribute"):
         _ = core.nonexistent_function_xyz

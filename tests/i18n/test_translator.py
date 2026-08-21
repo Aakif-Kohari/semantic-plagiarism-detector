@@ -342,16 +342,25 @@ def test_get_language_display_name():
     assert get_language_display_name("xyz") == "XYZ"
     assert get_language_display_name("") == ""
     assert get_language_display_name(None) == ""
+
+
 def test_new_languages_supported():
-    """Test that Portuguese and Chinese are present in supported languages and translations load correctly."""
+    """Test that Portuguese and Chinese are present in supported languages and translations load correctly.
+
+    This used to pin ``app_title``, which was the only key either stub file
+    carried. ``app_title`` is not an i18n key at all -- it appears in no other
+    locale, the window title comes from ``get_app_title()``, and no production
+    code ever looked it up -- so the assertion proved only that the stub was
+    still a stub. It now checks a key the UI actually renders (Issue #3048).
+    """
     from src.i18n.translator import _SUPPORTED_LANGUAGES, get_text
-    
+
     assert "pt" in _SUPPORTED_LANGUAGES
     assert "zh" in _SUPPORTED_LANGUAGES
-    
+
     assert _SUPPORTED_LANGUAGES["pt"] == "Português"
     assert _SUPPORTED_LANGUAGES["zh"] == "中文"
-    
-    # Verify fallback or translation lookup succeeds for app_title
-    assert get_text("app_title", lang="pt") == "Detector de Plágio Semântico"
-    assert get_text("app_title", lang="zh") == "语义查重系统"
+
+    # Both locales translate the title rather than falling back to English.
+    assert get_text("title", lang="pt") == "🔍 Sistema de Detecção de Plágio Semântico"
+    assert get_text("title", lang="zh") == "🔍 语义查重检测系统"

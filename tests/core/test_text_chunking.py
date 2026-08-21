@@ -102,12 +102,28 @@ def test_chunk_text_cjk_characters():
 def test_chunk_text_emoji_only():
     """Verify emoji-only strings are chunked correctly without character corruption."""
     emoji_text = "🚀🔍🤖📝💻📊" * 50
-    chunks = chunk_text(emoji_text, chunk_size=50, chunk_overlap=10)
+    chunks = chunk_text(emoji_text, chunk_size=50, chunk_overlap=10, min_words=1)
 
     assert len(chunks) >= 1
     for chunk in chunks:
         assert len(chunk) > 0
 
+
+def test_chunk_text_emoji_byte_length_enforced():
+    """Verify count_bytes=True enforces chunk_size as UTF-8 bytes, not code points.
+
+    Each emoji below is 1 Unicode code point but 4 UTF-8 bytes, so plain
+    len() undercounts actual size by 4x. With count_bytes=True, no chunk's
+    UTF-8 byte length should exceed chunk_size.
+    """
+    emoji_text = "🚀🔍🤖📝💻📊" * 50
+    chunks = chunk_text(
+        emoji_text, chunk_size=50, chunk_overlap=10, min_words=1, count_bytes=True
+    )
+
+    assert len(chunks) >= 1
+    for chunk in chunks:
+        assert len(chunk.encode("utf-8")) <= 50
 
 def test_chunk_overlap_boundaries():
     """Verify consecutive chunks share the exact configured overlap substring."""

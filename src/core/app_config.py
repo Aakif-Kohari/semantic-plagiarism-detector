@@ -48,6 +48,24 @@ _REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 DEFAULT_APP_TITLE: Final[str] = "Semantic Plagiarism Detection System"
 DEFAULT_PDF_FOOTER_TEXT: Final[str] = ""
 
+DEFAULT_VALID_ROLES: Final[set[str]] = {"admin", "teacher"}
+
+
+def get_valid_roles() -> set[str]:
+    """Return the set of valid user roles.
+
+    Configured via the ``ALLOWED_USER_ROLES`` environment variable as a
+    comma-separated string (e.g. ``ALLOWED_USER_ROLES="admin,teacher,teaching_assistant"``).
+    If not set or empty, falls back to ``{"admin", "teacher"}``.
+    Role names are normalized to lowercase and stripped of leading/trailing whitespace.
+    """
+    raw = os.getenv("ALLOWED_USER_ROLES", "").strip()
+    if not raw:
+        return set(DEFAULT_VALID_ROLES)
+    roles = {role.strip().lower() for role in raw.split(",") if role.strip()}
+    return roles or set(DEFAULT_VALID_ROLES)
+
+
 SUPPORTED_OCR_LANGUAGES = {
     "eng": "English",
     "spa": "Spanish",
@@ -90,6 +108,29 @@ FALLBACK_DATA_DIR: Final[Path] = (
     Path(tempfile.gettempdir()) / "semantic_plagiarism_detector" / "data"
 )
 FALLBACK_CORPUS_DB_PATH: Final[Path] = FALLBACK_DATA_DIR / "corpus.db"
+
+# Backup directory configuration (issue #2790).
+# Loads BACKUP_DIR environment variable, defaulting to an absolute path
+# completely outside the repository/web root (e.g., /var/backups/spd/).
+_DEFAULT_BACKUP_DIR_STR: Final[str] = "/var/backups/spd"
+
+
+def get_backup_dir() -> Path:
+    """Return the resolved absolute Path for storing database backups.
+
+    Configured via the ``BACKUP_DIR`` environment variable.
+    Ensures default location is an absolute path completely outside the repository/web root (Issue #2790).
+    """
+    raw_val = os.getenv("BACKUP_DIR", "").strip()
+    if raw_val:
+        return Path(raw_val).resolve()
+    default_path = Path(_DEFAULT_BACKUP_DIR_STR)
+    if not default_path.is_absolute():
+        default_path = default_path.resolve()
+    return default_path
+
+
+BACKUP_DIR: Final[Path] = get_backup_dir()
 
 
 # ─── Application display accessors (pre-existing) ──────────────────────────
@@ -329,3 +370,19 @@ def clear_branding_config_cache() -> None:
     """
     global _BRANDING_CONFIG_CACHE
     _BRANDING_CONFIG_CACHE = None
+
+
+def get_rescan_interval_minutes() -> int:
+    """Return the configured corpus rescan interval in minutes (default: 0 / disabled)."""
+    val = os.getenv("CORPUS_RESCAN_INTERVAL_MINUTES", "0")
+    try:
+        return max(0, int(val))
+    except (ValueError, TypeError):
+        return 0
+
+
+def __getattr__(name: str):
+    if name == "VALID_ROLES":
+        return get_valid_roles()
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+

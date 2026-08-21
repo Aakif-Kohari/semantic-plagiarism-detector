@@ -8,12 +8,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from tests.conftest import MockDataFactory
+from src.core.similarity import PLAGIARISM_THRESHOLD
 
 # Mock ML libraries to prevent pytest segmentation faults on Apple Silicon
 sys.modules["transformers"] = MagicMock()
 sys.modules["sentence_transformers"] = MagicMock()
 
-from src.cli import main, run_prewarm, run_scan  # noqa: E402
+from src.cli import _natural_sort_key, main, run_prewarm, run_scan  # noqa: E402
 
 
 @pytest.fixture
@@ -93,15 +94,24 @@ def test_cli_scan_success_text_format(
 def test_cli_scan_success_csv_format(
     mock_embed, mock_model_info, temp_assignments_dir, capsys
 ):
-    """Test a successful CLI scan with CSV format."""
+    """Test a successful CLI scan with CSV format including metadata headers (#2991)."""
     exit_code = run_scan(str(temp_assignments_dir), threshold=0.8, output_format="csv")
 
     assert exit_code == 0
     captured = capsys.readouterr()
 
-    lines = captured.out.strip().split("\n")
-    assert lines[0] == "doc_a,doc_b,similarity_score"
-    assert lines[1] == "doc1.txt,doc2.txt,1.0"
+    # Filter out commented metadata lines for parsing validation, or inspect metadata explicitly
+    lines = [line for line in captured.out.strip().split("\n") if line.strip()]
+    
+    # Verify metadata header lines start with '#'
+    assert lines[0].startswith("#")
+    assert any("Threshold Used: 0.8" in line for line in lines)
+
+    # Find the row index where standard CSV headers begin
+    header_idx = next(i for i, line in enumerate(lines) if not line.startswith("#"))
+    
+    assert lines[header_idx] == "doc_a,doc_b,similarity_score"
+    assert lines[header_idx + 1] == "doc1.txt,doc2.txt,1.0"
 
 
 def test_cli_scan_invalid_folder(capsys):
@@ -647,3 +657,39 @@ def test_cli_main_scan_recursive(temp_assignments_dir):
                 output_format="text",
                 recursive=True,
             )
+
+
+class TestNaturalSorting:
+    """Test suite for natural file ordering in the CLI."""
+
+    def test_natural_sort_key_orders_numeric_files(self):
+        """Verify doc10 sorts after doc2, not before (lexicographical behaviour)."""
+        files = ["doc10.pdf", "doc2.pdf", "doc1.pdf"]
+        assert sorted(files, key=_natural_sort_key) == [
+            "doc1.pdf",
+            "doc2.pdf",
+            "doc10.pdf",
+        ]
+
+    def test_natural_sort_key_mixed_paths(self):
+        """Verify natural sorting works on full file paths."""
+        files = [
+            "/tmp/submission/doc20.txt",
+            "/tmp/submission/doc3.txt",
+            "/tmp/submission/doc10.txt",
+        ]
+        assert sorted(files, key=_natural_sort_key) == [
+            "/tmp/submission/doc3.txt",
+            "/tmp/submission/doc10.txt",
+            "/tmp/submission/doc20.txt",
+        ]
+
+    def test_natural_sort_key_case_insensitive(self):
+        """Verify sorting is case-insensitive for the text portions."""
+        files = ["B.txt", "a.txt", "c.txt"]
+        assert sorted(files, key=_natural_sort_key) == ["a.txt", "B.txt", "c.txt"]
+
+    def test_natural_sort_key_stable_for_non_numeric(self):
+        """Verify behaviour matches lexicographical order for non-numeric names."""
+        files = ["readme.md", "report.pdf", "notes.txt"]
+        assert sorted(files, key=_natural_sort_key) == sorted(files)

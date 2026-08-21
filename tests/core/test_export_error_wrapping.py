@@ -4,7 +4,7 @@ from unittest.mock import patch
 import pytest
 
 from src.core.export_engine import LMSExportEngine
-from src.errors import ExportFailedError
+from src.exceptions import ExportFailedError
 
 
 def test_write_text_export_success(tmp_path):

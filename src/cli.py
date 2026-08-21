@@ -5,22 +5,27 @@ Headless command-line interface for plagiarism detection automation.
 """
 
 import argparse
-import concurrent.futures
+import csv
+import io
 import json
 import logging
 import os
+import re
 import sys
 import time
-import csv
-import io
 from io import BytesIO
 from pathlib import Path
 
 from src.core.app_config import FAISS_INDEX_PATH
 from src.core.cross_lingual import prepare_text_for_embedding
-from src.core.document_parser import DEFAULT_OCR_DPI, DEFAULT_OCR_LANGUAGE, extract_text, OCRDependencyError
+from src.core.document_parser import (
+    DEFAULT_OCR_DPI,
+    DEFAULT_OCR_LANGUAGE,
+    extract_text,
+)
 from src.core.embedding_model import embed_documents
-from src.core.logging_config import setup_logging
+from src.core.export_engine import LMSExportEngine
+from src.core.logging_setup import setup_logging
 from src.core.similarity import (
     PLAGIARISM_THRESHOLD,
     document_similarity_matrix,
@@ -29,10 +34,36 @@ from src.core.similarity import (
 from src.core.synchronization import verify_and_repair_index
 from src.core.text_chunking import chunk_documents
 from src.db.database_backup import optimize_database
-from src.core.export_engine import LMSExportEngine
+
+# Issue #2985: Import translation cache utilities for CLI purge command
+from src.db.translation_cache import (
+    get_cache_stats,
+    initialize_cache_db,
+    purge_old_translations,
+)
 from src.errors import EmptyDocumentError
 
 logger = logging.getLogger(__name__)
+
+
+def _natural_sort_key(filepath: str) -> list:
+    """
+    Return a natural-sort key so that embedded numbers sort numerically.
+
+    For example, 'doc10.pdf' sorts after 'doc2.pdf' (natural order) instead of
+    before it (lexicographical order), which is easier for human operators to read.
+
+    Args:
+        filepath: The file path to build a sort key for.
+
+    Returns:
+        A list of alternating (type, value) tuples used for stable comparison.
+    """
+    filename = os.path.basename(filepath)
+    return [
+        (0, int(part)) if part.isdigit() else (1, part.casefold())
+        for part in re.split(r"(\d+)", filename)
+    ]
 
 
 def _process_single_file(filepath: str) -> tuple[str, str | None, str | None]:
@@ -49,10 +80,13 @@ def _process_single_file(filepath: str) -> tuple[str, str | None, str | None]:
         if text.strip():
             return filename, text, None
         else:
-            return filename, None, f"Warning: Extracted text from '{filename}' is empty.\n"
+            return (
+                filename,
+                None,
+                f"Warning: Extracted text from '{filename}' is empty.\n",
+            )
     except Exception as e:
         return filename, None, f"Warning: Failed to parse '{filename}': {e}\n"
-
 
 
 def run_scan(
@@ -67,7 +101,7 @@ def run_scan(
     """
     start_time = time.time()
 
-    if not (0.0 <= threshold <= 1.0): 
+    if not (0.0 <= threshold <= 1.0):
         return 1
 
     if output_format not in ("json", "csv", "text", "html"):
@@ -89,9 +123,7 @@ def run_scan(
 
     try:
         entries = (
-            Path(folder_path).rglob("*")
-            if recursive
-            else Path(folder_path).iterdir()
+            Path(folder_path).rglob("*") if recursive else Path(folder_path).iterdir()
         )
 
         for entry in entries:
@@ -109,31 +141,39 @@ def run_scan(
         sys.stderr.write(f"Error reading folder contents: {e}\n")
         return 1
 
-    # Sort files to ensure deterministic ordering
-    files.sort()
+    # Sort files using natural order (doc2.pdf before doc10.pdf)
+    files.sort(key=_natural_sort_key)
 
     raw_texts = {}
     skipped_files = []
-    
-    for file_path in valid_files:
+
+    # Note: valid_files was likely intended to be 'files' from above
+    for file_path_str in files:
+        file_path = Path(file_path_str)
         filename = file_path.name
         try:
             with open(file_path, "rb") as f:
                 file_bytes = f.read()
-                
+
             extracted = extract_text(
-                file_bytes, 
-                filename=filename, 
-                language=ocr_language, 
-                dpi=ocr_dpi
+                BytesIO(file_bytes),
+                filename=filename,
+                language=DEFAULT_OCR_LANGUAGE,
+                dpi=DEFAULT_OCR_DPI,
             )
-            raw_texts[filename] = extracted
-            
+            if extracted.strip():
+                raw_texts[filename] = extracted
+            else:
+                sys.stderr.write(
+                    f"⚠️  Warning: Extracted text from '{filename}' is empty.\n"
+                )
+                skipped_files.append(filename)
+
         except EmptyDocumentError as ede:
             # Issue #2724: Handle empty documents gracefully in CLI
             sys.stderr.write(f"⚠️  Warning: {ede}\n")
             skipped_files.append(filename)
-            
+
         except Exception as e:
             sys.stderr.write(f"❌ Error processing {filename}: {e}\n")
             skipped_files.append(filename)
@@ -184,7 +224,11 @@ def run_scan(
 
     if output_format == "html":
         incidents = [
-            {"doc_a": m["document_1"], "doc_b": m["document_2"], "similarity": m["similarity_score"]}
+            {
+                "doc_a": m["document_1"],
+                "doc_b": m["document_2"],
+                "similarity": m["similarity_score"],
+            }
             for m in matches
         ]
         html = LMSExportEngine.generate_incident_html(incidents)
@@ -198,7 +242,13 @@ def run_scan(
         )
         writer.writeheader()
         for m in matches:
-            writer.writerow({"doc_a": m["document_1"], "doc_b": m["document_2"], "similarity_score": m["similarity_score"]})
+            writer.writerow(
+                {
+                    "doc_a": m["document_1"],
+                    "doc_b": m["document_2"],
+                    "similarity_score": m["similarity_score"],
+                }
+            )
         print(output.getvalue().strip())
     else:  # text
         print(f"Documents Processed: {num_processed}")
@@ -245,7 +295,7 @@ def run_prewarm(folder_path: str | None = None) -> int:
             sys.stderr.write(f"Error reading folder contents: {e}\n")
             return 1
 
-        files.sort()
+        files.sort(key=_natural_sort_key)
         for filepath in files:
             filename = os.path.basename(filepath)
             try:
@@ -365,6 +415,7 @@ def run_db_status(
         sys.stderr.write(f"Error: Unable to inspect database migration status: {exc}\n")
         return 1
 
+    if output_format == "json":
         print(json.dumps(status, indent=2))
     else:
         pending = status["pending_migrations"]
@@ -378,6 +429,83 @@ def run_db_status(
         print(f"Pending migrations: {pending_text}")
 
     return 0
+
+
+def run_db_downgrade(
+    db_path: str | Path | None = None,
+    db_type: str = "corpus",
+    steps: int = 1,
+) -> int:
+    """
+    Revert the most recent applied migration based on the migration_history table.
+
+    Args:
+        db_path: Optional path to SQLite database file. Defaults to corpus or auth DB.
+        db_type: Database type ('auth' or 'corpus').
+        steps: Number of migrations to revert (default: 1).
+
+    Returns:
+        0 on success, 1 on failure.
+    """
+    import sqlite3
+
+    from src.db.migrations import (
+        AUTH_DOWN_MIGRATIONS,
+        CORPUS_DOWN_MIGRATIONS,
+        get_latest_applied_migration,
+        rollback_migration,
+    )
+
+    if db_path is None:
+        if db_type == "auth":
+            from src.core.app_config import AUTH_DB_PATH
+
+            path = AUTH_DB_PATH
+        else:
+            from src.core.app_config import CORPUS_DB_PATH
+
+            path = CORPUS_DB_PATH
+    else:
+        path = Path(db_path).expanduser().resolve()
+
+    if not path.exists():
+        sys.stderr.write(f"Error: Database file '{path}' does not exist.\n")
+        return 1
+
+    if not path.is_file():
+        sys.stderr.write(f"Error: Path '{path}' is not a file.\n")
+        return 1
+
+    down_migrations = (
+        AUTH_DOWN_MIGRATIONS if db_type == "auth" else CORPUS_DOWN_MIGRATIONS
+    )
+
+    try:
+        with sqlite3.connect(str(path)) as conn:
+            conn.execute("PRAGMA foreign_keys = ON")
+            latest_version = get_latest_applied_migration(conn)
+
+            if latest_version <= 0:
+                print(
+                    f"Database '{path}' is already at version 0. No migration to downgrade."
+                )
+                return 0
+
+            target_version = max(0, latest_version - steps)
+            print(
+                f"Reverting migration(s) on '{path}' from version {latest_version} to {target_version}..."
+            )
+
+            new_version = rollback_migration(
+                conn,
+                target_version,
+                down_migrations=down_migrations,
+            )
+            print(f"Successfully downgraded database to version {new_version}.")
+            return 0
+    except Exception as exc:
+        sys.stderr.write(f"Error: Failed to downgrade database: {exc}\n")
+        return 1
 
 
 def run_database_optimization(db_path: str) -> int:
@@ -399,8 +527,13 @@ def main() -> None:
     argv = sys.argv[1:]
     if argv and argv[0] == "--db-status":
         argv[0] = "db-status"
+    elif argv and argv[0] == "db-downgrade":
+        argv[0] = "db"
+        argv.insert(1, "downgrade")
+
     parser = argparse.ArgumentParser(
-        description="Headless CLI Version for Plagiarism Detection Automation"
+        description="Headless CLI Version for Plagiarism Detection Automation",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
         "--optimize",
@@ -477,6 +610,46 @@ def main() -> None:
         help="Status output format (default: text).",
     )
 
+    db_parser = subparsers.add_parser("db", help="Database management commands")
+    db_subparsers = db_parser.add_subparsers(dest="db_action")
+
+    downgrade_parser = db_subparsers.add_parser(
+        "downgrade",
+        help="Revert the most recent applied migration based on migration_history table.",
+    )
+    downgrade_parser.add_argument(
+        "--database",
+        metavar="DB_PATH",
+        default=None,
+        help="Path to an existing SQLite database file.",
+    )
+    downgrade_parser.add_argument(
+        "--db-type",
+        choices=["auth", "corpus"],
+        default="corpus",
+        help="Migration set to revert (default: corpus).",
+    )
+    downgrade_parser.add_argument(
+        "--steps",
+        type=int,
+        default=1,
+        help="Number of migrations to revert (default: 1).",
+    )
+
+    # Issue #2985: Add purge-cache subcommand
+    purge_parser = subparsers.add_parser(
+        "purge-cache", help="Purge stale translations from the cross-lingual cache."
+    )
+    purge_parser.add_argument(
+        "--days",
+        type=int,
+        default=30,
+        help="Delete translations older than this many days.",
+    )
+    purge_parser.add_argument(
+        "--stats", action="store_true", help="Display cache statistics before purging."
+    )
+
     args = parser.parse_args(argv)
 
     if args.verify_schema is not None:
@@ -545,10 +718,10 @@ def main() -> None:
         try:
             verify_and_repair_index(index_path)
             print("Synchronization complete.")
-            return 0
+            sys.exit(0)
         except Exception as e:
             sys.stderr.write(f"Error during synchronization: {e}\n")
-            return 1
+            sys.exit(1)
 
     elif args.command == "db-status":
         exit_code = run_db_status(
@@ -558,9 +731,38 @@ def main() -> None:
         )
         sys.exit(exit_code)
 
+    elif args.command == "db":
+        if getattr(args, "db_action", None) == "downgrade":
+            exit_code = run_db_downgrade(
+                db_path=args.database,
+                db_type=args.db_type,
+                steps=args.steps,
+            )
+            sys.exit(exit_code)
+        else:
+            sys.stderr.write(
+                "Error: A valid db action (such as 'downgrade') is required.\n"
+            )
+            sys.exit(1)
+
     elif args.command == "prewarm":
         exit_code = run_prewarm(folder_path=args.folder)
         sys.exit(exit_code)
+
+    elif args.command == "purge-cache":
+        initialize_cache_db()
+
+        if args.stats:
+            stats = get_cache_stats()
+            print("Cache Statistics:")
+            print(f"  Total entries: {stats['total_entries']:,}")
+            print(f"  Oldest entry:  {stats['oldest_entry'] or 'N/A'}")
+            print(f"  Newest entry:  {stats['newest_entry'] or 'N/A'}")
+            print()
+
+        deleted = purge_old_translations(days=args.days)
+        print(f"✅ Purge complete. Deleted {deleted:,} stale translations.")
+        sys.exit(0)
 
     else:
         sys.stderr.write(f"Error: Invalid command '{args.command}'.\n")

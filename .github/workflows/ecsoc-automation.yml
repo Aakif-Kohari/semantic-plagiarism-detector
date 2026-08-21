@@ -1,5 +1,8 @@
 name: "ECSoC Automation"
 
+env:
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
+
 on:
   issue_comment:
     types: [created]
@@ -42,6 +45,9 @@ jobs:
             const commenterType = comment.user.type;
             const repoOwner = context.repo.owner;
             const issueAuthor = issue.user ? issue.user.login : null;
+            // ECSoC claims are intentionally single-assignee; make the policy explicit
+            // rather than relying on the repository's native multi-assignee capacity.
+            const MAX_ISSUE_ASSIGNEES = 1;
 
             // Helper to check if a comment is from a bot
             const isBotComment = (c) => c.user && (c.user.type === 'Bot' || (c.user.login && c.user.login.endsWith('[bot]')));
@@ -62,9 +68,11 @@ jobs:
               return;
             }
 
-            // 4. Ignore any comments once issue is assigned (natively via assignees OR via existing bot claim)
-            if (issue.assignees && issue.assignees.length > 0) {
-              console.log("Issue already assigned natively. Ignoring comment.");
+            // 4. Enforce the workflow's single-assignee claim policy.
+            // GitHub supports multiple native assignees, but ECSoC claims do not.
+            const assigneeCount = issue.assignees ? issue.assignees.length : 0;
+            if (assigneeCount >= MAX_ISSUE_ASSIGNEES) {
+              console.log(`Issue already has ${assigneeCount} assignee(s), which meets the ECSoC maximum of ${MAX_ISSUE_ASSIGNEES}. Ignoring comment.`);
               return;
             }
 
@@ -90,46 +98,19 @@ jobs:
               }
             }
 
-            // 5. Check max 5 open claimed issues limit for user
+            // 5. Check max 5 open claimed issues limit for user (Issue #2793 - Search API optimization)
             try {
-              const issues = await github.paginate(github.rest.issues.listForRepo, {
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                labels: 'ECSoC26',
-                state: 'open',
+              const query = `repo:${context.repo.owner}/${context.repo.repo} is:issue is:open assignee:${claimer}`;
+              const searchResult = await github.rest.search.issuesAndPullRequests({
+                q: query,
                 per_page: 100
               });
 
-              let activeCount = 0;
-              for (const iss of issues) {
-                if (iss.pull_request || iss.number === issue.number) continue;
+              const userIssues = (searchResult.data.items || []).filter(
+                iss => !iss.pull_request && iss.number !== issue.number
+              );
 
-                const issComments = await github.paginate(github.rest.issues.listComments, {
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: iss.number,
-                  per_page: 100
-                });
-
-                const issBotComments = issComments.filter(c =>
-                  isBotComment(c) && c.body && (
-                    c.body.includes("thanks for your interest in contributing under *ECSoC'26*") ||
-                    c.body.includes("open for anyone to claim")
-                  )
-                );
-
-                if (issBotComments.length > 0) {
-                  const lastBotComment = issBotComments[issBotComments.length - 1];
-                  if (!lastBotComment.body.includes("open for anyone to claim")) {
-                    const match = lastBotComment.body.match(/<!--\s*ecsoc-claim-user:\s*([a-zA-Z0-9-]+)\s*-->/) || lastBotComment.body.match(/Hi @([a-zA-Z0-9-]+)/);
-                    if (match && match[1].toLowerCase() === claimer.toLowerCase()) {
-                      activeCount++;
-                    }
-                  }
-                } else if (iss.assignees && iss.assignees.some(a => a.login.toLowerCase() === claimer.toLowerCase())) {
-                  activeCount++;
-                }
-              }
+              const activeCount = userIssues.length;
 
               if (activeCount >= 5) {
                 await github.rest.issues.createComment({
@@ -178,17 +159,12 @@ jobs:
     if: github.event_name == 'issues' || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/github-script@v7
         with:
           script: |
-            const labelRules = [
-              { label: 'UI', keywords: ['ui', 'frontend', 'css', 'style', 'sidebar', 'theme', 'dark mode', 'color', 'button', 'design', 'layout', 'responsive', 'react', 'html', 'component', 'view'] },
-              { label: 'Backend', keywords: ['backend', 'api', 'server', 'route', 'endpoint', 'database', 'db', 'sql', 'fastapi', 'flask', 'express', 'controller'] },
-              { label: 'Docs', keywords: ['docs', 'documentation', 'readme', 'guide', 'tutorial', 'docstring', 'changelog'] },
-              { label: 'Security', keywords: ['jwt', 'auth', 'security', 'token', 'password', 'login', 'permission', 'encryption', 'vulnerability', 'oauth', 'secret', 'cors'] },
-              { label: 'AI', keywords: ['ai', 'nlp', 'model', 'embedding', 'transformer', 'similarity', 'semantic', 'llm', 'bert', 'spacy', 'nltk', 'plagiarism'] },
-              { label: 'Performance', keywords: ['performance', 'speed', 'optimization', 'memory', 'cache', 'latency', 'slow', 'async', 'profiling', 'benchmark'] }
-            ];
+            const fs = require('fs');
+            const labelRules = JSON.parse(fs.readFileSync('.github/label_rules.json', 'utf8'));
 
             const labelMetaData = {
               'UI': { color: '1d76db', description: 'UI & Frontend changes' },
@@ -201,14 +177,14 @@ jobs:
             };
 
             const ensureLabelsExist = async (labels) => {
-              for (const labelName of labels) {
+              const labelPromises = labels.map(async (labelName) => {
                 try {
                   await github.rest.issues.getLabel({
                     owner: context.repo.owner,
                     repo: context.repo.repo,
                     name: labelName
                   });
-                } catch (err) {
+                }catch (err) {
                   if (err.status === 404) {
                     try {
                       const meta = labelMetaData[labelName] || { color: '0e8a16', description: '' };
@@ -225,13 +201,62 @@ jobs:
                     }
                   }
                 }
-              }
+              });
+              await Promise.all(labelPromises);
             };
 
             const processIssue = async (issue) => {
               if (!issue || issue.pull_request) return;
               const text = `${issue.title}\n${issue.body || ''}`.toLowerCase();
               const matchingLabels = ['ECSoC26'];
+
+              // Refined Multi-word / Strict matching arrays
+              const explicitUiPhrases = [
+                "css style", 
+                "ui design", 
+                "user interface", 
+                "frontend style",
+                "component color",
+                "theme color",
+                "dark mode"
+              ];
+              
+              const strictUiKeywords = [
+                "tailwind",
+                "css",
+                "flexbox",
+                "navbar"
+              ];
+
+              // Safety check: Explicitly skip if it matches backend style definitions
+              const isBackendStyleGuide = text.includes("coding style guide") || 
+                                          text.includes("code style") ||
+                                          text.includes("style guide");
+
+              let matchesUi = false;
+
+              // 1. Evaluate multi-word phrases
+              for (const phrase of explicitUiPhrases) {
+                if (text.includes(phrase)) {
+                  matchesUi = true;
+                  break;
+                }
+              }
+
+              // 2. Evaluate unambiguous strict keywords (only if not a backend style guide context)
+              if (!matchesUi && !isBackendStyleGuide) {
+                for (const keyword of strictUiKeywords) {
+                  if (text.includes(keyword)) {
+                    matchesUi = true;
+                    break;
+                  }
+                }
+              }
+
+              if (matchesUi) {
+                matchingLabels.push('UI');
+              }
+
               for (const rule of labelRules) {
                 const matched = rule.keywords.some(kw => new RegExp(`\\b${kw}\\b`, 'i').test(text));
                 if (matched) {

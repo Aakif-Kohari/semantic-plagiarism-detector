@@ -29,6 +29,7 @@ streamlit>=1.61.1                # Dashboard framework
 bcrypt>=4.0.0                    # Password hashing for auth
 pyotp>=2.10.0                     # TOTP generator/verifier for 2FA
 qrcode>=7.4.2                    # Local QR code generator for 2FA setup
+cryptography>=42.0.0              # Symmetric encryption for TOTP secrets
 python-dotenv>=1.0.0             # Load credentials from .env
 plotly>=5.20.0                   # Interactive heatmap with hover values
 deep-translator>=1.11.4          # Translation alignment for cross-lingual support
@@ -70,6 +71,9 @@ httpx>=0.26.0                   # Async HTTP client for API testing
 qrcode>=7.4.2
 # ── Observability & Monitoring ────────────────────────────────────────────────
 prometheus-client>=0.26.0       # Prometheus metrics export for production monitoring
+# ── Code Formatting & Linting ──────────────────────────────────────────────────
+pre-commit>=3.6.0               # Client-side Git hooks manager
+isort>=5.13.0                   # Import sorting library
 
 # ── Google Integration ─────────────────────────────────────────────────────────
 google-api-python-client>=2.198.0

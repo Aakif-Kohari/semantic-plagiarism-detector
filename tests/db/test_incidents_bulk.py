@@ -7,9 +7,10 @@ Refactored to use the centralized db_connection pytest fixture (Issue #2725),
 eliminating duplicated sqlite3.connect() and conn.close() boilerplate.
 """
 
-import pytest
 import sqlite3
 from datetime import datetime
+
+import pytest
 
 
 class TestBulkIncidentInsertion:

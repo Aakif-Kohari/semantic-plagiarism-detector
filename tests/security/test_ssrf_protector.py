@@ -8,10 +8,9 @@ and User-Agent header attachment (Issue #2212).
 """
 
 import socket
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-import requests
 
 from src.security.ssrf_protector import (
     DEFAULT_USER_AGENT,

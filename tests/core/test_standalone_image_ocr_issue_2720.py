@@ -16,8 +16,6 @@ This suite validates:
 """
 
 import io
-import os
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -28,6 +26,8 @@ from src.core.document_parser import (
 )
 from src.core.parsers.dispatch import (
     ALLOWED_EXTENSIONS as DISPATCH_ALLOWED_EXTENSIONS,
+)
+from src.core.parsers.dispatch import (
     extract_text,
     get_supported_file_extensions,
 )

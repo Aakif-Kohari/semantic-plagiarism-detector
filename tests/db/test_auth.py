@@ -5,30 +5,30 @@ import pytest
 
 from src.db.auth import (
     add_user,
+    auth_repo,
     delete_user,
     disable_2fa,
     enable_2fa,
+    format_user_created_date,
+    generate_sso_state,
     get_2fa_status,
     get_active_users_count,
+    get_all_users,
     get_user_active_status,
     get_user_last_login,
     get_user_role,
     get_user_theme,
-    auth_repo,
     init_db,
     is_user_active,
     set_user_active_status,
     set_user_theme,
-    update_password,
-    verify_user,
-    update_user_profile,
-    get_all_users,
-    format_user_created_date,
-    generate_sso_state,
     store_sso_state,
+    update_password,
+    update_user_profile,
     validate_sso_state,
+    verify_user,
 )
-from src.errors import StaleDataException
+from src.exceptions import StaleDataException
 
 
 @pytest.fixture(autouse=True)
@@ -213,9 +213,48 @@ def test_get_security_audit_log_count_dropped_table(mock_audit_db):
          auth_repo.get_security_audit_log_count()
 
 
-def test_get_distinct_audit_event_types(mock_audit_db):
-    events = auth_repo.get_distinct_audit_event_types()
-    assert set(events) == {"login", "logout"}
+def test_get_distinct_audit_event_types_caching_and_invalidation():
+    """Verify distinct audit event types are cached and properly invalidated (Issue #2687)."""
+    from src.db.auth import (
+        clear_distinct_audit_event_types_cache,
+        get_distinct_audit_event_types,
+        log_security_event,
+    )
+
+    clear_distinct_audit_event_types_cache()
+
+    # 1. Add initial events
+    log_security_event("login", "alice", "login success")
+    log_security_event("logout", "alice", "logout")
+
+    events1 = get_distinct_audit_event_types()
+    assert set(events1) >= {"login", "logout"}
+
+    # 2. Insert new event type directly into DB table (bypassing repo cache)
+    with auth_repo.connection() as conn:
+        conn.execute(
+            "INSERT INTO security_audit_log (event_type, username, timestamp, details) VALUES (?, ?, ?, ?)",
+            ("direct_db_insert", "user1", "2026-08-19T00:00:00Z", "test"),
+        )
+        conn.commit()
+
+    # Cached query without refresh should still return cached event types
+    events_cached = get_distinct_audit_event_types()
+    assert "direct_db_insert" not in events_cached
+
+    # Query with force_refresh=True should fetch latest from DB
+    events_refreshed = get_distinct_audit_event_types(force_refresh=True)
+    assert "direct_db_insert" in events_refreshed
+
+    # 3. log_security_event updates the cache in-place
+    log_security_event("password_reset", "user2", "reset password")
+    events_after_log = get_distinct_audit_event_types()
+    assert "password_reset" in events_after_log
+
+    # 4. clear_distinct_audit_event_types_cache clears cache state
+    clear_distinct_audit_event_types_cache()
+    assert auth_repo._cached_event_types is None
+
 
 
 def test_2fa_flow():
@@ -281,8 +320,67 @@ def test_get_2fa_status():
 
     enabled, secret = get_2fa_status(username)
     assert enabled is True
+    assert secret == test_secret
 
     delete_user(username)
+
+
+def test_otp_secret_is_encrypted_at_rest():
+    """Verify that OTP secret is encrypted when stored in the database, and decrypted by get_2fa_status."""
+    import sqlite3
+    from src.db.auth import get_auth_db_path
+
+    username = f"user_2fa_enc_{uuid.uuid4().hex[:8]}"
+    add_user(username, "Password123!")
+
+    test_secret = "MY_OTP_SECRET_12345"
+    enable_2fa(username, test_secret)
+
+    # 1. Query via API to verify transparent decryption
+    enabled, secret = get_2fa_status(username)
+    assert enabled is True
+    assert secret == test_secret
+
+    # 2. Query the raw database row directly to verify it's encrypted at rest
+    db_path = get_auth_db_path()
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT otp_secret FROM users WHERE username = ?",
+            (username.lower(),)
+        ).fetchone()
+
+    db_secret = row[0]
+    assert db_secret is not None
+    assert db_secret != test_secret
+    assert "gAAAAA" in db_secret  # Standard Fernet header prefix
+
+    delete_user(username)
+
+
+def test_otp_secret_legacy_plaintext_fallback():
+    """Verify that if the database contains a legacy plaintext OTP secret, it is returned as-is without crashing."""
+    import sqlite3
+    from src.db.auth import get_auth_db_path
+
+    username = f"user_2fa_legacy_{uuid.uuid4().hex[:8]}"
+    add_user(username, "Password123!")
+
+    # Force insert a plaintext secret into the database
+    db_path = get_auth_db_path()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE users SET two_factor_enabled = 1, otp_secret = ? WHERE username = ?",
+            ("LEGACY_PLAINTEXT_SECRET", username.lower())
+        )
+        conn.commit()
+
+    # Query via API
+    enabled, secret = get_2fa_status(username)
+    assert enabled is True
+    assert secret == "LEGACY_PLAINTEXT_SECRET"
+
+    delete_user(username)
+
 
 
 
@@ -447,7 +545,8 @@ def test_delete_user_removes_matching_session_and_authorization_rows(mock_db):
 def test_connect_uses_fifteen_second_timeout():
     """Verify that _connect helper sets sqlite3 timeout to 15.0 seconds."""
     from unittest.mock import patch
-    from src.db.auth import _connect, SQLITE_TIMEOUT
+
+    from src.db.auth import SQLITE_TIMEOUT, _connect
 
     assert SQLITE_TIMEOUT == 15.0
 
@@ -664,6 +763,52 @@ def test_revoke_token_and_is_token_revoked():
         revoke_token("")
 
 
+def test_cleanup_revoked_tokens():
+    """Verify that expired JWT tokens and their corresponding signatures are automatically cleaned up."""
+    import time
+    import sqlite3
+    import hashlib
+    import base64
+    import json
+    from src.db.auth import revoke_token, is_token_revoked, get_auth_db_path, _cleanup_revoked_tokens
+
+    def make_mock_jwt(exp: int) -> str:
+        header = base64.urlsafe_b64encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode("utf-8")).decode("utf-8").rstrip("=")
+        payload = base64.urlsafe_b64encode(json.dumps({"exp": exp, "type": "access"}).encode("utf-8")).decode("utf-8").rstrip("=")
+        signature = "signature_part"
+        return f"{header}.{payload}.{signature}"
+
+    # 1. Create one expired token and one active token
+    now = int(time.time())
+    expired_token = make_mock_jwt(now - 100)
+    active_token = make_mock_jwt(now + 3600)
+
+    # 2. Revoke both tokens
+    revoke_token(expired_token, details="Expired token test")
+    revoke_token(active_token, details="Active token test")
+
+    expired_hash = hashlib.sha256(expired_token.encode("utf-8")).hexdigest()
+    active_hash = hashlib.sha256(active_token.encode("utf-8")).hexdigest()
+
+    assert is_token_revoked(expired_token) is True
+    assert is_token_revoked(active_token) is True
+
+    # 3. Trigger cleanup
+    deleted_count = _cleanup_revoked_tokens()
+    assert deleted_count >= 2
+
+    # 4. Verify expired token is no longer marked revoked
+    assert is_token_revoked(expired_token) is False
+    assert is_token_revoked(active_token) is True
+
+    # Clean up the active token
+    db_path = get_auth_db_path()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DELETE FROM revoked_tokens WHERE token_signature IN (?, ?)", (active_token, active_hash))
+        conn.commit()
+
+
+
 def test_password_history_validation_prevents_reuse_of_last_3_passwords(mock_db):
     """Verify update_password prevents reusing any of the last 3 passwords."""
     user = f"hist_user_{uuid.uuid4().hex[:8]}"
@@ -785,8 +930,8 @@ def test_validate_username_rules():
             _validate_username(invalid)  # type: ignore
 
     # 6. Invalid credentials still return False (or dict with authenticated=False)
-    assert verify_user(username, "WrongPassword!") is False
-    assert verify_user(username, "WrongPassword!", return_details=True) == {
+    assert verify_user("alice", "WrongPassword!") is False
+    assert verify_user("alice", "WrongPassword!", return_details=True) == {
         "authenticated": False,
         "must_change_password": False,
     }
@@ -876,5 +1021,17 @@ def test_validate_sso_state_invalid_and_expired(mock_db):
     expired_state = "expired_state_token_123"
     store_sso_state(expired_state, expires_in_seconds=-10)
     assert validate_sso_state(expired_state) is False
+
+
+def test_role_validation_with_allowed_user_roles_override(monkeypatch):
+    """Verify _validate_role respects ALLOWED_USER_ROLES environment variable."""
+    from src.db.auth import _validate_role
+
+    monkeypatch.setenv("ALLOWED_USER_ROLES", "admin, teacher, teaching_assistant")
+    assert _validate_role("teaching_assistant") == "teaching_assistant"
+
+    with pytest.raises(ValueError, match="Role must be one of"):
+        _validate_role("invalid_role")
+
 
 

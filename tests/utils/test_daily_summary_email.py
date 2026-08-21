@@ -14,7 +14,6 @@ from src.utils.daily_summary_email import (
     build_email_html_body,
     build_incident_row_html,
     build_severity_section_html,
-    format_daily_summary,
     generate_daily_summary_html,
     get_admin_emails,
     get_incidents_last_24h,
@@ -197,9 +196,9 @@ def test_get_admin_emails_no_valid_db_or_env_email(mock_get_users):
     assert emails == []
 
 
-def test_format_daily_summary_with_incidents(mock_incidents):
+def test_build_email_html_body_with_incidents_legacy_args(mock_incidents):
     """Test formatting daily summary with incidents."""
-    html = format_daily_summary(mock_incidents)
+    html = build_email_html_body(incidents_data=mock_incidents, total_scans=0)
 
     assert "Daily Plagiarism Summary" in html
     assert "<strong>Total new incidents:</strong> 3" in html
@@ -211,9 +210,9 @@ def test_format_daily_summary_with_incidents(mock_incidents):
     assert "95.00%" in html
 
 
-def test_format_daily_summary_empty():
+def test_build_email_html_body_empty_legacy_args():
     """Test formatting daily summary with no incidents."""
-    html = format_daily_summary([])
+    html = build_email_html_body(incidents_data=[], total_scans=0)
 
     assert "Daily Plagiarism Summary" in html
     assert "No new plagiarism incidents detected" in html
@@ -614,13 +613,6 @@ class TestEmailTemplateHelpers:
         assert "Unknown" in html
         assert "0.00%" in html
 
-    def test_format_daily_summary_backward_compatibility(self):
-        """Test that the legacy wrapper still functions correctly."""
-        incidents = [{"severity_rank": "Low"}]
-        html = format_daily_summary(incidents)
-        assert "Daily Plagiarism Summary" in html
-        assert "<strong>Total scans processed:</strong> 0" in html
-
     def test_build_email_html_body_inline_css_compatibility(self):
         """Test that critical inline CSS properties are present for email clients."""
         html = build_email_html_body(incidents_data=[], total_scans=0)
@@ -1018,12 +1010,28 @@ class TestEmailStructureAndAccessibility:
         assert '<html lang="en">' in html
 
     def test_meta_viewport_present(self):
-        """Verify viewport meta tag is present for mobile responsiveness."""
+        """Verify viewport meta tag is present and prepended in <head> for mobile responsiveness."""
         stats = {"total_scans": 1}
         html = generate_daily_summary_html(stats)
 
         assert 'name="viewport"' in html
         assert "width=device-width" in html
+
+        head_content = html.split("<head>")[1].split("</head>")[0]
+        viewport_idx = head_content.find('<meta name="viewport"')
+        charset_idx = head_content.find('<meta charset=')
+        assert viewport_idx != -1, "Viewport meta tag must be in <head>"
+        assert viewport_idx < charset_idx, "Viewport meta tag must be prepended before charset in <head>"
+
+    def test_build_email_html_body_meta_viewport_prepended(self):
+        """Verify viewport meta tag is present and prepended in build_email_html_body <head>."""
+        html = build_email_html_body(incidents_data=[], total_scans=10)
+        assert '<meta name="viewport" content="width=device-width, initial-scale=1.0">' in html
+        head_content = html.split("<head>")[1].split("</head>")[0]
+        viewport_idx = head_content.find('<meta name="viewport"')
+        charset_idx = head_content.find('<meta charset=')
+        assert viewport_idx != -1
+        assert viewport_idx < charset_idx
 
     def test_report_date_rendered(self):
         """Verify the current date is rendered in the header."""

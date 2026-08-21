@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """
 analytics.py
 -----------
 Plotly visualizations for plagiarism analytics dashboard.
 Supports dynamic light and dark mode theme switching (#1619).
 """
+
+from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any, TypeVar

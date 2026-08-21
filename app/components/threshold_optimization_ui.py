@@ -4,16 +4,18 @@ Threshold Optimization UI Components.
 Provides UI elements for automated threshold optimization.
 """
 
-import streamlit as st
+from typing import Any, Dict, List, Optional  # noqa: F401
+
 import pandas as pd
 import plotly.graph_objects as go
-from typing import List, Dict, Any, Optional  # noqa: F401
+import streamlit as st
+
 from src.core.threshold_optimizer import (
-    ThresholdOptimizer,  # noqa: F401
-    ThresholdConfig,  # noqa: F401
-    get_threshold_optimizer,
     OptimizationResult,  # noqa: F401
+    ThresholdConfig,  # noqa: F401
+    ThresholdOptimizer,  # noqa: F401
     detect_document_type,
+    get_threshold_optimizer,
 )
 
 

@@ -27,6 +27,7 @@ class SemanticSimilarityEngine(BaseSimilarityEngine):
         batch_size: Optional[int] = None,
         min_threshold: float = 0.0,
         min_percentile: Optional[float] = None,
+        pooling: str = "mean",
     ):
         """
         Initialize the Semantic Similarity Engine.
@@ -38,13 +39,19 @@ class SemanticSimilarityEngine(BaseSimilarityEngine):
             batch_size: Batch size for matrix computation.
             min_threshold: Minimum similarity score to keep.
             min_percentile: Optional percentile threshold for filtering.
+            pooling: Pooling strategy for multi-chunk document embeddings ('mean' or 'max').
         """
+        if not isinstance(pooling, str) or pooling.lower() not in ("mean", "max"):
+            raise ValueError(
+                f"Invalid pooling method '{pooling}'. Supported methods: 'mean', 'max'."
+            )
         self.embedding_model = embedding_model
         self.faiss_index = faiss_index
         self.registry = registry
         self.batch_size = batch_size
         self.min_threshold = min_threshold
         self.min_percentile = min_percentile
+        self.pooling = pooling
 
     def _get_embedding(self, doc: Union[str, np.ndarray]) -> np.ndarray:
         """Helper to resolve a document to its embedding representation."""
@@ -73,16 +80,18 @@ class SemanticSimilarityEngine(BaseSimilarityEngine):
         emb1 = self._get_embedding(doc1)
         emb2 = self._get_embedding(doc2)
 
-        # Mean pool if chunk embeddings are provided (2D matrix of shape chunks x dim)
+        pooling_fn = np.max if self.pooling.lower() == "max" else np.mean
+
+        # Pool if chunk embeddings are provided (2D matrix of shape chunks x dim)
         if emb1.ndim == 2 and emb1.shape[0] > 0:
-            vec1 = np.mean(emb1, axis=0)
+            vec1 = pooling_fn(emb1, axis=0)
         elif emb1.ndim == 1 and emb1.shape[0] > 0:
             vec1 = emb1
         else:
             vec1 = np.zeros(384)
 
         if emb2.ndim == 2 and emb2.shape[0] > 0:
-            vec2 = np.mean(emb2, axis=0)
+            vec2 = pooling_fn(emb2, axis=0)
         elif emb2.ndim == 1 and emb2.shape[0] > 0:
             vec2 = emb2
         else:
@@ -110,6 +119,7 @@ class SemanticSimilarityEngine(BaseSimilarityEngine):
                 batch_size=self.batch_size,
                 min_threshold=self.min_threshold,
                 min_percentile=self.min_percentile,
+                pooling=self.pooling,
             )
             if isinstance(df_or_arr, pd.DataFrame):
                 return df_or_arr.to_numpy()
@@ -126,6 +136,7 @@ class SemanticSimilarityEngine(BaseSimilarityEngine):
                 batch_size=self.batch_size,
                 min_threshold=self.min_threshold,
                 min_percentile=self.min_percentile,
+                pooling=self.pooling,
             )
             if isinstance(df_or_arr, pd.DataFrame):
                 return df_or_arr.to_numpy()

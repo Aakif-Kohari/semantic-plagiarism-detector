@@ -5,11 +5,11 @@ Provides configurable stopword lists and filtering functions
 to reduce false positives in lexical similarity matching.
 """
 
-import re
-from typing import List, Set, Optional, Dict, Any
-from pathlib import Path
 import json
 import logging
+import re
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 

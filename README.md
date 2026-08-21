@@ -148,8 +148,8 @@ source venv/bin/activate        # Windows: venv\Scripts\activate
 ```bash
 pip install -r requirements.txt
 pip install pytest-cov  # Required for coverage reporting
+python -m nltk.downloader punkt_tab  # Pre-download NLTK corpus to avoid runtime delays
 ```
-
 > **Note:** The first run will download the `paraphrase-multilingual-MiniLM-L12-v2` model (~420 MB).
 > Subsequent runs use the local cache.
 
@@ -212,6 +212,7 @@ Customize behavior via a `.env` file in the project root or inline in
 | `SMTP_USERNAME` | | SMTP username |
 | `SMTP_PASSWORD` | | SMTP password |
 | `API_BEARER_TOKEN` | | Bearer token for REST API |
+| `BACKUP_IDLE_TIMEOUT_MINUTES` | `30` | Duration of zero user activity (in minutes) before automated DB backup runs |
 
 See `.env.example` for the full list.
 
@@ -222,16 +223,11 @@ docker compose build --no-cache
 docker compose up
 ```
 
+```markdown
 **Stop the app:**
 
 ```bash
 docker compose down
-```
-
-To also remove the Redis data volume:
-
-```bash
-docker compose down -v
 ```
 
 ### Default credentials
@@ -241,6 +237,32 @@ docker compose down -v
 | `admin` | `admin123` | Admin — full access + user management |
 
 Additional users can be created from the **User Management** page (admin only).
+
+
+## ⚠️ Data Persistence & Docker Volumes
+
+The app persists two SQLite databases plus the FAISS index. All three
+live in the container filesystem and are wiped on `docker compose down -v`
+**unless** they are mounted on named volumes. As of issue #3025, the
+`docker-compose.yml` mounts three named volumes by default so the
+data survives `down` / `up` cycles.
+
+### What is persisted
+
+| Volume name            | Container path | Holds                                           | Wiped by `down -v`? |
+|------------------------|----------------|-------------------------------------------------|----------------------|
+| `plagiarism_data`      | `/app/data`    | `corpus.db`, `corpus.index`, `backups/`         | ✅ Yes |
+| `plagiarism_users`     | `/app`         | `users.db` (auth, roles, password hashes)        | ✅ Yes |
+| `redis_data`           | `/data`        | Redis dump (session cache, rate-limit counters)  | ✅ Yes |
+
+### Safe operations
+
+```bash
+# Stop the app — data is preserved.
+docker compose down
+
+# Restart — data is back, no migration needed.
+docker compose up
 
 ---
 
@@ -284,6 +306,27 @@ You can manually trigger all hooks on all files in the repository at any time:
 ```bash
 pre-commit run --all-files
 ```
+
+---
+
+## 💾 Database Backups
+
+The system includes an automated background backup daemon that safely creates snapshots of the SQLite corpus database (`data/corpus.db`) during periods of inactivity.
+
+### Idle Trigger & Daemon Semantics
+- **Background Daemon:** A background thread polls every 30 seconds to monitor user session activity.
+- **Idle Threshold:** When all user sessions are idle and no active user requests occur for the configured duration (default: **30 minutes** of zero activity), the daemon creates a timestamped database snapshot.
+- **Rotation & Retention:** Automated backup rotation keeps only the **10 most recent backups** and automatically deletes backups older than **30 days** to prevent disk space exhaustion.
+
+### Configuration Keys (`.env`)
+
+| Key | Default | Description |
+|---|---|---|
+| `BACKUP_IDLE_TIMEOUT_MINUTES` | `30` | Duration of zero user activity (in minutes) required to trigger an automated database snapshot |
+
+### Storage Location
+- Automated backups are saved in the `data/backups/` directory (relative to the corpus database location).
+- Backup files are timestamped using the naming convention `corpus_backup_YYYYMMDD_HHMMSS.db`.
 
 ---
 

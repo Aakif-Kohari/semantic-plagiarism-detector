@@ -9,6 +9,7 @@ and strong password complexity policies.
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import logging
 import os
@@ -16,9 +17,12 @@ import re
 import secrets
 import sqlite3
 import string
+import time
+from contextlib import contextmanager
 from datetime import datetime as dt
-from datetime import timezone
+from datetime import timedelta, timezone
 from pathlib import Path
+from typing import Any, Dict, Generator, List, Optional
 
 import bcrypt
 from argon2 import PasswordHasher
@@ -27,11 +31,14 @@ from argon2.exceptions import VerificationError, VerifyMismatchError
 from src.core.app_config import AUTH_DB_PATH
 from src.db.base import BaseRepository
 from src.db.common import with_sqlite_retry
+from src.db.connection import get_connection
 from src.db.migrations import migrate_auth_database, table_exists
-from src.errors import StaleDataException
-from src.db.security_audit import log_security_event, count_recent_failed_logins
+from src.db.security_audit import count_recent_failed_logins, log_security_event
+from src.exceptions import StaleDataException
 
 logger = logging.getLogger(__name__)
+
+from src.core.app_config import get_valid_roles
 
 _DB_PATH = os.path.abspath(str(AUTH_DB_PATH))
 
@@ -40,7 +47,7 @@ def get_auth_db_path() -> Path:
     return Path(_DB_PATH)
 
 
-VALID_ROLES = {"admin", "teacher"}
+VALID_ROLES = get_valid_roles()
 
 SQLITE_TIMEOUT: float = 5.0
 """float: Busy timeout in seconds (15.0s) for SQLite database connections in the authentication module.
@@ -128,6 +135,25 @@ class AuthRepository(BaseRepository):
 
     def __init__(self, db_path: str | os.PathLike = AUTH_DB_PATH) -> None:
         super().__init__(db_path)
+        self._cached_event_types: list[str] | None = None
+        self._cached_event_types_timestamp: float = 0.0
+        self._event_types_cache_ttl: float = 60.0
+
+    @property
+    def db_path(self) -> Path:
+        return Path(_DB_PATH)
+
+    @contextmanager
+    def connection(
+        self, read_only: bool = False
+    ) -> Generator[sqlite3.Connection, None, None]:
+        with get_connection(Path(_DB_PATH), read_only=read_only) as conn:
+            yield conn
+
+    def clear_distinct_event_types_cache(self) -> None:
+        """Clear the cached distinct audit event types."""
+        self._cached_event_types = None
+        self._cached_event_types_timestamp = 0.0
 
     def init_db(self) -> None:
         """Create or upgrade users.db and seed default administrator accounts."""
@@ -151,6 +177,13 @@ class AuthRepository(BaseRepository):
                     (event_type, username, timestamp, details),
                 )
                 conn.commit()
+            if (
+                self._cached_event_types is not None
+                and event_type
+                and event_type not in self._cached_event_types
+            ):
+                self._cached_event_types.append(event_type)
+                self._cached_event_types.sort()
         except Exception as exc:
             logger.warning(
                 "Failed to write security audit log entry [%s, %s]: %s",
@@ -158,6 +191,16 @@ class AuthRepository(BaseRepository):
                 username,
                 exc,
             )
+            try:
+                from src.db.security_audit import _emit_audit_log_failure_alert
+
+                _emit_audit_log_failure_alert(
+                    event_type=event_type, username=username, error=exc
+                )
+            except Exception as alert_exc:
+                logger.warning(
+                    "Failed to trigger audit log failure alert: %s", alert_exc
+                )
 
     def _build_audit_log_query_conditions(
         self,
@@ -165,8 +208,8 @@ class AuthRepository(BaseRepository):
         event_type: str | None = None,
         start_date: str | None = None,
         end_date: str | None = None,
-    ) -> tuple[str, list]:
-        """Build WHERE clause snippet (if any) and parameters list for security audit log queries."""
+    ) -> tuple[str, tuple]:
+        """Build WHERE clause snippet (if any) and parameters tuple for security audit log queries."""
         conditions: list[str] = []
         params: list = []
 
@@ -184,7 +227,7 @@ class AuthRepository(BaseRepository):
             params.append(end_date)
 
         where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
-        return where_clause, params
+        return where_clause, tuple(params)
 
     def get_security_audit_logs(
         self,
@@ -209,11 +252,11 @@ class AuthRepository(BaseRepository):
             f"SELECT id, event_type, username, timestamp, details FROM security_audit_log{where_clause}"
             " ORDER BY id DESC LIMIT ? OFFSET ?"
         )
-        params.extend([limit, offset])
+        query_params = params + (limit, offset)
 
         try:
             with self.connection(read_only=True) as conn:
-                rows = conn.execute(query, params).fetchall()
+                rows = conn.execute(query, query_params).fetchall()
                 return [
                     {
                         "id": r[0],
@@ -252,14 +295,25 @@ class AuthRepository(BaseRepository):
             logger.error(f"Failed to count security audit logs: {e}")
             raise
 
-    def get_distinct_audit_event_types(self) -> list[str]:
-        """Return a list of all distinct event_type values from security_audit_log."""
+    def get_distinct_audit_event_types(self, force_refresh: bool = False) -> list[str]:
+        """Return a list of all distinct event_type values from security_audit_log with TTL caching (Issue #2687)."""
+        now = time.monotonic()
+        if (
+            not force_refresh
+            and self._cached_event_types is not None
+            and (now - self._cached_event_types_timestamp) < self._event_types_cache_ttl
+        ):
+            return list(self._cached_event_types)
+
         try:
             with self.connection(read_only=True) as conn:
                 rows = conn.execute(
                     "SELECT DISTINCT event_type FROM security_audit_log ORDER BY event_type"
                 ).fetchall()
-                return [r[0] for r in rows if r[0]]
+                event_types = [r[0] for r in rows if r[0]]
+                self._cached_event_types = event_types
+                self._cached_event_types_timestamp = now
+                return list(event_types)
         except sqlite3.Error:
             return []
 
@@ -291,7 +345,6 @@ def configure_db_path(db_path: str | os.PathLike) -> None:
 
 
 from contextlib import contextmanager
-from typing import Generator
 
 
 @contextmanager
@@ -350,9 +403,14 @@ def get_security_audit_log_count(
     )
 
 
-def get_distinct_audit_event_types() -> list[str]:
-    """Return a list of all distinct event_type values from security_audit_log."""
-    return auth_repo.get_distinct_audit_event_types()
+def get_distinct_audit_event_types(force_refresh: bool = False) -> list[str]:
+    """Return a list of all distinct event_type values from security_audit_log with TTL caching (Issue #2687)."""
+    return auth_repo.get_distinct_audit_event_types(force_refresh=force_refresh)
+
+
+def clear_distinct_audit_event_types_cache() -> None:
+    """Clear the cached distinct audit event types (Issue #2687)."""
+    auth_repo.clear_distinct_event_types_cache()
 
 
 def get_recent_audit_events(limit: int = 20) -> list[dict]:
@@ -444,8 +502,9 @@ def _validate_password_complexity(password: str) -> str:
 
 def _validate_role(role: str) -> str:
     role = str(role).strip().lower()
-    if role not in VALID_ROLES:
-        raise ValueError(f"Role must be one of: {', '.join(sorted(VALID_ROLES))}")
+    valid_roles = get_valid_roles()
+    if role not in valid_roles:
+        raise ValueError(f"Role must be one of: {', '.join(sorted(valid_roles))}")
     return role
 
 
@@ -705,7 +764,7 @@ def get_user_roles(user_ids: list[int]) -> dict[int, str]:
         with _connect() as conn:
             rows = conn.execute(
                 f"SELECT id, role FROM users WHERE id IN ({placeholders})",
-                user_ids,
+                tuple(user_ids),
             ).fetchall()
             return {row[0]: row[1] for row in rows}
     except sqlite3.Error as e:
@@ -752,10 +811,10 @@ def get_all_users(role: str | None = None) -> list:
     """
     try:
         query = "SELECT id, username, role, is_active, version FROM users"
-        params: list = []
+        params: tuple = ()
         if role is not None:
             query += " WHERE role = ?"
-            params.append(role)
+            params = (role,)
         query += " ORDER BY id"
         with _connect() as conn:
             rows = conn.execute(query, params).fetchall()
@@ -907,6 +966,41 @@ def set_tour_completed(username: str, completed: bool = True) -> None:
         raise sqlite3.Error(f"Failed to update tour status: {e}") from e
 
 
+def _get_fernet_key() -> bytes:
+    """Load or derive a valid 32-byte Fernet key from environment variables."""
+    import base64
+    import hashlib
+    key_str = os.getenv("OTP_ENCRYPTION_KEY") or os.getenv("ENCRYPTION_KEY")
+    if not key_str:
+        key_str = "default-fallback-otp-encryption-key-do-not-use-in-production"
+    
+    hashed = hashlib.sha256(key_str.encode("utf-8")).digest()
+    return base64.urlsafe_b64encode(hashed)
+
+
+def _encrypt_otp_secret(secret: str) -> str:
+    """Encrypt the OTP secret using cryptography.fernet."""
+    if not secret:
+        return secret
+    from cryptography.fernet import Fernet
+    key = _get_fernet_key()
+    f = Fernet(key)
+    return f.encrypt(secret.encode("utf-8")).decode("utf-8")
+
+
+def _decrypt_otp_secret(encrypted_secret: str) -> str:
+    """Decrypt the OTP secret using cryptography.fernet, falling back to plaintext on error."""
+    if not encrypted_secret:
+        return encrypted_secret
+    from cryptography.fernet import Fernet, InvalidToken
+    key = _get_fernet_key()
+    f = Fernet(key)
+    try:
+        return f.decrypt(encrypted_secret.encode("utf-8")).decode("utf-8")
+    except (InvalidToken, Exception):
+        return encrypted_secret
+
+
 def get_2fa_status(username: str) -> tuple[bool, str | None]:
     """Return (two_factor_enabled, otp_secret) for a user."""
     with _connect() as conn:
@@ -916,16 +1010,18 @@ def get_2fa_status(username: str) -> tuple[bool, str | None]:
         ).fetchone()
     if not row:
         return False, None
-    return bool(row[0]), row[1]
+    decrypted_secret = _decrypt_otp_secret(row[1]) if row[1] is not None else None
+    return bool(row[0]), decrypted_secret
 
 
 @with_sqlite_retry
 def enable_2fa(username: str, secret: str) -> None:
     """Enable 2FA for a user and store their OTP secret."""
+    encrypted_secret = _encrypt_otp_secret(secret)
     with _connect() as conn:
         conn.execute(
             "UPDATE users SET two_factor_enabled = 1, otp_secret = ? WHERE username = ?",
-            (secret, username.lower()),
+            (encrypted_secret, username.lower()),
         )
         conn.commit()
 
@@ -1425,6 +1521,73 @@ def _get_token_signature(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+_last_revoked_cleanup = 0.0
+
+
+def _cleanup_revoked_tokens() -> int:
+    """Delete expired JWT tokens and their corresponding SHA-256 signatures from revoked_tokens.
+
+    Returns:
+        The number of rows deleted.
+    """
+    import base64
+    import json
+    import time
+    import hashlib
+
+    deleted_count = 0
+    try:
+        with _connect() as conn:
+            cursor = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='revoked_tokens'"
+            )
+            if not cursor.fetchone():
+                return 0
+
+            cursor = conn.execute("SELECT token_signature FROM revoked_tokens")
+            rows = cursor.fetchall()
+
+            now_ts = int(time.time())
+            expired_signatures = []
+
+            for row in rows:
+                token_sig = row[0]
+                if not token_sig:
+                    continue
+                parts = token_sig.split(".")
+                if len(parts) == 3:
+                    try:
+                        payload_b64 = parts[1]
+                        rem = len(payload_b64) % 4
+                        if rem > 0:
+                            payload_b64 += "=" * (4 - rem)
+                        payload_bytes = base64.urlsafe_b64decode(payload_b64)
+                        payload = json.loads(payload_bytes.decode("utf-8"))
+                        exp = payload.get("exp")
+                        if exp is not None:
+                            exp_int = int(exp)
+                            if now_ts >= exp_int:
+                                expired_signatures.append(token_sig)
+                                token_hash = hashlib.sha256(token_sig.encode("utf-8")).hexdigest()
+                                expired_signatures.append(token_hash)
+                    except Exception:
+                        pass
+
+            if expired_signatures:
+                placeholders = ",".join("?" for _ in expired_signatures)
+                cur = conn.execute(
+                    f"DELETE FROM revoked_tokens WHERE token_signature IN ({placeholders})",
+                    expired_signatures
+                )
+                deleted_count = cur.rowcount
+                conn.commit()
+                if deleted_count > 0:
+                    logger.info(f"Cleaned up {deleted_count} expired entries from revoked_tokens table.")
+    except Exception as e:
+        logger.error(f"Failed to cleanup revoked tokens: {e}")
+    return deleted_count
+
+
 @with_sqlite_retry
 def revoke_token(token: str, details: str | None = None) -> None:
     """Revoke an active Bearer token by storing its signature in revoked_tokens table."""
@@ -1471,6 +1634,7 @@ def revoke_token(token: str, details: str | None = None) -> None:
                 username="system",
                 details=details or f"Token signature {signature[:12]}... revoked",
             )
+        _cleanup_revoked_tokens()
     except sqlite3.Error as e:
         logger.error(f"Failed to revoke token: {e}")
         raise sqlite3.Error(f"Failed to revoke token: {e}") from e
@@ -1484,6 +1648,12 @@ def is_token_revoked(token: str) -> bool:
     token = token.strip()
     if not token:
         return False
+
+    global _last_revoked_cleanup
+    now = time.time()
+    if now - _last_revoked_cleanup > 3600:
+        _last_revoked_cleanup = now
+        _cleanup_revoked_tokens()
 
     signature = _get_token_signature(token)
 
@@ -1536,7 +1706,7 @@ def format_user_creation_date(iso_str: str) -> str:
 
 from enum import Enum
 from functools import wraps
-from typing import Any, Dict, List, Optional, Set
+from typing import Set
 
 import streamlit as st
 
@@ -1991,13 +2161,6 @@ def demote_user(username: str, admin_username: str) -> bool:
 # ============================================================================
 # SSO SECURITY ENHANCEMENTS - Issue #2172
 # ============================================================================
-
-import hashlib
-import json  # noqa: F811
-import secrets  # noqa: F811
-import string  # noqa: F811
-from datetime import timedelta
-from typing import Any, Dict, List, Optional  # noqa: F811
 
 # ============================================================================
 # SECURE PASSWORD GENERATION

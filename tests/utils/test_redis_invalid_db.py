@@ -6,8 +6,6 @@ Unit tests for handling invalid REDIS_DB configurations gracefully (Issue #2818)
 
 import importlib
 import logging
-import os
-from unittest.mock import patch
 
 
 def test_invalid_redis_db_falls_back_to_zero_and_logs_warning(caplog, monkeypatch):

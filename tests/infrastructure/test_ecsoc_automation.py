@@ -31,3 +31,11 @@ def test_hidden_comment_regex_is_robust_to_greeting_changes():
     m3 = pattern.search(comment_3)
     assert m3 is not None
     assert m3.group(1) == "charlie99"
+
+
+def test_ecsoc_automation_uses_search_api_for_claim_limit():
+    """Verify issue-claim limit check uses GitHub Search API (Issue #2793)."""
+    content = WORKFLOW_PATH.read_text(encoding="utf-8")
+    assert "github.rest.search.issuesAndPullRequests" in content
+    assert "is:issue is:open assignee:" in content
+

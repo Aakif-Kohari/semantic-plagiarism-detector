@@ -710,6 +710,7 @@ def test_get_document_count_by_user_empty():
 def test_deleted_chunks_has_deleted_at_column():
     """Verify deleted_chunks table has deleted_at column (#2342)."""
     import sqlite3
+
     import src.db.corpus_db as corpus_db
 
     conn = sqlite3.connect(corpus_db._DB_PATH)

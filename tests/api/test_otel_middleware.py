@@ -9,6 +9,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 
 from src.api.app import app
 
+
 @pytest.fixture(autouse=True)
 def memory_exporter():
     exporter = InMemorySpanExporter()
@@ -97,4 +98,49 @@ def test_otel_middleware_anonymous_user_id_fallback(memory_exporter):
     http_span = next((s for s in spans if s.name == "HTTP GET /_test_anon_user"), None)
     assert http_span is not None
     assert http_span.attributes.get("user.id") == "anonymous"
+
+
+def test_otel_middleware_groups_by_route_template(memory_exporter):
+    """Test that otel_tracing_middleware uses the route template (generalized FastAPI path) for the span name to avoid cardinality explosion."""
+    client = TestClient(app)
+
+    @app.get("/_test_users/{user_id}")
+    async def get_test_user(user_id: int):
+        return {"user_id": user_id}
+
+    client.get("/_test_users/123")
+    client.get("/_test_users/456")
+
+    spans = memory_exporter.get_finished_spans()
+    user_spans = [s for s in spans if "/_test_users/" in s.name or "/_test_users/{" in s.name]
+    assert len(user_spans) == 2, "Should have 2 user spans recorded"
+    for span in user_spans:
+        assert span.name == "HTTP GET /_test_users/{user_id}"
+        assert span.attributes.get("http.route") == "/_test_users/{user_id}"
+
+
+def test_otel_middleware_injects_trace_id_in_global_exception_handler(memory_exporter, monkeypatch):
+    """Test that global_exception_handler injects the OpenTelemetry Trace ID into the error response payload when a trace is active."""
+    monkeypatch.setenv("APP_ENVIRONMENT", "production")
+    client = TestClient(app, raise_server_exceptions=False)
+
+    @app.get("/_test_unhandled_error")
+    async def raise_error():
+        raise RuntimeError("Test unhandled exception for trace ID injection")
+
+    response = client.get("/_test_unhandled_error")
+    assert response.status_code == 500
+    body = response.json()
+    assert body["error"] is True
+    assert "trace_id" in body
+    assert len(body["trace_id"]) == 32  # standard 32-character hex string for trace ID
+
+    # Ensure it matches the span trace ID
+    spans = memory_exporter.get_finished_spans()
+    span = next((s for s in spans if "/_test_unhandled_error" in s.name), None)
+    assert span is not None
+    span_trace_id = trace.format_trace_id(span.get_span_context().trace_id)
+    assert body["trace_id"] == span_trace_id
+
+
 

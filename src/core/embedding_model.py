@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 embedding_model.py
 ------------------
@@ -23,6 +21,8 @@ Recent Additions (Issue #1580):
   the model when the cached copy is unusable.
 """
 
+from __future__ import annotations
+
 import gc
 import logging
 import os
@@ -35,6 +35,8 @@ import torch
 import torch.quantization
 from sentence_transformers import SentenceTransformer
 
+from src.exceptions import ModelInitializationError
+
 logger = logging.getLogger(__name__)
 
 # ── Singleton model loader ─────────────────────────────────────────────────────
@@ -46,17 +48,25 @@ _quantized_model: SentenceTransformer | None = None
 def _apply_dynamic_quantization(model: SentenceTransformer) -> SentenceTransformer:
     """Apply PyTorch dynamic INT8 quantization to the model's Linear layers.
 
-    Dynamic quantization computes the quantization parameters (scale and zero-point)
-    for activations dynamically, just like static quantization, but the weights
-    are quantized statically. This significantly reduces memory footprint and
-    increases inference speed on CPU hosts without requiring a calibration dataset.
+    Dynamic quantization is intended for CPU inference. Apple Silicon's MPS
+    backend does not benefit from this INT8 path, so MPS models are returned
+    unchanged to preserve native floating-point performance.
 
     Args:
         model: The loaded SentenceTransformer model instance.
 
     Returns:
-        The quantized SentenceTransformer model.
+        The quantized SentenceTransformer model, or the original model when
+        running on MPS.
     """
+    device = _detect_device(model)
+    if device == "mps":
+        logger.warning(
+            "[embedding_model] Dynamic INT8 quantization is disabled on MPS; "
+            "using the unquantized floating-point model to preserve performance."
+        )
+        return model
+
     logger.info(
         "[embedding_model] Applying dynamic INT8 quantization to Linear layers..."
     )
@@ -185,13 +195,31 @@ class EmbeddingModelManager:
                 device,
             )
             logger.info("[embedding_model] Model loaded successfully.")
-        except Exception:
+        except Exception as primary_exc:
             logger.warning(
                 "Primary embedding model %s unavailable. Falling back to %s",
                 primary,
                 fallback,
             )
-            loaded_model = SentenceTransformer(fallback, cache_folder=cache_dir)
+            try:
+                loaded_model = SentenceTransformer(fallback, cache_folder=cache_dir)
+            except Exception as fallback_exc:
+                raise ModelInitializationError(
+                    "Unable to initialize the embedding model. Both the configured "
+                    f"primary model '{primary}' and fallback model '{fallback}' "
+                    "failed to load. This usually means the models are unavailable "
+                    "from the configured Hugging Face cache or cannot be downloaded. "
+                    "For offline or air-gapped deployments, download both models "
+                    "on an internet-connected machine with 'hf download', copy "
+                    "the model directories into the deployment environment, and "
+                    "configure SEMANTIC_PLAGIARISM_MODEL to point to the local "
+                    "primary model directory. For example: `hf download "
+                    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 "
+                    "--local-dir /opt/models/paraphrase-multilingual-MiniLM-L12-v2` "
+                    "and `hf download sentence-transformers/all-MiniLM-L6-v2 "
+                    "--local-dir /opt/models/all-MiniLM-L6-v2`. "
+                    f"Primary error: {primary_exc!r}; fallback error: {fallback_exc!r}"
+                ) from fallback_exc
             device = _detect_device(loaded_model)
             logger.info(
                 "SentenceTransformer model [%s] running on device [%s]",
@@ -215,9 +243,11 @@ def _get_model() -> SentenceTransformer:
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 
-# Model weight filenames inspected by verify_model_cache_integrity() (issue #1580)
-_MODEL_WEIGHT_FILENAMES = ("pytorch_model.bin", "model.safetensors")
-
+# Model weight file extensions inspected by verify_model_cache_integrity()
+# (issue #1580, extended for issue #2919). Extension-based matching avoids
+# breaking when HuggingFace ships new weight formats (e.g. GGUF, ONNX)
+# under different filenames.
+_MODEL_WEIGHT_EXTENSIONS = (".bin", ".safetensors", ".onnx", ".gguf")
 
 def _resolve_cache_root() -> Path:
     """Resolve the HuggingFace hub cache root used for model downloads."""
@@ -237,10 +267,10 @@ def _model_cache_subdir(cache_root: Path, model_name: str) -> Path:
 def verify_model_cache_integrity(cache_dir: Path) -> bool:
     """Verify cached SentenceTransformer weight files are not corrupted.
 
-    Acceptance criteria (issue #1580):
-    - Inspects the model weight files ``pytorch_model.bin`` and
-      ``model.safetensors`` for zero-byte sizes.
-    - Returns ``True`` when the cache holds no corrupted weight files.
+    Acceptance criteria (issue #1580, extended by #2919):
+    - Inspects any cached file matching a known model weight extension
+      (``.bin``, ``.safetensors``, ``.onnx``, ``.gguf``) for zero-byte
+      sizes.    - Returns ``True`` when the cache holds no corrupted weight files.
     - Returns ``False`` when any cached weight file is zero bytes or
       unreadable, allowing the caller to re-download the model.
 
@@ -272,7 +302,7 @@ def verify_model_cache_integrity(cache_dir: Path) -> bool:
     corrupted: List[tuple[Path, str]] = []
     for root, _, filenames in os.walk(cache_path):
         for filename in filenames:
-            if filename not in _MODEL_WEIGHT_FILENAMES:
+            if not filename.endswith(_MODEL_WEIGHT_EXTENSIONS):
                 continue
             weight_path = Path(root) / filename
             try:

@@ -2,18 +2,16 @@
 # ── SECTION: INTELLIGENT DOCUMENT TAGGING & CATEGORIZATION (Issue #1988) ────
 # ───────────────────────────────────────────────────────────────────────────────
 
+import hashlib
 import re
-import json
 import uuid
+from collections import Counter, defaultdict
+from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import Dict, List, Optional, Set, Tuple, Any
-from collections import defaultdict, Counter
-from dataclasses import dataclass, asdict
+from typing import Dict, List, Optional, Tuple
+
 import pandas as pd
-import numpy as np
 import streamlit as st
-import plotly.graph_objects as go
-import plotly.express as px
 
 # ── Data Models ─────────────────────────────────────────────────────────────
 
@@ -381,6 +379,15 @@ class TagManager:
 
 # ── Auto-Categorizer ──────────────────────────────────────────────────────
 
+@st.cache_data(show_spinner=False)
+def _categorize_content(content: str) -> Tuple[List[Tuple[str, float]], str, float]:
+    """Cache the CPU-heavy tagging/category analysis for immutable document content."""
+    generator = IntelligentTagGenerator()
+    tags = generator.generate_tags(content)
+    category, confidence = generator.generate_categories(content)
+    return tags, category, confidence
+
+
 class AutoCategorizer:
     """Automatically categorizes documents"""
     
@@ -395,11 +402,8 @@ class AutoCategorizer:
         if not content:
             return {'status': 'failed', 'reason': 'No content'}
         
-        # Generate tags
-        tags = self.tag_generator.generate_tags(content)
-        
-        # Detect category
-        category, confidence = self.tag_generator.generate_categories(content)
+        # Cache the CPU-heavy analysis so repeated categorization does not block the UI.
+        tags, category, confidence = _categorize_content(content)
         
         # Assign tags
         assigned = []
@@ -536,7 +540,7 @@ def render_tag_management_ui(tag_manager: TagManager, document_name: str = None)
                             unsafe_allow_html=True
                         )
                         
-                        if st.button(f"❌", key=f"remove_{tag.id}_{document_name}"):
+                        if st.button("❌", key=f"remove_{tag.id}_{document_name}"):
                             tag_manager.unassign_tag(document_name, tag.name)
                             st.rerun()
             else:

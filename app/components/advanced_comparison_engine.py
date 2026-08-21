@@ -2,18 +2,16 @@
 # ── SECTION: ADVANCED DOCUMENT COMPARISON ENGINE (Issue #1999) ──────────────
 # ───────────────────────────────────────────────────────────────────────────────
 
-import re
 import math
-import hashlib
+import re
 from collections import Counter
-from typing import Dict, List, Tuple, Optional, Any
-from dataclasses import dataclass, asdict
-import numpy as np
-import pandas as pd
+from dataclasses import asdict, dataclass
 from difflib import SequenceMatcher
-import streamlit as st
+from typing import Any, Dict, List, Tuple
+
+import pandas as pd
 import plotly.graph_objects as go
-import plotly.express as px
+import streamlit as st
 
 # ── Data Models ─────────────────────────────────────────────────────────────
 

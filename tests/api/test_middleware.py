@@ -12,6 +12,7 @@ import os
 from unittest.mock import patch
 
 import pytest
+
 from src.api.middleware import _is_public_path, get_valid_tokens
 
 
@@ -195,7 +196,9 @@ class TestVerifyBearerToken:
         """Verify valid token passes verification."""
         import asyncio
         from unittest.mock import MagicMock
+
         from fastapi.security import HTTPAuthorizationCredentials
+
         from src.api.middleware import verify_bearer_token
 
         async def _test():
@@ -215,8 +218,10 @@ class TestVerifyBearerToken:
         """Verify ValueError during verification raises 401 without logging unexpected error."""
         import asyncio
         from unittest.mock import MagicMock
+
         from fastapi import HTTPException
         from fastapi.security import HTTPAuthorizationCredentials
+
         from src.api.middleware import verify_bearer_token
 
         async def _test():
@@ -236,8 +241,10 @@ class TestVerifyBearerToken:
         """Verify unexpected Exception during verification logs error with exc_info and raises 401."""
         import asyncio
         from unittest.mock import MagicMock
+
         from fastapi import HTTPException
         from fastapi.security import HTTPAuthorizationCredentials
+
         from src.api.middleware import verify_bearer_token
 
         async def _test():
@@ -307,7 +314,9 @@ class TestVerifyBearerToken:
         """Verify valid token passes verification."""
         import asyncio
         from unittest.mock import MagicMock
+
         from fastapi.security import HTTPAuthorizationCredentials
+
         from src.api.middleware import verify_bearer_token
 
         async def _test():
@@ -327,8 +336,10 @@ class TestVerifyBearerToken:
         """Verify ValueError during verification raises 401 without logging unexpected error."""
         import asyncio
         from unittest.mock import MagicMock
+
         from fastapi import HTTPException
         from fastapi.security import HTTPAuthorizationCredentials
+
         from src.api.middleware import verify_bearer_token
 
         async def _test():
@@ -348,8 +359,10 @@ class TestVerifyBearerToken:
         """Verify unexpected Exception during verification logs error with exc_info and raises 401."""
         import asyncio
         from unittest.mock import MagicMock
+
         from fastapi import HTTPException
         from fastapi.security import HTTPAuthorizationCredentials
+
         from src.api.middleware import verify_bearer_token
 
         async def _test():
@@ -375,7 +388,9 @@ class TestVerifyBearerToken:
 def test_get_current_user_jwt_without_scopes_defaults_to_empty_list():
     """Verify JWT token without explicit scopes claim defaults to [] instead of read/write."""
     import asyncio
+
     from fastapi.security import SecurityScopes
+
     from src.api.middleware import get_current_user
 
     async def _test():
@@ -389,4 +404,26 @@ def test_get_current_user_jwt_without_scopes_defaults_to_empty_list():
                 assert res["scopes"] == []
 
     asyncio.run(_test())
+
+
+def test_no_inline_imports_in_middleware_functions():
+    """Verify src/api/middleware.py has no inline imports inside function bodies (Issue #3016)."""
+    import ast
+    from pathlib import Path
+
+    middleware_path = Path(__file__).resolve().parent.parent.parent / "src" / "api" / "middleware.py"
+    tree = ast.parse(middleware_path.read_text(encoding="utf-8"))
+
+    # Traverse AST to ensure no Import or ImportFrom exists inside FunctionDef/AsyncFunctionDef
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for child in ast.walk(node):
+                if child is not node and isinstance(child, (ast.Import, ast.ImportFrom)):
+                    imported_names = [alias.name for alias in child.names]
+                    module_name = getattr(child, "module", "")
+                    pytest.fail(
+                        f"Found inline import '{module_name} -> {imported_names}' inside function "
+                        f"'{node.name}' at line {child.lineno} in {middleware_path.name}"
+                    )
+
 

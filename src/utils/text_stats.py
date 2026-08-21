@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 text_stats.py
 -------------
@@ -9,6 +7,8 @@ Provides functions to compute various text metrics such as word count,
 sentence count, and unique word ratio. These metrics are used in
 plagiarism reports to provide additional context about compared documents.
 """
+
+from __future__ import annotations
 
 import logging
 import re
@@ -241,6 +241,15 @@ def format_stats_for_pdf(stats: Dict[str, float]) -> List[List[str]]:
 
 
 logger = logging.getLogger(__name__)
+
+
+def get_word_count(text: str) -> int:
+    """Deprecated alias for :func:`count_words`.
+
+    Kept for backward compatibility with existing callers/tests. New code
+    should call :func:`count_words` directly.
+    """
+    return count_words(text)
 
 
 def get_char_count(text: str) -> int:

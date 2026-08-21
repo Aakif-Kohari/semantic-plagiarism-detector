@@ -1,6 +1,9 @@
 from unittest.mock import patch
-import pytest
-from src.pdf_router import process_pdf_page  # Adjust import based on your project structure
+
+from src.pdf_router import (
+    process_pdf_page,  # Adjust import based on your project structure
+)
+
 
 @patch("src.pdf_router.pytesseract.image_to_string")
 def test_ocr_fallback_heuristic(mock_image_to_string):

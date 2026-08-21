@@ -12,7 +12,7 @@ import sqlite3
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from src.core.app_config import CORPUS_DB_PATH, FALLBACK_DATA_DIR
 from src.core.concurrency import with_sqlite_retry

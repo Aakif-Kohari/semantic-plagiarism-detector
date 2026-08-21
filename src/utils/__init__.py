@@ -2,6 +2,8 @@
 Utils package for semantic plagiarism detector.
 """
 
+# Issue #2781: OS compatibility patches
+from .os_compat import apply_asyncio_patches, get_os_platform
 from .pdf_report import generate_plagiarism_report
 from .text_stats import (
     compute_text_stats,
@@ -20,4 +22,6 @@ __all__ = [
     "count_words",
     "format_stats_for_pdf",
     "get_unique_word_ratio",
+    "apply_asyncio_patches",
+    "get_os_platform",
 ]

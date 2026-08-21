@@ -53,7 +53,7 @@ def cosine_distance_to_similarity(distance: float) -> float:
 # ── Validation helpers ─────────────────────────────────────────────────────────
 
 
-def _validated_batch_size(batch_size: Optional[int]) -> Optional[int]:
+def _validated_batch_size(batch_size: Optional[Union[int, float, str]]) -> Optional[int]:
     """Return a safe integer batch size or None for unbatched execution."""
     from src.errors import SIM_BATCH_SIZE_INVALID
 
@@ -61,14 +61,15 @@ def _validated_batch_size(batch_size: Optional[int]) -> Optional[int]:
         return None
     if isinstance(batch_size, bool):
         raise ValueError(SIM_BATCH_SIZE_INVALID)
-    if isinstance(batch_size, (float, np.floating)):
-        if not float(batch_size).is_integer():
-            raise ValueError(SIM_BATCH_SIZE_INVALID)
-        batch_size = int(batch_size)
     try:
-        size = int(batch_size)
+        val_float = float(batch_size)
     except (TypeError, ValueError) as exc:
         raise ValueError(SIM_BATCH_SIZE_INVALID) from exc
+
+    if not val_float.is_integer():
+        raise ValueError(SIM_BATCH_SIZE_INVALID)
+
+    size = int(val_float)
     return size if size > 0 else None
 
 
@@ -169,9 +170,16 @@ def document_similarity_matrix(
     batch_size: Optional[int] = None,
     min_threshold: float = 0.0,
     min_percentile: Optional[float] = None,
+    top_k: Optional[int] = None,
+    candidate_pairs: Optional[Set[Tuple[str, str]]] = None,
+    pooling: str = "mean",
+    use_hnsw: bool = False,
 ) -> Union[pd.DataFrame, np.ndarray]:
     """
     Build an N×N cosine similarity matrix between all document pairs.
+
+    Optionally pre-filters comparisons using an ephemeral FAISS index (when top_k is provided)
+    or an explicit candidate_pairs set, drastically reducing direct cosine similarity computations.
 
     Args:
         doc_embeddings: Dict mapping doc name → embedding array, or direct array/list of embeddings.
@@ -179,40 +187,102 @@ def document_similarity_matrix(
             if not specified to prevent out-of-memory errors on large workloads.
         min_threshold: Minimum similarity score to keep; values below this will be 0.0.
         min_percentile: Optional percentile threshold for filtering.
+        top_k: Optional top-K nearest neighbors to pre-filter document pairs using FAISS.
+        candidate_pairs: Optional pre-computed candidate pair set (doc_a, doc_b).
+        pooling: Pooling strategy for multi-chunk document embeddings ('mean' or 'max').
+        use_hnsw: Optional boolean flag to enable HNSW index filtering for performance.
 
     Returns:
         Symmetric pandas DataFrame or numpy ndarray with similarity values.
     """
     safe_batch_size = _validated_batch_size(batch_size) or DEFAULT_BATCH_SIZE
 
-    if isinstance(doc_embeddings, (np.ndarray, list)):
-        if isinstance(doc_embeddings, np.ndarray):
-            if doc_embeddings.ndim == 1 or doc_embeddings.size == 0:
-                return np.array([[]])
-            stacked = doc_embeddings
-        else:
-            if len(doc_embeddings) == 0:
-                return np.array([[]])
-            doc_vectors = []
-            for emb in doc_embeddings:
-                if isinstance(emb, np.ndarray):
-                    if emb.ndim == 2 and emb.shape[0] > 0:
-                        vec = np.mean(emb, axis=0)
-                    elif emb.ndim == 1 and emb.shape[0] > 0:
-                        vec = emb
-                    else:
-                        vec = np.zeros(384)
-                else:
-                    vec = np.zeros(384)
-                doc_vectors.append(vec)
-            if not doc_vectors:
-                return np.array([[]])
-            stacked = np.vstack(doc_vectors)
+    if not isinstance(pooling, str) or pooling.lower() not in ("mean", "max"):
+        raise ValueError(
+            f"Invalid pooling method '{pooling}'. Supported methods: 'mean', 'max'."
+        )
 
-        n = stacked.shape[0]
-        matrix = np.zeros((n, n), dtype=np.float64)
-        for start in range(0, n, safe_batch_size):
-            end = min(start + safe_batch_size, n)
+    pooling_fn = np.max if pooling.lower() == "max" else np.mean
+
+    if isinstance(doc_embeddings, (np.ndarray, list)):
+        if (
+            isinstance(doc_embeddings, list)
+            and len(doc_embeddings) > 0
+            and isinstance(doc_embeddings[0], np.ndarray)
+            and doc_embeddings[0].ndim == 2
+        ):
+            pooled_list = []
+            for emb in doc_embeddings:
+                if emb.ndim == 2 and emb.shape[0] > 0:
+                    pooled_list.append(pooling_fn(emb, axis=0))
+                else:
+                    pooled_list.append(emb)
+            stacked = np.array(pooled_list)
+        else:
+            stacked = np.array(doc_embeddings)
+
+        if stacked.ndim == 1 or stacked.size == 0:
+            return np.array([[]])
+
+        if use_hnsw:
+            try:
+                import faiss
+                n = len(stacked)
+                d = stacked.shape[1]
+                norms = np.linalg.norm(stacked, axis=1, keepdims=True)
+                norms = np.where(norms == 0, 1.0, norms)
+                normalized_stacked = stacked / norms
+
+                index = faiss.IndexHNSWFlat(d, 32, faiss.METRIC_INNER_PRODUCT)
+                index.add(normalized_stacked)
+
+                k = min(50, n)
+                D, I = index.search(normalized_stacked, k)
+
+                sim = np.zeros((n, n))
+                for i in range(n):
+                    candidates = [c for c in I[i] if c != -1]
+                    if not candidates:
+                        continue
+                    vec_i = stacked[i : i + 1]
+                    vecs_candidates = stacked[candidates]
+                    scores = cosine_similarity(vec_i, vecs_candidates)[0]
+                    scores = np.clip(scores, 0.0, 1.0)
+                    for idx_in_candidates, candidate_idx in enumerate(candidates):
+                        val = scores[idx_in_candidates]
+                        if val >= min_threshold:
+                            sim[i, candidate_idx] = val
+                            sim[candidate_idx, i] = val
+                sim = np.where(sim < min_threshold, 0.0, sim)
+                return _apply_min_percentile_filter(sim, min_percentile)
+            except Exception as e:
+                logger.warning(
+                    f"HNSW indexing failed: {e}. Falling back to exact pairwise computation."
+                )
+
+        if top_k is not None and top_k > 0 and stacked.shape[0] > top_k:
+            n_items = stacked.shape[0]
+            matrix = np.zeros((n_items, n_items))
+            np.fill_diagonal(matrix, 1.0)
+            dim = stacked.shape[1]
+            index = faiss.IndexFlatIP(dim)
+            matrix_f32 = stacked.astype("float32")
+            index.add(matrix_f32)
+            _, indices = index.search(matrix_f32, min(top_k + 1, n_items))
+            for i in range(n_items):
+                for j in indices[i]:
+                    if j < n_items and j != i:
+                        sim_val = float(np.dot(stacked[i], stacked[j]))
+                        sim_val = float(np.clip(sim_val, 0.0, 1.0))
+                        if sim_val >= min_threshold:
+                            matrix[i, j] = sim_val
+                            matrix[j, i] = sim_val
+            return _apply_min_percentile_filter(matrix, min_percentile)
+
+        n_items = stacked.shape[0]
+        matrix = np.zeros((n_items, n_items), dtype=np.float64)
+        for start in range(0, n_items, safe_batch_size):
+            end = min(start + safe_batch_size, n_items)
             sim = cosine_similarity(stacked[start:end], stacked)
             sim = np.clip(sim, 0.0, 1.0)
             matrix[start:end] = np.where(sim < min_threshold, 0.0, sim)
@@ -221,13 +291,13 @@ def document_similarity_matrix(
     doc_names = list(doc_embeddings.keys())
     n = len(doc_names)
 
-    # Build document-level vectors (mean pool over chunks)
+    # Build document-level vectors (mean or max pool over chunks)
     doc_vectors = []
     for name in doc_names:
         emb = doc_embeddings[name]
         if isinstance(emb, np.ndarray):
             if emb.ndim == 2 and emb.shape[0] > 0:
-                vec = np.mean(emb, axis=0)
+                vec = pooling_fn(emb, axis=0)
             elif emb.ndim == 1 and emb.shape[0] > 0:
                 vec = emb
             else:
@@ -237,13 +307,70 @@ def document_similarity_matrix(
         doc_vectors.append(vec)
 
     matrix = np.zeros((n, n))
+    np.fill_diagonal(matrix, 1.0)
+
     if doc_vectors:
         stacked = np.vstack(doc_vectors)
-        for start in range(0, n, safe_batch_size):
-            end = min(start + safe_batch_size, n)
-            sim = cosine_similarity(stacked[start:end], stacked)
-            sim = np.clip(sim, 0.0, 1.0)
-            matrix[start:end] = np.where(sim < min_threshold, 0.0, sim)
+
+        if use_hnsw:
+            try:
+                import faiss
+                d = stacked.shape[1]
+                norms = np.linalg.norm(stacked, axis=1, keepdims=True)
+                norms = np.where(norms == 0, 1.0, norms)
+                normalized_stacked = stacked / norms
+
+                index = faiss.IndexHNSWFlat(d, 32, faiss.METRIC_INNER_PRODUCT)
+                index.add(normalized_stacked)
+
+                k = min(50, n)
+                D, I = index.search(normalized_stacked, k)
+
+                for i in range(n):
+                    candidates = [c for c in I[i] if c != -1]
+                    if not candidates:
+                        continue
+                    vec_i = stacked[i : i + 1]
+                    vecs_candidates = stacked[candidates]
+                    scores = cosine_similarity(vec_i, vecs_candidates)[0]
+                    scores = np.clip(scores, 0.0, 1.0)
+                    for idx_in_candidates, candidate_idx in enumerate(candidates):
+                        val = scores[idx_in_candidates]
+                        if val >= min_threshold:
+                            matrix[i, candidate_idx] = val
+                            matrix[candidate_idx, i] = val
+                matrix = np.where(matrix < min_threshold, 0.0, matrix)
+                df = pd.DataFrame(matrix, index=doc_names, columns=doc_names)
+                return _apply_min_percentile_filter(df, min_percentile)
+            except Exception as e:
+                logger.warning(
+                    f"HNSW indexing failed: {e}. Falling back to exact pairwise computation."
+                )
+
+        # Pre-filtering with FAISS top_k or candidate_pairs
+        active_candidates = candidate_pairs
+        if active_candidates is None and top_k is not None and top_k > 0 and n > top_k:
+            active_candidates = find_candidate_pairs(doc_names, doc_vectors, top_k=top_k)
+
+        if active_candidates is not None:
+            name_to_idx = {name: i for i, name in enumerate(doc_names)}
+            for a, b in active_candidates:
+                if a in name_to_idx and b in name_to_idx:
+                    i, j = name_to_idx[a], name_to_idx[b]
+                    vec_i = stacked[i].reshape(1, -1)
+                    vec_j = stacked[j].reshape(1, -1)
+                    sim_val = float(cosine_similarity(vec_i, vec_j)[0, 0])
+                    sim_val = float(np.clip(sim_val, 0.0, 1.0))
+                    if sim_val >= min_threshold:
+                        matrix[i, j] = sim_val
+                        matrix[j, i] = sim_val
+        else:
+            for start in range(0, n, safe_batch_size):
+                end = min(start + safe_batch_size, n)
+                sim = cosine_similarity(stacked[start:end], stacked)
+                sim = np.clip(sim, 0.0, 1.0)
+                matrix[start:end] = np.where(sim < min_threshold, 0.0, sim)
+
 
     df = pd.DataFrame(matrix, index=doc_names, columns=doc_names)
     return _apply_min_percentile_filter(df, min_percentile)
@@ -254,6 +381,10 @@ def compute_similarity_matrix(
     batch_size: Optional[int] = None,
     min_threshold: float = 0.0,
     min_percentile: Optional[float] = None,
+    top_k: Optional[int] = None,
+    candidate_pairs: Optional[Set[Tuple[str, str]]] = None,
+    pooling: str = "mean",
+    use_hnsw: bool = False,
 ) -> Union[pd.DataFrame, np.ndarray]:
     """
     Direct alias/wrapper for document_similarity_matrix to maintain backwards compatibility
@@ -264,17 +395,86 @@ def compute_similarity_matrix(
         batch_size=batch_size,
         min_threshold=min_threshold,
         min_percentile=min_percentile,
+        top_k=top_k,
+        candidate_pairs=candidate_pairs,
+        pooling=pooling,
+        use_hnsw=use_hnsw,
     )
+
 
 
 # ── Hybrid similarity (lexical + semantic) ─────────────────────────────────────
 
 
+def normalize_scores(
+    scores: Union[pd.DataFrame, np.ndarray, float],
+    method: Optional[str] = None,
+) -> Union[pd.DataFrame, np.ndarray, float]:
+    """
+    Normalize score matrix, array, or scalar float value using Z-Score or Min-Max normalization.
+
+    Args:
+        scores: Input similarity scores (DataFrame, ndarray, or scalar float).
+        method: Normalization method ('minmax', 'min-max', 'zscore', 'z-score', or None).
+
+    Returns:
+        Normalized score object of the same type as input.
+    """
+    if method is None or str(method).lower() in ("none", ""):
+        return scores
+
+    norm_method = str(method).lower()
+    if norm_method not in ("minmax", "min-max", "zscore", "z-score"):
+        raise ValueError(
+            f"Invalid normalization method '{method}'. Supported methods: 'minmax', 'zscore', or None."
+        )
+
+    if isinstance(scores, (int, float, np.number)):
+        return float(scores)
+
+    is_df = isinstance(scores, pd.DataFrame)
+    arr = scores.values if is_df else np.asarray(scores, dtype=float)
+
+    if arr.size <= 1:
+        return scores
+
+    if norm_method in ("minmax", "min-max"):
+        min_val = float(np.min(arr))
+        max_val = float(np.max(arr))
+        if max_val > min_val:
+            norm_arr = (arr - min_val) / (max_val - min_val)
+        else:
+            norm_arr = np.zeros_like(arr)
+    else:  # zscore / z-score
+        mean_val = float(np.mean(arr))
+        std_val = float(np.std(arr))
+        if std_val > 0:
+            norm_arr = (arr - mean_val) / std_val
+        else:
+            norm_arr = arr - mean_val
+
+    if is_df:
+        return pd.DataFrame(norm_arr, index=scores.index, columns=scores.columns)
+    return norm_arr
+
+
 def hybrid_similarity_matrix(
-    semantic_df: pd.DataFrame, lexical_df: pd.DataFrame, w: float = 0.7
+    semantic_df: pd.DataFrame,
+    lexical_df: pd.DataFrame,
+    w: float = 0.7,
+    normalize: Optional[str] = None,
 ) -> pd.DataFrame:
     """
     Combine semantic and lexical similarity matrices using a weighted formula.
+
+    Args:
+        semantic_df: Semantic similarity matrix (pandas DataFrame).
+        lexical_df: Lexical similarity matrix (pandas DataFrame).
+        w: Weight factor for semantic similarity (default: 0.7).
+        normalize: Optional score normalization method before combining ('minmax', 'zscore', or None).
+
+    Returns:
+        Combined hybrid similarity pandas DataFrame.
     """
     if not (0.0 <= w <= 1.0):
         from src.errors import SIM_WEIGHT_OUT_OF_RANGE
@@ -292,7 +492,10 @@ def hybrid_similarity_matrix(
 
         raise ValueError(SIM_INDEX_MISMATCH)
 
-    hybrid_df = w * semantic_df + (1 - w) * lexical_df
+    sem_scores = normalize_scores(semantic_df, method=normalize)
+    lex_scores = normalize_scores(lexical_df, method=normalize)
+
+    hybrid_df = w * sem_scores + (1 - w) * lex_scores
     return hybrid_df
 
 
@@ -1012,28 +1215,35 @@ def detect_plagiarism_clusters(
 # HYBRID SIMILARITY INTEGRATION - Issue #2676
 # ============================================================================
 
-from src.core.hybrid_scorer import HybridScorer, HybridConfig, compute_hybrid_plagiarism_flags
+from src.core.hybrid_scorer import HybridConfig, HybridScorer
+
 
 def compute_hybrid_similarity_df(
     semantic_df: pd.DataFrame,
     texts: Dict[str, str],
     alpha: float = 0.7,
     lexical_method: str = "tfidf",
+    normalize: Optional[str] = None,
 ) -> pd.DataFrame:
     """
     Compute hybrid similarity DataFrame combining semantic and lexical scores.
-    
+
     Args:
         semantic_df: Semantic similarity DataFrame
         texts: Document texts
         alpha: Semantic weight (0.7 = 70% semantic, 30% lexical)
         lexical_method: Lexical method to use
-    
+        normalize: Normalization method ('minmax', 'zscore', or None)
+
     Returns:
         Hybrid similarity DataFrame
     """
-    scorer = HybridScorer(HybridConfig(alpha=alpha, lexical_method=lexical_method))
-    return scorer.compute_hybrid_matrix(texts, semantic_df, alpha, lexical_method)
+    scorer = HybridScorer(
+        HybridConfig(alpha=alpha, lexical_method=lexical_method, normalize=normalize)
+    )
+    return scorer.compute_hybrid_matrix(
+        texts, semantic_df, alpha, lexical_method, normalize=normalize
+    )
 
 
 def flag_plagiarism_hybrid(

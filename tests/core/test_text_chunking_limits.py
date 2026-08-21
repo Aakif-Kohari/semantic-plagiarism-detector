@@ -7,8 +7,8 @@ Ensures the chunking pipeline is robust against memory exhaustion
 attacks via extremely large document uploads.
 """
 
-import pytest
 import logging
+
 from src.core.text_chunking import chunk_by_sentences
 
 

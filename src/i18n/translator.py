@@ -13,7 +13,8 @@ import html
 import json
 import logging
 import os
-from typing import Any, Dict
+import re
+from typing import Any, Dict, List
 
 import streamlit as st
 
@@ -27,7 +28,6 @@ _SUPPORTED_LANGUAGES = {
     "de": "Deutsch",
     "pt": "Português",
     "zh": "中文",
-
 }
 LANGUAGE_DISPLAY = _SUPPORTED_LANGUAGES
 DISPLAY_TO_CODE = {
@@ -109,6 +109,112 @@ def clear_translation_cache() -> None:
 # Preload translations on module import. Streamlit's cache prevents
 # repeated disk I/O when this function is invoked during reruns.
 load_translations()
+
+
+#: Matches the field name at the start of a ``str.format`` replacement field,
+#: e.g. ``ai_a`` in ``{ai_a:.1%}``. Doubled braces are literal and skipped.
+_FORMAT_FIELD_RE = re.compile(r"(?<!\{)\{([a-zA-Z_][a-zA-Z0-9_]*)")
+
+REFERENCE_LANGUAGE = "en"
+
+
+def supported_language_codes() -> List[str]:
+    """Return the language codes offered in the picker.
+
+    Returns:
+        The codes in ``_SUPPORTED_LANGUAGES``, in declaration order.
+    """
+    return list(_SUPPORTED_LANGUAGES)
+
+
+def _format_fields(template: str) -> List[str]:
+    """Return the sorted, de-duplicated field names used by *template*.
+
+    Args:
+        template: A ``str.format``-style string.
+
+    Returns:
+        Field names, e.g. ``["ai_a", "ai_b", "doc_a", "doc_b"]``.
+    """
+    return sorted(set(_FORMAT_FIELD_RE.findall(template)))
+
+
+def missing_translation_keys(lang_code: str) -> List[str]:
+    """Return the English keys that *lang_code* does not translate.
+
+    A locale file that is missing a key is not broken — ``get_text`` falls
+    back to English per key — but the language picker offers the language as
+    though it were finished, and nothing else surfaces the gap. This makes it
+    inspectable, and lets a test fail on it.
+
+    Args:
+        lang_code: The language code to inspect, e.g. ``"pt"``.
+
+    Returns:
+        Sorted keys present in English and absent from *lang_code*. Empty when
+        the locale is complete, and empty for English itself.
+    """
+    if not _translations:
+        load_translations()
+
+    reference = _translations.get(REFERENCE_LANGUAGE, {})
+    translated = _translations.get(lang_code, {})
+
+    return sorted(set(reference) - set(translated))
+
+
+def placeholder_mismatches(lang_code: str) -> Dict[str, tuple]:
+    """Return keys whose placeholders differ from the English original.
+
+    A translation that renames ``{doc_a}`` or drops ``{ai_a:.1%}`` does not
+    fail loudly: :func:`format_text` catches the ``KeyError`` and returns the
+    raw template, so the user sees ``"{doc_a}"`` on screen. Comparing field
+    names catches that before it ships.
+
+    Args:
+        lang_code: The language code to inspect.
+
+    Returns:
+        Mapping of key to ``(english_fields, translated_fields)`` for every
+        key whose field names disagree. Empty when the locale is consistent.
+    """
+    if not _translations:
+        load_translations()
+
+    reference = _translations.get(REFERENCE_LANGUAGE, {})
+    translated = _translations.get(lang_code, {})
+
+    mismatches: Dict[str, tuple] = {}
+    for key, english_template in reference.items():
+        if key not in translated:
+            continue
+
+        english_fields = _format_fields(english_template)
+        local_fields = _format_fields(translated[key])
+        if english_fields != local_fields:
+            mismatches[key] = (english_fields, local_fields)
+
+    return mismatches
+
+
+def translation_coverage(lang_code: str) -> float:
+    """Return the fraction of English keys that *lang_code* translates.
+
+    Args:
+        lang_code: The language code to inspect.
+
+    Returns:
+        A value in ``[0.0, 1.0]``. ``1.0`` when the locale is complete, and
+        ``1.0`` when English carries no keys at all.
+    """
+    if not _translations:
+        load_translations()
+
+    reference = _translations.get(REFERENCE_LANGUAGE, {})
+    if not reference:
+        return 1.0
+
+    return 1.0 - len(missing_translation_keys(lang_code)) / len(reference)
 
 
 class _EscapedValue:

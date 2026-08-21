@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import logging
+import shutil
 import sqlite3
+from pathlib import Path
 
 from .common import column_exists, run_migrations, table_exists
 
+logger = logging.getLogger(__name__)
 CORPUS_SCHEMA_VERSION = 15
 
 
@@ -375,13 +379,160 @@ CORPUS_MIGRATIONS = {
 }
 
 
+def _drop_column_if_exists(
+    connection: sqlite3.Connection, table_name: str, column_name: str
+) -> None:
+    if column_exists(connection, table_name, column_name):
+        try:
+            connection.execute(f'ALTER TABLE "{table_name}" DROP COLUMN "{column_name}"')
+        except sqlite3.OperationalError:
+            pass
+
+
+def down_001_create_base_schema(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP TABLE IF EXISTS chunks")
+    connection.execute("DROP TABLE IF EXISTS documents")
+
+
+def down_002_add_document_metadata(connection: sqlite3.Connection) -> None:
+    for col in ("class_section", "student_name", "assignment_title"):
+        _drop_column_if_exists(connection, "documents", col)
+
+
+def down_003_add_required_indexes(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP INDEX IF EXISTS idx_documents_upload_date")
+    connection.execute("DROP INDEX IF EXISTS idx_documents_class_section")
+    connection.execute("DROP INDEX IF EXISTS idx_chunks_filename")
+
+
+def down_004_add_plagiarism_incidents(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP INDEX IF EXISTS idx_incidents_status")
+    connection.execute("DROP TABLE IF EXISTS plagiarism_incidents")
+
+
+def down_005_add_false_positives(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP TABLE IF EXISTS false_positives")
+
+
+def down_006_add_incident_threshold_snapshot(connection: sqlite3.Connection) -> None:
+    _drop_column_if_exists(connection, "plagiarism_incidents", "threshold_at_time_of_flag")
+
+
+def down_007_add_document_language(connection: sqlite3.Connection) -> None:
+    _drop_column_if_exists(connection, "documents", "detected_language")
+
+
+def down_008_add_soft_delete(connection: sqlite3.Connection) -> None:
+    _drop_column_if_exists(connection, "documents", "is_deleted")
+    _drop_column_if_exists(connection, "documents", "deleted_at")
+
+
+def down_009_add_file_hash_index(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP INDEX IF EXISTS idx_documents_file_hash")
+
+
+def down_010_add_document_owner(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP INDEX IF EXISTS idx_documents_owner")
+    _drop_column_if_exists(connection, "documents", "owner")
+
+
+def down_011_add_documents_created_at_index(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP INDEX IF EXISTS idx_documents_created_at")
+    _drop_column_if_exists(connection, "documents", "created_at")
+
+
+def down_012_add_fts5_index(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP TRIGGER IF EXISTS documents_ai")
+    connection.execute("DROP TRIGGER IF EXISTS documents_ad")
+    connection.execute("DROP TRIGGER IF EXISTS documents_au")
+    connection.execute("DROP TABLE IF EXISTS documents_fts")
+
+
+def down_013_add_incident_archive_table(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP TABLE IF EXISTS incidents_archive")
+
+
+def down_014_add_incident_severity_idx(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP INDEX IF EXISTS idx_incidents_severity_time")
+
+
+def down_015_pattern_recognition(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP INDEX IF EXISTS idx_recommendations_priority")
+    connection.execute("DROP INDEX IF EXISTS idx_recommendations_status")
+    connection.execute("DROP TABLE IF EXISTS proactive_recommendations")
+    connection.execute("DROP INDEX IF EXISTS idx_risk_level")
+    connection.execute("DROP TABLE IF EXISTS document_risk_scores")
+    connection.execute("DROP INDEX IF EXISTS idx_evolution_date")
+    connection.execute("DROP INDEX IF EXISTS idx_evolution_pattern")
+    connection.execute("DROP TABLE IF EXISTS pattern_evolution")
+    connection.execute("DROP INDEX IF EXISTS idx_patterns_severity")
+    connection.execute("DROP INDEX IF EXISTS idx_patterns_status")
+    connection.execute("DROP INDEX IF EXISTS idx_patterns_type")
+    connection.execute("DROP TABLE IF EXISTS plagiarism_patterns")
+
+
+CORPUS_DOWN_MIGRATIONS = {
+    1: down_001_create_base_schema,
+    2: down_002_add_document_metadata,
+    3: down_003_add_required_indexes,
+    4: down_004_add_plagiarism_incidents,
+    5: down_005_add_false_positives,
+    6: down_006_add_incident_threshold_snapshot,
+    7: down_007_add_document_language,
+    8: down_008_add_soft_delete,
+    9: down_009_add_file_hash_index,
+    10: down_010_add_document_owner,
+    11: down_011_add_documents_created_at_index,
+    12: down_012_add_fts5_index,
+    13: down_013_add_incident_archive_table,
+    14: down_014_add_incident_severity_idx,
+    15: down_015_pattern_recognition,
+}
+
+
+def _corpus_db_file_path(connection: sqlite3.Connection) -> Path | None:
+    """Return the on-disk path of the connection's "main" database.
+
+    Returns ``None`` for in-memory or temporary databases (no file to
+    back up).
+    """
+    for _, name, filename in connection.execute("PRAGMA database_list"):
+        if name == "main" and filename:
+            return Path(filename)
+    return None
+
+
 def migrate_corpus_database(
     connection: sqlite3.Connection,
 ) -> int:
-    """Upgrade corpus.db to the latest supported schema version."""
+    """Upgrade corpus.db to the latest supported schema version.
+
+    SQLite does not fully support transactional DDL, so a mid-migration
+    failure can leave the database half-migrated. To protect against
+    this (issue #2929), the on-disk database file is copied to
+    ``corpus_pre_migrate.db.bak`` before any migration scripts run. If a
+    migration raises, the original file is restored from that backup.
+    """
     connection.execute("PRAGMA foreign_keys = ON")
-    return run_migrations(
-        connection,
-        migrations=CORPUS_MIGRATIONS,
-        target_version=CORPUS_SCHEMA_VERSION,
-    )
+
+    db_path = _corpus_db_file_path(connection)
+    backup_path = db_path.with_name("corpus_pre_migrate.db.bak") if db_path else None
+
+    if backup_path is not None:
+        shutil.copy2(db_path, backup_path)
+
+    try:
+        return run_migrations(
+            connection,
+            migrations=CORPUS_MIGRATIONS,
+            target_version=CORPUS_SCHEMA_VERSION,
+        )
+    except Exception:
+        if backup_path is not None and backup_path.exists():
+            logger.error(
+                "Migration failed; restoring corpus.db from backup %s.",
+                backup_path,
+            )
+            connection.close()
+            shutil.copy2(backup_path, db_path)
+        raise

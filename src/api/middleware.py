@@ -7,6 +7,9 @@ from typing import Dict, List, Optional
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, SecurityScopes
 
+from src.db import auth as db_auth
+from src.security import jwt_utils
+
 # Expected JWT verification exceptions
 _JWT_EXCEPTIONS = [ValueError]
 try:
@@ -33,6 +36,7 @@ PUBLIC_PATH_PREFIXES = (
     "/health",
     "/healthz",
     "/metrics",
+    "/auth",
     "/api/v1/auth",
     "/api/v1/version",
     "/api/v1/healthz",
@@ -164,10 +168,8 @@ async def verify_bearer_token(
     if credentials and credentials.credentials in valid_tokens:
         is_valid = True
     elif credentials and credentials.credentials:
-        from src.security.jwt_utils import verify_access_token
-
         try:
-            verify_access_token(credentials.credentials)
+            jwt_utils.verify_access_token(credentials.credentials)
             is_valid = True
         except JWT_EXCEPTIONS:
             is_valid = False
@@ -184,14 +186,29 @@ async def verify_bearer_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    from src.db.auth import is_token_revoked
-
-    if is_token_revoked(credentials.credentials):
+    if db_auth.is_token_revoked(credentials.credentials):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token has been revoked.",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # Perform token-bucket rate limiting per credentials.credentials (Issue #2921)
+    if credentials and credentials.credentials:
+        from src.security.rate_limiter import get_token_bucket_limiter
+
+        token_str = credentials.credentials
+        limiter = get_token_bucket_limiter()
+        if not limiter.consume(token_str):
+            logger.warning(
+                "Rate limit exceeded for API Bearer token: %s...",
+                token_str[:8] if len(token_str) >= 8 else token_str,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Rate limit exceeded for API Bearer token. Please slow down requests.",
+                headers={"Retry-After": "1"},
+            )
 
     return credentials.credentials
 
@@ -210,10 +227,8 @@ async def get_current_user(
     if token in valid_tokens:
         token_scopes = valid_tokens[token]
     else:
-        from src.security.jwt_utils import verify_access_token
-
         try:
-            payload = verify_access_token(token)
+            payload = jwt_utils.verify_access_token(token)
             token_scopes = payload.get("scopes", [])
         except Exception:
             token_scopes = []

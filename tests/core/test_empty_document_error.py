@@ -5,12 +5,12 @@ Comprehensive unit tests for the EmptyDocumentError exception and its
 integration into the document parsing and UI/CLI pipelines (Issue #2724).
 """
 
-import pytest
-import io
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-from src.errors import EmptyDocumentError
+import pytest
+
 from src.core.document_parser import extract_text
+from src.errors import EmptyDocumentError
 
 
 class TestEmptyDocumentErrorClass:

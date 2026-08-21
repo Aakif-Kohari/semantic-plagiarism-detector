@@ -7,9 +7,10 @@ Verifies that malformed requests trigger the correct logging behavior
 and return properly structured 422 JSON responses. Addresses Issue #2564.
 """
 
-import pytest
 import logging
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock
+
+import pytest
 from fastapi import Request, status
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ValidationError

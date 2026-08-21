@@ -5,20 +5,22 @@ Combines lexical (TF-IDF, Jaccard) and semantic (Sentence-BERT) similarity
 for more robust plagiarism detection.
 """
 
+import logging
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
+
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Tuple, Optional, Any
-from dataclasses import dataclass, field
-import logging
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+
 from src.core.lexical_similarity import (
-    jaccard_similarity,
-    dice_coefficient,
-    overlap_coefficient,
-    n_gram_overlap,
-    compute_char_ngram_similarity,
     STOPWORDS,
+    compute_char_ngram_similarity,
+    dice_coefficient,
+    jaccard_similarity,
+    n_gram_overlap,
+    overlap_coefficient,
 )
 
 logger = logging.getLogger(__name__)
@@ -48,6 +50,7 @@ class HybridConfig:
     ngram_n: int = 3
     char_ngram_n: int = 5
     tfidf_max_features: int = 5000
+    normalize: Optional[str] = None  # Normalization method: None, 'minmax', or 'zscore'
 
 
 class HybridScorer:
@@ -186,6 +189,7 @@ class HybridScorer:
         semantic_matrix: Optional[pd.DataFrame] = None,
         alpha: Optional[float] = None,
         lexical_method: Optional[str] = None,
+        normalize: Optional[str] = None,
     ) -> pd.DataFrame:
         """
         Compute hybrid similarity matrix for all document pairs.
@@ -195,12 +199,16 @@ class HybridScorer:
             semantic_matrix: Pre-computed semantic matrix (optional)
             alpha: Semantic weight (default: from config)
             lexical_method: Lexical method (default: from config)
+            normalize: Normalization method ('minmax', 'zscore', or None)
         
         Returns:
             Hybrid similarity DataFrame
         """
+        from src.core.similarity import normalize_scores
+
         alpha = alpha if alpha is not None else self.config.alpha
         lexical_method = lexical_method or self.config.lexical_method
+        normalize = normalize if normalize is not None else self.config.normalize
         
         doc_names = list(texts.keys())
         n = len(doc_names)
@@ -231,11 +239,19 @@ class HybridScorer:
                     )
                     lexical_matrix[i, j] = score
                     lexical_matrix[j, i] = score
+
+        lexical_df = pd.DataFrame(lexical_matrix, index=doc_names, columns=doc_names)
+
+        sem_norm = normalize_scores(semantic_matrix, method=normalize)
+        lex_norm = normalize_scores(lexical_df, method=normalize)
         
         # Combine matrices
-        hybrid_matrix = alpha * semantic_matrix + (1 - alpha) * lexical_matrix
-        hybrid_matrix = np.clip(hybrid_matrix, 0.0, 1.0)
+        hybrid_matrix = alpha * sem_norm + (1 - alpha) * lex_norm
+        if normalize in (None, "none", "minmax", "min-max"):
+            hybrid_matrix = np.clip(hybrid_matrix, 0.0, 1.0)
         
+        if isinstance(hybrid_matrix, pd.DataFrame):
+            return hybrid_matrix
         return pd.DataFrame(
             hybrid_matrix,
             index=doc_names,
@@ -369,10 +385,11 @@ def compute_hybrid_plagiarism_flags(
     alpha: float = 0.7,
     threshold: float = 0.59,
     lexical_method: str = "tfidf",
+    normalize: Optional[str] = None,
 ) -> Tuple[pd.DataFrame, List[Dict[str, Any]]]:
     """
     Compute hybrid plagiarism flags.
-    
+
     Args:
         similarity_df: Semantic similarity DataFrame
         lexical_scores: Pre-computed lexical scores (optional)
@@ -380,20 +397,30 @@ def compute_hybrid_plagiarism_flags(
         alpha: Semantic weight
         threshold: Flagging threshold
         lexical_method: Lexical method
-    
+        normalize: Score normalization method ('minmax', 'zscore', or None)
+
     Returns:
         Tuple of (hybrid_df, flagged_pairs)
     """
-    scorer = HybridScorer(HybridConfig(alpha=alpha, lexical_method=lexical_method))
-    
+    from src.core.similarity import normalize_scores
+
+    scorer = HybridScorer(
+        HybridConfig(alpha=alpha, lexical_method=lexical_method, normalize=normalize)
+    )
+
     if lexical_scores is not None:
-        # Use pre-computed lexical scores
-        hybrid_df = alpha * similarity_df + (1 - alpha) * lexical_scores
+        sem_norm = normalize_scores(similarity_df, method=normalize)
+        lex_norm = normalize_scores(lexical_scores, method=normalize)
+        hybrid_df = alpha * sem_norm + (1 - alpha) * lex_norm
+        if normalize in (None, "none", "minmax", "min-max"):
+            hybrid_df = np.clip(hybrid_df, 0.0, 1.0)
     elif texts is not None:
-        hybrid_df = scorer.compute_hybrid_matrix(texts, similarity_df, alpha, lexical_method)
+        hybrid_df = scorer.compute_hybrid_matrix(
+            texts, similarity_df, alpha, lexical_method, normalize
+        )
     else:
         raise ValueError("Either lexical_scores or texts must be provided")
-    
+
     flagged = scorer.flag_plagiarism_hybrid(hybrid_df, threshold)
-    
+
     return hybrid_df, flagged

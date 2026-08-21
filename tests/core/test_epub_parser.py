@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import io
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from src.core.document_parser import extract_text, extract_text_from_epub
 
