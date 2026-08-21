@@ -17,10 +17,12 @@ import re
 import secrets
 import sqlite3
 import string
+import time
+from contextlib import contextmanager
 from datetime import datetime as dt
 from datetime import timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Generator, List, Optional
 
 import bcrypt
 from argon2 import PasswordHasher
@@ -29,13 +31,14 @@ from argon2.exceptions import VerificationError, VerifyMismatchError
 from src.core.app_config import AUTH_DB_PATH
 from src.db.base import BaseRepository
 from src.db.common import with_sqlite_retry
+from src.db.connection import get_connection
 from src.db.migrations import migrate_auth_database, table_exists
 from src.db.security_audit import count_recent_failed_logins, log_security_event
-from src.errors import StaleDataException
+from src.exceptions import StaleDataException
 
 logger = logging.getLogger(__name__)
 
-from src.core.app_config import AUTH_DB_PATH, get_valid_roles
+from src.core.app_config import get_valid_roles
 
 _DB_PATH = os.path.abspath(str(AUTH_DB_PATH))
 
@@ -132,6 +135,25 @@ class AuthRepository(BaseRepository):
 
     def __init__(self, db_path: str | os.PathLike = AUTH_DB_PATH) -> None:
         super().__init__(db_path)
+        self._cached_event_types: list[str] | None = None
+        self._cached_event_types_timestamp: float = 0.0
+        self._event_types_cache_ttl: float = 60.0
+
+    @property
+    def db_path(self) -> Path:
+        return Path(_DB_PATH)
+
+    @contextmanager
+    def connection(
+        self, read_only: bool = False
+    ) -> Generator[sqlite3.Connection, None, None]:
+        with get_connection(Path(_DB_PATH), read_only=read_only) as conn:
+            yield conn
+
+    def clear_distinct_event_types_cache(self) -> None:
+        """Clear the cached distinct audit event types."""
+        self._cached_event_types = None
+        self._cached_event_types_timestamp = 0.0
 
     def init_db(self) -> None:
         """Create or upgrade users.db and seed default administrator accounts."""
@@ -155,6 +177,13 @@ class AuthRepository(BaseRepository):
                     (event_type, username, timestamp, details),
                 )
                 conn.commit()
+            if (
+                self._cached_event_types is not None
+                and event_type
+                and event_type not in self._cached_event_types
+            ):
+                self._cached_event_types.append(event_type)
+                self._cached_event_types.sort()
         except Exception as exc:
             logger.warning(
                 "Failed to write security audit log entry [%s, %s]: %s",
@@ -266,14 +295,25 @@ class AuthRepository(BaseRepository):
             logger.error(f"Failed to count security audit logs: {e}")
             raise
 
-    def get_distinct_audit_event_types(self) -> list[str]:
-        """Return a list of all distinct event_type values from security_audit_log."""
+    def get_distinct_audit_event_types(self, force_refresh: bool = False) -> list[str]:
+        """Return a list of all distinct event_type values from security_audit_log with TTL caching (Issue #2687)."""
+        now = time.monotonic()
+        if (
+            not force_refresh
+            and self._cached_event_types is not None
+            and (now - self._cached_event_types_timestamp) < self._event_types_cache_ttl
+        ):
+            return list(self._cached_event_types)
+
         try:
             with self.connection(read_only=True) as conn:
                 rows = conn.execute(
                     "SELECT DISTINCT event_type FROM security_audit_log ORDER BY event_type"
                 ).fetchall()
-                return [r[0] for r in rows if r[0]]
+                event_types = [r[0] for r in rows if r[0]]
+                self._cached_event_types = event_types
+                self._cached_event_types_timestamp = now
+                return list(event_types)
         except sqlite3.Error:
             return []
 
@@ -305,7 +345,6 @@ def configure_db_path(db_path: str | os.PathLike) -> None:
 
 
 from contextlib import contextmanager
-from typing import Generator
 
 
 @contextmanager
@@ -364,9 +403,14 @@ def get_security_audit_log_count(
     )
 
 
-def get_distinct_audit_event_types() -> list[str]:
-    """Return a list of all distinct event_type values from security_audit_log."""
-    return auth_repo.get_distinct_audit_event_types()
+def get_distinct_audit_event_types(force_refresh: bool = False) -> list[str]:
+    """Return a list of all distinct event_type values from security_audit_log with TTL caching (Issue #2687)."""
+    return auth_repo.get_distinct_audit_event_types(force_refresh=force_refresh)
+
+
+def clear_distinct_audit_event_types_cache() -> None:
+    """Clear the cached distinct audit event types (Issue #2687)."""
+    auth_repo.clear_distinct_event_types_cache()
 
 
 def get_recent_audit_events(limit: int = 20) -> list[dict]:
@@ -1551,7 +1595,7 @@ def format_user_creation_date(iso_str: str) -> str:
 
 from enum import Enum
 from functools import wraps
-from typing import Any, Dict, List, Optional, Set
+from typing import Set
 
 import streamlit as st
 

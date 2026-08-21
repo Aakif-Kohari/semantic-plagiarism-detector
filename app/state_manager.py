@@ -8,6 +8,7 @@ and UI exception wrapping.
 
 import functools
 import logging
+import os
 import threading
 import time
 import traceback
@@ -42,6 +43,8 @@ def ui_exception_handler(component_name: str):
         def wrapper(*args, **kwargs):
             try:
                 return func(*args, **kwargs)
+            except st.runtime.scriptrunner.StopException:
+                raise
             except Exception:
                 logger.error(
                     "Component '%s' failed to render:\n%s",
@@ -79,10 +82,11 @@ def get_active_sessions_count() -> int:
 
         if cache.is_available():
             try:
-                if hasattr(cache._client, "scan_iter"):
-                    raw_keys = list(cache._client.scan_iter("spd:v1:session:*:last_interaction", count=1000))
-                else:
-                    raw_keys = cache._client.keys("spd:v1:session:*:last_interaction")
+                raw_keys = list(
+                    cache._client.scan_iter(
+                        match="spd:v1:session:*:last_interaction"
+                    )
+                )
                 keys = [
                     k.decode("utf-8") if isinstance(k, bytes) else k for k in raw_keys
                 ]
@@ -93,9 +97,10 @@ def get_active_sessions_count() -> int:
         try:
             fallback_dict = getattr(cache, "fallback_cache", {})
             if fallback_dict is not None:
+                # FIXED: Wrap in list() to avoid dictionary changed size during iteration (Thread-safe)
                 fallback_keys = [
                     k
-                    for k in fallback_dict.keys()
+                    for k in list(fallback_dict.keys())
                     if k.startswith("spd:v1:session:") and k.endswith(":last_interaction")
                 ]
                 for k in fallback_keys:
@@ -116,7 +121,7 @@ def get_active_sessions_count() -> int:
                     session_id = parts[3]
                     last_interaction = get_session_state(
                         session_id,
-                        "last_interaction",
+                        SessionKeys.LAST_INTERACTION,
                     )
                     if (
                         last_interaction is not None
@@ -150,8 +155,8 @@ def _start_api_server():
 
     uvicorn.run(
         fastapi_app,
-        host= os.getenv("API_HOST", "0.0.0.0"),
-        port= int(os.getenv("API_PORT", 8000)),
+        host=os.getenv("API_HOST", "0.0.0.0"),
+        port=int(os.getenv("API_PORT", 8000)),
         log_level="warning",
     )
 
@@ -215,13 +220,11 @@ def _run_backup_daemon():
                 and idle >= timeout
                 and last_activity > last_backup_time
             ):
-                from src.db.corpus_db import get_corpus_db_path
+                from src.core.app_config import get_backup_dir
                 from src.db.database_backup import (
                     cleanup_old_backups,
                     create_corpus_database_snapshot,
                 )
-
-                from src.core.app_config import get_backup_dir
 
                 snapshot = create_corpus_database_snapshot()
 

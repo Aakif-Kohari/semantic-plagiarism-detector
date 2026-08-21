@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 test_generate_synthetic_corpus.py
 ---------------------------------
@@ -11,6 +9,8 @@ Validates:
 - Manifest creation and metadata accuracy
 - CLI argument parsing and validation
 """
+
+from __future__ import annotations
 
 import json
 import random

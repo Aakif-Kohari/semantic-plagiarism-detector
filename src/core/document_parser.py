@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 
 import defusedxml
 
-from src.core.parse_durations import record_parse_duration
 from src.core.parsers.text_parser import (
     RTF_MAX_FILE_SIZE_BYTES,
     _rtf_content_within_limit,
@@ -72,7 +71,13 @@ DEFAULT_OCR_DPI = 250
 MIN_OCR_DPI = 150
 MAX_OCR_DPI = 400
 DEFAULT_OCR_LANGUAGE = "eng"
-MAX_BATCH_SIZE = 50
+try:
+    MAX_BATCH_SIZE = int(os.getenv("PARSER_MAX_BATCH_SIZE", 50))
+    if MAX_BATCH_SIZE <= 0:
+        MAX_BATCH_SIZE = 50
+except (ValueError, TypeError):
+    MAX_BATCH_SIZE = 50
+
 
 # File extensions supported by the extraction pipeline, exposed for UI display
 ALLOWED_EXTENSIONS = {
@@ -249,6 +254,25 @@ def load_custom_stopwords(file_path: Optional[str] = None) -> frozenset:
 def get_stopwords() -> frozenset:
     """Return the combined set of standard and custom (domain-specific) stopwords."""
     return ENGLISH_STOPWORDS | load_custom_stopwords()
+
+
+def reject_zero_width_characters(
+    text: str, filename: Optional[str] = None
+) -> str:
+    """Reject text containing zero-width Unicode characters."""
+    if not text:
+        return text
+
+    matches = ZERO_WIDTH_CHARS_PATTERN.findall(text)
+    if matches:
+        count = len(matches)
+        target = f"in file '{filename}'" if filename else "in document text"
+        raise ValueError(
+            f"Strict zero-width character rejection: found {count} "
+            f"zero-width unicode character(s) {target}."
+        )
+
+    return text
 
 
 def sanitize_zero_width_characters(text: str, filename: Optional[str] = None) -> str:
@@ -888,24 +912,27 @@ def _ocr_pdf_page(
     import pytesseract
     from PIL import Image
 
+    from src.utils.temp_manager import managed_ocr_temp_dir
+
     try:
-        with fitz.open(stream=pdf_bytes, filetype="pdf") as document:
-            page = document.load_page(page_index)
-            scale = dpi / 72
-            pixmap = page.get_pixmap(
-                matrix=fitz.Matrix(scale, scale),
-                alpha=False,
-            )
-            image = Image.frombytes(
-                "RGB",
-                (pixmap.width, pixmap.height),
-                pixmap.samples,
-            )
-            return pytesseract.image_to_string(
-                image,
-                lang=language,
-                config="--oem 3 --psm 3",
-            ).strip()
+        with managed_ocr_temp_dir(prefix=f"ocr_pdf_p{page_index}_") as tmp_dir:
+            with fitz.open(stream=pdf_bytes, filetype="pdf") as document:
+                page = document.load_page(page_index)
+                scale = dpi / 72
+                pixmap = page.get_pixmap(
+                    matrix=fitz.Matrix(scale, scale),
+                    alpha=False,
+                )
+                image = Image.frombytes(
+                    "RGB",
+                    (pixmap.width, pixmap.height),
+                    pixmap.samples,
+                )
+                return pytesseract.image_to_string(
+                    image,
+                    lang=language,
+                    config="--oem 3 --psm 3",
+                ).strip()
     except pytesseract.TesseractNotFoundError as exc:
         from src.errors import OCR_TESSERACT_NOT_FOUND
 
@@ -1810,28 +1837,26 @@ def extract_text_from_image(
     import pytesseract
     from PIL import Image
 
+    from src.utils.temp_manager import managed_ocr_temp_dir
+
     file_bytes = _read_pdf_bytes(file)
     try:
-        image = Image.open(io.BytesIO(file_bytes))
-        try:
-            return pytesseract.image_to_string(
-                image,
-                lang=ocr_language,
-                config="--oem 3 --psm 3",
-            ).strip()
-        except (MemoryError, Exception) as exc:
-            if isinstance(exc, MemoryError):
-                logger.warning(
-                    f"[document_parser] OCR image extraction failed due to memory exhaustion: {exc}"
-                )
-            else:
-                logger.warning(f"[document_parser] OCR image extraction failed: {exc}")
-            return "[OCR extraction failed for the file]"
-        return pytesseract.image_to_string(
-            image,
-            lang=ocr_language,
-            config="--oem 3 --psm 3",
-        ).strip()
+        with managed_ocr_temp_dir(prefix="ocr_image_") as tmp_dir:
+            image = Image.open(io.BytesIO(file_bytes))
+            try:
+                return pytesseract.image_to_string(
+                    image,
+                    lang=ocr_language,
+                    config="--oem 3 --psm 3",
+                ).strip()
+            except (MemoryError, Exception) as exc:
+                if isinstance(exc, MemoryError):
+                    logger.warning(
+                        f"[document_parser] OCR image extraction failed due to memory exhaustion: {exc}"
+                    )
+                else:
+                    logger.warning(f"[document_parser] OCR image extraction failed: {exc}")
+                return "[OCR extraction failed for the file]"
     except pytesseract.TesseractNotFoundError as exc:
         from src.errors import OCR_TESSERACT_NOT_FOUND
 
@@ -1983,7 +2008,7 @@ def extract_text(
 
     raw = strip_bibliography(raw)
     raw = normalize_unicode_spaces(raw)
-    raw = sanitize_zero_width_characters(raw, filename=filename)
+    raw = reject_zero_width_characters(raw, filename=filename)
 
     if clean_whitespace and raw:
         lines = [line.rstrip() for line in raw.splitlines()]

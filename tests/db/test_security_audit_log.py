@@ -195,7 +195,8 @@ def test_log_security_event_lowercases_username():
 
 def test_log_security_event_failure_emits_alert():
     """Verify that when writing to security audit log fails, _emit_audit_log_failure_alert is called (Issue #2729)."""
-    from unittest.mock import patch, MagicMock
+    from unittest.mock import patch
+
     from src.db.security_audit import log_security_event as sec_log_security_event
 
     with patch("sqlite3.connect") as mock_connect, patch(

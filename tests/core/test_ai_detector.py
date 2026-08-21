@@ -39,8 +39,38 @@ def test_categorize_ai_probability_boundaries():
     assert categorize_ai_probability(0.00) == "Low Probability"
 
 
+def test_categorize_at_0_0():
+    """Score of 0.0 should be Low Probability."""
+    assert categorize_ai_probability(0.0) == "Low Probability"
+
+
+def test_categorize_at_0_49():
+    """Score of 0.49 should be Moderate Probability (>= AI_MEDIUM_THRESHOLD of 0.40)."""
+    assert categorize_ai_probability(0.49) == "Moderate Probability"
+
+
+def test_categorize_at_0_50():
+    """Score of 0.50 should be Moderate Probability."""
+    assert categorize_ai_probability(0.50) == "Moderate Probability"
+
+
+def test_categorize_at_0_79():
+    """Score of 0.79 should be High Probability (>= AI_HIGH_THRESHOLD of 0.75)."""
+    assert categorize_ai_probability(0.79) == "High Probability"
+
+
+def test_categorize_at_0_80():
+    """Score of 0.80 should be High Probability."""
+    assert categorize_ai_probability(0.80) == "High Probability"
+
+
+def test_categorize_at_1_0():
+    """Score of 1.0 should be High Probability."""
+    assert categorize_ai_probability(1.0) == "High Probability"
+
+
 def test_ai_probability_categorization_consistency():
-    """Verify that both categorize_ai_probability and detect_ai_generated_text use consistent thresholds."""
+    """Verify that both categorize_ai_probability and detect_ai_generated_text use the same thresholds."""
     from src.core.ai_detector import (
         AI_HIGH_THRESHOLD,
         AI_MEDIUM_THRESHOLD,

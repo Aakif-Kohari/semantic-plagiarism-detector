@@ -251,6 +251,27 @@ def render_settings_view(user_role: str, lang_code: str, root_dir: str):
 
         st.markdown("")
         if st.button(
+            "Flush Redis Cache",
+            key="flush_redis_cache_button",
+            use_container_width=True,
+            type="primary",
+            help="Execute FLUSHALL on the Redis server to clear all stale data across all databases."
+        ):
+            from src.utils.redis_cache import get_cache
+
+            try:
+                cache = get_cache()
+                if cache._client:
+                    cache._client.flushall()
+                elif hasattr(cache, "clear_pattern"):
+                    cache.clear_pattern("*")
+                st.success("Redis cache flushed successfully!")
+                st.toast("Redis cache flushed successfully!")
+            except Exception as e:
+                st.error(f"Failed to flush Redis: {e}")
+
+        st.markdown("")
+        if st.button(
             "🔍 Ping Redis", key="ping_redis_button", use_container_width=True
         ):
             from src.utils.redis_cache import get_cache

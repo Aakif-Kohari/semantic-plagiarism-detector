@@ -1,11 +1,47 @@
+# .streamlit/config.toml
+# Streamlit server and UI configuration.
+# 
+# Issue #2926: Prevent RAM spikes on massive file uploads.
+# By default, Streamlit's st.file_uploader reads the entire file into server memory.
+# A malicious or accidental upload of massive files (e.g., 10x 100MB PDFs) can
+# exhaust the server's RAM, causing the application to crash or become unresponsive.
+#
+# We configure a safe upload limit of 50MB per file. This is sufficient for
+# standard academic documents, PDFs, and DOCX files, while preventing
+# denial-of-service via memory exhaustion.
+
+[server]
+# Maximum size in MB for each uploaded file.
+# Files exceeding this limit will be rejected by the Streamlit server before
+# they are fully read into memory, protecting the server's RAM.
+maxUploadSize = 50
+
+# Enable XSRF protection for security
+enableXsrfProtection = true
+
+# Enable CORS protection (can be disabled in development if needed)
+enableCORS = false
+
+# Disable file watcher to prevent unnecessary reloads in production
+fileWatcherType = "none"
+
 [theme]
+# Base theme configuration. The application supports dynamic light/dark mode
+# switching via the UI, but this sets the initial baseline.
+base = "light"
 primaryColor = "#0D9488"
 backgroundColor = "#FFFFFF"
 secondaryBackgroundColor = "#F8FAFC"
 textColor = "#0F172A"
 font = "sans serif"
 
+[logger]
+# Logging level for the Streamlit server
+level = "info"
+
 [browser]
+# Disable the default Streamlit sidebar navigation for a cleaner UI
+# since we use a custom multi-page architecture in app/pages/
 gatherUsageStats = false
 
 [server]

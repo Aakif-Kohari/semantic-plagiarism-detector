@@ -95,10 +95,9 @@ def run_full_pipeline(
                 raw_texts[url_filename] = url_text
 
             if failed_files:
-                from src.errors import OCRFileBatchError
+                from src.exceptions import OCRFileBatchError
 
                 raise OCRFileBatchError(failed_files, failure_details)
-
             if ignore_phrases and ignore_phrases.strip():
                 from src.core.document_parser import remove_ignore_phrases
 

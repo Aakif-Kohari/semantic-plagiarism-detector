@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import datetime
 from io import BytesIO
 from typing import Any, List, Optional, Tuple
@@ -62,23 +63,6 @@ def load_branding_logo() -> bytes | None:
     except Exception:
         return None
 
-
-
-def compute_text_stats(text: str) -> dict:
-    """Computes basic text statistics for document summary tables."""
-    words = text.split() if text else []
-    sentences = [s for s in text.split(".") if s.strip()] if text else []
-    unique_words = set(w.lower() for w in words)
-    word_count = len(words)
-    unique_count = len(unique_words)
-    ratio = unique_count / max(word_count, 1)
-    return {
-        "word_count": word_count,
-        "sentence_count": len(sentences),
-        "unique_word_count": unique_count,
-        "unique_word_ratio": ratio,
-    }
-
 def truncate_filename(filename: str, max_len: int = 30) -> str:
     """
     Truncates a filename to max_len characters with an ellipsis if needed,
@@ -112,6 +96,25 @@ def get_similarity_color(score: float) -> HexColor:
         return HexColor("#ffa500")
     else:
         return HexColor("#21c55d")
+
+
+def break_long_urls(text: str) -> str:
+    """
+    Inserts zero-width spaces (\u200b) or break opportunities after punctuation/slashes
+    in long URLs so ReportLab wraps them properly without bleeding off page margins.
+    """
+    if not text or not isinstance(text, str):
+        return text
+
+    def _insert_zwsp(match: re.Match) -> str:
+        url = match.group(0)
+        # Break after slashes, dots, query parameters, dashes, underscores, and ampersands
+        broken_url = re.sub(r"([/\.\?=&_\-#~:])", r"\1\u200b", url)
+        return broken_url
+
+    # Regex detecting http(s) URLs or ftp URLs
+    url_pattern = re.compile(r"https?://[^\s<>\"'()]+|ftp://[^\s<>\"'()]+")
+    return url_pattern.sub(_insert_zwsp, text)
 
 
 def wrap_text(text: str, max_chars: int = 400) -> str:
@@ -301,6 +304,7 @@ def generate_plagiarism_report(
         spaceAfter=30,
         alignment=TA_CENTER,
         keepWithNext=True,
+        wordWrap="CJK",
     )
     heading_style = ParagraphStyle(
         "CustomHeading",
@@ -311,6 +315,7 @@ def generate_plagiarism_report(
         spaceAfter=12,
         spaceBefore=20,
         keepWithNext=True,
+        wordWrap="CJK",
     )
     normal_style = ParagraphStyle(
         "CustomNormal",
@@ -318,6 +323,7 @@ def generate_plagiarism_report(
         fontSize=10,
         leading=14,
         textColor=HexColor("#FFFFFF") if dark_mode else HexColor("#31333f"),
+        wordWrap="CJK",
     )
 
     # ── Header / footer callback for logo ──
@@ -605,12 +611,16 @@ def generate_plagiarism_report(
                 hl_a = hl_a.replace(f"\\{char}", char)
                 hl_b = hl_b.replace(f"\\{char}", char)
 
+            hl_a = break_long_urls(hl_a)
+            hl_b = break_long_urls(hl_b)
+
             cell_header_style = ParagraphStyle(
                 f"ComparisonCellHeader_{rank}",
                 fontName="Helvetica-Bold",
                 fontSize=9,
                 leading=12,
                 textColor=HexColor("#FFFFFF") if dark_mode else HexColor("#111827"),
+                wordWrap="CJK",
             )
             cell_body_style = ParagraphStyle(
                 f"ComparisonCellBody_{rank}",
@@ -618,6 +628,7 @@ def generate_plagiarism_report(
                 fontSize=9,
                 leading=12,
                 textColor=HexColor("#FFFFFF") if dark_mode else HexColor("#31333f"),
+                wordWrap="CJK",
             )
 
             pair_data = [
@@ -1016,6 +1027,7 @@ def generate_audit_summary_pdf(
         textColor=HexColor("#1e1b4b"),
         spaceAfter=15,
         alignment=TA_LEFT,
+        wordWrap="CJK",
     )
     heading_style = ParagraphStyle(
         "AuditHeading",
@@ -1027,6 +1039,7 @@ def generate_audit_summary_pdf(
         spaceBefore=14,
         spaceAfter=8,
         keepWithNext=True,
+        wordWrap="CJK",
     )
     body_style = ParagraphStyle(
         "AuditBody",
@@ -1035,6 +1048,7 @@ def generate_audit_summary_pdf(
         fontSize=9,
         leading=12,
         textColor=HexColor("#334155"),
+        wordWrap="CJK",
     )
 
     story = []

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 test_fault_tolerance.py
 -----------------------
@@ -17,6 +15,8 @@ Acceptance Criteria (Issue #1380):
   assert graceful fallback to SQLite / disk storage.
 - Mock Webhook HTTP 500 error and assert fallback queue logging.
 """
+
+from __future__ import annotations
 
 import logging
 import os

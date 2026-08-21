@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from tests.conftest import MockDataFactory
+from src.core.similarity import PLAGIARISM_THRESHOLD
 
 # Mock ML libraries to prevent pytest segmentation faults on Apple Silicon
 sys.modules["transformers"] = MagicMock()
@@ -93,15 +94,24 @@ def test_cli_scan_success_text_format(
 def test_cli_scan_success_csv_format(
     mock_embed, mock_model_info, temp_assignments_dir, capsys
 ):
-    """Test a successful CLI scan with CSV format."""
+    """Test a successful CLI scan with CSV format including metadata headers (#2991)."""
     exit_code = run_scan(str(temp_assignments_dir), threshold=0.8, output_format="csv")
 
     assert exit_code == 0
     captured = capsys.readouterr()
 
-    lines = captured.out.strip().split("\n")
-    assert lines[0] == "doc_a,doc_b,similarity_score"
-    assert lines[1] == "doc1.txt,doc2.txt,1.0"
+    # Filter out commented metadata lines for parsing validation, or inspect metadata explicitly
+    lines = [line for line in captured.out.strip().split("\n") if line.strip()]
+    
+    # Verify metadata header lines start with '#'
+    assert lines[0].startswith("#")
+    assert any("Threshold Used: 0.8" in line for line in lines)
+
+    # Find the row index where standard CSV headers begin
+    header_idx = next(i for i, line in enumerate(lines) if not line.startswith("#"))
+    
+    assert lines[header_idx] == "doc_a,doc_b,similarity_score"
+    assert lines[header_idx + 1] == "doc1.txt,doc2.txt,1.0"
 
 
 def test_cli_scan_invalid_folder(capsys):

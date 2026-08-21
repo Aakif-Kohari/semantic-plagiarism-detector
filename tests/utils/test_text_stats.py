@@ -1,3 +1,8 @@
+from src.utils.text_stats import (count_words,format_text_stats, get_char_count,
+                                   get_reading_time_minutes, get_word_count,
+                                   get_sentence_count, get_syllable_count,
+                                   get_readability_metrics, get_text_stats)
+
 """Unit tests for src/utils/text_stats.py.
 
 This module could not be collected at all until Issue #2556: line 41 asserted
@@ -35,6 +40,32 @@ def test_count_words():
     assert count_words("hello,world") == 2
     assert count_words("hello-world") == 2
     assert count_words("HELLO hello") == 2
+
+
+def test_get_word_count_matches_count_words():
+    """Regression test for #2005: get_word_count() is now an alias for
+    count_words() and both entry points must produce identical results,
+    including on edge cases (punctuation, contractions, mixed case,
+    numbers, hyphenation, empty/whitespace-only input)."""
+    cases = [
+        "",
+        "   ",
+        "This is a test.",
+        "   Spaces   ",
+        "Hello, world! How are you?",
+        "don't stop believin'",
+        "MiXeD CaSe Words HERE",
+        "line1\nline2\ttabbed",
+        "numbers 123 and 456 mixed",
+        "hyphenated-word another_one",
+        "...!!! ???",
+    ]
+    for text in cases:
+        assert get_word_count(text) == count_words(text), (
+            f"Mismatch for input {text!r}: "
+            f"get_word_count={get_word_count(text)}, "
+            f"count_words={count_words(text)}"
+        )
 
 
 def test_get_char_count():

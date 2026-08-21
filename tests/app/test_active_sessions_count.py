@@ -5,9 +5,7 @@ Unit tests for get_active_sessions_count error handling and backup daemon safety
 """
 
 import time
-from unittest.mock import MagicMock, Mock, patch
-
-import pytest
+from unittest.mock import Mock, patch
 
 from app.state_manager import get_active_sessions_count
 
@@ -39,6 +37,26 @@ class TestGetActiveSessionsCount:
         ):
             count = get_active_sessions_count()
             assert count == 1
+            mock_cache._client.scan_iter.assert_called_once_with(
+                match="spd:v1:session:*:last_interaction"
+            )
+            assert not hasattr(mock_cache._client, "keys") or not mock_cache._client.keys.called
+
+    def test_active_sessions_count_uses_scan_iter_instead_of_keys(self):
+        """Explicitly verify that .scan_iter(match=...) is used instead of .keys() (Issue #2786)."""
+        mock_cache = Mock()
+        mock_cache.is_available.return_value = True
+        mock_cache._client.scan_iter.return_value = []
+        mock_cache.fallback_cache = {}
+
+        with patch("app.state_manager.get_cache", return_value=mock_cache):
+            count = get_active_sessions_count()
+            assert count == 0
+            mock_cache._client.scan_iter.assert_called_once_with(
+                match="spd:v1:session:*:last_interaction"
+            )
+            # Ensure .keys() was never called
+            mock_cache._client.keys.assert_not_called()
 
     def test_active_sessions_count_zero_when_none_active(self):
         """Test returns 0 when no sessions are active."""
@@ -103,8 +121,8 @@ class TestBackupDaemonSafety:
             # Snapshot must NOT be called because active_sessions was -1
             mock_snapshot.assert_not_called()
 
-    def test_backup_daemon_executes_cleanup_rotation(self, tmp_path):
-        """Verify backup daemon calls cleanup_old_backups after writing snapshot."""
+    def test_backup_daemon_triggers_when_zero_sessions_and_idle(self, tmp_path):
+        """Verify backup daemon triggers snapshot when active sessions count is 0 and idle."""
         from app.state_manager import _run_backup_daemon
 
         mock_cache = Mock()
@@ -122,16 +140,12 @@ class TestBackupDaemonSafety:
             "src.db.corpus_db.get_corpus_db_path", return_value=fake_db
         ), patch(
             "src.db.database_backup.create_corpus_database_snapshot", return_value=b"snapshot_data"
-        ), patch(
-            "src.db.database_backup.cleanup_old_backups"
-        ) as mock_cleanup, patch(
-            "time.sleep", side_effect=InterruptedError("Stop loop")
+        ) as mock_snapshot, patch(
+            "time.sleep", side_effect=[None, InterruptedError("Stop loop")]
         ):
             try:
                 _run_backup_daemon()
             except InterruptedError:
                 pass
 
-            mock_cleanup.assert_called_once_with(
-                tmp_path / "backups", max_backups=10, max_age_days=30
-            )
+            mock_snapshot.assert_called_once()

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 src/core/events.py
 -------------------
@@ -23,6 +21,8 @@ Key pieces:
       ``occurred_at`` for the caller.
     - ``serialize_event`` / ``deserialize_event``: deterministic JSON codec.
 """
+
+from __future__ import annotations
 
 import json
 import uuid

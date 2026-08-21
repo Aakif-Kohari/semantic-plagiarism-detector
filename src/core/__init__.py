@@ -51,7 +51,11 @@ from .similarity_engines import (
 from .tag_manager import TagManager, sanitize_tag_name
 from .text_chunking import chunk_by_sentences, chunk_document, chunk_documents
 from .translator import translate_text
-from .webhook import dispatch_plagiarism_alert, send_plagiarism_alert
+from .webhook import (
+    EventDispatcher,
+    dispatch_plagiarism_alert,
+    send_plagiarism_alert,
+)
 
 # TYPE_CHECKING block for lazy imports (Issue #2363)
 # This satisfies static analysis tools (mypy, pylance) that would otherwise
@@ -64,6 +68,7 @@ __all__ = [
     "BaseSimilarityEngine",
     "BrandingConfig",
     "ChunkRecord",
+    "EventDispatcher",
     "FaissChunkRecord",
     "HybridSimilarityEngine",
     "LexicalSimilarityEngine",

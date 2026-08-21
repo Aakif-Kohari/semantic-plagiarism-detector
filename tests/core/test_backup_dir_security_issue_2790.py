@@ -8,12 +8,9 @@ preventing accidental public exposure of database backups.
 """
 
 import os
-from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
-from src.core.app_config import get_backup_dir, BACKUP_DIR, _REPO_ROOT
+from src.core.app_config import _REPO_ROOT, get_backup_dir
 
 
 def test_default_backup_dir_is_outside_repo_root():

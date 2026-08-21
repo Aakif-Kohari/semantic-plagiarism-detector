@@ -1,9 +1,14 @@
+from unittest.mock import patch
+
 from src.utils.warning_list import (
     build_key_extractor,
+    escape_js_string,
     filter_warnings,
     matches_query_predicate,
     paginate_warnings,
     prepare_warning_page,
+    render_copy_button,
+    sanitize_element_id,
     sort_warnings,
 )
 
@@ -238,3 +243,240 @@ def test_page_size_clamping_to_max_100():
     assert page.page_size == 100
     assert len(page.items) == 100
     assert page.total_pages == 2
+
+
+def test_has_exact_match_no_results():
+    """Verify that _has_exact_match returns False if analysis_results is missing from session state."""
+    import streamlit as st
+
+    from src.utils.warning_list import _has_exact_match
+
+    # Ensure analysis_results is not in session state
+    if "analysis_results" in st.session_state:
+        del st.session_state["analysis_results"]
+
+    assert _has_exact_match("doc_a.pdf", "doc_b.pdf") is False
+
+
+def test_has_exact_match_with_matching_tuple_results():
+    """Verify that _has_exact_match works with legacy tuple format where index 1 is chunked_docs."""
+    import streamlit as st
+
+    from src.utils.warning_list import _has_exact_match
+
+    chunked_docs = {
+        "doc_a.pdf": ["hello world", "some other chunk"],
+        "doc_b.pdf": ["hello world", "different chunk"],
+    }
+    legacy_results = (None, chunked_docs, None, None, None, None, None, None, None)
+    st.session_state.analysis_results = legacy_results
+
+    assert _has_exact_match("doc_a.pdf", "doc_b.pdf") is True
+
+
+def test_has_exact_match_with_non_matching_tuple_results():
+    """Verify that _has_exact_match returns False when no chunks match."""
+    import streamlit as st
+
+    from src.utils.warning_list import _has_exact_match
+
+    chunked_docs = {"doc_a.pdf": ["hello world"], "doc_b.pdf": ["different chunk"]}
+    legacy_results = (None, chunked_docs, None, None, None, None, None, None, None)
+    st.session_state.analysis_results = legacy_results
+
+    assert _has_exact_match("doc_a.pdf", "doc_b.pdf") is False
+
+
+def test_has_exact_match_with_named_tuple_results():
+    """Verify that _has_exact_match works with NamedTuple format, accessing chunked_docs attribute."""
+    from collections import namedtuple
+
+    import streamlit as st
+
+    from src.utils.warning_list import _has_exact_match
+
+    MockPipelineResult = namedtuple("MockPipelineResult", ["raw_texts", "chunked_docs"])
+    chunked_docs = {
+        "doc_a.pdf": ["exact match chunk"],
+        "doc_b.pdf": ["exact match chunk"],
+    }
+    named_results = MockPipelineResult(raw_texts={}, chunked_docs=chunked_docs)
+    st.session_state.analysis_results = named_results
+
+    assert _has_exact_match("doc_a.pdf", "doc_b.pdf") is True
+
+
+def test_has_exact_match_with_pure_attribute():
+    """Verify that _has_exact_match works with an object that only has chunked_docs attribute."""
+    import streamlit as st
+
+    from src.utils.warning_list import _has_exact_match
+
+    class MockNamedTuple:
+        def __init__(self, chunked_docs):
+            self.chunked_docs = chunked_docs
+
+    chunked_docs = {"doc_a.pdf": ["exact match"], "doc_b.pdf": ["exact match"]}
+    st.session_state.analysis_results = MockNamedTuple(chunked_docs)
+
+    assert _has_exact_match("doc_a.pdf", "doc_b.pdf") is True
+
+
+def _render(**kwargs) -> str:
+    """Render the copy button and return the HTML handed to Streamlit."""
+    with patch("streamlit.components.v1.html") as mock_html:
+        render_copy_button(**kwargs)
+
+        assert mock_html.called
+        return mock_html.call_args[0][0]
+
+
+def test_render_copy_button_xss_sanitization():
+    """Verify that button_id is properly sanitized to prevent XSS.
+
+    The original assertion expected the id to be HTML-escaped. Escaping is
+    the wrong tool here: the id is written into an HTML attribute *and* into
+    a JavaScript string literal in the same document, and the browser
+    un-escapes only the first, so an escaped id no longer matches its own
+    getElementById lookup. The id is reduced to a safe character set instead,
+    which is valid in both contexts.
+    """
+    malicious_id = '"><script>alert(1)</script><div id="'
+
+    rendered_html = _render(text_to_copy="Sample text", button_id=malicious_id)
+
+    # No unescaped/raw markup from button_id survives.
+    assert 'id=""><script>alert(1)</script>' not in rendered_html
+    assert "alert(1)" not in rendered_html
+    assert "<script>alert" not in rendered_html
+
+    # The button and its script agree on one safe id.
+    assert 'id="scriptalert1scriptdivid"' in rendered_html
+    assert 'getElementById("scriptalert1scriptdivid")' in rendered_html
+
+
+def test_render_copy_button_escapes_copy_label():
+    """copy_label lands in the button body and in a JS innerHTML assignment."""
+    rendered_html = _render(
+        text_to_copy="Sample text",
+        copy_label="<img src=x onerror=alert(1)>",
+    )
+
+    # The payload survives as inert text, never as a live tag.
+    assert "<img src=x" not in rendered_html
+    assert "&lt;img src=x onerror=alert(1)&gt;" in rendered_html
+
+
+def test_render_copy_button_escapes_copied_label():
+    """copied_label is the more dangerous one: it is written via innerHTML."""
+    rendered_html = _render(
+        text_to_copy="Sample text",
+        copied_label="</script><script>alert(document.cookie)</script>",
+    )
+
+    # Only the component's own script block remains; the payload contributed
+    # no tag of its own.
+    assert rendered_html.count("<script>") == 1
+    assert rendered_html.count("</script>") == 1
+
+    # What is left of the payload is an inert JS string literal: every angle
+    # bracket and ampersand has been replaced by a \\u escape, so innerHTML
+    # renders it as visible text rather than parsing it as markup.
+    assert "\\u0026lt;/script\\u0026gt;" in rendered_html
+
+
+def test_render_copy_button_escapes_text_to_copy():
+    """The copied text closes neither the JS literal nor the script block."""
+    rendered_html = _render(
+        text_to_copy='x"; alert(1); var y = "</script>',
+    )
+
+    assert '"; alert(1); var y = "' not in rendered_html
+    assert rendered_html.count("</script>") == 1
+
+
+def test_render_copy_button_keeps_ordinary_ids_intact():
+    """Sanitisation must not disturb the ids the app actually passes."""
+    rendered_html = _render(text_to_copy="Sample text", button_id="copy_ca_3")
+
+    assert 'id="copy_ca_3"' in rendered_html
+    assert 'getElementById("copy_ca_3")' in rendered_html
+
+
+def test_render_copy_button_falls_back_when_id_is_all_unsafe():
+    """An id with nothing safe left in it must not produce id="".
+
+    An empty id would make every button on the page collide on
+    getElementById(""), so the first click would drive the wrong button.
+    """
+    rendered_html = _render(text_to_copy="Sample text", button_id="<<<>>>")
+
+    assert 'id="copy-btn"' in rendered_html
+    assert 'id=""' not in rendered_html
+
+
+def test_render_copy_button_emoji_labels_survive():
+    """The default labels are emoji; escaping must leave them readable."""
+    rendered_html = _render(text_to_copy="Sample text")
+
+    assert "📋 Copy" in rendered_html
+    assert "✅ Copied!" in rendered_html
+
+
+class TestSanitizeElementId:
+    """Unit coverage for the id sanitiser itself."""
+
+    def test_alphanumeric_and_separators_pass_through(self):
+        assert sanitize_element_id("copy-btn_2") == "copy-btn_2"
+
+    def test_quotes_and_angle_brackets_are_dropped(self):
+        assert sanitize_element_id('a"b<c>d') == "abcd"
+
+    def test_whitespace_is_dropped(self):
+        assert sanitize_element_id("copy me") == "copyme"
+
+    def test_empty_result_uses_the_fallback(self):
+        assert sanitize_element_id("!!!") == "copy-btn"
+
+    def test_none_uses_the_fallback(self):
+        assert sanitize_element_id(None) == "copy-btn"
+
+    def test_custom_fallback_is_honoured(self):
+        assert sanitize_element_id("###", fallback="snippet") == "snippet"
+
+    def test_non_string_input_is_stringified(self):
+        assert sanitize_element_id(42) == "42"
+
+
+class TestEscapeJsString:
+    """Unit coverage for the JavaScript string-literal escaper."""
+
+    def test_plain_text_is_unchanged(self):
+        assert escape_js_string("hello world") == "hello world"
+
+    def test_double_quote_is_escaped(self):
+        assert escape_js_string('say "hi"') == 'say \\"hi\\"'
+
+    def test_backslash_is_escaped_before_anything_else(self):
+        assert escape_js_string("C:\\path") == "C:\\\\path"
+
+    def test_newlines_become_escape_sequences(self):
+        assert escape_js_string("a\nb") == "a\\nb"
+
+    def test_closing_script_tag_cannot_survive(self):
+        assert "</script>" not in escape_js_string("</script>")
+
+    def test_line_separators_are_escaped(self):
+        assert escape_js_string("a\u2028b") == "a\\u2028b"
+
+    def test_non_string_input_is_stringified(self):
+        assert escape_js_string(12) == "12"
+
+
+def test_truncate_search_query_numeric():
+    """Test that _truncate_search_query converts int/float search inputs to strings instead of returning empty."""
+    from src.utils.warning_list import _truncate_search_query
+
+    assert _truncate_search_query(12345) == "12345"
+    assert _truncate_search_query(98.6) == "98.6"
+    assert _truncate_search_query(None) == ""

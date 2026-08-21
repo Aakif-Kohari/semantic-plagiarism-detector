@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """
 rate_limiter.py
 ---------------
 Security utility for API rate limiting with standard HTTP response headers.
 Tracks request counts per IP/user and returns appropriate headers when limits are exceeded.
 """
+
+from __future__ import annotations
 
 import logging
 import time
@@ -195,3 +195,96 @@ def get_rate_limit_headers(
     """
     limiter = RateLimiter(redis_client, limit=limit, window=window)
     return limiter.check_rate_limit(identifier)
+
+
+import os
+import threading
+from typing import Optional
+
+
+class TokenBucketRateLimiter:
+    """Token-Bucket rate limiter for per-token API rate limiting (Issue #2921).
+
+    Tracks token buckets per API bearer token string (credentials.credentials)
+    with configurable capacity and refill rate to prevent token abuse.
+    """
+
+    def __init__(
+        self,
+        capacity: float = 60.0,
+        refill_rate: float = 1.0,
+    ) -> None:
+        """Initialize TokenBucketRateLimiter.
+
+        Args:
+            capacity: Maximum token capacity for a bucket.
+            refill_rate: Tokens added per second.
+        """
+        self.capacity = float(capacity)
+        self.refill_rate = float(refill_rate)
+        self._buckets: Dict[str, Dict[str, float]] = {}
+        self._lock = threading.Lock()
+
+    def consume(self, identifier: str, tokens: float = 1.0) -> bool:
+        """Attempt to consume tokens for the given identifier (credentials.credentials).
+
+        Args:
+            identifier: Token string or client identifier.
+            tokens: Number of tokens to consume (default 1.0).
+
+        Returns:
+            bool: True if request is allowed, False if bucket has insufficient tokens.
+        """
+        if not identifier:
+            return True
+
+        now = time.time()
+        with self._lock:
+            bucket = self._buckets.get(identifier)
+            if bucket is None:
+                bucket = {"tokens": self.capacity, "last_refill": now}
+                self._buckets[identifier] = bucket
+
+            elapsed = max(0.0, now - bucket["last_refill"])
+            bucket["last_refill"] = now
+            bucket["tokens"] = min(
+                self.capacity,
+                bucket["tokens"] + elapsed * self.refill_rate,
+            )
+
+            if bucket["tokens"] >= tokens:
+                bucket["tokens"] -= tokens
+                return True
+            return False
+
+    def reset(self, identifier: Optional[str] = None) -> None:
+        """Reset rate limit buckets (or single bucket if identifier is provided)."""
+        with self._lock:
+            if identifier:
+                self._buckets.pop(identifier, None)
+            else:
+                self._buckets.clear()
+
+
+_TOKEN_BUCKET_LIMITER: Optional[TokenBucketRateLimiter] = None
+_LIMITER_LOCK = threading.Lock()
+
+
+def get_token_bucket_limiter(
+    capacity: float = 60.0,
+    refill_rate: float = 1.0,
+) -> TokenBucketRateLimiter:
+    """Retrieve or initialize the global TokenBucketRateLimiter instance."""
+    global _TOKEN_BUCKET_LIMITER
+    if _TOKEN_BUCKET_LIMITER is None:
+        with _LIMITER_LOCK:
+            if _TOKEN_BUCKET_LIMITER is None:
+                cap_env = os.getenv("TOKEN_BUCKET_CAPACITY")
+                refill_env = os.getenv("TOKEN_BUCKET_REFILL_RATE")
+                cap_val = float(cap_env) if cap_env else capacity
+                refill_val = float(refill_env) if refill_env else refill_rate
+                _TOKEN_BUCKET_LIMITER = TokenBucketRateLimiter(
+                    capacity=cap_val,
+                    refill_rate=refill_val,
+                )
+    return _TOKEN_BUCKET_LIMITER

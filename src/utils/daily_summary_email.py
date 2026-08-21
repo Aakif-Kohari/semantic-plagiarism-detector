@@ -18,6 +18,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from dotenv import load_dotenv
 
+from app.theme import COLORS
 from src.db.auth import get_all_users
 from src.db.incidents import DEFAULT_DB_PATH, get_recent_incidents
 
@@ -134,9 +135,9 @@ def build_severity_section_html(severity: str, incidents: List[Dict[str, Any]]) 
         str: HTML section with a table of incidents.
     """
     color_map = {
-        "High": "#d32f2f",
-        "Medium": "#f57c00",
-        "Low": "#388e3c",
+        "High": COLORS.get("danger", "#d32f2f"),
+        "Medium": COLORS.get("warning", "#f57c00"),
+        "Low": COLORS.get("success", "#388e3c"),
     }
     color = color_map.get(severity, "#666666")
 
@@ -198,6 +199,14 @@ def build_email_html_body(
 
     if not incidents_data:
         return f"""
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <meta charset="UTF-8">
+            <title>Daily Plagiarism Summary</title>
+        </head>
+        <body>
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9; border-radius: 8px;">
             <h2 style="color: #333333; text-align: center;">Daily Plagiarism Summary</h2>
             <p style="color: #666666; text-align: center; font-size: 16px;">
@@ -208,6 +217,8 @@ def build_email_html_body(
                 Total scans processed: <strong>{total_scans}</strong>
             </p>
         </div>
+        </body>
+        </html>
         """
 
     high_severity = [
@@ -219,6 +230,14 @@ def build_email_html_body(
     low_severity = [inc for inc in incidents_data if inc.get("severity_rank") == "Low"]
 
     html = f"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta charset="UTF-8">
+        <title>Daily Plagiarism Summary</title>
+    </head>
+    <body>
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9f9f9; border-radius: 8px;">
         <h2 style="color: #333333; text-align: center; border-bottom: 2px solid #007bff; padding-bottom: 10px;">Daily Plagiarism Summary</h2>
         <p style="color: #666666; font-size: 14px; text-align: right;">
@@ -247,20 +266,10 @@ def build_email_html_body(
             <a href="{os.getenv('APP_BASE_URL', 'http://localhost:8501')}" style="color: #007bff; text-decoration: none;">Review all incidents in the dashboard</a>
         </p>
     </div>
+    </body>
+    </html>
     """
     return html
-
-
-def format_daily_summary(
-    incidents: List[Dict[str, Any]], footer_note: Optional[str] = None
-) -> str:
-    """
-    Legacy wrapper for backward compatibility.
-    Delegates to the new build_email_html_body function.
-    """
-    return build_email_html_body(
-        incidents_data=incidents, total_scans=0, footer_note=footer_note
-    )
 
 
 def generate_daily_summary_html(stats: Dict[str, Any]) -> str:
@@ -318,8 +327,8 @@ def generate_daily_summary_html(stats: Dict[str, Any]) -> str:
     <!DOCTYPE html>
     <html lang="en">
     <head>
-        <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta charset="UTF-8">
         <title>Daily Plagiarism Summary</title>
     </head>
     <body style="margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">

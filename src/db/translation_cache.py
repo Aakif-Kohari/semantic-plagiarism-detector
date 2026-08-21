@@ -1,18 +1,23 @@
 """
 src/db/translation_cache.py
 ---------------------------
-SQLite-backed cache for cross-lingual back-translations and translation API
-requests to preserve API quota.
+SQLite-backed persistent cache for cross-lingual back-translations.
 
-Prevents redundant and expensive translation API/model calls by persisting
-source_text, target_language, and translated_text mappings.
+This module manages the storage and retrieval of translated text chunks
+to avoid redundant API calls to translation services (e.g., Google Translate,
+DeepL, or local MarianMT models). By caching translations, we significantly
+reduce latency and API costs during cross-lingual plagiarism detection.
 
-Maps SHA-256 hash of (foreign_text, source_lang, target_lang) -> cached_text.
+Features:
+- Persistent SQLite storage for source/target language pairs.
+- SHA-256 hashing for efficient lookups.
+- Automated TTL (Time-To-Live) cleanup to prevent unbounded database growth (Issue #2985).
+- Backward compatibility with legacy cache structures.
 
-Recent Additions (Issue #1956):
-- Created translation_cache table schema with source_hash primary key.
-- Implemented get_cached_translation() and save_translation() helpers
-  for the cross-lingual back-translation pipeline.
+Recent Additions:
+- Issue #1956: Created translation_cache table schema with source_hash primary key.
+- Issue #2985: Missing TTL cleanup for Translation Cache. Added automated purge
+  mechanism to delete translations older than a specified threshold (default 30 days).
 """
 
 import hashlib
@@ -22,35 +27,39 @@ import sqlite3
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from src.core.app_config import _REPO_ROOT, CORPUS_DB_PATH, FALLBACK_CORPUS_DB_PATH
 
 logger = logging.getLogger(__name__)
 
-# ── Legacy DB Path (backward compatibility) ──────────────────────────────────
+# ── Configuration & Paths ────────────────────────────────────────────────────
 
 # Seed the translation cache DB path from the centralized app_config.
 # ``DB_PATH`` is intentionally kept as a module-level string so that tests
 # importing ``src.db.translation_cache.DB_PATH`` continue to work.
 DB_PATH = str(CORPUS_DB_PATH)
 
-# In-memory counters for lookup hits and misses
+# In-memory counters for lookup hits and misses (Legacy)
 cache_hits = 0
 cache_misses = 0
 
-# ── Issue #1956 Cache DB Path ────────────────────────────────────────────────
-
+# Issue #1956 & #2985 Cache DB Path
 _CACHE_DB_PATH = _REPO_ROOT / "data" / "translation_cache.db"
 _lock = threading.Lock()
+_CORRUPTION_MESSAGE = "database disk image is malformed"
+
+# Default TTL for cached translations in days (Issue #2985)
+DEFAULT_TTL_DAYS = 30
 
 
-# ── Issue #1956 Connection Manager ───────────────────────────────────────────
+# ── Connection Managers ──────────────────────────────────────────────────────
 
 
 @contextmanager
 def _connect():
-    """Borrow a reusable SQLite connection for the translation cache."""
+    """Borrow a reusable SQLite connection for the translation cache (Issue #1956)."""
     _CACHE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(_CACHE_DB_PATH), check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
@@ -64,24 +73,74 @@ def _connect():
         conn.close()
 
 
+@contextmanager
+def _get_connection(db_path: Optional[Path] = None):
+    """Context manager for acquiring and releasing SQLite connections.
+
+    Ensures that connections are properly closed after use, even if
+    an exception occurs during database operations.
+
+    Args:
+        db_path: Path to the SQLite database file. If None, uses _CACHE_DB_PATH.
+
+    Yields:
+        An active sqlite3.Connection object.
+    """
+    path = db_path or _CACHE_DB_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    conn = sqlite3.connect(str(path))
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+# ── Initialization ───────────────────────────────────────────────────────────
+
+
 def init_translation_cache() -> None:
-    """Create the translation cache table if it does not exist (Issue #1956)."""
+    """Create the translation cache table if it does not exist (Issue #1956 & #2985)."""
     with _connect() as conn:
-        conn.execute("""
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS translation_cache (
                 source_hash TEXT PRIMARY KEY,
                 source_text TEXT NOT NULL,
                 source_lang TEXT NOT NULL,
                 target_lang TEXT NOT NULL,
                 translated_text TEXT NOT NULL,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                last_accessed_at TEXT
             )
-        """)
-        conn.execute("""
+        """
+        )
+        conn.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_translation_langs
             ON translation_cache(source_lang, target_lang)
-        """)
+        """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_translation_created
+            ON translation_cache(created_at)
+        """
+        )
     logger.info("Translation cache initialized at %s", _CACHE_DB_PATH)
+
+
+def initialize_cache_db(db_path: Optional[Path] = None) -> None:
+    """Alias for init_translation_cache for consistency with new API."""
+    init_translation_cache()
+
+
+# ── Hashing Helpers ──────────────────────────────────────────────────────────
 
 
 def _hash_text_simple(text: str) -> str:
@@ -89,17 +148,71 @@ def _hash_text_simple(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _generate_hash(text: str, source_lang: str, target_lang: str) -> str:
+    """Generate a deterministic SHA-256 hash for a translation request.
+
+    The hash uniquely identifies a translation based on the source text
+    and the language pair. This ensures that the same text translated
+    to different languages gets separate cache entries.
+
+    Args:
+        text: The source text to translate.
+        source_lang: The source language code (e.g., 'es').
+        target_lang: The target language code (e.g., 'en').
+
+    Returns:
+        A hex-encoded SHA-256 hash string.
+    """
+    # Normalize inputs to ensure consistent hashing
+    normalized_text = text.strip().lower()
+    normalized_source = source_lang.strip().lower()
+    normalized_target = target_lang.strip().lower()
+
+    # Combine into a single payload
+    payload = f"{normalized_source}|{normalized_target}|{normalized_text}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+# ── Core Cache Operations (Issue #1956 & #2985) ─────────────────────────────
+def _recover_corrupted_cache() -> None:
+    """Delete a corrupted cache database and recreate its schema."""
+    logger.critical(
+        "Translation cache database is corrupted at %s; deleting it and "
+        "recreating the schema.",
+        _CACHE_DB_PATH,
+    )
+
+    with _lock:
+        for suffix in ("", "-wal", "-shm"):
+            cache_path = (
+                _CACHE_DB_PATH
+                if not suffix
+                else _CACHE_DB_PATH.with_name(_CACHE_DB_PATH.name + suffix)
+            )
+            try:
+                cache_path.unlink(missing_ok=True)
+            except OSError as exc:
+                logger.critical(
+                    "Unable to remove corrupted translation cache file %s: %s",
+                    cache_path,
+                    exc,
+                )
+                raise
+
+        init_translation_cache()
+        logger.info("Recreated translation cache schema at %s", _CACHE_DB_PATH)
+
+
 def get_cached_translation(
-    source_text: str,
-    source_lang: str,
-    target_lang: str,
-) -> str | None:
-    """Retrieve a cached translation if it exists (Issue #1956).
+    source_text: str, source_lang: str, target_lang: str, db_path: Optional[Path] = None
+) -> Optional[str]:
+    """Retrieve a cached translation if it exists.
 
     Args:
         source_text: The original text.
         source_lang: Source language code.
         target_lang: Target language code.
+        db_path: Optional path to the database file.
 
     Returns:
         The translated text string, or None if not cached.
@@ -107,21 +220,44 @@ def get_cached_translation(
     if not source_text:
         return None
 
-    source_hash = _hash_text_simple(source_text)
+    source_hash = _generate_hash(source_text, source_lang, target_lang)
 
     try:
-        with _connect() as conn:
+        with _get_connection(db_path) as conn:
             cursor = conn.execute(
                 """
                 SELECT translated_text FROM translation_cache
-                WHERE source_hash = ? AND source_lang = ? AND target_lang = ?
+                WHERE source_hash = ?
                 """,
-                (source_hash, source_lang, target_lang),
+                (source_hash,),
             )
             row = cursor.fetchone()
-            return row[0] if row else None
+
+            if row:
+                # Update last_accessed_at for potential LRU tracking
+                conn.execute(
+                    """
+                    UPDATE translation_cache 
+                    SET last_accessed_at = ? 
+                    WHERE source_hash = ?
+                    """,
+                    (datetime.utcnow().isoformat(), source_hash),
+                )
+                logger.debug(
+                    "Cache hit for translation: %s -> %s", source_lang, target_lang
+                )
+                return row["translated_text"]
+
+            return None
+
     except sqlite3.Error as exc:
         logger.error("Failed to query translation cache: %s", exc)
+        return None
+    except sqlite3.DatabaseError as exc:
+        if _CORRUPTION_MESSAGE in str(exc).lower():
+            _recover_corrupted_cache()
+        else:
+            logger.error("Failed to query translation cache: %s", exc)
         return None
 
 
@@ -130,14 +266,16 @@ def save_translation(
     source_lang: str,
     target_lang: str,
     translated_text: str,
+    db_path: Optional[Path] = None,
 ) -> bool:
-    """Save a new translation to the cache (Issue #1956).
+    """Save a new translation to the cache.
 
     Args:
         source_text: The original text.
         source_lang: Source language code.
         target_lang: Target language code.
         translated_text: The resulting translation.
+        db_path: Optional path to the database file.
 
     Returns:
         True if saved successfully, False otherwise.
@@ -145,45 +283,123 @@ def save_translation(
     if not source_text or not translated_text:
         return False
 
-    source_hash = _hash_text_simple(source_text)
-    created_at = datetime.utcnow().isoformat()
+    source_hash = _generate_hash(source_text, source_lang, target_lang)
+    now = datetime.utcnow().isoformat()
 
     try:
-        with _connect() as conn:
+        with _get_connection(db_path) as conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO translation_cache
-                (source_hash, source_text, source_lang, target_lang, translated_text, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                (source_hash, source_text, source_lang, target_lang, translated_text, created_at, last_accessed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     source_hash,
                     source_text,
-                    source_lang,
-                    target_lang,
-                    translated_text,
-                    created_at,
+                    source_lang.strip().lower(),
+                    target_lang.strip().lower(),
+                    translated_text.strip(),
+                    now,
+                    now,
                 ),
             )
+        logger.debug("Saved translation to cache: %s -> %s", source_lang, target_lang)
         return True
     except sqlite3.Error as exc:
         logger.error("Failed to save translation to cache: %s", exc)
         return False
 
 
-def clear_translation_cache() -> int:
-    """Delete all entries from the translation cache (Issue #1956).
+def clear_translation_cache(db_path: Optional[Path] = None) -> int:
+    """Delete all entries from the translation cache.
 
     Returns:
         The number of rows deleted.
     """
     try:
-        with _connect() as conn:
+        with _get_connection(db_path) as conn:
             cursor = conn.execute("DELETE FROM translation_cache")
-            return cursor.rowcount
+            deleted_count = cursor.rowcount
+            logger.info("Cleared translation cache. Deleted %d rows.", deleted_count)
+            return deleted_count
     except sqlite3.Error as exc:
         logger.error("Failed to clear translation cache: %s", exc)
         return 0
+
+
+def purge_old_translations(
+    days: int = DEFAULT_TTL_DAYS, db_path: Optional[Path] = None
+) -> int:
+    """Delete cached translations older than the specified threshold.
+
+    This function implements the automated TTL cleanup mechanism required
+    by Issue #2985. It prevents the translation cache database from growing
+    indefinitely by removing stale entries.
+
+    Args:
+        days: The age threshold in days. Translations older than this
+              will be deleted. Defaults to 30 days.
+        db_path: Optional path to the database file.
+
+    Returns:
+        The number of rows deleted.
+    """
+    if days < 0:
+        raise ValueError(f"days must be >= 0, got {days}")
+
+    cutoff_date = datetime.utcnow() - timedelta(days=days)
+    cutoff_iso = cutoff_date.isoformat()
+
+    logger.info("Purging translations older than %d days (before %s)", days, cutoff_iso)
+
+    try:
+        with _get_connection(db_path) as conn:
+            cursor = conn.execute(
+                """
+                DELETE FROM translation_cache 
+                WHERE created_at < ?
+                """,
+                (cutoff_iso,),
+            )
+            deleted_count = cursor.rowcount
+
+            logger.info("Purge complete. Deleted %d stale translations.", deleted_count)
+            return deleted_count
+
+    except sqlite3.Error as e:
+        logger.error("Failed to purge old translations: %s", e)
+        return 0
+
+
+def get_cache_stats(db_path: Optional[Path] = None) -> Dict[str, Any]:
+    """Retrieve statistics about the translation cache.
+
+    Returns:
+        A dictionary containing:
+        - total_entries: Total number of cached translations.
+        - oldest_entry: ISO timestamp of the oldest cached translation.
+        - newest_entry: ISO timestamp of the newest cached translation.
+    """
+    stats = {"total_entries": 0, "oldest_entry": None, "newest_entry": None}
+
+    try:
+        with _get_connection(db_path) as conn:
+            cursor = conn.execute("SELECT COUNT(*) as count FROM translation_cache")
+            stats["total_entries"] = cursor.fetchone()["count"]
+
+            cursor = conn.execute(
+                "SELECT MIN(created_at) as oldest, MAX(created_at) as newest FROM translation_cache"
+            )
+            row = cursor.fetchone()
+            if row:
+                stats["oldest_entry"] = row["oldest"]
+                stats["newest_entry"] = row["newest"]
+
+    except sqlite3.Error as e:
+        logger.error("Failed to retrieve cache stats: %s", e)
+
+    return stats
 
 
 # ── Legacy Cache Functions (Backward Compatibility) ──────────────────────────
@@ -209,7 +425,8 @@ def _init_db() -> None:
     try:
         with conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 CREATE TABLE IF NOT EXISTS legacy_translation_cache (
                     text_hash TEXT PRIMARY KEY,
                     foreign_text TEXT NOT NULL,
@@ -218,11 +435,14 @@ def _init_db() -> None:
                     target_lang TEXT DEFAULT 'en',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
-                """)
-            cursor.execute("""
+                """
+            )
+            cursor.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_legacy_translation_cache_created_at
                 ON legacy_translation_cache(created_at)
-                """)
+                """
+            )
             conn.commit()
     finally:
         conn.close()

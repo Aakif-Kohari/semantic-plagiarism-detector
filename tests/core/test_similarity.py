@@ -1,3 +1,5 @@
+from typing import List, Tuple
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -10,6 +12,7 @@ from src.core.lexical_similarity import (
     tokenize,
 )
 from src.core.similarity import (
+    _validated_batch_size,
     calculate_paragraph_similarity_breakdown,
     chunk_max_similarity,
     chunk_similarity_matrix,
@@ -17,12 +20,14 @@ from src.core.similarity import (
     compute_hybrid_similarity,
     cosine_distance_to_similarity,
     document_similarity_matrix,
+    find_candidate_pairs,
     find_exact_matches,
     find_most_similar_chunks,
     flag_plagiarism,
     get_cross_encoder_info,
     hybrid_similarity_matrix,
     manhattan_similarity,
+    normalize_scores,
     rerank_candidates_with_cross_encoder,
 )
 
@@ -54,11 +59,47 @@ def test_chunk_max_similarity_supports_batching(dummy_embeddings):
     assert np.isclose(sim_batched, sim_unbatched)
 
 
+def test_validated_batch_size_valid_inputs():
+    assert _validated_batch_size(None) is None
+    assert _validated_batch_size(10) == 10
+    assert _validated_batch_size(10.0) == 10
+    assert _validated_batch_size("10") == 10
+    assert _validated_batch_size("10.0") == 10
+    assert _validated_batch_size(0) is None
+    assert _validated_batch_size(-5) is None
+
+
+def test_validated_batch_size_invalid_inputs():
+    invalid_values = ["10.5", 10.5, "abc", True, False, [10], {"batch": 10}]
+    for val in invalid_values:
+        with pytest.raises(ValueError, match="batch_size must be an integer"):
+            _validated_batch_size(val)
+
+
 def test_chunk_max_similarity_rejects_invalid_batch_size(dummy_embeddings):
     with pytest.raises(ValueError, match="batch_size must be an integer"):
         chunk_max_similarity(
             dummy_embeddings["doc_A"], dummy_embeddings["doc_B"], batch_size=0.5
         )
+    with pytest.raises(ValueError, match="batch_size must be an integer"):
+        chunk_max_similarity(
+            dummy_embeddings["doc_A"], dummy_embeddings["doc_B"], batch_size="10.5"
+        )
+
+
+def test_document_similarity_matrix_max_pooling(dummy_embeddings):
+    df_mean = document_similarity_matrix(dummy_embeddings, pooling="mean")
+    df_max = document_similarity_matrix(dummy_embeddings, pooling="max")
+
+    assert isinstance(df_max, pd.DataFrame)
+    assert df_max.shape == (3, 3)
+    assert list(df_max.columns) == ["doc_A", "doc_B", "doc_C"]
+    assert np.isclose(df_max.loc["doc_A", "doc_A"], 1.0)
+
+
+def test_document_similarity_matrix_rejects_invalid_pooling(dummy_embeddings):
+    with pytest.raises(ValueError, match="Invalid pooling method"):
+        document_similarity_matrix(dummy_embeddings, pooling="invalid_pooling")
 
 
 def test_document_similarity_matrix(dummy_embeddings):
@@ -119,6 +160,67 @@ def test_document_similarity_matrix_min_threshold_filters_low_scores(dummy_embed
     assert df.loc["doc_A", "doc_C"] == 0.0
     assert df.loc["doc_C", "doc_A"] == 0.0
     assert df.loc["doc_A", "doc_B"] > 0.0
+
+
+def test_document_similarity_matrix_top_k_faiss_prefilter():
+    """Test that top_k pre-filters comparisons using FAISS."""
+    # Generate 5 normalized document vectors
+    np.random.seed(42)
+    dim = 64
+    doc_names = [f"doc_{i}" for i in range(5)]
+    doc_embs = {}
+    for name in doc_names:
+        v = np.random.randn(1, dim).astype("float32")
+        v = v / np.linalg.norm(v)
+        doc_embs[name] = v
+
+    # Full matrix
+    full_df = document_similarity_matrix(doc_embs)
+    assert full_df.shape == (5, 5)
+    # top_k = 2 matrix
+    filtered_df = document_similarity_matrix(doc_embs, top_k=2)
+
+    assert isinstance(filtered_df, pd.DataFrame)
+    assert filtered_df.shape == (5, 5)
+    # Diagonal is always 1.0
+    for name in doc_names:
+        assert np.isclose(filtered_df.loc[name, name], 1.0)
+
+    # For each row, non-zero off-diagonal entries should be at most top_k * 2 (due to symmetry)
+    for name in doc_names:
+        row = filtered_df.loc[name].drop(name)
+        assert (row > 0).sum() <= 4
+
+
+def test_document_similarity_matrix_with_candidate_pairs(dummy_embeddings):
+    """Test document_similarity_matrix with explicitly provided candidate_pairs."""
+    candidate_pairs = {("doc_A", "doc_B")}
+    df = document_similarity_matrix(dummy_embeddings, candidate_pairs=candidate_pairs)
+
+    assert isinstance(df, pd.DataFrame)
+    assert df.loc["doc_A", "doc_A"] == 1.0
+    assert df.loc["doc_A", "doc_B"] > 0.0
+    assert df.loc["doc_B", "doc_A"] > 0.0
+    # doc_C was not in candidate_pairs
+    assert df.loc["doc_A", "doc_C"] == 0.0
+    assert df.loc["doc_B", "doc_C"] == 0.0
+
+
+def test_find_candidate_pairs():
+    """Test finding candidate pairs with FAISS flat index."""
+    np.random.seed(42)
+    dim = 32
+    names = [f"doc_{i}" for i in range(6)]
+    vectors = [np.random.randn(dim).astype("float32") for _ in range(6)]
+    for i in range(len(vectors)):
+        vectors[i] = vectors[i] / np.linalg.norm(vectors[i])
+
+    pairs = find_candidate_pairs(names, vectors, top_k=2)
+    assert isinstance(pairs, set)
+    assert len(pairs) > 0
+    # When n <= top_k, all pairs returned
+    all_pairs = find_candidate_pairs(names[:3], vectors[:3], top_k=5)
+    assert len(all_pairs) == 3
 
 
 def test_chunk_similarity_matrix(dummy_embeddings):
@@ -356,6 +458,43 @@ def test_hybrid_similarity_matrix_default_weight():
     hybrid_df = hybrid_similarity_matrix(semantic_df, lexical_df)
     expected = 0.7 * semantic_df + 0.3 * lexical_df
     assert np.allclose(hybrid_df.values, expected.values)
+
+
+def test_normalize_scores_minmax_and_zscore():
+    df = pd.DataFrame({"a": [10.0, 20.0], "b": [30.0, 40.0]})
+
+    # Min-max normalization
+    minmax_df = normalize_scores(df, method="minmax")
+    assert np.isclose(minmax_df.values.min(), 0.0)
+    assert np.isclose(minmax_df.values.max(), 1.0)
+
+    # Z-score normalization
+    zscore_df = normalize_scores(df, method="zscore")
+    assert np.isclose(zscore_df.values.mean(), 0.0, atol=1e-6)
+    assert np.isclose(zscore_df.values.std(), 1.0, atol=1e-6)
+
+    # Invalid normalization method
+    with pytest.raises(ValueError, match="Invalid normalization method"):
+        normalize_scores(df, method="invalid_method")
+
+
+def test_hybrid_similarity_matrix_with_normalization():
+    semantic_df = pd.DataFrame(
+        {"doc1": [1.0, 0.85], "doc2": [0.85, 1.0]}, index=["doc1", "doc2"]
+    )
+    lexical_df = pd.DataFrame(
+        {"doc1": [1.0, 0.15], "doc2": [0.15, 1.0]}, index=["doc1", "doc2"]
+    )
+
+    hybrid_minmax = hybrid_similarity_matrix(
+        semantic_df, lexical_df, w=0.5, normalize="minmax"
+    )
+    hybrid_zscore = hybrid_similarity_matrix(
+        semantic_df, lexical_df, w=0.5, normalize="zscore"
+    )
+
+    assert isinstance(hybrid_minmax, pd.DataFrame)
+    assert isinstance(hybrid_zscore, pd.DataFrame)
 
 
 def test_hybrid_similarity_matrix_invalid_weight():
@@ -1007,5 +1146,39 @@ def test_bm25_idf_calculation():
     # Since "very rare common" has more unmatched rare terms (which have higher IDF weight log(2.0) than log(1.2)),
     # its score_max_a is much higher, so the normalized similarity should be lower.
     assert score_2 < score_1
+
+
+def test_document_similarity_matrix_hnsw(dummy_embeddings):
+    """Test document_similarity_matrix with HNSW enabled (using FAISS) on dict embeddings."""
+    df = document_similarity_matrix(dummy_embeddings, use_hnsw=True)
+    assert isinstance(df, pd.DataFrame)
+    assert df.shape == (3, 3)
+    assert list(df.columns) == ["doc_A", "doc_B", "doc_C"]
+    assert np.isclose(df.loc["doc_A", "doc_A"], 1.0)
+    assert df.loc["doc_A", "doc_B"] > df.loc["doc_A", "doc_C"]
+
+
+def test_document_similarity_matrix_hnsw_ndarray(dummy_embeddings):
+    """Test document_similarity_matrix with HNSW enabled (using FAISS) on list/ndarray embeddings."""
+    embeddings_list = [dummy_embeddings["doc_A"][0], dummy_embeddings["doc_B"][0], dummy_embeddings["doc_C"][0]]
+    sim = document_similarity_matrix(embeddings_list, use_hnsw=True)
+    assert isinstance(sim, np.ndarray)
+    assert sim.shape == (3, 3)
+    assert np.isclose(sim[0, 0], 1.0)
+    assert sim[0, 1] > sim[0, 2]
+
+
+def test_document_similarity_matrix_hnsw_fallback(dummy_embeddings, monkeypatch):
+    """Verify that document_similarity_matrix falls back to exact computation when FAISS raises error."""
+    import sys
+    # Mock FAISS import failure
+    monkeypatch.setitem(sys.modules, "faiss", None)
+
+    df = document_similarity_matrix(dummy_embeddings, use_hnsw=True)
+    assert isinstance(df, pd.DataFrame)
+    assert df.shape == (3, 3)
+    assert np.isclose(df.loc["doc_A", "doc_A"], 1.0)
+    assert df.loc["doc_A", "doc_B"] > df.loc["doc_A", "doc_C"]
+
 
 
