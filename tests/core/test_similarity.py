@@ -12,6 +12,7 @@ from src.core.lexical_similarity import (
     tokenize,
 )
 from src.core.similarity import (
+    _validated_batch_size,
     calculate_paragraph_similarity_breakdown,
     chunk_max_similarity,
     chunk_similarity_matrix,
@@ -57,10 +58,31 @@ def test_chunk_max_similarity_supports_batching(dummy_embeddings):
     assert np.isclose(sim_batched, sim_unbatched)
 
 
+def test_validated_batch_size_valid_inputs():
+    assert _validated_batch_size(None) is None
+    assert _validated_batch_size(10) == 10
+    assert _validated_batch_size(10.0) == 10
+    assert _validated_batch_size("10") == 10
+    assert _validated_batch_size("10.0") == 10
+    assert _validated_batch_size(0) is None
+    assert _validated_batch_size(-5) is None
+
+
+def test_validated_batch_size_invalid_inputs():
+    invalid_values = ["10.5", 10.5, "abc", True, False, [10], {"batch": 10}]
+    for val in invalid_values:
+        with pytest.raises(ValueError, match="batch_size must be an integer"):
+            _validated_batch_size(val)
+
+
 def test_chunk_max_similarity_rejects_invalid_batch_size(dummy_embeddings):
     with pytest.raises(ValueError, match="batch_size must be an integer"):
         chunk_max_similarity(
             dummy_embeddings["doc_A"], dummy_embeddings["doc_B"], batch_size=0.5
+        )
+    with pytest.raises(ValueError, match="batch_size must be an integer"):
+        chunk_max_similarity(
+            dummy_embeddings["doc_A"], dummy_embeddings["doc_B"], batch_size="10.5"
         )
 
 
