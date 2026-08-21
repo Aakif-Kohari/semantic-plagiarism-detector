@@ -7,9 +7,9 @@ Ensures that the logical views have been correctly decomposed into the
 app/pages/ directory and follow Streamlit's naming conventions.
 """
 
-import pytest
-import os
 from pathlib import Path
+
+import pytest
 
 
 class TestMultiPageAppStructure:

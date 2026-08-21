@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from tests.conftest import MockDataFactory
+from src.core.similarity import PLAGIARISM_THRESHOLD
 
 # Mock ML libraries to prevent pytest segmentation faults on Apple Silicon
 sys.modules["transformers"] = MagicMock()

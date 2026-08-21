@@ -13,12 +13,16 @@ named colors, providing a robust fallback mechanism for theme configurations.
 Issue #2898: Fallback behavior for named colors in Badge Generator.
 """
 
+import hashlib
 import html
-import re
 import logging
 import hashlib
 from datetime import datetime, timezonefrom io import BytesIO
 from typing import Optional, Tuple, Dict
+import re
+from datetime import datetime
+from io import BytesIO
+from typing import Dict, Optional
 
 try:
     from PIL import Image, ImageDraw, ImageFont
@@ -225,20 +229,35 @@ def generate_badge_png(
     student_name: str = "Student",
     date: Optional[str] = None,
     text_preview: str = "",
+    student_id: Optional[str] = None,
 ) -> BytesIO:
     """
     Generates a visually appealing PNG badge for plagiarism-free work.
+    Caches generated badges in Redis for 24 hours based on student ID/name and date (Issue #2941).
 
     Args:
         student_name: Name of the student (optional, defaults to "Student")
         date: Date string (optional, defaults to current date)
         text_preview: Preview of the verified text (optional)
+        student_id: Optional unique ID of the student for caching
 
     Returns:
         BytesIO buffer containing the PNG badge
     """
     if Image is None:
         raise ImportError("PIL/Pillow is required for PNG badge generation")
+
+    target_date = date if date is not None else datetime.now().strftime("%B %d, %Y")
+    ident = str(student_id if student_id is not None else student_name)
+
+    # Check Redis cache
+    from src.utils.redis_cache import BADGE_TTL, CacheNamespace, RedisCache
+
+    cache = RedisCache.get_instance()
+    cache_key = CacheNamespace.BADGES.build_key("png", ident, target_date)
+    cached_bytes = cache.get(cache_key)
+    if cached_bytes is not None and isinstance(cached_bytes, bytes):
+        return BytesIO(cached_bytes)
 
     # Badge dimensions
     width, height = 800, 600
@@ -362,6 +381,11 @@ def generate_badge_png(
     # Save to buffer
     buffer = BytesIO()
     img.save(buffer, format="PNG", quality=95)
+    png_bytes = buffer.getvalue()
+    try:
+        cache.set(cache_key, png_bytes, ttl=BADGE_TTL)
+    except Exception:
+        pass
     buffer.seek(0)
     return buffer
 
@@ -371,20 +395,35 @@ def generate_badge_pdf(
     date: Optional[str] = None,
     text_preview: str = "",
     brand_color: Optional[str] = None,
+    student_id: Optional[str] = None,
 ) -> BytesIO:
     """
     Generates a professional PDF certificate for plagiarism-free work.
+    Caches generated certificates in Redis for 24 hours based on student ID/name and date (Issue #2941).
 
     Args:
         student_name: Name of the student (optional, defaults to "Student")
         date: Date string (optional, defaults to current date)
         text_preview: Preview of the verified text (optional)
         brand_color: Optional hex color string for branding
+        student_id: Optional unique ID of the student for caching
 
     Returns:
         BytesIO buffer containing the PDF certificate
     """
-    brand_hex = validate_hex_color(brand_color, DEFAULT_BADGE_COLOR)
+    target_date = date if date is not None else datetime.now().strftime("%B %d, %Y")
+    ident = str(student_id if student_id is not None else student_name)
+
+    # Check Redis cache
+    from src.utils.redis_cache import BADGE_TTL, CacheNamespace, RedisCache
+
+    cache = RedisCache.get_instance()
+    cache_key = CacheNamespace.BADGES.build_key("pdf", ident, target_date)
+    cached_bytes = cache.get(cache_key)
+    if cached_bytes is not None and isinstance(cached_bytes, bytes):
+        return BytesIO(cached_bytes)
+
+    brand_hex = validate_hex_color(brand_color)
     brand_clr = HexColor(brand_hex)
     buffer = BytesIO()
     doc = SimpleDocTemplate(
@@ -546,62 +585,11 @@ def generate_badge_pdf(
     doc.build(story)
     from src.utils.pdf_report import compress_pdf_buffer
 
-    return compress_pdf_buffer(buffer)
-
-
-def generate_svg_badge(
-    label: str,
-    message: str,
-    label_color: str = "#555",
-    message_color: str = "#007ec6",
-    icon: Optional[str] = None,
-) -> str:
-    """Generate a shields.io-style SVG badge.
-
-    Args:
-        label: The left-side text (e.g., "build", "coverage").
-        message: The right-side text (e.g., "passing", "95%").
-        label_color: Background color for the label side.
-        message_color: Background color for the message side.
-        icon: Optional base64 encoded SVG icon.
-
-    Returns:
-        A complete SVG XML string.
-    """
-    # Validate colors using the robust fallback mechanism
-    valid_label_color = validate_hex_color(label_color, "#555555")
-    valid_message_color = validate_hex_color(message_color, "#007ec6")
-
-    # Calculate approximate widths (simplified for this example)
-    label_width = max(30, len(label) * 7 + 10)
-    message_width = max(30, len(message) * 7 + 10)
-    total_width = label_width + message_width
-
-    svg_template = f"""<svg xmlns="http://www.w3.org/2000/svg" width="{total_width}" height="20">
-      <linearGradient id="b" x2="0" y2="100%">
-        <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
-        <stop offset="1" stop-opacity=".1"/>
-      </linearGradient>
-      <mask id="a">
-        <rect width="{total_width}" height="20" rx="3" fill="#fff"/>
-      </mask>
-      <g mask="url(#a)">
-        <path fill="{valid_label_color}" d="M0 0h{label_width}v20H0z"/>
-        <path fill="{valid_message_color}" d="M{label_width} 0h{message_width}v20H{label_width}z"/>
-        <path fill="url(#b)" d="M0 0h{total_width}v20H0z"/>
-      </g>
-      <g fill="#fff" text-anchor="middle" font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="11">
-        <text x="{label_width/2}" y="15" fill="#010101" fill-opacity=".3">{label}</text>
-        <text x="{label_width/2}" y="14">{label}</text>
-        <text x="{label_width + message_width/2}" y="15" fill="#010101" fill-opacity=".3">{message}</text>
-        <text x="{label_width + message_width/2}" y="14">{message}</text>
-      </g>
-    </svg>"""
-
-    return svg_template
-
-
-def get_badge_cache_key(label: str, message: str, color: str) -> str:
-    """Generate a deterministic cache key for a badge configuration."""
-    raw_key = f"{label}|{message}|{color}"
-    return hashlib.md5(raw_key.encode("utf-8")).hexdigest()
+    result_buffer = compress_pdf_buffer(buffer)
+    pdf_bytes = result_buffer.getvalue()
+    try:
+        cache.set(cache_key, pdf_bytes, ttl=BADGE_TTL)
+    except Exception:
+        pass
+    result_buffer.seek(0)
+    return result_buffer

@@ -1,8 +1,7 @@
 import json
 import logging
-import os
-import pytest
-from src.core.logging_setup import setup_logging, JSONFormatter
+
+from src.core.logging_setup import JSONFormatter, setup_logging
 
 
 def test_json_formatter_outputs_valid_json():
@@ -31,7 +30,7 @@ def test_json_formatter_includes_exception():
     formatter = JSONFormatter()
     try:
         raise ValueError("Boom exception")
-    except ValueError as e:
+    except ValueError:
         import sys
         exc_info = sys.exc_info()
 

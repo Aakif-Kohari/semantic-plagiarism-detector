@@ -252,7 +252,7 @@ def get_cached_translation(
 
     except sqlite3.Error as exc:
         logger.error("Failed to query translation cache: %s", exc)
-            return row[0] if row else None
+        return None
     except sqlite3.DatabaseError as exc:
         if _CORRUPTION_MESSAGE in str(exc).lower():
             _recover_corrupted_cache()

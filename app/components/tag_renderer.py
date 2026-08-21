@@ -10,12 +10,11 @@ are rendered with muted colors and warning icons to prompt manual verification.
 Issue #2812: Visual indicators for low-confidence tags.
 """
 
-import streamlit as st
-import html
 from typing import List, Optional
 
-from src.core.models.categorization import DocumentTag, TagSource
+import streamlit as st
 
+from src.core.models.categorization import DocumentTag
 
 # CSS styles for tag badges, supporting both Light and Dark modes
 _TAG_CSS = """

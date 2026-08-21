@@ -69,7 +69,8 @@ def test_categorize_at_1_0():
     assert categorize_ai_probability(1.0) == "High Probability"
 
 
-def test_ai_probability_categorization_consistency():    """Verify that both categorize_ai_probability and detect_ai_generated_text use consistent thresholds."""
+def test_ai_probability_categorization_consistency():
+    """Verify that both categorize_ai_probability and detect_ai_generated_text use the same thresholds."""
     from src.core.ai_detector import (
         AI_HIGH_THRESHOLD,
         AI_MEDIUM_THRESHOLD,

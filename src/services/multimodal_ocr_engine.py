@@ -7,12 +7,11 @@ and cross-modal layout vs text similarity matching against text corpora.
 import random
 import uuid
 from datetime import datetime
-from typing import List, Tuple
+from typing import List
 
 from src.models.multimodal_ocr_model import (
     BoundingBoxCoordinates,
     MultimodalImageOcrMatch,
-    MultimodalOcrAuditReport,
     OcrExtractedChunk,
 )
 

@@ -5,14 +5,12 @@ Provides persistent storage and retrieval of batch processing history
 with search, filtering, and analytics capabilities.
 """
 
-import os
 import json
-import sqlite3
 import logging
-from datetime import datetime, timedelta
-from typing import List, Dict, Optional, Any, Tuple
+import sqlite3
 from dataclasses import dataclass
-from pathlib import Path
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 

@@ -1,6 +1,7 @@
 """Streamlit Dashboard Page for Neural Code Clone Detector Suite."""
 
 import streamlit as st
+
 from src.components.code_clone_card import render_code_clone_card
 from src.components.code_clone_timeline import render_code_clone_timeline
 from src.models.neural_code_clone_model import CodeAstEmbedding
