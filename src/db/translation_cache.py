@@ -223,30 +223,31 @@ def get_cached_translation(
     source_hash = _generate_hash(source_text, source_lang, target_lang)
 
     try:
-        with _get_connection(db_path) as conn:
-            cursor = conn.execute(
-                """
-                SELECT translated_text FROM translation_cache
-                WHERE source_hash = ?
-                """,
-                (source_hash,),
-            )
-            row = cursor.fetchone()
-
-            if row:
-                # Update last_accessed_at for potential LRU tracking
-                conn.execute(
+        with _lock:
+            with _get_connection(db_path) as conn:
+                cursor = conn.execute(
                     """
-                    UPDATE translation_cache 
-                    SET last_accessed_at = ? 
+                    SELECT translated_text FROM translation_cache
                     WHERE source_hash = ?
                     """,
-                    (datetime.utcnow().isoformat(), source_hash),
+                    (source_hash,),
                 )
-                logger.debug(
-                    "Cache hit for translation: %s -> %s", source_lang, target_lang
-                )
-                return row["translated_text"]
+                row = cursor.fetchone()
+
+                if row:
+                    # Update last_accessed_at for potential LRU tracking
+                    conn.execute(
+                        """
+                        UPDATE translation_cache 
+                        SET last_accessed_at = ? 
+                        WHERE source_hash = ?
+                        """,
+                        (datetime.utcnow().isoformat(), source_hash),
+                    )
+                    logger.debug(
+                        "Cache hit for translation: %s -> %s", source_lang, target_lang
+                    )
+                    return row["translated_text"]
 
             return None
 
@@ -287,23 +288,24 @@ def save_translation(
     now = datetime.utcnow().isoformat()
 
     try:
-        with _get_connection(db_path) as conn:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO translation_cache
-                (source_hash, source_text, source_lang, target_lang, translated_text, created_at, last_accessed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    source_hash,
-                    source_text,
-                    source_lang.strip().lower(),
-                    target_lang.strip().lower(),
-                    translated_text.strip(),
-                    now,
-                    now,
-                ),
-            )
+        with _lock:
+            with _get_connection(db_path) as conn:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO translation_cache
+                    (source_hash, source_text, source_lang, target_lang, translated_text, created_at, last_accessed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        source_hash,
+                        source_text,
+                        source_lang.strip().lower(),
+                        target_lang.strip().lower(),
+                        translated_text.strip(),
+                        now,
+                        now,
+                    ),
+                )
         logger.debug("Saved translation to cache: %s -> %s", source_lang, target_lang)
         return True
     except sqlite3.Error as exc:

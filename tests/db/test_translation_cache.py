@@ -367,3 +367,21 @@ def test_get_cached_translation_handles_non_corruption_database_error(tmp_path, 
     assert result is None
     assert "Failed to query translation cache" in caplog.text
     assert cache_path.read_bytes() == b"placeholder"
+
+
+def test_translation_cache_uses_lock_for_get_and_save():
+    """Verify that get_cached_translation and save_translation acquire the global _lock."""
+    from unittest.mock import MagicMock
+    from src.db.translation_cache import _lock, save_translation
+
+    mock_lock = MagicMock()
+    with patch("src.db.translation_cache._lock", mock_lock):
+        # Trigger get_cached_translation
+        get_cached_translation("test lock query text", "en", "es")
+        # Trigger save_translation
+        save_translation("test lock save text", "en", "es", "translation text")
+
+    # Assert that _lock was acquired (enter) and released (exit)
+    assert mock_lock.__enter__.call_count >= 2
+    assert mock_lock.__exit__.call_count >= 2
+
