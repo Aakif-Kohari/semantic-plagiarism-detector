@@ -119,7 +119,7 @@ def get_active_sessions_count() -> int:
                     session_id = parts[3]
                     last_interaction = get_session_state(
                         session_id,
-                        "last_interaction",
+                        SessionKeys.LAST_INTERACTION,
                     )
                     if (
                         last_interaction is not None
