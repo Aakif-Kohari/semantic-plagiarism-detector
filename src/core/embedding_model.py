@@ -178,7 +178,7 @@ class EmbeddingModelManager:
                 return _model
 
         primary = _get_model_name()
-        fallback = "all-MiniLM-L6-v2"
+        fallback = os.getenv("SEMANTIC_PLAGIARISM_FALLBACK_MODEL", "all-MiniLM-L6-v2")
         cache_dir = _get_cache_dir()
         logger.info(f"[embedding_model] Loading model: {primary} ...")
         logger.info(
