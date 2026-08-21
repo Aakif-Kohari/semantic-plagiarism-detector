@@ -64,6 +64,21 @@ def test_chunk_max_similarity_rejects_invalid_batch_size(dummy_embeddings):
         )
 
 
+def test_document_similarity_matrix_max_pooling(dummy_embeddings):
+    df_mean = document_similarity_matrix(dummy_embeddings, pooling="mean")
+    df_max = document_similarity_matrix(dummy_embeddings, pooling="max")
+
+    assert isinstance(df_max, pd.DataFrame)
+    assert df_max.shape == (3, 3)
+    assert list(df_max.columns) == ["doc_A", "doc_B", "doc_C"]
+    assert np.isclose(df_max.loc["doc_A", "doc_A"], 1.0)
+
+
+def test_document_similarity_matrix_rejects_invalid_pooling(dummy_embeddings):
+    with pytest.raises(ValueError, match="Invalid pooling method"):
+        document_similarity_matrix(dummy_embeddings, pooling="invalid_pooling")
+
+
 def test_document_similarity_matrix(dummy_embeddings):
     df = document_similarity_matrix(dummy_embeddings)
 
