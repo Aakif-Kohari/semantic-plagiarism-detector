@@ -26,6 +26,7 @@ from src.core.similarity import (
     get_cross_encoder_info,
     hybrid_similarity_matrix,
     manhattan_similarity,
+    normalize_scores,
     rerank_candidates_with_cross_encoder,
 )
 
@@ -420,6 +421,43 @@ def test_hybrid_similarity_matrix_default_weight():
     hybrid_df = hybrid_similarity_matrix(semantic_df, lexical_df)
     expected = 0.7 * semantic_df + 0.3 * lexical_df
     assert np.allclose(hybrid_df.values, expected.values)
+
+
+def test_normalize_scores_minmax_and_zscore():
+    df = pd.DataFrame({"a": [10.0, 20.0], "b": [30.0, 40.0]})
+
+    # Min-max normalization
+    minmax_df = normalize_scores(df, method="minmax")
+    assert np.isclose(minmax_df.values.min(), 0.0)
+    assert np.isclose(minmax_df.values.max(), 1.0)
+
+    # Z-score normalization
+    zscore_df = normalize_scores(df, method="zscore")
+    assert np.isclose(zscore_df.values.mean(), 0.0, atol=1e-6)
+    assert np.isclose(zscore_df.values.std(), 1.0, atol=1e-6)
+
+    # Invalid normalization method
+    with pytest.raises(ValueError, match="Invalid normalization method"):
+        normalize_scores(df, method="invalid_method")
+
+
+def test_hybrid_similarity_matrix_with_normalization():
+    semantic_df = pd.DataFrame(
+        {"doc1": [1.0, 0.85], "doc2": [0.85, 1.0]}, index=["doc1", "doc2"]
+    )
+    lexical_df = pd.DataFrame(
+        {"doc1": [1.0, 0.15], "doc2": [0.15, 1.0]}, index=["doc1", "doc2"]
+    )
+
+    hybrid_minmax = hybrid_similarity_matrix(
+        semantic_df, lexical_df, w=0.5, normalize="minmax"
+    )
+    hybrid_zscore = hybrid_similarity_matrix(
+        semantic_df, lexical_df, w=0.5, normalize="zscore"
+    )
+
+    assert isinstance(hybrid_minmax, pd.DataFrame)
+    assert isinstance(hybrid_zscore, pd.DataFrame)
 
 
 def test_hybrid_similarity_matrix_invalid_weight():

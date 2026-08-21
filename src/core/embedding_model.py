@@ -303,7 +303,8 @@ def verify_model_cache_integrity(cache_dir: Path) -> bool:
     for root, _, filenames in os.walk(cache_path):
         for filename in filenames:
             if not filename.endswith(_MODEL_WEIGHT_EXTENSIONS):
-                continue            weight_path = Path(root) / filename
+                continue
+            weight_path = Path(root) / filename
             try:
                 size = weight_path.stat().st_size
             except OSError as exc:
