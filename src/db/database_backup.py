@@ -39,6 +39,7 @@ from __future__ import annotations
 import gzip
 import io
 import logging
+from src.db.corpus_db import get_corpus_db_path
 import os
 import re
 import shutil
@@ -51,8 +52,8 @@ from contextlib import closing
 from pathlib import Path
 from typing import Dict, Optional, Union
 
+from src.core.app_config import get_backup_dir
 from src.db.connection import apply_busy_timeout
-from src.core.app_config import BACKUP_DIR, get_backup_dir
 
 # ── Logger Configuration ───────────────────────────────────────────────────────
 logger = logging.getLogger(__name__)

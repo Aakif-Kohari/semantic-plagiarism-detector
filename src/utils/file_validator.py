@@ -13,12 +13,10 @@ this module provides application-level validation to give users immediate,
 descriptive feedback and to enforce stricter business logic rules.
 """
 
-import os
 import logging
-import mimetypes
-from pathlib import Path
-from typing import Optional, List, Tuple, Union
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional, Union
 
 logger = logging.getLogger(__name__)
 

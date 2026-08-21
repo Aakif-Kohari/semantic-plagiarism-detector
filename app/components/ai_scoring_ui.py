@@ -5,15 +5,17 @@ Streamlit-based interface for AI-powered plagiarism scoring with
 detailed metrics visualization and comparison reports.
 """
 
-import streamlit as st
+
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from typing import Dict, List, Any
+import streamlit as st
 
 from src.core.ai_scoring_engine import (
-    AIScoringEngine, ScoringConfig, PlagiarismScore, SeverityLevel,
-    ContentFingerprinter
+    AIScoringEngine,
+    ContentFingerprinter,
+    PlagiarismScore,
+    ScoringConfig,
 )
 
 
