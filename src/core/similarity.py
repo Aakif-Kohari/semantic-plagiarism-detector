@@ -168,6 +168,7 @@ def document_similarity_matrix(
     min_percentile: Optional[float] = None,
     top_k: Optional[int] = None,
     candidate_pairs: Optional[Set[Tuple[str, str]]] = None,
+    pooling: str = "mean",
 ) -> Union[pd.DataFrame, np.ndarray]:
     """
     Build an N×N cosine similarity matrix between all document pairs.
@@ -182,12 +183,35 @@ def document_similarity_matrix(
         min_percentile: Optional percentile threshold for filtering.
         top_k: Optional top-K nearest neighbors to pre-filter document pairs using FAISS.
         candidate_pairs: Optional pre-computed candidate pair set (doc_a, doc_b).
+        pooling: Pooling strategy for multi-chunk document embeddings ('mean' or 'max').
 
     Returns:
         Symmetric pandas DataFrame or numpy ndarray with similarity values.
     """
+    if not isinstance(pooling, str) or pooling.lower() not in ("mean", "max"):
+        raise ValueError(
+            f"Invalid pooling method '{pooling}'. Supported methods: 'mean', 'max'."
+        )
+
+    pooling_fn = np.max if pooling.lower() == "max" else np.mean
+
     if isinstance(doc_embeddings, (np.ndarray, list)):
-        stacked = np.array(doc_embeddings)
+        if (
+            isinstance(doc_embeddings, list)
+            and len(doc_embeddings) > 0
+            and isinstance(doc_embeddings[0], np.ndarray)
+            and doc_embeddings[0].ndim == 2
+        ):
+            pooled_list = []
+            for emb in doc_embeddings:
+                if emb.ndim == 2 and emb.shape[0] > 0:
+                    pooled_list.append(pooling_fn(emb, axis=0))
+                else:
+                    pooled_list.append(emb)
+            stacked = np.array(pooled_list)
+        else:
+            stacked = np.array(doc_embeddings)
+
         if stacked.ndim == 1 or stacked.size == 0:
             return np.array([[]])
         if top_k is not None and top_k > 0 and stacked.shape[0] > top_k:
@@ -216,13 +240,13 @@ def document_similarity_matrix(
     doc_names = list(doc_embeddings.keys())
     n = len(doc_names)
 
-    # Build document-level vectors (mean pool over chunks)
+    # Build document-level vectors (mean or max pool over chunks)
     doc_vectors = []
     for name in doc_names:
         emb = doc_embeddings[name]
         if isinstance(emb, np.ndarray):
             if emb.ndim == 2 and emb.shape[0] > 0:
-                vec = np.mean(emb, axis=0)
+                vec = pooling_fn(emb, axis=0)
             elif emb.ndim == 1 and emb.shape[0] > 0:
                 vec = emb
             else:
@@ -278,6 +302,7 @@ def compute_similarity_matrix(
     min_percentile: Optional[float] = None,
     top_k: Optional[int] = None,
     candidate_pairs: Optional[Set[Tuple[str, str]]] = None,
+    pooling: str = "mean",
 ) -> Union[pd.DataFrame, np.ndarray]:
     """
     Direct alias/wrapper for document_similarity_matrix to maintain backwards compatibility
@@ -290,6 +315,7 @@ def compute_similarity_matrix(
         min_percentile=min_percentile,
         top_k=top_k,
         candidate_pairs=candidate_pairs,
+        pooling=pooling,
     )
 
 
