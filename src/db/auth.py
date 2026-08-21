@@ -966,6 +966,41 @@ def set_tour_completed(username: str, completed: bool = True) -> None:
         raise sqlite3.Error(f"Failed to update tour status: {e}") from e
 
 
+def _get_fernet_key() -> bytes:
+    """Load or derive a valid 32-byte Fernet key from environment variables."""
+    import base64
+    import hashlib
+    key_str = os.getenv("OTP_ENCRYPTION_KEY") or os.getenv("ENCRYPTION_KEY")
+    if not key_str:
+        key_str = "default-fallback-otp-encryption-key-do-not-use-in-production"
+    
+    hashed = hashlib.sha256(key_str.encode("utf-8")).digest()
+    return base64.urlsafe_b64encode(hashed)
+
+
+def _encrypt_otp_secret(secret: str) -> str:
+    """Encrypt the OTP secret using cryptography.fernet."""
+    if not secret:
+        return secret
+    from cryptography.fernet import Fernet
+    key = _get_fernet_key()
+    f = Fernet(key)
+    return f.encrypt(secret.encode("utf-8")).decode("utf-8")
+
+
+def _decrypt_otp_secret(encrypted_secret: str) -> str:
+    """Decrypt the OTP secret using cryptography.fernet, falling back to plaintext on error."""
+    if not encrypted_secret:
+        return encrypted_secret
+    from cryptography.fernet import Fernet, InvalidToken
+    key = _get_fernet_key()
+    f = Fernet(key)
+    try:
+        return f.decrypt(encrypted_secret.encode("utf-8")).decode("utf-8")
+    except (InvalidToken, Exception):
+        return encrypted_secret
+
+
 def get_2fa_status(username: str) -> tuple[bool, str | None]:
     """Return (two_factor_enabled, otp_secret) for a user."""
     with _connect() as conn:
@@ -975,16 +1010,18 @@ def get_2fa_status(username: str) -> tuple[bool, str | None]:
         ).fetchone()
     if not row:
         return False, None
-    return bool(row[0]), row[1]
+    decrypted_secret = _decrypt_otp_secret(row[1]) if row[1] is not None else None
+    return bool(row[0]), decrypted_secret
 
 
 @with_sqlite_retry
 def enable_2fa(username: str, secret: str) -> None:
     """Enable 2FA for a user and store their OTP secret."""
+    encrypted_secret = _encrypt_otp_secret(secret)
     with _connect() as conn:
         conn.execute(
             "UPDATE users SET two_factor_enabled = 1, otp_secret = ? WHERE username = ?",
-            (secret, username.lower()),
+            (encrypted_secret, username.lower()),
         )
         conn.commit()
 
@@ -1484,6 +1521,73 @@ def _get_token_signature(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+_last_revoked_cleanup = 0.0
+
+
+def _cleanup_revoked_tokens() -> int:
+    """Delete expired JWT tokens and their corresponding SHA-256 signatures from revoked_tokens.
+
+    Returns:
+        The number of rows deleted.
+    """
+    import base64
+    import json
+    import time
+    import hashlib
+
+    deleted_count = 0
+    try:
+        with _connect() as conn:
+            cursor = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='revoked_tokens'"
+            )
+            if not cursor.fetchone():
+                return 0
+
+            cursor = conn.execute("SELECT token_signature FROM revoked_tokens")
+            rows = cursor.fetchall()
+
+            now_ts = int(time.time())
+            expired_signatures = []
+
+            for row in rows:
+                token_sig = row[0]
+                if not token_sig:
+                    continue
+                parts = token_sig.split(".")
+                if len(parts) == 3:
+                    try:
+                        payload_b64 = parts[1]
+                        rem = len(payload_b64) % 4
+                        if rem > 0:
+                            payload_b64 += "=" * (4 - rem)
+                        payload_bytes = base64.urlsafe_b64decode(payload_b64)
+                        payload = json.loads(payload_bytes.decode("utf-8"))
+                        exp = payload.get("exp")
+                        if exp is not None:
+                            exp_int = int(exp)
+                            if now_ts >= exp_int:
+                                expired_signatures.append(token_sig)
+                                token_hash = hashlib.sha256(token_sig.encode("utf-8")).hexdigest()
+                                expired_signatures.append(token_hash)
+                    except Exception:
+                        pass
+
+            if expired_signatures:
+                placeholders = ",".join("?" for _ in expired_signatures)
+                cur = conn.execute(
+                    f"DELETE FROM revoked_tokens WHERE token_signature IN ({placeholders})",
+                    expired_signatures
+                )
+                deleted_count = cur.rowcount
+                conn.commit()
+                if deleted_count > 0:
+                    logger.info(f"Cleaned up {deleted_count} expired entries from revoked_tokens table.")
+    except Exception as e:
+        logger.error(f"Failed to cleanup revoked tokens: {e}")
+    return deleted_count
+
+
 @with_sqlite_retry
 def revoke_token(token: str, details: str | None = None) -> None:
     """Revoke an active Bearer token by storing its signature in revoked_tokens table."""
@@ -1530,6 +1634,7 @@ def revoke_token(token: str, details: str | None = None) -> None:
                 username="system",
                 details=details or f"Token signature {signature[:12]}... revoked",
             )
+        _cleanup_revoked_tokens()
     except sqlite3.Error as e:
         logger.error(f"Failed to revoke token: {e}")
         raise sqlite3.Error(f"Failed to revoke token: {e}") from e
@@ -1543,6 +1648,12 @@ def is_token_revoked(token: str) -> bool:
     token = token.strip()
     if not token:
         return False
+
+    global _last_revoked_cleanup
+    now = time.time()
+    if now - _last_revoked_cleanup > 3600:
+        _last_revoked_cleanup = now
+        _cleanup_revoked_tokens()
 
     signature = _get_token_signature(token)
 
