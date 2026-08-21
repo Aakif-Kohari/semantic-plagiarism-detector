@@ -5,15 +5,17 @@ Comprehensive test suite covering report generation, export,
 and visualization functionality.
 """
 
-import os
 import json
+import os
 import tempfile
-import pytest
-from datetime import datetime
 
 from src.core.report_generator import (
-    ReportGenerator, ReportConfig, PlagiarismReport, ReportFormat,
-    ReportType, ReportSection
+    PlagiarismReport,
+    ReportConfig,
+    ReportFormat,
+    ReportGenerator,
+    ReportSection,
+    ReportType,
 )
 
 

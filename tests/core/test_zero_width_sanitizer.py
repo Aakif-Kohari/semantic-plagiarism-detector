@@ -79,6 +79,7 @@ def test_sanitize_zero_width_characters_consecutive_and_word_splitting():
 
 import pytest
 
+
 @pytest.mark.parametrize(
     "char_code, char_name",
     [

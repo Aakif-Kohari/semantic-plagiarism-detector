@@ -8,12 +8,11 @@ and UI exception wrapping.
 
 import functools
 import logging
+import os
 import threading
 import time
 import traceback
-import uuid
 from datetime import datetime
-import os
 
 import streamlit as st
 
@@ -215,13 +214,11 @@ def _run_backup_daemon():
                 and idle >= timeout
                 and last_activity > last_backup_time
             ):
-                from src.db.corpus_db import get_corpus_db_path
+                from src.core.app_config import get_backup_dir
                 from src.db.database_backup import (
                     cleanup_old_backups,
                     create_corpus_database_snapshot,
                 )
-
-                from src.core.app_config import get_backup_dir
 
                 snapshot = create_corpus_database_snapshot()
 

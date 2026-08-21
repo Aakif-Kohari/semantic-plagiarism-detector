@@ -13,13 +13,13 @@ named colors, providing a robust fallback mechanism for theme configurations.
 Issue #2898: Fallback behavior for named colors in Badge Generator.
 """
 
-import html
-import re
-import logging
 import hashlib
+import html
+import logging
+import re
 from datetime import datetime
 from io import BytesIO
-from typing import Optional, Tuple, Dict
+from typing import Dict, Optional
 
 try:
     from PIL import Image, ImageDraw, ImageFont

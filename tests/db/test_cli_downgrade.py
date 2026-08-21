@@ -21,7 +21,6 @@ from src.db.migrations import (
     migrate_auth_database,
     migrate_corpus_database,
     rollback_migration,
-    run_migrations,
 )
 
 

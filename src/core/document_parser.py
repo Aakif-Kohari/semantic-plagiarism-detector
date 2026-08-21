@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 
 import defusedxml
 
-from src.core.parse_durations import record_parse_duration
 from src.core.parsers.text_parser import (
     RTF_MAX_FILE_SIZE_BYTES,
     _rtf_content_within_limit,

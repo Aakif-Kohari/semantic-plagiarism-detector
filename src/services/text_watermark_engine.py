@@ -7,10 +7,8 @@ green/red list partitioning, and AI text fingerprinting detection.
 import math
 import uuid
 from datetime import datetime
-from typing import List, Tuple
 
 from src.models.text_watermark_model import (
-    WatermarkAuditReport,
     WatermarkDetectionMatch,
     WatermarkTokenDistribution,
 )

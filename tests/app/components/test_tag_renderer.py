@@ -7,16 +7,14 @@ Verifies that low-confidence tags receive warning icons, muted colors,
 and that the HTML output is safe from XSS vulnerabilities.
 """
 
-import pytest
-from unittest.mock import patch, MagicMock
-import html
+from unittest.mock import patch
 
-from src.core.models.categorization import DocumentTag, TagSource
 from app.components.tag_renderer import (
+    render_low_confidence_warning,
     render_tag,
     render_tag_collection,
-    render_low_confidence_warning,
 )
+from src.core.models.categorization import DocumentTag, TagSource
 
 
 class TestRenderTag:

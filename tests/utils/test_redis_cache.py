@@ -11,7 +11,6 @@ import pytest
 import redis
 
 from src.utils.redis_cache import (
-    CacheKeyPrefix,
     CacheNamespace,
     PayloadCompressor,
     RedisCache,
@@ -1208,6 +1207,7 @@ def test_redis_password_special_characters_escaped(monkeypatch):
     """Verify REDIS_PASSWORD with special characters (@, /, #, :) is safely URL-encoded (Issue #2799)."""
     import importlib
     import urllib.parse
+
     import src.utils.redis_cache
 
     monkeypatch.setenv("REDIS_PASSWORD", "p@ss/word#123:secret")
