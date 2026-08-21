@@ -157,6 +157,10 @@ def manhattan_similarity(
     return float(np.clip(similarity, 0.0, 1.0))
 
 
+DEFAULT_BATCH_SIZE: int = 2000
+DEFAULT_DOCUMENT_SIMILARITY_BATCH_SIZE: int = DEFAULT_BATCH_SIZE
+
+
 # ── Document-level similarity ──────────────────────────────────────────────────
 
 
@@ -171,20 +175,49 @@ def document_similarity_matrix(
 
     Args:
         doc_embeddings: Dict mapping doc name → embedding array, or direct array/list of embeddings.
-        batch_size: Optional number of documents to compare per batch.
+        batch_size: Optional number of documents to compare per batch. Defaults to DEFAULT_BATCH_SIZE (2000)
+            if not specified to prevent out-of-memory errors on large workloads.
         min_threshold: Minimum similarity score to keep; values below this will be 0.0.
         min_percentile: Optional percentile threshold for filtering.
 
     Returns:
         Symmetric pandas DataFrame or numpy ndarray with similarity values.
     """
+    safe_batch_size = _validated_batch_size(batch_size) or DEFAULT_BATCH_SIZE
+
     if isinstance(doc_embeddings, (np.ndarray, list)):
-        stacked = np.array(doc_embeddings)
-        if stacked.ndim == 1 or stacked.size == 0:
-            return np.array([[]])
-        sim = np.clip(cosine_similarity(stacked), 0.0, 1.0)
-        sim = np.where(sim < min_threshold, 0.0, sim)
-        return _apply_min_percentile_filter(sim, min_percentile)
+        if isinstance(doc_embeddings, np.ndarray):
+            if doc_embeddings.ndim == 1 or doc_embeddings.size == 0:
+                return np.array([[]])
+            stacked = doc_embeddings
+        else:
+            if len(doc_embeddings) == 0:
+                return np.array([[]])
+            doc_vectors = []
+            for emb in doc_embeddings:
+                if isinstance(emb, np.ndarray):
+                    if emb.ndim == 2 and emb.shape[0] > 0:
+                        vec = np.mean(emb, axis=0)
+                    elif emb.ndim == 1 and emb.shape[0] > 0:
+                        vec = emb
+                    else:
+                        vec = np.zeros(384)
+                else:
+                    vec = np.zeros(384)
+                doc_vectors.append(vec)
+            if not doc_vectors:
+                return np.array([[]])
+            stacked = np.vstack(doc_vectors)
+
+        n = stacked.shape[0]
+        matrix = np.zeros((n, n), dtype=np.float64)
+        for start in range(0, n, safe_batch_size):
+            end = min(start + safe_batch_size, n)
+            sim = cosine_similarity(stacked[start:end], stacked)
+            sim = np.clip(sim, 0.0, 1.0)
+            matrix[start:end] = np.where(sim < min_threshold, 0.0, sim)
+        return _apply_min_percentile_filter(matrix, min_percentile)
+
     doc_names = list(doc_embeddings.keys())
     n = len(doc_names)
 
@@ -206,17 +239,11 @@ def document_similarity_matrix(
     matrix = np.zeros((n, n))
     if doc_vectors:
         stacked = np.vstack(doc_vectors)
-        safe_batch_size = _validated_batch_size(batch_size)
-        if safe_batch_size is None:
-            sim = cosine_similarity(stacked)
+        for start in range(0, n, safe_batch_size):
+            end = min(start + safe_batch_size, n)
+            sim = cosine_similarity(stacked[start:end], stacked)
             sim = np.clip(sim, 0.0, 1.0)
-            matrix = np.where(sim < min_threshold, 0.0, sim)
-        else:
-            for start in range(0, n, safe_batch_size):
-                end = min(start + safe_batch_size, n)
-                sim = cosine_similarity(stacked[start:end], stacked)
-                sim = np.clip(sim, 0.0, 1.0)
-                matrix[start:end] = np.where(sim < min_threshold, 0.0, sim)
+            matrix[start:end] = np.where(sim < min_threshold, 0.0, sim)
 
     df = pd.DataFrame(matrix, index=doc_names, columns=doc_names)
     return _apply_min_percentile_filter(df, min_percentile)
