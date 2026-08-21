@@ -16,13 +16,10 @@ Issue #2898: Fallback behavior for named colors in Badge Generator.
 import hashlib
 import html
 import logging
-import hashlib
-from datetime import datetime, timezonefrom io import BytesIO
-from typing import Optional, Tuple, Dict
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from io import BytesIO
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 try:
     from PIL import Image, ImageDraw, ImageFont
@@ -117,7 +114,9 @@ _HEX_COLOR_PATTERN = re.compile(
 DEFAULT_BADGE_COLOR = "#4f46e5"
 
 
-def validate_hex_color(color: Optional[str], default_color: str = "#2563eb") -> str:
+def validate_hex_color(
+    color: Optional[str], default_color: str = DEFAULT_BADGE_COLOR
+) -> str:
     """Validate and normalize a color string into a standard hex format.
 
     This function accepts both standard hex color codes (e.g., "#ff0000")
@@ -132,10 +131,10 @@ def validate_hex_color(color: Optional[str], default_color: str = "#2563eb") -> 
         color: The input color string to validate. Can be a hex code or
                a CSS named color.
         default_color: The fallback hex color to return if validation fails.
-                      Defaults to a standard blue ("#2563eb").
+                      Defaults to DEFAULT_BADGE_COLOR.
 
     Returns:
-        A validated, normalized hex color string (e.g., "#ff0000").
+        A validated hex color string (e.g., "#ff0000").
 
     Examples:
         >>> validate_hex_color("#ff0000")
@@ -145,7 +144,7 @@ def validate_hex_color(color: Optional[str], default_color: str = "#2563eb") -> 
         >>> validate_hex_color("transparent")
         '#00000000'
         >>> validate_hex_color("invalid_color_name")
-        '#2563eb'
+        '#4f46e5'
     """
     if not color or not isinstance(color, str):
         logger.warning(
@@ -159,11 +158,6 @@ def validate_hex_color(color: Optional[str], default_color: str = "#2563eb") -> 
 
     # 1. Check if it's a valid standard hex code
     if _HEX_COLOR_PATTERN.match(cleaned_color):
-        # Normalize 3-digit hex to 6-digit for consistency (e.g., #f00 -> #ff0000)
-        if len(cleaned_color) == 4:  # #RGB
-            return f"#{cleaned_color[1]*2}{cleaned_color[2]*2}{cleaned_color[3]*2}"
-        if len(cleaned_color) == 5:  # #RGBA
-            return f"#{cleaned_color[1]*2}{cleaned_color[2]*2}{cleaned_color[3]*2}{cleaned_color[4]*2}"
         return cleaned_color
 
     # 2. Check if it's a recognized CSS named color (Issue #2898)
@@ -213,7 +207,8 @@ def generate_badge_svg(
     if date is None:
         date = datetime.now(timezone.utc).strftime("%B %d, %Y")
 
-    safe_name = html.escape(student_name)    safe_date = html.escape(date)
+    safe_name = html.escape(student_name)
+    safe_date = html.escape(date)
 
     safe_font = html.escape(font_family)
 
@@ -354,7 +349,8 @@ def generate_badge_png(
     # Date
     if date is None:
         date = datetime.now(timezone.utc).strftime("%B %d, %Y")
-    date_text = f"Date: {date}"    date_bbox = draw.textbbox((0, 0), date_text, font=body_font)
+    date_text = f"Date: {date}"
+    date_bbox = draw.textbbox((0, 0), date_text, font=body_font)
     date_width = date_bbox[2] - date_bbox[0]
     date_x = (width - date_width) // 2
     draw.text((date_x, 380), date_text, fill="#e0e7ff", font=body_font)
@@ -593,3 +589,61 @@ def generate_badge_pdf(
         pass
     result_buffer.seek(0)
     return result_buffer
+
+
+def generate_svg_badge(
+    label: str,
+    message: str,
+    label_color: str = "#555",
+    message_color: str = "#007ec6",
+    icon: Optional[str] = None,
+) -> str:
+    """Generate a shields.io-style SVG badge.
+
+    Args:
+        label: The left-side text (e.g., "build", "coverage").
+        message: The right-side text (e.g., "passing", "95%").
+        label_color: Background color for the label side.
+        message_color: Background color for the message side.
+        icon: Optional base64 encoded SVG icon.
+
+    Returns:
+        A complete SVG XML string.
+    """
+    # Validate colors using the robust fallback mechanism
+    valid_label_color = validate_hex_color(label_color, "#555555")
+    valid_message_color = validate_hex_color(message_color, "#007ec6")
+
+    # Calculate approximate widths (simplified for this example)
+    label_width = max(30, len(label) * 7 + 10)
+    message_width = max(30, len(message) * 7 + 10)
+    total_width = label_width + message_width
+
+    svg_template = f"""<svg xmlns="http://www.w3.org/2000/svg" width="{total_width}" height="20">
+      <linearGradient id="b" x2="0" y2="100%">
+        <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
+        <stop offset="1" stop-opacity=".1"/>
+      </linearGradient>
+      <mask id="a">
+        <rect width="{total_width}" height="20" rx="3" fill="#fff"/>
+      </mask>
+      <g mask="url(#a)">
+        <path fill="{valid_label_color}" d="M0 0h{label_width}v20H0z"/>
+        <path fill="{valid_message_color}" d="M{label_width} 0h{message_width}v20H{label_width}z"/>
+        <path fill="url(#b)" d="M0 0h{total_width}v20H0z"/>
+      </g>
+      <g fill="#fff" text-anchor="middle" font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="11">
+        <text x="{label_width/2}" y="15" fill="#010101" fill-opacity=".3">{label}</text>
+        <text x="{label_width/2}" y="14">{label}</text>
+        <text x="{label_width + message_width/2}" y="15" fill="#010101" fill-opacity=".3">{message}</text>
+        <text x="{label_width + message_width/2}" y="14">{message}</text>
+      </g>
+    </svg>"""
+
+    return svg_template
+
+
+def get_badge_cache_key(label: str, message: str, color: str) -> str:
+    """Generate a deterministic cache key for a badge configuration."""
+    raw_key = f"{label}|{message}|{color}"
+    return hashlib.md5(raw_key.encode("utf-8")).hexdigest()
