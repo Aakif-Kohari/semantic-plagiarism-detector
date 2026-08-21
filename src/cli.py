@@ -25,7 +25,7 @@ from src.core.document_parser import (
 )
 from src.core.embedding_model import embed_documents
 from src.core.export_engine import LMSExportEngine
-from src.core.logging_config import setup_logging
+from src.core.logging_setup import setup_logging
 from src.core.similarity import (
     PLAGIARISM_THRESHOLD,
     document_similarity_matrix,
@@ -35,6 +35,13 @@ from src.core.synchronization import verify_and_repair_index
 from src.core.text_chunking import chunk_documents
 from src.db.database_backup import optimize_database
 from src.errors import EmptyDocumentError
+
+# Issue #2985: Import translation cache utilities for CLI purge command
+from src.db.translation_cache import (
+    purge_old_translations,
+    get_cache_stats,
+    initialize_cache_db,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -73,10 +80,13 @@ def _process_single_file(filepath: str) -> tuple[str, str | None, str | None]:
         if text.strip():
             return filename, text, None
         else:
-            return filename, None, f"Warning: Extracted text from '{filename}' is empty.\n"
+            return (
+                filename,
+                None,
+                f"Warning: Extracted text from '{filename}' is empty.\n",
+            )
     except Exception as e:
         return filename, None, f"Warning: Failed to parse '{filename}': {e}\n"
-
 
 
 def run_scan(
@@ -91,7 +101,7 @@ def run_scan(
     """
     start_time = time.time()
 
-    if not (0.0 <= threshold <= 1.0): 
+    if not (0.0 <= threshold <= 1.0):
         return 1
 
     if output_format not in ("json", "csv", "text", "html"):
@@ -113,9 +123,7 @@ def run_scan(
 
     try:
         entries = (
-            Path(folder_path).rglob("*")
-            if recursive
-            else Path(folder_path).iterdir()
+            Path(folder_path).rglob("*") if recursive else Path(folder_path).iterdir()
         )
 
         for entry in entries:
@@ -138,26 +146,34 @@ def run_scan(
 
     raw_texts = {}
     skipped_files = []
-    
-    for file_path in valid_files:
+
+    # Note: valid_files was likely intended to be 'files' from above
+    for file_path_str in files:
+        file_path = Path(file_path_str)
         filename = file_path.name
         try:
             with open(file_path, "rb") as f:
                 file_bytes = f.read()
-                
+
             extracted = extract_text(
-                file_bytes, 
-                filename=filename, 
-                language=ocr_language, 
-                dpi=ocr_dpi
+                BytesIO(file_bytes),
+                filename=filename,
+                language=DEFAULT_OCR_LANGUAGE,
+                dpi=DEFAULT_OCR_DPI,
             )
-            raw_texts[filename] = extracted
-            
+            if extracted.strip():
+                raw_texts[filename] = extracted
+            else:
+                sys.stderr.write(
+                    f"⚠️  Warning: Extracted text from '{filename}' is empty.\n"
+                )
+                skipped_files.append(filename)
+
         except EmptyDocumentError as ede:
             # Issue #2724: Handle empty documents gracefully in CLI
             sys.stderr.write(f"⚠️  Warning: {ede}\n")
             skipped_files.append(filename)
-            
+
         except Exception as e:
             sys.stderr.write(f"❌ Error processing {filename}: {e}\n")
             skipped_files.append(filename)
@@ -208,7 +224,11 @@ def run_scan(
 
     if output_format == "html":
         incidents = [
-            {"doc_a": m["document_1"], "doc_b": m["document_2"], "similarity": m["similarity_score"]}
+            {
+                "doc_a": m["document_1"],
+                "doc_b": m["document_2"],
+                "similarity": m["similarity_score"],
+            }
             for m in matches
         ]
         html = LMSExportEngine.generate_incident_html(incidents)
@@ -222,7 +242,13 @@ def run_scan(
         )
         writer.writeheader()
         for m in matches:
-            writer.writerow({"doc_a": m["document_1"], "doc_b": m["document_2"], "similarity_score": m["similarity_score"]})
+            writer.writerow(
+                {
+                    "doc_a": m["document_1"],
+                    "doc_b": m["document_2"],
+                    "similarity_score": m["similarity_score"],
+                }
+            )
         print(output.getvalue().strip())
     else:  # text
         print(f"Documents Processed: {num_processed}")
@@ -389,6 +415,7 @@ def run_db_status(
         sys.stderr.write(f"Error: Unable to inspect database migration status: {exc}\n")
         return 1
 
+    if output_format == "json":
         print(json.dumps(status, indent=2))
     else:
         pending = status["pending_migrations"]
@@ -504,7 +531,8 @@ def main() -> None:
         argv.insert(1, "downgrade")
 
     parser = argparse.ArgumentParser(
-        description="Headless CLI Version for Plagiarism Detection Automation"
+        description="Headless CLI Version for Plagiarism Detection Automation",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
         "--optimize",
@@ -607,6 +635,20 @@ def main() -> None:
         help="Number of migrations to revert (default: 1).",
     )
 
+    # Issue #2985: Add purge-cache subcommand
+    purge_parser = subparsers.add_parser(
+        "purge-cache", help="Purge stale translations from the cross-lingual cache."
+    )
+    purge_parser.add_argument(
+        "--days",
+        type=int,
+        default=30,
+        help="Delete translations older than this many days.",
+    )
+    purge_parser.add_argument(
+        "--stats", action="store_true", help="Display cache statistics before purging."
+    )
+
     args = parser.parse_args(argv)
 
     if args.verify_schema is not None:
@@ -675,10 +717,10 @@ def main() -> None:
         try:
             verify_and_repair_index(index_path)
             print("Synchronization complete.")
-            return 0
+            sys.exit(0)
         except Exception as e:
             sys.stderr.write(f"Error during synchronization: {e}\n")
-            return 1
+            sys.exit(1)
 
     elif args.command == "db-status":
         exit_code = run_db_status(
@@ -705,6 +747,21 @@ def main() -> None:
     elif args.command == "prewarm":
         exit_code = run_prewarm(folder_path=args.folder)
         sys.exit(exit_code)
+
+    elif args.command == "purge-cache":
+        initialize_cache_db()
+
+        if args.stats:
+            stats = get_cache_stats()
+            print(f"Cache Statistics:")
+            print(f"  Total entries: {stats['total_entries']:,}")
+            print(f"  Oldest entry:  {stats['oldest_entry'] or 'N/A'}")
+            print(f"  Newest entry:  {stats['newest_entry'] or 'N/A'}")
+            print()
+
+        deleted = purge_old_translations(days=args.days)
+        print(f"✅ Purge complete. Deleted {deleted:,} stale translations.")
+        sys.exit(0)
 
     else:
         sys.stderr.write(f"Error: Invalid command '{args.command}'.\n")

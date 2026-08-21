@@ -1,5 +1,4 @@
-from __future__ import annotations
-
+# -*- coding: utf-8 -*-
 """
 app/theme.py
 ------------
@@ -10,14 +9,6 @@ Provides:
 - CSS class name constants for consistent styling
 - HTML generation helpers for UI components
 - Dynamic theme injection for Streamlit
-"""
-# -*- coding: utf-8 -*-
-
-
-"""
-theme.py
---------
-Centralized theme management and CSS injection for the Semantic Plagiarism Detector.
 
 This module defines the color palettes for Light and Dark modes, provides
 utilities for sanitizing hex colors, and injects global CSS to ensure a
@@ -27,6 +18,8 @@ Recent Additions (Issue #572):
 - Added comprehensive CSS rules targeting Streamlit's `.stFileUploader`
   dropzone borders, background, and hover states to match the active theme tokens.
 """
+
+from __future__ import annotations
 
 import re
 import secrets

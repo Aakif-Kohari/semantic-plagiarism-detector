@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-from __future__ import annotations
-
 """
 calibrate_thresholds.py
 -----------------------
@@ -34,6 +32,8 @@ Acceptance Criteria (Issue #2267):
 - Default behavior is unchanged when no calibration config is supplied:
   the loader falls back to DEFAULT_THRESHOLDS.
 """
+
+from __future__ import annotations
 
 import argparse
 import logging

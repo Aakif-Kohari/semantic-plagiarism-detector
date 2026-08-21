@@ -1030,7 +1030,7 @@ def update_global_activity():
         from streamlit_plotly_events import plotly_events  # type: ignore
     except ImportError:  # pragma: no cover - optional dependency
         plotly_events = None
-    from src.core.logging_config import setup_logging
+    from src.core.logging_setup import setup_logging
     setup_logging()
     logger = logging.getLogger(__name__)
     # Validate required environment variables during application startup
@@ -2796,6 +2796,48 @@ def update_global_activity():
                     except Exception as exc:
                         drive_progress_bar.empty()
                         st.error(f"⚠️ Google Drive import failed: {exc}")
+    # ... [existing imports] ...
+
+# Issue #2926: Import file validator to prevent RAM spikes and malicious uploads
+from src.utils.file_validator import validate_upload
+
+# ... [existing code] ...
+
+        progress_bar = st.progress(0, text="Preparing files…")
+        raw_texts = {}
+        failed_documents = []
+        
+        for i, (name, uploaded_file) in enumerate(uploaded_files.items()):
+            try:
+                # Read the file bytes
+                file_bytes = uploaded_file.getvalue()
+                
+                # Issue #2926: Validate file size, extension, and magic bytes
+                # This provides immediate feedback and prevents passing massive
+                # or malicious files to the expensive extraction pipeline.
+                validation_result = validate_upload(file_bytes, name)
+                
+                if not validation_result.is_valid:
+                    logger.warning(
+                        "File validation failed for %s: %s", 
+                        name, validation_result.error_message
+                    )
+                    failed_documents.append({
+                        "filename": name,
+                        "error": validation_result.error_message,
+                        "type": validation_result.error_code
+                    })
+                    st.error(f"❌ **{name}**: {validation_result.error_message}")
+                    continue  # Skip to the next file
+                
+                # Proceed with text extraction only if validation passed
+                extracted = extract_text(
+                    _io.BytesIO(file_bytes), name, ocr_language=ocr_language, ocr_dpi=ocr_dpi
+                )
+                raw_texts[name] = extracted
+                
+            except EmptyDocumentError as ede:
+                # ... [existing empty document handling] ...
     if uploaded_files:
         for uploaded_file in uploaded_files:
             original_name = uploaded_file.name

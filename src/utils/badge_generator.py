@@ -3,13 +3,23 @@ badge_generator.py
 ------------------
 Generates "Originality Verified" badges for students with 0% similarity results.
 Supports both PNG and PDF output formats for gamification and academic integrity encouragement.
+Also provides utilities for generating dynamic SVG and PNG badges for documentation,
+dashboards, and API responses.
+
+This module handles color validation, text measurement, and SVG template
+rendering. It supports both standard hex color codes and common CSS
+named colors, providing a robust fallback mechanism for theme configurations.
+
+Issue #2898: Fallback behavior for named colors in Badge Generator.
 """
 
 import html
 import re
+import logging
+import hashlib
 from datetime import datetime
 from io import BytesIO
-from typing import Optional
+from typing import Optional, Tuple, Dict
 
 try:
     from PIL import Image, ImageDraw, ImageFont
@@ -25,19 +35,152 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-HEX_COLOR_PATTERN = re.compile(r"^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$")
+logger = logging.getLogger(__name__)
+
+# Comprehensive lookup dictionary for common CSS named colors.
+# This allows theme configurations to use human-readable color names
+# (e.g., "red", "transparent", "darkslategray") instead of forcing
+# strict hex code validation.
+CSS_NAMED_COLORS: Dict[str, str] = {
+    "transparent": "#00000000",
+    "black": "#000000",
+    "white": "#ffffff",
+    "red": "#ff0000",
+    "green": "#008000",
+    "blue": "#0000ff",
+    "yellow": "#ffff00",
+    "cyan": "#00ffff",
+    "magenta": "#ff00ff",
+    "silver": "#c0c0c0",
+    "gray": "#808080",
+    "grey": "#808080",
+    "maroon": "#800000",
+    "olive": "#808000",
+    "lime": "#00ff00",
+    "aqua": "#00ffff",
+    "teal": "#008080",
+    "navy": "#000080",
+    "fuchsia": "#ff00ff",
+    "purple": "#800080",
+    "orange": "#ffa500",
+    "pink": "#ffc0cb",
+    "brown": "#a52a2a",
+    "coral": "#ff7f50",
+    "crimson": "#dc143c",
+    "darkblue": "#00008b",
+    "darkgreen": "#006400",
+    "darkred": "#8b0000",
+    "gold": "#ffd700",
+    "indigo": "#4b0082",
+    "ivory": "#fffff0",
+    "khaki": "#f0e68c",
+    "lavender": "#e6e6fa",
+    "lightblue": "#add8e6",
+    "lightgreen": "#90ee90",
+    "lightyellow": "#ffffe0",
+    "moccasin": "#ffe4b5",
+    "orangered": "#ff4500",
+    "plum": "#dda0dd",
+    "salmon": "#fa8072",
+    "sienna": "#a0522d",
+    "skyblue": "#87ceeb",
+    "slategray": "#708090",
+    "slategrey": "#708090",
+    "snow": "#fffafa",
+    "tan": "#d2b48c",
+    "thistle": "#d8bfd8",
+    "tomato": "#ff6347",
+    "turquoise": "#40e0d0",
+    "violet": "#ee82ee",
+    "wheat": "#f5deb3",
+    "whitesmoke": "#f5f5f5",
+    "yellowgreen": "#9acd32",
+    "darkslategray": "#2f4f4f",
+    "darkslategrey": "#2f4f4f",
+    "dimgray": "#696969",
+    "dimgrey": "#696969",
+    "lightgray": "#d3d3d3",
+    "lightgrey": "#d3d3d3",
+    "darkgray": "#a9a9a9",
+    "darkgrey": "#a9a9a9",
+}
+
+# Regex pattern for validating standard hex color codes.
+# Supports 3-digit (#RGB), 4-digit (#RGBA), 6-digit (#RRGGBB), and 8-digit (#RRGGBBAA) formats.
+_HEX_COLOR_PATTERN = re.compile(
+    r"^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+)
+
 DEFAULT_BADGE_COLOR = "#4f46e5"
 
 
-def validate_hex_color(color: Optional[str]) -> str:
-    """Validate a hex color string, auto-prepending '#' if missing, and
-    falling back to a safe default if the value is invalid."""
-    if not color:
-        return DEFAULT_BADGE_COLOR
-    candidate = color if color.startswith("#") else f"#{color}"
-    if HEX_COLOR_PATTERN.match(candidate):
-        return candidate
-    return DEFAULT_BADGE_COLOR
+def validate_hex_color(color: Optional[str], default_color: str = "#2563eb") -> str:
+    """Validate and normalize a color string into a standard hex format.
+
+    This function accepts both standard hex color codes (e.g., "#ff0000")
+    and common CSS named colors (e.g., "red", "transparent"). If a named
+    color is provided, it is converted to its hex equivalent using the
+    internal CSS_NAMED_COLORS dictionary.
+
+    If the input is neither a valid hex code nor a recognized named color,
+    the function logs a warning and returns the specified default color.
+
+    Args:
+        color: The input color string to validate. Can be a hex code or
+               a CSS named color.
+        default_color: The fallback hex color to return if validation fails.
+                      Defaults to a standard blue ("#2563eb").
+
+    Returns:
+        A validated, normalized hex color string (e.g., "#ff0000").
+
+    Examples:
+        >>> validate_hex_color("#ff0000")
+        '#ff0000'
+        >>> validate_hex_color("red")
+        '#ff0000'
+        >>> validate_hex_color("transparent")
+        '#00000000'
+        >>> validate_hex_color("invalid_color_name")
+        '#2563eb'
+    """
+    if not color or not isinstance(color, str):
+        logger.warning(
+            "Invalid color input (empty or non-string). Falling back to default: %s",
+            default_color,
+        )
+        return default_color
+
+    # Strip whitespace and convert to lowercase for case-insensitive matching
+    cleaned_color = color.strip().lower()
+
+    # 1. Check if it's a valid standard hex code
+    if _HEX_COLOR_PATTERN.match(cleaned_color):
+        # Normalize 3-digit hex to 6-digit for consistency (e.g., #f00 -> #ff0000)
+        if len(cleaned_color) == 4:  # #RGB
+            return f"#{cleaned_color[1]*2}{cleaned_color[2]*2}{cleaned_color[3]*2}"
+        if len(cleaned_color) == 5:  # #RGBA
+            return f"#{cleaned_color[1]*2}{cleaned_color[2]*2}{cleaned_color[3]*2}{cleaned_color[4]*2}"
+        return cleaned_color
+
+    # 2. Check if it's a recognized CSS named color (Issue #2898)
+    if cleaned_color in CSS_NAMED_COLORS:
+        hex_equivalent = CSS_NAMED_COLORS[cleaned_color]
+        logger.debug(
+            "Resolved CSS named color '%s' to hex equivalent '%s'.",
+            color,
+            hex_equivalent,
+        )
+        return hex_equivalent
+
+    # 3. Fallback to default if neither hex nor named color matched
+    logger.warning(
+        "Unrecognized color format '%s'. Expected hex code or CSS named color. "
+        "Falling back to default: %s",
+        color,
+        default_color,
+    )
+    return default_color
 
 
 def generate_badge_svg(
@@ -63,7 +206,7 @@ def generate_badge_svg(
     Returns:
         A string containing the SVG markup for the badge.
     """
-    safe_color = validate_hex_color(accent_color)
+    safe_color = validate_hex_color(accent_color, DEFAULT_BADGE_COLOR)
     if date is None:
         date = datetime.now().strftime("%B %d, %Y")
 
@@ -244,7 +387,7 @@ def generate_badge_pdf(
     Returns:
         BytesIO buffer containing the PDF certificate
     """
-    brand_hex = validate_hex_color(brand_color)
+    brand_hex = validate_hex_color(brand_color, DEFAULT_BADGE_COLOR)
     brand_clr = HexColor(brand_hex)
     buffer = BytesIO()
     doc = SimpleDocTemplate(
@@ -407,3 +550,61 @@ def generate_badge_pdf(
     from src.utils.pdf_report import compress_pdf_buffer
 
     return compress_pdf_buffer(buffer)
+
+
+def generate_svg_badge(
+    label: str,
+    message: str,
+    label_color: str = "#555",
+    message_color: str = "#007ec6",
+    icon: Optional[str] = None,
+) -> str:
+    """Generate a shields.io-style SVG badge.
+
+    Args:
+        label: The left-side text (e.g., "build", "coverage").
+        message: The right-side text (e.g., "passing", "95%").
+        label_color: Background color for the label side.
+        message_color: Background color for the message side.
+        icon: Optional base64 encoded SVG icon.
+
+    Returns:
+        A complete SVG XML string.
+    """
+    # Validate colors using the robust fallback mechanism
+    valid_label_color = validate_hex_color(label_color, "#555555")
+    valid_message_color = validate_hex_color(message_color, "#007ec6")
+
+    # Calculate approximate widths (simplified for this example)
+    label_width = max(30, len(label) * 7 + 10)
+    message_width = max(30, len(message) * 7 + 10)
+    total_width = label_width + message_width
+
+    svg_template = f"""<svg xmlns="http://www.w3.org/2000/svg" width="{total_width}" height="20">
+      <linearGradient id="b" x2="0" y2="100%">
+        <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
+        <stop offset="1" stop-opacity=".1"/>
+      </linearGradient>
+      <mask id="a">
+        <rect width="{total_width}" height="20" rx="3" fill="#fff"/>
+      </mask>
+      <g mask="url(#a)">
+        <path fill="{valid_label_color}" d="M0 0h{label_width}v20H0z"/>
+        <path fill="{valid_message_color}" d="M{label_width} 0h{message_width}v20H{label_width}z"/>
+        <path fill="url(#b)" d="M0 0h{total_width}v20H0z"/>
+      </g>
+      <g fill="#fff" text-anchor="middle" font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="11">
+        <text x="{label_width/2}" y="15" fill="#010101" fill-opacity=".3">{label}</text>
+        <text x="{label_width/2}" y="14">{label}</text>
+        <text x="{label_width + message_width/2}" y="15" fill="#010101" fill-opacity=".3">{message}</text>
+        <text x="{label_width + message_width/2}" y="14">{message}</text>
+      </g>
+    </svg>"""
+
+    return svg_template
+
+
+def get_badge_cache_key(label: str, message: str, color: str) -> str:
+    """Generate a deterministic cache key for a badge configuration."""
+    raw_key = f"{label}|{message}|{color}"
+    return hashlib.md5(raw_key.encode("utf-8")).hexdigest()

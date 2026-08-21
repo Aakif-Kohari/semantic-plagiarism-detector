@@ -5,7 +5,7 @@ import subprocess
 import sys
 from datetime import datetime
 
-from src.core.logging_config import setup_logging
+from src.core.logging_setup import setup_logging
 
 
 def check_dependencies():

@@ -1,5 +1,3 @@
-import xml.etree.ElementTree as ET
-
 """
 tests/visualization/test_network_graph.py
 -------------------------------------------
@@ -12,6 +10,7 @@ Validates:
 - Export functions (GEXF, CSV)
 """
 
+import xml.etree.ElementTree as ET
 from unittest.mock import patch
 
 import networkx as nx

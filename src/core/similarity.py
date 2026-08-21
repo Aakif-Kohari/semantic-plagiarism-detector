@@ -165,15 +165,22 @@ def document_similarity_matrix(
     batch_size: Optional[int] = None,
     min_threshold: float = 0.0,
     min_percentile: Optional[float] = None,
+    top_k: Optional[int] = None,
+    candidate_pairs: Optional[Set[Tuple[str, str]]] = None,
 ) -> Union[pd.DataFrame, np.ndarray]:
     """
     Build an N×N cosine similarity matrix between all document pairs.
+
+    Optionally pre-filters comparisons using an ephemeral FAISS index (when top_k is provided)
+    or an explicit candidate_pairs set, drastically reducing direct cosine similarity computations.
 
     Args:
         doc_embeddings: Dict mapping doc name → embedding array, or direct array/list of embeddings.
         batch_size: Optional number of documents to compare per batch.
         min_threshold: Minimum similarity score to keep; values below this will be 0.0.
         min_percentile: Optional percentile threshold for filtering.
+        top_k: Optional top-K nearest neighbors to pre-filter document pairs using FAISS.
+        candidate_pairs: Optional pre-computed candidate pair set (doc_a, doc_b).
 
     Returns:
         Symmetric pandas DataFrame or numpy ndarray with similarity values.
@@ -182,9 +189,29 @@ def document_similarity_matrix(
         stacked = np.array(doc_embeddings)
         if stacked.ndim == 1 or stacked.size == 0:
             return np.array([[]])
+        if top_k is not None and top_k > 0 and stacked.shape[0] > top_k:
+            n_items = stacked.shape[0]
+            matrix = np.zeros((n_items, n_items))
+            np.fill_diagonal(matrix, 1.0)
+            dim = stacked.shape[1]
+            index = faiss.IndexFlatIP(dim)
+            matrix_f32 = stacked.astype("float32")
+            index.add(matrix_f32)
+            _, indices = index.search(matrix_f32, min(top_k + 1, n_items))
+            for i in range(n_items):
+                for j in indices[i]:
+                    if j < n_items and j != i:
+                        sim_val = float(np.dot(stacked[i], stacked[j]))
+                        sim_val = float(np.clip(sim_val, 0.0, 1.0))
+                        if sim_val >= min_threshold:
+                            matrix[i, j] = sim_val
+                            matrix[j, i] = sim_val
+            return _apply_min_percentile_filter(matrix, min_percentile)
+
         sim = np.clip(cosine_similarity(stacked), 0.0, 1.0)
         sim = np.where(sim < min_threshold, 0.0, sim)
         return _apply_min_percentile_filter(sim, min_percentile)
+
     doc_names = list(doc_embeddings.keys())
     n = len(doc_names)
 
@@ -204,19 +231,40 @@ def document_similarity_matrix(
         doc_vectors.append(vec)
 
     matrix = np.zeros((n, n))
+    np.fill_diagonal(matrix, 1.0)
+
     if doc_vectors:
         stacked = np.vstack(doc_vectors)
-        safe_batch_size = _validated_batch_size(batch_size)
-        if safe_batch_size is None:
-            sim = cosine_similarity(stacked)
-            sim = np.clip(sim, 0.0, 1.0)
-            matrix = np.where(sim < min_threshold, 0.0, sim)
+
+        # Pre-filtering with FAISS top_k or candidate_pairs
+        active_candidates = candidate_pairs
+        if active_candidates is None and top_k is not None and top_k > 0 and n > top_k:
+            active_candidates = find_candidate_pairs(doc_names, doc_vectors, top_k=top_k)
+
+        if active_candidates is not None:
+            name_to_idx = {name: i for i, name in enumerate(doc_names)}
+            for a, b in active_candidates:
+                if a in name_to_idx and b in name_to_idx:
+                    i, j = name_to_idx[a], name_to_idx[b]
+                    vec_i = stacked[i].reshape(1, -1)
+                    vec_j = stacked[j].reshape(1, -1)
+                    sim_val = float(cosine_similarity(vec_i, vec_j)[0, 0])
+                    sim_val = float(np.clip(sim_val, 0.0, 1.0))
+                    if sim_val >= min_threshold:
+                        matrix[i, j] = sim_val
+                        matrix[j, i] = sim_val
         else:
-            for start in range(0, n, safe_batch_size):
-                end = min(start + safe_batch_size, n)
-                sim = cosine_similarity(stacked[start:end], stacked)
+            safe_batch_size = _validated_batch_size(batch_size)
+            if safe_batch_size is None:
+                sim = cosine_similarity(stacked)
                 sim = np.clip(sim, 0.0, 1.0)
-                matrix[start:end] = np.where(sim < min_threshold, 0.0, sim)
+                matrix = np.where(sim < min_threshold, 0.0, sim)
+            else:
+                for start in range(0, n, safe_batch_size):
+                    end = min(start + safe_batch_size, n)
+                    sim = cosine_similarity(stacked[start:end], stacked)
+                    sim = np.clip(sim, 0.0, 1.0)
+                    matrix[start:end] = np.where(sim < min_threshold, 0.0, sim)
 
     df = pd.DataFrame(matrix, index=doc_names, columns=doc_names)
     return _apply_min_percentile_filter(df, min_percentile)
@@ -227,6 +275,8 @@ def compute_similarity_matrix(
     batch_size: Optional[int] = None,
     min_threshold: float = 0.0,
     min_percentile: Optional[float] = None,
+    top_k: Optional[int] = None,
+    candidate_pairs: Optional[Set[Tuple[str, str]]] = None,
 ) -> Union[pd.DataFrame, np.ndarray]:
     """
     Direct alias/wrapper for document_similarity_matrix to maintain backwards compatibility
@@ -237,6 +287,8 @@ def compute_similarity_matrix(
         batch_size=batch_size,
         min_threshold=min_threshold,
         min_percentile=min_percentile,
+        top_k=top_k,
+        candidate_pairs=candidate_pairs,
     )
 
 
