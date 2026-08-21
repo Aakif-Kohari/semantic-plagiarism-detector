@@ -16,9 +16,7 @@ Issue #2781: Isolate OS-specific asyncio patches.
 
 import asyncio
 import logging
-import sys
 import platform
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 

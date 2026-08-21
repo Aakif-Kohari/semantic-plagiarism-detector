@@ -161,6 +161,7 @@ def migration_transaction(connection: sqlite3.Connection):
 
 from datetime import datetime, timezone
 
+
 def ensure_migration_history_table(connection: sqlite3.Connection) -> None:
     """Ensure that the migration_history table exists."""
     connection.execute("""

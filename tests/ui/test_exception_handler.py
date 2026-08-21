@@ -1,6 +1,6 @@
-import pytest
-from streamlit.testing.v1 import AppTest
 from src.utils.ui_helpers import ui_exception_handler  # type: ignore 
+from streamlit.testing.v1 import AppTest
+
 
 def test_ui_exception_handler_catches_runtime_error():
     """Test that ui_exception_handler intercepts a RuntimeError and displays st.error without crashing."""

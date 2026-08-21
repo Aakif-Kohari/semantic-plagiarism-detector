@@ -93,13 +93,15 @@ else:
     )
 REDIS_TIMEOUT_SECONDS = float(os.getenv("REDIS_TIMEOUT_SECONDS", "2.0"))
 
-# TTL settings (in seconds)
-SESSION_TTL = int(os.getenv("SESSION_TTL", str(15 * 60)))  # 15 minutes
-FAISS_INDEX_TTL = int(os.getenv("FAISS_INDEX_TTL", str(24 * 60 * 60)))  # 24 hours
-ANALYSIS_RESULTS_TTL = int(os.getenv("ANALYSIS_RESULTS_TTL", str(2 * 60 * 60)))  # 2 hours
-LOGIN_LOCKOUT_TTL = int(os.getenv("LOGIN_LOCKOUT_TTL", str(15 * 60)))  # 15 minutes
-UPLOAD_RATE_TTL = int(os.getenv("UPLOAD_RATE_TTL", str(60 * 60)))  # 1 hour
-DEFAULT_TTL = int(os.getenv("DEFAULT_TTL", str(24 * 60 * 60)))  # 24 hours fallback
+# TTL settings (in seconds) - Configurable via environment variables (Issue #2323)
+# Defaults are preserved for backward compatibility when env vars are not set
+SESSION_TTL = int(os.getenv("SESSION_TTL", str(15 * 60)))  # 15 minutes for session state
+FAISS_INDEX_TTL = int(os.getenv("FAISS_INDEX_TTL", str(24 * 60 * 60)))  # 24 hours for FAISS index cache
+ANALYSIS_RESULTS_TTL = int(os.getenv("ANALYSIS_RESULTS_TTL", str(2 * 60 * 60)))  # 2 hours for analysis results
+LOGIN_LOCKOUT_TTL = int(os.getenv("LOGIN_LOCKOUT_TTL", str(15 * 60)))  # 15 minutes for login lockout
+UPLOAD_RATE_TTL = int(os.getenv("UPLOAD_RATE_TTL", str(60 * 60)))  # 1 hour for upload rate limiting
+BADGE_TTL = int(os.getenv("BADGE_TTL", str(24 * 60 * 60)))  # 24 hours for badge buffer cache
+DEFAULT_TTL = int(os.getenv("DEFAULT_TTL", str(24 * 60 * 60)))  # 24 hours fallback for keys without explicit TTL
 
 
 # ============================================================================
@@ -211,6 +213,7 @@ class CacheNamespace(str, Enum):
     ANALYSIS = "spd:v1:analysis"
     LOGIN_ATTEMPTS = "spd:v1:login_attempts"
     UPLOADS = "spd:v1:uploads"
+    BADGES = "spd:v1:badges"
 
     def build_key(self, *parts: str) -> str:
         return ":".join([self.value] + list(parts))
@@ -669,6 +672,28 @@ def get_upload_count(username: str) -> int:
 
 def is_upload_rate_limited(username: str) -> bool:
     return get_upload_count(username) >= 100
+
+
+def cache_badge(
+    badge_type: str,
+    identifier: str,
+    date: str,
+    data: bytes,
+    ttl: Optional[int] = None,
+) -> bool:
+    """Cache generated badge bytes (PNG/PDF) in Redis for 24 hours (Issue #2941)."""
+    cache_key = CacheNamespace.BADGES.build_key(badge_type.lower(), identifier, date)
+    return _cache.set(cache_key, data, ttl or BADGE_TTL)
+
+
+def get_cached_badge(
+    badge_type: str,
+    identifier: str,
+    date: str,
+) -> Optional[bytes]:
+    """Retrieve cached badge bytes (PNG/PDF) from Redis (Issue #2941)."""
+    cache_key = CacheNamespace.BADGES.build_key(badge_type.lower(), identifier, date)
+    return _cache.get(cache_key)
 
 
 def _cleanup_redis() -> None:

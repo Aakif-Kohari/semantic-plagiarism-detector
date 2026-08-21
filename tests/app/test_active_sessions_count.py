@@ -5,9 +5,7 @@ Unit tests for get_active_sessions_count error handling and backup daemon safety
 """
 
 import time
-from unittest.mock import MagicMock, Mock, patch
-
-import pytest
+from unittest.mock import Mock, patch
 
 from app.state_manager import get_active_sessions_count
 

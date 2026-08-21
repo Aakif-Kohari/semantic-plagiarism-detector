@@ -8,8 +8,7 @@ using multilingual embeddings and translation-assisted comparison.
 import hashlib
 import logging
 import time
-from collections import defaultdict
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -176,7 +175,7 @@ class CrossLingualDetector:
         self._model = None
         self._cache: Dict[str, np.ndarray] = {}
         self.cache = TranslationCache() if use_cache else None
-        logger.info(f"CrossLingualDetector initialized")
+        logger.info("CrossLingualDetector initialized")
 
     def _get_model(self):
         if self._model is None:

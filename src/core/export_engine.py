@@ -22,6 +22,7 @@ from src.errors import (
     EXPORT_WRITE_FAILED,
 )
 from src.exceptions import ExportFailedError
+
 logger = logging.getLogger(__name__)
 
 SAFE_DOWNLOAD_CONTENT_TYPES = {

@@ -35,9 +35,10 @@ from src.db.connection import get_connection
 from src.db.migrations import migrate_auth_database, table_exists
 from src.db.security_audit import count_recent_failed_logins, log_security_event
 from src.exceptions import StaleDataException
+
 logger = logging.getLogger(__name__)
 
-from src.core.app_config import AUTH_DB_PATH, get_valid_roles
+from src.core.app_config import get_valid_roles
 
 _DB_PATH = os.path.abspath(str(AUTH_DB_PATH))
 
@@ -344,7 +345,6 @@ def configure_db_path(db_path: str | os.PathLike) -> None:
 
 
 from contextlib import contextmanager
-from typing import Generator
 
 
 @contextmanager
@@ -1595,7 +1595,7 @@ def format_user_creation_date(iso_str: str) -> str:
 
 from enum import Enum
 from functools import wraps
-from typing import Any, Dict, List, Optional, Set
+from typing import Set
 
 import streamlit as st
 

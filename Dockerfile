@@ -14,10 +14,10 @@ WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install pip==24.0 && \
-    pip install -r requirements.txt
+    pip install -r requirements.txt && \
+    python -m nltk.downloader punkt_tab
 
 COPY . .
-
 RUN chown -R appuser:appuser /app
 
 EXPOSE 8501

@@ -37,8 +37,8 @@ pip install --upgrade pip
 pip install -r requirements.txt
 pip install -r requirements-dev.txt
 pip install pytest-cov
+python -m nltk.downloader punkt_tab
 ```
-
 ---
 
 ## ⚙️ Step 3: Install Native C Dependencies

@@ -7,12 +7,12 @@ Verifies that standard hex codes, CSS named colors, and invalid inputs
 are handled correctly with appropriate fallbacks (Issue #2898).
 """
 
-import pytest
 import logging
+
 from src.utils.badge_generator import (
-    validate_hex_color,
-    generate_svg_badge,
     CSS_NAMED_COLORS,
+    generate_svg_badge,
+    validate_hex_color,
 )
 
 

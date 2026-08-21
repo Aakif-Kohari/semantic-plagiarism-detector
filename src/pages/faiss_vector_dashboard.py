@@ -1,7 +1,9 @@
 """Streamlit Dashboard Page for FAISS Semantic Search Vector Engine Suite."""
 
 import random
+
 import streamlit as st
+
 from src.components.faiss_vector_card import render_vector_match_card
 from src.components.faiss_vector_timeline import render_vector_search_timeline
 from src.services.faiss_vector_engine import FaissSemanticVectorEngine

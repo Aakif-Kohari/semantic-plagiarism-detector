@@ -9,14 +9,7 @@ automatically purged even if Tesseract crashes or raises exceptions mid-executio
 import os
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from src.core.document_parser import _ocr_pdf_page, extract_text_from_image
-from src.core.parsers.ocr_parser import (
-    _ocr_pdf_page as _ocr_pdf_page_parser,
-    extract_text_from_image as extract_text_from_image_parser,
-)
-from src.utils.temp_manager import managed_ocr_temp_dir
 
 
 def test_ocr_pdf_page_cleans_up_temp_dir_on_success():

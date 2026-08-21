@@ -148,8 +148,8 @@ source venv/bin/activate        # Windows: venv\Scripts\activate
 ```bash
 pip install -r requirements.txt
 pip install pytest-cov  # Required for coverage reporting
+python -m nltk.downloader punkt_tab  # Pre-download NLTK corpus to avoid runtime delays
 ```
-
 > **Note:** The first run will download the `paraphrase-multilingual-MiniLM-L12-v2` model (~420 MB).
 > Subsequent runs use the local cache.
 
@@ -223,16 +223,11 @@ docker compose build --no-cache
 docker compose up
 ```
 
+```markdown
 **Stop the app:**
 
 ```bash
 docker compose down
-```
-
-To also remove the Redis data volume:
-
-```bash
-docker compose down -v
 ```
 
 ### Default credentials
@@ -242,6 +237,32 @@ docker compose down -v
 | `admin` | `admin123` | Admin — full access + user management |
 
 Additional users can be created from the **User Management** page (admin only).
+
+
+## ⚠️ Data Persistence & Docker Volumes
+
+The app persists two SQLite databases plus the FAISS index. All three
+live in the container filesystem and are wiped on `docker compose down -v`
+**unless** they are mounted on named volumes. As of issue #3025, the
+`docker-compose.yml` mounts three named volumes by default so the
+data survives `down` / `up` cycles.
+
+### What is persisted
+
+| Volume name            | Container path | Holds                                           | Wiped by `down -v`? |
+|------------------------|----------------|-------------------------------------------------|----------------------|
+| `plagiarism_data`      | `/app/data`    | `corpus.db`, `corpus.index`, `backups/`         | ✅ Yes |
+| `plagiarism_users`     | `/app`         | `users.db` (auth, roles, password hashes)        | ✅ Yes |
+| `redis_data`           | `/data`        | Redis dump (session cache, rate-limit counters)  | ✅ Yes |
+
+### Safe operations
+
+```bash
+# Stop the app — data is preserved.
+docker compose down
+
+# Restart — data is back, no migration needed.
+docker compose up
 
 ---
 

@@ -5,26 +5,23 @@ Provides parallel processing, incremental indexing, progress tracking,
 and batch job management capabilities.
 """
 
+import json
 import logging
 import multiprocessing
 import os
-import json
 import threading
 import time
 import uuid
 from concurrent.futures import (
-    ProcessPoolExecutor,
     ThreadPoolExecutor,
-    as_completed,
 )
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
-import pandas as pd
 import psutil
 
 logger = logging.getLogger(__name__)

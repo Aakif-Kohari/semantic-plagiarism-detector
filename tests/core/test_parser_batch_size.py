@@ -1,6 +1,7 @@
 """Tests for document parser MAX_BATCH_SIZE configurable via PARSER_MAX_BATCH_SIZE (Issue #2708)."""
 
 import importlib
+
 import pytest
 
 

@@ -94,6 +94,7 @@ def _process_scan_job(
         matched_documents = []
         max_overall_score = 0.0
         max_chunk_overall_score = 0.0
+        uploaded_chunks_flagged = np.zeros(len(chunks), dtype=bool)
 
         for corpus_filename, corpus_data in corpus_docs.items():
             if corpus_filename == filename:
@@ -115,7 +116,11 @@ def _process_scan_job(
                     1.0,
                 )
             )
-            sim_chunk = chunk_max_similarity(uploaded_embeddings, c_embeddings)
+            sim_matrix = cosine_similarity(uploaded_embeddings, c_embeddings)
+            sim_chunk = float(np.max(sim_matrix))
+
+            chunk_maxes = np.max(sim_matrix, axis=1)
+            uploaded_chunks_flagged |= (chunk_maxes >= threshold)
 
             combined_score = max(sim_doc, sim_chunk)
             max_overall_score = max(max_overall_score, sim_doc)
@@ -156,6 +161,9 @@ def _process_scan_job(
             key=lambda x: x["max_chunk_similarity_score"], reverse=True
         )
         is_flagged = len(matched_documents) > 0 or max_chunk_overall_score >= threshold
+        
+        total_flagged = int(np.sum(uploaded_chunks_flagged))
+        plagiarism_density = int(round((total_flagged / len(chunks)) * 100)) if len(chunks) > 0 else 0
 
         scan_jobs[job_id]["status"] = "completed"
         scan_jobs[job_id]["completed_at"] = datetime.now(timezone.utc).isoformat()
@@ -165,6 +173,7 @@ def _process_scan_job(
             "chunk_count": len(chunks),
             "plagiarism_flagged": is_flagged,
             "threshold_used": threshold,
+            "plagiarism_density": plagiarism_density,
             "overall_document_similarity": round(max_overall_score, 4),
             "max_chunk_similarity": round(max_chunk_overall_score, 4),
             "matched_documents_count": len(matched_documents),
@@ -316,6 +325,7 @@ async def scan_document(
         matched_documents = []
         max_overall_score = 0.0
         max_chunk_overall_score = 0.0
+        uploaded_chunks_flagged = np.zeros(len(chunks), dtype=bool)
 
         for corpus_filename, corpus_data in corpus_docs.items():
             if corpus_filename == filename:
@@ -338,7 +348,11 @@ async def scan_document(
                 )
             )
 
-            sim_chunk = chunk_max_similarity(uploaded_embeddings, c_embeddings)
+            sim_matrix = cosine_similarity(uploaded_embeddings, c_embeddings)
+            sim_chunk = float(np.max(sim_matrix))
+
+            chunk_maxes = np.max(sim_matrix, axis=1)
+            uploaded_chunks_flagged |= (chunk_maxes >= threshold)
 
             combined_score = max(sim_doc, sim_chunk)
             max_overall_score = max(max_overall_score, sim_doc)
@@ -379,6 +393,9 @@ async def scan_document(
             key=lambda x: x["max_chunk_similarity_score"], reverse=True
         )
         is_flagged = len(matched_documents) > 0 or max_chunk_overall_score >= threshold
+        
+        total_flagged = int(np.sum(uploaded_chunks_flagged))
+        plagiarism_density = int(round((total_flagged / len(chunks)) * 100)) if len(chunks) > 0 else 0
 
         return {
             "filename": filename,
@@ -386,6 +403,7 @@ async def scan_document(
             "chunk_count": len(chunks),
             "plagiarism_flagged": is_flagged,
             "threshold_used": threshold,
+            "plagiarism_density": plagiarism_density,
             "overall_document_similarity": round(max_overall_score, 4),
             "max_chunk_similarity": round(max_chunk_overall_score, 4),
             "matched_documents_count": len(matched_documents),

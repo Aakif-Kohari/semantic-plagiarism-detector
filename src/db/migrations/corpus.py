@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import logging
+import shutil
 import sqlite3
+from pathlib import Path
 
 from .common import column_exists, run_migrations, table_exists
 
+logger = logging.getLogger(__name__)
 CORPUS_SCHEMA_VERSION = 15
 
 
@@ -486,13 +490,49 @@ CORPUS_DOWN_MIGRATIONS = {
 }
 
 
+def _corpus_db_file_path(connection: sqlite3.Connection) -> Path | None:
+    """Return the on-disk path of the connection's "main" database.
+
+    Returns ``None`` for in-memory or temporary databases (no file to
+    back up).
+    """
+    for _, name, filename in connection.execute("PRAGMA database_list"):
+        if name == "main" and filename:
+            return Path(filename)
+    return None
+
+
 def migrate_corpus_database(
     connection: sqlite3.Connection,
 ) -> int:
-    """Upgrade corpus.db to the latest supported schema version."""
+    """Upgrade corpus.db to the latest supported schema version.
+
+    SQLite does not fully support transactional DDL, so a mid-migration
+    failure can leave the database half-migrated. To protect against
+    this (issue #2929), the on-disk database file is copied to
+    ``corpus_pre_migrate.db.bak`` before any migration scripts run. If a
+    migration raises, the original file is restored from that backup.
+    """
     connection.execute("PRAGMA foreign_keys = ON")
-    return run_migrations(
-        connection,
-        migrations=CORPUS_MIGRATIONS,
-        target_version=CORPUS_SCHEMA_VERSION,
-    )
+
+    db_path = _corpus_db_file_path(connection)
+    backup_path = db_path.with_name("corpus_pre_migrate.db.bak") if db_path else None
+
+    if backup_path is not None:
+        shutil.copy2(db_path, backup_path)
+
+    try:
+        return run_migrations(
+            connection,
+            migrations=CORPUS_MIGRATIONS,
+            target_version=CORPUS_SCHEMA_VERSION,
+        )
+    except Exception:
+        if backup_path is not None and backup_path.exists():
+            logger.error(
+                "Migration failed; restoring corpus.db from backup %s.",
+                backup_path,
+            )
+            connection.close()
+            shutil.copy2(backup_path, db_path)
+        raise
