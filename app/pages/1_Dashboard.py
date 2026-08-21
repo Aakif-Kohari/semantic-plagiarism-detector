@@ -9,20 +9,21 @@ total scans, flagged incidents, severity distributions, and trend charts.
 Issue #2810: Decompose monolithic streamlit_app.py.
 """
 
+from datetime import datetime
+
 import streamlit as st
-import pandas as pd
-from datetime import datetime, timedelta
+
+from src.core.app_config import get_branding_config
+from src.db.auth import get_upload_count
+from src.db.incidents import get_all_incidents
 
 # Import core utilities and visualizations
 from src.visualization.analytics import (
+    calculate_severity_ratios,
     plot_high_severity_trends,
     plot_most_plagiarized_documents,
     plot_severity_donut_chart,
-    calculate_severity_ratios,
 )
-from src.db.incidents import get_all_incidents
-from src.db.auth import get_upload_count
-from src.core.app_config import get_branding_config
 
 # Page configuration
 st.set_page_config(

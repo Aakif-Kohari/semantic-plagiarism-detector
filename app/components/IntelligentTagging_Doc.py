@@ -2,9 +2,8 @@
 # ── SECTION: INTELLIGENT DOCUMENT TAGGING & CATEGORIZATION (Issue #1988) ────
 # ───────────────────────────────────────────────────────────────────────────────
 
-import re
-import json
 import hashlib
+import re
 import uuid
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass

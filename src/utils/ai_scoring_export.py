@@ -4,12 +4,12 @@ AI Scoring Export Utilities.
 Provides export functionality for AI scoring results in multiple formats.
 """
 
-import os
-import json
 import csv
+import json
 import logging
+import os
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 

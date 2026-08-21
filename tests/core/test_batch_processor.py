@@ -5,18 +5,19 @@ Comprehensive test suite covering batch job creation, processing,
 history tracking, and export functionality.
 """
 
-import os
 import json
+import os
 import tempfile
-import pytest
 from datetime import datetime
-from unittest.mock import MagicMock, patch
 
+from src.core.batch_history import BatchHistory
 from src.core.batch_processor import (
-    BatchProcessor, BatchJob, BatchConfig, BatchStatus, BatchPriority
+    BatchConfig,
+    BatchJob,
+    BatchProcessor,
+    BatchStatus,
 )
-from src.core.batch_history import BatchHistory, HistoryRecord
-from src.utils.batch_export import BatchExporter, ReportFormatter, ExportConfig
+from src.utils.batch_export import BatchExporter, ExportConfig, ReportFormatter
 
 
 class TestBatchJob:

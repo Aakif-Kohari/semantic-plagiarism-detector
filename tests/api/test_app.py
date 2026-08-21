@@ -1023,10 +1023,12 @@ def test_request_id_middleware_ignores_invalid_oversized_id():
 
 
 def test_custom_http_exception_handler_dictionary_detail():
-    from src.api.app import custom_http_exception_handler
-    from starlette.exceptions import HTTPException as StarletteHTTPException
     import asyncio
     from unittest.mock import Mock
+
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    from src.api.app import custom_http_exception_handler
     
     mock_request = Mock()
     mock_request.method = "GET"
@@ -1048,10 +1050,12 @@ def test_custom_http_exception_handler_dictionary_detail():
     assert "timestamp" not in body
 
 def test_custom_http_exception_handler_string_detail():
-    from src.api.app import custom_http_exception_handler
-    from starlette.exceptions import HTTPException as StarletteHTTPException
     import asyncio
     from unittest.mock import Mock
+
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    from src.api.app import custom_http_exception_handler
     
     mock_request = Mock()
     mock_request.method = "GET"

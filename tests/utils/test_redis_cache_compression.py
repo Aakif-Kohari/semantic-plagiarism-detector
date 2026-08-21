@@ -8,11 +8,10 @@ Verifies that corrupted payloads do not crash the application, but are
 instead treated as cache misses, triggering safe recomputation.
 """
 
-import pytest
 import zlib
-import pickle
-import json
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import MagicMock
+
+import pytest
 
 from src.utils.redis_cache import PayloadCompressor, RedisCache
 
