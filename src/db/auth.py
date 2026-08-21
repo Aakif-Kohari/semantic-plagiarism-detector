@@ -1484,6 +1484,73 @@ def _get_token_signature(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+_last_revoked_cleanup = 0.0
+
+
+def _cleanup_revoked_tokens() -> int:
+    """Delete expired JWT tokens and their corresponding SHA-256 signatures from revoked_tokens.
+
+    Returns:
+        The number of rows deleted.
+    """
+    import base64
+    import json
+    import time
+    import hashlib
+
+    deleted_count = 0
+    try:
+        with _connect() as conn:
+            cursor = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='revoked_tokens'"
+            )
+            if not cursor.fetchone():
+                return 0
+
+            cursor = conn.execute("SELECT token_signature FROM revoked_tokens")
+            rows = cursor.fetchall()
+
+            now_ts = int(time.time())
+            expired_signatures = []
+
+            for row in rows:
+                token_sig = row[0]
+                if not token_sig:
+                    continue
+                parts = token_sig.split(".")
+                if len(parts) == 3:
+                    try:
+                        payload_b64 = parts[1]
+                        rem = len(payload_b64) % 4
+                        if rem > 0:
+                            payload_b64 += "=" * (4 - rem)
+                        payload_bytes = base64.urlsafe_b64decode(payload_b64)
+                        payload = json.loads(payload_bytes.decode("utf-8"))
+                        exp = payload.get("exp")
+                        if exp is not None:
+                            exp_int = int(exp)
+                            if now_ts >= exp_int:
+                                expired_signatures.append(token_sig)
+                                token_hash = hashlib.sha256(token_sig.encode("utf-8")).hexdigest()
+                                expired_signatures.append(token_hash)
+                    except Exception:
+                        pass
+
+            if expired_signatures:
+                placeholders = ",".join("?" for _ in expired_signatures)
+                cur = conn.execute(
+                    f"DELETE FROM revoked_tokens WHERE token_signature IN ({placeholders})",
+                    expired_signatures
+                )
+                deleted_count = cur.rowcount
+                conn.commit()
+                if deleted_count > 0:
+                    logger.info(f"Cleaned up {deleted_count} expired entries from revoked_tokens table.")
+    except Exception as e:
+        logger.error(f"Failed to cleanup revoked tokens: {e}")
+    return deleted_count
+
+
 @with_sqlite_retry
 def revoke_token(token: str, details: str | None = None) -> None:
     """Revoke an active Bearer token by storing its signature in revoked_tokens table."""
@@ -1530,6 +1597,7 @@ def revoke_token(token: str, details: str | None = None) -> None:
                 username="system",
                 details=details or f"Token signature {signature[:12]}... revoked",
             )
+        _cleanup_revoked_tokens()
     except sqlite3.Error as e:
         logger.error(f"Failed to revoke token: {e}")
         raise sqlite3.Error(f"Failed to revoke token: {e}") from e
@@ -1543,6 +1611,12 @@ def is_token_revoked(token: str) -> bool:
     token = token.strip()
     if not token:
         return False
+
+    global _last_revoked_cleanup
+    now = time.time()
+    if now - _last_revoked_cleanup > 3600:
+        _last_revoked_cleanup = now
+        _cleanup_revoked_tokens()
 
     signature = _get_token_signature(token)
 

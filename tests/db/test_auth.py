@@ -704,6 +704,52 @@ def test_revoke_token_and_is_token_revoked():
         revoke_token("")
 
 
+def test_cleanup_revoked_tokens():
+    """Verify that expired JWT tokens and their corresponding signatures are automatically cleaned up."""
+    import time
+    import sqlite3
+    import hashlib
+    import base64
+    import json
+    from src.db.auth import revoke_token, is_token_revoked, get_auth_db_path, _cleanup_revoked_tokens
+
+    def make_mock_jwt(exp: int) -> str:
+        header = base64.urlsafe_b64encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode("utf-8")).decode("utf-8").rstrip("=")
+        payload = base64.urlsafe_b64encode(json.dumps({"exp": exp, "type": "access"}).encode("utf-8")).decode("utf-8").rstrip("=")
+        signature = "signature_part"
+        return f"{header}.{payload}.{signature}"
+
+    # 1. Create one expired token and one active token
+    now = int(time.time())
+    expired_token = make_mock_jwt(now - 100)
+    active_token = make_mock_jwt(now + 3600)
+
+    # 2. Revoke both tokens
+    revoke_token(expired_token, details="Expired token test")
+    revoke_token(active_token, details="Active token test")
+
+    expired_hash = hashlib.sha256(expired_token.encode("utf-8")).hexdigest()
+    active_hash = hashlib.sha256(active_token.encode("utf-8")).hexdigest()
+
+    assert is_token_revoked(expired_token) is True
+    assert is_token_revoked(active_token) is True
+
+    # 3. Trigger cleanup
+    deleted_count = _cleanup_revoked_tokens()
+    assert deleted_count >= 2
+
+    # 4. Verify expired token is no longer marked revoked
+    assert is_token_revoked(expired_token) is False
+    assert is_token_revoked(active_token) is True
+
+    # Clean up the active token
+    db_path = get_auth_db_path()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DELETE FROM revoked_tokens WHERE token_signature IN (?, ?)", (active_token, active_hash))
+        conn.commit()
+
+
+
 def test_password_history_validation_prevents_reuse_of_last_3_passwords(mock_db):
     """Verify update_password prevents reusing any of the last 3 passwords."""
     user = f"hist_user_{uuid.uuid4().hex[:8]}"
