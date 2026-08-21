@@ -177,6 +177,19 @@ def test_cli_prewarm_db_success(mock_embed, mock_docs, capsys):
 
 
 @patch(
+    "src.db.corpus_db.get_all_documents",
+    return_value=[],
+)
+def test_cli_prewarm_no_documents(mock_docs, capsys):
+    """Test prewarming cache when no documents are found."""
+    exit_code = run_prewarm()
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "No documents found. Exiting.\n" in captured.out
+
+
+
+@patch(
     "src.core.embedding_model.get_embedding_model_info",
     return_value=("all-MiniLM-L6-v2", 384),
 )
