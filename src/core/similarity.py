@@ -322,11 +322,75 @@ def compute_similarity_matrix(
 # ── Hybrid similarity (lexical + semantic) ─────────────────────────────────────
 
 
+def normalize_scores(
+    scores: Union[pd.DataFrame, np.ndarray, float],
+    method: Optional[str] = None,
+) -> Union[pd.DataFrame, np.ndarray, float]:
+    """
+    Normalize score matrix, array, or scalar float value using Z-Score or Min-Max normalization.
+
+    Args:
+        scores: Input similarity scores (DataFrame, ndarray, or scalar float).
+        method: Normalization method ('minmax', 'min-max', 'zscore', 'z-score', or None).
+
+    Returns:
+        Normalized score object of the same type as input.
+    """
+    if method is None or str(method).lower() in ("none", ""):
+        return scores
+
+    norm_method = str(method).lower()
+    if norm_method not in ("minmax", "min-max", "zscore", "z-score"):
+        raise ValueError(
+            f"Invalid normalization method '{method}'. Supported methods: 'minmax', 'zscore', or None."
+        )
+
+    if isinstance(scores, (int, float, np.number)):
+        return float(scores)
+
+    is_df = isinstance(scores, pd.DataFrame)
+    arr = scores.values if is_df else np.asarray(scores, dtype=float)
+
+    if arr.size <= 1:
+        return scores
+
+    if norm_method in ("minmax", "min-max"):
+        min_val = float(np.min(arr))
+        max_val = float(np.max(arr))
+        if max_val > min_val:
+            norm_arr = (arr - min_val) / (max_val - min_val)
+        else:
+            norm_arr = np.zeros_like(arr)
+    else:  # zscore / z-score
+        mean_val = float(np.mean(arr))
+        std_val = float(np.std(arr))
+        if std_val > 0:
+            norm_arr = (arr - mean_val) / std_val
+        else:
+            norm_arr = arr - mean_val
+
+    if is_df:
+        return pd.DataFrame(norm_arr, index=scores.index, columns=scores.columns)
+    return norm_arr
+
+
 def hybrid_similarity_matrix(
-    semantic_df: pd.DataFrame, lexical_df: pd.DataFrame, w: float = 0.7
+    semantic_df: pd.DataFrame,
+    lexical_df: pd.DataFrame,
+    w: float = 0.7,
+    normalize: Optional[str] = None,
 ) -> pd.DataFrame:
     """
     Combine semantic and lexical similarity matrices using a weighted formula.
+
+    Args:
+        semantic_df: Semantic similarity matrix (pandas DataFrame).
+        lexical_df: Lexical similarity matrix (pandas DataFrame).
+        w: Weight factor for semantic similarity (default: 0.7).
+        normalize: Optional score normalization method before combining ('minmax', 'zscore', or None).
+
+    Returns:
+        Combined hybrid similarity pandas DataFrame.
     """
     if not (0.0 <= w <= 1.0):
         from src.errors import SIM_WEIGHT_OUT_OF_RANGE
@@ -344,7 +408,10 @@ def hybrid_similarity_matrix(
 
         raise ValueError(SIM_INDEX_MISMATCH)
 
-    hybrid_df = w * semantic_df + (1 - w) * lexical_df
+    sem_scores = normalize_scores(semantic_df, method=normalize)
+    lex_scores = normalize_scores(lexical_df, method=normalize)
+
+    hybrid_df = w * sem_scores + (1 - w) * lex_scores
     return hybrid_df
 
 
@@ -1072,21 +1139,27 @@ def compute_hybrid_similarity_df(
     texts: Dict[str, str],
     alpha: float = 0.7,
     lexical_method: str = "tfidf",
+    normalize: Optional[str] = None,
 ) -> pd.DataFrame:
     """
     Compute hybrid similarity DataFrame combining semantic and lexical scores.
-    
+
     Args:
         semantic_df: Semantic similarity DataFrame
         texts: Document texts
         alpha: Semantic weight (0.7 = 70% semantic, 30% lexical)
         lexical_method: Lexical method to use
-    
+        normalize: Normalization method ('minmax', 'zscore', or None)
+
     Returns:
         Hybrid similarity DataFrame
     """
-    scorer = HybridScorer(HybridConfig(alpha=alpha, lexical_method=lexical_method))
-    return scorer.compute_hybrid_matrix(texts, semantic_df, alpha, lexical_method)
+    scorer = HybridScorer(
+        HybridConfig(alpha=alpha, lexical_method=lexical_method, normalize=normalize)
+    )
+    return scorer.compute_hybrid_matrix(
+        texts, semantic_df, alpha, lexical_method, normalize=normalize
+    )
 
 
 def flag_plagiarism_hybrid(
