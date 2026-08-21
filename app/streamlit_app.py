@@ -3325,7 +3325,27 @@ from src.utils.file_validator import validate_upload
             with c2:
                 db = st.selectbox("Document B", [d for d in doc_names if d != da], key="db")
             sim_val = float(active_sim_df.loc[da, db])
-            st.write(f"Overall Similarity: `{sim_val:.1%}`")
+            
+            # Compute Plagiarism Density for da against db
+            density_a = 0.0
+            density_b = 0.0
+            emb_a = embeddings.get(da, np.array([]))
+            emb_b = embeddings.get(db, np.array([]))
+            
+            if emb_a.size > 0 and emb_b.size > 0:
+                from src.core.similarity import cosine_similarity
+                sim_matrix = cosine_similarity(emb_a, emb_b)
+                chunk_maxes_a = np.max(sim_matrix, axis=1)
+                chunk_maxes_b = np.max(sim_matrix, axis=0)
+                plag_a = np.sum(chunk_maxes_a >= threshold)
+                plag_b = np.sum(chunk_maxes_b >= threshold)
+                density_a = (plag_a / len(emb_a)) * 100 if len(emb_a) > 0 else 0
+                density_b = (plag_b / len(emb_b)) * 100 if len(emb_b) > 0 else 0
+
+            m_col1, m_col2, m_col3 = st.columns(3)
+            m_col1.metric("Peak Similarity", f"{sim_val:.1%}")
+            m_col2.metric(f"Density ({da[:15]}...)", f"{density_a:.1f}%")
+            m_col3.metric(f"Density ({db[:15]}...)", f"{density_b:.1f}%")
             pair_flags = [
                 f
                 for f in flags
