@@ -1,0 +1,18 @@
+version: '3.8'
+services:
+  # 1. Backend Service Configuration Framework
+  backend:
+    volumes:
+      - ./src:/app/src:z # Mounts host source files with selinux compatibility flags
+    environment:
+      - ENV=development
+      - DEBUG=true # Overrides standard static boots to run with Uvicorn auto-reload active
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/src
+
+  # 2. Frontend/Dashboard Service Configuration Framework
+  frontend:
+    volumes:
+      - ./app:/app/frontend:z # Mounts host layout files dynamically
+    environment:
+      - STREAMLIT_SERVER_HEADLESS=true # Overrides standard static boots to activate Streamlit filesystem watchers
+    command: streamlit run /app/frontend/dashboard.py --server.port=8501 --server.fileWatcherType=auto
