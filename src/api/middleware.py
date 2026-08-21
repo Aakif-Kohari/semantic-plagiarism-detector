@@ -192,6 +192,23 @@ async def verify_bearer_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # Perform token-bucket rate limiting per credentials.credentials (Issue #2921)
+    if credentials and credentials.credentials:
+        from src.security.rate_limiter import get_token_bucket_limiter
+
+        token_str = credentials.credentials
+        limiter = get_token_bucket_limiter()
+        if not limiter.consume(token_str):
+            logger.warning(
+                "Rate limit exceeded for API Bearer token: %s...",
+                token_str[:8] if len(token_str) >= 8 else token_str,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Rate limit exceeded for API Bearer token. Please slow down requests.",
+                headers={"Retry-After": "1"},
+            )
+
     return credentials.credentials
 
 
