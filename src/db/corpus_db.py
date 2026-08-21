@@ -27,9 +27,24 @@ from src.utils.filename import sanitize_filename
 logger = logging.getLogger(__name__)
 
 # Seed the corpus DB path from the centralized app_config.
+import atexit
+import weakref
 _DB_PATH = os.path.abspath(str(CORPUS_DB_PATH))
 
 _connection_pool = threading.local()
+_all_connections = weakref.WeakSet()
+_pool_lock = threading.Lock()
+
+def _cleanup_all_connections():
+    with _pool_lock:
+        for conn in _all_connections:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        _all_connections.clear()
+
+atexit.register(_cleanup_all_connections)
 
 
 class CorpusRepository(BaseRepository):
@@ -70,9 +85,7 @@ def _pool() -> dict[str, sqlite3.Connection]:
 
 @contextmanager
 def _connect():
-    """Open a connection for the duration of the operation and always close
-    it on exit (success, error, or exception) to avoid leaked file handles
-    under concurrent requests."""
+    """Open a connection for the duration of the operation or use pooled connection."""
     path = os.path.abspath(_DB_PATH)
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -82,6 +95,14 @@ def _connect():
 
     pool = _pool()
     conn = pool.get(path)
+    
+    # Check if the connection is closed. If so, discard it.
+    if conn is not None:
+        try:
+            conn.execute("SELECT 1")
+        except sqlite3.ProgrammingError:
+            conn = None
+
     if conn is None:
         try:
             conn = sqlite3.connect(path, check_same_thread=False)
@@ -92,6 +113,8 @@ def _connect():
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA journal_mode=WAL")
         pool[path] = conn
+        with _pool_lock:
+            _all_connections.add(conn)
 
     try:
         yield conn
@@ -99,19 +122,23 @@ def _connect():
     except Exception:
         conn.rollback()
         raise
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
 
 
 def close_connections(all_threads: bool = False) -> None:
     """Close all pooled corpus connections for the current thread (or all threads if specified)."""
-    pool = getattr(_connection_pool, "connections", {})
-    for conn in pool.values():
-        conn.close()
-    pool.clear()
+    if all_threads:
+        _cleanup_all_connections()
+        # Clear the local pool too just in case
+        pool = getattr(_connection_pool, "connections", {})
+        pool.clear()
+    else:
+        pool = getattr(_connection_pool, "connections", {})
+        for conn in pool.values():
+            try:
+                conn.close()
+            except Exception:
+                pass
+        pool.clear()
 
 
 def init_corpus_db() -> None:

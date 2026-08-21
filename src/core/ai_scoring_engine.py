@@ -5,14 +5,15 @@ Provides advanced plagiarism scoring using multiple detection metrics,
 content fingerprinting, and ensemble scoring for accurate detection.
 """
 
-import re
 import hashlib
 import logging
-from dataclasses import dataclass, field, asdict
-from typing import List, Dict, Optional, Tuple, Any, Set
-from enum import Enum
-from datetime import datetime
+import re
 from collections import Counter
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
+from enum import Enum
+from typing import Any, Dict, List, Optional, Set, Tuple
+
 import numpy as np
 
 logger = logging.getLogger(__name__)

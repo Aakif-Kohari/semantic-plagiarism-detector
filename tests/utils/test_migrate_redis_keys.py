@@ -4,7 +4,7 @@ tests/utils/test_migrate_redis_keys.py
 Unit tests for the Redis key migration script and CacheNamespace legacy prefix removal (Issue #2803).
 """
 
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock
 
 import pytest
 

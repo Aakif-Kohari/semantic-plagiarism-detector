@@ -30,6 +30,7 @@ from src.db.auth import (
 )
 from src.exceptions import StaleDataException
 
+
 @pytest.fixture(autouse=True)
 def setup_test_db(mock_db):
     """Uses the mock_db fixture from conftest.py to isolate DB operations."""
@@ -824,8 +825,8 @@ def test_validate_username_rules():
             _validate_username(invalid)  # type: ignore
 
     # 6. Invalid credentials still return False (or dict with authenticated=False)
-    assert verify_user(username, "WrongPassword!") is False
-    assert verify_user(username, "WrongPassword!", return_details=True) == {
+    assert verify_user("alice", "WrongPassword!") is False
+    assert verify_user("alice", "WrongPassword!", return_details=True) == {
         "authenticated": False,
         "must_change_password": False,
     }

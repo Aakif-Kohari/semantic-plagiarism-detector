@@ -5,15 +5,14 @@ Generates comprehensive plagiarism detection reports with
 visualizations, statistics, and actionable insights.
 """
 
-import os
-import json
 import hashlib
+import json
 import logging
-from dataclasses import dataclass, field, asdict
-from typing import List, Dict, Optional, Any
-from enum import Enum
+import os
+from dataclasses import dataclass, field
 from datetime import datetime
-from collections import Counter
+from enum import Enum
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 

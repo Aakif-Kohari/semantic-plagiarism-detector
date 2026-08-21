@@ -7,12 +7,11 @@ and obfuscation detection algorithms for multi-language source code.
 import math
 import uuid
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import List, Tuple
 
 from src.models.neural_code_clone_model import (
     CodeAstEmbedding,
     CodeCloneMatch,
-    CodeCloneScanReport,
 )
 
 
