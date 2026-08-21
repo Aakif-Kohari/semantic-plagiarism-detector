@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 test_coverage_report.py
 -----------------------
@@ -11,6 +9,8 @@ Validates:
 - Browser opening behavior
 - Argument parsing logic
 """
+
+from __future__ import annotations
 
 import argparse
 import sys

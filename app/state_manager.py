@@ -13,6 +13,7 @@ import time
 import traceback
 import uuid
 from datetime import datetime
+import os
 
 import streamlit as st
 
@@ -94,9 +95,10 @@ def get_active_sessions_count() -> int:
         try:
             fallback_dict = getattr(cache, "fallback_cache", {})
             if fallback_dict is not None:
+                # FIXED: Wrap in list() to avoid dictionary changed size during iteration (Thread-safe)
                 fallback_keys = [
                     k
-                    for k in fallback_dict.keys()
+                    for k in list(fallback_dict.keys())
                     if k.startswith("spd:v1:session:") and k.endswith(":last_interaction")
                 ]
                 for k in fallback_keys:
@@ -117,7 +119,7 @@ def get_active_sessions_count() -> int:
                     session_id = parts[3]
                     last_interaction = get_session_state(
                         session_id,
-                        "last_interaction",
+                        SessionKeys.LAST_INTERACTION,
                     )
                     if (
                         last_interaction is not None
@@ -141,8 +143,8 @@ def _start_api_server():
 
     uvicorn.run(
         fastapi_app,
-        host= os.getenv("API_HOST", "0.0.0.0"),
-        port= int(os.getenv("API_PORT", 8000)),
+        host=os.getenv("API_HOST", "0.0.0.0"),
+        port=int(os.getenv("API_PORT", 8000)),
         log_level="warning",
     )
 

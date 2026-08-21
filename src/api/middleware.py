@@ -7,6 +7,9 @@ from typing import Dict, List, Optional
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, SecurityScopes
 
+from src.db import auth as db_auth
+from src.security import jwt_utils
+
 # Expected JWT verification exceptions
 _JWT_EXCEPTIONS = [ValueError]
 try:
@@ -164,10 +167,8 @@ async def verify_bearer_token(
     if credentials and credentials.credentials in valid_tokens:
         is_valid = True
     elif credentials and credentials.credentials:
-        from src.security.jwt_utils import verify_access_token
-
         try:
-            verify_access_token(credentials.credentials)
+            jwt_utils.verify_access_token(credentials.credentials)
             is_valid = True
         except JWT_EXCEPTIONS:
             is_valid = False
@@ -184,9 +185,7 @@ async def verify_bearer_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    from src.db.auth import is_token_revoked
-
-    if is_token_revoked(credentials.credentials):
+    if db_auth.is_token_revoked(credentials.credentials):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token has been revoked.",
@@ -210,10 +209,8 @@ async def get_current_user(
     if token in valid_tokens:
         token_scopes = valid_tokens[token]
     else:
-        from src.security.jwt_utils import verify_access_token
-
         try:
-            payload = verify_access_token(token)
+            payload = jwt_utils.verify_access_token(token)
             token_scopes = payload.get("scopes", [])
         except Exception:
             token_scopes = []

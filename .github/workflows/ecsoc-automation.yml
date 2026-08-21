@@ -162,13 +162,8 @@ jobs:
       - uses: actions/github-script@v7
         with:
           script: |
-            const labelRules = [
-              { label: 'Backend', keywords: ['backend', 'api', 'server', 'route', 'endpoint', 'database', 'db', 'sql', 'fastapi', 'flask', 'express', 'controller'] },
-              { label: 'Docs', keywords: ['docs', 'documentation', 'readme', 'guide', 'tutorial', 'docstring', 'changelog'] },
-              { label: 'Security', keywords: ['jwt', 'auth', 'security', 'token', 'password', 'login', 'permission', 'encryption', 'vulnerability', 'oauth', 'secret', 'cors'] },
-              { label: 'AI', keywords: ['ai', 'nlp', 'model', 'embedding', 'transformer', 'similarity', 'semantic', 'llm', 'bert', 'spacy', 'nltk', 'plagiarism'] },
-              { label: 'Performance', keywords: ['performance', 'speed', 'optimization', 'memory', 'cache', 'latency', 'slow', 'async', 'profiling', 'benchmark'] }
-            ];
+            const fs = require('fs');
+            const labelRules = JSON.parse(fs.readFileSync('.github/label_rules.json', 'utf8'));
 
             const labelMetaData = {
               'UI': { color: '1d76db', description: 'UI & Frontend changes' },
