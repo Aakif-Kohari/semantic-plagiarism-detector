@@ -58,10 +58,11 @@ DEFAULT_TTL_DAYS = 30
 
 
 @contextmanager
-def _connect():
+def _connect(db_path: Optional[Path] = None):
     """Borrow a reusable SQLite connection for the translation cache (Issue #1956)."""
-    _CACHE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(_CACHE_DB_PATH), check_same_thread=False)
+    path = db_path or _CACHE_DB_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path), check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     try:
         yield conn
@@ -204,7 +205,11 @@ def _recover_corrupted_cache() -> None:
 
 
 def get_cached_translation(
-    source_text: str, source_lang: str, target_lang: str, db_path: Optional[Path] = None
+    source_text: str,
+    source_lang: str,
+    target_lang: str,
+    db_path: Optional[Path] = None,
+    conn: Optional[sqlite3.Connection] = None,
 ) -> Optional[str]:
     """Retrieve a cached translation if it exists.
 
@@ -213,6 +218,7 @@ def get_cached_translation(
         source_lang: Source language code.
         target_lang: Target language code.
         db_path: Optional path to the database file.
+        conn: Optional active SQLite database connection.
 
     Returns:
         The translated text string, or None if not cached.
@@ -224,7 +230,8 @@ def get_cached_translation(
 
     try:
         with _lock:
-            with _get_connection(db_path) as conn:
+            if conn is not None:
+                conn.row_factory = sqlite3.Row
                 cursor = conn.execute(
                     """
                     SELECT translated_text FROM translation_cache
@@ -248,6 +255,32 @@ def get_cached_translation(
                         "Cache hit for translation: %s -> %s", source_lang, target_lang
                     )
                     return row["translated_text"]
+            else:
+                with _connect(db_path) as new_conn:
+                    new_conn.row_factory = sqlite3.Row
+                    cursor = new_conn.execute(
+                        """
+                        SELECT translated_text FROM translation_cache
+                        WHERE source_hash = ?
+                        """,
+                        (source_hash,),
+                    )
+                    row = cursor.fetchone()
+
+                    if row:
+                        # Update last_accessed_at for potential LRU tracking
+                        new_conn.execute(
+                            """
+                            UPDATE translation_cache 
+                            SET last_accessed_at = ? 
+                            WHERE source_hash = ?
+                            """,
+                            (datetime.utcnow().isoformat(), source_hash),
+                        )
+                        logger.debug(
+                            "Cache hit for translation: %s -> %s", source_lang, target_lang
+                        )
+                        return row["translated_text"]
 
             return None
 
@@ -268,6 +301,7 @@ def save_translation(
     target_lang: str,
     translated_text: str,
     db_path: Optional[Path] = None,
+    conn: Optional[sqlite3.Connection] = None,
 ) -> bool:
     """Save a new translation to the cache.
 
@@ -277,6 +311,7 @@ def save_translation(
         target_lang: Target language code.
         translated_text: The resulting translation.
         db_path: Optional path to the database file.
+        conn: Optional active SQLite database connection.
 
     Returns:
         True if saved successfully, False otherwise.
@@ -289,7 +324,7 @@ def save_translation(
 
     try:
         with _lock:
-            with _get_connection(db_path) as conn:
+            if conn is not None:
                 conn.execute(
                     """
                     INSERT OR REPLACE INTO translation_cache
@@ -306,6 +341,24 @@ def save_translation(
                         now,
                     ),
                 )
+            else:
+                with _connect(db_path) as new_conn:
+                    new_conn.execute(
+                        """
+                        INSERT OR REPLACE INTO translation_cache
+                        (source_hash, source_text, source_lang, target_lang, translated_text, created_at, last_accessed_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            source_hash,
+                            source_text,
+                            source_lang.strip().lower(),
+                            target_lang.strip().lower(),
+                            translated_text.strip(),
+                            now,
+                            now,
+                        ),
+                    )
         logger.debug("Saved translation to cache: %s -> %s", source_lang, target_lang)
         return True
     except sqlite3.Error as exc:

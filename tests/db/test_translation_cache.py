@@ -385,3 +385,33 @@ def test_translation_cache_uses_lock_for_get_and_save():
     assert mock_lock.__enter__.call_count >= 2
     assert mock_lock.__exit__.call_count >= 2
 
+
+def test_translation_cache_uses_provided_connection():
+    """Verify that get_cached_translation and save_translation use the provided connection and do not open a new one."""
+    from unittest.mock import MagicMock
+    from src.db.translation_cache import get_cached_translation, save_translation
+
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_cursor.fetchone.return_value = {"translated_text": "cached_val"}
+    mock_conn.execute.return_value = mock_cursor
+
+    with patch("src.db.translation_cache._connect") as mock_connect, \
+         patch("src.db.translation_cache._get_connection") as mock_get_conn:
+
+        # Call get_cached_translation with provided connection
+        result = get_cached_translation("source", "fr", "en", conn=mock_conn)
+        assert result == "cached_val"
+
+        # Call save_translation with provided connection
+        save_result = save_translation("source", "fr", "en", "target", conn=mock_conn)
+        assert save_result is True
+
+        # Assert that no new connections were spawned
+        mock_connect.assert_not_called()
+        mock_get_conn.assert_not_called()
+
+        # Assert that the provided connection was used
+        assert mock_conn.execute.call_count >= 2
+
+
