@@ -9,6 +9,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, SecurityS
 
 from src.db import auth as db_auth
 from src.security import jwt_utils
+from src.security.rate_limiter import get_token_bucket_limiter
+
 
 # Expected JWT verification exceptions
 _JWT_EXCEPTIONS = [ValueError]
@@ -195,10 +197,9 @@ async def verify_bearer_token(
 
     # Perform token-bucket rate limiting per credentials.credentials (Issue #2921)
     if credentials and credentials.credentials:
-        from src.security.rate_limiter import get_token_bucket_limiter
-
         token_str = credentials.credentials
         limiter = get_token_bucket_limiter()
+
         if not limiter.consume(token_str):
             logger.warning(
                 "Rate limit exceeded for API Bearer token: %s...",
