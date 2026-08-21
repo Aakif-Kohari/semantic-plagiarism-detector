@@ -43,6 +43,7 @@ cache_misses = 0
 
 _CACHE_DB_PATH = _REPO_ROOT / "data" / "translation_cache.db"
 _lock = threading.Lock()
+_CORRUPTION_MESSAGE = "database disk image is malformed"
 
 
 # ── Issue #1956 Connection Manager ───────────────────────────────────────────
@@ -89,6 +90,35 @@ def _hash_text_simple(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _recover_corrupted_cache() -> None:
+    """Delete a corrupted cache database and recreate its schema."""
+    logger.critical(
+        "Translation cache database is corrupted at %s; deleting it and "
+        "recreating the schema.",
+        _CACHE_DB_PATH,
+    )
+
+    with _lock:
+        for suffix in ("", "-wal", "-shm"):
+            cache_path = (
+                _CACHE_DB_PATH
+                if not suffix
+                else _CACHE_DB_PATH.with_name(_CACHE_DB_PATH.name + suffix)
+            )
+            try:
+                cache_path.unlink(missing_ok=True)
+            except OSError as exc:
+                logger.critical(
+                    "Unable to remove corrupted translation cache file %s: %s",
+                    cache_path,
+                    exc,
+                )
+                raise
+
+        init_translation_cache()
+        logger.info("Recreated translation cache schema at %s", _CACHE_DB_PATH)
+
+
 def get_cached_translation(
     source_text: str,
     source_lang: str,
@@ -120,8 +150,11 @@ def get_cached_translation(
             )
             row = cursor.fetchone()
             return row[0] if row else None
-    except sqlite3.Error as exc:
-        logger.error("Failed to query translation cache: %s", exc)
+    except sqlite3.DatabaseError as exc:
+        if _CORRUPTION_MESSAGE in str(exc).lower():
+            _recover_corrupted_cache()
+        else:
+            logger.error("Failed to query translation cache: %s", exc)
         return None
 
 
