@@ -5,6 +5,7 @@ from src.utils.badge_generator import (
     generate_badge_pdf,
     generate_badge_png,
     generate_badge_svg,
+    has_reportlab,
     validate_hex_color,
 )
 from src.utils.redis_cache import CacheNamespace, RedisCache
@@ -55,6 +56,20 @@ def test_generate_badge_svg_default_font_size():
 def test_generate_badge_svg_custom_font_size():
     svg = generate_badge_svg(student_name="Alex", font_size=20)
     assert 'font-size="20"' in svg
+
+
+def test_has_reportlab():
+    from src.utils.badge_generator import SimpleDocTemplate
+
+    assert has_reportlab() == (SimpleDocTemplate is not None)
+
+
+def test_generate_badge_pdf_raises_when_reportlab_missing(monkeypatch):
+    import src.utils.badge_generator as bg
+
+    monkeypatch.setattr(bg, "SimpleDocTemplate", None)
+    with pytest.raises(ImportError, match="reportlab is required for PDF badge generation"):
+        bg.generate_badge_pdf()
 
 
 def test_generate_badge_png_and_caching():
