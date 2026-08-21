@@ -243,6 +243,15 @@ def format_stats_for_pdf(stats: Dict[str, float]) -> List[List[str]]:
 logger = logging.getLogger(__name__)
 
 
+def get_word_count(text: str) -> int:
+    """Deprecated alias for :func:`count_words`.
+
+    Kept for backward compatibility with existing callers/tests. New code
+    should call :func:`count_words` directly.
+    """
+    return count_words(text)
+
+
 def get_char_count(text: str) -> int:
     return len(text)
 
