@@ -7,18 +7,16 @@ Verifies that purge_old_translations correctly identifies and deletes
 stale entries based on the created_at timestamp (Issue #2985).
 """
 
-import pytest
 import sqlite3
 from datetime import datetime, timedelta
-from pathlib import Path
-from unittest.mock import patch
+
+import pytest
 
 from src.db.translation_cache import (
-    initialize_cache_db,
-    save_translation,
-    purge_old_translations,
     get_cache_stats,
-    clear_translation_cache,
+    initialize_cache_db,
+    purge_old_translations,
+    save_translation,
 )
 
 

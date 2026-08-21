@@ -5,13 +5,15 @@ Comprehensive test suite covering language detection, embedding,
 cross-language comparison, and result generation.
 """
 
+
 import numpy as np
-import pytest
-from unittest.mock import patch, MagicMock
 
 from src.core.cross_lingual_detector import (
-    CrossLingualDetector, CrossLingualConfig, CrossLingualResult,
-    LanguageMatch, SupportedLanguage, LANGUAGE_NAMES
+    LANGUAGE_NAMES,
+    CrossLingualConfig,
+    CrossLingualDetector,
+    CrossLingualResult,
+    LanguageMatch,
 )
 
 

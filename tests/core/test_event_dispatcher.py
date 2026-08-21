@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.core.webhook import EventDispatcher, compute_webhook_signature
+from src.core.webhook import EventDispatcher
 from src.security.ssrf_protector import SSRFSecurityException
 
 

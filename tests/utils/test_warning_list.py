@@ -248,6 +248,7 @@ def test_page_size_clamping_to_max_100():
 def test_has_exact_match_no_results():
     """Verify that _has_exact_match returns False if analysis_results is missing from session state."""
     import streamlit as st
+
     from src.utils.warning_list import _has_exact_match
 
     # Ensure analysis_results is not in session state
@@ -260,6 +261,7 @@ def test_has_exact_match_no_results():
 def test_has_exact_match_with_matching_tuple_results():
     """Verify that _has_exact_match works with legacy tuple format where index 1 is chunked_docs."""
     import streamlit as st
+
     from src.utils.warning_list import _has_exact_match
 
     chunked_docs = {
@@ -275,6 +277,7 @@ def test_has_exact_match_with_matching_tuple_results():
 def test_has_exact_match_with_non_matching_tuple_results():
     """Verify that _has_exact_match returns False when no chunks match."""
     import streamlit as st
+
     from src.utils.warning_list import _has_exact_match
 
     chunked_docs = {"doc_a.pdf": ["hello world"], "doc_b.pdf": ["different chunk"]}
@@ -286,8 +289,10 @@ def test_has_exact_match_with_non_matching_tuple_results():
 
 def test_has_exact_match_with_named_tuple_results():
     """Verify that _has_exact_match works with NamedTuple format, accessing chunked_docs attribute."""
-    import streamlit as st
     from collections import namedtuple
+
+    import streamlit as st
+
     from src.utils.warning_list import _has_exact_match
 
     MockPipelineResult = namedtuple("MockPipelineResult", ["raw_texts", "chunked_docs"])
@@ -304,6 +309,7 @@ def test_has_exact_match_with_named_tuple_results():
 def test_has_exact_match_with_pure_attribute():
     """Verify that _has_exact_match works with an object that only has chunked_docs attribute."""
     import streamlit as st
+
     from src.utils.warning_list import _has_exact_match
 
     class MockNamedTuple:

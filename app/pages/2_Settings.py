@@ -9,13 +9,11 @@ OCR settings, database management, and system backups.
 Issue #2810: Decompose monolithic streamlit_app.py.
 """
 
-import streamlit as st
-import os
 import json
-from datetime import datetime, timezone
 
-from src.core.config import DEFAULT_THRESHOLDS, PLAGIARISM_THRESHOLD
-from src.core.app_config import get_branding_config
+import streamlit as st
+
+from src.core.config import PLAGIARISM_THRESHOLD
 from src.db.database_backup import (
     create_corpus_database_snapshot,
     create_password_protected_backup,
@@ -82,7 +80,7 @@ def render_settings():
         st.subheader("Optical Character Recognition (OCR)")
         st.caption("Used only for scanned or image-only PDF pages.")
 
-        from src.core.document_parser import SUPPORTED_OCR_LANGUAGES, DEFAULT_OCR_DPI
+        from src.core.document_parser import DEFAULT_OCR_DPI, SUPPORTED_OCR_LANGUAGES
 
         ocr_language_labels = {
             display_name: code for code, display_name in SUPPORTED_OCR_LANGUAGES.items()

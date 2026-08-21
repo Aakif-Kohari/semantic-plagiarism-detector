@@ -5,15 +5,16 @@ Streamlit-based interface for generating and exporting
 comprehensive plagiarism detection reports.
 """
 
-import streamlit as st
-import pandas as pd
+from typing import Any, Dict
+
 import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime
-from typing import Dict, Any
+import streamlit as st
 
 from src.core.report_generator import (
-    ReportGenerator, ReportConfig, ReportFormat, ReportType
+    ReportConfig,
+    ReportFormat,
+    ReportGenerator,
+    ReportType,
 )
 
 
@@ -157,7 +158,8 @@ def _render_preview():
     st.subheader("⬇️ Export Report")
     fmt = st.session_state.get("report_format", "markdown")
     generator = ReportGenerator()
-    import tempfile, os
+    import os
+    import tempfile
     with tempfile.NamedTemporaryFile(suffix=f".{fmt}", delete=False) as f:
         temp_path = f.name
 

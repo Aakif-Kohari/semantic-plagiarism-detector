@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
 
 try:
     import nltk  # type: ignore

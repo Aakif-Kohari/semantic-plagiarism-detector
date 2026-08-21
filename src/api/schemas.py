@@ -122,6 +122,9 @@ class SimilarityCheckResponse(BaseModel):
     threshold_used: float = Field(
         ..., description="Similarity threshold configured for scan"
     )
+    plagiarism_density: int = Field(
+        ..., description="Percentage of document chunks flagged as plagiarized"
+    )
     overall_document_similarity: float = Field(
         ..., description="Highest overall document similarity score"
     )
