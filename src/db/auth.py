@@ -966,6 +966,41 @@ def set_tour_completed(username: str, completed: bool = True) -> None:
         raise sqlite3.Error(f"Failed to update tour status: {e}") from e
 
 
+def _get_fernet_key() -> bytes:
+    """Load or derive a valid 32-byte Fernet key from environment variables."""
+    import base64
+    import hashlib
+    key_str = os.getenv("OTP_ENCRYPTION_KEY") or os.getenv("ENCRYPTION_KEY")
+    if not key_str:
+        key_str = "default-fallback-otp-encryption-key-do-not-use-in-production"
+    
+    hashed = hashlib.sha256(key_str.encode("utf-8")).digest()
+    return base64.urlsafe_b64encode(hashed)
+
+
+def _encrypt_otp_secret(secret: str) -> str:
+    """Encrypt the OTP secret using cryptography.fernet."""
+    if not secret:
+        return secret
+    from cryptography.fernet import Fernet
+    key = _get_fernet_key()
+    f = Fernet(key)
+    return f.encrypt(secret.encode("utf-8")).decode("utf-8")
+
+
+def _decrypt_otp_secret(encrypted_secret: str) -> str:
+    """Decrypt the OTP secret using cryptography.fernet, falling back to plaintext on error."""
+    if not encrypted_secret:
+        return encrypted_secret
+    from cryptography.fernet import Fernet, InvalidToken
+    key = _get_fernet_key()
+    f = Fernet(key)
+    try:
+        return f.decrypt(encrypted_secret.encode("utf-8")).decode("utf-8")
+    except (InvalidToken, Exception):
+        return encrypted_secret
+
+
 def get_2fa_status(username: str) -> tuple[bool, str | None]:
     """Return (two_factor_enabled, otp_secret) for a user."""
     with _connect() as conn:
@@ -975,16 +1010,18 @@ def get_2fa_status(username: str) -> tuple[bool, str | None]:
         ).fetchone()
     if not row:
         return False, None
-    return bool(row[0]), row[1]
+    decrypted_secret = _decrypt_otp_secret(row[1]) if row[1] is not None else None
+    return bool(row[0]), decrypted_secret
 
 
 @with_sqlite_retry
 def enable_2fa(username: str, secret: str) -> None:
     """Enable 2FA for a user and store their OTP secret."""
+    encrypted_secret = _encrypt_otp_secret(secret)
     with _connect() as conn:
         conn.execute(
             "UPDATE users SET two_factor_enabled = 1, otp_secret = ? WHERE username = ?",
-            (secret, username.lower()),
+            (encrypted_secret, username.lower()),
         )
         conn.commit()
 

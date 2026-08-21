@@ -320,8 +320,67 @@ def test_get_2fa_status():
 
     enabled, secret = get_2fa_status(username)
     assert enabled is True
+    assert secret == test_secret
 
     delete_user(username)
+
+
+def test_otp_secret_is_encrypted_at_rest():
+    """Verify that OTP secret is encrypted when stored in the database, and decrypted by get_2fa_status."""
+    import sqlite3
+    from src.db.auth import get_auth_db_path
+
+    username = f"user_2fa_enc_{uuid.uuid4().hex[:8]}"
+    add_user(username, "Password123!")
+
+    test_secret = "MY_OTP_SECRET_12345"
+    enable_2fa(username, test_secret)
+
+    # 1. Query via API to verify transparent decryption
+    enabled, secret = get_2fa_status(username)
+    assert enabled is True
+    assert secret == test_secret
+
+    # 2. Query the raw database row directly to verify it's encrypted at rest
+    db_path = get_auth_db_path()
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT otp_secret FROM users WHERE username = ?",
+            (username.lower(),)
+        ).fetchone()
+
+    db_secret = row[0]
+    assert db_secret is not None
+    assert db_secret != test_secret
+    assert "gAAAAA" in db_secret  # Standard Fernet header prefix
+
+    delete_user(username)
+
+
+def test_otp_secret_legacy_plaintext_fallback():
+    """Verify that if the database contains a legacy plaintext OTP secret, it is returned as-is without crashing."""
+    import sqlite3
+    from src.db.auth import get_auth_db_path
+
+    username = f"user_2fa_legacy_{uuid.uuid4().hex[:8]}"
+    add_user(username, "Password123!")
+
+    # Force insert a plaintext secret into the database
+    db_path = get_auth_db_path()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE users SET two_factor_enabled = 1, otp_secret = ? WHERE username = ?",
+            ("LEGACY_PLAINTEXT_SECRET", username.lower())
+        )
+        conn.commit()
+
+    # Query via API
+    enabled, secret = get_2fa_status(username)
+    assert enabled is True
+    assert secret == "LEGACY_PLAINTEXT_SECRET"
+
+    delete_user(username)
+
 
 
 
