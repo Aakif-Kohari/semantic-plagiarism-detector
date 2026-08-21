@@ -12,6 +12,9 @@ import os
 import threading
 import time
 import traceback
+import uuid
+import os
+import multiprocessing
 from datetime import datetime
 
 import streamlit as st
@@ -138,7 +141,17 @@ def get_active_sessions_count() -> int:
 def _start_api_server():
     import uvicorn
 
+    from starlette.middleware.base import BaseHTTPMiddleware
+
     from src.api.app import app as fastapi_app
+
+    class ActivityMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request, call_next):
+            if request.url.path not in ("/health", "/healthz"):
+                update_global_activity()
+            return await call_next(request)
+
+    fastapi_app.add_middleware(ActivityMiddleware)
 
     uvicorn.run(
         fastapi_app,
@@ -155,18 +168,11 @@ def init_api_server_daemon():
     if not getattr(app_config, "_api_server_started", False):
         app_config._api_server_started = True
 
-        from starlette.middleware.base import BaseHTTPMiddleware
-
-        from src.api.app import app as fastapi_app
-
-        class ActivityMiddleware(BaseHTTPMiddleware):
-            async def dispatch(self, request, call_next):
-                if request.url.path not in ("/health", "/healthz"):
-                    update_global_activity()
-                return await call_next(request)
-
-        fastapi_app.add_middleware(ActivityMiddleware)
-        threading.Thread(target=_start_api_server, daemon=True).start()
+        app_config.api_server_process = multiprocessing.Process(
+            target=_start_api_server,
+            daemon=True,
+        )
+        app_config.api_server_process.start()
 
 
 def _run_backup_daemon():
