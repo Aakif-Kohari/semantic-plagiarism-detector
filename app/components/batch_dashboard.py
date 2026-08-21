@@ -5,15 +5,19 @@ Provides a comprehensive UI for managing and monitoring batch
 plagiarism detection jobs with real-time progress tracking.
 """
 
-import streamlit as st
+from datetime import datetime
+
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime
-from typing import List, Dict, Any, Optional
+import streamlit as st
 
-from src.core.batch_processor import BatchProcessor, BatchJob, BatchStatus, BatchPriority, BatchConfig
 from src.core.batch_history import BatchHistory
+from src.core.batch_processor import (
+    BatchConfig,
+    BatchPriority,
+    BatchProcessor,
+    BatchStatus,
+)
 
 
 def render_batch_dashboard(processor: BatchProcessor, history: BatchHistory):

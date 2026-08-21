@@ -5,13 +5,13 @@ Provides batch export functionality for plagiarism reports
 in multiple formats with compression support.
 """
 
-import os
-import json
 import csv
-import zipfile
+import json
 import logging
+import os
+import zipfile
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 

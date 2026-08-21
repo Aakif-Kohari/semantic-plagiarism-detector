@@ -7,13 +7,10 @@ Verifies that file size limits, extension checks, and magic byte validation
 work correctly to prevent RAM spikes and malicious file processing.
 """
 
-import pytest
 from src.utils.file_validator import (
-    FileValidator,
-    ValidationResult,
-    validate_upload,
     MAX_FILE_SIZE_BYTES,
-    ALLOWED_EXTENSIONS,
+    FileValidator,
+    validate_upload,
 )
 
 

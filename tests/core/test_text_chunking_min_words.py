@@ -8,10 +8,9 @@ Verifies that small chunks (e.g., page numbers, headers) are discarded
 early in the chunking loop to optimize performance.
 """
 
-import pytest
 from src.core.text_chunking import (
-    chunk_text,
     chunk_by_sentences,
+    chunk_text,
     count_words,
 )
 

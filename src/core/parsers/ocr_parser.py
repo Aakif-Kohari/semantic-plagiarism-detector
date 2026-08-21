@@ -3,6 +3,7 @@
 import io
 import logging
 import os
+from PIL import Image
 
 from src.core.parsers.common import DEFAULT_OCR_DPI, DEFAULT_OCR_LANGUAGE, PDFInput
 

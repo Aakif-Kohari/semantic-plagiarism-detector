@@ -9,12 +9,13 @@ audit trail, including login attempts, configuration changes, and data exports.
 Issue #2810: Decompose monolithic streamlit_app.py.
 """
 
-import streamlit as st
-import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 
-from src.db.security_audit import get_recent_audit_events, get_audit_events_count
+import pandas as pd
+import streamlit as st
+
 from src.db.auth import get_distinct_audit_event_types
+from src.db.security_audit import get_audit_events_count, get_recent_audit_events
 
 st.set_page_config(
     page_title="Audit Logs - Plagiarism Detector", page_icon="📜", layout="wide"

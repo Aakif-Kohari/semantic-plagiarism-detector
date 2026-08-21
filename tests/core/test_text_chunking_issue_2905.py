@@ -1,6 +1,7 @@
 """Regression tests for Issue #2905."""
 import ast
 from pathlib import Path
+
 from src.core import text_chunking
 
 SOURCE = Path(text_chunking.__file__).read_text(encoding="utf-8")

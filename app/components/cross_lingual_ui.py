@@ -5,18 +5,18 @@ Provides Streamlit-based interface components, language badges,
 and dashboard reporting for multi-language plagiarism detection.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
 
 from src.core.cross_lingual_detector import (
-    CrossLingualDetector, CrossLingualConfig, LANGUAGE_NAMES,
-    detect_cross_lingual_plagiarism, get_language_name
+    LANGUAGE_NAMES,
+    CrossLingualConfig,
+    CrossLingualDetector,
+    get_language_name,
 )
-
 
 # ============================================================================
 # MAIN DASHBOARD RENDERER

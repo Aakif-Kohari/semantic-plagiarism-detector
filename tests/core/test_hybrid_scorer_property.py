@@ -45,7 +45,6 @@ from hypothesis import strategies as st
 
 from src.core.hybrid_scorer import HybridConfig, HybridScorer
 
-
 # ── Strategies ────────────────────────────────────────────────────────────────
 
 # Printable ASCII text — covers empty, all-whitespace, all-punctuation, and

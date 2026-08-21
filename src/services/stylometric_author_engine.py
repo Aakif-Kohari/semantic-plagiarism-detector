@@ -8,10 +8,8 @@ import math
 import re
 import uuid
 from datetime import datetime
-from typing import Dict, List, Tuple
 
 from src.models.stylometric_author_model import (
-    StylometricAuditReport,
     StylometricAuthorMatch,
     StylometricFingerprint,
 )

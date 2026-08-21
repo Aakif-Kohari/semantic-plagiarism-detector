@@ -6,8 +6,8 @@ from datetime import datetime
 import pytest
 
 from src.db.database_backup import (
-    SQLITE_HEADER,
     _ALLOWED_DB_DIR,
+    SQLITE_HEADER,
     create_sqlite_snapshot,
     get_database_file_size_bytes,
 )

@@ -1,7 +1,9 @@
 import hashlib
 import os
+
 import streamlit as st
 from streamlit.web.server.websocket_headers import _get_websocket_headers
+
 
 def get_client_fingerprint() -> str:
     """

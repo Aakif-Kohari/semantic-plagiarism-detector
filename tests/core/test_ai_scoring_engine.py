@@ -5,11 +5,13 @@ Comprehensive test suite covering scoring components, fingerprinting,
 severity classification, and batch processing.
 """
 
-import pytest
-import numpy as np
 from src.core.ai_scoring_engine import (
-    AIScoringEngine, ContentFingerprinter, ScoringConfig,
-    PlagiarismScore, SeverityLevel, ScoringMethod, ContentFingerprint
+    AIScoringEngine,
+    ContentFingerprint,
+    ContentFingerprinter,
+    PlagiarismScore,
+    ScoringConfig,
+    SeverityLevel,
 )
 
 
