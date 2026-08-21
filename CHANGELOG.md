@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `--recursive` support to the CLI scan command for scanning documents in nested subdirectories.
 
 ### Fixed
+- Graceful degradation when reportlab is not installed: badge generator module loads without reportlab and raises a clear error only when PDF generation is requested (`src/utils/badge_generator.py`).
 - Fixed unreadable line overflowing for long URLs in ReportLab PDF reports by adding `wordWrap='CJK'` to paragraph styles and inserting zero-width spaces into long URLs (`src/utils/pdf_report.py`).
 - Robust claim parsing in `.github/workflows/ecsoc-automation.yml` using structured hidden HTML comments to prevent breaking on greeting message variations.
 
