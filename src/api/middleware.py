@@ -36,6 +36,7 @@ PUBLIC_PATH_PREFIXES = (
     "/health",
     "/healthz",
     "/metrics",
+    "/auth",
     "/api/v1/auth",
     "/api/v1/version",
     "/api/v1/healthz",

@@ -20,6 +20,17 @@ router = APIRouter(tags=["Authentication"])
 
 
 @router.post(
+    "/auth/login",
+    summary="Authenticate user",
+    response_model=LoginResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        400: {"model": ErrorResponse, "description": "Bad Request"},
+        401: {"model": ErrorResponse, "description": "Unauthorized"},
+        500: {"model": ErrorResponse, "description": "Internal Server Error"},
+    },
+)
+@router.post(
     "/api/v1/auth/login",
     summary="Authenticate user",
     response_model=LoginResponse,
