@@ -243,9 +243,11 @@ def _get_model() -> SentenceTransformer:
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 
-# Model weight filenames inspected by verify_model_cache_integrity() (issue #1580)
-_MODEL_WEIGHT_FILENAMES = ("pytorch_model.bin", "model.safetensors")
-
+# Model weight file extensions inspected by verify_model_cache_integrity()
+# (issue #1580, extended for issue #2919). Extension-based matching avoids
+# breaking when HuggingFace ships new weight formats (e.g. GGUF, ONNX)
+# under different filenames.
+_MODEL_WEIGHT_EXTENSIONS = (".bin", ".safetensors", ".onnx", ".gguf")
 
 def _resolve_cache_root() -> Path:
     """Resolve the HuggingFace hub cache root used for model downloads."""
@@ -265,10 +267,10 @@ def _model_cache_subdir(cache_root: Path, model_name: str) -> Path:
 def verify_model_cache_integrity(cache_dir: Path) -> bool:
     """Verify cached SentenceTransformer weight files are not corrupted.
 
-    Acceptance criteria (issue #1580):
-    - Inspects the model weight files ``pytorch_model.bin`` and
-      ``model.safetensors`` for zero-byte sizes.
-    - Returns ``True`` when the cache holds no corrupted weight files.
+    Acceptance criteria (issue #1580, extended by #2919):
+    - Inspects any cached file matching a known model weight extension
+      (``.bin``, ``.safetensors``, ``.onnx``, ``.gguf``) for zero-byte
+      sizes.    - Returns ``True`` when the cache holds no corrupted weight files.
     - Returns ``False`` when any cached weight file is zero bytes or
       unreadable, allowing the caller to re-download the model.
 
@@ -300,9 +302,8 @@ def verify_model_cache_integrity(cache_dir: Path) -> bool:
     corrupted: List[tuple[Path, str]] = []
     for root, _, filenames in os.walk(cache_path):
         for filename in filenames:
-            if filename not in _MODEL_WEIGHT_FILENAMES:
-                continue
-            weight_path = Path(root) / filename
+            if not filename.endswith(_MODEL_WEIGHT_EXTENSIONS):
+                continue            weight_path = Path(root) / filename
             try:
                 size = weight_path.stat().st_size
             except OSError as exc:
