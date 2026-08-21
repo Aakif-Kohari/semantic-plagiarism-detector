@@ -35,6 +35,8 @@ import torch
 import torch.quantization
 from sentence_transformers import SentenceTransformer
 
+from src.exceptions import ModelInitializationError
+
 logger = logging.getLogger(__name__)
 
 # ── Singleton model loader ─────────────────────────────────────────────────────
@@ -193,13 +195,31 @@ class EmbeddingModelManager:
                 device,
             )
             logger.info("[embedding_model] Model loaded successfully.")
-        except Exception:
+        except Exception as primary_exc:
             logger.warning(
                 "Primary embedding model %s unavailable. Falling back to %s",
                 primary,
                 fallback,
             )
-            loaded_model = SentenceTransformer(fallback, cache_folder=cache_dir)
+            try:
+                loaded_model = SentenceTransformer(fallback, cache_folder=cache_dir)
+            except Exception as fallback_exc:
+                raise ModelInitializationError(
+                    "Unable to initialize the embedding model. Both the configured "
+                    f"primary model '{primary}' and fallback model '{fallback}' "
+                    "failed to load. This usually means the models are unavailable "
+                    "from the configured Hugging Face cache or cannot be downloaded. "
+                    "For offline or air-gapped deployments, download both models "
+                    "on an internet-connected machine with 'hf download', copy "
+                    "the model directories into the deployment environment, and "
+                    "configure SEMANTIC_PLAGIARISM_MODEL to point to the local "
+                    "primary model directory. For example: `hf download "
+                    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 "
+                    "--local-dir /opt/models/paraphrase-multilingual-MiniLM-L12-v2` "
+                    "and `hf download sentence-transformers/all-MiniLM-L6-v2 "
+                    "--local-dir /opt/models/all-MiniLM-L6-v2`. "
+                    f"Primary error: {primary_exc!r}; fallback error: {fallback_exc!r}"
+                ) from fallback_exc
             device = _detect_device(loaded_model)
             logger.info(
                 "SentenceTransformer model [%s] running on device [%s]",

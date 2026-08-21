@@ -27,6 +27,7 @@ from src.core.embedding_model import (
     embed_documents,
     get_document_embedding,
 )
+from src.exceptions import ModelInitializationError
 
 
 def _mock_encode(
@@ -175,6 +176,36 @@ def test_embedding_model_manager_fallback(caplog, monkeypatch):
         in record.message
         for record in caplog.records
     )
+
+
+def test_embedding_model_manager_raises_descriptive_error_when_all_models_fail(
+    monkeypatch,
+):
+    """Raise ModelInitializationError with offline deployment guidance when both loads fail."""
+    monkeypatch.setattr(embedding_model, "_model", None)
+    monkeypatch.setattr(EmbeddingModelManager, "_instance", None)
+
+    primary = embedding_model._get_model_name()
+
+    def fail_every_model(model_name, cache_folder=None):
+        raise RuntimeError(f"failed to load {model_name}")
+
+    monkeypatch.setattr(
+        embedding_model, "SentenceTransformer", fail_every_model
+    )
+
+    manager = EmbeddingModelManager.get_instance()
+
+    with pytest.raises(ModelInitializationError) as exc_info:
+        manager.get_model()
+
+    message = str(exc_info.value)
+    assert f"primary model '{primary}'" in message
+    assert "fallback model 'all-MiniLM-L6-v2'" in message
+    assert "offline or air-gapped deployments" in message
+    assert "hf download" in message
+    assert "SEMANTIC_PLAGIARISM_MODEL" in message
+    assert "failed to load" in message
 
 
 def test_embedding_model_device_logging(caplog, monkeypatch):
