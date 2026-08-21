@@ -724,3 +724,44 @@ def test_sanitize_hex_color_invalid():
     """Invalid/non-hex values use the configured fallback."""
     assert sanitize_hex_color("not-a-color", fallback="#FFFFFF") == "#FFFFFF"
 
+
+def get_luminance(hex_color: str) -> float:
+    """Calculate the relative luminance of a hex color."""
+    hex_color = hex_color.lstrip('#')
+    if len(hex_color) == 3:
+        hex_color = ''.join(c + c for c in hex_color)
+    
+    rgb = tuple(int(hex_color[i:i+2], 16) / 255.0 for i in (0, 2, 4))
+    
+    linear_rgb = []
+    for c in rgb:
+        if c <= 0.03928:
+            linear_rgb.append(c / 12.92)
+        else:
+            linear_rgb.append(((c + 0.055) / 1.055) ** 2.4)
+            
+    return 0.2126 * linear_rgb[0] + 0.7152 * linear_rgb[1] + 0.0722 * linear_rgb[2]
+
+
+def get_contrast_ratio(hex1: str, hex2: str) -> float:
+    """Calculate the WCAG contrast ratio between two hex colors."""
+    l1 = get_luminance(hex1)
+    l2 = get_luminance(hex2)
+    
+    lighter = max(l1, l2)
+    darker = min(l1, l2)
+    
+    return (lighter + 0.05) / (darker + 0.05)
+
+
+def test_theme_wcag_contrast():
+    """Verify primary text colors against background colors have a ratio of at least 4.5:1."""
+    for theme_name, theme in THEMES.items():
+        bg = theme.get("background")
+        ink = theme.get("ink")
+        
+        if bg and ink:
+            contrast = get_contrast_ratio(bg, ink)
+            assert contrast >= 4.5, f"{theme_name} theme contrast ratio {contrast:.2f} is below 4.5:1 (bg: {bg}, ink: {ink})"
+
+
