@@ -1,0 +1,59 @@
+"""Multimodal Image Document OCR Domain Model.
+
+Defines data classes for extracted document OCR text chunks, bounding box coordinates,
+image resolution quality telemetry, and OCR plagiarism scan records.
+"""
+
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Dict, List, Optional
+
+
+@dataclass
+class BoundingBoxCoordinates:
+    """Represents bounding box spatial coordinates of OCR extracted text."""
+
+    x_min: int
+    y_min: int
+    x_max: int
+    y_max: int
+    confidence_score: float  # Range: 0.0 - 1.0
+
+
+@dataclass
+class OcrExtractedChunk:
+    """Represents a text chunk extracted from a document image via OCR."""
+
+    chunk_id: str
+    image_id: str
+    extracted_text: str
+    bounding_box: BoundingBoxCoordinates
+    page_number: int = 1
+
+
+@dataclass
+class MultimodalImageOcrMatch:
+    """Represents a detected plagiarism match from image document OCR analysis."""
+
+    scan_id: str
+    source_image_id: str
+    source_image_name: str
+    target_reference_id: str
+    target_reference_title: str
+    ocr_text_similarity: float  # Range: 0.0 - 1.0
+    layout_structure_similarity: float  # Range: 0.0 - 1.0
+    overall_multimodal_score: float
+    ocr_engine_used: str  # e.g., 'Tesseract-5.0', 'PaddleOCR-v3', 'EasyOCR'
+    scanned_at: datetime = field(default_factory=datetime.utcnow)
+
+
+@dataclass
+class MultimodalOcrAuditReport:
+    """Audit report summary aggregating multimodal image OCR plagiarism scans."""
+
+    report_id: str
+    total_images_scanned: int
+    total_ocr_text_chunks: int
+    highest_similarity_ratio: float
+    report_generated_at: datetime = field(default_factory=datetime.utcnow)
+    matches: List[MultimodalImageOcrMatch] = field(default_factory=list)

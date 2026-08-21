@@ -24,6 +24,11 @@ import logging
 import re
 from typing import Dict, List
 
+try:
+    import nltk  # type: ignore
+except ImportError:
+    nltk = None  # type: ignore[assignment]
+
 logger = logging.getLogger(__name__)
 
 # Default chunking parameters
@@ -53,11 +58,7 @@ def _split_into_sentences(text: str) -> List[str]:
     if NLTK data is unavailable so the function works in restricted environments
     (e.g. CI containers without the punkt corpus downloaded).
     """
-    global _nltk_punkt_checked
-
-    try:
-        import nltk  # type: ignore
-
+    if nltk is not None:
         try:
             from nltk.tokenize import sent_tokenize  # type: ignore
 
@@ -66,17 +67,12 @@ def _split_into_sentences(text: str) -> List[str]:
                 return sentences
         except LookupError:
             # punkt_tab / punkt corpus not downloaded – trigger download once
-            if not _nltk_punkt_checked:
-                _nltk_punkt_checked = True
-                try:
-                    nltk.download("punkt_tab", quiet=True)
-                    from nltk.tokenize import sent_tokenize  # type: ignore
-
-                    return sent_tokenize(text)
-                except Exception:
-                    pass
-    except ImportError:
-        pass
+            try:
+                nltk.download("punkt_tab", quiet=True)
+                from nltk.tokenize import sent_tokenize  # type: ignore
+                return sent_tokenize(text)
+            except Exception:
+                pass
 
     # Regex fallback: split on sentence-ending punctuation followed by
     # whitespace and an uppercase letter (covers English prose well).
