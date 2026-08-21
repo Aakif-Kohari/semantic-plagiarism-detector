@@ -16,7 +16,8 @@ import time
 import urllib.parse
 import zlib
 from enum import Enum
-from typing import Any, Optional
+from pathlib import Path
+from typing import Any, Optional, Union
 
 # CacheKeyPrefix has been consolidated into CacheNamespace below
 
@@ -207,6 +208,22 @@ class PayloadCompressor:
 # ============================================================================
 
 
+def normalize_cache_key_path(p: Any) -> str:
+    """Normalize path strings for cross-platform Redis cache keys (Issue #2939).
+
+    Uses pathlib.Path(p).as_posix() to convert backslashes (\) on Windows
+    to POSIX forward slashes (/) for cross-platform cache key compatibility.
+    """
+    if p is None:
+        return ""
+    if isinstance(p, Path):
+        return p.as_posix()
+    p_str = str(p)
+    if "\\" in p_str:
+        return Path(p_str).as_posix()
+    return p_str
+
+
 class CacheNamespace(str, Enum):
     SESSION = "spd:v1:session"
     FAISS = "spd:v1:faiss"
@@ -215,8 +232,10 @@ class CacheNamespace(str, Enum):
     UPLOADS = "spd:v1:uploads"
     BADGES = "spd:v1:badges"
 
-    def build_key(self, *parts: str) -> str:
-        return ":".join([self.value] + list(parts))
+    def build_key(self, *parts: Any) -> str:
+        """Build a normalized Redis cache key using pathlib.Path(p).as_posix() for path components."""
+        normalized_parts = [normalize_cache_key_path(p) for p in parts]
+        return ":".join([self.value] + normalized_parts)
 
 
 CacheKeyPrefix = CacheNamespace
@@ -704,38 +723,40 @@ def _cleanup_redis() -> None:
 atexit.register(_cleanup_redis)
 
 
-def store_large_data(key: str, data: Any, ttl: int = 1800) -> None:
-    """Store large data in Redis with compression."""
+def store_large_data(key: Union[str, Path], data: Any, ttl: int = 1800) -> None:
+    """Store large data in Redis with compression and normalized POSIX key paths."""
+    key_str = normalize_cache_key_path(key)
     try:
         cache = get_cache()
         compressed = zlib.compress(pickle.dumps(data))
         
         if cache.is_available():
-            cache._client.setex(f"spd:v1:large:{key}", ttl, compressed)
+            cache._client.setex(f"spd:v1:large:{key_str}", ttl, compressed)
         else:
-            cache.fallback_cache[f"spd:v1:large:{key}"] = {
+            cache.fallback_cache[f"spd:v1:large:{key_str}"] = {
                 "data": compressed,
                 "expiry": time.time() + ttl
             }
-        logger.debug(f"Stored large data for key: {key} ({len(compressed)} bytes compressed)")
+        logger.debug(f"Stored large data for key: {key_str} ({len(compressed)} bytes compressed)")
     except Exception as e:
-        logger.error(f"Failed to store large data for key {key}: {e}")
+        logger.error(f"Failed to store large data for key {key_str}: {e}")
 
 
-def get_large_data(key: str) -> Optional[Any]:
-    """Retrieve large data from Redis with decompression."""
+def get_large_data(key: Union[str, Path]) -> Optional[Any]:
+    """Retrieve large data from Redis with decompression and normalized POSIX key paths."""
+    key_str = normalize_cache_key_path(key)
     try:
         cache = get_cache()
         data = None
         
         if cache.is_available():
-            data = cache._client.get(f"spd:v1:large:{key}")
+            data = cache._client.get(f"spd:v1:large:{key_str}")
         else:
-            entry = cache.fallback_cache.get(f"spd:v1:large:{key}")
+            entry = cache.fallback_cache.get(f"spd:v1:large:{key_str}")
             if entry and entry.get("expiry", 0) > time.time():
                 data = entry["data"]
             elif entry:
-                del cache.fallback_cache[f"spd:v1:large:{key}"]
+                del cache.fallback_cache[f"spd:v1:large:{key_str}"]
         
         if data:
             return pickle.loads(zlib.decompress(data))
