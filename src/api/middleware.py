@@ -2,13 +2,14 @@ import json
 import logging
 import os
 from functools import lru_cache
-from typing import Dict, List, Optional
+from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, SecurityScopes
 
 from src.db import auth as db_auth
 from src.security import jwt_utils
+from src.security.rate_limiter import get_token_bucket_limiter
 
 # Expected JWT verification exceptions
 _JWT_EXCEPTIONS = [ValueError]
@@ -195,8 +196,6 @@ async def verify_bearer_token(
 
     # Perform token-bucket rate limiting per credentials.credentials (Issue #2921)
     if credentials and credentials.credentials:
-        from src.security.rate_limiter import get_token_bucket_limiter
-
         token_str = credentials.credentials
         limiter = get_token_bucket_limiter()
         if not limiter.consume(token_str):
@@ -213,12 +212,88 @@ async def verify_bearer_token(
     return credentials.credentials
 
 
+def _validate_scopes(
+    required_scopes: Optional[Union[Iterable[str], List[str]]],
+    token_scopes: List[str],
+    mode: str = "all",
+) -> None:
+    """Validate that token_scopes satisfy required_scopes under the specified mode.
+
+    Args:
+        required_scopes: List/iterable of required scope strings.
+        token_scopes: Scopes possessed by the authenticated token.
+        mode: Logic to apply ('all' / 'and' or 'any' / 'or'). Defaults to 'all'.
+
+    Raises:
+        HTTPException: 403 Forbidden if the token does not have required permissions.
+    """
+    if not required_scopes:
+        return
+
+    normalized_mode = mode.lower()
+    token_scopes_set = set(token_scopes)
+
+    # 1. ANY / OR mode: token must possess at least one of the required scopes
+    if normalized_mode in ("any", "or"):
+        candidate_scopes = []
+        for s in required_scopes:
+            if s.startswith("any:"):
+                s = s[4:]
+            parts = [
+                p.strip()
+                for p in s.replace("||", "|").replace(",", "|").split("|")
+                if p.strip()
+            ]
+            candidate_scopes.extend(parts)
+
+        if not any(scope in token_scopes_set for scope in candidate_scopes):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: Insufficient privileges/missing required scope.",
+            )
+        return
+
+    # 2. ALL / AND mode: token must satisfy every required scope entry
+    for scope_expr in required_scopes:
+        if scope_expr.startswith("any:"):
+            inner = scope_expr[4:]
+            any_parts = [
+                p.strip()
+                for p in inner.replace("||", "|").replace(",", "|").split("|")
+                if p.strip()
+            ]
+            if not any(p in token_scopes_set for p in any_parts):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Forbidden: Insufficient privileges/missing required scope.",
+                )
+        elif "|" in scope_expr:
+            or_parts = [
+                p.strip()
+                for p in scope_expr.replace("||", "|").split("|")
+                if p.strip()
+            ]
+            if not any(p in token_scopes_set for p in or_parts):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Forbidden: Insufficient privileges/missing required scope.",
+                )
+        else:
+            if scope_expr not in token_scopes_set:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Forbidden: Insufficient privileges/missing required scope.",
+                )
+
+
 async def get_current_user(
     security_scopes: SecurityScopes,
     token: Optional[str] = Depends(verify_bearer_token),
 ) -> dict:
     """
     Dependency to authorize the token against required scopes.
+    Supports ALL (AND) logic by default, and OR (ANY) logic via pipe-syntax ('admin|manager')
+    or prefix-syntax ('any:admin,manager').
     """
     if token is None:
         return {"token": None, "scopes": []}
@@ -233,11 +308,74 @@ async def get_current_user(
         except Exception:
             token_scopes = []
 
-    if security_scopes.scopes:
-        for scope in security_scopes.scopes:
-            if scope not in token_scopes:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Forbidden: Insufficient privileges/missing required scope.",
-                )
+    _validate_scopes(security_scopes.scopes, token_scopes, mode="all")
     return {"token": token, "scopes": token_scopes}
+
+
+class RequireScopes:
+    """Dependency injection class allowing multiple valid scopes where possessing
+    either all (mode='all') or at least one (mode='any') is sufficient (Issue #3017).
+
+    Args:
+        scopes: List or iterable of required scope strings.
+        mode: Logic to apply ('all' / 'and' vs 'any' / 'or'). Defaults to 'all'.
+    """
+
+    def __init__(
+        self,
+        scopes: Optional[Union[List[str], Set[str], Tuple[str, ...], str]] = None,
+        mode: str = "all",
+    ):
+        if isinstance(scopes, str):
+            self.scopes = [scopes]
+        else:
+            self.scopes = list(scopes) if scopes else []
+        self.mode = mode.lower()
+        if self.mode not in ("all", "and", "any", "or"):
+            raise ValueError(
+                f"Invalid scope evaluation mode '{mode}'. Supported modes: 'all', 'any'."
+            )
+
+    async def __call__(
+        self,
+        security_scopes: Optional[SecurityScopes] = None,
+        token: Optional[str] = Depends(verify_bearer_token),
+    ) -> dict:
+        if token is None:
+            return {"token": None, "scopes": []}
+
+        valid_tokens = get_valid_tokens()
+        if token in valid_tokens:
+            token_scopes = valid_tokens[token]
+        else:
+            try:
+                payload = jwt_utils.verify_access_token(token)
+                token_scopes = payload.get("scopes", [])
+            except Exception:
+                token_scopes = []
+
+        effective_scopes = list(self.scopes)
+        if security_scopes and security_scopes.scopes:
+            effective_scopes.extend(security_scopes.scopes)
+
+        _validate_scopes(effective_scopes, token_scopes, mode=self.mode)
+        return {"token": token, "scopes": token_scopes}
+
+
+def require_scopes(
+    scopes: Union[List[str], Set[str], Tuple[str, ...], str],
+    mode: str = "all",
+) -> RequireScopes:
+    """Factory helper to construct a RequireScopes dependency."""
+    return RequireScopes(scopes=scopes, mode=mode)
+
+
+def require_any_scope(*scopes: str) -> RequireScopes:
+    """Convenience dependency requiring at least one of the specified scopes (OR logic)."""
+    return RequireScopes(scopes=list(scopes), mode="any")
+
+
+def require_all_scopes(*scopes: str) -> RequireScopes:
+    """Convenience dependency requiring all of the specified scopes (AND logic)."""
+    return RequireScopes(scopes=list(scopes), mode="all")
+
