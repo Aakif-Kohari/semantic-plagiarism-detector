@@ -9,11 +9,17 @@ import re
 import unicodedata
 from collections.abc import Collection, Mapping
 from pathlib import PurePath
-from typing import TypeVar
-from typing import IO
+from typing import IO, TypeVar
 
 DEFAULT_FILENAME = "document"
-MAX_FILENAME_LENGTH = 150
+
+# Upper bound on a sanitized filename, in characters.
+#
+# 128 leaves headroom under the 255-byte limit most filesystems impose, which
+# matters because a single character can occupy up to four bytes once encoded,
+# and under the shorter limits that apply inside archives and on the export
+# paths a name is later joined onto.
+MAX_FILENAME_LENGTH = 128
 
 _HTML_TAG_RE = re.compile(r"<[^>]*>")
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
@@ -103,7 +109,8 @@ def normalize_sha256_hash(hash_str: str) -> str:
     return hash_str.lower()
 
 
-def sanitize_filename(    filename: object,
+def sanitize_filename(
+    filename: object,
     *,
     fallback: str = DEFAULT_FILENAME,
     max_length: int = MAX_FILENAME_LENGTH,
@@ -175,7 +182,15 @@ def unique_filename(
     fallback: str = DEFAULT_FILENAME,
     max_length: int = MAX_FILENAME_LENGTH,
 ) -> str:
-    """Return a sanitized filename that does not collide with existing names."""
+    """Return a sanitized filename that does not collide with existing names.
+
+    The result never exceeds ``max_length``, whatever the collision count.
+
+    Raises:
+        ValueError: If ``max_length`` cannot hold the extension alongside the
+            counter needed to disambiguate. This requires an unusually small
+            limit together with a very large number of colliding names.
+    """
     safe_name = sanitize_filename(
         filename,
         fallback=fallback,
@@ -192,6 +207,19 @@ def unique_filename(
     while True:
         suffix = f"_{counter}"
         allowed_stem = max_length - len(extension) - len(suffix)
+
+        # A negative budget used to be handed straight to the slice, where
+        # stem[:-2] trims from the *end* instead of clamping to nothing. The
+        # candidate then came out longer than max_length — exactly the limit
+        # this function exists to enforce.
+        if allowed_stem < 0:
+            raise ValueError(
+                f"max_length={max_length} is too small to disambiguate "
+                f"{safe_name!r}: the extension {extension!r} and the counter "
+                f"suffix {suffix!r} need {len(extension) + len(suffix)} "
+                "characters between them."
+            )
+
         candidate_stem = stem[:allowed_stem].rstrip(" ._-")
         candidate = f"{candidate_stem}{suffix}{extension}"
 
@@ -302,6 +330,7 @@ def get_final_extension(filename: object) -> str:
     stem, extension = os.path.splitext(basename)
     return extension.casefold()
 
+
 def get_file_extension_sanitized(filename: str) -> str:
     """Return the lower-case file extension, starting with a dot.
 
@@ -310,6 +339,40 @@ def get_file_extension_sanitized(filename: str) -> str:
     basename = _basename(str(filename or ""))
     _stem, extension = os.path.splitext(basename)
     return extension.lower()
+
+
+_EXTENSION_BADGES: dict[str, str] = {
+    ".pdf": "📄 PDF",
+    ".docx": "📝 DOCX",
+    ".doc": "📝 DOC",
+    ".txt": "📑 TXT",
+    ".csv": "📊 CSV",
+    ".epub": "📚 EPUB",
+    ".rtf": "📃 RTF",
+    ".zip": "📦 ZIP",
+}
+_DEFAULT_EXTENSION_BADGE = "📁 FILE"
+
+
+def format_extension_badge(filename: str) -> str:
+    """Return a color-coded emoji badge describing a filename's format.
+
+    Used in document list views so filenames aren't shown as plain text
+    with no visual indication of file type, e.g. ``"📄 PDF"`` for a
+    ``.pdf`` file. Falls back to a generic file badge for unrecognized or
+    missing extensions.
+
+    Examples
+    --------
+    >>> format_extension_badge("report.pdf")
+    '📄 PDF'
+    >>> format_extension_badge("notes.CSV")
+    '📊 CSV'
+    >>> format_extension_badge("no_extension")
+    '📁 FILE'
+    """
+    extension = get_final_extension(filename)
+    return _EXTENSION_BADGES.get(extension, _DEFAULT_EXTENSION_BADGE)
 
 
 def validate_document_extension(
@@ -352,8 +415,7 @@ def validate_document_extension(
 
     if final_extension in DANGEROUS_EXECUTABLE_EXTENSIONS:
         raise InvalidFileExtensionError(
-            "Executable or script file extensions are not allowed: "
-            f"{final_extension}"
+            f"Executable or script file extensions are not allowed: {final_extension}"
         )
 
     if final_extension not in normalized_allowed:
@@ -383,4 +445,3 @@ def sanitize_and_validate_filename(
         fallback=fallback,
         max_length=max_length,
     )
-

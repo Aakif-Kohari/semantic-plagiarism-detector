@@ -106,7 +106,7 @@ database is locked
 
 ---
 
-## ModuleNotFoundError or dependency installation errors 
+## ModuleNotFoundError or dependency installation errors
 
 ``` text
 ModuleNotFoundError: No module named '<package>'
@@ -114,12 +114,12 @@ ModuleNotFoundError: No module named '<package>'
 
 ### Possible causes
 
-- Project dependencies have not been installed. 
-- The virtual environment is not activated. 
-- The dependency installation was interrupted or failed. 
+- Project dependencies have not been installed.
+- The virtual environment is not activated.
+- The dependency installation was interrupted or failed.
 
 
-### Solution 
+### Solution
 - Make sure your virtual environment is activated and install the required dependencies:
 
 ```bash
@@ -146,38 +146,38 @@ If the missing module is related to OCR support, install the additional OCR depe
 python -m pip install pytesseract pymupdf pillow
 ```
 
-## Sentence Transformer model download or loading errors 
+## Sentence Transformer model download or loading errors
 
-The application may fail while loading paraphrase-multilingual-MiniLM-L12-v2, or the first startup may appear to hang while downloading the model. 
+The application may fail while loading paraphrase-multilingual-MiniLM-L12-v2, or the first startup may appear to hang while downloading the model.
 
-### Possible causes: 
-- The model has not been downloaded before. 
-- The machine has limited or unstable internet connectivity. 
-- There is not enough disk space for the model cache. 
+### Possible causes:
+- The model has not been downloaded before.
+- The machine has limited or unstable internet connectivity.
+- There is not enough disk space for the model cache.
 
-### Solution: 
-- Make sure you have an active internet connection during the first run. The application downloads the paraphrase-multilingual-MiniLM-L12-v2 model (approximately 420 MB) and caches it locally. 
-- After the initial download, subsequent runs should use the cached model. If the model download fails, restart the application and try again. Also verify that sufficient disk space is available. 
+### Solution:
+- Make sure you have an active internet connection during the first run. The application downloads the paraphrase-multilingual-MiniLM-L12-v2 model (approximately 420 MB) and caches it locally.
+- After the initial download, subsequent runs should use the cached model. If the model download fails, restart the application and try again. Also verify that sufficient disk space is available.
 
 ---
 
-## Memory allocation or out-of-memory errors 
+## Memory allocation or out-of-memory errors
 
-The application may become slow, crash, or report memory allocation errors when processing a large number of documents or building FAISS indexes. 
+The application may become slow, crash, or report memory allocation errors when processing a large number of documents or building FAISS indexes.
 
 ### Possible causes:
 - A large number of documents or text chunks are being processed at once.
-- Embedding generation requires more RAM than is currently available. 
-- FAISS is indexing a large collection of vectors. 
-- The embedding batch size is too high for the available hardware. 
+- Embedding generation requires more RAM than is currently available.
+- FAISS is indexing a large collection of vectors.
+- The embedding batch size is too high for the available hardware.
 
 ### Solutions:
 
-Try the following: 
-- Close other applications to free system memory. 
-- Process fewer documents at a time. 
-- Reduce the embedding batch size in src/core/embedding_model.py. 
-- If using a GPU, make sure sufficient GPU memory is available. 
+Try the following:
+- Close other applications to free system memory.
+- Process fewer documents at a time.
+- Reduce the embedding batch size in src/core/embedding_model.py.
+- If using a GPU, make sure sufficient GPU memory is available.
 - Restart the application to clear unused memory. For larger collections, the application automatically switches from IndexFlatIP to IndexIVFFlat when the number of vectors reaches 5,000 or more. If the problem persists, reduce the batch size and try processing the documents again.
 
 

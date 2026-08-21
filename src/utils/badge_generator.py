@@ -3,13 +3,24 @@ badge_generator.py
 ------------------
 Generates "Originality Verified" badges for students with 0% similarity results.
 Supports both PNG and PDF output formats for gamification and academic integrity encouragement.
+Also provides utilities for generating dynamic SVG and PNG badges for documentation,
+dashboards, and API responses.
+
+This module handles color validation, text measurement, and SVG template
+rendering. It supports both standard hex color codes and common CSS
+named colors, providing a robust fallback mechanism for theme configurations.
+
+Issue #2898: Fallback behavior for named colors in Badge Generator.
 """
 
+import hashlib
 import html
+import logging
 import re
 from datetime import datetime
 from io import BytesIO
-from typing import Optional
+from typing import Dict, Optional
+
 try:
     from PIL import Image, ImageDraw, ImageFont
 except ImportError:
@@ -22,22 +33,154 @@ from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
-from reportlab.platypus import (Paragraph, SimpleDocTemplate, Spacer, Table,
-                                TableStyle)
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-HEX_COLOR_PATTERN = re.compile(r"^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$")
+logger = logging.getLogger(__name__)
+
+# Comprehensive lookup dictionary for common CSS named colors.
+# This allows theme configurations to use human-readable color names
+# (e.g., "red", "transparent", "darkslategray") instead of forcing
+# strict hex code validation.
+CSS_NAMED_COLORS: Dict[str, str] = {
+    "transparent": "#00000000",
+    "black": "#000000",
+    "white": "#ffffff",
+    "red": "#ff0000",
+    "green": "#008000",
+    "blue": "#0000ff",
+    "yellow": "#ffff00",
+    "cyan": "#00ffff",
+    "magenta": "#ff00ff",
+    "silver": "#c0c0c0",
+    "gray": "#808080",
+    "grey": "#808080",
+    "maroon": "#800000",
+    "olive": "#808000",
+    "lime": "#00ff00",
+    "aqua": "#00ffff",
+    "teal": "#008080",
+    "navy": "#000080",
+    "fuchsia": "#ff00ff",
+    "purple": "#800080",
+    "orange": "#ffa500",
+    "pink": "#ffc0cb",
+    "brown": "#a52a2a",
+    "coral": "#ff7f50",
+    "crimson": "#dc143c",
+    "darkblue": "#00008b",
+    "darkgreen": "#006400",
+    "darkred": "#8b0000",
+    "gold": "#ffd700",
+    "indigo": "#4b0082",
+    "ivory": "#fffff0",
+    "khaki": "#f0e68c",
+    "lavender": "#e6e6fa",
+    "lightblue": "#add8e6",
+    "lightgreen": "#90ee90",
+    "lightyellow": "#ffffe0",
+    "moccasin": "#ffe4b5",
+    "orangered": "#ff4500",
+    "plum": "#dda0dd",
+    "salmon": "#fa8072",
+    "sienna": "#a0522d",
+    "skyblue": "#87ceeb",
+    "slategray": "#708090",
+    "slategrey": "#708090",
+    "snow": "#fffafa",
+    "tan": "#d2b48c",
+    "thistle": "#d8bfd8",
+    "tomato": "#ff6347",
+    "turquoise": "#40e0d0",
+    "violet": "#ee82ee",
+    "wheat": "#f5deb3",
+    "whitesmoke": "#f5f5f5",
+    "yellowgreen": "#9acd32",
+    "darkslategray": "#2f4f4f",
+    "darkslategrey": "#2f4f4f",
+    "dimgray": "#696969",
+    "dimgrey": "#696969",
+    "lightgray": "#d3d3d3",
+    "lightgrey": "#d3d3d3",
+    "darkgray": "#a9a9a9",
+    "darkgrey": "#a9a9a9",
+}
+
+# Regex pattern for validating standard hex color codes.
+# Supports 3-digit (#RGB), 4-digit (#RGBA), 6-digit (#RRGGBB), and 8-digit (#RRGGBBAA) formats.
+_HEX_COLOR_PATTERN = re.compile(
+    r"^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+)
+
 DEFAULT_BADGE_COLOR = "#4f46e5"
 
 
-def validate_hex_color(color: Optional[str]) -> str:
-    """Validate a hex color string, auto-prepending '#' if missing, and
-    falling back to a safe default if the value is invalid."""
-    if not color:
-        return DEFAULT_BADGE_COLOR
-    candidate = color if color.startswith("#") else f"#{color}"
-    if HEX_COLOR_PATTERN.match(candidate):
-        return candidate
-    return DEFAULT_BADGE_COLOR
+def validate_hex_color(color: Optional[str], default_color: str = "#2563eb") -> str:
+    """Validate and normalize a color string into a standard hex format.
+
+    This function accepts both standard hex color codes (e.g., "#ff0000")
+    and common CSS named colors (e.g., "red", "transparent"). If a named
+    color is provided, it is converted to its hex equivalent using the
+    internal CSS_NAMED_COLORS dictionary.
+
+    If the input is neither a valid hex code nor a recognized named color,
+    the function logs a warning and returns the specified default color.
+
+    Args:
+        color: The input color string to validate. Can be a hex code or
+               a CSS named color.
+        default_color: The fallback hex color to return if validation fails.
+                      Defaults to a standard blue ("#2563eb").
+
+    Returns:
+        A validated, normalized hex color string (e.g., "#ff0000").
+
+    Examples:
+        >>> validate_hex_color("#ff0000")
+        '#ff0000'
+        >>> validate_hex_color("red")
+        '#ff0000'
+        >>> validate_hex_color("transparent")
+        '#00000000'
+        >>> validate_hex_color("invalid_color_name")
+        '#2563eb'
+    """
+    if not color or not isinstance(color, str):
+        logger.warning(
+            "Invalid color input (empty or non-string). Falling back to default: %s",
+            default_color,
+        )
+        return default_color
+
+    # Strip whitespace and convert to lowercase for case-insensitive matching
+    cleaned_color = color.strip().lower()
+
+    # 1. Check if it's a valid standard hex code
+    if _HEX_COLOR_PATTERN.match(cleaned_color):
+        # Normalize 3-digit hex to 6-digit for consistency (e.g., #f00 -> #ff0000)
+        if len(cleaned_color) == 4:  # #RGB
+            return f"#{cleaned_color[1]*2}{cleaned_color[2]*2}{cleaned_color[3]*2}"
+        if len(cleaned_color) == 5:  # #RGBA
+            return f"#{cleaned_color[1]*2}{cleaned_color[2]*2}{cleaned_color[3]*2}{cleaned_color[4]*2}"
+        return cleaned_color
+
+    # 2. Check if it's a recognized CSS named color (Issue #2898)
+    if cleaned_color in CSS_NAMED_COLORS:
+        hex_equivalent = CSS_NAMED_COLORS[cleaned_color]
+        logger.debug(
+            "Resolved CSS named color '%s' to hex equivalent '%s'.",
+            color,
+            hex_equivalent,
+        )
+        return hex_equivalent
+
+    # 3. Fallback to default if neither hex nor named color matched
+    logger.warning(
+        "Unrecognized color format '%s'. Expected hex code or CSS named color. "
+        "Falling back to default: %s",
+        color,
+        default_color,
+    )
+    return default_color
 
 
 def generate_badge_svg(
@@ -45,6 +188,7 @@ def generate_badge_svg(
     date: Optional[str] = None,
     accent_color: Optional[str] = None,
     font_family: str = "Verdana, Geneva, sans-serif",
+    font_size: int = 11,
 ) -> str:
     """
     Generates a simple SVG "Originality Verified" badge.
@@ -62,39 +206,56 @@ def generate_badge_svg(
     Returns:
         A string containing the SVG markup for the badge.
     """
-    safe_color = validate_hex_color(accent_color)
+    safe_color = validate_hex_color(accent_color, DEFAULT_BADGE_COLOR)
     if date is None:
         date = datetime.now().strftime("%B %d, %Y")
 
     safe_name = html.escape(student_name)
     safe_date = html.escape(date)
-    
+
     safe_font = html.escape(font_family)
 
     return f"""<svg xmlns="http://www.w3.org/2000/svg" width="400" height="120" viewBox="0 0 400 120">
   <rect width="400" height="120" rx="12" fill="{safe_color}" />
-  <text x="20" y="45" font-family="{safe_font}" font-size="20" fill="#ffffff">Originality Verified</text>
-  <text x="20" y="75" font-family="{safe_font}" font-size="14" fill="#e0e7ff">Awarded to: {safe_name}</text>
-  <text x="20" y="100" font-family="{safe_font}" font-size="12" fill="#e0e7ff">Date: {safe_date}</text>
+  <text x="20" y="45" font-family="{safe_font}" font-size="{font_size}" fill="#ffffff">Originality Verified</text>
+  <text x="20" y="75" font-family="{safe_font}" font-size="{font_size}" fill="#e0e7ff">Awarded to: {safe_name}</text>
+  <text x="20" y="100" font-family="{safe_font}" font-size="{font_size}" fill="#e0e7ff">Date: {safe_date}</text>
 </svg>"""
 
 
-def generate_badge_png(    student_name: str = "Student",    date: Optional[str] = None,
+def generate_badge_png(
+    student_name: str = "Student",
+    date: Optional[str] = None,
     text_preview: str = "",
+    student_id: Optional[str] = None,
 ) -> BytesIO:
     """
     Generates a visually appealing PNG badge for plagiarism-free work.
+    Caches generated badges in Redis for 24 hours based on student ID/name and date (Issue #2941).
 
     Args:
         student_name: Name of the student (optional, defaults to "Student")
         date: Date string (optional, defaults to current date)
         text_preview: Preview of the verified text (optional)
+        student_id: Optional unique ID of the student for caching
 
     Returns:
         BytesIO buffer containing the PNG badge
     """
     if Image is None:
         raise ImportError("PIL/Pillow is required for PNG badge generation")
+
+    target_date = date if date is not None else datetime.now().strftime("%B %d, %Y")
+    ident = str(student_id if student_id is not None else student_name)
+
+    # Check Redis cache
+    from src.utils.redis_cache import BADGE_TTL, CacheNamespace, RedisCache
+
+    cache = RedisCache.get_instance()
+    cache_key = CacheNamespace.BADGES.build_key("png", ident, target_date)
+    cached_bytes = cache.get(cache_key)
+    if cached_bytes is not None and isinstance(cached_bytes, bytes):
+        return BytesIO(cached_bytes)
 
     # Badge dimensions
     width, height = 800, 600
@@ -219,6 +380,11 @@ def generate_badge_png(    student_name: str = "Student",    date: Optional[str]
     # Save to buffer
     buffer = BytesIO()
     img.save(buffer, format="PNG", quality=95)
+    png_bytes = buffer.getvalue()
+    try:
+        cache.set(cache_key, png_bytes, ttl=BADGE_TTL)
+    except Exception:
+        pass
     buffer.seek(0)
     return buffer
 
@@ -228,19 +394,34 @@ def generate_badge_pdf(
     date: Optional[str] = None,
     text_preview: str = "",
     brand_color: Optional[str] = None,
+    student_id: Optional[str] = None,
 ) -> BytesIO:
     """
     Generates a professional PDF certificate for plagiarism-free work.
+    Caches generated certificates in Redis for 24 hours based on student ID/name and date (Issue #2941).
 
     Args:
         student_name: Name of the student (optional, defaults to "Student")
         date: Date string (optional, defaults to current date)
         text_preview: Preview of the verified text (optional)
         brand_color: Optional hex color string for branding
+        student_id: Optional unique ID of the student for caching
 
     Returns:
         BytesIO buffer containing the PDF certificate
     """
+    target_date = date if date is not None else datetime.now().strftime("%B %d, %Y")
+    ident = str(student_id if student_id is not None else student_name)
+
+    # Check Redis cache
+    from src.utils.redis_cache import BADGE_TTL, CacheNamespace, RedisCache
+
+    cache = RedisCache.get_instance()
+    cache_key = CacheNamespace.BADGES.build_key("pdf", ident, target_date)
+    cached_bytes = cache.get(cache_key)
+    if cached_bytes is not None and isinstance(cached_bytes, bytes):
+        return BytesIO(cached_bytes)
+
     brand_hex = validate_hex_color(brand_color)
     brand_clr = HexColor(brand_hex)
     buffer = BytesIO()
@@ -403,4 +584,11 @@ def generate_badge_pdf(
     doc.build(story)
     from src.utils.pdf_report import compress_pdf_buffer
 
-    return compress_pdf_buffer(buffer)
+    result_buffer = compress_pdf_buffer(buffer)
+    pdf_bytes = result_buffer.getvalue()
+    try:
+        cache.set(cache_key, pdf_bytes, ttl=BADGE_TTL)
+    except Exception:
+        pass
+    result_buffer.seek(0)
+    return result_buffer

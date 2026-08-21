@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 SOURCE = Path("src/db/common.py")
 TESTS = Path("tests/db/test_common.py")
 
@@ -24,8 +23,5 @@ def test_connection_uses_read_only_sqlite_uri():
 def test_write_rejection_unit_test_exists():
     source = TESTS.read_text(encoding="utf-8")
 
-    assert (
-        "test_get_read_connection_rejects_write_attempts"
-        in source
-    )
+    assert "test_get_read_connection_rejects_write_attempts" in source
     assert "sqlite3.OperationalError" in source

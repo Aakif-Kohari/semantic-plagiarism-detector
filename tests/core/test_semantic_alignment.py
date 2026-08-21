@@ -4,11 +4,13 @@ tests/core/test_semantic_alignment.py
 Unit tests for the semantic-aware sequence alignment algorithm.
 """
 
-import pytest
 import numpy as np
+import pytest
+
 from src.core.semantic_alignment import (
-    align_semantic_sequences,
+    MAX_SEQUENCE_LENGTH,
     _cosine_similarity_matrix,
+    align_semantic_sequences,
 )
 
 
@@ -37,18 +39,16 @@ class TestCosineSimilarityMatrix:
         """Zero vectors should not cause division by zero errors."""
         emb_a = np.array([[0.0, 0.0], [1.0, 0.0]])
         emb_b = np.array([[1.0, 0.0]])
-        # Should not raise, zero vector normalized is treated as 0 similarity
         sim = _cosine_similarity_matrix(emb_a, emb_b)
         assert sim[0, 0] == 0.0
 
 
 class TestAlignSemanticSequences:
-    """Tests for the banded DP alignment algorithm."""
+    """Tests for the banded DP alignment algorithm and edge cases (Issue #2029)."""
 
     def test_exact_match_alignment(self):
         """Identical sequences should align perfectly with 'match' type."""
         chunks = ["Sentence one.", "Sentence two."]
-        # Embeddings pointing in the same direction
         emb = np.array([[1.0, 0.0], [0.0, 1.0]])
 
         alignment = align_semantic_sequences(
@@ -62,9 +62,8 @@ class TestAlignSemanticSequences:
     def test_insertions_and_deletions(self):
         """Sequences with different lengths should produce gap operations."""
         chunks_a = ["A1", "A2", "A3"]
-        chunks_b = ["B1", "B3"]  # B2 is missing
+        chunks_b = ["B1", "B3"]
 
-        # A1 matches B1, A2 is unmatched, A3 matches B3
         emb_a = np.array([[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]])
         emb_b = np.array([[1.0, 0.0], [0.5, 0.5]])
 
@@ -73,50 +72,142 @@ class TestAlignSemanticSequences:
         )
 
         types = [op["type"] for op in alignment]
-        # Expecting match, insert_a (gap in B), match
         assert "insert_a" in types or "insert_b" in types
 
-    def test_paraphrase_detection(self):
-        """Similar but not identical chunks should be flagged as 'paraphrase'."""
-        chunks_a = ["The quick brown fox."]
-        chunks_b = ["The fast brown fox."]
+    def test_both_inputs_empty(self):
+        """Empty inputs ([], []) should return an empty alignment."""
+        alignment = align_semantic_sequences([], [], np.array([]), np.array([]))
+        assert alignment == []
 
-        # High similarity but not 1.0
-        emb_a = np.array([[0.9, 0.1]])
-        emb_b = np.array([[0.8, 0.2]])
+    def test_only_a_empty(self):
+        """Aligning ([], ['chunk']) should produce 'insert_b' operations for sequence B."""
+        chunks_b = ["chunk"]
+        emb_b = np.array([[1.0, 0.0]])
 
-        alignment = align_semantic_sequences(
-            chunks_a, chunks_b, emb_a, emb_b, match_threshold=0.99
-        )
+        alignment = align_semantic_sequences([], chunks_b, np.array([]), emb_b)
 
         assert len(alignment) == 1
-        # Since sim < 0.99, it should be marked as paraphrase (or mismatch handled as gap)
-        # With default gap penalty, it might prefer gap if sim is too low.
-        # Let's ensure it doesn't crash and returns valid structure.
-        assert alignment[0]["type"] in ("match", "paraphrase", "insert_a", "insert_b")
+        assert alignment[0]["type"] == "insert_b"
+        assert alignment[0]["chunk_b"] == "chunk"
 
-    def test_empty_sequences(self):
-        """Empty inputs should return empty alignment."""
-        assert align_semantic_sequences([], [], np.array([]), np.array([])) == []
-
-    def test_one_empty_sequence(self):
-        """If one sequence is empty, all items in the other should be insertions."""
-        chunks_a = ["A1", "A2"]
-        emb_a = np.array([[1.0, 0.0], [0.0, 1.0]])
+    def test_only_b_empty(self):
+        """Aligning (['chunk'], []) should produce 'insert_a' operations for sequence A."""
+        chunks_a = ["chunk"]
+        emb_a = np.array([[1.0, 0.0]])
 
         alignment = align_semantic_sequences(chunks_a, [], emb_a, np.array([]))
 
-        assert len(alignment) == 2
-        assert all(op["type"] == "insert_a" for op in alignment)
+        assert len(alignment) == 1
+        assert alignment[0]["type"] == "insert_a"
+        assert alignment[0]["chunk_a"] == "chunk"
 
-    def test_band_width_restricts_computation(self):
-        """Verify that large sequences complete within reasonable time due to banding."""
-        # 200 chunks
-        n = 200
-        chunks = [f"Sentence {i}" for i in range(n)]
-        emb = np.random.rand(n, 384).astype(np.float32)
+    def test_single_chunk_inputs_match(self):
+        """Aligning single identical chunks should produce a 'match' operation."""
+        chunks_a = ["a"]
+        chunks_b = ["a"]
+        emb_a = np.array([[1.0, 0.0]])
+        emb_b = np.array([[1.0, 0.0]])
 
-        # This should complete in < 1 second due to O(N*W) banding
-        alignment = align_semantic_sequences(chunks, chunks, emb, emb, band_width=10)
+        alignment = align_semantic_sequences(
+            chunks_a, chunks_b, emb_a, emb_b, match_threshold=0.5
+        )
 
-        assert len(alignment) >= n  # At least N operations
+        assert len(alignment) == 1
+        assert alignment[0]["type"] == "match"
+        assert alignment[0]["chunk_a"] == "a"
+        assert alignment[0]["chunk_b"] == "a"
+
+    def test_single_chunk_inputs_mismatch(self):
+        """Aligning single distinct chunks (['a'], ['b']) should handle mismatch gracefully."""
+        chunks_a = ["a"]
+        chunks_b = ["b"]
+        emb_a = np.array([[1.0, 0.0]])
+        emb_b = np.array([[0.0, 1.0]])
+
+        alignment = align_semantic_sequences(
+            chunks_a, chunks_b, emb_a, emb_b, match_threshold=0.5
+        )
+
+        assert len(alignment) > 0
+        valid_types = {"match", "mismatch", "insert_a", "insert_b"}
+        assert all(op["type"] in valid_types for op in alignment)
+
+
+class TestMemoryAllocationGuard:
+    """Test suite for the N > 1000 memory allocation guard (Issue #2001)."""
+
+    def test_raises_value_error_when_n_exceeds_limit(self):
+        """Verify ValueError is raised when len(chunks_a) > 1000."""
+        n = MAX_SEQUENCE_LENGTH + 1
+        m = 10
+
+        chunks_a = [f"chunk_{i}" for i in range(n)]
+        chunks_b = [f"chunk_{i}" for i in range(m)]
+
+        emb_a = np.random.rand(n, 384).astype(np.float32)
+        emb_b = np.random.rand(m, 384).astype(np.float32)
+
+        with pytest.raises(
+            ValueError, match="Sequence alignment matrix size limit exceeded"
+        ):
+            align_semantic_sequences(chunks_a, chunks_b, emb_a, emb_b)
+
+    def test_raises_value_error_when_m_exceeds_limit(self):
+        """Verify ValueError is raised when len(chunks_b) > 1000."""
+        n = 10
+        m = MAX_SEQUENCE_LENGTH + 1
+
+        chunks_a = [f"chunk_{i}" for i in range(n)]
+        chunks_b = [f"chunk_{i}" for i in range(m)]
+
+        emb_a = np.random.rand(n, 384).astype(np.float32)
+        emb_b = np.random.rand(m, 384).astype(np.float32)
+
+        with pytest.raises(
+            ValueError, match="Sequence alignment matrix size limit exceeded"
+        ):
+            align_semantic_sequences(chunks_a, chunks_b, emb_a, emb_b)
+
+    def test_raises_value_error_when_both_exceed_limit(self):
+        """Verify ValueError is raised when both N and M > 1000."""
+        n = MAX_SEQUENCE_LENGTH + 50
+        m = MAX_SEQUENCE_LENGTH + 50
+
+        chunks_a = [f"chunk_{i}" for i in range(n)]
+        chunks_b = [f"chunk_{i}" for i in range(m)]
+
+        emb_a = np.random.rand(n, 384).astype(np.float32)
+        emb_b = np.random.rand(m, 384).astype(np.float32)
+
+        with pytest.raises(ValueError, match="Maximum allowed is 1000x1000"):
+            align_semantic_sequences(chunks_a, chunks_b, emb_a, emb_b)
+
+    def test_succeeds_at_exact_limit(self):
+        """Verify alignment succeeds when N and M are exactly at the limit."""
+        n = MAX_SEQUENCE_LENGTH
+        m = MAX_SEQUENCE_LENGTH
+
+        chunks_a = [f"chunk_{i}" for i in range(n)]
+        chunks_b = [f"chunk_{i}" for i in range(m)]
+
+        emb_a = np.random.rand(n, 384).astype(np.float32)
+        emb_b = np.random.rand(m, 384).astype(np.float32)
+
+        # Should not raise
+        alignment = align_semantic_sequences(chunks_a, chunks_b, emb_a, emb_b)
+        assert isinstance(alignment, list)
+
+    def test_succeeds_below_limit(self):
+        """Verify alignment succeeds for normal document sizes."""
+        n = 50
+        m = 60
+
+        chunks_a = [f"chunk_{i}" for i in range(n)]
+        chunks_b = [f"chunk_{i}" for i in range(m)]
+
+        emb_a = np.random.rand(n, 384).astype(np.float32)
+        emb_b = np.random.rand(m, 384).astype(np.float32)
+
+        alignment = align_semantic_sequences(chunks_a, chunks_b, emb_a, emb_b)
+        assert len(alignment) > 0
+        

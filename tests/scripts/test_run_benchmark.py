@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 test_run_benchmark.py
 ---------------------
@@ -11,6 +9,8 @@ Validates:
 - Metrics calculation accuracy
 - Output formatting helpers
 """
+
+from __future__ import annotations
 
 import argparse
 import json
@@ -28,7 +28,6 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import run_benchmark
-
 
 # ─── Synthetic Data Generation Tests ──────────────────────────────────────────
 

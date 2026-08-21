@@ -1,19 +1,20 @@
 import json
 import sqlite3
 import subprocess
-from pathlib import Path
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from tests.conftest import MockDataFactory
+from src.core.similarity import PLAGIARISM_THRESHOLD
 
 # Mock ML libraries to prevent pytest segmentation faults on Apple Silicon
 sys.modules["transformers"] = MagicMock()
 sys.modules["sentence_transformers"] = MagicMock()
 
-from src.cli import main, run_prewarm, run_scan  # noqa: E402
+from src.cli import _natural_sort_key, main, run_prewarm, run_scan  # noqa: E402
 
 
 @pytest.fixture
@@ -61,7 +62,16 @@ def test_cli_scan_success(mock_embed, mock_model_info, temp_assignments_dir, cap
     assert match["similarity_score"] == 1.0
 
 
-def test_cli_scan_success_text_format(mock_embed, mock_model_info, temp_assignments_dir, capsys):
+@patch(
+    "src.core.embedding_model.get_embedding_model_info",
+    return_value=("all-MiniLM-L6-v2", 384),
+)
+@patch(
+    "src.core.embedding_model.embed_chunks", side_effect=MockDataFactory.embed_chunks
+)
+def test_cli_scan_success_text_format(
+    mock_embed, mock_model_info, temp_assignments_dir, capsys
+):
     """Test a successful CLI scan with plain text format."""
     exit_code = run_scan(str(temp_assignments_dir), threshold=0.8, output_format="text")
 
@@ -74,7 +84,16 @@ def test_cli_scan_success_text_format(mock_embed, mock_model_info, temp_assignme
     assert "- doc1.txt <-> doc2.txt: 1.0000" in captured.out
 
 
-def test_cli_scan_success_csv_format(mock_embed, mock_model_info, temp_assignments_dir, capsys):
+@patch(
+    "src.core.embedding_model.get_embedding_model_info",
+    return_value=("all-MiniLM-L6-v2", 384),
+)
+@patch(
+    "src.core.embedding_model.embed_chunks", side_effect=MockDataFactory.embed_chunks
+)
+def test_cli_scan_success_csv_format(
+    mock_embed, mock_model_info, temp_assignments_dir, capsys
+):
     """Test a successful CLI scan with CSV format."""
     exit_code = run_scan(str(temp_assignments_dir), threshold=0.8, output_format="csv")
 
@@ -82,9 +101,8 @@ def test_cli_scan_success_csv_format(mock_embed, mock_model_info, temp_assignmen
     captured = capsys.readouterr()
 
     lines = captured.out.strip().split("\n")
-    assert lines[0] == "document_1,document_2,similarity_score"
+    assert lines[0] == "doc_a,doc_b,similarity_score"
     assert lines[1] == "doc1.txt,doc2.txt,1.0"
-
 
 
 def test_cli_scan_invalid_folder(capsys):
@@ -101,13 +119,14 @@ def test_cli_scan_empty_folder(tmp_path, capsys):
     d = tmp_path / "empty"
     d.mkdir()
 
-    exit_code = run_scan(str(d), threshold=0.8)
+    exit_code = run_scan(str(d), threshold=0.8, output_format="json")
     assert exit_code == 0
 
     captured = capsys.readouterr()
     report = json.loads(captured.out)
     assert report["documents_processed"] == 0
     assert len(report["matches"]) == 0
+
 
 
 @patch(
@@ -117,7 +136,9 @@ def test_cli_scan_empty_folder(tmp_path, capsys):
 @patch(
     "src.core.embedding_model.embed_chunks", side_effect=MockDataFactory.embed_chunks
 )
-def test_cli_prewarm_folder_success(mock_embed, mock_model_info, temp_assignments_dir, capsys):
+def test_cli_prewarm_folder_success(
+    mock_embed, mock_model_info, temp_assignments_dir, capsys
+):
     """Test prewarming cache for a directory of documents."""
     exit_code = run_prewarm(str(temp_assignments_dir))
     assert exit_code == 0
@@ -162,9 +183,13 @@ def test_cli_prewarm_db_success(mock_embed, mock_docs, capsys):
 @patch(
     "src.core.embedding_model.embed_chunks", side_effect=MockDataFactory.embed_chunks
 )
-def test_cli_main_prewarm_command(mock_embed, mock_model_info, temp_assignments_dir, capsys):
+def test_cli_main_prewarm_command(
+    mock_embed, mock_model_info, temp_assignments_dir, capsys
+):
     """Test main CLI invocation with prewarm subcommand."""
-    with patch("sys.argv", ["cli.py", "prewarm", "--folder", str(temp_assignments_dir)]):
+    with patch(
+        "sys.argv", ["cli.py", "prewarm", "--folder", str(temp_assignments_dir)]
+    ):
         with pytest.raises(SystemExit) as excinfo:
             main()
         assert excinfo.value.code == 0
@@ -176,6 +201,24 @@ def test_cli_main_invalid_threshold():
         with pytest.raises(SystemExit) as excinfo:
             main()
         assert excinfo.value.code == 1
+
+
+def test_cli_scan_default_threshold(temp_assignments_dir):
+    """Test that run_scan defaults to PLAGIARISM_THRESHOLD when threshold argument is omitted."""
+    from src.core.similarity import PLAGIARISM_THRESHOLD
+
+    with patch("src.cli.run_scan") as mock_run_scan:
+        mock_run_scan.return_value = 0
+        with patch("sys.argv", ["cli.py", "scan", str(temp_assignments_dir)]):
+            with pytest.raises(SystemExit) as excinfo:
+                main()
+            assert excinfo.value.code == 0
+            mock_run_scan.assert_called_once_with(
+                str(temp_assignments_dir),
+                PLAGIARISM_THRESHOLD,
+                output_format="text",
+            )
+
 
 
 def test_cli_main_invalid_command():
@@ -194,17 +237,20 @@ def test_cli_main_invalid_command():
 @patch(
     "src.core.embedding_model.embed_chunks", side_effect=MockDataFactory.embed_chunks
 )
-def test_cli_main_scan_format(mock_embed, mock_model_info, temp_assignments_dir, capsys):
+def test_cli_main_scan_format(
+    mock_embed, mock_model_info, temp_assignments_dir, capsys
+):
     """Test main function with scan subcommand specifying output format."""
-    with patch("sys.argv", ["cli.py", "scan", str(temp_assignments_dir), "--output-format", "json"]):
+    with patch(
+        "sys.argv",
+        ["cli.py", "scan", str(temp_assignments_dir), "--output-format", "json"],
+    ):
         with pytest.raises(SystemExit) as excinfo:
             main()
         assert excinfo.value.code == 0
         captured = capsys.readouterr()
         report = json.loads(captured.out)
         assert report["documents_processed"] == 2
-
-
 
 
 def _normalized_sql(sql: str | None) -> str:
@@ -217,20 +263,16 @@ def _database_schema_snapshot(db_path: Path) -> dict:
     with sqlite3.connect(db_path) as connection:
         connection.execute("PRAGMA foreign_keys = ON")
 
-        table_rows = connection.execute(
-            """
+        table_rows = connection.execute("""
             SELECT name, sql
             FROM sqlite_master
             WHERE type = 'table'
               AND name NOT LIKE 'sqlite_%'
             ORDER BY name
-            """
-        ).fetchall()
+            """).fetchall()
 
         snapshot = {
-            "user_version": connection.execute(
-                "PRAGMA user_version"
-            ).fetchone()[0],
+            "user_version": connection.execute("PRAGMA user_version").fetchone()[0],
             "tables": {},
         }
 
@@ -354,8 +396,11 @@ def test_seed_data_database_matches_active_corpus_schema(tmp_path):
 # ─── Tests for Database Schema Verification (Issue #1494) ──────────────────────
 
 from pathlib import Path
+
 import pytest
+
 from src.db.migrations.common import verify_schema_integrity
+
 
 class TestVerifySchemaIntegrity:
     """Test suite for database schema verification helper."""
@@ -382,11 +427,12 @@ class TestVerifySchemaIntegrity:
         conn.close()
 
         expected = ["documents", "chunks"]
-        
+
         import logging
+
         with caplog.at_level(logging.ERROR):
             result = verify_schema_integrity(db_path, expected)
-            
+
         assert result is False
         assert "MISSING tables" in caplog.text
         assert "chunks" in caplog.text
@@ -401,11 +447,12 @@ class TestVerifySchemaIntegrity:
         conn.close()
 
         expected = ["documents"]
-        
+
         import logging
+
         with caplog.at_level(logging.WARNING):
             result = verify_schema_integrity(db_path, expected)
-            
+
         assert result is False
         assert "UNEXPECTED tables" in caplog.text
         assert "legacy_table" in caplog.text
@@ -414,7 +461,7 @@ class TestVerifySchemaIntegrity:
         """A non-existent database path should raise FileNotFoundError."""
         db_path = tmp_path / "nonexistent.db"
         expected = ["documents"]
-        
+
         with pytest.raises(FileNotFoundError):
             verify_schema_integrity(db_path, expected)
 
@@ -423,7 +470,7 @@ class TestVerifySchemaIntegrity:
         db_dir = tmp_path / "not_a_file"
         db_dir.mkdir()
         expected = ["documents"]
-        
+
         with pytest.raises(IsADirectoryError):
             verify_schema_integrity(db_dir, expected)
 
@@ -432,7 +479,7 @@ class TestVerifySchemaIntegrity:
         db_path = tmp_path / "invalid.db"
         db_path.write_text("This is not a SQLite database file.")
         expected = ["documents"]
-        
+
         with pytest.raises(sqlite3.DatabaseError):
             verify_schema_integrity(db_path, expected)
 
@@ -487,11 +534,18 @@ class TestVerifySchemaIntegrity:
 
 # ─── CLI Integration Tests for --verify-schema ────────────────────────────────
 
+
 def test_cli_main_verify_schema_success(tmp_path, capsys):
     """Test main CLI invocation with --verify-schema flag on a valid DB."""
     db_path = tmp_path / "valid_cli.db"
     conn = sqlite3.connect(db_path)
-    for table in ["documents", "chunks", "deleted_chunks", "plagiarism_incidents", "false_positives"]:
+    for table in [
+        "documents",
+        "chunks",
+        "deleted_chunks",
+        "plagiarism_incidents",
+        "false_positives",
+    ]:
         conn.execute(f"CREATE TABLE {table} (id INTEGER PRIMARY KEY)")
     conn.commit()
     conn.close()
@@ -500,9 +554,40 @@ def test_cli_main_verify_schema_success(tmp_path, capsys):
         with pytest.raises(SystemExit) as excinfo:
             main()
         assert excinfo.value.code == 0
-        
+
     captured = capsys.readouterr()
     assert "PASSED" in captured.out
+
+@patch(
+    "src.core.embedding_model.get_embedding_model_info",
+    return_value=("all-MiniLM-L6-v2", 384),
+)
+@patch(
+    "src.core.embedding_model.embed_chunks",
+    side_effect=MockDataFactory.embed_chunks,
+)
+def test_cli_scan_recursive(
+    mock_embed, mock_model_info, temp_assignments_dir, capsys
+):
+    """Test scanning documents in nested subdirectories."""
+    nested_dir = temp_assignments_dir / "student_1" / "assignment"
+    nested_dir.mkdir(parents=True)
+
+    (nested_dir / "doc3.txt").write_text("This is nested assignment one.")
+    (nested_dir / "doc4.txt").write_text("This is nested assignment two.")
+
+    exit_code = run_scan(
+        str(temp_assignments_dir),
+        threshold=0.8,
+        output_format="json",
+        recursive=True,
+    )
+
+    assert exit_code == 0
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["documents_processed"] == 4
+
 
 def test_cli_main_verify_schema_failure(tmp_path, capsys):
     """Test main CLI invocation with --verify-schema flag on an invalid DB."""
@@ -517,9 +602,10 @@ def test_cli_main_verify_schema_failure(tmp_path, capsys):
         with pytest.raises(SystemExit) as excinfo:
             main()
         assert excinfo.value.code == 1
-        
+
     captured = capsys.readouterr()
     assert "FAILED" in captured.out
+
 
 def test_cli_main_verify_schema_nonexistent_file(capsys):
     """Test --verify-schema with a non-existent file exits with code 1."""
@@ -527,17 +613,74 @@ def test_cli_main_verify_schema_nonexistent_file(capsys):
         with pytest.raises(SystemExit) as excinfo:
             main()
         assert excinfo.value.code == 1
-        
+
     captured = capsys.readouterr()
     assert "Error" in captured.err
+
 
 def test_cli_main_verify_schema_cannot_combine_with_subcommand(tmp_path):
     """Test that --verify-schema cannot be combined with a subcommand."""
     db_path = tmp_path / "test.db"
     db_path.touch()
-    
+
     with patch("sys.argv", ["cli.py", "--verify-schema", str(db_path), "scan", "./"]):
         with pytest.raises(SystemExit) as excinfo:
             main()
         # argparse exits with 2 for argument errors
         assert excinfo.value.code == 2
+
+def test_cli_main_scan_recursive(temp_assignments_dir):
+    """Test the --recursive CLI flag."""
+    with patch("src.cli.run_scan") as mock_run_scan:
+        mock_run_scan.return_value = 0
+
+        with patch(
+            "sys.argv",
+            ["cli.py", "scan", str(temp_assignments_dir), "--recursive"],
+        ):
+            with pytest.raises(SystemExit) as excinfo:
+                main()
+
+            assert excinfo.value.code == 0
+            mock_run_scan.assert_called_once_with(
+                str(temp_assignments_dir),
+                PLAGIARISM_THRESHOLD,
+                output_format="text",
+                recursive=True,
+            )
+
+
+class TestNaturalSorting:
+    """Test suite for natural file ordering in the CLI."""
+
+    def test_natural_sort_key_orders_numeric_files(self):
+        """Verify doc10 sorts after doc2, not before (lexicographical behaviour)."""
+        files = ["doc10.pdf", "doc2.pdf", "doc1.pdf"]
+        assert sorted(files, key=_natural_sort_key) == [
+            "doc1.pdf",
+            "doc2.pdf",
+            "doc10.pdf",
+        ]
+
+    def test_natural_sort_key_mixed_paths(self):
+        """Verify natural sorting works on full file paths."""
+        files = [
+            "/tmp/submission/doc20.txt",
+            "/tmp/submission/doc3.txt",
+            "/tmp/submission/doc10.txt",
+        ]
+        assert sorted(files, key=_natural_sort_key) == [
+            "/tmp/submission/doc3.txt",
+            "/tmp/submission/doc10.txt",
+            "/tmp/submission/doc20.txt",
+        ]
+
+    def test_natural_sort_key_case_insensitive(self):
+        """Verify sorting is case-insensitive for the text portions."""
+        files = ["B.txt", "a.txt", "c.txt"]
+        assert sorted(files, key=_natural_sort_key) == ["a.txt", "B.txt", "c.txt"]
+
+    def test_natural_sort_key_stable_for_non_numeric(self):
+        """Verify behaviour matches lexicographical order for non-numeric names."""
+        files = ["readme.md", "report.pdf", "notes.txt"]
+        assert sorted(files, key=_natural_sort_key) == sorted(files)

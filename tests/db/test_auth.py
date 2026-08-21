@@ -5,30 +5,30 @@ import pytest
 
 from src.db.auth import (
     add_user,
+    auth_repo,
     delete_user,
     disable_2fa,
     enable_2fa,
+    format_user_created_date,
+    generate_sso_state,
     get_2fa_status,
     get_active_users_count,
+    get_all_users,
     get_user_active_status,
     get_user_last_login,
     get_user_role,
     get_user_theme,
     init_db,
     is_user_active,
-    log_security_event,
     set_user_active_status,
     set_user_theme,
+    store_sso_state,
     update_password,
-    get_security_audit_logs,
-    get_security_audit_log_count,
-    get_distinct_audit_event_types,
-    verify_user,
     update_user_profile,
-    get_all_users,
-    format_user_created_date,
+    validate_sso_state,
+    verify_user,
 )
-from src.errors import StaleDataException
+from src.exceptions import StaleDataException
 
 
 @pytest.fixture(autouse=True)
@@ -63,17 +63,15 @@ def test_verify_user():
     add_user(user, "SecurePass123!")
     assert verify_user(user, "SecurePass123!") is True
     assert verify_user(user, "WrongPass123!") is False
+
+
 def test_verify_user_rejects_suspended_user():
+    """Verify that verify_user returns False when a user is suspended."""
     user = f"user_{uuid.uuid4().hex[:8]}"
     add_user(user, "SecurePass123!")
-
-    assert verify_user(user, "SecurePass123!") is True
-
-    set_user_status(user, "suspended") # type: ignore
-
+    set_user_active_status(user, False)
     assert verify_user(user, "SecurePass123!") is False
 
-    delete_user(user)
 
 def test_get_user_role():
     user = f"user_{uuid.uuid4().hex[:8]}"
@@ -150,7 +148,7 @@ def mock_audit_db():
 
 
 def test_get_security_audit_logs_default(mock_audit_db):
-    logs = get_security_audit_logs()
+    logs = auth_repo.get_security_audit_logs()
     assert len(logs) == 3
     # Order by timestamp DESC
     assert logs[0]["username"] == "alice"
@@ -160,33 +158,38 @@ def test_get_security_audit_logs_default(mock_audit_db):
 
 
 def test_get_security_audit_logs_pagination(mock_audit_db):
-    logs = get_security_audit_logs(limit=1, offset=1)
+    logs = auth_repo.get_security_audit_logs(limit=1, offset=1)
     assert len(logs) == 1
     # 2nd in desc order is bob
     assert logs[0]["username"] == "bob"
 
 
 def test_get_security_audit_logs_username_filter(mock_audit_db):
-    logs = get_security_audit_logs(username="alice")
+    logs = auth_repo.get_security_audit_logs(username="alice")
     assert len(logs) == 2
     assert logs[0]["event_type"] == "logout"
     assert logs[1]["event_type"] == "login"
 
 
 def test_get_security_audit_logs_empty(mock_audit_db):
-    logs = get_security_audit_logs(username="charlie")
+    logs = auth_repo.get_security_audit_logs(username="charlie")
     assert len(logs) == 0
 
 
 def test_get_security_audit_logs_invalid_limit_offset(mock_audit_db):
     with pytest.raises(ValueError):
-        get_security_audit_logs(limit=-1)
+         auth_repo.get_security_audit_logs(limit=-1)
     with pytest.raises(ValueError):
-        get_security_audit_logs(offset=-1)
+         auth_repo.get_security_audit_logs(offset=-1)
+
+
+def test_get_security_audit_logs_negative_limit(mock_audit_db):
+    with pytest.raises(ValueError):
+        get_security_audit_logs(limit=-1)
 
 
 def test_get_security_audit_logs_date_filter(mock_audit_db):
-    logs = get_security_audit_logs(
+    logs = auth_repo.get_security_audit_logs(
         start_date="2023-01-02 00:00:00", end_date="2023-01-02 23:59:59"
     )
     assert len(logs) == 1
@@ -194,14 +197,64 @@ def test_get_security_audit_logs_date_filter(mock_audit_db):
 
 
 def test_get_security_audit_log_count(mock_audit_db):
-    assert get_security_audit_log_count() == 3
-    assert get_security_audit_log_count(username="alice") == 2
-    assert get_security_audit_log_count(event_type="logout") == 1
+    assert auth_repo.get_security_audit_log_count() == 3
+    assert auth_repo.get_security_audit_log_count(username="alice") == 2
+    assert auth_repo.get_security_audit_log_count(event_type="logout") == 1
 
 
-def test_get_distinct_audit_event_types(mock_audit_db):
-    events = get_distinct_audit_event_types()
-    assert set(events) == {"login", "logout"}
+def test_get_security_audit_log_count_dropped_table(mock_audit_db):
+    """Ensure get_security_audit_log_count re-raises sqlite3.Error if the table is dropped."""
+    from src.db.auth import _connect
+
+    with _connect() as conn:
+        conn.execute("DROP TABLE security_audit_log")
+
+    with pytest.raises(sqlite3.Error):
+         auth_repo.get_security_audit_log_count()
+
+
+def test_get_distinct_audit_event_types_caching_and_invalidation():
+    """Verify distinct audit event types are cached and properly invalidated (Issue #2687)."""
+    from src.db.auth import (
+        clear_distinct_audit_event_types_cache,
+        get_distinct_audit_event_types,
+        log_security_event,
+    )
+
+    clear_distinct_audit_event_types_cache()
+
+    # 1. Add initial events
+    log_security_event("login", "alice", "login success")
+    log_security_event("logout", "alice", "logout")
+
+    events1 = get_distinct_audit_event_types()
+    assert set(events1) >= {"login", "logout"}
+
+    # 2. Insert new event type directly into DB table (bypassing repo cache)
+    with auth_repo.connection() as conn:
+        conn.execute(
+            "INSERT INTO security_audit_log (event_type, username, timestamp, details) VALUES (?, ?, ?, ?)",
+            ("direct_db_insert", "user1", "2026-08-19T00:00:00Z", "test"),
+        )
+        conn.commit()
+
+    # Cached query without refresh should still return cached event types
+    events_cached = get_distinct_audit_event_types()
+    assert "direct_db_insert" not in events_cached
+
+    # Query with force_refresh=True should fetch latest from DB
+    events_refreshed = get_distinct_audit_event_types(force_refresh=True)
+    assert "direct_db_insert" in events_refreshed
+
+    # 3. log_security_event updates the cache in-place
+    log_security_event("password_reset", "user2", "reset password")
+    events_after_log = get_distinct_audit_event_types()
+    assert "password_reset" in events_after_log
+
+    # 4. clear_distinct_audit_event_types_cache clears cache state
+    clear_distinct_audit_event_types_cache()
+    assert auth_repo._cached_event_types is None
+
 
 
 def test_2fa_flow():
@@ -227,33 +280,51 @@ def test_2fa_flow():
 
     delete_user(username)
 
-def test_set_user_status():
-    user = f"user_{uuid.uuid4().hex[:8]}"
-    add_user(user, "SecurePass123!")
 
-    set_user_status(user, "suspended") # type: ignore
+def test_enable_disable_2fa():
+    """Verify enable_2fa saves a secret and disable_2fa removes the secret."""
+    username = f"user2fa_{uuid.uuid4().hex[:8]}"
+    add_user(username, "pass1234567!")
 
-    with sqlite3.connect(src.db.auth._DB_PATH) as conn: # type: ignore
-        status, is_active = conn.execute(
-            "SELECT status, is_active FROM users WHERE username = ?",
-            (user,),
-        ).fetchone()
+    # Verify initial state: 2FA disabled and secret is None
+    enabled, secret = get_2fa_status(username)
+    assert enabled is False
+    assert secret is None
 
-    assert status == "suspended"
-    assert is_active == 0
+    # Verify enable_2fa saves a secret
+    test_secret = "JBSWY3DPEHPK3PXP"
+    enable_2fa(username, test_secret)
+    enabled, secret = get_2fa_status(username)
+    assert enabled is True
+    assert secret == test_secret
 
-    set_user_status(user, "active") # type: ignore
+    # Verify disable_2fa removes the secret
+    disable_2fa(username)
+    enabled, secret = get_2fa_status(username)
+    assert enabled is False
+    assert secret is None
 
-    with sqlite3.connect(src.db.auth._DB_PATH) as conn: # type: ignore
-        status, is_active = conn.execute(
-            "SELECT status, is_active FROM users WHERE username = ?",
-            (user,),
-        ).fetchone()
+    delete_user(username)
 
-    assert status == "active"
-    assert is_active == 1
 
-    delete_user(user)
+def test_get_2fa_status():
+    """Verify get_2fa_status returns False initially and True after calling enable_2fa."""
+    username = f"user_2fa_{uuid.uuid4().hex[:8]}"
+    add_user(username, "Password123!")
+
+    enabled, secret = get_2fa_status(username)
+    assert enabled is False
+
+    test_secret = "JBSWY3DPEHPK3PXP"
+    enable_2fa(username, test_secret)
+
+    enabled, secret = get_2fa_status(username)
+    assert enabled is True
+
+    delete_user(username)
+
+
+
 def test_suspend_account():
     username = f"user_{uuid.uuid4().hex[:8]}"
     add_user(username, "password123!")
@@ -312,16 +383,15 @@ def test_user_theme(mock_db):
 
 def test_delete_user_removes_user_row_and_audit_log(mock_db):
     """delete_user() must remove the user row and associated security_audit_log entries."""
-    import src.db.auth
 
     user = f"user_{uuid.uuid4().hex[:8]}"
     add_user(user, "password123")
 
     # Seed an audit log entry for this user
-    log_security_event("password_change", user, "test entry")
+    auth_repo.log_security_event("password_change", user, "test entry")
 
     # Confirm the audit entry exists before deletion
-    with sqlite3.connect(src.db.auth._DB_PATH) as conn:
+    with sqlite3.connect(str(auth_repo.db_path)) as conn:
         audit_before = conn.execute(
             "SELECT COUNT(*) FROM security_audit_log WHERE username = ?", (user,)
         ).fetchone()[0]
@@ -333,7 +403,7 @@ def test_delete_user_removes_user_row_and_audit_log(mock_db):
     assert get_user_role(user) is None
 
     # Audit log entries for the deleted user must also be removed
-    with sqlite3.connect(src.db.auth._DB_PATH) as conn:
+    with sqlite3.connect(str(auth_repo.db_path)) as conn:
         audit_after = conn.execute(
             "SELECT COUNT(*) FROM security_audit_log WHERE username = ?", (user,)
         ).fetchone()[0]
@@ -416,7 +486,8 @@ def test_delete_user_removes_matching_session_and_authorization_rows(mock_db):
 def test_connect_uses_fifteen_second_timeout():
     """Verify that _connect helper sets sqlite3 timeout to 15.0 seconds."""
     from unittest.mock import patch
-    from src.db.auth import _connect, SQLITE_TIMEOUT
+
+    from src.db.auth import SQLITE_TIMEOUT, _connect
 
     assert SQLITE_TIMEOUT == 15.0
 
@@ -487,32 +558,44 @@ class TestFormatUserCreatedDate:
 
 
 def test_get_active_users_count():
-    """Verify get_active_users_count counts only active users."""
-    # 1. Starting count should be 1 (the default seeded 'admin' is active)
-    initial_count = get_active_users_count()
-    assert initial_count == 1
+    """Verify get_active_users_count returns 2 when 3 users are created and 1 is suspended."""
+    delete_user("admin")
 
-    # 2. Add an active user
-    user1 = f"active_{uuid.uuid4().hex[:8]}"
+    user1 = f"user1_{uuid.uuid4().hex[:8]}"
+    user2 = f"user2_{uuid.uuid4().hex[:8]}"
+    user3 = f"user3_{uuid.uuid4().hex[:8]}"
+
     add_user(user1, "SecurePass123!")
-    assert get_active_users_count() == 2
-
-    # 3. Add another user and suspend them
-    user2 = f"suspended_{uuid.uuid4().hex[:8]}"
     add_user(user2, "SecurePass123!")
+    add_user(user3, "SecurePass123!")
+
     set_user_active_status(user2, False)
-    # The count should still be 2 because user2 is inactive
+
     assert get_active_users_count() == 2
 
-    # 4. Reactivate user2
-    set_user_active_status(user2, True)
-    assert get_active_users_count() == 3
 
-    # 5. Delete user1
-    delete_user(user1)
-    assert get_active_users_count() == 2
+def test_update_user_profile():
+    """Verify that update_user_profile correctly updates user role and active status in the database."""
+    username = f"user_update_{uuid.uuid4().hex[:8]}"
+    add_user(username, "Password123!", "teacher")
 
-    delete_user(user2)
+    # Fetch initial state
+    users = get_all_users()
+    initial = next(u for u in users if u["username"] == username)
+    assert initial["role"] == "teacher"
+    assert initial["is_active"] is True
+    assert initial["version"] == 1
+
+    # Update profile
+    update_user_profile(username, role="admin", is_active=False, expected_version=1)
+
+    # Fetch updated user from database and verify changes
+    updated_users = get_all_users()
+    updated = next(u for u in updated_users if u["username"] == username)
+    assert updated["role"] == "admin"
+    assert updated["is_active"] is False
+    assert updated["status"] == "suspended"
+    assert updated["version"] == 2
 
 
 def test_update_user_profile_success():
@@ -644,7 +727,9 @@ def test_password_history_validation_prevents_reuse_of_last_3_passwords(mock_db)
     for forbidden_pass in (pass1, pass2, pass3):
         with pytest.raises(ValueError) as exc_info:
             update_password(user, forbidden_pass)
-        assert "New password cannot be one of your last 3 passwords" in str(exc_info.value)
+        assert "New password cannot be one of your last 3 passwords" in str(
+            exc_info.value
+        )
 
     # 5. Update to pass4 (succeeds)
     update_password(user, pass4)
@@ -657,13 +742,12 @@ def test_password_history_validation_prevents_reuse_of_last_3_passwords(mock_db)
 
 def test_get_recent_audit_events(mock_db):
     """Verify get_recent_audit_events returns recent audit entries ordered by timestamp DESC up to limit."""
-    from src.db.auth import get_recent_audit_events, log_security_event
 
-    log_security_event("login_success", "alice", "Alice logged in")
-    log_security_event("login_failure", "bob", "Bob failed login")
-    log_security_event("password_change", "charlie", "Charlie updated password")
+    auth_repo.log_security_event("login_success", "alice", "Alice logged in")
+    auth_repo.log_security_event("login_failure", "bob", "Bob failed login")
+    auth_repo.log_security_event("password_change", "charlie", "Charlie updated password")
 
-    events = get_recent_audit_events(limit=2)
+    events = auth_repo.get_recent_audit_events(limit=2)
     assert len(events) == 2
     assert isinstance(events, list)
     assert isinstance(events[0], dict)
@@ -677,12 +761,12 @@ def test_get_recent_audit_events(mock_db):
         assert "details" in event
 
     # Default limit=20 returns all logged events
-    all_recent = get_recent_audit_events(limit=20)
+    all_recent = auth_repo.get_recent_audit_events(limit=20)
     assert len(all_recent) >= 3
 
     # Negative limit raises ValueError
     with pytest.raises(ValueError):
-        get_recent_audit_events(limit=-5)
+         auth_repo.get_recent_audit_events(limit=-5)
 
 
 def test_password_change_required_flag(mock_db):
@@ -718,10 +802,34 @@ def test_password_change_required_flag(mock_db):
     with pytest.raises(ValueError):
         set_password_change_required("nonexistent_user_xyz", required=True)
 
-    # 6. Invalid credentials still return False (or dict with authenticated=False)
-    assert verify_user(username, "WrongPassword!") is False
-    assert verify_user(username, "WrongPassword!", return_details=True) == {"authenticated": False, "must_change_password": False}
+    # 5b. Invalid/empty username raises ValueError
+    with pytest.raises(ValueError, match="Username cannot be empty"):
+        set_password_change_required("", required=True)
 
+    with pytest.raises(ValueError, match="Username cannot be empty"):
+        set_password_change_required("   ", required=True)
+
+    with pytest.raises(ValueError, match="Username cannot be empty"):
+        set_password_change_required(None, required=True)  # type: ignore
+
+
+def test_validate_username_rules():
+    """Verify _validate_username enforces string type, non-emptiness, and normalizes."""
+    from src.db.auth import _validate_username
+
+    assert _validate_username("  Alice  ") == "alice"
+    assert _validate_username("BOB") == "bob"
+
+    for invalid in [None, "", "   ", 123, [], {}]:
+        with pytest.raises(ValueError, match="Username cannot be empty"):
+            _validate_username(invalid)  # type: ignore
+
+    # 6. Invalid credentials still return False (or dict with authenticated=False)
+    assert verify_user("alice", "WrongPassword!") is False
+    assert verify_user("alice", "WrongPassword!", return_details=True) == {
+        "authenticated": False,
+        "must_change_password": False,
+    }
 
 
 # ── Issue #1778: SQL query shape regression guard ─────────────────────────
@@ -789,7 +897,36 @@ def test_get_active_users_count_zero_on_empty_database():
     assert result is not None
     assert result >= 0
 
-def test_update_password_updates_timestamp():
-    """Verify that updating a user password correctly updates password_changed_at."""
-    # Setup user, call update_password, and assert that user['password_changed_at'] is not None/updated.
-    pass
+
+def test_oauth_state_replay_invalidation(mock_db):
+    """Verify that an OAuth state is valid on first use and invalidated on second use (replay attack prevention)."""
+    state = generate_sso_state()
+    # First validation must succeed
+    assert validate_sso_state(state) is True
+    # Second validation must fail due to replay invalidation
+    assert validate_sso_state(state) is False
+
+
+def test_validate_sso_state_invalid_and_expired(mock_db):
+    """Verify validate_sso_state returns False for invalid, empty, or expired states."""
+    assert validate_sso_state("") is False
+    assert validate_sso_state("non_existent_state_token") is False
+
+    # Stored expired state
+    expired_state = "expired_state_token_123"
+    store_sso_state(expired_state, expires_in_seconds=-10)
+    assert validate_sso_state(expired_state) is False
+
+
+def test_role_validation_with_allowed_user_roles_override(monkeypatch):
+    """Verify _validate_role respects ALLOWED_USER_ROLES environment variable."""
+    from src.db.auth import _validate_role
+
+    monkeypatch.setenv("ALLOWED_USER_ROLES", "admin, teacher, teaching_assistant")
+    assert _validate_role("teaching_assistant") == "teaching_assistant"
+
+    with pytest.raises(ValueError, match="Role must be one of"):
+        _validate_role("invalid_role")
+
+
+

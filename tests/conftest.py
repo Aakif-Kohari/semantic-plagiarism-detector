@@ -42,6 +42,7 @@ os.environ.setdefault("REDIS_DB", "1")
 os.environ.setdefault("MPLBACKEND", "Agg")
 try:
     import matplotlib
+
     matplotlib.use("Agg")
 except ImportError:
     pass
@@ -49,8 +50,10 @@ except ImportError:
 # Patch torch.__spec__ for Python 3.13 + PyTorch compatibility
 try:
     import torch
+
     if getattr(torch, "__spec__", None) is None:
         import importlib.util
+
         torch.__spec__ = importlib.util.spec_from_loader("torch", loader=None)
 except ImportError:
     pass
@@ -68,28 +71,62 @@ if "sentence_transformers" not in sys.modules:
 
 if "torch" not in sys.modules:
     torch_stub = types.ModuleType("torch")
+    torch_stub.__path__ = []
+
     class Tensor:
         pass
+
     torch_stub.Tensor = Tensor  # type: ignore
+    torch_quant_stub = types.ModuleType("torch.quantization")
+    torch_stub.quantization = torch_quant_stub
     sys.modules["torch"] = torch_stub
+    sys.modules["torch.quantization"] = torch_quant_stub
 
 
 import importlib.util
 
 for mod_name in [
-    "fitz", "redis", "bs4", "faker", "argon2", "argon2.exceptions",
-    "pdfplumber", "langdetect", "striprtf", "striprtf.striprtf", "src.core.translator",
-    "src.core.webhook",
-    "pypdf", "reportlab", "reportlab.pdfgen", "reportlab.lib", "reportlab.platypus",
-    "reportlab.lib.colors", "reportlab.lib.enums", "reportlab.lib.styles", "reportlab.lib.units",
-    "reportlab.lib.pagesizes", "reportlab.lib.utils",
-    "matplotlib", "matplotlib.patches", "matplotlib.pyplot", "matplotlib.figure", "matplotlib.ticker",
+    "fitz",
+    "redis",
+    "bs4",
+    "faker",
+    "argon2",
+    "argon2.exceptions",
+    "pdfplumber",
+    "langdetect",
+    "striprtf",
+    "striprtf.striprtf",
+    "src.core.translator",
+    "pypdf",
+    "reportlab",
+    "reportlab.pdfgen",
+    "reportlab.lib",
+    "reportlab.platypus",
+    "reportlab.lib.colors",
+    "reportlab.lib.enums",
+    "reportlab.lib.styles",
+    "reportlab.lib.units",
+    "reportlab.lib.pagesizes",
+    "reportlab.lib.utils",
+    "matplotlib",
+    "matplotlib.patches",
+    "matplotlib.pyplot",
+    "matplotlib.figure",
+    "matplotlib.ticker",
     "networkx",
-    "faiss", "torch", "psutil", "pytesseract",
-    "sklearn", "sklearn.metrics", "sklearn.metrics.pairwise",
-    "sklearn.feature_extraction", "sklearn.feature_extraction.text",
+    "faiss",
+    "torch",
+    "psutil",
+    "pytesseract",
+    "sklearn",
+    "sklearn.metrics",
+    "sklearn.metrics.pairwise",
+    "sklearn.feature_extraction",
+    "sklearn.feature_extraction.text",
     "requests",
-    "streamlit", "streamlit.components", "streamlit.components.v1",
+    "streamlit",
+    "streamlit.components",
+    "streamlit.components.v1",
     "transformers",
 ]:
     if mod_name not in sys.modules:
@@ -121,10 +158,12 @@ def clean_test_env():
     """
     try:
         from src.db.corpus_db import clear_all_data
+
         clear_all_data()
     except Exception:
         try:
             from src.db.corpus_db import close_connections
+
             close_connections()
         except Exception:
             pass
@@ -144,10 +183,12 @@ def clean_test_env():
 
     try:
         from src.db.corpus_db import clear_all_data
+
         clear_all_data()
     except Exception:
         try:
             from src.db.corpus_db import close_connections
+
             close_connections()
         except Exception:
             pass
@@ -177,6 +218,7 @@ class MockDataFactory:
     Generalized factory pattern for generating test mocks.
     Consolidates multiple disparate mocking functions.
     """
+
     @staticmethod
     def embed_chunks(chunks, batch_size=64):
         """Standardized fast embedding mock for streamlit app tests."""
@@ -208,18 +250,25 @@ def mock_db(tmp_path):
     auth_db_file = tmp_path / "test_users.db"
 
     import unittest.mock
-    with unittest.mock.patch("src.db.corpus_db._DB_PATH", str(corpus_db_file)), \
-         unittest.mock.patch("src.db.incidents.DEFAULT_DB_PATH", str(corpus_db_file)), \
-         unittest.mock.patch("src.db.auth._DB_PATH", str(auth_db_file)):
+
+    with unittest.mock.patch(
+        "src.db.corpus_db._DB_PATH", str(corpus_db_file)
+    ), unittest.mock.patch(
+        "src.db.incidents.DEFAULT_DB_PATH", str(corpus_db_file)
+    ), unittest.mock.patch(
+        "src.db.auth._DB_PATH", str(auth_db_file)
+    ):
         try:
+            from src.db.auth import init_db
             from src.db.corpus_db import init_corpus_db
             from src.db.incidents import init_incident_db
-            from src.db.auth import init_db
+
             init_corpus_db()
             init_incident_db()
             init_db()
         except Exception:
             import traceback
+
             traceback.print_exc()
 
         yield str(corpus_db_file)
@@ -272,17 +321,17 @@ def sample_document_files(request):
                 b'<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
                 b'<Default Extension="xml" ContentType="application/xml"/>'
                 b'<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
-                b'</Types>'
+                b"</Types>",
             )
             # 2. Main Document
             zf.writestr(
                 "word/document.xml",
                 b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
                 b'<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
-                b'<w:body>'
-                b'<w:p><w:r><w:t>Sample DOCX content for testing the parsing pipeline.</w:t></w:r></w:p>'
-                b'</w:body>'
-                b'</w:document>'
+                b"<w:body>"
+                b"<w:p><w:r><w:t>Sample DOCX content for testing the parsing pipeline.</w:t></w:r></w:p>"
+                b"</w:body>"
+                b"</w:document>",
             )
             # 3. Relationships
             zf.writestr(
@@ -290,17 +339,131 @@ def sample_document_files(request):
                 b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
                 b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
                 b'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>'
-                b'</Relationships>'
+                b"</Relationships>",
             )
         zip_buffer.seek(0)
         filename = "sample_test.docx"
         yield zip_buffer, filename
 
+
 import pytest
+
+
 @pytest.fixture(autouse=True)
 def clear_streamlit_singletons():
     try:
         from streamlit.delta_generator_singletons import _dg_singleton
+
         _dg_singleton._instance = None
     except ImportError:
         pass
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_corpus_db_connections():
+    yield
+    try:
+        from src.db.corpus_db import close_connections
+        close_connections(all_threads=True)
+    except ImportError:
+        pass
+
+
+import sqlite3
+from pathlib import Path
+
+import pytest
+
+
+@pytest.fixture
+def db_connection(tmp_path: Path) -> sqlite3.Connection:
+    """Provide a clean, initialized SQLite database connection for testing.
+    
+    This fixture creates a temporary SQLite database in the pytest tmp_path,
+    initializes the required schema (incidents, documents, etc.), yields the
+    active connection for the test to use, and automatically closes the
+    connection during teardown.
+    
+    This eliminates the need for manual sqlite3.connect() and conn.close()
+    calls in every test function (Issue #2725).
+    
+    Yields:
+        sqlite3.Connection: An active, initialized database connection.
+    """
+    db_path = tmp_path / "test_plagiarism.db"
+    
+    # Create connection with row factory for dictionary-like access
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    
+    # Initialize schema (simplified for test environment)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS documents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT UNIQUE NOT NULL,
+            file_hash TEXT UNIQUE,
+            upload_date TEXT NOT NULL,
+            class_section TEXT,
+            student_name TEXT,
+            is_deleted INTEGER DEFAULT 0
+        );
+        
+        CREATE TABLE IF NOT EXISTS plagiarism_incidents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            incident_id TEXT UNIQUE NOT NULL,
+            document_a TEXT NOT NULL,
+            document_b TEXT NOT NULL,
+            similarity REAL NOT NULL,
+            severity TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            threshold_at_time_of_flag REAL,
+            review_status TEXT DEFAULT 'Pending'
+        );
+        
+        CREATE INDEX IF NOT EXISTS idx_incidents_docs 
+        ON plagiarism_incidents(document_a, document_b);
+    """)
+    conn.commit()
+    
+    # Yield the connection to the test
+    yield conn
+    
+    # Teardown: Close the connection
+    conn.close()
+
+
+@pytest.fixture
+def populated_db_connection(db_connection: sqlite3.Connection) -> sqlite3.Connection:
+    """Provide a database connection pre-populated with sample incident data.
+    
+    Builds on the base db_connection fixture by inserting 50 sample
+    plagiarism incidents with varying severities and similarities.
+    """
+    sample_incidents = []
+    for i in range(50):
+        sim = 0.50 + (i * 0.01)
+        severity = "High" if sim >= 0.80 else ("Medium" if sim >= 0.60 else "Low")
+        sample_incidents.append((
+            f"INC-{i:04d}",
+            f"student_{i}_a.pdf",
+            f"student_{i}_b.pdf",
+            sim,
+            severity,
+            f"2024-01-{(i % 28) + 1:02d}T10:00:00",
+            0.59,
+            "Pending"
+        ))
+        
+    db_connection.executemany(
+        """
+        INSERT INTO plagiarism_incidents 
+        (incident_id, document_a, document_b, similarity, severity, timestamp, threshold_at_time_of_flag, review_status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        sample_incidents
+    )
+    db_connection.commit()
+    
+    yield db_connection
+
+

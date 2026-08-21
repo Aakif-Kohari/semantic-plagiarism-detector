@@ -8,12 +8,12 @@ Also validates sentence-aware chunk padding (Issue #1480).
 import pytest
 
 from src.core.text_chunking import (
+    ChunkString,
+    _find_sentence_boundary,
     chunk_by_sentences,
     chunk_documents,
     chunk_text,
     chunk_text_dynamic,
-    _find_sentence_boundary,
-    DEFAULT_CHUNK_SIZE,
 )
 
 
@@ -37,12 +37,20 @@ def test_chunk_documents_passes_parameters():
     assert len(chunked["doc1.txt"]) > 0
 
 
+def test_chunk_documents_empty_dictionary():
+    """Empty input should return an empty dict without error."""
+    assert chunk_documents({}) == {}
+
+
 def test_min_words_filters_short_chunks():
     # "42" and "Page 1" are ultra-short; only the long sentence should survive
-    text = "42\n\nPage 1\n\nThis is a sufficiently long sentence with many words in it."
-    chunks = chunk_text(text, chunk_size=500, chunk_overlap=0, min_words=5)
+    text = "42\n\nPage 1\n\nThis is a sufficiently long sentence with many words in it. Here is a second sentence to add enough text. This is a third sentence to ensure we have enough text for overlap to potentially trigger."
+    chunks = chunk_text(text, chunk_size=100, chunk_overlap=50, min_words=5)
+    assert len(chunks) > 0
     assert all(len(c.split()) >= 5 for c in chunks)
     assert any("sufficiently" in c for c in chunks)
+    assert not any("42" in c for c in chunks)
+    assert not any("Page 1" in c for c in chunks)
 
 
 def test_min_words_default_is_five():
@@ -94,25 +102,43 @@ def test_chunk_text_cjk_characters():
 def test_chunk_text_emoji_only():
     """Verify emoji-only strings are chunked correctly without character corruption."""
     emoji_text = "🚀🔍🤖📝💻📊" * 50
-    chunks = chunk_text(emoji_text, chunk_size=50, chunk_overlap=10)
+    chunks = chunk_text(emoji_text, chunk_size=50, chunk_overlap=10, min_words=1)
 
     assert len(chunks) >= 1
     for chunk in chunks:
         assert len(chunk) > 0
 
 
+def test_chunk_text_emoji_byte_length_enforced():
+    """Verify count_bytes=True enforces chunk_size as UTF-8 bytes, not code points.
+
+    Each emoji below is 1 Unicode code point but 4 UTF-8 bytes, so plain
+    len() undercounts actual size by 4x. With count_bytes=True, no chunk's
+    UTF-8 byte length should exceed chunk_size.
+    """
+    emoji_text = "🚀🔍🤖📝💻📊" * 50
+    chunks = chunk_text(
+        emoji_text, chunk_size=50, chunk_overlap=10, min_words=1, count_bytes=True
+    )
+
+    assert len(chunks) >= 1
+    for chunk in chunks:
+        assert len(chunk.encode("utf-8")) <= 50
+
 def test_chunk_overlap_boundaries():
-    """Verify consecutive chunks preserve configured overlap boundaries."""
-    text = "Sentence one. Sentence two. Sentence three. Sentence four. Sentence five."
-    chunk_size = 30
-    chunk_overlap = 10
+    """Verify consecutive chunks share the exact configured overlap substring."""
+    # Use CJK text so chunking is character-based and overlap is a precise substring.
+    text = "这是一个关于人工智能和神经网络的测试文本。" * 20
+    chunk_size = 100
+    chunk_overlap = 20
 
-    chunks = chunk_text(text, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    chunks = chunk_text(
+        text, chunk_size=chunk_size, chunk_overlap=chunk_overlap, min_words=1
+    )
 
-    if len(chunks) > 1:
-        # Check that consecutive chunks share overlapping content
-        for i in range(len(chunks) - 1):
-            assert len(chunks[i]) <= chunk_size
+    assert len(chunks) > 1
+    overlap = chunks[0][-chunk_overlap:]
+    assert chunks[1].startswith(overlap)
 
 
 # ── Sentence-Boundary Chunking Tests (#919) ──────────────────────────────────
@@ -200,6 +226,29 @@ def test_chunk_by_sentences_produces_multiple_chunks_for_long_text():
 
     chunks = chunk_by_sentences(text, max_chunk_size=150)
     assert len(chunks) > 1
+
+
+def test_chunk_by_sentences_decimal_and_ellipsis():
+    """Verify chunk_by_sentences handles decimals and ellipses properly."""
+    text = (
+        "The software version 3.14 was released today. "
+        "We are currently loading... done! "
+        "This is the final sentence."
+    )
+    chunks = chunk_by_sentences(text, max_chunk_size=50)
+
+    # They should be split as three separate chunks
+    assert len(chunks) == 3
+
+    assert "version 3.14" in chunks[0]
+    assert "loading... done!" in chunks[1]
+    assert "final sentence" in chunks[2]
+
+    # Ensure no split happened strictly inside the decimal or ellipsis
+    for chunk in chunks:
+        assert not chunk.strip().endswith("version 3.")
+        assert not chunk.strip().endswith("loading.")
+        assert not chunk.strip().endswith("loading..")
 
 
 def test_chunk_text_percentage_overlap():
@@ -544,3 +593,228 @@ class TestChunkTextSentencePadding:
             text, chunk_size=100, chunk_overlap=0, sentence_padding=False
         )
         assert padded == unpadded
+
+
+def test_chunkstring_strip_returns_plain_str():
+    """str operations on ChunkString drop metadata and return a plain str."""
+    chunk = ChunkString("hello", {"k": "v"})
+    result = chunk.strip()
+
+    assert result == "hello"
+    assert type(result) is str
+    assert not hasattr(result, "metadata")
+
+
+# ── NLTK punkt download caching (Issue #2059) ────────────────────────────────
+
+
+def test_nltk_punkt_download_called_at_most_once(monkeypatch):
+    """Missing punkt corpus should trigger nltk.download only once across calls."""
+    import sys
+    from unittest.mock import MagicMock
+
+    import src.core.text_chunking as text_chunking
+    from src.core.text_chunking import _split_into_sentences
+
+    text_chunking._nltk_punkt_checked = False
+
+    mock_download = MagicMock()
+    mock_sent_tokenize = MagicMock(side_effect=LookupError("punkt missing"))
+
+    fake_tokenize = MagicMock()
+    fake_tokenize.sent_tokenize = mock_sent_tokenize
+
+    fake_nltk = MagicMock()
+    fake_nltk.download = mock_download
+    fake_nltk.tokenize = fake_tokenize
+
+    monkeypatch.setitem(sys.modules, "nltk", fake_nltk)
+    monkeypatch.setitem(sys.modules, "nltk.tokenize", fake_tokenize)
+
+    sample = "First sentence. Second sentence."
+    for _ in range(5):
+        result = _split_into_sentences(sample)
+        assert len(result) >= 1
+
+    assert mock_download.call_count == 1
+    mock_download.assert_called_with("punkt_tab", quiet=True)
+    assert text_chunking._nltk_punkt_checked is True
+
+
+def test_dynamic_snaps_to_period():
+    """Test that chunk_text_dynamic snaps chunk boundaries to a period within the margin."""
+    from src.core.text_chunking import chunk_text_dynamic
+
+    # Construct text where a period falls near the target split boundary (e.g. target ~50 chars)
+    # The snapping margin is 20% (±10 chars around index 50).
+    text = "This is the first sentence that is quite long. Here is the second short sentence."
+
+    chunks = chunk_text_dynamic(text, target_size=45)
+
+    # Verify that the first chunk correctly snapped to the period after "long."
+    assert len(chunks) > 0
+    assert chunks[0].endswith(".")
+    assert "first sentence" in chunks[0]
+
+
+def test_dynamic_no_punctuation():
+    """Test that text without sentence-ending punctuation falls back to an exact character split."""
+    from src.core.text_chunking import chunk_text_dynamic
+
+    text = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
+    target_size = 20
+
+    chunks = chunk_text_dynamic(text, target_size=target_size)
+
+    # Verify that chunks are split strictly by the target character length without punctuation snapping
+    assert len(chunks) > 1
+    assert chunks[0] == text[:target_size]
+
+
+def test_dynamic_single_chunk():
+    """Test that text shorter than target_size is returned as a single chunk."""
+    from src.core.text_chunking import chunk_text_dynamic
+
+    text = "Short text."
+    chunks = chunk_text_dynamic(text, target_size=100)
+
+    assert len(chunks) == 1
+    assert chunks[0] == text
+
+
+def test_sentence_boundary_empty_text():
+    """Test that _find_sentence_boundary returns the original index when given empty text."""
+    from src.core.text_chunking import _find_sentence_boundary
+
+    index = 10
+    result = _find_sentence_boundary("", index, max_search=5)
+    assert result == index
+
+
+def test_sentence_boundary_no_match():
+    """Test that _find_sentence_boundary returns the original index when no punctuation is found within max_search."""
+    from src.core.text_chunking import _find_sentence_boundary
+
+    text = "abcdefghijklmnopqrstuvwxyz"
+    index = 10
+    # No punctuation anywhere near index 10, and tight max_search
+    result = _find_sentence_boundary(text, index, max_search=3)
+    assert result == index
+
+
+def test_sentence_boundary_backward():
+    """Test that _find_sentence_boundary finds the nearest backward sentence end."""
+    from src.core.text_chunking import _find_sentence_boundary
+
+    # "Hello world. How are you?"
+    # Period is at index 11. If target index is 13, it should search backward and snap to index 12 (after period/space).
+    text = "Hello world. How are you?"
+    index = 13
+    result = _find_sentence_boundary(text, index, max_search=5)
+    # Depending on implementation details, it should identify the boundary near index 11 or 12.
+    assert result != index
+    assert text[result - 1] in ".!?"
+
+
+def test_sentence_boundary_forward():
+    """Test that _find_sentence_boundary finds the nearest forward sentence end."""
+    from src.core.text_chunking import _find_sentence_boundary
+
+    text = "Hello world. How are you?"
+    # Index 9 is inside "world", period is at index 11. Searching forward within max_search should find it.
+    index = 9
+    result = _find_sentence_boundary(text, index, max_search=5)
+    assert result != index
+    assert text[result - 1] in ".!?"
+
+
+# ── Comprehensive Sentence-Aware Chunking Tests ─────────────────────────────
+
+
+class TestChunkBySentencesBasic:
+    """Test suite for basic sentence-aware chunking behavior."""
+
+    def test_empty_string_returns_empty_list(self):
+        """Verify empty input returns an empty list."""
+        assert chunk_by_sentences("") == []
+        assert chunk_by_sentences("   ") == []
+
+    def test_none_input_returns_empty_list(self):
+        """Verify None input is handled gracefully."""
+        assert chunk_by_sentences(None) == []
+
+    def test_single_sentence_returns_single_chunk(self):
+        """Verify a single sentence is returned as one chunk."""
+        text = "This is a single sentence."
+        chunks = chunk_by_sentences(text)
+        assert len(chunks) == 1
+        assert chunks[0] == text
+
+    def test_multiple_sentences_combined_into_chunks(self):
+        """Verify short sentences are combined to meet target chunk length."""
+        text = "First. Second. Third. Fourth. Fifth."
+        chunks = chunk_by_sentences(text, min_chunk_length=5)
+        # Should combine short sentences rather than returning 5 tiny chunks
+        assert len(chunks) < 5
+        assert all(len(c) >= 5 for c in chunks)
+
+    def test_long_sentence_not_split(self):
+        """Verify a single long sentence is not split mid-sentence."""
+        long_sentence = "This is a very long sentence " * 50
+        text = long_sentence + ". Another sentence."
+        chunks = chunk_by_sentences(text)
+        # The long sentence should remain intact in the first chunk
+        assert long_sentence.strip() in chunks[0]
+
+    def test_min_chunk_length_filters_tiny_chunks(self):
+        """Verify chunks shorter than min_chunk_length are filtered out."""
+        text = "Ok. This is a much longer sentence that should be kept."
+        chunks = chunk_by_sentences(text, min_chunk_length=20)
+        assert len(chunks) == 1
+        assert "Ok" not in chunks[0]
+
+
+class TestChunkBySentencesLimits:
+    """Test suite for max_chunks safety limit (Issue #2054)."""
+
+    def test_max_chunks_default_is_1000(self):
+        """Verify the default max_chunks parameter is 1000."""
+        # Generate text with > 1000 sentences
+        text = ". ".join([f"Sentence {i}" for i in range(1500)]) + "."
+        chunks = chunk_by_sentences(text, min_chunk_length=1)
+        assert len(chunks) <= 1000
+
+    def test_max_chunks_custom_limit_respected(self):
+        """Verify custom max_chunks limit is strictly enforced."""
+        text = ". ".join([f"Sentence {i}" for i in range(100)]) + "."
+        chunks = chunk_by_sentences(text, max_chunks=10, min_chunk_length=1)
+        assert len(chunks) == 10
+
+    def test_max_chunks_zero_raises_value_error(self):
+        """Verify max_chunks=0 raises ValueError."""
+        with pytest.raises(ValueError, match="max_chunks must be > 0"):
+            chunk_by_sentences("Some text.", max_chunks=0)
+
+    def test_max_chunks_negative_raises_value_error(self):
+        """Verify negative max_chunks raises ValueError."""
+        with pytest.raises(ValueError, match="max_chunks must be > 0"):
+            chunk_by_sentences("Some text.", max_chunks=-5)
+
+    def test_max_chunks_logs_warning_on_truncation(self, caplog):
+        """Verify a warning is logged when the max_chunks limit is reached."""
+        import logging
+
+        text = ". ".join([f"Sentence {i}" for i in range(50)]) + "."
+
+        with caplog.at_level(logging.WARNING):
+            chunk_by_sentences(text, max_chunks=5, min_chunk_length=1)
+
+        assert any(
+            "Reached max_chunks limit" in record.message for record in caplog.records
+        )
+
+    def test_text_shorter_than_max_chunks_not_truncated(self):
+        """Verify text with fewer sentences than max_chunks is not truncated."""
+        text = "First. Second. Third."
+        chunks = chunk_by_sentences(text, max_chunks=100, min_chunk_length=1)
+        assert len(chunks) <= 3  # Depends on combining logic, but definitely <= 100

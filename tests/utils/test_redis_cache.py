@@ -4,24 +4,26 @@ test_redis_cache.py
 Unit tests for Redis cache functionality.
 """
 
-import numpy as np
-import pytest
 from unittest.mock import Mock, patch
 
+import numpy as np
+import pytest
+import redis
+
 from src.utils.redis_cache import (
-    CacheKeyPrefix,
+    CacheNamespace,
+    PayloadCompressor,
     RedisCache,
+    RedisError,
     cache_analysis_results,
     cache_faiss_index,
     cache_session_state,
     clear_session,
     get_analysis_results,
-    RedisError,
     get_cache,
     get_faiss_index,
     get_session_state,
 )
-import redis
 
 
 class TestRedisCache:
@@ -42,6 +44,7 @@ class TestRedisCache:
         cache._client = mock_redis_client
 
         yield cache
+
     def test_cache_set_get(self, cache_with_mock, mock_redis_client):
         """Test basic set and get operations."""
         import pickle
@@ -95,7 +98,7 @@ class TestRedisCache:
         value = True
 
         cache_session_state(session_id, key, value)
-        expected_key = f"{CacheKeyPrefix.SESSION.value}:{session_id}:{key}"
+        expected_key = CacheNamespace.SESSION.build_key(session_id, key)
         mock_redis_client.setex.assert_called_once()
 
         mock_redis_client.get.return_value = b"\x80"
@@ -106,14 +109,14 @@ class TestRedisCache:
         """Test clearing session data."""
         session_id = "test_session"
         mock_redis_client.keys.return_value = [
-            f"{CacheKeyPrefix.SESSION.value}:test_session:key1".encode("utf-8"),
-            f"{CacheKeyPrefix.SESSION.value}:test_session:key2".encode("utf-8"),
+            CacheNamespace.SESSION.build_key("test_session", "key1").encode("utf-8"),
+            CacheNamespace.SESSION.build_key("test_session", "key2").encode("utf-8"),
         ]
         mock_redis_client.delete.return_value = 2
 
         result = clear_session(session_id)
         assert result is True
-        mock_redis_client.keys.assert_called_once_with(f"{CacheKeyPrefix.SESSION.value}:{session_id}:*")
+        mock_redis_client.keys.assert_called_once_with(CacheNamespace.SESSION.build_key(session_id, "*"))
 
     def test_faiss_index_caching(self, cache_with_mock, mock_redis_client):
         """Test FAISS index caching."""
@@ -135,14 +138,16 @@ class TestRedisCache:
         results = {"embeddings": np.array([[1, 2, 3]]), "similarity": 0.85}
 
         cache_analysis_results(analysis_key, results)
-        expected_key = f"{CacheKeyPrefix.ANALYSIS.value}:{analysis_key}"
+        expected_key = CacheNamespace.ANALYSIS.build_key(analysis_key)
         mock_redis_client.setex.assert_called_once()
 
         mock_redis_client.get.return_value = b"\x80"
         get_analysis_results(analysis_key)
         mock_redis_client.get.assert_called_once_with(expected_key)
 
-    def test_document_query_cache_key_uniqueness(self, cache_with_mock, mock_redis_client):
+    def test_document_query_cache_key_uniqueness(
+        self, cache_with_mock, mock_redis_client
+    ):
         """Test that different document queries with similar hash prefixes generate unique cache keys."""
         import hashlib
 
@@ -175,8 +180,8 @@ class TestRedisCache:
         key2_called = call_args_list[1][0][0]
 
         assert key1_called != key2_called
-        assert key1_called == f"{CacheKeyPrefix.LEGACY_ANALYSIS_PREFIX.value}{simulated_hash1}"
-        assert key2_called == f"{CacheKeyPrefix.LEGACY_ANALYSIS_PREFIX.value}{simulated_hash2}"
+        assert key1_called == CacheNamespace.ANALYSIS.build_key(simulated_hash1)
+        assert key2_called == CacheNamespace.ANALYSIS.build_key(simulated_hash2)
 
     # ------------------------------------------------------------------
     # Issue #531 – hash-prefix boundary / collision tests
@@ -217,9 +222,9 @@ class TestRedisCache:
         full_hash_b = hashlib.sha256(query_b.encode("utf-8")).hexdigest()
 
         # The two queries must produce genuinely different full digests.
-        assert full_hash_a != full_hash_b, (
-            "Test pre-condition failed: the two queries must hash differently."
-        )
+        assert (
+            full_hash_a != full_hash_b
+        ), "Test pre-condition failed: the two queries must hash differently."
 
         # ── Truncation boundary: graft a shared 12-char prefix ──────────────
         # Simulate a caller that truncates to 12 chars – if those 12 chars
@@ -228,9 +233,9 @@ class TestRedisCache:
         truncated_key_a = shared_prefix  # 12-char key – "unique" part lost
         truncated_key_b = shared_prefix  # same!
 
-        assert truncated_key_a == truncated_key_b, (
-            "Test pre-condition: truncated keys must be equal to model collision."
-        )
+        assert (
+            truncated_key_a == truncated_key_b
+        ), "Test pre-condition: truncated keys must be equal to model collision."
 
         # ── Case 1: truncated keys DO collide ────────────────────────────────
         mock_redis_client.reset_mock()
@@ -241,9 +246,9 @@ class TestRedisCache:
         assert mock_redis_client.setex.call_count == 2
         colliding_key_a = mock_redis_client.setex.call_args_list[0][0][0]
         colliding_key_b = mock_redis_client.setex.call_args_list[1][0][0]
-        assert colliding_key_a == colliding_key_b, (
-            "Truncated keys should collide, demonstrating the risky pattern."
-        )
+        assert (
+            colliding_key_a == colliding_key_b
+        ), "Truncated keys should collide, demonstrating the risky pattern."
 
         # ── Case 2: full-digest keys do NOT collide ──────────────────────────
         mock_redis_client.reset_mock()
@@ -255,11 +260,11 @@ class TestRedisCache:
         safe_key_b = mock_redis_client.setex.call_args_list[1][0][0]
 
         # Full-digest keys must be unique – no collision.
-        assert safe_key_a != safe_key_b, (
-            "Full-digest keys must be distinct for different queries."
-        )
-        assert safe_key_a == f"{CacheKeyPrefix.LEGACY_ANALYSIS_PREFIX.value}{full_hash_a}"
-        assert safe_key_b == f"{CacheKeyPrefix.LEGACY_ANALYSIS_PREFIX.value}{full_hash_b}"
+        assert (
+            safe_key_a != safe_key_b
+        ), "Full-digest keys must be distinct for different queries."
+        assert safe_key_a == CacheNamespace.ANALYSIS.build_key(full_hash_a)
+        assert safe_key_b == CacheNamespace.ANALYSIS.build_key(full_hash_b)
 
     @pytest.mark.parametrize(
         "query_a, query_b",
@@ -302,9 +307,9 @@ class TestRedisCache:
         key_b = hashlib.sha256(query_b.encode("utf-8")).hexdigest()
 
         # Queries are intentionally different, so their digests must differ.
-        assert key_a != key_b, (
-            f"SHA-256 collision detected between:\n  '{query_a}'\n  '{query_b}'"
-        )
+        assert (
+            key_a != key_b
+        ), f"SHA-256 collision detected between:\n  '{query_a}'\n  '{query_b}'"
 
         mock_redis_client.reset_mock()
         cache_analysis_results(key_a, {"query": query_a})
@@ -316,12 +321,12 @@ class TestRedisCache:
         redis_key_b = mock_redis_client.setex.call_args_list[1][0][0]
 
         # Primary assertion: no collision
-        assert redis_key_a != redis_key_b, (
-            "Full-digest analysis keys must not collide for distinct queries."
-        )
+        assert (
+            redis_key_a != redis_key_b
+        ), "Full-digest analysis keys must not collide for distinct queries."
         # Secondary: keys must be well-formed with the 'analysis:' namespace
-        assert redis_key_a == f"{CacheKeyPrefix.LEGACY_ANALYSIS_PREFIX.value}{key_a}"
-        assert redis_key_b == f"{CacheKeyPrefix.LEGACY_ANALYSIS_PREFIX.value}{key_b}"
+        assert redis_key_a == CacheNamespace.ANALYSIS.build_key(key_a)
+        assert redis_key_b == CacheNamespace.ANALYSIS.build_key(key_b)
 
     def test_get_cache_singleton(self):
         """Test that get_cache returns the same instance."""
@@ -329,17 +334,54 @@ class TestRedisCache:
         cache2 = get_cache()
         assert cache1 is cache2
 
+    def test_get_instance_method_singleton(self):
+        """Test that RedisCache.get_instance() returns the singleton instance."""
+        instance1 = RedisCache.get_instance()
+        instance2 = RedisCache.get_instance()
+        instance3 = RedisCache()
+        assert instance1 is instance2
+        assert instance1 is instance3
+        assert instance1 is get_cache()
+
+    def test_redis_cache_lock_exists(self):
+        """Verify that RedisCache defines a threading.Lock for singleton thread safety."""
+        import threading
+        assert hasattr(RedisCache, "_lock")
+        assert isinstance(RedisCache._lock, type(threading.Lock()))
+
+    def test_redis_cache_concurrent_instantiation(self):
+        """Verify that concurrent threads calling RedisCache() / get_instance() receive the exact same singleton instance."""
+        import threading
+
+        instances = []
+
+        def worker():
+            for _ in range(50):
+                instances.append(RedisCache.get_instance())
+                instances.append(RedisCache())
+
+        threads = [threading.Thread(target=worker) for _ in range(20)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(instances) == 2000
+        first = instances[0]
+        assert all(inst is first for inst in instances)
+
     def test_redis_url_without_ssl_redis_scheme(self):
         """Test that redis:// URL (without SSL) is handled correctly."""
         test_url = "redis://localhost:6379/0"
 
-        with patch.object(redis, 'from_url') as mock_from_url:
+        with patch.object(redis, "from_url") as mock_from_url:
             mock_client = Mock()
             mock_client.ping.return_value = True
             mock_from_url.return_value = mock_client
 
             # Temporarily modify REDIS_URL
             import src.utils.redis_cache as redis_cache_module
+
             original_url = redis_cache_module.REDIS_URL
 
             try:
@@ -354,7 +396,7 @@ class TestRedisCache:
                     test_url,
                     password=None,
                     decode_responses=False,
-                    socket_connect_timeout=5
+                    socket_connect_timeout=5,
                 )
             finally:
                 redis_cache_module.REDIS_URL = original_url
@@ -363,13 +405,14 @@ class TestRedisCache:
         """Test that rediss:// URL (with SSL) is handled correctly."""
         test_url = "rediss://localhost:6380/0"
 
-        with patch.object(redis, 'from_url') as mock_from_url:
+        with patch.object(redis, "from_url") as mock_from_url:
             mock_client = Mock()
             mock_client.ping.return_value = True
             mock_from_url.return_value = mock_client
 
             # Temporarily modify REDIS_URL
             import src.utils.redis_cache as redis_cache_module
+
             original_url = redis_cache_module.REDIS_URL
 
             try:
@@ -385,7 +428,7 @@ class TestRedisCache:
                     test_url,
                     password=None,
                     decode_responses=False,
-                    socket_connect_timeout=5
+                    socket_connect_timeout=5,
                 )
             finally:
                 redis_cache_module.REDIS_URL = original_url
@@ -394,12 +437,13 @@ class TestRedisCache:
         """Test that rediss:// URL with password is handled correctly."""
         test_url = "rediss://user:password@redis.example.com:6380/1"
 
-        with patch.object(redis, 'from_url') as mock_from_url:
+        with patch.object(redis, "from_url") as mock_from_url:
             mock_client = Mock()
             mock_client.ping.return_value = True
             mock_from_url.return_value = mock_client
 
             import src.utils.redis_cache as redis_cache_module
+
             original_url = redis_cache_module.REDIS_URL
             original_password = redis_cache_module.REDIS_PASSWORD
 
@@ -415,7 +459,7 @@ class TestRedisCache:
                     test_url,
                     password=None,
                     decode_responses=False,
-                    socket_connect_timeout=5
+                    socket_connect_timeout=5,
                 )
             finally:
                 redis_cache_module.REDIS_URL = original_url
@@ -426,12 +470,13 @@ class TestRedisCache:
         # Use redis:// scheme to ensure SSL is disabled
         test_url = "redis://localhost:6379/0"
 
-        with patch.object(redis, 'from_url') as mock_from_url:
+        with patch.object(redis, "from_url") as mock_from_url:
             mock_client = Mock()
             mock_client.ping.return_value = True
             mock_from_url.return_value = mock_client
 
             import src.utils.redis_cache as redis_cache_module
+
             original_url = redis_cache_module.REDIS_URL
 
             try:
@@ -447,7 +492,9 @@ class TestRedisCache:
                 call_kwargs = mock_from_url.call_args.kwargs
                 # redis.from_url automatically sets ssl based on scheme
                 # For redis://, ssl defaults to False
-                assert 'ssl' not in call_kwargs or call_kwargs.get('ssl', False) is False
+                assert (
+                    "ssl" not in call_kwargs or call_kwargs.get("ssl", False) is False
+                )
             finally:
                 redis_cache_module.REDIS_URL = original_url
 
@@ -455,11 +502,12 @@ class TestRedisCache:
         """Test that connection failures print appropriate error messages."""
         test_url = "redis://unreachable-host:9999/0"
 
-        with patch.object(redis, 'from_url') as mock_from_url:
+        with patch.object(redis, "from_url") as mock_from_url:
             # Simulate connection failure
             mock_from_url.side_effect = redis.ConnectionError("Connection refused")
 
             import src.utils.redis_cache as redis_cache_module
+
             original_url = redis_cache_module.REDIS_URL
 
             try:
@@ -473,6 +521,7 @@ class TestRedisCache:
                 assert cache._client is None
             finally:
                 redis_cache_module.REDIS_URL = original_url
+
     def test_redis_failover_during_get(self):
         """Test graceful fallback when Redis fails during a get operation."""
         cache = RedisCache.__new__(RedisCache)
@@ -672,7 +721,11 @@ class TestRedisCache:
         mock_client = Mock()
 
         # Simulate Redis timeout
-        mock_client.get.side_effect = redis.TimeoutError("Request timed out") if hasattr(redis, 'TimeoutError') else RedisError("Timeout")
+        mock_client.get.side_effect = (
+            redis.TimeoutError("Request timed out")
+            if hasattr(redis, "TimeoutError")
+            else RedisError("Timeout")
+        )
         cache._client = mock_client
 
         # Should return None gracefully
@@ -702,6 +755,7 @@ class TestRedisCache:
         # 2. Write key & read back (should be a hit)
         cache_with_mock.set("existing_key", "hello")
         import pickle
+
         mock_redis_client.get.return_value = pickle.dumps("hello")
 
         val2 = cache_with_mock.get("existing_key")
@@ -710,6 +764,7 @@ class TestRedisCache:
         assert stats2["hits"] == 1
         assert stats2["misses"] == 1
         assert stats2["hit_ratio"] == 0.5
+
 
 class TestHitRateTracking:
     """Test hit/miss counter tracking and get_hit_rate() (Issue #714)."""
@@ -783,7 +838,7 @@ class TestHitRateTracking:
         cache_with_mock._client = None  # force fallback path
         cache_with_mock._fallback_cache["fb_key"] = ("fb_value", None)
 
-        cache_with_mock.get("fb_key")          # hit via fallback
+        cache_with_mock.get("fb_key")  # hit via fallback
         cache_with_mock.get("nonexistent_key")  # miss via fallback
 
         assert cache_with_mock.get_hit_rate() == 50.0
@@ -807,3 +862,366 @@ class TestHitRateTracking:
 
         assert cache_with_mock._hits == 1000
         assert cache_with_mock.get_hit_rate() == 100.0
+
+
+def test_redis_fallback_exceptions():
+    """Verify that when redis is missing, fallback classes are custom subclasses of Exception."""
+    import sys
+    from unittest.mock import patch
+
+    # We hide 'redis' module to simulate a missing redis package
+    with patch.dict(sys.modules, {"redis": None}):
+        # Reload redis_cache module to trigger the except ImportError block
+        import importlib
+
+        import src.utils.redis_cache as rc
+        importlib.reload(rc)
+
+        # Retrieve the fallback error classes
+        fallback_RedisError = rc.RedisError
+        fallback_RedisConnectionError = rc.RedisConnectionError
+        fallback_RedisTimeoutError = rc.RedisTimeoutError
+
+        # Assert they are distinct subclasses of Exception
+        assert issubclass(fallback_RedisError, Exception)
+        assert fallback_RedisError is not Exception
+
+        assert issubclass(fallback_RedisConnectionError, fallback_RedisError)
+        assert fallback_RedisConnectionError is not ConnectionError
+
+        assert issubclass(fallback_RedisTimeoutError, fallback_RedisError)
+        assert fallback_RedisTimeoutError is not TimeoutError
+
+        # Verify that catching fallback_RedisError does NOT catch a generic KeyError
+        try:
+            raise KeyError("test")
+        except fallback_RedisError:
+            pytest.fail("fallback_RedisError caught generic KeyError!")
+        except KeyError:
+            pass  # Expected
+
+    # Finally, reload the module one more time to restore it to the default environment state
+    import importlib
+
+    import src.utils.redis_cache as rc
+    importlib.reload(rc)
+
+
+
+# ── Issue #2320: REDIS_URL password injection ──────────────────
+
+
+class TestRedisUrlPasswordInjection:
+    """Tests for REDIS_URL construction with REDIS_PASSWORD (Issue #2320)."""
+
+    def test_redis_url_includes_password_when_set(self, monkeypatch):
+        """When REDIS_PASSWORD is set, it must be injected into the URL."""
+        import importlib
+
+        import src.utils.redis_cache as redis_cache_module
+
+        monkeypatch.setenv("REDIS_HOST", "myhost.example.com")
+        monkeypatch.setenv("REDIS_PORT", "6380")
+        monkeypatch.setenv("REDIS_DB", "2")
+        monkeypatch.setenv("REDIS_PASSWORD", "s3cr3tP@ss")
+        # Remove REDIS_URL so the fallback is used.
+        monkeypatch.delenv("REDIS_URL", raising=False)
+
+        importlib.reload(redis_cache_module)
+
+        assert redis_cache_module.REDIS_URL == (
+            "redis://:s3cr3tP@ss@myhost.example.com:6380/2"
+        )
+
+    def test_redis_url_omits_password_when_not_set(self, monkeypatch):
+        """When REDIS_PASSWORD is not set, the URL must not include credentials."""
+        import importlib
+
+        import src.utils.redis_cache as redis_cache_module
+
+        monkeypatch.setenv("REDIS_HOST", "localhost")
+        monkeypatch.setenv("REDIS_PORT", "6379")
+        monkeypatch.setenv("REDIS_DB", "0")
+        monkeypatch.delenv("REDIS_PASSWORD", raising=False)
+        monkeypatch.delenv("REDIS_URL", raising=False)
+
+        importlib.reload(redis_cache_module)
+
+        assert redis_cache_module.REDIS_URL == "redis://localhost:6379/0"
+        # No @ symbol means no credentials in the URL.
+        assert "@" not in redis_cache_module.REDIS_URL
+
+    def test_redis_url_respects_explicit_env_var(self, monkeypatch):
+        """If REDIS_URL is set explicitly in the env, it takes precedence."""
+        import importlib
+
+        import src.utils.redis_cache as redis_cache_module
+
+        monkeypatch.setenv("REDIS_HOST", "ignored.example.com")
+        monkeypatch.setenv("REDIS_PORT", "9999")
+        monkeypatch.setenv("REDIS_DB", "9")
+        monkeypatch.setenv("REDIS_PASSWORD", "ignored_password")
+        monkeypatch.setenv(
+            "REDIS_URL", "rediss://user:pass@explicit.redis.com:6380/3"
+        )
+
+        importlib.reload(redis_cache_module)
+
+        assert redis_cache_module.REDIS_URL == (
+            "rediss://user:pass@explicit.redis.com:6380/3"
+        )
+
+    def test_redis_url_with_special_chars_in_password(self, monkeypatch):
+        """Passwords with special characters are included as-is."""
+        import importlib
+
+        import src.utils.redis_cache as redis_cache_module
+
+        monkeypatch.setenv("REDIS_HOST", "redis.example.com")
+        monkeypatch.setenv("REDIS_PORT", "6379")
+        monkeypatch.setenv("REDIS_DB", "0")
+        monkeypatch.setenv("REDIS_PASSWORD", "p@ss:w0rd#123")
+        monkeypatch.delenv("REDIS_URL", raising=False)
+
+        importlib.reload(redis_cache_module)
+
+        # The password is inserted as-is (URL encoding is the caller's
+        # responsibility — redis-py handles it via from_url).
+        assert "p@ss:w0rd#123" in redis_cache_module.REDIS_URL
+        assert redis_cache_module.REDIS_URL.startswith("redis://:p@ss:w0rd#123@")
+
+    def test_redis_url_empty_password_falls_back_to_no_auth(self, monkeypatch):
+        """An empty REDIS_PASSWORD string should be treated as 'no password'."""
+        import importlib
+
+        import src.utils.redis_cache as redis_cache_module
+
+        monkeypatch.setenv("REDIS_HOST", "localhost")
+        monkeypatch.setenv("REDIS_PORT", "6379")
+        monkeypatch.setenv("REDIS_DB", "0")
+        monkeypatch.setenv("REDIS_PASSWORD", "")
+        monkeypatch.delenv("REDIS_URL", raising=False)
+
+        importlib.reload(redis_cache_module)
+
+        assert redis_cache_module.REDIS_URL == "redis://localhost:6379/0"
+        assert "@" not in redis_cache_module.REDIS_URL
+
+
+
+class TestPayloadCompressor:
+    """Unit tests for PayloadCompressor zlib compression and decompression logic."""
+
+    def test_compress_decompress_large_payload(self):
+        """Verify that large payloads exceeding compression threshold compress with magic header and decompress losslessly."""
+        threshold = PayloadCompressor.get_threshold()
+        large_payload = b"PlagiarismDetectorMockData" * ((threshold // 20) + 100)
+        assert len(large_payload) > threshold
+
+        compressed = PayloadCompressor.compress(large_payload)
+
+        assert compressed.startswith(PayloadCompressor.MAGIC_HEADER)
+        assert len(compressed) < len(large_payload)
+
+        decompressed = PayloadCompressor.decompress(compressed)
+        assert decompressed == large_payload
+        assert PayloadCompressor.decompress(PayloadCompressor.compress(large_payload)) == large_payload
+
+    def test_small_payload_remains_uncompressed(self):
+        """Verify that small payloads below compression threshold remain uncompressed and lack magic header."""
+        threshold = PayloadCompressor.get_threshold()
+        small_payload = b"small_mock_payload_below_threshold"
+        assert len(small_payload) < threshold
+
+        compressed = PayloadCompressor.compress(small_payload)
+
+        assert not compressed.startswith(PayloadCompressor.MAGIC_HEADER)
+        assert compressed == small_payload
+
+        decompressed = PayloadCompressor.decompress(compressed)
+        assert decompressed == small_payload
+
+    def test_compress_empty_byte_string(self):
+        """Verify that compressing an empty byte string returns empty bytes and does not fail."""
+        empty_data = b""
+        compressed = PayloadCompressor.compress(empty_data)
+        assert compressed == b""
+        assert not compressed.startswith(PayloadCompressor.MAGIC_HEADER)
+        assert PayloadCompressor.decompress(compressed) == b""
+
+    def test_compress_one_byte_smaller_than_threshold(self):
+        """Verify that compressing a payload exactly 1 byte smaller than the threshold remains uncompressed."""
+        threshold = PayloadCompressor.get_threshold()
+        payload = b"A" * (threshold - 1)
+        assert len(payload) == threshold - 1
+
+        compressed = PayloadCompressor.compress(payload)
+        assert not compressed.startswith(PayloadCompressor.MAGIC_HEADER)
+        assert compressed == payload
+        assert PayloadCompressor.decompress(compressed) == payload
+
+    def test_decompress_garbage_data_with_magic_header_safe_fallback(self):
+        """Verify that feeding garbage data prefixed with the magic header safely falls back to None."""
+        garbage_payload = PayloadCompressor.MAGIC_HEADER + b"this_is_not_valid_zlib_compressed_data_9999"
+        result = PayloadCompressor.decompress(garbage_payload)
+        assert result is None
+
+    def test_decompress_truncated_zlib_stream_safe_fallback(self):
+        """Verify that a truncated or invalid zlib stream with magic header returns None safely."""
+        # A partial/corrupted zlib payload
+        truncated_payload = PayloadCompressor.MAGIC_HEADER + b"\x78\x9c\x01\x00\x00"
+        result = PayloadCompressor.decompress(truncated_payload)
+        assert result is None
+
+    def test_decompress_non_bytes_passthrough(self):
+        """Verify that passing non-bytes to decompress returns the original input safely."""
+        assert PayloadCompressor.decompress(None) is None
+        assert PayloadCompressor.decompress("string_input") == "string_input"
+        assert PayloadCompressor.decompress(12345) == 12345
+
+    def test_class_level_attributes_default(self):
+        """Verify default class-level attributes initialized on module load."""
+        import zlib
+        assert PayloadCompressor.COMPRESSION_LEVEL == zlib.Z_BEST_SPEED
+        assert PayloadCompressor.COMPRESSION_THRESHOLD_BYTES == 64 * 1024
+        assert PayloadCompressor.get_threshold() == 64 * 1024
+
+    def test_compression_level_env_int(self, monkeypatch):
+        """Verify integer REDIS_COMPRESSION_LEVEL is parsed into COMPRESSION_LEVEL."""
+        import importlib
+
+        import src.utils.redis_cache as rc
+
+        monkeypatch.setenv("REDIS_COMPRESSION_LEVEL", "9")
+        importlib.reload(rc)
+        try:
+            assert rc.PayloadCompressor.COMPRESSION_LEVEL == 9
+        finally:
+            monkeypatch.delenv("REDIS_COMPRESSION_LEVEL", raising=False)
+            importlib.reload(rc)
+
+    def test_compression_level_env_named(self, monkeypatch):
+        """Verify named constant REDIS_COMPRESSION_LEVEL is parsed into COMPRESSION_LEVEL."""
+        import importlib
+        import zlib
+
+        import src.utils.redis_cache as rc
+
+        monkeypatch.setenv("REDIS_COMPRESSION_LEVEL", "Z_BEST_COMPRESSION")
+        importlib.reload(rc)
+        try:
+            assert rc.PayloadCompressor.COMPRESSION_LEVEL == zlib.Z_BEST_COMPRESSION
+        finally:
+            monkeypatch.delenv("REDIS_COMPRESSION_LEVEL", raising=False)
+            importlib.reload(rc)
+
+    def test_compression_level_env_invalid(self, monkeypatch):
+        """Verify invalid REDIS_COMPRESSION_LEVEL falls back to Z_BEST_SPEED."""
+        import importlib
+        import zlib
+
+        import src.utils.redis_cache as rc
+
+        monkeypatch.setenv("REDIS_COMPRESSION_LEVEL", "INVALID_OPTION")
+        importlib.reload(rc)
+        try:
+            assert rc.PayloadCompressor.COMPRESSION_LEVEL == zlib.Z_BEST_SPEED
+        finally:
+            monkeypatch.delenv("REDIS_COMPRESSION_LEVEL", raising=False)
+            importlib.reload(rc)
+
+    def test_compression_threshold_env_custom(self, monkeypatch):
+        """Verify custom REDIS_COMPRESSION_THRESHOLD is parsed into COMPRESSION_THRESHOLD_BYTES."""
+        import importlib
+
+        import src.utils.redis_cache as rc
+
+        monkeypatch.setenv("REDIS_COMPRESSION_THRESHOLD", "2048")
+        importlib.reload(rc)
+        try:
+            assert rc.PayloadCompressor.COMPRESSION_THRESHOLD_BYTES == 2048
+            assert rc.PayloadCompressor.get_threshold() == 2048
+        finally:
+            monkeypatch.delenv("REDIS_COMPRESSION_THRESHOLD", raising=False)
+            importlib.reload(rc)
+
+    def test_compression_threshold_env_invalid(self, monkeypatch):
+        """Verify invalid REDIS_COMPRESSION_THRESHOLD falls back to default 64 KiB."""
+        import importlib
+
+        import src.utils.redis_cache as rc
+
+        monkeypatch.setenv("REDIS_COMPRESSION_THRESHOLD", "not_a_number")
+        importlib.reload(rc)
+        try:
+            assert rc.PayloadCompressor.COMPRESSION_THRESHOLD_BYTES == 64 * 1024
+            assert rc.PayloadCompressor.get_threshold() == 64 * 1024
+        finally:
+            monkeypatch.delenv("REDIS_COMPRESSION_THRESHOLD", raising=False)
+            importlib.reload(rc)
+
+    def test_compress_does_not_call_os_getenv(self):
+        """Verify that compress() does not perform any os.getenv lookups during execution."""
+        threshold = PayloadCompressor.COMPRESSION_THRESHOLD_BYTES
+        large_payload = b"PlagiarismDetectorTestData" * ((threshold // 20) + 100)
+
+        with patch("os.getenv") as mock_getenv:
+            compressed = PayloadCompressor.compress(large_payload)
+            assert compressed.startswith(PayloadCompressor.MAGIC_HEADER)
+            mock_getenv.assert_not_called()
+
+
+
+def test_payload_compressor_exact_threshold_boundary():
+    """Verify compression boundary behavior at exactly COMPRESSION_THRESHOLD_BYTES (64 * 1024 bytes).
+
+    Protects against off-by-one errors (incorrect >= vs > threshold evaluation).
+    Payloads of size >= COMPRESSION_THRESHOLD_BYTES must be compressed with MAGIC_HEADER,
+    while payloads of size COMPRESSION_THRESHOLD_BYTES - 1 must remain uncompressed.
+    """
+    from src.utils.redis_cache import PayloadCompressor
+
+    threshold = PayloadCompressor.COMPRESSION_THRESHOLD_BYTES
+    assert threshold == 64 * 1024
+
+    # 1. Payload exactly at the threshold (64 * 1024 bytes) MUST be compressed
+    exact_threshold_data = b"B" * threshold
+    assert len(exact_threshold_data) == 64 * 1024
+
+    compressed_exact = PayloadCompressor.compress(exact_threshold_data)
+    assert compressed_exact.startswith(PayloadCompressor.MAGIC_HEADER)
+    assert len(compressed_exact) < len(exact_threshold_data)
+    assert PayloadCompressor.decompress(compressed_exact) == exact_threshold_data
+
+    # 2. Payload 1 byte below the threshold (64 * 1024 - 1 bytes) MUST remain uncompressed
+    below_threshold_data = b"B" * (threshold - 1)
+    assert len(below_threshold_data) == (64 * 1024 - 1)
+
+    compressed_below = PayloadCompressor.compress(below_threshold_data)
+    assert not compressed_below.startswith(PayloadCompressor.MAGIC_HEADER)
+    assert compressed_below == below_threshold_data
+    assert PayloadCompressor.decompress(compressed_below) == below_threshold_data
+
+
+def test_redis_password_special_characters_escaped(monkeypatch):
+    """Verify REDIS_PASSWORD with special characters (@, /, #, :) is safely URL-encoded (Issue #2799)."""
+    import importlib
+    import urllib.parse
+
+    import src.utils.redis_cache
+
+    monkeypatch.setenv("REDIS_PASSWORD", "p@ss/word#123:secret")
+    monkeypatch.setenv("REDIS_HOST", "localhost")
+    monkeypatch.setenv("REDIS_PORT", "6379")
+    monkeypatch.setenv("REDIS_DB", "0")
+    monkeypatch.delenv("REDIS_URL", raising=False)
+
+    importlib.reload(src.utils.redis_cache)
+
+    expected_encoded = urllib.parse.quote_plus("p@ss/word#123:secret")
+    assert expected_encoded in src.utils.redis_cache.REDIS_URL
+    assert f":{expected_encoded}@localhost:6379/0" in src.utils.redis_cache.REDIS_URL
+
+
+
+

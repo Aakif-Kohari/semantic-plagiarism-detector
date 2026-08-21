@@ -11,9 +11,10 @@ Recent Additions (Issue #1958):
 """
 
 import logging
-from typing import List, Dict, Optional
-import plotly.graph_objects as go
+from typing import Dict, List, Optional
+
 import networkx as nx
+import plotly.graph_objects as go
 
 logger = logging.getLogger(__name__)
 

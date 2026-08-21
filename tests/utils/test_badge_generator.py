@@ -2,9 +2,12 @@ import pytest
 
 from src.utils.badge_generator import (
     DEFAULT_BADGE_COLOR,
+    generate_badge_pdf,
+    generate_badge_png,
     generate_badge_svg,
     validate_hex_color,
 )
+from src.utils.redis_cache import CacheNamespace, RedisCache
 
 
 @pytest.mark.parametrize(
@@ -42,3 +45,77 @@ def test_generate_badge_svg_default_font_family():
 def test_generate_badge_svg_custom_font_family():
     svg = generate_badge_svg(student_name="Alex", font_family="Arial, sans-serif")
     assert 'font-family="Arial, sans-serif"' in svg
+
+
+def test_generate_badge_svg_default_font_size():
+    svg = generate_badge_svg(student_name="Alex")
+    assert 'font-size="11"' in svg
+
+
+def test_generate_badge_svg_custom_font_size():
+    svg = generate_badge_svg(student_name="Alex", font_size=20)
+    assert 'font-size="20"' in svg
+
+
+def test_generate_badge_png_and_caching():
+    """Test generating PNG badge and caching in Redis."""
+    cache = RedisCache.get_instance()
+    student_id = "test_student_123"
+    date_str = "2026-08-20"
+    cache_key = CacheNamespace.BADGES.build_key("png", student_id, date_str)
+
+    # Invalidate cache if present
+    cache.delete(cache_key)
+
+    buf1 = generate_badge_png(
+        student_name="Test Student",
+        date=date_str,
+        student_id=student_id,
+    )
+    val1 = buf1.getvalue()
+    assert val1.startswith(b"\x89PNG")
+
+    # Verify cached in Redis
+    cached_val = cache.get(cache_key)
+    assert cached_val is not None
+    assert cached_val == val1
+
+    # Second call hits cache
+    buf2 = generate_badge_png(
+        student_name="Test Student",
+        date=date_str,
+        student_id=student_id,
+    )
+    assert buf2.getvalue() == val1
+
+
+def test_generate_badge_pdf_and_caching():
+    """Test generating PDF certificate and caching in Redis."""
+    cache = RedisCache.get_instance()
+    student_id = "test_student_456"
+    date_str = "2026-08-20"
+    cache_key = CacheNamespace.BADGES.build_key("pdf", student_id, date_str)
+
+    # Invalidate cache if present
+    cache.delete(cache_key)
+
+    buf1 = generate_badge_pdf(
+        student_name="Test Student",
+        date=date_str,
+        student_id=student_id,
+    )
+    val1 = buf1.getvalue()
+    assert val1.startswith(b"%PDF")
+
+    # Verify cached in Redis
+    cached_val = cache.get(cache_key)
+    assert cached_val is not None
+    assert cached_val == val1
+
+    # Second call hits cache
+    buf2 = generate_badge_pdf(
+        student_name="Test Student",
+        date=date_str,
+        student_id=student_id,
+    )
+    assert buf2.getvalue() == val1

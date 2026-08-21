@@ -1,4 +1,5 @@
 import pytest
+
 from src.core.lexical_similarity import (
     calculate_lexical_similarity,
     compute_tfidf_lexical_similarity,
@@ -163,6 +164,7 @@ def test_compute_tfidf_lexical_similarity_empty_inputs():
 
 from src.core.lexical_similarity import compute_char_ngram_similarity
 
+
 class TestComputeCharNgramSimilarity:
     """Comprehensive test suite for character-level sliding n-gram Jaccard similarity."""
 
@@ -213,7 +215,9 @@ class TestComputeCharNgramSimilarity:
     def test_non_string_input_returns_zero(self):
         """Non-string types (int, list) must return 0.0 without raising TypeError."""
         assert compute_char_ngram_similarity(12345, "text", n=5) == 0.0
-        assert compute_char_ngram_similarity("text", ["list", "of", "words"], n=5) == 0.0
+        assert (
+            compute_char_ngram_similarity("text", ["list", "of", "words"], n=5) == 0.0
+        )
 
     def test_case_insensitivity(self):
         """Character n-grams should be case-insensitive for plagiarism detection."""
@@ -293,4 +297,37 @@ class TestComputeCharNgramSimilarity:
         """The return type must strictly be a Python float."""
         score = compute_char_ngram_similarity("test", "test", n=2)
         assert isinstance(score, float)
+
+
+def test_tokenize_optimization_caching():
+    """Verify that _get_base_tokens caches results and avoids redundant tokenization."""
+    from src.core.lexical_similarity import _get_base_tokens
+
+    test_text = "This is a unique string that will be tokenized once."
+    # Clear cache before starting
+    _get_base_tokens.cache_clear()
+
+    # Call it first time
+    tokens1 = _get_base_tokens(test_text)
+    # Call it second time
+    tokens2 = _get_base_tokens(test_text)
+
+    assert tokens1 == tokens2
+
+    # Check cache info
+    info = _get_base_tokens.cache_info()
+    assert info.hits >= 1
+
+
+def test_tokenize_optimized_punctuation_handling():
+    """Verify that our optimized tokenization handles punctuation correctly (ignores it)."""
+    from src.core.lexical_similarity import tokenize
+    text = "Machine learning! Natural language processing..."
+    tokens = tokenize(text)
+    assert "machine" in tokens
+    assert "learning" in tokens
+    assert "natural" in tokens
+    assert "processing" in tokens
+    assert "!" not in tokens
+    assert "..." not in tokens
 

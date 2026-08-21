@@ -10,7 +10,6 @@ import subprocess
 import sys
 import tracemalloc
 
-
 MEMORY_DELTA_LIMIT_MB = 10.0
 
 

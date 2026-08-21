@@ -11,12 +11,16 @@ import os
 import time
 import uuid
 from collections.abc import Iterable
+from contextlib import asynccontextmanager
 
 import streamlit as st
 from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
+
+from src.core.scheduler import start_scheduler, stop_scheduler
+from src.utils.tracing import _tracer_provider, init_tracer_provider
 
 DEFAULT_MAX_REQUEST_BYTES = 52_428_800
 JSON_API_PREFIX = "/api/"
@@ -48,26 +52,68 @@ class ClientIPLoggingMiddleware(BaseHTTPMiddleware):
         return response
 
 
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Add anti-clickjacking and security headers to every HTTP response."""
+class SecurityHeadersMiddleware:
+    """Middleware that adds security HTTP headers to all responses.
 
-    async def dispatch(self, request, call_next):
-        response = await call_next(request)
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Content-Security-Policy"] = (
-            "frame-ancestors 'none'; default-src 'self';"
+    Adds headers to defend against common web vulnerabilities:
+    - X-Content-Type-Options: Prevents MIME type sniffing
+    - X-Frame-Options: Prevents clickjacking via iframes
+    - X-XSS-Protection: Enables browser XSS filters
+    - Referrer-Policy: Controls referrer information leakage
+    - Content-Security-Policy: Restricts resource loading (Issue #2014)
+
+    The Content-Security-Policy header can be configured via the CSP_POLICY
+    environment variable. If not set, a restrictive default policy is used
+    that only allows resources from the same origin.
+    """
+
+    def __init__(self, app):
+        self.app = app
+        # Read CSP policy from environment, with secure default
+        # Default policy: only allow resources from same origin
+        # 'unsafe-inline' is needed for Swagger UI inline scripts
+        self.csp_policy = os.getenv(
+            "CSP_POLICY",
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'",
         )
-        enable_hsts = os.getenv("ENABLE_HSTS", "").strip().lower() in (
-            "true",
-            "1",
-            "yes",
-            "on",
-        )
-        if enable_hsts:
-            response.headers["Strict-Transport-Security"] = (
-                "max-age=31536000; includeSubDomains"
-            )
-        return response
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_security_headers(message):
+            if message["type"] == "http.response.start":
+                headers = dict(message.get("headers", []))
+
+                # Add security headers
+                headers[b"x-content-type-options"] = b"nosniff"
+                headers[b"x-frame-options"] = b"DENY"
+                headers[b"x-xss-protection"] = b"1; mode=block"
+                headers[b"referrer-policy"] = b"strict-origin-when-cross-origin"
+
+                # Add Content-Security-Policy header (Issue #2014)
+                # This restricts where resources can be loaded from, preventing XSS
+                headers[b"content-security-policy"] = self.csp_policy.encode("utf-8")
+
+                # HSTS support
+                enable_hsts = os.getenv("ENABLE_HSTS", "").strip().lower() in (
+                    "true",
+                    "1",
+                    "yes",
+                    "on",
+                )
+                if enable_hsts:
+                    headers[b"strict-transport-security"] = (
+                        b"max-age=31536000; includeSubDomains"
+                    )
+
+                # Convert back to list of tuples
+                message["headers"] = [(k, v) for k, v in headers.items()]
+
+            await send(message)
+
+        await self.app(scope, receive, send_with_security_headers)
 
 
 class ContentLengthLimitMiddleware(BaseHTTPMiddleware):
@@ -290,6 +336,26 @@ class TokenBucketRateLimiter(BaseHTTPMiddleware):
         )
 
 
+@asynccontextmanager
+async def _lifespan(app):
+    """Start/stop the scheduled plagiarism-rescan background job and OpenTelemetry provider.
+
+    Wraps ``src.core.scheduler.RescanScheduler``, which re-checks recently
+    uploaded documents against the full corpus on a configurable interval
+    so cross-submission plagiarism that only becomes apparent once a later
+    document is uploaded still gets caught (and reviewers get notified via
+    the existing webhook layer).
+    """
+    init_tracer_provider()
+    await start_scheduler()
+    try:
+        yield
+    finally:
+        await stop_scheduler()
+        if _tracer_provider and hasattr(_tracer_provider, "shutdown"):
+            _tracer_provider.shutdown()
+
+
 app = st.App(
     "app/streamlit_app.py",
     middleware=[
@@ -300,4 +366,5 @@ app = st.App(
         Middleware(JSONContentTypeMiddleware),
         Middleware(TokenBucketRateLimiter),
     ],
+    lifespan=_lifespan,
 )

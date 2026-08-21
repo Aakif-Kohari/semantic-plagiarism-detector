@@ -1,22 +1,23 @@
 """Tests for src/utils/pdf_report.py PDF plagiarism report generation."""
+
 from __future__ import annotations
+
 import hashlib
 import json
 import os
 from datetime import datetime
 from io import BytesIO
-from pypdf import PdfReader
+from unittest.mock import patch
 
 import pytest
+from pypdf import PdfReader
 
 from src.utils.pdf_report import (
+    break_long_urls,
     generate_plagiarism_report,
     get_similarity_color,
     wrap_text,
 )
-from unittest.mock import patch
-
-
 
 FIXTURE_DIR = os.path.join(os.path.dirname(__file__), "..", "fixtures")
 GOLDEN_PATH = os.path.join(FIXTURE_DIR, "pdf_report_golden.hash")
@@ -55,20 +56,21 @@ def _generate_snapshot_pdf():
         mock_dt.strftime = datetime.strftime
         return generate_plagiarism_report(**SNAPSHOT_INPUTS)
 
-# Test utilities for golden fixture comparison
-from tests.utils import FIXTURES_DIR, compare_pdf_bytes, assert_pdf_matches
-
-# Test utilities for golden fixture comparison
 
 # Text stats utilities
 from src.utils.text_stats import (
-    count_words,
+    compute_text_stats,
     count_sentences,
     count_unique_words,
-    get_unique_word_ratio,
-    compute_text_stats,
+    count_words,
     format_stats_for_pdf,
+    get_unique_word_ratio,
 )
+
+# Test utilities for golden fixture comparison
+from tests.utils import FIXTURES_DIR, assert_pdf_matches, compare_pdf_bytes
+
+# Test utilities for golden fixture comparison
 
 
 def _read_text(pdf_bytes: bytes) -> str:
@@ -111,28 +113,17 @@ def test_pdf_matches_golden_fixture():
         overall_similarity=0.934,
         threshold=0.59,
         top_pairs=[
-            (
-                "This is the first paragraph from document A that contains some text about the subject being discussed.",
-                "This is the first paragraph from document B that contains similar text about the same subject being discussed.",
-                0.96,
-            ),
-            (
-                "The second paragraph discusses the methodology used in the research study and includes various statistical analyses.",
-                "Methodology section describes the research approach and includes statistical analysis similar to the previous paragraph.",
-                0.87,
-            ),
-            (
-                "In the conclusion, the authors summarize their findings and suggest areas for future research.",
-                "The authors conclude by summarizing their key findings and identifying potential areas for further investigation.",
-                0.79,
-            ),
-            (
-                "The introduction provides background information on the topic and establishes the context for the study.",
-                "Introduction section gives background on the topic and sets up the research context.",
-                0.72,
-            ),
+            ("First matching paragraph.", "Second matching paragraph.", 0.96),
         ],
+        incident_id="INC-QR-12345",
     )
+    pdf_bytes = pdf_buffer.getvalue()
+
+    assert pdf_bytes.startswith(b"%PDF")
+    assert len(pdf_bytes) > 1000
+
+    text = _read_text(pdf_bytes)
+    assert "student_a.pdf" in text
 
     assert_pdf_matches(pdf_buffer.getvalue(), golden_path)
 
@@ -214,7 +205,7 @@ def test_get_unique_word_ratio():
     assert get_unique_word_ratio("") == 0.0
     assert get_unique_word_ratio("hello") == 1.0
     assert get_unique_word_ratio("hello world") == 1.0
-    assert get_unique_word_ratio("hello hello world") == pytest.approx(2/3, rel=0.01)
+    assert get_unique_word_ratio("hello hello world") == pytest.approx(2 / 3, rel=0.01)
 
 
 def test_compute_text_stats():
@@ -222,28 +213,28 @@ def test_compute_text_stats():
     text = "Hello world. Hello there. The world is beautiful."
     stats = compute_text_stats(text)
 
-    assert stats['word_count'] > 0
-    assert stats['sentence_count'] > 0
-    assert stats['unique_word_count'] > 0
-    assert 0.0 <= stats['unique_word_ratio'] <= 1.0
+    assert stats["word_count"] > 0
+    assert stats["sentence_count"] > 0
+    assert stats["unique_word_count"] > 0
+    assert 0.0 <= stats["unique_word_ratio"] <= 1.0
 
 
 def test_format_stats_for_pdf():
     """Test statistics formatting for PDF table."""
     stats = {
-        'word_count': 150,
-        'sentence_count': 12,
-        'unique_word_count': 100,
-        'unique_word_ratio': 0.67,
+        "word_count": 150,
+        "sentence_count": 12,
+        "unique_word_count": 100,
+        "unique_word_ratio": 0.67,
     }
 
     rows = format_stats_for_pdf(stats)
 
     assert len(rows) == 4
-    assert rows[0] == ['Word Count', '150']
-    assert rows[1] == ['Sentence Count', '12']
-    assert rows[2] == ['Unique Words', '100']
-    assert rows[3] == ['Unique Word Ratio', '67.00%']
+    assert rows[0] == ["Word Count", "150"]
+    assert rows[1] == ["Sentence Count", "12"]
+    assert rows[2] == ["Unique Words", "100"]
+    assert rows[3] == ["Unique Word Ratio", "67.00%"]
 
 
 def test_generate_plagiarism_report_with_text_stats():
@@ -257,8 +248,11 @@ def test_generate_plagiarism_report_with_text_stats():
         overall_similarity=0.934,
         threshold=0.59,
         top_pairs=[
-            ("First matching paragraph from document A.",
-             "First matching paragraph from document B.", 0.96),
+            (
+                "First matching paragraph from document A.",
+                "First matching paragraph from document B.",
+                0.96,
+            ),
         ],
         doc_a_text=sample_text_a,
         doc_b_text=sample_text_b,
@@ -497,16 +491,20 @@ def test_generate_plagiarism_report_dark_mode():
 def test_load_branding_logo_returns_bytes_for_valid_path(tmp_path):
     """load_branding_logo returns bytes when logo_path points to a real file."""
     import json
+
     from src.utils.pdf_report import load_branding_logo
 
     logo_file = tmp_path / "logo.png"
     logo_file.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)  # minimal PNG header
 
     cfg = {"logo_path": str(logo_file)}
-    with patch("builtins.open", side_effect=[
-        __import__("io").StringIO(json.dumps(cfg)),
-        open(str(logo_file), "rb"),
-    ]):
+    with patch(
+        "builtins.open",
+        side_effect=[
+            __import__("io").StringIO(json.dumps(cfg)),
+            open(str(logo_file), "rb"),
+        ],
+    ):
         pass  # use monkeypatch approach below
 
     # Directly patch _BRANDING_CONFIG_PATH via monkeypatch on the module
@@ -514,6 +512,7 @@ def test_load_branding_logo_returns_bytes_for_valid_path(tmp_path):
     config_file.write_text(json.dumps({"logo_path": str(logo_file)}))
 
     import src.utils.pdf_report as pdf_mod
+
     original = pdf_mod._BRANDING_CONFIG_PATH
     pdf_mod._BRANDING_CONFIG_PATH = str(config_file)
     try:
@@ -528,12 +527,14 @@ def test_load_branding_logo_returns_bytes_for_valid_path(tmp_path):
 def test_load_branding_logo_returns_none_for_missing_path(tmp_path):
     """load_branding_logo returns None when logo_path is empty."""
     import json
+
     from src.utils.pdf_report import load_branding_logo
 
     config_file = tmp_path / "branding_config.json"
     config_file.write_text(json.dumps({"logo_path": ""}))
 
     import src.utils.pdf_report as pdf_mod
+
     original = pdf_mod._BRANDING_CONFIG_PATH
     pdf_mod._BRANDING_CONFIG_PATH = str(config_file)
     try:
@@ -545,12 +546,14 @@ def test_load_branding_logo_returns_none_for_missing_path(tmp_path):
 def test_load_branding_logo_returns_none_for_invalid_path(tmp_path):
     """load_branding_logo returns None when logo_path points to a non-existent file."""
     import json
+
     from src.utils.pdf_report import load_branding_logo
 
     config_file = tmp_path / "branding_config.json"
     config_file.write_text(json.dumps({"logo_path": "/nonexistent/logo.png"}))
 
     import src.utils.pdf_report as pdf_mod
+
     original = pdf_mod._BRANDING_CONFIG_PATH
     pdf_mod._BRANDING_CONFIG_PATH = str(config_file)
     try:
@@ -561,8 +564,9 @@ def test_load_branding_logo_returns_none_for_invalid_path(tmp_path):
 
 def test_pdf_generation_succeeds_with_custom_logo(tmp_path):
     """PDF generation succeeds when load_branding_logo returns valid image bytes."""
-    from PIL import Image
     import io
+
+    from PIL import Image
 
     img = Image.new("RGB", (200, 80), color=(30, 58, 138))
     buf = io.BytesIO()
@@ -582,7 +586,9 @@ def test_pdf_generation_succeeds_with_custom_logo(tmp_path):
     assert _read_text(pdf_bytes) is not None
 
 
-def test_generate_plagiarism_report_uses_configured_logo_when_no_bytes_are_provided(monkeypatch):
+def test_generate_plagiarism_report_uses_configured_logo_when_no_bytes_are_provided(
+    monkeypatch,
+):
     """PDF generation should fall back to the branding helper when no logo bytes are passed."""
     import src.utils.pdf_report as pdf_mod
 
@@ -661,3 +667,42 @@ def test_pdf_report_headers_french():
     assert "Nom du Document" in text
     assert "Score de Similarit" in text
     assert "Seuil de D" in text
+
+
+def test_break_long_urls():
+    """Test that break_long_urls inserts zero-width spaces into long URLs."""
+    url = "https://example.com/very/long/path/with/parameters?key=value&other=123#section"
+    broken = break_long_urls(url)
+    assert "\u200b" in broken
+    assert broken.replace("\u200b", "") == url
+
+    # Test plain text with URL embedded
+    text = "References: Please consult https://example.com/very/long/url for details."
+    broken_text = break_long_urls(text)
+    assert "\u200b" in broken_text
+    assert broken_text.replace("\u200b", "") == text
+
+    # Test non-string / empty string
+    assert break_long_urls("") == ""
+    assert break_long_urls(None) is None
+
+
+def test_pdf_report_with_long_url_generates_successfully():
+    """Test generating a PDF report containing long URLs in top_pairs without layout error."""
+    long_url_paragraph = (
+        "According to research found at "
+        "https://academic-repository.example.edu/department/computer-science/publications/2026/advanced-semantic-similarity-and-plagiarism-detection-benchmarks-and-algorithms.html?token=abcdef1234567890&session=xyz987654321 "
+        "the plagiarism score was high."
+    )
+    pdf_buffer = generate_plagiarism_report(
+        doc_a="paper_a.pdf",
+        doc_b="paper_b.pdf",
+        overall_similarity=0.92,
+        threshold=0.59,
+        top_pairs=[(long_url_paragraph, long_url_paragraph, 0.95)],
+    )
+    pdf_bytes = pdf_buffer.getvalue()
+    assert pdf_bytes.startswith(b"%PDF")
+    text = _read_text(pdf_bytes)
+    assert "paper_a.pdf" in text
+

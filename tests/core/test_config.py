@@ -1,13 +1,16 @@
-import os
-import json
-import tempfile
 import importlib.util
+import json
+import os
+import tempfile
 
 # Load config module directly without triggering package __init__ files
-config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'core', 'config.py')
+config_path = os.path.join(
+    os.path.dirname(__file__), "..", "..", "src", "core", "config.py"
+)
 spec = importlib.util.spec_from_file_location("config_module", config_path)
 config_module = importlib.util.module_from_spec(spec)
 import sys
+
 sys.modules["config_module"] = config_module
 spec.loader.exec_module(config_module)
 
@@ -67,12 +70,9 @@ def test_branding_config_from_dict_invalid_logo_type():
 
 def test_load_valid_config():
     """Test loading a valid configuration file."""
-    valid_config = {
-        "brand_color": "#2ecc71",
-        "logo_path": "/custom/logo.png"
-    }
+    valid_config = {"brand_color": "#2ecc71", "logo_path": "/custom/logo.png"}
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
         json.dump(valid_config, f)
         temp_path = f.name
 
@@ -86,7 +86,7 @@ def test_load_valid_config():
 
 def test_load_invalid_json():
     """Test loading invalid JSON falls back to defaults."""
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
         f.write("{ invalid json }")
         temp_path = f.name
 
@@ -100,12 +100,9 @@ def test_load_invalid_json():
 
 def test_load_invalid_schema():
     """Test loading invalid schema falls back to defaults."""
-    invalid_schema_config = {
-        "brand_color": "not-a-color",
-        "logo_path": 12345
-    }
+    invalid_schema_config = {"brand_color": "not-a-color", "logo_path": 12345}
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
         json.dump(invalid_schema_config, f)
         temp_path = f.name
 
@@ -126,7 +123,7 @@ def test_load_missing_file():
 
 def test_load_empty_json():
     """Test loading empty JSON falls back to defaults."""
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
         json.dump({}, f)
         temp_path = f.name
 
@@ -140,7 +137,9 @@ def test_load_empty_json():
 
 def test_actual_branding_config():
     """Test loading the actual branding_config.json from the project."""
-    config_path = os.path.join(os.path.dirname(__file__), "..", "..", "branding_config.json")
+    config_path = os.path.join(
+        os.path.dirname(__file__), "..", "..", "branding_config.json"
+    )
 
     if os.path.exists(config_path):
         config = load_branding_config(config_path)
@@ -175,5 +174,44 @@ def test_get_allowed_webhook_domains(monkeypatch):
     assert get_allowed_webhook_domains() == ["hooks.slack.com"]
 
     # Multiple domains with spaces and mixed case
-    monkeypatch.setenv("ALLOWED_WEBHOOK_DOMAINS", " hooks.slack.com, Discord.com , EXAMPLE.org ")
-    assert get_allowed_webhook_domains() == ["hooks.slack.com", "discord.com", "example.org"]
+    monkeypatch.setenv(
+        "ALLOWED_WEBHOOK_DOMAINS", " hooks.slack.com, Discord.com , EXAMPLE.org "
+    )
+    assert get_allowed_webhook_domains() == [
+        "hooks.slack.com",
+        "discord.com",
+        "example.org",
+    ]
+def test_load_branding_config_missing_file_fallback():
+    """Test that load_branding_config returns default BrandingConfig when the JSON file is missing."""
+    from src.core.config import BrandingConfig, load_branding_config
+    
+    # Call with a non-existent file path
+    result = load_branding_config("nonexistent_path_123.json")
+    
+    # Assert no FileNotFoundError is raised (handled implicitly by successful execution) and returns defaults
+    assert result == BrandingConfig()
+
+
+def test_get_valid_roles_default_and_override(monkeypatch):
+    """Test get_valid_roles returns defaults and supports ALLOWED_USER_ROLES override."""
+    from src.core.app_config import get_valid_roles
+
+    # Unset env -> returns default {"admin", "teacher"}
+    monkeypatch.delenv("ALLOWED_USER_ROLES", raising=False)
+    assert get_valid_roles() == {"admin", "teacher"}
+
+    # Empty string -> falls back to default
+    monkeypatch.setenv("ALLOWED_USER_ROLES", "   ")
+    assert get_valid_roles() == {"admin", "teacher"}
+
+    # Overridden with custom roles
+    monkeypatch.setenv(
+        "ALLOWED_USER_ROLES", "admin, teacher, teaching_assistant, STUDENT"
+    )
+    assert get_valid_roles() == {
+        "admin",
+        "teacher",
+        "teaching_assistant",
+        "student",
+    }

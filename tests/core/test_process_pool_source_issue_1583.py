@@ -1,10 +1,7 @@
 from pathlib import Path
 
-
 SOURCE = Path("src/core/document_parser.py")
-TESTS = Path(
-    "tests/core/test_document_parser_process_pool_issue_1583.py"
-)
+TESTS = Path("tests/core/test_document_parser_process_pool_issue_1583.py")
 
 
 def test_bulk_helper_accepts_worker_limit():
@@ -26,7 +23,4 @@ def test_unit_test_verifies_process_pool_bounds():
     source = TESTS.read_text(encoding="utf-8")
 
     assert "test_process_pool_is_capped_by_cpu_count" in source
-    assert (
-        "RecordingExecutor.recorded_max_workers == 4"
-        in source
-    )
+    assert "RecordingExecutor.recorded_max_workers == 4" in source

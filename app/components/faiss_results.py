@@ -14,7 +14,6 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
-
 RESULT_COLUMNS: list[str] = [
     "Rank",
     "Target Document",
@@ -128,6 +127,7 @@ def inspect_diff_dialog(
         st.code(str(doc_hash), language="text")
 
     from src.utils.diff_highlighter import highlight_overlap
+
     highlighted_query, highlighted_match = highlight_overlap(query_text, matched_text)
 
     col_q, col_m = st.columns(2)
@@ -135,13 +135,13 @@ def inspect_diff_dialog(
         st.markdown("### 📝 Query Text")
         st.markdown(
             f"<div style='border: 1px solid #cccccc; padding: 12px; border-radius: 6px; min-height: 150px; white-space: pre-wrap;'>{highlighted_query}</div>",
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
     with col_m:
         st.markdown(f"### 📄 Matched Chunk ({doc_name})")
         st.markdown(
             f"<div style='border: 1px solid #cccccc; padding: 12px; border-radius: 6px; min-height: 150px; white-space: pre-wrap;'>{highlighted_match}</div>",
-            unsafe_allow_html=True
+            unsafe_allow_html=True,
         )
 
     if pdf_bytes:
@@ -200,7 +200,11 @@ def render_faiss_results_ui(
         chunk_index = int(_record_value(record, "chunk_index", 0))
         chunk_id = str(_record_value(record, "chunk_id", f"chunk_{chunk_index + 1}"))
         chunk_text = str(_record_value(record, "chunk_text", ""))
-        raw_hash = _record_value(record, "doc_hash", None) or _record_value(record, "file_hash", None) or _record_value(record, "hash", None)
+        raw_hash = (
+            _record_value(record, "doc_hash", None)
+            or _record_value(record, "file_hash", None)
+            or _record_value(record, "hash", None)
+        )
         doc_hash = str(raw_hash) if raw_hash else None
 
         st.markdown(
@@ -272,9 +276,14 @@ def get_faiss_metric_label(faiss_index: Any = None) -> str:
 
         try:
             import faiss
-            if metric_type == faiss.METRIC_INNER_PRODUCT or isinstance(faiss_index, faiss.IndexFlatIP):
+
+            if metric_type == faiss.METRIC_INNER_PRODUCT or isinstance(
+                faiss_index, faiss.IndexFlatIP
+            ):
                 return "Inner Product (Cosine)"
-            elif metric_type == faiss.METRIC_L2 or isinstance(faiss_index, faiss.IndexFlatL2):
+            elif metric_type == faiss.METRIC_L2 or isinstance(
+                faiss_index, faiss.IndexFlatL2
+            ):
                 return "L2 (Euclidean)"
         except ImportError:
             pass

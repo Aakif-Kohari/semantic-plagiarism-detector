@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-from __future__ import annotations
-
 """
 run_benchmark.py
 ----------------
@@ -18,6 +16,8 @@ Acceptance Criteria (Issue #955):
 - Print formatted latency metrics table (ms/chunk, throughput docs/sec).
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import logging
@@ -28,13 +28,12 @@ import time
 from pathlib import Path
 from typing import Dict, List
 
-
 # Add project root to path for imports
 ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from src.core.embedding_model import embed_chunks, embed_documents, _detect_device
+from src.core.embedding_model import _detect_device, embed_chunks, embed_documents
 from src.core.faiss_index import build_index
 from src.core.text_chunking import chunk_documents
 

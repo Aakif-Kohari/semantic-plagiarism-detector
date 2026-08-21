@@ -1,4 +1,3 @@
-# filepath: redis_cache.py
 """
 redis_cache.py
 --------------
@@ -14,24 +13,17 @@ import os
 import pickle
 import threading
 import time
+import urllib.parse
 import zlib
 from enum import Enum
 from typing import Any, Optional
 
-
-class CacheKeyPrefix(str, Enum):
-    LOGIN_ATTEMPTS = "login_attempts:"
-    UPLOAD_COUNT = "upload_count:"
-    SIMILARITY_RESULT = "similarity:"
-    DOCUMENT_CACHE = "doc:"
-    LEGACY_UPLOADS_PREFIX = "upload_count:"
+# CacheKeyPrefix has been consolidated into CacheNamespace below
 
 try:
     import redis
 except ImportError:
     redis = None
-
-from dotenv import load_dotenv
 
 
 try:
@@ -41,69 +33,124 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-load_dotenv()
 
-_RedisErr = getattr(redis, "RedisError", Exception)
-RedisError = _RedisErr if isinstance(_RedisErr, type) and issubclass(_RedisErr, BaseException) else Exception
+class DummyRedisError(Exception):
+    pass
 
-_ConnErr = getattr(redis, "ConnectionError", ConnectionError)
-RedisConnectionError = _ConnErr if isinstance(_ConnErr, type) and issubclass(_ConnErr, BaseException) else ConnectionError
 
-_TimeoutErr = getattr(redis, "TimeoutError", TimeoutError)
-RedisTimeoutError = _TimeoutErr if isinstance(_TimeoutErr, type) and issubclass(_TimeoutErr, BaseException) else TimeoutError
+class DummyRedisConnectionError(DummyRedisError):
+    pass
 
+
+class DummyRedisTimeoutError(DummyRedisError):
+    pass
+
+
+_RedisErr = getattr(redis, "RedisError", DummyRedisError)
+RedisError = (
+    _RedisErr
+    if isinstance(_RedisErr, type) and issubclass(_RedisErr, BaseException)
+    else DummyRedisError
+)
+
+_ConnErr = getattr(redis, "ConnectionError", DummyRedisConnectionError)
+RedisConnectionError = (
+    _ConnErr
+    if isinstance(_ConnErr, type) and issubclass(_ConnErr, BaseException)
+    else DummyRedisConnectionError
+)
+
+_TimeoutErr = getattr(redis, "TimeoutError", DummyRedisTimeoutError)
+RedisTimeoutError = (
+    _TimeoutErr
+    if isinstance(_TimeoutErr, type) and issubclass(_TimeoutErr, BaseException)
+    else DummyRedisTimeoutError
+)
 
 
 # Redis connection configuration
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
-REDIS_DB = int(os.getenv("REDIS_DB", "0"))
+try:
+    REDIS_DB = int(os.getenv("REDIS_DB", "0"))
+except ValueError:
+    logger.warning(
+        f"Invalid REDIS_DB configuration '{os.getenv('REDIS_DB')}'. Defaulting to 0."
+    )
+    REDIS_DB = 0
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", None)
-REDIS_URL = os.getenv("REDIS_URL", f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}")
+
+if REDIS_PASSWORD:
+    encoded_password = urllib.parse.quote_plus(REDIS_PASSWORD)
+    REDIS_URL = os.getenv(
+        "REDIS_URL",
+        f"redis://:{encoded_password}@{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}",
+    )
+else:
+    REDIS_URL = os.getenv(
+        "REDIS_URL",
+        f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}",
+    )
 REDIS_TIMEOUT_SECONDS = float(os.getenv("REDIS_TIMEOUT_SECONDS", "2.0"))
 
-# TTL settings (in seconds)
-SESSION_TTL = 15 * 60  # 15 minutes for session state
-FAISS_INDEX_TTL = 24 * 60 * 60  # 24 hours for FAISS index cache
-ANALYSIS_RESULTS_TTL = 2 * 60 * 60  # 2 hours for analysis results
-LOGIN_LOCKOUT_TTL = 15 * 60  # 15 minutes for login lockout
-UPLOAD_RATE_TTL = 60 * 60  # 1 hour for upload rate limiting
-DEFAULT_TTL = 24 * 60 * 60  # 24 hours fallback for keys without explicit TTL
+# TTL settings (in seconds) - Configurable via environment variables (Issue #2323)
+# Defaults are preserved for backward compatibility when env vars are not set
+SESSION_TTL = int(os.getenv("SESSION_TTL", str(15 * 60)))  # 15 minutes for session state
+FAISS_INDEX_TTL = int(os.getenv("FAISS_INDEX_TTL", str(24 * 60 * 60)))  # 24 hours for FAISS index cache
+ANALYSIS_RESULTS_TTL = int(os.getenv("ANALYSIS_RESULTS_TTL", str(2 * 60 * 60)))  # 2 hours for analysis results
+LOGIN_LOCKOUT_TTL = int(os.getenv("LOGIN_LOCKOUT_TTL", str(15 * 60)))  # 15 minutes for login lockout
+UPLOAD_RATE_TTL = int(os.getenv("UPLOAD_RATE_TTL", str(60 * 60)))  # 1 hour for upload rate limiting
+BADGE_TTL = int(os.getenv("BADGE_TTL", str(24 * 60 * 60)))  # 24 hours for badge buffer cache
+DEFAULT_TTL = int(os.getenv("DEFAULT_TTL", str(24 * 60 * 60)))  # 24 hours fallback for keys without explicit TTL
 
 
 # ============================================================================
 # COMPRESSION UTILITIES
 # ============================================================================
 
+
 class PayloadCompressor:
     """
     Handles robust compression and decompression of serialized cache payloads.
-    Uses zlib (standard library) to drastically reduce memory usage of large matrices.
+    Uses zlib to drastically reduce memory usage of large matrices.
     """
 
-    # Threshold above which data is compressed (e.g., 512KB)
-    COMPRESSION_THRESHOLD_BYTES = 512 * 1024
+    COMPRESSION_THRESHOLD_BYTES: int = 64 * 1024
+    _raw_threshold = os.getenv("REDIS_COMPRESSION_THRESHOLD", "").strip()
+    if _raw_threshold:
+        try:
+            COMPRESSION_THRESHOLD_BYTES = int(_raw_threshold)
+        except ValueError:
+            pass
 
-    # Magic header bytes to distinguish compressed vs uncompressed payloads in Redis
+    COMPRESSION_LEVEL: int = zlib.Z_BEST_SPEED
+    _raw_level = os.getenv("REDIS_COMPRESSION_LEVEL", "").strip()
+    if _raw_level:
+        try:
+            COMPRESSION_LEVEL = int(_raw_level)
+        except ValueError:
+            _consts = {
+                "Z_BEST_SPEED": zlib.Z_BEST_SPEED,
+                "Z_BEST_COMPRESSION": zlib.Z_BEST_COMPRESSION,
+                "Z_DEFAULT_COMPRESSION": zlib.Z_DEFAULT_COMPRESSION,
+                "Z_NO_COMPRESSION": zlib.Z_NO_COMPRESSION,
+            }
+            COMPRESSION_LEVEL = _consts.get(_raw_level.upper(), zlib.Z_BEST_SPEED)
+
     MAGIC_HEADER = b"ZLIB_COMPRESSED_V1::"
 
     @classmethod
+    def get_threshold(cls) -> int:
+        return cls.COMPRESSION_THRESHOLD_BYTES
+
+    @classmethod
     def compress(cls, data: bytes) -> bytes:
-        """
-        Compresses bytes if they exceed the threshold. Appends magic header.
-
-        Args:
-            data (bytes): Raw serialized bytes.
-
-        Returns:
-            bytes: Compressed bytes with header, or original bytes if too small.
-        """
-        if len(data) < cls.COMPRESSION_THRESHOLD_BYTES:
+        if len(data) < cls.get_threshold():
             return data
 
         try:
             start_time = time.perf_counter()
-            compressed_data = zlib.compress(data, level=zlib.Z_BEST_SPEED)
+            compressed_data = zlib.compress(data, level=cls.COMPRESSION_LEVEL)
             compression_ratio = len(data) / max(1, len(compressed_data))
 
             logger.debug(
@@ -113,27 +160,20 @@ class PayloadCompressor:
 
             return cls.MAGIC_HEADER + compressed_data
         except zlib.error as e:
-            logger.error(f"[CacheCompression] zlib compression failed: {e}. Falling back to uncompressed.")
+            logger.error(
+                f"[CacheCompression] zlib compression failed: {e}. Falling back to uncompressed."
+            )
             return data
 
     @classmethod
-    def decompress(cls, data: bytes) -> bytes:
-        """
-        Decompresses bytes if they contain the magic header.
-
-        Args:
-            data (bytes): Stored bytes retrieved from cache.
-
-        Returns:
-            bytes: Decompressed raw bytes.
-        """
+    def decompress(cls, data: bytes) -> bytes | None:
         if not isinstance(data, bytes):
             return data
 
         if data.startswith(cls.MAGIC_HEADER):
             try:
                 start_time = time.perf_counter()
-                payload = data[len(cls.MAGIC_HEADER):]
+                payload = data[len(cls.MAGIC_HEADER) :]
                 decompressed_data = zlib.decompress(payload)
 
                 logger.debug(
@@ -141,9 +181,23 @@ class PayloadCompressor:
                     f"Time: {(time.perf_counter()-start_time)*1000:.2f}ms"
                 )
                 return decompressed_data
+                
             except zlib.error as e:
-                logger.error(f"[CacheCompression] zlib decompression failed: {e}. Corrupted payload?")
-                raise e
+                logger.critical(
+                    "[CacheCompression] CRITICAL: zlib decompression failed due to "
+                    "corrupted payload. Treating as cache miss. Error: %s",
+                    e,
+                    exc_info=True
+                )
+                return None
+                
+            except Exception as e:
+                logger.critical(
+                    "[CacheCompression] CRITICAL: Unexpected error during decompression: %s",
+                    e,
+                    exc_info=True
+                )
+                return None
 
         return data
 
@@ -152,21 +206,26 @@ class PayloadCompressor:
 # REDIS NAMESPACES
 # ============================================================================
 
+
 class CacheNamespace(str, Enum):
     SESSION = "spd:v1:session"
     FAISS = "spd:v1:faiss"
     ANALYSIS = "spd:v1:analysis"
     LOGIN_ATTEMPTS = "spd:v1:login_attempts"
     UPLOADS = "spd:v1:uploads"
+    BADGES = "spd:v1:badges"
 
     def build_key(self, *parts: str) -> str:
-        """Construct a standardized cache key with namespace prefix."""
         return ":".join([self.value] + list(parts))
+
+
+CacheKeyPrefix = CacheNamespace
 
 
 # ============================================================================
 # MAIN REDIS CACHE MANAGER
 # ============================================================================
+
 
 class RedisCache:
     """Redis cache manager for session state and computational results."""
@@ -179,22 +238,34 @@ class RedisCache:
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._fallback_cache = {}
-                    cls._instance._hits = 0
-                    cls._instance._misses = 0
+                    instance = super().__new__(cls)
+                    instance._fallback_cache = {}
+                    instance._hits = 0
+                    instance._misses = 0
+                    instance._client = None
+                    instance._initialized = False
+                    cls._instance = instance
         return cls._instance
+
     def __init__(self):
         if not hasattr(self, "_fallback_cache") or self._fallback_cache is None:
             self._fallback_cache = {}
-        if self._client is None:
+        if not getattr(self, "_initialized", False):
             with self._lock:
-                if self._client is None:
+                if not getattr(self, "_initialized", False):
                     self._connect()
+                    self._initialized = True
+
+    @classmethod
+    def get_instance(cls) -> "RedisCache":
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = cls()
+        return cls._instance
 
     @property
     def fallback_cache(self) -> dict:
-        """Lazily initialize fallback cache dictionary if not present."""
         if not hasattr(self, "_fallback_cache") or self._fallback_cache is None:
             with self._lock:
                 if not hasattr(self, "_fallback_cache") or self._fallback_cache is None:
@@ -227,7 +298,9 @@ class RedisCache:
     def _fallback_exists(self, key: str) -> bool:
         return self._fallback_get(key) is not None
 
-    def _fallback_set_json(self, key: str, value: dict, ttl: Optional[int] = None) -> bool:
+    def _fallback_set_json(
+        self, key: str, value: dict, ttl: Optional[int] = None
+    ) -> bool:
         serialized = json.dumps(value)
         return self._fallback_set(key, json.loads(serialized), ttl)
 
@@ -239,9 +312,11 @@ class RedisCache:
 
     def _fallback_clear_pattern(self, pattern: str) -> int:
         import fnmatch
+
         with self._lock:
             keys_to_delete = [
-                key for key in list(self.fallback_cache.keys())
+                key
+                for key in list(self.fallback_cache.keys())
                 if fnmatch.fnmatch(key, pattern)
             ]
             count = 0
@@ -252,7 +327,6 @@ class RedisCache:
             return count
 
     def _connect(self) -> None:
-        """Establish Redis connection with fallback to in-memory if unavailable."""
         if redis is None:
             self._client = None
             return
@@ -281,12 +355,12 @@ class RedisCache:
             RedisTimeoutError,
             ConnectionRefusedError,
         ) as e:
-            print(f"[RedisCache] Redis connection failed: {e}. Running without cache.")
-            logger.warning(f"[RedisCache] Redis connection failed: {e}. Running without cache.")
+            logger.warning(
+                f"[RedisCache] Redis connection failed: {e}. Running without cache."
+            )
             self._client = None
 
     def is_available(self) -> bool:
-        """Check if Redis is available."""
         if self._client is None:
             return False
         try:
@@ -294,8 +368,6 @@ class RedisCache:
             return True
         except Exception:
             return False
-
-
 
     def ping(self) -> tuple[bool, Optional[float]]:
         if self._client is None:
@@ -310,7 +382,6 @@ class RedisCache:
             return False, None
 
     def get_stats(self) -> dict[str, Any]:
-        """Get cache statistics including hit ratio and total items count."""
         total_requests = self._hits + self._misses
         hit_ratio = (self._hits / total_requests) if total_requests > 0 else 0.0
 
@@ -331,63 +402,54 @@ class RedisCache:
         }
 
     def get_hit_rate(self) -> float:
-        """Return cache hit rate as a percentage (0-100)."""
         with self._lock:
             hits, misses = self._hits, self._misses
         total = hits + misses
         if total == 0:
             return 0.0
         return (hits / total) * 100
-    
 
     def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
-        """Store a value in Redis with optional TTL and automatic compression."""
         if self.is_available():
             try:
-                # 1. Serialize
                 serialized = pickle.dumps(value)
-                # 2. Compress large payloads
                 processed_bytes = PayloadCompressor.compress(serialized)
 
-                # 3. Store
                 if ttl:
                     self._client.setex(key, ttl, processed_bytes)
                 else:
                     self._client.set(key, processed_bytes)
                 return True
-            except (
-                RedisError,
-                RedisConnectionError,
-                RedisTimeoutError,
-                ConnectionRefusedError,
-                ConnectionResetError,
-                pickle.PickleError,
-            ) as e:
-                print(f"[RedisCache] Error setting key {key}: {e}. Falling back to in-memory.")
-                logger.error(f"[RedisCache] Error setting key {key}: {e}. Falling back to in-memory.")
+            except Exception as e:
+                logger.error(
+                    f"[RedisCache] Error setting key {key}: {e}. Falling back to in-memory."
+                )
 
         return self._fallback_set(key, value, ttl)
 
     def get(self, key: str) -> Optional[Any]:
-        """Retrieve a value from Redis with automatic decompression."""
         if self.is_available():
             try:
                 data = self._client.get(key)
                 if data is not None:
-                    with self._lock:
-                        self._hits += 1
-                    return pickle.loads(data)
-            except (
-                RedisError,
-                RedisConnectionError,
-                RedisTimeoutError,
-                ConnectionRefusedError,
-                ConnectionResetError,
-                pickle.PickleError,
-                zlib.error,
-            ) as e:
-                print(f"[RedisCache] Error getting key {key}: {e}. Falling back to in-memory.")
-                logger.error(f"[RedisCache] Error getting key {key}: {e}. Falling back to in-memory.")
+                    decompressed = PayloadCompressor.decompress(data)
+                    
+                    if decompressed is None:
+                        logger.warning(
+                            "[RedisCache] Corrupted payload detected for key '%s'. Deleting.",
+                            key
+                        )
+                        try:
+                            self._client.delete(key)
+                        except Exception:
+                            pass
+                    else:
+                        with self._lock:
+                            self._hits += 1
+                        return pickle.loads(decompressed)
+                        
+            except Exception as e:
+                logger.error(f"[RedisCache] Error getting key {key}: {e}. Falling back.")
 
         val = self._fallback_get(key)
         if val is not None:
@@ -398,7 +460,7 @@ class RedisCache:
         with self._lock:
             self._misses += 1
         return None
-    
+
     def delete(self, key: str) -> bool:
         redis_deleted = False
         if self.is_available():
@@ -411,10 +473,9 @@ class RedisCache:
         return redis_deleted or fallback_deleted
 
     def set_json(self, key: str, value: dict, ttl: Optional[int] = None) -> bool:
-        """Store a JSON-serializable dict in Redis with automatic compression."""
         if self.is_available():
             try:
-                serialized = json.dumps(value).encode('utf-8')
+                serialized = json.dumps(value).encode("utf-8")
                 processed_bytes = PayloadCompressor.compress(serialized)
 
                 if ttl:
@@ -427,26 +488,29 @@ class RedisCache:
 
         return self._fallback_set_json(key, value, ttl)
 
-
     def get_json(self, key: str) -> Optional[dict]:
-        """Retrieve a JSON value from Redis with automatic decompression."""
         if self.is_available():
             try:
                 data = self._client.get(key)
                 if data is not None:
-                    with self._lock:
-                        self._hits += 1
-                    return json.loads(data)
-            except (
-                RedisError,
-                RedisConnectionError,
-                RedisTimeoutError,
-                ConnectionRefusedError,
-                ConnectionResetError,
-                json.JSONDecodeError,
-            ) as e:
-                print(f"[RedisCache] Error getting JSON key {key}: {e}. Falling back to in-memory.")
-                logger.error(f"[RedisCache] Error getting JSON key {key}: {e}. Falling back to in-memory.")
+                    decompressed = PayloadCompressor.decompress(data)
+                    
+                    if decompressed is None:
+                        logger.warning(
+                            "[RedisCache] Corrupted JSON payload for key '%s'. Deleting.",
+                            key
+                        )
+                        try:
+                            self._client.delete(key)
+                        except Exception:
+                            pass
+                    else:
+                        with self._lock:
+                            self._hits += 1
+                        return json.loads(decompressed.decode('utf-8'))
+                        
+            except Exception as e:
+                logger.error(f"[RedisCache] Error getting JSON key {key}: {e}.")
 
         val = self._fallback_get_json(key)
         if val is not None:
@@ -472,26 +536,30 @@ class RedisCache:
         redis_count = 0
         if self.is_available():
             try:
-                keys = self._client.keys(pattern)
-                if keys and not isinstance(keys, (list, set, tuple)):
-                    keys = None
+                if hasattr(self._client, "scan_iter"):
+                    keys = list(self._client.scan_iter(match=pattern, count=1000))
+                else:
+                    keys = self._client.keys(pattern)
+
                 if keys:
-                    res = self._client.delete(*keys)
-                    redis_count = int(res) if isinstance(res, (int, float)) else 0
-            except (
-                RedisError,
-                RedisConnectionError,
-                RedisTimeoutError,
-                ConnectionRefusedError,
-                ConnectionResetError,
-                Exception,
-            ) as e:
-                print(f"[RedisCache] Error clearing pattern {pattern}: {e}. Falling back to in-memory.")
-                logger.error(f"[RedisCache] Error clearing pattern {pattern}: {e}. Falling back to in-memory.")
+                    pipeline = self._client.pipeline()
+                    chunk_size = 1000
+                    for i in range(0, len(keys), chunk_size):
+                        chunk = keys[i : i + chunk_size]
+                        pipeline.delete(*chunk)
+                    results = pipeline.execute()
+                    redis_count = sum(
+                        r for r in results if isinstance(r, (int, float))
+                    )
+            except Exception as e:
+                logger.error(
+                    f"[RedisCache] Error clearing pattern {pattern}: {e}. Falling back to in-memory."
+                )
 
         fallback_count = self._fallback_clear_pattern(pattern)
-        return (int(redis_count) if isinstance(redis_count, (int, float)) else 0) + fallback_count
-
+        return (
+            int(redis_count) if isinstance(redis_count, (int, float)) else 0
+        ) + fallback_count
 
     def close(self) -> None:
         with self._lock:
@@ -511,44 +579,55 @@ _cache = RedisCache()
 # MODULE LEVEL PUBLIC API
 # ============================================================================
 
+
 def get_cache(key: Optional[str] = None):
     if key is not None:
         return _cache.get(key)
     return _cache
 
+
 def set_cache(key: str, value: Any, expire: Optional[int] = None) -> bool:
     return _cache.set(key, value, ttl=expire)
 
+
 def delete_cache(key: str) -> bool:
     return _cache.delete(key)
+
 
 def cache_session_state(session_id: str, key: str, value: Any) -> bool:
     cache_key = CacheNamespace.SESSION.build_key(session_id, key)
     return _cache.set(cache_key, value, SESSION_TTL)
 
+
 def get_session_state(session_id: str, key: str) -> Optional[Any]:
     cache_key = CacheNamespace.SESSION.build_key(session_id, key)
     return _cache.get(cache_key)
+
 
 def clear_session(session_id: str) -> bool:
     pattern = CacheNamespace.SESSION.build_key(session_id, "*")
     return _cache.clear_pattern(pattern) > 0
 
+
 def cache_faiss_index(index_key: str, index_data: bytes) -> bool:
     cache_key = CacheNamespace.FAISS.build_key("index", index_key)
     return _cache.set(cache_key, index_data, FAISS_INDEX_TTL)
+
 
 def get_faiss_index(index_key: str) -> Optional[bytes]:
     cache_key = CacheNamespace.FAISS.build_key("index", index_key)
     return _cache.get(cache_key)
 
+
 def cache_analysis_results(analysis_key: str, results: dict) -> bool:
     cache_key = CacheNamespace.ANALYSIS.build_key(analysis_key)
     return _cache.set(cache_key, results, ANALYSIS_RESULTS_TTL)
 
+
 def get_analysis_results(analysis_key: str) -> Optional[dict]:
     cache_key = CacheNamespace.ANALYSIS.build_key(analysis_key)
     return _cache.get(cache_key)
+
 
 def increment_login_attempts(identifier: str) -> int:
     cache_key = CacheNamespace.LOGIN_ATTEMPTS.build_key(identifier)
@@ -559,17 +638,21 @@ def increment_login_attempts(identifier: str) -> int:
     _cache.set(cache_key, current, LOGIN_LOCKOUT_TTL)
     return current
 
+
 def get_login_attempts(identifier: str) -> int:
     cache_key = CacheNamespace.LOGIN_ATTEMPTS.build_key(identifier)
     current = _cache.get(cache_key)
     return current if current is not None else 0
 
+
 def is_login_locked_out(identifier: str) -> bool:
     return get_login_attempts(identifier) >= 5
+
 
 def clear_login_attempts(identifier: str) -> bool:
     cache_key = CacheNamespace.LOGIN_ATTEMPTS.build_key(identifier)
     return _cache.delete(cache_key)
+
 
 def increment_upload_count(username: str) -> int:
     cache_key = CacheNamespace.UPLOADS.build_key(username)
@@ -580,16 +663,123 @@ def increment_upload_count(username: str) -> int:
     _cache.set(cache_key, current, UPLOAD_RATE_TTL)
     return current
 
+
 def get_upload_count(username: str) -> int:
     cache_key = CacheNamespace.UPLOADS.build_key(username)
     current = _cache.get(cache_key)
     return current if current is not None else 0
 
+
 def is_upload_rate_limited(username: str) -> bool:
     return get_upload_count(username) >= 100
+
+
+def cache_badge(
+    badge_type: str,
+    identifier: str,
+    date: str,
+    data: bytes,
+    ttl: Optional[int] = None,
+) -> bool:
+    """Cache generated badge bytes (PNG/PDF) in Redis for 24 hours (Issue #2941)."""
+    cache_key = CacheNamespace.BADGES.build_key(badge_type.lower(), identifier, date)
+    return _cache.set(cache_key, data, ttl or BADGE_TTL)
+
+
+def get_cached_badge(
+    badge_type: str,
+    identifier: str,
+    date: str,
+) -> Optional[bytes]:
+    """Retrieve cached badge bytes (PNG/PDF) from Redis (Issue #2941)."""
+    cache_key = CacheNamespace.BADGES.build_key(badge_type.lower(), identifier, date)
+    return _cache.get(cache_key)
+
 
 def _cleanup_redis() -> None:
     if _cache:
         _cache.close()
 
+
 atexit.register(_cleanup_redis)
+
+
+def store_large_data(key: str, data: Any, ttl: int = 1800) -> None:
+    """Store large data in Redis with compression."""
+    try:
+        cache = get_cache()
+        compressed = zlib.compress(pickle.dumps(data))
+        
+        if cache.is_available():
+            cache._client.setex(f"spd:v1:large:{key}", ttl, compressed)
+        else:
+            cache.fallback_cache[f"spd:v1:large:{key}"] = {
+                "data": compressed,
+                "expiry": time.time() + ttl
+            }
+        logger.debug(f"Stored large data for key: {key} ({len(compressed)} bytes compressed)")
+    except Exception as e:
+        logger.error(f"Failed to store large data for key {key}: {e}")
+
+
+def get_large_data(key: str) -> Optional[Any]:
+    """Retrieve large data from Redis with decompression."""
+    try:
+        cache = get_cache()
+        data = None
+        
+        if cache.is_available():
+            data = cache._client.get(f"spd:v1:large:{key}")
+        else:
+            entry = cache.fallback_cache.get(f"spd:v1:large:{key}")
+            if entry and entry.get("expiry", 0) > time.time():
+                data = entry["data"]
+            elif entry:
+                del cache.fallback_cache[f"spd:v1:large:{key}"]
+        
+        if data:
+            return pickle.loads(zlib.decompress(data))
+        return None
+    except Exception as e:
+        logger.error(f"Failed to retrieve large data for key {key}: {e}")
+        return None
+
+
+def clear_large_data(key: str) -> None:
+    """Clear large data from cache."""
+    try:
+        cache = get_cache()
+        if cache.is_available():
+            cache._client.delete(f"spd:v1:large:{key}")
+        else:
+            cache.fallback_cache.pop(f"spd:v1:large:{key}", None)
+        logger.debug(f"Cleared large data for key: {key}")
+    except Exception as e:
+        logger.error(f"Failed to clear large data for key {key}: {e}")
+
+
+def clear_all_large_data(session_id: str) -> None:
+    """Clear all large data for a session using pipelined deletion."""
+    try:
+        cache = get_cache()
+        pattern = f"spd:v1:large:{session_id}:*"
+
+        if cache.is_available():
+            if hasattr(cache._client, "scan_iter"):
+                keys = list(cache._client.scan_iter(match=pattern, count=1000))
+            else:
+                keys = cache._client.keys(pattern)
+            if keys:
+                pipeline = cache._client.pipeline()
+                chunk_size = 1000
+                for i in range(0, len(keys), chunk_size):
+                    chunk = keys[i : i + chunk_size]
+                    pipeline.delete(*chunk)
+                pipeline.execute()
+        else:
+            keys_to_remove = [k for k in cache.fallback_cache.keys() if k.startswith(f"spd:v1:large:{session_id}:")]
+            for key in keys_to_remove:
+                del cache.fallback_cache[key]
+        logger.debug(f"Cleared all large data for session: {session_id}")
+    except Exception as e:
+        logger.error(f"Failed to clear all large data for session {session_id}: {e}")

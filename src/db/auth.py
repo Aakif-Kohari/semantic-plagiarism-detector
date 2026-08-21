@@ -9,46 +9,343 @@ and strong password complexity policies.
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import logging
 import os
 import re
+import secrets
 import sqlite3
+import string
+import time
+from contextlib import contextmanager
 from datetime import datetime as dt
-from datetime import timezone
+from datetime import timedelta, timezone
+from pathlib import Path
+from typing import Any, Dict, Generator, List, Optional
 
 import bcrypt
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError, VerifyMismatchError
 
 from src.core.app_config import AUTH_DB_PATH
-from src.core.concurrency import with_sqlite_retry
+from src.db.base import BaseRepository
+from src.db.common import with_sqlite_retry
+from src.db.connection import get_connection
 from src.db.migrations import migrate_auth_database, table_exists
-from src.errors import StaleDataException
+from src.db.security_audit import count_recent_failed_logins, log_security_event
+from src.exceptions import StaleDataException
 
 logger = logging.getLogger(__name__)
 
+from src.core.app_config import get_valid_roles
+
 _DB_PATH = os.path.abspath(str(AUTH_DB_PATH))
 
-VALID_ROLES = {"admin", "teacher"}
 
-SQLITE_TIMEOUT: float = 15.0
+def get_auth_db_path() -> Path:
+    return Path(_DB_PATH)
+
+
+VALID_ROLES = get_valid_roles()
+
+SQLITE_TIMEOUT: float = 5.0
+"""float: Busy timeout in seconds (15.0s) for SQLite database connections in the authentication module.
+
+Architecture & High-Concurrency System Rationale:
+-------------------------------------------------
+This high timeout (15.0 seconds) is intentionally configured to prevent lock contention failures in `users.db`
+when background plagiarism detection tasks, vector database syncs, and multi-user authentication requests execute concurrently.
+
+Although SQLite WAL (Write-Ahead Logging) mode allows concurrent readers alongside one writer, writing operations
+(such as transparent password re-hashing, audit log insertion, failed attempt tracking, and user profile updates)
+must acquire an exclusive write lock.
+
+Specific Scenarios Requiring a 15.0-Second Busy Timeout in `auth.py`:
+----------------------------------------------------------------------
+1. **Concurrent User Logins & Transparent Bcrypt-to-Argon2 Re-hashing:**
+   During peak user activity or automated batch tests, multiple authentication threads attempt to update user records
+   simultaneously when migrating legacy passwords to Argon2id.
+
+2. **Security Audit Log Persistence & Login Rate-Limiting:**
+   Every authentication attempt, failed login, or password update writes security audit events to `users.db`.
+   High-frequency parallel authentication requests contend for write locks on the audit log table.
+
+3. **Background WAL Checkpointing Sweeps:**
+   SQLite automatically flushes write-ahead log pages (`users.db-wal`) back to the main `users.db` database.
+   Checkpointing holds temporary exclusive write locks.
+
+⚠️ WARNING FOR DEVELOPERS:
+------------------------
+Do NOT reduce `SQLITE_TIMEOUT` below 15.0 seconds. Lowering this value risks raising spurious
+`sqlite3.OperationalError: database is locked` exceptions under concurrent workloads.
+"""
 
 PASSWORD_COMPLEXITY_REGEX = re.compile(
-    r"^(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\])[A-Za-z\d@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\]{8,}$"
+    r"^(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\])[A-Za-z\d@$!%*?&_\-#^()+=\[\]{}|:<>,./~\\]{8,128}$"
 )
 
-_ph = PasswordHasher()
+_ph = PasswordHasher(
+    time_cost=3,
+    memory_cost=65536,
+    parallelism=4,
+)
+
+# Configuration for account lockout (Issue #2704)
+MAX_FAILED_ATTEMPTS = 5
+LOCKOUT_WINDOW_MINUTES = 15
+
+
+def is_account_locked(
+    username: str, 
+    max_attempts: int = MAX_FAILED_ATTEMPTS,
+    window_minutes: int = LOCKOUT_WINDOW_MINUTES
+) -> bool:
+    """Check if an account is temporarily locked due to too many failed login attempts.
+    
+    Args:
+        username: The username to check.
+        max_attempts: Maximum allowed failed attempts before lockout.
+        window_minutes: Time window in minutes for counting attempts.
+        
+    Returns:
+        True if the account is locked, False otherwise.
+    """
+    if not username:
+        return False
+        
+    failed_count = count_recent_failed_logins(
+        username, 
+        window_minutes=window_minutes
+    )
+    
+    is_locked = failed_count >= max_attempts
+    
+    if is_locked:
+        logger.warning(
+            "Account lockout triggered for %s: %d failed attempts in last %d minutes.",
+            username, failed_count, window_minutes
+        )
+        
+    return is_locked
+
+
+class AuthRepository(BaseRepository):
+    """Data access repository for authentication, user management, and security audit logs."""
+
+    def __init__(self, db_path: str | os.PathLike = AUTH_DB_PATH) -> None:
+        super().__init__(db_path)
+        self._cached_event_types: list[str] | None = None
+        self._cached_event_types_timestamp: float = 0.0
+        self._event_types_cache_ttl: float = 60.0
+
+    @property
+    def db_path(self) -> Path:
+        return Path(_DB_PATH)
+
+    @contextmanager
+    def connection(
+        self, read_only: bool = False
+    ) -> Generator[sqlite3.Connection, None, None]:
+        with get_connection(Path(_DB_PATH), read_only=read_only) as conn:
+            yield conn
+
+    def clear_distinct_event_types_cache(self) -> None:
+        """Clear the cached distinct audit event types."""
+        self._cached_event_types = None
+        self._cached_event_types_timestamp = 0.0
+
+    def init_db(self) -> None:
+        """Create or upgrade users.db and seed default administrator accounts."""
+        init_db()
+
+    def log_security_event(
+        self,
+        event_type: str,
+        username: str,
+        details: str | None = None,
+    ) -> None:
+        """Record a security-relevant event in the security_audit_log table."""
+        timestamp = datetime.datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        try:
+            with self.connection() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO security_audit_log (event_type, username, timestamp, details)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (event_type, username, timestamp, details),
+                )
+                conn.commit()
+            if (
+                self._cached_event_types is not None
+                and event_type
+                and event_type not in self._cached_event_types
+            ):
+                self._cached_event_types.append(event_type)
+                self._cached_event_types.sort()
+        except Exception as exc:
+            logger.warning(
+                "Failed to write security audit log entry [%s, %s]: %s",
+                event_type,
+                username,
+                exc,
+            )
+            try:
+                from src.db.security_audit import _emit_audit_log_failure_alert
+
+                _emit_audit_log_failure_alert(
+                    event_type=event_type, username=username, error=exc
+                )
+            except Exception as alert_exc:
+                logger.warning(
+                    "Failed to trigger audit log failure alert: %s", alert_exc
+                )
+
+    def _build_audit_log_query_conditions(
+        self,
+        username: str | None = None,
+        event_type: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> tuple[str, tuple]:
+        """Build WHERE clause snippet (if any) and parameters tuple for security audit log queries."""
+        conditions: list[str] = []
+        params: list = []
+
+        if username:
+            conditions.append("username = ?")
+            params.append(username.lower())
+        if event_type:
+            conditions.append("event_type = ?")
+            params.append(event_type)
+        if start_date:
+            conditions.append("timestamp >= ?")
+            params.append(start_date)
+        if end_date:
+            conditions.append("timestamp <= ?")
+            params.append(end_date)
+
+        where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+        return where_clause, tuple(params)
+
+    def get_security_audit_logs(
+        self,
+        username: str | None = None,
+        event_type: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict]:
+        """Retrieve security audit log entries with limit, offset, and optional filters (username, event_type, start_date, end_date)."""
+        if limit < 0 or offset < 0:
+            raise ValueError("Limit and offset must be non-negative integers.")
+
+        where_clause, params = self._build_audit_log_query_conditions(
+            username=username,
+            event_type=event_type,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        query = (
+            f"SELECT id, event_type, username, timestamp, details FROM security_audit_log{where_clause}"
+            " ORDER BY id DESC LIMIT ? OFFSET ?"
+        )
+        query_params = params + (limit, offset)
+
+        try:
+            with self.connection(read_only=True) as conn:
+                rows = conn.execute(query, query_params).fetchall()
+                return [
+                    {
+                        "id": r[0],
+                        "event_type": r[1],
+                        "username": r[2],
+                        "timestamp": r[3],
+                        "details": r[4],
+                    }
+                    for r in rows
+                ]
+        except sqlite3.Error as e:
+            logger.error(f"Failed to query security audit logs: {e}")
+            return []
+
+    def get_security_audit_log_count(
+        self,
+        username: str | None = None,
+        event_type: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> int:
+        """Return total number of matching security audit log entries."""
+        where_clause, params = self._build_audit_log_query_conditions(
+            username=username,
+            event_type=event_type,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        query = f"SELECT COUNT(*) FROM security_audit_log{where_clause}"
+
+        try:
+            with self.connection(read_only=True) as conn:
+                row = conn.execute(query, params).fetchone()
+                return row[0] if row else 0
+        except sqlite3.Error as e:
+            logger.error(f"Failed to count security audit logs: {e}")
+            raise
+
+    def get_distinct_audit_event_types(self, force_refresh: bool = False) -> list[str]:
+        """Return a list of all distinct event_type values from security_audit_log with TTL caching (Issue #2687)."""
+        now = time.monotonic()
+        if (
+            not force_refresh
+            and self._cached_event_types is not None
+            and (now - self._cached_event_types_timestamp) < self._event_types_cache_ttl
+        ):
+            return list(self._cached_event_types)
+
+        try:
+            with self.connection(read_only=True) as conn:
+                rows = conn.execute(
+                    "SELECT DISTINCT event_type FROM security_audit_log ORDER BY event_type"
+                ).fetchall()
+                event_types = [r[0] for r in rows if r[0]]
+                self._cached_event_types = event_types
+                self._cached_event_types_timestamp = now
+                return list(event_types)
+        except sqlite3.Error:
+            return []
+
+    def get_recent_audit_events(self, limit: int = 20) -> list[dict]:
+        """Fetch the N most recent security audit events across all accounts."""
+        if limit < 0:
+            raise ValueError("Limit must be a non-negative integer.")
+
+        try:
+            with self.connection(read_only=True) as conn:
+                rows = conn.execute(
+                    "SELECT * FROM security_audit_log ORDER BY timestamp DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+                return [dict(row) for row in rows]
+        except sqlite3.Error as e:
+            logger.error(f"Failed to query recent security audit events: {e}")
+            return []
+
+
+auth_repo = AuthRepository(_DB_PATH)
 
 
 def configure_db_path(db_path: str | os.PathLike) -> None:
     """Configure the SQLite database path used by the authentication module."""
     global _DB_PATH
     _DB_PATH = os.path.abspath(os.fspath(db_path))
+    auth_repo.configure_db_path(_DB_PATH)
 
 
 from contextlib import contextmanager
-from typing import Generator
+
 
 @contextmanager
 def _connect() -> Generator[sqlite3.Connection, None, None]:
@@ -69,24 +366,7 @@ def log_security_event(
     details: str | None = None,
 ) -> None:
     """Record a security-relevant event in the security_audit_log table."""
-    timestamp = datetime.datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    try:
-        with _connect() as conn:
-            conn.execute(
-                """
-                INSERT INTO security_audit_log (event_type, username, timestamp, details)
-                VALUES (?, ?, ?, ?)
-                """,
-                (event_type, username, timestamp, details),
-            )
-            conn.commit()
-    except Exception as exc:
-        logger.warning(
-            "Failed to write security audit log entry [%s, %s]: %s",
-            event_type,
-            username,
-            exc,
-        )
+    auth_repo.log_security_event(event_type, username, details)
 
 
 def get_security_audit_logs(
@@ -98,50 +378,14 @@ def get_security_audit_logs(
     offset: int = 0,
 ) -> list[dict]:
     """Retrieve security audit log entries with limit, offset, and optional filters (username, event_type, start_date, end_date)."""
-    if limit < 0 or offset < 0:
-        raise ValueError("Limit and offset must be non-negative integers.")
-
-    query = (
-        "SELECT id, event_type, username, timestamp, details FROM security_audit_log"
+    return auth_repo.get_security_audit_logs(
+        username=username,
+        event_type=event_type,
+        start_date=start_date,
+        end_date=end_date,
+        limit=limit,
+        offset=offset,
     )
-    params: list = []
-    conditions: list[str] = []
-
-    if username:
-        conditions.append("username = ?")
-        params.append(username.lower())
-    if event_type:
-        conditions.append("event_type = ?")
-        params.append(event_type)
-    if start_date:
-        conditions.append("timestamp >= ?")
-        params.append(start_date)
-    if end_date:
-        conditions.append("timestamp <= ?")
-        params.append(end_date)
-
-    if conditions:
-        query += " WHERE " + " AND ".join(conditions)
-
-    query += " ORDER BY id DESC LIMIT ? OFFSET ?"
-    params.extend([limit, offset])
-
-    try:
-        with _connect() as conn:
-            rows = conn.execute(query, params).fetchall()
-            return [
-                {
-                    "id": r[0],
-                    "event_type": r[1],
-                    "username": r[2],
-                    "timestamp": r[3],
-                    "details": r[4],
-                }
-                for r in rows
-            ]
-    except sqlite3.Error as e:
-        logger.error(f"Failed to query security audit logs: {e}")
-        return []
 
 
 def get_security_audit_log_count(
@@ -151,63 +395,27 @@ def get_security_audit_log_count(
     end_date: str | None = None,
 ) -> int:
     """Return total number of matching security audit log entries."""
-    query = "SELECT COUNT(*) FROM security_audit_log"
-    params: list = []
-    conditions: list[str] = []
-
-    if username:
-        conditions.append("username = ?")
-        params.append(username.lower())
-    if event_type:
-        conditions.append("event_type = ?")
-        params.append(event_type)
-    if start_date:
-        conditions.append("timestamp >= ?")
-        params.append(start_date)
-    if end_date:
-        conditions.append("timestamp <= ?")
-        params.append(end_date)
-
-    if conditions:
-        query += " WHERE " + " AND ".join(conditions)
-
-    try:
-        with _connect() as conn:
-            row = conn.execute(query, params).fetchone()
-            return row[0] if row else 0
-    except sqlite3.Error as e:
-        logger.error(f"Failed to count security audit logs: {e}")
-        return 0
+    return auth_repo.get_security_audit_log_count(
+        username=username,
+        event_type=event_type,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
 
-def get_distinct_audit_event_types() -> list[str]:
-    """Return a list of all distinct event_type values from security_audit_log."""
-    try:
-        with _connect() as conn:
-            rows = conn.execute(
-                "SELECT DISTINCT event_type FROM security_audit_log ORDER BY event_type"
-            ).fetchall()
-            return [r[0] for r in rows if r[0]]
-    except sqlite3.Error:
-        return []
+def get_distinct_audit_event_types(force_refresh: bool = False) -> list[str]:
+    """Return a list of all distinct event_type values from security_audit_log with TTL caching (Issue #2687)."""
+    return auth_repo.get_distinct_audit_event_types(force_refresh=force_refresh)
+
+
+def clear_distinct_audit_event_types_cache() -> None:
+    """Clear the cached distinct audit event types (Issue #2687)."""
+    auth_repo.clear_distinct_event_types_cache()
 
 
 def get_recent_audit_events(limit: int = 20) -> list[dict]:
     """Fetch the N most recent security audit events across all accounts."""
-    if limit < 0:
-        raise ValueError("Limit must be a non-negative integer.")
-
-    try:
-        with _connect() as conn:
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                "SELECT * FROM security_audit_log ORDER BY timestamp DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-            return [dict(row) for row in rows]
-    except sqlite3.Error as e:
-        logger.error(f"Failed to query recent security audit events: {e}")
-        return []
+    return auth_repo.get_recent_audit_events(limit=limit)
 
 
 def _hash_password(password: str) -> str:
@@ -250,11 +458,18 @@ def _verify_password_hash(password: str, stored_hash: str) -> bool:
     return False
 
 
-def _validate_username(username: str) -> str:
-    username = str(username).strip().lower()
-    if not username:
+def _validate_username(username: Any) -> str:
+    """Validate and sanitize a username string.
+
+    Raises:
+        ValueError: If username is None, not a string, or empty/whitespace.
+    """
+    if username is None or not isinstance(username, str):
         raise ValueError("Username cannot be empty.")
-    return username
+    normalized = username.strip().lower()
+    if not normalized:
+        raise ValueError("Username cannot be empty.")
+    return normalized
 
 
 def _validate_password(password: str) -> str:
@@ -262,6 +477,8 @@ def _validate_password(password: str) -> str:
     password = str(password)
     if not password:
         raise ValueError("Password cannot be empty.")
+    if len(password) > 128:
+        raise ValueError("Password cannot exceed 128 characters.")
     return password
 
 
@@ -270,6 +487,8 @@ def _validate_password_complexity(password: str) -> str:
     password = str(password)
     if len(password) < 8:
         raise ValueError("Password must be at least 8 characters long.")
+    if len(password) > 128:
+        raise ValueError("Password cannot exceed 128 characters.")
     if not re.search(r"[A-Z]", password):
         raise ValueError("Password must contain at least one uppercase letter.")
     if not re.search(r"\d", password):
@@ -283,8 +502,9 @@ def _validate_password_complexity(password: str) -> str:
 
 def _validate_role(role: str) -> str:
     role = str(role).strip().lower()
-    if role not in VALID_ROLES:
-        raise ValueError(f"Role must be one of: {', '.join(sorted(VALID_ROLES))}")
+    valid_roles = get_valid_roles()
+    if role not in valid_roles:
+        raise ValueError(f"Role must be one of: {', '.join(sorted(valid_roles))}")
     return role
 
 
@@ -313,7 +533,7 @@ def init_db() -> None:
             exists = bool(row and row[0])
 
             if not exists:
-                hashed = _hash_password("Admin123!")
+                hashed = str(_hash_password("Admin123!"))
                 conn.execute(
                     """
                     INSERT INTO users (username, password, role)
@@ -339,8 +559,11 @@ def verify_user(
     """Authenticate a user and return auth status.
 
     If return_details is True, returns a dict
-    ``{"authenticated": bool, "must_change_password": bool}``.
+    ``{"authenticated": bool, "must_change_password": bool, "password_expired": bool}``.
     Otherwise returns a boolean (True on success, False on failure).
+    
+    Implements account lockout protection (Issue #2704) by checking for
+    recent failed login attempts before verifying the password hash.
     """
     try:
         username = _validate_username(username)
@@ -349,6 +572,7 @@ def verify_user(
         if return_details:
             return {"authenticated": False, "must_change_password": False}
         return False
+    
     try:
         with _connect() as conn:
             row = conn.execute(
@@ -363,6 +587,17 @@ def verify_user(
 
         stored_hash, status, is_active, must_change_password = row
         if status == "suspended" or not is_active:
+            if return_details:
+                return {"authenticated": False, "must_change_password": False}
+            return False
+
+        # Issue #2704: Check for account lockout before doing expensive password hashing
+        if is_account_locked(username):
+            log_security_event(
+                event_type="login_blocked_lockout",
+                username=username,
+                details=f"Login attempt blocked due to lockout ({MAX_FAILED_ATTEMPTS} failures in {LOCKOUT_WINDOW_MINUTES}m)"
+            )
             if return_details:
                 return {"authenticated": False, "must_change_password": False}
             return False
@@ -386,7 +621,9 @@ def verify_user(
 
         elif stored_hash and stored_hash.startswith(("$2a$", "$2b$", "$2y$")):
             try:
-                if bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8")):
+                if bcrypt.checkpw(
+                    password.encode("utf-8"), stored_hash.encode("utf-8")
+                ):
                     hashed = _hash_password(password)
                     with _connect() as conn_migrate:
                         conn_migrate.execute(
@@ -399,10 +636,30 @@ def verify_user(
             except Exception:
                 authenticated = False
 
+        # Check password expiration after successful authentication (Issue #2716)
+        password_expired = False
+        if authenticated:
+            password_expired = is_password_expired(username)
+            if password_expired:
+                log_security_event(
+                    event_type="login_success_password_expired",
+                    username=username,
+                    details="Successful login but password requires rotation"
+                )
+            else:
+                log_security_event(
+                    event_type="login_success",
+                    username=username,
+                    details="Successful authentication"
+                )
+        
         if return_details:
             return {
                 "authenticated": authenticated,
-                "must_change_password": bool(must_change_password) if authenticated else False,
+                "must_change_password": (
+                    bool(must_change_password) if authenticated else False
+                ),
+                "password_expired": password_expired if authenticated else False,
             }
         return authenticated
     except sqlite3.Error as e:
@@ -415,8 +672,16 @@ def verify_user(
 authenticate_user = verify_user
 
 
-def get_user_role(username: str) -> str | None:
-    """Return the role of a user, or None if not found."""
+def get_user_role(username: str) -> str:
+    """
+    Return the role of a user, or 'user' as default if not found.
+
+    Args:
+        username: The username to look up
+
+    Returns:
+        str: The user's role (admin, teacher, or user)
+    """
     try:
         username = _validate_username(username)
         with _connect() as conn:
@@ -424,9 +689,56 @@ def get_user_role(username: str) -> str | None:
                 "SELECT role FROM users WHERE username = ?",
                 (username,),
             ).fetchone()
-            return row[0] if row else None
+            # Return the role if found, otherwise default to "user"
+            return row[0] if row else "user"
     except sqlite3.Error as e:
-        raise sqlite3.Error(f"Failed to retrieve user role: {e}") from e
+        logger.error(f"Failed to retrieve user role for {username}: {e}")
+        return "user"  # Safe fallback
+
+
+def get_user_role_safe(username: str, default: str = "user") -> str:
+    """
+    Safely get user role with a custom default.
+
+    Args:
+        username: The username to look up
+        default: Default role if user not found (default: "user")
+
+    Returns:
+        str: The user's role or the default
+    """
+    try:
+        return get_user_role(username)
+    except Exception as e:
+        logger.error(f"Error getting role for {username}: {e}")
+        return default
+
+
+def is_admin(username: str) -> bool:
+    """
+    Check if a user is an admin.
+
+    Args:
+        username: The username to check
+
+    Returns:
+        bool: True if user is admin, False otherwise
+    """
+    return get_user_role(username) == "admin"
+
+
+def is_teacher(username: str) -> bool:
+    """
+    Check if a user is a teacher.
+
+    Args:
+        username: The username to check
+
+    Returns:
+        bool: True if user is teacher, False otherwise
+    """
+    role = get_user_role(username)
+    return role == "teacher" or role == "admin"
 
 
 def get_user_last_login(username: str) -> str | None:
@@ -452,7 +764,7 @@ def get_user_roles(user_ids: list[int]) -> dict[int, str]:
         with _connect() as conn:
             rows = conn.execute(
                 f"SELECT id, role FROM users WHERE id IN ({placeholders})",
-                user_ids,
+                tuple(user_ids),
             ).fetchall()
             return {row[0]: row[1] for row in rows}
     except sqlite3.Error as e:
@@ -499,10 +811,10 @@ def get_all_users(role: str | None = None) -> list:
     """
     try:
         query = "SELECT id, username, role, is_active, version FROM users"
-        params: list = []
+        params: tuple = ()
         if role is not None:
             query += " WHERE role = ?"
-            params.append(role)
+            params = (role,)
         query += " ORDER BY id"
         with _connect() as conn:
             rows = conn.execute(query, params).fetchall()
@@ -718,6 +1030,111 @@ def clear_login_attempts(username: str) -> None:
     redis_clear_login_attempts(username.lower())
 
 
+# ============================================================================
+# PASSWORD EXPIRATION - Issue #2716
+# ============================================================================
+
+DEFAULT_PASSWORD_LIFETIME_DAYS = 90
+
+
+def is_password_expired(username: str) -> bool:
+    """Check if a user's password has expired based on password_expires_at.
+
+    Args:
+        username: The username to check.
+
+    Returns:
+        True if the password is expired, False if still valid or if
+        expiration is not configured (NULL).
+    """
+    if not username:
+        return False
+
+    try:
+        username = _validate_username(username)
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT password_expires_at FROM users WHERE username = ?", (username,)
+            ).fetchone()
+
+            if not row or not row[0]:
+                # No expiration set means password never expires
+                return False
+
+            expires_at_str = row[0]
+            expires_at = dt.fromisoformat(expires_at_str.replace("Z", "+00:00"))
+
+            # Compare with current UTC time
+            now_utc = dt.now(timezone.utc)
+            is_expired = now_utc >= expires_at
+
+            if is_expired:
+                logger.info(
+                    "Password expired for user %s (expired at %s)",
+                    username,
+                    expires_at_str,
+                )
+
+            return is_expired
+
+    except sqlite3.Error as e:
+        logger.error("Failed to check password expiration for %s: %s", username, e)
+        # Fail open: don't block login if we can't read the expiration date
+        return False
+    except ValueError as e:
+        logger.error(
+            "Invalid date format in password_expires_at for %s: %s", username, e
+        )
+        return False
+
+
+@with_sqlite_retry
+def set_password_expiration(
+    username: str, days_until_expiration: int = DEFAULT_PASSWORD_LIFETIME_DAYS
+) -> bool:
+    """Set or update the password expiration date for a user.
+
+    Args:
+        username: The username to update.
+        days_until_expiration: Number of days until the password expires.
+
+    Returns:
+        True if the update was successful, False otherwise.
+    """
+    if not username or days_until_expiration < 0:
+        return False
+
+    try:
+        username = _validate_username(username)
+        expiration_date = (
+            dt.now(timezone.utc) + timedelta(days=days_until_expiration)
+        ).isoformat()
+
+        with _connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE users 
+                SET password_expires_at = ? 
+                WHERE username = ?
+                """,
+                (expiration_date, username),
+            )
+            conn.commit()
+
+            if cursor.rowcount == 0:
+                logger.warning("set_password_expiration: User %s not found", username)
+                return False
+
+            logger.info(
+                "Set password expiration for %s to %s", username, expiration_date
+            )
+            return True
+
+    except sqlite3.Error as e:
+        logger.error("Failed to set password expiration for %s: %s", username, e)
+        return False
+
+
 def get_user_preferences(username: str) -> dict:
     """Return user preferences as a dictionary, or empty dict if none exist."""
     username = username.lower()
@@ -811,24 +1228,46 @@ def set_user_theme(username: str, theme: str) -> None:
 
 
 @with_sqlite_retry
+def _generate_secure_password(length: int = 32) -> str:
+    """
+    Generate a cryptographically secure random password.
+
+    Args:
+        length: Length of the password (default: 32 characters)
+
+    Returns:
+        A secure random password containing uppercase, lowercase, digits, and symbols
+    """
+    alphabet = string.ascii_letters + string.digits + string.punctuation
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
 def get_or_create_sso_user(email: str, default_role: str = "teacher") -> str:
-    """Finds a user by email (as username) or creates a new one for SSO."""
-    username = _validate_username(email)
-    with _connect() as conn:
-        row = conn.execute(
-            "SELECT role FROM users WHERE username = ?",
-            (username,),
-        ).fetchone()
-        if row:
-            return row[0]
-        hashed = _hash_password("!")
-        role = _validate_role(default_role)
-        conn.execute(
-            "INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
-            (username, hashed, role),
-        )
-        conn.commit()
-        return role
+    """
+    Get or create SSO user with enhanced security.
+    Wrapper around get_or_create_sso_user_enhanced for backward compatibility.
+    """
+    result = get_or_create_sso_user_enhanced(
+        email=email,
+        provider="unknown",
+        provider_user_id=email,
+        default_role=default_role,
+    )
+    return result["role"]
+
+
+def is_sso_user(username: str) -> bool:
+    """Check if a user was created via SSO."""
+    try:
+        username = _validate_username(username)
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT sso_provider FROM users WHERE username = ?",
+                (username,),
+            ).fetchone()
+            return row is not None and row[0] is not None
+    except sqlite3.Error:
+        return False
 
 
 def get_user_active_status(username: str) -> bool:
@@ -843,6 +1282,7 @@ def get_user_active_status(username: str) -> bool:
             return bool(row[0]) if row else False
     except sqlite3.Error as e:
         raise sqlite3.Error(f"Failed to retrieve user active status: {e}") from e
+
 
 @with_sqlite_retry
 def set_user_status(username: str, status: str) -> None:
@@ -866,6 +1306,8 @@ def set_user_status(username: str, status: str) -> None:
             conn.commit()
     except sqlite3.Error as e:
         raise sqlite3.Error(f"Failed to update user status: {e}") from e
+
+
 @with_sqlite_retry
 def set_user_active_status(username: str, is_active: bool) -> None:
     """Set whether a user account is active (suspended or active)."""
@@ -946,12 +1388,12 @@ SET role = ?,
                 WHERE username = ? AND version = ?
                 """,
                 (
-    role,
-    is_active_val,
-    "active" if is_active else "suspended",
-    username,
-    expected_version,
-)
+                    role,
+                    is_active_val,
+                    "active" if is_active else "suspended",
+                    username,
+                    expected_version,
+                ),
             )
             if cursor.rowcount == 0:
                 raise StaleDataException(
@@ -1139,3 +1581,1141 @@ def get_upload_count(username: str | None = None) -> int:
             return row[0] if row else 0
     except sqlite3.Error:
         return 0
+
+
+def format_user_creation_date(iso_str: str) -> str:
+    """Format an ISO creation date as 'MMM DD, YYYY'."""
+    date = dt.fromisoformat(iso_str.replace("Z", "+00:00"))
+    return date.strftime("%b %d, %Y")
+
+
+# ============================================================================
+# ROLE-BASED ACCESS CONTROL (RBAC) ENHANCEMENTS - Issue #2171
+# ============================================================================
+
+from enum import Enum
+from functools import wraps
+from typing import Set
+
+import streamlit as st
+
+# ============================================================================
+# ROLE DEFINITIONS
+# ============================================================================
+
+
+class UserRole(Enum):
+    """User roles with hierarchical permissions."""
+
+    USER = "user"
+    TEACHER = "teacher"
+    ADMIN = "admin"
+    SUPER_ADMIN = "super_admin"
+
+    @classmethod
+    def from_string(cls, role: str) -> "UserRole":
+        """Convert string to UserRole enum."""
+        try:
+            return cls(role.lower())
+        except ValueError:
+            return cls.USER
+
+    def level(self) -> int:
+        """Get role hierarchy level (higher = more permissions)."""
+        levels = {
+            UserRole.USER: 0,
+            UserRole.TEACHER: 1,
+            UserRole.ADMIN: 2,
+            UserRole.SUPER_ADMIN: 3,
+        }
+        return levels.get(self, 0)
+
+    def has_permission(self, required_role: "UserRole") -> bool:
+        """Check if this role has permission for a required role."""
+        return self.level() >= required_role.level()
+
+
+# ============================================================================
+# PERMISSION DEFINITIONS
+# ============================================================================
+
+
+class Permission(Enum):
+    """Available permissions in the system."""
+
+    # User permissions
+    VIEW_DASHBOARD = "view_dashboard"
+    VIEW_PROFILE = "view_profile"
+    EDIT_PROFILE = "edit_profile"
+
+    # Document permissions
+    UPLOAD_DOCUMENTS = "upload_documents"
+    VIEW_DOCUMENTS = "view_documents"
+    DELETE_DOCUMENTS = "delete_documents"
+    EXPORT_DOCUMENTS = "export_documents"
+
+    # Analysis permissions
+    RUN_ANALYSIS = "run_analysis"
+    VIEW_ANALYSIS = "view_analysis"
+    DELETE_ANALYSIS = "delete_analysis"
+    EXPORT_ANALYSIS = "export_analysis"
+
+    # User management permissions
+    VIEW_USERS = "view_users"
+    CREATE_USERS = "create_users"
+    EDIT_USERS = "edit_users"
+    DELETE_USERS = "delete_users"
+    MANAGE_ROLES = "manage_roles"
+
+    # System permissions
+    VIEW_LOGS = "view_logs"
+    VIEW_SETTINGS = "view_settings"
+    EDIT_SETTINGS = "edit_settings"
+    VIEW_AUDIT_LOGS = "view_audit_logs"
+    MANAGE_BACKUPS = "manage_backups"
+    VIEW_SYSTEM_HEALTH = "view_system_health"
+
+
+# ============================================================================
+# ROLE-PERMISSION MAPPING
+# ============================================================================
+
+_ROLE_PERMISSIONS: Dict[UserRole, Set[Permission]] = {
+    UserRole.USER: {
+        Permission.VIEW_DASHBOARD,
+        Permission.VIEW_PROFILE,
+        Permission.EDIT_PROFILE,
+        Permission.VIEW_DOCUMENTS,
+        Permission.VIEW_ANALYSIS,
+    },
+    UserRole.TEACHER: {
+        Permission.VIEW_DASHBOARD,
+        Permission.VIEW_PROFILE,
+        Permission.EDIT_PROFILE,
+        Permission.UPLOAD_DOCUMENTS,
+        Permission.VIEW_DOCUMENTS,
+        Permission.EXPORT_DOCUMENTS,
+        Permission.RUN_ANALYSIS,
+        Permission.VIEW_ANALYSIS,
+        Permission.EXPORT_ANALYSIS,
+        Permission.VIEW_USERS,
+    },
+    UserRole.ADMIN: {
+        Permission.VIEW_DASHBOARD,
+        Permission.VIEW_PROFILE,
+        Permission.EDIT_PROFILE,
+        Permission.UPLOAD_DOCUMENTS,
+        Permission.VIEW_DOCUMENTS,
+        Permission.DELETE_DOCUMENTS,
+        Permission.EXPORT_DOCUMENTS,
+        Permission.RUN_ANALYSIS,
+        Permission.VIEW_ANALYSIS,
+        Permission.DELETE_ANALYSIS,
+        Permission.EXPORT_ANALYSIS,
+        Permission.VIEW_USERS,
+        Permission.CREATE_USERS,
+        Permission.EDIT_USERS,
+        Permission.DELETE_USERS,
+        Permission.MANAGE_ROLES,
+        Permission.VIEW_LOGS,
+        Permission.VIEW_SETTINGS,
+        Permission.EDIT_SETTINGS,
+        Permission.VIEW_AUDIT_LOGS,
+        Permission.MANAGE_BACKUPS,
+        Permission.VIEW_SYSTEM_HEALTH,
+    },
+    UserRole.SUPER_ADMIN: {
+        Permission.VIEW_DASHBOARD,
+        Permission.VIEW_PROFILE,
+        Permission.EDIT_PROFILE,
+        Permission.UPLOAD_DOCUMENTS,
+        Permission.VIEW_DOCUMENTS,
+        Permission.DELETE_DOCUMENTS,
+        Permission.EXPORT_DOCUMENTS,
+        Permission.RUN_ANALYSIS,
+        Permission.VIEW_ANALYSIS,
+        Permission.DELETE_ANALYSIS,
+        Permission.EXPORT_ANALYSIS,
+        Permission.VIEW_USERS,
+        Permission.CREATE_USERS,
+        Permission.EDIT_USERS,
+        Permission.DELETE_USERS,
+        Permission.MANAGE_ROLES,
+        Permission.VIEW_LOGS,
+        Permission.VIEW_SETTINGS,
+        Permission.EDIT_SETTINGS,
+        Permission.VIEW_AUDIT_LOGS,
+        Permission.MANAGE_BACKUPS,
+        Permission.VIEW_SYSTEM_HEALTH,
+    },
+}
+
+
+# ============================================================================
+# PERMISSION CHECK FUNCTIONS
+# ============================================================================
+
+
+def get_role_permissions(role: UserRole) -> Set[Permission]:
+    """Get all permissions for a role."""
+    return _ROLE_PERMISSIONS.get(role, set())
+
+
+def has_permission(username: str, permission: Permission) -> bool:
+    """
+    Check if a user has a specific permission.
+
+    Args:
+        username: The username to check
+        permission: The permission to check for
+
+    Returns:
+        bool: True if user has the permission
+    """
+    try:
+        role_str = get_user_role(username)
+        role = UserRole.from_string(role_str)
+        permissions = get_role_permissions(role)
+        return permission in permissions
+    except Exception as e:
+        logger.error(f"Failed to check permission for {username}: {e}")
+        return False
+
+
+def has_any_permission(username: str, *permissions: Permission) -> bool:
+    """Check if a user has any of the given permissions."""
+    for permission in permissions:
+        if has_permission(username, permission):
+            return True
+    return False
+
+
+def has_all_permissions(username: str, *permissions: Permission) -> bool:
+    """Check if a user has all of the given permissions."""
+    for permission in permissions:
+        if not has_permission(username, permission):
+            return False
+    return True
+
+
+def require_permission(permission: Permission):
+    """
+    Decorator to require a specific permission for a function.
+
+    Usage:
+        @require_permission(Permission.VIEW_AUDIT_LOGS)
+        def admin_function():
+            pass
+    """
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Get username from session state
+            username = st.session_state.get(SessionKeys.USERNAME)  # noqa: F821
+            if not username:
+                st.error("🔒 Authentication required.")
+                return None
+
+            if not has_permission(username, permission):
+                st.error(f"🔒 Permission denied. Requires: {permission.value}")
+                return None
+
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+def require_role(required_role: UserRole):
+    """
+    Decorator to require a specific role for a function.
+
+    Usage:
+        @require_role(UserRole.ADMIN)
+        def admin_function():
+            pass
+    """
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            username = st.session_state.get(SessionKeys.USERNAME)  # noqa: F821
+            if not username:
+                st.error("🔒 Authentication required.")
+                return None
+
+            role_str = get_user_role(username)
+            role = UserRole.from_string(role_str)
+
+            if not role.has_permission(required_role):
+                st.error(f"🔒 Role required: {required_role.value}")
+                return None
+
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+# ============================================================================
+# RBAC HELPERS
+# ============================================================================
+
+
+def get_user_role_enhanced(username: str) -> Dict[str, Any]:
+    """
+    Get enhanced user role information.
+
+    Returns:
+        Dict with role, level, permissions, and hierarchy info
+    """
+    role_str = get_user_role(username)
+    role = UserRole.from_string(role_str)
+    permissions = get_role_permissions(role)
+
+    return {
+        "username": username,
+        "role": role_str,
+        "role_enum": role,
+        "level": role.level(),
+        "permissions": [p.value for p in permissions],
+        "permission_count": len(permissions),
+        "is_admin": role in [UserRole.ADMIN, UserRole.SUPER_ADMIN],
+        "is_teacher": role in [UserRole.TEACHER, UserRole.ADMIN, UserRole.SUPER_ADMIN],
+        "is_super_admin": role == UserRole.SUPER_ADMIN,
+    }
+
+
+def get_roles_hierarchy() -> Dict[str, int]:
+    """Get the hierarchy levels for all roles."""
+    return {role.value: role.level() for role in UserRole}
+
+
+def get_available_permissions() -> List[str]:
+    """Get list of all available permissions."""
+    return [p.value for p in Permission]
+
+
+def get_roles_summary() -> Dict[str, Dict[str, Any]]:
+    """Get summary of all roles and their permissions."""
+    summary = {}
+    for role in UserRole:
+        permissions = get_role_permissions(role)
+        summary[role.value] = {
+            "level": role.level(),
+            "permission_count": len(permissions),
+            "permissions": [p.value for p in permissions],
+        }
+    return summary
+
+
+def get_users_by_role(role: UserRole) -> List[str]:
+    """
+    Get all users with a specific role.
+
+    Args:
+        role: The role to filter by
+
+    Returns:
+        List of usernames with the specified role
+    """
+    try:
+        from src.db.auth import get_all_users
+
+        users = get_all_users()
+        return [
+            user["username"]
+            for user in users
+            if UserRole.from_string(user["role"]) == role
+        ]
+    except Exception as e:
+        logger.error(f"Failed to get users by role: {e}")
+        return []
+
+
+def get_users_by_permission(permission: Permission) -> List[str]:
+    """
+    Get all users who have a specific permission.
+
+    Args:
+        permission: The permission to check
+
+    Returns:
+        List of usernames with the permission
+    """
+    try:
+        from src.db.auth import get_all_users
+
+        users = get_all_users()
+        return [
+            user["username"]
+            for user in users
+            if has_permission(user["username"], permission)
+        ]
+    except Exception as e:
+        logger.error(f"Failed to get users by permission: {e}")
+        return []
+
+
+def promote_user(username: str, new_role: UserRole, admin_username: str) -> bool:
+    """
+    Promote a user to a new role.
+
+    Args:
+        username: The user to promote
+        new_role: The new role
+        admin_username: The admin performing the promotion
+
+    Returns:
+        bool: True if promotion was successful
+    """
+    try:
+        username = _validate_username(username)
+        admin_role = UserRole.from_string(get_user_role(admin_username))
+
+        # Only admins can promote users
+        if not admin_role.has_permission(UserRole.ADMIN):
+            raise PermissionError("Only admins can promote users")
+
+        # Cannot promote to higher than admin
+        if new_role.level() > UserRole.ADMIN.level():
+            raise ValueError("Cannot promote users to Super Admin")
+
+        with _connect() as conn:
+            cursor = conn.execute(
+                "UPDATE users SET role = ? WHERE username = ?",
+                (new_role.value, username),
+            )
+            affected = cursor.rowcount
+            conn.commit()
+
+            if affected > 0:
+                log_security_event(
+                    event_type="user_role_changed",
+                    username=username,
+                    details=f"Role changed to {new_role.value} by {admin_username}",
+                )
+                return True
+            return False
+
+    except Exception as e:
+        logger.error(f"Failed to promote user {username}: {e}")
+        return False
+
+
+def demote_user(username: str, admin_username: str) -> bool:
+    """
+    Demote a user to the member role.
+
+    Args:
+        username: The user to demote
+        admin_username: The admin performing the demotion
+
+    Returns:
+        bool: True if demotion was successful
+    """
+    try:
+        username = _validate_username(username)
+        admin_role = UserRole.from_string(get_user_role(admin_username))
+
+        # Only admins can demote users
+        if not admin_role.has_permission(UserRole.ADMIN):
+            raise PermissionError("Only admins can demote users")
+
+        with _connect() as conn:
+            cursor = conn.execute(
+                "UPDATE users SET role = ? WHERE username = ?",
+                (UserRole.MEMBER.value, username),
+            )
+            affected = cursor.rowcount
+            conn.commit()
+
+            if affected > 0:
+                log_security_event(
+                    event_type="user_role_changed",
+                    username=username,
+                    details=f"Role changed to {UserRole.MEMBER.value} by {admin_username}",
+                )
+                return True
+            return False
+
+    except Exception as e:
+        logger.error(f"Failed to demote user {username}: {e}")
+        return False
+
+
+# ============================================================================
+# SSO SECURITY ENHANCEMENTS - Issue #2172
+# ============================================================================
+
+# ============================================================================
+# SECURE PASSWORD GENERATION
+# ============================================================================
+
+
+def generate_secure_password(length: int = 32) -> str:
+    """
+    Generate a cryptographically secure random password.
+
+    Args:
+        length: Length of the password (default: 32 characters)
+
+    Returns:
+        A secure random password containing uppercase, lowercase, digits, and symbols
+
+    Examples:
+        >>> generate_secure_password(16)
+        'K#9mP$2vL&8qR!x4'
+    """
+    if length < 12:
+        raise ValueError("Password length must be at least 12 characters for security.")
+
+    alphabet = string.ascii_letters + string.digits + string.punctuation
+    password = "".join(secrets.choice(alphabet) for _ in range(length))
+
+    # Ensure password meets complexity requirements
+    while not _validate_password_complexity(password):
+        password = "".join(secrets.choice(alphabet) for _ in range(length))
+
+    return password
+
+
+def generate_sso_token() -> str:
+    """
+    Generate a secure token for SSO session management.
+
+    Returns:
+        A 64-character hex token
+    """
+    return secrets.token_hex(64)
+
+
+def store_sso_state(state: str, expires_in_seconds: int = 600) -> bool:
+    """
+    Store an OAuth SSO state parameter in the database with an expiration time.
+
+    Args:
+        state: The state token string.
+        expires_in_seconds: Lifetime of state in seconds (default 600s / 10m).
+
+    Returns:
+        bool: True if state was stored successfully.
+    """
+    if not state:
+        return False
+    try:
+        expires_at = (dt.now() + timedelta(seconds=expires_in_seconds)).isoformat()
+        with _connect() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS sso_states (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    state TEXT UNIQUE NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    used_at TEXT DEFAULT NULL,
+                    expires_at TEXT NOT NULL
+                )
+            """
+            )
+            conn.execute(
+                """INSERT OR REPLACE INTO sso_states (state, expires_at, used_at)
+                   VALUES (?, ?, NULL)""",
+                (state, expires_at),
+            )
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Failed to store SSO state: {e}")
+        return False
+
+
+def validate_sso_state(state: str) -> bool:
+    """
+    Validate an OAuth SSO state parameter and invalidate it after validation to prevent replay attacks.
+
+    Args:
+        state: The state token to validate.
+
+    Returns:
+        bool: True if valid, unexpired, and not previously used; False otherwise.
+    """
+    if not state:
+        return False
+
+    try:
+        with _connect() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS sso_states (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    state TEXT UNIQUE NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    used_at TEXT DEFAULT NULL,
+                    expires_at TEXT NOT NULL
+                )
+            """
+            )
+            row = conn.execute(
+                "SELECT expires_at, used_at FROM sso_states WHERE state = ?", (state,)
+            ).fetchone()
+
+            if not row:
+                return False
+
+            expires_at, used_at = row
+            if used_at is not None:
+                logger.warning(f"OAuth state replay attack detected for state: {state}")
+                return False
+
+            if expires_at < dt.now().isoformat():
+                logger.warning(f"OAuth state expired for state: {state}")
+                return False
+
+            # Invalidate state immediately after validation to prevent replay attacks
+            conn.execute(
+                "UPDATE sso_states SET used_at = CURRENT_TIMESTAMP WHERE state = ?",
+                (state,),
+            )
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Failed to validate SSO state: {e}")
+        return False
+
+
+def verify_sso_state(state: str) -> bool:
+    """Alias for validate_sso_state."""
+    return validate_sso_state(state)
+
+
+def generate_sso_state() -> str:
+    """
+    Generate a secure state parameter for OAuth2 flow and store it.
+
+    Returns:
+        A 32-character hex state token
+    """
+    state = secrets.token_hex(32)
+    store_sso_state(state)
+    return state
+
+
+# ============================================================================
+# SSO USER MANAGEMENT
+# ============================================================================
+
+
+def get_or_create_sso_user_enhanced(
+    email: str, provider: str, provider_user_id: str, default_role: str = "teacher"
+) -> Dict[str, Any]:
+    """
+    Enhanced SSO user creation with security features.
+
+    This function:
+    1. Checks if user exists
+    2. Updates SSO provider info if needed
+    3. Creates user with secure random password
+    4. Logs security events
+    5. Returns user info with security status
+
+    Args:
+        email: User's email address
+        provider: SSO provider (github, google, etc.)
+        provider_user_id: User ID from the provider
+        default_role: Default role for new users
+
+    Returns:
+        Dict containing user info and security status
+    """
+    username = _validate_username(email)
+    provider = provider.lower()
+
+    if provider not in ["github", "google", "microsoft", "gitlab"]:
+        raise ValueError(f"Unsupported SSO provider: {provider}")
+
+    with _connect() as conn:
+        # Check if user exists
+        row = conn.execute(
+            "SELECT id, role, sso_provider, sso_provider_user_id FROM users WHERE username = ?",
+            (username,),
+        ).fetchone()
+
+        if row:
+            user_id, role, existing_provider, existing_provider_id = row
+
+            # Update provider info if changed
+            if (
+                existing_provider != provider
+                or existing_provider_id != provider_user_id
+            ):
+                conn.execute(
+                    """UPDATE users 
+                       SET sso_provider = ?, 
+                           sso_provider_user_id = ?,
+                           updated_at = CURRENT_TIMESTAMP
+                       WHERE username = ?""",
+                    (provider, provider_user_id, username),
+                )
+                conn.commit()
+
+                log_security_event(
+                    event_type="sso_provider_updated",
+                    username=username,
+                    details=f"SSO provider updated from {existing_provider} to {provider}",
+                )
+
+            # Log successful SSO login
+            log_security_event(
+                event_type="sso_login_success",
+                username=username,
+                details=f"SSO login via {provider} (user_id: {user_id})",
+            )
+
+            return {
+                "username": username,
+                "role": role,
+                "user_id": user_id,
+                "is_new_user": False,
+                "provider": provider,
+                "sso_enabled": True,
+            }
+
+        # New user - generate secure random password
+        secure_password = generate_secure_password(32)
+        hashed = _hash_password(secure_password)
+        role = _validate_role(default_role)
+
+        # Insert new user with SSO info
+        cursor = conn.execute(
+            """INSERT INTO users 
+               (username, password, role, sso_provider, sso_provider_user_id, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
+            (username, hashed, role, provider, provider_user_id),
+        )
+        user_id = cursor.lastrowid
+        conn.commit()
+
+        # Store secure password in a separate table for recovery (optional)
+        _store_sso_recovery_token(username, secure_password)
+
+        # Log security events
+        log_security_event(
+            event_type="sso_user_created",
+            username=username,
+            details=f"SSO user created via {provider} with role: {role}",
+        )
+
+        log_security_event(
+            event_type="user_created",
+            username=username,
+            details=f"User created via SSO ({provider}) with secure random password",
+        )
+
+        return {
+            "username": username,
+            "role": role,
+            "user_id": user_id,
+            "is_new_user": True,
+            "provider": provider,
+            "sso_enabled": True,
+            "secure_password_set": True,
+        }
+
+
+def _store_sso_recovery_token(username: str, password: str) -> None:
+    """
+    Store a recovery token for SSO users in case they need to reset password.
+    """
+    try:
+        token = generate_sso_token()
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+        expires_at = (dt.now() + timedelta(days=7)).isoformat()
+
+        with _connect() as conn:
+            # Create recovery_tokens table if not exists
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS sso_recovery_tokens (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT NOT NULL,
+                    token_hash TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    used_at TEXT DEFAULT NULL,
+                    FOREIGN KEY (username) REFERENCES users(username)
+                )
+            """
+            )
+
+            # Store recovery token
+            conn.execute(
+                """INSERT INTO sso_recovery_tokens (username, token_hash, expires_at)
+                   VALUES (?, ?, ?)""",
+                (username, token_hash, expires_at),
+            )
+            conn.commit()
+
+            # Log for security
+            log_security_event(
+                event_type="sso_recovery_token_created",
+                username=username,
+                details="SSO recovery token created",
+            )
+    except Exception as e:
+        logger.error(f"Failed to store SSO recovery token: {e}")
+
+
+def verify_sso_recovery_token(username: str, token: str) -> bool:
+    """
+    Verify an SSO recovery token.
+
+    Args:
+        username: The username
+        token: The recovery token to verify
+
+    Returns:
+        True if token is valid and not expired
+    """
+    try:
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+
+        with _connect() as conn:
+            row = conn.execute(
+                """SELECT expires_at, used_at FROM sso_recovery_tokens 
+                   WHERE username = ? AND token_hash = ?""",
+                (username, token_hash),
+            ).fetchone()
+
+            if not row:
+                return False
+
+            expires_at, used_at = row
+            if used_at is not None:
+                return False  # Token already used
+
+            if expires_at < dt.now().isoformat():
+                return False  # Token expired
+
+            # Mark token as used
+            conn.execute(
+                "UPDATE sso_recovery_tokens SET used_at = CURRENT_TIMESTAMP WHERE username = ? AND token_hash = ?",
+                (username, token_hash),
+            )
+            conn.commit()
+            return True
+
+    except Exception as e:
+        logger.error(f"Failed to verify SSO recovery token: {e}")
+        return False
+
+
+def get_sso_user_info(username: str) -> Optional[Dict[str, Any]]:
+    """
+    Get SSO user information.
+
+    Args:
+        username: The username to lookup
+
+    Returns:
+        Dict with SSO info or None if not an SSO user
+    """
+    try:
+        username = _validate_username(username)
+        with _connect() as conn:
+            row = conn.execute(
+                """SELECT id, username, role, sso_provider, sso_provider_user_id, 
+                          created_at, updated_at, is_active
+                   FROM users WHERE username = ? AND sso_provider IS NOT NULL""",
+                (username,),
+            ).fetchone()
+
+            if not row:
+                return None
+
+            return {
+                "user_id": row[0],
+                "username": row[1],
+                "role": row[2],
+                "sso_provider": row[3],
+                "sso_provider_user_id": row[4],
+                "created_at": row[5],
+                "updated_at": row[6],
+                "is_active": bool(row[7]),
+                "is_sso_user": True,
+            }
+    except Exception as e:
+        logger.error(f"Failed to get SSO user info: {e}")
+        return None
+
+
+def list_sso_users() -> List[Dict[str, Any]]:
+    """
+    List all SSO users in the system.
+
+    Returns:
+        List of SSO user info dicts
+    """
+    try:
+        with _connect() as conn:
+            rows = conn.execute(
+                """SELECT id, username, role, sso_provider, sso_provider_user_id, 
+                          created_at, updated_at, is_active
+                   FROM users WHERE sso_provider IS NOT NULL
+                   ORDER BY created_at DESC"""
+            ).fetchall()
+
+            return [
+                {
+                    "user_id": row[0],
+                    "username": row[1],
+                    "role": row[2],
+                    "sso_provider": row[3],
+                    "sso_provider_user_id": row[4],
+                    "created_at": row[5],
+                    "updated_at": row[6],
+                    "is_active": bool(row[7]),
+                }
+                for row in rows
+            ]
+    except Exception as e:
+        logger.error(f"Failed to list SSO users: {e}")
+        return []
+
+
+def revoke_sso_access(username: str) -> bool:
+    """
+    Revoke SSO access for a user.
+
+    Args:
+        username: The username to revoke access for
+
+    Returns:
+        True if successfully revoked
+    """
+    try:
+        username = _validate_username(username)
+        with _connect() as conn:
+            cursor = conn.execute(
+                """UPDATE users 
+                   SET sso_provider = NULL, 
+                       sso_provider_user_id = NULL,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE username = ?""",
+                (username,),
+            )
+            affected = cursor.rowcount
+            conn.commit()
+
+            if affected > 0:
+                log_security_event(
+                    event_type="user_role_changed",
+                    username=username,
+                    details=f"Role changed to {new_role.value} by {admin_username}",  # noqa: F821
+                )
+                return True
+            return False
+
+    except Exception as e:
+        logger.error(f"Failed to promote user {username}: {e}")
+        return False
+
+
+def demote_user(username: str, admin_username: str) -> bool:  # noqa: F811
+    """
+    Demote a user to the default USER role.
+
+    Args:
+        username: The user to demote
+        admin_username: The admin performing the demotion
+
+    Returns:
+        bool: True if demotion was successful
+    """
+    return promote_user(username, UserRole.USER, admin_username)
+
+
+# ============================================================================
+# STREAMLIT UI HELPERS
+# ============================================================================
+
+
+def render_role_badge(role: str) -> str:
+    """
+    Render a role badge HTML.
+
+    Args:
+        role: The role string
+
+    Returns:
+        HTML string for the role badge
+    """
+    badges = {
+        "super_admin": '<span style="background: #8B0000; color: white; padding: 2px 10px; border-radius: 12px; font-size: 0.8rem;">🛡️ Super Admin</span>',
+        "admin": '<span style="background: #1e3a8a; color: white; padding: 2px 10px; border-radius: 12px; font-size: 0.8rem;">🔑 Admin</span>',
+        "teacher": '<span style="background: #0d9488; color: white; padding: 2px 10px; border-radius: 12px; font-size: 0.8rem;">👨‍🏫 Teacher</span>',
+        "user": '<span style="background: #6b7280; color: white; padding: 2px 10px; border-radius: 12px; font-size: 0.8rem;">👤 User</span>',
+    }
+    return badges.get(role.lower(), badges.get("user"))
+
+
+def render_role_selector(username: str, current_role: str) -> None:
+    """
+    Render a role selector dropdown for admin users.
+
+    Args:
+        username: The user to change role for
+        current_role: The current role
+    """
+    roles = [r.value for r in UserRole if r != UserRole.SUPER_ADMIN]
+    selected = st.selectbox(
+        f"Role for {username}",
+        options=roles,
+        index=roles.index(current_role) if current_role in roles else 0,
+        key=f"role_select_{username}",
+    )
+
+    if selected != current_role:
+        if st.button(f"Update Role for {username}", key=f"role_update_{username}"):
+            admin = st.session_state.get(SessionKeys.USERNAME)  # noqa: F821
+            new_role = UserRole.from_string(selected)
+            if promote_user(username, new_role, admin):
+                st.success(f"✅ Role updated to {selected} for {username}")
+                st.rerun()
+            else:
+                st.error("❌ Failed to update role")
+
+
+def render_permission_checklist(username: str) -> None:
+    """
+    Render a checklist of permissions for a user.
+
+    Args:
+        username: The user to display permissions for
+    """
+    role_str = get_user_role(username)
+    role = UserRole.from_string(role_str)
+    permissions = get_role_permissions(role)
+
+    st.markdown(f"### Permissions for {username}")
+    st.caption(f"Role: {role_str} (Level {role.level()})")
+
+    cols = st.columns(3)
+    for idx, permission in enumerate(sorted(permissions, key=lambda x: x.value)):
+        col_idx = idx % 3
+        with cols[col_idx]:
+            st.markdown(f"✅ {permission.value}")
+
+
+def get_sso_users_count() -> int:
+    """
+    Get the total number of SSO users.
+
+    Returns:
+        Count of SSO users
+    """
+    try:
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM users WHERE sso_provider IS NOT NULL"
+            ).fetchone()
+            return row[0] if row else 0
+    except Exception as e:
+        logger.error(f"Failed to count SSO users: {e}")
+        return 0
+
+
+def migrate_existing_sso_users() -> Dict[str, Any]:
+    """
+    Migrate existing SSO users to secure passwords.
+
+    This function finds all SSO users with weak passwords and
+    upgrades them to secure random passwords.
+
+    Returns:
+        Dict with migration statistics
+    """
+    try:
+        from src.db.auth import get_all_users, update_password  # noqa: F401
+
+        sso_users = list_sso_users()
+        migrated = 0
+        failed = 0
+
+        for user in sso_users:
+            try:
+                username = user["username"]
+                # Generate new secure password
+                new_password = generate_secure_password(32)
+                # Update password
+                update_password(username, new_password)
+                migrated += 1
+
+                log_security_event(
+                    event_type="sso_password_upgraded",
+                    username=username,
+                    details="SSO user password upgraded from weak to secure",
+                )
+            except Exception as e:
+                logger.error(f"Failed to upgrade password for {username}: {e}")
+                failed += 1
+
+        return {
+            "total_sso_users": len(sso_users),
+            "migrated": migrated,
+            "failed": failed,
+            "success": failed == 0,
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to migrate SSO users: {e}")
+        return {
+            "total_sso_users": 0,
+            "migrated": 0,
+            "failed": 1,
+            "success": False,
+            "error": str(e),
+        }
+
+
+# ============================================================================
+# EXPORTS
+# ============================================================================
+
+__all__ = [
+    "UserRole",
+    "Permission",
+    "get_role_permissions",
+    "has_permission",
+    "has_any_permission",
+    "has_all_permissions",
+    "require_permission",
+    "require_role",
+    "get_user_role_enhanced",
+    "get_roles_hierarchy",
+    "get_available_permissions",
+    "get_roles_summary",
+    "get_users_by_role",
+    "get_users_by_permission",
+    "promote_user",
+    "demote_user",
+    "render_role_badge",
+    "render_role_selector",
+    "render_permission_checklist",
+    "generate_secure_password",
+    "generate_sso_token",
+    "generate_sso_state",
+    "store_sso_state",
+    "validate_sso_state",
+    "verify_sso_state",
+    "get_or_create_sso_user_enhanced",
+    "get_sso_user_info",
+    "list_sso_users",
+    "revoke_sso_access",
+    "is_sso_user",
+    "get_sso_users_count",
+    "migrate_existing_sso_users",
+    "verify_sso_recovery_token",
+]

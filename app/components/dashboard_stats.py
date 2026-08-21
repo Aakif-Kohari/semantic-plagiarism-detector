@@ -8,9 +8,10 @@ responsive Plotly charts, a recent incidents feed, and summary tables.
 
 from __future__ import annotations
 
-import logging
 import html
+import logging
 from typing import Any, Dict, List
+
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -21,11 +22,13 @@ logger = logging.getLogger(__name__)
 
 # ── DATABASE LOADING FUNCTIONS WITH CACHING ───────────────────────────────────
 
+
 @st.cache_data(ttl=60)
 def _load_documents_cached() -> List[Any]:
     """Fetch all non-deleted documents from the database, cached for performance."""
     try:
         from src.db.corpus_db import get_all_documents
+
         return get_all_documents(include_deleted=False)
     except Exception as e:
         logger.error("Failed to load documents from database: %s", e)
@@ -37,6 +40,7 @@ def _load_incidents_cached() -> List[Any]:
     """Fetch all incidents from the database, cached for performance."""
     try:
         from src.db.incidents import get_all_incidents
+
         # Retrieve incidents with a sufficiently large limit for dashboarding
         return get_all_incidents(limit=100000)
     except Exception as e:
@@ -49,6 +53,7 @@ def _load_high_severity_trends_cached(days: int = 30) -> List[Dict[str, Any]]:
     """Fetch daily high severity incident trend counts, cached for performance."""
     try:
         from src.db.incidents import get_high_severity_trends
+
         return get_high_severity_trends(days=days)
     except Exception as e:
         logger.error("Failed to load high severity trends: %s", e)
@@ -60,6 +65,7 @@ def _load_most_plagiarized_documents_cached(limit: int = 10) -> List[Dict[str, A
     """Fetch the most frequently plagiarized documents, cached for performance."""
     try:
         from src.db.incidents import get_most_plagiarized_documents
+
         return get_most_plagiarized_documents(limit=limit)
     except Exception as e:
         logger.error("Failed to load most plagiarized documents: %s", e)
@@ -71,6 +77,7 @@ def _load_document_count_cached() -> int:
     """Fetch total document count, cached for performance."""
     try:
         from src.db.corpus_db import get_total_document_count
+
         return get_total_document_count(include_deleted=False)
     except Exception as e:
         logger.error("Failed to load document count: %s", e)
@@ -78,6 +85,7 @@ def _load_document_count_cached() -> int:
 
 
 # ── HELPER FUNCTIONS ──────────────────────────────────────────────────────────
+
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
     """Safely convert a value to float, handling exceptions."""
@@ -124,14 +132,22 @@ def _normalise_review_status(value: Any) -> str:
 def _incidents_to_dataframe(incidents: List[Any]) -> pd.DataFrame:
     """Convert raw incidents lists (dicts or Pydantic models) into a Pandas DataFrame."""
     if not incidents:
-        return pd.DataFrame(columns=[
-            "incident_id", "document_a", "document_b", "similarity_score",
-            "severity_rank", "review_status", "date_flagged", "last_seen"
-        ])
+        return pd.DataFrame(
+            columns=[
+                "incident_id",
+                "document_a",
+                "document_b",
+                "similarity_score",
+                "severity_rank",
+                "review_status",
+                "date_flagged",
+                "last_seen",
+            ]
+        )
     rows = []
     for inc in incidents:
         is_dict = isinstance(inc, dict)
-        
+
         def _get_val(key: str, default: Any = None) -> Any:
             if is_dict:
                 return inc.get(key, default)
@@ -144,40 +160,44 @@ def _incidents_to_dataframe(incidents: List[Any]) -> pd.DataFrame:
         doc_a = _get_val("document_a") or _get_val("doc_a") or "Unknown"
         doc_b = _get_val("document_b") or _get_val("doc_b") or "Unknown"
         similarity = _safe_float(_get_val("similarity_score") or _get_val("similarity"))
-        severity = _normalise_severity(_get_val("severity_rank") or _get_val("severity"))
+        severity = _normalise_severity(
+            _get_val("severity_rank") or _get_val("severity")
+        )
         status = _normalise_review_status(_get_val("review_status"))
         date_flg = _get_val("date_flagged")
         last_seen = _get_val("last_seen")
 
-        rows.append({
-            "incident_id": inc_id,
-            "document_a": doc_a,
-            "document_b": doc_b,
-            "similarity_score": similarity,
-            "severity_rank": severity,
-            "review_status": status,
-            "date_flagged": date_flg,
-            "last_seen": last_seen,
-        })
+        rows.append(
+            {
+                "incident_id": inc_id,
+                "document_a": doc_a,
+                "document_b": doc_b,
+                "similarity_score": similarity,
+                "severity_rank": severity,
+                "review_status": status,
+                "date_flagged": date_flg,
+                "last_seen": last_seen,
+            }
+        )
     return pd.DataFrame(rows)
 
 
 def _calculate_dashboard_stats(df: pd.DataFrame, total_docs: int) -> Dict[str, Any]:
     """Calculate statistics for metrics, summary, and widgets from incidents DataFrame."""
     total_incidents = len(df)
-    
+
     if total_incidents > 0:
         raw_scores = df["similarity_score"].astype(float)
         scaled_scores = raw_scores.apply(lambda x: x * 100.0 if x <= 1.0 else x)
         avg_similarity = float(scaled_scores.mean())
         max_similarity = float(scaled_scores.max())
-        
+
         high_severity_count = int((df["severity_rank"] == "High").sum())
         medium_severity_count = int((df["severity_rank"] == "Medium").sum())
-        
+
         pending_count = int((df["review_status"] == "Pending").sum())
         resolved_count = int((df["review_status"] == "Resolved").sum())
-        
+
         pending_review_pct = (pending_count / total_incidents) * 100.0
     else:
         avg_similarity = 0.0
@@ -206,12 +226,13 @@ def _calculate_dashboard_stats(df: pd.DataFrame, total_docs: int) -> Dict[str, A
 
 # ── UI RENDERING HELPERS ──────────────────────────────────────────────────────
 
+
 def _render_metric_card(
     label: str,
     value: str | int | float,
     icon: str,
     description: str,
-    accent_color_var: str
+    accent_color_var: str,
 ) -> None:
     """Render a styled KPI metric card using custom HTML/CSS."""
     card_html = f"""
@@ -237,7 +258,7 @@ def _render_empty_state() -> None:
             <div class="empty-desc" style="font-size: 0.95rem; color: var(--secondary-text-color, #64748B); max-width: 500px; margin: 0 auto;">The system has not flagged any document matches. Ensure the document corpus contains files, and running scans will populate this panel.</div>
         </div>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
 
@@ -259,7 +280,9 @@ def _render_recent_incidents(recent_df: pd.DataFrame) -> None:
 
         severity = row["severity_rank"]
         status = row["review_status"]
-        date_flagged = str(row["date_flagged"]) if pd.notna(row["date_flagged"]) else "N/A"
+        date_flagged = (
+            str(row["date_flagged"]) if pd.notna(row["date_flagged"]) else "N/A"
+        )
         if " " in date_flagged:
             date_flagged = date_flagged.split(" ")[0]
 
@@ -323,7 +346,7 @@ def _render_summary(stats: Dict[str, Any]) -> None:
             value=f"{stats['incident_rate']:.1f}%",
             icon="📊",
             description="Incidents / corpus ratio",
-            accent_color_var="--accent-color"
+            accent_color_var="--accent-color",
         )
     with col2:
         _render_metric_card(
@@ -331,7 +354,7 @@ def _render_summary(stats: Dict[str, Any]) -> None:
             value=f"{stats['pending_review_pct']:.1f}%",
             icon="⏳",
             description="Proportion awaiting review",
-            accent_color_var="--warning"
+            accent_color_var="--warning",
         )
     with col3:
         _render_metric_card(
@@ -339,7 +362,7 @@ def _render_summary(stats: Dict[str, Any]) -> None:
             value=f"{stats['avg_similarity']:.1f}%",
             icon="⚖️",
             description="Mean similarity index",
-            accent_color_var="--accent-color"
+            accent_color_var="--accent-color",
         )
     with col4:
         _render_metric_card(
@@ -347,13 +370,16 @@ def _render_summary(stats: Dict[str, Any]) -> None:
             value=f"{stats['max_similarity']:.1f}%",
             icon="🔥",
             description="Maximum similarity logged",
-            accent_color_var="--danger"
+            accent_color_var="--danger",
         )
 
 
 # ── PLOTLY CHART HELPERS ──────────────────────────────────────────────────────
 
-def _apply_plotly_theme(fig: go.Figure, title: str, theme_colors: Dict[str, str], margin_left: int = 50) -> None:
+
+def _apply_plotly_theme(
+    fig: go.Figure, title: str, theme_colors: Dict[str, str], margin_left: int = 50
+) -> None:
     """Style Plotly figures layout to match active light or dark themes."""
     fig.update_layout(
         title=dict(
@@ -361,35 +387,35 @@ def _apply_plotly_theme(fig: go.Figure, title: str, theme_colors: Dict[str, str]
             font=dict(
                 family="'Inter', sans-serif",
                 size=16,
-                color=theme_colors.get("ink", "#0F172A")
+                color=theme_colors.get("ink", "#0F172A"),
             ),
-            x=0.02
+            x=0.02,
         ),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         font=dict(
-            family="'Inter', sans-serif",
-            color=theme_colors.get("ink", "#0F172A")
+            family="'Inter', sans-serif", color=theme_colors.get("ink", "#0F172A")
         ),
         margin=dict(l=margin_left, r=30, t=60, b=40),
         legend=dict(
             font=dict(color=theme_colors.get("muted", "#64748B")),
-            bgcolor="rgba(0,0,0,0)"
+            bgcolor="rgba(0,0,0,0)",
         ),
         xaxis=dict(
             gridcolor=theme_colors.get("border", "#E2E8F0"),
             tickfont=dict(color=theme_colors.get("muted", "#64748B")),
-            titlefont=dict(color=theme_colors.get("ink", "#0F172A"))
+            titlefont=dict(color=theme_colors.get("ink", "#0F172A")),
         ),
         yaxis=dict(
             gridcolor=theme_colors.get("border", "#E2E8F0"),
             tickfont=dict(color=theme_colors.get("muted", "#64748B")),
-            titlefont=dict(color=theme_colors.get("ink", "#0F172A"))
-        )
+            titlefont=dict(color=theme_colors.get("ink", "#0F172A")),
+        ),
     )
 
 
 # ── MAIN COMPONENT ENTRYPOINT ─────────────────────────────────────────────────
+
 
 def render_dashboard_stats() -> None:
     """Entrypoint function to render the Semantic Plagiarism Analytics Dashboard.
@@ -541,7 +567,7 @@ def render_dashboard_stats() -> None:
         }
         </style>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
     # Render header
@@ -552,12 +578,13 @@ def render_dashboard_stats() -> None:
             <p class="dashboard-subtitle">Real-time overview of plagiarism detection statistics.</p>
         </div>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
     # 2. Load active theme colors from theme utility
     try:
         from app.theme import get_chart_colors
+
         theme_colors = get_chart_colors()
     except Exception:
         theme_colors = {
@@ -570,7 +597,7 @@ def render_dashboard_stats() -> None:
             "border": "#E2E8F0",
             "danger": "#FF4B4B",
             "warning": "#FFA500",
-            "success": "#21C55D"
+            "success": "#21C55D",
         }
 
     # 3. Load DB data
@@ -593,7 +620,7 @@ def render_dashboard_stats() -> None:
             value=f"{stats['total_documents']:,}",
             icon="📄",
             description="Indexed in corpus",
-            accent_color_var="--accent-color"
+            accent_color_var="--accent-color",
         )
     with col2:
         _render_metric_card(
@@ -601,7 +628,7 @@ def render_dashboard_stats() -> None:
             value=f"{stats['total_incidents']:,}",
             icon="🚨",
             description="Total flagged incidents",
-            accent_color_var="--muted"
+            accent_color_var="--muted",
         )
     with col3:
         _render_metric_card(
@@ -609,7 +636,7 @@ def render_dashboard_stats() -> None:
             value=f"{stats['high_severity_count']:,}",
             icon="🔴",
             description="Similarity score >= 80%",
-            accent_color_var="--danger"
+            accent_color_var="--danger",
         )
     with col4:
         _render_metric_card(
@@ -617,7 +644,7 @@ def render_dashboard_stats() -> None:
             value=f"{stats['medium_severity_count']:,}",
             icon="🟡",
             description="Similarity score 50-79%",
-            accent_color_var="--warning"
+            accent_color_var="--warning",
         )
 
     col5, col6, col7, col8 = st.columns(4)
@@ -627,7 +654,7 @@ def render_dashboard_stats() -> None:
             value=f"{stats['pending_reviews_count']:,}",
             icon="⏳",
             description="Incidents awaiting review",
-            accent_color_var="--warning"
+            accent_color_var="--warning",
         )
     with col6:
         _render_metric_card(
@@ -635,7 +662,7 @@ def render_dashboard_stats() -> None:
             value=f"{stats['resolved_reviews_count']:,}",
             icon="🟢",
             description="Incidents marked resolved",
-            accent_color_var="--success"
+            accent_color_var="--success",
         )
     with col7:
         _render_metric_card(
@@ -643,7 +670,7 @@ def render_dashboard_stats() -> None:
             value=f"{stats['avg_similarity']:.1f}%",
             icon="⚖️",
             description="Average index value",
-            accent_color_var="--accent-color"
+            accent_color_var="--accent-color",
         )
     with col8:
         _render_metric_card(
@@ -651,7 +678,7 @@ def render_dashboard_stats() -> None:
             value=f"{stats['max_similarity']:.1f}%",
             icon="🔥",
             description="Maximum logged score",
-            accent_color_var="--danger"
+            accent_color_var="--danger",
         )
 
     st.markdown("---")
@@ -666,49 +693,75 @@ def render_dashboard_stats() -> None:
         values_sev = [
             stats["high_severity_count"],
             stats["medium_severity_count"],
-            max(0, stats["total_incidents"] - stats["high_severity_count"] - stats["medium_severity_count"])
+            max(
+                0,
+                stats["total_incidents"]
+                - stats["high_severity_count"]
+                - stats["medium_severity_count"],
+            ),
         ]
         if sum(values_sev) == 0:
             fig_sev = go.Figure()
-            fig_sev.add_annotation(text="No severity data available", showarrow=False, font=dict(size=14))
+            fig_sev.add_annotation(
+                text="No severity data available", showarrow=False, font=dict(size=14)
+            )
         else:
-            fig_sev = go.Figure(data=[go.Pie(
-                labels=labels_sev,
-                values=values_sev,
-                marker=dict(
-                    colors=[
-                        theme_colors.get("danger", "#FF4B4B"),
-                        theme_colors.get("warning", "#FFA500"),
-                        theme_colors.get("success", "#21C55D")
-                    ],
-                    line=dict(color=theme_colors.get("card", "#FFFFFF"), width=2)
-                ),
-                textinfo="percent+label",
-                insidetextorientation="radial"
-            )])
+            fig_sev = go.Figure(
+                data=[
+                    go.Pie(
+                        labels=labels_sev,
+                        values=values_sev,
+                        marker=dict(
+                            colors=[
+                                theme_colors.get("danger", "#FF4B4B"),
+                                theme_colors.get("warning", "#FFA500"),
+                                theme_colors.get("success", "#21C55D"),
+                            ],
+                            line=dict(
+                                color=theme_colors.get("card", "#FFFFFF"), width=2
+                            ),
+                        ),
+                        textinfo="percent+label",
+                        insidetextorientation="radial",
+                    )
+                ]
+            )
         _apply_plotly_theme(fig_sev, "Incident Severity Distribution", theme_colors)
         st.plotly_chart(fig_sev, use_container_width=True)
 
     with chart_col2:
         labels_status = ["Pending", "Resolved"]
-        values_status = [stats["pending_reviews_count"], stats["resolved_reviews_count"]]
+        values_status = [
+            stats["pending_reviews_count"],
+            stats["resolved_reviews_count"],
+        ]
         if sum(values_status) == 0:
             fig_status = go.Figure()
-            fig_status.add_annotation(text="No review status data available", showarrow=False, font=dict(size=14))
+            fig_status.add_annotation(
+                text="No review status data available",
+                showarrow=False,
+                font=dict(size=14),
+            )
         else:
-            fig_status = go.Figure(data=[go.Pie(
-                labels=labels_status,
-                values=values_status,
-                marker=dict(
-                    colors=[
-                        theme_colors.get("warning", "#FFA500"),
-                        theme_colors.get("success", "#21C55D")
-                    ],
-                    line=dict(color=theme_colors.get("card", "#FFFFFF"), width=2)
-                ),
-                textinfo="percent+label",
-                hole=0.4
-            )])
+            fig_status = go.Figure(
+                data=[
+                    go.Pie(
+                        labels=labels_status,
+                        values=values_status,
+                        marker=dict(
+                            colors=[
+                                theme_colors.get("warning", "#FFA500"),
+                                theme_colors.get("success", "#21C55D"),
+                            ],
+                            line=dict(
+                                color=theme_colors.get("card", "#FFFFFF"), width=2
+                            ),
+                        ),
+                        textinfo="percent+label",
+                        hole=0.4,
+                    )
+                ]
+            )
         _apply_plotly_theme(fig_status, "Review Status Breakdown (Donut)", theme_colors)
         st.plotly_chart(fig_status, use_container_width=True)
 
@@ -717,20 +770,26 @@ def render_dashboard_stats() -> None:
     with chart_col3:
         fig_hist = go.Figure()
         if df.empty:
-            fig_hist.add_annotation(text="No similarity score data available", showarrow=False, font=dict(size=14))
+            fig_hist.add_annotation(
+                text="No similarity score data available",
+                showarrow=False,
+                font=dict(size=14),
+            )
         else:
             raw_scores = df["similarity_score"].astype(float)
             scaled_scores = raw_scores.apply(lambda x: x * 100.0 if x <= 1.0 else x)
-            fig_hist.add_trace(go.Histogram(
-                x=scaled_scores,
-                nbinsx=20,
-                marker=dict(
-                    color=theme_colors.get("accent", "#0D9488"),
-                    line=dict(color=theme_colors.get("card", "#FFFFFF"), width=0.5)
-                ),
-                opacity=0.85,
-                hovertemplate="Score Range: %{x}%<br>Count: %{y}<extra></extra>"
-            ))
+            fig_hist.add_trace(
+                go.Histogram(
+                    x=scaled_scores,
+                    nbinsx=20,
+                    marker=dict(
+                        color=theme_colors.get("accent", "#0D9488"),
+                        line=dict(color=theme_colors.get("card", "#FFFFFF"), width=0.5),
+                    ),
+                    opacity=0.85,
+                    hovertemplate="Score Range: %{x}%<br>Count: %{y}<extra></extra>",
+                )
+            )
             fig_hist.update_xaxes(range=[0, 100], title_text="Similarity Score (%)")
             fig_hist.update_yaxes(title_text="Incident Count")
         _apply_plotly_theme(fig_hist, "Similarity Score Distribution", theme_colors)
@@ -739,29 +798,41 @@ def render_dashboard_stats() -> None:
     with chart_col4:
         fig_trend = go.Figure()
         if df.empty:
-            fig_trend.add_annotation(text="No daily trend data available", showarrow=False, font=dict(size=14))
+            fig_trend.add_annotation(
+                text="No daily trend data available",
+                showarrow=False,
+                font=dict(size=14),
+            )
         else:
             df["date"] = pd.to_datetime(df["date_flagged"], errors="coerce").dt.date
             trend_data = df.groupby("date").size().reset_index(name="count")
             trend_data = trend_data.sort_values("date")
-            
+
             if trend_data.empty:
-                fig_trend.add_annotation(text="No daily trend data available", showarrow=False, font=dict(size=14))
+                fig_trend.add_annotation(
+                    text="No daily trend data available",
+                    showarrow=False,
+                    font=dict(size=14),
+                )
             else:
-                fig_trend.add_trace(go.Scatter(
-                    x=trend_data["date"],
-                    y=trend_data["count"],
-                    mode="lines+markers",
-                    line=dict(color=theme_colors.get("accent", "#0D9488"), width=3),
-                    marker=dict(
-                        color=theme_colors.get("danger", "#FF4B4B"),
-                        size=8,
-                        line=dict(color=theme_colors.get("card", "#FFFFFF"), width=1.5)
-                    ),
-                    fill="tozeroy",
-                    fillcolor="rgba(13, 148, 136, 0.1)",
-                    hovertemplate="Date: %{x}<br>Incidents: %{y}<extra></extra>"
-                ))
+                fig_trend.add_trace(
+                    go.Scatter(
+                        x=trend_data["date"],
+                        y=trend_data["count"],
+                        mode="lines+markers",
+                        line=dict(color=theme_colors.get("accent", "#0D9488"), width=3),
+                        marker=dict(
+                            color=theme_colors.get("danger", "#FF4B4B"),
+                            size=8,
+                            line=dict(
+                                color=theme_colors.get("card", "#FFFFFF"), width=1.5
+                            ),
+                        ),
+                        fill="tozeroy",
+                        fillcolor="rgba(13, 148, 136, 0.1)",
+                        hovertemplate="Date: %{x}<br>Incidents: %{y}<extra></extra>",
+                    )
+                )
                 fig_trend.update_xaxes(title_text="Date Flagged")
                 fig_trend.update_yaxes(title_text="Incident Count")
         _apply_plotly_theme(fig_trend, "Incident Trend (Daily)", theme_colors)
@@ -771,21 +842,27 @@ def render_dashboard_stats() -> None:
     most_plagiarized = _load_most_plagiarized_documents_cached(limit=10)
     fig_bar = go.Figure()
     if not most_plagiarized:
-        fig_bar.add_annotation(text="No document plagiarism count data available", showarrow=False, font=dict(size=14))
+        fig_bar.add_annotation(
+            text="No document plagiarism count data available",
+            showarrow=False,
+            font=dict(size=14),
+        )
     else:
         bar_df = pd.DataFrame(most_plagiarized)
         bar_df = bar_df.sort_values("incident_count", ascending=True)
-        fig_bar.add_trace(go.Bar(
-            x=bar_df["incident_count"],
-            y=bar_df["document_name"],
-            orientation="h",
-            marker=dict(
-                color=theme_colors.get("accent", "#0D9488"),
-                line=dict(color=theme_colors.get("card", "#FFFFFF"), width=1)
-            ),
-            opacity=0.9,
-            hovertemplate="Document: %{y}<br>Incident Count: %{x}<extra></extra>"
-        ))
+        fig_bar.add_trace(
+            go.Bar(
+                x=bar_df["incident_count"],
+                y=bar_df["document_name"],
+                orientation="h",
+                marker=dict(
+                    color=theme_colors.get("accent", "#0D9488"),
+                    line=dict(color=theme_colors.get("card", "#FFFFFF"), width=1),
+                ),
+                opacity=0.9,
+                hovertemplate="Document: %{y}<br>Incident Count: %{x}<extra></extra>",
+            )
+        )
         fig_bar.update_xaxes(title_text="Incident Count")
         fig_bar.update_yaxes(title_text="Document Name")
     _apply_plotly_theme(fig_bar, "Top Flagged Documents", theme_colors, margin_left=160)

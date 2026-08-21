@@ -15,10 +15,10 @@ from src.db import translation_cache
 from src.db.translation_cache import (
     DB_PATH,
     cache_translation,
-    get_cached_translation,
-    reset_translation_cache_counters,
     get_cache_performance_summary,
+    get_cached_translation,
     get_translation_cache_hit_ratio,
+    reset_translation_cache_counters,
 )
 
 
@@ -126,13 +126,11 @@ class TestTranslationCacheTTL:
         """Test purging with 0 days (should purge nothing inserted 'now')."""
         conn = sqlite3.connect(temp_db_path)
         translation_cache.get_cached_translation("init")
-        conn.execute(
-            """
+        conn.execute("""
             INSERT INTO translation_cache
             (text_hash, foreign_text, translated_text, source_lang, target_lang)
             VALUES ('hash_now', 'foreign', 'translated', 'auto', 'en')
-            """
-        )
+            """)
         conn.commit()
 
         deleted_count = translation_cache.purge_expired_translation_cache(days_old=0)
@@ -149,7 +147,9 @@ class TestTranslationCacheTTL:
         """Test that database errors during purge are logged and return 0."""
         with patch("sqlite3.connect") as mock_connect:
             mock_conn = mock_connect.return_value.__enter__.return_value
-            mock_conn.cursor.return_value.execute.side_effect = sqlite3.Error("DB locked")
+            mock_conn.cursor.return_value.execute.side_effect = sqlite3.Error(
+                "DB locked"
+            )
 
             deleted_count = translation_cache.purge_expired_translation_cache()
 
@@ -191,7 +191,9 @@ class TestTranslationCacheTTL:
         """Test that database errors during purge are logged and return 0."""
         with patch("sqlite3.connect") as mock_connect:
             mock_conn = mock_connect.return_value.__enter__.return_value
-            mock_conn.cursor.return_value.execute.side_effect = sqlite3.Error("DB locked")
+            mock_conn.cursor.return_value.execute.side_effect = sqlite3.Error(
+                "DB locked"
+            )
 
             deleted_count = translation_cache.purge_translation_cache_older_than()
 
@@ -262,9 +264,11 @@ class TestTranslationCacheTTL:
         assert translation_cache.cache_misses == 1
         assert get_translation_cache_hit_ratio() == 2 / 3
 
+
 def test_init_db_closes_connection():
     """Verify that _init_db() explicitly closes the database connection."""
     from unittest.mock import MagicMock
+
     with patch("sqlite3.connect") as mock_connect:
         mock_conn = MagicMock()
         mock_connect.return_value = mock_conn
@@ -300,3 +304,66 @@ def test_get_cache_performance_summary():
     assert summary["misses"] == 1
     assert abs(summary["hit_ratio_percentage"] - 66.6666666) < 0.1
 
+
+def test_get_translation_cache_stats(self, temp_db_path):
+    """Test retrieving accurate cache statistics."""
+    conn = sqlite3.connect(temp_db_path)
+    translation_cache.get_cached_translation("init")
+    self._seed_cache_with_dates(conn, [10, 50, 100])
+
+    stats = translation_cache.get_translation_cache_stats()
+
+    assert stats == {"total_entries": 3}
+
+
+def test_get_translation_cache_stats_empty(self, temp_db_path):
+    """Test stats retrieval on an empty cache."""
+    stats = translation_cache.get_translation_cache_stats()
+    assert stats == {"total_entries": 0}
+
+
+def test_get_cached_translation_recovers_from_malformed_database(tmp_path, caplog):
+    """A malformed SQLite cache is replaced and its schema is recreated."""
+    cache_path = tmp_path / "translation_cache.db"
+    with sqlite3.connect(cache_path) as conn:
+        conn.execute("CREATE TABLE marker (value TEXT)")
+        conn.execute("INSERT INTO marker VALUES ('keep schema test')")
+
+    corrupted_bytes = bytearray(cache_path.read_bytes())
+    corrupted_bytes[100:120] = b"X" * 20
+    cache_path.write_bytes(corrupted_bytes)
+
+    with patch.object(translation_cache, "_CACHE_DB_PATH", cache_path):
+        with caplog.at_level("CRITICAL", logger=translation_cache.logger.name):
+            result = get_cached_translation("malformed-cache", "en", "fr")
+
+        assert result is None
+        assert "corrupted" in caplog.text.lower()
+        assert "deleting it and recreating the schema" in caplog.text
+
+        with sqlite3.connect(cache_path) as conn:
+            table = conn.execute(
+                "SELECT name FROM sqlite_master "
+                "WHERE type='table' AND name='translation_cache'"
+            ).fetchone()
+
+        assert table == ("translation_cache",)
+
+
+def test_get_cached_translation_handles_non_corruption_database_error(tmp_path, caplog):
+    """Non-corruption DatabaseError instances remain ordinary cache misses."""
+    cache_path = tmp_path / "translation_cache.db"
+    cache_path.write_bytes(b"placeholder")
+
+    with patch.object(translation_cache, "_CACHE_DB_PATH", cache_path):
+        with patch.object(
+            translation_cache,
+            "_connect",
+            side_effect=sqlite3.DatabaseError("database is locked"),
+        ):
+            with caplog.at_level("ERROR", logger=translation_cache.logger.name):
+                result = get_cached_translation("locked-cache")
+
+    assert result is None
+    assert "Failed to query translation cache" in caplog.text
+    assert cache_path.read_bytes() == b"placeholder"

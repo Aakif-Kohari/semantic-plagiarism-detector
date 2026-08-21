@@ -14,7 +14,6 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
-
 DEFAULT_TAG_COLORS = [
     "#3B82F6",  # Blue
     "#10B981",  # Emerald / Green
@@ -156,9 +155,7 @@ def build_network_data(
     visible_node_count = len(G)
     hidden_node_count = max(0, visible_node_count - max_nodes)
     if hidden_node_count:
-        original_order = {
-            name: index for index, name in enumerate(doc_names)
-        }
+        original_order = {name: index for index, name in enumerate(doc_names)}
         ranked_nodes = sorted(
             G.nodes(),
             key=lambda node: (
@@ -168,11 +165,7 @@ def build_network_data(
         )
         retained_nodes = set(ranked_nodes[:max_nodes])
         G.remove_nodes_from(
-            [
-                node
-                for node in list(G.nodes())
-                if node not in retained_nodes
-            ]
+            [node for node in list(G.nodes()) if node not in retained_nodes]
         )
         edge_similarities = {
             edge: score
@@ -539,6 +532,24 @@ def render_network_plotly(
             )
         )
 
+    # Issue #2350: If the graph is completely empty (no nodes/traces),
+    # add a fallback annotation so the user sees a message rather than
+    # a blank canvas.
+    if not traces and not shapes:
+        annotations.append(
+            dict(
+                text="No documents or plagiarism connections to display.",
+                showarrow=False,
+                xref="paper",
+                yref="paper",
+                x=0.5,
+                y=0.5,
+                xanchor="center",
+                yanchor="middle",
+                font=dict(size=16, color=ink_color),
+            )
+        )
+
     fig = go.Figure(
         data=traces,
         layout=go.Layout(
@@ -608,7 +619,6 @@ def render_network_plotly(
             )
         )
     return fig
-
 
 
 def calculate_force_directed_layout(
@@ -818,29 +828,42 @@ def export_network_to_csv_bytes(
 
 def export_network_centrality_csv(graph: nx.Graph) -> str:
     """
-    Calculate node degree centrality using NetworkX and export as a CSV string
-    formatted with headers: Document_Name,Degree,Centrality_Score.
-    """
-    import csv
-    import io
+    Calculate degree and PageRank centralities and export them as CSV.
 
+    The CSV contains the raw degree, normalized degree centrality, and
+    PageRank score for each document node.
+    """
     degrees = dict(graph.degree())
-    centralities = nx.degree_centrality(graph)
+    degree_centralities = nx.degree_centrality(graph)
+    pagerank_scores = nx.pagerank(graph) if graph.number_of_nodes() else {}
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["Document_Name", "Degree", "Centrality_Score"])
+    writer.writerow(
+        [
+            "Document_Name",
+            "Degree",
+            "Centrality_Score",
+            "PageRank_Score",
+        ]
+    )
 
     for node in graph.nodes():
-        deg = degrees.get(node, 0)
-        score = centralities.get(node, 0.0)
-        writer.writerow([node, deg, score])
+        writer.writerow(
+            [
+                node,
+                degrees.get(node, 0),
+                degree_centralities.get(node, 0.0),
+                pagerank_scores.get(node, 0.0),
+            ]
+        )
 
     return output.getvalue()
 
 
-import networkx as nx
 import logging
+
+import networkx as nx
 
 logger = logging.getLogger(__name__)
 

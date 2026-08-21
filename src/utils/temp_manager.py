@@ -254,6 +254,7 @@ def get_temp_directory_size_bytes() -> int:
 
     return total_size
 
+
 def verify_available_temp_space(required_bytes: int) -> bool:
     """
     Verify that the system temporary directory has enough free disk space.
@@ -275,6 +276,7 @@ def verify_available_temp_space(required_bytes: int) -> bool:
 
     return True
 
+
 def check_temp_disk_space(min_free_mb: int = 100) -> bool:
     """
     Verify that available disk space in the system temporary directory exceeds the minimum safety threshold.
@@ -290,11 +292,12 @@ def check_temp_disk_space(min_free_mb: int = 100) -> bool:
     """
     temp_dir = tempfile.gettempdir()
     _, _, free = shutil.disk_usage(temp_dir)
-    
+
     if free < min_free_mb * 1024 * 1024:
         raise OSError("Disk space in temp directory below safety threshold")
-        
+
     return True
+
 
 def rotate_backup_files(backup_dir: Path, keep_count: int = 5) -> int:
     """Enforce retention policies on backup directories by keeping only the N most recent files.
@@ -390,7 +393,7 @@ def rotate_backup_files(backup_dir: Path, keep_count: int = 5) -> int:
 
     # Files to keep are the first `keep_count` entries
     files_to_delete = backup_files[keep_count:]
-    
+
     deleted_count = 0
     freed_bytes = 0
 
@@ -401,7 +404,7 @@ def rotate_backup_files(backup_dir: Path, keep_count: int = 5) -> int:
             os.remove(file_path)
             deleted_count += 1
             freed_bytes += file_size
-            
+
             logger.info(
                 "rotate_backup_files: deleted old backup %s (age: %.1f days, size: %.2f MB)",
                 os.path.basename(file_path),
@@ -425,3 +428,42 @@ def rotate_backup_files(backup_dir: Path, keep_count: int = 5) -> int:
     )
 
     return deleted_count
+
+
+from contextlib import contextmanager
+from typing import Generator
+
+
+@contextmanager
+def managed_ocr_temp_dir(prefix: str = "tesseract_ocr_") -> Generator[str, None, None]:
+    """Context manager for OCR processing that creates a dedicated temporary directory.
+
+    Ensures all temporary files created for OCR (rendered page PNGs, pytesseract
+    inputs/outputs, subprocess artifacts) are isolated within a Python
+    `tempfile.TemporaryDirectory()` context manager.
+
+    Guarantees that even if Tesseract crashes mid-execution, raises a MemoryError,
+    or throws an unhandled exception, Python's TemporaryDirectory() context manager
+    automatically purges the temporary folder and all contained artifacts upon exit,
+    preventing disk space accumulation in system /tmp.
+
+    Yields:
+        str: Absolute path to the created temporary directory.
+    """
+    with tempfile.TemporaryDirectory(prefix=prefix) as tmp_dir:
+        old_temp = tempfile.tempdir
+        tempfile.tempdir = tmp_dir
+        old_env = {k: os.environ.get(k) for k in ("TMPDIR", "TEMP", "TMP")}
+        os.environ["TMPDIR"] = tmp_dir
+        os.environ["TEMP"] = tmp_dir
+        os.environ["TMP"] = tmp_dir
+        try:
+            yield tmp_dir
+        finally:
+            tempfile.tempdir = old_temp
+            for k, v in old_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
