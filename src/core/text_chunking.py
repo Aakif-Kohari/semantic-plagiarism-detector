@@ -47,13 +47,13 @@ _nltk_punkt_checked = False
 
 # Regex pattern to split text into sentences while preserving punctuation.
 # Matches periods, exclamation marks, and question marks followed by whitespace
-# and an uppercase letter, or at the end of the string.
-_SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[.!?])\s+(?=[A-Z])|(?<=[.!?])$")
+# and an uppercase letter, or at the end of the string. Also matches standard CJK terminators.
+_SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[.!?])\s+(?=[A-Z])|(?<=[.!?])$|(?<=[。！？])")
 
 # Regex pattern to identify sentence boundaries.
 # Matches '.', '!', or '?' followed by a space and an uppercase letter,
-# or followed by the end of the string.
-_SENTENCE_BOUNDARY_PATTERN = re.compile(r"([.!?])\s+(?=[A-Z])|([.!?])$")
+# or followed by the end of the string. Also matches standard CJK terminators.
+_SENTENCE_BOUNDARY_PATTERN = re.compile(r"([.!?])\s+(?=[A-Z])|([.!?])$|([。！？])")
 
 # Regex pattern to count words (alphanumeric sequences)
 _WORD_COUNT_PATTERN = re.compile(r"\b\w+\b")
