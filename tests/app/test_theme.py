@@ -551,9 +551,27 @@ def test_get_theme_accent_color():
     from app.theme import get_theme_accent_color
 
     assert get_theme_accent_color("Indigo") == "#4f46e5"
+    assert get_theme_accent_color("Emerald") == "#059669"
+    assert get_theme_accent_color("Crimson") == "#dc2626"
+    assert get_theme_accent_color("Amber") == "#d97706"
     assert get_theme_accent_color("Teal") == "#0d9488"
     assert get_theme_accent_color("Light") == "#0D9488"
     assert get_theme_accent_color("Dark") == "#2DD4BF"
+
+
+def test_inject_css_dynamic_primary_accent():
+    """Verify inject_css includes --primary-accent variable dynamically updated from session_state."""
+    from unittest.mock import patch
+    from app.theme import inject_css
+
+    mock_state = {"accent_color": "Crimson", "theme": "Light", "theme_colors": {"background": "#FFFFFF", "surface": "#F8FAFC", "card": "#FFFFFF", "ink": "#0F172A", "muted": "#64748B", "accent": "#0D9488", "border": "#E2E8F0", "input": "#FFFFFF", "neutral_soft": "#F1F5F9", "danger": "#FF4B4B", "danger_soft": "#FEE2E2", "warning": "#FFA500", "warning_soft": "#FEF3C7", "success": "#21C55D", "success_soft": "#DCFCE7"}}
+
+    with patch("app.theme.st.session_state", mock_state), patch("app.theme.st.markdown") as mock_md:
+        inject_css()
+        css = mock_md.call_args_list[0].args[0]
+        assert "--primary-accent: #dc2626" in css
+        assert "--accent-color: #dc2626" in css
+
 
 
 def test_build_active_tab_custom_css():
