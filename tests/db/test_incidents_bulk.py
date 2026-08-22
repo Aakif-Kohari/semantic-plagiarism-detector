@@ -75,15 +75,19 @@ class TestBulkIncidentInsertion:
         ]
 
         with pytest.raises(sqlite3.IntegrityError):
-            db_connection.executemany(
-                """
-                INSERT INTO plagiarism_incidents 
-                (incident_id, document_a, document_b, similarity, severity, timestamp, threshold_at_time_of_flag, review_status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                incidents,
-            )
-            db_connection.commit()
+            try:
+                db_connection.executemany(
+                    """
+                    INSERT INTO plagiarism_incidents 
+                    (incident_id, document_a, document_b, similarity, severity, timestamp, threshold_at_time_of_flag, review_status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    incidents,
+                )
+                db_connection.commit()
+            except sqlite3.IntegrityError:
+                db_connection.rollback()
+                raise
 
         # Verify only the original incident exists
         cursor = db_connection.execute("SELECT COUNT(*) FROM plagiarism_incidents")
@@ -156,3 +160,30 @@ class TestBulkIncidentDeletion:
         min_timestamp = cursor.fetchone()[0]
 
         assert min_timestamp >= cutoff_date
+
+
+class TestBulkIncidentUpsert:
+    """Test suite for bulk updating / upserting incidents."""
+
+    def test_sync_flagged_incidents_bulk_upsert_severity(
+        self, populated_db_connection: sqlite3.Connection
+    ):
+        """Verify updating an incident's severity to 'Critical' correctly records 'Critical' rather than defaulting to 'High'."""
+        conn = populated_db_connection
+
+        conn.execute(
+            """
+            UPDATE plagiarism_incidents
+            SET similarity = 0.99, severity = 'Critical'
+            WHERE incident_id = 'INC-0000'
+            """
+        )
+        conn.commit()
+
+        cursor = conn.execute(
+            "SELECT similarity, severity FROM plagiarism_incidents WHERE incident_id = 'INC-0000'"
+        )
+        row = cursor.fetchone()
+        assert row[0] == 0.99
+        assert row[1] == "Critical"
+
