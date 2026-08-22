@@ -29,6 +29,10 @@ except ImportError:
     ImageDraw = None
     ImageFont = None
 
+def has_pillow() -> bool:
+    """Check if PIL/Pillow is installed."""
+    return Image is not None
+
 from reportlab.lib.colors import HexColor
 from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
