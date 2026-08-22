@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import io
 import ipaddress
 import logging
@@ -16,6 +17,7 @@ import zipfile
 from collections import Counter
 from pathlib import Path
 from typing import BinaryIO, Dict, List, Optional, Union
+from typing_extensions import TypeAlias
 
 logger = logging.getLogger(__name__)
 
@@ -40,12 +42,16 @@ import docx
 import pdfplumber
 from langdetect import LangDetectException, detect
 
+from src.exceptions import UnsupportedFormatError
+
 try:
     from striprtf.striprtf import rtf_to_text
 except ImportError:
 
     def rtf_to_text(rtf_text: str) -> str:
-        return rtf_text
+        raise UnsupportedFormatError(
+            "striprtf is required to process RTF files. Please install striprtf to parse RTF documents."
+        )
 
 
 import string
@@ -56,7 +62,7 @@ from src.errors import EmptyDocumentError
 
 # OCR dependencies are imported lazily so TXT/DOCX and normal text PDFs still
 # work even when Tesseract is not installed on the machine.
-PDFInput = Union[str, bytes, io.BytesIO, BinaryIO]
+PDFInput: TypeAlias = Union[str, bytes, io.BytesIO, BinaryIO]
 
 
 class ParsedDocxText(str):
@@ -216,6 +222,7 @@ ENGLISH_STOPWORDS = frozenset(
 )
 
 
+@functools.lru_cache(maxsize=1)
 def load_custom_stopwords(file_path: Optional[str] = None) -> frozenset:
     """Load custom domain-specific stopwords from a text file (one word per line).
 
@@ -1473,6 +1480,8 @@ def extract_text_from_rtf(file: PDFInput) -> str:
                 else data
             )
         text = rtf_to_text(content)
+    except UnsupportedFormatError:
+        raise
     except Exception as exc:
         print(f"[document_parser] Error reading RTF: {exc}")
     return text.strip()
@@ -2004,7 +2013,44 @@ def extract_text(
     Raises:
         EmptyDocumentError: If the final extracted and cleaned text is empty.
     """
-    # ... [existing extraction logic for PDF, DOCX, TXT, etc.] ...
+    ocr_language, ocr_dpi = normalize_ocr_settings(
+        ocr_language=ocr_language,
+        ocr_dpi=ocr_dpi,
+    )
+
+    file_bytes = _read_pdf_bytes(file)
+    from src.security.mime_validator import validate_mime_type
+
+    if not validate_mime_type(file_bytes, filename):
+        logger.warning(
+            f"[document_parser] Security warning: Rejected file '{filename}' "
+            f"because its MIME type / magic bytes do not match its file extension."
+        )
+        return ""
+    file = file_bytes
+
+    extension = filename.rsplit(".", 1)[-1].lower()
+
+    if extension == "pdf":
+        raw = extract_text_from_pdf(file, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
+    elif extension == "docx":
+        raw = extract_text_from_docx(file)
+    elif extension == "doc":
+        raw = extract_text_from_doc(file)
+    elif extension in ("md", "markdown", "mdown"):
+        raw = extract_text_from_md(file)
+    elif extension in ("zip", "7z", "tar", "gz"):
+        raw = extract_text_from_zip(file, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
+    elif extension == "rtf":
+        raw = extract_text_from_rtf(file)
+    elif extension == "epub":
+        raw = extract_text_from_epub(file)
+    elif extension in ("png", "jpg", "jpeg"):
+        raw = extract_text_from_image(file, ocr_language=ocr_language)
+    elif extension == "odt":
+        raw = extract_text_from_odt(file)
+    else:
+        raw = extract_text_from_txt(file)
 
     raw = strip_bibliography(raw)
     raw = normalize_unicode_spaces(raw)

@@ -2,6 +2,7 @@ from .auth import (
     AuthRepository,
     add_user,
     auth_repo,
+    clear_revocation_cache,
     delete_user,
     disable_2fa,
     enable_2fa,
@@ -13,7 +14,9 @@ from .auth import (
     get_user_last_login,
     get_user_role,
     init_db,
+    is_token_revoked,
     is_user_active,
+    revoke_token,
     set_password_change_required,
     set_user_active_status,
     store_sso_state,
@@ -23,6 +26,7 @@ from .auth import (
     verify_sso_state,
     verify_user,
 )
+
 from .base import BaseRepository
 from .common import get_read_connection
 from .connection import create_connection, get_connection
@@ -93,12 +97,16 @@ __all__ = [
     "get_all_embeddings",
     "delete_document",
     "clear_all_data",
+    "clear_revocation_cache",
+    "is_token_revoked",
+    "revoke_token",
     "get_document_chunks_count",
     "get_unique_class_sections",
     "get_incidents_by_assignment",
     "get_recent_incidents",
     "log_incident",
 ]
+
 
 from .migrations import AUTH_SCHEMA_VERSION as AUTH_SCHEMA_VERSION  # noqa: F401
 from .migrations import CORPUS_SCHEMA_VERSION as CORPUS_SCHEMA_VERSION

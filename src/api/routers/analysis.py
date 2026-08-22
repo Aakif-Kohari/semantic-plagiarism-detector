@@ -4,7 +4,7 @@ import logging
 import os
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import numpy as np
 from fastapi import (
@@ -45,6 +45,7 @@ from src.db.corpus_db import get_document_by_hash
 from src.security.mime_validator import is_executable_upload
 from src.utils.file_streaming import stream_upload_file_to_disk
 from src.utils.hash_util import calculate_file_sha256
+from src.utils.redis_cache import CacheNamespace, SCAN_JOBS_TTL, get_cache
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,34 @@ total_scans = 0
 scan_jobs: Dict[str, Dict[str, Any]] = {}
 
 
+def _get_scan_job(job_id: str) -> Optional[Dict[str, Any]]:
+    """Retrieve scan job state from Redis (key: spd:v1:scan_jobs:{job_id}), falling back to in-memory dict."""
+    try:
+        cache = get_cache()
+        if cache.is_available():
+            data = cache.get_json(CacheNamespace.SCAN_JOBS.build_key(job_id))
+            if data is not None:
+                return data
+    except Exception as e:
+        logger.warning(f"Failed to retrieve scan job '{job_id}' from Redis: {e}")
+
+    # Fall back to in-memory dictionary
+    return scan_jobs.get(job_id)
+
+
+def _set_scan_job(job_id: str, data: Dict[str, Any], ttl: int = SCAN_JOBS_TTL) -> None:
+    """Store scan job state in Redis with 24-hour TTL, falling back to in-memory dict (Issue #3222)."""
+    # Always update in-memory dict as fallback
+    scan_jobs[job_id] = data
+
+    try:
+        cache = get_cache()
+        if cache.is_available():
+            cache.set_json(CacheNamespace.SCAN_JOBS.build_key(job_id), data, ttl=ttl)
+    except Exception as e:
+        logger.warning(f"Failed to persist scan job '{job_id}' to Redis: {e}")
+
+
 def _process_scan_job(
     job_id: str,
     file_input: Any,
@@ -61,7 +90,8 @@ def _process_scan_job(
     threshold: float,
     top_k: int,
 ) -> None:
-    if job_id not in scan_jobs:
+    job = _get_scan_job(job_id)
+    if job is None:
         if isinstance(file_input, (str, os.PathLike)) and os.path.exists(file_input):
             try:
                 os.unlink(file_input)
@@ -69,15 +99,15 @@ def _process_scan_job(
                 pass
         return
 
-    scan_jobs[job_id]["status"] = "processing"
+    job["status"] = "processing"
+    _set_scan_job(job_id, job)
 
     try:
         extracted_text = extract_text(file_input, filename)
         if not extracted_text.strip():
-            scan_jobs[job_id]["status"] = "failed"
-            scan_jobs[job_id][
-                "error"
-            ] = "Failed to extract readable text from the uploaded file."
+            job["status"] = "failed"
+            job["error"] = "Failed to extract readable text from the uploaded file."
+            _set_scan_job(job_id, job)
             return
 
         words = extracted_text.split()
@@ -165,9 +195,9 @@ def _process_scan_job(
         total_flagged = int(np.sum(uploaded_chunks_flagged))
         plagiarism_density = int(round((total_flagged / len(chunks)) * 100)) if len(chunks) > 0 else 0
 
-        scan_jobs[job_id]["status"] = "completed"
-        scan_jobs[job_id]["completed_at"] = datetime.now(timezone.utc).isoformat()
-        scan_jobs[job_id]["result"] = {
+        job["status"] = "completed"
+        job["completed_at"] = datetime.now(timezone.utc).isoformat()
+        job["result"] = {
             "filename": filename,
             "word_count": word_count,
             "chunk_count": len(chunks),
@@ -179,9 +209,11 @@ def _process_scan_job(
             "matched_documents_count": len(matched_documents),
             "matched_documents": matched_documents,
         }
+        _set_scan_job(job_id, job)
     except Exception as exc:
-        scan_jobs[job_id]["status"] = "failed"
-        scan_jobs[job_id]["error"] = str(exc)
+        job["status"] = "failed"
+        job["error"] = str(exc)
+        _set_scan_job(job_id, job)
     finally:
         if isinstance(file_input, (str, os.PathLike)) and os.path.exists(file_input):
             try:
@@ -255,7 +287,7 @@ async def scan_document(
     top_k: int = Query(
         default=3,
         ge=1,
-        le=10,
+        le=100,
         description="Number of top matching paragraph pairs to include per matched document",
     ),
     reprocess: bool = Query(
@@ -442,7 +474,7 @@ async def scan_document_async(
     top_k: int = Query(
         default=3,
         ge=1,
-        le=10,
+        le=100,
         description="Number of top matching paragraph pairs to include per matched document",
     ),
     reprocess: bool = Query(
@@ -484,7 +516,7 @@ async def scan_document_async(
     job_id = f"job_{uuid.uuid4().hex[:12]}"
     status_url = f"/api/v1/scan/status/{job_id}"
 
-    scan_jobs[job_id] = {
+    job_data = {
         "job_id": job_id,
         "status": "queued",
         "filename": filename,
@@ -493,6 +525,7 @@ async def scan_document_async(
         "result": None,
         "error": None,
     }
+    _set_scan_job(job_id, job_data)
 
     background_tasks.add_task(
         _process_scan_job,
@@ -524,13 +557,13 @@ def get_async_scan_status(
     _user: dict = Security(get_current_user, scopes=["read"]),
 ):
     """Retrieve the status and results of an asynchronous scan job."""
-    if job_id not in scan_jobs:
+    job = _get_scan_job(job_id)
+    if job is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Scan job '{job_id}' not found.",
         )
 
-    job = scan_jobs[job_id]
     return {
         "job_id": job["job_id"],
         "status": job["status"],

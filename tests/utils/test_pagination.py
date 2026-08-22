@@ -341,6 +341,107 @@ class TestPaginationPageEq:
         assert len(page_set) == 2  # page1 and page2 are duplicates
 
 
+class TestPaginationPageHash:
+    """Tests for PaginationPage.__hash__ (Issue #3221).
+
+    ``@dataclass(frozen=True)`` generates a hash over every field, and
+    ``items`` is a ``list``, so an explicit __hash__ tuples the items before
+    feeding them to ``hash()``. These tests pin down that contract:
+
+    * equal pages hash identically,
+    * pages carrying unhashable items (dicts — the shape ``warning_list``
+      builds) raise ``TypeError`` instead of silently corrupting a set,
+    * equality itself keeps working for such pages, because __eq__ compares
+      the lists directly.
+    """
+
+    def make_page(self, items=None, **overrides):
+        """Build a page with sensible defaults and optional overrides."""
+        kwargs = dict(
+            items=[1, 2, 3] if items is None else items,
+            page=1,
+            total_pages=2,
+            total_items=10,
+            per_page=5,
+        )
+        kwargs.update(overrides)
+        return PaginationPage(**kwargs)
+
+    def test_equal_pages_hash_identically_across_construction_paths(self):
+        """Pages equal via __eq__ must hash equally however they were built."""
+        constructed = self.make_page(
+            items=[0, 1, 2],
+            total_items=3,
+            total_pages=1,
+            start_index=1,
+            end_index=3,
+        )
+        created = PaginationPage.create(
+            items=[0, 1, 2],
+            page=1,
+            per_page=5,
+            total_items=3,
+        )
+        paginated = paginate_items([0, 1, 2], page=1, page_size=5)
+
+        # The hash contract covers every compared field — including the
+        # start_index / end_index defaults that differ between paths above.
+        assert constructed == created
+        assert hash(constructed) == hash(created)
+        assert constructed == paginated
+        assert hash(constructed) == hash(paginated)
+
+    def test_hash_is_stable_across_repeated_calls(self):
+        """The same instance must not change its hash within a process."""
+        page = self.make_page()
+
+        first = hash(page)
+        assert hash(page) == first
+        assert hash(page) == first
+
+    def test_pages_with_tuple_items_are_usable_as_dict_keys(self):
+        """Hashable item payloads keep the frozen-dataclass promise."""
+        keyed = {self.make_page(items=(1, 2)): "value"}
+
+        assert keyed[self.make_page(items=(1, 2))] == "value"
+
+    def test_unhashable_items_raise_type_error(self):
+        """A page of dicts is unhashable — the ordinary Python contract."""
+        page = self.make_page(items=[{"id": 1}, {"id": 2}])
+
+        with pytest.raises(TypeError):
+            hash(page)
+
+    def test_unhashable_items_error_message_names_the_offender(self):
+        """The raised error should explain what could not be hashed."""
+        page = self.make_page(items=[{"id": 1}])
+
+        with pytest.raises(TypeError, match="unhashable type"):
+            hash(page)
+
+    def test_dict_item_pages_still_compare_equal(self):
+        """__eq__ compares the raw lists, so dict-backed pages stay equal."""
+        items = [{"id": 1}, {"id": 2}]
+        page1 = self.make_page(items=list(items))
+        page2 = self.make_page(items=list(items))
+
+        assert page1 == page2
+
+    def test_dict_item_pages_are_rejected_from_sets(self):
+        """A set membership attempt surfaces the same TypeError."""
+        page = self.make_page(items=[{"id": 1}])
+
+        with pytest.raises(TypeError, match="unhashable type"):
+            {page}
+
+    def test_unequal_pages_are_valid_set_members_together(self):
+        """Distinct pages may share a set; equal ones collapse to one."""
+        page_a = self.make_page(items=[1])
+        page_b = self.make_page(items=[2])
+
+        assert len({page_a, page_b}) == 2
+
+
 class TestPaginationPageFactory:
     """Test suite for PaginationPage.create() factory method."""
 
