@@ -17,6 +17,7 @@ import zipfile
 from collections import Counter
 from pathlib import Path
 from typing import BinaryIO, Dict, List, Optional, Union
+from typing_extensions import TypeAlias
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ from src.errors import EmptyDocumentError
 
 # OCR dependencies are imported lazily so TXT/DOCX and normal text PDFs still
 # work even when Tesseract is not installed on the machine.
-PDFInput = Union[str, bytes, io.BytesIO, BinaryIO]
+PDFInput: TypeAlias = Union[str, bytes, io.BytesIO, BinaryIO]
 
 
 class ParsedDocxText(str):
