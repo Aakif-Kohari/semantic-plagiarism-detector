@@ -20,6 +20,7 @@ Recent Additions (Issue #566):
   file buffers for PDF, DOCX, and TXT formats for comprehensive parser testing.
 """
 
+import importlib
 import io
 import os
 import pathlib
@@ -73,17 +74,59 @@ if "torch" not in sys.modules:
     torch_stub = types.ModuleType("torch")
     torch_stub.__path__ = []
 
-    class Tensor:
-        pass
-
+    Tensor = type("Tensor", (), {"__module__": "torch"})
     torch_stub.Tensor = Tensor  # type: ignore
     torch_quant_stub = types.ModuleType("torch.quantization")
     torch_stub.quantization = torch_quant_stub
     sys.modules["torch"] = torch_stub
     sys.modules["torch.quantization"] = torch_quant_stub
 
+if "faiss" not in sys.modules:
+    try:
+        import faiss  # noqa: F401
+    except ImportError:
+        faiss_stub = types.ModuleType("faiss")
 
-import importlib.util
+        class _MockIndex:
+            def __init__(self, d, *args, **kwargs):
+                self.d = d
+                self.vectors = []
+
+            def add(self, x):
+                if isinstance(x, np.ndarray):
+                    self.vectors.append(x)
+
+            def search(self, q, k):
+                if not self.vectors:
+                    return np.zeros((q.shape[0], k), dtype=np.float32), np.full(
+                        (q.shape[0], k), -1, dtype=np.int64
+                    )
+                data = np.vstack(self.vectors)
+                scores = np.dot(q, data.T)
+                n_samples = data.shape[0]
+                actual_k = min(k, n_samples)
+                sorted_indices = np.argsort(-scores, axis=1)[:, :actual_k]
+                sorted_distances = np.take_along_axis(scores, sorted_indices, axis=1)
+                if actual_k < k:
+                    pad_width = k - actual_k
+                    sorted_indices = np.pad(
+                        sorted_indices, ((0, 0), (0, pad_width)), constant_values=-1
+                    )
+                    sorted_distances = np.pad(
+                        sorted_distances,
+                        ((0, 0), (0, pad_width)),
+                        constant_values=-np.inf,
+                    )
+                return sorted_distances.astype(np.float32), sorted_indices.astype(
+                    np.int64
+                )
+
+        faiss_stub.IndexFlatIP = _MockIndex
+        faiss_stub.IndexHNSWFlat = _MockIndex
+        faiss_stub.METRIC_INNER_PRODUCT = 0
+        sys.modules["faiss"] = faiss_stub
+
+
 
 for mod_name in [
     "fitz",
@@ -131,13 +174,12 @@ for mod_name in [
 ]:
     if mod_name not in sys.modules:
         try:
-            spec = importlib.util.find_spec(mod_name)
-            if spec is None:
-                top_pkg = mod_name.split(".")[0]
-                if importlib.util.find_spec(top_pkg) is None:
-                    sys.modules[mod_name] = MagicMock()
+            importlib.import_module(mod_name)
         except Exception:
             sys.modules[mod_name] = MagicMock()
+
+
+
 
 # ── Tesseract OCR Availability ────────────────────────────────────────────────
 TESSERACT_AVAILABLE = shutil.which("tesseract") is not None
