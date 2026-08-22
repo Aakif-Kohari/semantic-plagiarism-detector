@@ -178,6 +178,38 @@ def test_embedding_model_manager_fallback(caplog, monkeypatch):
     )
 
 
+def test_embedding_model_manager_fallback_custom(caplog, monkeypatch):
+    """Test that EmbeddingModelManager uses the custom fallback model from env var on failure."""
+    import logging
+
+    custom_fallback = "custom-fallback-model"
+    monkeypatch.setenv("SEMANTIC_PLAGIARISM_FALLBACK_MODEL", custom_fallback)
+    monkeypatch.setattr(embedding_model, "_model", None)
+    monkeypatch.setattr(EmbeddingModelManager, "_instance", None)
+
+    primary = embedding_model._get_model_name()
+
+    def mock_sentence_transformer(model_name, cache_folder=None):
+        if model_name == primary:
+            raise RuntimeError("Failed to load primary model")
+        return MagicMock()
+
+    monkeypatch.setattr(
+        embedding_model, "SentenceTransformer", mock_sentence_transformer
+    )
+
+    with caplog.at_level(logging.WARNING):
+        manager = EmbeddingModelManager.get_instance()
+        model = manager.get_model()
+
+    assert model is not None
+    assert any(
+        f"Primary embedding model {primary} unavailable. Falling back to {custom_fallback}"
+        in record.message
+        for record in caplog.records
+    )
+
+
 def test_embedding_model_manager_raises_descriptive_error_when_all_models_fail(
     monkeypatch,
 ):
