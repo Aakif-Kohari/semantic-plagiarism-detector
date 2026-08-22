@@ -17,7 +17,7 @@ import urllib.parse
 import zlib
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, List, Optional, Union
 
 # CacheKeyPrefix has been consolidated into CacheNamespace below
 
@@ -387,6 +387,18 @@ class RedisCache:
             return True
         except Exception:
             return False
+
+    def scan_keys(self, match: str) -> List[str]:
+        if not self.is_available():
+            return []
+        try:
+            raw_keys = list(self._client.scan_iter(match=match))
+            return [
+                k.decode("utf-8") if isinstance(k, bytes) else k for k in raw_keys
+            ]
+        except Exception as e:
+            logger.error(f"[RedisCache] Error scanning keys for pattern {match}: {e}")
+            return []
 
     def ping(self) -> tuple[bool, Optional[float]]:
         if self._client is None:
