@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import io
 import ipaddress
 import logging
@@ -216,6 +217,7 @@ ENGLISH_STOPWORDS = frozenset(
 )
 
 
+@functools.lru_cache(maxsize=1)
 def load_custom_stopwords(file_path: Optional[str] = None) -> frozenset:
     """Load custom domain-specific stopwords from a text file (one word per line).
 
