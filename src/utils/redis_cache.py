@@ -32,6 +32,11 @@ try:
 except ImportError:
     REDIS_CACHE_TTL = int(os.getenv("REDIS_CACHE_TTL", "3600"))
 
+try:
+    from src.version import APP_VERSION
+except ImportError:
+    APP_VERSION = "1.0.0"
+
 logger = logging.getLogger(__name__)
 
 
@@ -236,9 +241,10 @@ class CacheNamespace(str, Enum):
     SCAN_JOBS = "spd:v1:scan_jobs"
 
     def build_key(self, *parts: Any) -> str:
-        """Build a normalized Redis cache key using pathlib.Path(p).as_posix() for path components."""
+        """Build a normalized Redis cache key appending APP_VERSION and using pathlib.Path(p).as_posix() for path components."""
         normalized_parts = [normalize_cache_key_path(p) for p in parts]
-        return ":".join([self.value] + normalized_parts)
+        key_parts = [self.value, APP_VERSION] + [p for p in normalized_parts if p]
+        return ":".join(key_parts)
 
 
 CacheKeyPrefix = CacheNamespace

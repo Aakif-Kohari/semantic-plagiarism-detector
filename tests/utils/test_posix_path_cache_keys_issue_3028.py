@@ -1,4 +1,4 @@
-﻿"""
+"""
 test_posix_path_cache_keys_issue_3028.py
 -----------------------------------------
 Unit tests for Issue #3028:
@@ -37,6 +37,9 @@ def test_normalize_cache_key_path_handles_path_objects_and_drive_letters():
     assert "\\" not in normalize_cache_key_path(path_obj)
 
 
+from src.version import APP_VERSION
+
+
 def test_cache_namespace_build_key_produces_consistent_posix_keys():
     """Verify CacheNamespace.build_key produces identical keys regardless of OS path separator."""
     win_path = r"documents\incident_001\scan.docx"
@@ -46,7 +49,7 @@ def test_cache_namespace_build_key_produces_consistent_posix_keys():
     key_from_linux = CacheNamespace.ANALYSIS.build_key(linux_path)
 
     assert key_from_win == key_from_linux
-    assert key_from_win == "spd:v1:analysis:documents/incident_001/scan.docx"
+    assert key_from_win == f"spd:v1:analysis:{APP_VERSION}:documents/incident_001/scan.docx"
     assert "\\" not in key_from_win
 
 
