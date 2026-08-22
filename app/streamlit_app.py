@@ -1702,6 +1702,11 @@ def update_global_activity():
                     options=lang_options,
                     key=SessionKeys.LANG_SELECTOR,
                 )
+                st.selectbox(
+                    "🎨 Accent Color",
+                    options=["Indigo", "Emerald", "Crimson", "Amber"],
+                    key=SessionKeys.ACCENT_COLOR,
+                )
                 selected_lang_name = st.session_state.get(SessionKeys.LANG_SELECTOR, "English")
                 _lang_reverse = {v: k for k, v in _SUPPORTED_LANGUAGES.items()}
                 lang_code = _lang_reverse.get(selected_lang_name, "en")
@@ -3526,6 +3531,19 @@ def update_global_activity():
     with tab_settings:
         update_page_title("Settings")
         st.subheader("⚙️ System Configuration")
+        st.selectbox(
+            "🎨 Accent Color",
+            options=["Indigo", "Emerald", "Crimson", "Amber"],
+            key="tab_settings_accent_color",
+            index=["Indigo", "Emerald", "Crimson", "Amber"].index(
+                st.session_state.get(SessionKeys.ACCENT_COLOR, "Indigo")
+                if st.session_state.get(SessionKeys.ACCENT_COLOR, "Indigo") in ["Indigo", "Emerald", "Crimson", "Amber"]
+                else "Indigo"
+            ),
+            on_change=lambda: st.session_state.update(
+                {SessionKeys.ACCENT_COLOR: st.session_state.get("tab_settings_accent_color", "Indigo")}
+            ),
+        )
         st.info(
             "👈 **Settings have been moved to the dedicated Settings page.** "
             "Please use the sidebar navigation to access system configuration, "
