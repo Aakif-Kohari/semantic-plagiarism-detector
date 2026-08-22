@@ -20,7 +20,7 @@ from src.core.anomaly_detector import (
 def render_anomaly_detection_dashboard():
     """Render the anomaly detection dashboard."""
     st.title("🔍 Plagiarism Anomaly Detection")
-    st.markdown "Detect **unusual patterns** that may indicate plagiarism, collusion, or academic dishonesty.")
+    st.markdown("Detect **unusual patterns** that may indicate plagiarism, collusion, or academic dishonesty.")
 
     tab_config, tab_detect, tab_results = st.tabs(["⚙️ Configuration", "🔎 Detection", "📊 Results"])
 

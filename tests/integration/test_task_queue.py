@@ -221,7 +221,7 @@ class TestTaskQueue:
         from src.workers.task_queue import TaskQueue
         from src.db import task_db
         q = TaskQueue()
-        job = q.enqueue({"files": {"x": "x"}}, max_retries=1)
+        job = q.enqueue({"files": {"x": "x"}}, max_retries=2)
         q.fail(job["id"], "error 1")
         j = task_db.get_job(job["id"])
         assert j["status"] == "PENDING"  # re-queued for retry
