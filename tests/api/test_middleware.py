@@ -390,29 +390,12 @@ class TestGetCurrentUserScopes:
         from src.api.middleware import get_current_user
 
         async def _test():
-<<<<<<< HEAD
             security_scopes = SecurityScopes(scopes=["read", "write"])
             payload = {"sub": "user1", "scopes": ["read", "write", "admin"]}
             with patch("src.security.jwt_utils.verify_access_token", return_value=payload):
                 with patch("src.api.middleware.get_valid_tokens", return_value={}):
                     res = await get_current_user(security_scopes, token="token_jwt")
                     assert res["scopes"] == ["read", "write", "admin"]
-=======
-            request = MagicMock()
-            request.method = "GET"
-            request.url.path = "/api/v1/protected"
-            creds = HTTPAuthorizationCredentials(
-                scheme="Bearer", credentials="valid_token_123"
-            )
-
-            with patch("src.db.auth.is_token_revoked", return_value=False):
-                with patch(
-                    "src.security.jwt_utils.verify_access_token",
-                    return_value={"sub": "user"},
-                ):
-                    token = await verify_bearer_token(request, creds)
-                    assert token == "valid_token_123"
->>>>>>> upstream/main
 
         asyncio.run(_test())
 
@@ -423,53 +406,10 @@ class TestGetCurrentUserScopes:
         from src.api.middleware import get_current_user
 
         async def _test():
-<<<<<<< HEAD
             security_scopes = SecurityScopes(scopes=["read", "write"])
             payload = {"sub": "user1", "scopes": ["read"]}
             with patch("src.security.jwt_utils.verify_access_token", return_value=payload):
                 with patch("src.api.middleware.get_valid_tokens", return_value={}):
-=======
-            request = MagicMock()
-            request.method = "GET"
-            request.url.path = "/api/v1/protected"
-            creds = HTTPAuthorizationCredentials(
-                scheme="Bearer", credentials="invalid_token"
-            )
-
-            with patch(
-                "src.security.jwt_utils.verify_access_token",
-                side_effect=ValueError("Invalid signature"),
-            ):
-                with pytest.raises(HTTPException) as exc_info:
-                    await verify_bearer_token(request, creds)
-                assert exc_info.value.status_code == 401
-
-        asyncio.run(_test())
-
-    def test_unexpected_exception_logs_error_and_returns_401(self, caplog):
-        """Verify unexpected Exception during verification logs error with exc_info and raises 401."""
-        import asyncio
-        from unittest.mock import MagicMock
-
-        from fastapi import HTTPException
-        from fastapi.security import HTTPAuthorizationCredentials
-
-        from src.api.middleware import verify_bearer_token
-
-        async def _test():
-            request = MagicMock()
-            request.method = "GET"
-            request.url.path = "/api/v1/protected"
-            creds = HTTPAuthorizationCredentials(
-                scheme="Bearer", credentials="some_token"
-            )
-
-            with patch(
-                "src.security.jwt_utils.verify_access_token",
-                side_effect=RuntimeError("Corrupted secret key configuration"),
-            ):
-                with caplog.at_level(logging.ERROR):
->>>>>>> upstream/main
                     with pytest.raises(HTTPException) as exc_info:
                         await get_current_user(security_scopes, token="token_jwt")
                     assert exc_info.value.status_code == 403
