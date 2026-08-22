@@ -547,3 +547,84 @@ def populated_db_connection(db_connection: sqlite3.Connection) -> sqlite3.Connec
     yield db_connection
 
 
+# ── Mock FAISS Index Fixture (Issue #3248) ────────────────────────────────────
+
+
+class MockFAISSIndexWrapper:
+    """Helper wrapper around in-memory FAISS index for synthetic NLP and vector search tests (Issue #3248)."""
+
+    def __init__(self, dimension: int = 384):
+        self.dimension = dimension
+        try:
+            import faiss
+
+            self.index = faiss.IndexFlatL2(dimension)
+        except Exception:
+            self.index = None
+            self.vectors = []
+
+    def add_vectors(self, vectors: Any) -> None:
+        """Add synthetic vectors to the in-memory FAISS index.
+
+        Args:
+            vectors: Array or list of synthetic vector embeddings.
+        """
+        arr = np.ascontiguousarray(vectors, dtype=np.float32)
+        if arr.ndim == 1:
+            arr = arr.reshape(1, -1)
+        if self.index is not None and hasattr(self.index, "add"):
+            self.index.add(arr)
+        else:
+            self.vectors.append(arr)
+
+    def search_vectors(self, query_vectors: Any, k: int = 5) -> tuple[np.ndarray, np.ndarray]:
+        """Query nearest neighbors for the given query vectors.
+
+        Args:
+            query_vectors: Query vector embeddings.
+            k: Number of nearest neighbors to retrieve.
+
+        Returns:
+            tuple[np.ndarray, np.ndarray]: (distances, indices)
+        """
+        q_arr = np.ascontiguousarray(query_vectors, dtype=np.float32)
+        if q_arr.ndim == 1:
+            q_arr = q_arr.reshape(1, -1)
+
+        if self.index is not None and hasattr(self.index, "search"):
+            distances, indices = self.index.search(q_arr, k)
+            return distances, indices
+        else:
+            if not self.vectors:
+                return np.zeros((q_arr.shape[0], k), dtype=np.float32), np.full(
+                    (q_arr.shape[0], k), -1, dtype=np.int64
+                )
+            data = np.vstack(self.vectors)
+            dists = np.linalg.norm(q_arr[:, np.newaxis, :] - data[np.newaxis, :, :], axis=2) ** 2
+            actual_k = min(k, data.shape[0])
+            sorted_indices = np.argsort(dists, axis=1)[:, :actual_k]
+            sorted_distances = np.take_along_axis(dists, sorted_indices, axis=1)
+            if actual_k < k:
+                pad_width = k - actual_k
+                sorted_indices = np.pad(
+                    sorted_indices, ((0, 0), (0, pad_width)), constant_values=-1
+                )
+                sorted_distances = np.pad(
+                    sorted_distances, ((0, 0), (0, pad_width)), constant_values=np.inf
+                )
+            return sorted_distances.astype(np.float32), sorted_indices.astype(np.int64)
+
+    def get_nearest_neighbors(self, query_vectors: Any, k: int = 5) -> tuple[np.ndarray, np.ndarray]:
+        """Alias helper to query nearest neighbors."""
+        return self.search_vectors(query_vectors, k=k)
+
+
+@pytest.fixture
+def mock_faiss_index():
+    """Pytest fixture providing an in-memory FAISS index wrapper for synthetic vector testing (Issue #3248).
+
+    Provides helpers to add synthetic vectors (`add_vectors`) and query nearest neighbors (`search_vectors` / `get_nearest_neighbors`).
+    """
+    return MockFAISSIndexWrapper(dimension=384)
+
+
