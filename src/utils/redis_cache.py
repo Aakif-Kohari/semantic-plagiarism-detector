@@ -102,6 +102,7 @@ ANALYSIS_RESULTS_TTL = int(os.getenv("ANALYSIS_RESULTS_TTL", str(2 * 60 * 60))) 
 LOGIN_LOCKOUT_TTL = int(os.getenv("LOGIN_LOCKOUT_TTL", str(15 * 60)))  # 15 minutes for login lockout
 UPLOAD_RATE_TTL = int(os.getenv("UPLOAD_RATE_TTL", str(60 * 60)))  # 1 hour for upload rate limiting
 BADGE_TTL = int(os.getenv("BADGE_TTL", str(24 * 60 * 60)))  # 24 hours for badge buffer cache
+SCAN_JOBS_TTL = int(os.getenv("SCAN_JOBS_TTL", str(24 * 60 * 60)))  # 24 hours for scan jobs
 DEFAULT_TTL = int(os.getenv("DEFAULT_TTL", str(24 * 60 * 60)))  # 24 hours fallback for keys without explicit TTL
 
 
@@ -231,6 +232,7 @@ class CacheNamespace(str, Enum):
     LOGIN_ATTEMPTS = "spd:v1:login_attempts"
     UPLOADS = "spd:v1:uploads"
     BADGES = "spd:v1:badges"
+    SCAN_JOBS = "spd:v1:scan_jobs"
 
     def build_key(self, *parts: Any) -> str:
         """Build a normalized Redis cache key using pathlib.Path(p).as_posix() for path components."""
@@ -713,6 +715,28 @@ def get_cached_badge(
     """Retrieve cached badge bytes (PNG/PDF) from Redis (Issue #2941)."""
     cache_key = CacheNamespace.BADGES.build_key(badge_type.lower(), identifier, date)
     return _cache.get(cache_key)
+
+
+def cache_scan_job(
+    job_id: str,
+    data: dict,
+    ttl: Optional[int] = None,
+) -> bool:
+    """Store scan job status and results in Redis under spd:v1:scan_jobs:{job_id} with 24-hour TTL (Issue #3222)."""
+    cache_key = CacheNamespace.SCAN_JOBS.build_key(job_id)
+    return _cache.set_json(cache_key, data, ttl or SCAN_JOBS_TTL)
+
+
+def get_scan_job(job_id: str) -> Optional[dict]:
+    """Retrieve scan job status and results from Redis (Issue #3222)."""
+    cache_key = CacheNamespace.SCAN_JOBS.build_key(job_id)
+    return _cache.get_json(cache_key)
+
+
+def delete_scan_job(job_id: str) -> bool:
+    """Delete scan job from Redis (Issue #3222)."""
+    cache_key = CacheNamespace.SCAN_JOBS.build_key(job_id)
+    return _cache.delete(cache_key)
 
 
 def _cleanup_redis() -> None:
