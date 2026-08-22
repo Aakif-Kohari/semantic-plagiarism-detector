@@ -41,12 +41,16 @@ import docx
 import pdfplumber
 from langdetect import LangDetectException, detect
 
+from src.exceptions import UnsupportedFormatError
+
 try:
     from striprtf.striprtf import rtf_to_text
 except ImportError:
 
     def rtf_to_text(rtf_text: str) -> str:
-        return rtf_text
+        raise UnsupportedFormatError(
+            "striprtf is required to process RTF files. Please install striprtf to parse RTF documents."
+        )
 
 
 import string
@@ -1475,6 +1479,8 @@ def extract_text_from_rtf(file: PDFInput) -> str:
                 else data
             )
         text = rtf_to_text(content)
+    except UnsupportedFormatError:
+        raise
     except Exception as exc:
         print(f"[document_parser] Error reading RTF: {exc}")
     return text.strip()
