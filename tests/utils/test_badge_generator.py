@@ -120,3 +120,13 @@ def test_generate_badge_pdf_and_caching():
         student_id=student_id,
     )
     assert buf2.getvalue() == val1
+
+
+def test_generate_badge_png_includes_accessibility_metadata():
+    """Verify generate_badge_png includes PngInfo Description metadata for screen readers."""
+    from PIL import Image
+
+    buf = generate_badge_png(student_name="Jane Doe", student_id="metadata_test_789")
+    img = Image.open(buf)
+    assert "Description" in img.info
+    assert img.info["Description"] == "Originality Verified Certificate for Jane Doe"

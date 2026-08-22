@@ -22,11 +22,12 @@ from io import BytesIO
 from typing import Dict, Optional, Tuple
 
 try:
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw, ImageFont, PngImagePlugin
 except ImportError:
     Image = None
     ImageDraw = None
     ImageFont = None
+    PngImagePlugin = None
 
 from reportlab.lib.colors import HexColor
 from reportlab.lib.enums import TA_CENTER
@@ -374,9 +375,13 @@ def generate_badge_png(
     footer_x = (width - footer_width) // 2
     draw.text((footer_x, 540), footer_text, fill="#94a3b8", font=small_font)
 
+    # Create PngInfo for accessibility alt-text metadata
+    pnginfo = PngImagePlugin.PngInfo()
+    pnginfo.add_text("Description", f"Originality Verified Certificate for {student_name}")
+
     # Save to buffer
     buffer = BytesIO()
-    img.save(buffer, format="PNG", quality=95)
+    img.save(buffer, format="PNG", pnginfo=pnginfo, quality=95)
     png_bytes = buffer.getvalue()
     try:
         cache.set(cache_key, png_bytes, ttl=BADGE_TTL)
