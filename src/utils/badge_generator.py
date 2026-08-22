@@ -19,6 +19,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from io import BytesIO
+from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 try:
@@ -290,17 +291,31 @@ def generate_badge_png(
         width=2,
     )
 
-    # Try to load fonts, fallback to default if not available
-    try:
-        title_font = ImageFont.truetype("arial.ttf", 48)
-        subtitle_font = ImageFont.truetype("arial.ttf", 32)
-        body_font = ImageFont.truetype("arial.ttf", 24)
-        small_font = ImageFont.truetype("arial.ttf", 18)
-    except (IOError, OSError):
-        title_font = ImageFont.load_default()
-        subtitle_font = ImageFont.load_default()
-        body_font = ImageFont.load_default()
-        small_font = ImageFont.load_default()
+    # Load bundled TTF font (Roboto-Regular or DejaVuSans), with system and default fallbacks
+    fonts_dir = Path(__file__).parent.parent / "assets" / "fonts"
+    bundled_fonts = [
+        fonts_dir / "Roboto-Regular.ttf",
+        fonts_dir / "DejaVuSans.ttf",
+    ]
+
+    def _load_badge_font(size: int):
+        for font_path in bundled_fonts:
+            if font_path.exists():
+                try:
+                    return ImageFont.truetype(str(font_path), size)
+                except (IOError, OSError):
+                    pass
+        for system_font in ["arial.ttf", "DejaVuSans.ttf"]:
+            try:
+                return ImageFont.truetype(system_font, size)
+            except (IOError, OSError):
+                pass
+        return ImageFont.load_default()
+
+    title_font = _load_badge_font(48)
+    subtitle_font = _load_badge_font(32)
+    body_font = _load_badge_font(24)
+    small_font = _load_badge_font(18)
 
     # Title
     title_text = "ORIGINALITY VERIFIED"
