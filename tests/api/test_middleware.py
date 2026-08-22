@@ -307,80 +307,148 @@ class TestIsPublicPath:
         assert not _is_public_path("/api/v1/status-private")
 
 
-class TestVerifyBearerToken:
-    """Test suite for verify_bearer_token() exception handling."""
+class TestValidateScopes:
+    """Test suite for validate_scopes() under 'all' and 'any' modes (Issue #3017)."""
 
-    def test_valid_token_verification(self):
-        """Verify valid token passes verification."""
+    def test_all_mode_passes_when_all_required_present(self):
+        from src.api.middleware import validate_scopes
+
+        assert validate_scopes(["read", "write"], ["read", "write", "admin"], mode="all") is True
+
+    def test_all_mode_fails_when_any_required_missing(self):
+        from src.api.middleware import validate_scopes
+
+        assert validate_scopes(["read", "write"], ["read"], mode="all") is False
+
+    def test_all_mode_empty_required_always_passes(self):
+        from src.api.middleware import validate_scopes
+
+        assert validate_scopes([], ["read"], mode="all") is True
+        assert validate_scopes([], [], mode="all") is True
+
+    def test_any_mode_passes_when_at_least_one_required_present(self):
+        from src.api.middleware import validate_scopes
+
+        assert validate_scopes(["read", "write"], ["read"], mode="any") is True
+        assert validate_scopes(["read", "write"], ["write"], mode="any") is True
+        assert validate_scopes(["admin", "operator"], ["operator", "user"], mode="any") is True
+
+    def test_any_mode_fails_when_no_required_present(self):
+        from src.api.middleware import validate_scopes
+
+        assert validate_scopes(["read", "write"], ["audit", "guest"], mode="any") is False
+        assert validate_scopes(["read"], [], mode="any") is False
+
+    def test_any_mode_empty_required_always_passes(self):
+        from src.api.middleware import validate_scopes
+
+        assert validate_scopes([], ["read"], mode="any") is True
+        assert validate_scopes([], [], mode="any") is True
+
+    def test_invalid_mode_raises_value_error(self):
+        from src.api.middleware import validate_scopes
+
+        with pytest.raises(ValueError, match="Invalid scope mode"):
+            validate_scopes(["read"], ["read"], mode="invalid_mode")
+
+
+class TestGetCurrentUserScopes:
+    """Test suite for get_current_user (ALL scopes logic) and get_current_user_any (ANY scopes logic)."""
+
+    def test_get_current_user_all_scopes_success(self):
         import asyncio
-        from unittest.mock import MagicMock
-
-        from fastapi.security import HTTPAuthorizationCredentials
-
-        from src.api.middleware import verify_bearer_token
+        from fastapi.security import SecurityScopes
+        from src.api.middleware import get_current_user
 
         async def _test():
-            request = MagicMock()
-            request.method = "GET"
-            request.url.path = "/api/v1/protected"
-            creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="valid_token_123")
-
-            with patch("src.db.auth.is_token_revoked", return_value=False):
-                with patch("src.security.jwt_utils.verify_access_token", return_value={"sub": "user"}):
-                    token = await verify_bearer_token(request, creds)
-                    assert token == "valid_token_123"
+            security_scopes = SecurityScopes(scopes=["read", "write"])
+            payload = {"sub": "user1", "scopes": ["read", "write", "admin"]}
+            with patch("src.security.jwt_utils.verify_access_token", return_value=payload):
+                with patch("src.api.middleware.get_valid_tokens", return_value={}):
+                    res = await get_current_user(security_scopes, token="token_jwt")
+                    assert res["scopes"] == ["read", "write", "admin"]
 
         asyncio.run(_test())
 
-    def test_jwt_verification_failure_returns_401(self):
-        """Verify ValueError during verification raises 401 without logging unexpected error."""
+    def test_get_current_user_all_scopes_missing_raises_403(self):
         import asyncio
-        from unittest.mock import MagicMock
-
         from fastapi import HTTPException
-        from fastapi.security import HTTPAuthorizationCredentials
-
-        from src.api.middleware import verify_bearer_token
+        from fastapi.security import SecurityScopes
+        from src.api.middleware import get_current_user
 
         async def _test():
-            request = MagicMock()
-            request.method = "GET"
-            request.url.path = "/api/v1/protected"
-            creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="invalid_token")
-
-            with patch("src.security.jwt_utils.verify_access_token", side_effect=ValueError("Invalid signature")):
-                with pytest.raises(HTTPException) as exc_info:
-                    await verify_bearer_token(request, creds)
-                assert exc_info.value.status_code == 401
-
-        asyncio.run(_test())
-
-    def test_unexpected_exception_logs_error_and_returns_401(self, caplog):
-        """Verify unexpected Exception during verification logs error with exc_info and raises 401."""
-        import asyncio
-        from unittest.mock import MagicMock
-
-        from fastapi import HTTPException
-        from fastapi.security import HTTPAuthorizationCredentials
-
-        from src.api.middleware import verify_bearer_token
-
-        async def _test():
-            request = MagicMock()
-            request.method = "GET"
-            request.url.path = "/api/v1/protected"
-            creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="some_token")
-
-            with patch("src.security.jwt_utils.verify_access_token", side_effect=RuntimeError("Corrupted secret key configuration")):
-                with caplog.at_level(logging.ERROR):
+            security_scopes = SecurityScopes(scopes=["read", "write"])
+            payload = {"sub": "user1", "scopes": ["read"]}
+            with patch("src.security.jwt_utils.verify_access_token", return_value=payload):
+                with patch("src.api.middleware.get_valid_tokens", return_value={}):
                     with pytest.raises(HTTPException) as exc_info:
-                        await verify_bearer_token(request, creds)
+                        await get_current_user(security_scopes, token="token_jwt")
+                    assert exc_info.value.status_code == 403
+                    assert "Forbidden: Insufficient privileges" in exc_info.value.detail
 
-                assert exc_info.value.status_code == 401
-                assert any(
-                    "Unexpected error while verifying bearer token" in record.message
-                    for record in caplog.records
-                )
+        asyncio.run(_test())
+
+    def test_get_current_user_none_token_returns_empty(self):
+        import asyncio
+        from fastapi.security import SecurityScopes
+        from src.api.middleware import get_current_user
+
+        async def _test():
+            security_scopes = SecurityScopes(scopes=["read"])
+            res = await get_current_user(security_scopes, token=None)
+            assert res == {"token": None, "scopes": []}
+
+        asyncio.run(_test())
+
+    def test_get_current_user_any_success(self):
+        import asyncio
+        from fastapi.security import SecurityScopes
+        from src.api.middleware import get_current_user_any
+
+        async def _test():
+            security_scopes = SecurityScopes(scopes=["read", "write"])
+            payload = {"sub": "user1", "scopes": ["write"]}
+            with patch("src.security.jwt_utils.verify_access_token", return_value=payload):
+                with patch("src.api.middleware.get_valid_tokens", return_value={}):
+                    res = await get_current_user_any(security_scopes, token="token_jwt")
+                    assert res["scopes"] == ["write"]
+
+        asyncio.run(_test())
+
+    def test_get_current_user_any_no_match_raises_403(self):
+        import asyncio
+        from fastapi import HTTPException
+        from fastapi.security import SecurityScopes
+        from src.api.middleware import get_current_user_any
+
+        async def _test():
+            security_scopes = SecurityScopes(scopes=["read", "write"])
+            payload = {"sub": "user1", "scopes": ["analytics"]}
+            with patch("src.security.jwt_utils.verify_access_token", return_value=payload):
+                with patch("src.api.middleware.get_valid_tokens", return_value={}):
+                    with pytest.raises(HTTPException) as exc_info:
+                        await get_current_user_any(security_scopes, token="token_jwt")
+                    assert exc_info.value.status_code == 403
+                    assert "Forbidden: Insufficient privileges" in exc_info.value.detail
+
+        asyncio.run(_test())
+
+    def test_require_scopes_dependencies(self):
+        import asyncio
+        from fastapi import HTTPException
+        from src.api.middleware import require_all_scopes, require_any_scopes
+
+        async def _test():
+            any_dep = require_any_scopes("read", "write")
+            all_dep = require_all_scopes("read", "write")
+
+            with patch("src.api.middleware.get_valid_tokens", return_value={"tok1": ["read"]}):
+                res_any = await any_dep(token="tok1")
+                assert res_any["scopes"] == ["read"]
+
+                with pytest.raises(HTTPException) as exc_all:
+                    await all_dep(token="tok1")
+                assert exc_all.value.status_code == 403
 
         asyncio.run(_test())
 
