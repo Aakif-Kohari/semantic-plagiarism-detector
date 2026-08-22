@@ -249,7 +249,7 @@ def _validate_scopes(
     normalized_mode = mode.lower().strip()
     if normalized_mode not in ("all", "and", "any", "or"):
         raise ValueError(
-            f"Invalid scope evaluation mode '{mode}'. Supported modes: 'all', 'any'."
+            f"Invalid scope evaluation mode / Invalid scope mode '{mode}'. Supported modes: 'all', 'any'."
         )
 
     token_scopes_set = set(token_scopes)
@@ -384,7 +384,7 @@ class RequireScopes:
         self.mode = mode.lower()
         if self.mode not in ("all", "and", "any", "or"):
             raise ValueError(
-                f"Invalid scope evaluation mode '{mode}'. Supported modes: 'all', 'any'."
+                f"Invalid scope evaluation mode / Invalid scope mode '{mode}'. Supported modes: 'all', 'any'."
             )
 
     async def __call__(
