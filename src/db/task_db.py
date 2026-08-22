@@ -1,6 +1,243 @@
 """
 src/db/task_db.py
 -----------------
+SQLite database manager for the distributed task queue.
+
+Manages the lifecycle of batch scanning jobs, including state transitions
+(PENDING -> PROCESSING -> COMPLETED/FAILED), payload storage, and result retrieval.
+"""
+
+import sqlite3
+import json
+import logging
+import uuid
+from pathlib import Path
+from typing import Optional, Dict, Any, List
+from contextlib import contextmanager
+from datetime import datetime
+from enum import Enum
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_DB_PATH = Path("data/task_queue.db")
+
+
+class JobStatus(str, Enum):
+    """Enumeration of valid job states."""
+    PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
+@contextmanager
+def get_connection(db_path: Optional[Path] = None):
+    """Context manager for acquiring and releasing SQLite connections."""
+    path = db_path or DEFAULT_DB_PATH
+    path.parent.mkdir(parents=True, exist_ok=True)
+    
+    conn = sqlite3.connect(str(path), timeout=10.0)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout = 5000")
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def initialize_task_db(db_path: Optional[Path] = None) -> None:
+    """Create the task queue database schema."""
+    with get_connection(db_path) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS scan_jobs (
+                id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                result TEXT,
+                error_message TEXT,
+                attempts INTEGER DEFAULT 0,
+                max_attempts INTEGER DEFAULT 3,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT
+            )
+        """)
+        
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_jobs_status 
+            ON scan_jobs(status)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_jobs_created 
+            ON scan_jobs(created_at)
+        """)
+        
+    logger.info("Task queue database initialized at %s", db_path or DEFAULT_DB_PATH)
+
+
+def create_job(
+    payload: Dict[str, Any], 
+    max_attempts: int = 3,
+    db_path: Optional[Path] = None
+) -> str:
+    """Insert a new job into the queue."""
+    job_id = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat()
+    payload_json = json.dumps(payload)
+    
+    try:
+        with get_connection(db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO scan_jobs 
+                (id, status, payload, attempts, max_attempts, created_at, updated_at)
+                VALUES (?, ?, ?, 0, ?, ?, ?)
+                """,
+                (job_id, JobStatus.PENDING.value, payload_json, max_attempts, now, now)
+            )
+        logger.info("Created job %s", job_id)
+        return job_id
+    except sqlite3.Error as e:
+        logger.error("Failed to create job: %s", e)
+        raise
+
+
+def claim_job(db_path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
+    """Atomically claim the next PENDING job and mark it as PROCESSING.
+    
+    Uses an UPDATE with a WHERE clause to ensure only one worker can claim
+    a specific job, even in a multi-worker environment.
+    """
+    try:
+        with get_connection(db_path) as conn:
+            # Find the oldest PENDING job that hasn't exceeded max attempts
+            cursor = conn.execute(
+                """
+                SELECT id FROM scan_jobs 
+                WHERE status = ? AND attempts < max_attempts 
+                ORDER BY created_at ASC 
+                LIMIT 1
+                """,
+                (JobStatus.PENDING.value,)
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+                
+            job_id = row["id"]
+            now = datetime.utcnow().isoformat()
+            
+            # Atomic update to claim the job
+            conn.execute(
+                """
+                UPDATE scan_jobs 
+                SET status = ?, attempts = attempts + 1, started_at = ?, updated_at = ?
+                WHERE id = ? AND status = ?
+                """,
+                (JobStatus.PROCESSING.value, now, now, job_id, JobStatus.PENDING.value)
+            )
+            
+            # Fetch the full job details
+            cursor = conn.execute("SELECT * FROM scan_jobs WHERE id = ?", (job_id,))
+            job_row = cursor.fetchone()
+            if job_row:
+                return dict(job_row)
+            return None
+            
+    except sqlite3.Error as e:
+        logger.error("Failed to claim job: %s", e)
+        return None
+
+
+def complete_job(
+    job_id: str, 
+    result: Dict[str, Any],
+    db_path: Optional[Path] = None
+) -> bool:
+    """Mark a job as COMPLETED and store the result."""
+    now = datetime.utcnow().isoformat()
+    result_json = json.dumps(result)
+    
+    try:
+        with get_connection(db_path) as conn:
+            conn.execute(
+                """
+                UPDATE scan_jobs 
+                SET status = ?, result = ?, completed_at = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (JobStatus.COMPLETED.value, result_json, now, now, job_id)
+            )
+        logger.info("Job %s completed", job_id)
+        return True
+    except sqlite3.Error as e:
+        logger.error("Failed to complete job %s: %s", job_id, e)
+        return False
+
+
+def fail_job(
+    job_id: str, 
+    error_message: str,
+    db_path: Optional[Path] = None
+) -> bool:
+    """Mark a job as FAILED. If attempts < max_attempts, it returns to PENDING."""
+    now = datetime.utcnow().isoformat()
+    
+    try:
+        with get_connection(db_path) as conn:
+            # Check current attempts
+            cursor = conn.execute(
+                "SELECT attempts, max_attempts FROM scan_jobs WHERE id = ?", 
+                (job_id,)
+            )
+            row = cursor.fetchone()
+            if not row:
+                return False
+                
+            if row["attempts"] < row["max_attempts"]:
+                # Return to PENDING for retry
+                new_status = JobStatus.PENDING.value
+                logger.warning("Job %s failed (attempt %d/%d), returning to PENDING", 
+                             job_id, row["attempts"], row["max_attempts"])
+            else:
+                # Permanently FAILED
+                new_status = JobStatus.FAILED.value
+                logger.error("Job %s permanently failed: %s", job_id, error_message)
+                
+            conn.execute(
+                """
+                UPDATE scan_jobs 
+                SET status = ?, error_message = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (new_status, error_message, now, job_id)
+            )
+        return True
+    except sqlite3.Error as e:
+        logger.error("Failed to update job %s status: %s", job_id, e)
+        return False
+
+
+def get_job(job_id: str, db_path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
+    """Retrieve the full details of a specific job."""
+    try:
+        with get_connection(db_path) as conn:
+            cursor = conn.execute("SELECT * FROM scan_jobs WHERE id = ?", (job_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+    except sqlite3.Error as e:
+        logger.error("Failed to get job %s: %s", job_id, e)
+        return None
+
+"""
+src/db/task_db.py
+-----------------
 SQLite-backed job state manager for the distributed task queue (Issue #3146).
 
 Manages job lifecycle states (PENDING → PROCESSING → COMPLETED / FAILED)
