@@ -2013,7 +2013,44 @@ def extract_text(
     Raises:
         EmptyDocumentError: If the final extracted and cleaned text is empty.
     """
-    # ... [existing extraction logic for PDF, DOCX, TXT, etc.] ...
+    ocr_language, ocr_dpi = normalize_ocr_settings(
+        ocr_language=ocr_language,
+        ocr_dpi=ocr_dpi,
+    )
+
+    file_bytes = _read_pdf_bytes(file)
+    from src.security.mime_validator import validate_mime_type
+
+    if not validate_mime_type(file_bytes, filename):
+        logger.warning(
+            f"[document_parser] Security warning: Rejected file '{filename}' "
+            f"because its MIME type / magic bytes do not match its file extension."
+        )
+        return ""
+    file = file_bytes
+
+    extension = filename.rsplit(".", 1)[-1].lower()
+
+    if extension == "pdf":
+        raw = extract_text_from_pdf(file, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
+    elif extension == "docx":
+        raw = extract_text_from_docx(file)
+    elif extension == "doc":
+        raw = extract_text_from_doc(file)
+    elif extension in ("md", "markdown", "mdown"):
+        raw = extract_text_from_md(file)
+    elif extension in ("zip", "7z", "tar", "gz"):
+        raw = extract_text_from_zip(file, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
+    elif extension == "rtf":
+        raw = extract_text_from_rtf(file)
+    elif extension == "epub":
+        raw = extract_text_from_epub(file)
+    elif extension in ("png", "jpg", "jpeg"):
+        raw = extract_text_from_image(file, ocr_language=ocr_language)
+    elif extension == "odt":
+        raw = extract_text_from_odt(file)
+    else:
+        raw = extract_text_from_txt(file)
 
     raw = strip_bibliography(raw)
     raw = normalize_unicode_spaces(raw)
