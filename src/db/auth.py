@@ -28,12 +28,17 @@ import bcrypt
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError, VerifyMismatchError
 
+try:
+    import zxcvbn
+except ImportError:
+    zxcvbn = None
+
 from src.core.app_config import AUTH_DB_PATH
 from src.db.base import BaseRepository
 from src.db.common import with_sqlite_retry
 from src.db.connection import get_connection
 from src.db.migrations import migrate_auth_database, table_exists
-from src.db.security_audit import count_recent_failed_logins, log_security_event
+from src.db.security_audit import count_recent_failed_logins
 from src.exceptions import StaleDataException
 
 logger = logging.getLogger(__name__)
@@ -497,7 +502,20 @@ def _validate_password_complexity(password: str) -> str:
         raise ValueError(
             "Password must contain at least one special character (e.g. @$!%*?&)."
         )
+    if zxcvbn is not None:
+        result = zxcvbn.zxcvbn(password)
+        if result.get("score", 0) < 3:
+            feedback = result.get("feedback", {})
+            warning = feedback.get("warning")
+            if warning:
+                raise ValueError(f"Password is too weak or common: {warning}")
+            raise ValueError(
+                "Password is too weak or commonly used. Please choose a stronger password."
+            )
     return password
+
+
+validate_password_complexity = _validate_password_complexity
 
 
 def _validate_role(role: str) -> str:
@@ -1582,9 +1600,9 @@ def _cleanup_revoked_tokens() -> int:
         The number of rows deleted.
     """
     import base64
+    import hashlib
     import json
     import time
-    import hashlib
 
     deleted_count = 0
     try:
@@ -2264,8 +2282,12 @@ def generate_secure_password(length: int = 32) -> str:
     password = "".join(secrets.choice(alphabet) for _ in range(length))
 
     # Ensure password meets complexity requirements
-    while not _validate_password_complexity(password):
-        password = "".join(secrets.choice(alphabet) for _ in range(length))
+    while True:
+        try:
+            _validate_password_complexity(password)
+            break
+        except ValueError:
+            password = "".join(secrets.choice(alphabet) for _ in range(length))
 
     return password
 
@@ -2905,4 +2927,6 @@ __all__ = [
     "get_sso_users_count",
     "migrate_existing_sso_users",
     "verify_sso_recovery_token",
+    "validate_password_complexity",
+    "_validate_password_complexity",
 ]

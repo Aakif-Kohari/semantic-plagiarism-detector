@@ -32,12 +32,15 @@ def test_normalize_cache_key_path_handles_path_objects(tmp_path):
     assert normalized == path_obj.as_posix()
 
 
+from src.version import APP_VERSION
+
+
 def test_cache_namespace_build_key_normalizes_paths():
     """Verify CacheNamespace.build_key normalizes path components into POSIX format."""
     win_path = r"uploads\user123\doc.pdf"
     key = CacheNamespace.UPLOADS.build_key(win_path)
     assert "\\" not in key
-    assert key == "spd:v1:uploads:uploads/user123/doc.pdf"
+    assert key == f"spd:v1:uploads:{APP_VERSION}:uploads/user123/doc.pdf"
 
 
 def test_build_similarity_cache_key_normalizes_path_session_id():

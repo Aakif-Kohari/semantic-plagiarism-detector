@@ -23,6 +23,7 @@ EbookLib>=0.18                   # EPUB e-book parsing
 thefuzz>=0.22.1                  # Fuzzy string matching
 networkx>=3.0                    # Plagiarism network graphs
 argon2-cffi>=23.1.0              # Password hashing
+zxcvbn>=4.4.28                   # Password strength and common dictionary checks
 
 # ── Web UI ────────────────────────────────────────────────────────────────────
 streamlit>=1.61.1                # Dashboard framework

@@ -120,3 +120,16 @@ def test_generate_badge_pdf_and_caching():
         student_id=student_id,
     )
     assert buf2.getvalue() == val1
+
+
+def test_generate_badge_png_uses_bundled_ttf_font():
+    """Verify generate_badge_png loads bundled TTF font from src/assets/fonts/."""
+    from pathlib import Path
+    fonts_dir = Path(__file__).parent.parent.parent / "src" / "assets" / "fonts"
+    assert (fonts_dir / "Roboto-Regular.ttf").exists() or (fonts_dir / "DejaVuSans.ttf").exists()
+
+    buf = generate_badge_png(student_name="Bundled Font Test", student_id="test_font_123")
+    val = buf.getvalue()
+    assert val.startswith(b"\x89PNG")
+    assert len(val) > 1000
+

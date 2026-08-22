@@ -179,7 +179,6 @@ for mod_name in [
             sys.modules[mod_name] = MagicMock()
 
 if "slowapi" not in sys.modules:
-
     try:
         import slowapi  # noqa: F401
     except ImportError:
