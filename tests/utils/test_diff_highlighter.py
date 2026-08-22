@@ -3,6 +3,7 @@
 import html
 import random
 import time
+import xml.etree.ElementTree as ET
 
 from src.utils.diff_highlighter import MARK_OPEN_TAG, highlight_overlap
 
@@ -109,6 +110,29 @@ def test_marks_never_nest():
     for result in (result_a, result_b):
         assert result.count("<mark") == 1
         assert result.count("</mark>") == 1
+
+
+def test_highlighted_output_is_balanced_and_xml_parseable():
+    """Opened <mark> tags must close, and the HTML fragment must parse."""
+    cases = [
+        ("alpha beta gamma delta", "alpha beta gamma delta"),
+        (
+            "alpha beta gamma delta epsilon zeta eta theta",
+            "alpha beta gamma delta epsilon zeta eta theta",
+        ),
+        ("<b>alpha beta gamma delta</b>", "<b>alpha beta gamma delta</b>"),
+        ("alpha beta gamma delta café 🎓", "alpha beta gamma delta café 🎓"),
+        (
+            "alpha beta gamma delta filler words here kappa lambda mu nu",
+            "alpha beta gamma delta other bridging text kappa lambda mu nu",
+        ),
+    ]
+
+    for text_a, text_b in cases:
+        result_a, result_b = highlight_overlap(text_a, text_b)
+        for result in (result_a, result_b):
+            assert result.count("<mark") == result.count("</mark>")
+            ET.fromstring(f"<root>{result}</root>")
 
 
 def test_output_stays_escaped_around_a_match():
