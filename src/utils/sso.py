@@ -2,11 +2,20 @@ import logging
 import os
 import secrets
 import urllib.parse
+from dataclasses import dataclass
 
 import requests
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class SSOUserProfile:
+    email: str
+    username: str
+    name: str
+    avatar: str
 
 
 def _load_env() -> None:
@@ -42,7 +51,7 @@ def get_google_auth_url() -> tuple[str, str]:
     return url, state
 
 
-def exchange_google_code(code: str) -> tuple[dict | None, str | None]:
+def exchange_google_code(code: str) -> tuple[SSOUserProfile | None, str | None]:
     """Exchange code for access token and fetch user info."""
     _load_env()
     client_id = os.getenv("GOOGLE_CLIENT_ID")
@@ -100,7 +109,15 @@ def exchange_google_code(code: str) -> tuple[dict | None, str | None]:
     if not user_info_resp.ok:
         return None, "SSO authentication failed"
 
-    return user_info_resp.json(), None
+    user_data = user_info_resp.json()
+    email = user_data.get("email", "")
+    profile = SSOUserProfile(
+        email=email,
+        username=email.split("@")[0] if email else "",
+        name=user_data.get("name", ""),
+        avatar=user_data.get("picture", "")
+    )
+    return profile, None
 
 
 def get_github_auth_url() -> tuple[str, str]:
@@ -125,7 +142,7 @@ def get_github_auth_url() -> tuple[str, str]:
     return url, state
 
 
-def exchange_github_code(code: str) -> tuple[dict | None, str | None]:
+def exchange_github_code(code: str) -> tuple[SSOUserProfile | None, str | None]:
     """Exchange code for access token and fetch user info."""
     _load_env()
     client_id = os.getenv("GITHUB_CLIENT_ID")
@@ -231,4 +248,10 @@ def exchange_github_code(code: str) -> tuple[dict | None, str | None]:
         # We raise a ValueError to reject login with message requesting a public email.
         raise ValueError("GitHub login failed: A verified public email is required. Please update your GitHub settings.")
 
-    return user_data, None
+    profile = SSOUserProfile(
+        email=user_data["email"],
+        username=user_data.get("login", ""),
+        name=user_data.get("name", ""),
+        avatar=user_data.get("avatar_url", "")
+    )
+    return profile, None

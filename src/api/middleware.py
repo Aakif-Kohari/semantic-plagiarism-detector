@@ -11,6 +11,7 @@ from src.db import auth as db_auth
 from src.security import jwt_utils
 from src.security.rate_limiter import get_token_bucket_limiter
 
+
 # Expected JWT verification exceptions
 _JWT_EXCEPTIONS = [ValueError]
 try:
@@ -198,6 +199,7 @@ async def verify_bearer_token(
     if credentials and credentials.credentials:
         token_str = credentials.credentials
         limiter = get_token_bucket_limiter()
+
         if not limiter.consume(token_str):
             logger.warning(
                 "Rate limit exceeded for API Bearer token: %s...",

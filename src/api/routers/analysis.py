@@ -255,7 +255,7 @@ async def scan_document(
     top_k: int = Query(
         default=3,
         ge=1,
-        le=10,
+        le=100,
         description="Number of top matching paragraph pairs to include per matched document",
     ),
     reprocess: bool = Query(
@@ -442,7 +442,7 @@ async def scan_document_async(
     top_k: int = Query(
         default=3,
         ge=1,
-        le=10,
+        le=100,
         description="Number of top matching paragraph pairs to include per matched document",
     ),
     reprocess: bool = Query(

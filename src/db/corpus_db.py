@@ -32,8 +32,9 @@ import weakref
 _DB_PATH = os.path.abspath(str(CORPUS_DB_PATH))
 
 _connection_pool = threading.local()
-_all_connections = weakref.WeakSet()
+_all_connections = set()
 _pool_lock = threading.Lock()
+
 
 def _cleanup_all_connections():
     with _pool_lock:

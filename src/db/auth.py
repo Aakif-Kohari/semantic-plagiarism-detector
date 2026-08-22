@@ -1521,6 +1521,57 @@ def _get_token_signature(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+# ── Revoked Tokens In-Memory Cache (Issue #3018) ──────────────────────────────
+_REVOKED_TOKEN_CACHE_TTL: int = 60
+_REVOKED_TOKEN_CACHE_MAXSIZE: int = 10000
+
+try:
+    import cachetools
+
+    _revoked_token_cache: cachetools.TTLCache = cachetools.TTLCache(
+        maxsize=_REVOKED_TOKEN_CACHE_MAXSIZE, ttl=_REVOKED_TOKEN_CACHE_TTL
+    )
+except ImportError:
+    class _FallbackTTLCache(dict):
+        def __init__(self, maxsize: int = 10000, ttl: int = 60):
+            super().__init__()
+            self._ttl = ttl
+            self._times: Dict[str, float] = {}
+
+        def __getitem__(self, key: str) -> bool:
+            if key in self._times and time.time() - self._times[key] > self._ttl:
+                del self[key]
+                del self._times[key]
+                raise KeyError(key)
+            return super().__getitem__(key)
+
+        def __contains__(self, key: object) -> bool:
+            k_str = str(key)
+            if k_str in self._times and time.time() - self._times[k_str] > self._ttl:
+                del self[k_str]
+                del self._times[k_str]
+                return False
+            return super().__contains__(key)
+
+        def __setitem__(self, key: str, value: bool) -> None:
+            self._times[key] = time.time()
+            super().__setitem__(key, value)
+
+        def clear(self) -> None:
+            self._times.clear()
+            super().clear()
+
+    _revoked_token_cache = _FallbackTTLCache(
+        maxsize=_REVOKED_TOKEN_CACHE_MAXSIZE, ttl=_REVOKED_TOKEN_CACHE_TTL
+    )
+
+
+def clear_revocation_cache() -> None:
+    """Clear the in-memory cache of revoked token check results (Issue #3018)."""
+    global _revoked_token_cache
+    _revoked_token_cache.clear()
+
+
 _last_revoked_cleanup = 0.0
 
 
@@ -1582,6 +1633,7 @@ def _cleanup_revoked_tokens() -> int:
                 deleted_count = cur.rowcount
                 conn.commit()
                 if deleted_count > 0:
+                    clear_revocation_cache()
                     logger.info(f"Cleaned up {deleted_count} expired entries from revoked_tokens table.")
     except Exception as e:
         logger.error(f"Failed to cleanup revoked tokens: {e}")
@@ -1629,19 +1681,31 @@ def revoke_token(token: str, details: str | None = None) -> None:
                     (token, revoked_at, details),
                 )
             conn.commit()
+            # Update in-memory TTLCache immediately on revocation
+            _revoked_token_cache[token] = True
+            _revoked_token_cache[signature] = True
             log_security_event(
                 event_type="token_revocation",
                 username="system",
                 details=details or f"Token signature {signature[:12]}... revoked",
             )
-        _cleanup_revoked_tokens()
+        global _last_revoked_cleanup
+        now = time.time()
+        if now - _last_revoked_cleanup > 3600:
+            _last_revoked_cleanup = now
+            _cleanup_revoked_tokens()
     except sqlite3.Error as e:
         logger.error(f"Failed to revoke token: {e}")
         raise sqlite3.Error(f"Failed to revoke token: {e}") from e
 
 
+
 def is_token_revoked(token: str) -> bool:
-    """Return True if the token or its SHA-256 signature exists in revoked_tokens."""
+    """Return True if the token or its SHA-256 signature exists in revoked_tokens.
+
+    Caches query results in-memory using cachetools.TTLCache (60s TTL) to drastically
+    reduce database disk reads and latency on authenticated requests (Issue #3018).
+    """
     if not token or not isinstance(token, str):
         return False
 
@@ -1649,13 +1713,19 @@ def is_token_revoked(token: str) -> bool:
     if not token:
         return False
 
+    # 1. Check in-memory TTLCache first
+    if token in _revoked_token_cache:
+        return _revoked_token_cache[token]
+
+    signature = _get_token_signature(token)
+    if signature in _revoked_token_cache:
+        return _revoked_token_cache[signature]
+
     global _last_revoked_cleanup
     now = time.time()
     if now - _last_revoked_cleanup > 3600:
         _last_revoked_cleanup = now
         _cleanup_revoked_tokens()
-
-    signature = _get_token_signature(token)
 
     try:
         with _connect() as conn:
@@ -1663,16 +1733,22 @@ def is_token_revoked(token: str) -> bool:
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='revoked_tokens'"
             )
             if not cursor.fetchone():
+                _revoked_token_cache[token] = False
+                _revoked_token_cache[signature] = False
                 return False
 
             row = conn.execute(
                 "SELECT 1 FROM revoked_tokens WHERE token_signature = ? OR token_signature = ? LIMIT 1",
                 (signature, token),
             ).fetchone()
-            return bool(row)
+            revoked = bool(row)
+            _revoked_token_cache[token] = revoked
+            _revoked_token_cache[signature] = revoked
+            return revoked
     except sqlite3.Error as e:
         logger.error(f"Failed to check token revocation status: {e}")
         return False
+
 
 
 def get_upload_count(username: str | None = None) -> int:

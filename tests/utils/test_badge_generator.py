@@ -14,16 +14,17 @@ from src.utils.redis_cache import CacheNamespace, RedisCache
     ("raw", "expected"),
     [
         ("#4f46e5", "#4f46e5"),
-        ("4f46e5", "#4f46e5"),
+        ("#abc", "#abc"),
         ("#fff", "#fff"),
-        ("fff", "#fff"),
-        ("not-a-color", DEFAULT_BADGE_COLOR),
+        ("#1e3a8a", "#1e3a8a"),
+        ("#12345g", DEFAULT_BADGE_COLOR),
+        ("rgb(255, 0, 0)", DEFAULT_BADGE_COLOR),
         ("", DEFAULT_BADGE_COLOR),
         (None, DEFAULT_BADGE_COLOR),
     ],
 )
 def test_validate_hex_color(raw, expected):
-    assert validate_hex_color(raw) == expected
+    assert validate_hex_color(raw, DEFAULT_BADGE_COLOR) == expected
 
 
 def test_generate_badge_svg_uses_validated_color():

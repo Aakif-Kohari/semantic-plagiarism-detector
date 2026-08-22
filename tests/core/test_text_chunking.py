@@ -141,6 +141,17 @@ def test_chunk_overlap_boundaries():
     assert chunks[1].startswith(overlap)
 
 
+def test_chunk_by_sentences_cjk_boundaries():
+    """Verify Chinese, Japanese, and Korean sentence boundaries are recognized."""
+    text = "这是第一句。这是第二句！这是第三句？"
+    chunks = chunk_by_sentences(text, max_chunk_size=10, min_chunk_length=1, min_words=1)
+
+    assert len(chunks) == 3
+    assert chunks[0] == "这是第一句。"
+    assert chunks[1] == "这是第二句！"
+    assert chunks[2] == "这是第三句？"
+
+
 # ── Sentence-Boundary Chunking Tests (#919) ──────────────────────────────────
 
 

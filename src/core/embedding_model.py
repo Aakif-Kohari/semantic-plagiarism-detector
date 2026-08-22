@@ -178,7 +178,7 @@ class EmbeddingModelManager:
                 return _model
 
         primary = _get_model_name()
-        fallback = "all-MiniLM-L6-v2"
+        fallback = os.getenv("SEMANTIC_PLAGIARISM_FALLBACK_MODEL", "all-MiniLM-L6-v2")
         cache_dir = _get_cache_dir()
         logger.info(f"[embedding_model] Loading model: {primary} ...")
         logger.info(
@@ -310,8 +310,8 @@ def verify_model_cache_integrity(cache_dir: Path) -> bool:
             except OSError as exc:
                 corrupted.append((weight_path, f"unreadable ({exc})"))
                 continue
-            if size == 0:
-                corrupted.append((weight_path, "zero-byte"))
+            if size <= 1024 * 1024:
+                corrupted.append((weight_path, "too small (<= 1MB)"))
 
     if corrupted:
         for weight_path, reason in corrupted:

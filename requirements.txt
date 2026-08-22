@@ -55,8 +55,10 @@ jsonschema>=4.20.0               # JSON Schema validation for API error-response
 
 # ── Caching & Session Management ───────────────────────────────────────────────
 
+cachetools>=5.3.0               # In-memory TTL cache for revoked tokens & rate limiting
 redis>=5.0.0                    # Redis client for session state and caching
 psutil>=5.9.0                   # System memory monitoring
+
 
 # ── Web Scraping ───────────────────────────────────────────────────────────────
 beautifulsoup4>=4.15.0          # HTML parsing for URL content extraction
