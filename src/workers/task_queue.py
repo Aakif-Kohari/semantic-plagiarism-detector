@@ -1,6 +1,78 @@
 """
 src/workers/task_queue.py
 -------------------------
+High-level interface for the distributed task queue.
+
+Wraps the low-level DB operations to provide a clean API for submitting
+and managing batch scanning jobs.
+"""
+
+import logging
+from typing import Dict, Any, Optional
+from src.db.task_db import (
+    initialize_task_db,
+    create_job,
+    get_job,
+    JobStatus
+)
+
+logger = logging.getLogger(__name__)
+
+
+class TaskQueue:
+    """Client interface for the task queue system."""
+    
+    def __init__(self, db_path: Optional[str] = None):
+        """Initialize the task queue client."""
+        self.db_path = db_path
+        initialize_task_db(db_path)
+        
+    def submit_batch_scan(
+        self, 
+        document_ids: list[str],
+        user_id: str,
+        priority: int = 0
+    ) -> str:
+        """Submit a new batch scanning job.
+        
+        Args:
+            document_ids: List of document IDs to scan.
+            user_id: ID of the user requesting the scan.
+            priority: Job priority (higher = sooner).
+            
+        Returns:
+            The unique job ID.
+        """
+        payload = {
+            "document_ids": document_ids,
+            "user_id": user_id,
+            "priority": priority,
+            "type": "batch_scan"
+        }
+        
+        job_id = create_job(payload, db_path=self.db_path)
+        logger.info("Submitted batch scan job %s for %d documents", 
+                   job_id, len(document_ids))
+        return job_id
+        
+    def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
+        """Get the current status and details of a job."""
+        job = get_job(job_id, db_path=self.db_path)
+        if not job:
+            return None
+            
+        # Parse JSON fields for the client
+        import json
+        if job.get("payload"):
+            job["payload"] = json.loads(job["payload"])
+        if job.get("result"):
+            job["result"] = json.loads(job["result"])
+            
+        return job
+
+"""
+src/workers/task_queue.py
+-------------------------
 Thread-safe producer/consumer queue with retry logic and dead-letter
 handling (Issue #3146).
 
