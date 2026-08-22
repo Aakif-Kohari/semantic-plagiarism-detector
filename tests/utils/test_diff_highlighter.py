@@ -4,7 +4,21 @@ import html
 import random
 import time
 
-from src.utils.diff_highlighter import MARK_OPEN_TAG, highlight_overlap
+from src.utils.diff_highlighter import MARK_OPEN_TAG, _sanitize_color, highlight_overlap
+
+SAFE_FALLBACK = "rgba(250, 204, 21, 0.3)"
+
+
+def test_sanitize_color_accepts_valid_hex_and_rgba():
+    assert _sanitize_color("#fef08a") == "#fef08a"
+    assert _sanitize_color("#abc") == "#abc"
+    assert _sanitize_color("rgba(250, 204, 21, 0.3)") == "rgba(250, 204, 21, 0.3)"
+    assert _sanitize_color("rgb(255, 0, 0)") == "rgb(255, 0, 0)"
+
+
+def test_sanitize_color_rejects_injection_vectors():
+    assert _sanitize_color("red; background: url(evil.com)") == SAFE_FALLBACK
+    assert _sanitize_color("rgba(0,0,0,0);</style><script>") == SAFE_FALLBACK
 
 
 def test_no_overlap():
