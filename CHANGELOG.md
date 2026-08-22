@@ -13,11 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `--recursive` support to the CLI scan command for scanning documents in nested subdirectories.
 
 ### Fixed
+- Raised `UnsupportedFormatError` when `striprtf` is missing during RTF document parsing rather than returning raw unparsed RTF markup strings (`src/core/document_parser.py`, `src/core/parsers/text_parser.py`, `src/exceptions.py`).
 - Fixed unreadable line overflowing for long URLs in ReportLab PDF reports by adding `wordWrap='CJK'` to paragraph styles and inserting zero-width spaces into long URLs (`src/utils/pdf_report.py`).
 - Robust claim parsing in `.github/workflows/ecsoc-automation.yml` using structured hidden HTML comments to prevent breaking on greeting message variations.
 - Restored broken imports in `badge_generator.py` and kept invalid hex colors falling back to `DEFAULT_BADGE_COLOR`.
 
 ### Security
+- Integrated `zxcvbn` password strength evaluation in `_validate_password_complexity` to block common dictionary passwords and weak credentials (`src/db/auth.py`, `requirements.txt`).
 - Explicitly excluded `.env`, `.git/`, `.venv/`, `*.sqlite`, and bytecode caches in `.dockerignore` to prevent leaking secrets and development artifacts into production containers (`.dockerignore`).
 
 ### Changed

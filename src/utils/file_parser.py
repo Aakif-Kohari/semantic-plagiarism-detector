@@ -94,7 +94,11 @@ def _get_page_text_with_timeout(
             raise PageExtractionTimeoutError(
                 f"Extracting text from page {page.number} exceeded "
                 f"{timeout} seconds."
-            )    """Custom exception raised when a PDF requires a password to be read."""
+            )
+
+
+class EncryptedPDFError(Exception):
+    """Custom exception raised when a PDF requires a password to be read."""
 
     pass
 
@@ -370,7 +374,8 @@ def extract_text_from_pdf(
                     page.number,
                     PAGE_EXTRACTION_TIMEOUT_SECONDS,
                 )
-                text_content.append("")    finally:
+                text_content.append("")
+    finally:
         # Release the handle on every path, including the EncryptedPDFError
         # raises above, which previously leaked the open document.
         doc.close()

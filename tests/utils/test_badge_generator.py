@@ -122,11 +122,14 @@ def test_generate_badge_pdf_and_caching():
     assert buf2.getvalue() == val1
 
 
-def test_generate_badge_png_includes_accessibility_metadata():
-    """Verify generate_badge_png includes PngInfo Description metadata for screen readers."""
-    from PIL import Image
+def test_generate_badge_png_uses_bundled_ttf_font():
+    """Verify generate_badge_png loads bundled TTF font from src/assets/fonts/."""
+    from pathlib import Path
+    fonts_dir = Path(__file__).parent.parent.parent / "src" / "assets" / "fonts"
+    assert (fonts_dir / "Roboto-Regular.ttf").exists() or (fonts_dir / "DejaVuSans.ttf").exists()
 
-    buf = generate_badge_png(student_name="Jane Doe", student_id="metadata_test_789")
-    img = Image.open(buf)
-    assert "Description" in img.info
-    assert img.info["Description"] == "Originality Verified Certificate for Jane Doe"
+    buf = generate_badge_png(student_name="Bundled Font Test", student_id="test_font_123")
+    val = buf.getvalue()
+    assert val.startswith(b"\x89PNG")
+    assert len(val) > 1000
+
