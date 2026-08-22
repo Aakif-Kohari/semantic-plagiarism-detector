@@ -103,45 +103,61 @@ def metrics_json():
     response_model=HealthzResponse,
 )
 def healthz():
-    """Health endpoint for container orchestration."""
+    """Health endpoint for container orchestration checking database, memory, and disk space."""
+    db_status = "connected"
     try:
         with _connect() as conn:
             conn.execute("SELECT 1")
-
-        memory = psutil.virtual_memory()
-
-        if memory.available <= 0:
-            raise RuntimeError("Low memory")
-
-        from src.core.app_config import CORPUS_DB_PATH
-
-        db_size_bytes = 0
-        db_size_mb = 0.0
-        if os.path.exists(CORPUS_DB_PATH):
-            try:
-                db_size_bytes = os.path.getsize(CORPUS_DB_PATH)
-                db_size_mb = round(db_size_bytes / (1024 * 1024), 2)
-            except OSError:
-                pass
-
-        return {
-            "status": "ok",
-            "db": "connected",
-            "memory": "ok",
-            "db_size_bytes": db_size_bytes,
-            "db_size_mb": db_size_mb,
-        }
-
     except Exception:
+        db_status = "disconnected"
+
+    memory_status = "ok"
+    try:
+        memory = psutil.virtual_memory()
+        if memory.available <= 0:
+            memory_status = "unavailable"
+    except Exception:
+        memory_status = "unavailable"
+
+    disk_status = "ok"
+    try:
+        disk = psutil.disk_usage('/')
+        if (100.0 - disk.percent) < 5.0:
+            disk_status = "low"
+    except Exception:
+        disk_status = "unavailable"
+
+    is_healthy = (
+        db_status == "connected"
+        and memory_status == "ok"
+        and disk_status == "ok"
+    )
+
+    from src.core.app_config import CORPUS_DB_PATH
+    db_size_bytes = 0
+    db_size_mb = 0.0
+    if os.path.exists(CORPUS_DB_PATH):
+        try:
+            db_size_bytes = os.path.getsize(CORPUS_DB_PATH)
+            db_size_mb = round(db_size_bytes / (1024 * 1024), 2)
+        except OSError:
+            pass
+
+    response_content = {
+        "status": "ok" if is_healthy else "degraded",
+        "db": db_status,
+        "memory": memory_status,
+        "disk": disk_status,
+        "db_size_bytes": db_size_bytes if is_healthy else 0,
+        "db_size_mb": db_size_mb if is_healthy else 0.0,
+    }
+
+    if is_healthy:
+        return response_content
+    else:
         return JSONResponse(
             status_code=503,
-            content={
-                "status": "degraded",
-                "db": "disconnected",
-                "memory": "unavailable",
-                "db_size_bytes": 0,
-                "db_size_mb": 0.0,
-            },
+            content=response_content,
         )
 
 

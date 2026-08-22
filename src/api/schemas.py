@@ -62,6 +62,7 @@ class HealthzResponse(BaseModel):
     status: str = Field(..., description="Overall service status")
     db: str = Field(..., description="Database connectivity status")
     memory: str = Field(..., description="Memory status")
+    disk: str = Field(default="ok", description="Disk status")
     db_size_bytes: int = Field(
         default=0, description="Corpus database file size in bytes"
     )
