@@ -1,113 +1,6 @@
 """
 src/workers/scan_worker.py
 --------------------------
-Background worker process for executing batch scanning jobs.
-
-Polls the task queue for PENDING jobs, claims them, executes the
-embedding and similarity pipeline, and updates the job status.
-"""
-
-import time
-import logging
-import json
-import signal
-import sys
-from typing import Optional
-
-from src.db.task_db import claim_job, complete_job, fail_job, JobStatus
-
-logger = logging.getLogger(__name__)
-
-# Global flag for graceful shutdown
-_shutdown_requested = False
-
-
-def signal_handler(signum, frame):
-    """Handle termination signals for graceful shutdown."""
-    global _shutdown_requested
-    logger.info("Shutdown signal received, finishing current job...")
-    _shutdown_requested = True
-
-
-def execute_scan_pipeline(payload: dict) -> dict:
-    """Execute the actual scanning logic.
-    
-    In a real implementation, this would import and run the core
-    embedding and similarity pipeline. For this worker, we simulate
-    the work to demonstrate the queue mechanics.
-    """
-    document_ids = payload.get("document_ids", [])
-    logger.info("Starting scan for %d documents", len(document_ids))
-    
-    # Simulate processing time
-    time.sleep(2) 
-    
-    # Simulate results
-    results = []
-    for doc_id in document_ids:
-        results.append({
-            "document_id": doc_id,
-            "status": "scanned",
-            "similarity_score": 0.85 # Mock score
-        })
-        
-    return {
-        "scanned_count": len(document_ids),
-        "results": results,
-        "completed_at": time.time()
-    }
-
-
-def run_worker_loop(poll_interval: float = 1.0, db_path: Optional[str] = None):
-    """Main loop for the worker process.
-    
-    Continuously polls for jobs, claims them, and executes them.
-    Handles retries and dead-lettering via the DB layer.
-    """
-    global _shutdown_requested
-    
-    # Register signal handlers for graceful shutdown
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
-    logger.info("Worker started, polling for jobs...")
-    
-    while not _shutdown_requested:
-        try:
-            job = claim_job(db_path=db_path)
-            
-            if job:
-                job_id = job["id"]
-                payload = json.loads(job["payload"])
-                logger.info("Claimed job %s (attempt %d)", job_id, job["attempts"])
-                
-                try:
-                    result = execute_scan_pipeline(payload)
-                    complete_job(job_id, result, db_path=db_path)
-                    logger.info("Job %s completed successfully", job_id)
-                except Exception as e:
-                    error_msg = f"{type(e).__name__}: {str(e)}"
-                    fail_job(job_id, error_msg, db_path=db_path)
-                    logger.error("Job %s failed: %s", job_id, error_msg)
-            else:
-                # No jobs available, wait before polling again
-                time.sleep(poll_interval)
-                
-        except Exception as e:
-            logger.critical("Worker loop error: %s", e)
-            time.sleep(poll_interval * 5) # Back off on errors
-            
-    logger.info("Worker shutdown complete")
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    run_worker_loop()
-
-
-"""
-src/workers/scan_worker.py
---------------------------
 Isolated worker process logic for the distributed task queue
 (Issue #3146).
 
@@ -193,7 +86,9 @@ def execute_scan_job(payload: Dict[str, Any]) -> Dict[str, Any]:
     for name, data in files_bytes.items():
         try:
             from src.core.document_parser import extract_text
-            raw_texts[name] = extract_text(data, name)
+            extracted = extract_text(data, name)
+            if extracted and extracted.strip():
+                raw_texts[name] = extracted
         except Exception as exc:
             logger.warning("Failed to extract text from %s: %s", name, exc)
             continue
