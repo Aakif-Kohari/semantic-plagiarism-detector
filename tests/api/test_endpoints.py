@@ -50,3 +50,41 @@ def test_metrics_json_endpoint():
 
     data = response.json()
     assert isinstance(data, dict)
+
+
+def test_cache_prometheus_metrics(tmp_path):
+    """Verify that translation and Redis cache hit/miss events register in Prometheus /metrics."""
+    from src.db.translation_cache import get_cached_translation, save_translation, configure_db_path, init_translation_cache
+    from src.utils.redis_cache import get_cache
+
+    # 1. Setup a clean translation cache DB file
+    db_file = tmp_path / "test_trans_metrics.db"
+    configure_db_path(db_file)
+    init_translation_cache()
+
+    # Trigger translation miss
+    get_cached_translation("Some source text", "en", "es")
+
+    # Trigger translation hit
+    save_translation("Some source text", "en", "es", "Texto traducido")
+    get_cached_translation("Some source text", "en", "es")
+
+    # Trigger Redis miss & hit
+    cache = get_cache()
+    cache.get("non_existent_key_xyz")
+    cache.set("existent_key_xyz", "value")
+    cache.get("existent_key_xyz")
+
+    # Fetch Prometheus metrics
+    response = client.get("/metrics")
+    assert response.status_code == 200
+    content = response.text
+
+    # Assert metric counters are defined in the exporter output
+    assert "spd_cache_hits_total" in content
+    assert "spd_cache_misses_total" in content
+    
+    # Assert labels are present
+    assert 'cache_type="translation"' in content
+    assert 'cache_type="redis"' in content
+
