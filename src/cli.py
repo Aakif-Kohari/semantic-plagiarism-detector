@@ -330,6 +330,10 @@ def run_prewarm(folder_path: str | None = None) -> int:
     docs_processed = len(raw_texts)
     redis_status = "unavailable"
 
+    if docs_processed == 0:
+        sys.stdout.write("No documents found. Exiting.\n")
+        return 0
+
     if docs_processed > 0:
         try:
             chunked_docs = chunk_documents(raw_texts)
