@@ -178,7 +178,6 @@ for mod_name in [
         except Exception:
             sys.modules[mod_name] = MagicMock()
 
-
 if "slowapi" not in sys.modules:
     try:
         import slowapi  # noqa: F401
@@ -223,8 +222,6 @@ if "slowapi" not in sys.modules:
         sys.modules["slowapi.errors"] = slowapi_errors_stub
         sys.modules["slowapi.middleware"] = slowapi_middleware_stub
         sys.modules["slowapi.util"] = slowapi_util_stub
-
-
 
 
 # ── Tesseract OCR Availability ────────────────────────────────────────────────
@@ -434,7 +431,8 @@ def sample_document_files(request):
         yield zip_buffer, filename
 
 
-import pytest
+import sqlite3
+from pathlib import Path
 
 
 @pytest.fixture(autouse=True)
@@ -455,12 +453,6 @@ def _cleanup_corpus_db_connections():
         close_connections(all_threads=True)
     except ImportError:
         pass
-
-
-import sqlite3
-from pathlib import Path
-
-import pytest
 
 
 @pytest.fixture

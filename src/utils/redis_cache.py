@@ -17,7 +17,7 @@ import urllib.parse
 import zlib
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, List, Optional, Union
 
 # CacheKeyPrefix has been consolidated into CacheNamespace below
 
@@ -210,19 +210,20 @@ class PayloadCompressor:
 
 
 def normalize_cache_key_path(p: Any) -> str:
-    """Normalize path strings for cross-platform Redis cache keys (Issue #2939).
+    """Normalize path strings for cross-platform Redis cache keys (Issue #2939, #3028).
 
-    Uses pathlib.Path(p).as_posix() to convert backslashes (\) on Windows
-    to POSIX forward slashes (/) for cross-platform cache key compatibility.
+    Uses pathlib.Path(p).as_posix() explicitly whenever creating cache keys based on file paths
+    to convert backslashes (\) on Windows to POSIX forward slashes (/) for cross-platform
+    cache key compatibility.
     """
     if p is None:
         return ""
     if isinstance(p, Path):
         return p.as_posix()
     p_str = str(p)
-    if "\\" in p_str:
-        return Path(p_str).as_posix()
-    return p_str
+    if not p_str:
+        return ""
+    return Path(p_str).as_posix()
 
 
 class CacheNamespace(str, Enum):
@@ -389,6 +390,18 @@ class RedisCache:
             return True
         except Exception:
             return False
+
+    def scan_keys(self, match: str) -> List[str]:
+        if not self.is_available():
+            return []
+        try:
+            raw_keys = list(self._client.scan_iter(match=match))
+            return [
+                k.decode("utf-8") if isinstance(k, bytes) else k for k in raw_keys
+            ]
+        except Exception as e:
+            logger.error(f"[RedisCache] Error scanning keys for pattern {match}: {e}")
+            return []
 
     def ping(self) -> tuple[bool, Optional[float]]:
         if self._client is None:
@@ -790,30 +803,35 @@ def get_large_data(key: Union[str, Path]) -> Optional[Any]:
         return None
 
 
-def clear_large_data(key: str) -> None:
-    """Clear large data from cache."""
+def clear_large_data(key: Union[str, Path]) -> None:
+    """Clear large data from cache using normalized POSIX key paths (Issue #3028)."""
+    key_str = normalize_cache_key_path(key)
     try:
         cache = get_cache()
         if cache.is_available():
-            cache._client.delete(f"spd:v1:large:{key}")
+            cache._client.delete(f"spd:v1:large:{key_str}")
         else:
-            cache.fallback_cache.pop(f"spd:v1:large:{key}", None)
-        logger.debug(f"Cleared large data for key: {key}")
+            cache.fallback_cache.pop(f"spd:v1:large:{key_str}", None)
+        logger.debug(f"Cleared large data for key: {key_str}")
     except Exception as e:
-        logger.error(f"Failed to clear large data for key {key}: {e}")
+        logger.error(f"Failed to clear large data for key {key_str}: {e}")
 
 
-def clear_all_large_data(session_id: str) -> None:
-    """Clear all large data for a session using pipelined deletion."""
+def clear_all_large_data(session_id: Union[str, Path]) -> None:
+    """Clear all large data for a session using pipelined deletion and normalized POSIX path (Issue #3028)."""
+    sid_str = normalize_cache_key_path(session_id)
     try:
         cache = get_cache()
-        pattern = f"spd:v1:large:{session_id}:*"
+        patterns = [f"spd:v1:large:{sid_str}:*", f"spd:v1:large:{sid_str}/*"]
 
         if cache.is_available():
-            if hasattr(cache._client, "scan_iter"):
-                keys = list(cache._client.scan_iter(match=pattern, count=1000))
-            else:
-                keys = cache._client.keys(pattern)
+            keys = []
+            for pattern in patterns:
+                if hasattr(cache._client, "scan_iter"):
+                    keys.extend(list(cache._client.scan_iter(match=pattern, count=1000)))
+                else:
+                    keys.extend(cache._client.keys(pattern))
+            keys = list(set(keys))
             if keys:
                 pipeline = cache._client.pipeline()
                 chunk_size = 1000
@@ -822,9 +840,13 @@ def clear_all_large_data(session_id: str) -> None:
                     pipeline.delete(*chunk)
                 pipeline.execute()
         else:
-            keys_to_remove = [k for k in cache.fallback_cache.keys() if k.startswith(f"spd:v1:large:{session_id}:")]
+            prefixes = (f"spd:v1:large:{sid_str}:", f"spd:v1:large:{sid_str}/")
+            keys_to_remove = [
+                k for k in cache.fallback_cache.keys()
+                if any(k.startswith(p) for p in prefixes)
+            ]
             for key in keys_to_remove:
                 del cache.fallback_cache[key]
-        logger.debug(f"Cleared all large data for session: {session_id}")
+        logger.debug(f"Cleared all large data for session: {sid_str}")
     except Exception as e:
-        logger.error(f"Failed to clear all large data for session {session_id}: {e}")
+        logger.error(f"Failed to clear all large data for session {sid_str}: {e}")
