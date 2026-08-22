@@ -310,8 +310,8 @@ def verify_model_cache_integrity(cache_dir: Path) -> bool:
             except OSError as exc:
                 corrupted.append((weight_path, f"unreadable ({exc})"))
                 continue
-            if size == 0:
-                corrupted.append((weight_path, "zero-byte"))
+            if size <= 1024 * 1024:
+                corrupted.append((weight_path, "too small (<= 1MB)"))
 
     if corrupted:
         for weight_path, reason in corrupted:
