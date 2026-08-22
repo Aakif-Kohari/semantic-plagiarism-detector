@@ -80,6 +80,7 @@ enabled); see the Description column for the condition.
 |---|---|---|---|
 | `THRESHOLD_CONFIG_PATH` | `config/thresholds.json` (relative to repo root) | No | Path to an optional JSON file with `plagiarism`/`medium`/`high` similarity boundaries. If the file is missing, the built-in default thresholds (`0.59` / `0.75` / `0.90`) are used unchanged. |
 | `EMBEDDING_BATCH_SIZE` | `32` | No | Number of text chunks embedded per batch when generating vectors. |
+| `DEFAULT_DIFF_MIN_MATCH_LENGTH` | `4` | No | Minimum consecutive words required for a side-by-side diff highlight match. |
 | `SEMANTIC_PLAGIARISM_MODEL` | Built-in default model name (`paraphrase-multilingual-MiniLM-L12-v2`) | No | SentenceTransformers model used to generate semantic embeddings. |
 | `SEMANTIC_PLAGIARISM_FALLBACK_MODEL` | `all-MiniLM-L6-v2` | No | Fallback embedding model used if the primary model fails to load. |
 | `AI_DETECTION_MODEL` | Built-in default AI-detection model name | No | Model used for AI-generated-text detection. |

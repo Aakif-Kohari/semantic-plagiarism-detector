@@ -14,6 +14,8 @@ import html
 import re
 from typing import Tuple
 
+from src.core.config import DEFAULT_DIFF_MIN_MATCH_LENGTH
+
 #: Inline style applied to every highlighted run. Kept as a module constant so
 #: the markup is identical everywhere and testable without a regex.
 MARK_OPEN_TAG = (
@@ -114,7 +116,7 @@ def _apply_marks(text: str, word_ranges: list[tuple[int, int]]) -> str:
 def highlight_overlap(
     text_a: str,
     text_b: str,
-    min_match_length: int = 4,
+    min_match_length: int = DEFAULT_DIFF_MIN_MATCH_LENGTH,
 ) -> Tuple[str, str]:
     """Highlight overlapping sequences between two text strings.
 
@@ -140,9 +142,10 @@ def highlight_overlap(
         text_a: The first document's text chunk.
         text_b: The second document's text chunk.
         min_match_length: Minimum number of consecutive words required to
-                         constitute a "match". Defaults to 4 to avoid
-                         highlighting common phrases like "in the" or "and the".
-                         Values below 1 are treated as 1.
+                         constitute a "match". Defaults to
+                         ``DEFAULT_DIFF_MIN_MATCH_LENGTH`` (4, overridable via
+                         the env var of the same name). Values below 1 are
+                         treated as 1.
 
     Returns:
         A tuple of two HTML strings (highlighted_a, highlighted_b) with
