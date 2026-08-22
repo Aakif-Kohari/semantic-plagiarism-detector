@@ -216,6 +216,76 @@ Customize behavior via a `.env` file in the project root or inline in
 
 See `.env.example` for the full list.
 
+**Securing Redis with TLS:**
+
+By default, `docker-compose.yml` and the table above use a plaintext
+`redis://` connection, which is fine for local development but should not be
+used in production. [`SECURITY.md`](SECURITY.md#redis-security--access-control)
+recommends encrypting Redis traffic in transit with TLS (`rediss://`). The
+app doesn't need any code changes to support this — `REDIS_URL` is passed
+straight to `redis-py`'s `redis.from_url()`, which natively understands the
+`rediss://` scheme and standard `ssl_*` query parameters.
+
+1. **Generate or obtain TLS certificates** for your Redis server (CA
+   certificate, and optionally a client certificate/key pair if you're using
+   `tls-auth-clients yes` as described in `SECURITY.md`). For local testing
+   you can generate a self-signed CA with `openssl`; for production, use
+   certificates issued by your organization's CA.
+
+2. **Mount the certificates into both containers.** Add a volume mount to
+   the `redis` and app services in `docker-compose.yml`:
+
+   ```yaml
+   services:
+     app:
+       volumes:
+         - ./certs:/app/certs:ro   # add alongside the existing volumes
+
+     redis:
+       image: redis:7-alpine
+       command: >
+         redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+         --tls-port 6380 --port 0
+         --tls-cert-file /certs/redis.crt
+         --tls-key-file /certs/redis.key
+         --tls-ca-cert-file /certs/ca.crt
+       volumes:
+         - ./certs:/certs:ro
+         - redis_data:/data
+       ports:
+         - "6380:6380"
+   ```
+
+   Setting `--port 0` disables Redis's plaintext port entirely, so all
+   connections must use TLS on `--tls-port`.
+
+3. **Point `REDIS_URL` at the TLS port using the `rediss://` scheme,** and
+   pass the CA certificate (and client cert/key, if configured) as query
+   parameters:
+
+   ```bash
+   REDIS_URL=rediss://redis:6380/0?ssl_ca_certs=/app/certs/ca.crt&ssl_cert_reqs=required
+   ```
+
+   If you've enabled client certificate verification (`tls-auth-clients yes`),
+   also include your client certificate and key:
+
+   ```bash
+   REDIS_URL=rediss://redis:6380/0?ssl_ca_certs=/app/certs/ca.crt&ssl_certfile=/app/certs/client.crt&ssl_keyfile=/app/certs/client.key&ssl_cert_reqs=required
+   ```
+
+4. **Restart the stack** so both containers pick up the new configuration:
+
+   ```bash
+   docker compose down
+   docker compose up --build
+   ```
+
+For the full set of Redis hardening recommendations — strong passwords,
+`requirepass`, and least-privilege ACLs — see the
+[Redis Security & Access Control](SECURITY.md#redis-security--access-control)
+section of `SECURITY.md`.
+
 **Rebuild after dependency changes:**
 
 ```bash
