@@ -178,7 +178,51 @@ for mod_name in [
         except Exception:
             sys.modules[mod_name] = MagicMock()
 
+if "slowapi" not in sys.modules:
 
+    try:
+        import slowapi  # noqa: F401
+    except ImportError:
+        slowapi_stub = types.ModuleType("slowapi")
+        slowapi_errors_stub = types.ModuleType("slowapi.errors")
+
+        class RateLimitExceeded(Exception):
+            def __init__(self, detail: str = ""):
+                self.detail = detail
+                super().__init__(detail)
+
+        slowapi_errors_stub.RateLimitExceeded = RateLimitExceeded
+        slowapi_middleware_stub = types.ModuleType("slowapi.middleware")
+
+        class SlowAPIMiddleware:
+            def __init__(self, app, *args, **kwargs):
+                self.app = app
+
+            async def __call__(self, scope, receive, send):
+                await self.app(scope, receive, send)
+
+        slowapi_middleware_stub.SlowAPIMiddleware = SlowAPIMiddleware
+        slowapi_util_stub = types.ModuleType("slowapi.util")
+        slowapi_util_stub.get_remote_address = lambda request: "127.0.0.1"
+
+        class Limiter:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def limit(self, *args, **kwargs):
+                def decorator(func):
+                    return func
+
+                return decorator
+
+            def _inject_headers(self, response, *args, **kwargs):
+                return response
+
+        slowapi_stub.Limiter = Limiter
+        sys.modules["slowapi"] = slowapi_stub
+        sys.modules["slowapi.errors"] = slowapi_errors_stub
+        sys.modules["slowapi.middleware"] = slowapi_middleware_stub
+        sys.modules["slowapi.util"] = slowapi_util_stub
 
 
 # ── Tesseract OCR Availability ────────────────────────────────────────────────
@@ -388,7 +432,8 @@ def sample_document_files(request):
         yield zip_buffer, filename
 
 
-import pytest
+import sqlite3
+from pathlib import Path
 
 
 @pytest.fixture(autouse=True)
@@ -409,12 +454,6 @@ def _cleanup_corpus_db_connections():
         close_connections(all_threads=True)
     except ImportError:
         pass
-
-
-import sqlite3
-from pathlib import Path
-
-import pytest
 
 
 @pytest.fixture
