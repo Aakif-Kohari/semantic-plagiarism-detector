@@ -12,6 +12,8 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from src.api.middleware import get_current_user
 from src.api.schemas import (
     HealthCheckResponse,
+    HealthLiveResponse,
+    HealthReadyResponse,
     HealthzResponse,
     StatusResponse,
 )
@@ -40,6 +42,77 @@ def health_check():
         "service": "Semantic Plagiarism Detector API",
         "version": APP_VERSION,
     }
+
+
+@router.get(
+    "/health/live",
+    tags=["Health"],
+    summary="Kubernetes Liveness Probe",
+    response_model=HealthLiveResponse,
+    status_code=status.HTTP_200_OK,
+)
+@router.get(
+    "/api/v1/health/live",
+    tags=["Health"],
+    summary="Kubernetes Liveness Probe",
+    response_model=HealthLiveResponse,
+    status_code=status.HTTP_200_OK,
+)
+def health_live():
+    """Liveness probe returning 200 OK immediately to indicate the application process is alive."""
+    return {
+        "status": "alive",
+        "service": "Semantic Plagiarism Detector API",
+        "version": APP_VERSION,
+    }
+
+
+@router.get(
+    "/health/ready",
+    tags=["Health"],
+    summary="Kubernetes Readiness Probe",
+    response_model=HealthReadyResponse,
+)
+@router.get(
+    "/api/v1/health/ready",
+    tags=["Health"],
+    summary="Kubernetes Readiness Probe",
+    response_model=HealthReadyResponse,
+)
+def health_ready():
+    """Readiness probe checking SQLite DB and Redis connectivity before returning 200 OK."""
+    db_ok = False
+    try:
+        with _connect() as conn:
+            conn.execute("SELECT 1")
+        db_ok = True
+    except Exception as e:
+        logger.warning(f"Readiness probe DB check failed: {e}")
+        db_ok = False
+
+    redis_ok = False
+    try:
+        from src.utils.redis_cache import get_cache
+
+        cache = get_cache()
+        connected, _ = cache.ping()
+        redis_ok = bool(connected or cache.is_available())
+    except Exception as e:
+        logger.warning(f"Readiness probe Redis check failed: {e}")
+        redis_ok = False
+
+    is_ready = db_ok and redis_ok
+    content = {
+        "status": "ready" if is_ready else "not_ready",
+        "db": "connected" if db_ok else "disconnected",
+        "redis": "connected" if redis_ok else "disconnected",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+    if is_ready:
+        return JSONResponse(status_code=200, content=content)
+    else:
+        return JSONResponse(status_code=503, content=content)
 
 
 @router.get(

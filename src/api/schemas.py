@@ -72,6 +72,31 @@ class HealthCheckResponse(BaseModel):
     version: str = Field(..., description="Service version string")
 
 
+class HealthLiveResponse(BaseModel):
+    """Response schema for Kubernetes liveness probe endpoint."""
+
+    status: str = Field(default="alive", description="Liveness status indicator ('alive')")
+    service: str = Field(
+        default="Semantic Plagiarism Detector API", description="Name of the service"
+    )
+    version: str = Field(..., description="Service version string")
+
+
+class HealthReadyResponse(BaseModel):
+    """Response schema for Kubernetes readiness probe endpoint."""
+
+    status: str = Field(
+        ..., description="Readiness status indicator ('ready' or 'not_ready')"
+    )
+    db: str = Field(
+        ..., description="Database connectivity status ('connected' or 'disconnected')"
+    )
+    redis: str = Field(
+        ..., description="Redis connectivity status ('connected' or 'disconnected')"
+    )
+    timestamp: str = Field(..., description="Server UTC timestamp in ISO 8601 format")
+
+
 class HealthzResponse(BaseModel):
     """Response schema for health endpoint."""
 
