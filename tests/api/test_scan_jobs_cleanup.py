@@ -1,4 +1,4 @@
-﻿"""
+"""
 tests/api/test_scan_jobs_cleanup.py
 -----------------------------------
 Tests for auto-expiration and cleanup for in-memory scan_jobs (Issue #3223).
