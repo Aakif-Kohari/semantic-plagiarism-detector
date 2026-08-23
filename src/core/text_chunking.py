@@ -62,6 +62,12 @@ _WORD_COUNT_PATTERN = re.compile(r"\b\w+\b")
 # ── Helper Functions ──────────────────────────────────────────────────────────
 
 
+def _chunking_text(text: str) -> str:
+    """Return plain text from either a string or a structured DOCX result."""
+    structured_text = getattr(text, "text", None)
+    return structured_text if isinstance(structured_text, str) else text
+
+
 def count_words(text: str) -> int:
     """Count the number of words in a text string.
 
@@ -308,6 +314,9 @@ def chunk_text(
     Returns:
         List of chunk strings.
     """
+    structured_headings = getattr(text, "headings", None)
+    text = _chunking_text(text)
+
     if chunk_size <= 0:
         raise ValueError("chunk_size must be a positive integer > 0")
 
@@ -329,14 +338,13 @@ def chunk_text(
         )
         chunk_size = MIN_CHUNK_SIZE
 
-    # ── Issue #1390 & #2908 ───────────────────────────────────────────────
+    # ── Issue #1390 ───────────────────────────────────────────────────────
     max_chunk_capacity = max_chunks * chunk_size
     if len(text) > max_chunk_capacity:
         logger.warning(
             "Text length (%d chars) exceeded chunk capacity limit; text was truncated",
             len(text),
         )
-        text = text[:max_chunk_capacity]
 
     text = text.strip()
     text_len = len(text)
@@ -389,7 +397,7 @@ def chunk_text(
                 chunks.append(ChunkString(chunk))
         else:
             # Original word-boundary path (sentence_padding=False)
-            word_headings = getattr(text, "word_headings", None)
+            word_headings = structured_headings
             words = raw_chunk.split()
 
             if len(words) >= min_words:
