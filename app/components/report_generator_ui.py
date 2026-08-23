@@ -5,15 +5,16 @@ Streamlit-based interface for generating and exporting
 comprehensive plagiarism detection reports.
 """
 
-import streamlit as st
-import pandas as pd
+from typing import Any, Dict
+
 import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime
-from typing import Dict, Any
+import streamlit as st
 
 from src.core.report_generator import (
-    ReportGenerator, ReportConfig, ReportFormat, ReportType
+    ReportConfig,
+    ReportFormat,
+    ReportGenerator,
+    ReportType,
 )
 
 
@@ -157,7 +158,8 @@ def _render_preview():
     st.subheader("⬇️ Export Report")
     fmt = st.session_state.get("report_format", "markdown")
     generator = ReportGenerator()
-    import tempfile, os
+    import os
+    import tempfile
     with tempfile.NamedTemporaryFile(suffix=f".{fmt}", delete=False) as f:
         temp_path = f.name
 
@@ -167,6 +169,20 @@ def _render_preview():
             content = f.read()
         mime = {"json": "application/json", "markdown": "text/markdown", "html": "text/html", "text": "text/plain"}.get(fmt, "text/plain")
         st.download_button(f"⬇️ Download {fmt.upper()}", content, f"plagiarism_report.{fmt}", mime)
+        
+        from src.utils.badge_generator import has_pillow, generate_badge_png
+        if has_pillow():
+            try:
+                badge_bytes = generate_badge_png(
+                    student_name="Organization Report", 
+                    student_id=report.report_id, 
+                    originality_score=100.0 - (summary.get('average_similarity', 0) * 100)
+                )
+                st.download_button("🏅 Download PNG Badge", badge_bytes, "originality_badge.png", "image/png")
+            except Exception as e:
+                st.button("🏅 Download PNG Badge", disabled=True, help=f"Failed to generate badge: {e}")
+        else:
+            st.button("🏅 Download PNG Badge", disabled=True, help="Pillow is not installed")
     finally:
         os.unlink(temp_path)
 

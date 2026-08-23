@@ -8,20 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Pre-filtering matrix comparisons with ephemeral FAISS index (`top_k` / `candidate_pairs`) to reduce quadratic computation in large document sets (`src/core/similarity.py`).
+- Added `docker-compose.override.yml` mounting `./src` and `./app` into container for live hot-reloading during local development (`docker-compose.override.yml`).
 - Automated fault tolerance test for mid-session Redis connection drop and graceful in-memory failover (`tests/core/test_fault_tolerance.py`, `tests/utils/test_redis_fallback_failover.py`).
 - Added `--recursive` support to the CLI scan command for scanning documents in nested subdirectories.
 
 ### Fixed
+- Fixed assertion mismatch in `test_sync_flagged_incidents_bulk_upsert` to verify that `severity_rank` is updated to `"Critical"` and other ranks during bulk upsert (`tests/db/test_incidents.py`, `tests/db/test_incidents_bulk.py`).
 - Fixed unreadable line overflowing for long URLs in ReportLab PDF reports by adding `wordWrap='CJK'` to paragraph styles and inserting zero-width spaces into long URLs (`src/utils/pdf_report.py`).
 - Robust claim parsing in `.github/workflows/ecsoc-automation.yml` using structured hidden HTML comments to prevent breaking on greeting message variations.
+- Restored broken imports in `badge_generator.py` and kept invalid hex colors falling back to `DEFAULT_BADGE_COLOR`.
 
 ### Security
+- Integrated `zxcvbn` password strength evaluation in `_validate_password_complexity` to block common dictionary passwords and weak credentials (`src/db/auth.py`, `requirements.txt`).
 - Explicitly excluded `.env`, `.git/`, `.venv/`, `*.sqlite`, and bytecode caches in `.dockerignore` to prevent leaking secrets and development artifacts into production containers (`.dockerignore`).
 
 ### Changed
 - Optimized `clear_session` and `clear_pattern` with Redis pipelining to batch deletions into a single network round-trip (`src/utils/redis_cache.py`).
 - Warning list pagination no longer writes `st.session_state` directly; page updates are applied via a view-layer callback (`src/utils/warning_list.py`).
+- Build originality badge SVGs with `xml.etree.ElementTree` instead of f-string interpolation (`src/utils/badge_generator.py`).
 
 ## [1.0.0] - 2026-07-21
 

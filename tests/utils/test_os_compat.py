@@ -8,14 +8,13 @@ are applied safely, and Unix systems are left untouched.
 """
 
 import asyncio
-import sys
-import platform
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from src.utils.os_compat import (
-    get_os_platform,
     apply_asyncio_patches,
+    get_os_platform,
     reset_patches_state,
 )
 

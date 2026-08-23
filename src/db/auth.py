@@ -28,16 +28,22 @@ import bcrypt
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError, VerifyMismatchError
 
+try:
+    import zxcvbn
+except ImportError:
+    zxcvbn = None
+
 from src.core.app_config import AUTH_DB_PATH
 from src.db.base import BaseRepository
 from src.db.common import with_sqlite_retry
 from src.db.connection import get_connection
 from src.db.migrations import migrate_auth_database, table_exists
-from src.db.security_audit import count_recent_failed_logins, log_security_event
+from src.db.security_audit import count_recent_failed_logins
 from src.exceptions import StaleDataException
+
 logger = logging.getLogger(__name__)
 
-from src.core.app_config import AUTH_DB_PATH, get_valid_roles
+from src.core.app_config import get_valid_roles
 
 _DB_PATH = os.path.abspath(str(AUTH_DB_PATH))
 
@@ -344,7 +350,6 @@ def configure_db_path(db_path: str | os.PathLike) -> None:
 
 
 from contextlib import contextmanager
-from typing import Generator
 
 
 @contextmanager
@@ -497,7 +502,20 @@ def _validate_password_complexity(password: str) -> str:
         raise ValueError(
             "Password must contain at least one special character (e.g. @$!%*?&)."
         )
+    if zxcvbn is not None:
+        result = zxcvbn.zxcvbn(password)
+        if result.get("score", 0) < 3:
+            feedback = result.get("feedback", {})
+            warning = feedback.get("warning")
+            if warning:
+                raise ValueError(f"Password is too weak or common: {warning}")
+            raise ValueError(
+                "Password is too weak or commonly used. Please choose a stronger password."
+            )
     return password
+
+
+validate_password_complexity = _validate_password_complexity
 
 
 def _validate_role(role: str) -> str:
@@ -966,6 +984,41 @@ def set_tour_completed(username: str, completed: bool = True) -> None:
         raise sqlite3.Error(f"Failed to update tour status: {e}") from e
 
 
+def _get_fernet_key() -> bytes:
+    """Load or derive a valid 32-byte Fernet key from environment variables."""
+    import base64
+    import hashlib
+    key_str = os.getenv("OTP_ENCRYPTION_KEY") or os.getenv("ENCRYPTION_KEY")
+    if not key_str:
+        key_str = "default-fallback-otp-encryption-key-do-not-use-in-production"
+    
+    hashed = hashlib.sha256(key_str.encode("utf-8")).digest()
+    return base64.urlsafe_b64encode(hashed)
+
+
+def _encrypt_otp_secret(secret: str) -> str:
+    """Encrypt the OTP secret using cryptography.fernet."""
+    if not secret:
+        return secret
+    from cryptography.fernet import Fernet
+    key = _get_fernet_key()
+    f = Fernet(key)
+    return f.encrypt(secret.encode("utf-8")).decode("utf-8")
+
+
+def _decrypt_otp_secret(encrypted_secret: str) -> str:
+    """Decrypt the OTP secret using cryptography.fernet, falling back to plaintext on error."""
+    if not encrypted_secret:
+        return encrypted_secret
+    from cryptography.fernet import Fernet, InvalidToken
+    key = _get_fernet_key()
+    f = Fernet(key)
+    try:
+        return f.decrypt(encrypted_secret.encode("utf-8")).decode("utf-8")
+    except (InvalidToken, Exception):
+        return encrypted_secret
+
+
 def get_2fa_status(username: str) -> tuple[bool, str | None]:
     """Return (two_factor_enabled, otp_secret) for a user."""
     with _connect() as conn:
@@ -975,16 +1028,18 @@ def get_2fa_status(username: str) -> tuple[bool, str | None]:
         ).fetchone()
     if not row:
         return False, None
-    return bool(row[0]), row[1]
+    decrypted_secret = _decrypt_otp_secret(row[1]) if row[1] is not None else None
+    return bool(row[0]), decrypted_secret
 
 
 @with_sqlite_retry
 def enable_2fa(username: str, secret: str) -> None:
     """Enable 2FA for a user and store their OTP secret."""
+    encrypted_secret = _encrypt_otp_secret(secret)
     with _connect() as conn:
         conn.execute(
             "UPDATE users SET two_factor_enabled = 1, otp_secret = ? WHERE username = ?",
-            (secret, username.lower()),
+            (encrypted_secret, username.lower()),
         )
         conn.commit()
 
@@ -1484,6 +1539,125 @@ def _get_token_signature(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+# ── Revoked Tokens In-Memory Cache (Issue #3018) ──────────────────────────────
+_REVOKED_TOKEN_CACHE_TTL: int = 60
+_REVOKED_TOKEN_CACHE_MAXSIZE: int = 10000
+
+try:
+    import cachetools
+
+    _revoked_token_cache: cachetools.TTLCache = cachetools.TTLCache(
+        maxsize=_REVOKED_TOKEN_CACHE_MAXSIZE, ttl=_REVOKED_TOKEN_CACHE_TTL
+    )
+except ImportError:
+    class _FallbackTTLCache(dict):
+        def __init__(self, maxsize: int = 10000, ttl: int = 60):
+            super().__init__()
+            self._ttl = ttl
+            self._times: Dict[str, float] = {}
+
+        def __getitem__(self, key: str) -> bool:
+            if key in self._times and time.time() - self._times[key] > self._ttl:
+                del self[key]
+                del self._times[key]
+                raise KeyError(key)
+            return super().__getitem__(key)
+
+        def __contains__(self, key: object) -> bool:
+            k_str = str(key)
+            if k_str in self._times and time.time() - self._times[k_str] > self._ttl:
+                del self[k_str]
+                del self._times[k_str]
+                return False
+            return super().__contains__(key)
+
+        def __setitem__(self, key: str, value: bool) -> None:
+            self._times[key] = time.time()
+            super().__setitem__(key, value)
+
+        def clear(self) -> None:
+            self._times.clear()
+            super().clear()
+
+    _revoked_token_cache = _FallbackTTLCache(
+        maxsize=_REVOKED_TOKEN_CACHE_MAXSIZE, ttl=_REVOKED_TOKEN_CACHE_TTL
+    )
+
+
+def clear_revocation_cache() -> None:
+    """Clear the in-memory cache of revoked token check results (Issue #3018)."""
+    global _revoked_token_cache
+    _revoked_token_cache.clear()
+
+
+_last_revoked_cleanup = 0.0
+
+
+def _cleanup_revoked_tokens() -> int:
+    """Delete expired JWT tokens and their corresponding SHA-256 signatures from revoked_tokens.
+
+    Returns:
+        The number of rows deleted.
+    """
+    import base64
+    import hashlib
+    import json
+    import time
+
+    deleted_count = 0
+    try:
+        with _connect() as conn:
+            cursor = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='revoked_tokens'"
+            )
+            if not cursor.fetchone():
+                return 0
+
+            cursor = conn.execute("SELECT token_signature FROM revoked_tokens")
+            rows = cursor.fetchall()
+
+            now_ts = int(time.time())
+            expired_signatures = []
+
+            for row in rows:
+                token_sig = row[0]
+                if not token_sig:
+                    continue
+                parts = token_sig.split(".")
+                if len(parts) == 3:
+                    try:
+                        payload_b64 = parts[1]
+                        rem = len(payload_b64) % 4
+                        if rem > 0:
+                            payload_b64 += "=" * (4 - rem)
+                        payload_bytes = base64.urlsafe_b64decode(payload_b64)
+                        payload = json.loads(payload_bytes.decode("utf-8"))
+                        exp = payload.get("exp")
+                        if exp is not None:
+                            exp_int = int(exp)
+                            if now_ts >= exp_int:
+                                expired_signatures.append(token_sig)
+                                token_hash = hashlib.sha256(token_sig.encode("utf-8")).hexdigest()
+                                expired_signatures.append(token_hash)
+                    except Exception:
+                        pass
+
+            if expired_signatures:
+                placeholders = ",".join("?" for _ in expired_signatures)
+                cur = conn.execute(
+                    f"DELETE FROM revoked_tokens WHERE token_signature IN ({placeholders})",
+                    expired_signatures
+                )
+                deleted_count = cur.rowcount
+                conn.commit()
+                if deleted_count > 0:
+                    clear_revocation_cache()
+                    logger.info(f"Cleaned up {deleted_count} expired entries from revoked_tokens table.")
+    except Exception as e:
+        logger.error(f"Failed to cleanup revoked tokens: {e}")
+    return deleted_count
+
+
 @with_sqlite_retry
 def revoke_token(token: str, details: str | None = None) -> None:
     """Revoke an active Bearer token by storing its signature in revoked_tokens table."""
@@ -1525,18 +1699,31 @@ def revoke_token(token: str, details: str | None = None) -> None:
                     (token, revoked_at, details),
                 )
             conn.commit()
+            # Update in-memory TTLCache immediately on revocation
+            _revoked_token_cache[token] = True
+            _revoked_token_cache[signature] = True
             log_security_event(
                 event_type="token_revocation",
                 username="system",
                 details=details or f"Token signature {signature[:12]}... revoked",
             )
+        global _last_revoked_cleanup
+        now = time.time()
+        if now - _last_revoked_cleanup > 3600:
+            _last_revoked_cleanup = now
+            _cleanup_revoked_tokens()
     except sqlite3.Error as e:
         logger.error(f"Failed to revoke token: {e}")
         raise sqlite3.Error(f"Failed to revoke token: {e}") from e
 
 
+
 def is_token_revoked(token: str) -> bool:
-    """Return True if the token or its SHA-256 signature exists in revoked_tokens."""
+    """Return True if the token or its SHA-256 signature exists in revoked_tokens.
+
+    Caches query results in-memory using cachetools.TTLCache (60s TTL) to drastically
+    reduce database disk reads and latency on authenticated requests (Issue #3018).
+    """
     if not token or not isinstance(token, str):
         return False
 
@@ -1544,7 +1731,19 @@ def is_token_revoked(token: str) -> bool:
     if not token:
         return False
 
+    # 1. Check in-memory TTLCache first
+    if token in _revoked_token_cache:
+        return _revoked_token_cache[token]
+
     signature = _get_token_signature(token)
+    if signature in _revoked_token_cache:
+        return _revoked_token_cache[signature]
+
+    global _last_revoked_cleanup
+    now = time.time()
+    if now - _last_revoked_cleanup > 3600:
+        _last_revoked_cleanup = now
+        _cleanup_revoked_tokens()
 
     try:
         with _connect() as conn:
@@ -1552,16 +1751,22 @@ def is_token_revoked(token: str) -> bool:
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='revoked_tokens'"
             )
             if not cursor.fetchone():
+                _revoked_token_cache[token] = False
+                _revoked_token_cache[signature] = False
                 return False
 
             row = conn.execute(
                 "SELECT 1 FROM revoked_tokens WHERE token_signature = ? OR token_signature = ? LIMIT 1",
                 (signature, token),
             ).fetchone()
-            return bool(row)
+            revoked = bool(row)
+            _revoked_token_cache[token] = revoked
+            _revoked_token_cache[signature] = revoked
+            return revoked
     except sqlite3.Error as e:
         logger.error(f"Failed to check token revocation status: {e}")
         return False
+
 
 
 def get_upload_count(username: str | None = None) -> int:
@@ -1595,7 +1800,7 @@ def format_user_creation_date(iso_str: str) -> str:
 
 from enum import Enum
 from functools import wraps
-from typing import Any, Dict, List, Optional, Set
+from typing import Set
 
 import streamlit as st
 
@@ -2077,8 +2282,12 @@ def generate_secure_password(length: int = 32) -> str:
     password = "".join(secrets.choice(alphabet) for _ in range(length))
 
     # Ensure password meets complexity requirements
-    while not _validate_password_complexity(password):
-        password = "".join(secrets.choice(alphabet) for _ in range(length))
+    while True:
+        try:
+            _validate_password_complexity(password)
+            break
+        except ValueError:
+            password = "".join(secrets.choice(alphabet) for _ in range(length))
 
     return password
 
@@ -2718,4 +2927,6 @@ __all__ = [
     "get_sso_users_count",
     "migrate_existing_sso_users",
     "verify_sso_recovery_token",
+    "validate_password_complexity",
+    "_validate_password_complexity",
 ]

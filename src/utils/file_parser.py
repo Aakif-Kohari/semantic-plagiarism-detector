@@ -13,10 +13,10 @@ along with file categorization and validation helpers.
 
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from typing import Any, List, Optional, Tuple, Union
 
 import fitz
-
 logger = logging.getLogger(__name__)
 
 
@@ -60,6 +60,41 @@ _MAX_INSPECTION_BYTES = 16
 
 
 # ── Custom Exceptions ─────────────────────────────────────────────────────────
+
+
+
+# Issue #2931: Maximum seconds allowed for extracting text from a single
+# PDF page before aborting. Certain corrupted or maliciously crafted PDFs
+# (e.g. containing millions of tiny vector lines) can cause PyMuPDF's
+# get_text() to hang indefinitely on a single page.
+PAGE_EXTRACTION_TIMEOUT_SECONDS = 10
+
+
+class PageExtractionTimeoutError(Exception):
+    """Raised when extracting text from a single PDF page exceeds the timeout."""
+
+
+def _get_page_text_with_timeout(
+    page: "fitz.Page",
+    timeout: float = PAGE_EXTRACTION_TIMEOUT_SECONDS,
+) -> str:
+    """Run ``page.get_text()`` with a hard timeout to guard against hangs.
+
+    Uses a worker thread so it works regardless of which thread this is
+    called from (``signal.alarm`` only works on the main thread).
+
+    Raises:
+        PageExtractionTimeoutError: If extraction exceeds ``timeout`` seconds.
+    """
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(page.get_text)
+        try:
+            return future.result(timeout=timeout)
+        except FutureTimeoutError:
+            raise PageExtractionTimeoutError(
+                f"Extracting text from page {page.number} exceeded "
+                f"{timeout} seconds."
+            )
 
 
 class EncryptedPDFError(Exception):
@@ -331,7 +366,15 @@ def extract_text_from_pdf(
 
         text_content = []
         for page in doc:
-            text_content.append(page.get_text())
+            try:
+                text_content.append(_get_page_text_with_timeout(page))
+            except PageExtractionTimeoutError:
+                logger.error(
+                    "Skipping page %s: text extraction exceeded %s seconds.",
+                    page.number,
+                    PAGE_EXTRACTION_TIMEOUT_SECONDS,
+                )
+                text_content.append("")
     finally:
         # Release the handle on every path, including the EncryptedPDFError
         # raises above, which previously leaked the open document.

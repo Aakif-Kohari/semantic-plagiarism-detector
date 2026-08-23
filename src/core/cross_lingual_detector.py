@@ -8,8 +8,7 @@ using multilingual embeddings and translation-assisted comparison.
 import hashlib
 import logging
 import time
-from collections import defaultdict
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -176,7 +175,7 @@ class CrossLingualDetector:
         self._model = None
         self._cache: Dict[str, np.ndarray] = {}
         self.cache = TranslationCache() if use_cache else None
-        logger.info(f"CrossLingualDetector initialized")
+        logger.info("CrossLingualDetector initialized")
 
     def _get_model(self):
         if self._model is None:
@@ -244,7 +243,7 @@ class CrossLingualDetector:
 
         doc_chunks = {name: chunks for name, (_, chunks) in documents.items()}
         embeddings = {
-            doc_name: [self.embed_text(chunk) for chunk in chunks[:self.config.max_chunks_per_doc]]
+            doc_name: [self.embed_text(chunk.text if hasattr(chunk, "text") else chunk) for chunk in chunks[:self.config.max_chunks_per_doc]]
             for doc_name, chunks in doc_chunks.items()
         }
 

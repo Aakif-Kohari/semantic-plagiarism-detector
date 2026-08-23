@@ -12,6 +12,9 @@ from src.core.lexical_similarity import (
     tokenize,
 )
 from src.core.similarity import (
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_DOCUMENT_SIMILARITY_BATCH_SIZE,
+    _validated_batch_size,
     calculate_paragraph_similarity_breakdown,
     chunk_max_similarity,
     chunk_similarity_matrix,
@@ -26,6 +29,7 @@ from src.core.similarity import (
     get_cross_encoder_info,
     hybrid_similarity_matrix,
     manhattan_similarity,
+    normalize_scores,
     rerank_candidates_with_cross_encoder,
 )
 
@@ -57,11 +61,47 @@ def test_chunk_max_similarity_supports_batching(dummy_embeddings):
     assert np.isclose(sim_batched, sim_unbatched)
 
 
+def test_validated_batch_size_valid_inputs():
+    assert _validated_batch_size(None) is None
+    assert _validated_batch_size(10) == 10
+    assert _validated_batch_size(10.0) == 10
+    assert _validated_batch_size("10") == 10
+    assert _validated_batch_size("10.0") == 10
+    assert _validated_batch_size(0) is None
+    assert _validated_batch_size(-5) is None
+
+
+def test_validated_batch_size_invalid_inputs():
+    invalid_values = ["10.5", 10.5, "abc", True, False, [10], {"batch": 10}]
+    for val in invalid_values:
+        with pytest.raises(ValueError, match="batch_size must be an integer"):
+            _validated_batch_size(val)
+
+
 def test_chunk_max_similarity_rejects_invalid_batch_size(dummy_embeddings):
     with pytest.raises(ValueError, match="batch_size must be an integer"):
         chunk_max_similarity(
             dummy_embeddings["doc_A"], dummy_embeddings["doc_B"], batch_size=0.5
         )
+    with pytest.raises(ValueError, match="batch_size must be an integer"):
+        chunk_max_similarity(
+            dummy_embeddings["doc_A"], dummy_embeddings["doc_B"], batch_size="10.5"
+        )
+
+
+def test_document_similarity_matrix_max_pooling(dummy_embeddings):
+    df_mean = document_similarity_matrix(dummy_embeddings, pooling="mean")
+    df_max = document_similarity_matrix(dummy_embeddings, pooling="max")
+
+    assert isinstance(df_max, pd.DataFrame)
+    assert df_max.shape == (3, 3)
+    assert list(df_max.columns) == ["doc_A", "doc_B", "doc_C"]
+    assert np.isclose(df_max.loc["doc_A", "doc_A"], 1.0)
+
+
+def test_document_similarity_matrix_rejects_invalid_pooling(dummy_embeddings):
+    with pytest.raises(ValueError, match="Invalid pooling method"):
+        document_similarity_matrix(dummy_embeddings, pooling="invalid_pooling")
 
 
 def test_document_similarity_matrix(dummy_embeddings):
@@ -70,6 +110,49 @@ def test_document_similarity_matrix(dummy_embeddings):
     assert isinstance(df, pd.DataFrame)
     assert df.shape == (3, 3)
     assert list(df.columns) == ["doc_A", "doc_B", "doc_C"]
+
+
+def test_document_similarity_matrix_fallback_batch_size_constant():
+    assert DEFAULT_BATCH_SIZE == 2000
+    assert DEFAULT_DOCUMENT_SIMILARITY_BATCH_SIZE == 2000
+
+
+def test_document_similarity_matrix_fallback_batch_size_chunking(monkeypatch):
+    """Verify that when batch_size is None, document_similarity_matrix chunks using DEFAULT_BATCH_SIZE (Issue #3009)."""
+    import src.core.similarity as sim_mod
+
+    # Temporarily set DEFAULT_BATCH_SIZE to small value to verify chunking behavior
+    monkeypatch.setattr(sim_mod, "DEFAULT_BATCH_SIZE", 2)
+
+    docs = {
+        f"doc_{i}": np.random.RandomState(i).randn(2, 64).astype(np.float32)
+        for i in range(5)
+    }
+
+    df_default = sim_mod.document_similarity_matrix(docs)
+    df_explicit = sim_mod.document_similarity_matrix(docs, batch_size=2)
+
+    assert isinstance(df_default, pd.DataFrame)
+    assert df_default.shape == (5, 5)
+    assert np.allclose(df_default.values, df_explicit.values)
+
+
+def test_document_similarity_matrix_large_workload_fallback_chunked():
+    """Verify chunked execution on workloads spanning multiple default batch chunks."""
+    num_docs = 2100  # Exceeds DEFAULT_BATCH_SIZE of 2000
+    vecs = np.random.RandomState(42).randn(num_docs, 32).astype(np.float32)
+    # L2 normalize
+    vecs /= np.linalg.norm(vecs, axis=1, keepdims=True)
+
+    docs = {f"doc_{i}": vecs[i] for i in range(num_docs)}
+    df = document_similarity_matrix(docs, batch_size=None)
+
+    assert isinstance(df, pd.DataFrame)
+    assert df.shape == (num_docs, num_docs)
+    # Check diagonal
+    assert np.allclose(np.diag(df.values), 1.0, atol=1e-5)
+    # Check symmetry
+    assert np.allclose(df.values, df.values.T, atol=1e-5)
 
 
 def test_document_similarity_matrix_accepts_batch_size_basic(dummy_embeddings):
@@ -420,6 +503,43 @@ def test_hybrid_similarity_matrix_default_weight():
     hybrid_df = hybrid_similarity_matrix(semantic_df, lexical_df)
     expected = 0.7 * semantic_df + 0.3 * lexical_df
     assert np.allclose(hybrid_df.values, expected.values)
+
+
+def test_normalize_scores_minmax_and_zscore():
+    df = pd.DataFrame({"a": [10.0, 20.0], "b": [30.0, 40.0]})
+
+    # Min-max normalization
+    minmax_df = normalize_scores(df, method="minmax")
+    assert np.isclose(minmax_df.values.min(), 0.0)
+    assert np.isclose(minmax_df.values.max(), 1.0)
+
+    # Z-score normalization
+    zscore_df = normalize_scores(df, method="zscore")
+    assert np.isclose(zscore_df.values.mean(), 0.0, atol=1e-6)
+    assert np.isclose(zscore_df.values.std(), 1.0, atol=1e-6)
+
+    # Invalid normalization method
+    with pytest.raises(ValueError, match="Invalid normalization method"):
+        normalize_scores(df, method="invalid_method")
+
+
+def test_hybrid_similarity_matrix_with_normalization():
+    semantic_df = pd.DataFrame(
+        {"doc1": [1.0, 0.85], "doc2": [0.85, 1.0]}, index=["doc1", "doc2"]
+    )
+    lexical_df = pd.DataFrame(
+        {"doc1": [1.0, 0.15], "doc2": [0.15, 1.0]}, index=["doc1", "doc2"]
+    )
+
+    hybrid_minmax = hybrid_similarity_matrix(
+        semantic_df, lexical_df, w=0.5, normalize="minmax"
+    )
+    hybrid_zscore = hybrid_similarity_matrix(
+        semantic_df, lexical_df, w=0.5, normalize="zscore"
+    )
+
+    assert isinstance(hybrid_minmax, pd.DataFrame)
+    assert isinstance(hybrid_zscore, pd.DataFrame)
 
 
 def test_hybrid_similarity_matrix_invalid_weight():

@@ -4,7 +4,6 @@ import json
 import logging
 import logging.config
 import os
-import sys
 from datetime import datetime, timezone
 
 

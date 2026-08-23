@@ -148,8 +148,8 @@ source venv/bin/activate        # Windows: venv\Scripts\activate
 ```bash
 pip install -r requirements.txt
 pip install pytest-cov  # Required for coverage reporting
+python -m nltk.downloader punkt_tab  # Pre-download NLTK corpus to avoid runtime delays
 ```
-
 > **Note:** The first run will download the `paraphrase-multilingual-MiniLM-L12-v2` model (~420 MB).
 > Subsequent runs use the local cache.
 
@@ -216,6 +216,76 @@ Customize behavior via a `.env` file in the project root or inline in
 
 See `.env.example` for the full list.
 
+**Securing Redis with TLS:**
+
+By default, `docker-compose.yml` and the table above use a plaintext
+`redis://` connection, which is fine for local development but should not be
+used in production. [`SECURITY.md`](SECURITY.md#redis-security--access-control)
+recommends encrypting Redis traffic in transit with TLS (`rediss://`). The
+app doesn't need any code changes to support this — `REDIS_URL` is passed
+straight to `redis-py`'s `redis.from_url()`, which natively understands the
+`rediss://` scheme and standard `ssl_*` query parameters.
+
+1. **Generate or obtain TLS certificates** for your Redis server (CA
+   certificate, and optionally a client certificate/key pair if you're using
+   `tls-auth-clients yes` as described in `SECURITY.md`). For local testing
+   you can generate a self-signed CA with `openssl`; for production, use
+   certificates issued by your organization's CA.
+
+2. **Mount the certificates into both containers.** Add a volume mount to
+   the `redis` and app services in `docker-compose.yml`:
+
+   ```yaml
+   services:
+     app:
+       volumes:
+         - ./certs:/app/certs:ro   # add alongside the existing volumes
+
+     redis:
+       image: redis:7-alpine
+       command: >
+         redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+         --tls-port 6380 --port 0
+         --tls-cert-file /certs/redis.crt
+         --tls-key-file /certs/redis.key
+         --tls-ca-cert-file /certs/ca.crt
+       volumes:
+         - ./certs:/certs:ro
+         - redis_data:/data
+       ports:
+         - "6380:6380"
+   ```
+
+   Setting `--port 0` disables Redis's plaintext port entirely, so all
+   connections must use TLS on `--tls-port`.
+
+3. **Point `REDIS_URL` at the TLS port using the `rediss://` scheme,** and
+   pass the CA certificate (and client cert/key, if configured) as query
+   parameters:
+
+   ```bash
+   REDIS_URL=rediss://redis:6380/0?ssl_ca_certs=/app/certs/ca.crt&ssl_cert_reqs=required
+   ```
+
+   If you've enabled client certificate verification (`tls-auth-clients yes`),
+   also include your client certificate and key:
+
+   ```bash
+   REDIS_URL=rediss://redis:6380/0?ssl_ca_certs=/app/certs/ca.crt&ssl_certfile=/app/certs/client.crt&ssl_keyfile=/app/certs/client.key&ssl_cert_reqs=required
+   ```
+
+4. **Restart the stack** so both containers pick up the new configuration:
+
+   ```bash
+   docker compose down
+   docker compose up --build
+   ```
+
+For the full set of Redis hardening recommendations — strong passwords,
+`requirepass`, and least-privilege ACLs — see the
+[Redis Security & Access Control](SECURITY.md#redis-security--access-control)
+section of `SECURITY.md`.
+
 **Rebuild after dependency changes:**
 
 ```bash
@@ -223,16 +293,11 @@ docker compose build --no-cache
 docker compose up
 ```
 
+```markdown
 **Stop the app:**
 
 ```bash
 docker compose down
-```
-
-To also remove the Redis data volume:
-
-```bash
-docker compose down -v
 ```
 
 ### Default credentials
@@ -242,6 +307,32 @@ docker compose down -v
 | `admin` | `admin123` | Admin — full access + user management |
 
 Additional users can be created from the **User Management** page (admin only).
+
+
+## ⚠️ Data Persistence & Docker Volumes
+
+The app persists two SQLite databases plus the FAISS index. All three
+live in the container filesystem and are wiped on `docker compose down -v`
+**unless** they are mounted on named volumes. As of issue #3025, the
+`docker-compose.yml` mounts three named volumes by default so the
+data survives `down` / `up` cycles.
+
+### What is persisted
+
+| Volume name            | Container path | Holds                                           | Wiped by `down -v`? |
+|------------------------|----------------|-------------------------------------------------|----------------------|
+| `plagiarism_data`      | `/app/data`    | `corpus.db`, `corpus.index`, `backups/`         | ✅ Yes |
+| `plagiarism_users`     | `/app`         | `users.db` (auth, roles, password hashes)        | ✅ Yes |
+| `redis_data`           | `/data`        | Redis dump (session cache, rate-limit counters)  | ✅ Yes |
+
+### Safe operations
+
+```bash
+# Stop the app — data is preserved.
+docker compose down
+
+# Restart — data is back, no migration needed.
+docker compose up
 
 ---
 

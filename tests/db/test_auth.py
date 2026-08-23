@@ -30,6 +30,7 @@ from src.db.auth import (
 )
 from src.exceptions import StaleDataException
 
+
 @pytest.fixture(autouse=True)
 def setup_test_db(mock_db):
     """Uses the mock_db fixture from conftest.py to isolate DB operations."""
@@ -319,8 +320,67 @@ def test_get_2fa_status():
 
     enabled, secret = get_2fa_status(username)
     assert enabled is True
+    assert secret == test_secret
 
     delete_user(username)
+
+
+def test_otp_secret_is_encrypted_at_rest():
+    """Verify that OTP secret is encrypted when stored in the database, and decrypted by get_2fa_status."""
+    import sqlite3
+    from src.db.auth import get_auth_db_path
+
+    username = f"user_2fa_enc_{uuid.uuid4().hex[:8]}"
+    add_user(username, "Password123!")
+
+    test_secret = "MY_OTP_SECRET_12345"
+    enable_2fa(username, test_secret)
+
+    # 1. Query via API to verify transparent decryption
+    enabled, secret = get_2fa_status(username)
+    assert enabled is True
+    assert secret == test_secret
+
+    # 2. Query the raw database row directly to verify it's encrypted at rest
+    db_path = get_auth_db_path()
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT otp_secret FROM users WHERE username = ?",
+            (username.lower(),)
+        ).fetchone()
+
+    db_secret = row[0]
+    assert db_secret is not None
+    assert db_secret != test_secret
+    assert "gAAAAA" in db_secret  # Standard Fernet header prefix
+
+    delete_user(username)
+
+
+def test_otp_secret_legacy_plaintext_fallback():
+    """Verify that if the database contains a legacy plaintext OTP secret, it is returned as-is without crashing."""
+    import sqlite3
+    from src.db.auth import get_auth_db_path
+
+    username = f"user_2fa_legacy_{uuid.uuid4().hex[:8]}"
+    add_user(username, "Password123!")
+
+    # Force insert a plaintext secret into the database
+    db_path = get_auth_db_path()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE users SET two_factor_enabled = 1, otp_secret = ? WHERE username = ?",
+            ("LEGACY_PLAINTEXT_SECRET", username.lower())
+        )
+        conn.commit()
+
+    # Query via API
+    enabled, secret = get_2fa_status(username)
+    assert enabled is True
+    assert secret == "LEGACY_PLAINTEXT_SECRET"
+
+    delete_user(username)
+
 
 
 
@@ -703,6 +763,95 @@ def test_revoke_token_and_is_token_revoked():
         revoke_token("")
 
 
+def test_cleanup_revoked_tokens():
+    """Verify that expired JWT tokens and their corresponding signatures are automatically cleaned up."""
+    import time
+    import sqlite3
+    import hashlib
+    import base64
+    import json
+    from src.db.auth import revoke_token, is_token_revoked, get_auth_db_path, _cleanup_revoked_tokens
+
+    def make_mock_jwt(exp: int) -> str:
+        header = base64.urlsafe_b64encode(json.dumps({"alg": "HS256", "typ": "JWT"}).encode("utf-8")).decode("utf-8").rstrip("=")
+        payload = base64.urlsafe_b64encode(json.dumps({"exp": exp, "type": "access"}).encode("utf-8")).decode("utf-8").rstrip("=")
+        signature = "signature_part"
+        return f"{header}.{payload}.{signature}"
+
+    # 1. Create one expired token and one active token
+    now = int(time.time())
+    expired_token = make_mock_jwt(now - 100)
+    active_token = make_mock_jwt(now + 3600)
+
+    # 2. Revoke both tokens
+    revoke_token(expired_token, details="Expired token test")
+    revoke_token(active_token, details="Active token test")
+
+    expired_hash = hashlib.sha256(expired_token.encode("utf-8")).hexdigest()
+    active_hash = hashlib.sha256(active_token.encode("utf-8")).hexdigest()
+
+    assert is_token_revoked(expired_token) is True
+    assert is_token_revoked(active_token) is True
+
+    # 3. Trigger cleanup
+    deleted_count = _cleanup_revoked_tokens()
+    assert deleted_count >= 2
+
+    # 4. Verify expired token is no longer marked revoked
+    assert is_token_revoked(expired_token) is False
+    assert is_token_revoked(active_token) is True
+
+    # Clean up the active token
+    db_path = get_auth_db_path()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DELETE FROM revoked_tokens WHERE token_signature IN (?, ?)", (active_token, active_hash))
+        conn.commit()
+
+
+def test_is_token_revoked_uses_ttl_cache():
+    """Verify is_token_revoked caches results in-memory avoiding redundant SQLite queries (Issue #3018)."""
+    from unittest.mock import patch
+    from src.db.auth import is_token_revoked, revoke_token, clear_revocation_cache, _revoked_token_cache
+
+    clear_revocation_cache()
+    token = f"cache_test_tok_{uuid.uuid4().hex}"
+
+    # First check: query DB and cache False
+    assert is_token_revoked(token) is False
+    assert token in _revoked_token_cache
+
+    # Second check: must hit cache without calling _connect
+    with patch("src.db.auth._connect") as mock_connect:
+        assert is_token_revoked(token) is False
+        mock_connect.assert_not_called()
+
+    # Revoke token: must update cache immediately
+    revoke_token(token)
+    assert _revoked_token_cache[token] is True
+
+    # Cached check for revoked token without calling _connect
+    with patch("src.db.auth._connect") as mock_connect:
+        assert is_token_revoked(token) is True
+        mock_connect.assert_not_called()
+
+
+def test_clear_revocation_cache():
+    """Verify clear_revocation_cache removes cached entries forcing fresh DB reads."""
+    from unittest.mock import patch
+    from src.db.auth import is_token_revoked, clear_revocation_cache, _revoked_token_cache
+
+    clear_revocation_cache()
+    token = f"clear_cache_tok_{uuid.uuid4().hex}"
+
+    is_token_revoked(token)
+    assert token in _revoked_token_cache
+
+    clear_revocation_cache()
+    assert token not in _revoked_token_cache
+
+
+
+
 def test_password_history_validation_prevents_reuse_of_last_3_passwords(mock_db):
     """Verify update_password prevents reusing any of the last 3 passwords."""
     user = f"hist_user_{uuid.uuid4().hex[:8]}"
@@ -824,8 +973,8 @@ def test_validate_username_rules():
             _validate_username(invalid)  # type: ignore
 
     # 6. Invalid credentials still return False (or dict with authenticated=False)
-    assert verify_user(username, "WrongPassword!") is False
-    assert verify_user(username, "WrongPassword!", return_details=True) == {
+    assert verify_user("alice", "WrongPassword!") is False
+    assert verify_user("alice", "WrongPassword!", return_details=True) == {
         "authenticated": False,
         "must_change_password": False,
     }

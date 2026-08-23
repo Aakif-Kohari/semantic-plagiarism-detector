@@ -43,8 +43,8 @@ def _pick_free_port() -> int:
 
 def _wait_for_streamlit(url: str, timeout_s: float = 90.0) -> None:
     """Poll the Streamlit health endpoint until the server is ready."""
-    import urllib.request
     import urllib.error
+    import urllib.request
 
     deadline = time.time() + timeout_s
     last_err: Exception | None = None
@@ -71,6 +71,7 @@ def _seed_test_user(auth_db_path: Path) -> None:
     os.environ["CORPUS_DB_PATH"] = str(auth_db_path.parent / "e2e_corpus.db")
 
     import importlib
+
     from src.core import app_config
     importlib.reload(app_config)
     from src.db import auth as auth_mod

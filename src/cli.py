@@ -34,14 +34,14 @@ from src.core.similarity import (
 from src.core.synchronization import verify_and_repair_index
 from src.core.text_chunking import chunk_documents
 from src.db.database_backup import optimize_database
-from src.errors import EmptyDocumentError
 
 # Issue #2985: Import translation cache utilities for CLI purge command
 from src.db.translation_cache import (
-    purge_old_translations,
     get_cache_stats,
     initialize_cache_db,
+    purge_old_translations,
 )
+from src.errors import EmptyDocumentError
 
 logger = logging.getLogger(__name__)
 
@@ -194,7 +194,7 @@ def run_scan(
             for doc_name, chunks in chunked_docs.items():
                 translated_chunked_docs[doc_name] = []
                 for chunk in chunks:
-                    prepared = prepare_text_for_embedding(chunk)
+                    prepared = prepare_text_for_embedding(chunk.text if hasattr(chunk, "text") else chunk)
                     translated_chunked_docs[doc_name].append(prepared["embedding_text"])
 
             embeddings = embed_documents(translated_chunked_docs)
@@ -330,6 +330,10 @@ def run_prewarm(folder_path: str | None = None) -> int:
     docs_processed = len(raw_texts)
     redis_status = "unavailable"
 
+    if docs_processed == 0:
+        sys.stdout.write("No documents found. Exiting.\n")
+        return 0
+
     if docs_processed > 0:
         try:
             chunked_docs = chunk_documents(raw_texts)
@@ -448,6 +452,7 @@ def run_db_downgrade(
         0 on success, 1 on failure.
     """
     import sqlite3
+
     from src.db.migrations import (
         AUTH_DOWN_MIGRATIONS,
         CORPUS_DOWN_MIGRATIONS,
@@ -753,7 +758,7 @@ def main() -> None:
 
         if args.stats:
             stats = get_cache_stats()
-            print(f"Cache Statistics:")
+            print("Cache Statistics:")
             print(f"  Total entries: {stats['total_entries']:,}")
             print(f"  Oldest entry:  {stats['oldest_entry'] or 'N/A'}")
             print(f"  Newest entry:  {stats['newest_entry'] or 'N/A'}")

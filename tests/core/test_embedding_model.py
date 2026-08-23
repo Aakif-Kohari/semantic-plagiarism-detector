@@ -178,6 +178,38 @@ def test_embedding_model_manager_fallback(caplog, monkeypatch):
     )
 
 
+def test_embedding_model_manager_fallback_custom(caplog, monkeypatch):
+    """Test that EmbeddingModelManager uses the custom fallback model from env var on failure."""
+    import logging
+
+    custom_fallback = "custom-fallback-model"
+    monkeypatch.setenv("SEMANTIC_PLAGIARISM_FALLBACK_MODEL", custom_fallback)
+    monkeypatch.setattr(embedding_model, "_model", None)
+    monkeypatch.setattr(EmbeddingModelManager, "_instance", None)
+
+    primary = embedding_model._get_model_name()
+
+    def mock_sentence_transformer(model_name, cache_folder=None):
+        if model_name == primary:
+            raise RuntimeError("Failed to load primary model")
+        return MagicMock()
+
+    monkeypatch.setattr(
+        embedding_model, "SentenceTransformer", mock_sentence_transformer
+    )
+
+    with caplog.at_level(logging.WARNING):
+        manager = EmbeddingModelManager.get_instance()
+        model = manager.get_model()
+
+    assert model is not None
+    assert any(
+        f"Primary embedding model {primary} unavailable. Falling back to {custom_fallback}"
+        in record.message
+        for record in caplog.records
+    )
+
+
 def test_embedding_model_manager_raises_descriptive_error_when_all_models_fail(
     monkeypatch,
 ):
@@ -248,7 +280,22 @@ def test_detect_device_helper():
     mock_obj_device_type.device = mock_dev
     assert _detect_device(mock_obj_device_type) == "mps"
 
-    assert _detect_device(None) in ("cpu", "cuda", "mps")
+    assert _detect_device(None) in ("cpu", "cuda", "mps", "xpu")
+
+
+def test_detect_device_supports_xpu(monkeypatch):
+    """Return XPU when an Intel accelerator is available."""
+    monkeypatch.setattr(torch.xpu, "is_available", lambda: True, raising=False)
+    assert _detect_device(None) == "xpu"
+
+
+def test_detect_device_supports_rocm(monkeypatch):
+    """ROCm/HIP devices are exposed through PyTorch's CUDA device API."""
+    monkeypatch.setattr(torch.xpu, "is_available", lambda: False, raising=False)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.backends.cuda, "is_built", lambda: True)
+    monkeypatch.setattr(torch.version, "hip", "6.2.0", raising=False)
+    assert _detect_device(None) == "cuda"
 
 
 # ─── Mini-Batch Processing Tests (Issue #920) ──────────────────────────────────
@@ -480,12 +527,20 @@ class TestVerifyModelCacheIntegrity:
     """Tests for verify_model_cache_integrity (issue #1580)."""
 
     def test_returns_true_for_healthy_weight_file(self, tmp_path):
-        """A cache with a non-zero pytorch_model.bin must be healthy."""
+        """A cache with a large enough pytorch_model.bin must be healthy."""
         snapshot = tmp_path / "models--demo--model" / "snapshots" / "abcdef1234"
         snapshot.mkdir(parents=True)
-        (snapshot / "pytorch_model.bin").write_bytes(b"\x00" * 4096)
+        (snapshot / "pytorch_model.bin").write_bytes(b"\x00" * (1024 * 1024 + 1))
 
         assert embedding_model.verify_model_cache_integrity(tmp_path) is True
+
+    def test_returns_false_for_small_file_1mb(self, tmp_path):
+        """A file exactly 1MB (or smaller) must be reported as corrupted."""
+        snapshot = tmp_path / "models--demo--model" / "snapshots" / "abcdef1234"
+        snapshot.mkdir(parents=True)
+        (snapshot / "pytorch_model.bin").write_bytes(b"\x00" * (1024 * 1024))
+
+        assert embedding_model.verify_model_cache_integrity(tmp_path) is False
 
     def test_returns_false_for_zero_byte_pytorch_model_bin(self, tmp_path):
         """A zero-byte pytorch_model.bin must be reported as corrupted."""
@@ -521,7 +576,7 @@ class TestVerifyModelCacheIntegrity:
         """A zero-byte non-weight file must not fail the integrity check."""
         snapshot = tmp_path / "models--demo--model" / "snapshots" / "abcdef1234"
         snapshot.mkdir(parents=True)
-        (snapshot / "pytorch_model.bin").write_bytes(b"\x00" * 4096)
+        (snapshot / "pytorch_model.bin").write_bytes(b"\x00" * (1024 * 1024 + 1))
         (snapshot / "config.json").write_bytes(b"")
 
         assert embedding_model.verify_model_cache_integrity(tmp_path) is True
@@ -530,7 +585,7 @@ class TestVerifyModelCacheIntegrity:
         """Both Path and str inputs must produce the same verdict."""
         snapshot = tmp_path / "models--demo--model" / "snapshots" / "abcdef1234"
         snapshot.mkdir(parents=True)
-        (snapshot / "pytorch_model.bin").write_bytes(b"\x00" * 4096)
+        (snapshot / "pytorch_model.bin").write_bytes(b"\x00" * (1024 * 1024 + 1))
 
         assert embedding_model.verify_model_cache_integrity(
             tmp_path
@@ -586,7 +641,7 @@ class TestGetModelRedownloadsCorruptedCache:
         model_cache_dir = tmp_path / "models--paraphrase-multilingual-MiniLM-L12-v2"
         snapshot = model_cache_dir / "snapshots" / "abcdef1234"
         snapshot.mkdir(parents=True)
-        (snapshot / "pytorch_model.bin").write_bytes(b"\x00" * 4096)
+        (snapshot / "pytorch_model.bin").write_bytes(b"\x00" * (1024 * 1024 + 1))
 
         monkeypatch.setenv("HF_HUB_CACHE", str(tmp_path))
         monkeypatch.setenv(

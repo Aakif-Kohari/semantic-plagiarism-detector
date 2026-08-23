@@ -7,13 +7,10 @@ Verifies that file size limits, extension checks, and magic byte validation
 work correctly to prevent RAM spikes and malicious file processing.
 """
 
-import pytest
 from src.utils.file_validator import (
-    FileValidator,
-    ValidationResult,
-    validate_upload,
     MAX_FILE_SIZE_BYTES,
-    ALLOWED_EXTENSIONS,
+    FileValidator,
+    validate_upload,
 )
 
 
@@ -127,6 +124,68 @@ class TestFileValidatorMagicBytes:
         validator = FileValidator()
         result = validator.validate(b"Just some plain text content.", "readme.txt")
         assert result.is_valid is True
+
+
+class TestStrictModeMagicByteEnforcement:
+    """strict_mode turns magic-byte mismatches into hard failures (#3201).
+
+    The permissive default exists because some valid files carry unusual
+    headers — but it equally lets an executable renamed to .pdf through,
+    which is unacceptable in high-security deployments. With
+    ``strict_mode=True`` a mismatched header fails validation with the
+    machine-readable ``MAGIC_BYTE_MISMATCH`` code.
+    """
+
+    def test_strict_mode_rejects_mismatched_header(self):
+        validator = FileValidator(strict_mode=True)
+
+        result = validator.validate(b"This is plain text", "fake.pdf")
+
+        assert result.is_valid is False
+        assert result.error_code == "MAGIC_BYTE_MISMATCH"
+        assert "does not match extension" in result.error_message
+
+    def test_strict_mode_accepts_correct_magic_bytes(self):
+        validator = FileValidator(strict_mode=True)
+
+        assert validator.validate(b"%PDF-1.7\n real pdf", "doc.pdf").is_valid is True
+        assert (
+            validator.validate(b"PK\x03\x04\x14\x00\x06\x00", "doc.docx").is_valid
+            is True
+        )
+
+    def test_permissive_default_still_tolerates_a_mismatch(self, caplog):
+        import logging
+        validator = FileValidator()
+
+        with caplog.at_level(logging.WARNING):
+            result = validator.validate(b"MZ executable bytes", "evil.pdf")
+
+        assert result.is_valid is True
+        assert any("Magic byte mismatch" in r.message for r in caplog.records)
+
+    def test_strict_mode_does_not_break_signatureless_extensions(self):
+        validator = FileValidator(strict_mode=True)
+
+        assert (
+            validator.validate(b"# Just markdown", "notes.md").is_valid is True
+        )
+        assert validator.validate(b"plain,text", "table.csv").is_valid is True
+
+    def test_strict_mode_still_enforces_size_and_extension_first(self):
+        validator = FileValidator(strict_mode=True, max_size_bytes=10)
+
+        too_big = validator.validate(b"x" * 11 + b"%PDF", "big.pdf")
+        bad_ext = validator.validate(b"%PDF", "virus.exe")
+        empty = validator.validate(b"", "empty.pdf")
+
+        assert too_big.error_code == "FILE_TOO_LARGE"
+        assert bad_ext.error_code == "UNSUPPORTED_EXTENSION"
+        assert empty.error_code == "FILE_EMPTY"
+
+    def test_strict_mode_flag_is_stored(self):
+        assert FileValidator().strict_mode is False
+        assert FileValidator(strict_mode=True).strict_mode is True
 
 
 class TestValidateUploadConvenience:

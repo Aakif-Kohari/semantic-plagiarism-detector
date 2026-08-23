@@ -13,20 +13,26 @@ named colors, providing a robust fallback mechanism for theme configurations.
 Issue #2898: Fallback behavior for named colors in Badge Generator.
 """
 
-import html
-import re
-import logging
 import hashlib
-from datetime import datetime
+import logging
+import re
+import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 from io import BytesIO
-from typing import Optional, Tuple, Dict
+from pathlib import Path
+from typing import Dict, Optional, Tuple
 
 try:
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw, ImageFont, PngImagePlugin
 except ImportError:
     Image = None
     ImageDraw = None
     ImageFont = None
+    PngImagePlugin = None
+
+def has_pillow() -> bool:
+    """Check if PIL/Pillow is installed."""
+    return Image is not None
 
 from reportlab.lib.colors import HexColor
 from reportlab.lib.enums import TA_CENTER
@@ -114,7 +120,9 @@ _HEX_COLOR_PATTERN = re.compile(
 DEFAULT_BADGE_COLOR = "#4f46e5"
 
 
-def validate_hex_color(color: Optional[str], default_color: str = "#2563eb") -> str:
+def validate_hex_color(
+    color: Optional[str], default_color: str = DEFAULT_BADGE_COLOR
+) -> str:
     """Validate and normalize a color string into a standard hex format.
 
     This function accepts both standard hex color codes (e.g., "#ff0000")
@@ -129,10 +137,10 @@ def validate_hex_color(color: Optional[str], default_color: str = "#2563eb") -> 
         color: The input color string to validate. Can be a hex code or
                a CSS named color.
         default_color: The fallback hex color to return if validation fails.
-                      Defaults to a standard blue ("#2563eb").
+                      Defaults to DEFAULT_BADGE_COLOR.
 
     Returns:
-        A validated, normalized hex color string (e.g., "#ff0000").
+        A validated hex color string (e.g., "#ff0000").
 
     Examples:
         >>> validate_hex_color("#ff0000")
@@ -142,7 +150,7 @@ def validate_hex_color(color: Optional[str], default_color: str = "#2563eb") -> 
         >>> validate_hex_color("transparent")
         '#00000000'
         >>> validate_hex_color("invalid_color_name")
-        '#2563eb'
+        '#4f46e5'
     """
     if not color or not isinstance(color, str):
         logger.warning(
@@ -156,11 +164,6 @@ def validate_hex_color(color: Optional[str], default_color: str = "#2563eb") -> 
 
     # 1. Check if it's a valid standard hex code
     if _HEX_COLOR_PATTERN.match(cleaned_color):
-        # Normalize 3-digit hex to 6-digit for consistency (e.g., #f00 -> #ff0000)
-        if len(cleaned_color) == 4:  # #RGB
-            return f"#{cleaned_color[1]*2}{cleaned_color[2]*2}{cleaned_color[3]*2}"
-        if len(cleaned_color) == 5:  # #RGBA
-            return f"#{cleaned_color[1]*2}{cleaned_color[2]*2}{cleaned_color[3]*2}{cleaned_color[4]*2}"
         return cleaned_color
 
     # 2. Check if it's a recognized CSS named color (Issue #2898)
@@ -193,9 +196,8 @@ def generate_badge_svg(
     """
     Generates a simple SVG "Originality Verified" badge.
 
-    The accent_color is validated (and defaulted if invalid) before being
-    inserted into the SVG markup, preventing malformed or unescaped color
-    values from producing invalid SVG.
+    Builds the SVG with ElementTree so text/attributes are XML-escaped
+    automatically instead of relying on manual string interpolation.
 
     Args:
         student_name: Name of the student (optional, defaults to "Student")
@@ -208,39 +210,103 @@ def generate_badge_svg(
     """
     safe_color = validate_hex_color(accent_color, DEFAULT_BADGE_COLOR)
     if date is None:
-        date = datetime.now().strftime("%B %d, %Y")
+        date = datetime.now(timezone.utc).strftime("%B %d, %Y")
 
-    safe_name = html.escape(student_name)
-    safe_date = html.escape(date)
+    root = ET.Element(
+        "svg",
+        {
+            "xmlns": "http://www.w3.org/2000/svg",
+            "width": "400",
+            "height": "120",
+            "viewBox": "0 0 400 120",
+        },
+    )
+    ET.SubElement(
+        root,
+        "rect",
+        {
+            "width": "400",
+            "height": "120",
+            "rx": "12",
+            "fill": safe_color,
+        },
+    )
 
-    safe_font = html.escape(font_family)
+    title = ET.SubElement(
+        root,
+        "text",
+        {
+            "x": "20",
+            "y": "45",
+            "font-family": font_family,
+            "font-size": str(font_size),
+            "fill": "#ffffff",
+        },
+    )
+    title.text = "Originality Verified"
 
-    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="400" height="120" viewBox="0 0 400 120">
-  <rect width="400" height="120" rx="12" fill="{safe_color}" />
-  <text x="20" y="45" font-family="{safe_font}" font-size="{font_size}" fill="#ffffff">Originality Verified</text>
-  <text x="20" y="75" font-family="{safe_font}" font-size="{font_size}" fill="#e0e7ff">Awarded to: {safe_name}</text>
-  <text x="20" y="100" font-family="{safe_font}" font-size="{font_size}" fill="#e0e7ff">Date: {safe_date}</text>
-</svg>"""
+    awarded = ET.SubElement(
+        root,
+        "text",
+        {
+            "x": "20",
+            "y": "75",
+            "font-family": font_family,
+            "font-size": str(font_size),
+            "fill": "#e0e7ff",
+        },
+    )
+    awarded.text = f"Awarded to: {student_name}"
+
+    dated = ET.SubElement(
+        root,
+        "text",
+        {
+            "x": "20",
+            "y": "100",
+            "font-family": font_family,
+            "font-size": str(font_size),
+            "fill": "#e0e7ff",
+        },
+    )
+    dated.text = f"Date: {date}"
+
+    return ET.tostring(root, encoding="unicode")
 
 
 def generate_badge_png(
     student_name: str = "Student",
     date: Optional[str] = None,
     text_preview: str = "",
+    student_id: Optional[str] = None,
 ) -> BytesIO:
     """
     Generates a visually appealing PNG badge for plagiarism-free work.
+    Caches generated badges in Redis for 24 hours based on student ID/name and date (Issue #2941).
 
     Args:
         student_name: Name of the student (optional, defaults to "Student")
         date: Date string (optional, defaults to current date)
         text_preview: Preview of the verified text (optional)
+        student_id: Optional unique ID of the student for caching
 
     Returns:
         BytesIO buffer containing the PNG badge
     """
     if Image is None:
         raise ImportError("PIL/Pillow is required for PNG badge generation")
+
+    target_date = date if date is not None else datetime.now().strftime("%B %d, %Y")
+    ident = str(student_id if student_id is not None else student_name)
+
+    # Check Redis cache
+    from src.utils.redis_cache import BADGE_TTL, CacheNamespace, RedisCache
+
+    cache = RedisCache.get_instance()
+    cache_key = CacheNamespace.BADGES.build_key("png", ident, target_date)
+    cached_bytes = cache.get(cache_key)
+    if cached_bytes is not None and isinstance(cached_bytes, bytes):
+        return BytesIO(cached_bytes)
 
     # Badge dimensions
     width, height = 800, 600
@@ -278,17 +344,31 @@ def generate_badge_png(
         width=2,
     )
 
-    # Try to load fonts, fallback to default if not available
-    try:
-        title_font = ImageFont.truetype("arial.ttf", 48)
-        subtitle_font = ImageFont.truetype("arial.ttf", 32)
-        body_font = ImageFont.truetype("arial.ttf", 24)
-        small_font = ImageFont.truetype("arial.ttf", 18)
-    except (IOError, OSError):
-        title_font = ImageFont.load_default()
-        subtitle_font = ImageFont.load_default()
-        body_font = ImageFont.load_default()
-        small_font = ImageFont.load_default()
+    # Load bundled TTF font (Roboto-Regular or DejaVuSans), with system and default fallbacks
+    fonts_dir = Path(__file__).parent.parent / "assets" / "fonts"
+    bundled_fonts = [
+        fonts_dir / "Roboto-Regular.ttf",
+        fonts_dir / "DejaVuSans.ttf",
+    ]
+
+    def _load_badge_font(size: int):
+        for font_path in bundled_fonts:
+            if font_path.exists():
+                try:
+                    return ImageFont.truetype(str(font_path), size)
+                except (IOError, OSError):
+                    pass
+        for system_font in ["arial.ttf", "DejaVuSans.ttf"]:
+            try:
+                return ImageFont.truetype(system_font, size)
+            except (IOError, OSError):
+                pass
+        return ImageFont.load_default()
+
+    title_font = _load_badge_font(48)
+    subtitle_font = _load_badge_font(32)
+    body_font = _load_badge_font(24)
+    small_font = _load_badge_font(18)
 
     # Title
     title_text = "ORIGINALITY VERIFIED"
@@ -336,7 +416,7 @@ def generate_badge_png(
 
     # Date
     if date is None:
-        date = datetime.now().strftime("%B %d, %Y")
+        date = datetime.now(timezone.utc).strftime("%B %d, %Y")
     date_text = f"Date: {date}"
     date_bbox = draw.textbbox((0, 0), date_text, font=body_font)
     date_width = date_bbox[2] - date_bbox[0]
@@ -362,9 +442,18 @@ def generate_badge_png(
     footer_x = (width - footer_width) // 2
     draw.text((footer_x, 540), footer_text, fill="#94a3b8", font=small_font)
 
+    # Create PngInfo for accessibility alt-text metadata
+    pnginfo = PngImagePlugin.PngInfo()
+    pnginfo.add_text("Description", f"Originality Verified Certificate for {student_name}")
+
     # Save to buffer
     buffer = BytesIO()
-    img.save(buffer, format="PNG", quality=95)
+    img.save(buffer, format="PNG", pnginfo=pnginfo, quality=95)
+    png_bytes = buffer.getvalue()
+    try:
+        cache.set(cache_key, png_bytes, ttl=BADGE_TTL)
+    except Exception:
+        pass
     buffer.seek(0)
     return buffer
 
@@ -374,20 +463,35 @@ def generate_badge_pdf(
     date: Optional[str] = None,
     text_preview: str = "",
     brand_color: Optional[str] = None,
+    student_id: Optional[str] = None,
 ) -> BytesIO:
     """
     Generates a professional PDF certificate for plagiarism-free work.
+    Caches generated certificates in Redis for 24 hours based on student ID/name and date (Issue #2941).
 
     Args:
         student_name: Name of the student (optional, defaults to "Student")
         date: Date string (optional, defaults to current date)
         text_preview: Preview of the verified text (optional)
         brand_color: Optional hex color string for branding
+        student_id: Optional unique ID of the student for caching
 
     Returns:
         BytesIO buffer containing the PDF certificate
     """
-    brand_hex = validate_hex_color(brand_color, DEFAULT_BADGE_COLOR)
+    target_date = date if date is not None else datetime.now().strftime("%B %d, %Y")
+    ident = str(student_id if student_id is not None else student_name)
+
+    # Check Redis cache
+    from src.utils.redis_cache import BADGE_TTL, CacheNamespace, RedisCache
+
+    cache = RedisCache.get_instance()
+    cache_key = CacheNamespace.BADGES.build_key("pdf", ident, target_date)
+    cached_bytes = cache.get(cache_key)
+    if cached_bytes is not None and isinstance(cached_bytes, bytes):
+        return BytesIO(cached_bytes)
+
+    brand_hex = validate_hex_color(brand_color)
     brand_clr = HexColor(brand_hex)
     buffer = BytesIO()
     doc = SimpleDocTemplate(
@@ -549,7 +653,14 @@ def generate_badge_pdf(
     doc.build(story)
     from src.utils.pdf_report import compress_pdf_buffer
 
-    return compress_pdf_buffer(buffer)
+    result_buffer = compress_pdf_buffer(buffer)
+    pdf_bytes = result_buffer.getvalue()
+    try:
+        cache.set(cache_key, pdf_bytes, ttl=BADGE_TTL)
+    except Exception:
+        pass
+    result_buffer.seek(0)
+    return result_buffer
 
 
 def generate_svg_badge(

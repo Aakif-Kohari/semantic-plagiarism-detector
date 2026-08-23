@@ -2902,7 +2902,7 @@ from src.utils.file_validator import validate_upload
         for doc_name, chunks in chunked_docs.items():
             translated_chunked_docs[doc_name] = []
             for chunk in chunks:
-                prepared = prepare_text_for_embedding(chunk)
+                prepared = prepare_text_for_embedding(chunk.text if hasattr(chunk, "text") else chunk)
                 translated_chunked_docs[doc_name].append(prepared["embedding_text"])
         embeddings = embed_documents(translated_chunked_docs)
         sim_df = document_similarity_matrix(embeddings)
@@ -3325,7 +3325,27 @@ from src.utils.file_validator import validate_upload
             with c2:
                 db = st.selectbox("Document B", [d for d in doc_names if d != da], key="db")
             sim_val = float(active_sim_df.loc[da, db])
-            st.write(f"Overall Similarity: `{sim_val:.1%}`")
+            
+            # Compute Plagiarism Density for da against db
+            density_a = 0.0
+            density_b = 0.0
+            emb_a = embeddings.get(da, np.array([]))
+            emb_b = embeddings.get(db, np.array([]))
+            
+            if emb_a.size > 0 and emb_b.size > 0:
+                from src.core.similarity import cosine_similarity
+                sim_matrix = cosine_similarity(emb_a, emb_b)
+                chunk_maxes_a = np.max(sim_matrix, axis=1)
+                chunk_maxes_b = np.max(sim_matrix, axis=0)
+                plag_a = np.sum(chunk_maxes_a >= threshold)
+                plag_b = np.sum(chunk_maxes_b >= threshold)
+                density_a = (plag_a / len(emb_a)) * 100 if len(emb_a) > 0 else 0
+                density_b = (plag_b / len(emb_b)) * 100 if len(emb_b) > 0 else 0
+
+            m_col1, m_col2, m_col3 = st.columns(3)
+            m_col1.metric("Peak Similarity", f"{sim_val:.1%}")
+            m_col2.metric(f"Density ({da[:15]}...)", f"{density_a:.1f}%")
+            m_col3.metric(f"Density ({db[:15]}...)", f"{density_b:.1f}%")
             pair_flags = [
                 f
                 for f in flags
@@ -3371,6 +3391,36 @@ from src.utils.file_validator import validate_upload
                                     button_id=f"copy_cb_{rank}",
                                     copy_label="📋 Copy Snippet",
                                 )
+
+            st.markdown("---")
+            st.markdown("### 📄 Full Document Context")
+            st.markdown("Below is the complete text of both documents, with flagged passages highlighted.")
+
+            full_a = str(raw_texts.get(da, ""))
+            full_b = str(raw_texts.get(db, ""))
+
+            for flag in pair_flags:
+                snip_a = str(flag.get("snippet_a", ""))
+                snip_b = str(flag.get("snippet_b", ""))
+                if flag.get("doc_a") == db:
+                    snip_a, snip_b = snip_b, snip_a
+                
+                if snip_a and snip_a in full_a:
+                    full_a = full_a.replace(snip_a, f'<mark style="background-color: #fca5a5; padding: 0.1em; border-radius: 2px;">{snip_a}</mark>')
+                if snip_b and snip_b in full_b:
+                    full_b = full_b.replace(snip_b, f'<mark style="background-color: #fca5a5; padding: 0.1em; border-radius: 2px;">{snip_b}</mark>')
+            
+            full_a_html = full_a.replace("\n", "<br>")
+            full_b_html = full_b.replace("\n", "<br>")
+
+            c_full_a, c_full_b = st.columns(2)
+            with c_full_a:
+                st.markdown(f"**{da}**")
+                st.markdown(f"<div style='border: 1px solid #ddd; padding: 10px; border-radius: 5px; max-height: 500px; overflow-y: auto;'>{full_a_html}</div>", unsafe_allow_html=True)
+            with c_full_b:
+                st.markdown(f"**{db}**")
+                st.markdown(f"<div style='border: 1px solid #ddd; padding: 10px; border-radius: 5px; max-height: 500px; overflow-y: auto;'>{full_b_html}</div>", unsafe_allow_html=True)
+
             # ── Semantic Diff Viewer (Issue #1957) ────────────────────────────────────
             if pair_flags and len(doc_names) >= 2:
                 with st.expander("🔬 Semantic Diff Viewer (Paraphrase Detection)", expanded=False):
@@ -3405,8 +3455,8 @@ from src.utils.file_validator import validate_upload
                             current_theme = get_theme_name()
                             # Compute alignment using DP on sentence embeddings
                             alignment_map = align_semantic_sequences(
-                                chunks_a=chunks_a,
-                                chunks_b=chunks_b,
+                                chunks_a=[chunk.text for chunk in chunks_a],
+                                chunks_b=[chunk.text for chunk in chunks_b],
                                 embeddings_a=emb_a,
                                 embeddings_b=emb_b,
                             )

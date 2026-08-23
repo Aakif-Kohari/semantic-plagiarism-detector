@@ -47,17 +47,17 @@ def test_min_words_filters_short_chunks():
     text = "42\n\nPage 1\n\nThis is a sufficiently long sentence with many words in it. Here is a second sentence to add enough text. This is a third sentence to ensure we have enough text for overlap to potentially trigger."
     chunks = chunk_text(text, chunk_size=100, chunk_overlap=50, min_words=5)
     assert len(chunks) > 0
-    assert all(len(c.split()) >= 5 for c in chunks)
-    assert any("sufficiently" in c for c in chunks)
-    assert not any("42" in c for c in chunks)
-    assert not any("Page 1" in c for c in chunks)
+    assert all(len(c.text.split()) >= 5 for c in chunks)
+    assert any("sufficiently" in c.text for c in chunks)
+    assert not any("42" in c.text for c in chunks)
+    assert not any("Page 1" in c.text for c in chunks)
 
 
 def test_min_words_default_is_five():
     # Verify default min_words=5 without explicit argument
     text = "one two\n\nthree four five six seven eight"
     chunks = chunk_text(text)
-    assert all(len(c.split()) >= 5 for c in chunks)
+    assert all(len(c.text.split()) >= 5 for c in chunks)
 
 
 def test_chunk_text_respects_max_chunks_limit():
@@ -86,7 +86,7 @@ def test_chunk_text_single_long_word():
     assert len(chunks) >= 1
     # Ensure no chunk exceeds the maximum hard limits
     for chunk in chunks:
-        assert len(chunk) > 0
+        assert len(chunk.text) > 0
 
 
 def test_chunk_text_cjk_characters():
@@ -96,7 +96,7 @@ def test_chunk_text_cjk_characters():
 
     assert len(chunks) > 1
     for chunk in chunks:
-        assert len(chunk) <= 100
+        assert len(chunk.text) <= 100
 
 
 def test_chunk_text_emoji_only():
@@ -106,7 +106,7 @@ def test_chunk_text_emoji_only():
 
     assert len(chunks) >= 1
     for chunk in chunks:
-        assert len(chunk) > 0
+        assert len(chunk.text) > 0
 
 
 def test_chunk_text_emoji_byte_length_enforced():
@@ -123,7 +123,7 @@ def test_chunk_text_emoji_byte_length_enforced():
 
     assert len(chunks) >= 1
     for chunk in chunks:
-        assert len(chunk.encode("utf-8")) <= 50
+        assert len(chunk.text.encode("utf-8")) <= 50
 
 def test_chunk_overlap_boundaries():
     """Verify consecutive chunks share the exact configured overlap substring."""
@@ -137,8 +137,19 @@ def test_chunk_overlap_boundaries():
     )
 
     assert len(chunks) > 1
-    overlap = chunks[0][-chunk_overlap:]
-    assert chunks[1].startswith(overlap)
+    overlap = chunks[0].text[-chunk_overlap:]
+    assert chunks[1].text.startswith(overlap)
+
+
+def test_chunk_by_sentences_cjk_boundaries():
+    """Verify Chinese, Japanese, and Korean sentence boundaries are recognized."""
+    text = "这是第一句。这是第二句！这是第三句？"
+    chunks = chunk_by_sentences(text, max_chunk_size=10, min_chunk_length=1, min_words=1)
+
+    assert len(chunks) == 3
+    assert chunks[0] == "这是第一句。"
+    assert chunks[1] == "这是第二句！"
+    assert chunks[2] == "这是第三句？"
 
 
 # ── Sentence-Boundary Chunking Tests (#919) ──────────────────────────────────
@@ -390,7 +401,7 @@ def test_chunk_text_dynamic_preserves_sentences_intact():
     assert len(chunks) >= 2
     sentence_endings = (".", "!", "?")
     for chunk in chunks:
-        stripped = chunk.strip()
+        stripped = chunk.text.strip()
         assert len(stripped) > 0
         # Check that non-final boundary chunks end at sentence punctuation
         assert stripped[-1] in sentence_endings or stripped == text.strip()
@@ -404,7 +415,7 @@ def test_chunk_text_dynamic_empty_and_short():
     short = "Short single sentence."
     chunks = chunk_text_dynamic(short, target_size=500)
     assert len(chunks) == 1
-    assert chunks[0] == short
+    assert chunks[0].text == short
 
 
 def test_chunk_text_raises_value_error_for_invalid_overlap():
@@ -498,7 +509,7 @@ class TestChunkTextSentencePadding:
         text = "Short text."
         chunks = chunk_text(text, chunk_size=500)
         assert len(chunks) == 1
-        assert chunks[0] == text
+        assert chunks[0].text == text
 
     def test_fixed_size_chunking_without_padding(self):
         text = "A" * 1000
@@ -506,7 +517,7 @@ class TestChunkTextSentencePadding:
             text, chunk_size=200, chunk_overlap=0, sentence_padding=False
         )
         assert len(chunks) == 5
-        assert all(len(c) == 200 for c in chunks)
+        assert all(len(c.text) == 200 for c in chunks)
 
     def test_sentence_padding_extends_to_boundary(self):
         # Create text where fixed chunk size cuts mid-sentence
@@ -520,9 +531,9 @@ class TestChunkTextSentencePadding:
         # Verify no chunk ends abruptly without punctuation (unless it's the very last chunk)
         for i, chunk in enumerate(chunks[:-1]):
             # Chunk should end with a sentence terminator or be the end of text
-            assert chunk.endswith(
+            assert chunk.text.endswith(
                 (".", "!", "?")
-            ), f"Chunk {i} does not end on sentence boundary: '{chunk[-20:]}'"
+            ), f"Chunk {i} does not end on sentence boundary: '{chunk.text[-20:]}'"
 
     def test_sentence_padding_respects_hard_cap(self):
         # Create a massive sentence that exceeds 2x chunk_size
@@ -533,7 +544,7 @@ class TestChunkTextSentencePadding:
 
         # Ensure no chunk is absurdly large (hard cap is 2x chunk_size = 200)
         for chunk in chunks:
-            assert len(chunk) <= 200 + 10  # small buffer for strip()
+            assert len(chunk.text) <= 200 + 10  # small buffer for strip()
 
     def test_overlap_preserves_context(self):
         text = "One. Two. Three. Four. Five. Six. Seven. Eight."
@@ -559,7 +570,7 @@ class TestChunkTextSentencePadding:
 
         assert len(chunks) > 1
         for chunk in chunks:
-            stripped = chunk.strip()
+            stripped = chunk.text.strip()
             # First character should be uppercase (start of sentence) or non-alpha
             assert (
                 stripped[0] == stripped[0].upper() or not stripped[0].isalpha()
@@ -576,7 +587,7 @@ class TestChunkTextSentencePadding:
         assert len(chunks) > 1
         # All chunks except possibly the last should end with sentence punctuation
         for chunk in chunks[:-1]:
-            stripped = chunk.strip()
+            stripped = chunk.text.strip()
             assert stripped[-1] in (
                 ".",
                 "!",
@@ -595,14 +606,16 @@ class TestChunkTextSentencePadding:
         assert padded == unpadded
 
 
-def test_chunkstring_strip_returns_plain_str():
-    """str operations on ChunkString drop metadata and return a plain str."""
-    chunk = ChunkString("hello", {"k": "v"})
-    result = chunk.strip()
+def test_chunkstring_is_dataclass_with_text_and_metadata():
+    """ChunkString stores its payload and metadata as explicit dataclass fields."""
+    from dataclasses import is_dataclass
 
-    assert result == "hello"
-    assert type(result) is str
-    assert not hasattr(result, "metadata")
+    chunk = ChunkString("hello", {"k": "v"})
+
+    assert is_dataclass(chunk)
+    assert chunk.text == "hello"
+    assert chunk.metadata == {"k": "v"}
+    assert not isinstance(chunk, str)
 
 
 # ── NLTK punkt download caching (Issue #2059) ────────────────────────────────
@@ -653,8 +666,8 @@ def test_dynamic_snaps_to_period():
 
     # Verify that the first chunk correctly snapped to the period after "long."
     assert len(chunks) > 0
-    assert chunks[0].endswith(".")
-    assert "first sentence" in chunks[0]
+    assert chunks[0].text.endswith(".")
+    assert "first sentence" in chunks[0].text
 
 
 def test_dynamic_no_punctuation():
@@ -668,7 +681,7 @@ def test_dynamic_no_punctuation():
 
     # Verify that chunks are split strictly by the target character length without punctuation snapping
     assert len(chunks) > 1
-    assert chunks[0] == text[:target_size]
+    assert chunks[0].text == text[:target_size]
 
 
 def test_dynamic_single_chunk():
@@ -679,7 +692,7 @@ def test_dynamic_single_chunk():
     chunks = chunk_text_dynamic(text, target_size=100)
 
     assert len(chunks) == 1
-    assert chunks[0] == text
+    assert chunks[0].text == text
 
 
 def test_sentence_boundary_empty_text():

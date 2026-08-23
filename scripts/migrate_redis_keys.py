@@ -26,7 +26,7 @@ import argparse
 import logging
 import os
 import sys
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 
 from src.utils.redis_cache import CacheNamespace
 

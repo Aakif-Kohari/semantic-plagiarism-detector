@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import io
 import ipaddress
 import logging
@@ -21,7 +22,6 @@ logger = logging.getLogger(__name__)
 
 import defusedxml
 
-from src.core.parse_durations import record_parse_duration
 from src.core.parsers.text_parser import (
     RTF_MAX_FILE_SIZE_BYTES,
     _rtf_content_within_limit,
@@ -54,17 +54,12 @@ import unicodedata
 
 from src.core.translator import translate_text
 from src.errors import EmptyDocumentError
+from src.core.parsers.docx_parser import ParsedDocxText
 
 # OCR dependencies are imported lazily so TXT/DOCX and normal text PDFs still
 # work even when Tesseract is not installed on the machine.
 PDFInput = Union[str, bytes, io.BytesIO, BinaryIO]
 
-
-class ParsedDocxText(str):
-    def __new__(cls, value, word_headings=None):
-        obj = super().__new__(cls, value)
-        obj.word_headings = word_headings or []
-        return obj
 
 
 MIN_NATIVE_WORDS_PER_PAGE = 8
@@ -217,6 +212,7 @@ ENGLISH_STOPWORDS = frozenset(
 )
 
 
+@functools.lru_cache(maxsize=1)
 def load_custom_stopwords(file_path: Optional[str] = None) -> frozenset:
     """Load custom domain-specific stopwords from a text file (one word per line).
 
@@ -522,18 +518,20 @@ _BIBLIOGRAPHY_HEADERS = re.compile(
 
 
 def strip_bibliography(text: str) -> str:
-    """Remove everything from the first bibliography header onward.
+    """Remove everything from the first standalone bibliography header onward.
 
     The header must appear on its own line (standalone) to avoid stripping
     body text that merely mentions the word "References".
     """
-    match = _BIBLIOGRAPHY_HEADERS.search(text)
+    structured_headings = getattr(text, "headings", None)
+    plain_text = text.text if isinstance(text, ParsedDocxText) else text
+    match = _BIBLIOGRAPHY_HEADERS.search(plain_text)
     if match:
-        sliced_text = text[: match.start()].rstrip()
-        if hasattr(text, "word_headings"):
+        sliced_text = plain_text[: match.start()].rstrip()
+        if structured_headings is not None:
             words_in_sliced = len(sliced_text.split())
             return ParsedDocxText(
-                sliced_text, word_headings=text.word_headings[:words_in_sliced]
+                text=sliced_text, headings=structured_headings[:words_in_sliced]
             )
         return sliced_text
     return text
@@ -1396,7 +1394,7 @@ def extract_text_from_docx(file: PDFInput) -> str:
                         word_headings.extend([current_heading] * len(p_words))
 
         full_text = "\n\n".join(paragraphs_text)
-        return ParsedDocxText(full_text.strip(), word_headings=word_headings)
+        return ParsedDocxText(text=full_text.strip(), headings=word_headings)
     except (ValueError, KeyError, OSError) as exc:
         print(f"[document_parser] Error reading DOCX: {exc}")
     except Exception as exc:

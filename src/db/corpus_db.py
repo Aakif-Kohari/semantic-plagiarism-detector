@@ -27,9 +27,25 @@ from src.utils.filename import sanitize_filename
 logger = logging.getLogger(__name__)
 
 # Seed the corpus DB path from the centralized app_config.
+import atexit
+import weakref
 _DB_PATH = os.path.abspath(str(CORPUS_DB_PATH))
 
 _connection_pool = threading.local()
+_all_connections = set()
+_pool_lock = threading.Lock()
+
+
+def _cleanup_all_connections():
+    with _pool_lock:
+        for conn in _all_connections:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        _all_connections.clear()
+
+atexit.register(_cleanup_all_connections)
 
 
 class CorpusRepository(BaseRepository):
@@ -70,9 +86,7 @@ def _pool() -> dict[str, sqlite3.Connection]:
 
 @contextmanager
 def _connect():
-    """Open a connection for the duration of the operation and always close
-    it on exit (success, error, or exception) to avoid leaked file handles
-    under concurrent requests."""
+    """Open a connection for the duration of the operation or use pooled connection."""
     path = os.path.abspath(_DB_PATH)
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -82,6 +96,14 @@ def _connect():
 
     pool = _pool()
     conn = pool.get(path)
+    
+    # Check if the connection is closed. If so, discard it.
+    if conn is not None:
+        try:
+            conn.execute("SELECT 1")
+        except sqlite3.ProgrammingError:
+            conn = None
+
     if conn is None:
         try:
             conn = sqlite3.connect(path, check_same_thread=False)
@@ -92,6 +114,8 @@ def _connect():
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA journal_mode=WAL")
         pool[path] = conn
+        with _pool_lock:
+            _all_connections.add(conn)
 
     try:
         yield conn
@@ -99,19 +123,23 @@ def _connect():
     except Exception:
         conn.rollback()
         raise
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
 
 
 def close_connections(all_threads: bool = False) -> None:
     """Close all pooled corpus connections for the current thread (or all threads if specified)."""
-    pool = getattr(_connection_pool, "connections", {})
-    for conn in pool.values():
-        conn.close()
-    pool.clear()
+    if all_threads:
+        _cleanup_all_connections()
+        # Clear the local pool too just in case
+        pool = getattr(_connection_pool, "connections", {})
+        pool.clear()
+    else:
+        pool = getattr(_connection_pool, "connections", {})
+        for conn in pool.values():
+            try:
+                conn.close()
+            except Exception:
+                pass
+        pool.clear()
 
 
 def init_corpus_db() -> None:
@@ -274,6 +302,108 @@ def init_corpus_db() -> None:
             os.chmod(_DB_PATH, 0o600)
         except OSError:
             pass
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS system_metrics (
+                metric_name TEXT PRIMARY KEY,
+                metric_value INTEGER DEFAULT 0
+            )
+            """)
+        conn.execute("""
+            INSERT OR IGNORE INTO system_metrics (metric_name, metric_value)
+            VALUES ('total_scans', 0)
+            """)
+
+
+_in_memory_total_scans = 0
+
+
+def increment_total_scans() -> int:
+    """Increment the total scan count in Redis (if available) or SQLite system_metrics."""
+    # 1. Try Redis first
+    try:
+        from src.utils.redis_cache import get_cache
+        cache = get_cache()
+        if cache.is_available():
+            val = cache._client.incr("spd:v1:metrics:total_scans")
+            return int(val)
+    except Exception as e:
+        logger.warning(f"Failed to increment total_scans in Redis: {e}. Falling back to SQLite.")
+
+    # 2. Fallback to SQLite system_metrics table
+    try:
+        with _connect() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO system_metrics (metric_name, metric_value)
+                VALUES ('total_scans', 0)
+                """
+            )
+            conn.execute(
+                """
+                UPDATE system_metrics
+                SET metric_value = metric_value + 1
+                WHERE metric_name = 'total_scans'
+                """
+            )
+            conn.commit()
+            
+            row = conn.execute(
+                "SELECT metric_value FROM system_metrics WHERE metric_name = 'total_scans'"
+            )
+            res = row.fetchone()
+            if res:
+                return int(res[0])
+    except Exception as e:
+        logger.error(f"Failed to increment total_scans in SQLite: {e}")
+
+    # 3. Fallback to in-memory
+    global _in_memory_total_scans
+    _in_memory_total_scans += 1
+    return _in_memory_total_scans
+
+
+def get_total_scans() -> int:
+    """Get the total scan count from Redis (if available) or SQLite system_metrics."""
+    # 1. Try Redis first
+    try:
+        from src.utils.redis_cache import get_cache
+        cache = get_cache()
+        if cache.is_available():
+            val = cache._client.get("spd:v1:metrics:total_scans")
+            if val is not None:
+                return int(val)
+    except Exception as e:
+        logger.warning(f"Failed to get total_scans from Redis: {e}. Falling back to SQLite.")
+
+    # 2. Fallback to SQLite system_metrics table
+    try:
+        with _connect() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO system_metrics (metric_name, metric_value)
+                VALUES ('total_scans', 0)
+                """
+            )
+            row = conn.execute(
+                "SELECT metric_value FROM system_metrics WHERE metric_name = 'total_scans'"
+            )
+            res = row.fetchone()
+            if res:
+                val = int(res[0])
+                try:
+                    from src.utils.redis_cache import get_cache
+                    cache = get_cache()
+                    if cache.is_available():
+                        cache._client.set("spd:v1:metrics:total_scans", val)
+                except Exception:
+                    pass
+                return val
+    except Exception as e:
+        logger.error(f"Failed to get total_scans from SQLite: {e}")
+
+    # 3. Fallback to in-memory
+    return _in_memory_total_scans
 
 
 @with_sqlite_retry

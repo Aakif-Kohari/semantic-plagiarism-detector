@@ -28,6 +28,7 @@ from src.api.routers import (
 from src.version import APP_VERSION
 
 # Re-exports for backward compatibility with existing tests and scripts
+from src.api.routers.analysis import total_scans
 
 logger = logging.getLogger(__name__)
 
