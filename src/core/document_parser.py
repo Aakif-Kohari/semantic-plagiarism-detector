@@ -12,6 +12,7 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import time
 import xml.etree.ElementTree
 import zipfile
 from collections import Counter
@@ -55,6 +56,7 @@ import unicodedata
 from src.core.translator import translate_text
 from src.errors import EmptyDocumentError
 from src.core.parsers.docx_parser import ParsedDocxText
+from src.core.parse_durations import record_parse_duration
 
 # OCR dependencies are imported lazily so TXT/DOCX and normal text PDFs still
 # work even when Tesseract is not installed on the machine.
@@ -2003,7 +2005,55 @@ def extract_text(
     Raises:
         EmptyDocumentError: If the final extracted and cleaned text is empty.
     """
-    # ... [existing extraction logic for PDF, DOCX, TXT, etc.] ...
+    ocr_language, ocr_dpi = normalize_ocr_settings(
+        language=ocr_language,
+        dpi=ocr_dpi,
+    )
+
+    # Validate file type magic bytes first to prevent malicious file uploads
+    file_bytes = _read_pdf_bytes(file)
+    from src.security.mime_validator import validate_mime_type
+
+    if not validate_mime_type(file_bytes, filename):
+        logger.warning(
+            f"[document_parser] Security warning: Rejected file '{filename}' "
+            f"because its MIME type / magic bytes do not match its file extension."
+        )
+        return ""
+    file = file_bytes
+
+    extension = filename.rsplit(".", 1)[-1].lower()
+
+    _parse_start = time.perf_counter()
+
+    if extension == "pdf":
+        raw = extract_text_from_pdf(file, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
+    elif extension == "docx":
+        raw = extract_text_from_docx(file)
+    elif extension == "doc":
+        raw = extract_text_from_doc(file)
+    elif extension in ("md", "markdown", "mdown"):
+        raw = extract_text_from_md(file)
+    elif extension in ("zip", "7z", "tar", "gz"):
+        raw = extract_text_from_zip(file, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
+    elif extension == "rtf":
+        raw = extract_text_from_rtf(file)
+    elif extension == "epub":
+        raw = extract_text_from_epub(file)
+    elif extension in ("png", "jpg", "jpeg"):
+        raw = extract_text_from_image(file, ocr_language=ocr_language)
+    elif extension == "odt":
+        raw = extract_text_from_odt(file)
+    else:
+        raw = extract_text_from_txt(file)
+
+    _parse_elapsed = time.perf_counter() - _parse_start
+    record_parse_duration(filename, _parse_elapsed)
+    logger.info(
+        "[document_parser] Parsed '%s' in %.3f seconds.",
+        filename,
+        _parse_elapsed,
+    )
 
     raw = strip_bibliography(raw)
     raw = normalize_unicode_spaces(raw)
