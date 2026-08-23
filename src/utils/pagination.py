@@ -36,12 +36,7 @@ Recent Additions (Issue #3215):
   slow once a table (e.g. the incidents table) reaches tens of thousands of
   rows. Cursor pagination instead resumes from an opaque token derived from
   the last row of the previous page, so a query can use ``WHERE (sort_key)
-  > (cursor)`` instead of ``OFFSET n``.
-
-Recent Additions (Issue #3218):
-- ``PaginationPage.was_clamped`` records whether ``paginate_items`` had to
-  pull an out-of-range page number back into range, so API callers can tell
-  a genuine last-page response from a clamped one.  
+  > (cursor)`` instead of ``OFFSET n``.  
 """
 
 import base64
