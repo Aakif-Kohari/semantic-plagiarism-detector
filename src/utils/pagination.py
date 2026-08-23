@@ -279,7 +279,6 @@ class PaginationPage(Generic[T]):
         """Check if there is a previous page available."""
         return self.page > 1
 
-    
         """Get the next page number if available.
 
         Returns:
