@@ -535,7 +535,7 @@ def prepare_chunks_for_embedding(
     metadata: list[dict[str, object]] = []
 
     for chunk in chunks:
-        prepared = prepare_text_for_embedding(chunk)
+        prepared = prepare_text_for_embedding(chunk.text if hasattr(chunk, "text") else chunk)
         embedding_chunks.append(str(prepared["embedding_text"]))
         metadata.append(prepared)
 

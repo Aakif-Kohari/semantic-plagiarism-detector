@@ -169,6 +169,20 @@ def _render_preview():
             content = f.read()
         mime = {"json": "application/json", "markdown": "text/markdown", "html": "text/html", "text": "text/plain"}.get(fmt, "text/plain")
         st.download_button(f"⬇️ Download {fmt.upper()}", content, f"plagiarism_report.{fmt}", mime)
+        
+        from src.utils.badge_generator import has_pillow, generate_badge_png
+        if has_pillow():
+            try:
+                badge_bytes = generate_badge_png(
+                    student_name="Organization Report", 
+                    student_id=report.report_id, 
+                    originality_score=100.0 - (summary.get('average_similarity', 0) * 100)
+                )
+                st.download_button("🏅 Download PNG Badge", badge_bytes, "originality_badge.png", "image/png")
+            except Exception as e:
+                st.button("🏅 Download PNG Badge", disabled=True, help=f"Failed to generate badge: {e}")
+        else:
+            st.button("🏅 Download PNG Badge", disabled=True, help="Pillow is not installed")
     finally:
         os.unlink(temp_path)
 

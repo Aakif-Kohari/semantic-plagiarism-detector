@@ -105,9 +105,11 @@ def _get_connection(db_path: Optional[Path] = None):
 # ── Initialization ───────────────────────────────────────────────────────────
 
 
-def init_translation_cache() -> None:
-    """Create the translation cache table if it does not exist (Issue #1956 & #2985)."""
-    with _connect() as conn:
+def _ensure_translation_cache_schema(db_path: Path) -> None:
+    """Create the modern translation-cache schema at ``db_path`` if needed."""
+    db_path = Path(db_path)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(str(db_path)) as conn:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS translation_cache (
@@ -119,26 +121,31 @@ def init_translation_cache() -> None:
                 created_at TEXT NOT NULL,
                 last_accessed_at TEXT
             )
-        """
+            """
         )
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_translation_langs
             ON translation_cache(source_lang, target_lang)
-        """
+            """
         )
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_translation_created
             ON translation_cache(created_at)
-        """
+            """
         )
+
+
+def init_translation_cache() -> None:
+    """Create the translation cache table if it does not exist (Issue #1956 & #2985)."""
+    _ensure_translation_cache_schema(_CACHE_DB_PATH)
     logger.info("Translation cache initialized at %s", _CACHE_DB_PATH)
 
 
 def initialize_cache_db(db_path: Optional[Path] = None) -> None:
-    """Alias for init_translation_cache for consistency with new API."""
-    init_translation_cache()
+    """Initialize the modern cache schema at the requested database path."""
+    _ensure_translation_cache_schema(Path(db_path) if db_path is not None else _CACHE_DB_PATH)
 
 
 # ── Hashing Helpers ──────────────────────────────────────────────────────────
@@ -172,6 +179,117 @@ def _generate_hash(text: str, source_lang: str, target_lang: str) -> str:
     # Combine into a single payload
     payload = f"{normalized_source}|{normalized_target}|{normalized_text}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def migrate_legacy_cache(
+    legacy_db_path: Optional[Path] = None,
+    cache_db_path: Optional[Path] = None,
+) -> dict[str, int]:
+    """Migrate entries from ``legacy_translation_cache`` into ``translation_cache``.
+
+    The legacy cache uses ``_hash_text()`` and stores its source text in
+    ``foreign_text``. The modern cache uses ``_generate_hash()``, which includes
+    normalized source/target language codes in the cache key. This migration
+    deliberately recomputes the modern hash instead of reusing ``text_hash``.
+
+    Existing modern entries are left untouched so that a migration cannot
+    overwrite newer translations. The legacy table is preserved for rollback
+    and backward compatibility.
+
+    Args:
+        legacy_db_path: SQLite database containing ``legacy_translation_cache``.
+            Defaults to the configured corpus database.
+        cache_db_path: SQLite database containing ``translation_cache``.
+            Defaults to the modern translation-cache database.
+
+    Returns:
+        A summary with ``scanned``, ``migrated``, ``skipped``, and ``errors``
+        counts.
+    """
+    source_path = Path(legacy_db_path) if legacy_db_path is not None else Path(DB_PATH)
+    target_path = (
+        Path(cache_db_path) if cache_db_path is not None else _CACHE_DB_PATH
+    )
+
+    if not source_path.exists():
+        logger.info("Legacy translation cache database does not exist: %s", source_path)
+        return {"scanned": 0, "migrated": 0, "skipped": 0, "errors": 0}
+
+    _ensure_translation_cache_schema(target_path)
+
+    try:
+        with sqlite3.connect(str(source_path)) as legacy_conn:
+            legacy_conn.row_factory = sqlite3.Row
+            try:
+                rows = legacy_conn.execute(
+                    """
+                    SELECT text_hash, foreign_text, translated_text,
+                           source_lang, target_lang, created_at
+                    FROM legacy_translation_cache
+                    """
+                ).fetchall()
+            except sqlite3.Error as exc:
+                logger.error("Failed to read legacy translation cache: %s", exc)
+                return {"scanned": 0, "migrated": 0, "skipped": 0, "errors": 1}
+
+        stats = {"scanned": len(rows), "migrated": 0, "skipped": 0, "errors": 0}
+        now = datetime.utcnow().isoformat()
+
+        with sqlite3.connect(str(target_path)) as cache_conn:
+            for row in rows:
+                source_text = row["foreign_text"]
+                translated_text = row["translated_text"]
+                source_lang = (row["source_lang"] or "auto").strip().lower()
+                target_lang = (row["target_lang"] or "en").strip().lower()
+
+                if not source_text or not translated_text:
+                    stats["skipped"] += 1
+                    continue
+
+                source_hash = _generate_hash(source_text, source_lang, target_lang)
+                created_at = row["created_at"] or now
+                try:
+                    cursor = cache_conn.execute(
+                        """
+                        INSERT OR IGNORE INTO translation_cache
+                        (source_hash, source_text, source_lang, target_lang,
+                         translated_text, created_at, last_accessed_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            source_hash,
+                            source_text,
+                            source_lang,
+                            target_lang,
+                            translated_text,
+                            str(created_at),
+                            str(created_at),
+                        ),
+                    )
+                    if cursor.rowcount == 1:
+                        stats["migrated"] += 1
+                    else:
+                        stats["skipped"] += 1
+                except sqlite3.Error as exc:
+                    stats["errors"] += 1
+                    logger.error(
+                        "Failed to migrate legacy translation entry %s: %s",
+                        row["text_hash"],
+                        exc,
+                    )
+
+        logger.info(
+            "Legacy translation cache migration complete: scanned=%d migrated=%d "
+            "skipped=%d errors=%d",
+            stats["scanned"],
+            stats["migrated"],
+            stats["skipped"],
+            stats["errors"],
+        )
+        return stats
+    except sqlite3.Error as exc:
+        logger.error("Translation cache migration failed: %s", exc)
+        return {"scanned": 0, "migrated": 0, "skipped": 0, "errors": 1}
 
 
 # ── Core Cache Operations (Issue #1956 & #2985) ─────────────────────────────

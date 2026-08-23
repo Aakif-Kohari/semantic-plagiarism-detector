@@ -37,12 +37,19 @@ def get_google_auth_url() -> tuple[str, str]:
     redirect_uri = _get_redirect_uri()
     state = f"google_{secrets.token_urlsafe(16)}"
 
+    try:
+        from src.db.auth import store_sso_state
+        store_sso_state(state)
+    except Exception as e:
+        logger.warning(f"Failed to store Google SSO state parameter: {e}")
+
     query_params = {
         "response_type": "code",
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "scope": "email profile",
         "state": state,
+        "prompt": "select_account",
     }
 
     encoded_args = urllib.parse.urlencode(query_params)
@@ -51,8 +58,12 @@ def get_google_auth_url() -> tuple[str, str]:
     return url, state
 
 
-def exchange_google_code(code: str) -> tuple[SSOUserProfile | None, str | None]:
+def exchange_google_code(code: str, state: str | None = None) -> tuple[SSOUserProfile | None, str | None]:
     """Exchange code for access token and fetch user info."""
+    if state is not None:
+        if not verify_sso_state(state):
+            return None, "Invalid or expired SSO state parameter (CSRF protection failed)."
+
     _load_env()
     client_id = os.getenv("GOOGLE_CLIENT_ID")
     if not client_id:
@@ -120,6 +131,30 @@ def exchange_google_code(code: str) -> tuple[SSOUserProfile | None, str | None]:
     return profile, None
 
 
+def verify_sso_state(state: str) -> bool:
+    """Verify that the state parameter returned in the OAuth callback matches the stored value.
+
+    Args:
+        state: State token string returned from OAuth provider callback.
+
+    Returns:
+        bool: True if state is valid, unexpired, and not previously used; False otherwise.
+    """
+    if not state:
+        logger.warning("SSO state verification failed: Empty state parameter.")
+        return False
+
+    try:
+        from src.db.auth import validate_sso_state
+        is_valid = validate_sso_state(state)
+        if not is_valid:
+            logger.warning(f"CSRF protection: Invalid or expired SSO state parameter '{state}'")
+        return is_valid
+    except Exception as e:
+        logger.error(f"Error during SSO state verification: {e}")
+        return False
+
+
 def get_github_auth_url() -> tuple[str, str]:
     """Return the GitHub OAuth authorization URL and state."""
     _load_env()
@@ -128,6 +163,12 @@ def get_github_auth_url() -> tuple[str, str]:
         raise ValueError("GITHUB_CLIENT_ID environment variable is not configured")
     redirect_uri = _get_redirect_uri()
     state = f"github_{secrets.token_urlsafe(16)}"
+
+    try:
+        from src.db.auth import store_sso_state
+        store_sso_state(state)
+    except Exception as e:
+        logger.warning(f"Failed to store GitHub SSO state parameter: {e}")
 
     query_params = {
         "client_id": client_id,
@@ -142,8 +183,12 @@ def get_github_auth_url() -> tuple[str, str]:
     return url, state
 
 
-def exchange_github_code(code: str) -> tuple[SSOUserProfile | None, str | None]:
+def exchange_github_code(code: str, state: str | None = None) -> tuple[SSOUserProfile | None, str | None]:
     """Exchange code for access token and fetch user info."""
+    if state is not None:
+        if not verify_sso_state(state):
+            return None, "Invalid or expired SSO state parameter (CSRF protection failed)."
+
     _load_env()
     client_id = os.getenv("GITHUB_CLIENT_ID")
     if not client_id:

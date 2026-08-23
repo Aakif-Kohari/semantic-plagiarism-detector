@@ -10,9 +10,10 @@ content in side-by-side comparison views.
 
 from __future__ import annotations
 
+import functools
 import html
 import re
-from typing import Tuple
+from typing import Callable, Tuple
 
 from src.core.config import DEFAULT_DIFF_MIN_MATCH_LENGTH
 
@@ -35,6 +36,67 @@ def _tokenize(text: str) -> list[str]:
         The word tokens, in order.
     """
     return _WORD_RE.findall(text.lower())
+
+
+#: Vowels used by the fallback stemmer's consonant-doubling cleanup.
+_VOWELS = frozenset("aeiou")
+
+
+def _fallback_stem(token: str) -> str:
+    """Conservative Porter-style suffix stripper for when NLTK is unavailable.
+
+    Handles the regular English inflections that matter most for fuzzy
+    overlap (-s/-es, -ied/-ies, -ed, -ing) well enough to keep the feature
+    useful; it is deliberately *not* a full Porter implementation. Words of
+    three characters or fewer are returned untouched so short tokens and
+    acronyms are never mangled.
+    """
+    if len(token) <= 3:
+        return token
+
+    if token.endswith("ies") and len(token) > 4:
+        return token[:-3] + "y"
+    if token.endswith(("sses", "shes", "ches", "xes", "zes")):
+        return token[:-2]
+    if token.endswith("s") and not token.endswith("ss"):
+        candidate = token[:-1]
+        return candidate if len(candidate) >= 3 else token
+
+    for suffix in ("ing", "edly", "ed"):
+        if token.endswith(suffix) and len(token) - len(suffix) >= 3:
+            base = token[: -len(suffix)]
+            if not any(char in _VOWELS for char in base):
+                return token
+            # Undo the doubled final consonant ("running" -> "runn" -> "run"),
+            # except where doubling is part of the stem ("falling" -> "fall").
+            if (
+                len(set(base[-2:])) == 1
+                and base[-1] not in _VOWELS
+                and base[-1] not in ("l", "s", "z")
+            ):
+                base = base[:-1]
+            return base
+
+    return token
+
+
+@functools.lru_cache(maxsize=1)
+def _get_stem_function() -> Callable[[str], str]:
+    """Resolve the word-stemming function used by fuzzy overlap matching.
+
+    Prefers ``nltk.stem.PorterStemmer`` (NLTK is a core dependency) and falls
+    back to :func:`_fallback_stem` when NLTK cannot be imported, so enabling
+    stemming never crashes a minimal install.
+
+    Returns:
+        A callable mapping a lowercased word token to its stem.
+    """
+    try:
+        from nltk.stem import PorterStemmer  # type: ignore
+
+        return PorterStemmer().stem
+    except Exception:
+        return _fallback_stem
 
 
 def _covered_word_ranges(
@@ -117,6 +179,7 @@ def highlight_overlap(
     text_a: str,
     text_b: str,
     min_match_length: int = DEFAULT_DIFF_MIN_MATCH_LENGTH,
+    use_stemming: bool = False,
 ) -> Tuple[str, str]:
     """Highlight overlapping sequences between two text strings.
 
@@ -146,6 +209,13 @@ def highlight_overlap(
                          ``DEFAULT_DIFF_MIN_MATCH_LENGTH`` (4, overridable via
                          the env var of the same name). Values below 1 are
                          treated as 1.
+        use_stemming: When True, word tokens are reduced to their stems
+                      (Porter stemmer, with a built-in fallback) before
+                      matching, so tense and plural variations such as
+                      "analyzed" vs "analyzing" still highlight. Token
+                      positions are unchanged, so ``_apply_marks`` keeps
+                      wrapping each document's original characters.
+                      Defaults to False (exact lowercase matching).
 
     Returns:
         A tuple of two HTML strings (highlighted_a, highlighted_b) with
@@ -167,6 +237,27 @@ def highlight_overlap(
         True
         >>> "quick brown" in a and "quick brown" in b
         True
+
+        Tense changes evade exact matching but match once stemming is on:
+
+        >>> a, b = highlight_overlap(
+        ...     "students analyzed the data",
+        ...     "students analyzing the data",
+        ...     3,
+        ... )
+        >>> "<mark" in a or "<mark" in b
+        False
+
+        >>> a, b = highlight_overlap(
+        ...     "students analyzed the data",
+        ...     "students analyzing the data",
+        ...     3,
+        ...     use_stemming=True,
+        ... )
+        >>> "<mark" in a and "<mark" in b
+        True
+        >>> "analyzing" in b
+        True
     """
     if not text_a or not text_b:
         return html.escape(text_a or ""), html.escape(text_b or "")
@@ -180,6 +271,14 @@ def highlight_overlap(
     window = max(1, min_match_length)
     if len(words_a) < window or len(words_b) < window:
         return html.escape(text_a), html.escape(text_b)
+
+    if use_stemming:
+        # Stemming only rewrites token *values*; it never changes how many
+        # tokens there are, so the ranges computed below still line up with
+        # the original character positions that _apply_marks highlights.
+        stem = _get_stem_function()
+        words_a = [stem(word) for word in words_a]
+        words_b = [stem(word) for word in words_b]
 
     ngrams_a = {
         tuple(words_a[i : i + window]) for i in range(len(words_a) - window + 1)

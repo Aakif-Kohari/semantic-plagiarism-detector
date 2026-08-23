@@ -1,8 +1,8 @@
 """Versioned migrations for users.db."""
 
-from __future__ import annotations
-
+import inspect
 import sqlite3
+import sys
 
 from .common import column_exists, run_migrations
 
@@ -162,7 +162,7 @@ def migration_012_create_revoked_tokens_table(
         """)
 
 
-def migration_013_create_password_history_table(
+def migration_014_create_password_history_table(
     connection: sqlite3.Connection,
 ) -> None:
     """Create password_history table for tracking recent password hashes per user."""
@@ -180,7 +180,7 @@ def migration_013_create_password_history_table(
         """)
 
 
-def migration_014_add_must_change_password(
+def migration_015_add_must_change_password(
     connection: sqlite3.Connection,
 ) -> None:
     """Add must_change_password flag to force password reset on next login."""
@@ -210,7 +210,7 @@ def migration_013_add_user_status(
         """)
 
 
-def migration_015_add_audit_log_indexes(
+def migration_016_add_audit_log_indexes(
     connection: sqlite3.Connection,
 ) -> None:
     """Create indexes on security_audit_log(username) and security_audit_log(event_type)."""
@@ -224,24 +224,20 @@ def migration_015_add_audit_log_indexes(
         """)
 
 
-AUTH_MIGRATIONS = {
-    1: migration_001_create_users,
-    2: migration_002_add_onboarding_state,
-    3: migration_003_add_two_factor_fields,
-    4: migration_004_add_role_index,
-    5: migration_005_add_preferences,
-    6: migration_006_add_active_flag,
-    7: migration_007_add_theme_preference,
-    8: migration_008_create_security_audit_log,
-    9: migration_009_add_last_login_at,
-    10: migration_010_add_password_changed_at,
-    11: migration_011_add_version_column,
-    12: migration_012_create_revoked_tokens_table,
-    13: migration_013_add_user_status,
-    14: migration_013_create_password_history_table,
-    15: migration_014_add_must_change_password,
-    16: migration_015_add_audit_log_indexes,
-}
+def _discover_migrations() -> dict[int, callable]:
+    """Dynamically discover migration functions starting with 'migration_' sorted numerically."""
+    current_module = sys.modules[__name__]
+    migration_funcs = [
+        func
+        for name, func in inspect.getmembers(current_module, inspect.isfunction)
+        if name.startswith("migration_")
+    ]
+    # Sort by function name to ensure ascending numeric order (e.g. migration_001, migration_002, ...)
+    migration_funcs.sort(key=lambda f: f.__name__)
+    return {idx + 1: func for idx, func in enumerate(migration_funcs)}
+
+
+AUTH_MIGRATIONS = _discover_migrations()
 
 
 def _drop_column_if_exists(

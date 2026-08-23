@@ -746,7 +746,8 @@ def flag_plagiarism(
             if chunked_docs is not None and embeddings is not None:
                 sim_matrix = cosine_similarity(embeddings[doc_a], embeddings[doc_b])
                 idx_a, idx_b = np.unravel_index(np.argmax(sim_matrix), sim_matrix.shape)
-                chunk_text = chunked_docs[doc_a][idx_a]
+                chunk = chunked_docs[doc_a][idx_a]
+                chunk_text = chunk.text if hasattr(chunk, "text") else chunk
                 matched_length = len(chunk_text.split())
 
             flags.append(
