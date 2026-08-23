@@ -520,6 +520,120 @@ class DocumentsListResponse(PaginatedResponse[DocumentSchema]):
 
 
 # ============================================================================
+# Batch Analysis History Schemas
+# ============================================================================
+
+
+class BatchRunCreateResponse(BaseModel):
+    """Response schema for creating a batch analysis run."""
+
+    run_id: int = Field(..., description="Unique batch run identifier")
+    status: str = Field(..., description="Initial run status")
+    message: str = Field(..., description="Status description message")
+
+
+class BatchRunSummary(BaseModel):
+    """Compact schema for a batch run in list views."""
+
+    run_id: int = Field(..., description="Unique batch run identifier")
+    started_at: str = Field(..., description="ISO 8601 timestamp of run start")
+    completed_at: Optional[str] = Field(default=None, description="ISO 8601 timestamp of completion")
+    status: str = Field(..., description="Run status: running, completed, failed, cancelled")
+    trigger_source: str = Field(default="manual", description="What triggered the run")
+    documents_scanned: int = Field(default=0, description="Number of documents processed")
+    documents_flagged: int = Field(default=0, description="Number of documents flagged")
+    avg_similarity: float = Field(default=0.0, description="Average similarity score")
+    max_similarity: float = Field(default=0.0, description="Peak similarity score")
+    threshold_used: float = Field(default=0.75, description="Similarity threshold")
+    duration_ms: Optional[int] = Field(default=None, description="Run duration in milliseconds")
+    error_message: Optional[str] = Field(default=None, description="Error message if failed")
+    created_by: Optional[str] = Field(default=None, description="User who initiated the run")
+
+
+class BatchRunListResponse(BaseModel):
+    """Paginated list of batch runs."""
+
+    runs: List[BatchRunSummary] = Field(default_factory=list, description="List of batch runs")
+    page: int = Field(..., ge=1, description="Current page number")
+    per_page: int = Field(..., ge=1, description="Items per page")
+    total_items: int = Field(..., ge=0, description="Total number of runs")
+    total_pages: int = Field(..., ge=0, description="Total number of pages")
+    has_next: bool = Field(default=False, description="Whether there is a next page")
+    has_previous: bool = Field(default=False, description="Whether there is a previous page")
+
+
+class BatchDocumentResult(BaseModel):
+    """Schema for a single document result within a batch run."""
+
+    id: int = Field(..., description="Result record ID")
+    run_id: int = Field(..., description="Parent batch run ID")
+    document_name: str = Field(..., description="Document filename")
+    similarity_score: float = Field(default=0.0, description="Similarity score")
+    severity: str = Field(default="none", description="Severity level")
+    flagged: int = Field(default=0, description="Whether flagged (0 or 1)")
+    matched_docs: List[str] = Field(default_factory=list, description="Matched document names")
+    processing_ms: Optional[int] = Field(default=None, description="Processing time in ms")
+
+
+class BatchRunDetailResponse(BaseModel):
+    """Detailed response for a single batch run including documents."""
+
+    run: BatchRunSummary = Field(..., description="Batch run metadata")
+    documents: List[BatchDocumentResult] = Field(default_factory=list, description="Document results")
+    severity_distribution: Dict[str, int] = Field(default_factory=dict, description="Severity counts")
+
+
+class BatchTimelineEventResponse(BaseModel):
+    """Schema for a timeline event in the audit trail."""
+
+    event_id: int = Field(..., description="Event identifier")
+    run_id: Optional[int] = Field(default=None, description="Associated batch run")
+    event_type: str = Field(..., description="Event type classification")
+    severity: str = Field(default="info", description="Severity level")
+    message: str = Field(..., description="Human-readable event description")
+    metadata: Optional[Any] = Field(default=None, description="Additional event data")
+    created_at: str = Field(..., description="ISO 8601 timestamp")
+
+
+class BatchAlertResponse(BaseModel):
+    """Schema for an alert notification."""
+
+    alert_id: int = Field(..., description="Alert identifier")
+    run_id: Optional[int] = Field(default=None, description="Associated batch run")
+    alert_type: str = Field(..., description="Alert type classification")
+    title: str = Field(..., description="Alert title")
+    message: str = Field(..., description="Detailed alert message")
+    is_read: int = Field(default=0, description="Read status (0 or 1)")
+    created_at: str = Field(..., description="ISO 8601 timestamp")
+
+
+class BatchHistorySummaryResponse(BaseModel):
+    """Aggregated summary statistics for batch analysis history."""
+
+    total_runs: int = Field(default=0, description="Total number of batch runs")
+    completed_runs: int = Field(default=0, description="Successfully completed runs")
+    failed_runs: int = Field(default=0, description="Failed runs")
+    success_rate: float = Field(default=0.0, description="Success rate percentage")
+    total_documents_scanned: int = Field(default=0, description="Total documents scanned")
+    total_documents_flagged: int = Field(default=0, description="Total documents flagged")
+    avg_similarity: float = Field(default=0.0, description="Average similarity across runs")
+    avg_duration_ms: int = Field(default=0, description="Average run duration in ms")
+    last_run_at: Optional[str] = Field(default=None, description="Timestamp of most recent run")
+
+
+class BatchTrendDataResponse(BaseModel):
+    """Daily trend data point for analytics charts."""
+
+    scan_date: str = Field(..., description="Date (YYYY-MM-DD)")
+    total_runs: int = Field(default=0, description="Number of runs on this date")
+    total_docs_scanned: Optional[int] = Field(default=0, description="Documents scanned")
+    total_docs_flagged: Optional[int] = Field(default=0, description="Documents flagged")
+    avg_similarity: Optional[float] = Field(default=0.0, description="Average similarity")
+    peak_similarity: Optional[float] = Field(default=0.0, description="Peak similarity")
+    avg_duration_ms: Optional[float] = Field(default=0.0, description="Average duration in ms")
+
+
+# ============================================================================
 # Document Health Scoring Schemas
 # ============================================================================
 
@@ -725,13 +839,16 @@ __all__ = [
     'ClearDataResponse',
     'IncidentResponse',
     
-    # Errors
-    'ErrorResponse',
-    'create_error_response',
-    
-    # Async Jobs
-    'AsyncScanJobResponse',
-    'AsyncScanStatusResponse',
+    # Batch Analysis History
+    'BatchRunCreateResponse',
+    'BatchRunSummary',
+    'BatchRunListResponse',
+    'BatchDocumentResult',
+    'BatchRunDetailResponse',
+    'BatchTimelineEventResponse',
+    'BatchAlertResponse',
+    'BatchHistorySummaryResponse',
+    'BatchTrendDataResponse',
     
     # Document Health Scoring
     'HealthDimensionScore',
@@ -741,4 +858,12 @@ __all__ = [
     'HealthGateConfigResponse',
     'HealthGateCheckResponse',
     'HealthDimensionAvgResponse',
+    
+    # Errors
+    'ErrorResponse',
+    'create_error_response',
+    
+    # Async Jobs
+    'AsyncScanJobResponse',
+    'AsyncScanStatusResponse',
 ]

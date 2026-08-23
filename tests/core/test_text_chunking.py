@@ -125,6 +125,31 @@ def test_chunk_text_emoji_byte_length_enforced():
     for chunk in chunks:
         assert len(chunk.text.encode("utf-8")) <= 50
 
+
+
+
+def test_character_fallback_does_not_split_surrogate_pairs():
+    """Fallback chunking keeps explicit UTF-16 surrogate pairs intact."""
+    from src.core.text_chunking import _character_fallback_chunking
+
+    emoji = "\ud83d\ude80" * 20  # U+1F680 represented as a surrogate pair
+    chunks = _character_fallback_chunking(emoji, chunk_size=5, chunk_overlap=1, count_bytes=True)
+
+    assert chunks
+    for chunk in chunks:
+        assert not chunk.text.endswith("\ud83d")
+        assert not chunk.text.startswith("\ude80")
+
+
+def test_character_fallback_handles_surrogate_pair_larger_than_byte_limit():
+    """A surrogate pair remains intact even when it exceeds the byte limit."""
+    from src.core.text_chunking import _character_fallback_chunking
+
+    chunks = _character_fallback_chunking("\ud83d\ude80", chunk_size=1, chunk_overlap=0, count_bytes=True)
+
+    assert len(chunks) == 1
+    assert chunks[0].text == "\ud83d\ude80"
+
 def test_chunk_overlap_boundaries():
     """Verify consecutive chunks share the exact configured overlap substring."""
     # Use CJK text so chunking is character-based and overlap is a precise substring.

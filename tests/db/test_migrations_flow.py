@@ -579,3 +579,23 @@ class TestMigrationColumnDefaults:
             assert row == (0.0,)
         finally:
             conn.close()
+
+
+def test_auth_migrations_auto_discovered():
+    """Verify that AUTH_MIGRATIONS is dynamically discovered and sorted by numeric prefix (Issue #2999)."""
+    import inspect
+    from src.db.migrations import auth
+
+    funcs = [
+        f
+        for name, f in inspect.getmembers(auth, inspect.isfunction)
+        if name.startswith("migration_")
+    ]
+    assert len(auth.AUTH_MIGRATIONS) == len(funcs)
+    assert auth.AUTH_SCHEMA_VERSION == len(funcs)
+
+    for i in range(1, len(funcs) + 1):
+        assert i in auth.AUTH_MIGRATIONS
+        assert callable(auth.AUTH_MIGRATIONS[i])
+        assert auth.AUTH_MIGRATIONS[i].__name__.startswith(f"migration_{i:03d}")
+
