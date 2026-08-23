@@ -333,7 +333,7 @@ def detect_document_ai_probability(chunks: List[str]) -> Dict[str, Any]:
             "chunk_scores": [],
         }
 
-    chunk_scores = detect_ai_probability_batch(chunks)
+    chunk_scores = detect_ai_probability_batch([chunk.text if hasattr(chunk, "text") else chunk for chunk in chunks])
 
     return {
         "overall": (float(np.mean(chunk_scores)) if chunk_scores else 0.0),

@@ -37,6 +37,18 @@ uploads_total = Counter(
     labelnames=["status"],
 )
 
+cache_hits_total = Counter(
+    "spd_cache_hits_total",
+    "Total cache hits",
+    labelnames=["cache_type"],
+)
+
+cache_misses_total = Counter(
+    "spd_cache_misses_total",
+    "Total cache misses",
+    labelnames=["cache_type"],
+)
+
 # ── Gauges ─────────────────────────────────────────────────────────────────────
 
 corpus_size_gauge = Gauge(
@@ -67,6 +79,12 @@ pipeline_duration_seconds = Histogram(
     "Duration of each pipeline stage in seconds",
     labelnames=["stage"],
     buckets=(0.01, 0.05, 0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0),
+)
+
+spd_scan_duration_seconds = Histogram(
+    "spd_scan_duration_seconds",
+    "Scan stage duration in seconds",
+    ["stage"],
 )
 
 query_response_time_seconds = Histogram(

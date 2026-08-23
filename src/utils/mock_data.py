@@ -201,7 +201,7 @@ def generate_mock_data(
             chunk_rows = []
             for chunk_idx, (chunk_text, vec) in enumerate(zip(chunks, emb_array)):
                 vector_id = current_count + len(chunk_rows)
-                chunk_rows.append((vector_id, doc_name, chunk_idx, chunk_text, vec))
+                chunk_rows.append((vector_id, doc_name, chunk_idx, chunk_text.text, vec))
 
             if chunk_rows:
                 add_chunks(chunk_rows)

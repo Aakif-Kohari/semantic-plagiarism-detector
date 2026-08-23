@@ -243,7 +243,7 @@ class CrossLingualDetector:
 
         doc_chunks = {name: chunks for name, (_, chunks) in documents.items()}
         embeddings = {
-            doc_name: [self.embed_text(chunk) for chunk in chunks[:self.config.max_chunks_per_doc]]
+            doc_name: [self.embed_text(chunk.text if hasattr(chunk, "text") else chunk) for chunk in chunks[:self.config.max_chunks_per_doc]]
             for doc_name, chunks in doc_chunks.items()
         }
 

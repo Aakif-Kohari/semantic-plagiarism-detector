@@ -1,78 +1,6 @@
 """
 src/workers/task_queue.py
 -------------------------
-High-level interface for the distributed task queue.
-
-Wraps the low-level DB operations to provide a clean API for submitting
-and managing batch scanning jobs.
-"""
-
-import logging
-from typing import Dict, Any, Optional
-from src.db.task_db import (
-    initialize_task_db,
-    create_job,
-    get_job,
-    JobStatus
-)
-
-logger = logging.getLogger(__name__)
-
-
-class TaskQueue:
-    """Client interface for the task queue system."""
-    
-    def __init__(self, db_path: Optional[str] = None):
-        """Initialize the task queue client."""
-        self.db_path = db_path
-        initialize_task_db(db_path)
-        
-    def submit_batch_scan(
-        self, 
-        document_ids: list[str],
-        user_id: str,
-        priority: int = 0
-    ) -> str:
-        """Submit a new batch scanning job.
-        
-        Args:
-            document_ids: List of document IDs to scan.
-            user_id: ID of the user requesting the scan.
-            priority: Job priority (higher = sooner).
-            
-        Returns:
-            The unique job ID.
-        """
-        payload = {
-            "document_ids": document_ids,
-            "user_id": user_id,
-            "priority": priority,
-            "type": "batch_scan"
-        }
-        
-        job_id = create_job(payload, db_path=self.db_path)
-        logger.info("Submitted batch scan job %s for %d documents", 
-                   job_id, len(document_ids))
-        return job_id
-        
-    def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
-        """Get the current status and details of a job."""
-        job = get_job(job_id, db_path=self.db_path)
-        if not job:
-            return None
-            
-        # Parse JSON fields for the client
-        import json
-        if job.get("payload"):
-            job["payload"] = json.loads(job["payload"])
-        if job.get("result"):
-            job["result"] = json.loads(job["result"])
-            
-        return job
-
-"""
-src/workers/task_queue.py
--------------------------
 Thread-safe producer/consumer queue with retry logic and dead-letter
 handling (Issue #3146).
 
@@ -118,13 +46,17 @@ class TaskQueue:
         worker_id: str = "queue-orchestrator",
         max_retries: int = 3,
         poll_interval: float = 0.5,
+        db_path: Optional[str] = None,
     ) -> None:
         self._worker_id = worker_id
         self._max_retries = max_retries
         self._poll_interval = poll_interval
+        self.db_path = db_path
         self._queue: "queue.Queue[Optional[str]]" = queue.Queue()
         self._lock = threading.Lock()
         self._running = False
+        if db_path is not None:
+            task_db.initialize_task_db(Path(db_path))
 
     # ── Producer ──────────────────────────────────────────────
 
@@ -136,10 +68,30 @@ class TaskQueue:
     ) -> Dict[str, Any]:
         """Persist a new job to SQLite and signal the in-memory queue."""
         retries = max_retries if max_retries is not None else self._max_retries
-        job = task_db.create_job(payload, max_retries=retries)
+        job = task_db.create_job(payload, max_retries=retries, db_path=self.db_path)
         self._queue.put(job["id"])
         logger.info("Enqueued job %s (payload keys: %s)", job["id"], list(payload.keys()))
         return job
+
+    def submit_batch_scan(
+        self,
+        document_ids: list[str],
+        user_id: str,
+        priority: int = 0,
+    ) -> str:
+        """Submit a new batch scanning job."""
+        payload = {
+            "document_ids": document_ids,
+            "user_id": user_id,
+            "priority": priority,
+            "type": "batch_scan",
+        }
+        job = self.enqueue(payload)
+        return job["id"]
+
+    def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
+        """Get the current status and details of a job."""
+        return task_db.get_job(job_id, db_path=self.db_path)
 
     # ── Consumer ──────────────────────────────────────────────
 
@@ -153,7 +105,7 @@ class TaskQueue:
         except queue.Empty:
             # In-memory queue empty — poll SQLite directly (catches jobs
             # that were enqueued by another process / a previous run).
-            return task_db.claim_next_job(self._worker_id)
+            return task_db.claim_next_job(self._worker_id, db_path=self.db_path)
 
         if item is _SHUTDOWN:
             return None
@@ -161,27 +113,27 @@ class TaskQueue:
             # We got a job_id from the in-memory queue, but we still need
             # to atomically claim it from SQLite (another worker might
             # have grabbed it first).
-            job = task_db.claim_next_job(self._worker_id)
+            job = task_db.claim_next_job(self._worker_id, db_path=self.db_path)
             if job is not None:
                 return job
             # The job was already claimed by another worker; poll SQLite
             # for the next pending one.
-            return task_db.claim_next_job(self._worker_id)
+            return task_db.claim_next_job(self._worker_id, db_path=self.db_path)
         return None
 
     # ── Result handlers ───────────────────────────────────────
 
     def complete(self, job_id: str, result: Dict[str, Any]) -> None:
-        task_db.mark_completed(job_id, result)
+        task_db.mark_completed(job_id, result, db_path=self.db_path)
         logger.info("Job %s completed", job_id)
 
     def fail(self, job_id: str, error: str) -> None:
         """Mark a job as failed. Retries if attempts remain."""
-        task_db.mark_failed(job_id, error)
+        task_db.mark_failed(job_id, error, db_path=self.db_path)
         logger.warning("Job %s failed: %s", job_id, error[:200])
 
     def dead_letter(self, job_id: str, error: str) -> None:
-        task_db.mark_dead_letter(job_id, error)
+        task_db.mark_dead_letter(job_id, error, db_path=self.db_path)
         logger.error("Job %s moved to dead-letter: %s", job_id, error[:200])
 
     # ── Lifecycle ──────────────────────────────────────────────
@@ -194,9 +146,9 @@ class TaskQueue:
 
         Returns the number of jobs re-queued.
         """
-        stale = task_db.list_jobs(status="PROCESSING", limit=1000)
+        stale = task_db.list_jobs(status="PROCESSING", limit=1000, db_path=self.db_path)
         for job in stale:
-            task_db.mark_failed(job["id"], "Re-queued: stale PROCESSING job (worker crash)")
+            task_db.mark_failed(job["id"], "Re-queued: stale PROCESSING job (worker crash)", db_path=self.db_path)
         return len(stale)
 
     @property

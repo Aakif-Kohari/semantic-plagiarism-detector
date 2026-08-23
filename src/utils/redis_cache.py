@@ -17,7 +17,7 @@ import urllib.parse
 import zlib
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, List, Optional, Union
 
 # CacheKeyPrefix has been consolidated into CacheNamespace below
 
@@ -31,6 +31,11 @@ try:
     from src.core.app_config import REDIS_CACHE_TTL
 except ImportError:
     REDIS_CACHE_TTL = int(os.getenv("REDIS_CACHE_TTL", "3600"))
+
+try:
+    from src.version import APP_VERSION
+except ImportError:
+    APP_VERSION = "1.0.0"
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +107,7 @@ ANALYSIS_RESULTS_TTL = int(os.getenv("ANALYSIS_RESULTS_TTL", str(2 * 60 * 60))) 
 LOGIN_LOCKOUT_TTL = int(os.getenv("LOGIN_LOCKOUT_TTL", str(15 * 60)))  # 15 minutes for login lockout
 UPLOAD_RATE_TTL = int(os.getenv("UPLOAD_RATE_TTL", str(60 * 60)))  # 1 hour for upload rate limiting
 BADGE_TTL = int(os.getenv("BADGE_TTL", str(24 * 60 * 60)))  # 24 hours for badge buffer cache
+SCAN_JOBS_TTL = int(os.getenv("SCAN_JOBS_TTL", str(24 * 60 * 60)))  # 24 hours for scan jobs
 DEFAULT_TTL = int(os.getenv("DEFAULT_TTL", str(24 * 60 * 60)))  # 24 hours fallback for keys without explicit TTL
 
 
@@ -209,19 +215,20 @@ class PayloadCompressor:
 
 
 def normalize_cache_key_path(p: Any) -> str:
-    """Normalize path strings for cross-platform Redis cache keys (Issue #2939).
+    """Normalize path strings for cross-platform Redis cache keys (Issue #2939, #3028).
 
-    Uses pathlib.Path(p).as_posix() to convert backslashes (\) on Windows
-    to POSIX forward slashes (/) for cross-platform cache key compatibility.
+    Uses pathlib.Path(p).as_posix() explicitly whenever creating cache keys based on file paths
+    to convert backslashes (\) on Windows to POSIX forward slashes (/) for cross-platform
+    cache key compatibility.
     """
     if p is None:
         return ""
     if isinstance(p, Path):
         return p.as_posix()
     p_str = str(p)
-    if "\\" in p_str:
-        return Path(p_str).as_posix()
-    return p_str
+    if not p_str:
+        return ""
+    return Path(p_str).as_posix()
 
 
 class CacheNamespace(str, Enum):
@@ -231,11 +238,14 @@ class CacheNamespace(str, Enum):
     LOGIN_ATTEMPTS = "spd:v1:login_attempts"
     UPLOADS = "spd:v1:uploads"
     BADGES = "spd:v1:badges"
+    SCAN_JOBS = "spd:v1:scan_jobs"
+    CLUSTERING_JOBS = "spd:v1:clustering_jobs"
 
     def build_key(self, *parts: Any) -> str:
-        """Build a normalized Redis cache key using pathlib.Path(p).as_posix() for path components."""
+        """Build a normalized Redis cache key appending APP_VERSION and using pathlib.Path(p).as_posix() for path components."""
         normalized_parts = [normalize_cache_key_path(p) for p in parts]
-        return ":".join([self.value] + normalized_parts)
+        key_parts = [self.value, APP_VERSION] + [p for p in normalized_parts if p]
+        return ":".join(key_parts)
 
 
 CacheKeyPrefix = CacheNamespace
@@ -388,6 +398,18 @@ class RedisCache:
         except Exception:
             return False
 
+    def scan_keys(self, match: str) -> List[str]:
+        if not self.is_available():
+            return []
+        try:
+            raw_keys = list(self._client.scan_iter(match=match))
+            return [
+                k.decode("utf-8") if isinstance(k, bytes) else k for k in raw_keys
+            ]
+        except Exception as e:
+            logger.error(f"[RedisCache] Error scanning keys for pattern {match}: {e}")
+            return []
+
     def ping(self) -> tuple[bool, Optional[float]]:
         if self._client is None:
             return False, None
@@ -428,6 +450,24 @@ class RedisCache:
             return 0.0
         return (hits / total) * 100
 
+    def _inc_hits(self) -> None:
+        with self._lock:
+            self._hits += 1
+        try:
+            from src.core.metrics import cache_hits_total
+            cache_hits_total.labels(cache_type="redis").inc()
+        except Exception:
+            pass
+
+    def _inc_misses(self) -> None:
+        with self._lock:
+            self._misses += 1
+        try:
+            from src.core.metrics import cache_misses_total
+            cache_misses_total.labels(cache_type="redis").inc()
+        except Exception:
+            pass
+
     def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
         if self.is_available():
             try:
@@ -463,8 +503,7 @@ class RedisCache:
                         except Exception:
                             pass
                     else:
-                        with self._lock:
-                            self._hits += 1
+                        self._inc_hits()
                         return pickle.loads(decompressed)
                         
             except Exception as e:
@@ -472,12 +511,10 @@ class RedisCache:
 
         val = self._fallback_get(key)
         if val is not None:
-            with self._lock:
-                self._hits += 1
+            self._inc_hits()
             return val
 
-        with self._lock:
-            self._misses += 1
+        self._inc_misses()
         return None
 
     def delete(self, key: str) -> bool:
@@ -524,8 +561,7 @@ class RedisCache:
                         except Exception:
                             pass
                     else:
-                        with self._lock:
-                            self._hits += 1
+                        self._inc_hits()
                         return json.loads(decompressed.decode('utf-8'))
                         
             except Exception as e:
@@ -533,12 +569,10 @@ class RedisCache:
 
         val = self._fallback_get_json(key)
         if val is not None:
-            with self._lock:
-                self._hits += 1
+            self._inc_hits()
             return val
 
-        with self._lock:
-            self._misses += 1
+        self._inc_misses()
         return None
 
     def exists(self, key: str) -> bool:
@@ -715,6 +749,28 @@ def get_cached_badge(
     return _cache.get(cache_key)
 
 
+def cache_scan_job(
+    job_id: str,
+    data: dict,
+    ttl: Optional[int] = None,
+) -> bool:
+    """Store scan job status and results in Redis under spd:v1:scan_jobs:{job_id} with 24-hour TTL (Issue #3222)."""
+    cache_key = CacheNamespace.SCAN_JOBS.build_key(job_id)
+    return _cache.set_json(cache_key, data, ttl or SCAN_JOBS_TTL)
+
+
+def get_scan_job(job_id: str) -> Optional[dict]:
+    """Retrieve scan job status and results from Redis (Issue #3222)."""
+    cache_key = CacheNamespace.SCAN_JOBS.build_key(job_id)
+    return _cache.get_json(cache_key)
+
+
+def delete_scan_job(job_id: str) -> bool:
+    """Delete scan job from Redis (Issue #3222)."""
+    cache_key = CacheNamespace.SCAN_JOBS.build_key(job_id)
+    return _cache.delete(cache_key)
+
+
 def _cleanup_redis() -> None:
     if _cache:
         _cache.close()
@@ -766,30 +822,35 @@ def get_large_data(key: Union[str, Path]) -> Optional[Any]:
         return None
 
 
-def clear_large_data(key: str) -> None:
-    """Clear large data from cache."""
+def clear_large_data(key: Union[str, Path]) -> None:
+    """Clear large data from cache using normalized POSIX key paths (Issue #3028)."""
+    key_str = normalize_cache_key_path(key)
     try:
         cache = get_cache()
         if cache.is_available():
-            cache._client.delete(f"spd:v1:large:{key}")
+            cache._client.delete(f"spd:v1:large:{key_str}")
         else:
-            cache.fallback_cache.pop(f"spd:v1:large:{key}", None)
-        logger.debug(f"Cleared large data for key: {key}")
+            cache.fallback_cache.pop(f"spd:v1:large:{key_str}", None)
+        logger.debug(f"Cleared large data for key: {key_str}")
     except Exception as e:
-        logger.error(f"Failed to clear large data for key {key}: {e}")
+        logger.error(f"Failed to clear large data for key {key_str}: {e}")
 
 
-def clear_all_large_data(session_id: str) -> None:
-    """Clear all large data for a session using pipelined deletion."""
+def clear_all_large_data(session_id: Union[str, Path]) -> None:
+    """Clear all large data for a session using pipelined deletion and normalized POSIX path (Issue #3028)."""
+    sid_str = normalize_cache_key_path(session_id)
     try:
         cache = get_cache()
-        pattern = f"spd:v1:large:{session_id}:*"
+        patterns = [f"spd:v1:large:{sid_str}:*", f"spd:v1:large:{sid_str}/*"]
 
         if cache.is_available():
-            if hasattr(cache._client, "scan_iter"):
-                keys = list(cache._client.scan_iter(match=pattern, count=1000))
-            else:
-                keys = cache._client.keys(pattern)
+            keys = []
+            for pattern in patterns:
+                if hasattr(cache._client, "scan_iter"):
+                    keys.extend(list(cache._client.scan_iter(match=pattern, count=1000)))
+                else:
+                    keys.extend(cache._client.keys(pattern))
+            keys = list(set(keys))
             if keys:
                 pipeline = cache._client.pipeline()
                 chunk_size = 1000
@@ -798,9 +859,13 @@ def clear_all_large_data(session_id: str) -> None:
                     pipeline.delete(*chunk)
                 pipeline.execute()
         else:
-            keys_to_remove = [k for k in cache.fallback_cache.keys() if k.startswith(f"spd:v1:large:{session_id}:")]
+            prefixes = (f"spd:v1:large:{sid_str}:", f"spd:v1:large:{sid_str}/")
+            keys_to_remove = [
+                k for k in cache.fallback_cache.keys()
+                if any(k.startswith(p) for p in prefixes)
+            ]
             for key in keys_to_remove:
                 del cache.fallback_cache[key]
-        logger.debug(f"Cleared all large data for session: {session_id}")
+        logger.debug(f"Cleared all large data for session: {sid_str}")
     except Exception as e:
-        logger.error(f"Failed to clear all large data for session {session_id}: {e}")
+        logger.error(f"Failed to clear all large data for session {sid_str}: {e}")

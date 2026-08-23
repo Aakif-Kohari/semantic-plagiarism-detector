@@ -5,6 +5,7 @@ from src.utils.badge_generator import (
     generate_badge_pdf,
     generate_badge_png,
     generate_badge_svg,
+    has_reportlab,
     validate_hex_color,
 )
 from src.utils.redis_cache import CacheNamespace, RedisCache
@@ -56,6 +57,20 @@ def test_generate_badge_svg_default_font_size():
 def test_generate_badge_svg_custom_font_size():
     svg = generate_badge_svg(student_name="Alex", font_size=20)
     assert 'font-size="20"' in svg
+
+
+def test_has_reportlab():
+    from src.utils.badge_generator import SimpleDocTemplate
+
+    assert has_reportlab() == (SimpleDocTemplate is not None)
+
+
+def test_generate_badge_pdf_raises_when_reportlab_missing(monkeypatch):
+    import src.utils.badge_generator as bg
+
+    monkeypatch.setattr(bg, "SimpleDocTemplate", None)
+    with pytest.raises(ImportError, match="reportlab is required for PDF badge generation"):
+        bg.generate_badge_pdf()
 
 
 def test_generate_badge_png_and_caching():
@@ -120,3 +135,16 @@ def test_generate_badge_pdf_and_caching():
         student_id=student_id,
     )
     assert buf2.getvalue() == val1
+
+
+def test_generate_badge_png_uses_bundled_ttf_font():
+    """Verify generate_badge_png loads bundled TTF font from src/assets/fonts/."""
+    from pathlib import Path
+    fonts_dir = Path(__file__).parent.parent.parent / "src" / "assets" / "fonts"
+    assert (fonts_dir / "Roboto-Regular.ttf").exists() or (fonts_dir / "DejaVuSans.ttf").exists()
+
+    buf = generate_badge_png(student_name="Bundled Font Test", student_id="test_font_123")
+    val = buf.getvalue()
+    assert val.startswith(b"\x89PNG")
+    assert len(val) > 1000
+
