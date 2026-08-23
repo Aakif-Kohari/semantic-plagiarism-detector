@@ -303,6 +303,108 @@ def init_corpus_db() -> None:
         except OSError:
             pass
 
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS system_metrics (
+                metric_name TEXT PRIMARY KEY,
+                metric_value INTEGER DEFAULT 0
+            )
+            """)
+        conn.execute("""
+            INSERT OR IGNORE INTO system_metrics (metric_name, metric_value)
+            VALUES ('total_scans', 0)
+            """)
+
+
+_in_memory_total_scans = 0
+
+
+def increment_total_scans() -> int:
+    """Increment the total scan count in Redis (if available) or SQLite system_metrics."""
+    # 1. Try Redis first
+    try:
+        from src.utils.redis_cache import get_cache
+        cache = get_cache()
+        if cache.is_available():
+            val = cache._client.incr("spd:v1:metrics:total_scans")
+            return int(val)
+    except Exception as e:
+        logger.warning(f"Failed to increment total_scans in Redis: {e}. Falling back to SQLite.")
+
+    # 2. Fallback to SQLite system_metrics table
+    try:
+        with _connect() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO system_metrics (metric_name, metric_value)
+                VALUES ('total_scans', 0)
+                """
+            )
+            conn.execute(
+                """
+                UPDATE system_metrics
+                SET metric_value = metric_value + 1
+                WHERE metric_name = 'total_scans'
+                """
+            )
+            conn.commit()
+            
+            row = conn.execute(
+                "SELECT metric_value FROM system_metrics WHERE metric_name = 'total_scans'"
+            )
+            res = row.fetchone()
+            if res:
+                return int(res[0])
+    except Exception as e:
+        logger.error(f"Failed to increment total_scans in SQLite: {e}")
+
+    # 3. Fallback to in-memory
+    global _in_memory_total_scans
+    _in_memory_total_scans += 1
+    return _in_memory_total_scans
+
+
+def get_total_scans() -> int:
+    """Get the total scan count from Redis (if available) or SQLite system_metrics."""
+    # 1. Try Redis first
+    try:
+        from src.utils.redis_cache import get_cache
+        cache = get_cache()
+        if cache.is_available():
+            val = cache._client.get("spd:v1:metrics:total_scans")
+            if val is not None:
+                return int(val)
+    except Exception as e:
+        logger.warning(f"Failed to get total_scans from Redis: {e}. Falling back to SQLite.")
+
+    # 2. Fallback to SQLite system_metrics table
+    try:
+        with _connect() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO system_metrics (metric_name, metric_value)
+                VALUES ('total_scans', 0)
+                """
+            )
+            row = conn.execute(
+                "SELECT metric_value FROM system_metrics WHERE metric_name = 'total_scans'"
+            )
+            res = row.fetchone()
+            if res:
+                val = int(res[0])
+                try:
+                    from src.utils.redis_cache import get_cache
+                    cache = get_cache()
+                    if cache.is_available():
+                        cache._client.set("spd:v1:metrics:total_scans", val)
+                except Exception:
+                    pass
+                return val
+    except Exception as e:
+        logger.error(f"Failed to get total_scans from SQLite: {e}")
+
+    # 3. Fallback to in-memory
+    return _in_memory_total_scans
+
 
 @with_sqlite_retry
 def add_document(

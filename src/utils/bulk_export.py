@@ -614,8 +614,8 @@ def generate_bulk_reports_zip(
                     emb_a = embeddings[doc_a]
                     emb_b = embeddings[doc_b]
                     top_pairs = find_most_similar_chunks(
-                        chunked_docs[doc_a],
-                        chunked_docs[doc_b],
+                        [chunk.text for chunk in chunked_docs[doc_a]],
+                        [chunk.text for chunk in chunked_docs[doc_b]],
                         emb_a,
                         emb_b,
                         top_k=3,
