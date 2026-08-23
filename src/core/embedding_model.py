@@ -36,6 +36,7 @@ import torch.quantization
 from sentence_transformers import SentenceTransformer
 
 from src.exceptions import ModelInitializationError
+from src.core.text_chunking import ChunkString
 
 logger = logging.getLogger(__name__)
 
@@ -381,7 +382,10 @@ def embed_chunks(chunks: List[str], batch_size: int = 32) -> np.ndarray:
 
     # Process in explicit mini-batches to optimize memory utilization
     for i in range(0, total_chunks, batch_size):
-        batch = chunks[i : i + batch_size]
+        batch = [
+            chunk.text if isinstance(chunk, ChunkString) else chunk
+            for chunk in chunks[i : i + batch_size]
+        ]
 
         # Encode the current mini-batch
         # show_progress_bar=False keeps console clean in Streamlit

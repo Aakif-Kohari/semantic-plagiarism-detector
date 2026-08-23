@@ -1702,11 +1702,6 @@ def update_global_activity():
                     options=lang_options,
                     key=SessionKeys.LANG_SELECTOR,
                 )
-                st.selectbox(
-                    "🎨 Accent Color",
-                    options=["Indigo", "Emerald", "Crimson", "Amber"],
-                    key=SessionKeys.ACCENT_COLOR,
-                )
                 selected_lang_name = st.session_state.get(SessionKeys.LANG_SELECTOR, "English")
                 _lang_reverse = {v: k for k, v in _SUPPORTED_LANGUAGES.items()}
                 lang_code = _lang_reverse.get(selected_lang_name, "en")
@@ -2801,6 +2796,48 @@ def update_global_activity():
                     except Exception as exc:
                         drive_progress_bar.empty()
                         st.error(f"⚠️ Google Drive import failed: {exc}")
+    # ... [existing imports] ...
+
+# Issue #2926: Import file validator to prevent RAM spikes and malicious uploads
+from src.utils.file_validator import validate_upload
+
+# ... [existing code] ...
+
+        progress_bar = st.progress(0, text="Preparing files…")
+        raw_texts = {}
+        failed_documents = []
+        
+        for i, (name, uploaded_file) in enumerate(uploaded_files.items()):
+            try:
+                # Read the file bytes
+                file_bytes = uploaded_file.getvalue()
+                
+                # Issue #2926: Validate file size, extension, and magic bytes
+                # This provides immediate feedback and prevents passing massive
+                # or malicious files to the expensive extraction pipeline.
+                validation_result = validate_upload(file_bytes, name)
+                
+                if not validation_result.is_valid:
+                    logger.warning(
+                        "File validation failed for %s: %s", 
+                        name, validation_result.error_message
+                    )
+                    failed_documents.append({
+                        "filename": name,
+                        "error": validation_result.error_message,
+                        "type": validation_result.error_code
+                    })
+                    st.error(f"❌ **{name}**: {validation_result.error_message}")
+                    continue  # Skip to the next file
+                
+                # Proceed with text extraction only if validation passed
+                extracted = extract_text(
+                    _io.BytesIO(file_bytes), name, ocr_language=ocr_language, ocr_dpi=ocr_dpi
+                )
+                raw_texts[name] = extracted
+                
+            except EmptyDocumentError as ede:
+                # ... [existing empty document handling] ...
     if uploaded_files:
         for uploaded_file in uploaded_files:
             original_name = uploaded_file.name
@@ -2865,7 +2902,7 @@ def update_global_activity():
         for doc_name, chunks in chunked_docs.items():
             translated_chunked_docs[doc_name] = []
             for chunk in chunks:
-                prepared = prepare_text_for_embedding(chunk)
+                prepared = prepare_text_for_embedding(chunk.text if hasattr(chunk, "text") else chunk)
                 translated_chunked_docs[doc_name].append(prepared["embedding_text"])
         embeddings = embed_documents(translated_chunked_docs)
         sim_df = document_similarity_matrix(embeddings)
@@ -3418,8 +3455,8 @@ def update_global_activity():
                             current_theme = get_theme_name()
                             # Compute alignment using DP on sentence embeddings
                             alignment_map = align_semantic_sequences(
-                                chunks_a=chunks_a,
-                                chunks_b=chunks_b,
+                                chunks_a=[chunk.text for chunk in chunks_a],
+                                chunks_b=[chunk.text for chunk in chunks_b],
                                 embeddings_a=emb_a,
                                 embeddings_b=emb_b,
                             )
@@ -3531,19 +3568,6 @@ def update_global_activity():
     with tab_settings:
         update_page_title("Settings")
         st.subheader("⚙️ System Configuration")
-        st.selectbox(
-            "🎨 Accent Color",
-            options=["Indigo", "Emerald", "Crimson", "Amber"],
-            key="tab_settings_accent_color",
-            index=["Indigo", "Emerald", "Crimson", "Amber"].index(
-                st.session_state.get(SessionKeys.ACCENT_COLOR, "Indigo")
-                if st.session_state.get(SessionKeys.ACCENT_COLOR, "Indigo") in ["Indigo", "Emerald", "Crimson", "Amber"]
-                else "Indigo"
-            ),
-            on_change=lambda: st.session_state.update(
-                {SessionKeys.ACCENT_COLOR: st.session_state.get("tab_settings_accent_color", "Indigo")}
-            ),
-        )
         st.info(
             "👈 **Settings have been moved to the dedicated Settings page.** "
             "Please use the sidebar navigation to access system configuration, "
