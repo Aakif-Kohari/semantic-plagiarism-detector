@@ -13,7 +13,6 @@ Provides comprehensive URL validation including:
 - Strict MyPy type checking compliance (Issue #3250)
 """
 
-from __main__ import *  # type: ignore
 from __future__ import annotations
 
 import ipaddress

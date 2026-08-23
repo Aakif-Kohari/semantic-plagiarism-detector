@@ -49,6 +49,7 @@ def get_google_auth_url() -> tuple[str, str]:
         "redirect_uri": redirect_uri,
         "scope": "email profile",
         "state": state,
+        "prompt": "select_account",
     }
 
     encoded_args = urllib.parse.urlencode(query_params)
