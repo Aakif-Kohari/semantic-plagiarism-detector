@@ -1,4 +1,4 @@
-﻿"""
+"""
 tests/api/test_async_scan_progress.py
 -------------------------------------
 Tests for progress percentage and stage in AsyncScanStatusResponse and _process_scan_job (Issue #3224).

@@ -38,7 +38,6 @@ from src.core.embedding_model import embed_chunks, get_document_embedding
 from src.core.metrics import spd_scan_duration_seconds
 from src.core.similarity import (
     PLAGIARISM_THRESHOLD,
-    chunk_max_similarity,
     find_most_similar_chunks,
 )
 from src.core.text_chunking import chunk_document
