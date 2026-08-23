@@ -399,7 +399,8 @@ from src.core.embedding_model import _apply_dynamic_quantization
 class TestEmbeddingModelQuantization:
     """Test suite for INT8 dynamic quantization support."""
 
-    def test_apply_dynamic_quantization_modifies_linear_layers(self):
+    @patch("src.core.embedding_model._detect_device", return_value="cpu")
+    def test_apply_dynamic_quantization_modifies_linear_layers(self, mock_detect):
         """Verify that quantize_dynamic targets torch.nn.Linear layers."""
         mock_model = MagicMock()
         # Simulate a module structure
@@ -417,17 +418,17 @@ class TestEmbeddingModelQuantization:
     def test_dynamic_quantization_skips_mps(self, caplog):
         """MPS models must bypass dynamic INT8 quantization."""
         mock_model = MagicMock()
-        mock_model.device = "mps"
+        with patch("src.core.embedding_model._detect_device", return_value="mps"):
+            with patch("torch.quantization.quantize_dynamic") as mock_quantize:
+                with caplog.at_level("WARNING"):
+                    result = _apply_dynamic_quantization(mock_model)
 
-        with patch("torch.quantization.quantize_dynamic") as mock_quantize:
-            with caplog.at_level("WARNING"):
-                result = _apply_dynamic_quantization(mock_model)
+            assert result is mock_model
+            mock_quantize.assert_not_called()
+            assert "disabled on MPS" in caplog.text
 
-        assert result is mock_model
-        mock_quantize.assert_not_called()
-        assert "disabled on MPS" in caplog.text
-
-    def test_quantization_fallback_on_error(self, caplog):
+    @patch("src.core.embedding_model._detect_device", return_value="cpu")
+    def test_quantization_fallback_on_error(self, mock_detect, caplog):
         """If quantization fails, the original float32 model should be returned."""
         mock_model = MagicMock()
 
