@@ -151,6 +151,80 @@ def get_valid_tokens() -> Dict[str, List[str]]:
         )
         return {}
 
+def validate_bearer_tokens_config() -> None:
+    """Fail-fast validation of API_BEARER_TOKENS_MAPPING at startup (Issue #3015).
+
+    Parses the ``API_BEARER_TOKENS_MAPPING`` environment variable and raises
+    a fatal :class:`RuntimeError` if the JSON is malformed or has an invalid
+    structure. This prevents the server from starting with a broken security
+    configuration that would silently disable scoped token authentication.
+
+    This function should be called from the FastAPI lifespan / startup hook.
+    It is safe to call multiple times — the result is also cached in the
+    :func:`get_valid_tokens` LRU cache for runtime lookups.
+
+    Raises:
+        RuntimeError: If the JSON is malformed, not a JSON object, or
+                      contains unexpected types that would silently disable
+                      authentication.
+    """
+    tokens_json = os.getenv("API_BEARER_TOKENS_MAPPING", "")
+
+    if not tokens_json:
+        # Empty / unset is a valid state — means "JWT auth only".
+        logger.info("No static API tokens configured. Relying solely on JWT auth.")
+        return
+
+    try:
+        tokens_mapping = json.loads(tokens_json)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"API_BEARER_TOKENS_MAPPING contains malformed JSON: {exc}. "
+            f"Fix the environment variable or remove it to disable static tokens. "
+            f"Server refusing to start with broken security configuration."
+        ) from exc
+
+    if not isinstance(tokens_mapping, dict):
+        raise RuntimeError(
+            f"API_BEARER_TOKENS_MAPPING must be a JSON object (dict), "
+            f"got {type(tokens_mapping).__name__}. "
+            f"Server refusing to start with broken security configuration."
+        )
+
+    # Validate each entry — raise on structural issues that would silently
+    # disable authentication for configured tokens.
+    for token, scopes in tokens_mapping.items():
+        if not isinstance(token, str):
+            raise RuntimeError(
+                f"API_BEARER_TOKENS_MAPPING contains a non-string token key: "
+                f"{token!r} (type {type(token).__name__}). "
+                f"All keys must be strings. "
+                f"Server refusing to start with broken security configuration."
+            )
+
+        if not isinstance(scopes, list):
+            raise RuntimeError(
+                f"API_BEARER_TOKENS_MAPPING token '{token}' has non-list scopes: "
+                f"{scopes!r} (type {type(scopes).__name__}). "
+                f"Scopes must be a list of strings. "
+                f"Server refusing to start with broken security configuration."
+            )
+
+        for scope in scopes:
+            if not isinstance(scope, str):
+                raise RuntimeError(
+                    f"API_BEARER_TOKENS_MAPPING token '{token}' has a non-string "
+                    f"scope: {scope!r} (type {type(scope).__name__}). "
+                    f"All scopes must be strings. "
+                    f"Server refusing to start with broken security configuration."
+                )
+
+    # Pre-populate the LRU cache so runtime lookups are instant.
+    get_valid_tokens.cache_clear()
+    logger.info(
+        "API_BEARER_TOKENS_MAPPING validated successfully: %d static token(s) configured.",
+        len(tokens_mapping),
+    )
 
 async def verify_bearer_token(
     request: Request,
