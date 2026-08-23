@@ -28,6 +28,31 @@ def test_lexical_and_hybrid_cache_keys_are_distinct():
     assert lexical != hybrid
 
 
+def test_compute_hybrid_matrix_global_tfidf():
+    """Verify compute_hybrid_matrix computes TF-IDF in a single pass across documents (Issue #3002)."""
+    import numpy as np
+    import pandas as pd
+    from src.core.hybrid_scorer import HybridConfig, HybridScorer
+
+    scorer = HybridScorer(HybridConfig(alpha=0.0, lexical_method="tfidf"))
+    texts = {
+        "doc1": "machine learning and deep learning algorithms",
+        "doc2": "deep learning neural networks and algorithms",
+        "doc3": "totally unrelated recipe for baking chocolate cake",
+    }
+    doc_names = list(texts.keys())
+    sem_df = pd.DataFrame(np.eye(3), index=doc_names, columns=doc_names)
+    matrix = scorer.compute_hybrid_matrix(texts, semantic_matrix=sem_df)
+    assert isinstance(matrix, pd.DataFrame)
+    assert matrix.shape == (3, 3)
+    assert np.isclose(matrix.loc["doc1", "doc1"], 1.0)
+    assert np.isclose(matrix.loc["doc2", "doc2"], 1.0)
+    assert np.isclose(matrix.loc["doc3", "doc3"], 1.0)
+    # doc1 and doc2 should share high similarity, doc3 should have low similarity
+    assert matrix.loc["doc1", "doc2"] > matrix.loc["doc1", "doc3"]
+    assert matrix.loc["doc1", "doc2"] == matrix.loc["doc2", "doc1"]
+
+
 def test_hybrid_scorer_lru_cache_bounded_size():
     """Verify that HybridScorer._lexical_cache is bounded by LRUCache maxsize (Issue #3003)."""
     from src.core.hybrid_scorer import HybridConfig, HybridScorer, LRUCache
