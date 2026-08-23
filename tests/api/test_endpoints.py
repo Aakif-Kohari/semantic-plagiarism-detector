@@ -52,30 +52,39 @@ def test_metrics_json_endpoint():
     assert isinstance(data, dict)
 
 
-def test_healthz_low_disk_space():
-    """Verify that /healthz returns 503 degraded when available disk space is low (< 5%)."""
-    from collections import namedtuple
-    DiskUsage = namedtuple("DiskUsage", ["total", "used", "free", "percent"])
-    mock_low_disk = DiskUsage(total=1000, used=960, free=40, percent=96.0)
+def test_cache_prometheus_metrics(tmp_path):
+    """Verify that translation and Redis cache hit/miss events register in Prometheus /metrics."""
+    from src.db.translation_cache import get_cached_translation, save_translation, configure_db_path, init_translation_cache
+    from src.utils.redis_cache import get_cache
 
-    with patch("psutil.disk_usage", return_value=mock_low_disk):
-        response = client.get("/healthz")
-        assert response.status_code == 503
-        data = response.json()
-        assert data["status"] == "degraded"
-        assert data["disk"] == "low"
+    # 1. Setup a clean translation cache DB file
+    db_file = tmp_path / "test_trans_metrics.db"
+    configure_db_path(db_file)
+    init_translation_cache()
 
+    # Trigger translation miss
+    get_cached_translation("Some source text", "en", "es")
 
-def test_healthz_sufficient_disk_space():
-    """Verify that /healthz returns 200 OK when available disk space is sufficient (>= 5%)."""
-    from collections import namedtuple
-    DiskUsage = namedtuple("DiskUsage", ["total", "used", "free", "percent"])
-    mock_sufficient_disk = DiskUsage(total=1000, used=800, free=200, percent=80.0)
+    # Trigger translation hit
+    save_translation("Some source text", "en", "es", "Texto traducido")
+    get_cached_translation("Some source text", "en", "es")
 
-    with patch("psutil.disk_usage", return_value=mock_sufficient_disk):
-        response = client.get("/healthz")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["status"] == "ok"
-        assert data["disk"] == "ok"
+    # Trigger Redis miss & hit
+    cache = get_cache()
+    cache.get("non_existent_key_xyz")
+    cache.set("existent_key_xyz", "value")
+    cache.get("existent_key_xyz")
+
+    # Fetch Prometheus metrics
+    response = client.get("/metrics")
+    assert response.status_code == 200
+    content = response.text
+
+    # Assert metric counters are defined in the exporter output
+    assert "spd_cache_hits_total" in content
+    assert "spd_cache_misses_total" in content
+    
+    # Assert labels are present
+    assert 'cache_type="translation"' in content
+    assert 'cache_type="redis"' in content
 

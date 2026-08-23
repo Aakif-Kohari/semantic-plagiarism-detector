@@ -254,6 +254,13 @@ def get_cached_translation(
                     logger.debug(
                         "Cache hit for translation: %s -> %s", source_lang, target_lang
                     )
+                    global cache_hits
+                    cache_hits += 1
+                    try:
+                        from src.core.metrics import cache_hits_total
+                        cache_hits_total.labels(cache_type="translation").inc()
+                    except Exception:
+                        pass
                     return row["translated_text"]
             else:
                 with _connect(db_path) as new_conn:
@@ -280,8 +287,22 @@ def get_cached_translation(
                         logger.debug(
                             "Cache hit for translation: %s -> %s", source_lang, target_lang
                         )
+                        global cache_hits
+                        cache_hits += 1
+                        try:
+                            from src.core.metrics import cache_hits_total
+                            cache_hits_total.labels(cache_type="translation").inc()
+                        except Exception:
+                            pass
                         return row["translated_text"]
 
+            global cache_misses
+            cache_misses += 1
+            try:
+                from src.core.metrics import cache_misses_total
+                cache_misses_total.labels(cache_type="translation").inc()
+            except Exception:
+                pass
             return None
 
     except sqlite3.Error as exc:
