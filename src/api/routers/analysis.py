@@ -28,6 +28,7 @@ from src.api.dependencies import (
     verify_bearer_token,
 )
 from src.api.schemas import (
+    AsyncScanJobCancelResponse,
     AsyncScanJobResponse,
     AsyncScanStatusResponse,
     ErrorResponse,
@@ -61,7 +62,7 @@ def _process_scan_job(
     threshold: float,
     top_k: int,
 ) -> None:
-    if job_id not in scan_jobs:
+    if job_id not in scan_jobs or scan_jobs[job_id].get("status") == "cancelled":
         if isinstance(file_input, (str, os.PathLike)) and os.path.exists(file_input):
             try:
                 os.unlink(file_input)
@@ -69,15 +70,25 @@ def _process_scan_job(
                 pass
         return
 
+    def _is_cancelled() -> bool:
+        return scan_jobs.get(job_id, {}).get("status") == "cancelled"
+
     scan_jobs[job_id]["status"] = "processing"
 
     try:
+        if _is_cancelled():
+            return
+
         extracted_text = extract_text(file_input, filename)
         if not extracted_text.strip():
-            scan_jobs[job_id]["status"] = "failed"
-            scan_jobs[job_id][
-                "error"
-            ] = "Failed to extract readable text from the uploaded file."
+            if not _is_cancelled():
+                scan_jobs[job_id]["status"] = "failed"
+                scan_jobs[job_id][
+                    "error"
+                ] = "Failed to extract readable text from the uploaded file."
+            return
+
+        if _is_cancelled():
             return
 
         words = extracted_text.split()
@@ -87,7 +98,17 @@ def _process_scan_job(
         if not chunks:
             chunks = [extracted_text[:1000]]
 
-        uploaded_embeddings = embed_chunks(chunks)
+        if _is_cancelled():
+            return
+
+        uploaded_embeddings = embed_chunks(
+            chunks,
+            cancel_callback=_is_cancelled,
+        )
+
+        if _is_cancelled():
+            return
+
         doc_embedding = get_document_embedding(uploaded_embeddings)
         corpus_docs = get_corpus_documents_with_embeddings()
 
@@ -97,6 +118,9 @@ def _process_scan_job(
         uploaded_chunks_flagged = np.zeros(len(chunks), dtype=bool)
 
         for corpus_filename, corpus_data in corpus_docs.items():
+            if _is_cancelled():
+                return
+
             if corpus_filename == filename:
                 continue
 
@@ -157,6 +181,9 @@ def _process_scan_job(
                     }
                 )
 
+        if _is_cancelled():
+            return
+
         matched_documents.sort(
             key=lambda x: x["max_chunk_similarity_score"], reverse=True
         )
@@ -180,6 +207,8 @@ def _process_scan_job(
             "matched_documents": matched_documents,
         }
     except Exception as exc:
+        if _is_cancelled():
+            return
         scan_jobs[job_id]["status"] = "failed"
         scan_jobs[job_id]["error"] = str(exc)
     finally:
@@ -539,4 +568,34 @@ def get_async_scan_status(
         "completed_at": job.get("completed_at"),
         "result": job.get("result"),
         "error": job.get("error"),
+    }
+
+
+@router.delete(
+    "/api/v1/scan/jobs/{job_id}",
+    response_model=AsyncScanJobCancelResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        404: {"model": ErrorResponse, "description": "Not Found"},
+    },
+)
+def cancel_async_scan_job(
+    job_id: str,
+    _user: dict = Security(get_current_user, scopes=["write"]),
+):
+    """Cancel an active or queued asynchronous document scan job."""
+    if job_id not in scan_jobs:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Scan job '{job_id}' not found.",
+        )
+
+    scan_jobs[job_id]["status"] = "cancelled"
+    scan_jobs[job_id]["completed_at"] = datetime.now(timezone.utc).isoformat()
+    scan_jobs[job_id]["error"] = "Job was cancelled by user request."
+
+    return {
+        "job_id": job_id,
+        "status": "cancelled",
+        "message": f"Scan job '{job_id}' successfully cancelled.",
     }

@@ -464,6 +464,44 @@ def test_async_scan_empty_file_returns_400():
     assert "empty" in response.json()["detail"].lower()
 
 
+def test_cancel_async_scan_job_success():
+    """Verify DELETE /api/v1/scan/jobs/{job_id} cancels an async scan job."""
+    client = TestClient(app)
+
+    files = {"file": ("cancel_test.txt", b"Content for job cancellation test.")}
+    headers_write = {"Authorization": "Bearer test-write-token"}
+    headers_read = {"Authorization": "Bearer test-read-token"}
+
+    # 1. Enqueue job
+    post_res = client.post("/api/v1/scan/async", files=files, headers=headers_write)
+    assert post_res.status_code == 202
+    job_id = post_res.json()["job_id"]
+
+    # 2. Cancel job via DELETE /api/v1/scan/jobs/{job_id}
+    cancel_res = client.delete(f"/api/v1/scan/jobs/{job_id}", headers=headers_write)
+    assert cancel_res.status_code == 200
+    cancel_data = cancel_res.json()
+    assert cancel_data["job_id"] == job_id
+    assert cancel_data["status"] == "cancelled"
+
+    # 3. Verify status endpoint reports job as cancelled
+    status_res = client.get(f"/api/v1/scan/status/{job_id}", headers=headers_read)
+    assert status_res.status_code == 200
+    status_data = status_res.json()
+    assert status_data["status"] == "cancelled"
+    assert "cancelled" in status_data["error"].lower()
+
+
+def test_cancel_async_scan_job_invalid_id_returns_404():
+    """Verify DELETE /api/v1/scan/jobs/{job_id} returns 404 for unknown job IDs."""
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer test-write-token"}
+
+    response = client.delete("/api/v1/scan/jobs/nonexistent_job_123", headers=headers)
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"].lower()
+
+
 # ── Global Exception Handler Tests (#1500) ────────────────────────────────────
 
 import asyncio

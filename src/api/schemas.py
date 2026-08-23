@@ -451,12 +451,20 @@ class AsyncScanJobResponse(BaseModel):
     message: str = Field(..., description="Status description message")
 
 
+class AsyncScanJobCancelResponse(BaseModel):
+    """Response schema for cancelling an asynchronous document scan job."""
+
+    job_id: str = Field(..., description="Unique background scan job identifier")
+    status: str = Field(..., description="Updated job status (cancelled)")
+    message: str = Field(..., description="Cancellation confirmation message")
+
+
 class AsyncScanStatusResponse(BaseModel):
     """Response schema for checking the status of an asynchronous scan job."""
 
     job_id: str = Field(..., description="Unique background scan job identifier")
     status: str = Field(
-        ..., description="Current job status: queued, processing, completed, or failed"
+        ..., description="Current job status: queued, processing, completed, failed, or cancelled"
     )
     filename: str = Field(
         ..., description="Filename of uploaded document being scanned"
@@ -778,5 +786,6 @@ __all__ = [
     
     # Async Jobs
     'AsyncScanJobResponse',
+    'AsyncScanJobCancelResponse',
     'AsyncScanStatusResponse',
 ]
