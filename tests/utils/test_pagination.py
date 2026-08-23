@@ -808,3 +808,101 @@ class TestPaginationPageIndexFields:
         )
 
         assert first != second
+
+
+class TestPaginationPageWasClamped:
+    """``was_clamped`` distinguishes clamped requests from genuine ones (#3218).
+
+    ``paginate_items`` deliberately never raises for an out-of-range page,
+    which left API callers unable to tell "the user asked for the last page"
+    from "an out-of-range request was silently pulled back". The flag makes
+    that distinction visible on the returned page.
+    """
+
+    def make_page(self, **overrides):
+        """Build a page with sensible defaults and optional overrides."""
+        kwargs = dict(
+            items=[1, 2, 3],
+            page=1,
+            total_pages=2,
+            total_items=10,
+            per_page=5,
+        )
+        kwargs.update(overrides)
+        return PaginationPage(**kwargs)
+
+    def test_page_beyond_the_end_is_flagged(self):
+        page = paginate_items([1, 2, 3, 4, 5], page=9999, page_size=2)
+
+        assert page.page == 3
+        assert page.was_clamped is True
+
+    def test_page_zero_is_flagged(self):
+        page = paginate_items([1, 2, 3, 4, 5], page=0, page_size=2)
+
+        assert page.page == 1
+        assert page.was_clamped is True
+
+    def test_negative_page_is_flagged(self):
+        page = paginate_items([1, 2, 3, 4, 5], page=-7, page_size=2)
+
+        assert page.page == 1
+        assert page.was_clamped is True
+
+    def test_in_range_request_is_not_flagged(self):
+        page = paginate_items(list(range(23)), page=2, page_size=10)
+
+        assert page.page == 2
+        assert page.was_clamped is False
+
+    def test_last_page_requested_exactly_is_not_flagged(self):
+        page = paginate_items([1, 2, 3, 4, 5], page=3, page_size=2)
+
+        assert page.page == 3
+        assert page.was_clamped is False
+
+    def test_default_page_request_is_not_flagged(self):
+        page = paginate_items(list(range(50)))
+
+        assert page.page == 1
+        assert page.was_clamped is False
+
+    def test_non_numeric_page_coerces_without_a_clamp_flag(self):
+        # "abc" falls back to the default (a coercion), not a clamp.
+        page = paginate_items(list(range(23)), page="abc", page_size=10)
+
+        assert page.page == 1
+        assert page.was_clamped is False
+
+    def test_empty_sequence_with_out_of_range_page_is_flagged(self):
+        page = paginate_items([], page=5, page_size=10)
+
+        assert page.items == []
+        assert page.total_pages == 1
+        assert page.was_clamped is True
+
+    def test_field_defaults_to_false_for_direct_construction(self):
+        page = self.make_page()
+
+        assert page.was_clamped is False
+
+    def test_to_dict_exposes_the_flag(self):
+        clamped = paginate_items([], page=5, page_size=10).to_dict()
+        exact = paginate_items([], page=1, page_size=10).to_dict()
+
+        assert clamped["was_clamped"] is True
+        assert exact["was_clamped"] is False
+
+    def test_pages_differing_only_by_the_flag_are_unequal(self):
+        clamped = self.make_page(was_clamped=True)
+        plain = self.make_page()
+
+        assert clamped != plain
+
+    def test_hash_covers_the_flag_consistently_with_equality(self):
+        clamped = self.make_page(was_clamped=True)
+        plain = self.make_page()
+        same_clamp = self.make_page(was_clamped=True)
+
+        assert hash(clamped) != hash(plain)
+        assert hash(clamped) == hash(same_clamp)

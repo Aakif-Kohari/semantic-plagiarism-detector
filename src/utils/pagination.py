@@ -28,6 +28,11 @@ Recent Fixes (Issue #3045):
 - Restored the keyword-only ``page`` / ``page_size`` / ``max_page_size``
   contract that ``src/utils/warning_list.py`` calls, along with the
   ``_coerce_integer`` helper and the ``start_index`` / ``end_index`` fields.
+
+Recent Additions (Issue #3218):
+- ``PaginationPage.was_clamped`` records whether ``paginate_items`` had to
+  pull an out-of-range page number back into range, so API callers can tell
+  a genuine last-page response from a clamped one.
 """
 
 from dataclasses import dataclass, field
@@ -62,6 +67,9 @@ class PaginationPage(Generic[T]):
             page within the full sequence. ``0`` when the page is empty.
         end_index: One-based inclusive position of the last item on this
             page within the full sequence. ``0`` when the page is empty.
+        was_clamped: True when a helper had to adjust an out-of-range page
+            number to produce this page (Issue #3218). Pages built directly,
+            or sliced from an in-range request, are False.
 
     Recent Additions (Issue #1998):
         Custom __repr__ truncates large item lists for readability.
@@ -80,6 +88,7 @@ class PaginationPage(Generic[T]):
     per_page: int
     start_index: int = field(default=0)
     end_index: int = field(default=0)
+    was_clamped: bool = field(default=False)
 
     @property
     def page_size(self) -> int:
@@ -138,8 +147,9 @@ class PaginationPage(Generic[T]):
 
         Two PaginationPage instances are equal if and only if all their
         fields (items, page, total_pages, total_items, per_page, start_index,
-        end_index) are equal. This is automatically handled by the @dataclass
-        decorator when frozen=True, but we document it explicitly for clarity.
+        end_index, was_clamped) are equal. This is automatically handled by
+        the @dataclass decorator when frozen=True, but we document it
+        explicitly for clarity.
 
         Args:
             other: Another object to compare against.
@@ -163,6 +173,7 @@ class PaginationPage(Generic[T]):
             and self.per_page == other.per_page
             and self.start_index == other.start_index
             and self.end_index == other.end_index
+            and self.was_clamped == other.was_clamped
         )
 
     def __hash__(self) -> int:
@@ -193,6 +204,7 @@ class PaginationPage(Generic[T]):
                 self.per_page,
                 self.start_index,
                 self.end_index,
+                self.was_clamped,
             )
         )
 
@@ -293,6 +305,7 @@ class PaginationPage(Generic[T]):
             "per_page": self.per_page,
             "start_index": self.start_index,
             "end_index": self.end_index,
+            "was_clamped": self.was_clamped,
             "has_next": self.has_next(),
             "has_previous": self.has_previous(),
             "next_page": self.next_page(),
@@ -367,6 +380,12 @@ def paginate_items(
     * ``page`` is clamped into ``[1, total_pages]``, so a bookmarked
       ``?page=9999`` lands on the last page instead of an empty one.
 
+    The returned page carries ``was_clamped=True`` whenever that last rule
+    fired, so API callers can distinguish "the user really asked for the
+    last page" from "an out-of-range request was pulled back into range"
+    (Issue #3218). A non-numeric ``page`` is a coercion to the default, not
+    an out-of-range adjustment, and therefore leaves the flag False.
+
     Args:
         items: The full sequence to paginate. Not mutated.
         page: One-based page number requested by the caller.
@@ -383,6 +402,10 @@ def paginate_items(
         [5]
         >>> paginate_items([1, 2, 3, 4, 5], page=9999, page_size=2).page
         3
+        >>> paginate_items([1, 2, 3, 4, 5], page=9999, page_size=2).was_clamped
+        True
+        >>> paginate_items([1, 2, 3, 4, 5], page=2, page_size=2).was_clamped
+        False
         >>> paginate_items([], page=1, page_size=10).total_pages
         1
     """
@@ -395,6 +418,7 @@ def paginate_items(
     total_pages = max(1, -(-total_items // safe_page_size))
 
     safe_page = _coerce_integer(page, 1)
+    was_clamped = safe_page < 1 or safe_page > total_pages
     safe_page = min(max(1, safe_page), total_pages)
 
     start = (safe_page - 1) * safe_page_size
@@ -414,4 +438,5 @@ def paginate_items(
         per_page=safe_page_size,
         start_index=start_index,
         end_index=end_index,
+        was_clamped=was_clamped,
     )
