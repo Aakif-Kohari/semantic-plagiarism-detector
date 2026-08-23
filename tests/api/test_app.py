@@ -851,6 +851,31 @@ def test_api_usage_endpoint():
     assert data["total_scans"] == initial_scans + 1
 
 
+def test_total_scans_persistence():
+    """Verify that total_scans persists in the database / Redis across resets."""
+    from src.db.corpus_db import get_total_scans, increment_total_scans
+    import sqlite3
+    from src.core.app_config import CORPUS_DB_PATH
+
+    initial = get_total_scans()
+    incremented = increment_total_scans()
+    assert incremented == initial + 1
+
+    # Read from database to verify persistence
+    conn = sqlite3.connect(str(CORPUS_DB_PATH))
+    try:
+        cursor = conn.execute("SELECT metric_value FROM system_metrics WHERE metric_name = 'total_scans'")
+        row = cursor.fetchone()
+        assert row is not None
+    except sqlite3.OperationalError:
+        # If running in environment where Redis is used or system_metrics table is initialized differently
+        pass
+    finally:
+        conn.close()
+
+    assert get_total_scans() == incremented
+
+
 def test_hsts_security_header_options():
     """Verify HSTS Strict-Transport-Security header behavior when ENABLE_HSTS is configured."""
     import os

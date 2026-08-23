@@ -71,7 +71,7 @@ def get_api_usage(request: Request):
 
     uptime = time.time() - START_TIME
     return {
-        "total_scans": total_scans,
+        "total_scans": int(total_scans),
         "uptime_seconds": float(uptime),
     }
 

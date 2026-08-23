@@ -51,7 +51,64 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Plagiarism Detection"])
 
-total_scans = 0
+class TotalScansCounter:
+    def __int__(self):
+        from src.db.corpus_db import get_total_scans
+        return get_total_scans()
+
+    def __index__(self):
+        from src.db.corpus_db import get_total_scans
+        return get_total_scans()
+
+    def __repr__(self):
+        from src.db.corpus_db import get_total_scans
+        return str(get_total_scans())
+
+    def __str__(self):
+        from src.db.corpus_db import get_total_scans
+        return str(get_total_scans())
+
+    def __add__(self, other):
+        from src.db.corpus_db import get_total_scans
+        return get_total_scans() + other
+
+    def __radd__(self, other):
+        from src.db.corpus_db import get_total_scans
+        return other + get_total_scans()
+
+    def __iadd__(self, other):
+        from src.db.corpus_db import increment_total_scans
+        for _ in range(other):
+            increment_total_scans()
+        return self
+
+    def __eq__(self, other):
+        from src.db.corpus_db import get_total_scans
+        if hasattr(other, "__int__"):
+            return get_total_scans() == int(other)
+        return get_total_scans() == other
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __lt__(self, other):
+        from src.db.corpus_db import get_total_scans
+        return get_total_scans() < other
+
+    def __le__(self, other):
+        from src.db.corpus_db import get_total_scans
+        return get_total_scans() <= other
+
+    def __gt__(self, other):
+        from src.db.corpus_db import get_total_scans
+        return get_total_scans() > other
+
+    def __ge__(self, other):
+        from src.db.corpus_db import get_total_scans
+        return get_total_scans() >= other
+
+
+total_scans = TotalScansCounter()
 scan_jobs: Dict[str, Dict[str, Any]] = {}
 
 
