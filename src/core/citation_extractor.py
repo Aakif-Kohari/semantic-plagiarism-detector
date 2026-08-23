@@ -1,6 +1,117 @@
 """
 src/core/citation_extractor.py
 ------------------------------
+Automated Citation Extraction Engine.
+
+Parses bibliography sections from extracted document text using regex
+and NLP heuristics. Supports APA and MLA formats to identify cited works,
+enabling the detection of citation laundering and shared bibliography rings.
+"""
+
+import re
+import logging
+from typing import List, Dict, Any, Set
+from dataclasses import dataclass, asdict
+
+logger = logging.getLogger(__name__)
+
+@dataclass
+class Citation:
+    """Represents a single parsed citation."""
+    raw_text: str
+    authors: str
+    year: str
+    title: str
+    source: str
+    format_detected: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    def get_normalized_key(self) -> str:
+        """Generate a normalized key for graph node matching."""
+        # Combine first author, year, and first 5 words of title
+        title_words = "_".join(self.title.lower().split()[:5])
+        return f"{self.authors.lower().split(',')[0]}_{self.year}_{title_words}"
+
+
+# Regex patterns for common citation formats
+# APA: Author, A. A. (Year). Title of work. Source.
+APA_PATTERN = re.compile(
+    r'^(?P<authors>[A-Z][a-z]+(?:,\s*[A-Z]\.?\s*(?:&\s*[A-Z][a-z]+)*)*)\s*'
+    r'\((?P<year>\d{4})\)\.\s*'
+    r'(?P<title>[^.]+)\.\s*'
+    r'(?P<source>.+)$',
+    re.MULTILINE
+)
+
+# MLA: Author. "Title." Source, Year.
+MLA_PATTERN = re.compile(
+    r'^(?P<authors>[A-Z][a-z]+(?:,\s*[A-Z][a-z]+)*)\.\s*'
+    r'"(?P<title>[^"]+)"\s*'
+    r'(?P<source>[^,]+),\s*'
+    r'(?P<year>\d{4})',
+    re.MULTILINE
+)
+
+
+def extract_citations(text: str) -> List[Citation]:
+    """Parse the bibliography section of a document.
+    
+    Args:
+        text: The raw text of the bibliography/references section.
+        
+    Returns:
+        A list of Citation objects.
+    """
+    if not text:
+        return []
+
+    citations = []
+    
+    # Try APA format first
+    for match in APA_PATTERN.finditer(text):
+        citations.append(Citation(
+            raw_text=match.group(0).strip(),
+            authors=match.group('authors').strip(),
+            year=match.group('year').strip(),
+            title=match.group('title').strip(),
+            source=match.group('source').strip(),
+            format_detected="APA"
+        ))
+        
+    # If APA didn't find much, try MLA
+    if len(citations) < 2:
+        mla_citations = []
+        for match in MLA_PATTERN.finditer(text):
+            mla_citations.append(Citation(
+                raw_text=match.group(0).strip(),
+                authors=match.group('authors').strip(),
+                year=match.group('year').strip(),
+                title=match.group('title').strip(),
+                source=match.group('source').strip(),
+                format_detected="MLA"
+            ))
+        if len(mla_citations) > len(citations):
+            citations = mla_citations
+
+    logger.info("Extracted %d citations from text.", len(citations))
+    return citations
+
+
+def compute_jaccard_similarity(set_a: Set[str], set_b: Set[str]) -> float:
+    """Compute the Jaccard similarity between two sets of citation keys."""
+    if not set_a and not set_b:
+        return 1.0
+    intersection = len(set_a.intersection(set_b))
+    union = len(set_a.union(set_b))
+    if union == 0:
+        return 0.0
+    return intersection / union
+
+"""
+src/core/citation_extractor.py
+------------------------------
 Bibliography parser and citation extraction engine.
 
 Extracts structured citation data (author, year, title) from raw
