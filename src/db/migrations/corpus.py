@@ -93,16 +93,18 @@ def migration_004_add_plagiarism_incidents(
         """)
 
 
-def migration_005_add_false_positives(cursor):
+def migration_005_add_false_positives(
+    connection: sqlite3.Connection,
+) -> None:
     """Adds a table to track dismissed false-positive plagiarism pairs."""
-    cursor.execute("""
+    connection.execute("""
         CREATE TABLE IF NOT EXISTS false_positives (
             document_a TEXT,
             document_b TEXT,
             date_dismissed TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (document_a, document_b)
         )
-    """)
+        """)
 
 
 def migration_006_add_incident_threshold_snapshot(
@@ -256,7 +258,7 @@ def migration_012_add_fts5_index(
         """)
 
 
-def migration_013_add_incident_severity_idx(
+def migration_014_add_incident_severity_idx(
     connection: sqlite3.Connection,
 ) -> None:
     """Add index on severity_rank and date_flagged to speed up
@@ -374,7 +376,7 @@ CORPUS_MIGRATIONS = {
     11: migration_011_add_documents_created_at_index,
     12: migration_012_add_fts5_index,
     13: migration_013_add_incident_archive_table,
-    14: migration_013_add_incident_severity_idx,
+    14: migration_014_add_incident_severity_idx,
     15: migration_015_pattern_recognition,
 }
 
