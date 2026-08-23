@@ -130,8 +130,8 @@ def _process_scan_job(
                 severity = "🔴 High" if combined_score >= 0.90 else "🟡 Medium"
 
                 similar_chunks = find_most_similar_chunks(
-                    chunks_a=chunks,
-                    chunks_b=c_chunks,
+                    chunks_a=[chunk.text for chunk in chunks],
+                    chunks_b=[chunk.text for chunk in c_chunks],
                     emb_a=uploaded_embeddings,
                     emb_b=c_embeddings,
                     top_k=top_k,
@@ -255,7 +255,7 @@ async def scan_document(
     top_k: int = Query(
         default=3,
         ge=1,
-        le=10,
+        le=100,
         description="Number of top matching paragraph pairs to include per matched document",
     ),
     reprocess: bool = Query(
@@ -362,8 +362,8 @@ async def scan_document(
                 severity = "🔴 High" if combined_score >= 0.90 else "🟡 Medium"
 
                 similar_chunks = find_most_similar_chunks(
-                    chunks_a=chunks,
-                    chunks_b=c_chunks,
+                    chunks_a=[chunk.text for chunk in chunks],
+                    chunks_b=[chunk.text for chunk in c_chunks],
                     emb_a=uploaded_embeddings,
                     emb_b=c_embeddings,
                     top_k=top_k,
@@ -442,7 +442,7 @@ async def scan_document_async(
     top_k: int = Query(
         default=3,
         ge=1,
-        le=10,
+        le=100,
         description="Number of top matching paragraph pairs to include per matched document",
     ),
     reprocess: bool = Query(

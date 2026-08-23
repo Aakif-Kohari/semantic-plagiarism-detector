@@ -36,6 +36,7 @@ import torch.quantization
 from sentence_transformers import SentenceTransformer
 
 from src.exceptions import ModelInitializationError
+from src.core.text_chunking import ChunkString
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +92,13 @@ def _apply_dynamic_quantization(model: SentenceTransformer) -> SentenceTransform
 
 
 def _detect_device(model: SentenceTransformer | None = None) -> str:
-    """Detect active PyTorch compute device (cpu, cuda, or mps)."""
+    """Detect the active PyTorch compute device.
+
+    Supports NVIDIA CUDA, AMD ROCm (exposed by PyTorch through the CUDA
+    device API), Intel XPU, and Apple MPS. ROCm intentionally returns
+    ``"cuda"`` because PyTorch uses ``torch.device("cuda")`` for HIP
+    devices as well.
+    """
     if model is not None and hasattr(model, "device"):
         dev = getattr(model, "device")
         if isinstance(dev, str):
@@ -99,12 +106,42 @@ def _detect_device(model: SentenceTransformer | None = None) -> str:
         if hasattr(dev, "type") and isinstance(getattr(dev, "type", None), str):
             return dev.type
 
+    # Intel oneAPI/XPU devices. Keep this ahead of CUDA so an available XPU
+    # is not shadowed by another backend exposed by the same PyTorch build.
     try:
+        xpu = getattr(torch, "xpu", None)
         if (
-            hasattr(torch, "cuda")
-            and hasattr(torch.cuda, "is_available")
-            and torch.cuda.is_available()
+            xpu is not None
+            and hasattr(xpu, "is_available")
+            and xpu.is_available()
         ):
+            return "xpu"
+    except Exception:
+        pass
+
+    # PyTorch exposes AMD ROCm through the CUDA API. ``torch.version.hip`` is
+    # the reliable indicator that the installed PyTorch build targets HIP.
+    # ``torch.backends.cuda.is_built()`` is checked as a safe fallback for
+    # CUDA-enabled builds where the HIP version metadata is unavailable.
+    try:
+        cuda = getattr(torch, "cuda", None)
+        cuda_available = (
+            cuda is not None
+            and hasattr(cuda, "is_available")
+            and cuda.is_available()
+        )
+        cuda_backend = getattr(getattr(torch, "backends", None), "cuda", None)
+        cuda_built = bool(
+            cuda_backend is not None
+            and hasattr(cuda_backend, "is_built")
+            and cuda_backend.is_built()
+        )
+        hip_version = getattr(getattr(torch, "version", None), "hip", None)
+
+        if cuda_available and hip_version:
+            logger.info("[embedding_model] AMD ROCm/HIP device detected.")
+            return "cuda"
+        if cuda_available and cuda_built:
             return "cuda"
     except Exception:
         pass
@@ -178,7 +215,7 @@ class EmbeddingModelManager:
                 return _model
 
         primary = _get_model_name()
-        fallback = "all-MiniLM-L6-v2"
+        fallback = os.getenv("SEMANTIC_PLAGIARISM_FALLBACK_MODEL", "all-MiniLM-L6-v2")
         cache_dir = _get_cache_dir()
         logger.info(f"[embedding_model] Loading model: {primary} ...")
         logger.info(
@@ -310,8 +347,8 @@ def verify_model_cache_integrity(cache_dir: Path) -> bool:
             except OSError as exc:
                 corrupted.append((weight_path, f"unreadable ({exc})"))
                 continue
-            if size == 0:
-                corrupted.append((weight_path, "zero-byte"))
+            if size <= 1024 * 1024:
+                corrupted.append((weight_path, "too small (<= 1MB)"))
 
     if corrupted:
         for weight_path, reason in corrupted:
@@ -381,7 +418,10 @@ def embed_chunks(chunks: List[str], batch_size: int = 32) -> np.ndarray:
 
     # Process in explicit mini-batches to optimize memory utilization
     for i in range(0, total_chunks, batch_size):
-        batch = chunks[i : i + batch_size]
+        batch = [
+            chunk.text if isinstance(chunk, ChunkString) else chunk
+            for chunk in chunks[i : i + batch_size]
+        ]
 
         # Encode the current mini-batch
         # show_progress_bar=False keeps console clean in Streamlit

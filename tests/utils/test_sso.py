@@ -4,6 +4,7 @@ import pytest
 import requests
 
 from src.utils.sso import (
+    SSOUserProfile,
     exchange_github_code,
     exchange_google_code,
     get_github_auth_url,
@@ -23,6 +24,7 @@ def test_get_google_auth_url_success(monkeypatch):
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "dummy_google_client_id")
     url, state = get_google_auth_url()
     assert "dummy_google_client_id" in url
+    assert "prompt=select_account" in url
     assert state.startswith("google_")
 
 
@@ -59,10 +61,11 @@ def test_exchange_google_code_success(mock_post, mock_get, monkeypatch):
     mock_get.return_value.json.return_value = {
         "email": "user@example.com",
         "name": "Test User",
+        "picture": "https://example.com/avatar.png",
     }
 
     user_data, error_msg = exchange_google_code("valid_code")
-    assert user_data == {"email": "user@example.com", "name": "Test User"}
+    assert user_data == SSOUserProfile(email="user@example.com", username="user", name="Test User", avatar="https://example.com/avatar.png")
     assert error_msg is None
     mock_post.assert_called_once()
     mock_get.assert_called_once()
@@ -132,10 +135,12 @@ def test_exchange_github_code_success(mock_post, mock_get, monkeypatch):
     mock_get.return_value.json.return_value = {
         "login": "octocat",
         "email": "octocat@github.com",
+        "name": "The Octocat",
+        "avatar_url": "https://example.com/octocat.png",
     }
 
     user_data, error_msg = exchange_github_code("valid_code")
-    assert user_data == {"login": "octocat", "email": "octocat@github.com"}
+    assert user_data == SSOUserProfile(email="octocat@github.com", username="octocat", name="The Octocat", avatar="https://example.com/octocat.png")
     assert error_msg is None
     mock_post.assert_called_once()
     mock_get.assert_called_once()
@@ -263,7 +268,7 @@ def test_exchange_github_code_email_fallback_success(mock_post, mock_get, monkey
     user_response = MagicMock()
     user_response.ok = True
     user_response.status_code = 200
-    user_response.json.return_value = {"login": "octocat", "email": None}
+    user_response.json.return_value = {"login": "octocat", "email": None, "name": "The Octocat", "avatar_url": "https://example.com/octocat.png"}
 
     # Second call: GET /user/emails (returns list of emails)
     emails_response = MagicMock()
@@ -277,7 +282,7 @@ def test_exchange_github_code_email_fallback_success(mock_post, mock_get, monkey
     mock_get.side_effect = [user_response, emails_response]
 
     user_data, error_msg = exchange_github_code("valid_code")
-    assert user_data == {"login": "octocat", "email": "primary@github.com"}
+    assert user_data == SSOUserProfile(email="primary@github.com", username="octocat", name="The Octocat", avatar="https://example.com/octocat.png")
     assert error_msg is None
     assert mock_get.call_count == 2
 
@@ -321,7 +326,7 @@ def test_exchange_github_code_filters_noreply_profile_email(mock_post, mock_get,
     user_response = MagicMock()
     user_response.ok = True
     user_response.status_code = 200
-    user_response.json.return_value = {"login": "octocat", "email": "12345+octocat@users.noreply.github.com"}
+    user_response.json.return_value = {"login": "octocat", "email": "12345+octocat@users.noreply.github.com", "name": "The Octocat", "avatar_url": "https://example.com/octocat.png"}
 
     # /user/emails returns list with real verified email
     emails_response = MagicMock()
@@ -335,7 +340,7 @@ def test_exchange_github_code_filters_noreply_profile_email(mock_post, mock_get,
     mock_get.side_effect = [user_response, emails_response]
 
     user_data, error_msg = exchange_github_code("valid_code")
-    assert user_data == {"login": "octocat", "email": "octocat@github.com"}
+    assert user_data == SSOUserProfile(email="octocat@github.com", username="octocat", name="The Octocat", avatar="https://example.com/octocat.png")
     assert error_msg is None
 
 

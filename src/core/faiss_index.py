@@ -22,6 +22,8 @@ inner product == cosine similarity.
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
+from src.core.text_chunking import ChunkString
+
 # FAISS has no official type stubs; suppress Pylance false positives
 import faiss  # type: ignore
 import numpy as np
@@ -90,9 +92,12 @@ def build_index(
         chunks = chunked_docs.get(doc_name, [])
         if emb.ndim != 2 or emb.shape[0] == 0:
             continue
-        for i, (vec, text) in enumerate(zip(emb, chunks)):
+        for i, (vec, chunk) in enumerate(zip(emb, chunks)):
             all_vectors.append(vec.astype("float32"))
-            registry.append(ChunkRecord(doc_name, i, text))
+            if isinstance(chunk, ChunkString):
+                registry.append(ChunkRecord(doc_name, i, chunk.text, metadata=chunk.metadata))
+            else:
+                registry.append(ChunkRecord(doc_name, i, chunk))
 
     if not all_vectors:
         return faiss.IndexFlatIP(dim), registry
@@ -270,7 +275,7 @@ def find_plagiarised_chunks(
                     {
                         "source_doc": doc_name,
                         "source_chunk_text": (
-                            chunks[chunk_idx] if chunk_idx < len(chunks) else ""
+                            chunks[chunk_idx].text if chunk_idx < len(chunks) else ""
                         ),
                         "match_doc": record.doc_name,
                         "match_chunk_text": record.chunk_text,
@@ -312,9 +317,12 @@ def add_to_index(
         chunks = chunked_docs.get(doc_name, [])
         if emb.ndim != 2 or emb.shape[0] == 0:
             continue
-        for i, (vec, text) in enumerate(zip(emb, chunks)):
+        for i, (vec, chunk) in enumerate(zip(emb, chunks)):
             new_vectors.append(vec.astype("float32"))
-            new_registry.append(ChunkRecord(doc_name, i, text))
+            if isinstance(chunk, ChunkString):
+                new_registry.append(ChunkRecord(doc_name, i, chunk.text, metadata=chunk.metadata))
+            else:
+                new_registry.append(ChunkRecord(doc_name, i, chunk))
 
     if not new_vectors:
         return index, registry

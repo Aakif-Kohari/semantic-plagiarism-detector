@@ -37,6 +37,18 @@ uploads_total = Counter(
     labelnames=["status"],
 )
 
+cache_hits_total = Counter(
+    "spd_cache_hits_total",
+    "Total cache hits",
+    labelnames=["cache_type"],
+)
+
+cache_misses_total = Counter(
+    "spd_cache_misses_total",
+    "Total cache misses",
+    labelnames=["cache_type"],
+)
+
 # ── Gauges ─────────────────────────────────────────────────────────────────────
 
 corpus_size_gauge = Gauge(

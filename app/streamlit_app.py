@@ -2902,7 +2902,7 @@ from src.utils.file_validator import validate_upload
         for doc_name, chunks in chunked_docs.items():
             translated_chunked_docs[doc_name] = []
             for chunk in chunks:
-                prepared = prepare_text_for_embedding(chunk)
+                prepared = prepare_text_for_embedding(chunk.text if hasattr(chunk, "text") else chunk)
                 translated_chunked_docs[doc_name].append(prepared["embedding_text"])
         embeddings = embed_documents(translated_chunked_docs)
         sim_df = document_similarity_matrix(embeddings)
@@ -3455,8 +3455,8 @@ from src.utils.file_validator import validate_upload
                             current_theme = get_theme_name()
                             # Compute alignment using DP on sentence embeddings
                             alignment_map = align_semantic_sequences(
-                                chunks_a=chunks_a,
-                                chunks_b=chunks_b,
+                                chunks_a=[chunk.text for chunk in chunks_a],
+                                chunks_b=[chunk.text for chunk in chunks_b],
                                 embeddings_a=emb_a,
                                 embeddings_b=emb_b,
                             )

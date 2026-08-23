@@ -194,7 +194,7 @@ def run_scan(
             for doc_name, chunks in chunked_docs.items():
                 translated_chunked_docs[doc_name] = []
                 for chunk in chunks:
-                    prepared = prepare_text_for_embedding(chunk)
+                    prepared = prepare_text_for_embedding(chunk.text if hasattr(chunk, "text") else chunk)
                     translated_chunked_docs[doc_name].append(prepared["embedding_text"])
 
             embeddings = embed_documents(translated_chunked_docs)
@@ -329,6 +329,10 @@ def run_prewarm(folder_path: str | None = None) -> int:
     embeddings_count = 0
     docs_processed = len(raw_texts)
     redis_status = "unavailable"
+
+    if docs_processed == 0:
+        sys.stdout.write("No documents found. Exiting.\n")
+        return 0
 
     if docs_processed > 0:
         try:

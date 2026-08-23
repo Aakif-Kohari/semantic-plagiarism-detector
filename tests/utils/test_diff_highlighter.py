@@ -3,8 +3,29 @@
 import html
 import random
 import time
+import xml.etree.ElementTree as ET
 
-from src.utils.diff_highlighter import MARK_OPEN_TAG, highlight_overlap
+import src.utils.diff_highlighter as diff_highlighter
+from src.utils.diff_highlighter import (
+    MARK_OPEN_TAG,
+    _fallback_stem,
+    _sanitize_color,
+    highlight_overlap,
+)
+
+SAFE_FALLBACK = "rgba(250, 204, 21, 0.3)"
+
+
+def test_sanitize_color_accepts_valid_hex_and_rgba():
+    assert _sanitize_color("#fef08a") == "#fef08a"
+    assert _sanitize_color("#abc") == "#abc"
+    assert _sanitize_color("rgba(250, 204, 21, 0.3)") == "rgba(250, 204, 21, 0.3)"
+    assert _sanitize_color("rgb(255, 0, 0)") == "rgb(255, 0, 0)"
+
+
+def test_sanitize_color_rejects_injection_vectors():
+    assert _sanitize_color("red; background: url(evil.com)") == SAFE_FALLBACK
+    assert _sanitize_color("rgba(0,0,0,0);</style><script>") == SAFE_FALLBACK
 
 
 def test_no_overlap():
@@ -109,6 +130,29 @@ def test_marks_never_nest():
     for result in (result_a, result_b):
         assert result.count("<mark") == 1
         assert result.count("</mark>") == 1
+
+
+def test_highlighted_output_is_balanced_and_xml_parseable():
+    """Opened <mark> tags must close, and the HTML fragment must parse."""
+    cases = [
+        ("alpha beta gamma delta", "alpha beta gamma delta"),
+        (
+            "alpha beta gamma delta epsilon zeta eta theta",
+            "alpha beta gamma delta epsilon zeta eta theta",
+        ),
+        ("<b>alpha beta gamma delta</b>", "<b>alpha beta gamma delta</b>"),
+        ("alpha beta gamma delta café 🎓", "alpha beta gamma delta café 🎓"),
+        (
+            "alpha beta gamma delta filler words here kappa lambda mu nu",
+            "alpha beta gamma delta other bridging text kappa lambda mu nu",
+        ),
+    ]
+
+    for text_a, text_b in cases:
+        result_a, result_b = highlight_overlap(text_a, text_b)
+        for result in (result_a, result_b):
+            assert result.count("<mark") == result.count("</mark>")
+            ET.fromstring(f"<root>{result}</root>")
 
 
 def test_output_stays_escaped_around_a_match():
@@ -294,3 +338,148 @@ def test_large_identical_documents_complete_quickly():
     assert "<mark" in result_a
     assert "<mark" in result_b
     assert elapsed < 2.0, f"highlight_overlap took {elapsed:.2f}s for 3000 words"
+
+
+# --- Optional stemming for fuzzy overlap (Issue #3210) ---------------------
+
+
+def test_tense_change_evades_highlighting_without_stemming():
+    """Exact lowercase matching misses tense variants — the reported gap."""
+    result_a, result_b = highlight_overlap(
+        "students analyzed the data",
+        "students analyzing the data",
+        min_match_length=3,
+    )
+
+    assert "<mark" not in result_a
+    assert "<mark" not in result_b
+
+
+def test_stemming_matches_tense_changed_words():
+    """With use_stemming=True the same pair highlights as a shared run."""
+    result_a, result_b = highlight_overlap(
+        "students analyzed the data",
+        "students analyzing the data",
+        min_match_length=3,
+        use_stemming=True,
+    )
+
+    assert "<mark" in result_a
+    assert "<mark" in result_b
+    # The highlighted run keeps each document's own surface forms.
+    assert "analyzed the data" in result_a
+    assert "analyzing the data" in result_b
+
+
+def test_plural_variation_matches_with_stemming():
+    """Stemming also bridges singular/plural pairs."""
+    result_a, result_b = highlight_overlap(
+        "the students submitted their work",
+        "the student submitted their work",
+        min_match_length=4,
+        use_stemming=True,
+    )
+
+    assert "<mark" in result_a
+    assert "<mark" in result_b
+
+
+def test_stemming_defaults_to_off():
+    """The flag must be opt-in: default behaviour stays byte-compatible."""
+    exact_pair = ("alpha beta gamma delta", "alpha beta gamma delta")
+    tense_pair = (
+        "students analyzed the data",
+        "students analyzing the data",
+    )
+
+    assert highlight_overlap(*exact_pair, 3) == highlight_overlap(
+        *exact_pair, 3, use_stemming=False
+    )
+    assert highlight_overlap(*tense_pair, 3) == highlight_overlap(
+        *tense_pair, 3, use_stemming=False
+    )
+
+
+def test_stemming_preserves_original_characters():
+    """Highlighting wraps original text even when tokens were stemmed."""
+    result_a, result_b = highlight_overlap(
+        "Students ANALYZED the Data.",
+        "students analyzing THE data!",
+        min_match_length=3,
+        use_stemming=True,
+    )
+
+    assert "ANALYZED" in result_a
+    # Casing survives; the trailing period sits outside the mark but intact.
+    assert "Students ANALYZED the Data" in result_a
+    assert "." in result_a
+    assert "analyzing THE data" in result_b
+    assert "!" in result_b
+
+
+def test_stemming_uses_the_resolved_stem_function(monkeypatch):
+    """The pipeline routes through _get_stem_function exactly once per side."""
+
+    calls: list[str] = []
+
+    def fake_stem(token):
+        calls.append(token)
+        return token.upper()
+
+    monkeypatch.setattr(diff_highlighter, "_get_stem_function", lambda: fake_stem)
+
+    # With the stub, every token matches only its uppercased twin.
+    result_a, result_b = highlight_overlap(
+        "one two three four",
+        "ONE TWO THREE FOUR",
+        min_match_length=4,
+        use_stemming=True,
+    )
+
+    assert "<mark" in result_a
+    assert "<mark" in result_b
+    assert set(calls) == {"one", "two", "three", "four"}
+
+
+def test_fallback_stemmer_handles_regular_inflections():
+    """The no-NLTK fallback agrees with Porter on common regular words."""
+    stem = _fallback_stem
+
+    assert stem("runs") == stem("running")
+    assert stem("analyzed") == stem("analyzing")
+    assert stem("walked") == "walk"
+    assert stem("studies") == "study"
+    assert stem("caresses") == stem("caress")
+    assert stem("the") == "the"  # short tokens stay untouched
+    assert stem("data") == "data"
+
+
+def test_fallback_stemmer_keeps_vowelless_bases_intact():
+    """Suffix stripping never leaves a stemless fragment behind."""
+    assert _fallback_stem("bed") == "bed"
+    assert _fallback_stem("bled") == "bled"
+
+
+def test_get_stem_function_returns_callable():
+    """The resolver always yields something callable, with or without NLTK."""
+    stem = diff_highlighter._get_stem_function()
+
+    assert callable(stem)
+    assert isinstance(stem("analyzing"), str)
+
+
+def test_stemmed_matching_does_not_break_escaping():
+    """XSS escaping guarantees hold when stemming is enabled."""
+    payload = "<b>students analyzed gamma delta</b> tail"
+    other = "<i>students analyzing gamma delta</i> tail"
+    result_a, result_b = highlight_overlap(
+        payload,
+        other,
+        min_match_length=3,
+        use_stemming=True,
+    )
+
+    for result in (result_a, result_b):
+        assert "<script>" not in result
+        stripped = result.replace(MARK_OPEN_TAG, "").replace("</mark>", "")
+        assert "<b>" not in stripped and "<i>" not in stripped

@@ -335,7 +335,7 @@ def run_extraction_pipeline(
             for doc_name, chunks in chunked_docs.items():
                 processed_chunked_docs[doc_name] = []
                 for chunk in chunks:
-                    prepared = prepare_text_for_embedding(chunk)
+                    prepared = prepare_text_for_embedding(chunk.text if hasattr(chunk, "text") else chunk)
                     processed_chunked_docs[doc_name].append(prepared["embedding_text"])
     else:
         # Standard processing without translation
@@ -343,7 +343,7 @@ def run_extraction_pipeline(
         for doc_name, chunks in chunked_docs.items():
             processed_chunked_docs[doc_name] = []
             for chunk in chunks:
-                prepared = prepare_text_for_embedding(chunk)
+                prepared = prepare_text_for_embedding(chunk.text if hasattr(chunk, "text") else chunk)
                 processed_chunked_docs[doc_name].append(prepared["embedding_text"])
     # ===================================
 
