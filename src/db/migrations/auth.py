@@ -162,7 +162,7 @@ def migration_012_create_revoked_tokens_table(
         """)
 
 
-def migration_014_create_password_history_table(
+def migration_013_create_password_history_table(
     connection: sqlite3.Connection,
 ) -> None:
     """Create password_history table for tracking recent password hashes per user."""
@@ -180,18 +180,7 @@ def migration_014_create_password_history_table(
         """)
 
 
-def migration_015_add_must_change_password(
-    connection: sqlite3.Connection,
-) -> None:
-    """Add must_change_password flag to force password reset on next login."""
-    if not column_exists(connection, "users", "must_change_password"):
-        connection.execute("""
-            ALTER TABLE users
-            ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0
-            """)
-
-
-def migration_013_add_user_status(
+def migration_014_add_user_status(
     connection: sqlite3.Connection,
 ) -> None:
     """Add account status field and migrate the legacy is_active flag."""
@@ -208,6 +197,17 @@ def migration_013_add_user_status(
             ELSE 'active'
         END
         """)
+
+
+def migration_015_add_must_change_password(
+    connection: sqlite3.Connection,
+) -> None:
+    """Add must_change_password flag to force password reset on next login."""
+    if not column_exists(connection, "users", "must_change_password"):
+        connection.execute("""
+            ALTER TABLE users
+            ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0
+            """)
 
 
 def migration_016_add_audit_log_indexes(
@@ -302,13 +302,13 @@ def down_012_create_revoked_tokens_table(connection: sqlite3.Connection) -> None
     connection.execute("DROP TABLE IF EXISTS revoked_tokens")
 
 
-def down_013_add_user_status(connection: sqlite3.Connection) -> None:
-    _drop_column_if_exists(connection, "users", "status")
-
-
-def down_014_create_password_history_table(connection: sqlite3.Connection) -> None:
+def down_013_create_password_history_table(connection: sqlite3.Connection) -> None:
     connection.execute("DROP INDEX IF EXISTS idx_password_history_username")
     connection.execute("DROP TABLE IF EXISTS password_history")
+
+
+def down_014_add_user_status(connection: sqlite3.Connection) -> None:
+    _drop_column_if_exists(connection, "users", "status")
 
 
 def down_015_add_must_change_password(connection: sqlite3.Connection) -> None:
@@ -333,8 +333,8 @@ AUTH_DOWN_MIGRATIONS = {
     10: down_010_add_password_changed_at,
     11: down_011_add_version_column,
     12: down_012_create_revoked_tokens_table,
-    13: down_013_add_user_status,
-    14: down_014_create_password_history_table,
+    13: down_013_create_password_history_table,
+    14: down_014_add_user_status,
     15: down_015_add_must_change_password,
     16: down_016_add_audit_log_indexes,
 }
