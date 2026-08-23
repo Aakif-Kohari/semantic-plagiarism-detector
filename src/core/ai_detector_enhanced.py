@@ -316,7 +316,7 @@ def detect_ai_probability_enhanced(
     
     results = {}
     for doc_name, chunks in chunked_docs.items():
-        text = " ".join(chunks)
+        text = " ".join(chunk.text if hasattr(chunk, "text") else chunk for chunk in chunks)
         result = detector.detect_document(text, doc_name)
         results[doc_name] = result.ai_probability
     

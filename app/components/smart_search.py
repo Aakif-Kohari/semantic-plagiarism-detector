@@ -150,13 +150,14 @@ class SmartSearchEngine:
             # Generate embeddings for chunks
             doc_chunks = chunks.get(doc_name, [])
             for idx, chunk in enumerate(doc_chunks):
-                chunk_embedding = self.embedding_model.encode([chunk])[0]
+                chunk_text = chunk.text if hasattr(chunk, "text") else chunk
+                chunk_embedding = self.embedding_model.encode([chunk_text])[0]
                 key = f"{doc_name}_chunk_{idx}"
                 self.search_index[key] = chunk_embedding
                 self.chunk_registry[key] = {
                     "document": doc_name,
                     "chunk_index": idx,
-                    "text": chunk
+                    "text": chunk_text
                 }
     
     def _index_fallback(self, documents: Dict[str, str], chunks: Dict[str, List[str]]):
@@ -177,7 +178,8 @@ class SmartSearchEngine:
             # Index chunks
             doc_chunks = chunks.get(doc_name, [])
             for idx, chunk in enumerate(doc_chunks):
-                words = re.findall(r'\w+', chunk.lower())
+                chunk_text = chunk.text if hasattr(chunk, "text") else chunk
+                words = re.findall(r'\w+', chunk_text.lower())
                 word_freq = Counter(words)
                 vector = [word for word, freq in word_freq.most_common(20)]
                 key = f"{doc_name}_chunk_{idx}"

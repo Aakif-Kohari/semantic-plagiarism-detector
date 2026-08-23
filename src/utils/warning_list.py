@@ -387,8 +387,8 @@ def _has_exact_match(doc_a: str, doc_b: str) -> bool:
     chunks_b = chunked_docs.get(doc_b, [])
 
     # Normalize chunks by removing all whitespace
-    norm_a = {"".join(c.split()) for c in chunks_a if c.strip()}
-    norm_b = {"".join(c.split()) for c in chunks_b if c.strip()}
+    norm_a = {"".join((c.text if hasattr(c, "text") else c).split()) for c in chunks_a if (c.text if hasattr(c, "text") else c).strip()}
+    norm_b = {"".join((c.text if hasattr(c, "text") else c).split()) for c in chunks_b if (c.text if hasattr(c, "text") else c).strip()}
 
     return not norm_a.isdisjoint(norm_b)
 
