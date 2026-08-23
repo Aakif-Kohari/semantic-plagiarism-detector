@@ -110,6 +110,9 @@ class HealthzResponse(BaseModel):
     db_size_mb: float = Field(
         default=0.0, description="Corpus database file size in megabytes"
     )
+    warning: Optional[str] = Field(
+        default=None, description="Descriptive warning when service is degraded"
+    )
 
 
 class StatusResponse(BaseModel):

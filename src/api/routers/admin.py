@@ -185,12 +185,28 @@ def healthz():
         db_status = "disconnected"
 
     memory_status = "ok"
+    memory_warning = None
     try:
         memory = psutil.virtual_memory()
-        if memory.available <= 0:
+        try:
+            max_memory_percent = float(os.getenv("HEALTHZ_MAX_MEMORY_PERCENT", "95.0"))
+        except (ValueError, TypeError):
+            max_memory_percent = 95.0
+
+        if memory.percent >= max_memory_percent:
             memory_status = "unavailable"
-    except Exception:
+            memory_warning = (
+                f"Memory usage {memory.percent:.1f}% exceeds threshold {max_memory_percent:.1f}%"
+            )
+            logger.warning(memory_warning)
+        elif memory.available <= 0:
+            memory_status = "unavailable"
+            memory_warning = "Low memory: no available memory"
+            logger.warning(memory_warning)
+    except Exception as exc:
         memory_status = "unavailable"
+        memory_warning = f"Memory check failed: {exc}"
+        logger.warning(memory_warning)
 
     disk_status = "ok"
     try:
@@ -224,6 +240,8 @@ def healthz():
         "db_size_bytes": db_size_bytes if is_healthy else 0,
         "db_size_mb": db_size_mb if is_healthy else 0.0,
     }
+    if not is_healthy and memory_warning:
+        response_content["warning"] = memory_warning
 
     if is_healthy:
         return response_content
