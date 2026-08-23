@@ -267,15 +267,18 @@ class PaginationPage(Generic[T]):
         """
         return self.page < self.total_pages
 
-    def has_previous(self) -> bool:
-        """Check if there is a previous page available.
+    @property
+    def next_page(self) -> Optional[int]:
+        return self.page + 1 if self.has_next() else None
 
-        Returns:
-            True if current page > 1, False otherwise
-        """
+    @property
+    def prev_page(self) -> Optional[int]:
+        return self.page - 1 if self.has_previous() else None
+
+    def has_previous(self) -> bool:
+        """Check if there is a previous page available."""
         return self.page > 1
 
-    def next_page(self) -> Optional[int]:
         """Get the next page number if available.
 
         Returns:
