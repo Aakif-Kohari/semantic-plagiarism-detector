@@ -20,7 +20,11 @@ from src.core.parsers.common import (
     check_batch_rate_limit,
     normalize_ocr_settings,
 )
-from src.core.parsers.docx_parser import extract_text_from_doc, extract_text_from_docx
+from src.core.parsers.docx_parser import (
+    ParsedDocxText,
+    extract_text_from_doc,
+    extract_text_from_docx,
+)
 from src.core.parsers.ocr_parser import extract_text_from_image
 from src.core.parsers.pdf_parser import (
     _read_pdf_bytes,
@@ -108,6 +112,11 @@ def extract_text(
         raw = extract_text_from_odt(file)
     else:
         raw = extract_text_from_txt(file)
+
+    # ParsedDocxText is an internal structured result; the public extraction
+    # API continues to return plain text.
+    if isinstance(raw, ParsedDocxText):
+        raw = raw.text
 
     raw = strip_bibliography(raw)
     raw = normalize_unicode_spaces(raw)
