@@ -226,6 +226,7 @@ def get_cached_translation(
     if not source_text:
         return None
 
+    global cache_hits, cache_misses
     source_hash = _generate_hash(source_text, source_lang, target_lang)
 
     try:
@@ -254,7 +255,6 @@ def get_cached_translation(
                     logger.debug(
                         "Cache hit for translation: %s -> %s", source_lang, target_lang
                     )
-                    global cache_hits
                     cache_hits += 1
                     try:
                         from src.core.metrics import cache_hits_total
@@ -287,7 +287,6 @@ def get_cached_translation(
                         logger.debug(
                             "Cache hit for translation: %s -> %s", source_lang, target_lang
                         )
-                        global cache_hits
                         cache_hits += 1
                         try:
                             from src.core.metrics import cache_hits_total
@@ -296,7 +295,6 @@ def get_cached_translation(
                             pass
                         return row["translated_text"]
 
-            global cache_misses
             cache_misses += 1
             try:
                 from src.core.metrics import cache_misses_total
