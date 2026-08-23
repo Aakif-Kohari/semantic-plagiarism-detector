@@ -147,7 +147,6 @@ def has_reportlab() -> bool:
     return SimpleDocTemplate is not None
 
 
-def validate_hex_color(color: Optional[str], default_color: str = "#2563eb") -> str:
 def validate_hex_color(
     color: Optional[str], default_color: str = DEFAULT_BADGE_COLOR
 ) -> str:
