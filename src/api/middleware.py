@@ -94,6 +94,7 @@ def get_valid_tokens() -> Dict[str, List[str]]:
     tokens_json = os.getenv("API_BEARER_TOKENS_MAPPING", "")
 
     if not tokens_json:
+        logger.info("No static API tokens configured. Relying solely on JWT auth.")
         return {}
 
     try:

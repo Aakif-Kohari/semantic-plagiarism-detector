@@ -51,7 +51,64 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Plagiarism Detection"])
 
-total_scans = 0
+class TotalScansCounter:
+    def __int__(self):
+        from src.db.corpus_db import get_total_scans
+        return get_total_scans()
+
+    def __index__(self):
+        from src.db.corpus_db import get_total_scans
+        return get_total_scans()
+
+    def __repr__(self):
+        from src.db.corpus_db import get_total_scans
+        return str(get_total_scans())
+
+    def __str__(self):
+        from src.db.corpus_db import get_total_scans
+        return str(get_total_scans())
+
+    def __add__(self, other):
+        from src.db.corpus_db import get_total_scans
+        return get_total_scans() + other
+
+    def __radd__(self, other):
+        from src.db.corpus_db import get_total_scans
+        return other + get_total_scans()
+
+    def __iadd__(self, other):
+        from src.db.corpus_db import increment_total_scans
+        for _ in range(other):
+            increment_total_scans()
+        return self
+
+    def __eq__(self, other):
+        from src.db.corpus_db import get_total_scans
+        if hasattr(other, "__int__"):
+            return get_total_scans() == int(other)
+        return get_total_scans() == other
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __lt__(self, other):
+        from src.db.corpus_db import get_total_scans
+        return get_total_scans() < other
+
+    def __le__(self, other):
+        from src.db.corpus_db import get_total_scans
+        return get_total_scans() <= other
+
+    def __gt__(self, other):
+        from src.db.corpus_db import get_total_scans
+        return get_total_scans() > other
+
+    def __ge__(self, other):
+        from src.db.corpus_db import get_total_scans
+        return get_total_scans() >= other
+
+
+total_scans = TotalScansCounter()
 scan_jobs: Dict[str, Dict[str, Any]] = {}
 
 
@@ -573,3 +630,150 @@ def get_async_scan_status(
         "result": job.get("result"),
         "error": job.get("error"),
     }
+
+
+# ── Background Document Clustering (Issue #3122) ─────────────────────────────
+clustering_jobs: Dict[str, Dict[str, Any]] = {}
+
+
+def _get_clustering_job(task_id: str) -> Optional[Dict[str, Any]]:
+    """Retrieve clustering task state from Redis, falling back to in-memory dict."""
+    try:
+        cache = get_cache()
+        if cache.is_available():
+            data = cache.get_json(CacheNamespace.CLUSTERING_JOBS.build_key(task_id))
+            if data is not None:
+                return data
+    except Exception as e:
+        logger.warning(f"Failed to retrieve clustering task '{task_id}' from Redis: {e}")
+    return clustering_jobs.get(task_id)
+
+
+def _set_clustering_job(task_id: str, data: Dict[str, Any], ttl: int = 86400) -> None:
+    """Store clustering task state in Redis with 24-hour TTL, falling back to in-memory dict."""
+    clustering_jobs[task_id] = data
+    try:
+        cache = get_cache()
+        if cache.is_available():
+            cache.set_json(CacheNamespace.CLUSTERING_JOBS.build_key(task_id), data, ttl=ttl)
+    except Exception as e:
+        logger.warning(f"Failed to persist clustering task '{task_id}' to Redis: {e}")
+
+
+def _process_clustering_job(
+    task_id: str,
+    algorithm: str,
+    n_clusters: Optional[int],
+    linkage: str,
+    embeddings: Optional[Any],
+    similarity_matrix: Optional[Any],
+) -> None:
+    task = _get_clustering_job(task_id)
+    if task is None:
+        return
+
+    task["status"] = "processing"
+    _set_clustering_job(task_id, task)
+
+    try:
+        from app.components.clustering import SemanticClusterer
+
+        clusterer = SemanticClusterer(linkage=linkage or "ward")
+        labels = None
+
+        if algorithm == "kmeans" and embeddings is not None:
+            emb_arr = np.array(embeddings, dtype=np.float32)
+            labels = clusterer.fit_kmeans(emb_arr, n_clusters=n_clusters)
+        elif similarity_matrix is not None:
+            sim_arr = np.array(similarity_matrix, dtype=np.float32)
+            labels = clusterer.fit_hierarchical(sim_arr, n_clusters=n_clusters)
+        else:
+            raise ValueError("Insufficient data provided for document clustering.")
+
+        task["status"] = "completed"
+        task["completed_at"] = datetime.now(timezone.utc).isoformat()
+        task["result"] = {
+            "labels": labels.tolist() if isinstance(labels, np.ndarray) else list(labels),
+            "n_clusters": int(clusterer.cluster_metrics.get("n_clusters", n_clusters or len(set(labels)))),
+            "cluster_metrics": {
+                k: float(v) if isinstance(v, (np.floating, float)) else v
+                for k, v in clusterer.cluster_metrics.items()
+            },
+        }
+        _set_clustering_job(task_id, task)
+    except Exception as exc:
+        logger.error(f"Error in background clustering task '{task_id}': {exc}", exc_info=True)
+        task["status"] = "failed"
+        task["completed_at"] = datetime.now(timezone.utc).isoformat()
+        task["error"] = str(exc)
+        _set_clustering_job(task_id, task)
+
+
+@router.post(
+    "/api/v1/analysis/cluster",
+    summary="Initiate background document clustering task",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def start_background_clustering(
+    payload: Dict[str, Any],
+    background_tasks: BackgroundTasks,
+    _user: dict = Security(get_current_user, scopes=["write"]),
+):
+    """Offload document clustering execution to a background FastAPI endpoint (Issue #3122)."""
+    algorithm = payload.get("algorithm", "hierarchical")
+    n_clusters = payload.get("n_clusters")
+    linkage = payload.get("linkage", "ward")
+    embeddings = payload.get("embeddings")
+    similarity_matrix = payload.get("similarity_matrix")
+
+    task_id = f"cluster_{uuid.uuid4().hex[:12]}"
+    task_data = {
+        "task_id": task_id,
+        "status": "queued",
+        "algorithm": algorithm,
+        "n_clusters": n_clusters,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "completed_at": None,
+        "result": None,
+        "error": None,
+    }
+    _set_clustering_job(task_id, task_data)
+
+    background_tasks.add_task(
+        _process_clustering_job,
+        task_id,
+        algorithm,
+        n_clusters,
+        linkage,
+        embeddings,
+        similarity_matrix,
+    )
+
+    return {
+        "task_id": task_id,
+        "status": "queued",
+        "status_url": f"/api/v1/analysis/cluster/task/{task_id}",
+        "message": "Document clustering task queued for background execution.",
+    }
+
+
+@router.get(
+    "/api/v1/analysis/cluster/task/{task_id}",
+    summary="Get background document clustering task status and results",
+    status_code=status.HTTP_200_OK,
+    responses={
+        404: {"model": ErrorResponse, "description": "Not Found"},
+    },
+)
+def get_clustering_task_status(
+    task_id: str,
+    _user: dict = Security(get_current_user, scopes=["read"]),
+):
+    """Retrieve status and results for a background document clustering task (Issue #3122)."""
+    task = _get_clustering_job(task_id)
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Clustering task '{task_id}' not found.",
+        )
+    return task

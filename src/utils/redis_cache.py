@@ -239,6 +239,7 @@ class CacheNamespace(str, Enum):
     UPLOADS = "spd:v1:uploads"
     BADGES = "spd:v1:badges"
     SCAN_JOBS = "spd:v1:scan_jobs"
+    CLUSTERING_JOBS = "spd:v1:clustering_jobs"
 
     def build_key(self, *parts: Any) -> str:
         """Build a normalized Redis cache key appending APP_VERSION and using pathlib.Path(p).as_posix() for path components."""

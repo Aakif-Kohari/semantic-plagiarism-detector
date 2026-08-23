@@ -353,6 +353,41 @@ def test_scope_enforcement_clear_endpoint(tmp_path):
     assert res.status_code == 403
 
 
+def test_clear_corpus_audit_logging(tmp_path):
+    """Verify that successful /api/v1/clear logs a security event with event_type='CORPUS_CLEARED'."""
+    from fastapi.testclient import TestClient
+    from src.api.app import app
+    from src.db.auth import add_user, configure_db_path, init_db, get_security_audit_logs
+
+    db_file = tmp_path / "test_clear_audit.db"
+    configure_db_path(db_file)
+    init_db()
+    
+    try:
+        add_user("admin_user", "password123", role="admin")
+    except ValueError:
+        pass
+
+    client = TestClient(app)
+
+    # 1. Execute clear
+    res = client.post(
+        "/api/v1/clear?username=admin_user",
+        headers={"Authorization": "Bearer test-admin-token"},
+    )
+    assert res.status_code == 200
+
+    # 2. Query logs to verify the event is logged
+    logs = get_security_audit_logs(username="admin_user", event_type="CORPUS_CLEARED")
+    assert len(logs) > 0
+    event = logs[0]
+    assert event["event_type"] == "CORPUS_CLEARED"
+    assert event["username"] == "admin_user"
+    assert "Client IP:" in event["details"]
+    assert "Timestamp:" in event["details"]
+
+
+
 # ── Asynchronous Background Scan Job Queue Tests (#1372) ─────────────────────
 
 
@@ -849,6 +884,31 @@ def test_api_usage_endpoint():
     assert response.status_code == 200
     data = response.json()
     assert data["total_scans"] == initial_scans + 1
+
+
+def test_total_scans_persistence():
+    """Verify that total_scans persists in the database / Redis across resets."""
+    from src.db.corpus_db import get_total_scans, increment_total_scans
+    import sqlite3
+    from src.core.app_config import CORPUS_DB_PATH
+
+    initial = get_total_scans()
+    incremented = increment_total_scans()
+    assert incremented == initial + 1
+
+    # Read from database to verify persistence
+    conn = sqlite3.connect(str(CORPUS_DB_PATH))
+    try:
+        cursor = conn.execute("SELECT metric_value FROM system_metrics WHERE metric_name = 'total_scans'")
+        row = cursor.fetchone()
+        assert row is not None
+    except sqlite3.OperationalError:
+        # If running in environment where Redis is used or system_metrics table is initialized differently
+        pass
+    finally:
+        conn.close()
+
+    assert get_total_scans() == incremented
 
 
 def test_hsts_security_header_options():

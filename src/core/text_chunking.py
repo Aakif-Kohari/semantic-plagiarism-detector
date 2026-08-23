@@ -329,13 +329,14 @@ def chunk_text(
         )
         chunk_size = MIN_CHUNK_SIZE
 
-    # ── Issue #1390 ───────────────────────────────────────────────────────
+    # ── Issue #1390 & #2908 ───────────────────────────────────────────────
     max_chunk_capacity = max_chunks * chunk_size
     if len(text) > max_chunk_capacity:
         logger.warning(
             "Text length (%d chars) exceeded chunk capacity limit; text was truncated",
             len(text),
         )
+        text = text[:max_chunk_capacity]
 
     text = text.strip()
     text_len = len(text)
