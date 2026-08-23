@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Optimized `clear_session` and `clear_pattern` with Redis pipelining to batch deletions into a single network round-trip (`src/utils/redis_cache.py`).
 - Warning list pagination no longer writes `st.session_state` directly; page updates are applied via a view-layer callback (`src/utils/warning_list.py`).
+- Build originality badge SVGs with `xml.etree.ElementTree` instead of f-string interpolation (`src/utils/badge_generator.py`).
 
 ## [1.0.0] - 2026-07-21
 

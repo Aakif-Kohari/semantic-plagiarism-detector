@@ -14,9 +14,9 @@ Issue #2898: Fallback behavior for named colors in Badge Generator.
 """
 
 import hashlib
-import html
 import logging
 import re
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -191,9 +191,8 @@ def generate_badge_svg(
     """
     Generates a simple SVG "Originality Verified" badge.
 
-    The accent_color is validated (and defaulted if invalid) before being
-    inserted into the SVG markup, preventing malformed or unescaped color
-    values from producing invalid SVG.
+    Builds the SVG with ElementTree so text/attributes are XML-escaped
+    automatically instead of relying on manual string interpolation.
 
     Args:
         student_name: Name of the student (optional, defaults to "Student")
@@ -208,17 +207,66 @@ def generate_badge_svg(
     if date is None:
         date = datetime.now(timezone.utc).strftime("%B %d, %Y")
 
-    safe_name = html.escape(student_name)
-    safe_date = html.escape(date)
+    root = ET.Element(
+        "svg",
+        {
+            "xmlns": "http://www.w3.org/2000/svg",
+            "width": "400",
+            "height": "120",
+            "viewBox": "0 0 400 120",
+        },
+    )
+    ET.SubElement(
+        root,
+        "rect",
+        {
+            "width": "400",
+            "height": "120",
+            "rx": "12",
+            "fill": safe_color,
+        },
+    )
 
-    safe_font = html.escape(font_family)
+    title = ET.SubElement(
+        root,
+        "text",
+        {
+            "x": "20",
+            "y": "45",
+            "font-family": font_family,
+            "font-size": str(font_size),
+            "fill": "#ffffff",
+        },
+    )
+    title.text = "Originality Verified"
 
-    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="400" height="120" viewBox="0 0 400 120">
-  <rect width="400" height="120" rx="12" fill="{safe_color}" />
-  <text x="20" y="45" font-family="{safe_font}" font-size="{font_size}" fill="#ffffff">Originality Verified</text>
-  <text x="20" y="75" font-family="{safe_font}" font-size="{font_size}" fill="#e0e7ff">Awarded to: {safe_name}</text>
-  <text x="20" y="100" font-family="{safe_font}" font-size="{font_size}" fill="#e0e7ff">Date: {safe_date}</text>
-</svg>"""
+    awarded = ET.SubElement(
+        root,
+        "text",
+        {
+            "x": "20",
+            "y": "75",
+            "font-family": font_family,
+            "font-size": str(font_size),
+            "fill": "#e0e7ff",
+        },
+    )
+    awarded.text = f"Awarded to: {student_name}"
+
+    dated = ET.SubElement(
+        root,
+        "text",
+        {
+            "x": "20",
+            "y": "100",
+            "font-family": font_family,
+            "font-size": str(font_size),
+            "fill": "#e0e7ff",
+        },
+    )
+    dated.text = f"Date: {date}"
+
+    return ET.tostring(root, encoding="unicode")
 
 
 def generate_badge_png(
