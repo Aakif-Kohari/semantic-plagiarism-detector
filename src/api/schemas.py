@@ -461,6 +461,12 @@ class AsyncScanStatusResponse(BaseModel):
     status: str = Field(
         ..., description="Current job status: queued, processing, completed, or failed"
     )
+    progress_percent: int = Field(
+        default=0, ge=0, le=100, description="Scan progress percentage (0-100)"
+    )
+    stage: str = Field(
+        default="", description="Current processing stage description"
+    )
     filename: str = Field(
         ..., description="Filename of uploaded document being scanned"
     )
