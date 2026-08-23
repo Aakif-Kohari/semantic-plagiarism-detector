@@ -29,7 +29,9 @@ def test_docx_headings_extraction_and_chunking():
 
     # Extract text
     parsed_text = extract_text_from_docx(file_bytes)
-    assert hasattr(parsed_text, "word_headings")
+    assert parsed_text.text
+    assert parsed_text.headings
+    assert len(parsed_text.headings) == len(parsed_text.text.split())
 
     # Chunk text
     chunks = chunk_text(parsed_text, chunk_size=30, chunk_overlap=5)
@@ -103,16 +105,16 @@ def test_extract_text_from_docx_with_tables():
 
     # Extract using the main document parser version
     parsed_text_1 = extract_text_from_docx(file_bytes)
-    assert "Cell 1,1 Text" in parsed_text_1
-    assert "Cell 1,2 Text" in parsed_text_1
-    assert "Cell 2,1 Text" in parsed_text_1
-    assert "Cell 2,2 Text" in parsed_text_1
+    assert "Cell 1,1 Text" in parsed_text_1.text
+    assert "Cell 1,2 Text" in parsed_text_1.text
+    assert "Cell 2,1 Text" in parsed_text_1.text
+    assert "Cell 2,2 Text" in parsed_text_1.text
 
     # Extract using the parsers package version
     parsed_text_2 = parser_extract_docx(file_bytes)
-    assert "Cell 1,1 Text" in parsed_text_2
-    assert "Cell 1,2 Text" in parsed_text_2
-    assert "Cell 2,1 Text" in parsed_text_2
-    assert "Cell 2,2 Text" in parsed_text_2
+    assert "Cell 1,1 Text" in parsed_text_2.text
+    assert "Cell 1,2 Text" in parsed_text_2.text
+    assert "Cell 2,1 Text" in parsed_text_2.text
+    assert "Cell 2,2 Text" in parsed_text_2.text
 
         

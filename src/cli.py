@@ -194,7 +194,7 @@ def run_scan(
             for doc_name, chunks in chunked_docs.items():
                 translated_chunked_docs[doc_name] = []
                 for chunk in chunks:
-                    prepared = prepare_text_for_embedding(chunk)
+                    prepared = prepare_text_for_embedding(chunk.text if hasattr(chunk, "text") else chunk)
                     translated_chunked_docs[doc_name].append(prepared["embedding_text"])
 
             embeddings = embed_documents(translated_chunked_docs)

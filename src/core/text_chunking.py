@@ -63,6 +63,12 @@ _WORD_COUNT_PATTERN = re.compile(r"\b\w+\b")
 # ── Helper Functions ──────────────────────────────────────────────────────────
 
 
+def _chunking_text(text: str) -> str:
+    """Return plain text from either a string or a structured DOCX result."""
+    structured_text = getattr(text, "text", None)
+    return structured_text if isinstance(structured_text, str) else text
+
+
 def count_words(text: str) -> int:
     """Count the number of words in a text string.
 
@@ -375,6 +381,9 @@ def chunk_text(
     Returns:
         List of chunk strings.
     """
+    structured_headings = getattr(text, "headings", None)
+    text = _chunking_text(text)
+
     if chunk_size <= 0:
         raise ValueError("chunk_size must be a positive integer > 0")
 
@@ -455,7 +464,7 @@ def chunk_text(
                 chunks.append(ChunkString(text=chunk))
         else:
             # Original word-boundary path (sentence_padding=False)
-            word_headings = getattr(text, "word_headings", None)
+            word_headings = structured_headings
             words = raw_chunk.split()
 
             if len(words) >= min_words:

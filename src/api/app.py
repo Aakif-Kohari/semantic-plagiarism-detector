@@ -163,14 +163,18 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         request.url.path,
         exc.errors(),
     )
-    errors_list = [
-        {
-            "field": ".".join(map(str, err["loc"])),
-            "message": err["msg"],
-            "type": err["type"],
-        }
-        for err in exc.errors()
-    ]
+    errors_list = []
+    for err in exc.errors():
+        loc = err.get("loc", ())
+        if loc and loc[0] in ("body", "query", "path"):
+            loc = loc[1:]
+        errors_list.append(
+            {
+                "field": ".".join(map(str, loc)),
+                "message": err["msg"],
+                "type": err["type"],
+            }
+        )
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content={
