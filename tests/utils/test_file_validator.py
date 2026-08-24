@@ -91,6 +91,108 @@ class TestFileValidatorExtension:
         assert validator.validate(b"data", "file.txt").is_valid is False
 
 
+class TestFileValidatorDoubleExtension:
+    """Test suite for double-extension disguise detection (Issue #3205).
+
+    Malicious files frequently use double extensions (e.g. ``thesis.pdf.exe``
+    or ``report.docx.vbs``) to trick users and naive server-side checks into
+    treating a dangerous file as a safe document.
+    """
+
+    def test_pdf_exe_double_extension_rejected(self):
+        """The exact example from the issue: thesis.pdf.exe is rejected."""
+        validator = FileValidator()
+        result = validator._check_extension("thesis.pdf.exe")
+
+        assert result.is_valid is False
+        assert result.error_code == "DOUBLE_EXTENSION"
+        assert "pdf" in result.error_message
+        assert "exe" in result.error_message
+
+    def test_docx_vbs_double_extension_rejected(self):
+        """The second example from the issue: report.docx.vbs is rejected."""
+        validator = FileValidator()
+        result = validator._check_extension("report.docx.vbs")
+
+        assert result.is_valid is False
+        assert result.error_code == "DOUBLE_EXTENSION"
+
+    def test_double_extension_via_full_validate(self):
+        """The double-extension check fires through the public validate() path too."""
+        validator = FileValidator()
+        result = validator.validate(b"MZ\x90\x00", "invoice.pdf.exe")
+
+        assert result.is_valid is False
+        assert result.error_code == "DOUBLE_EXTENSION"
+
+    def test_legit_dotted_filename_not_flagged(self):
+        """A filename with an incidental dot (not an allowed extension) passes.
+
+        'my.notes.pdf' has suffixes ['.notes', '.pdf'] — '.notes' is not in
+        ALLOWED_EXTENSIONS, so this must NOT be treated as a double-extension
+        disguise; it's just a normal .pdf file with a dot in its name.
+        """
+        validator = FileValidator()
+        result = validator._check_extension("my.notes.pdf")
+
+        assert result.is_valid is True
+
+    def test_neither_extension_allowed_falls_back_to_unsupported(self):
+        """archive.tar.gz: neither '.tar' nor '.gz' is allowed.
+
+        This should NOT be reported as a double-extension disguise (no
+        allowed extension is being impersonated) — it's just an ordinary
+        unsupported extension.
+        """
+        validator = FileValidator()
+        result = validator._check_extension("archive.tar.gz")
+
+        assert result.is_valid is False
+        assert result.error_code == "UNSUPPORTED_EXTENSION"
+
+    def test_single_extension_still_works_normally(self):
+        """A normal single-extension file is unaffected by the new check."""
+        validator = FileValidator()
+        result = validator._check_extension("document.pdf")
+
+        assert result.is_valid is True
+
+    def test_double_extension_case_insensitive(self):
+        """Double-extension detection matches regardless of case."""
+        validator = FileValidator()
+        result = validator._check_extension("REPORT.DOCX.VBS")
+
+        assert result.is_valid is False
+        assert result.error_code == "DOUBLE_EXTENSION"
+
+    def test_triple_extension_detected(self):
+        """More than two suffixes still triggers detection if any non-final
+        suffix is allowed and the final one is not."""
+        validator = FileValidator()
+        result = validator._check_extension("report.final.docx.scr")
+
+        assert result.is_valid is False
+        assert result.error_code == "DOUBLE_EXTENSION"
+
+    def test_two_allowed_extensions_in_a_row_passes(self):
+        """A final extension that IS allowed should pass, even with an
+        earlier allowed-looking suffix — only the final suffix matters for
+        what the file will actually be treated as."""
+        validator = FileValidator()
+        result = validator._check_extension("notes.md.txt")
+
+        assert result.is_valid is True
+
+    def test_custom_allowed_extensions_respected(self):
+        """Double-extension detection uses the validator's own allowed set,
+        not the global default."""
+        validator = FileValidator(allowed_extensions={".safe"})
+        result = validator._check_extension("file.safe.exe")
+
+        assert result.is_valid is False
+        assert result.error_code == "DOUBLE_EXTENSION"
+
+
 class TestFileValidatorMagicBytes:
     """Test suite for magic byte (content) validation."""
 
