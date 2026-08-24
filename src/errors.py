@@ -48,6 +48,7 @@ __all__ = [
     "SSRF_WEBHOOK_URL_EMPTY",
     "SSRF_INSECURE_SCHEME",
     "SSRF_MISSING_HOSTNAME",
+    "SSRF_INVALID_HOSTNAME",
     "SSRF_INVALID_IP_FORMAT",
     "SSRF_BLOCKED_PRIVATE_SUBNET",
     "SSRF_BLOCKED_LOOPBACK",
@@ -165,6 +166,9 @@ INCIDENT_UPDATE_STATUS_FAILED = "Failed to update review status: {error}"
 SSRF_WEBHOOK_URL_EMPTY = "Webhook URL cannot be empty."
 SSRF_INSECURE_SCHEME = "Insecure scheme '{scheme}'. Webhooks must use 'https'."
 SSRF_MISSING_HOSTNAME = "Invalid URL: missing hostname."
+SSRF_INVALID_HOSTNAME = (
+    "Invalid URL: hostname cannot be encoded as an internationalised domain name."
+)
 SSRF_INVALID_IP_FORMAT = "Resolved invalid IP address format: {error}"
 SSRF_BLOCKED_PRIVATE_SUBNET = "Blocked private IPv4 subnet IP: {ip} ({subnet})"
 SSRF_BLOCKED_LOOPBACK = "Blocked loopback IP: {ip}"
