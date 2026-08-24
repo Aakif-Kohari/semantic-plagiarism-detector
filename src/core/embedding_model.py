@@ -28,7 +28,7 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import Dict, List
+from typing import Callable, Dict, List, Optional
 
 import numpy as np
 import torch
@@ -36,6 +36,7 @@ import torch.quantization
 from sentence_transformers import SentenceTransformer
 
 from src.exceptions import ModelInitializationError
+from src.core.text_chunking import ChunkString
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +92,13 @@ def _apply_dynamic_quantization(model: SentenceTransformer) -> SentenceTransform
 
 
 def _detect_device(model: SentenceTransformer | None = None) -> str:
-    """Detect active PyTorch compute device (cpu, cuda, or mps)."""
+    """Detect the active PyTorch compute device.
+
+    Supports NVIDIA CUDA, AMD ROCm (exposed by PyTorch through the CUDA
+    device API), Intel XPU, and Apple MPS. ROCm intentionally returns
+    ``"cuda"`` because PyTorch uses ``torch.device("cuda")`` for HIP
+    devices as well.
+    """
     if model is not None and hasattr(model, "device"):
         dev = getattr(model, "device")
         if isinstance(dev, str):
@@ -99,12 +106,42 @@ def _detect_device(model: SentenceTransformer | None = None) -> str:
         if hasattr(dev, "type") and isinstance(getattr(dev, "type", None), str):
             return dev.type
 
+    # Intel oneAPI/XPU devices. Keep this ahead of CUDA so an available XPU
+    # is not shadowed by another backend exposed by the same PyTorch build.
     try:
+        xpu = getattr(torch, "xpu", None)
         if (
-            hasattr(torch, "cuda")
-            and hasattr(torch.cuda, "is_available")
-            and torch.cuda.is_available()
+            xpu is not None
+            and hasattr(xpu, "is_available")
+            and xpu.is_available()
         ):
+            return "xpu"
+    except Exception:
+        pass
+
+    # PyTorch exposes AMD ROCm through the CUDA API. ``torch.version.hip`` is
+    # the reliable indicator that the installed PyTorch build targets HIP.
+    # ``torch.backends.cuda.is_built()`` is checked as a safe fallback for
+    # CUDA-enabled builds where the HIP version metadata is unavailable.
+    try:
+        cuda = getattr(torch, "cuda", None)
+        cuda_available = (
+            cuda is not None
+            and hasattr(cuda, "is_available")
+            and cuda.is_available()
+        )
+        cuda_backend = getattr(getattr(torch, "backends", None), "cuda", None)
+        cuda_built = bool(
+            cuda_backend is not None
+            and hasattr(cuda_backend, "is_built")
+            and cuda_backend.is_built()
+        )
+        hip_version = getattr(getattr(torch, "version", None), "hip", None)
+
+        if cuda_available and hip_version:
+            logger.info("[embedding_model] AMD ROCm/HIP device detected.")
+            return "cuda"
+        if cuda_available and cuda_built:
             return "cuda"
     except Exception:
         pass
@@ -347,7 +384,11 @@ def _repair_corrupted_model_cache(cache_root: Path, model_name: str) -> None:
         shutil.rmtree(model_cache_dir, ignore_errors=True)
 
 
-def embed_chunks(chunks: List[str], batch_size: int = 32) -> np.ndarray:
+def embed_chunks(
+    chunks: List[str],
+    batch_size: int = 32,
+    cancel_callback: Optional[Callable[[], bool]] = None,
+) -> np.ndarray:
     """
     Generate embeddings for a list of text chunks using explicit mini-batching.
 
@@ -361,6 +402,7 @@ def embed_chunks(chunks: List[str], batch_size: int = 32) -> np.ndarray:
         chunks: List of text strings to embed.
         batch_size: Number of texts encoded per forward pass. Defaults to 32
                     to balance throughput and memory consumption.
+        cancel_callback: Optional callback returning True if processing should be cancelled.
 
     Returns:
         numpy array of shape (N, 384) where N = len(chunks). Returns an
@@ -381,7 +423,14 @@ def embed_chunks(chunks: List[str], batch_size: int = 32) -> np.ndarray:
 
     # Process in explicit mini-batches to optimize memory utilization
     for i in range(0, total_chunks, batch_size):
-        batch = chunks[i : i + batch_size]
+        if cancel_callback and cancel_callback():
+            logger.info("[embedding_model] Embedding forward pass cancelled by callback.")
+            raise RuntimeError("Scan job cancelled")
+
+        batch = [
+            chunk.text if isinstance(chunk, ChunkString) else chunk
+            for chunk in chunks[i : i + batch_size]
+        ]
 
         # Encode the current mini-batch
         # show_progress_bar=False keeps console clean in Streamlit

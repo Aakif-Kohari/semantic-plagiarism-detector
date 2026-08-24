@@ -24,6 +24,7 @@ def test_get_google_auth_url_success(monkeypatch):
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "dummy_google_client_id")
     url, state = get_google_auth_url()
     assert "dummy_google_client_id" in url
+    assert "prompt=select_account" in url
     assert state.startswith("google_")
 
 

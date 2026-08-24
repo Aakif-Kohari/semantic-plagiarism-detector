@@ -91,6 +91,108 @@ class TestFileValidatorExtension:
         assert validator.validate(b"data", "file.txt").is_valid is False
 
 
+class TestFileValidatorDoubleExtension:
+    """Test suite for double-extension disguise detection (Issue #3205).
+
+    Malicious files frequently use double extensions (e.g. ``thesis.pdf.exe``
+    or ``report.docx.vbs``) to trick users and naive server-side checks into
+    treating a dangerous file as a safe document.
+    """
+
+    def test_pdf_exe_double_extension_rejected(self):
+        """The exact example from the issue: thesis.pdf.exe is rejected."""
+        validator = FileValidator()
+        result = validator._check_extension("thesis.pdf.exe")
+
+        assert result.is_valid is False
+        assert result.error_code == "DOUBLE_EXTENSION"
+        assert "pdf" in result.error_message
+        assert "exe" in result.error_message
+
+    def test_docx_vbs_double_extension_rejected(self):
+        """The second example from the issue: report.docx.vbs is rejected."""
+        validator = FileValidator()
+        result = validator._check_extension("report.docx.vbs")
+
+        assert result.is_valid is False
+        assert result.error_code == "DOUBLE_EXTENSION"
+
+    def test_double_extension_via_full_validate(self):
+        """The double-extension check fires through the public validate() path too."""
+        validator = FileValidator()
+        result = validator.validate(b"MZ\x90\x00", "invoice.pdf.exe")
+
+        assert result.is_valid is False
+        assert result.error_code == "DOUBLE_EXTENSION"
+
+    def test_legit_dotted_filename_not_flagged(self):
+        """A filename with an incidental dot (not an allowed extension) passes.
+
+        'my.notes.pdf' has suffixes ['.notes', '.pdf'] — '.notes' is not in
+        ALLOWED_EXTENSIONS, so this must NOT be treated as a double-extension
+        disguise; it's just a normal .pdf file with a dot in its name.
+        """
+        validator = FileValidator()
+        result = validator._check_extension("my.notes.pdf")
+
+        assert result.is_valid is True
+
+    def test_neither_extension_allowed_falls_back_to_unsupported(self):
+        """archive.tar.gz: neither '.tar' nor '.gz' is allowed.
+
+        This should NOT be reported as a double-extension disguise (no
+        allowed extension is being impersonated) — it's just an ordinary
+        unsupported extension.
+        """
+        validator = FileValidator()
+        result = validator._check_extension("archive.tar.gz")
+
+        assert result.is_valid is False
+        assert result.error_code == "UNSUPPORTED_EXTENSION"
+
+    def test_single_extension_still_works_normally(self):
+        """A normal single-extension file is unaffected by the new check."""
+        validator = FileValidator()
+        result = validator._check_extension("document.pdf")
+
+        assert result.is_valid is True
+
+    def test_double_extension_case_insensitive(self):
+        """Double-extension detection matches regardless of case."""
+        validator = FileValidator()
+        result = validator._check_extension("REPORT.DOCX.VBS")
+
+        assert result.is_valid is False
+        assert result.error_code == "DOUBLE_EXTENSION"
+
+    def test_triple_extension_detected(self):
+        """More than two suffixes still triggers detection if any non-final
+        suffix is allowed and the final one is not."""
+        validator = FileValidator()
+        result = validator._check_extension("report.final.docx.scr")
+
+        assert result.is_valid is False
+        assert result.error_code == "DOUBLE_EXTENSION"
+
+    def test_two_allowed_extensions_in_a_row_passes(self):
+        """A final extension that IS allowed should pass, even with an
+        earlier allowed-looking suffix — only the final suffix matters for
+        what the file will actually be treated as."""
+        validator = FileValidator()
+        result = validator._check_extension("notes.md.txt")
+
+        assert result.is_valid is True
+
+    def test_custom_allowed_extensions_respected(self):
+        """Double-extension detection uses the validator's own allowed set,
+        not the global default."""
+        validator = FileValidator(allowed_extensions={".safe"})
+        result = validator._check_extension("file.safe.exe")
+
+        assert result.is_valid is False
+        assert result.error_code == "DOUBLE_EXTENSION"
+
+
 class TestFileValidatorMagicBytes:
     """Test suite for magic byte (content) validation."""
 
@@ -126,6 +228,68 @@ class TestFileValidatorMagicBytes:
         assert result.is_valid is True
 
 
+class TestStrictModeMagicByteEnforcement:
+    """strict_mode turns magic-byte mismatches into hard failures (#3201).
+
+    The permissive default exists because some valid files carry unusual
+    headers — but it equally lets an executable renamed to .pdf through,
+    which is unacceptable in high-security deployments. With
+    ``strict_mode=True`` a mismatched header fails validation with the
+    machine-readable ``MAGIC_BYTE_MISMATCH`` code.
+    """
+
+    def test_strict_mode_rejects_mismatched_header(self):
+        validator = FileValidator(strict_mode=True)
+
+        result = validator.validate(b"This is plain text", "fake.pdf")
+
+        assert result.is_valid is False
+        assert result.error_code == "MAGIC_BYTE_MISMATCH"
+        assert "does not match extension" in result.error_message
+
+    def test_strict_mode_accepts_correct_magic_bytes(self):
+        validator = FileValidator(strict_mode=True)
+
+        assert validator.validate(b"%PDF-1.7\n real pdf", "doc.pdf").is_valid is True
+        assert (
+            validator.validate(b"PK\x03\x04\x14\x00\x06\x00", "doc.docx").is_valid
+            is True
+        )
+
+    def test_permissive_default_still_tolerates_a_mismatch(self, caplog):
+        import logging
+        validator = FileValidator()
+
+        with caplog.at_level(logging.WARNING):
+            result = validator.validate(b"MZ executable bytes", "evil.pdf")
+
+        assert result.is_valid is True
+        assert any("Magic byte mismatch" in r.message for r in caplog.records)
+
+    def test_strict_mode_does_not_break_signatureless_extensions(self):
+        validator = FileValidator(strict_mode=True)
+
+        assert (
+            validator.validate(b"# Just markdown", "notes.md").is_valid is True
+        )
+        assert validator.validate(b"plain,text", "table.csv").is_valid is True
+
+    def test_strict_mode_still_enforces_size_and_extension_first(self):
+        validator = FileValidator(strict_mode=True, max_size_bytes=10)
+
+        too_big = validator.validate(b"x" * 11 + b"%PDF", "big.pdf")
+        bad_ext = validator.validate(b"%PDF", "virus.exe")
+        empty = validator.validate(b"", "empty.pdf")
+
+        assert too_big.error_code == "FILE_TOO_LARGE"
+        assert bad_ext.error_code == "UNSUPPORTED_EXTENSION"
+        assert empty.error_code == "FILE_EMPTY"
+
+    def test_strict_mode_flag_is_stored(self):
+        assert FileValidator().strict_mode is False
+        assert FileValidator(strict_mode=True).strict_mode is True
+
+
 class TestValidateUploadConvenience:
     """Test suite for the validate_upload convenience function."""
 
@@ -140,4 +304,77 @@ class TestValidateUploadConvenience:
         result = validate_upload(large_data, "huge.pdf")
         assert result.is_valid is False
         assert result.error_code == "FILE_TOO_LARGE"
+
+
+class TestEpubAndCsvValidation:
+    """Test suite for EPUB and CSV specific content validation."""
+
+    def test_valid_epub_with_mimetype_passes(self):
+        validator = FileValidator(strict_mode=True)
+        # EPUB header (PK\x03\x04) with mimetype string
+        epub_bytes = b"PK\x03\x04" + b"\x00" * 26 + b"mimetypeapplication/epub+zip"
+        result = validator.validate(epub_bytes, "book.epub")
+        assert result.is_valid is True
+
+    def test_invalid_epub_header_fails(self):
+        validator = FileValidator(strict_mode=True)
+        # Mismatched magic header
+        result = validator.validate(b"NOT_A_ZIP_HEADER", "book.epub")
+        assert result.is_valid is False
+        assert result.error_code == "MAGIC_BYTE_MISMATCH"
+
+    def test_epub_missing_mimetype_fails(self):
+        validator = FileValidator(strict_mode=True)
+        # Header matches PK\x03\x04 but missing mimetype
+        result = validator.validate(b"PK\x03\x04" + b"random zip contents without mimetype", "book.epub")
+        assert result.is_valid is False
+        assert result.error_code == "MAGIC_BYTE_MISMATCH"
+
+    def test_valid_csv_passes(self):
+        validator = FileValidator(strict_mode=True)
+        csv_bytes = b"name,age,city\nAlice,30,New York\nBob,25,London\n"
+        result = validator.validate(csv_bytes, "data.csv")
+        assert result.is_valid is True
+
+    def test_csv_with_binary_null_byte_fails(self):
+        validator = FileValidator(strict_mode=True)
+        bad_csv = b"col1,col2\nval1,\x00val2\n"
+        result = validator.validate(bad_csv, "data.csv")
+        assert result.is_valid is False
+        assert result.error_code == "MAGIC_BYTE_MISMATCH"
+
+    def test_csv_invalid_encoding_fails(self):
+        validator = FileValidator(strict_mode=True)
+        # Invalid UTF-8 sequence
+        bad_utf8 = b"col1,col2\nval1,\xff\xfe\xfa\n"
+        result = validator.validate(bad_utf8, "data.csv")
+        assert result.is_valid is False
+        assert result.error_code == "MAGIC_BYTE_MISMATCH"
+
+
+def test_filename_with_null_byte_fails():
+    """Verify that a filename containing a null byte fails validation immediately."""
+    validator = FileValidator()
+    result = validator.validate(b"%PDF-1.4", "exploit.pdf\x00.exe")
+    assert result.is_valid is False
+    assert result.error_code == "INVALID_FILENAME_CHARACTERS"
+    assert "invalid characters" in result.error_message.lower()
+
+
+def test_max_file_size_from_env(monkeypatch):
+    """Verify that MAX_FILE_SIZE_BYTES respects MAX_UPLOAD_SIZE_MB env variable on reload."""
+    import importlib
+    import src.utils.file_validator as fv
+
+    monkeypatch.setenv("MAX_UPLOAD_SIZE_MB", "10")
+    importlib.reload(fv)
+    try:
+        assert fv.MAX_FILE_SIZE_BYTES == 10 * 1024 * 1024
+    finally:
+        # Reset back to default
+        monkeypatch.delenv("MAX_UPLOAD_SIZE_MB", raising=False)
+        importlib.reload(fv)
+
+
+
 

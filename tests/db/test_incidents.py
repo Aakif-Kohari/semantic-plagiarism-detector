@@ -162,6 +162,7 @@ def test_sync_flagged_incidents_bulk_upsert(test_db):
             "doc_a": "doc1.pdf",
             "doc_b": "doc2.pdf",
             "similarity": 0.50,
+            "severity": "Medium",
         }
     ]
 
@@ -169,18 +170,23 @@ def test_sync_flagged_incidents_bulk_upsert(test_db):
     incidents = get_all_incidents(test_db)
     assert len(incidents) == 1
     assert incidents[0]["similarity_score"] == 0.50
+    assert incidents[0]["severity_rank"] == "Medium"
 
     flags[0]["similarity"] = 0.99
+    flags[0]["severity"] = "Critical"
     sync_flagged_incidents(flags, test_db)
     incidents = get_all_incidents(test_db)
     assert len(incidents) == 1
     assert incidents[0]["similarity_score"] == 0.99
+    assert incidents[0]["severity_rank"] == "Critical"
 
     flags[0]["similarity"] = 0.50
+    flags[0]["severity"] = "Low"
     sync_flagged_incidents(flags, test_db)
     incidents = get_all_incidents(test_db)
     assert len(incidents) == 1
     assert incidents[0]["similarity_score"] == 0.50
+    assert incidents[0]["severity_rank"] == "Low"
 
 
 def test_sync_flagged_incidents_handles_invalid_similarity(test_db):

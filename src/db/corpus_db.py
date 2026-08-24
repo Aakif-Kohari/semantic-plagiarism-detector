@@ -75,6 +75,10 @@ def get_corpus_db_path() -> Path:
     return Path(_DB_PATH)
 
 
+class WeakConnection(sqlite3.Connection):
+    """Subclass of sqlite3.Connection that supports weak references."""
+    pass
+
 def _pool() -> dict[str, sqlite3.Connection]:
     """Return the connection pool belonging to the current thread."""
     pool = getattr(_connection_pool, "connections", None)
@@ -106,11 +110,11 @@ def _connect():
 
     if conn is None:
         try:
-            conn = sqlite3.connect(path, check_same_thread=False)
+            conn = sqlite3.connect(path, check_same_thread=False, factory=WeakConnection)
         except sqlite3.OperationalError:
             path = str(FALLBACK_CORPUS_DB_PATH)
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            conn = sqlite3.connect(path, check_same_thread=False)
+            conn = sqlite3.connect(path, check_same_thread=False, factory=WeakConnection)
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA journal_mode=WAL")
         pool[path] = conn
@@ -302,6 +306,108 @@ def init_corpus_db() -> None:
             os.chmod(_DB_PATH, 0o600)
         except OSError:
             pass
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS system_metrics (
+                metric_name TEXT PRIMARY KEY,
+                metric_value INTEGER DEFAULT 0
+            )
+            """)
+        conn.execute("""
+            INSERT OR IGNORE INTO system_metrics (metric_name, metric_value)
+            VALUES ('total_scans', 0)
+            """)
+
+
+_in_memory_total_scans = 0
+
+
+def increment_total_scans() -> int:
+    """Increment the total scan count in Redis (if available) or SQLite system_metrics."""
+    # 1. Try Redis first
+    try:
+        from src.utils.redis_cache import get_cache
+        cache = get_cache()
+        if cache.is_available():
+            val = cache._client.incr("spd:v1:metrics:total_scans")
+            return int(val)
+    except Exception as e:
+        logger.warning(f"Failed to increment total_scans in Redis: {e}. Falling back to SQLite.")
+
+    # 2. Fallback to SQLite system_metrics table
+    try:
+        with _connect() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO system_metrics (metric_name, metric_value)
+                VALUES ('total_scans', 0)
+                """
+            )
+            conn.execute(
+                """
+                UPDATE system_metrics
+                SET metric_value = metric_value + 1
+                WHERE metric_name = 'total_scans'
+                """
+            )
+            conn.commit()
+            
+            row = conn.execute(
+                "SELECT metric_value FROM system_metrics WHERE metric_name = 'total_scans'"
+            )
+            res = row.fetchone()
+            if res:
+                return int(res[0])
+    except Exception as e:
+        logger.error(f"Failed to increment total_scans in SQLite: {e}")
+
+    # 3. Fallback to in-memory
+    global _in_memory_total_scans
+    _in_memory_total_scans += 1
+    return _in_memory_total_scans
+
+
+def get_total_scans() -> int:
+    """Get the total scan count from Redis (if available) or SQLite system_metrics."""
+    # 1. Try Redis first
+    try:
+        from src.utils.redis_cache import get_cache
+        cache = get_cache()
+        if cache.is_available():
+            val = cache._client.get("spd:v1:metrics:total_scans")
+            if val is not None:
+                return int(val)
+    except Exception as e:
+        logger.warning(f"Failed to get total_scans from Redis: {e}. Falling back to SQLite.")
+
+    # 2. Fallback to SQLite system_metrics table
+    try:
+        with _connect() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO system_metrics (metric_name, metric_value)
+                VALUES ('total_scans', 0)
+                """
+            )
+            row = conn.execute(
+                "SELECT metric_value FROM system_metrics WHERE metric_name = 'total_scans'"
+            )
+            res = row.fetchone()
+            if res:
+                val = int(res[0])
+                try:
+                    from src.utils.redis_cache import get_cache
+                    cache = get_cache()
+                    if cache.is_available():
+                        cache._client.set("spd:v1:metrics:total_scans", val)
+                except Exception:
+                    pass
+                return val
+    except Exception as e:
+        logger.error(f"Failed to get total_scans from SQLite: {e}")
+
+    # 3. Fallback to in-memory
+    return _in_memory_total_scans
 
 
 @with_sqlite_retry
@@ -1228,3 +1334,53 @@ def get_scan_history(
     except Exception as exc:
         logger.error("Failed to retrieve scan history: %s", exc)
         return []
+
+
+def get_embedding_storage_footprint() -> dict[str, int | float]:
+    """Calculate and return the vector embedding storage usage.
+
+    Queries the SQLite database to compute the total size in bytes of the 
+    'embedding' column across all rows in the 'chunks' table, and compares 
+    it against the actual file size of the database.
+
+    Returns:
+        A dictionary containing:
+        - 'embedding_bytes' (int): Total bytes used by embeddings in the chunks table.
+        - 'database_bytes' (int): Total size of the corpus database file on disk.
+        - 'embedding_percentage' (float): Percentage of DB size used by embeddings (0.0 to 100.0).
+        - 'chunk_count' (int): Total number of chunks analyzed.
+    """
+    path = get_corpus_db_path()
+    try:
+        database_bytes = path.stat().st_size if path.exists() else 0
+    except OSError:
+        database_bytes = 0
+
+    embedding_bytes = 0
+    chunk_count = 0
+
+    try:
+        with _connect() as conn:
+            # Calculate sum of lengths of BLOBs, handling empty table case safely
+            row = conn.execute(
+                "SELECT SUM(LENGTH(embedding)), COUNT(1) FROM chunks"
+            ).fetchone()
+            if row:
+                embedding_bytes = int(row[0]) if row[0] is not None else 0
+                chunk_count = int(row[1]) if row[1] is not None else 0
+    except Exception as e:
+        logger.error("Failed to calculate embedding footprint: %s", e)
+        # We can still proceed returning whatever info we successfully gathered
+
+    percentage = 0.0
+    if database_bytes > 0:
+        percentage = (embedding_bytes / database_bytes) * 100.0
+        # Guard against anomalies where sum of columns > file size (e.g., WAL file missing from calculation but containing data)
+        percentage = min(percentage, 100.0)
+
+    return {
+        "embedding_bytes": embedding_bytes,
+        "database_bytes": database_bytes,
+        "embedding_percentage": float(percentage),
+        "chunk_count": chunk_count,
+    }

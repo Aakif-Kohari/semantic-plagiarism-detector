@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass, field
 from typing import Dict, List
 
 try:
@@ -60,6 +61,12 @@ _WORD_COUNT_PATTERN = re.compile(r"\b\w+\b")
 
 
 # ── Helper Functions ──────────────────────────────────────────────────────────
+
+
+def _chunking_text(text: str) -> str:
+    """Return plain text from either a string or a structured DOCX result."""
+    structured_text = getattr(text, "text", None)
+    return structured_text if isinstance(structured_text, str) else text
 
 
 def count_words(text: str) -> int:
@@ -148,52 +155,117 @@ def _align_to_sentence_boundary(
 # ── ChunkString ───────────────────────────────────────────────────────────────
 
 
-class ChunkString(str):
-    """str subclass that carries optional chunk metadata.
+@dataclass
+class ChunkString:
+    """Structured text chunk with optional metadata.
 
-    Warning: Metadata is lost if the string is modified via standard str operations.
+    The payload is stored explicitly in ``text`` rather than by subclassing
+    ``str``, which makes the type easier for static analyzers, serializers,
+    and C-extension boundaries to handle safely.
     """
 
-    def __new__(cls, value, metadata=None):
-        obj = super().__new__(cls, value)
-        obj.metadata = metadata or {}
-        return obj
+    text: str
+    metadata: dict = field(default_factory=dict)
 
 
 # ── Character-level fallback (CJK / emoji / long-word texts) ─────────────────
 
 
+def _is_low_surrogate(char: str) -> bool:
+    """Return whether *char* is a UTF-16 low-surrogate code point."""
+    return 0xDC00 <= ord(char) <= 0xDFFF
+
+
+def _is_high_surrogate(char: str) -> bool:
+    """Return whether *char* is a UTF-16 high-surrogate code point."""
+    return 0xD800 <= ord(char) <= 0xDBFF
+
+
+def _safe_chunk_start(text: str, index: int) -> int:
+    """Move *index* back when it points into a UTF-16 surrogate pair.
+
+    Python normally represents Unicode characters as complete code points, but
+    strings containing explicitly encoded UTF-16 surrogate pairs can still be
+    encountered at API boundaries. Starting a chunk on a low surrogate would
+    split that pair and can make downstream UTF-8 encoding fail.
+    """
+    if 0 < index < len(text) and _is_low_surrogate(text[index]):
+        if _is_high_surrogate(text[index - 1]):
+            return index - 1
+    return index
+
+
+def _safe_chunk_end(text: str, index: int) -> int:
+    """Move *index* back so a chunk never ends between surrogate code points."""
+    if 0 < index < len(text):
+        if _is_low_surrogate(text[index]) and _is_high_surrogate(text[index - 1]):
+            return index - 1
+    return index
+
+
 def _find_length_capped_end(
     text: str, start: int, limit: int, count_bytes: bool
 ) -> int:
-    """Return the end index so that text[start:end] does not exceed *limit*.
+    """Return a Unicode-safe end index within the requested size limit.
 
-    When count_bytes is True, *limit* is enforced in UTF-8 bytes, so
-    multi-byte characters (e.g. emoji, which can be 4 bytes each) are
-    measured accurately instead of being undercounted by plain len().
-    Otherwise, *limit* is enforced in Unicode code points (previous
-    behavior).
+    The returned slice never ends between the two code points of an explicit
+    UTF-16 surrogate pair. When *count_bytes* is true, the limit is enforced
+    using UTF-8 bytes without ever encoding an isolated surrogate.
     """
     n = len(text)
+    start = _safe_chunk_start(text, start)
+
     if not count_bytes:
-        return min(start + limit, n)
+        end = _safe_chunk_end(text, min(start + limit, n))
+        if end == start and start < n:
+            if _is_high_surrogate(text[start]) and start + 1 < n and _is_low_surrogate(text[start + 1]):
+                return start + 2
+            if not _is_low_surrogate(text[start]):
+                return start + 1
+        return end
 
     end = start
     byte_total = 0
     while end < n:
-        char_bytes = len(text[end].encode("utf-8"))
+        char = text[end]
+
+        # Treat an explicit surrogate pair as one logical character. This
+        # avoids attempting to UTF-8 encode either half independently.
+        if _is_high_surrogate(char) and end + 1 < n and _is_low_surrogate(text[end + 1]):
+            codepoint = chr(
+                0x10000
+                + ((ord(char) - 0xD800) << 10)
+                + (ord(text[end + 1]) - 0xDC00)
+            )
+            char_bytes = len(codepoint.encode("utf-8"))
+            width = 2
+        elif _is_low_surrogate(char):
+            # An already-isolated surrogate cannot be safely encoded as UTF-8.
+            # Keep it out of normal chunks rather than producing invalid bytes.
+            break
+        else:
+            char_bytes = len(char.encode("utf-8"))
+            width = 1
+
         if byte_total + char_bytes > limit:
             break
         byte_total += char_bytes
-        end += 1
+        end += width
+
     if end == start and start < n:
-        end = start + 1
-    return end
+        # A single character/pair larger than the requested byte limit still
+        # needs to make progress. Include the complete Unicode unit.
+        if _is_high_surrogate(text[start]) and start + 1 < n and _is_low_surrogate(text[start + 1]):
+            end = start + 2
+        elif not _is_low_surrogate(text[start]):
+            end = start + 1
+
+    return _safe_chunk_end(text, end)
 
 
 def _character_fallback_chunking(
     text: str, chunk_size: int, chunk_overlap: int, count_bytes: bool = False
-) -> List[str]:
+) -> List[ChunkString]:
     """Fallback character-based chunking for non-space or single-token texts (CJK, emojis, long words)."""
     text = text.strip()
     if not text:
@@ -202,10 +274,11 @@ def _character_fallback_chunking(
     chunks = []
     step = max(1, chunk_size - chunk_overlap)
     for start in range(0, len(text), step):
+        start = _safe_chunk_start(text, start)
         end = _find_length_capped_end(text, start, chunk_size, count_bytes)
         chunk = text[start:end]
         if chunk:
-            chunks.append(ChunkString(chunk))
+            chunks.append(ChunkString(text=chunk))
         if end >= len(text):
             break
     return chunks
@@ -273,7 +346,7 @@ def chunk_text(
     sentence_padding: bool = True,
     count_bytes: bool = False,
     separator: str = " ",
-) -> List[str]:
+) -> List[ChunkString]:
     """Split text into chunks of a target character length with overlapping boundaries.
 
     When *sentence_padding* is enabled (default), chunk start and end boundaries
@@ -308,6 +381,9 @@ def chunk_text(
     Returns:
         List of chunk strings.
     """
+    structured_headings = getattr(text, "headings", None)
+    text = _chunking_text(text)
+
     if chunk_size <= 0:
         raise ValueError("chunk_size must be a positive integer > 0")
 
@@ -385,10 +461,10 @@ def chunk_text(
             # Final verification after sentence alignment
             final_word_count = count_words(chunk)
             if final_word_count >= min_words:
-                chunks.append(ChunkString(chunk))
+                chunks.append(ChunkString(text=chunk))
         else:
             # Original word-boundary path (sentence_padding=False)
-            word_headings = getattr(text, "word_headings", None)
+            word_headings = structured_headings
             words = raw_chunk.split()
 
             if len(words) >= min_words:
@@ -399,7 +475,7 @@ def chunk_text(
                     # Note: This is a simplified approximation for the non-padding path
                     metadata["section_title"] = None
 
-                chunks.append(ChunkString(chunk_str, metadata=metadata))
+                chunks.append(ChunkString(text=chunk_str, metadata=metadata))
 
         if len(chunks) >= max_chunks:
             logger.warning(
@@ -439,7 +515,7 @@ def chunk_text(
         text_len,
         min_words,
     )
-    return [c for c in chunks if len(c.split()) >= min_words]
+    return [c for c in chunks if len(c.text.split()) >= min_words]
 
 
 # Alias for backward compatibility with src/core/__init__.py
@@ -567,7 +643,7 @@ def chunk_text_dynamic(
     target_size: int = 500,
     min_overlap: int = 50,
     max_chunks: int = 1000,
-) -> List[str]:
+) -> List[ChunkString]:
     """Dynamically split text into sliding window chunks while preserving sentence boundaries.
 
     Window boundaries are shifted to the nearest sentence end punctuation ('.', '!', '?')
@@ -591,10 +667,10 @@ def chunk_text_dynamic(
     n_total = len(clean_src)
 
     if n_total <= target_size:
-        return [ChunkString(clean_src)]
+        return [ChunkString(text=clean_src)]
 
     margin = int(target_size * 0.20)
-    chunks: List[str] = []
+    chunks: List[ChunkString] = []
     start = 0
 
     sentence_punct = {".", "!", "?"}
@@ -626,7 +702,7 @@ def chunk_text_dynamic(
 
         chunk_content = clean_src[start:actual_end].strip()
         if chunk_content:
-            chunks.append(ChunkString(chunk_content))
+            chunks.append(ChunkString(text=chunk_content))
 
             if len(chunks) >= max_chunks:
                 logger.warning(

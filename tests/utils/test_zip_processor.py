@@ -94,6 +94,7 @@ def test_extract_zip_handles_corrupted_inner_files():
 
 
 from src.utils.zip_processor import (
+    ALLOWED_ZIP_MEMBER_EXTENSIONS,
     MAX_ABSOLUTE_UNCOMPRESSED_SIZE,
     MAX_SINGLE_FILE_SIZE,
     MAX_TOTAL_DECOMPRESSED_SIZE,
@@ -121,6 +122,12 @@ def create_in_memory_zip(
     return zip_stream.getvalue()
 
 
+def test_allowed_zip_member_extensions_constant():
+    """Verify that ALLOWED_ZIP_MEMBER_EXTENSIONS includes all required formats."""
+    expected = {".pdf", ".docx", ".txt", ".rtf", ".csv", ".odt", ".md"}
+    assert ALLOWED_ZIP_MEMBER_EXTENSIONS == expected
+
+
 def test_process_zip_valid_extraction():
     """Verify that supported files are successfully extracted from a valid ZIP archive."""
     zip_data = create_in_memory_zip(
@@ -128,6 +135,10 @@ def test_process_zip_valid_extraction():
             "doc1.pdf": b"PDF text content",
             "doc2.docx": b"Word text content",
             "doc3.txt": b"Plain text content",
+            "doc4.rtf": b"{\\rtf1\\ansi RTF content}",
+            "doc5.csv": b"col1,col2\nval1,val2",
+            "doc6.odt": b"ODT content",
+            "doc7.md": b"# Markdown content",
             "unsupported.png": b"Image data",
             "executable.sh": b"#!/bin/sh\necho 1",
         }
@@ -141,6 +152,14 @@ def test_process_zip_valid_extraction():
     assert result["doc2.docx"] == b"Word text content"
     assert "doc3.txt" in result
     assert result["doc3.txt"] == b"Plain text content"
+    assert "doc4.rtf" in result
+    assert result["doc4.rtf"] == b"{\\rtf1\\ansi RTF content}"
+    assert "doc5.csv" in result
+    assert result["doc5.csv"] == b"col1,col2\nval1,val2"
+    assert "doc6.odt" in result
+    assert result["doc6.odt"] == b"ODT content"
+    assert "doc7.md" in result
+    assert result["doc7.md"] == b"# Markdown content"
 
     # Unsupported formats must be ignored
     assert "unsupported.png" not in result
@@ -399,3 +418,40 @@ def test_zip_bomb_zero_compressed_size_handled():
             process_zip_file(zip_bytes)
         except ValueError as e:
             assert "Decompression ratio" not in str(e)
+
+
+def test_zip_bomb_ratio_boundary():
+    """Verify that a ZIP entry with ratio exactly 100:1 passes validation, but 100.1:1 fails."""
+    from unittest.mock import patch
+
+    # 1. Setup exact 100:1 ratio (e.g., 100000 bytes uncompressed, 1000 bytes compressed)
+    info_exact = zipfile.ZipInfo("exact_100.txt")
+    info_exact.file_size = 100_000
+    info_exact.compress_size = 1_000
+
+    # 2. Setup 100.1:1 ratio (e.g., 100100 bytes uncompressed, 1000 bytes compressed)
+    info_exceeds = zipfile.ZipInfo("exceeds_100.txt")
+    info_exceeds.file_size = 100_100
+    info_exceeds.compress_size = 1_000
+
+    # Create a valid minimal ZIP for the wrapper
+    zip_bytes = create_in_memory_zip({"doc.txt": b"some content"})
+
+    def mock_read(self, name_or_info):
+        return b"some content"
+
+    # Exact 100:1 ratio must pass
+    with patch("zipfile.ZipFile.infolist", return_value=[info_exact]), patch(
+        "zipfile.ZipFile.read", mock_read
+    ):
+        try:
+            process_zip_file(zip_bytes)
+        except ValueError as e:
+            if "Decompression ratio exceeds security limit" in str(e):
+                pytest.fail("Ratio exactly 100:1 should have passed validation but failed.")
+
+    # 100.1:1 ratio must fail
+    with patch("zipfile.ZipFile.infolist", return_value=[info_exceeds]):
+        with pytest.raises(ValueError, match="Decompression ratio exceeds security limit"):
+            process_zip_file(zip_bytes)
+

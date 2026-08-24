@@ -280,7 +280,22 @@ def test_detect_device_helper():
     mock_obj_device_type.device = mock_dev
     assert _detect_device(mock_obj_device_type) == "mps"
 
-    assert _detect_device(None) in ("cpu", "cuda", "mps")
+    assert _detect_device(None) in ("cpu", "cuda", "mps", "xpu")
+
+
+def test_detect_device_supports_xpu(monkeypatch):
+    """Return XPU when an Intel accelerator is available."""
+    monkeypatch.setattr(torch.xpu, "is_available", lambda: True, raising=False)
+    assert _detect_device(None) == "xpu"
+
+
+def test_detect_device_supports_rocm(monkeypatch):
+    """ROCm/HIP devices are exposed through PyTorch's CUDA device API."""
+    monkeypatch.setattr(torch.xpu, "is_available", lambda: False, raising=False)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.backends.cuda, "is_built", lambda: True)
+    monkeypatch.setattr(torch.version, "hip", "6.2.0", raising=False)
+    assert _detect_device(None) == "cuda"
 
 
 # ─── Mini-Batch Processing Tests (Issue #920) ──────────────────────────────────

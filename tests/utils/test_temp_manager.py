@@ -695,3 +695,38 @@ def test_managed_ocr_temp_dir_restores_environment_and_tempdir():
     assert tempfile.tempdir == orig_tempdir
     assert os.environ.get("TMPDIR") == orig_tmpdir_env
 
+
+def test_thread_safety_registered_temp_paths():
+    """Verify concurrent register, unregister, and cleanup operations across multiple threads do not crash or corrupt state."""
+    import threading
+    from src.utils.temp_manager import _lock
+
+    assert isinstance(_lock, type(threading.Lock()))
+
+    threads = []
+    errors = []
+
+    def worker(worker_id: int):
+        try:
+            for i in range(50):
+                path = os.path.join(tempfile.gettempdir(), f"fake_thread_test_{worker_id}_{i}.tmp")
+                register_temp_path(path)
+                if i % 2 == 0:
+                    unregister_temp_path(path)
+                else:
+                    cleanup_temp_files(retention_hours=0.0)
+        except Exception as e:
+            errors.append(e)
+
+    for w in range(10):
+        t = threading.Thread(target=worker, args=(w,))
+        threads.append(t)
+        t.start()
+
+    for t in threads:
+        t.join()
+
+    assert not errors, f"Errors encountered during concurrent access: {errors}"
+    cleanup_registered_temp_paths()
+
+

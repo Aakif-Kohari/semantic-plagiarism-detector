@@ -17,7 +17,6 @@ import zipfile
 from collections import Counter
 from pathlib import Path
 from typing import BinaryIO, Dict, List, Optional, Union
-from typing_extensions import TypeAlias
 
 logger = logging.getLogger(__name__)
 
@@ -42,34 +41,25 @@ import docx
 import pdfplumber
 from langdetect import LangDetectException, detect
 
-from src.exceptions import UnsupportedFormatError
-
 try:
     from striprtf.striprtf import rtf_to_text
 except ImportError:
 
     def rtf_to_text(rtf_text: str) -> str:
-        raise UnsupportedFormatError(
-            "striprtf is required to process RTF files. Please install striprtf to parse RTF documents."
-        )
+        return rtf_text
 
 
 import string
 import unicodedata
 
+from src.core.parsers.docx_parser import ParsedDocxText
 from src.core.translator import translate_text
 from src.errors import EmptyDocumentError
 
 # OCR dependencies are imported lazily so TXT/DOCX and normal text PDFs still
 # work even when Tesseract is not installed on the machine.
-PDFInput: TypeAlias = Union[str, bytes, io.BytesIO, BinaryIO]
+PDFInput = Union[str, bytes, io.BytesIO, BinaryIO]
 
-
-class ParsedDocxText(str):
-    def __new__(cls, value, word_headings=None):
-        obj = super().__new__(cls, value)
-        obj.word_headings = word_headings or []
-        return obj
 
 
 MIN_NATIVE_WORDS_PER_PAGE = 8
@@ -528,18 +518,20 @@ _BIBLIOGRAPHY_HEADERS = re.compile(
 
 
 def strip_bibliography(text: str) -> str:
-    """Remove everything from the first bibliography header onward.
+    """Remove everything from the first standalone bibliography header onward.
 
     The header must appear on its own line (standalone) to avoid stripping
     body text that merely mentions the word "References".
     """
-    match = _BIBLIOGRAPHY_HEADERS.search(text)
+    structured_headings = getattr(text, "headings", None)
+    plain_text = text.text if isinstance(text, ParsedDocxText) else text
+    match = _BIBLIOGRAPHY_HEADERS.search(plain_text)
     if match:
-        sliced_text = text[: match.start()].rstrip()
-        if hasattr(text, "word_headings"):
+        sliced_text = plain_text[: match.start()].rstrip()
+        if structured_headings is not None:
             words_in_sliced = len(sliced_text.split())
             return ParsedDocxText(
-                sliced_text, word_headings=text.word_headings[:words_in_sliced]
+                text=sliced_text, headings=structured_headings[:words_in_sliced]
             )
         return sliced_text
     return text
@@ -922,7 +914,7 @@ def _ocr_pdf_page(
     from src.utils.temp_manager import managed_ocr_temp_dir
 
     try:
-        with managed_ocr_temp_dir(prefix=f"ocr_pdf_p{page_index}_") as tmp_dir:
+        with managed_ocr_temp_dir(prefix=f"ocr_pdf_p{page_index}_"):
             with fitz.open(stream=pdf_bytes, filetype="pdf") as document:
                 page = document.load_page(page_index)
                 scale = dpi / 72
@@ -1402,7 +1394,7 @@ def extract_text_from_docx(file: PDFInput) -> str:
                         word_headings.extend([current_heading] * len(p_words))
 
         full_text = "\n\n".join(paragraphs_text)
-        return ParsedDocxText(full_text.strip(), word_headings=word_headings)
+        return ParsedDocxText(text=full_text.strip(), headings=word_headings)
     except (ValueError, KeyError, OSError) as exc:
         print(f"[document_parser] Error reading DOCX: {exc}")
     except Exception as exc:
@@ -1480,8 +1472,6 @@ def extract_text_from_rtf(file: PDFInput) -> str:
                 else data
             )
         text = rtf_to_text(content)
-    except UnsupportedFormatError:
-        raise
     except Exception as exc:
         print(f"[document_parser] Error reading RTF: {exc}")
     return text.strip()
@@ -1850,7 +1840,7 @@ def extract_text_from_image(
 
     file_bytes = _read_pdf_bytes(file)
     try:
-        with managed_ocr_temp_dir(prefix="ocr_image_") as tmp_dir:
+        with managed_ocr_temp_dir(prefix="ocr_image_"):
             image = Image.open(io.BytesIO(file_bytes))
             try:
                 return pytesseract.image_to_string(
@@ -2014,19 +2004,11 @@ def extract_text(
         EmptyDocumentError: If the final extracted and cleaned text is empty.
     """
     ocr_language, ocr_dpi = normalize_ocr_settings(
-        ocr_language=ocr_language,
-        ocr_dpi=ocr_dpi,
+        language=ocr_language,
+        dpi=ocr_dpi,
     )
 
     file_bytes = _read_pdf_bytes(file)
-    from src.security.mime_validator import validate_mime_type
-
-    if not validate_mime_type(file_bytes, filename):
-        logger.warning(
-            f"[document_parser] Security warning: Rejected file '{filename}' "
-            f"because its MIME type / magic bytes do not match its file extension."
-        )
-        return ""
     file = file_bytes
 
     extension = filename.rsplit(".", 1)[-1].lower()

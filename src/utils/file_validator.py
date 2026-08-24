@@ -14,6 +14,7 @@ descriptive feedback and to enforce stricter business logic rules.
 """
 
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Union
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 # This should match or be slightly less than the server.maxUploadSize in config.toml
 # to ensure our application-level check catches it before the server does,
 # allowing us to return a friendly error message.
-MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024
+MAX_FILE_SIZE_BYTES = int(os.getenv("MAX_UPLOAD_SIZE_MB", "50")) * 1024 * 1024
 
 # Allowed file extensions for document processing.
 # These correspond to the formats supported by src/core/document_parser.py
@@ -39,6 +40,7 @@ ALLOWED_EXTENSIONS = {
     ".rtf",
     ".odt",
     ".csv",
+    ".epub",
 }
 
 # Magic byte signatures for common document formats.
@@ -50,6 +52,7 @@ MAGIC_SIGNATURES = {
     ".doc": b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",  # OLE2 Compound Document
     ".rtf": b"{\\rtf",
     ".odt": b"PK\x03\x04",  # ZIP archive
+    ".epub": b"PK\x03\x04",  # ZIP archive (EPUB is a ZIP)
     ".png": b"\x89PNG\r\n\x1a\n",
     ".jpg": b"\xff\xd8\xff",
     ".jpeg": b"\xff\xd8\xff",
@@ -74,25 +77,35 @@ class ValidationResult:
 
 class FileValidator:
     """Validates uploaded files for size, extension, and content integrity.
-    
+
     This class provides a centralized validation mechanism that can be used
     by both the Streamlit UI and the FastAPI backend to ensure files are
     safe and supported before processing.
+
+    By default a magic-byte mismatch is logged but tolerated. Pass
+    ``strict_mode=True`` to make such mismatches a hard failure with
+    ``error_code="MAGIC_BYTE_MISMATCH"`` (Issue #3201).
     """
     
     def __init__(
         self,
         max_size_bytes: int = MAX_FILE_SIZE_BYTES,
-        allowed_extensions: Optional[set] = None
+        allowed_extensions: Optional[set] = None,
+        strict_mode: bool = False,
     ):
         """Initialize the FileValidator with configurable limits.
-        
+
         Args:
             max_size_bytes: Maximum allowed file size in bytes.
             allowed_extensions: Set of allowed file extensions (e.g., {'.pdf', '.txt'}).
+            strict_mode: When True, a magic-byte/extension mismatch fails
+                validation with ``MAGIC_BYTE_MISMATCH`` instead of logging a
+                warning and passing (Issue #3201). Off by default so existing
+                callers keep the permissive behaviour.
         """
         self.max_size_bytes = max_size_bytes
         self.allowed_extensions = allowed_extensions or ALLOWED_EXTENSIONS
+        self.strict_mode = strict_mode
         
     def validate(
         self,
@@ -104,6 +117,10 @@ class FileValidator:
         This method checks the file size, extension, and magic bytes to ensure
         the file is safe and supported. It returns a ValidationResult object
         containing the status and any error details.
+
+        In permissive mode (the default) a magic-byte mismatch only logs a
+        warning; with ``strict_mode=True`` it fails validation with
+        ``MAGIC_BYTE_MISMATCH``.
         
         Args:
             file_data: The raw bytes of the uploaded file.
@@ -112,6 +129,14 @@ class FileValidator:
         Returns:
             A ValidationResult object indicating success or failure.
         """
+        if "\x00" in filename:
+            return ValidationResult(
+                is_valid=False,
+                filename=filename,
+                error_message="Filename contains invalid characters.",
+                error_code="INVALID_FILENAME_CHARACTERS"
+            )
+
         logger.debug("Validating file: %s", filename)
         
         # 1. Check file size
@@ -127,15 +152,22 @@ class FileValidator:
         # 3. Check magic bytes (content verification)
         magic_result = self._check_magic_bytes(file_data, filename)
         if not magic_result.is_valid:
-            # Log a warning for magic byte mismatch, but don't fail hard
-            # unless it's a known dangerous signature. Some valid files
-            # might have unusual headers.
+            # In strict mode a mismatch is a hard failure: an executable
+            # renamed to .pdf must not reach the processing pipeline
+            # (Issue #3201).
+            if self.strict_mode:
+                logger.error(
+                    "Magic byte mismatch for %s (strict mode). Expected %s, got %s",
+                    filename, magic_result.error_message, file_data[:8]
+                )
+                return magic_result
+
+            # Permissive default: log the mismatch and let the file through,
+            # because some valid files carry unusual headers.
             logger.warning(
                 "Magic byte mismatch for %s. Expected %s, got %s",
                 filename, magic_result.error_message, file_data[:8]
             )
-            # For now, we allow it but log it. In high-security environments,
-            # this could be changed to return the invalid result.
             
         logger.info("File validation passed for %s", filename)
         return ValidationResult(is_valid=True, filename=filename)
@@ -184,6 +216,13 @@ class FileValidator:
         
     def _check_extension(self, filename: str) -> ValidationResult:
         """Verify the file extension is in the allowed list.
+
+        Also detects "double extension" disguise attempts (e.g.
+        ``thesis.pdf.exe`` or ``report.docx.vbs``), where an earlier part of
+        the filename looks like a legitimate document extension but the
+        actual (final) extension is something else — a common technique for
+        tricking users and naive server-side checks into treating a
+        dangerous file as safe.
         
         Args:
             filename: The name of the file.
@@ -202,6 +241,31 @@ class FileValidator:
                 error_message=error_msg,
                 error_code="MISSING_EXTENSION"
             )
+
+        suffixes = [s.lower() for s in Path(filename).suffixes]
+        if len(suffixes) > 1:
+            final_suffix = suffixes[-1]
+            non_final_suffixes = suffixes[:-1]
+            if final_suffix not in self.allowed_extensions and any(
+                s in self.allowed_extensions for s in non_final_suffixes
+            ):
+                disguised_as = next(
+                    s for s in non_final_suffixes if s in self.allowed_extensions
+                )
+                error_msg = (
+                    f"File '{filename}' has a suspicious double extension: "
+                    f"it looks like a '{disguised_as}' document but the actual "
+                    f"file extension is '{final_suffix}', which is not supported. "
+                    f"This pattern (e.g. 'report.docx.vbs') is often used to "
+                    f"disguise malicious files — the file was rejected."
+                )
+                logger.warning(error_msg)
+                return ValidationResult(
+                    is_valid=False,
+                    filename=filename,
+                    error_message=error_msg,
+                    error_code="DOUBLE_EXTENSION"
+                )
             
         if ext not in self.allowed_extensions:
             error_msg = (
@@ -218,6 +282,70 @@ class FileValidator:
             
         return ValidationResult(is_valid=True, filename=filename)
         
+    def _check_epub_mimetype(
+        self,
+        file_data: Union[bytes, bytearray],
+        filename: str
+    ) -> ValidationResult:
+        """Verify that an EPUB file contains a valid EPUB mimetype entry."""
+        import io
+        import zipfile
+
+        try:
+            with zipfile.ZipFile(io.BytesIO(file_data)) as z:
+                names = [name.lower() for name in z.namelist()]
+                if "mimetype" in names:
+                    target = next(n for n in z.namelist() if n.lower() == "mimetype")
+                    mimetype_content = (
+                        z.read(target).decode("utf-8", errors="ignore").strip().lower()
+                    )
+                    if "application/epub+zip" in mimetype_content or "epub" in mimetype_content:
+                        return ValidationResult(is_valid=True, filename=filename)
+        except Exception:
+            pass
+
+        # Fallback byte pattern scan for mimetype in EPUB container
+        if b"application/epub+zip" in file_data or b"mimetype" in file_data:
+            return ValidationResult(is_valid=True, filename=filename)
+
+        error_msg = (
+            f"File '{filename}' content is missing EPUB mimetype declaration."
+        )
+        return ValidationResult(
+            is_valid=False,
+            filename=filename,
+            error_message=error_msg,
+            error_code="MAGIC_BYTE_MISMATCH",
+        )
+
+    def _check_csv_content(
+        self,
+        file_data: Union[bytes, bytearray],
+        filename: str
+    ) -> ValidationResult:
+        """Verify CSV content is valid UTF-8/ASCII text without binary null bytes."""
+        if b"\x00" in file_data:
+            error_msg = f"CSV file '{filename}' contains binary null bytes."
+            return ValidationResult(
+                is_valid=False,
+                filename=filename,
+                error_message=error_msg,
+                error_code="MAGIC_BYTE_MISMATCH",
+            )
+
+        try:
+            file_data.decode("utf-8")
+        except UnicodeDecodeError:
+            error_msg = f"CSV file '{filename}' is not valid UTF-8/ASCII text."
+            return ValidationResult(
+                is_valid=False,
+                filename=filename,
+                error_message=error_msg,
+                error_code="MAGIC_BYTE_MISMATCH",
+            )
+
+        return ValidationResult(is_valid=True, filename=filename)
+
     def _check_magic_bytes(
         self,
         file_data: Union[bytes, bytearray],
@@ -237,6 +365,9 @@ class FileValidator:
         """
         ext = Path(filename).suffix.lower()
         
+        if ext == ".csv":
+            return self._check_csv_content(file_data, filename)
+
         if ext not in MAGIC_SIGNATURES:
             # No magic signature defined for this extension (e.g., .txt, .md)
             # Plain text files don't have standard magic bytes, so we skip.
@@ -257,6 +388,9 @@ class FileValidator:
                 error_code="MAGIC_BYTE_MISMATCH"
             )
             
+        if ext == ".epub":
+            return self._check_epub_mimetype(file_data, filename)
+
         return ValidationResult(is_valid=True, filename=filename)
 
 

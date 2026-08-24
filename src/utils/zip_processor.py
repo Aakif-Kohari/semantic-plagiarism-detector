@@ -2,7 +2,7 @@ import io
 import os
 import zipfile
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Generator, Tuple
 
 from src.utils.filename import (
     InvalidFileExtensionError,
@@ -16,6 +16,16 @@ MAX_SINGLE_FILE_SIZE = 100 * 1024 * 1024  # 100 MB
 # Issue #1364: Structural zip bomb protection via decompression ratio
 MAX_DECOMPRESSION_RATIO = 100  # 100:1 ratio limit
 MAX_ABSOLUTE_UNCOMPRESSED_SIZE = 500 * 1024 * 1024  # 500 MB absolute limit
+
+ALLOWED_ZIP_MEMBER_EXTENSIONS = {
+    ".pdf",
+    ".docx",
+    ".txt",
+    ".rtf",
+    ".csv",
+    ".odt",
+    ".md",
+}
 
 
 def is_safe_zip_path(target_dir: Path, extracted_path: Path) -> bool:
@@ -32,28 +42,26 @@ def is_safe_zip_path(target_dir: Path, extracted_path: Path) -> bool:
     return True
 
 
-def process_zip_file(zip_bytes: bytes) -> Dict[str, bytes]:
+def iter_zip_files(
+    zip_bytes: bytes,
+) -> Generator[Tuple[str, bytes], None, None]:
     """
-    Extracts supported documents (PDF, DOCX, TXT) from a ZIP archive entirely in memory.
+    Yields (filename, file_bytes) tuples one entry at a time from a ZIP archive.
 
-    Handles:
-    - Invalid or corrupted ZIP files (raises ValueError).
-    - Encrypted ZIP entries (raises ValueError).
-    - Subdirectory filtering (ignores folder entries, flattens paths to keep filenames safe).
-    - Path traversal attempts (skips any entries containing ".." or starting with "/").
-    - ZIP bombs (checks total/individual decompressed size limits before extraction).
-    - Duplicate filename collisions (resolves them uniquely).
+    Memory Optimization (Issue #3197):
+    Instead of reading all decompressed file entry bytes into memory simultaneously,
+    this generator processes and yields each entry sequentially to minimize peak RAM usage.
 
     Args:
         zip_bytes: The raw binary data of the ZIP archive.
 
-    Returns:
-        Dict[str, bytes]: A dictionary mapping unique, sanitized filenames to their raw bytes.
+    Yields:
+        Tuple[str, bytes]: (sanitized_unique_filename, raw_file_bytes)
     """
     if not zip_bytes:
         raise ValueError("ZIP archive is empty.")
 
-    extracted_files: Dict[str, bytes] = {}
+    used_filenames: Dict[str, bytes] = {}
 
     try:
         zip_stream = io.BytesIO(zip_bytes)
@@ -93,7 +101,7 @@ def process_zip_file(zip_bytes: bytes) -> Dict[str, bytes]:
                         f"ZIP archive total decompressed size exceeds safety limit of {MAX_TOTAL_DECOMPRESSED_SIZE // (1024 * 1024)}MB."
                     )
 
-            # 2. Extract and sanitize entries
+            # 2. Extract and yield entries sequentially
             for zip_info in zf.infolist():
                 # Skip directories
                 if zip_info.is_dir():
@@ -115,7 +123,7 @@ def process_zip_file(zip_bytes: bytes) -> Dict[str, bytes]:
                 # Filter by supported document extensions
                 _, ext = os.path.splitext(filename)
                 ext = ext.lower()
-                if ext not in [".pdf", ".docx", ".txt"]:
+                if ext not in ALLOWED_ZIP_MEMBER_EXTENSIONS:
                     continue
 
                 # Read entry bytes
@@ -133,13 +141,7 @@ def process_zip_file(zip_bytes: bytes) -> Dict[str, bytes]:
                 try:
                     validate_document_extension(
                         filename,
-                        allowed_extensions={
-                            ".csv",
-                            ".docx",
-                            ".pdf",
-                            ".rtf",
-                            ".txt",
-                        },
+                        allowed_extensions=ALLOWED_ZIP_MEMBER_EXTENSIONS,
                     )
                 except InvalidFileExtensionError:
                     # Unsafe or unsupported archive members are ignored.
@@ -149,11 +151,24 @@ def process_zip_file(zip_bytes: bytes) -> Dict[str, bytes]:
                 # input after strict final-extension validation.
                 unique_name = unique_filename(
                     filename,
-                    extracted_files,
+                    used_filenames,
                 )
-                extracted_files[unique_name] = file_data
+                used_filenames[unique_name] = b""
+
+                yield unique_name, file_data
 
     except zipfile.BadZipFile as e:
         raise ValueError("Invalid or corrupted ZIP archive.") from e
 
-    return extracted_files
+
+def process_zip_file(zip_bytes: bytes) -> Dict[str, bytes]:
+    """
+    Extracts supported documents (.pdf, .docx, .txt, .rtf, .csv, .odt, .md) from a ZIP archive entirely in memory.
+
+    Args:
+        zip_bytes: The raw binary data of the ZIP archive.
+
+    Returns:
+        Dict[str, bytes]: A dictionary mapping unique, sanitized filenames to their raw bytes.
+    """
+    return dict(iter_zip_files(zip_bytes))

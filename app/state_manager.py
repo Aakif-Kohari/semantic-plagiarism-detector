@@ -173,6 +173,7 @@ def init_api_server_daemon():
 def _run_backup_daemon():
     """Background loop to create backups after inactivity."""
     last_backup_time = 0.0
+    daemon_start_time = time.time()
 
     try:
         cache = get_cache()
@@ -198,15 +199,25 @@ def _run_backup_daemon():
             from src.core.app_config import get_backup_idle_timeout
 
             cache = get_cache()
-
             timeout = get_backup_idle_timeout()
+            now = time.time()
+            
+            # Establish a safe startup state: wait for at least one timeout interval
+            # after daemon startup before allowing ANY backups to trigger.
+            # We track this explicit condition rather than using an arbitrary sleep/continue.
+            is_startup_phase = (now - daemon_start_time) < timeout
 
             last_activity = cache.get("spd:v1:global:last_activity")
             if last_activity is None:
-                last_activity = time.time()
+                last_activity = now
                 cache.set("spd:v1:global:last_activity", last_activity)
+            else:
+                try:
+                    last_activity = float(last_activity)
+                except (ValueError, TypeError):
+                    last_activity = now
+                    cache.set("spd:v1:global:last_activity", last_activity)
 
-            now = time.time()
             idle = now - last_activity
 
             active_sessions = get_active_sessions_count()
@@ -221,6 +232,7 @@ def _run_backup_daemon():
                 active_sessions == 0
                 and idle >= timeout
                 and last_activity > last_backup_time
+                and not is_startup_phase
             ):
                 from src.core.app_config import get_backup_dir
                 from src.db.database_backup import (
@@ -345,3 +357,79 @@ def save_preferences_callback():
             "theme": st.session_state.get("theme_selector", "Light"),
         }
         update_user_preferences(st.session_state[SessionKeys.USERNAME], prefs)
+
+
+def reset_analysis_data() -> None:
+    """Clear document analysis and scan results from session state while preserving authentication and theme preferences."""
+    preserved_keys = {
+        SessionKeys.AUTHENTICATED,
+        SessionKeys.USERNAME,
+        SessionKeys.ROLE,
+        SessionKeys.SESSION_ID,
+        SessionKeys.LANG,
+        SessionKeys.SESSION_START_TIME,
+        SessionKeys.MODEL_LOAD_TIME,
+        SessionKeys.LAST_INTERACTION,
+        SessionKeys.ACCENT_COLOR,
+        SessionKeys.COMPACT_VIEW,
+        SessionKeys.FORCE_DARK_CHARTS,
+        SessionKeys.PDF_PASSWORDS,
+        "authenticated",
+        "username",
+        "role",
+        "session_id",
+        "lang",
+        "session_start_time",
+        "model_load_time",
+        "last_interaction",
+        "accent_color",
+        "compact_view",
+        "force_dark_charts",
+        "pdf_passwords",
+        "theme_selector",
+        "theme",
+        "active_session_token",
+        "raw_session_uuid",
+    }
+
+    target_keys = {
+        SessionKeys.ANALYSIS_RESULTS,
+        SessionKeys.ANALYSIS_FILE_SIGNATURE,
+        SessionKeys.DRIVE_FILES_DICT,
+        SessionKeys.FAILED_DOCUMENTS,
+        SessionKeys.SELECTED_DOCUMENT_ID,
+        SessionKeys.SCANNING,
+        SessionKeys.AUDIT_REPORT_GENERATED,
+        SessionKeys.SENT_ALERTS,
+        SessionKeys.WARNING_PAGE,
+        "analysis_results",
+        "analysis_file_signature",
+        "drive_files_dict",
+        "failed_documents",
+        "selected_document_id",
+        "scanning",
+        "scanned_documents",
+        "uploaded_files",
+        "current_document",
+        "analysis_data",
+    }
+
+    for key in list(st.session_state.keys()):
+        key_str = str(key)
+        if key in preserved_keys or key_str in preserved_keys:
+            continue
+        if (
+            key in target_keys
+            or key_str in target_keys
+            or key_str.startswith("file_uploader")
+            or key_str.startswith("doc_")
+            or key_str.startswith("scan_")
+            or key_str.startswith("analysis_")
+        ):
+            del st.session_state[key]
+
+
+def reset_analysis_state() -> None:
+    """Alias for reset_analysis_data() to preserve authentication state while clearing document analysis."""
+    reset_analysis_data()
+

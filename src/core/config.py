@@ -218,6 +218,11 @@ SEVERITY_RANK: Final[Mapping[str, int]] = {
 # Embedding batch size configuration (default: 32)
 EMBEDDING_BATCH_SIZE: Final[int] = int(os.getenv("EMBEDDING_BATCH_SIZE", "32"))
 
+# Minimum consecutive words for a highlighted match in side-by-side diffs.
+DEFAULT_DIFF_MIN_MATCH_LENGTH: Final[int] = int(
+    os.getenv("DEFAULT_DIFF_MIN_MATCH_LENGTH", "4")
+)
+
 
 @dataclass(frozen=True)
 class SimilarityThresholds:

@@ -239,6 +239,7 @@ class CacheNamespace(str, Enum):
     UPLOADS = "spd:v1:uploads"
     BADGES = "spd:v1:badges"
     SCAN_JOBS = "spd:v1:scan_jobs"
+    CLUSTERING_JOBS = "spd:v1:clustering_jobs"
 
     def build_key(self, *parts: Any) -> str:
         """Build a normalized Redis cache key appending APP_VERSION and using pathlib.Path(p).as_posix() for path components."""
@@ -449,6 +450,24 @@ class RedisCache:
             return 0.0
         return (hits / total) * 100
 
+    def _inc_hits(self) -> None:
+        with self._lock:
+            self._hits += 1
+        try:
+            from src.core.metrics import cache_hits_total
+            cache_hits_total.labels(cache_type="redis").inc()
+        except Exception:
+            pass
+
+    def _inc_misses(self) -> None:
+        with self._lock:
+            self._misses += 1
+        try:
+            from src.core.metrics import cache_misses_total
+            cache_misses_total.labels(cache_type="redis").inc()
+        except Exception:
+            pass
+
     def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
         if self.is_available():
             try:
@@ -484,8 +503,7 @@ class RedisCache:
                         except Exception:
                             pass
                     else:
-                        with self._lock:
-                            self._hits += 1
+                        self._inc_hits()
                         return pickle.loads(decompressed)
                         
             except Exception as e:
@@ -493,12 +511,10 @@ class RedisCache:
 
         val = self._fallback_get(key)
         if val is not None:
-            with self._lock:
-                self._hits += 1
+            self._inc_hits()
             return val
 
-        with self._lock:
-            self._misses += 1
+        self._inc_misses()
         return None
 
     def delete(self, key: str) -> bool:
@@ -545,8 +561,7 @@ class RedisCache:
                         except Exception:
                             pass
                     else:
-                        with self._lock:
-                            self._hits += 1
+                        self._inc_hits()
                         return json.loads(decompressed.decode('utf-8'))
                         
             except Exception as e:
@@ -554,12 +569,10 @@ class RedisCache:
 
         val = self._fallback_get_json(key)
         if val is not None:
-            with self._lock:
-                self._hits += 1
+            self._inc_hits()
             return val
 
-        with self._lock:
-            self._misses += 1
+        self._inc_misses()
         return None
 
     def exists(self, key: str) -> bool:

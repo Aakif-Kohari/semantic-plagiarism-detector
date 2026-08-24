@@ -13,28 +13,55 @@ named colors, providing a robust fallback mechanism for theme configurations.
 Issue #2898: Fallback behavior for named colors in Badge Generator.
 """
 
-import hashlib
 import html
 import logging
 import re
+import hashlib
+import logging
+import re
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
 try:
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw, ImageFont, PngImagePlugin
 except ImportError:
     Image = None
     ImageDraw = None
     ImageFont = None
+    PngImagePlugin = None
 
-from reportlab.lib.colors import HexColor
-from reportlab.lib.enums import TA_CENTER
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.lib.units import inch
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+def has_pillow() -> bool:
+    """Check if PIL/Pillow is installed."""
+    return Image is not None
+
+try:
+    from reportlab.lib.colors import HexColor
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import inch
+    from reportlab.platypus import (
+        Paragraph,
+        SimpleDocTemplate,
+        Spacer,
+        Table,
+        TableStyle,
+    )
+except ImportError:
+    HexColor = None
+    TA_CENTER = None
+    A4 = None
+    ParagraphStyle = None
+    getSampleStyleSheet = None
+    inch = None
+    Paragraph = None
+    SimpleDocTemplate = None
+    Spacer = None
+    Table = None
+    TableStyle = None
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +142,11 @@ _HEX_COLOR_PATTERN = re.compile(
 DEFAULT_BADGE_COLOR = "#4f46e5"
 
 
+def has_reportlab() -> bool:
+    """Return True when reportlab is installed and PDF badge generation is available."""
+    return SimpleDocTemplate is not None
+
+
 def validate_hex_color(
     color: Optional[str], default_color: str = DEFAULT_BADGE_COLOR
 ) -> str:
@@ -191,9 +223,8 @@ def generate_badge_svg(
     """
     Generates a simple SVG "Originality Verified" badge.
 
-    The accent_color is validated (and defaulted if invalid) before being
-    inserted into the SVG markup, preventing malformed or unescaped color
-    values from producing invalid SVG.
+    Builds the SVG with ElementTree so text/attributes are XML-escaped
+    automatically instead of relying on manual string interpolation.
 
     Args:
         student_name: Name of the student (optional, defaults to "Student")
@@ -210,15 +241,66 @@ def generate_badge_svg(
 
     safe_name = html.escape(student_name)
     safe_date = html.escape(date)
+    root = ET.Element(
+        "svg",
+        {
+            "xmlns": "http://www.w3.org/2000/svg",
+            "width": "400",
+            "height": "120",
+            "viewBox": "0 0 400 120",
+        },
+    )
+    ET.SubElement(
+        root,
+        "rect",
+        {
+            "width": "400",
+            "height": "120",
+            "rx": "12",
+            "fill": safe_color,
+        },
+    )
 
-    safe_font = html.escape(font_family)
+    title = ET.SubElement(
+        root,
+        "text",
+        {
+            "x": "20",
+            "y": "45",
+            "font-family": font_family,
+            "font-size": str(font_size),
+            "fill": "#ffffff",
+        },
+    )
+    title.text = "Originality Verified"
 
-    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="400" height="120" viewBox="0 0 400 120">
-  <rect width="400" height="120" rx="12" fill="{safe_color}" />
-  <text x="20" y="45" font-family="{safe_font}" font-size="{font_size}" fill="#ffffff">Originality Verified</text>
-  <text x="20" y="75" font-family="{safe_font}" font-size="{font_size}" fill="#e0e7ff">Awarded to: {safe_name}</text>
-  <text x="20" y="100" font-family="{safe_font}" font-size="{font_size}" fill="#e0e7ff">Date: {safe_date}</text>
-</svg>"""
+    awarded = ET.SubElement(
+        root,
+        "text",
+        {
+            "x": "20",
+            "y": "75",
+            "font-family": font_family,
+            "font-size": str(font_size),
+            "fill": "#e0e7ff",
+        },
+    )
+    awarded.text = f"Awarded to: {student_name}"
+
+    dated = ET.SubElement(
+        root,
+        "text",
+        {
+            "x": "20",
+            "y": "100",
+            "font-family": font_family,
+            "font-size": str(font_size),
+            "fill": "#e0e7ff",
+        },
+    )
+    dated.text = f"Date: {date}"
+
+    return ET.tostring(root, encoding="unicode")
 
 
 def generate_badge_png(
@@ -389,9 +471,13 @@ def generate_badge_png(
     footer_x = (width - footer_width) // 2
     draw.text((footer_x, 540), footer_text, fill="#94a3b8", font=small_font)
 
+    # Create PngInfo for accessibility alt-text metadata
+    pnginfo = PngImagePlugin.PngInfo()
+    pnginfo.add_text("Description", f"Originality Verified Certificate for {student_name}")
+
     # Save to buffer
     buffer = BytesIO()
-    img.save(buffer, format="PNG", quality=95)
+    img.save(buffer, format="PNG", pnginfo=pnginfo, quality=95)
     png_bytes = buffer.getvalue()
     try:
         cache.set(cache_key, png_bytes, ttl=BADGE_TTL)
@@ -422,6 +508,9 @@ def generate_badge_pdf(
     Returns:
         BytesIO buffer containing the PDF certificate
     """
+    if not has_reportlab():
+        raise ImportError("reportlab is required for PDF badge generation")
+
     target_date = date if date is not None else datetime.now().strftime("%B %d, %Y")
     ident = str(student_id if student_id is not None else student_name)
 
