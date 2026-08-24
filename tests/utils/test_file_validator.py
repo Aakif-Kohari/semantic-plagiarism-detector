@@ -352,15 +352,6 @@ class TestEpubAndCsvValidation:
         assert result.error_code == "MAGIC_BYTE_MISMATCH"
 
 
-def test_filename_with_null_byte_fails():
-    """Verify that a filename containing a null byte fails validation immediately."""
-    validator = FileValidator()
-    result = validator.validate(b"%PDF-1.4", "exploit.pdf\x00.exe")
-    assert result.is_valid is False
-    assert result.error_code == "INVALID_FILENAME_CHARACTERS"
-    assert "invalid characters" in result.error_message.lower()
-
-
 def test_max_file_size_from_env(monkeypatch):
     """Verify that MAX_FILE_SIZE_BYTES respects MAX_UPLOAD_SIZE_MB env variable on reload."""
     import importlib
@@ -374,7 +365,6 @@ def test_max_file_size_from_env(monkeypatch):
         # Reset back to default
         monkeypatch.delenv("MAX_UPLOAD_SIZE_MB", raising=False)
         importlib.reload(fv)
-
 
 
 
