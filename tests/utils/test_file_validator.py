@@ -203,3 +203,50 @@ class TestValidateUploadConvenience:
         assert result.is_valid is False
         assert result.error_code == "FILE_TOO_LARGE"
 
+
+class TestEpubAndCsvValidation:
+    """Test suite for EPUB and CSV specific content validation."""
+
+    def test_valid_epub_with_mimetype_passes(self):
+        validator = FileValidator(strict_mode=True)
+        # EPUB header (PK\x03\x04) with mimetype string
+        epub_bytes = b"PK\x03\x04" + b"\x00" * 26 + b"mimetypeapplication/epub+zip"
+        result = validator.validate(epub_bytes, "book.epub")
+        assert result.is_valid is True
+
+    def test_invalid_epub_header_fails(self):
+        validator = FileValidator(strict_mode=True)
+        # Mismatched magic header
+        result = validator.validate(b"NOT_A_ZIP_HEADER", "book.epub")
+        assert result.is_valid is False
+        assert result.error_code == "MAGIC_BYTE_MISMATCH"
+
+    def test_epub_missing_mimetype_fails(self):
+        validator = FileValidator(strict_mode=True)
+        # Header matches PK\x03\x04 but missing mimetype
+        result = validator.validate(b"PK\x03\x04" + b"random zip contents without mimetype", "book.epub")
+        assert result.is_valid is False
+        assert result.error_code == "MAGIC_BYTE_MISMATCH"
+
+    def test_valid_csv_passes(self):
+        validator = FileValidator(strict_mode=True)
+        csv_bytes = b"name,age,city\nAlice,30,New York\nBob,25,London\n"
+        result = validator.validate(csv_bytes, "data.csv")
+        assert result.is_valid is True
+
+    def test_csv_with_binary_null_byte_fails(self):
+        validator = FileValidator(strict_mode=True)
+        bad_csv = b"col1,col2\nval1,\x00val2\n"
+        result = validator.validate(bad_csv, "data.csv")
+        assert result.is_valid is False
+        assert result.error_code == "MAGIC_BYTE_MISMATCH"
+
+    def test_csv_invalid_encoding_fails(self):
+        validator = FileValidator(strict_mode=True)
+        # Invalid UTF-8 sequence
+        bad_utf8 = b"col1,col2\nval1,\xff\xfe\xfa\n"
+        result = validator.validate(bad_utf8, "data.csv")
+        assert result.is_valid is False
+        assert result.error_code == "MAGIC_BYTE_MISMATCH"
+
+
