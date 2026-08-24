@@ -128,6 +128,14 @@ class FileValidator:
         Returns:
             A ValidationResult object indicating success or failure.
         """
+        if "\x00" in filename:
+            return ValidationResult(
+                is_valid=False,
+                filename=filename,
+                error_message="Filename contains invalid characters.",
+                error_code="INVALID_FILENAME_CHARACTERS"
+            )
+
         logger.debug("Validating file: %s", filename)
         
         # 1. Check file size

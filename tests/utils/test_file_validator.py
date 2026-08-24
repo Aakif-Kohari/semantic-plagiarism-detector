@@ -250,3 +250,13 @@ class TestEpubAndCsvValidation:
         assert result.error_code == "MAGIC_BYTE_MISMATCH"
 
 
+def test_filename_with_null_byte_fails():
+    """Verify that a filename containing a null byte fails validation immediately."""
+    validator = FileValidator()
+    result = validator.validate(b"%PDF-1.4", "exploit.pdf\x00.exe")
+    assert result.is_valid is False
+    assert result.error_code == "INVALID_FILENAME_CHARACTERS"
+    assert "invalid characters" in result.error_message.lower()
+
+
+
