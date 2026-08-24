@@ -11,6 +11,7 @@ import atexit
 import csv
 import io
 import os
+import re
 import tempfile
 from typing import Generator
 
@@ -19,6 +20,18 @@ from openpyxl import Workbook
 from openpyxl.formatting.rule import ColorScaleRule
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.comments import Comment
+def sanitize_sheet_title(title: str) -> str:
+    """
+    Sanitize a worksheet title to comply with Excel's naming rules.
+
+    Excel worksheet titles:
+    - Cannot exceed 31 characters
+    - Cannot contain [, ], *, ?, :, /, or .
+    """
+    sanitized_title = re.sub(r"[\[\]\*\?:/\.]", "", str(title))
+    sanitized_title = sanitized_title[:31]
+
+    return sanitized_title or "Sheet"
 
 
 def _create_managed_temp_file(suffix: str = ".xlsx", prefix: str = "temp_") -> str:
@@ -59,7 +72,7 @@ def build_similarity_workbook(
     """Helper function that builds and styles the openpyxl Workbook."""
     wb = Workbook()
     ws = wb.active
-    ws.title = "Similarity Matrix"
+    ws.title = sanitize_sheet_title("Similarity Matrix")
 
     # Write headers and index labels with truncated titles, preserving full names in comments
     ws.cell(row=1, column=1, value="Document")
