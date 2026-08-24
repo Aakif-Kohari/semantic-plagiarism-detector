@@ -13,7 +13,7 @@ from __future__ import annotations
 import functools
 import html
 import re
-from typing import Callable, Tuple
+from typing import Callable, Optional, Tuple
 
 from src.core.config import DEFAULT_DIFF_MIN_MATCH_LENGTH
 
@@ -137,12 +137,19 @@ def _covered_word_ranges(
     return ranges
 
 
-def _apply_marks(text: str, word_ranges: list[tuple[int, int]]) -> str:
+def _apply_marks(
+    text: str,
+    word_ranges: list[tuple[int, int]],
+    css_class: Optional[str] = None,
+) -> str:
     """Wrap the given word ranges of *text* in ``<mark>`` tags.
 
     Args:
         text: The original, unescaped document text.
         word_ranges: Half-open, sorted, non-overlapping word ranges.
+        css_class: Optional CSS class name to apply to ``<mark>`` tags.
+            When provided, ``<mark class="...">`` is rendered instead of
+            inline styles.
 
     Returns:
         HTML-escaped text with the matching runs wrapped in ``<mark>``.
@@ -153,6 +160,8 @@ def _apply_marks(text: str, word_ranges: list[tuple[int, int]]) -> str:
     word_positions = [(m.start(), m.end()) for m in _WORD_RE.finditer(text)]
     if not word_positions:
         return html.escape(text)
+
+    open_tag = f'<mark class="{html.escape(css_class)}">' if css_class else MARK_OPEN_TAG
 
     result: list[str] = []
     last_end = 0
@@ -165,7 +174,7 @@ def _apply_marks(text: str, word_ranges: list[tuple[int, int]]) -> str:
         char_end = word_positions[min(end_word - 1, len(word_positions) - 1)][1]
 
         result.append(html.escape(text[last_end:char_start]))
-        result.append(MARK_OPEN_TAG)
+        result.append(open_tag)
         result.append(html.escape(text[char_start:char_end]))
         result.append("</mark>")
 
@@ -180,11 +189,13 @@ def highlight_overlap(
     text_b: str,
     min_match_length: int = DEFAULT_DIFF_MIN_MATCH_LENGTH,
     use_stemming: bool = False,
+    css_class: Optional[str] = None,
 ) -> Tuple[str, str]:
     """Highlight overlapping sequences between two text strings.
 
     Identifies common word sequences of at least `min_match_length` words
-    and wraps them in HTML <mark> tags with a distinct background color.
+    and wraps them in HTML <mark> tags with a distinct background color or
+    custom CSS class.
     This helps instructors visually identify plagiarized phrases while
     ignoring common stop words and short coincidental matches.
 
@@ -216,6 +227,10 @@ def highlight_overlap(
                       positions are unchanged, so ``_apply_marks`` keeps
                       wrapping each document's original characters.
                       Defaults to False (exact lowercase matching).
+        css_class: Optional CSS class name to apply to ``<mark>`` tags.
+                   When provided, renders ``<mark class="...">`` instead of
+                   inline styles, enabling external CSS themes or Dark Mode
+                   overrides. Defaults to None.
 
     Returns:
         A tuple of two HTML strings (highlighted_a, highlighted_b) with
@@ -287,10 +302,9 @@ def highlight_overlap(
         tuple(words_b[j : j + window]) for j in range(len(words_b) - window + 1)
     }
 
-    ranges_a = _covered_word_ranges(words_a, ngrams_b, window)
-    ranges_b = _covered_word_ranges(words_b, ngrams_a, window)
-
-    return _apply_marks(text_a, ranges_a), _apply_marks(text_b, ranges_b)
+    return _apply_marks(text_a, ranges_a, css_class=css_class), _apply_marks(
+        text_b, ranges_b, css_class=css_class
+    )
 
 
 def _escape_text(text: str) -> str:
