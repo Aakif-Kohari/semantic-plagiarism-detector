@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import os
 import socket
 import time
 import idna
@@ -98,12 +99,33 @@ class SSRFProtector:
     DEFAULT_USER_AGENT: str = DEFAULT_USER_AGENT
 
     @classmethod
+    def get_dns_cache_ttl(cls) -> int:
+        """Return the configured SSRF DNS cache TTL in seconds.
+
+        Reads SSRF_DNS_CACHE_TTL_SECONDS environment variable,
+        falling back to cls.DNS_CACHE_TTL_SECONDS (default 300).
+        """
+        env_ttl = os.getenv("SSRF_DNS_CACHE_TTL_SECONDS")
+        if env_ttl is not None:
+            try:
+                val = int(env_ttl)
+                if val >= 0:
+                    return val
+            except ValueError:
+                logger.warning(
+                    "Invalid SSRF_DNS_CACHE_TTL_SECONDS value '%s', falling back to default.",
+                    env_ttl,
+                )
+        return getattr(cls, "DNS_CACHE_TTL_SECONDS", 300)
+
+    @classmethod
     def _resolve_hostname(cls, hostname: str) -> str:
         current_time = float(time.time())
+        ttl_seconds = cls.get_dns_cache_ttl()
 
         if hostname in cls._dns_cache:
             cached_ip, timestamp = cls._dns_cache[hostname]
-            if current_time - timestamp < cls.DNS_CACHE_TTL_SECONDS:
+            if current_time - timestamp < ttl_seconds:
                 cls._dns_cache.move_to_end(hostname)
                 return cached_ip
             del cls._dns_cache[hostname]

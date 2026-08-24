@@ -706,3 +706,25 @@ def test_pdf_report_with_long_url_generates_successfully():
     text = _read_text(pdf_bytes)
     assert "paper_a.pdf" in text
 
+
+@pytest.mark.parametrize(
+    ("doc_a", "doc_b"),
+    [
+        ("έκθεση_α.pdf", "έκθεση_β.pdf"),
+        ("отчёт_а.pdf", "отчёт_б.pdf"),
+        ("निबंध_क.pdf", "निबंध_ख.pdf"),
+        ("تقرير_ا.pdf", "تقرير_ب.pdf"),
+    ],
+)
+def test_pdf_report_with_non_latin_document_titles(doc_a, doc_b):
+    pdf_buffer = generate_plagiarism_report(
+        doc_a=doc_a,
+        doc_b=doc_b,
+        overall_similarity=0.88,
+        threshold=0.59,
+        top_pairs=[("matching paragraph one", "matching paragraph two", 0.91)],
+    )
+    pdf_bytes = pdf_buffer.getvalue()
+    assert pdf_bytes.startswith(b"%PDF")
+    assert len(pdf_bytes) > 0
+

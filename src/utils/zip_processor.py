@@ -17,6 +17,16 @@ MAX_SINGLE_FILE_SIZE = 100 * 1024 * 1024  # 100 MB
 MAX_DECOMPRESSION_RATIO = 100  # 100:1 ratio limit
 MAX_ABSOLUTE_UNCOMPRESSED_SIZE = 500 * 1024 * 1024  # 500 MB absolute limit
 
+ALLOWED_ZIP_MEMBER_EXTENSIONS = {
+    ".pdf",
+    ".docx",
+    ".txt",
+    ".rtf",
+    ".csv",
+    ".odt",
+    ".md",
+}
+
 
 def is_safe_zip_path(target_dir: Path, extracted_path: Path) -> bool:
     """
@@ -34,7 +44,7 @@ def is_safe_zip_path(target_dir: Path, extracted_path: Path) -> bool:
 
 def process_zip_file(zip_bytes: bytes) -> Dict[str, bytes]:
     """
-    Extracts supported documents (PDF, DOCX, TXT) from a ZIP archive entirely in memory.
+    Extracts supported documents (.pdf, .docx, .txt, .rtf, .csv, .odt, .md) from a ZIP archive entirely in memory.
 
     Handles:
     - Invalid or corrupted ZIP files (raises ValueError).
@@ -115,7 +125,7 @@ def process_zip_file(zip_bytes: bytes) -> Dict[str, bytes]:
                 # Filter by supported document extensions
                 _, ext = os.path.splitext(filename)
                 ext = ext.lower()
-                if ext not in [".pdf", ".docx", ".txt"]:
+                if ext not in ALLOWED_ZIP_MEMBER_EXTENSIONS:
                     continue
 
                 # Read entry bytes
@@ -133,13 +143,7 @@ def process_zip_file(zip_bytes: bytes) -> Dict[str, bytes]:
                 try:
                     validate_document_extension(
                         filename,
-                        allowed_extensions={
-                            ".csv",
-                            ".docx",
-                            ".pdf",
-                            ".rtf",
-                            ".txt",
-                        },
+                        allowed_extensions=ALLOWED_ZIP_MEMBER_EXTENSIONS,
                     )
                 except InvalidFileExtensionError:
                     # Unsafe or unsupported archive members are ignored.

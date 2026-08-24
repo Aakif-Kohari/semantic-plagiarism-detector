@@ -81,6 +81,12 @@ pipeline_duration_seconds = Histogram(
     buckets=(0.01, 0.05, 0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0),
 )
 
+spd_scan_duration_seconds = Histogram(
+    "spd_scan_duration_seconds",
+    "Scan stage duration in seconds",
+    ["stage"],
+)
+
 query_response_time_seconds = Histogram(
     "query_response_time_seconds",
     "Duration of similarity search queries in seconds",

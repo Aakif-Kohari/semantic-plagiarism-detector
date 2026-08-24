@@ -213,3 +213,30 @@ def test_generate_metrics_json_reports_the_counter_as_a_counter():
     payload = metrics.generate_metrics_json()
 
     assert payload["documents"]["type"] == "counter"
+
+
+# ── Scan Stage Duration Histogram ──────────────────────────────────────────────
+
+
+def test_spd_scan_duration_seconds_definition():
+    """Verify that spd_scan_duration_seconds is defined with the correct name, docstring, and labels."""
+    assert hasattr(metrics, "spd_scan_duration_seconds")
+    hist = metrics.spd_scan_duration_seconds
+    assert hist._name == "spd_scan_duration_seconds"
+    assert hist._documentation == "Scan stage duration in seconds"
+    assert hist._labelnames == ("stage",)
+
+
+def test_spd_scan_duration_seconds_observe_stages():
+    """Verify that spd_scan_duration_seconds can record time for all pipeline stages."""
+    stages = ["parsing", "chunking", "embedding", "matrix comparison"]
+    for stage in stages:
+        label_child = metrics.spd_scan_duration_seconds.labels(stage=stage)
+        before_count = sum(b.get() for b in label_child._buckets)
+        with label_child.time():
+            pass
+        after_count = sum(b.get() for b in label_child._buckets)
+        assert after_count == before_count + 1
+        assert label_child._sum.get() >= 0
+
+

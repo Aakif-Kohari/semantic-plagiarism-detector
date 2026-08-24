@@ -537,6 +537,49 @@ class TestEmailTemplateHelpers:
         assert "Doc1" in html
         assert "85.00%" in html
 
+    def test_build_email_html_body_across_incident_volumes(self):
+        empty = build_email_html_body(incidents_data=[], total_scans=10)
+        assert "No new plagiarism incidents detected" in empty
+
+        one = [
+            {
+                "document_a": "solo_a.pdf",
+                "document_b": "solo_b.pdf",
+                "similarity_score": 0.91,
+                "severity_rank": "High",
+                "date_flagged": "2026-08-23",
+            }
+        ]
+        html_one = build_email_html_body(incidents_data=one, total_scans=10)
+        assert "<strong>Total new incidents:</strong> 1" in html_one
+        assert "High Severity Incidents (1)" in html_one
+        assert "solo_a.pdf" in html_one
+
+        ranks = (["High"] * 34) + (["Medium"] * 33) + (["Low"] * 33)
+        many = []
+        for i, rank in enumerate(ranks):
+            many.append(
+                {
+                    "document_a": f"doc_a_{i}.pdf",
+                    "document_b": f"doc_b_{i}.pdf",
+                    "similarity_score": (
+                        0.9 if rank == "High" else 0.7 if rank == "Medium" else 0.4
+                    ),
+                    "severity_rank": rank,
+                    "date_flagged": "2026-08-23",
+                }
+            )
+
+        html_many = build_email_html_body(incidents_data=many, total_scans=200)
+        assert "<strong>Total new incidents:</strong> 100" in html_many
+        assert "High Severity Incidents (34)" in html_many
+        assert "Medium Severity Incidents (33)" in html_many
+        assert "Low Severity Incidents (33)" in html_many
+        assert html_many.count("<table") == 3
+        assert html_many.rstrip().endswith("</html>")
+        for i in range(100):
+            assert f"doc_a_{i}.pdf" in html_many
+
     def test_build_email_html_body_with_custom_footer_note(self):
         """Test that custom footer note is included in HTML output (#1252)."""
         note = "Please complete all pending reviews before Friday 5 PM."

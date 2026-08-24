@@ -39,6 +39,7 @@ ALLOWED_EXTENSIONS = {
     ".rtf",
     ".odt",
     ".csv",
+    ".epub",
 }
 
 # Magic byte signatures for common document formats.
@@ -50,6 +51,7 @@ MAGIC_SIGNATURES = {
     ".doc": b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",  # OLE2 Compound Document
     ".rtf": b"{\\rtf",
     ".odt": b"PK\x03\x04",  # ZIP archive
+    ".epub": b"PK\x03\x04",  # ZIP archive (EPUB is a ZIP)
     ".png": b"\x89PNG\r\n\x1a\n",
     ".jpg": b"\xff\xd8\xff",
     ".jpeg": b"\xff\xd8\xff",
@@ -239,6 +241,70 @@ class FileValidator:
             
         return ValidationResult(is_valid=True, filename=filename)
         
+    def _check_epub_mimetype(
+        self,
+        file_data: Union[bytes, bytearray],
+        filename: str
+    ) -> ValidationResult:
+        """Verify that an EPUB file contains a valid EPUB mimetype entry."""
+        import io
+        import zipfile
+
+        try:
+            with zipfile.ZipFile(io.BytesIO(file_data)) as z:
+                names = [name.lower() for name in z.namelist()]
+                if "mimetype" in names:
+                    target = next(n for n in z.namelist() if n.lower() == "mimetype")
+                    mimetype_content = (
+                        z.read(target).decode("utf-8", errors="ignore").strip().lower()
+                    )
+                    if "application/epub+zip" in mimetype_content or "epub" in mimetype_content:
+                        return ValidationResult(is_valid=True, filename=filename)
+        except Exception:
+            pass
+
+        # Fallback byte pattern scan for mimetype in EPUB container
+        if b"application/epub+zip" in file_data or b"mimetype" in file_data:
+            return ValidationResult(is_valid=True, filename=filename)
+
+        error_msg = (
+            f"File '{filename}' content is missing EPUB mimetype declaration."
+        )
+        return ValidationResult(
+            is_valid=False,
+            filename=filename,
+            error_message=error_msg,
+            error_code="MAGIC_BYTE_MISMATCH",
+        )
+
+    def _check_csv_content(
+        self,
+        file_data: Union[bytes, bytearray],
+        filename: str
+    ) -> ValidationResult:
+        """Verify CSV content is valid UTF-8/ASCII text without binary null bytes."""
+        if b"\x00" in file_data:
+            error_msg = f"CSV file '{filename}' contains binary null bytes."
+            return ValidationResult(
+                is_valid=False,
+                filename=filename,
+                error_message=error_msg,
+                error_code="MAGIC_BYTE_MISMATCH",
+            )
+
+        try:
+            file_data.decode("utf-8")
+        except UnicodeDecodeError:
+            error_msg = f"CSV file '{filename}' is not valid UTF-8/ASCII text."
+            return ValidationResult(
+                is_valid=False,
+                filename=filename,
+                error_message=error_msg,
+                error_code="MAGIC_BYTE_MISMATCH",
+            )
+
+        return ValidationResult(is_valid=True, filename=filename)
+
     def _check_magic_bytes(
         self,
         file_data: Union[bytes, bytearray],
@@ -258,6 +324,9 @@ class FileValidator:
         """
         ext = Path(filename).suffix.lower()
         
+        if ext == ".csv":
+            return self._check_csv_content(file_data, filename)
+
         if ext not in MAGIC_SIGNATURES:
             # No magic signature defined for this extension (e.g., .txt, .md)
             # Plain text files don't have standard magic bytes, so we skip.
@@ -278,6 +347,9 @@ class FileValidator:
                 error_code="MAGIC_BYTE_MISMATCH"
             )
             
+        if ext == ".epub":
+            return self._check_epub_mimetype(file_data, filename)
+
         return ValidationResult(is_valid=True, filename=filename)
 
 

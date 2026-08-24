@@ -483,3 +483,41 @@ def test_stemmed_matching_does_not_break_escaping():
         assert "<script>" not in result
         stripped = result.replace(MARK_OPEN_TAG, "").replace("</mark>", "")
         assert "<b>" not in stripped and "<i>" not in stripped
+
+
+def test_custom_css_class_renders_class_attribute_instead_of_inline_styles():
+    """Providing css_class renders <mark class="..."> instead of default inline style."""
+    text_a = "alpha beta gamma delta"
+    text_b = "alpha beta gamma delta"
+
+    result_a, result_b = highlight_overlap(text_a, text_b, css_class="diff-highlight-custom")
+
+    assert '<mark class="diff-highlight-custom">' in result_a
+    assert '<mark class="diff-highlight-custom">' in result_b
+    assert 'style="' not in result_a
+    assert 'style="' not in result_b
+
+
+def test_apply_marks_with_css_class():
+    """_apply_marks respects css_class parameter when provided."""
+    from src.utils.diff_highlighter import _apply_marks
+
+    text = "the quick brown fox"
+    ranges = [(1, 3)]
+
+    result = _apply_marks(text, ranges, css_class="custom-mark-class")
+    assert '<mark class="custom-mark-class">quick brown</mark>' in result
+    assert "style=" not in result
+
+
+def test_apply_marks_without_css_class_uses_inline_style():
+    """_apply_marks defaults to inline MARK_OPEN_TAG when css_class is None."""
+    from src.utils.diff_highlighter import MARK_OPEN_TAG, _apply_marks
+
+    text = "the quick brown fox"
+    ranges = [(1, 3)]
+
+    result = _apply_marks(text, ranges, css_class=None)
+    assert MARK_OPEN_TAG in result
+    assert 'class=' not in result
+
