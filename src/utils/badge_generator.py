@@ -13,6 +13,9 @@ named colors, providing a robust fallback mechanism for theme configurations.
 Issue #2898: Fallback behavior for named colors in Badge Generator.
 """
 
+import html
+import logging
+import re
 import hashlib
 import logging
 import re
@@ -34,12 +37,31 @@ def has_pillow() -> bool:
     """Check if PIL/Pillow is installed."""
     return Image is not None
 
-from reportlab.lib.colors import HexColor
-from reportlab.lib.enums import TA_CENTER
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.lib.units import inch
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+try:
+    from reportlab.lib.colors import HexColor
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import inch
+    from reportlab.platypus import (
+        Paragraph,
+        SimpleDocTemplate,
+        Spacer,
+        Table,
+        TableStyle,
+    )
+except ImportError:
+    HexColor = None
+    TA_CENTER = None
+    A4 = None
+    ParagraphStyle = None
+    getSampleStyleSheet = None
+    inch = None
+    Paragraph = None
+    SimpleDocTemplate = None
+    Spacer = None
+    Table = None
+    TableStyle = None
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +142,12 @@ _HEX_COLOR_PATTERN = re.compile(
 DEFAULT_BADGE_COLOR = "#4f46e5"
 
 
+def has_reportlab() -> bool:
+    """Return True when reportlab is installed and PDF badge generation is available."""
+    return SimpleDocTemplate is not None
+
+
+def validate_hex_color(color: Optional[str], default_color: str = "#2563eb") -> str:
 def validate_hex_color(
     color: Optional[str], default_color: str = DEFAULT_BADGE_COLOR
 ) -> str:
@@ -212,6 +240,8 @@ def generate_badge_svg(
     if date is None:
         date = datetime.now(timezone.utc).strftime("%B %d, %Y")
 
+    safe_name = html.escape(student_name)
+    safe_date = html.escape(date)
     root = ET.Element(
         "svg",
         {
@@ -479,6 +509,9 @@ def generate_badge_pdf(
     Returns:
         BytesIO buffer containing the PDF certificate
     """
+    if not has_reportlab():
+        raise ImportError("reportlab is required for PDF badge generation")
+
     target_date = date if date is not None else datetime.now().strftime("%B %d, %Y")
     ident = str(student_id if student_id is not None else student_name)
 

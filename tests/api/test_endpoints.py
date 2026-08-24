@@ -31,6 +31,63 @@ def test_healthz_db_not_exist():
         assert data["db_size_mb"] == 0.0
 
 
+def test_healthz_high_memory_default_threshold():
+    """Verify that /healthz returns 503 degraded when memory exceeds default 95% threshold."""
+    from unittest.mock import MagicMock
+    mock_memory = MagicMock(percent=96.0, available=1024 * 1024)
+    with patch("psutil.virtual_memory", return_value=mock_memory), patch.dict("os.environ", {}, clear=False):
+        response = client.get("/healthz")
+        assert response.status_code == 503
+        data = response.json()
+        assert data["status"] == "degraded"
+        assert data["memory"] == "unavailable"
+        assert "warning" in data
+        assert "96.0%" in data["warning"]
+
+
+def test_healthz_configurable_memory_threshold():
+    """Verify that HEALTHZ_MAX_MEMORY_PERCENT environment variable configures memory threshold."""
+    from unittest.mock import MagicMock
+    mock_memory = MagicMock(percent=85.0, available=1024 * 1024)
+
+    # With threshold at 80%, 85% usage should trigger 503 degraded
+    with patch("psutil.virtual_memory", return_value=mock_memory), patch.dict(
+        "os.environ", {"HEALTHZ_MAX_MEMORY_PERCENT": "80.0"}
+    ):
+        response = client.get("/healthz")
+        assert response.status_code == 503
+        data = response.json()
+        assert data["status"] == "degraded"
+        assert data["memory"] == "unavailable"
+        assert "warning" in data
+        assert "85.0%" in data["warning"]
+        assert "80.0%" in data["warning"]
+
+    # With threshold at 90%, 85% usage should return 200 OK
+    with patch("psutil.virtual_memory", return_value=mock_memory), patch.dict(
+        "os.environ", {"HEALTHZ_MAX_MEMORY_PERCENT": "90.0"}
+    ):
+        response = client.get("/healthz")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ok"
+        assert data["memory"] == "ok"
+
+
+def test_healthz_invalid_memory_threshold_fallback():
+    """Verify that invalid HEALTHZ_MAX_MEMORY_PERCENT values fall back to 95.0% default."""
+    from unittest.mock import MagicMock
+    mock_memory = MagicMock(percent=92.0, available=1024 * 1024)
+
+    with patch("psutil.virtual_memory", return_value=mock_memory), patch.dict(
+        "os.environ", {"HEALTHZ_MAX_MEMORY_PERCENT": "invalid_number"}
+    ):
+        response = client.get("/healthz")
+        assert response.status_code == 200
+        assert response.json()["status"] == "ok"
+
+
+
 def test_metrics_prometheus_endpoint():
     """Verify that GET /metrics returns Prometheus format metrics in plain text."""
     response = client.get("/metrics")

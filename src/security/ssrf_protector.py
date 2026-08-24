@@ -19,6 +19,7 @@ import ipaddress
 import logging
 import socket
 import time
+import idna
 import urllib.parse
 from collections import OrderedDict
 from typing import Optional, Tuple, List, Dict
@@ -82,6 +83,7 @@ def is_ip_in_cidr_block(ip_str: str, cidr_block: str) -> bool:
 
 class SSRFSecurityException(Exception):
     """Raised when a Webhook URL fails SSRF security checks."""
+
     pass
 
 
@@ -144,9 +146,24 @@ class SSRFProtector:
         if not hostname:
             raise SSRFSecurityException(SSRF_MISSING_HOSTNAME)
 
-        if allowed_domains is None:
+        # Encode hostname to ASCII (Punycode) to prevent IDN homograph attacks
+        try:
+            hostname = idna.encode(hostname).decode("ascii")
+        except idna.IDNAError:
+            raise SSRFSecurityException(SSRF_INVALID_HOSTNAME)
+
+        # Normalize allowed domains to Punycode as well
+        normalized_allowed_domains = []
+        for domain in allowed_domains or []:
+            try:
+                normalized_allowed_domains.append(idna.encode(domain).decode("ascii"))
+            except idna.IDNAError:
+                continue
+
+        if hostname in normalized_allowed_domains:
             try:
                 from src.core.app_config import get_allowed_webhook_domains
+
                 allowed_domains = get_allowed_webhook_domains()
             except ImportError:
                 allowed_domains = []

@@ -36,6 +36,7 @@ from src.api.schemas import (
 )
 from src.core.document_parser import extract_text
 from src.core.embedding_model import embed_chunks, get_document_embedding
+from src.core.metrics import spd_scan_duration_seconds
 from src.core.similarity import (
     PLAGIARISM_THRESHOLD,
     chunk_max_similarity,
@@ -76,10 +77,8 @@ def _process_scan_job(
     scan_jobs[job_id]["status"] = "processing"
 
     try:
-        if _is_cancelled():
-            return
-
-        extracted_text = extract_text(file_input, filename)
+        with spd_scan_duration_seconds.labels(stage="parsing").time():
+            extracted_text = extract_text(file_input, filename)
         if not extracted_text.strip():
             if not _is_cancelled():
                 scan_jobs[job_id]["status"] = "failed"
@@ -94,103 +93,90 @@ def _process_scan_job(
         words = extracted_text.split()
         word_count = len(words)
 
-        chunks = chunk_document(extracted_text)
-        if not chunks:
-            chunks = [extracted_text[:1000]]
+        with spd_scan_duration_seconds.labels(stage="chunking").time():
+            chunks = chunk_document(extracted_text)
+            if not chunks:
+                chunks = [extracted_text[:1000]]
 
-        if _is_cancelled():
-            return
-
-        uploaded_embeddings = embed_chunks(
-            chunks,
-            cancel_callback=_is_cancelled,
-        )
-
-        if _is_cancelled():
-            return
-
-        doc_embedding = get_document_embedding(uploaded_embeddings)
-        corpus_docs = get_corpus_documents_with_embeddings()
+        with spd_scan_duration_seconds.labels(stage="embedding").time():
+            uploaded_embeddings = embed_chunks(chunks)
+            doc_embedding = get_document_embedding(uploaded_embeddings)
+            corpus_docs = get_corpus_documents_with_embeddings()
 
         matched_documents = []
         max_overall_score = 0.0
         max_chunk_overall_score = 0.0
         uploaded_chunks_flagged = np.zeros(len(chunks), dtype=bool)
 
-        for corpus_filename, corpus_data in corpus_docs.items():
-            if _is_cancelled():
-                return
+        with spd_scan_duration_seconds.labels(stage="matrix comparison").time():
+            for corpus_filename, corpus_data in corpus_docs.items():
+                if corpus_filename == filename:
+                    continue
 
-            if corpus_filename == filename:
-                continue
+                c_embeddings = corpus_data["embeddings"]
+                c_chunks = corpus_data["chunks"]
 
-            c_embeddings = corpus_data["embeddings"]
-            c_chunks = corpus_data["chunks"]
+                if c_embeddings.size == 0:
+                    continue
 
-            if c_embeddings.size == 0:
-                continue
-
-            c_doc_embedding = get_document_embedding(c_embeddings)
-            sim_doc = float(
-                np.clip(
-                    cosine_similarity(
-                        doc_embedding.reshape(1, -1), c_doc_embedding.reshape(1, -1)
-                    )[0, 0],
-                    0.0,
-                    1.0,
+                c_doc_embedding = get_document_embedding(c_embeddings)
+                sim_doc = float(
+                    np.clip(
+                        cosine_similarity(
+                            doc_embedding.reshape(1, -1), c_doc_embedding.reshape(1, -1)
+                        )[0, 0],
+                        0.0,
+                        1.0,
+                    )
                 )
+                sim_matrix = cosine_similarity(uploaded_embeddings, c_embeddings)
+                sim_chunk = float(np.max(sim_matrix))
+
+                chunk_maxes = np.max(sim_matrix, axis=1)
+                uploaded_chunks_flagged |= (chunk_maxes >= threshold)
+
+                combined_score = max(sim_doc, sim_chunk)
+                max_overall_score = max(max_overall_score, sim_doc)
+                max_chunk_overall_score = max(max_chunk_overall_score, sim_chunk)
+
+                if combined_score >= threshold:
+                    severity = "🔴 High" if combined_score >= 0.90 else "🟡 Medium"
+
+                    similar_chunks = find_most_similar_chunks(
+                        chunks_a=[chunk.text for chunk in chunks],
+                        chunks_b=[chunk.text for chunk in c_chunks],
+                        emb_a=uploaded_embeddings,
+                        emb_b=c_embeddings,
+                        top_k=top_k,
+                        threshold=threshold,
+                    )
+
+                    flagged_chunks = [
+                        {
+                            "uploaded_chunk": pair[0],
+                            "matched_chunk": pair[1],
+                            "similarity_score": round(float(pair[2]), 4),
+                        }
+                        for pair in similar_chunks
+                    ]
+
+                    matched_documents.append(
+                        {
+                            "filename": corpus_filename,
+                            "document_similarity_score": round(sim_doc, 4),
+                            "max_chunk_similarity_score": round(sim_chunk, 4),
+                            "severity": severity,
+                            "flagged_chunks": flagged_chunks,
+                        }
+                    )
+
+            matched_documents.sort(
+                key=lambda x: x["max_chunk_similarity_score"], reverse=True
             )
-            sim_matrix = cosine_similarity(uploaded_embeddings, c_embeddings)
-            sim_chunk = float(np.max(sim_matrix))
-
-            chunk_maxes = np.max(sim_matrix, axis=1)
-            uploaded_chunks_flagged |= (chunk_maxes >= threshold)
-
-            combined_score = max(sim_doc, sim_chunk)
-            max_overall_score = max(max_overall_score, sim_doc)
-            max_chunk_overall_score = max(max_chunk_overall_score, sim_chunk)
-
-            if combined_score >= threshold:
-                severity = "🔴 High" if combined_score >= 0.90 else "🟡 Medium"
-
-                similar_chunks = find_most_similar_chunks(
-                    chunks_a=[chunk.text for chunk in chunks],
-                    chunks_b=[chunk.text for chunk in c_chunks],
-                    emb_a=uploaded_embeddings,
-                    emb_b=c_embeddings,
-                    top_k=top_k,
-                    threshold=threshold,
-                )
-
-                flagged_chunks = [
-                    {
-                        "uploaded_chunk": pair[0],
-                        "matched_chunk": pair[1],
-                        "similarity_score": round(float(pair[2]), 4),
-                    }
-                    for pair in similar_chunks
-                ]
-
-                matched_documents.append(
-                    {
-                        "filename": corpus_filename,
-                        "document_similarity_score": round(sim_doc, 4),
-                        "max_chunk_similarity_score": round(sim_chunk, 4),
-                        "severity": severity,
-                        "flagged_chunks": flagged_chunks,
-                    }
-                )
-
-        if _is_cancelled():
-            return
-
-        matched_documents.sort(
-            key=lambda x: x["max_chunk_similarity_score"], reverse=True
-        )
-        is_flagged = len(matched_documents) > 0 or max_chunk_overall_score >= threshold
-        
-        total_flagged = int(np.sum(uploaded_chunks_flagged))
-        plagiarism_density = int(round((total_flagged / len(chunks)) * 100)) if len(chunks) > 0 else 0
+            is_flagged = len(matched_documents) > 0 or max_chunk_overall_score >= threshold
+            
+            total_flagged = int(np.sum(uploaded_chunks_flagged))
+            plagiarism_density = int(round((total_flagged / len(chunks)) * 100)) if len(chunks) > 0 else 0
 
         scan_jobs[job_id]["status"] = "completed"
         scan_jobs[job_id]["completed_at"] = datetime.now(timezone.utc).isoformat()
@@ -333,7 +319,8 @@ async def scan_document(
                     },
                 )
 
-        extracted_text = extract_text(temp_path, filename)
+        with spd_scan_duration_seconds.labels(stage="parsing").time():
+            extracted_text = extract_text(temp_path, filename)
         if not extracted_text.strip():
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -343,88 +330,91 @@ async def scan_document(
         words = extracted_text.split()
         word_count = len(words)
 
-        chunks = chunk_document(extracted_text)
-        if not chunks:
-            chunks = [extracted_text[:1000]]
+        with spd_scan_duration_seconds.labels(stage="chunking").time():
+            chunks = chunk_document(extracted_text)
+            if not chunks:
+                chunks = [extracted_text[:1000]]
 
-        uploaded_embeddings = embed_chunks(chunks)
-        doc_embedding = get_document_embedding(uploaded_embeddings)
-        corpus_docs = get_corpus_documents_with_embeddings()
+        with spd_scan_duration_seconds.labels(stage="embedding").time():
+            uploaded_embeddings = embed_chunks(chunks)
+            doc_embedding = get_document_embedding(uploaded_embeddings)
+            corpus_docs = get_corpus_documents_with_embeddings()
 
         matched_documents = []
         max_overall_score = 0.0
         max_chunk_overall_score = 0.0
         uploaded_chunks_flagged = np.zeros(len(chunks), dtype=bool)
 
-        for corpus_filename, corpus_data in corpus_docs.items():
-            if corpus_filename == filename:
-                continue
+        with spd_scan_duration_seconds.labels(stage="matrix comparison").time():
+            for corpus_filename, corpus_data in corpus_docs.items():
+                if corpus_filename == filename:
+                    continue
 
-            c_embeddings = corpus_data["embeddings"]
-            c_chunks = corpus_data["chunks"]
+                c_embeddings = corpus_data["embeddings"]
+                c_chunks = corpus_data["chunks"]
 
-            if c_embeddings.size == 0:
-                continue
+                if c_embeddings.size == 0:
+                    continue
 
-            c_doc_embedding = get_document_embedding(c_embeddings)
-            sim_doc = float(
-                np.clip(
-                    cosine_similarity(
-                        doc_embedding.reshape(1, -1), c_doc_embedding.reshape(1, -1)
-                    )[0, 0],
-                    0.0,
-                    1.0,
+                c_doc_embedding = get_document_embedding(c_embeddings)
+                sim_doc = float(
+                    np.clip(
+                        cosine_similarity(
+                            doc_embedding.reshape(1, -1), c_doc_embedding.reshape(1, -1)
+                        )[0, 0],
+                        0.0,
+                        1.0,
+                    )
                 )
+
+                sim_matrix = cosine_similarity(uploaded_embeddings, c_embeddings)
+                sim_chunk = float(np.max(sim_matrix))
+
+                chunk_maxes = np.max(sim_matrix, axis=1)
+                uploaded_chunks_flagged |= (chunk_maxes >= threshold)
+
+                combined_score = max(sim_doc, sim_chunk)
+                max_overall_score = max(max_overall_score, sim_doc)
+                max_chunk_overall_score = max(max_chunk_overall_score, sim_chunk)
+
+                if combined_score >= threshold:
+                    severity = "🔴 High" if combined_score >= 0.90 else "🟡 Medium"
+
+                    similar_chunks = find_most_similar_chunks(
+                        chunks_a=[chunk.text for chunk in chunks],
+                        chunks_b=[chunk.text for chunk in c_chunks],
+                        emb_a=uploaded_embeddings,
+                        emb_b=c_embeddings,
+                        top_k=top_k,
+                        threshold=threshold,
+                    )
+
+                    flagged_chunks = [
+                        {
+                            "uploaded_chunk": pair[0],
+                            "matched_chunk": pair[1],
+                            "similarity_score": round(float(pair[2]), 4),
+                        }
+                        for pair in similar_chunks
+                    ]
+
+                    matched_documents.append(
+                        {
+                            "filename": corpus_filename,
+                            "document_similarity_score": round(sim_doc, 4),
+                            "max_chunk_similarity_score": round(sim_chunk, 4),
+                            "severity": severity,
+                            "flagged_chunks": flagged_chunks,
+                        }
+                    )
+
+            matched_documents.sort(
+                key=lambda x: x["max_chunk_similarity_score"], reverse=True
             )
-
-            sim_matrix = cosine_similarity(uploaded_embeddings, c_embeddings)
-            sim_chunk = float(np.max(sim_matrix))
-
-            chunk_maxes = np.max(sim_matrix, axis=1)
-            uploaded_chunks_flagged |= (chunk_maxes >= threshold)
-
-            combined_score = max(sim_doc, sim_chunk)
-            max_overall_score = max(max_overall_score, sim_doc)
-            max_chunk_overall_score = max(max_chunk_overall_score, sim_chunk)
-
-            if combined_score >= threshold:
-                severity = "🔴 High" if combined_score >= 0.90 else "🟡 Medium"
-
-                similar_chunks = find_most_similar_chunks(
-                    chunks_a=[chunk.text for chunk in chunks],
-                    chunks_b=[chunk.text for chunk in c_chunks],
-                    emb_a=uploaded_embeddings,
-                    emb_b=c_embeddings,
-                    top_k=top_k,
-                    threshold=threshold,
-                )
-
-                flagged_chunks = [
-                    {
-                        "uploaded_chunk": pair[0],
-                        "matched_chunk": pair[1],
-                        "similarity_score": round(float(pair[2]), 4),
-                    }
-                    for pair in similar_chunks
-                ]
-
-                matched_documents.append(
-                    {
-                        "filename": corpus_filename,
-                        "document_similarity_score": round(sim_doc, 4),
-                        "max_chunk_similarity_score": round(sim_chunk, 4),
-                        "severity": severity,
-                        "flagged_chunks": flagged_chunks,
-                    }
-                )
-
-        matched_documents.sort(
-            key=lambda x: x["max_chunk_similarity_score"], reverse=True
-        )
-        is_flagged = len(matched_documents) > 0 or max_chunk_overall_score >= threshold
-        
-        total_flagged = int(np.sum(uploaded_chunks_flagged))
-        plagiarism_density = int(round((total_flagged / len(chunks)) * 100)) if len(chunks) > 0 else 0
+            is_flagged = len(matched_documents) > 0 or max_chunk_overall_score >= threshold
+            
+            total_flagged = int(np.sum(uploaded_chunks_flagged))
+            plagiarism_density = int(round((total_flagged / len(chunks)) * 100)) if len(chunks) > 0 else 0
 
         return {
             "filename": filename,
