@@ -649,9 +649,9 @@ class BatchTrendDataResponse(BaseModel):
 
 
 # ============================================================================
-# ============================================================================
 # Anomaly Detection Schemas
 # ============================================================================
+
 
 
 class AnomalyScanResponse(BaseModel):
@@ -676,6 +676,45 @@ class AnomalyScanListResponse(BaseModel):
     per_page: int = Field(..., ge=1)
     total: int = Field(..., ge=0)
     total_pages: int = Field(..., ge=0)
+
+
+# ============================================================================
+# Document Health Scoring Schemas
+# ============================================================================
+
+
+
+class HealthDimensionScore(BaseModel):
+    """Score for a single health dimension."""
+
+    name: str = Field(..., description="Dimension name")
+    score: float = Field(..., description="Score 0-100")
+    weight: float = Field(..., description="Weight in composite score")
+    weighted: float = Field(..., description="Weighted contribution")
+    details: str = Field(default="", description="Human-readable detail")
+
+
+class DocumentHealthScoreResponse(BaseModel):
+    """Response schema for a document health score."""
+
+    id: int = Field(..., description="Score record ID")
+    filename: str = Field(..., description="Document filename")
+    overall_score: float = Field(..., description="Composite health score 0-100")
+    grade: str = Field(..., description="Letter grade (A+, A, B+, B, C, D, F)")
+    dimensions: List[HealthDimensionScore] = Field(default_factory=list, description="Per-dimension scores")
+    checked_at: str = Field(..., description="ISO 8601 timestamp of check")
+    gate_passed: bool = Field(default=True, description="Whether document passed quality gate")
+    gate_reason: str = Field(default="", description="Quality gate decision reason")
+
+
+class DocumentHealthListResponse(BaseModel):
+    """Paginated list of document health scores."""
+
+    scores: List[DocumentHealthScoreResponse] = Field(default_factory=list, description="Health scores")
+    page: int = Field(..., ge=1, description="Current page")
+    per_page: int = Field(..., ge=1, description="Items per page")
+    total_items: int = Field(..., ge=0, description="Total score records")
+    total_pages: int = Field(..., ge=0, description="Total pages")
     has_next: bool = Field(default=False)
     has_previous: bool = Field(default=False)
 
@@ -708,11 +747,6 @@ class HeatmapSnapshotListResponse(BaseModel):
     page: int = Field(..., ge=1)
     per_page: int = Field(..., ge=1)
     total_items: int = Field(..., ge=0)
-    total_pages: int = Field(..., ge=0)
-    has_next: bool = Field(default=False)
-    has_previous: bool = Field(default=False)
-
-
     total_pages: int = Field(..., ge=0)
     has_next: bool = Field(default=False)
     has_previous: bool = Field(default=False)
@@ -782,6 +816,44 @@ class AnomalyConfigResponse(BaseModel):
     enable_pattern: int = Field(default=1)
     enable_collusion: int = Field(default=1)
     updated_at: Optional[str] = Field(default=None)
+
+
+class HealthScoreSummaryResponse(BaseModel):
+    """Aggregate health score statistics."""
+
+    total_scored: int = Field(default=0, description="Total documents scored")
+    avg_score: float = Field(default=0.0, description="Average health score")
+    min_score: float = Field(default=0.0, description="Minimum score")
+    max_score: float = Field(default=0.0, description="Maximum score")
+    passed_gate: int = Field(default=0, description="Documents that passed gate")
+    failed_gate: int = Field(default=0, description="Documents that failed gate")
+    pass_rate: float = Field(default=0.0, description="Pass rate percentage")
+    grade_distribution: Dict[str, int] = Field(default_factory=dict, description="Grade counts")
+    last_checked_at: Optional[str] = Field(default=None, description="Last check timestamp")
+
+
+class HealthGateConfigResponse(BaseModel):
+    """Quality gate configuration."""
+
+    min_score: float = Field(default=60.0, description="Minimum passing score")
+    min_grade: str = Field(default="D", description="Minimum passing grade")
+    enabled: bool = Field(default=True, description="Whether gate is active")
+
+
+class HealthGateCheckResponse(BaseModel):
+    """Result of a quality gate check."""
+
+    filename: str = Field(..., description="Document filename")
+    passed: bool = Field(..., description="Whether document passed")
+    reason: str = Field(..., description="Decision reason")
+    overall_score: float = Field(..., description="Document score")
+    grade: str = Field(..., description="Document grade")
+
+
+class HealthDimensionAvgResponse(BaseModel):
+    """Average scores per health dimension."""
+
+    dimensions: Dict[str, float] = Field(default_factory=dict, description="Dimension name → avg score")
 
 
 class ClusterInfo(BaseModel):
@@ -983,6 +1055,15 @@ __all__ = [
     'AnomalySummaryResponse',
     'AnomalySeverityDistResponse',
     'AnomalyConfigResponse',
+
+    # Document Health Scoring
+    'HealthDimensionScore',
+    'DocumentHealthScoreResponse',
+    'DocumentHealthListResponse',
+    'HealthScoreSummaryResponse',
+    'HealthGateConfigResponse',
+    'HealthGateCheckResponse',
+    'HealthDimensionAvgResponse',
     # Similarity Heatmap & Clustering
     'HeatmapSnapshotResponse',
     'HeatmapSnapshotListResponse',
