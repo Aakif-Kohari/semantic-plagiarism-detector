@@ -418,3 +418,40 @@ def test_zip_bomb_zero_compressed_size_handled():
             process_zip_file(zip_bytes)
         except ValueError as e:
             assert "Decompression ratio" not in str(e)
+
+
+def test_zip_bomb_ratio_boundary():
+    """Verify that a ZIP entry with ratio exactly 100:1 passes validation, but 100.1:1 fails."""
+    from unittest.mock import patch
+
+    # 1. Setup exact 100:1 ratio (e.g., 100000 bytes uncompressed, 1000 bytes compressed)
+    info_exact = zipfile.ZipInfo("exact_100.txt")
+    info_exact.file_size = 100_000
+    info_exact.compress_size = 1_000
+
+    # 2. Setup 100.1:1 ratio (e.g., 100100 bytes uncompressed, 1000 bytes compressed)
+    info_exceeds = zipfile.ZipInfo("exceeds_100.txt")
+    info_exceeds.file_size = 100_100
+    info_exceeds.compress_size = 1_000
+
+    # Create a valid minimal ZIP for the wrapper
+    zip_bytes = create_in_memory_zip({"doc.txt": b"some content"})
+
+    def mock_read(self, name_or_info):
+        return b"some content"
+
+    # Exact 100:1 ratio must pass
+    with patch("zipfile.ZipFile.infolist", return_value=[info_exact]), patch(
+        "zipfile.ZipFile.read", mock_read
+    ):
+        try:
+            process_zip_file(zip_bytes)
+        except ValueError as e:
+            if "Decompression ratio exceeds security limit" in str(e):
+                pytest.fail("Ratio exactly 100:1 should have passed validation but failed.")
+
+    # 100.1:1 ratio must fail
+    with patch("zipfile.ZipFile.infolist", return_value=[info_exceeds]):
+        with pytest.raises(ValueError, match="Decompression ratio exceeds security limit"):
+            process_zip_file(zip_bytes)
+

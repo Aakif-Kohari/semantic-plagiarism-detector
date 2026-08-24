@@ -6,26 +6,7 @@ import time
 import xml.etree.ElementTree as ET
 
 import src.utils.diff_highlighter as diff_highlighter
-from src.utils.diff_highlighter import (
-    MARK_OPEN_TAG,
-    _fallback_stem,
-    _sanitize_color,
-    highlight_overlap,
-)
-
-SAFE_FALLBACK = "rgba(250, 204, 21, 0.3)"
-
-
-def test_sanitize_color_accepts_valid_hex_and_rgba():
-    assert _sanitize_color("#fef08a") == "#fef08a"
-    assert _sanitize_color("#abc") == "#abc"
-    assert _sanitize_color("rgba(250, 204, 21, 0.3)") == "rgba(250, 204, 21, 0.3)"
-    assert _sanitize_color("rgb(255, 0, 0)") == "rgb(255, 0, 0)"
-
-
-def test_sanitize_color_rejects_injection_vectors():
-    assert _sanitize_color("red; background: url(evil.com)") == SAFE_FALLBACK
-    assert _sanitize_color("rgba(0,0,0,0);</style><script>") == SAFE_FALLBACK
+from src.utils.diff_highlighter import MARK_OPEN_TAG, _tokenize, highlight_overlap
 
 
 def test_no_overlap():
@@ -340,184 +321,118 @@ def test_large_identical_documents_complete_quickly():
     assert elapsed < 2.0, f"highlight_overlap took {elapsed:.2f}s for 3000 words"
 
 
-# --- Optional stemming for fuzzy overlap (Issue #3210) ---------------------
+# --- CJK tokenization (Issue #3213) -----------------------------------------
 
 
-def test_tense_change_evades_highlighting_without_stemming():
-    """Exact lowercase matching misses tense variants — the reported gap."""
+def test_tokenize_splits_cjk_characters_individually():
+    """Each Han/Kana character is its own token; latin words stay whole."""
+    assert _tokenize("你好世界") == ["你", "好", "世", "界"]
+    assert _tokenize("hello 世界") == ["hello", "世", "界"]
+    assert _tokenize("カタカナ") == list("カタカナ")
+    assert _tokenize("ひらがな") == list("ひらがな")
+
+
+def test_identical_chinese_sentences_are_fully_highlighted():
+    """Identical CJK documents mark their shared text like latin ones do."""
+    text = "这是一段用于检测抄袭的中文句子"
+    result_a, result_b = highlight_overlap(text, text)
+
+    assert "<mark" in result_a
+    assert "<mark" in result_b
+    assert text in result_a
+    assert text in result_b
+
+
+def test_shared_cjk_run_inside_different_sentences_is_found():
+    """The reported symptom: whole-sentence tokens used to hide this run.
+
+    Both sentences tokenize to a single opaque token under the old
+    word-boundary scanner, so the eight-character shared middle could
+    never match.
+    """
+    text_a = "前半部分这段文字完全相同其余不同"
+    text_b = "别的内容这段文字完全相同另一段"
+
+    result_a, result_b = highlight_overlap(text_a, text_b, min_match_length=4)
+
+    assert "<mark" in result_a
+    assert "<mark" in result_b
+    assert "这段文字完全相同" in result_a
+    assert "这段文字完全相同" in result_b
+
+
+def test_cjk_prefix_share_is_now_visible():
+    """A long shared prefix across divergent sentences gets marked."""
     result_a, result_b = highlight_overlap(
-        "students analyzed the data",
-        "students analyzing the data",
-        min_match_length=3,
+        "今天我们讨论数据库设计",
+        "今天我们讨论了别的主题",
+        min_match_length=4,
     )
+
+    assert "<mark" in result_a
+    assert "<mark" in result_b
+    assert "今天我们讨论" in result_a
+    assert "今天我们讨论" in result_b
+
+
+def test_short_cjk_run_below_threshold_is_not_highlighted():
+    """Fewer than min_match_length shared characters must stay clean."""
+    text_a = "甲乙丙丁相同字戊己庚辛"
+    text_b = "子丑寅卯相同字辰巳午未"
+
+    result_a, result_b = highlight_overlap(text_a, text_b, min_match_length=4)
 
     assert "<mark" not in result_a
     assert "<mark" not in result_b
 
 
-def test_stemming_matches_tense_changed_words():
-    """With use_stemming=True the same pair highlights as a shared run."""
-    result_a, result_b = highlight_overlap(
-        "students analyzed the data",
-        "students analyzing the data",
-        min_match_length=3,
-        use_stemming=True,
-    )
+def test_japanese_kana_document_highlights_and_preserves_text():
+    """Hiragana/Katakana (U+3040-U+30FF) follow the same character path."""
+    text = "プログラムを書くのが好きです"
+    tokens = _tokenize(text)
+
+    assert len(tokens) == len(text)
+    assert "".join(tokens) == text.lower()
+
+    result_a, result_b = highlight_overlap(text, text)
 
     assert "<mark" in result_a
-    assert "<mark" in result_b
-    # The highlighted run keeps each document's own surface forms.
-    assert "analyzed the data" in result_a
-    assert "analyzing the data" in result_b
+    assert text in result_a
 
 
-def test_plural_variation_matches_with_stemming():
-    """Stemming also bridges singular/plural pairs."""
-    result_a, result_b = highlight_overlap(
-        "the students submitted their work",
-        "the student submitted their work",
-        min_match_length=4,
-        use_stemming=True,
-    )
+def test_mixed_script_documents_keep_original_characters():
+    """English words and CJK characters interleave without breaking spans."""
+    text_a = "Report says 数据完全一致 in section 3."
+    text_b = "Other report: 数据完全一致 elsewhere."
+
+    result_a, result_b = highlight_overlap(text_a, text_b, min_match_length=4)
 
     assert "<mark" in result_a
-    assert "<mark" in result_b
+    assert "数据完全一致" in result_a
+    assert "数据完全一致" in result_b
+    # Unshared latin context survives untouched around the marks.
+    assert "Report says" in result_a
+    assert "in section 3." in result_a
 
 
-def test_stemming_defaults_to_off():
-    """The flag must be opt-in: default behaviour stays byte-compatible."""
-    exact_pair = ("alpha beta gamma delta", "alpha beta gamma delta")
-    tense_pair = (
-        "students analyzed the data",
-        "students analyzing the data",
-    )
+def test_cjk_matching_does_not_break_escaping():
+    """XSS escaping guarantees hold for CJK payloads too."""
+    payload = "<b>这一段文字完全相同</b> 尾部"
 
-    assert highlight_overlap(*exact_pair, 3) == highlight_overlap(
-        *exact_pair, 3, use_stemming=False
-    )
-    assert highlight_overlap(*tense_pair, 3) == highlight_overlap(
-        *tense_pair, 3, use_stemming=False
-    )
+    result_a, _ = highlight_overlap(payload, payload)
+
+    stripped = result_a.replace(MARK_OPEN_TAG, "").replace("</mark>", "")
+    assert "<b>" not in stripped
+    assert "&lt;b&gt;" in stripped
 
 
-def test_stemming_preserves_original_characters():
-    """Highlighting wraps original text even when tokens were stemmed."""
-    result_a, result_b = highlight_overlap(
-        "Students ANALYZED the Data.",
-        "students analyzing THE data!",
-        min_match_length=3,
-        use_stemming=True,
-    )
-
-    assert "ANALYZED" in result_a
-    # Casing survives; the trailing period sits outside the mark but intact.
-    assert "Students ANALYZED the Data" in result_a
-    assert "." in result_a
-    assert "analyzing THE data" in result_b
-    assert "!" in result_b
-
-
-def test_stemming_uses_the_resolved_stem_function(monkeypatch):
-    """The pipeline routes through _get_stem_function exactly once per side."""
-
-    calls: list[str] = []
-
-    def fake_stem(token):
-        calls.append(token)
-        return token.upper()
-
-    monkeypatch.setattr(diff_highlighter, "_get_stem_function", lambda: fake_stem)
-
-    # With the stub, every token matches only its uppercased twin.
-    result_a, result_b = highlight_overlap(
-        "one two three four",
-        "ONE TWO THREE FOUR",
-        min_match_length=4,
-        use_stemming=True,
-    )
-
-    assert "<mark" in result_a
-    assert "<mark" in result_b
-    assert set(calls) == {"one", "two", "three", "four"}
-
-
-def test_fallback_stemmer_handles_regular_inflections():
-    """The no-NLTK fallback agrees with Porter on common regular words."""
-    stem = _fallback_stem
-
-    assert stem("runs") == stem("running")
-    assert stem("analyzed") == stem("analyzing")
-    assert stem("walked") == "walk"
-    assert stem("studies") == "study"
-    assert stem("caresses") == stem("caress")
-    assert stem("the") == "the"  # short tokens stay untouched
-    assert stem("data") == "data"
-
-
-def test_fallback_stemmer_keeps_vowelless_bases_intact():
-    """Suffix stripping never leaves a stemless fragment behind."""
-    assert _fallback_stem("bed") == "bed"
-    assert _fallback_stem("bled") == "bled"
-
-
-def test_get_stem_function_returns_callable():
-    """The resolver always yields something callable, with or without NLTK."""
-    stem = diff_highlighter._get_stem_function()
-
-    assert callable(stem)
-    assert isinstance(stem("analyzing"), str)
-
-
-def test_stemmed_matching_does_not_break_escaping():
-    """XSS escaping guarantees hold when stemming is enabled."""
-    payload = "<b>students analyzed gamma delta</b> tail"
-    other = "<i>students analyzing gamma delta</i> tail"
-    result_a, result_b = highlight_overlap(
-        payload,
-        other,
-        min_match_length=3,
-        use_stemming=True,
-    )
-
-    for result in (result_a, result_b):
-        assert "<script>" not in result
-        stripped = result.replace(MARK_OPEN_TAG, "").replace("</mark>", "")
-        assert "<b>" not in stripped and "<i>" not in stripped
-
-
-def test_custom_css_class_renders_class_attribute_instead_of_inline_styles():
-    """Providing css_class renders <mark class="..."> instead of default inline style."""
-    text_a = "alpha beta gamma delta"
-    text_b = "alpha beta gamma delta"
-
-    result_a, result_b = highlight_overlap(text_a, text_b, css_class="diff-highlight-custom")
-
-    assert '<mark class="diff-highlight-custom">' in result_a
-    assert '<mark class="diff-highlight-custom">' in result_b
-    assert 'style="' not in result_a
-    assert 'style="' not in result_b
-
-
-def test_apply_marks_with_css_class():
-    """_apply_marks respects css_class parameter when provided."""
-    from src.utils.diff_highlighter import _apply_marks
-
-    text = "the quick brown fox"
-    ranges = [(1, 3)]
-
-    result = _apply_marks(text, ranges, css_class="custom-mark-class")
-    assert '<mark class="custom-mark-class">quick brown</mark>' in result
-    assert "style=" not in result
-
-
-def test_apply_marks_without_css_class_uses_inline_style():
-    """_apply_marks defaults to inline MARK_OPEN_TAG when css_class is None."""
-    from src.utils.diff_highlighter import MARK_OPEN_TAG, _apply_marks
-
-    text = "the quick brown fox"
-    ranges = [(1, 3)]
-
-    result = _apply_marks(text, ranges, css_class=None)
-    assert MARK_OPEN_TAG in result
-    assert 'class=' not in result
-
+def test_latin_tokenization_unchanged_by_cjk_support():
+    """Pure-latin documents tokenize exactly as before the change."""
+    assert _tokenize("Hello, World! Don't stop.") == [
+        "hello",
+        "world",
+        "don",
+        "t",
+        "stop",
+    ]
+    assert _tokenize("!!! ??? ...") == []

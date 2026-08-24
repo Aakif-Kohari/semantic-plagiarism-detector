@@ -1,4 +1,4 @@
-"""
+﻿"""
 src/utils/bulk_export.py
 -------------------------
 Bulk export utilities for generating ZIP archives, CSV streams, JSON payloads,
@@ -252,13 +252,13 @@ def export_incidents_csv_stream(
 
     The function writes the following columns in order:
 
-    * **Incident ID** – ``incident_id`` field (default: empty string)
-    * **Doc A**       – ``document_a`` field
-    * **Doc B**       – ``document_b`` field
-    * **Similarity**  – ``similarity_score`` formatted as a percentage (e.g. ``95.00%``)
-    * **Severity**    – ``severity_rank`` field
-    * **Status**      – ``review_status`` field
-    * **Date**        – ``date_flagged`` field
+    * **Incident ID** â€“ ``incident_id`` field (default: empty string)
+    * **Doc A**       â€“ ``document_a`` field
+    * **Doc B**       â€“ ``document_b`` field
+    * **Similarity**  â€“ ``similarity_score`` formatted as a percentage (e.g. ``95.00%``)
+    * **Severity**    â€“ ``severity_rank`` field
+    * **Status**      â€“ ``review_status`` field
+    * **Date**        â€“ ``date_flagged`` field
 
     Parameters
     ----------
@@ -561,6 +561,7 @@ def generate_bulk_reports_zip(
     include_pdf: bool = True,
     include_csv: bool = True,
     include_json: bool = True,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> bytes:
     """Generate a ZIP file containing selected artefacts for flagged document pairs.
 
@@ -569,23 +570,26 @@ def generate_bulk_reports_zip(
     flags:
         List of flag dicts returned by :func:`~src.core.similarity.flag_plagiarism`.
     chunked_docs:
-        Optional mapping of document name → list of text chunks.
+        Optional mapping of document name â†’ list of text chunks.
     embeddings:
-        Optional mapping of document name → NumPy embedding array.
+        Optional mapping of document name â†’ NumPy embedding array.
     include_pdf:
-        Whether to generate per‑pair PDF reports.
+        Whether to generate perâ€‘pair PDF reports.
     include_csv:
         Whether to include a summary CSV of all flagged pairs.
     include_json:
         Whether to include a metadata JSON file describing the export.
+    progress_callback:
+        Optional callback invoked with (current_idx, total_count) after processing each pair.
 
     Returns
     -------
     bytes
-        In‑memory ZIP file contents.
+        Inâ€‘memory ZIP file contents.
     """
     memory_file = io.BytesIO()
     csv_rows = []
+    total_count = len(flags)
 
     with zipfile.ZipFile(memory_file, "w", zipfile.ZIP_DEFLATED) as zf:
         for idx, flag in enumerate(flags):
@@ -623,7 +627,7 @@ def generate_bulk_reports_zip(
                     )
                 except Exception as exc:
                     logger.debug(
-                        "Could not compute chunk pairs for %s ↔ %s: %s",
+                        "Could not compute chunk pairs for %s â†” %s: %s",
                         doc_a,
                         doc_b,
                         exc,
@@ -645,10 +649,10 @@ def generate_bulk_reports_zip(
                     zf.writestr(pdf_filename, pdf_buffer.getvalue())
                 except Exception as exc:
                     logger.error(
-                        "Failed to generate PDF for %s ↔ %s: %s", doc_a, doc_b, exc
+                        "Failed to generate PDF for %s â†” %s: %s", doc_a, doc_b, exc
                     )
 
-            # Fallback JSON per‑pair if PDF generation fails
+            # Fallback JSON perâ€‘pair if PDF generation fails
             safe_a = _sanitise_filename(doc_a)
             safe_b = _sanitise_filename(doc_b)
             fallback = {
@@ -662,6 +666,9 @@ def generate_bulk_reports_zip(
             zf.writestr(
                 f"report_{safe_a}_{safe_b}.json", json.dumps(fallback, indent=2)
             )
+
+            if progress_callback:
+                progress_callback(idx + 1, total_count)
 
         # Optional CSV summary
         if include_csv:
@@ -690,6 +697,7 @@ def create_batch_incident_zip_archive(
     incidents: list[dict],
     delimiter: str = ",",
     quoting_style: int = csv.QUOTE_MINIMAL,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> bytes:
     """Generate in-memory ZIP byte buffer containing incidents_summary.csv, metadata.json, and PDF reports.
 
@@ -697,11 +705,13 @@ def create_batch_incident_zip_archive(
         incidents: A list of incident dictionaries.
         delimiter: Field delimiter used for ``incidents_summary.csv``.
         quoting_style: The quoting mode passed to CSV export.
+        progress_callback: Optional callback invoked with (current_idx, total_count) after processing each incident.
 
     Returns:
         bytes: The in-memory ZIP file content.
     """
     memory_file = io.BytesIO()
+    total_count = len(incidents)
 
     with zipfile.ZipFile(memory_file, "w", zipfile.ZIP_DEFLATED) as zf:
         # 1. Generate and write incidents_summary.csv
@@ -737,6 +747,8 @@ def create_batch_incident_zip_archive(
                     "Skipping PDF generation for incident at index %d: missing doc_a or doc_b",
                     idx,
                 )
+                if progress_callback:
+                    progress_callback(idx + 1, total_count)
                 continue
 
             raw_score = incident.get("similarity_score") or incident.get(
@@ -781,22 +793,29 @@ def create_batch_incident_zip_archive(
                 zf.writestr(pdf_filename, pdf_buffer.getvalue())
             except Exception as exc:
                 logger.error(
-                    "Failed to generate PDF for incident %s (%s ↔ %s): %s",
+                    "Failed to generate PDF for incident %s (%s â†” %s): %s",
                     incident_id,
                     doc_a,
                     doc_b,
                     exc,
                 )
 
+            if progress_callback:
+                progress_callback(idx + 1, total_count)
+
     return memory_file.getvalue()
 
 
-def create_documents_bulk_zip_archive(filenames: list[str]) -> bytes:
+def create_documents_bulk_zip_archive(
+    filenames: list[str],
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+) -> bytes:
     """Create a downloadable .zip archive containing text content and metadata manifest
     for the specified document filenames from the corpus database.
 
     Args:
         filenames: List of document filenames to include in the ZIP archive.
+        progress_callback: Optional callback invoked with (current_idx, total_count) after processing each document.
 
     Returns:
         ZIP archive file bytes ready for download.
@@ -816,9 +835,10 @@ def create_documents_bulk_zip_archive(filenames: list[str]) -> bytes:
 
     word_counts = get_document_word_counts()
     manifest_rows = []
+    total_count = len(filenames)
 
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
-        for filename in filenames:
+        for idx, filename in enumerate(filenames):
             doc_obj = all_docs.get(filename)
             doc_meta = {}
             if doc_obj:
@@ -861,6 +881,9 @@ def create_documents_bulk_zip_archive(filenames: list[str]) -> bytes:
                     "upload_date": doc_meta.get("upload_date") or "N/A",
                 }
             )
+
+            if progress_callback:
+                progress_callback(idx + 1, total_count)
 
         if manifest_rows:
             manifest_df = pd.DataFrame(manifest_rows)
