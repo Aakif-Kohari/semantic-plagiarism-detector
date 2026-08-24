@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import math
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
+import jsonschema
 import numpy as np
 import pandas as pd
 
@@ -397,6 +399,44 @@ def export_filtered_similarity_matrix_to_json(
     )
 
 
+def load_plagiarism_report_schema() -> Dict[str, Any]:
+    """Load official JSON Schema dictionary for exported plagiarism reports.
+
+    Returns:
+        JSON Schema dictionary.
+    """
+    schema_path = Path(__file__).parent.parent / "schemas" / "plagiarism_report_schema.json"
+    if schema_path.is_file():
+        try:
+            with open(schema_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return build_export_schema_definition()
+
+
+def validate_report_json(report_data: Any) -> bool:
+    """Validate a report dictionary against the official JSON schema using jsonschema.
+
+    Validating against an official JSON schema ensures third-party LMS parsers
+    never encounter unexpected payloads.
+
+    Args:
+        report_data: Python dictionary representation of report JSON.
+
+    Returns:
+        True if valid according to the schema, False otherwise.
+    """
+    if not isinstance(report_data, dict):
+        return False
+    schema = load_plagiarism_report_schema()
+    try:
+        jsonschema.validate(instance=report_data, schema=schema)
+        return True
+    except (jsonschema.exceptions.ValidationError, jsonschema.exceptions.SchemaError, Exception):
+        return False
+
+
 def build_export_schema_definition() -> Dict[str, Any]:
     """Return JSON Schema representation for validating exported metadata reports.
 
@@ -427,3 +467,4 @@ def build_export_schema_definition() -> Dict[str, Any]:
             },
         },
     }
+
