@@ -28,7 +28,7 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import Dict, List
+from typing import Callable, Dict, List, Optional
 
 import numpy as np
 import torch
@@ -384,7 +384,11 @@ def _repair_corrupted_model_cache(cache_root: Path, model_name: str) -> None:
         shutil.rmtree(model_cache_dir, ignore_errors=True)
 
 
-def embed_chunks(chunks: List[str], batch_size: int = 32) -> np.ndarray:
+def embed_chunks(
+    chunks: List[str],
+    batch_size: int = 32,
+    cancel_callback: Optional[Callable[[], bool]] = None,
+) -> np.ndarray:
     """
     Generate embeddings for a list of text chunks using explicit mini-batching.
 
@@ -398,6 +402,7 @@ def embed_chunks(chunks: List[str], batch_size: int = 32) -> np.ndarray:
         chunks: List of text strings to embed.
         batch_size: Number of texts encoded per forward pass. Defaults to 32
                     to balance throughput and memory consumption.
+        cancel_callback: Optional callback returning True if processing should be cancelled.
 
     Returns:
         numpy array of shape (N, 384) where N = len(chunks). Returns an
@@ -418,6 +423,10 @@ def embed_chunks(chunks: List[str], batch_size: int = 32) -> np.ndarray:
 
     # Process in explicit mini-batches to optimize memory utilization
     for i in range(0, total_chunks, batch_size):
+        if cancel_callback and cancel_callback():
+            logger.info("[embedding_model] Embedding forward pass cancelled by callback.")
+            raise RuntimeError("Scan job cancelled")
+
         batch = [
             chunk.text if isinstance(chunk, ChunkString) else chunk
             for chunk in chunks[i : i + batch_size]

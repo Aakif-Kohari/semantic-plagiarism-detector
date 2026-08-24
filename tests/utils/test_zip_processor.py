@@ -94,6 +94,7 @@ def test_extract_zip_handles_corrupted_inner_files():
 
 
 from src.utils.zip_processor import (
+    ALLOWED_ZIP_MEMBER_EXTENSIONS,
     MAX_ABSOLUTE_UNCOMPRESSED_SIZE,
     MAX_SINGLE_FILE_SIZE,
     MAX_TOTAL_DECOMPRESSED_SIZE,
@@ -121,6 +122,12 @@ def create_in_memory_zip(
     return zip_stream.getvalue()
 
 
+def test_allowed_zip_member_extensions_constant():
+    """Verify that ALLOWED_ZIP_MEMBER_EXTENSIONS includes all required formats."""
+    expected = {".pdf", ".docx", ".txt", ".rtf", ".csv", ".odt", ".md"}
+    assert ALLOWED_ZIP_MEMBER_EXTENSIONS == expected
+
+
 def test_process_zip_valid_extraction():
     """Verify that supported files are successfully extracted from a valid ZIP archive."""
     zip_data = create_in_memory_zip(
@@ -128,6 +135,10 @@ def test_process_zip_valid_extraction():
             "doc1.pdf": b"PDF text content",
             "doc2.docx": b"Word text content",
             "doc3.txt": b"Plain text content",
+            "doc4.rtf": b"{\\rtf1\\ansi RTF content}",
+            "doc5.csv": b"col1,col2\nval1,val2",
+            "doc6.odt": b"ODT content",
+            "doc7.md": b"# Markdown content",
             "unsupported.png": b"Image data",
             "executable.sh": b"#!/bin/sh\necho 1",
         }
@@ -141,6 +152,14 @@ def test_process_zip_valid_extraction():
     assert result["doc2.docx"] == b"Word text content"
     assert "doc3.txt" in result
     assert result["doc3.txt"] == b"Plain text content"
+    assert "doc4.rtf" in result
+    assert result["doc4.rtf"] == b"{\\rtf1\\ansi RTF content}"
+    assert "doc5.csv" in result
+    assert result["doc5.csv"] == b"col1,col2\nval1,val2"
+    assert "doc6.odt" in result
+    assert result["doc6.odt"] == b"ODT content"
+    assert "doc7.md" in result
+    assert result["doc7.md"] == b"# Markdown content"
 
     # Unsupported formats must be ignored
     assert "unsupported.png" not in result

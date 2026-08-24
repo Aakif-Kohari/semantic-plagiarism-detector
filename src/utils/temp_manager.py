@@ -19,27 +19,32 @@ import logging
 import os
 import shutil
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import List, Optional, Generator
 
 # Global list of registered temporary paths to clean up
 _REGISTERED_TEMP_PATHS: List[str] = []
+_lock = threading.Lock()
 
 logger = logging.getLogger(__name__)
 
 
 def register_temp_path(path: str) -> str:
     """Registers a file or directory path for automatic cleanup on process exit."""
-    if path and path not in _REGISTERED_TEMP_PATHS:
-        _REGISTERED_TEMP_PATHS.append(path)
+    if path:
+        with _lock:
+            if path not in _REGISTERED_TEMP_PATHS:
+                _REGISTERED_TEMP_PATHS.append(path)
     return path
 
 
 def unregister_temp_path(path: str) -> None:
     """Removes a path from the cleanup tracking list if manually deleted earlier."""
-    if path in _REGISTERED_TEMP_PATHS:
-        _REGISTERED_TEMP_PATHS.remove(path)
+    with _lock:
+        if path in _REGISTERED_TEMP_PATHS:
+            _REGISTERED_TEMP_PATHS.remove(path)
 
 
 def cleanup_registered_temp_paths() -> None:
@@ -47,7 +52,10 @@ def cleanup_registered_temp_paths() -> None:
     Cleans up all registered temporary files and directories.
     Registered as an atexit hook.
     """
-    for path in list(_REGISTERED_TEMP_PATHS):
+    with _lock:
+        paths = list(_REGISTERED_TEMP_PATHS)
+
+    for path in paths:
         try:
             if os.path.isfile(path) or os.path.islink(path):
                 os.remove(path)
@@ -56,8 +64,9 @@ def cleanup_registered_temp_paths() -> None:
         except OSError as exc:
             logger.warning("Failed to clean up temp file %s: %s", path, exc)
         finally:
-            if path in _REGISTERED_TEMP_PATHS:
-                _REGISTERED_TEMP_PATHS.remove(path)
+            with _lock:
+                if path in _REGISTERED_TEMP_PATHS:
+                    _REGISTERED_TEMP_PATHS.remove(path)
 
 
 # Register the exit handler automatically on module import
@@ -71,7 +80,10 @@ def cleanup_temp_files(retention_hours: float = 1.0) -> None:
     now = time.time()
     retention_seconds = retention_hours * 3600.0
 
-    for path in list(_REGISTERED_TEMP_PATHS):
+    with _lock:
+        paths = list(_REGISTERED_TEMP_PATHS)
+
+    for path in paths:
         try:
             if os.path.exists(path) or os.path.islink(path):
                 mtime = os.path.getmtime(path)
@@ -80,11 +92,13 @@ def cleanup_temp_files(retention_hours: float = 1.0) -> None:
                         shutil.rmtree(path, ignore_errors=True)
                     else:
                         os.remove(path)
+                    with _lock:
+                        if path in _REGISTERED_TEMP_PATHS:
+                            _REGISTERED_TEMP_PATHS.remove(path)
+            else:
+                with _lock:
                     if path in _REGISTERED_TEMP_PATHS:
                         _REGISTERED_TEMP_PATHS.remove(path)
-            else:
-                if path in _REGISTERED_TEMP_PATHS:
-                    _REGISTERED_TEMP_PATHS.remove(path)
         except OSError as exc:
             logger.warning("Failed to clean up temp path %s: %s", path, exc)
 
