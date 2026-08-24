@@ -62,6 +62,25 @@ Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the project maintainers. All complaints will be reviewed and
 investigated promptly and fairly.
 
+**How to report:** Send an email to
+[gkambli70@gmail.com](mailto:gkambli70@gmail.com)
+with a description of the incident, including any relevant links, screenshots,
+or logs, and the names (or usernames) of the people involved. If you're
+uncomfortable reporting via email, you may instead contact a maintainer
+directly through a private message on GitHub.
+
+**Confidentiality:** Reports are handled by the project maintainers only.
+Details of an incident, including the reporter's identity, are shared only
+with maintainers directly involved in the investigation and are not
+disclosed publicly without the reporter's consent, except where required by
+law or necessary to protect the safety of others.
+
+**Response timeline:** Maintainers will acknowledge receipt of a report
+within **3 business days** and aim to complete an initial review within
+**10 business days** of acknowledgment. If a report requires a longer
+investigation, the reporter will be updated on progress at least once every
+10 business days until it is resolved.
+
 All community leaders are obligated to respect the privacy and security of the
 reporter of any incident.
 
