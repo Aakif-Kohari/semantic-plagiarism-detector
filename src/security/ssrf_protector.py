@@ -19,12 +19,13 @@ import ipaddress
 import logging
 import os
 import socket
+import threading
 import time
-import idna
 import urllib.parse
 from collections import OrderedDict
-from typing import Optional, Tuple, List, Dict
+from typing import Dict, List, Optional, Tuple
 
+import idna
 import requests
 
 from src.errors import (
@@ -38,9 +39,11 @@ from src.errors import (
     SSRF_DNS_RESOLUTION_FAILED,
     SSRF_DOMAIN_NOT_ALLOWED,
     SSRF_INSECURE_SCHEME,
+    SSRF_INVALID_HOSTNAME,
     SSRF_INVALID_IP_FORMAT,
     SSRF_MAX_REDIRECTS_EXCEEDED,
     SSRF_MISSING_HOSTNAME,
+    SSRF_PORT_NOT_ALLOWED,
     SSRF_WEBHOOK_URL_EMPTY,
 )
 
@@ -82,6 +85,33 @@ def is_ip_in_cidr_block(ip_str: str, cidr_block: str) -> bool:
     return ip_address in network
 
 
+def get_allowed_webhook_domains() -> List[str]:
+    """Return the deployment's configured webhook domain allowlist.
+
+    Thin wrapper over :func:`src.core.app_config.get_allowed_webhook_domains`.
+    The import stays inside the function because ``src.core`` pulls in
+    ``src.core.webhook``, which imports this module -- a module-level import
+    would close that cycle. Having the accessor live here also gives tests a
+    single name to patch.
+
+    Returns:
+        The configured domains, or an empty list when the configuration module
+        is unavailable.
+    """
+    try:
+        from src.core.app_config import (
+            get_allowed_webhook_domains as _configured_domains,
+        )
+    except ImportError:
+        logger.warning(
+            "Could not load the webhook domain allowlist; "
+            "falling back to IP-level restrictions only."
+        )
+        return []
+
+    return _configured_domains()
+
+
 class SSRFSecurityException(Exception):
     """Raised when a Webhook URL fails SSRF security checks."""
 
@@ -92,11 +122,18 @@ class SSRFProtector:
     """Core security module designed to prevent SSRF attacks under strict typing."""
 
     _dns_cache: "OrderedDict[str, tuple[str, float]]" = OrderedDict()
+    _cache_lock: threading.Lock = threading.Lock()
     DNS_CACHE_TTL_SECONDS: int = 300
     DNS_CACHE_MAX_SIZE: int = 1000
     RESTRICTED_IPV4_CIDR_BLOCKS: Tuple[str, ...] = RESTRICTED_IPV4_CIDR_BLOCKS
     MAX_REDIRECT_DEPTH: int = 5
     DEFAULT_USER_AGENT: str = DEFAULT_USER_AGENT
+
+    @classmethod
+    def clear_dns_cache(cls) -> None:
+        """Clear all cached DNS resolution entries in a thread-safe manner."""
+        with cls._cache_lock:
+            cls._dns_cache.clear()
 
     @classmethod
     def get_dns_cache_ttl(cls) -> int:
@@ -119,16 +156,37 @@ class SSRFProtector:
         return getattr(cls, "DNS_CACHE_TTL_SECONDS", 300)
 
     @classmethod
+    def get_allowed_webhook_ports(cls) -> set[int]:
+        """Return the set of allowed webhook target ports.
+
+        Reads ALLOWED_WEBHOOK_PORTS environment variable (comma-separated integers),
+        defaulting to {443}. Restricts allowed ports to prevent port scanning attacks (Issue #3190).
+        """
+        env_ports = os.getenv("ALLOWED_WEBHOOK_PORTS")
+        if env_ports is not None and env_ports.strip():
+            allowed = set()
+            for item in env_ports.split(","):
+                item_str = item.strip()
+                if item_str.isdigit():
+                    port_num = int(item_str)
+                    if 1 <= port_num <= 65535:
+                        allowed.add(port_num)
+            if allowed:
+                return allowed
+        return {443}
+
+    @classmethod
     def _resolve_hostname(cls, hostname: str) -> str:
         current_time = float(time.time())
         ttl_seconds = cls.get_dns_cache_ttl()
 
-        if hostname in cls._dns_cache:
-            cached_ip, timestamp = cls._dns_cache[hostname]
-            if current_time - timestamp < ttl_seconds:
-                cls._dns_cache.move_to_end(hostname)
-                return cached_ip
-            del cls._dns_cache[hostname]
+        with cls._cache_lock:
+            if hostname in cls._dns_cache:
+                cached_ip, timestamp = cls._dns_cache[hostname]
+                if current_time - timestamp < ttl_seconds:
+                    cls._dns_cache.move_to_end(hostname)
+                    return cached_ip
+                del cls._dns_cache[hostname]
 
         try:
             addr_info = socket.getaddrinfo(hostname, None)
@@ -138,10 +196,11 @@ class SSRFProtector:
                 )
 
             ip_str = str(addr_info[0][4][0])
-            cls._dns_cache[hostname] = (ip_str, current_time)
-            cls._dns_cache.move_to_end(hostname)
-            if len(cls._dns_cache) > cls.DNS_CACHE_MAX_SIZE:
-                cls._dns_cache.popitem(last=False)
+            with cls._cache_lock:
+                cls._dns_cache[hostname] = (ip_str, current_time)
+                cls._dns_cache.move_to_end(hostname)
+                if len(cls._dns_cache) > cls.DNS_CACHE_MAX_SIZE:
+                    cls._dns_cache.popitem(last=False)
             return ip_str
 
         except socket.gaierror as e:
@@ -155,6 +214,39 @@ class SSRFProtector:
         url: str,
         allowed_domains: Optional[List[str]] = None,
     ) -> str:
+        """Run every network-free safety check for a single URL.
+
+        Covers scheme, hostname encoding, the domain allowlist, DNS
+        resolution, and the private/loopback/link-local/multicast IP checks.
+        Makes no outbound HTTP request, so it is safe to call before deciding
+        whether a URL is worth contacting at all.
+
+        Args:
+            url: The URL to validate.
+            allowed_domains: Domain allowlist to enforce. ``None`` -- the
+                default -- means "use the deployment's configured allowlist",
+                read from ``ALLOWED_WEBHOOK_DOMAINS`` via
+                :func:`get_allowed_webhook_domains`. An explicit empty list is
+                the opt-out: the domain check is skipped and any external
+                domain is permitted, subject to the IP-level restrictions
+                below. Entries are compared after Punycode encoding, and a
+                host matches an entry exactly or as a subdomain of it.
+
+        Returns:
+            The resolved IP address, as a string.
+
+        Raises:
+            SSRFSecurityException: If the URL is empty, is not HTTPS, has no
+                hostname, has a hostname that cannot be IDNA-encoded, is
+                outside the allowlist, fails DNS resolution, or resolves to a
+                restricted address.
+
+        Security note:
+            An empty allowlist permits any external domain by design, for
+            deployments that rely on IP-level restrictions alone. It is not a
+            bypass: private, loopback, link-local, multicast and unspecified
+            addresses are still blocked regardless of allowlist state.
+        """
         if not url:
             raise SSRFSecurityException(SSRF_WEBHOOK_URL_EMPTY)
 
@@ -162,6 +254,16 @@ class SSRFProtector:
         if parsed.scheme != "https":
             raise SSRFSecurityException(
                 SSRF_INSECURE_SCHEME.format(scheme=parsed.scheme)
+            )
+
+        # Restrict allowed destination ports to prevent internal port scanning (Issue #3190)
+        port = parsed.port if parsed.port is not None else 443
+        allowed_ports = cls.get_allowed_webhook_ports()
+        if port not in allowed_ports:
+            raise SSRFSecurityException(
+                SSRF_PORT_NOT_ALLOWED.format(
+                    port=port, allowed_ports=sorted(list(allowed_ports))
+                )
             )
 
         hostname: Optional[str] = parsed.hostname
@@ -174,26 +276,34 @@ class SSRFProtector:
         except idna.IDNAError:
             raise SSRFSecurityException(SSRF_INVALID_HOSTNAME)
 
-        # Normalize allowed domains to Punycode as well
+        # A caller that passes nothing wants the deployment's configured
+        # allowlist. An explicit empty list is the documented opt-out and is
+        # left alone, so IP-level restrictions remain the only gate.
+        if allowed_domains is None:
+            allowed_domains = get_allowed_webhook_domains()
+
+        # Compare against Punycode, not the raw configuration, so an allowlist
+        # written as 'bücher.example' matches the 'xn--bcher-kva.example' the
+        # hostname was just encoded to.
         normalized_allowed_domains = []
-        for domain in allowed_domains or []:
+        for domain in allowed_domains:
             try:
                 normalized_allowed_domains.append(idna.encode(domain).decode("ascii"))
             except idna.IDNAError:
+                logger.warning(
+                    "Ignoring un-encodable webhook allowlist entry: %s", domain
+                )
                 continue
 
-        if hostname in normalized_allowed_domains:
-            try:
-                from src.core.app_config import get_allowed_webhook_domains
-
-                allowed_domains = get_allowed_webhook_domains()
-            except ImportError:
-                allowed_domains = []
-
+        # Gate on what was *supplied*, and compare against what survived
+        # normalisation. A list whose every entry is malformed therefore
+        # rejects rather than falling through to "no allowlist configured" --
+        # an allowlist that quietly evaluates to empty is the failure this
+        # whole block exists to prevent.
         if allowed_domains:
             host_lower = hostname.lower()
             allowed = False
-            for domain in allowed_domains:
+            for domain in normalized_allowed_domains:
                 dom_lower = domain.lower()
                 if host_lower == dom_lower or host_lower.endswith("." + dom_lower):
                     allowed = True

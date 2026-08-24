@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import src.security.ssrf_protector as ssrf_protector
 from src.security.ssrf_protector import (
     DEFAULT_USER_AGENT,
     RESTRICTED_IPV4_CIDR_BLOCKS,
@@ -54,6 +55,21 @@ def test_validate_webhook_url_dns_failure(mock_getaddrinfo):
     mock_getaddrinfo.side_effect = socket.gaierror("Name or service not known")
     with pytest.raises(SSRFSecurityException, match="DNS resolution failed"):
         SSRFProtector.validate_webhook_url("https://nonexistent.domain.local/api")
+
+
+@patch("src.security.ssrf_protector.socket.getaddrinfo")
+def test_ssrf_dns_resolution_failed_formatting(mock_getaddrinfo):
+    """Verify SSRF_DNS_RESOLUTION_FAILED message is formatted without error with hostname and gaierror string (Issue #3193)."""
+    target_hostname = "unresolvable-domain-12345.local"
+    gaierror_msg = "nodename nor servname provided, or not known"
+    mock_getaddrinfo.side_effect = socket.gaierror(8, gaierror_msg)
+
+    with pytest.raises(SSRFSecurityException) as exc_info:
+        SSRFProtector.validate_webhook_url(f"https://{target_hostname}/webhook")
+
+    err_message = str(exc_info.value)
+    assert target_hostname in err_message
+    assert gaierror_msg in err_message
 
 
 @patch("src.security.ssrf_protector.socket.getaddrinfo")
@@ -738,7 +754,9 @@ class TestEmptyAllowedDomainsBehavior:
         assert ip == "93.184.216.34"
         
         # Should fail for non-approved domain
-        with pytest.raises(SSRFSecurityException, match="not in the allowed domains"):
+        with pytest.raises(
+            SSRFSecurityException, match="not in ALLOWED_WEBHOOK_DOMAINS"
+        ):
             SSRFProtector._validate_url_target(
                 "https://malicious.com/webhook",
                 allowed_domains=["slack.com", "discord.com"]
@@ -794,3 +812,229 @@ def test_is_ip_in_cidr_block_strips_padded_ip():
     """Whitespace-padded private IPs must still match the CIDR block."""
     assert is_ip_in_cidr_block(" 127.0.0.1 ", "127.0.0.0/8") is True
 
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for issue #3562
+#
+# The guard that loads the configured allowlist was rewritten from
+#
+#     if allowed_domains is None:
+#
+# into
+#
+#     if hostname in normalized_allowed_domains:
+#
+# so a caller who passed nothing -- every caller in the codebase -- left
+# allowed_domains as None, fell through to the "allowlist is empty" branch and
+# reached any public HTTPS host. Two smaller defects sat in the same block: the
+# Punycode-normalised list was built and never compared against, and
+# SSRF_INVALID_HOSTNAME was raised without being defined anywhere.
+# ---------------------------------------------------------------------------
+
+
+class TestConfiguredAllowlistIsHonoured:
+    """The configured allowlist must apply when the caller passes nothing."""
+
+    @patch.object(SSRFProtector, "_resolve_hostname", return_value="93.184.216.34")
+    def test_host_outside_the_configured_allowlist_is_rejected(self, mock_resolve):
+        """The regression itself: a default call must consult the config."""
+        with patch(
+            "src.security.ssrf_protector.get_allowed_webhook_domains",
+            return_value=["hooks.slack.com"],
+        ):
+            with pytest.raises(
+                SSRFSecurityException, match="not in ALLOWED_WEBHOOK_DOMAINS"
+            ):
+                SSRFProtector._validate_url_target("https://evil.example.com/x")
+
+    @patch.object(SSRFProtector, "_resolve_hostname", return_value="93.184.216.34")
+    def test_rejection_happens_before_dns_resolution(self, mock_resolve):
+        """A disallowed host is never looked up, so it is never contacted."""
+        with patch(
+            "src.security.ssrf_protector.get_allowed_webhook_domains",
+            return_value=["hooks.slack.com"],
+        ):
+            with pytest.raises(SSRFSecurityException):
+                SSRFProtector._validate_url_target("https://evil.example.com/x")
+
+        mock_resolve.assert_not_called()
+
+    @patch.object(SSRFProtector, "_resolve_hostname", return_value="93.184.216.34")
+    def test_host_inside_the_configured_allowlist_passes(self, mock_resolve):
+        """An exact match against the configured allowlist is permitted."""
+        with patch(
+            "src.security.ssrf_protector.get_allowed_webhook_domains",
+            return_value=["hooks.slack.com"],
+        ):
+            ip = SSRFProtector._validate_url_target("https://hooks.slack.com/x")
+
+        assert ip == "93.184.216.34"
+
+    @patch.object(SSRFProtector, "_resolve_hostname", return_value="93.184.216.34")
+    def test_subdomain_of_a_configured_entry_passes(self, mock_resolve):
+        """Subdomain matching applies to the configured allowlist too."""
+        with patch(
+            "src.security.ssrf_protector.get_allowed_webhook_domains",
+            return_value=["slack.com"],
+        ):
+            ip = SSRFProtector._validate_url_target("https://hooks.slack.com/x")
+
+        assert ip == "93.184.216.34"
+
+    @patch.object(SSRFProtector, "_resolve_hostname", return_value="93.184.216.34")
+    def test_partial_suffix_is_not_treated_as_a_subdomain(self, mock_resolve):
+        """'evilslack.com' must not match an allowlist entry of 'slack.com'."""
+        with patch(
+            "src.security.ssrf_protector.get_allowed_webhook_domains",
+            return_value=["slack.com"],
+        ):
+            with pytest.raises(
+                SSRFSecurityException, match="not in ALLOWED_WEBHOOK_DOMAINS"
+            ):
+                SSRFProtector._validate_url_target("https://evilslack.com/x")
+
+    @patch.object(SSRFProtector, "_resolve_hostname", return_value="93.184.216.34")
+    def test_configuration_is_not_read_when_the_caller_supplies_a_list(
+        self, mock_resolve
+    ):
+        """An explicit list wins; the deployment configuration is left alone."""
+        configured = MagicMock(return_value=["hooks.slack.com"])
+
+        with patch(
+            "src.security.ssrf_protector.get_allowed_webhook_domains", configured
+        ):
+            ip = SSRFProtector._validate_url_target(
+                "https://discord.com/x", allowed_domains=["discord.com"]
+            )
+
+        assert ip == "93.184.216.34"
+        configured.assert_not_called()
+
+    @patch.object(SSRFProtector, "_resolve_hostname", return_value="93.184.216.34")
+    def test_explicit_empty_list_remains_the_documented_opt_out(self, mock_resolve):
+        """`allowed_domains=[]` still permits any external domain."""
+        configured = MagicMock(return_value=["hooks.slack.com"])
+
+        with patch(
+            "src.security.ssrf_protector.get_allowed_webhook_domains", configured
+        ):
+            ip = SSRFProtector._validate_url_target(
+                "https://anything.example/x", allowed_domains=[]
+            )
+
+        assert ip == "93.184.216.34"
+        configured.assert_not_called()
+
+    @patch.object(SSRFProtector, "_resolve_hostname", return_value="127.0.0.1")
+    def test_allowlisted_host_is_still_subject_to_ip_checks(self, mock_resolve):
+        """Being on the allowlist does not exempt a host from the IP rules."""
+        with patch(
+            "src.security.ssrf_protector.get_allowed_webhook_domains",
+            return_value=["hooks.slack.com"],
+        ):
+            with pytest.raises(SSRFSecurityException, match="loopback"):
+                SSRFProtector._validate_url_target("https://hooks.slack.com/x")
+
+    @patch.object(SSRFProtector, "_resolve_hostname", return_value="93.184.216.34")
+    def test_empty_configuration_permits_any_external_domain(self, mock_resolve):
+        """A deployment with no allowlist configured keeps the old behaviour."""
+        with patch(
+            "src.security.ssrf_protector.get_allowed_webhook_domains", return_value=[]
+        ):
+            ip = SSRFProtector._validate_url_target("https://anything.example/x")
+
+        assert ip == "93.184.216.34"
+
+
+class TestAllowlistPunycodeNormalisation:
+    """The comparison runs against Punycode, not the raw configuration."""
+
+    @patch.object(SSRFProtector, "_resolve_hostname", return_value="93.184.216.34")
+    def test_unicode_allowlist_entry_matches_its_encoded_host(self, mock_resolve):
+        """An entry written in Unicode matches the host's encoded form."""
+        ip = SSRFProtector._validate_url_target(
+            "https://xn--bcher-kva.example/x", allowed_domains=["bücher.example"]
+        )
+
+        assert ip == "93.184.216.34"
+
+    @patch.object(SSRFProtector, "_resolve_hostname", return_value="93.184.216.34")
+    def test_unicode_allowlist_entry_matches_a_unicode_host(self, mock_resolve):
+        """Both sides encode, so a Unicode URL matches a Unicode entry."""
+        ip = SSRFProtector._validate_url_target(
+            "https://bücher.example/x", allowed_domains=["bücher.example"]
+        )
+
+        assert ip == "93.184.216.34"
+
+    @patch.object(SSRFProtector, "_resolve_hostname", return_value="93.184.216.34")
+    def test_unencodable_allowlist_entry_is_skipped_not_fatal(self, mock_resolve):
+        """One bad entry is dropped; the remaining entries still apply."""
+        ip = SSRFProtector._validate_url_target(
+            "https://hooks.slack.com/x",
+            allowed_domains=["a" * 70 + ".example", "hooks.slack.com"],
+        )
+
+        assert ip == "93.184.216.34"
+
+    @patch.object(SSRFProtector, "_resolve_hostname", return_value="93.184.216.34")
+    def test_a_list_of_only_unencodable_entries_does_not_permit_everything(
+        self, mock_resolve
+    ):
+        """Dropping every entry must not silently disable the allowlist.
+
+        This is the failure mode the original bug had: an allowlist that
+        evaluates to empty stops rejecting anything. An operator whose entries
+        are all malformed should see the same rejection as an operator whose
+        entries are merely wrong.
+        """
+        with pytest.raises(
+            SSRFSecurityException, match="not in ALLOWED_WEBHOOK_DOMAINS"
+        ):
+            SSRFProtector._validate_url_target(
+                "https://evil.example/x", allowed_domains=["a" * 70 + ".example"]
+            )
+
+
+class TestInvalidHostnameMessage:
+    """An un-encodable hostname raises a catchable exception, not NameError."""
+
+    def test_unencodable_hostname_raises_ssrf_exception(self):
+        """SSRF_INVALID_HOSTNAME used to be undefined, so this raised NameError."""
+        with pytest.raises(SSRFSecurityException):
+            SSRFProtector._validate_url_target("https://" + "a" * 70 + ".example/x")
+
+    def test_unencodable_hostname_message_is_readable(self):
+        """The message names the problem rather than leaking a traceback."""
+        with pytest.raises(SSRFSecurityException) as excinfo:
+            SSRFProtector._validate_url_target("https://" + "a" * 70 + ".example/x")
+
+        assert "hostname" in str(excinfo.value).lower()
+
+    def test_invalid_hostname_constant_is_exported(self):
+        """The constant lives with the other SSRF messages and is exported."""
+        import src.errors as errors
+
+        assert isinstance(errors.SSRF_INVALID_HOSTNAME, str)
+        assert errors.SSRF_INVALID_HOSTNAME
+        assert "SSRF_INVALID_HOSTNAME" in errors.__all__
+
+
+class TestAllowlistAccessor:
+    """The module-level accessor is the single seam for the configuration."""
+
+    def test_accessor_returns_the_configured_domains(self, monkeypatch):
+        """It reads through to app_config, which reads the environment."""
+        monkeypatch.setenv("ALLOWED_WEBHOOK_DOMAINS", "hooks.slack.com, discord.com")
+
+        assert ssrf_protector.get_allowed_webhook_domains() == [
+            "hooks.slack.com",
+            "discord.com",
+        ]
+
+    def test_accessor_returns_empty_when_unconfigured(self, monkeypatch):
+        """No configuration means an empty list, not None."""
+        monkeypatch.delenv("ALLOWED_WEBHOOK_DOMAINS", raising=False)
+
+        assert ssrf_protector.get_allowed_webhook_domains() == []

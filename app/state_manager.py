@@ -173,6 +173,7 @@ def init_api_server_daemon():
 def _run_backup_daemon():
     """Background loop to create backups after inactivity."""
     last_backup_time = 0.0
+    daemon_start_time = time.time()
 
     try:
         cache = get_cache()
@@ -198,15 +199,25 @@ def _run_backup_daemon():
             from src.core.app_config import get_backup_idle_timeout
 
             cache = get_cache()
-
             timeout = get_backup_idle_timeout()
+            now = time.time()
+            
+            # Establish a safe startup state: wait for at least one timeout interval
+            # after daemon startup before allowing ANY backups to trigger.
+            # We track this explicit condition rather than using an arbitrary sleep/continue.
+            is_startup_phase = (now - daemon_start_time) < timeout
 
             last_activity = cache.get("spd:v1:global:last_activity")
             if last_activity is None:
-                last_activity = time.time()
+                last_activity = now
                 cache.set("spd:v1:global:last_activity", last_activity)
+            else:
+                try:
+                    last_activity = float(last_activity)
+                except (ValueError, TypeError):
+                    last_activity = now
+                    cache.set("spd:v1:global:last_activity", last_activity)
 
-            now = time.time()
             idle = now - last_activity
 
             active_sessions = get_active_sessions_count()
@@ -221,6 +232,7 @@ def _run_backup_daemon():
                 active_sessions == 0
                 and idle >= timeout
                 and last_activity > last_backup_time
+                and not is_startup_phase
             ):
                 from src.core.app_config import get_backup_dir
                 from src.db.database_backup import (
