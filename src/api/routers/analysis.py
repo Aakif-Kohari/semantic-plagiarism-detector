@@ -53,6 +53,64 @@ router = APIRouter(tags=["Plagiarism Detection"])
 
 total_scans = 0
 scan_jobs: Dict[str, Dict[str, Any]] = {}
+SCAN_JOB_TTL_SECONDS = int(os.getenv("SCAN_JOB_TTL_SECONDS", 7200))  # 2 hours default
+MAX_IN_MEMORY_SCAN_JOBS = int(os.getenv("MAX_IN_MEMORY_SCAN_JOBS", 10000))
+
+
+def cleanup_expired_scan_jobs(
+    max_age_seconds: int = SCAN_JOB_TTL_SECONDS,
+    max_capacity: int = MAX_IN_MEMORY_SCAN_JOBS,
+) -> int:
+    """Remove completed or failed scan jobs from the in-memory dictionary.
+
+    Evicts:
+    1. Jobs whose completion/failure time (or created time) is older than `max_age_seconds` (default: 2 hours).
+    2. Oldest completed/failed jobs if the total in-memory jobs exceed `max_capacity`.
+
+    Args:
+        max_age_seconds: Maximum lifetime in seconds for finished scan jobs.
+        max_capacity: Maximum number of scan jobs permitted in memory.
+
+    Returns:
+        int: Number of evicted jobs.
+    """
+    now = datetime.now(timezone.utc)
+    expired_job_ids = []
+
+    for job_id, job in list(scan_jobs.items()):
+        status_val = job.get("status")
+        # Only evict finished jobs (completed, failed, or cancelled); active jobs in queued/processing state must remain
+        if status_val not in ("completed", "failed", "cancelled"):
+            continue
+
+        ts_str = job.get("completed_at") or job.get("created_at")
+        if ts_str:
+            try:
+                ts = datetime.fromisoformat(ts_str)
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                if (now - ts).total_seconds() >= max_age_seconds:
+                    expired_job_ids.append(job_id)
+            except (ValueError, TypeError):
+                pass
+
+    for job_id in expired_job_ids:
+        scan_jobs.pop(job_id, None)
+
+    # Capacity-based eviction for remaining completed/failed/cancelled jobs if limit exceeded
+    if len(scan_jobs) > max_capacity:
+        finished_jobs = [
+            (jid, jdata.get("completed_at") or jdata.get("created_at") or "")
+            for jid, jdata in scan_jobs.items()
+            if jdata.get("status") in ("completed", "failed", "cancelled")
+        ]
+        finished_jobs.sort(key=lambda x: x[1])
+        excess = len(scan_jobs) - max_capacity
+        for jid, _ in finished_jobs[:excess]:
+            scan_jobs.pop(jid, None)
+            expired_job_ids.append(jid)
+
+    return len(expired_job_ids)
 
 
 def _process_scan_job(
@@ -84,9 +142,11 @@ def _process_scan_job(
         if not extracted_text.strip():
             if not _is_cancelled():
                 scan_jobs[job_id]["status"] = "failed"
+                scan_jobs[job_id]["completed_at"] = datetime.now(timezone.utc).isoformat()
                 scan_jobs[job_id][
                     "error"
                 ] = "Failed to extract readable text from the uploaded file."
+                cleanup_expired_scan_jobs()
             return
 
         if _is_cancelled():
@@ -207,8 +267,10 @@ def _process_scan_job(
         if _is_cancelled():
             return
         scan_jobs[job_id]["status"] = "failed"
+        scan_jobs[job_id]["completed_at"] = datetime.now(timezone.utc).isoformat()
         scan_jobs[job_id]["error"] = str(exc)
     finally:
+        cleanup_expired_scan_jobs()
         if isinstance(file_input, (str, os.PathLike)) and os.path.exists(file_input):
             try:
                 os.unlink(file_input)
@@ -514,6 +576,8 @@ async def scan_document_async(
     job_id = f"job_{uuid.uuid4().hex[:12]}"
     status_url = f"/api/v1/scan/status/{job_id}"
 
+    cleanup_expired_scan_jobs()
+
     scan_jobs[job_id] = {
         "job_id": job_id,
         "status": "queued",
@@ -556,6 +620,7 @@ def get_async_scan_status(
     _user: dict = Security(get_current_user, scopes=["read"]),
 ):
     """Retrieve the status and results of an asynchronous scan job."""
+    cleanup_expired_scan_jobs()
     if job_id not in scan_jobs:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -589,6 +654,7 @@ def cancel_async_scan_job(
     _user: dict = Security(get_current_user, scopes=["write"]),
 ):
     """Cancel an active or queued asynchronous document scan job."""
+    cleanup_expired_scan_jobs()
     if job_id not in scan_jobs:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
