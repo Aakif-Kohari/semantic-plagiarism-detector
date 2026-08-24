@@ -19,6 +19,7 @@ import ipaddress
 import logging
 import os
 import socket
+import threading
 import time
 import idna
 import urllib.parse
@@ -92,11 +93,18 @@ class SSRFProtector:
     """Core security module designed to prevent SSRF attacks under strict typing."""
 
     _dns_cache: "OrderedDict[str, tuple[str, float]]" = OrderedDict()
+    _cache_lock: threading.Lock = threading.Lock()
     DNS_CACHE_TTL_SECONDS: int = 300
     DNS_CACHE_MAX_SIZE: int = 1000
     RESTRICTED_IPV4_CIDR_BLOCKS: Tuple[str, ...] = RESTRICTED_IPV4_CIDR_BLOCKS
     MAX_REDIRECT_DEPTH: int = 5
     DEFAULT_USER_AGENT: str = DEFAULT_USER_AGENT
+
+    @classmethod
+    def clear_dns_cache(cls) -> None:
+        """Clear all cached DNS resolution entries in a thread-safe manner."""
+        with cls._cache_lock:
+            cls._dns_cache.clear()
 
     @classmethod
     def get_dns_cache_ttl(cls) -> int:
@@ -123,12 +131,13 @@ class SSRFProtector:
         current_time = float(time.time())
         ttl_seconds = cls.get_dns_cache_ttl()
 
-        if hostname in cls._dns_cache:
-            cached_ip, timestamp = cls._dns_cache[hostname]
-            if current_time - timestamp < ttl_seconds:
-                cls._dns_cache.move_to_end(hostname)
-                return cached_ip
-            del cls._dns_cache[hostname]
+        with cls._cache_lock:
+            if hostname in cls._dns_cache:
+                cached_ip, timestamp = cls._dns_cache[hostname]
+                if current_time - timestamp < ttl_seconds:
+                    cls._dns_cache.move_to_end(hostname)
+                    return cached_ip
+                del cls._dns_cache[hostname]
 
         try:
             addr_info = socket.getaddrinfo(hostname, None)
@@ -138,10 +147,11 @@ class SSRFProtector:
                 )
 
             ip_str = str(addr_info[0][4][0])
-            cls._dns_cache[hostname] = (ip_str, current_time)
-            cls._dns_cache.move_to_end(hostname)
-            if len(cls._dns_cache) > cls.DNS_CACHE_MAX_SIZE:
-                cls._dns_cache.popitem(last=False)
+            with cls._cache_lock:
+                cls._dns_cache[hostname] = (ip_str, current_time)
+                cls._dns_cache.move_to_end(hostname)
+                if len(cls._dns_cache) > cls.DNS_CACHE_MAX_SIZE:
+                    cls._dns_cache.popitem(last=False)
             return ip_str
 
         except socket.gaierror as e:
