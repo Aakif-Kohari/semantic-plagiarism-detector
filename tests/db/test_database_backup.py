@@ -59,6 +59,27 @@ def test_snapshot_does_not_modify_source_database(tmp_path):
     assert source.read_bytes() == before
 
 
+def test_snapshot_applies_busy_timeout_to_source_connection(tmp_path, monkeypatch):
+    source = tmp_path / "corpus.db"
+    create_test_database(source)
+
+    applied_timeouts = []
+    from src.db import database_backup
+
+    orig_apply = database_backup.apply_busy_timeout
+
+    def mock_apply(conn, timeout):
+        applied_timeouts.append(timeout)
+        return orig_apply(conn, timeout)
+
+    monkeypatch.setattr(database_backup, "apply_busy_timeout", mock_apply)
+
+    snapshot = create_sqlite_snapshot(source)
+    assert snapshot.startswith(SQLITE_HEADER)
+    assert len(applied_timeouts) >= 1
+    assert applied_timeouts[0] == database_backup.DEFAULT_SQLITE_TIMEOUT
+
+
 def test_missing_database_raises_file_not_found(tmp_path):
     missing = tmp_path / "missing.db"
 
