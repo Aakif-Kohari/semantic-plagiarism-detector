@@ -57,6 +57,21 @@ def test_validate_webhook_url_dns_failure(mock_getaddrinfo):
 
 
 @patch("src.security.ssrf_protector.socket.getaddrinfo")
+def test_ssrf_dns_resolution_failed_formatting(mock_getaddrinfo):
+    """Verify SSRF_DNS_RESOLUTION_FAILED message is formatted without error with hostname and gaierror string (Issue #3193)."""
+    target_hostname = "unresolvable-domain-12345.local"
+    gaierror_msg = "nodename nor servname provided, or not known"
+    mock_getaddrinfo.side_effect = socket.gaierror(8, gaierror_msg)
+
+    with pytest.raises(SSRFSecurityException) as exc_info:
+        SSRFProtector.validate_webhook_url(f"https://{target_hostname}/webhook")
+
+    err_message = str(exc_info.value)
+    assert target_hostname in err_message
+    assert gaierror_msg in err_message
+
+
+@patch("src.security.ssrf_protector.socket.getaddrinfo")
 def test_validate_webhook_url_loopback(mock_getaddrinfo):
     mock_getaddrinfo.return_value = [(2, 1, 6, "", ("127.0.0.1", 443))]
     with pytest.raises(SSRFSecurityException, match="Blocked loopback IP: 127.0.0.1"):
