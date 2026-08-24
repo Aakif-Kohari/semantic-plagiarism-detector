@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Admin DB repair CLI with `--check` / `--vacuum` / `--reindex` for `corpus.db` and `users.db` (`scripts/repair_db.py`).
 
 ### Fixed
+- Embed bundled DejaVu Sans / Roboto TTF in ReportLab PDF reports so non-ASCII document names render correctly (`src/utils/pdf_report.py`).
 - Graceful degradation when reportlab is not installed: badge generator module loads without reportlab and raises a clear error only when PDF generation is requested (`src/utils/badge_generator.py`).
 - Fixed assertion mismatch in `test_sync_flagged_incidents_bulk_upsert` to verify that `severity_rank` is updated to `"Critical"` and other ranks during bulk upsert (`tests/db/test_incidents.py`, `tests/db/test_incidents_bulk.py`).
 - Fixed unreadable line overflowing for long URLs in ReportLab PDF reports by adding `wordWrap='CJK'` to paragraph styles and inserting zero-width spaces into long URLs (`src/utils/pdf_report.py`).
