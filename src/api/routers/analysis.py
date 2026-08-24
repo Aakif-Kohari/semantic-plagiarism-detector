@@ -35,7 +35,11 @@ from src.api.schemas import (
     SimilarityCheckResponse,
 )
 from src.core.document_parser import extract_text
-from src.core.embedding_model import embed_chunks, get_document_embedding
+from src.core.embedding_model import (
+    embed_chunks,
+    get_document_embedding,
+    release_large_batch_memory,
+)
 from src.core.metrics import spd_scan_duration_seconds
 from src.core.similarity import (
     PLAGIARISM_THRESHOLD,
@@ -132,6 +136,7 @@ def _process_scan_job(
         return scan_jobs.get(job_id, {}).get("status") == "cancelled"
 
     scan_jobs[job_id]["status"] = "processing"
+    chunks: list = []
 
     try:
         with spd_scan_duration_seconds.labels(stage="parsing").time():
@@ -271,6 +276,8 @@ def _process_scan_job(
         scan_jobs[job_id]["error"] = str(exc)
     finally:
         cleanup_expired_scan_jobs()
+        # Issue #3479: free NumPy/PyTorch heap memory after large batch scans.
+        release_large_batch_memory(len(chunks))
         if isinstance(file_input, (str, os.PathLike)) and os.path.exists(file_input):
             try:
                 os.unlink(file_input)

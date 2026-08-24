@@ -19,6 +19,11 @@ Recent Additions (Issue #1580):
 - Added verify_model_cache_integrity() to detect zero-byte (corrupted)
   cached SentenceTransformer weight files and automatically re-download
   the model when the cached copy is unusable.
+
+Recent Additions (Issue #3479):
+- Added release_large_batch_memory() so callers (_process_scan_job and the
+  batch CLI commands) can explicitly run gc.collect() and, when CUDA is
+  available, torch.cuda.empty_cache() after scans larger than 20 documents.
 """
 
 from __future__ import annotations
@@ -35,8 +40,8 @@ import torch
 import torch.quantization
 from sentence_transformers import SentenceTransformer
 
-from src.exceptions import ModelInitializationError
 from src.core.text_chunking import ChunkString
+from src.exceptions import ModelInitializationError
 
 logger = logging.getLogger(__name__)
 
@@ -382,6 +387,36 @@ def _repair_corrupted_model_cache(cache_root: Path, model_name: str) -> None:
             model_cache_dir,
         )
         shutil.rmtree(model_cache_dir, ignore_errors=True)
+
+
+# Issue #3479: batches larger than this many documents trigger explicit
+# garbage collection (and CUDA cache release when applicable).
+LARGE_BATCH_GC_THRESHOLD = 20
+
+
+def release_large_batch_memory(batch_size: int) -> None:
+    """Explicitly free heap memory after large batch scans (Issue #3479).
+
+    Processing 100+ documents in a single batch leaves NumPy arrays and
+    PyTorch tensors on the heap. ``_process_scan_job`` and the batch CLI
+    commands call this once a scan finishes so those intermediates are
+    released promptly instead of lingering until the next allocation cycle.
+
+    Args:
+        batch_size: Number of documents/chunks processed in the finished
+            batch. Cleanup only runs when this exceeds
+            ``LARGE_BATCH_GC_THRESHOLD``.
+    """
+    if batch_size <= LARGE_BATCH_GC_THRESHOLD:
+        return
+
+    logger.debug(
+        "[embedding_model] Releasing memory after large batch of %d items",
+        batch_size,
+    )
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 def embed_chunks(
