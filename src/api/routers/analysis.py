@@ -39,7 +39,6 @@ from src.core.embedding_model import embed_chunks, get_document_embedding
 from src.core.metrics import spd_scan_duration_seconds
 from src.core.similarity import (
     PLAGIARISM_THRESHOLD,
-    chunk_max_similarity,
     find_most_similar_chunks,
 )
 from src.core.text_chunking import chunk_document
@@ -79,6 +78,9 @@ def _process_scan_job(
     try:
         with spd_scan_duration_seconds.labels(stage="parsing").time():
             extracted_text = extract_text(file_input, filename)
+        scan_jobs[job_id]["progress_percent"] = 20
+        scan_jobs[job_id]["stage"] = "text extraction"
+
         if not extracted_text.strip():
             if not _is_cancelled():
                 scan_jobs[job_id]["status"] = "failed"
@@ -97,11 +99,15 @@ def _process_scan_job(
             chunks = chunk_document(extracted_text)
             if not chunks:
                 chunks = [extracted_text[:1000]]
+        scan_jobs[job_id]["progress_percent"] = 40
+        scan_jobs[job_id]["stage"] = "chunking"
 
         with spd_scan_duration_seconds.labels(stage="embedding").time():
             uploaded_embeddings = embed_chunks(chunks)
             doc_embedding = get_document_embedding(uploaded_embeddings)
             corpus_docs = get_corpus_documents_with_embeddings()
+        scan_jobs[job_id]["progress_percent"] = 70
+        scan_jobs[job_id]["stage"] = "embedding"
 
         matched_documents = []
         max_overall_score = 0.0
@@ -178,7 +184,12 @@ def _process_scan_job(
             total_flagged = int(np.sum(uploaded_chunks_flagged))
             plagiarism_density = int(round((total_flagged / len(chunks)) * 100)) if len(chunks) > 0 else 0
 
+        scan_jobs[job_id]["progress_percent"] = 90
+        scan_jobs[job_id]["stage"] = "comparison"
+
         scan_jobs[job_id]["status"] = "completed"
+        scan_jobs[job_id]["progress_percent"] = 100
+        scan_jobs[job_id]["stage"] = "done"
         scan_jobs[job_id]["completed_at"] = datetime.now(timezone.utc).isoformat()
         scan_jobs[job_id]["result"] = {
             "filename": filename,
@@ -506,6 +517,8 @@ async def scan_document_async(
     scan_jobs[job_id] = {
         "job_id": job_id,
         "status": "queued",
+        "progress_percent": 0,
+        "stage": "",
         "filename": filename,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "completed_at": None,
@@ -553,6 +566,8 @@ def get_async_scan_status(
     return {
         "job_id": job["job_id"],
         "status": job["status"],
+        "progress_percent": job.get("progress_percent", 0),
+        "stage": job.get("stage", ""),
         "filename": job["filename"],
         "created_at": job["created_at"],
         "completed_at": job.get("completed_at"),

@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from typing import List, Optional, Any, Dict, TypeVar, Generic
-from datetime import datetime
+from typing import Any, Dict, Generic, List, Optional, TypeVar
 
-from pydantic import BaseModel, Field, ConfigDict
-
+from pydantic import BaseModel, ConfigDict, Field
 
 # ============================================================================
 # Generic Type Variable for Pagination
@@ -468,6 +466,12 @@ class AsyncScanStatusResponse(BaseModel):
     job_id: str = Field(..., description="Unique background scan job identifier")
     status: str = Field(
         ..., description="Current job status: queued, processing, completed, failed, or cancelled"
+    )
+    progress_percent: int = Field(
+        default=0, ge=0, le=100, description="Scan progress percentage (0-100)"
+    )
+    stage: str = Field(
+        default="", description="Current processing stage description"
     )
     filename: str = Field(
         ..., description="Filename of uploaded document being scanned"
