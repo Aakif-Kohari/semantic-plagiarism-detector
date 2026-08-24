@@ -250,3 +250,19 @@ class TestEpubAndCsvValidation:
         assert result.error_code == "MAGIC_BYTE_MISMATCH"
 
 
+def test_max_file_size_from_env(monkeypatch):
+    """Verify that MAX_FILE_SIZE_BYTES respects MAX_UPLOAD_SIZE_MB env variable on reload."""
+    import importlib
+    import src.utils.file_validator as fv
+
+    monkeypatch.setenv("MAX_UPLOAD_SIZE_MB", "10")
+    importlib.reload(fv)
+    try:
+        assert fv.MAX_FILE_SIZE_BYTES == 10 * 1024 * 1024
+    finally:
+        # Reset back to default
+        monkeypatch.delenv("MAX_UPLOAD_SIZE_MB", raising=False)
+        importlib.reload(fv)
+
+
+
