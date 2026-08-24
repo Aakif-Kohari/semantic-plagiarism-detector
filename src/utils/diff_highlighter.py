@@ -23,19 +23,38 @@ MARK_OPEN_TAG = (
     '<mark style="background-color: #fef08a; ' 'padding: 2px 4px; border-radius: 3px;">'
 )
 
-_WORD_RE = re.compile(r"\b\w+\b")
+#: CJK ranges called out in #3213: Han ideographs plus Hiragana/Katakana.
+_CJK_RANGE = r"\u4e00-\u9fff\u3040-\u30ff"
+
+#: Token scanner used everywhere tokens must line up with character offsets.
+#:
+#: Chinese and Japanese write without spaces, so the previous ``\b\w+\b``
+#: scanner swallowed an entire sentence into one token and partial overlaps
+#: could never be seen. Here every CJK character stands alone — the n-gram
+#: window in ``highlight_overlap`` thereby becomes a *character* n-gram for
+#: such text — while non-CJK runs keep the original word grouping. The word
+#: branch excludes the CJK ranges explicitly rather than relying on ``\w``
+#: (which matches CJK and would otherwise absorb them); alternation order
+#: makes the single-character branch win first regardless.
+_TOKEN_SPAN_RE = re.compile(rf"[{_CJK_RANGE}]|[^\W{_CJK_RANGE}]+")
 
 
 def _tokenize(text: str) -> list[str]:
-    """Split *text* into lowercased word tokens.
+    """Split *text* into lowercased tokens.
+
+    Non-CJK runs are grouped into words exactly as before. Each CJK
+    character (Han, Hiragana, Katakana) becomes its own token because
+    those scripts separate words with neither spaces nor punctuation,
+    which turns the n-gram window in :func:`highlight_overlap` into a
+    character n-gram match (#3213).
 
     Args:
         text: Raw document text.
 
     Returns:
-        The word tokens, in order.
+        The tokens, in order.
     """
-    return _WORD_RE.findall(text.lower())
+    return [match.group().lower() for match in _TOKEN_SPAN_RE.finditer(text)]
 
 
 #: Vowels used by the fallback stemmer's consonant-doubling cleanup.
@@ -157,7 +176,9 @@ def _apply_marks(
     if not word_ranges:
         return html.escape(text)
 
-    word_positions = [(m.start(), m.end()) for m in _WORD_RE.finditer(text)]
+    # Must use the same scanner as _tokenize so word indices line up with
+    # the token indices the ranges refer to.
+    word_positions = [(m.start(), m.end()) for m in _TOKEN_SPAN_RE.finditer(text)]
     if not word_positions:
         return html.escape(text)
 
@@ -216,21 +237,10 @@ def highlight_overlap(
         text_a: The first document's text chunk.
         text_b: The second document's text chunk.
         min_match_length: Minimum number of consecutive words required to
-                         constitute a "match". Defaults to
-                         ``DEFAULT_DIFF_MIN_MATCH_LENGTH`` (4, overridable via
-                         the env var of the same name). Values below 1 are
-                         treated as 1.
-        use_stemming: When True, word tokens are reduced to their stems
-                      (Porter stemmer, with a built-in fallback) before
-                      matching, so tense and plural variations such as
-                      "analyzed" vs "analyzing" still highlight. Token
-                      positions are unchanged, so ``_apply_marks`` keeps
-                      wrapping each document's original characters.
-                      Defaults to False (exact lowercase matching).
-        css_class: Optional CSS class name to apply to ``<mark>`` tags.
-                   When provided, renders ``<mark class="...">`` instead of
-                   inline styles, enabling external CSS themes or Dark Mode
-                   overrides. Defaults to None.
+                         constitute a "match". Defaults to 4 to avoid
+                         highlighting common phrases like "in the" or "and the".
+                         Values below 1 are treated as 1. For CJK text every
+                         character is a token, so this counts characters.
 
     Returns:
         A tuple of two HTML strings (highlighted_a, highlighted_b) with
@@ -253,25 +263,18 @@ def highlight_overlap(
         >>> "quick brown" in a and "quick brown" in b
         True
 
-        Tense changes evade exact matching but match once stemming is on:
+        Chinese has no spaces, so it used to tokenize into one opaque
+        sentence-sized token per document and nothing ever matched. Each
+        character is now its own token, and the shared opening run is found:
 
         >>> a, b = highlight_overlap(
-        ...     "students analyzed the data",
-        ...     "students analyzing the data",
-        ...     3,
-        ... )
-        >>> "<mark" in a or "<mark" in b
-        False
-
-        >>> a, b = highlight_overlap(
-        ...     "students analyzed the data",
-        ...     "students analyzing the data",
-        ...     3,
-        ...     use_stemming=True,
+        ...     "今天天气很好我们一起去公园",
+        ...     "今天天气很好他们待在家里",
+        ...     min_match_length=5,
         ... )
         >>> "<mark" in a and "<mark" in b
         True
-        >>> "analyzing" in b
+        >>> "今天天气很好" in a and "今天天气很好" in b
         True
     """
     if not text_a or not text_b:
