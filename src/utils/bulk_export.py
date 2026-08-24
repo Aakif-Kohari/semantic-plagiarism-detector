@@ -35,6 +35,7 @@ import numpy as np
 import pandas as pd
 
 from src.core.similarity import find_most_similar_chunks
+from src.utils.filename import sanitize_filename
 from src.utils.pdf_report import generate_plagiarism_report
 
 logger = logging.getLogger(__name__)
@@ -546,13 +547,6 @@ def stream_incidents_csv_chunks(
             break
 
 
-def _sanitise_filename(name: str) -> str:
-    """Strip non-alphanumeric characters (except ``-``, ``_``) for safe filenames."""
-    return (
-        "".join(c for c in name if c.isalnum() or c in ("-", "_")).rstrip() or "unnamed"
-    )
-
-
 def generate_bulk_reports_zip(
     flags: List[Dict],
     *,
@@ -643,9 +637,15 @@ def generate_bulk_reports_zip(
                         top_pairs=top_pairs,
                         report_title=f"Plagiarism Report: {doc_a} vs {doc_b}",
                     )
-                    safe_a = _sanitise_filename(doc_a)
-                    safe_b = _sanitise_filename(doc_b)
-                    pdf_filename = f"report_{safe_a}_{safe_b}.pdf"
+                    safe_a = os.path.splitext(
+                        sanitize_filename(doc_a, fallback="doc_a")
+                    )[0]
+                    safe_b = os.path.splitext(
+                        sanitize_filename(doc_b, fallback="doc_b")
+                    )[0]
+                    pdf_filename = sanitize_filename(
+                        f"report_{safe_a}_{safe_b}.pdf", fallback="report.pdf"
+                    )
                     zf.writestr(pdf_filename, pdf_buffer.getvalue())
                 except Exception as exc:
                     logger.error(
@@ -653,8 +653,8 @@ def generate_bulk_reports_zip(
                     )
 
             # Fallback JSON perâ€‘pair if PDF generation fails
-            safe_a = _sanitise_filename(doc_a)
-            safe_b = _sanitise_filename(doc_b)
+            safe_a = os.path.splitext(sanitize_filename(doc_a, fallback="doc_a"))[0]
+            safe_b = os.path.splitext(sanitize_filename(doc_b, fallback="doc_b"))[0]
             fallback = {
                 "generated_at": datetime.now().isoformat(),
                 "document_a": doc_a,
@@ -664,7 +664,10 @@ def generate_bulk_reports_zip(
                 "note": "PDF generation failed; JSON fallback provided.",
             }
             zf.writestr(
-                f"report_{safe_a}_{safe_b}.json", json.dumps(fallback, indent=2)
+                sanitize_filename(
+                    f"report_{safe_a}_{safe_b}.json", fallback="report.json"
+                ),
+                json.dumps(fallback, indent=2),
             )
 
             if progress_callback:
@@ -777,9 +780,12 @@ def create_batch_incident_zip_archive(
                 except Exception:
                     incident_id = f"unknown_{idx}"
 
-            safe_a = _sanitise_filename(doc_a)
-            safe_b = _sanitise_filename(doc_b)
-            pdf_filename = f"report_{incident_id}_{safe_a}_{safe_b}.pdf"
+            safe_id = sanitize_filename(str(incident_id), fallback=f"unknown_{idx}")
+            safe_a = os.path.splitext(sanitize_filename(doc_a, fallback="doc_a"))[0]
+            safe_b = os.path.splitext(sanitize_filename(doc_b, fallback="doc_b"))[0]
+            pdf_filename = sanitize_filename(
+                f"report_{safe_id}_{safe_a}_{safe_b}.pdf", fallback="report.pdf"
+            )
 
             try:
                 pdf_buffer = generate_plagiarism_report(
@@ -821,7 +827,6 @@ def create_documents_bulk_zip_archive(
         ZIP archive file bytes ready for download.
     """
     from src.db.corpus_db import _connect, get_all_documents, get_document_word_counts
-    from src.utils.filename import sanitize_filename
 
     buffer = io.BytesIO()
     raw_docs = get_all_documents(include_deleted=True)
