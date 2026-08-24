@@ -38,11 +38,15 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install ruff pylint mypy pip-audit pytest pytest-cov
+          pip install ruff pylint mypy pip-audit pytest pytest-cov yamllint
           # Pre-install numpy<2.5.0 so pip's resolver doesn't try to pull
           # numpy 2.5.x (which requires Python >=3.12) on Python 3.9-3.11.
           pip install "numpy>=1.26.0,<2.5.0"
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Run YAML Linter (yamllint)
+        run: |
+          yamllint .github/ docker-compose.yml .pre-commit-config.yaml
 
       - name: Run Ruff Linter
         run: |
