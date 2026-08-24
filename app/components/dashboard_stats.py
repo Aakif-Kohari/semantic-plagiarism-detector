@@ -84,6 +84,22 @@ def _load_document_count_cached() -> int:
         return 0
 
 
+@st.cache_data(ttl=60)
+def _load_storage_footprint_cached() -> Dict[str, Any]:
+    """Fetch vector embedding storage footprint, cached for performance."""
+    try:
+        from src.db.corpus_db import get_embedding_storage_footprint
+        return get_embedding_storage_footprint()
+    except Exception as e:
+        logger.error("Failed to load storage footprint: %s", e)
+        return {
+            "embedding_bytes": 0,
+            "database_bytes": 0,
+            "embedding_percentage": 0.0,
+            "chunk_count": 0
+        }
+
+
 # ── HELPER FUNCTIONS ──────────────────────────────────────────────────────────
 
 
@@ -682,10 +698,48 @@ def render_dashboard_stats() -> None:
         )
 
     st.markdown("---")
+    
+    # SECTION 1.5: Database Vector Footprint
+    footprint_stats = _load_storage_footprint_cached()
+    st.markdown("### Vector Storage Footprint")
+    col_f1, col_f2, col_f3, col_f4 = st.columns(4)
+    with col_f1:
+        _render_metric_card(
+            label="Database Size",
+            value=f"{footprint_stats['database_bytes'] / 1024 / 1024:.2f} MB",
+            icon="🗄️",
+            description="Total SQLite size",
+            accent_color_var="--accent-color",
+        )
+    with col_f2:
+        _render_metric_card(
+            label="Embedding Size",
+            value=f"{footprint_stats['embedding_bytes'] / 1024 / 1024:.2f} MB",
+            icon="🧠",
+            description="Total Vector storage",
+            accent_color_var="--warning",
+        )
+    with col_f3:
+        _render_metric_card(
+            label="Embedding %",
+            value=f"{footprint_stats['embedding_percentage']:.2f}%",
+            icon="📈",
+            description="Of total database size",
+            accent_color_var="--accent-color",
+        )
+    with col_f4:
+        _render_metric_card(
+            label="Total Chunks",
+            value=f"{footprint_stats['chunk_count']:,}",
+            icon="🧩",
+            description="Stored in database",
+            accent_color_var="--success",
+        )
+
+    st.markdown("---")
 
     # SECTION 2: Plotly Charts
     st.markdown("### Visual Analytics")
-
     # Row 1 of charts: Severity Distribution (Pie) & Review Status (Donut)
     chart_col1, chart_col2 = st.columns(2)
     with chart_col1:

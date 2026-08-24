@@ -1330,3 +1330,53 @@ def get_scan_history(
     except Exception as exc:
         logger.error("Failed to retrieve scan history: %s", exc)
         return []
+
+
+def get_embedding_storage_footprint() -> dict[str, int | float]:
+    """Calculate and return the vector embedding storage usage.
+
+    Queries the SQLite database to compute the total size in bytes of the 
+    'embedding' column across all rows in the 'chunks' table, and compares 
+    it against the actual file size of the database.
+
+    Returns:
+        A dictionary containing:
+        - 'embedding_bytes' (int): Total bytes used by embeddings in the chunks table.
+        - 'database_bytes' (int): Total size of the corpus database file on disk.
+        - 'embedding_percentage' (float): Percentage of DB size used by embeddings (0.0 to 100.0).
+        - 'chunk_count' (int): Total number of chunks analyzed.
+    """
+    path = get_corpus_db_path()
+    try:
+        database_bytes = path.stat().st_size if path.exists() else 0
+    except OSError:
+        database_bytes = 0
+
+    embedding_bytes = 0
+    chunk_count = 0
+
+    try:
+        with _connect() as conn:
+            # Calculate sum of lengths of BLOBs, handling empty table case safely
+            row = conn.execute(
+                "SELECT SUM(LENGTH(embedding)), COUNT(1) FROM chunks"
+            ).fetchone()
+            if row:
+                embedding_bytes = int(row[0]) if row[0] is not None else 0
+                chunk_count = int(row[1]) if row[1] is not None else 0
+    except Exception as e:
+        logger.error("Failed to calculate embedding footprint: %s", e)
+        # We can still proceed returning whatever info we successfully gathered
+
+    percentage = 0.0
+    if database_bytes > 0:
+        percentage = (embedding_bytes / database_bytes) * 100.0
+        # Guard against anomalies where sum of columns > file size (e.g., WAL file missing from calculation but containing data)
+        percentage = min(percentage, 100.0)
+
+    return {
+        "embedding_bytes": embedding_bytes,
+        "database_bytes": database_bytes,
+        "embedding_percentage": float(percentage),
+        "chunk_count": chunk_count,
+    }
