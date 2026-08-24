@@ -14,6 +14,7 @@ descriptive feedback and to enforce stricter business logic rules.
 """
 
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Union
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 # This should match or be slightly less than the server.maxUploadSize in config.toml
 # to ensure our application-level check catches it before the server does,
 # allowing us to return a friendly error message.
-MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024
+MAX_FILE_SIZE_BYTES = int(os.getenv("MAX_UPLOAD_SIZE_MB", "50")) * 1024 * 1024
 
 # Allowed file extensions for document processing.
 # These correspond to the formats supported by src/core/document_parser.py
@@ -128,6 +129,14 @@ class FileValidator:
         Returns:
             A ValidationResult object indicating success or failure.
         """
+        if "\x00" in filename:
+            return ValidationResult(
+                is_valid=False,
+                filename=filename,
+                error_message="Filename contains invalid characters.",
+                error_code="INVALID_FILENAME_CHARACTERS"
+            )
+
         logger.debug("Validating file: %s", filename)
         
         # 1. Check file size
