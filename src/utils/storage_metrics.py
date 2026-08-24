@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 logger = logging.getLogger(__name__)
 
@@ -170,3 +170,35 @@ def calculate_storage_usage(
         "sqlite_file_count": sqlite_file_count,
         "faiss_file_count": faiss_file_count,
     }
+
+
+def get_directory_size_bytes(directory: Union[str, Path]) -> int:
+    """Calculate total file size in bytes for a directory recursively.
+
+    Accurately sums files in nested subdirectories while ignoring broken symlinks
+    or unreadable files.
+
+    Args:
+        directory: Path or string path of directory to inspect.
+
+    Returns:
+        int: Total size of files in bytes.
+    """
+    dir_path = Path(directory)
+    if not dir_path.exists() or not dir_path.is_dir():
+        return 0
+
+    total_bytes = 0
+    try:
+        for file_path in dir_path.rglob("*"):
+            try:
+                if file_path.is_file():
+                    total_bytes += file_path.stat().st_size
+            except (OSError, ValueError) as e:
+                logger.debug("Could not read size of %s: %s", file_path, e)
+                continue
+    except OSError as e:
+        logger.debug("Error traversing directory %s: %s", dir_path, e)
+
+    return total_bytes
+
