@@ -66,6 +66,33 @@ jobs:
           name: pip-audit-report
           path: security-report.json
 
+  markdown-lint:
+    name: Markdown Formatting Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # Issue #3485: Catch inconsistent heading levels, trailing whitespace,
+      # and other Markdown formatting problems across docs/ and README.md.
+      #
+      # continue-on-error is intentional for now: a repo-wide scan found
+      # existing heading-level violations (H1 -> H3/H4 skips) in 13 files,
+      # including README.md itself. Flipping this to a hard failure should
+      # happen in a follow-up PR once those pre-existing violations are
+      # cleaned up — otherwise this step would block every unrelated PR
+      # from merging on day one.
+      - name: Run markdownlint-cli2
+        uses: DavidAnson/markdownlint-cli2-action@v18
+        continue-on-error: true
+        with:
+          globs: |
+            **/*.md
+            !node_modules
+            !.github/ISSUE_TEMPLATE/**
+
   test:
     name: Execute Test Suite
     runs-on: ubuntu-latest
