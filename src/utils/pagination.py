@@ -29,14 +29,25 @@ Recent Fixes (Issue #3045):
   contract that ``src/utils/warning_list.py`` calls, along with the
   ``_coerce_integer`` helper and the ``start_index`` / ``end_index`` fields.
 
+Recent Additions (Issue #3215):
+- Added ``CursorPaginationPage`` and ``paginate_by_cursor`` for cursor-based
+  pagination. Offset pagination (``paginate_items`` / ``PaginationPage``)
+  requires the database to scan and discard every skipped row, which gets
+  slow once a table (e.g. the incidents table) reaches tens of thousands of
+  rows. Cursor pagination instead resumes from an opaque token derived from
+  the last row of the previous page, so a query can use ``WHERE (sort_key)
+  > (cursor)`` instead of ``OFFSET n``.  
+
 Recent Additions (Issue #3218):
 - ``PaginationPage.was_clamped`` records whether ``paginate_items`` had to
   pull an out-of-range page number back into range, so API callers can tell
   a genuine last-page response from a clamped one.
 """
 
+import base64
+import json
 from dataclasses import dataclass, field
-from typing import Generic, List, Optional, Sequence, Tuple, TypeVar
+from typing import Any, Callable, Generic, List, Optional, Sequence, Tuple, TypeVar
 
 T = TypeVar("T")
 
@@ -442,4 +453,149 @@ def paginate_items(
         start_index=start_index,
         end_index=end_index,
         was_clamped=was_clamped,
+    )
+
+def encode_cursor(value: Any) -> str:
+    """Encode a sort-key value into an opaque cursor string.
+
+    The cursor is a base64url-encoded JSON representation of *value*. It is
+    deliberately opaque to callers: cursors should be treated as tokens to
+    pass back verbatim, not decoded or constructed by hand.
+
+    Args:
+        value: The sort-key value to encode. Typically a scalar
+            (``str``/``int``/``float``) or a small tuple/list of scalars for
+            composite sort keys (e.g. ``(date_flagged, incident_id)``).
+
+    Returns:
+        An opaque, URL-safe cursor string.
+
+    Examples:
+        >>> cursor = encode_cursor(("2026-08-01T00:00:00Z", 42))
+        >>> decode_cursor(cursor)
+        ['2026-08-01T00:00:00Z', 42]
+    """
+    payload = json.dumps(value, separators=(",", ":"))
+    return base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii")
+
+
+def decode_cursor(cursor: str) -> Any:
+    """Decode a cursor string produced by :func:`encode_cursor`.
+
+    Args:
+        cursor: The opaque cursor string.
+
+    Returns:
+        The original sort-key value (or ``None`` if *cursor* is falsy).
+
+    Raises:
+        ValueError: If *cursor* is not a valid cursor produced by
+            :func:`encode_cursor` (malformed base64 or JSON).
+    """
+    if not cursor:
+        return None
+    try:
+        payload = base64.urlsafe_b64decode(cursor.encode("ascii")).decode("utf-8")
+        return json.loads(payload)
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Invalid pagination cursor: {cursor!r}") from exc
+
+
+@dataclass(frozen=True)
+class CursorPaginationPage(Generic[T]):
+    """Represents a single page of cursor-paginated results.
+
+    Unlike :class:`PaginationPage`, this does not carry a total item/page
+    count — computing those for a large table requires the same expensive
+    ``COUNT(*)``/``OFFSET`` scan cursor pagination exists to avoid. Callers
+    that need a "page 3 of 40"-style UI should use :class:`PaginationPage`
+    instead; cursor pagination is for "load more" / infinite-scroll style
+    interfaces over large or frequently-changing tables.
+
+    Attributes:
+        items: List of items on the current page, in the query's sort order.
+        next_cursor: Opaque token to fetch the next page, or ``None`` if this
+            is the last page.
+        prev_cursor: Opaque token to fetch the previous page, or ``None`` if
+            this is the first page.
+        has_more: ``True`` if at least one more item exists after ``items``.
+    """
+
+    items: List[T]
+    next_cursor: Optional[str]
+    prev_cursor: Optional[str]
+    has_more: bool
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary representation for JSON serialization.
+
+        Returns:
+            Dictionary with all cursor-pagination fields.
+        """
+        return {
+            "items": self.items,
+            "next_cursor": self.next_cursor,
+            "prev_cursor": self.prev_cursor,
+            "has_more": self.has_more,
+        }
+
+
+def paginate_by_cursor(
+    items: Sequence[T],
+    *,
+    cursor_key: Callable[[T], Any],
+    limit: int = DEFAULT_PAGE_SIZE,
+    prev_cursor: Optional[str] = None,
+) -> CursorPaginationPage[T]:
+    """Build a :class:`CursorPaginationPage` from an over-fetched query result.
+
+    This is the cursor-pagination counterpart to :func:`paginate_items`. It
+    does not itself query a database — callers are expected to fetch
+    ``limit + 1`` rows ordered by their cursor column(s) (optionally with a
+    ``WHERE (sort_key) > (decode_cursor(cursor))`` clause instead of
+    ``OFFSET``), and pass that raw result in as *items*. Fetching one extra
+    row lets this function determine ``has_more`` without a separate
+    ``COUNT(*)`` query.
+
+    Args:
+        items: The over-fetched sequence, containing up to ``limit + 1``
+            items in cursor sort order. Not mutated.
+        cursor_key: Callable that extracts the sort-key value from an item,
+            used to build ``next_cursor`` from the last item kept on the
+            page (e.g. ``lambda incident: (incident.date_flagged,
+            incident.incident_id)`` for a composite sort key).
+        limit: Maximum number of items to return on this page.
+        prev_cursor: The cursor that was used to fetch *this* page, echoed
+            back unchanged so the caller can request the previous page.
+            ``None`` on the first page.
+
+    Returns:
+        A :class:`CursorPaginationPage` holding at most ``limit`` items.
+
+    Examples:
+        >>> rows = [{"id": 1}, {"id": 2}, {"id": 3}]  # limit=2, one extra row
+        >>> page = paginate_by_cursor(rows, cursor_key=lambda r: r["id"], limit=2)
+        >>> page.items
+        [{'id': 1}, {'id': 2}]
+        >>> page.has_more
+        True
+        >>> decode_cursor(page.next_cursor)
+        2
+    """
+    safe_limit = max(1, _coerce_integer(limit, DEFAULT_PAGE_SIZE))
+
+    has_more = len(items) > safe_limit
+    page_items = list(items[:safe_limit])
+
+    next_cursor = (
+        encode_cursor(cursor_key(page_items[-1]))
+        if has_more and page_items
+        else None
+    )
+
+    return CursorPaginationPage(
+        items=page_items,
+        next_cursor=next_cursor,
+        prev_cursor=prev_cursor,
+        has_more=has_more,
     )

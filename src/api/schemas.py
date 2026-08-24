@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from typing import List, Optional, Any, Dict, TypeVar, Generic
-from datetime import datetime
+from typing import Any, Dict, Generic, List, Optional, TypeVar
 
-from pydantic import BaseModel, Field, ConfigDict
-
+from pydantic import BaseModel, ConfigDict, Field
 
 # ============================================================================
 # Generic Type Variable for Pagination
@@ -109,6 +107,9 @@ class HealthzResponse(BaseModel):
     )
     db_size_mb: float = Field(
         default=0.0, description="Corpus database file size in megabytes"
+    )
+    warning: Optional[str] = Field(
+        default=None, description="Descriptive warning when service is degraded"
     )
 
 
@@ -451,12 +452,26 @@ class AsyncScanJobResponse(BaseModel):
     message: str = Field(..., description="Status description message")
 
 
+class AsyncScanJobCancelResponse(BaseModel):
+    """Response schema for cancelling an asynchronous document scan job."""
+
+    job_id: str = Field(..., description="Unique background scan job identifier")
+    status: str = Field(..., description="Updated job status (cancelled)")
+    message: str = Field(..., description="Cancellation confirmation message")
+
+
 class AsyncScanStatusResponse(BaseModel):
     """Response schema for checking the status of an asynchronous scan job."""
 
     job_id: str = Field(..., description="Unique background scan job identifier")
     status: str = Field(
-        ..., description="Current job status: queued, processing, completed, or failed"
+        ..., description="Current job status: queued, processing, completed, failed, or cancelled"
+    )
+    progress_percent: int = Field(
+        default=0, ge=0, le=100, description="Scan progress percentage (0-100)"
+    )
+    stage: str = Field(
+        default="", description="Current processing stage description"
     )
     filename: str = Field(
         ..., description="Filename of uploaded document being scanned"
@@ -673,6 +688,39 @@ class DocumentHealthListResponse(BaseModel):
     has_previous: bool = Field(default=False)
 
 
+# ============================================================================
+# Similarity Heatmap & Clustering Schemas
+# ============================================================================
+
+
+class HeatmapSnapshotResponse(BaseModel):
+    """Response schema for a similarity heatmap snapshot."""
+
+    snapshot_id: int = Field(..., description="Snapshot identifier")
+    labels: Optional[List[str]] = Field(default=None, description="Document labels")
+    matrix: Optional[List[List[float]]] = Field(default=None, description="NxN similarity matrix")
+    document_count: int = Field(..., description="Number of documents")
+    min_similarity: float = Field(..., description="Minimum pairwise similarity")
+    max_similarity: float = Field(..., description="Maximum pairwise similarity")
+    mean_similarity: float = Field(..., description="Average pairwise similarity")
+    computed_at: str = Field(..., description="ISO 8601 computation timestamp")
+    computed_by: Optional[str] = Field(default=None, description="User who triggered computation")
+    notes: Optional[str] = Field(default=None, description="Optional notes")
+    hotspots_found: Optional[int] = Field(default=None, description="Number of hotspots detected")
+
+
+class HeatmapSnapshotListResponse(BaseModel):
+    """Paginated list of heatmap snapshots."""
+
+    snapshots: List[HeatmapSnapshotResponse] = Field(default_factory=list)
+    page: int = Field(..., ge=1)
+    per_page: int = Field(..., ge=1)
+    total_items: int = Field(..., ge=0)
+    total_pages: int = Field(..., ge=0)
+    has_next: bool = Field(default=False)
+    has_previous: bool = Field(default=False)
+
+
 class HealthScoreSummaryResponse(BaseModel):
     """Aggregate health score statistics."""
 
@@ -709,6 +757,57 @@ class HealthDimensionAvgResponse(BaseModel):
     """Average scores per health dimension."""
 
     dimensions: Dict[str, float] = Field(default_factory=dict, description="Dimension name → avg score")
+
+
+class ClusterInfo(BaseModel):
+    """Single cluster in a clustering result."""
+
+    cluster_id: int = Field(..., description="Cluster identifier")
+    documents: List[str] = Field(default_factory=list, description="Filenames in cluster")
+    centroid_score: float = Field(..., description="Average intra-cluster similarity")
+    size: int = Field(..., description="Number of documents")
+
+
+class ClusteringResultResponse(BaseModel):
+    """Response schema for a clustering result."""
+
+    result_id: int = Field(..., description="Result identifier")
+    num_clusters: int = Field(..., description="Total clusters formed")
+    silhouette_score: float = Field(..., description="Silhouette quality score (-1 to 1)")
+    linkage_method: str = Field(..., description="Linkage method used")
+    distance_threshold: float = Field(..., description="Distance cutoff")
+    clusters: List[ClusterInfo] = Field(default_factory=list, description="Cluster details")
+    document_assignments: Dict[str, int] = Field(default_factory=dict, description="Doc → cluster mapping")
+    computed_at: str = Field(..., description="ISO 8601 timestamp")
+
+
+class HotspotResponse(BaseModel):
+    """Response schema for a similarity hotspot."""
+
+    hotspot_id: int = Field(..., description="Hotspot identifier")
+    snapshot_id: Optional[int] = Field(default=None, description="Associated snapshot")
+    doc_a: str = Field(..., description="First document")
+    doc_b: str = Field(..., description="Second document")
+    similarity: float = Field(..., description="Similarity score")
+    severity: str = Field(default="warning", description="Severity level")
+    created_at: str = Field(..., description="Creation timestamp")
+    is_resolved: int = Field(default=0, description="Resolution status")
+
+
+class HotspotListResponse(BaseModel):
+    """Response for hotspot listing."""
+
+    hotspots: List[HotspotResponse] = Field(default_factory=list)
+    total: int = Field(default=0)
+
+
+class HotspotSummaryResponse(BaseModel):
+    """Summary statistics for hotspots."""
+
+    total_hotspots: int = Field(default=0)
+    unresolved: int = Field(default=0)
+    critical_unresolved: int = Field(default=0)
+    avg_similarity: float = Field(default=0.0)
 
 
 # ============================================================================
@@ -858,6 +957,14 @@ __all__ = [
     'HealthGateConfigResponse',
     'HealthGateCheckResponse',
     'HealthDimensionAvgResponse',
+    # Similarity Heatmap & Clustering
+    'HeatmapSnapshotResponse',
+    'HeatmapSnapshotListResponse',
+    'ClusterInfo',
+    'ClusteringResultResponse',
+    'HotspotResponse',
+    'HotspotListResponse',
+    'HotspotSummaryResponse',
     
     # Errors
     'ErrorResponse',
@@ -865,5 +972,6 @@ __all__ = [
     
     # Async Jobs
     'AsyncScanJobResponse',
+    'AsyncScanJobCancelResponse',
     'AsyncScanStatusResponse',
 ]
