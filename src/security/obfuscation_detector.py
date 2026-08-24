@@ -29,7 +29,7 @@ ZERO_WIDTH_PATTERN = re.compile(
 
 # Cyrillic homoglyphs that visually resemble Latin characters
 # Mapping Cyrillic char -> Latin equivalent it is trying to mimic
-CYRILLIC_HOMOGLYPHS: Dict[str, str] = {
+CYRILLIC_HOMOGLYPHS: dict[str, str] = {
     "а": "a",
     "е": "e",
     "о": "o",
@@ -64,11 +64,11 @@ class ObfuscationReport:
     zero_width_count: int = 0
     homoglyph_count: int = 0
     control_char_count: int = 0
-    flagged_indices: List[int] = field(default_factory=list)
+    flagged_indices: list[int] = field(default_factory=list)
     obfuscation_score: float = 0.0
     is_suspicious: bool = False
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize the report to a dictionary for JSON/DB storage."""
         return {
             "total_characters": self.total_characters,
@@ -81,7 +81,7 @@ class ObfuscationReport:
         }
 
 
-def detect_zero_width_chars(text: str) -> Tuple[int, List[int]]:
+def detect_zero_width_chars(text: str) -> tuple[int, list[int]]:
     """Identify zero-width and invisible characters in the text.
 
     Args:
@@ -100,7 +100,7 @@ def detect_zero_width_chars(text: str) -> Tuple[int, List[int]]:
     return count, indices
 
 
-def detect_homoglyphs(text: str) -> Tuple[int, List[int]]:
+def detect_homoglyphs(text: str) -> tuple[int, list[int]]:
     """Identify Cyrillic homoglyphs masquerading as Latin characters.
 
     Args:
@@ -118,7 +118,7 @@ def detect_homoglyphs(text: str) -> Tuple[int, List[int]]:
     return count, indices
 
 
-def detect_control_chars(text: str) -> Tuple[int, List[int]]:
+def detect_control_chars(text: str) -> tuple[int, list[int]]:
     """Identify invisible Unicode control characters (categories Cc and Cf).
 
     Args:

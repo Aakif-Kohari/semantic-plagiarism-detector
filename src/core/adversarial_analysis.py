@@ -34,7 +34,7 @@ def analyze_document_for_obfuscation(
     user_id: Optional[str] = None,
     threshold: float = 0.15,
     strict_mode: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Analyze a document for adversarial obfuscation and log the results.
 
     This function acts as the primary entry point for the main pipeline.

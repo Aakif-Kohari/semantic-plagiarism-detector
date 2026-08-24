@@ -221,7 +221,7 @@ def generate_plagiarism_report(
     doc_b: str,
     overall_similarity: float,
     threshold: float,
-    top_pairs: List[Tuple[str, str, float]],
+    top_pairs: list[tuple[str, str, float]],
     doc_a_text: Optional[str] = None,
     doc_b_text: Optional[str] = None,
     report_title: str = "Plagiarism Detection Report",
@@ -712,8 +712,8 @@ def generate_plagiarism_report(
 
 def highlight_pdf_matches(
     pdf_source: str | bytes,
-    matching_chunks: List[str],
-    highlight_color: Tuple[float, float, float] = (1.0, 0.85, 0.0),
+    matching_chunks: list[str],
+    highlight_color: tuple[float, float, float] = (1.0, 0.85, 0.0),
 ) -> bytes:
     """Opens an original PDF, searches for matching plagiarized text chunks,
     applies yellow highlight annotations on exact coordinate boxes,

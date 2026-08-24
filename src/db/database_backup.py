@@ -637,10 +637,10 @@ def restore_database_backup(
 
 
 def cleanup_old_backups(
-    backup_dir: Union[str, Path] = DEFAULT_BACKUP_DIRECTORY,
+    backup_dir: str | Path = DEFAULT_BACKUP_DIRECTORY,
     max_backups: int = 10,
     max_age_days: int = 30,
-) -> Dict[str, int]:
+) -> dict[str, int]:
     """Remove stale ``.db`` backups using count and age limits."""
     backup_path = Path(backup_dir)
 

@@ -97,9 +97,9 @@ class PatchwritingLogsDB:
     during mosaic plagiarism detection scans.
     """
     def __init__(self):
-        self.logs_store: List[Dict[str, Any]] = []
+        self.logs_store: list[dict[str, Any]] = []
 
-    def log_structural_clone(self, submission_id: str, source_id: str, similarity_score: float, metrics: Dict[str, Any]) -> None:
+    def log_structural_clone(self, submission_id: str, source_id: str, similarity_score: float, metrics: dict[str, Any]) -> None:
         """Persists a structural clone detection record."""
         record = {
             "timestamp": datetime.utcnow().isoformat(),
@@ -110,10 +110,10 @@ class PatchwritingLogsDB:
         }
         self.logs_store.append(record)
 
-    def fetch_logs_by_submission(self, submission_id: str) -> List[Dict[str, Any]]:
+    def fetch_logs_by_submission(self, submission_id: str) -> list[dict[str, Any]]:
         """Retrieves all patchwriting logs for a given submission."""
         return [log for log in self.logs_store if log["submission_id"] == submission_id]
 
-    def fetch_all_logs(self) -> List[Dict[str, Any]]:
+    def fetch_all_logs(self) -> list[dict[str, Any]]:
         """Retrieves all recorded patchwriting logs."""
         return self.logs_store

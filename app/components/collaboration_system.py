@@ -23,8 +23,8 @@ class DocumentAnnotation:
     resolved: bool = False
     resolved_at: Optional[datetime] = None
     resolved_by: Optional[str] = None
-    replies: List[Dict] = None
-    metadata: Dict = None
+    replies: list[dict] = None
+    metadata: dict = None
     
     def __post_init__(self):
         if self.replies is None:
@@ -32,7 +32,7 @@ class DocumentAnnotation:
         if self.metadata is None:
             self.metadata = {}
     
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             **asdict(self),
             'created_at': self.created_at.isoformat(),
@@ -63,11 +63,11 @@ class ReviewWorkflow:
     created_by: str
     created_at: datetime
     status: str  # 'pending', 'in_review', 'approved', 'rejected', 'needs_changes'
-    reviewers: List[str]
-    decisions: Dict[str, Dict]  # reviewer_id -> {decision, timestamp, comments}
+    reviewers: list[str]
+    decisions: dict[str, dict]  # reviewer_id -> {decision, timestamp, comments}
     current_reviewer_index: int = 0
-    timeline: List[Dict] = None
-    metadata: Dict = None
+    timeline: list[dict] = None
+    metadata: dict = None
     
     def __post_init__(self):
         if self.timeline is None:
@@ -75,7 +75,7 @@ class ReviewWorkflow:
         if self.metadata is None:
             self.metadata = {}
     
-    def add_timeline_event(self, event_type: str, user_id: str, details: Dict):
+    def add_timeline_event(self, event_type: str, user_id: str, details: dict):
         event = {
             'timestamp': datetime.now().isoformat(),
             'event_type': event_type,
@@ -117,7 +117,7 @@ class ReviewWorkflow:
         
         self.add_timeline_event('status_updated', 'system', {'status': self.status})
     
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             **asdict(self),
             'created_at': self.created_at.isoformat(),
@@ -145,7 +145,7 @@ class UserSession:
         self.last_activity = datetime.now()
         self.is_active = True
     
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             'user_id': self.user_id,
             'username': self.username,
@@ -161,7 +161,7 @@ class AnnotationManager:
     """Manages document annotations and comments"""
     
     def __init__(self):
-        self.annotations: Dict[str, List[DocumentAnnotation]] = defaultdict(list)
+        self.annotations: dict[str, list[DocumentAnnotation]] = defaultdict(list)
         self.annotation_count = 0
     
     def add_annotation(self, doc_name: str, user_id: str, content: str, 
@@ -180,7 +180,7 @@ class AnnotationManager:
         self.annotation_count += 1
         return annotation
     
-    def get_annotations(self, doc_name: str) -> List[DocumentAnnotation]:
+    def get_annotations(self, doc_name: str) -> list[DocumentAnnotation]:
         """Get all annotations for a document"""
         return self.annotations.get(doc_name, [])
     
@@ -217,7 +217,7 @@ class AnnotationManager:
             return True
         return False
     
-    def get_annotation_summary(self, doc_name: str) -> Dict:
+    def get_annotation_summary(self, doc_name: str) -> dict:
         """Get summary statistics for annotations on a document"""
         annotations = self.get_annotations(doc_name)
         return {
@@ -238,11 +238,11 @@ class WorkflowManager:
     """Manages review workflows for documents"""
     
     def __init__(self):
-        self.workflows: Dict[str, ReviewWorkflow] = {}
+        self.workflows: dict[str, ReviewWorkflow] = {}
         self.workflow_count = 0
     
     def create_workflow(self, doc_name: str, created_by: str, 
-                        reviewers: List[str]) -> ReviewWorkflow:
+                        reviewers: list[str]) -> ReviewWorkflow:
         """Create a new review workflow for a document"""
         workflow = ReviewWorkflow(
             id=str(uuid.uuid4()),
@@ -262,19 +262,19 @@ class WorkflowManager:
         """Get a workflow by ID"""
         return self.workflows.get(workflow_id)
     
-    def get_workflows_for_document(self, doc_name: str) -> List[ReviewWorkflow]:
+    def get_workflows_for_document(self, doc_name: str) -> list[ReviewWorkflow]:
         """Get all workflows for a document"""
         return [w for w in self.workflows.values() if w.doc_name == doc_name]
     
-    def get_workflows_for_user(self, user_id: str) -> List[ReviewWorkflow]:
+    def get_workflows_for_user(self, user_id: str) -> list[ReviewWorkflow]:
         """Get all workflows assigned to a user"""
         return [w for w in self.workflows.values() if user_id in w.reviewers]
     
-    def get_pending_workflows(self) -> List[ReviewWorkflow]:
+    def get_pending_workflows(self) -> list[ReviewWorkflow]:
         """Get all pending workflows"""
         return [w for w in self.workflows.values() if w.status == 'pending']
     
-    def get_workflow_status_summary(self) -> Dict:
+    def get_workflow_status_summary(self) -> dict:
         """Get summary statistics of all workflows"""
         return {
             'total': len(self.workflows),
@@ -289,8 +289,8 @@ class ActivityManager:
     """Manages user sessions and real-time activity tracking"""
     
     def __init__(self):
-        self.sessions: Dict[str, UserSession] = {}
-        self.activity_log: List[Dict] = []
+        self.sessions: dict[str, UserSession] = {}
+        self.activity_log: list[dict] = []
         self.active_timeout_seconds = 300  # 5 minutes
     
     def create_session(self, user_id: str, username: str) -> UserSession:
@@ -308,7 +308,7 @@ class ActivityManager:
             session = self.create_session(user_id, user_id)
             session.update_activity(doc_name, action)
     
-    def get_active_users(self, doc_name: str = None) -> List[UserSession]:
+    def get_active_users(self, doc_name: str = None) -> list[UserSession]:
         """Get active users, optionally filtered by document"""
         current_time = datetime.now()
         active_sessions = []
@@ -326,7 +326,7 @@ class ActivityManager:
         """Get a user's session"""
         return self.sessions.get(user_id)
     
-    def get_user_activity(self, user_id: str) -> Dict:
+    def get_user_activity(self, user_id: str) -> dict:
         """Get activity statistics for a user"""
         session = self.get_session(user_id)
         if not session:
@@ -339,7 +339,7 @@ class ActivityManager:
             'last_activity': session.last_activity.isoformat()
         }
     
-    def get_document_activity(self, doc_name: str) -> Dict:
+    def get_document_activity(self, doc_name: str) -> dict:
         """Get activity statistics for a document"""
         active_users = self.get_active_users(doc_name)
         return {
@@ -358,7 +358,7 @@ class ReviewSystem:
         self.annotation_manager = AnnotationManager()
         self.workflow_manager = WorkflowManager()
         self.activity_manager = ActivityManager()
-        self.decision_history: List[Dict] = []
+        self.decision_history: list[dict] = []
     
     def submit_review_decision(self, workflow_id: str, reviewer_id: str, 
                               decision: str, comments: str = ""):
@@ -376,7 +376,7 @@ class ReviewSystem:
             return True
         return False
     
-    def get_review_summary(self, doc_name: str) -> Dict:
+    def get_review_summary(self, doc_name: str) -> dict:
         """Get comprehensive review summary for a document"""
         workflows = self.workflow_manager.get_workflows_for_document(doc_name)
         annotations = self.annotation_manager.get_annotations(doc_name)
@@ -392,7 +392,7 @@ class ReviewSystem:
                                    if d.get('workflow_id') in [w.id for w in workflows]])
         }
     
-    def get_user_review_dashboard(self, user_id: str) -> Dict:
+    def get_user_review_dashboard(self, user_id: str) -> dict:
         """Get review dashboard for a specific user"""
         pending_workflows = [w for w in self.workflow_manager.get_workflows_for_user(user_id)
                             if w.status in ['pending', 'in_review']]

@@ -69,7 +69,7 @@ logger = logging.getLogger(__name__)
 # This allows theme configurations to use human-readable color names
 # (e.g., "red", "transparent", "darkslategray") instead of forcing
 # strict hex code validation.
-CSS_NAMED_COLORS: Dict[str, str] = {
+CSS_NAMED_COLORS: dict[str, str] = {
     "transparent": "#00000000",
     "black": "#000000",
     "white": "#ffffff",

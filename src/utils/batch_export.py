@@ -39,7 +39,7 @@ class BatchExporter:
 
     def export_json(
         self,
-        results: Dict[str, Any],
+        results: dict[str, Any],
         filename: str = "batch_results.json"
     ) -> str:
         """
@@ -64,7 +64,7 @@ class BatchExporter:
 
     def export_csv(
         self,
-        data: List[Dict[str, Any]],
+        data: list[dict[str, Any]],
         filename: str = "batch_results.csv"
     ) -> str:
         """
@@ -93,8 +93,8 @@ class BatchExporter:
 
     def export_plagiarism_report(
         self,
-        flagged_pairs: List[Dict[str, Any]],
-        summary: Dict[str, Any],
+        flagged_pairs: list[dict[str, Any]],
+        summary: dict[str, Any],
         filename: str = "plagiarism_report.json"
     ) -> str:
         """
@@ -130,7 +130,7 @@ class BatchExporter:
 
     def export_batch_summary(
         self,
-        jobs: List[Dict[str, Any]],
+        jobs: list[dict[str, Any]],
         filename: str = "batch_summary.csv"
     ) -> str:
         """
@@ -163,7 +163,7 @@ class BatchExporter:
 
     def generate_text_summary(
         self,
-        results: Dict[str, Any]
+        results: dict[str, Any]
     ) -> str:
         """
         Generate a human-readable text summary.
@@ -195,11 +195,11 @@ class BatchExporter:
 
     def export_all(
         self,
-        results: Dict[str, Any],
-        flagged_pairs: List[Dict[str, Any]],
-        jobs: List[Dict[str, Any]],
+        results: dict[str, Any],
+        flagged_pairs: list[dict[str, Any]],
+        jobs: list[dict[str, Any]],
         base_name: str = "batch_export"
-    ) -> Dict[str, str]:
+    ) -> dict[str, str]:
         """
         Export all results in multiple formats.
 

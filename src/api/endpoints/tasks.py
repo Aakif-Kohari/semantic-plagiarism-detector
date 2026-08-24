@@ -49,7 +49,7 @@ class FilePayload(BaseModel):
 
 class BatchScanRequest(BaseModel):
     """Request body for POST /api/v1/tasks/batch-scan."""
-    files: List[FilePayload] = Field(
+    files: list[FilePayload] = Field(
         ..., min_length=1, max_length=50,
         description="1–50 files to scan in this batch job."
     )
@@ -70,8 +70,8 @@ class JobStatusResponse(BaseModel):
     """Full job status payload returned by GET /api/v1/tasks/{job_id}."""
     id: str
     status: str
-    payload: Optional[Dict[str, Any]] = None
-    result: Optional[Dict[str, Any]] = None
+    payload: Optional[dict[str, Any]] = None
+    result: Optional[dict[str, Any]] = None
     error: Optional[str] = None
     retry_count: int = 0
     max_retries: int = 3
@@ -82,7 +82,7 @@ class JobStatusResponse(BaseModel):
 
 
 class JobListResponse(BaseModel):
-    jobs: List[JobStatusResponse]
+    jobs: list[JobStatusResponse]
     total: int
 
 
@@ -101,7 +101,7 @@ async def submit_batch_scan(request: BatchScanRequest) -> BatchScanResponse:
     in a background worker. Poll ``GET /api/v1/tasks/{job_id}`` to
     check progress.
     """
-    files_dict: Dict[str, str] = {}
+    files_dict: dict[str, str] = {}
     for f in request.files:
         files_dict[f.filename] = f.content_base64
 

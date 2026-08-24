@@ -38,9 +38,9 @@ class ConnectionManager:
 
     def __init__(self):
         # Maps room_id (document_id) to a set of active WebSocket connections
-        self.active_connections: Dict[str, Set[WebSocket]] = {}
+        self.active_connections: dict[str, set[WebSocket]] = {}
         # Maps websocket to user_id for tracking who is in the room
-        self.connection_users: Dict[WebSocket, str] = {}
+        self.connection_users: dict[WebSocket, str] = {}
 
     async def connect(self, websocket: WebSocket, room_id: str, user_id: str):
         """Accept a new WebSocket connection and add it to the room."""
@@ -80,7 +80,7 @@ class ConnectionManager:
         for conn in disconnected:
             self.disconnect(conn, room_id)
 
-    def get_active_users(self, room_id: str) -> List[str]:
+    def get_active_users(self, room_id: str) -> list[str]:
         """Get a list of active user IDs in a room."""
         if room_id not in self.active_connections:
             return []

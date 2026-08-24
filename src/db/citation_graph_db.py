@@ -80,7 +80,7 @@ def initialize_citation_db(db_path: Optional[Path] = None) -> None:
 
 
 def ingest_citations(
-    document_id: str, citations: List[Citation], db_path: Optional[Path] = None
+    document_id: str, citations: list[Citation], db_path: Optional[Path] = None
 ) -> int:
     """Ingest a list of citations for a specific document."""
     inserted = 0
@@ -117,7 +117,7 @@ def ingest_citations(
 
 def get_document_citation_keys(
     document_id: str, db_path: Optional[Path] = None
-) -> Set[str]:
+) -> set[str]:
     """Retrieve the set of citation node keys for a document."""
     try:
         with get_connection(db_path) as conn:

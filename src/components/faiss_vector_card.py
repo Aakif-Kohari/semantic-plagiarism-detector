@@ -25,7 +25,7 @@ class FAISSVectorDashboardComponent:
             st.metric("Index Search Metric", "L2 Euclidean")
 
     @staticmethod
-    def render_nearest_neighbor_results(results: List[Dict[str, Any]]) -> None:
+    def render_nearest_neighbor_results(results: list[dict[str, Any]]) -> None:
         """Renders top-k nearest neighbor match candidates."""
         st.subheader("🎯 Nearest Neighbor Semantic Matches")
         if not results:

@@ -21,7 +21,7 @@ _MERSENNE_PRIME = (1 << 61) - 1
 _MAX_HASH = (1 << 32) - 1
 
 
-def _hash_shingles(shingles: Set[str], num_hashes: int, seed: int = 42) -> np.ndarray:
+def _hash_shingles(shingles: set[str], num_hashes: int, seed: int = 42) -> np.ndarray:
     """Compute MinHash signature for a set of shingles.
 
     Uses a family of linear hash functions: h(x) = (a * x + b) % p.
@@ -69,7 +69,7 @@ def generate_minhash_signature(
 
 def generate_lsh_bands(
     signature: np.ndarray, bands: int, rows_per_band: int
-) -> List[bytes]:
+) -> list[bytes]:
     """Divide a MinHash signature into LSH bands for candidate generation.
 
     Args:

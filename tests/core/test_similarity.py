@@ -1115,13 +1115,13 @@ def test_find_most_similar_chunks_comparison_with_legacy():
 
     # Define the legacy implementation to compare against
     def legacy_find_most_similar_chunks(
-        chunks_a: List[str],
-        chunks_b: List[str],
+        chunks_a: list[str],
+        chunks_b: list[str],
         emb_a: np.ndarray,
         emb_b: np.ndarray,
         top_k: int = 3,
         threshold: float = 0.5,
-    ) -> List[Tuple[str, str, float]]:
+    ) -> list[tuple[str, str, float]]:
         if emb_a.size == 0 or emb_b.size == 0:
             return []
         from sklearn.metrics.pairwise import cosine_similarity

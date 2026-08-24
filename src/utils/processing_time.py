@@ -43,7 +43,7 @@ class ProfilerSpan:
     def __init__(self, name: str, parent: Optional["ProfilerSpan"] = None):
         self.name = name
         self.parent = parent
-        self.children: List["ProfilerSpan"] = []
+        self.children: list["ProfilerSpan"] = []
         self.start_time: float = time.perf_counter()
         self.end_time: Optional[float] = None
         self.duration: float = 0.0
@@ -53,7 +53,7 @@ class ProfilerSpan:
         self.end_time = time.perf_counter()
         self.duration = self.end_time - self.start_time
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert the span and its children to a dictionary."""
         return {
             "name": self.name,
@@ -69,11 +69,11 @@ class ProcessingTimer:
     """
 
     def __init__(self):
-        self.durations: List[float] = []
-        self.spans: List[ProfilerSpan] = []
-        self._active_stack: List[ProfilerSpan] = []
+        self.durations: list[float] = []
+        self.spans: list[ProfilerSpan] = []
+        self._active_stack: list[ProfilerSpan] = []
         self._active_timers: int = 0
-        self._aggregate_stats: Dict[str, float] = defaultdict(float)
+        self._aggregate_stats: dict[str, float] = defaultdict(float)
 
     @contextmanager
     def time_block(self, name: str = "Unnamed Block"):
@@ -108,7 +108,7 @@ class ProcessingTimer:
 
             self._aggregate_stats[name] += span.duration
 
-    def get_summary(self) -> Dict[str, float]:
+    def get_summary(self) -> dict[str, float]:
         """Returns aggregated durations for all named blocks."""
         return dict(self._aggregate_stats)
 

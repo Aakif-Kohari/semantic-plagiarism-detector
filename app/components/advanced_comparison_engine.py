@@ -21,7 +21,7 @@ class ComparisonMetric:
     name: str
     score: float
     weight: float
-    details: Dict[str, Any] = None
+    details: dict[str, Any] = None
     threshold: float = 0.5
     
     def __post_init__(self):
@@ -31,7 +31,7 @@ class ComparisonMetric:
     def is_passed(self) -> bool:
         return self.score >= self.threshold
     
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             **asdict(self),
             'passed': self.is_passed()
@@ -44,12 +44,12 @@ class DocumentComparisonResult:
     doc_b: str
     timestamp: str
     overall_score: float
-    metrics: List[ComparisonMetric]
-    highlights: Dict[str, List[Tuple[int, int]]]
-    recommendations: List[str]
+    metrics: list[ComparisonMetric]
+    highlights: dict[str, list[tuple[int, int]]]
+    recommendations: list[str]
     risk_level: str  # 'low', 'medium', 'high', 'critical'
     
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             'doc_a': self.doc_a,
             'doc_b': self.doc_b,
@@ -320,19 +320,19 @@ class AdvancedComparisonEngine:
         
         return similar / total if total > 0 else 0.0
     
-    def _tokenize(self, text: str) -> List[str]:
+    def _tokenize(self, text: str) -> list[str]:
         """Tokenize text into words"""
         words = re.findall(r'\b[a-zA-Z]+\b', text.lower())
         return [w for w in words if len(w) > 2]
     
-    def _extract_keywords(self, text: str) -> Dict[str, float]:
+    def _extract_keywords(self, text: str) -> dict[str, float]:
         """Extract keywords with TF scores"""
         words = self._tokenize(text)
         total = len(words) or 1
         freq = Counter(words)
         return {word: count/total for word, count in freq.items()}
     
-    def _extract_style_features(self, text: str) -> Dict[str, Any]:
+    def _extract_style_features(self, text: str) -> dict[str, Any]:
         """Extract writing style features"""
         sentences = [s for s in text.split('.') if s.strip()]
         words = self._tokenize(text)
@@ -351,7 +351,7 @@ class AdvancedComparisonEngine:
         
         return features
     
-    def _extract_citations(self, text: str) -> List[str]:
+    def _extract_citations(self, text: str) -> list[str]:
         """Extract citations from text"""
         # Simple citation extraction (author-year format)
         pattern = r'\(([A-Z][a-z]+,\s*\d{4})\)'
@@ -363,13 +363,13 @@ class AdvancedComparisonEngine:
         
         return citations
     
-    def _extract_ngrams(self, text: str, n: int = 3) -> List[Tuple[str, ...]]:
+    def _extract_ngrams(self, text: str, n: int = 3) -> list[tuple[str, ...]]:
         """Extract n-grams from text"""
         words = self._tokenize(text)
         return [tuple(words[i:i+n]) for i in range(len(words) - n + 1)]
     
-    def _ngram_similarity(self, ngram_a: Tuple[str, ...], 
-                          ngram_b: Tuple[str, ...]) -> float:
+    def _ngram_similarity(self, ngram_a: tuple[str, ...], 
+                          ngram_b: tuple[str, ...]) -> float:
         """Calculate similarity between two n-grams"""
         if not ngram_a or not ngram_b:
             return 0.0
@@ -379,7 +379,7 @@ class AdvancedComparisonEngine:
         
         return common / total if total > 0 else 0.0
     
-    def _generate_highlights(self, text_a: str, text_b: str) -> Dict[str, List[Tuple[int, int]]]:
+    def _generate_highlights(self, text_a: str, text_b: str) -> dict[str, list[tuple[int, int]]]:
         """Generate highlight positions for similar content"""
         highlights = {'a': [], 'b': []}
         
@@ -399,7 +399,7 @@ class AdvancedComparisonEngine:
         
         return highlights
     
-    def _generate_recommendations(self, metrics: List[ComparisonMetric]) -> List[str]:
+    def _generate_recommendations(self, metrics: list[ComparisonMetric]) -> list[str]:
         """Generate recommendations based on metrics"""
         recommendations = []
         
@@ -423,7 +423,7 @@ class AdvancedComparisonEngine:
         
         return recommendations
     
-    def _determine_risk_level(self, metrics: List[ComparisonMetric], 
+    def _determine_risk_level(self, metrics: list[ComparisonMetric], 
                               overall_score: float) -> str:
         """Determine risk level based on metrics"""
         high_scores = sum(1 for m in metrics if m.score > 0.7)
@@ -438,11 +438,11 @@ class AdvancedComparisonEngine:
         else:
             return 'low'
     
-    def get_comparison_history(self, limit: int = 50) -> List[Dict]:
+    def get_comparison_history(self, limit: int = 50) -> list[dict]:
         """Get comparison history"""
         return [r.to_dict() for r in self.comparison_history[-limit:]]
     
-    def get_comparison_stats(self) -> Dict:
+    def get_comparison_stats(self) -> dict:
         """Get comparison statistics"""
         if not self.comparison_history:
             return {'total': 0}

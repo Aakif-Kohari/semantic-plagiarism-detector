@@ -83,8 +83,8 @@ class Workflow:
     description: str
     category: WorkflowCategory
     status: WorkflowStatus
-    tasks: List[Dict[str, Any]]
-    triggers: List[Dict[str, Any]]
+    tasks: list[dict[str, Any]]
+    triggers: list[dict[str, Any]]
     created_at: float
     created_by: str
     updated_at: Optional[float] = None
@@ -92,7 +92,7 @@ class Workflow:
     completed_at: Optional[float] = None
     execution_count: int = 0
     last_execution: Optional[float] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -103,9 +103,9 @@ class WorkflowExecution:
     status: WorkflowStatus
     started_at: float
     completed_at: Optional[float] = None
-    task_results: List[Dict[str, Any]] = field(default_factory=list)
+    task_results: list[dict[str, Any]] = field(default_factory=list)
     error: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -115,8 +115,8 @@ class Task:
     name: str
     description: str
     function: str
-    parameters: Dict[str, Any]
-    dependencies: List[str]
+    parameters: dict[str, Any]
+    dependencies: list[str]
     status: TaskStatus
     created_at: float
     started_at: Optional[float] = None
@@ -126,7 +126,7 @@ class Task:
     retry_count: int = 0
     max_retries: int = 3
     timeout_seconds: int = 300
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -136,13 +136,13 @@ class ApprovalRequest:
     workflow_id: str
     task_id: str
     requester: str
-    approvers: List[str]
+    approvers: list[str]
     status: WorkflowStatus
     created_at: float
     responded_at: Optional[float] = None
     response: Optional[str] = None
-    comments: List[Dict[str, Any]] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    comments: list[dict[str, Any]] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -152,13 +152,13 @@ class WorkflowTemplate:
     name: str
     description: str
     category: WorkflowCategory
-    tasks: List[Dict[str, Any]]
-    triggers: List[Dict[str, Any]]
+    tasks: list[dict[str, Any]]
+    triggers: list[dict[str, Any]]
     created_at: float
     created_by: str
     is_active: bool = True
     usage_count: int = 0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 # ==============================================================================
@@ -172,14 +172,14 @@ class WorkflowEngine:
     
     def __init__(self, storage_path: Path):
         self.storage_path = storage_path
-        self.workflows: Dict[str, Workflow] = {}
-        self.executions: List[WorkflowExecution] = []
-        self.templates: List[WorkflowTemplate] = []
-        self.approvals: List[ApprovalRequest] = []
+        self.workflows: dict[str, Workflow] = {}
+        self.executions: list[WorkflowExecution] = []
+        self.templates: list[WorkflowTemplate] = []
+        self.approvals: list[ApprovalRequest] = []
         self.task_queue: queue.Queue = queue.Queue()
         self.is_running = False
         self.worker_thread: Optional[threading.Thread] = None
-        self.task_handlers: Dict[str, Callable] = {}
+        self.task_handlers: dict[str, Callable] = {}
         self._load_data()
         self._register_default_handlers()
         self._start_worker()
@@ -340,7 +340,7 @@ class WorkflowEngine:
             # Check if workflow is complete
             self._check_workflow_completion(workflow_id)
     
-    def _check_dependencies(self, workflow: Workflow, task: Dict) -> bool:
+    def _check_dependencies(self, workflow: Workflow, task: dict) -> bool:
         """Check if task dependencies are met."""
         dependencies = task.get("dependencies", [])
         
@@ -391,7 +391,7 @@ class WorkflowEngine:
     # TASK HANDLERS
     # ==========================================================================
     
-    def _handle_plagiarism_check(self, task: Dict, workflow: Workflow) -> Dict:
+    def _handle_plagiarism_check(self, task: dict, workflow: Workflow) -> dict:
         """Handle plagiarism check task."""
         params = task.get("parameters", {})
         document_ids = params.get("document_ids", [])
@@ -408,7 +408,7 @@ class WorkflowEngine:
             "timestamp": time.time()
         }
     
-    def _handle_document_processing(self, task: Dict, workflow: Workflow) -> Dict:
+    def _handle_document_processing(self, task: dict, workflow: Workflow) -> dict:
         """Handle document processing task."""
         params = task.get("parameters", {})
         documents = params.get("documents", [])
@@ -423,7 +423,7 @@ class WorkflowEngine:
             "timestamp": time.time()
         }
     
-    def _handle_report_generation(self, task: Dict, workflow: Workflow) -> Dict:
+    def _handle_report_generation(self, task: dict, workflow: Workflow) -> dict:
         """Handle report generation task."""
         params = task.get("parameters", {})
         report_type = params.get("type", "standard")
@@ -438,7 +438,7 @@ class WorkflowEngine:
             "timestamp": time.time()
         }
     
-    def _handle_notification(self, task: Dict, workflow: Workflow) -> Dict:
+    def _handle_notification(self, task: dict, workflow: Workflow) -> dict:
         """Handle notification task."""
         params = task.get("parameters", {})
         recipients = params.get("recipients", [])
@@ -454,7 +454,7 @@ class WorkflowEngine:
             "timestamp": time.time()
         }
     
-    def _handle_approval(self, task: Dict, workflow: Workflow) -> Dict:
+    def _handle_approval(self, task: dict, workflow: Workflow) -> dict:
         """Handle approval task."""
         params = task.get("parameters", {})
         approvers = params.get("approvers", [])
@@ -492,7 +492,7 @@ class WorkflowEngine:
             "timestamp": time.time()
         }
     
-    def _handle_export(self, task: Dict, workflow: Workflow) -> Dict:
+    def _handle_export(self, task: dict, workflow: Workflow) -> dict:
         """Handle export task."""
         params = task.get("parameters", {})
         format = params.get("format", "csv")
@@ -508,7 +508,7 @@ class WorkflowEngine:
             "timestamp": time.time()
         }
     
-    def _handle_cleanup(self, task: Dict, workflow: Workflow) -> Dict:
+    def _handle_cleanup(self, task: dict, workflow: Workflow) -> dict:
         """Handle cleanup task."""
         params = task.get("parameters", {})
         cleanup_type = params.get("type", "temp_files")
@@ -533,8 +533,8 @@ class WorkflowEngine:
         name: str,
         description: str,
         category: WorkflowCategory,
-        tasks: List[Dict[str, Any]],
-        triggers: List[Dict[str, Any]],
+        tasks: list[dict[str, Any]],
+        triggers: list[dict[str, Any]],
         created_by: str
     ) -> Workflow:
         """Create a new workflow."""
@@ -564,7 +564,7 @@ class WorkflowEngine:
         self,
         template_id: str,
         name: str,
-        parameters: Dict[str, Any],
+        parameters: dict[str, Any],
         created_by: str
     ) -> Optional[Workflow]:
         """Create workflow from template."""
@@ -682,8 +682,8 @@ class WorkflowEngine:
         name: str,
         description: str,
         category: WorkflowCategory,
-        tasks: List[Dict[str, Any]],
-        triggers: List[Dict[str, Any]],
+        tasks: list[dict[str, Any]],
+        triggers: list[dict[str, Any]],
         created_by: str
     ) -> WorkflowTemplate:
         """Create a workflow template."""
@@ -739,7 +739,7 @@ class WorkflowEngine:
             
             self._save_data()
     
-    def get_workflow_status(self, workflow_id: str) -> Optional[Dict]:
+    def get_workflow_status(self, workflow_id: str) -> Optional[dict]:
         """Get workflow status."""
         workflow = self.workflows.get(workflow_id)
         if not workflow:
@@ -769,7 +769,7 @@ class WorkflowEngine:
         
         return completed_tasks / total_tasks
     
-    def get_workflow_stats(self) -> Dict[str, Any]:
+    def get_workflow_stats(self) -> dict[str, Any]:
         """Get workflow statistics."""
         total_workflows = len(self.workflows)
         running = len([w for w in self.workflows.values() if w.status == WorkflowStatus.RUNNING])

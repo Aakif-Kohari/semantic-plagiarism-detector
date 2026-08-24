@@ -167,7 +167,7 @@ def get_version_lineage(
     user_id: str, 
     assignment_id: str,
     db_path: Optional[Path] = None
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Retrieve the complete version lineage for a specific assignment."""
     try:
         with get_connection(db_path) as conn:

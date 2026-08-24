@@ -44,7 +44,7 @@ class ScoreComponent:
     method: str
     score: float
     confidence: float
-    details: Dict[str, Any]
+    details: dict[str, Any]
     weight: float = 1.0
 
     def weighted_score(self) -> float:
@@ -58,11 +58,11 @@ class PlagiarismScore:
     doc_b: str
     overall_score: float
     severity: SeverityLevel
-    components: List[ScoreComponent]
+    components: list[ScoreComponent]
     fingerprint_match: bool
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "doc_a": self.doc_a, "doc_b": self.doc_b,
             "overall_score": self.overall_score,
@@ -77,13 +77,13 @@ class PlagiarismScore:
 class ContentFingerprint:
     """Content fingerprint for near-duplicate detection."""
     doc_name: str
-    shingles: Set[str]
-    minhash_signature: List[int]
+    shingles: set[str]
+    minhash_signature: list[int]
     ngram_hash: str
     word_set_hash: str
-    paragraph_hashes: List[str]
+    paragraph_hashes: list[str]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "doc_name": self.doc_name,
             "shingle_count": len(self.shingles),
@@ -97,11 +97,11 @@ class ContentFingerprint:
 @dataclass
 class ScoringConfig:
     """Configuration for the scoring engine."""
-    weights: Dict[str, float] = field(default_factory=lambda: {
+    weights: dict[str, float] = field(default_factory=lambda: {
         "semantic": 0.35, "lexical": 0.25, "structural": 0.15,
         "statistical": 0.15, "fingerprint": 0.10
     })
-    severity_thresholds: Dict[str, float] = field(default_factory=lambda: {
+    severity_thresholds: dict[str, float] = field(default_factory=lambda: {
         "clean": 0.20, "low": 0.40, "moderate": 0.60, "high": 0.80
     })
     shingle_size: int = 5
@@ -140,7 +140,7 @@ class ContentFingerprinter:
             paragraph_hashes=para_hashes,
         )
 
-    def _create_shingles(self, words: List[str]) -> Set[str]:
+    def _create_shingles(self, words: list[str]) -> set[str]:
         """Create word-level shingles."""
         shingles = set()
         for i in range(len(words) - self.config.shingle_size + 1):
@@ -148,7 +148,7 @@ class ContentFingerprinter:
             shingles.add(hashlib.md5(shingle.encode()).hexdigest()[:12])
         return shingles
 
-    def _compute_minhash(self, shingles: Set[str]) -> List[int]:
+    def _compute_minhash(self, shingles: set[str]) -> list[int]:
         """Compute MinHash signature."""
         signature = []
         for i in range(self.config.minhash_num_perm):
@@ -167,12 +167,12 @@ class ContentFingerprinter:
         combined = "|".join(sorted(ngrams)[:100])
         return hashlib.sha256(combined.encode()).hexdigest()[:16]
 
-    def _word_set_hash(self, words: List[str]) -> str:
+    def _word_set_hash(self, words: list[str]) -> str:
         """Compute word set hash."""
         word_set = sorted(set(w.lower() for w in words))
         return hashlib.md5(" ".join(word_set).encode()).hexdigest()[:16]
 
-    def _paragraph_hashes(self, text: str) -> List[str]:
+    def _paragraph_hashes(self, text: str) -> list[str]:
         """Compute paragraph-level hashes."""
         paragraphs = [p.strip() for p in text.split("\n\n") if len(p.strip()) > 20]
         return [hashlib.md5(p.encode()).hexdigest()[:12] for p in paragraphs[:50]]
@@ -185,7 +185,7 @@ class ContentFingerprinter:
         union = fp1.shingles | fp2.shingles
         return len(intersection) / len(union) if union else 0.0
 
-    def detect_near_duplicates(self, fingerprints: List[ContentFingerprint], threshold: float = 0.85) -> List[Tuple[str, str, float]]:
+    def detect_near_duplicates(self, fingerprints: list[ContentFingerprint], threshold: float = 0.85) -> list[tuple[str, str, float]]:
         """Detect near-duplicate document pairs."""
         duplicates = []
         for i in range(len(fingerprints)):
@@ -207,9 +207,9 @@ class AIScoringEngine:
     def __init__(self, config: Optional[ScoringConfig] = None):
         self.config = config or ScoringConfig()
         self.fingerprinter = ContentFingerprinter(config)
-        self._cache: Dict[str, Any] = {}
+        self._cache: dict[str, Any] = {}
 
-    def _preprocess(self, text: str) -> List[str]:
+    def _preprocess(self, text: str) -> list[str]:
         """Tokenize and preprocess text."""
         text = text.lower()
         text = re.sub(r'[^\w\s]', ' ', text)
@@ -293,7 +293,7 @@ class AIScoringEngine:
         return ScoreComponent(method="fingerprint", score=min(score, 1.0), confidence=0.90,
                             details={"shingle_similarity": shingle_sim, "paragraph_matches": para_match, "paragraph_total": para_total})
 
-    def compute_ensemble_score(self, components: List[ScoreComponent]) -> ScoreComponent:
+    def compute_ensemble_score(self, components: list[ScoreComponent]) -> ScoreComponent:
         """Compute weighted ensemble score from all components."""
         total_weight = 0
         weighted_sum = 0
@@ -358,7 +358,7 @@ class AIScoringEngine:
                      "timestamp": datetime.now().isoformat()}
         )
 
-    def batch_score(self, documents: Dict[str, str]) -> List[PlagiarismScore]:
+    def batch_score(self, documents: dict[str, str]) -> list[PlagiarismScore]:
         """Score all document pairs in a batch."""
         scores = []
         doc_names = list(documents.keys())

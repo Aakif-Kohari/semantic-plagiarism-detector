@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 def generate_behavioral_hash(
-    stdout: str, stderr: str, test_results: List[Dict[str, Any]], return_code: int
+    stdout: str, stderr: str, test_results: list[dict[str, Any]], return_code: int
 ) -> str:
     """Generate a deterministic behavioral hash from execution traces.
 
@@ -69,8 +69,8 @@ def generate_behavioral_hash(
 
 
 def compare_behavioral_fingerprints(
-    trace_a: Dict[str, Any], trace_b: Dict[str, Any]
-) -> Dict[str, Any]:
+    trace_a: dict[str, Any], trace_b: dict[str, Any]
+) -> dict[str, Any]:
     """Compare two execution traces and compute behavioral similarity.
 
     Args:

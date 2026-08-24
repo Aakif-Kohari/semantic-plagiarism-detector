@@ -17,9 +17,9 @@ class StylometricWriteprintExtractor:
 
     def __init__(self, target_author_id: Optional[str] = None):
         self.target_author_id = target_author_id
-        self.extracted_fingerprints: Dict[str, Any] = {}
+        self.extracted_fingerprints: dict[str, Any] = {}
 
-    def extract_author_writeprint(self, text: str) -> Dict[str, Any]:
+    def extract_author_writeprint(self, text: str) -> dict[str, Any]:
         """Extracts complete set of quantitative stylometric metrics from document text."""
         words = re.findall(r'\b\w+\b', text.lower())
         sentences = [s.strip() for s in re.split(r'[.!?]+', text) if s.strip()]
@@ -66,12 +66,12 @@ class AuthorshipAttributionClassifier:
     using Euclidean feature distance and Cosine writeprint similarity.
     """
 
-    def __init__(self, author_baseline_profiles: Dict[str, Dict[str, Any]]):
+    def __init__(self, author_baseline_profiles: dict[str, dict[str, Any]]):
         self.baseline_profiles = author_baseline_profiles
 
     def classify_authorship(
-        self, candidate_writeprint: Dict[str, Any], distance_threshold: float = 0.85
-    ) -> List[Dict[str, Any]]:
+        self, candidate_writeprint: dict[str, Any], distance_threshold: float = 0.85
+    ) -> list[dict[str, Any]]:
         """Classifies candidate writeprint against baseline author profiles."""
         matches = []
 

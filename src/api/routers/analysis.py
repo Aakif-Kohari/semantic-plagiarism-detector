@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Plagiarism Detection"])
 
 total_scans = 0
-scan_jobs: Dict[str, Dict[str, Any]] = {}
+scan_jobs: dict[str, dict[str, Any]] = {}
 SCAN_JOB_TTL_SECONDS = int(os.getenv("SCAN_JOB_TTL_SECONDS", 7200))  # 2 hours default
 MAX_IN_MEMORY_SCAN_JOBS = int(os.getenv("MAX_IN_MEMORY_SCAN_JOBS", 10000))
 

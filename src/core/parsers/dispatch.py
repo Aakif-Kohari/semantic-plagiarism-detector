@@ -198,7 +198,7 @@ def extract_texts(
     files: list,
     session_id: Optional[str] = None,
     max_workers: int | None = None,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """Extract text from multiple uploaded files."""
     check_batch_rate_limit(len(files) if files else 0, session_id=session_id)
 

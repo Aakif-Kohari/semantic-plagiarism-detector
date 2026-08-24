@@ -51,7 +51,7 @@ def json_serializer_fallback(obj: Any) -> Any:
 
 
 def export_similarity_matrix_to_json(
-    df: Optional[Union[pd.DataFrame, Any]],
+    df: Optional[pd.DataFrame | Any],
     include_metadata: bool = False,
     indent: Optional[int] = 2,
 ) -> str:
@@ -99,9 +99,9 @@ def export_similarity_matrix_to_json(
             return json.dumps(payload, indent=indent, ensure_ascii=False)
         return "[]"
 
-    doc_names: List[str] = [str(col) for col in df.columns]
+    doc_names: list[str] = [str(col) for col in df.columns]
     n: int = len(doc_names)
-    pairs: List[Dict[str, Union[str, float]]] = []
+    pairs: list[dict[str, str | float]] = []
 
     for i in range(n):
         for j in range(i + 1, n):
@@ -145,7 +145,7 @@ def export_similarity_matrix_to_json(
 def export_to_json(
     data: Any,
     include_metadata: bool = True,
-    metadata: Optional[Dict[str, Any]] = None,
+    metadata: Optional[dict[str, Any]] = None,
     indent: Optional[int] = 2,
 ) -> str:
     """Export arbitrary report data structures into a clean JSON string with an exported_at timestamp.
@@ -180,7 +180,7 @@ def export_to_json(
             default=json_serializer_fallback,
         )
 
-    root_metadata: Dict[str, Any] = {
+    root_metadata: dict[str, Any] = {
         "exported_at": exported_at_timestamp,
     }
 
@@ -210,8 +210,8 @@ def export_to_json(
 
 
 def export_report_to_json(
-    report_dict: Dict[str, Any],
-    custom_metadata: Optional[Dict[str, Any]] = None,
+    report_dict: dict[str, Any],
+    custom_metadata: Optional[dict[str, Any]] = None,
     indent: Optional[int] = 2,
 ) -> str:
     """Export a comprehensive plagiarism inspection report dictionary to JSON.
@@ -237,7 +237,7 @@ def export_report_to_json(
 
 
 def export_incidents_to_json(
-    incidents: List[Dict[str, Any]],
+    incidents: list[dict[str, Any]],
     session_id: Optional[str] = None,
     indent: Optional[int] = 2,
 ) -> str:
@@ -266,7 +266,7 @@ def export_incidents_to_json(
     )
 
 
-def parse_export_json(json_str: str) -> Dict[str, Any]:
+def parse_export_json(json_str: str) -> dict[str, Any]:
     """Parse a serialized JSON report string and validate structure.
 
     Args:
@@ -317,7 +317,7 @@ def generate_export_checksum(json_str: str) -> str:
 
 
 def export_batch_reports_to_json(
-    reports: List[Dict[str, Any]],
+    reports: list[dict[str, Any]],
     batch_id: Optional[str] = None,
     indent: Optional[int] = 2,
 ) -> str:
@@ -331,7 +331,7 @@ def export_batch_reports_to_json(
     Returns:
         JSON report string with batch metadata and exported_at timestamp.
     """
-    metadata: Dict[str, Any] = {
+    metadata: dict[str, Any] = {
         "report_type": "batch_plagiarism_analysis",
         "batch_size": len(reports) if isinstance(reports, list) else 0,
     }
@@ -368,9 +368,9 @@ def export_filtered_similarity_matrix_to_json(
             None, include_metadata=include_metadata, indent=indent
         )
 
-    doc_names: List[str] = [str(col) for col in df.columns]
+    doc_names: list[str] = [str(col) for col in df.columns]
     n: int = len(doc_names)
-    filtered_pairs: List[Dict[str, Union[str, float]]] = []
+    filtered_pairs: list[dict[str, str | float]] = []
 
     for i in range(n):
         for j in range(i + 1, n):
@@ -397,7 +397,7 @@ def export_filtered_similarity_matrix_to_json(
     )
 
 
-def build_export_schema_definition() -> Dict[str, Any]:
+def build_export_schema_definition() -> dict[str, Any]:
     """Return JSON Schema representation for validating exported metadata reports.
 
     Returns:

@@ -238,5 +238,3 @@ class TestBulkIncidentUpsert:
         row = cursor.fetchone()
         assert row[0] == 0.99
         assert row[1] == "Critical"
-
- main

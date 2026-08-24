@@ -39,12 +39,12 @@ def run_migrations_up(conn: sqlite3.Connection, target_version: int) -> None:
     conn.commit()
 
 # --- Helper Methods for Database Catalog Introspection ---
-def get_database_tables(conn: sqlite3.Connection) -> Set[str]:
+def get_database_tables(conn: sqlite3.Connection) -> set[str]:
     cursor = conn.cursor()
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
     return {row[0] for row in cursor.fetchall()}
 
-def get_table_columns(conn: sqlite3.Connection, table_name: str) -> List[str]:
+def get_table_columns(conn: sqlite3.Connection, table_name: str) -> list[str]:
     cursor = conn.cursor()
     cursor.execute(f"PRAGMA table_info({table_name});")
     return [row[1] for row in cursor.fetchall()]

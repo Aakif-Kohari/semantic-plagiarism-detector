@@ -35,7 +35,7 @@ def get_total_corpus_storage_bytes() -> int:
     return total_bytes
 
 
-def render_storage_quota_progress(limit_gb: float = 10.0) -> Dict[str, Any]:
+def render_storage_quota_progress(limit_gb: float = 10.0) -> dict[str, Any]:
     """Render st.progress bar in Settings tab displaying percentage of storage limit consumed.
 
     Args:

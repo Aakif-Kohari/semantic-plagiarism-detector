@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 
-def get_incidents_last_24h(db_path: str = DEFAULT_DB_PATH) -> List[Dict[str, Any]]:
+def get_incidents_last_24h(db_path: str = DEFAULT_DB_PATH) -> list[dict[str, Any]]:
     """
     Retrieve all incidents flagged in the last 24 hours.
 
@@ -64,7 +64,7 @@ def is_valid_email(email: Optional[str]) -> bool:
     return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email.strip()))
 
 
-def get_admin_emails() -> List[str]:
+def get_admin_emails() -> list[str]:
     """
     Retrieve email addresses for all admin users with valid email formats.
     Falls back to ADMIN_EMAIL environment variable if no DB admin users have valid emails.
@@ -91,7 +91,7 @@ def get_admin_emails() -> List[str]:
     return []
 
 
-def build_incident_row_html(inc: Dict[str, Any]) -> str:
+def build_incident_row_html(inc: dict[str, Any]) -> str:
     """
     Build a single HTML table row for an incident.
 
@@ -123,7 +123,7 @@ def build_incident_row_html(inc: Dict[str, Any]) -> str:
     """
 
 
-def build_severity_section_html(severity: str, incidents: List[Dict[str, Any]]) -> str:
+def build_severity_section_html(severity: str, incidents: list[dict[str, Any]]) -> str:
     """
     Build an HTML section for a specific severity level.
 
@@ -172,7 +172,7 @@ def build_severity_section_html(severity: str, incidents: List[Dict[str, Any]]) 
 
 
 def build_email_html_body(
-    incidents_data: List[Dict[str, Any]],
+    incidents_data: list[dict[str, Any]],
     total_scans: int,
     footer_note: Optional[str] = None,
 ) -> str:
@@ -272,7 +272,7 @@ def build_email_html_body(
     return html
 
 
-def generate_daily_summary_html(stats: Dict[str, Any]) -> str:
+def generate_daily_summary_html(stats: dict[str, Any]) -> str:
     """Generate the HTML content for the daily plagiarism summary email.
 
     Creates a responsive, email-client-safe HTML email with modern system
@@ -413,7 +413,7 @@ def generate_daily_summary_html(stats: Dict[str, Any]) -> str:
 
 
 def send_email(
-    to_emails: List[str],
+    to_emails: list[str],
     subject: str,
     html_body: str,
     status_callback: Optional[Callable[[bool, str], None]] = None,

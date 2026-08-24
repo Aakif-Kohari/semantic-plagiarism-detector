@@ -13,7 +13,7 @@ from defusedxml.common import DefusedXmlException
 logger = logging.getLogger(__name__)
 
 # Strict mapping of file extension to allowed MIME types/signatures.
-ALLOWED_MIME_TYPES: Dict[str, List[str]] = {
+ALLOWED_MIME_TYPES: dict[str, list[str]] = {
     "pdf": ["application/pdf"],
     "docx": [
         "application/vnd.openxmlformats-officedocument."
@@ -72,7 +72,7 @@ ALLOWED_MIME_TYPES: Dict[str, List[str]] = {
     "jpeg": ["image/jpeg"],
 }
 
-ALLOWED_MAGIC_HEADERS: Dict[str, List[bytes]] = {
+ALLOWED_MAGIC_HEADERS: dict[str, list[bytes]] = {
     "pdf": [b"%PDF-"],
     "zip": [b"PK\x03\x04"],
     "epub": [b"PK\x03\x04"],
@@ -84,12 +84,12 @@ ALLOWED_MAGIC_HEADERS: Dict[str, List[bytes]] = {
     "jpeg": [b"\xff\xd8\xff"],
 }
 
-OOXML_EXTENSIONS: Set[str] = {"docx", "xlsx"}
-OOXML_REQUIRED_PARTS: Dict[str, Set[str]] = {
+OOXML_EXTENSIONS: set[str] = {"docx", "xlsx"}
+OOXML_REQUIRED_PARTS: dict[str, set[str]] = {
     "docx": {"[Content_Types].xml", "word/document.xml"},
     "xlsx": {"[Content_Types].xml", "xl/workbook.xml"},
 }
-OOXML_MAIN_CONTENT_TYPES: Dict[str, Set[str]] = {
+OOXML_MAIN_CONTENT_TYPES: dict[str, set[str]] = {
     "docx": {
         "application/vnd.openxmlformats-officedocument."
         "wordprocessingml.document.main+xml",
@@ -106,7 +106,7 @@ MAX_OOXML_ARCHIVE_ENTRIES: int = 10_000
 MAX_OOXML_TOTAL_UNCOMPRESSED_SIZE: int = 250 * 1024 * 1024
 MAX_CONTENT_TYPES_XML_SIZE: int = 2 * 1024 * 1024
 
-BLOCKED_EXECUTABLE_EXTENSIONS: Set[str] = {
+BLOCKED_EXECUTABLE_EXTENSIONS: set[str] = {
     "exe",
     "sh",
     "bat",
@@ -117,7 +117,7 @@ BLOCKED_EXECUTABLE_EXTENSIONS: Set[str] = {
 
 # Magic-byte signatures that identify executable/script content regardless
 # of the declared file extension.
-EXECUTABLE_MAGIC_SIGNATURES: Tuple[bytes, ...] = (
+EXECUTABLE_MAGIC_SIGNATURES: tuple[bytes, ...] = (
     b"MZ",
     b"#!/bin/sh",
 )

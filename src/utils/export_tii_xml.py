@@ -17,7 +17,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def generate_tii_xml(report_data: Dict[str, Any], include_text: bool = True) -> str:
+def generate_tii_xml(report_data: dict[str, Any], include_text: bool = True) -> str:
     """Generate a Turnitin-compatible Originality XML report.
 
     Args:

@@ -1,6 +1,7 @@
-# Ruff configuration — shared between CI and pre-commit hooks
+target-version = "py310"
+
 [lint]
-select = ["E", "F", "I"]
+select = ["E", "F", "I", "UP006", "UP007"]
 # E402: Module level import not at top of file
 #   Required because app/streamlit_app.py and evaluation/evaluate.py
 #   modify sys.path before importing project modules.

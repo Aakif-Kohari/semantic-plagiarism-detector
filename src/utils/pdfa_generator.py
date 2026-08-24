@@ -92,7 +92,7 @@ def generate_xmp_metadata(
     return xmp_packet
 
 
-def prepare_pdfa_metadata(report_data: Dict[str, Any]) -> str:
+def prepare_pdfa_metadata(report_data: dict[str, Any]) -> str:
     """High-level wrapper to generate XMP metadata from a report dictionary."""
     now = datetime.utcnow()
     return generate_xmp_metadata(

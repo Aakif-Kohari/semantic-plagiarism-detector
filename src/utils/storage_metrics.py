@@ -10,9 +10,9 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
-def _deduplicate_paths(paths: List[Path]) -> List[Path]:
+def _deduplicate_paths(paths: list[Path]) -> list[Path]:
     """Remove duplicate paths by comparing their resolved absolute form."""
-    unique_paths: List[Path] = []
+    unique_paths: list[Path] = []
     seen: set[Path] = set()
     for p in paths:
         try:
@@ -25,7 +25,7 @@ def _deduplicate_paths(paths: List[Path]) -> List[Path]:
     return unique_paths
 
 
-def get_sqlite_db_paths() -> List[Path]:
+def get_sqlite_db_paths() -> list[Path]:
     """Retrieve unique paths of SQLite database files in standard locations.
 
     Collects the three configured application databases (corpus, auth and
@@ -40,7 +40,7 @@ def get_sqlite_db_paths() -> List[Path]:
         List[Path]: Existing-or-not database paths, de-duplicated by their
         resolved absolute form. Paths are returned in discovery order.
     """
-    paths: List[Path] = []
+    paths: list[Path] = []
 
     # 1. Corpus DB path
     try:
@@ -78,7 +78,7 @@ def get_sqlite_db_paths() -> List[Path]:
     return _deduplicate_paths(paths)
 
 
-def get_faiss_index_paths() -> List[Path]:
+def get_faiss_index_paths() -> list[Path]:
     """Retrieve unique paths of FAISS index files in standard locations.
 
     Always includes the two default ``corpus.index`` locations (repository
@@ -90,7 +90,7 @@ def get_faiss_index_paths() -> List[Path]:
         List[Path]: Existing-or-not index paths, de-duplicated by their
         resolved absolute form. Paths are returned in discovery order.
     """
-    paths: List[Path] = []
+    paths: list[Path] = []
 
     base_dir = Path(__file__).resolve().parents[2]
     data_dir = base_dir / "data"
@@ -108,9 +108,9 @@ def get_faiss_index_paths() -> List[Path]:
 
 
 def calculate_storage_usage(
-    db_paths: Optional[List[Path]] = None,
-    index_paths: Optional[List[Path]] = None,
-) -> Dict[str, Any]:
+    db_paths: Optional[list[Path]] = None,
+    index_paths: Optional[list[Path]] = None,
+) -> dict[str, Any]:
     """Calculate total SQLite + FAISS disk usage in bytes and formatted megabytes.
 
     Returns:

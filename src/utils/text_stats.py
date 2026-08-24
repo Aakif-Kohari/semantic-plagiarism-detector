@@ -195,7 +195,7 @@ def get_unique_word_ratio(text: str) -> float:
     return unique_words / total_words
 
 
-def compute_text_stats(text: str) -> Dict[str, float]:
+def compute_text_stats(text: str) -> dict[str, float]:
     """
     Compute all text statistics for the given text.
 
@@ -222,7 +222,7 @@ def compute_text_stats(text: str) -> Dict[str, float]:
     }
 
 
-def format_stats_for_pdf(stats: Dict[str, float]) -> List[List[str]]:
+def format_stats_for_pdf(stats: dict[str, float]) -> list[list[str]]:
     """
     Format text statistics for display in a PDF table.
 

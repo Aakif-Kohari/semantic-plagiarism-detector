@@ -187,7 +187,7 @@ def _render_preview():
         os.unlink(temp_path)
 
 
-def _get_sample_results() -> Dict[str, Any]:
+def _get_sample_results() -> dict[str, Any]:
     """Get sample detection results for demo."""
     return {
         "total_documents": 6,

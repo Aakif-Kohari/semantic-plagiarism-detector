@@ -211,7 +211,7 @@ def highlight_overlap(
     min_match_length: int = DEFAULT_DIFF_MIN_MATCH_LENGTH,
     use_stemming: bool = False,
     css_class: Optional[str] = None,
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     """Highlight overlapping sequences between two text strings.
 
     Identifies common word sequences of at least `min_match_length` words

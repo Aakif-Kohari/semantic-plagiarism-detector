@@ -32,7 +32,7 @@ class StylometricProfile:
     punctuation_frequency: float  # Punctuation marks per 100 words
     yules_k: float  # Yule's characteristic K (vocabulary richness)
 
-    def to_dict(self) -> Dict[str, float]:
+    def to_dict(self) -> dict[str, float]:
         """Convert the profile to a dictionary."""
         return asdict(self)
 
@@ -61,19 +61,19 @@ class StylometricProfile:
         return math.sqrt(sum(squared_diffs))
 
 
-def _tokenize_words(text: str) -> List[str]:
+def _tokenize_words(text: str) -> list[str]:
     """Extract alphanumeric words from text, lowercased."""
     return re.findall(r"\b\w+\b", text.lower())
 
 
-def _tokenize_sentences(text: str) -> List[str]:
+def _tokenize_sentences(text: str) -> list[str]:
     """Split text into sentences using punctuation boundaries."""
     # Simple regex for sentence splitting
     sentences = re.split(r"(?<=[.!?])\s+", text.strip())
     return [s for s in sentences if s.strip()]
 
 
-def compute_type_token_ratio(words: List[str]) -> float:
+def compute_type_token_ratio(words: list[str]) -> float:
     """Compute Type-Token Ratio (TTR).
 
     TTR = (Number of unique words) / (Total number of words).
@@ -85,7 +85,7 @@ def compute_type_token_ratio(words: List[str]) -> float:
     return len(unique_words) / len(words)
 
 
-def compute_yules_k(words: List[str]) -> float:
+def compute_yules_k(words: list[str]) -> float:
     """Compute Yule's characteristic K for vocabulary richness.
 
     Yule's K is a measure of vocabulary richness that is independent of
@@ -110,7 +110,7 @@ def compute_yules_k(words: List[str]) -> float:
     return max(0.0, k)  # Ensure non-negative
 
 
-def compute_sentence_stats(sentences: List[str]) -> tuple[float, float]:
+def compute_sentence_stats(sentences: list[str]) -> tuple[float, float]:
     """Compute average sentence length and variance."""
     if not sentences:
         return 0.0, 0.0
@@ -130,7 +130,7 @@ def compute_sentence_stats(sentences: List[str]) -> tuple[float, float]:
     return mean_len, variance
 
 
-def compute_punctuation_frequency(text: str, words: List[str]) -> float:
+def compute_punctuation_frequency(text: str, words: list[str]) -> float:
     """Compute the number of punctuation marks per 100 words."""
     if not words:
         return 0.0
@@ -140,7 +140,7 @@ def compute_punctuation_frequency(text: str, words: List[str]) -> float:
     return (punct_count / len(words)) * 100.0
 
 
-def compute_avg_word_length(words: List[str]) -> float:
+def compute_avg_word_length(words: list[str]) -> float:
     """Compute the average character length of words."""
     if not words:
         return 0.0

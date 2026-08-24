@@ -40,11 +40,11 @@ class ReportSection:
     """A section in the plagiarism report."""
     title: str
     content: str
-    data: Optional[Dict[str, Any]] = None
-    charts: List[Dict[str, Any]] = field(default_factory=list)
+    data: Optional[dict[str, Any]] = None
+    charts: list[dict[str, Any]] = field(default_factory=list)
     severity: str = "info"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {"title": self.title, "content": self.content, "data": self.data, "charts": self.charts, "severity": self.severity}
 
 
@@ -55,13 +55,13 @@ class PlagiarismReport:
     report_type: ReportType
     title: str
     generated_at: str
-    summary: Dict[str, Any]
-    sections: List[ReportSection]
-    metadata: Dict[str, Any]
-    recommendations: List[str]
-    raw_data: Dict[str, Any]
+    summary: dict[str, Any]
+    sections: list[ReportSection]
+    metadata: dict[str, Any]
+    recommendations: list[str]
+    raw_data: dict[str, Any]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "report_id": self.report_id,
             "report_type": self.report_type.value,
@@ -97,11 +97,11 @@ class ReportGenerator:
 
     def __init__(self, config: Optional[ReportConfig] = None):
         self.config = config or ReportConfig()
-        self._template_cache: Dict[str, str] = {}
+        self._template_cache: dict[str, str] = {}
 
     def generate_report(
         self,
-        detection_results: Dict[str, Any],
+        detection_results: dict[str, Any],
         report_type: ReportType = ReportType.DETAILED,
         title: Optional[str] = None
     ) -> PlagiarismReport:
@@ -135,7 +135,7 @@ class ReportGenerator:
             raw_data=detection_results if self.config.include_raw_data else {},
         )
 
-    def _generate_summary(self, results: Dict[str, Any]) -> Dict[str, Any]:
+    def _generate_summary(self, results: dict[str, Any]) -> dict[str, Any]:
         """Generate report summary statistics."""
         matches = results.get("matches", results.get("flagged", []))
         total_docs = results.get("total_documents", results.get("n_docs", 0))
@@ -171,7 +171,7 @@ class ReportGenerator:
             "high_severity_count": severities["critical"] + severities["high"],
         }
 
-    def _generate_sections(self, results: Dict[str, Any], report_type: ReportType) -> List[ReportSection]:
+    def _generate_sections(self, results: dict[str, Any], report_type: ReportType) -> list[ReportSection]:
         """Generate report sections based on type."""
         sections = []
         sections.append(self._create_overview_section(results))
@@ -184,7 +184,7 @@ class ReportGenerator:
             sections.append(self._create_executive_insights_section(results))
         return sections
 
-    def _create_overview_section(self, results: Dict[str, Any]) -> ReportSection:
+    def _create_overview_section(self, results: dict[str, Any]) -> ReportSection:
         """Create overview section."""
         summary = self._generate_summary(results)
         content = f"""
@@ -205,7 +205,7 @@ class ReportGenerator:
 """
         return ReportSection(title="Overview", content=content, data=summary, severity="info")
 
-    def _create_matches_section(self, results: Dict[str, Any]) -> ReportSection:
+    def _create_matches_section(self, results: dict[str, Any]) -> ReportSection:
         """Create matches section."""
         matches = results.get("matches", results.get("flagged", []))
         sorted_matches = sorted(matches, key=lambda m: m.get("similarity", m.get("overall_score", 0)), reverse=True)
@@ -224,7 +224,7 @@ class ReportGenerator:
 
         return ReportSection(title="Detected Matches", content=content, data={"matches": displayed}, severity="warning")
 
-    def _create_statistics_section(self, results: Dict[str, Any]) -> ReportSection:
+    def _create_statistics_section(self, results: dict[str, Any]) -> ReportSection:
         """Create statistics section."""
         matches = results.get("matches", results.get("flagged", []))
         scores = [m.get("similarity", m.get("overall_score", 0)) for m in matches]
@@ -252,10 +252,10 @@ class ReportGenerator:
 
         return ReportSection(title="Statistics", content=content, data=stats, severity="info")
 
-    def _create_document_breakdown_section(self, results: Dict[str, Any]) -> ReportSection:
+    def _create_document_breakdown_section(self, results: dict[str, Any]) -> ReportSection:
         """Create document breakdown section."""
         matches = results.get("matches", results.get("flagged", []))
-        doc_scores: Dict[str, List[float]] = {}
+        doc_scores: dict[str, list[float]] = {}
         for match in matches:
             doc_a = match.get("doc_a", match.get("source_doc", ""))
             doc_b = match.get("doc_b", match.get("target_doc", ""))
@@ -276,7 +276,7 @@ class ReportGenerator:
 
         return ReportSection(title="Document Breakdown", content=content, data=doc_scores, severity="info")
 
-    def _create_executive_insights_section(self, results: Dict[str, Any]) -> ReportSection:
+    def _create_executive_insights_section(self, results: dict[str, Any]) -> ReportSection:
         """Create executive insights section."""
         summary = self._generate_summary(results)
         plagiarism_rate = summary["plagiarism_rate"]
@@ -295,7 +295,7 @@ class ReportGenerator:
         content += f"**Key Metrics:**\n- Plagiarism Rate: {plagiarism_rate:.1f}%\n- High Severity Matches: {high_count}\n"
         return ReportSection(title="Executive Insights", content=content, data=summary, severity="critical" if high_count > 0 else "info")
 
-    def _generate_recommendations(self, results: Dict[str, Any]) -> List[str]:
+    def _generate_recommendations(self, results: dict[str, Any]) -> list[str]:
         """Generate recommendations based on results."""
         summary = self._generate_summary(results)
         recs = []

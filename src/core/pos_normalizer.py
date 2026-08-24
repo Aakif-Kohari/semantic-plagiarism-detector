@@ -45,7 +45,7 @@ POS_NORMALIZATION_MAP = {
 }
 
 
-def _mock_pos_tagger(text: str) -> List[Tuple[str, str]]:
+def _mock_pos_tagger(text: str) -> list[tuple[str, str]]:
     """A lightweight, regex-based heuristic POS tagger for environments without NLTK.
     
     This is a fallback for when nltk is not installed. It uses simple regex
@@ -85,7 +85,7 @@ def _mock_pos_tagger(text: str) -> List[Tuple[str, str]]:
     return tagged
 
 
-def extract_pos_sequence(text: str, use_nltk: bool = False) -> List[str]:
+def extract_pos_sequence(text: str, use_nltk: bool = False) -> list[str]:
     """Extract a normalized Part-of-Speech tag sequence from text.
     
     Args:
@@ -133,7 +133,7 @@ def extract_pos_sequence(text: str, use_nltk: bool = False) -> List[str]:
     return normalized_sequence
 
 
-def compute_pos_ngrams(pos_sequence: List[str], n: int = 3) -> List[Tuple[str, ...]]:
+def compute_pos_ngrams(pos_sequence: list[str], n: int = 3) -> list[tuple[str, ...]]:
     """Generate n-grams from a POS sequence.
     
     Args:
@@ -168,7 +168,7 @@ class POSNormalizer:
     """
 
     @staticmethod
-    def extract_pos_sequence(text: str) -> List[str]:
+    def extract_pos_sequence(text: str) -> list[str]:
         """
         Tokenizes text and extracts a normalized sequence of POS tags.
         Example: "The quick brown fox jumps" -> ['DT', 'JJ', 'JJ', 'NN', 'VBZ']

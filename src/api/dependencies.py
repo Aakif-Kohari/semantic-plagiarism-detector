@@ -64,10 +64,10 @@ def validate_content_type(request: Request) -> None:
         )
 
 
-def get_corpus_documents_with_embeddings() -> Dict[str, Dict]:
+def get_corpus_documents_with_embeddings() -> dict[str, dict]:
     """Load all stored corpus documents, text chunks, and chunk embeddings from SQLite."""
     init_corpus_db()
-    corpus: Dict[str, Dict] = {}
+    corpus: dict[str, dict] = {}
 
     with _connect() as conn:
         rows = conn.execute(

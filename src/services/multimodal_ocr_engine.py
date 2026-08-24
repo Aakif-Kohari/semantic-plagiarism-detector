@@ -18,11 +18,11 @@ class MultimodalPDFOCREngine:
     def __init__(self, dpi_resolution: int = 300, enable_table_extraction: bool = True):
         self.dpi_resolution = dpi_resolution
         self.enable_table_extraction = enable_table_extraction
-        self.processed_pages_log: List[Dict[str, Any]] = []
+        self.processed_pages_log: list[dict[str, Any]] = []
 
     def extract_text_from_pdf_page(
         self, page_number: int, mock_image_bytes: bytes
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Extracts text content and layout bounding boxes from a PDF page."""
         image_hash = hashlib.sha256(mock_image_bytes).hexdigest()
         extracted_text = f"Page {page_number} OCR Extracted Content: Multi-modal document processing with SHA-256 hash {image_hash[:10]}."
@@ -43,7 +43,7 @@ class MultimodalPDFOCREngine:
         self.processed_pages_log.append(page_record)
         return page_record
 
-    def get_extraction_summary() -> Dict[str, Any]:
+    def get_extraction_summary() -> dict[str, Any]:
         """Calculates aggregate OCR confidence and total pages processed telemetry."""
         total_pages = len(self.processed_pages_log)
         avg_confidence = (
@@ -69,11 +69,11 @@ class ParaphraseNeuralAlignmentEngine:
 
     def __init__(self, semantic_threshold: float = 0.82):
         self.semantic_threshold = semantic_threshold
-        self.aligned_sentence_pairs: List[Dict[str, Any]] = []
+        self.aligned_sentence_pairs: list[dict[str, Any]] = []
 
     def align_sentence_pair(
         self, sentence_a: str, sentence_b: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Aligns two candidate sentences and computes contextual paraphrase score."""
         vec_a = self._vectorize_sentence(sentence_a)
         vec_b = self._vectorize_sentence(sentence_b)
@@ -95,7 +95,7 @@ class ParaphraseNeuralAlignmentEngine:
         self.aligned_sentence_pairs.append(alignment_record)
         return alignment_record
 
-    def _vectorize_sentence(self, text: str) -> List[float]:
+    def _vectorize_sentence(self, text: str) -> list[float]:
         """Creates pseudo-semantic vector representation for text sentence."""
         vec = [0.0] * 128
         words = text.lower().split()

@@ -185,7 +185,7 @@ def _render_results():
                 "anomaly_results.csv", "text/csv")
 
 
-def _get_sample_documents() -> Dict[str, str]:
+def _get_sample_documents() -> dict[str, str]:
     """Get sample documents for demo."""
     return {
         "student_a.txt": "Machine learning is a subset of artificial intelligence that focuses on building systems that learn from data. Deep learning is a subset of machine learning that uses neural networks with many layers. The field has grown rapidly in recent years due to increased computational power and data availability.",

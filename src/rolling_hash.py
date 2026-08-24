@@ -52,7 +52,7 @@ class RollingHash:
         self.config = config or RollingHashConfig()
         self._precomputed_powers = {}
     
-    def _precompute_powers(self, max_len: int) -> List[int]:
+    def _precompute_powers(self, max_len: int) -> list[int]:
         """
         Precompute powers of the base for efficient rolling hash updates.
         
@@ -90,7 +90,7 @@ class RollingHash:
         else:
             return hash(token) & 0xFFFFFFFF
     
-    def compute_window_hash(self, tokens: List[str], start: int) -> int:
+    def compute_window_hash(self, tokens: list[str], start: int) -> int:
         """
         Compute polynomial hash for a specific window of tokens.
         
@@ -111,7 +111,7 @@ class RollingHash:
         
         return hash_value
     
-    def compute_rolling_hashes(self, tokens: List[str]) -> Iterator[int]:
+    def compute_rolling_hashes(self, tokens: list[str]) -> Iterator[int]:
         """
         Compute rolling hashes for all n-gram windows.
         
@@ -152,7 +152,7 @@ class RollingHash:
             
             yield current_hash
     
-    def compute_hash_set(self, tokens: List[str]) -> Set[int]:
+    def compute_hash_set(self, tokens: list[str]) -> set[int]:
         """
         Compute a set of all n-gram hashes for the given tokens.
         
@@ -167,7 +167,7 @@ class RollingHash:
         """
         return set(self.compute_rolling_hashes(tokens))
     
-    def compute_hash_dict(self, tokens: List[str]) -> dict:
+    def compute_hash_dict(self, tokens: list[str]) -> dict:
         """
         Compute a dictionary mapping positions to their n-gram hashes.
         
@@ -181,7 +181,7 @@ class RollingHash:
         """
         return {i: h for i, h in enumerate(self.compute_rolling_hashes(tokens))}
     
-    def compute_position_lookup(self, tokens: List[str]) -> dict:
+    def compute_position_lookup(self, tokens: list[str]) -> dict:
         """
         Create a lookup table from hash to positions.
         
@@ -219,7 +219,7 @@ class OptimizedDiffHash:
         self.config = RollingHashConfig(ngram_size=ngram_size)
         self.rolling_hash = RollingHash(self.config)
     
-    def compute_overlap_hashes(self, text_a: List[str], text_b: List[str]) -> Tuple[Set[int], Set[int]]:
+    def compute_overlap_hashes(self, text_a: list[str], text_b: list[str]) -> tuple[set[int], set[int]]:
         """
         Compute hash sets for overlap detection between two texts.
         
@@ -240,7 +240,7 @@ class OptimizedDiffHash:
         
         return hashes_a, hashes_b
     
-    def find_common_hashes(self, text_a: List[str], text_b: List[str]) -> Set[int]:
+    def find_common_hashes(self, text_a: list[str], text_b: list[str]) -> set[int]:
         """
         Find common n-gram hashes between two texts.
         
@@ -256,7 +256,7 @@ class OptimizedDiffHash:
         
         return hashes_a.intersection(hashes_b)
     
-    def compute_diff_regions(self, text_a: List[str], text_b: List[str]) -> List[Tuple[int, int]]:
+    def compute_diff_regions(self, text_a: list[str], text_b: list[str]) -> list[tuple[int, int]]:
         """
         Compute diff regions between two texts using hashing.
         
@@ -307,7 +307,7 @@ class OptimizedDiffHash:
         return diff_regions
 
 
-def compute_ngram_hashes_optimized(tokens: List[str], ngram_size: int = 3) -> Set[int]:
+def compute_ngram_hashes_optimized(tokens: list[str], ngram_size: int = 3) -> set[int]:
     """
     Convenience function to compute n-gram hash set using rolling hash.
     
@@ -343,7 +343,7 @@ class HighlightOverlapOptimizer:
         self.ngram_size = ngram_size
         self.diff_hash = OptimizedDiffHash(ngram_size)
     
-    def highlight_overlap(self, text_a: List[str], text_b: List[str]) -> Set[int]:
+    def highlight_overlap(self, text_a: list[str], text_b: list[str]) -> set[int]:
         """
         Find overlap between two texts using optimized rolling hashes.
         

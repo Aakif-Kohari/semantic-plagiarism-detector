@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 #: Mapping-style keys accepted by :meth:`Citation.__getitem__`, pointing at the
 #: attribute that backs each one. ``author`` and ``hash`` are the spellings the
 #: database layer uses; the others match the attribute names.
-_ITEM_KEYS: Dict[str, str] = {
+_ITEM_KEYS: dict[str, str] = {
     "author": "authors",
     "authors": "authors",
     "hash": "citation_hash",
@@ -84,7 +84,7 @@ class Citation:
                 self.authors, self.year, self.title
             )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return the entry as a dictionary.
 
         Carries both spellings the database layer uses (``author`` alongside
@@ -167,7 +167,7 @@ _YEAR_PATTERN = re.compile(r"\b(?:19|20)\d{2}\b")
 _TRAILING_PUNCTUATION = " .,;:\"'"
 
 #: ``(format_name, authors, year, title, source)``.
-ParsedCitation = Tuple[str, str, str, str, str]
+ParsedCitation = tuple[str, str, str, str, str]
 
 
 # ── Field helpers ─────────────────────────────────────────────────────────────
@@ -285,7 +285,7 @@ def _parse_heuristic(line: str) -> Optional[ParsedCitation]:
 # ── Public API ────────────────────────────────────────────────────────────────
 
 
-def extract_citations(text: str) -> List[Citation]:
+def extract_citations(text: str) -> list[Citation]:
     """Parse the bibliography section of a document.
 
     Each non-empty line is matched against APA, IEEE and MLA in turn, then
@@ -302,8 +302,8 @@ def extract_citations(text: str) -> List[Citation]:
     if not text or not isinstance(text, str):
         return []
 
-    citations: List[Citation] = []
-    seen_hashes: Set[str] = set()
+    citations: list[Citation] = []
+    seen_hashes: set[str] = set()
 
     for raw_line in text.split("\n"):
         line = raw_line.strip()
@@ -335,7 +335,7 @@ def extract_citations(text: str) -> List[Citation]:
     return citations
 
 
-def compute_jaccard_similarity(set_a: Set[str], set_b: Set[str]) -> float:
+def compute_jaccard_similarity(set_a: set[str], set_b: set[str]) -> float:
     """Compute the Jaccard similarity between two sets of citation keys.
 
     Args:

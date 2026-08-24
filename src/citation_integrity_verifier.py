@@ -20,8 +20,8 @@ class CitationIntegrityVerifier:
         }
 
     def verify_manuscript_citations(
-        self, citations: List[Dict[str, str]]
-    ) -> Dict[str, Any]:
+        self, citations: list[dict[str, str]]
+    ) -> dict[str, Any]:
         """
         Verifies list of citation objects: [{'doi': '...', 'title': '...', 'year': '...'}]
         """

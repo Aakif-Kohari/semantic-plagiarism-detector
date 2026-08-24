@@ -1554,7 +1554,7 @@ except ImportError:
         def __init__(self, maxsize: int = 10000, ttl: int = 60):
             super().__init__()
             self._ttl = ttl
-            self._times: Dict[str, float] = {}
+            self._times: dict[str, float] = {}
 
         def __getitem__(self, key: str) -> bool:
             if key in self._times and time.time() - self._times[key] > self._ttl:
@@ -1885,7 +1885,7 @@ class Permission(Enum):
 # ROLE-PERMISSION MAPPING
 # ============================================================================
 
-_ROLE_PERMISSIONS: Dict[UserRole, Set[Permission]] = {
+_ROLE_PERMISSIONS: dict[UserRole, set[Permission]] = {
     UserRole.USER: {
         Permission.VIEW_DASHBOARD,
         Permission.VIEW_PROFILE,
@@ -1961,7 +1961,7 @@ _ROLE_PERMISSIONS: Dict[UserRole, Set[Permission]] = {
 # ============================================================================
 
 
-def get_role_permissions(role: UserRole) -> Set[Permission]:
+def get_role_permissions(role: UserRole) -> set[Permission]:
     """Get all permissions for a role."""
     return _ROLE_PERMISSIONS.get(role, set())
 
@@ -2070,7 +2070,7 @@ def require_role(required_role: UserRole):
 # ============================================================================
 
 
-def get_user_role_enhanced(username: str) -> Dict[str, Any]:
+def get_user_role_enhanced(username: str) -> dict[str, Any]:
     """
     Get enhanced user role information.
 
@@ -2094,17 +2094,17 @@ def get_user_role_enhanced(username: str) -> Dict[str, Any]:
     }
 
 
-def get_roles_hierarchy() -> Dict[str, int]:
+def get_roles_hierarchy() -> dict[str, int]:
     """Get the hierarchy levels for all roles."""
     return {role.value: role.level() for role in UserRole}
 
 
-def get_available_permissions() -> List[str]:
+def get_available_permissions() -> list[str]:
     """Get list of all available permissions."""
     return [p.value for p in Permission]
 
 
-def get_roles_summary() -> Dict[str, Dict[str, Any]]:
+def get_roles_summary() -> dict[str, dict[str, Any]]:
     """Get summary of all roles and their permissions."""
     summary = {}
     for role in UserRole:
@@ -2117,7 +2117,7 @@ def get_roles_summary() -> Dict[str, Dict[str, Any]]:
     return summary
 
 
-def get_users_by_role(role: UserRole) -> List[str]:
+def get_users_by_role(role: UserRole) -> list[str]:
     """
     Get all users with a specific role.
 
@@ -2141,7 +2141,7 @@ def get_users_by_role(role: UserRole) -> List[str]:
         return []
 
 
-def get_users_by_permission(permission: Permission) -> List[str]:
+def get_users_by_permission(permission: Permission) -> list[str]:
     """
     Get all users who have a specific permission.
 
@@ -2378,7 +2378,7 @@ def generate_sso_state() -> str:
 
 def get_or_create_sso_user_enhanced(
     email: str, provider: str, provider_user_id: str, default_role: str = "teacher"
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Enhanced SSO user creation with security features.
 
@@ -2580,7 +2580,7 @@ def verify_sso_recovery_token(username: str, token: str) -> bool:
         return False
 
 
-def get_sso_user_info(username: str) -> Optional[Dict[str, Any]]:
+def get_sso_user_info(username: str) -> Optional[dict[str, Any]]:
     """
     Get SSO user information.
 
@@ -2619,7 +2619,7 @@ def get_sso_user_info(username: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def list_sso_users() -> List[Dict[str, Any]]:
+def list_sso_users() -> list[dict[str, Any]]:
     """
     List all SSO users in the system.
 
@@ -2815,7 +2815,7 @@ def get_sso_users_count() -> int:
         return 0
 
 
-def migrate_existing_sso_users() -> Dict[str, Any]:
+def migrate_existing_sso_users() -> dict[str, Any]:
     """
     Migrate existing SSO users to secure passwords.
 
