@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automated fault tolerance test for mid-session Redis connection drop and graceful in-memory failover (`tests/core/test_fault_tolerance.py`, `tests/utils/test_redis_fallback_failover.py`).
 - Added `--recursive` support to the CLI scan command for scanning documents in nested subdirectories.
 - Admin DB repair CLI with `--check` / `--vacuum` / `--reindex` for `corpus.db` and `users.db` (`scripts/repair_db.py`).
+- Run `pre-commit run --all-files` in the CI lint job (`.github/workflows/ci.yml`).
 
 ### Fixed
 - Graceful degradation when reportlab is not installed: badge generator module loads without reportlab and raises a clear error only when PDF generation is requested (`src/utils/badge_generator.py`).
