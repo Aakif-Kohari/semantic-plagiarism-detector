@@ -521,3 +521,169 @@ def test_apply_marks_without_css_class_uses_inline_style():
     assert MARK_OPEN_TAG in result
     assert 'class=' not in result
 
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for issue #3563
+#
+# highlight_overlap() built both n-gram indexes and then returned
+# _apply_marks(text_a, ranges_a, ...) without ever computing ranges_a or
+# ranges_b, so every call that got past the short-input guards raised
+# NameError. The guards (empty text, no word tokens, fewer words than the
+# match window) return early, which is why the cheaper cases above kept
+# passing. Everything below deliberately feeds documents that are longer than
+# the window so the range computation has to run.
+# ---------------------------------------------------------------------------
+
+LONG_SHARED_RUN = (
+    "the committee reviewed every submission carefully before the deadline "
+    "and recorded its findings in the shared spreadsheet"
+)
+
+
+def test_long_documents_do_not_raise():
+    """The regression itself: a realistic pair must not raise NameError."""
+    text_a = f"opening remarks from the chair {LONG_SHARED_RUN} closing notes"
+    text_b = f"a different preamble entirely {LONG_SHARED_RUN} and an appendix"
+
+    result_a, result_b = highlight_overlap(text_a, text_b)
+
+    assert "<mark" in result_a
+    assert "<mark" in result_b
+
+
+def test_long_documents_highlight_the_shared_run_on_both_sides():
+    """The shared sentence is marked in full in both documents."""
+    text_a = f"opening remarks from the chair {LONG_SHARED_RUN} closing notes"
+    text_b = f"a different preamble entirely {LONG_SHARED_RUN} and an appendix"
+
+    result_a, result_b = highlight_overlap(text_a, text_b)
+
+    for result in (result_a, result_b):
+        marked = result.split(MARK_OPEN_TAG)[1].split("</mark>")[0]
+        assert marked == LONG_SHARED_RUN
+
+
+def test_long_documents_leave_the_unique_text_unmarked():
+    """Text that only one document contains stays outside the <mark> tags."""
+    text_a = f"opening remarks from the chair {LONG_SHARED_RUN} closing notes"
+    text_b = f"a different preamble entirely {LONG_SHARED_RUN} and an appendix"
+
+    result_a, result_b = highlight_overlap(text_a, text_b)
+
+    unmarked_a = result_a.replace(MARK_OPEN_TAG, "").replace("</mark>", "")
+    assert "opening remarks from the chair" in result_a.split(MARK_OPEN_TAG)[0]
+    assert "closing notes" in result_a.split("</mark>")[-1]
+    assert unmarked_a == text_a
+
+    assert "a different preamble entirely" in result_b.split(MARK_OPEN_TAG)[0]
+    assert "and an appendix" in result_b.split("</mark>")[-1]
+
+
+def test_ranges_are_computed_against_the_opposite_document():
+    """A asks B's index and B asks A's, so an asymmetric pair marks both sides.
+
+    If the two arguments were ever swapped, the document whose run appears
+    twice would still highlight but the other one would not, so this pins the
+    orientation the restored assignments rely on.
+    """
+    shared = "alpha beta gamma delta epsilon"
+    text_a = f"{shared} then a tail that is unique to a"
+    text_b = f"a head unique to b then {shared} then {shared} again"
+
+    result_a, result_b = highlight_overlap(text_a, text_b, min_match_length=5)
+
+    assert result_a.count(MARK_OPEN_TAG) == 1
+    assert result_b.count(MARK_OPEN_TAG) == 1
+
+
+def test_covered_word_ranges_is_reachable_from_highlight_overlap(monkeypatch):
+    """highlight_overlap must actually call the range helper.
+
+    The helper survived the regression as dead code, so asserting that the
+    marks appear is not enough on its own -- a future rewrite could inline a
+    different scan and quietly drop the linear index again.
+    """
+    calls = []
+    original = diff_highlighter._covered_word_ranges
+
+    def recording(words, other_ngrams, window):
+        calls.append((tuple(words), window))
+        return original(words, other_ngrams, window)
+
+    monkeypatch.setattr(diff_highlighter, "_covered_word_ranges", recording)
+
+    text = f"{LONG_SHARED_RUN} and a trailing clause"
+    diff_highlighter.highlight_overlap(text, text)
+
+    assert len(calls) == 2, "expected one range computation per document"
+    assert {window for _, window in calls} == {4}
+
+
+def test_covered_word_ranges_merges_adjacent_windows():
+    """Overlapping windows collapse into one range so marks cannot nest."""
+    words = "alpha beta gamma delta epsilon zeta".split()
+    other = {tuple(words[i : i + 3]) for i in range(len(words) - 2)}
+
+    ranges = diff_highlighter._covered_word_ranges(words, other, 3)
+
+    assert ranges == [(0, len(words))]
+
+
+def test_covered_word_ranges_keeps_disjoint_runs_separate():
+    """Two runs separated by a non-matching word stay as two ranges."""
+    words = "alpha beta gamma sep delta epsilon zeta".split()
+    other = {("alpha", "beta", "gamma"), ("delta", "epsilon", "zeta")}
+
+    ranges = diff_highlighter._covered_word_ranges(words, other, 3)
+
+    assert ranges == [(0, 3), (4, 7)]
+
+
+def test_covered_word_ranges_returns_empty_when_nothing_matches():
+    """No shared window means no ranges, and _apply_marks escapes the text."""
+    words = "alpha beta gamma delta".split()
+
+    assert diff_highlighter._covered_word_ranges(words, set(), 3) == []
+
+
+def test_long_documents_stay_xml_parseable():
+    """Restored ranges must still produce balanced, escapable markup."""
+    text_a = f"<b>{LONG_SHARED_RUN}</b> & a tail"
+    text_b = f"<i>{LONG_SHARED_RUN}</i> & another tail"
+
+    result_a, result_b = highlight_overlap(text_a, text_b)
+
+    for result in (result_a, result_b):
+        ET.fromstring(f"<root>{result}</root>")
+        stripped = result.replace(MARK_OPEN_TAG, "").replace("</mark>", "")
+        assert "<b>" not in stripped and "<i>" not in stripped
+        assert html.unescape(stripped).count("&") == 1
+
+
+def test_long_documents_honour_css_class():
+    """css_class still wins over the inline style on the restored path."""
+    text_a = f"{LONG_SHARED_RUN} tail a"
+    text_b = f"{LONG_SHARED_RUN} tail b"
+
+    result_a, result_b = highlight_overlap(text_a, text_b, css_class="diff-hit")
+
+    assert '<mark class="diff-hit">' in result_a
+    assert '<mark class="diff-hit">' in result_b
+    assert MARK_OPEN_TAG not in result_a
+    assert MARK_OPEN_TAG not in result_b
+
+
+def test_long_documents_honour_stemming():
+    """use_stemming still matches inflections once the ranges are computed."""
+    text_a = "the students analyzed the corpus and recorded every finding"
+    text_b = "the students analyzing the corpus and recording every finding"
+
+    plain_a, _ = highlight_overlap(text_a, text_b, min_match_length=4)
+    stemmed_a, _ = highlight_overlap(
+        text_a, text_b, min_match_length=4, use_stemming=True
+    )
+
+    assert "<mark" not in plain_a
+    assert "<mark" in stemmed_a
+    assert "analyzed" in stemmed_a
