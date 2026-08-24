@@ -52,9 +52,9 @@ except ImportError:
 import string
 import unicodedata
 
+from src.core.parsers.docx_parser import ParsedDocxText
 from src.core.translator import translate_text
 from src.errors import EmptyDocumentError
-from src.core.parsers.docx_parser import ParsedDocxText
 
 # OCR dependencies are imported lazily so TXT/DOCX and normal text PDFs still
 # work even when Tesseract is not installed on the machine.
@@ -914,7 +914,7 @@ def _ocr_pdf_page(
     from src.utils.temp_manager import managed_ocr_temp_dir
 
     try:
-        with managed_ocr_temp_dir(prefix=f"ocr_pdf_p{page_index}_") as tmp_dir:
+        with managed_ocr_temp_dir(prefix=f"ocr_pdf_p{page_index}_"):
             with fitz.open(stream=pdf_bytes, filetype="pdf") as document:
                 page = document.load_page(page_index)
                 scale = dpi / 72
@@ -1840,7 +1840,7 @@ def extract_text_from_image(
 
     file_bytes = _read_pdf_bytes(file)
     try:
-        with managed_ocr_temp_dir(prefix="ocr_image_") as tmp_dir:
+        with managed_ocr_temp_dir(prefix="ocr_image_"):
             image = Image.open(io.BytesIO(file_bytes))
             try:
                 return pytesseract.image_to_string(
@@ -2003,7 +2003,36 @@ def extract_text(
     Raises:
         EmptyDocumentError: If the final extracted and cleaned text is empty.
     """
-    # ... [existing extraction logic for PDF, DOCX, TXT, etc.] ...
+    ocr_language, ocr_dpi = normalize_ocr_settings(
+        language=ocr_language,
+        dpi=ocr_dpi,
+    )
+
+    file_bytes = _read_pdf_bytes(file)
+    file = file_bytes
+
+    extension = filename.rsplit(".", 1)[-1].lower()
+
+    if extension == "pdf":
+        raw = extract_text_from_pdf(file, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
+    elif extension == "docx":
+        raw = extract_text_from_docx(file)
+    elif extension == "doc":
+        raw = extract_text_from_doc(file)
+    elif extension in ("md", "markdown", "mdown"):
+        raw = extract_text_from_md(file)
+    elif extension in ("zip", "7z", "tar", "gz"):
+        raw = extract_text_from_zip(file, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
+    elif extension == "rtf":
+        raw = extract_text_from_rtf(file)
+    elif extension == "epub":
+        raw = extract_text_from_epub(file)
+    elif extension in ("png", "jpg", "jpeg"):
+        raw = extract_text_from_image(file, ocr_language=ocr_language)
+    elif extension == "odt":
+        raw = extract_text_from_odt(file)
+    else:
+        raw = extract_text_from_txt(file)
 
     raw = strip_bibliography(raw)
     raw = normalize_unicode_spaces(raw)
