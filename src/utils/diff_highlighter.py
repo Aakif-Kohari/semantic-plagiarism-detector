@@ -302,6 +302,11 @@ def highlight_overlap(
         tuple(words_b[j : j + window]) for j in range(len(words_b) - window + 1)
     }
 
+    # Each document is highlighted against the *other* document's windows, so
+    # the index built from B decides what gets marked in A and vice versa.
+    ranges_a = _covered_word_ranges(words_a, ngrams_b, window)
+    ranges_b = _covered_word_ranges(words_b, ngrams_a, window)
+
     return _apply_marks(text_a, ranges_a, css_class=css_class), _apply_marks(
         text_b, ranges_b, css_class=css_class
     )
