@@ -174,7 +174,7 @@ def test_process_zip_empty():
 
 def test_process_zip_corrupted():
     """Verify that a corrupted ZIP raises a ValueError."""
-    with pytest.raises(ValueError, match="Invalid or corrupted ZIP archive."):
+    with pytest.raises(ValueError, match="Invalid or corrupted ZIP archive: missing ZIP header signature."):
         process_zip_file(b"this is not a zip file content")
 
 

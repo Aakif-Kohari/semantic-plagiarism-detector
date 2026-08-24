@@ -63,6 +63,11 @@ def process_zip_file(zip_bytes: bytes) -> Dict[str, bytes]:
     if not zip_bytes:
         raise ValueError("ZIP archive is empty.")
 
+    # Fast-fail if the standard ZIP magic signature is missing
+    magic = zip_bytes[:4]
+    if magic not in (b"PK\x03\x04", b"PK\x05\x06"):
+        raise ValueError("Invalid or corrupted ZIP archive: missing ZIP header signature.")
+
     extracted_files: Dict[str, bytes] = {}
 
     try:
