@@ -178,6 +178,7 @@ SSRF_DNS_RESOLUTION_FAILED = "DNS resolution failed for hostname '{hostname}': {
 SSRF_DOMAIN_NOT_ALLOWED = (
     "Webhook domain '{hostname}' is not in ALLOWED_WEBHOOK_DOMAINS."
 )
+SSRF_PORT_NOT_ALLOWED = "Unauthorized port {port} in webhook URL. Allowed ports: {allowed_ports}."
 SSRF_MAX_REDIRECTS_EXCEEDED = "Maximum HTTP redirect depth exceeded"
 SSRF_CIRCULAR_REDIRECT_LOOP = "Circular HTTP redirect loop detected"
 
