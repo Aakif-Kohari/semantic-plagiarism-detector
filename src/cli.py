@@ -636,6 +636,17 @@ def main() -> None:
         help="Number of migrations to revert (default: 1).",
     )
 
+    footprint_parser = db_subparsers.add_parser(
+        "footprint",
+        help="Measure vector embedding storage footprint in the corpus database.",
+    )
+    footprint_parser.add_argument(
+        "--output-format",
+        choices=["text", "json"],
+        default="text",
+        help="Output format (default: text).",
+    )
+
     # Issue #2985: Add purge-cache subcommand
     purge_parser = subparsers.add_parser(
         "purge-cache", help="Purge stale translations from the cross-lingual cache."
@@ -739,9 +750,27 @@ def main() -> None:
                 steps=args.steps,
             )
             sys.exit(exit_code)
+        elif getattr(args, "db_action", None) == "footprint":
+            try:
+                from src.db.corpus_db import get_embedding_storage_footprint
+                res = get_embedding_storage_footprint()
+            except Exception as e:
+                sys.stderr.write(f"Error calculating storage footprint: {e}\n")
+                sys.exit(1)
+
+            if args.output_format == "json":
+                print(json.dumps(res, indent=2))
+            else:
+                print("Vector Embedding Storage Footprint")
+                print("----------------------------------")
+                print(f"Total Database Size: {res['database_bytes']:,} bytes")
+                print(f"Total Embedding Size: {res['embedding_bytes']:,} bytes")
+                print(f"Embedding Storage Percentage: {res['embedding_percentage']:.2f}%")
+                print(f"Total Chunks: {res['chunk_count']:,}")
+            sys.exit(0)
         else:
             sys.stderr.write(
-                "Error: A valid db action (such as 'downgrade') is required.\n"
+                "Error: A valid db action (such as 'downgrade' or 'footprint') is required.\n"
             )
             sys.exit(1)
 
