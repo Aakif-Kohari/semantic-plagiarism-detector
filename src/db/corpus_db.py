@@ -74,6 +74,10 @@ def get_corpus_db_path() -> Path:
     return Path(_DB_PATH)
 
 
+class WeakConnection(sqlite3.Connection):
+    """Subclass of sqlite3.Connection that supports weak references."""
+    pass
+
 def _pool() -> dict[str, sqlite3.Connection]:
     """Return the connection pool belonging to the current thread."""
     pool = getattr(_connection_pool, "connections", None)
@@ -105,11 +109,11 @@ def _connect():
 
     if conn is None:
         try:
-            conn = sqlite3.connect(path, check_same_thread=False)
+            conn = sqlite3.connect(path, check_same_thread=False, factory=WeakConnection)
         except sqlite3.OperationalError:
             path = str(FALLBACK_CORPUS_DB_PATH)
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            conn = sqlite3.connect(path, check_same_thread=False)
+            conn = sqlite3.connect(path, check_same_thread=False, factory=WeakConnection)
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA journal_mode=WAL")
         pool[path] = conn
