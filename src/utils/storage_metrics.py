@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -229,3 +230,100 @@ def calculate_database_fragmentation(db_path: str) -> dict[str, float | int | st
     finally:
         if connection:
             connection.close()
+
+
+def _storage_history_db_path() -> Path:
+    """Default SQLite file used for daily storage snapshots."""
+    data_dir = Path(__file__).resolve().parents[2] / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir / "storage_history.db"
+
+
+def _connect_storage_history(
+    db_path: Optional[Path] = None,
+) -> sqlite3.Connection:
+    path = db_path or _storage_history_db_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path))
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS storage_history (
+            date TEXT PRIMARY KEY,
+            db_size_bytes INTEGER,
+            temp_size_bytes INTEGER
+        )
+        """
+    )
+    return conn
+
+
+def record_storage_snapshot(db_path: Optional[Path] = None) -> None:
+    """Record today's database and temp directory sizes in storage_history."""
+    from src.utils.temp_manager import get_temp_directory_size_bytes
+
+    usage = calculate_storage_usage()
+    db_size_bytes = int(usage["sqlite_bytes"])
+    temp_size_bytes = int(get_temp_directory_size_bytes())
+    today = date.today().isoformat()
+
+    conn = _connect_storage_history(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO storage_history (date, db_size_bytes, temp_size_bytes)
+            VALUES (?, ?, ?)
+            ON CONFLICT(date) DO UPDATE SET
+                db_size_bytes = excluded.db_size_bytes,
+                temp_size_bytes = excluded.temp_size_bytes
+            """,
+            (today, db_size_bytes, temp_size_bytes),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_projected_days_until_full(
+    max_disk_bytes: int,
+    db_path: Optional[Path] = None,
+) -> float:
+    """Estimate days until combined db+temp usage reaches max_disk_bytes.
+
+    Uses a simple linear growth rate from the oldest to newest snapshot.
+    Returns ``float('inf')`` when growth cannot be projected (too few points
+    or non-positive growth). Returns ``0.0`` when usage already meets or
+    exceeds the limit.
+    """
+    conn = _connect_storage_history(db_path)
+    try:
+        rows = conn.execute(
+            """
+            SELECT date, db_size_bytes, temp_size_bytes
+            FROM storage_history
+            ORDER BY date ASC
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+
+    if len(rows) < 2:
+        return float("inf")
+
+    first_day = datetime.strptime(rows[0][0], "%Y-%m-%d").date()
+    last_day = datetime.strptime(rows[-1][0], "%Y-%m-%d").date()
+    elapsed_days = (last_day - first_day).days
+    if elapsed_days <= 0:
+        return float("inf")
+
+    first_total = int(rows[0][1] or 0) + int(rows[0][2] or 0)
+    last_total = int(rows[-1][1] or 0) + int(rows[-1][2] or 0)
+    growth = last_total - first_total
+    if growth <= 0:
+        return float("inf")
+
+    if last_total >= max_disk_bytes:
+        return 0.0
+
+    bytes_per_day = growth / elapsed_days
+    remaining = max_disk_bytes - last_total
+    return remaining / bytes_per_day
