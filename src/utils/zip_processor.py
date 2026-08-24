@@ -1,4 +1,5 @@
 import io
+import logging
 import os
 import zipfile
 from pathlib import Path
@@ -9,6 +10,8 @@ from src.utils.filename import (
     unique_filename,
     validate_document_extension,
 )
+
+logger = logging.getLogger(__name__)
 
 # Safety limits for ZIP bomb protection
 MAX_TOTAL_DECOMPRESSED_SIZE = 200 * 1024 * 1024  # 200 MB
@@ -42,9 +45,7 @@ def is_safe_zip_path(target_dir: Path, extracted_path: Path) -> bool:
     return True
 
 
-def iter_zip_files(
-    zip_bytes: bytes,
-) -> Generator[Tuple[str, bytes], None, None]:
+def process_zip_file(zip_bytes: bytes, skip_corrupted: bool = False) -> Dict[str, bytes]:
     """
     Yields (filename, file_bytes) tuples one entry at a time from a ZIP archive.
 
@@ -109,9 +110,15 @@ def iter_zip_files(
 
                 # Check for encryption
                 if zip_info.flag_bits & 0x1:
-                    raise ValueError(
-                        "Password-protected or encrypted ZIP files are not supported."
-                    )
+                    if skip_corrupted:
+                        logger.warning(
+                            f"Skipping encrypted ZIP entry '{zip_info.filename}'"
+                        )
+                        continue
+                    else:
+                        raise ValueError(
+                            "Password-protected or encrypted ZIP files are not supported."
+                        )
 
                 # Normalize filename slashes (Windows to Unix format)
                 filename = zip_info.filename.replace("\\", "/")
@@ -130,9 +137,15 @@ def iter_zip_files(
                 try:
                     file_data = zf.read(zip_info)
                 except (zipfile.BadZipFile, RuntimeError) as e:
-                    raise ValueError(
-                        f"Corrupted or protected entry: {zip_info.filename}"
-                    ) from e
+                    if skip_corrupted:
+                        logger.warning(
+                            f"Skipping corrupted or protected ZIP entry '{zip_info.filename}': {e}"
+                        )
+                        continue
+                    else:
+                        raise ValueError(
+                            f"Corrupted or protected entry: {zip_info.filename}"
+                        ) from e
 
                 # Skip empty files
                 if not file_data:

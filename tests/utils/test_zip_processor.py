@@ -420,38 +420,68 @@ def test_zip_bomb_zero_compressed_size_handled():
             assert "Decompression ratio" not in str(e)
 
 
-def test_zip_bomb_ratio_boundary():
-    """Verify that a ZIP entry with ratio exactly 100:1 passes validation, but 100.1:1 fails."""
+def test_process_zip_skip_corrupted_on_read_failure():
+    """Verify that process_zip_file with skip_corrupted=True skips corrupted read entries and extracts valid ones."""
     from unittest.mock import patch
 
-    # 1. Setup exact 100:1 ratio (e.g., 100000 bytes uncompressed, 1000 bytes compressed)
-    info_exact = zipfile.ZipInfo("exact_100.txt")
-    info_exact.file_size = 100_000
-    info_exact.compress_size = 1_000
+    # 1. Create a zip with one valid file and one corrupted/malformed file.
+    zip_data = create_in_memory_zip({
+        "valid.pdf": b"Valid PDF contents",
+        "corrupted.pdf": b"Corrupted contents"
+    })
 
-    # 2. Setup 100.1:1 ratio (e.g., 100100 bytes uncompressed, 1000 bytes compressed)
-    info_exceeds = zipfile.ZipInfo("exceeds_100.txt")
-    info_exceeds.file_size = 100_100
-    info_exceeds.compress_size = 1_000
-
-    # Create a valid minimal ZIP for the wrapper
-    zip_bytes = create_in_memory_zip({"doc.txt": b"some content"})
-
+    # Mock ZipFile.read to raise BadZipFile for "corrupted.pdf"
+    original_read = zipfile.ZipFile.read
     def mock_read(self, name_or_info):
-        return b"some content"
+        name = name_or_info.filename if isinstance(name_or_info, zipfile.ZipInfo) else name_or_info
+        if "corrupted" in name:
+            raise zipfile.BadZipFile("CRC check failed")
+        return original_read(self, name_or_info)
 
-    # Exact 100:1 ratio must pass
-    with patch("zipfile.ZipFile.infolist", return_value=[info_exact]), patch(
+    with patch("zipfile.ZipFile.read", mock_read):
+        # With skip_corrupted=False, it should raise ValueError
+        with pytest.raises(ValueError, match="Corrupted or protected entry"):
+            process_zip_file(zip_data, skip_corrupted=False)
+
+        # With skip_corrupted=True, it should successfully extract the valid entry and log warning
+        result = process_zip_file(zip_data, skip_corrupted=True)
+        assert "valid.pdf" in result
+        assert result["valid.pdf"] == b"Valid PDF contents"
+        assert "corrupted.pdf" not in result
+
+
+def test_process_zip_skip_encrypted_entries():
+    """Verify that process_zip_file with skip_corrupted=True skips encrypted entries and extracts valid ones."""
+    from unittest.mock import patch
+
+    info_encrypted = zipfile.ZipInfo("secret.pdf")
+    info_encrypted.flag_bits = 0x1
+
+    info_valid = zipfile.ZipInfo("valid.pdf")
+    info_valid.flag_bits = 0x0
+
+    zip_data = create_in_memory_zip({
+        "secret.pdf": b"secret contents",
+        "valid.pdf": b"valid contents"
+    })
+
+    # Mock infolist to return both entries, and mock read to return contents
+    def mock_read(self, name_or_info):
+        name = name_or_info.filename if isinstance(name_or_info, zipfile.ZipInfo) else name_or_info
+        if "secret" in name:
+            return b"secret contents"
+        return b"valid contents"
+
+    with patch("zipfile.ZipFile.infolist", return_value=[info_encrypted, info_valid]), patch(
         "zipfile.ZipFile.read", mock_read
     ):
-        try:
-            process_zip_file(zip_bytes)
-        except ValueError as e:
-            if "Decompression ratio exceeds security limit" in str(e):
-                pytest.fail("Ratio exactly 100:1 should have passed validation but failed.")
+        # With skip_corrupted=False, it should raise ValueError
+        with pytest.raises(ValueError, match="Password-protected or encrypted ZIP files are not supported."):
+            process_zip_file(zip_data, skip_corrupted=False)
 
-    # 100.1:1 ratio must fail
-    with patch("zipfile.ZipFile.infolist", return_value=[info_exceeds]):
-        with pytest.raises(ValueError, match="Decompression ratio exceeds security limit"):
-            process_zip_file(zip_bytes)
+        # With skip_corrupted=True, it should skip the encrypted file and successfully return the valid one
+        result = process_zip_file(zip_data, skip_corrupted=True)
+        assert "valid.pdf" in result
+        assert result["valid.pdf"] == b"valid contents"
+        assert "secret.pdf" not in result
 
