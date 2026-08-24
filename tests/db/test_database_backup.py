@@ -156,3 +156,38 @@ def test_get_database_file_size_bytes_rejects_path_traversal(tmp_path):
     outside.write_text("x")
     with pytest.raises(ValueError, match="outside the allowed directory"):
         get_database_file_size_bytes(outside)
+
+
+def test_create_database_backup_sets_restrictive_permissions(tmp_path, monkeypatch):
+    import os
+    from src.db.database_backup import create_database_backup
+
+    source = tmp_path / "source.db"
+    create_test_database(source)
+    backup_dir = tmp_path / "backups"
+
+    chmod_calls = []
+    orig_chmod = os.chmod
+
+    def mock_chmod(path, mode):
+        chmod_calls.append((path, mode))
+        try:
+            orig_chmod(path, mode)
+        except OSError:
+            pass
+
+    monkeypatch.setattr(os, "chmod", mock_chmod)
+
+    # Test compressed backup (.db.gz)
+    gz_backup = create_database_backup(source, backup_dir=backup_dir, compress_backup=True)
+    assert gz_backup.exists()
+    assert len(chmod_calls) >= 1
+    assert chmod_calls[-1][0] == gz_backup
+    assert chmod_calls[-1][1] == 0o600
+
+    # Test uncompressed backup (.db)
+    db_backup = create_database_backup(source, backup_dir=backup_dir, compress_backup=False)
+    assert db_backup.exists()
+    assert len(chmod_calls) >= 2
+    assert chmod_calls[-1][0] == db_backup
+    assert chmod_calls[-1][1] == 0o600

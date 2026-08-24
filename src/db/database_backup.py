@@ -186,6 +186,11 @@ def create_database_backup(
         backup_path = destination_dir / f"{source_name}.{timestamp}.db"
         backup_path.write_bytes(snapshot_bytes)
 
+    try:
+        os.chmod(backup_path, 0o600)
+    except OSError:
+        pass
+
     return backup_path
 
 
