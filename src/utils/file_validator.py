@@ -14,6 +14,7 @@ descriptive feedback and to enforce stricter business logic rules.
 """
 
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Union
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 # This should match or be slightly less than the server.maxUploadSize in config.toml
 # to ensure our application-level check catches it before the server does,
 # allowing us to return a friendly error message.
-MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024
+MAX_FILE_SIZE_BYTES = int(os.getenv("MAX_UPLOAD_SIZE_MB", "50")) * 1024 * 1024
 
 # Allowed file extensions for document processing.
 # These correspond to the formats supported by src/core/document_parser.py
@@ -128,6 +129,14 @@ class FileValidator:
         Returns:
             A ValidationResult object indicating success or failure.
         """
+        if "\x00" in filename:
+            return ValidationResult(
+                is_valid=False,
+                filename=filename,
+                error_message="Filename contains invalid characters.",
+                error_code="INVALID_FILENAME_CHARACTERS"
+            )
+
         logger.debug("Validating file: %s", filename)
         
         # 1. Check file size
@@ -207,6 +216,13 @@ class FileValidator:
         
     def _check_extension(self, filename: str) -> ValidationResult:
         """Verify the file extension is in the allowed list.
+
+        Also detects "double extension" disguise attempts (e.g.
+        ``thesis.pdf.exe`` or ``report.docx.vbs``), where an earlier part of
+        the filename looks like a legitimate document extension but the
+        actual (final) extension is something else — a common technique for
+        tricking users and naive server-side checks into treating a
+        dangerous file as safe.
         
         Args:
             filename: The name of the file.
@@ -225,6 +241,31 @@ class FileValidator:
                 error_message=error_msg,
                 error_code="MISSING_EXTENSION"
             )
+
+        suffixes = [s.lower() for s in Path(filename).suffixes]
+        if len(suffixes) > 1:
+            final_suffix = suffixes[-1]
+            non_final_suffixes = suffixes[:-1]
+            if final_suffix not in self.allowed_extensions and any(
+                s in self.allowed_extensions for s in non_final_suffixes
+            ):
+                disguised_as = next(
+                    s for s in non_final_suffixes if s in self.allowed_extensions
+                )
+                error_msg = (
+                    f"File '{filename}' has a suspicious double extension: "
+                    f"it looks like a '{disguised_as}' document but the actual "
+                    f"file extension is '{final_suffix}', which is not supported. "
+                    f"This pattern (e.g. 'report.docx.vbs') is often used to "
+                    f"disguise malicious files — the file was rejected."
+                )
+                logger.warning(error_msg)
+                return ValidationResult(
+                    is_valid=False,
+                    filename=filename,
+                    error_message=error_msg,
+                    error_code="DOUBLE_EXTENSION"
+                )
             
         if ext not in self.allowed_extensions:
             error_msg = (

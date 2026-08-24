@@ -19,6 +19,7 @@ import ipaddress
 import logging
 import os
 import socket
+import threading
 import time
 import idna
 import urllib.parse
@@ -41,6 +42,7 @@ from src.errors import (
     SSRF_INVALID_IP_FORMAT,
     SSRF_MAX_REDIRECTS_EXCEEDED,
     SSRF_MISSING_HOSTNAME,
+    SSRF_PORT_NOT_ALLOWED,
     SSRF_WEBHOOK_URL_EMPTY,
 )
 
@@ -92,11 +94,18 @@ class SSRFProtector:
     """Core security module designed to prevent SSRF attacks under strict typing."""
 
     _dns_cache: "OrderedDict[str, tuple[str, float]]" = OrderedDict()
+    _cache_lock: threading.Lock = threading.Lock()
     DNS_CACHE_TTL_SECONDS: int = 300
     DNS_CACHE_MAX_SIZE: int = 1000
     RESTRICTED_IPV4_CIDR_BLOCKS: Tuple[str, ...] = RESTRICTED_IPV4_CIDR_BLOCKS
     MAX_REDIRECT_DEPTH: int = 5
     DEFAULT_USER_AGENT: str = DEFAULT_USER_AGENT
+
+    @classmethod
+    def clear_dns_cache(cls) -> None:
+        """Clear all cached DNS resolution entries in a thread-safe manner."""
+        with cls._cache_lock:
+            cls._dns_cache.clear()
 
     @classmethod
     def get_dns_cache_ttl(cls) -> int:
@@ -119,16 +128,37 @@ class SSRFProtector:
         return getattr(cls, "DNS_CACHE_TTL_SECONDS", 300)
 
     @classmethod
+    def get_allowed_webhook_ports(cls) -> set[int]:
+        """Return the set of allowed webhook target ports.
+
+        Reads ALLOWED_WEBHOOK_PORTS environment variable (comma-separated integers),
+        defaulting to {443}. Restricts allowed ports to prevent port scanning attacks (Issue #3190).
+        """
+        env_ports = os.getenv("ALLOWED_WEBHOOK_PORTS")
+        if env_ports is not None and env_ports.strip():
+            allowed = set()
+            for item in env_ports.split(","):
+                item_str = item.strip()
+                if item_str.isdigit():
+                    port_num = int(item_str)
+                    if 1 <= port_num <= 65535:
+                        allowed.add(port_num)
+            if allowed:
+                return allowed
+        return {443}
+
+    @classmethod
     def _resolve_hostname(cls, hostname: str) -> str:
         current_time = float(time.time())
         ttl_seconds = cls.get_dns_cache_ttl()
 
-        if hostname in cls._dns_cache:
-            cached_ip, timestamp = cls._dns_cache[hostname]
-            if current_time - timestamp < ttl_seconds:
-                cls._dns_cache.move_to_end(hostname)
-                return cached_ip
-            del cls._dns_cache[hostname]
+        with cls._cache_lock:
+            if hostname in cls._dns_cache:
+                cached_ip, timestamp = cls._dns_cache[hostname]
+                if current_time - timestamp < ttl_seconds:
+                    cls._dns_cache.move_to_end(hostname)
+                    return cached_ip
+                del cls._dns_cache[hostname]
 
         try:
             addr_info = socket.getaddrinfo(hostname, None)
@@ -138,10 +168,11 @@ class SSRFProtector:
                 )
 
             ip_str = str(addr_info[0][4][0])
-            cls._dns_cache[hostname] = (ip_str, current_time)
-            cls._dns_cache.move_to_end(hostname)
-            if len(cls._dns_cache) > cls.DNS_CACHE_MAX_SIZE:
-                cls._dns_cache.popitem(last=False)
+            with cls._cache_lock:
+                cls._dns_cache[hostname] = (ip_str, current_time)
+                cls._dns_cache.move_to_end(hostname)
+                if len(cls._dns_cache) > cls.DNS_CACHE_MAX_SIZE:
+                    cls._dns_cache.popitem(last=False)
             return ip_str
 
         except socket.gaierror as e:
@@ -162,6 +193,16 @@ class SSRFProtector:
         if parsed.scheme != "https":
             raise SSRFSecurityException(
                 SSRF_INSECURE_SCHEME.format(scheme=parsed.scheme)
+            )
+
+        # Restrict allowed destination ports to prevent internal port scanning (Issue #3190)
+        port = parsed.port if parsed.port is not None else 443
+        allowed_ports = cls.get_allowed_webhook_ports()
+        if port not in allowed_ports:
+            raise SSRFSecurityException(
+                SSRF_PORT_NOT_ALLOWED.format(
+                    port=port, allowed_ports=sorted(list(allowed_ports))
+                )
             )
 
         hostname: Optional[str] = parsed.hostname

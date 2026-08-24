@@ -1,4 +1,4 @@
-import csv
+﻿import csv
 import io
 import json
 import zipfile
@@ -313,8 +313,8 @@ class TestNormalizeCsvHeaders:
 
     def test_unicode_characters_preserved(self):
         """Unicode characters must be preserved in normalized headers."""
-        result = normalize_csv_headers(["café", "naïve", "résumé"])
-        assert result == ["café", "naïve", "résumé"]
+        result = normalize_csv_headers(["cafÃ©", "naÃ¯ve", "rÃ©sumÃ©"])
+        assert result == ["cafÃ©", "naÃ¯ve", "rÃ©sumÃ©"]
 
     def test_single_header(self):
         """A single header must be normalized correctly."""
@@ -886,3 +886,68 @@ class TestLegacyFunctions:
         incidents = [{"incident_id": "1", "document_a": "A"}]
         result = export_incidents_json_stream(incidents)
         assert json.loads(result.decode("utf-8"))[0]["incident_id"] == "1"
+
+# ---------------------------------------------------------------------------
+# Tests for Progress Callback (Issue #3467)
+# ---------------------------------------------------------------------------
+
+def test_generate_bulk_reports_zip_progress_callback():
+    from src.utils.bulk_export import generate_bulk_reports_zip
+    flags = [
+        {"doc_a": "A.pdf", "doc_b": "B.pdf", "similarity": 0.5},
+        {"doc_a": "C.pdf", "doc_b": "D.pdf", "similarity": 0.6},
+    ]
+    calls = []
+    def progress_cb(current, total):
+        calls.append((current, total))
+
+    generate_bulk_reports_zip(flags, include_pdf=False, progress_callback=progress_cb)
+
+    assert calls == [(1, 2), (2, 2)]
+
+def test_create_batch_incident_zip_archive_progress_callback():
+    from src.utils.bulk_export import create_batch_incident_zip_archive
+    incidents = [
+        {"incident_id": "1", "document_a": "A", "document_b": "B"},
+        {"incident_id": "2", "document_a": "C", "document_b": "D"},
+        {"incident_id": "3", "document_a": "E", "document_b": "F"},
+    ]
+    calls = []
+    def progress_cb(current, total):
+        calls.append((current, total))
+
+    # Mock generate_plagiarism_report to speed up test
+    with patch("src.utils.bulk_export.generate_plagiarism_report") as mock_report:
+        mock_report.return_value = io.BytesIO(b"fake pdf")
+        create_batch_incident_zip_archive(incidents, progress_callback=progress_cb)
+
+    assert calls == [(1, 3), (2, 3), (3, 3)]
+
+def test_create_documents_bulk_zip_archive_progress_callback():
+    from src.utils.bulk_export import create_documents_bulk_zip_archive
+    filenames = ["doc1.pdf", "doc2.pdf"]
+    calls = []
+    def progress_cb(current, total):
+        calls.append((current, total))
+
+    with patch("src.utils.bulk_export.get_all_documents", return_value=[]), \
+         patch("src.utils.bulk_export.get_document_word_counts", return_value={}), \
+         patch("src.utils.bulk_export._connect") as mock_connect:
+
+        # mock conn
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value.fetchall.return_value = []
+        mock_connect.return_value.__enter__.return_value = mock_conn
+
+        create_documents_bulk_zip_archive(filenames, progress_callback=progress_cb)
+
+    assert calls == [(1, 2), (2, 2)]
+
+def test_generate_bulk_reports_zip_no_callback():
+    from src.utils.bulk_export import generate_bulk_reports_zip
+    flags = [
+        {"doc_a": "A.pdf", "doc_b": "B.pdf", "similarity": 0.5},
+    ]
+    # Should not raise any error
+    result = generate_bulk_reports_zip(flags, include_pdf=False)
+    assert isinstance(result, bytes)

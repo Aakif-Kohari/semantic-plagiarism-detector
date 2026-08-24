@@ -722,3 +722,99 @@ def test_deleted_chunks_has_deleted_at_column():
     finally:
         conn.close()
 
+
+def test_get_embedding_storage_footprint_empty(mock_db):
+    """Test storage footprint on an empty database."""
+    from src.db.corpus_db import get_embedding_storage_footprint
+
+    # Ensure empty
+    clear_all_data()
+
+    res = get_embedding_storage_footprint()
+    assert res["embedding_bytes"] == 0
+    assert res["chunk_count"] == 0
+    assert isinstance(res["database_bytes"], int)
+    assert res["database_bytes"] > 0  # SQLite db file has overhead even if empty
+    assert res["embedding_percentage"] == 0.0
+
+
+def test_get_embedding_storage_footprint_normal(mock_db):
+    """Test storage footprint with normal populated chunks."""
+    from src.db.corpus_db import get_embedding_storage_footprint
+
+    clear_all_data()
+    add_document("doc1.pdf", "hash_footprint_1")
+    
+    # Add dummy embeddings of a known size (e.g. 384 floats = 1536 bytes each)
+    dummy_emb_1 = np.ones(384, dtype=np.float32)
+    dummy_emb_2 = np.ones(384, dtype=np.float32)
+    
+    chunks = [
+        (0, "doc1.pdf", 0, "Paragraph 1 text", dummy_emb_1),
+        (1, "doc1.pdf", 1, "Paragraph 2 text", dummy_emb_2),
+    ]
+    add_chunks(chunks)
+
+    res = get_embedding_storage_footprint()
+    assert res["chunk_count"] == 2
+    # 2 * 384 * 4 = 3072 bytes
+    assert res["embedding_bytes"] == 3072
+    assert res["database_bytes"] > 0
+    assert 0.0 < res["embedding_percentage"] <= 100.0
+
+
+def test_get_embedding_storage_footprint_missing_file(monkeypatch, mock_db):
+    """Test storage footprint handles OSError when checking DB file size."""
+    from src.db.corpus_db import get_embedding_storage_footprint
+    from pathlib import Path
+
+    def mock_stat(*args, **kwargs):
+        raise OSError("File not found mocked")
+
+    monkeypatch.setattr(Path, "stat", mock_stat)
+
+    res = get_embedding_storage_footprint()
+    
+    # database_bytes should fallback to 0 when stat raises OSError
+    assert res["database_bytes"] == 0
+    assert res["embedding_percentage"] == 0.0
+
+
+def test_get_embedding_storage_footprint_null_values(mock_db):
+    """Test storage footprint gracefully handles NULL returned from SUM() query."""
+    from src.db.corpus_db import get_embedding_storage_footprint, _connect
+
+    clear_all_data()
+
+    # Manually insert a chunk with a NULL embedding to force SUM() behavior.
+    # Note: the chunks table has a NOT NULL constraint on embedding, but 
+    # we can bypass it by temporarily dropping the table or just querying an empty table
+    # Wait, if table is empty, SUM() returns NULL.
+    # We already test empty table, let's explicitly mock the cursor to return (None, 0)
+    
+    class MockCursor:
+        def fetchone(self):
+            return (None, 0)
+            
+    class MockConn:
+        def execute(self, query):
+            return MockCursor()
+        def __enter__(self):
+            return self
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            pass
+
+    import src.db.corpus_db
+    original_connect = src.db.corpus_db._connect
+    
+    def mock_connect():
+        return MockConn()
+
+    src.db.corpus_db._connect = mock_connect
+    try:
+        res = get_embedding_storage_footprint()
+        assert res["embedding_bytes"] == 0
+        assert res["chunk_count"] == 0
+    finally:
+        src.db.corpus_db._connect = original_connect
+
