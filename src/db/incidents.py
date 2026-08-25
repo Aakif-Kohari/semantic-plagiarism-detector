@@ -803,6 +803,9 @@ def incidents_to_csv(incidents: Iterable[Mapping[str, Any]]) -> bytes:
     return buffer.getvalue().encode("utf-8-sig")
 
 
+export_incidents_to_csv = incidents_to_csv
+
+
 def export_current_flags_csv(
     flags: Iterable[Mapping[str, Any]],
     db_path: str | Path = DEFAULT_DB_PATH,
