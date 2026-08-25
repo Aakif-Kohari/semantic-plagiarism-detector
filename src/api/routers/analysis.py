@@ -1,5 +1,6 @@
 """src/api/routers/analysis.py - Plagiarism analysis and scan job management router."""
 
+import hashlib
 import logging
 import os
 import uuid
@@ -32,6 +33,7 @@ from src.api.schemas import (
     AsyncScanJobResponse,
     AsyncScanStatusResponse,
     ErrorResponse,
+    ScanTextRequest,
     SimilarityCheckResponse,
 )
 from src.core.document_parser import extract_text
@@ -407,113 +409,183 @@ async def scan_document(
                 detail="Failed to extract readable text from the uploaded file.",
             )
 
-        words = extracted_text.split()
-        word_count = len(words)
-
-        with spd_scan_duration_seconds.labels(stage="chunking").time():
-            chunks = chunk_document(extracted_text)
-            if not chunks:
-                chunks = [extracted_text[:1000]]
-
-        with spd_scan_duration_seconds.labels(stage="embedding").time():
-            uploaded_embeddings = embed_chunks(chunks)
-            doc_embedding = get_document_embedding(uploaded_embeddings)
-            corpus_docs = get_corpus_documents_with_embeddings()
-
-        matched_documents = []
-        max_overall_score = 0.0
-        max_chunk_overall_score = 0.0
-        uploaded_chunks_flagged = np.zeros(len(chunks), dtype=bool)
-
-        with spd_scan_duration_seconds.labels(stage="matrix comparison").time():
-            for corpus_filename, corpus_data in corpus_docs.items():
-                if corpus_filename == filename:
-                    continue
-
-                c_embeddings = corpus_data["embeddings"]
-                c_chunks = corpus_data["chunks"]
-
-                if c_embeddings.size == 0:
-                    continue
-
-                c_doc_embedding = get_document_embedding(c_embeddings)
-                sim_doc = float(
-                    np.clip(
-                        cosine_similarity(
-                            doc_embedding.reshape(1, -1), c_doc_embedding.reshape(1, -1)
-                        )[0, 0],
-                        0.0,
-                        1.0,
-                    )
-                )
-
-                sim_matrix = cosine_similarity(uploaded_embeddings, c_embeddings)
-                sim_chunk = float(np.max(sim_matrix))
-
-                chunk_maxes = np.max(sim_matrix, axis=1)
-                uploaded_chunks_flagged |= (chunk_maxes >= threshold)
-
-                combined_score = max(sim_doc, sim_chunk)
-                max_overall_score = max(max_overall_score, sim_doc)
-                max_chunk_overall_score = max(max_chunk_overall_score, sim_chunk)
-
-                if combined_score >= threshold:
-                    severity = "🔴 High" if combined_score >= 0.90 else "🟡 Medium"
-
-                    similar_chunks = find_most_similar_chunks(
-                        chunks_a=[chunk.text for chunk in chunks],
-                        chunks_b=[chunk.text for chunk in c_chunks],
-                        emb_a=uploaded_embeddings,
-                        emb_b=c_embeddings,
-                        top_k=top_k,
-                        threshold=threshold,
-                    )
-
-                    flagged_chunks = [
-                        {
-                            "uploaded_chunk": pair[0],
-                            "matched_chunk": pair[1],
-                            "similarity_score": round(float(pair[2]), 4),
-                        }
-                        for pair in similar_chunks
-                    ]
-
-                    matched_documents.append(
-                        {
-                            "filename": corpus_filename,
-                            "document_similarity_score": round(sim_doc, 4),
-                            "max_chunk_similarity_score": round(sim_chunk, 4),
-                            "severity": severity,
-                            "flagged_chunks": flagged_chunks,
-                        }
-                    )
-
-            matched_documents.sort(
-                key=lambda x: x["max_chunk_similarity_score"], reverse=True
-            )
-            is_flagged = len(matched_documents) > 0 or max_chunk_overall_score >= threshold
-            
-            total_flagged = int(np.sum(uploaded_chunks_flagged))
-            plagiarism_density = int(round((total_flagged / len(chunks)) * 100)) if len(chunks) > 0 else 0
-
-        return {
-            "filename": filename,
-            "word_count": word_count,
-            "chunk_count": len(chunks),
-            "plagiarism_flagged": is_flagged,
-            "threshold_used": threshold,
-            "plagiarism_density": plagiarism_density,
-            "overall_document_similarity": round(max_overall_score, 4),
-            "max_chunk_similarity": round(max_chunk_overall_score, 4),
-            "matched_documents_count": len(matched_documents),
-            "matched_documents": matched_documents,
-        }
+        return _perform_text_scan(
+            extracted_text=extracted_text,
+            filename=filename,
+            threshold=threshold,
+            top_k=top_k,
+        )
     finally:
         if os.path.exists(temp_path):
             try:
                 os.unlink(temp_path)
             except Exception:
                 pass
+
+
+def _perform_text_scan(
+    extracted_text: str,
+    filename: str,
+    threshold: float,
+    top_k: int = 3,
+) -> dict:
+    """Core embedding and vector comparison pipeline shared by file scan and raw text scan endpoints."""
+    if not extracted_text or not extracted_text.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Failed to extract readable text from the submission.",
+        )
+
+    words = extracted_text.split()
+    word_count = len(words)
+
+    with spd_scan_duration_seconds.labels(stage="chunking").time():
+        chunks = chunk_document(extracted_text)
+        if not chunks:
+            chunks = [extracted_text[:1000]]
+
+    with spd_scan_duration_seconds.labels(stage="embedding").time():
+        uploaded_embeddings = embed_chunks(chunks)
+        doc_embedding = get_document_embedding(uploaded_embeddings)
+        corpus_docs = get_corpus_documents_with_embeddings()
+
+    matched_documents = []
+    max_overall_score = 0.0
+    max_chunk_overall_score = 0.0
+    uploaded_chunks_flagged = np.zeros(len(chunks), dtype=bool)
+
+    with spd_scan_duration_seconds.labels(stage="matrix comparison").time():
+        for corpus_filename, corpus_data in corpus_docs.items():
+            if corpus_filename == filename:
+                continue
+
+            c_embeddings = corpus_data["embeddings"]
+            c_chunks = corpus_data["chunks"]
+
+            if c_embeddings.size == 0:
+                continue
+
+            c_doc_embedding = get_document_embedding(c_embeddings)
+            sim_doc = float(
+                np.clip(
+                    cosine_similarity(
+                        doc_embedding.reshape(1, -1), c_doc_embedding.reshape(1, -1)
+                    )[0, 0],
+                    0.0,
+                    1.0,
+                )
+            )
+
+            sim_matrix = cosine_similarity(uploaded_embeddings, c_embeddings)
+            sim_chunk = float(np.max(sim_matrix))
+
+            chunk_maxes = np.max(sim_matrix, axis=1)
+            uploaded_chunks_flagged |= (chunk_maxes >= threshold)
+
+            combined_score = max(sim_doc, sim_chunk)
+            max_overall_score = max(max_overall_score, sim_doc)
+            max_chunk_overall_score = max(max_chunk_overall_score, sim_chunk)
+
+            if combined_score >= threshold:
+                severity = "🔴 High" if combined_score >= 0.90 else "🟡 Medium"
+
+                similar_chunks = find_most_similar_chunks(
+                    chunks_a=[chunk.text for chunk in chunks],
+                    chunks_b=[chunk.text for chunk in c_chunks],
+                    emb_a=uploaded_embeddings,
+                    emb_b=c_embeddings,
+                    top_k=top_k,
+                    threshold=threshold,
+                )
+
+                flagged_chunks = [
+                    {
+                        "uploaded_chunk": pair[0],
+                        "matched_chunk": pair[1],
+                        "similarity_score": round(float(pair[2]), 4),
+                    }
+                    for pair in similar_chunks
+                ]
+
+                matched_documents.append(
+                    {
+                        "filename": corpus_filename,
+                        "document_similarity_score": round(sim_doc, 4),
+                        "max_chunk_similarity_score": round(sim_chunk, 4),
+                        "severity": severity,
+                        "flagged_chunks": flagged_chunks,
+                    }
+                )
+
+        matched_documents.sort(
+            key=lambda x: x["max_chunk_similarity_score"], reverse=True
+        )
+        is_flagged = len(matched_documents) > 0 or max_chunk_overall_score >= threshold
+
+        total_flagged = int(np.sum(uploaded_chunks_flagged))
+        plagiarism_density = (
+            int(round((total_flagged / len(chunks)) * 100)) if len(chunks) > 0 else 0
+        )
+
+    return {
+        "filename": filename,
+        "word_count": word_count,
+        "chunk_count": len(chunks),
+        "plagiarism_flagged": is_flagged,
+        "threshold_used": threshold,
+        "plagiarism_density": plagiarism_density,
+        "overall_document_similarity": round(max_overall_score, 4),
+        "max_chunk_similarity": round(max_chunk_overall_score, 4),
+        "matched_documents_count": len(matched_documents),
+        "matched_documents": matched_documents,
+    }
+
+
+@router.post(
+    "/api/v1/scan/text",
+    response_model=SimilarityCheckResponse,
+    status_code=status.HTTP_200_OK,
+    responses={
+        400: {"model": ErrorResponse, "description": "Bad Request"},
+        409: {"description": "Conflict - Duplicate content"},
+        422: {"model": ErrorResponse, "description": "Unprocessable Entity"},
+        500: {"model": ErrorResponse, "description": "Internal Server Error"},
+    },
+)
+async def scan_text(
+    request_data: ScanTextRequest,
+    _user: dict = Security(get_current_user, scopes=["write"]),
+):
+    """Scan raw text content directly for plagiarism without requiring a multipart file upload."""
+    global total_scans
+    total_scans += 1
+
+    if not request_data.text or not request_data.text.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Text content cannot be empty.",
+        )
+
+    filename = request_data.filename or "submission.txt"
+
+    if not request_data.reprocess:
+        text_hash = hashlib.sha256(request_data.text.encode("utf-8")).hexdigest()
+        existing_doc = get_document_by_hash(text_hash)
+        if existing_doc:
+            return JSONResponse(
+                status_code=status.HTTP_409_CONFLICT,
+                content={
+                    "duplicate": True,
+                    "message": "This file has already been uploaded.",
+                },
+            )
+
+    return _perform_text_scan(
+        extracted_text=request_data.text,
+        filename=filename,
+        threshold=request_data.threshold,
+        top_k=request_data.top_k,
+    )
 
 
 @router.post(
