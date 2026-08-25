@@ -474,6 +474,13 @@ def send_email(
             msg_obj["From"] = from_email
             msg_obj["To"] = ", ".join(to_emails)
 
+            # Issue #3447: Mark this as an automated message so Outlook/Gmail
+            # spam filters and out-of-office auto-responders treat it
+            # correctly, instead of flagging it as suspicious or bouncing
+            # auto-replies back into this automated pipeline.
+            msg_obj["Auto-Submitted"] = "auto-generated"
+            msg_obj["X-Auto-Response-Suppress"] = "All"
+
             if reply_to:
                 msg_obj["Reply-To"] = reply_to
 
