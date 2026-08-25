@@ -785,6 +785,41 @@ def update_review_status(
             raise sqlite3.Error(f"Failed to update review status: {e}") from e
 
 
+@with_sqlite_retry
+def bulk_update_incident_status(
+    incident_ids: list[str],
+    new_status: str,
+    db_path: str | Path | None = None,
+) -> int:
+    if db_path is None:
+        db_path = DEFAULT_DB_PATH
+    status = str(new_status).strip().title()
+
+    if status not in VALID_REVIEW_STATUSES:
+        raise ValueError(
+            f"new_status must be one of {sorted(VALID_REVIEW_STATUSES)}"
+        )
+
+    if not incident_ids:
+        return 0
+
+    init_incident_db(db_path)
+    cleaned_ids = [str(i).strip() for i in incident_ids]
+    
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        try:
+            placeholders = ",".join(["?"] * len(cleaned_ids))
+            cursor = conn.execute(
+                f"UPDATE plagiarism_incidents SET review_status = ? WHERE incident_id IN ({placeholders})",
+                [status, *cleaned_ids],
+            )
+            conn.commit()
+            return cursor.rowcount
+        except sqlite3.Error as e:
+            conn.rollback()
+            raise sqlite3.Error(f"Failed to bulk update review statuses: {e}") from e
+
+
 def incidents_to_csv(incidents: Iterable[Mapping[str, Any]]) -> bytes:
     buffer = io.StringIO(newline="")
     writer = csv.DictWriter(buffer, fieldnames=CSV_COLUMNS)
