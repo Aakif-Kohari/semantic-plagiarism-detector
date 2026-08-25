@@ -2796,48 +2796,6 @@ def update_global_activity():
                     except Exception as exc:
                         drive_progress_bar.empty()
                         st.error(f"⚠️ Google Drive import failed: {exc}")
-    # ... [existing imports] ...
-
-# Issue #2926: Import file validator to prevent RAM spikes and malicious uploads
-from src.utils.file_validator import validate_upload
-
-# ... [existing code] ...
-
-        progress_bar = st.progress(0, text="Preparing files…")
-        raw_texts = {}
-        failed_documents = []
-        
-        for i, (name, uploaded_file) in enumerate(uploaded_files.items()):
-            try:
-                # Read the file bytes
-                file_bytes = uploaded_file.getvalue()
-                
-                # Issue #2926: Validate file size, extension, and magic bytes
-                # This provides immediate feedback and prevents passing massive
-                # or malicious files to the expensive extraction pipeline.
-                validation_result = validate_upload(file_bytes, name)
-                
-                if not validation_result.is_valid:
-                    logger.warning(
-                        "File validation failed for %s: %s", 
-                        name, validation_result.error_message
-                    )
-                    failed_documents.append({
-                        "filename": name,
-                        "error": validation_result.error_message,
-                        "type": validation_result.error_code
-                    })
-                    st.error(f"❌ **{name}**: {validation_result.error_message}")
-                    continue  # Skip to the next file
-                
-                # Proceed with text extraction only if validation passed
-                extracted = extract_text(
-                    _io.BytesIO(file_bytes), name, ocr_language=ocr_language, ocr_dpi=ocr_dpi
-                )
-                raw_texts[name] = extracted
-                
-            except EmptyDocumentError as ede:
-                # ... [existing empty document handling] ...
     if uploaded_files:
         for uploaded_file in uploaded_files:
             original_name = uploaded_file.name
@@ -3190,15 +3148,45 @@ from src.utils.file_validator import validate_upload
             f"Filtering incidents from **{start_date.strftime('%Y-%m-%d')}** to "
             f"**{end_date.strftime('%Y-%m-%d')}**"
         )
-        if not flags:
-            st.info("No plagiarism incidents detected above configured threshold.")
+
+        # Filter by Tags (Issue #3167)
+        available_tags = []
+        try:
+            from src.db.corpus_db import get_all_tags, get_document_tags
+            available_tags = get_all_tags()
+        except Exception as e:
+            logger.error(f"Failed to load available tags: {e}")
+
+        selected_tags = st.multiselect(
+            "Filter by Tags",
+            options=available_tags,
+            key="incident_tag_filter",
+            help="Filter incident datasets by document tags (e.g., midterm, final_exam)",
+        )
+
+        filtered_flags = flags
+        if selected_tags and flags:
+            filtered_flags = []
+            for flag in flags:
+                doc_a = flag.get("doc_a", "")
+                doc_b = flag.get("doc_b", "")
+                tags_a = set(get_document_tags(doc_a).split(",")) if doc_a else set()
+                tags_b = set(get_document_tags(doc_b).split(",")) if doc_b else set()
+                all_doc_tags = {t.strip() for t in (tags_a | tags_b) if t.strip()}
+                if any(tag in all_doc_tags for tag in selected_tags):
+                    filtered_flags.append(flag)
+
+        st.caption(f"Total matching incidents: **{len(filtered_flags)}**")
+
+        if not filtered_flags:
+            st.info("No plagiarism incidents detected matching the selected filters.")
         elif render_warning_controls is not None:
             if "warning_page" not in st.session_state:
                 st.session_state.warning_page = reset_warning_page()
             def _set_warning_page(page: int) -> None:
                 st.session_state.warning_page = page
             render_warning_controls(
-                flags,
+                filtered_flags,
                 threshold=threshold,
                 ai_probabilities=ai_probabilities,
                 set_warning_page=_set_warning_page,
@@ -3528,6 +3516,22 @@ from src.utils.file_validator import validate_upload
     with tab_analytics:
         update_page_title("Analytics")
         st.subheader("📊 Analytics Dashboard")
+
+        # Filter by Tags (Issue #3167)
+        available_tags = []
+        try:
+            from src.db.corpus_db import get_all_tags
+            available_tags = get_all_tags()
+        except Exception as e:
+            logger.error(f"Failed to load available tags: {e}")
+
+        selected_tags = st.multiselect(
+            "Filter by Tags",
+            options=available_tags,
+            default=[],
+            help="Filter incident datasets by document tag",
+        )
+
         # Get data for enhanced analytics
         history_data = []
         try:
@@ -3542,6 +3546,16 @@ from src.utils.file_validator import validate_upload
             )
         except Exception as e:
             logger.error(f"Failed to load history data: {e}")
+
+        if selected_tags and history_data:
+            history_data = [
+                h for h in history_data
+                if any(tag in (h.get("tags") or []) or tag in (h.get("document_tags") or "") for tag in selected_tags)
+            ]
+
+        matching_incident_count = sum(h.get("flagged_count", 0) for h in history_data)
+        st.caption(f"Total matching incidents: **{matching_incident_count}**")
+
         # Render enhanced analytics
         render_enhanced_analytics_tab(
             sim_matrix=active_sim_df if active_sim_df is not None else pd.DataFrame(),
