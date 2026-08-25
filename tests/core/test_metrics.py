@@ -240,3 +240,10 @@ def test_spd_scan_duration_seconds_observe_stages():
         assert label_child._sum.get() >= 0
 
 
+def test_generate_latest_sets_active_threads_gauge():
+    with patch("src.core.metrics.threading.active_count", return_value=42):
+        metrics.generate_latest()
+    assert _sample_value(metrics.active_threads_gauge) == 42
+    assert metrics.active_threads_gauge._name == "spd_active_threads"
+
+
