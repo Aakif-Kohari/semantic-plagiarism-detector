@@ -107,8 +107,18 @@ def _truncate_title(title, max_length: int = 60) -> str:
     return title[: max_length - 3] + "..."
 
 
-def build_similarity_workbook(df: pd.DataFrame, threshold: float = 0.59) -> Workbook:
+def build_similarity_workbook(
+    df: pd.DataFrame,
+    threshold: float = 0.59,
+    low_threshold: float = 0.0,
+    mid_threshold: float = 0.59,
+    high_threshold: float = 1.0,
+) -> Workbook:
     """Helper function that builds and styles the openpyxl Workbook."""
+    # Older callers pass ``threshold`` as the yellow midpoint.
+    if threshold != 0.59 and mid_threshold == 0.59:
+        mid_threshold = threshold
+
     wb = Workbook()
     wb.properties.title = "Semantic Plagiarism Similarity Report"
     wb.properties.creator = "Semantic Plagiarism Detector"
@@ -176,14 +186,14 @@ def build_similarity_workbook(df: pd.DataFrame, threshold: float = 0.59) -> Work
 
         color_scale = ColorScaleRule(
             start_type="num",
-            start_value=0.0,
-            start_color="FFFFFF",  # White (0%)
+            start_value=low_threshold,
+            start_color="FFFFFF",  # White (low)
             mid_type="num",
-            mid_value=threshold,
-            mid_color="FEF08A",  # Yellow (At threshold)
+            mid_value=mid_threshold,
+            mid_color="FEF08A",  # Yellow (mid)
             end_type="num",
-            end_value=1.0,
-            end_color="EF4444",  # Red (100%)
+            end_value=high_threshold,
+            end_color="EF4444",  # Red (high)
         )
         ws.conditional_formatting.add(matrix_range, color_scale)
 
@@ -200,7 +210,7 @@ def export_similarity_matrix_to_excel(
     df: pd.DataFrame, threshold: float = 0.59
 ) -> bytes:
     """Exports a similarity matrix DataFrame into an in-memory Excel file (.xlsx) with formatting."""
-    wb = build_similarity_workbook(df, threshold=threshold)
+    wb = build_similarity_workbook(df, threshold=threshold, mid_threshold=threshold)
     output = io.BytesIO()
     wb.save(output)
     return output.getvalue()
@@ -216,7 +226,7 @@ def export_similarity_matrix_to_temp_file(
     Returns:
         str: Absolute path to the created temporary Excel file.
     """
-    wb = build_similarity_workbook(df, threshold=threshold)
+    wb = build_similarity_workbook(df, threshold=threshold, mid_threshold=threshold)
     temp_path = _create_managed_temp_file(suffix=".xlsx", prefix="similarity_matrix_")
     wb.save(temp_path)
     return temp_path
