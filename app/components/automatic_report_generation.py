@@ -44,13 +44,13 @@ class ReportTemplate:
     id: str
     name: str
     description: str
-    sections: List[str]
-    style_config: Dict[str, Any]
+    sections: list[str]
+    style_config: dict[str, Any]
     default_format: ExportFormat
     created_at: datetime
     updated_at: datetime
     is_custom: bool = False
-    metadata: Dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
 
 @dataclass
 class ReportJob:
@@ -59,14 +59,14 @@ class ReportJob:
     name: str
     template_id: str
     schedule: str  # 'daily', 'weekly', 'monthly', 'custom'
-    recipients: List[str]
+    recipients: list[str]
     format: ExportFormat
-    filters: Dict[str, Any]
+    filters: dict[str, Any]
     last_run: Optional[datetime] = None
     next_run: Optional[datetime] = None
     status: ReportStatus = ReportStatus.PENDING
     created_at: datetime = field(default_factory=datetime.now)
-    metadata: Dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
 
 @dataclass
 class Report:
@@ -82,9 +82,9 @@ class Report:
     file_size: int = 0
     file_path: Optional[str] = None
     status: ReportStatus = ReportStatus.COMPLETED
-    metadata: Dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
     
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             **asdict(self),
             'generated_at': self.generated_at.isoformat(),
@@ -102,10 +102,10 @@ class ReportInsight:
     description: str
     severity: str  # 'low', 'medium', 'high', 'critical'
     confidence: float
-    data: Dict[str, Any]
+    data: dict[str, Any]
     created_at: datetime = field(default_factory=datetime.now)
     
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             **asdict(self),
             'created_at': self.created_at.isoformat()
@@ -117,10 +117,10 @@ class ReportGenerator:
     """Main report generation engine"""
     
     def __init__(self):
-        self.templates: Dict[str, ReportTemplate] = {}
-        self.reports: Dict[str, Report] = {}
-        self.jobs: Dict[str, ReportJob] = {}
-        self.insights: Dict[str, List[ReportInsight]] = defaultdict(list)
+        self.templates: dict[str, ReportTemplate] = {}
+        self.reports: dict[str, Report] = {}
+        self.jobs: dict[str, ReportJob] = {}
+        self.insights: dict[str, list[ReportInsight]] = defaultdict(list)
         self._init_default_templates()
     
     def _init_default_templates(self):
@@ -174,8 +174,8 @@ class ReportGenerator:
             )
             self.templates[template.id] = template
     
-    def create_template(self, name: str, description: str, sections: List[str],
-                       style_config: Dict, format: ExportFormat = ExportFormat.PDF) -> ReportTemplate:
+    def create_template(self, name: str, description: str, sections: list[str],
+                       style_config: dict, format: ExportFormat = ExportFormat.PDF) -> ReportTemplate:
         """Create a new custom template"""
         template = ReportTemplate(
             id=str(uuid.uuid4()),
@@ -191,7 +191,7 @@ class ReportGenerator:
         self.templates[template.id] = template
         return template
     
-    def generate_report(self, template_id: str, data: Dict[str, Any],
+    def generate_report(self, template_id: str, data: dict[str, Any],
                        title: str = None, format: ExportFormat = None,
                        generated_by: str = "system") -> Report:
         """Generate a report from template"""
@@ -229,7 +229,7 @@ class ReportGenerator:
         
         return report
     
-    def _generate_content(self, template: ReportTemplate, data: Dict) -> str:
+    def _generate_content(self, template: ReportTemplate, data: dict) -> str:
         """Generate report content as HTML"""
         # Build HTML content
         html_parts = []
@@ -266,7 +266,7 @@ class ReportGenerator:
         
         return '\n'.join(html_parts)
     
-    def _get_style_css(self, style_config: Dict) -> str:
+    def _get_style_css(self, style_config: dict) -> str:
         """Get CSS styles based on configuration"""
         colors = {
             'professional': {'primary': '#1a237e', 'secondary': '#0d47a1', 'bg': '#f5f5f5'},
@@ -340,7 +340,7 @@ class ReportGenerator:
         }}
         """
     
-    def _generate_section(self, section: str, data: Dict) -> str:
+    def _generate_section(self, section: str, data: dict) -> str:
         """Generate content for a specific section"""
         section_handlers = {
             'Overview': self._generate_overview_section,
@@ -366,7 +366,7 @@ class ReportGenerator:
             return handler(data)
         return f"<p>Content for {section}</p>"
     
-    def _generate_overview_section(self, data: Dict) -> str:
+    def _generate_overview_section(self, data: dict) -> str:
         """Generate overview section"""
         total_docs = data.get('total_documents', 0)
         flagged = data.get('flagged_count', 0)
@@ -389,7 +389,7 @@ class ReportGenerator:
         </div>
         """
     
-    def _generate_metrics_section(self, data: Dict) -> str:
+    def _generate_metrics_section(self, data: dict) -> str:
         """Generate metrics section"""
         metrics = data.get('metrics', {})
         html = '<div class="metrics-grid">'
@@ -405,7 +405,7 @@ class ReportGenerator:
         html += '</div>'
         return html
     
-    def _generate_risk_section(self, data: Dict) -> str:
+    def _generate_risk_section(self, data: dict) -> str:
         """Generate risk summary section"""
         risk_levels = data.get('risk_levels', {})
         if not risk_levels:
@@ -423,7 +423,7 @@ class ReportGenerator:
         html += '</div>'
         return html
     
-    def _generate_recommendations_section(self, data: Dict) -> str:
+    def _generate_recommendations_section(self, data: dict) -> str:
         """Generate recommendations section"""
         recommendations = data.get('recommendations', [])
         if not recommendations:
@@ -435,7 +435,7 @@ class ReportGenerator:
         html += '</ul>'
         return html
     
-    def _generate_document_analysis_section(self, data: Dict) -> str:
+    def _generate_document_analysis_section(self, data: dict) -> str:
         """Generate document analysis section"""
         docs = data.get('documents', [])
         if not docs:
@@ -454,7 +454,7 @@ class ReportGenerator:
         html += '</table>'
         return html
     
-    def _generate_similarity_section(self, data: Dict) -> str:
+    def _generate_similarity_section(self, data: dict) -> str:
         """Generate similarity matrix section"""
         matrix = data.get('similarity_matrix', [])
         if not matrix:
@@ -493,7 +493,7 @@ class ReportGenerator:
         else:
             return '#81c784'
     
-    def _generate_trend_section(self, data: Dict) -> str:
+    def _generate_trend_section(self, data: dict) -> str:
         """Generate trend analysis section"""
         trends = data.get('trends', {})
         if not trends:
@@ -512,7 +512,7 @@ class ReportGenerator:
         html += '</div>'
         return html
     
-    def _generate_summary_section(self, data: Dict) -> str:
+    def _generate_summary_section(self, data: dict) -> str:
         """Generate summary section"""
         summary = data.get('summary', '')
         if not summary:
@@ -520,7 +520,7 @@ class ReportGenerator:
         
         return f'<div class="summary-content"><p>{summary}</p></div>'
     
-    def _generate_findings_section(self, data: Dict) -> str:
+    def _generate_findings_section(self, data: dict) -> str:
         """Generate key findings section"""
         findings = data.get('findings', [])
         if not findings:
@@ -534,7 +534,7 @@ class ReportGenerator:
         html += '</ul>'
         return html
     
-    def _generate_statistics_section(self, data: Dict) -> str:
+    def _generate_statistics_section(self, data: dict) -> str:
         """Generate statistics section"""
         stats = data.get('statistics', {})
         if not stats:
@@ -551,7 +551,7 @@ class ReportGenerator:
         html += '</div>'
         return html
     
-    def _generate_compliance_section(self, data: Dict) -> str:
+    def _generate_compliance_section(self, data: dict) -> str:
         """Generate compliance section"""
         compliance = data.get('compliance', {})
         if not compliance:
@@ -573,7 +573,7 @@ class ReportGenerator:
         </div>
         """
     
-    def _generate_violations_section(self, data: Dict) -> str:
+    def _generate_violations_section(self, data: dict) -> str:
         """Generate policy violations section"""
         violations = data.get('violations', [])
         if not violations:
@@ -591,7 +591,7 @@ class ReportGenerator:
         html += '</table>'
         return html
     
-    def _generate_actions_section(self, data: Dict) -> str:
+    def _generate_actions_section(self, data: dict) -> str:
         """Generate actions taken section"""
         actions = data.get('actions', [])
         if not actions:
@@ -609,7 +609,7 @@ class ReportGenerator:
         html += '</ul>'
         return html
     
-    def _generate_audit_section(self, data: Dict) -> str:
+    def _generate_audit_section(self, data: dict) -> str:
         """Generate audit trail section"""
         audit_trail = data.get('audit_trail', [])
         if not audit_trail:
@@ -628,7 +628,7 @@ class ReportGenerator:
         html += '</table>'
         return html
     
-    def _generate_insights(self, data: Dict, template: ReportTemplate) -> List[ReportInsight]:
+    def _generate_insights(self, data: dict, template: ReportTemplate) -> list[ReportInsight]:
         """Generate intelligent insights from data"""
         insights = []
         
@@ -789,8 +789,8 @@ class ReportGenerator:
         """
     
     def create_scheduled_job(self, name: str, template_id: str, schedule: str,
-                            recipients: List[str], format: ExportFormat = None,
-                            filters: Dict = None) -> ReportJob:
+                            recipients: list[str], format: ExportFormat = None,
+                            filters: dict = None) -> ReportJob:
         """Create a scheduled report job"""
         if not format:
             template = self.templates.get(template_id)
@@ -810,7 +810,7 @@ class ReportGenerator:
         self.jobs[job.id] = job
         return job
     
-    def run_scheduled_job(self, job_id: str, data: Dict = None) -> Optional[Report]:
+    def run_scheduled_job(self, job_id: str, data: dict = None) -> Optional[Report]:
         """Execute a scheduled report job"""
         job = self.jobs.get(job_id)
         if not job:
@@ -833,7 +833,7 @@ class ReportGenerator:
             job.status = ReportStatus.FAILED
             return None
     
-    def get_report_stats(self) -> Dict:
+    def get_report_stats(self) -> dict:
         """Get report generation statistics"""
         total = len(self.reports)
         if total == 0:

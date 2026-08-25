@@ -1,4 +1,4 @@
-﻿"""
+"""
 src/utils/bulk_export.py
 -------------------------
 Bulk export utilities for generating ZIP archives, CSV streams, JSON payloads,
@@ -27,14 +27,15 @@ import logging
 import os
 import re
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
+from typing import Any, Callable, Generator, Optional
 
 import numpy as np
 import pandas as pd
 
 from src.core.similarity import find_most_similar_chunks
+from src.utils.filename import sanitize_filename
 from src.utils.pdf_report import generate_plagiarism_report
 
 logger = logging.getLogger(__name__)
@@ -243,7 +244,7 @@ def normalize_csv_headers(headers: list[str]) -> list[str]:
 
 
 def export_incidents_csv_stream(
-    incidents_list: List[Dict],
+    incidents_list: list[dict],
     delimiter: str = ",",
     quoting_style: int = csv.QUOTE_MINIMAL,
 ) -> bytes:
@@ -326,7 +327,7 @@ def export_incidents_csv_stream(
     return csv_text.encode("utf-8-sig")
 
 
-def export_incidents_json_stream(incidents_list: List[Dict]) -> bytes:
+def export_incidents_json_stream(incidents_list: list[dict]) -> bytes:
     """Serialize a list of incident dicts into a JSON-formatted byte stream.
 
     Args:
@@ -340,7 +341,7 @@ def export_incidents_json_stream(incidents_list: List[Dict]) -> bytes:
     return json_str.encode("utf-8")
 
 
-def export_incidents_xlsx_stream(incidents_list: List[Dict]) -> bytes:
+def export_incidents_xlsx_stream(incidents_list: list[dict]) -> bytes:
     """Convert a list of incident dicts into an Excel XLSX byte stream.
 
     Requires pandas and openpyxl. If openpyxl is missing, falls back to CSV.
@@ -369,6 +370,11 @@ def export_incidents_xlsx_stream(incidents_list: List[Dict]) -> bytes:
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
             df.to_excel(writer, index=False, sheet_name="Plagiarism Incidents")
+            wb = writer.book
+            if hasattr(wb, "properties") and wb.properties is not None:
+                wb.properties.title = "Semantic Plagiarism Similarity Report"
+                wb.properties.creator = "Semantic Plagiarism Detector"
+                wb.properties.created = datetime.now(timezone.utc)
 
         return output.getvalue()
     except ImportError:
@@ -377,8 +383,8 @@ def export_incidents_xlsx_stream(incidents_list: List[Dict]) -> bytes:
 
 
 def export_incidents_to_format(
-    incidents_list: List[Dict],
-    format: Union[ExportFormat, str] = ExportFormat.CSV,
+    incidents_list: list[dict],
+    format: ExportFormat | str = ExportFormat.CSV,
 ) -> bytes:
     """Dispatcher function that routes incident data to the appropriate serializer.
 
@@ -440,11 +446,11 @@ def sanitize_export_filename(filename: str, default_ext: str = ".csv") -> str:
 
 
 def export_incidents_csv(
-    incidents_list: List[Dict],
+    incidents_list: list[dict],
     delimiter: str = ",",
     quoting_style: int = csv.QUOTE_MINIMAL,
     filename: Optional[str] = None,
-) -> Union[bytes, Tuple[bytes, str]]:
+) -> bytes | tuple[bytes, str]:
     """Export a list of incident dicts to a CSV-formatted byte stream.
 
     Validates that the delimiter is a single character string, falling back to a
@@ -546,18 +552,11 @@ def stream_incidents_csv_chunks(
             break
 
 
-def _sanitise_filename(name: str) -> str:
-    """Strip non-alphanumeric characters (except ``-``, ``_``) for safe filenames."""
-    return (
-        "".join(c for c in name if c.isalnum() or c in ("-", "_")).rstrip() or "unnamed"
-    )
-
-
 def generate_bulk_reports_zip(
-    flags: List[Dict],
+    flags: list[dict],
     *,
-    chunked_docs: Optional[Dict[str, List[str]]] = None,
-    embeddings: Optional[Dict[str, "np.ndarray"]] = None,
+    chunked_docs: Optional[dict[str, list[str]]] = None,
+    embeddings: Optional[dict[str, "np.ndarray"]] = None,
     include_pdf: bool = True,
     include_csv: bool = True,
     include_json: bool = True,
@@ -643,9 +642,15 @@ def generate_bulk_reports_zip(
                         top_pairs=top_pairs,
                         report_title=f"Plagiarism Report: {doc_a} vs {doc_b}",
                     )
-                    safe_a = _sanitise_filename(doc_a)
-                    safe_b = _sanitise_filename(doc_b)
-                    pdf_filename = f"report_{safe_a}_{safe_b}.pdf"
+                    safe_a = os.path.splitext(
+                        sanitize_filename(doc_a, fallback="doc_a")
+                    )[0]
+                    safe_b = os.path.splitext(
+                        sanitize_filename(doc_b, fallback="doc_b")
+                    )[0]
+                    pdf_filename = sanitize_filename(
+                        f"report_{safe_a}_{safe_b}.pdf", fallback="report.pdf"
+                    )
                     zf.writestr(pdf_filename, pdf_buffer.getvalue())
                 except Exception as exc:
                     logger.error(
@@ -653,8 +658,8 @@ def generate_bulk_reports_zip(
                     )
 
             # Fallback JSON perâ€‘pair if PDF generation fails
-            safe_a = _sanitise_filename(doc_a)
-            safe_b = _sanitise_filename(doc_b)
+            safe_a = os.path.splitext(sanitize_filename(doc_a, fallback="doc_a"))[0]
+            safe_b = os.path.splitext(sanitize_filename(doc_b, fallback="doc_b"))[0]
             fallback = {
                 "generated_at": datetime.now().isoformat(),
                 "document_a": doc_a,
@@ -664,7 +669,10 @@ def generate_bulk_reports_zip(
                 "note": "PDF generation failed; JSON fallback provided.",
             }
             zf.writestr(
-                f"report_{safe_a}_{safe_b}.json", json.dumps(fallback, indent=2)
+                sanitize_filename(
+                    f"report_{safe_a}_{safe_b}.json", fallback="report.json"
+                ),
+                json.dumps(fallback, indent=2),
             )
 
             if progress_callback:
@@ -777,9 +785,12 @@ def create_batch_incident_zip_archive(
                 except Exception:
                     incident_id = f"unknown_{idx}"
 
-            safe_a = _sanitise_filename(doc_a)
-            safe_b = _sanitise_filename(doc_b)
-            pdf_filename = f"report_{incident_id}_{safe_a}_{safe_b}.pdf"
+            safe_id = sanitize_filename(str(incident_id), fallback=f"unknown_{idx}")
+            safe_a = os.path.splitext(sanitize_filename(doc_a, fallback="doc_a"))[0]
+            safe_b = os.path.splitext(sanitize_filename(doc_b, fallback="doc_b"))[0]
+            pdf_filename = sanitize_filename(
+                f"report_{safe_id}_{safe_a}_{safe_b}.pdf", fallback="report.pdf"
+            )
 
             try:
                 pdf_buffer = generate_plagiarism_report(
@@ -821,7 +832,6 @@ def create_documents_bulk_zip_archive(
         ZIP archive file bytes ready for download.
     """
     from src.db.corpus_db import _connect, get_all_documents, get_document_word_counts
-    from src.utils.filename import sanitize_filename
 
     buffer = io.BytesIO()
     raw_docs = get_all_documents(include_deleted=True)

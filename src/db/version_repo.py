@@ -145,7 +145,7 @@ class DocumentSnapshotRepository:
         content_text: str,
         parent_hash: Optional[str] = None,
         similarity_to_parent: Optional[float] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Register a new document version and return the snapshot record."""
         content_hash = hashlib.sha256(content_text.encode("utf-8")).hexdigest()
         word_count = len(content_text.split())
@@ -202,7 +202,7 @@ class DocumentSnapshotRepository:
         removed_words: int,
         changed_words: int,
         jaccard_index: float,
-        diff_summary: Optional[Dict] = None,
+        diff_summary: Optional[dict] = None,
     ) -> int:
         """Store a pairwise diff record between two versions."""
         now = datetime.now(timezone.utc).isoformat()
@@ -223,7 +223,7 @@ class DocumentSnapshotRepository:
 
     # -- Read -----------------------------------------------------------------
 
-    def get_snapshot(self, doc_hash: str) -> Optional[Dict[str, Any]]:
+    def get_snapshot(self, doc_hash: str) -> Optional[dict[str, Any]]:
         """Retrieve a single snapshot by hash."""
         with self._conn() as conn:
             row = conn.execute(
@@ -238,10 +238,10 @@ class DocumentSnapshotRepository:
         assignment_id: Optional[str] = None,
         page: int = 1,
         per_page: int = 20,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """List document snapshots with optional filtering and pagination."""
-        conditions: List[str] = []
-        params: List[Any] = []
+        conditions: list[str] = []
+        params: list[Any] = []
         if user_id:
             conditions.append("user_id = ?")
             params.append(user_id)
@@ -278,7 +278,7 @@ class DocumentSnapshotRepository:
 
     def get_lineage(
         self, user_id: str, assignment_id: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Get the full version lineage for a user + assignment."""
         with self._conn() as conn:
             cursor = conn.execute(
@@ -289,7 +289,7 @@ class DocumentSnapshotRepository:
             )
             return [dict(r) for r in cursor.fetchall()]
 
-    def get_diff(self, parent_hash: str, child_hash: str) -> Optional[Dict[str, Any]]:
+    def get_diff(self, parent_hash: str, child_hash: str) -> Optional[dict[str, Any]]:
         """Get the diff record between two specific versions."""
         with self._conn() as conn:
             row = conn.execute(
@@ -299,7 +299,7 @@ class DocumentSnapshotRepository:
             ).fetchone()
             return dict(row) if row else None
 
-    def get_diffs_for_version(self, doc_hash: str) -> List[Dict[str, Any]]:
+    def get_diffs_for_version(self, doc_hash: str) -> list[dict[str, Any]]:
         """Get all diffs involving a specific version (as parent or child)."""
         with self._conn() as conn:
             cursor = conn.execute(
@@ -316,10 +316,10 @@ class DocumentSnapshotRepository:
         assignment_id: Optional[str] = None,
         page: int = 1,
         per_page: int = 20,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """List all tracked lineages with optional filtering."""
-        conditions: List[str] = []
-        params: List[Any] = []
+        conditions: list[str] = []
+        params: list[Any] = []
         if user_id:
             conditions.append("user_id = ?")
             params.append(user_id)
@@ -356,7 +356,7 @@ class DocumentSnapshotRepository:
 
     # -- Analytics ------------------------------------------------------------
 
-    def analytics_summary(self) -> Dict[str, Any]:
+    def analytics_summary(self) -> dict[str, Any]:
         """Return aggregate statistics across all versions."""
         with self._conn() as conn:
             total_versions = conn.execute(
@@ -394,13 +394,13 @@ class DocumentSnapshotRepository:
 
     def similarity_trend(
         self, user_id: str, assignment_id: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Return the similarity trend across versions for a lineage."""
         lineage = self.get_lineage(user_id, assignment_id)
         if len(lineage) < 2:
             return []
 
-        trend: List[Dict[str, Any]] = []
+        trend: list[dict[str, Any]] = []
         for i in range(1, len(lineage)):
             parent = lineage[i - 1]
             child = lineage[i]
@@ -415,7 +415,7 @@ class DocumentSnapshotRepository:
             })
         return trend
 
-    def most_revised_documents(self, limit: int = 10) -> List[Dict[str, Any]]:
+    def most_revised_documents(self, limit: int = 10) -> list[dict[str, Any]]:
         """Return documents with the most versions."""
         with self._conn() as conn:
             cursor = conn.execute(
@@ -428,7 +428,7 @@ class DocumentSnapshotRepository:
             )
             return [dict(r) for r in cursor.fetchall()]
 
-    def highest_drift_documents(self, limit: int = 10) -> List[Dict[str, Any]]:
+    def highest_drift_documents(self, limit: int = 10) -> list[dict[str, Any]]:
         """Return documents with the most drift (lowest avg similarity)."""
         with self._conn() as conn:
             cursor = conn.execute(

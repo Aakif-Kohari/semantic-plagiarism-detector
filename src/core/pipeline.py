@@ -61,9 +61,9 @@ def _get_cross_lingual_mode() -> bool:
 
 
 def _process_chunks_cross_lingual(
-    chunked_docs: Dict[str, List[str]],
+    chunked_docs: dict[str, list[str]],
     cross_lingual_mode: bool = False
-) -> Tuple[Dict[str, List[str]], Dict[str, List[Dict[str, Any]]]]:
+) -> tuple[dict[str, list[str]], dict[str, list[dict[str, Any]]]]:
     """
     Process chunks with cross-lingual translation if enabled.
     

@@ -12,6 +12,7 @@ import csv
 import io
 import os
 import tempfile
+from datetime import datetime, timezone
 from typing import Generator
 
 import pandas as pd
@@ -109,6 +110,10 @@ def _truncate_title(title, max_length: int = 60) -> str:
 def build_similarity_workbook(df: pd.DataFrame, threshold: float = 0.59) -> Workbook:
     """Helper function that builds and styles the openpyxl Workbook."""
     wb = Workbook()
+    wb.properties.title = "Semantic Plagiarism Similarity Report"
+    wb.properties.creator = "Semantic Plagiarism Detector"
+    wb.properties.created = datetime.now(timezone.utc)
+
     ws = wb.active
     ws.title = "Similarity Matrix"
 

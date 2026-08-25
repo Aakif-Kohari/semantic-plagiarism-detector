@@ -69,7 +69,7 @@ class BrandingConfig:
         self.logo_path = logo_path
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "BrandingConfig":
+    def from_dict(cls, data: dict[str, Any]) -> "BrandingConfig":
         """
         Create BrandingConfig from dictionary with validation.
 
@@ -100,7 +100,7 @@ class BrandingConfig:
 
         return cls(brand_color=brand_color, logo_path=logo_path)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """
         Convert BrandingConfig to dictionary.
 
@@ -425,7 +425,7 @@ def get_offline_mode_status() -> bool:
     return os.getenv("OFFLINE_MODE", "false").lower() == "true"
 
 
-def get_offline_config() -> Dict[str, Any]:
+def get_offline_config() -> dict[str, Any]:
     """Get offline mode configuration."""
     import os
     return {

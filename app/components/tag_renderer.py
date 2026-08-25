@@ -93,7 +93,7 @@ def render_tag(tag: DocumentTag, show_confidence: bool = True) -> str:
 
 
 def render_tag_collection(
-    tags: List[DocumentTag], title: Optional[str] = None, show_confidence: bool = True
+    tags: list[DocumentTag], title: Optional[str] = None, show_confidence: bool = True
 ) -> None:
     """Render a collection of DocumentTags in the Streamlit UI.
 

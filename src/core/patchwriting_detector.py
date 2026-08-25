@@ -17,7 +17,7 @@ from src.core.pos_normalizer import extract_pos_sequence, compute_pos_ngrams
 logger = logging.getLogger(__name__)
 
 
-def compute_syntactic_jaccard(seq_a: List[str], seq_b: List[str]) -> float:
+def compute_syntactic_jaccard(seq_a: list[str], seq_b: list[str]) -> float:
     """Compute the Jaccard similarity between two POS tag sequences.
     
     Treats the sequences as sets of unique tags to measure overall syntactic
@@ -33,8 +33,8 @@ def compute_syntactic_jaccard(seq_a: List[str], seq_b: List[str]) -> float:
 
 
 def compute_ngram_overlap(
-    seq_a: List[str], 
-    seq_b: List[str], 
+    seq_a: list[str], 
+    seq_b: list[str], 
     n: int = 3
 ) -> float:
     """Compute the Dice coefficient for POS n-gram overlap.
@@ -71,7 +71,7 @@ def detect_patchwriting(
     text_b: str, 
     n: int = 3,
     threshold: float = 0.60
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Analyze two texts for mosaic plagiarism (patchwriting).
     
     Args:
@@ -129,14 +129,14 @@ class PatchwritingDetector:
     """
 
     @staticmethod
-    def _get_ngrams(sequence: List[str], n: int = 3) -> set:
+    def _get_ngrams(sequence: list[str], n: int = 3) -> set:
         """Generates n-grams from a sequence of POS tags."""
         if len(sequence) < n:
             return {tuple(sequence)}
         return {tuple(sequence[i:i+n]) for i in range(len(sequence) - n + 1)}
 
     @classmethod
-    def compute_syntactic_similarity(cls, source_text: str, student_text: str, n: int = 3) -> Dict[str, Any]:
+    def compute_syntactic_similarity(cls, source_text: str, student_text: str, n: int = 3) -> dict[str, Any]:
         """
         Computes structural similarity between source and student text using POS n-grams and sequence matching.
         """

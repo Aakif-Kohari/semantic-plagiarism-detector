@@ -23,7 +23,7 @@ class ReportExportManager:
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
 
-    def export_batch_json(self, reports: List[Dict], filename: str = "batch_reports.json") -> str:
+    def export_batch_json(self, reports: list[dict], filename: str = "batch_reports.json") -> str:
         """Export multiple reports to a single JSON file."""
         path = os.path.join(self.output_dir, filename)
         export_data = {
@@ -36,7 +36,7 @@ class ReportExportManager:
         logger.info(f"Exported batch JSON: {path}")
         return path
 
-    def export_comparison_csv(self, comparisons: List[Dict], filename: str = "comparison_results.csv") -> str:
+    def export_comparison_csv(self, comparisons: list[dict], filename: str = "comparison_results.csv") -> str:
         """Export comparison results to CSV."""
         if not comparisons:
             return ""
@@ -48,7 +48,7 @@ class ReportExportManager:
         logger.info(f"Exported comparison CSV: {path}")
         return path
 
-    def create_zip_archive(self, files: List[str], archive_name: str = "reports_archive.zip") -> str:
+    def create_zip_archive(self, files: list[str], archive_name: str = "reports_archive.zip") -> str:
         """Create a ZIP archive of multiple report files."""
         path = os.path.join(self.output_dir, archive_name)
         with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as zf:
@@ -59,7 +59,7 @@ class ReportExportManager:
         logger.info(f"Created ZIP archive: {path}")
         return path
 
-    def generate_csv_summary(self, results: Dict[str, Any], filename: str = "results_summary.csv") -> str:
+    def generate_csv_summary(self, results: dict[str, Any], filename: str = "results_summary.csv") -> str:
         """Generate a CSV summary of all results."""
         path = os.path.join(self.output_dir, filename)
         rows = []

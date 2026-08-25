@@ -23,7 +23,7 @@ from src.core.document_parser import (
     DEFAULT_OCR_LANGUAGE,
     extract_text,
 )
-from src.core.embedding_model import embed_documents
+from src.core.embedding_model import embed_documents, release_large_batch_memory
 from src.core.export_engine import LMSExportEngine
 from src.core.logging_setup import setup_logging
 from src.core.similarity import (
@@ -213,6 +213,9 @@ def run_scan(
             sys.stderr.write(f"Error during plagiarism detection pipeline: {e}\n")
             return 1
 
+    # Issue #3479: free NumPy/PyTorch heap memory after large batch scans.
+    release_large_batch_memory(num_processed)
+
     execution_time_seconds = time.time() - start_time
 
     report = {
@@ -379,6 +382,9 @@ def run_prewarm(folder_path: str | None = None) -> int:
         except Exception as e:
             sys.stderr.write(f"Error during cache pre-warming pipeline: {e}\n")
             return 1
+
+    # Issue #3479: free NumPy/PyTorch heap memory after large batch scans.
+    release_large_batch_memory(docs_processed)
 
     report = {
         "prewarmed_documents": docs_processed,

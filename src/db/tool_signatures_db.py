@@ -73,7 +73,7 @@ def log_attribution(
     document_id: str,
     attributed_tool: str,
     confidence: float,
-    fingerprint: Dict[str, float],
+    fingerprint: dict[str, float],
     db_path: Optional[Path] = None,
 ) -> bool:
     """Log a paraphrase tool attribution result."""

@@ -256,7 +256,7 @@ class ScriptNormalizer:
         text = unicodedata.normalize('NFKC', text)
         return text
     
-    def detect_and_normalize(self, text: str) -> Tuple[str, str]:
+    def detect_and_normalize(self, text: str) -> tuple[str, str]:
         """
         Detect script and normalize text.
         

@@ -15,7 +15,7 @@ class MultimodalOCRDashboardComponent:
     """
 
     @staticmethod
-    def render_ocr_summary_card(summary: Dict[str, Any]) -> None:
+    def render_ocr_summary_card(summary: dict[str, Any]) -> None:
         """Renders summary metrics card for OCR extraction telemetry."""
         st.subheader("📄 Multimodal PDF OCR Telemetry")
         col1, col2, col3 = st.columns(3)
@@ -27,7 +27,7 @@ class MultimodalOCRDashboardComponent:
             st.metric("Pipeline Status", summary.get("status", "IDLE"))
 
     @staticmethod
-    def render_paraphrase_alignment_matrix(alignments: List[Dict[str, Any]]) -> None:
+    def render_paraphrase_alignment_matrix(alignments: list[dict[str, Any]]) -> None:
         """Renders tabular matrix displaying candidate paraphrase alignments."""
         st.subheader("🧩 Neural Paraphrase Alignment Matrix")
         if not alignments:

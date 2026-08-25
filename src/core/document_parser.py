@@ -58,7 +58,7 @@ from src.errors import EmptyDocumentError
 
 # OCR dependencies are imported lazily so TXT/DOCX and normal text PDFs still
 # work even when Tesseract is not installed on the machine.
-PDFInput = Union[str, bytes, io.BytesIO, BinaryIO]
+PDFInput = str | bytes | io.BytesIO | BinaryIO
 
 
 
@@ -648,9 +648,9 @@ def _is_page_number(line: str) -> bool:
     ) or bool(re.fullmatch(r"\d{1,3}", cleaned))
 
 
-def _clean_page_text(page_text: str) -> List[str]:
+def _clean_page_text(page_text: str) -> list[str]:
     """Clean one page of extracted text."""
-    lines: List[str] = []
+    lines: list[str] = []
     for raw_line in page_text.splitlines():
         cleaned = clean_text(raw_line)
         if not cleaned or _is_page_number(cleaned):
@@ -660,8 +660,8 @@ def _clean_page_text(page_text: str) -> List[str]:
 
 
 def _remove_repeated_boundary_lines(
-    page_lines: List[List[str]],
-) -> List[List[str]]:
+    page_lines: list[list[str]],
+) -> list[list[str]]:
     """Remove repeated first/last lines, typically headers and footers."""
     if not page_lines:
         return []
@@ -669,7 +669,7 @@ def _remove_repeated_boundary_lines(
     cleaned_pages = [list(lines) for lines in page_lines]
 
     for position in ("start", "end"):
-        candidates: List[str] = []
+        candidates: list[str] = []
         for lines in cleaned_pages:
             if not lines:
                 continue
@@ -693,7 +693,7 @@ def _remove_repeated_boundary_lines(
     return cleaned_pages
 
 
-def _normalize_whitespace(page_lines: List[List[str]]) -> str:
+def _normalize_whitespace(page_lines: list[list[str]]) -> str:
     """Join cleaned lines and collapse excessive whitespace."""
     cleaned_lines = [line for lines in page_lines for line in lines]
     text = "\n".join(cleaned_lines).strip()
@@ -970,13 +970,13 @@ def _should_use_parallel() -> bool:
     return True
 
 
-def _format_table_as_text(table: List[List[Optional[str]]]) -> str:
+def _format_table_as_text(table: list[list[Optional[str]]]) -> str:
     """Format a pdfplumber-extracted table into clean, readable text.
 
     Each row's cells are joined with ' | ' so the structure stays
     readable instead of being merged into one chaotic string.
     """
-    lines: List[str] = []
+    lines: list[str] = []
     for row in table:
         cells = [str(cell).strip() if cell is not None else "" for cell in row]
         if any(cells):
@@ -989,7 +989,7 @@ def _parse_pdf_page(
     page_index: int,
     ocr_dpi: int,
     ocr_language: str,
-) -> List[str]:
+) -> list[str]:
     """Helper running in a subprocess to extract text from a single PDF page."""
     import io
 
@@ -1085,13 +1085,13 @@ def _resolve_process_pool_workers(
 
 
 def extract_texts_parallel(
-    files_dict: Dict[str, bytes],
+    files_dict: dict[str, bytes],
     *,
     ocr_language: str = DEFAULT_OCR_LANGUAGE,
     ocr_dpi: int = DEFAULT_OCR_DPI,
     session_id: Optional[str] = None,
     max_workers: int | None = None,
-) -> tuple[Dict[str, str], Dict[str, Exception]]:
+) -> tuple[dict[str, str], dict[str, Exception]]:
     """
     Extract text from multiple files using a bounded process pool.
 
@@ -1113,8 +1113,8 @@ def extract_texts_parallel(
         dpi=ocr_dpi,
     )
 
-    results: Dict[str, str] = {}
-    errors: Dict[str, Exception] = {}
+    results: dict[str, str] = {}
+    errors: dict[str, Exception] = {}
 
     if not files_dict:
         return results, errors
@@ -1225,7 +1225,7 @@ def count_pdf_images(pdf_bytes: bytes) -> int:
         return 0
 
 
-def extract_pdf_metadata(file: PDFInput) -> Dict[str, str]:
+def extract_pdf_metadata(file: PDFInput) -> dict[str, str]:
     """Extract PDF metadata (Author, Creation Date, Title) using PyMuPDF.
 
     Returns:
@@ -1654,7 +1654,7 @@ def _strip_inline_markdown(line: str) -> str:
 def strip_markdown_syntax(raw_text: str) -> str:
     """Convert raw Markdown source into plain readable text."""
     lines = raw_text.splitlines()
-    output: List[str] = []
+    output: list[str] = []
     in_code_block = False
 
     for line in lines:
@@ -1745,8 +1745,8 @@ def extract_text_from_zip(
         )
 
     zip_stream.seek(0)
-    extracted_texts: List[str] = []
-    corrupted_files: List[str] = []
+    extracted_texts: list[str] = []
+    corrupted_files: list[str] = []
 
     try:
         with zipfile.ZipFile(zip_stream, "r") as archive:
@@ -1793,7 +1793,7 @@ def extract_text_from_odt(file: PDFInput) -> str:
     """
     try:
         raw_data = _read_pdf_bytes(file)
-        text_parts: List[str] = []
+        text_parts: list[str] = []
 
         with zipfile.ZipFile(io.BytesIO(raw_data), "r") as archive:
             with archive.open("content.xml") as xml_file:
@@ -2088,7 +2088,7 @@ def get_supported_file_extensions() -> list[str]:
 
 def extract_texts_from_pdfs(
     files: list, session_id: Optional[str] = None
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """Legacy compatibility wrapper."""
     return extract_texts(files, session_id=session_id)
 
@@ -2166,7 +2166,7 @@ def extract_texts(
     files: list,
     session_id: Optional[str] = None,
     max_workers: int | None = None,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """Extract text from multiple uploaded files."""
     check_batch_rate_limit(len(files) if files else 0, session_id=session_id)
 

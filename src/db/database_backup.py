@@ -50,10 +50,10 @@ import time
 import zipfile
 from contextlib import closing
 from pathlib import Path
-from typing import Dict, Optional, Union
+from typing import Dict, Generator, Optional, Union
 
 from src.core.app_config import get_backup_dir
-from src.db.connection import apply_busy_timeout
+from src.db.connection import DEFAULT_SQLITE_TIMEOUT, apply_busy_timeout
 
 # ── Logger Configuration ───────────────────────────────────────────────────────
 logger = logging.getLogger(__name__)
@@ -89,19 +89,23 @@ def _resolve_safe_path(db_path: str | Path) -> Path:
     return path
 
 
-def create_sqlite_snapshot(database_path: str | Path) -> bytes:
+def iter_sqlite_snapshot_chunks(
+    database_path: str | Path,
+    chunk_size: int = 64 * 1024,
+) -> Generator[bytes, None, None]:
     """
-    Return a transactionally consistent SQLite snapshot.
+    Yield transactionally consistent SQLite snapshot bytes in chunks directly from a temporary file on disk.
 
     SQLite's online backup API is used instead of reading a live database
-    file directly. This includes committed pages correctly even when the
-    source database uses WAL journaling.
+    file directly into memory. This includes committed pages correctly even when the
+    source database uses WAL journaling, while preventing high RAM usage spikes.
 
     Args:
         database_path: Path to the source SQLite database.
+        chunk_size: Chunk size in bytes (default: 64KB).
 
-    Returns:
-        bytes: The raw bytes of the SQLite snapshot.
+    Yields:
+        bytes: Chunks of raw SQLite snapshot bytes.
 
     Raises:
         FileNotFoundError: If the source database does not exist.
@@ -128,17 +132,41 @@ def create_sqlite_snapshot(database_path: str | Path) -> bytes:
                 check_same_thread=False,
             )
         ) as source_connection:
+            apply_busy_timeout(source_connection, DEFAULT_SQLITE_TIMEOUT)
             with closing(sqlite3.connect(snapshot_path)) as destination:
                 source_connection.backup(destination)
 
-        snapshot = snapshot_path.read_bytes()
+        with open(snapshot_path, "rb") as f:
+            header = f.read(len(SQLITE_HEADER))
+            if header != SQLITE_HEADER:
+                raise sqlite3.DatabaseError(
+                    "Generated backup is not a valid SQLite database."
+                )
+            f.seek(0)
+            while chunk := f.read(chunk_size):
+                yield chunk
 
-        if not snapshot.startswith(SQLITE_HEADER):
-            raise sqlite3.DatabaseError(
-                "Generated backup is not a valid SQLite database."
-            )
 
-        return snapshot
+def create_sqlite_snapshot(database_path: str | Path) -> bytes:
+    """
+    Return a transactionally consistent SQLite snapshot.
+
+    SQLite's online backup API is used instead of reading a live database
+    file directly. This includes committed pages correctly even when the
+    source database uses WAL journaling.
+
+    Args:
+        database_path: Path to the source SQLite database.
+
+    Returns:
+        bytes: The raw bytes of the SQLite snapshot.
+
+    Raises:
+        FileNotFoundError: If the source database does not exist.
+        IsADirectoryError: If the source path is a directory.
+        sqlite3.DatabaseError: If the generated backup is invalid.
+    """
+    return b"".join(iter_sqlite_snapshot_chunks(database_path))
 
 
 def get_database_file_size_bytes(db_path: str | Path) -> int:
@@ -150,6 +178,13 @@ def get_database_file_size_bytes(db_path: str | Path) -> int:
 def create_corpus_database_snapshot() -> bytes:
     """Return a downloadable snapshot of the configured corpus DB."""
     return create_sqlite_snapshot(get_corpus_db_path())
+
+
+def iter_corpus_database_snapshot_chunks(
+    chunk_size: int = 64 * 1024,
+) -> Generator[bytes, None, None]:
+    """Yield chunks of a downloadable snapshot of the configured corpus DB."""
+    return iter_sqlite_snapshot_chunks(get_corpus_db_path(), chunk_size=chunk_size)
 
 
 def create_database_backup(
@@ -171,8 +206,6 @@ def create_database_backup(
     if not os.path.exists(database_path):
         raise FileNotFoundError(f"Source database file does not exist: {database_path}")
 
-    snapshot_bytes = create_sqlite_snapshot(database_path)
-
     source_name = Path(database_path).name
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     destination_dir = Path(backup_dir).expanduser()
@@ -181,10 +214,18 @@ def create_database_backup(
     if compress_backup:
         backup_path = destination_dir / f"{source_name}.{timestamp}.db.gz"
         with gzip.GzipFile(backup_path, "wb") as gz_file:
-            gz_file.write(snapshot_bytes)
+            for chunk in iter_sqlite_snapshot_chunks(database_path):
+                gz_file.write(chunk)
     else:
         backup_path = destination_dir / f"{source_name}.{timestamp}.db"
-        backup_path.write_bytes(snapshot_bytes)
+        with open(backup_path, "wb") as f:
+            for chunk in iter_sqlite_snapshot_chunks(database_path):
+                f.write(chunk)
+
+    try:
+        os.chmod(backup_path, 0o600)
+    except OSError:
+        pass
 
     return backup_path
 
@@ -637,10 +678,10 @@ def restore_database_backup(
 
 
 def cleanup_old_backups(
-    backup_dir: Union[str, Path] = DEFAULT_BACKUP_DIRECTORY,
+    backup_dir: str | Path = DEFAULT_BACKUP_DIRECTORY,
     max_backups: int = 10,
     max_age_days: int = 30,
-) -> Dict[str, int]:
+) -> dict[str, int]:
     """Remove stale ``.db`` backups using count and age limits."""
     backup_path = Path(backup_dir)
 

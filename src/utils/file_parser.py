@@ -107,7 +107,7 @@ class EncryptedPDFError(Exception):
 
 
 def get_file_mime_type_from_bytes(
-    file_bytes: Union[bytes, bytearray, memoryview],
+    file_bytes: bytes | bytearray | memoryview,
 ) -> str:
     """Inspect raw byte headers to determine the file's MIME type.
 
@@ -181,7 +181,7 @@ def get_file_mime_type_from_bytes(
     return "application/octet-stream"
 
 
-def is_office_open_xml(file_bytes: Union[bytes, bytearray]) -> bool:
+def is_office_open_xml(file_bytes: bytes | bytearray) -> bool:
     """Check if a ZIP file is specifically an Office Open XML document (DOCX, XLSX).
 
     Office documents are ZIP archives containing a specific [Content_Types].xml
@@ -333,7 +333,7 @@ def get_pdf_page_count(file_bytes: bytes) -> int:
 
 def extract_text_from_pdf(
     file_bytes: bytes, password: Optional[str] = None
-) -> Tuple[str, bool]:
+) -> tuple[str, bool]:
     """
     Extracts text from PDF bytes.
 
@@ -464,7 +464,7 @@ def get_file_mime_category(filename: str) -> str:
     return mime_mapping.get(ext, "unknown")
 
 
-def get_supported_mime_categories() -> List[str]:
+def get_supported_mime_categories() -> list[str]:
     """
     Retrieve a list of all supported high-level MIME categories.
 
@@ -475,7 +475,7 @@ def get_supported_mime_categories() -> List[str]:
 
 
 def is_extension_supported(
-    filename: str, allowed_categories: Optional[List[str]] = None
+    filename: str, allowed_categories: Optional[list[str]] = None
 ) -> bool:
     """
     Check if a file's extension belongs to an allowed list of MIME categories.

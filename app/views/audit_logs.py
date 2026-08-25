@@ -80,7 +80,7 @@ def fetch_audit_logs(
     end_date: Optional[str] = None,
     limit: int = 100,
     offset: int = 0
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Fetch audit logs from the database with filters."""
     try:
         from src.db.auth import auth_repo
@@ -117,7 +117,7 @@ def count_audit_logs(
         return 0
 
 
-def get_distinct_event_types() -> List[str]:
+def get_distinct_event_types() -> list[str]:
     """Get all distinct event types from audit logs."""
     try:
         from src.db.auth import auth_repo

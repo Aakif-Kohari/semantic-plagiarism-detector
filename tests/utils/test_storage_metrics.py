@@ -11,6 +11,7 @@ import pytest
 from src.utils.storage_metrics import (
     _deduplicate_paths,
     calculate_storage_usage,
+    get_directory_size_bytes,
     get_faiss_index_paths,
     get_sqlite_db_paths,
 )
@@ -168,7 +169,7 @@ class TestModuleParses:
     @pytest.mark.parametrize(
         "name",
         ["_deduplicate_paths", "get_sqlite_db_paths", "get_faiss_index_paths",
-         "calculate_storage_usage"],
+         "calculate_storage_usage", "get_directory_size_bytes"],
     )
     def test_function_is_defined_exactly_once(self, name):
         """A second definition would silently shadow the first."""
@@ -493,3 +494,52 @@ def test_get_projected_days_until_full_insufficient_history(tmp_path: Path) -> N
 
     assert get_projected_days_until_full(10_000, db_path=history_db) == float("inf")
 
+
+class TestGetDirectorySizeBytes:
+    """Test suite for get_directory_size_bytes calculation and symlink handling."""
+
+    def test_sums_files_in_nested_subdirectories_exactly(self, tmp_path: Path):
+        """Create a temporary folder structure with 3 files of known sizes and assert exact sum."""
+        # File 1 in root: 100 bytes
+        file1 = tmp_path / "file1.bin"
+        file1.write_bytes(b"A" * 100)
+
+        # File 2 in subfolder: 250 bytes
+        sub_dir = tmp_path / "subdir"
+        sub_dir.mkdir()
+        file2 = sub_dir / "file2.bin"
+        file2.write_bytes(b"B" * 250)
+
+        # File 3 in nested subfolder: 500 bytes
+        nested_dir = sub_dir / "nested"
+        nested_dir.mkdir()
+        file3 = nested_dir / "file3.bin"
+        file3.write_bytes(b"C" * 500)
+
+        expected_total = 100 + 250 + 500  # 850 bytes
+        actual_total = get_directory_size_bytes(tmp_path)
+
+        assert actual_total == expected_total
+
+    def test_ignores_broken_symlinks(self, tmp_path: Path):
+        """Verify broken symlinks do not crash or alter the calculated size."""
+        file1 = tmp_path / "file1.txt"
+        file1.write_bytes(b"Hello World")  # 11 bytes
+
+        # Attempt to create a real broken symlink if OS supports it
+        broken_symlink = tmp_path / "broken_link.txt"
+        target_path = tmp_path / "nonexistent.txt"
+        try:
+            broken_symlink.symlink_to(target_path)
+        except (OSError, NotImplementedError):
+            pass
+
+        # Verify get_directory_size_bytes accurately counts file1 (11 bytes) and ignores broken link
+        size = get_directory_size_bytes(tmp_path)
+        assert size == 11
+
+
+    def test_returns_zero_for_nonexistent_directory(self, tmp_path: Path):
+        """Verify nonexistent directory path returns 0 bytes."""
+        nonexistent = tmp_path / "does_not_exist"
+        assert get_directory_size_bytes(nonexistent) == 0

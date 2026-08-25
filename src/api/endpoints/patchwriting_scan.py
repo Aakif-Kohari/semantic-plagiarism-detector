@@ -34,8 +34,8 @@ class ScanResponse(BaseModel):
     syntactic_jaccard: float
     ngram_overlap: float
     is_patchwriting: bool
-    pos_sequence_a: List[str]
-    pos_sequence_b: List[str]
+    pos_sequence_a: list[str]
+    pos_sequence_b: list[str]
 
 
 @router.post("/scan", response_model=ScanResponse)
@@ -82,7 +82,7 @@ class ScanRequest(BaseModel):
     student_text: str
 
 @router.post("/scan")
-def scan_mosaic_plagiarism(payload: ScanRequest) -> Dict[str, Any]:
+def scan_mosaic_plagiarism(payload: ScanRequest) -> dict[str, Any]:
     """Exposes syntactic POS analysis and mosaic plagiarism detection via REST."""
     try:
         results = PatchwritingDetector.compute_syntactic_similarity(

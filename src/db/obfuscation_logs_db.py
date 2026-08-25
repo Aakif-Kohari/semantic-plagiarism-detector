@@ -115,7 +115,7 @@ def log_obfuscation_attempt(
 
 def get_user_obfuscation_history(
     user_id: str, limit: int = 50, db_path: Optional[Path] = None
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Retrieve the obfuscation log history for a specific user."""
     try:
         with get_connection(db_path) as conn:

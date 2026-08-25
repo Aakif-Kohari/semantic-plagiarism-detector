@@ -33,14 +33,14 @@ try:
     from utils.chunking import chunk_text, chunk_by_sentences, ContextPreservingChunker
 except ImportError:
     # Fallback mock implementations if core module is structured differently
-    def chunk_text(text: str, chunk_size: int = 500) -> List[str]:
+    def chunk_text(text: str, chunk_size: int = 500) -> list[str]:
         return [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
     
-    def chunk_by_sentences(text: str) -> List[str]:
+    def chunk_by_sentences(text: str) -> list[str]:
         return [s.strip() for s in text.split('.') if s.strip()]
         
     class ContextPreservingChunker:
-        def chunk(self, text: str) -> List[str]:
+        def chunk(self, text: str) -> list[str]:
             return [text[i:i+1000] for i in range(0, len(text), 1000)]
 
 # Configure logging
@@ -80,7 +80,7 @@ def generate_synthetic_text(size_mb: int) -> str:
 
 # ── Benchmark Execution ────────────────────────────────────────────────────────
 
-def benchmark_algorithm(name: str, func, text: str, size_mb: int) -> Dict[str, Any]:
+def benchmark_algorithm(name: str, func, text: str, size_mb: int) -> dict[str, Any]:
     """Measures execution time, throughput (MB/s), and peak memory consumption."""
     exact_size_mb = len(text.encode('utf-8')) / (1024 * 1024)
     
@@ -114,7 +114,7 @@ def benchmark_algorithm(name: str, func, text: str, size_mb: int) -> Dict[str, A
     }
 
 
-def run_benchmarks() -> List[Dict[str, Any]]:
+def run_benchmarks() -> list[dict[str, Any]]:
     sizes = [1, 5, 20]
     results = []
     
@@ -140,7 +140,7 @@ def run_benchmarks() -> List[Dict[str, Any]]:
 
 # ── Reporting & Output ─────────────────────────────────────────────────────────
 
-def print_markdown_table(results: List[Dict[str, Any]]) -> None:
+def print_markdown_table(results: list[dict[str, Any]]) -> None:
     """Print results formatted as a Markdown table."""
     print("\n### Chunking Benchmark Results\n")
     print("| Algorithm | Size | Time (s) | Throughput (MB/s) | Peak Memory (MB) | Chunks Created |")

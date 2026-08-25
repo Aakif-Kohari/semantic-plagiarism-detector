@@ -98,7 +98,7 @@ def log_review_override(
 
 def update_reviewer_metrics(
     reviewer_id: str,
-    metrics: Dict[str, float],
+    metrics: dict[str, float],
     weight: float,
     db_path: Optional[Path] = None
 ) -> bool:
@@ -151,7 +151,7 @@ class ReviewerCalibrationDB:
     """
     def __init__(self):
         # In-memory storage mock for demonstration (replace with SQL/ORM in production)
-        self.overrides_store: List[Dict[str, Any]] = []
+        self.overrides_store: list[dict[str, Any]] = []
 
     def save_review_override(self, submission_id: str, reviewer_id: str, assigned_score: float, consensus_score: float) -> None:
         """Persists a reviewer override event along with its deviation from consensus."""
@@ -165,10 +165,10 @@ class ReviewerCalibrationDB:
         }
         self.overrides_store.append(record)
 
-    def fetch_reviewer_history(self, reviewer_id: str) -> List[Dict[str, Any]]:
+    def fetch_reviewer_history(self, reviewer_id: str) -> list[dict[str, Any]]:
         """Retrieves all historical review overrides for a specific reviewer."""
         return [r for r in self.overrides_store if r["reviewer_id"] == reviewer_id]
 
-    def fetch_all_overrides(self) -> List[Dict[str, Any]]:
+    def fetch_all_overrides(self) -> list[dict[str, Any]]:
         """Retrieves entire override dataset for committee IRR calculations."""
         return self.overrides_store

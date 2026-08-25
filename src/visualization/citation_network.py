@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 def generate_citation_network_graph(
-    doc_citations: Dict[str, Set[str]],
+    doc_citations: dict[str, set[str]],
     title: str = "Citation Network Analysis"
 ) -> go.Figure:
     """Generate a Plotly network graph showing shared citations.

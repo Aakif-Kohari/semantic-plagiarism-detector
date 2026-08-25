@@ -19,10 +19,10 @@ logger = logging.getLogger(__name__)
 
 def package_lsh_bands(
     document_id: str,
-    lsh_bands: List[bytes],
+    lsh_bands: list[bytes],
     institution_id: str,
     secret_key: str
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Package and cryptographically sign LSH bands for exchange.
     
     Args:
@@ -60,7 +60,7 @@ def package_lsh_bands(
 
 
 def verify_lsh_package(
-    package: Dict[str, Any],
+    package: dict[str, Any],
     secret_key: str
 ) -> bool:
     """Verify the cryptographic signature of an LSH package.

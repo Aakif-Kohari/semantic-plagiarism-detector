@@ -10,10 +10,12 @@ from __future__ import annotations
 import functools
 import logging
 import os
+import threading
 import time
 from typing import Any, Callable
 
-from prometheus_client import Counter, Gauge, Histogram, generate_latest
+from prometheus_client import Counter, Gauge, Histogram
+from prometheus_client import generate_latest as _prometheus_generate_latest
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +74,11 @@ active_users_gauge = Gauge(
     "Current number of active users",
 )
 
+active_threads_gauge = Gauge(
+    "spd_active_threads",
+    "Active Python threads",
+)
+
 # ── Histograms ─────────────────────────────────────────────────────────────────
 
 pipeline_duration_seconds = Histogram(
@@ -125,6 +132,12 @@ def timed(stage: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
 
 
 # ── JSON-formatted output (for non-Prometheus setups) ──────────────────────────
+
+
+def generate_latest(*args: Any, **kwargs: Any) -> bytes:
+    """Prometheus text exposition; refresh thread count before each scrape."""
+    active_threads_gauge.set(threading.active_count())
+    return _prometheus_generate_latest(*args, **kwargs)
 
 
 def generate_metrics_json() -> dict[str, Any]:

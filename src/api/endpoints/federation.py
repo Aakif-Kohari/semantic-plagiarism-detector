@@ -46,7 +46,7 @@ class UploadRequest(BaseModel):
 
     document_id: str
     institution_id: str
-    lsh_bands: List[str]
+    lsh_bands: list[str]
 
 
 @router.post("/minhash")

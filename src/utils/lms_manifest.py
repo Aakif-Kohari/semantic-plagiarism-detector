@@ -16,7 +16,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def generate_canvas_manifest(records: List[Dict[str, Any]], format: str = "csv") -> str:
+def generate_canvas_manifest(records: list[dict[str, Any]], format: str = "csv") -> str:
     """Generate a Canvas-compatible import manifest.
 
     Args:

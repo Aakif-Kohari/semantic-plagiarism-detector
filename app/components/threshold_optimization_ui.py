@@ -134,10 +134,10 @@ def render_threshold_optimization_panel() -> None:
 
 
 def render_threshold_sweep_chart(
-    thresholds: List[float],
-    precisions: List[float],
-    recalls: List[float],
-    f1_scores: List[float]
+    thresholds: list[float],
+    precisions: list[float],
+    recalls: list[float],
+    f1_scores: list[float]
 ) -> None:
     """
     Render threshold sweep chart.
@@ -207,8 +207,8 @@ def render_threshold_sweep_chart(
 
 
 def render_document_type_analysis(
-    scores: List[float],
-    texts: Optional[List[str]] = None
+    scores: list[float],
+    texts: Optional[list[str]] = None
 ) -> None:
     """
     Render document type analysis.

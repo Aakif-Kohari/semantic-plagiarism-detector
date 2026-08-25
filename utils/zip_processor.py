@@ -6,13 +6,13 @@ from typing import Union, Set
 
 # Configuration constants
 MAX_ARCHIVE_DEPTH = 1
-SUPPORTED_ARCHIVE_EXTENSIONS: Set[str] = {'.zip', '.tar', '.gz', '.rar', '.7z'}
+SUPPORTED_ARCHIVE_EXTENSIONS: set[str] = {'.zip', '.tar', '.gz', '.rar', '.7z'}
 
 class NestedArchiveError(ValueError):
     """Raised when nested archive depth exceeds safety limits or unauthorized archives are detected."""
     pass
 
-def validate_nested_archives(zip_path: Union[str, Path], current_depth: int = 0) -> None:
+def validate_nested_archives(zip_path: str | Path, current_depth: int = 0) -> None:
     """
     Validates an uploaded ZIP file for nested archive safety limits to prevent
     zip bombs and recursive decompression attacks.
@@ -43,7 +43,7 @@ def validate_nested_archives(zip_path: Union[str, Path], current_depth: int = 0)
     except zipfile.BadZipFile:
         raise ValueError(f"The file at '{zip_path}' is corrupted or not a valid ZIP archive.")
 
-def process_submission_zip(zip_path: Union[str, Path]) -> None:
+def process_submission_zip(zip_path: str | Path) -> None:
     """
     Main entry point for processing submission ZIP files with integrated safety checks.
     """

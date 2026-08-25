@@ -32,19 +32,19 @@ logger = logging.getLogger(__name__)
 class PipelineResult(NamedTuple):
     """Named outputs from ``run_full_pipeline`` (still unpackable as a tuple)."""
 
-    raw_texts: Dict[str, str]
-    chunked_docs: Dict[str, List[str]]
-    embeddings: Dict[str, np.ndarray]
+    raw_texts: dict[str, str]
+    chunked_docs: dict[str, list[str]]
+    embeddings: dict[str, np.ndarray]
     sim_df: pd.DataFrame
     chunk_sim_df: pd.DataFrame
     faiss_index: Any
-    registry: List[ChunkRecord]
-    ai_probabilities: Dict[str, Dict[str, Any]]
-    flags: List[Dict[str, Any]]
+    registry: list[ChunkRecord]
+    ai_probabilities: dict[str, dict[str, Any]]
+    flags: list[dict[str, Any]]
 
 
 def run_full_pipeline(
-    file_bytes_dict: Dict[str, bytes],
+    file_bytes_dict: dict[str, bytes],
     *,
     ocr_language: str = "eng",
     ocr_dpi: int = 300,
@@ -75,9 +75,9 @@ def run_full_pipeline(
             psutil = None
             logger.debug("psutil is not installed; skipping system memory usage check.")
 
-        raw_texts: Dict[str, str] = {}
-        failed_files: List[str] = []
-        failure_details: List[str] = []
+        raw_texts: dict[str, str] = {}
+        failed_files: list[str] = []
+        failure_details: list[str] = []
 
         with tracer.start_as_current_span("pipeline.parse") as parse_span:
             for name, data in file_bytes_dict.items():
@@ -204,14 +204,14 @@ class RescanResult(NamedTuple):
 
     documents_scanned: int
     candidate_pairs_checked: int
-    new_incidents: List[Dict[str, Any]]
+    new_incidents: list[dict[str, Any]]
     total_flags: int
 
 
 def _aggregate_chunk_matches_to_flags(
-    matches: List[Dict[str, Any]],
+    matches: list[dict[str, Any]],
     threshold: float,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Collapse chunk-level FAISS matches into one flag per document pair.
 
     ``find_plagiarised_chunks`` returns one row per matching chunk pair;
@@ -219,7 +219,7 @@ def _aggregate_chunk_matches_to_flags(
     keeps only the strongest (max-similarity) match per document pair,
     mirroring the semantics of ``flag_plagiarism``.
     """
-    best_per_pair: Dict[tuple, Dict[str, Any]] = {}
+    best_per_pair: dict[tuple, dict[str, Any]] = {}
 
     for match in matches:
         doc_a = str(match.get("source_doc", "")).strip()
@@ -343,12 +343,12 @@ def rescan_recent_documents(
     recent_chunked_docs = {name: texts for name, (texts, _emb) in recent_chunks.items()}
     recent_embeddings = {name: emb for name, (_texts, emb) in recent_chunks.items()}
 
-    new_incidents: List[Dict[str, Any]] = []
-    all_flags: List[Dict[str, Any]] = []
+    new_incidents: list[dict[str, Any]] = []
+    all_flags: list[dict[str, Any]] = []
 
     with faiss_write_lock(lock_path=f"{FAISS_INDEX_PATH}.lock"):
         if not recent_embeddings:
-            matches: List[Dict[str, Any]] = []
+            matches: list[dict[str, Any]] = []
         else:
             index, registry, _recovered = load_or_rebuild_index(str(FAISS_INDEX_PATH))
             matches = find_plagiarised_chunks(

@@ -72,8 +72,8 @@ class Notification:
     timestamp: float
     status: NotificationStatus
     read_at: Optional[float] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    actions: List[Dict[str, str]] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    actions: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -84,10 +84,10 @@ class AlertRule:
     enabled: bool
     condition: str  # e.g., "similarity > 0.85"
     priority: NotificationPriority
-    channels: List[NotificationChannel]
+    channels: list[NotificationChannel]
     cooldown_seconds: int = 300
     last_triggered: Optional[float] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -95,14 +95,14 @@ class UserNotificationPreferences:
     """User notification preferences."""
     user_id: str
     enabled: bool = True
-    channels: List[NotificationChannel] = field(default_factory=lambda: [NotificationChannel.IN_APP])
+    channels: list[NotificationChannel] = field(default_factory=lambda: [NotificationChannel.IN_APP])
     min_priority: NotificationPriority = NotificationPriority.NORMAL
     daily_digest: bool = True
     weekly_summary: bool = False
     quiet_hours_start: Optional[int] = None  # Hour (0-23)
     quiet_hours_end: Optional[int] = None
-    muted_keywords: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    muted_keywords: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 # ==============================================================================
@@ -116,13 +116,13 @@ class NotificationManager:
     
     def __init__(self, storage_path: Path):
         self.storage_path = storage_path
-        self.notifications: List[Notification] = []
-        self.alert_rules: List[AlertRule] = []
-        self.user_preferences: Dict[str, UserNotificationPreferences] = {}
+        self.notifications: list[Notification] = []
+        self.alert_rules: list[AlertRule] = []
+        self.user_preferences: dict[str, UserNotificationPreferences] = {}
         self.notification_queue: queue.Queue = queue.Queue()
         self.is_running = False
         self.worker_thread: Optional[threading.Thread] = None
-        self.channel_handlers: Dict[NotificationChannel, Callable] = {}
+        self.channel_handlers: dict[NotificationChannel, Callable] = {}
         
         # Tracking
         self.delivery_stats = {
@@ -364,8 +364,8 @@ class NotificationManager:
         priority: NotificationPriority = NotificationPriority.NORMAL,
         channel: NotificationChannel = NotificationChannel.IN_APP,
         recipient: str = "all",
-        metadata: Dict[str, Any] = None,
-        actions: List[Dict[str, str]] = None
+        metadata: dict[str, Any] = None,
+        actions: list[dict[str, str]] = None
     ) -> str:
         """
         Send a notification.
@@ -408,7 +408,7 @@ class NotificationManager:
         doc_b: str,
         similarity: float,
         threshold: float = 0.75,
-        recipients: List[str] = None
+        recipients: list[str] = None
     ):
         """
         Send plagiarism detection alert.
@@ -476,7 +476,7 @@ class NotificationManager:
         status: NotificationStatus = None,
         limit: int = 50,
         include_read: bool = False
-    ) -> List[Notification]:
+    ) -> list[Notification]:
         """
         Get notifications for a user.
         
@@ -539,7 +539,7 @@ class NotificationManager:
                     count += 1
         return count
     
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get notification statistics."""
         total = len(self.notifications)
         unread = len([n for n in self.notifications if n.status not in [NotificationStatus.READ, NotificationStatus.DISMISSED]])
@@ -574,10 +574,10 @@ class SmartFilter:
     
     def __init__(self, notification_manager: NotificationManager):
         self.manager = notification_manager
-        self.similarity_history: Dict[str, List[float]] = defaultdict(list)
-        self.notification_cooldown: Dict[str, float] = {}
+        self.similarity_history: dict[str, list[float]] = defaultdict(list)
+        self.notification_cooldown: dict[str, float] = {}
     
-    def should_filter(self, event: Dict[str, Any], cooldown_seconds: int = 300) -> bool:
+    def should_filter(self, event: dict[str, Any], cooldown_seconds: int = 300) -> bool:
         """
         Check if an event should be filtered out.
         
@@ -602,7 +602,7 @@ class SmartFilter:
         
         return False
     
-    def _get_event_key(self, event: Dict[str, Any]) -> str:
+    def _get_event_key(self, event: dict[str, Any]) -> str:
         """Generate event key for deduplication."""
         # For plagiarism events, use document pair
         if "doc_a" in event and "doc_b" in event:

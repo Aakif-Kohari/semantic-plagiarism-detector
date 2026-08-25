@@ -20,8 +20,8 @@ class SearchResult:
     score: float
     snippet: str
     match_type: str  # 'full_text', 'semantic', 'metadata', 'tag'
-    metadata: Dict[str, Any] = None
-    highlights: List[Tuple[int, int]] = None
+    metadata: dict[str, Any] = None
+    highlights: list[tuple[int, int]] = None
     
     def __post_init__(self):
         if self.metadata is None:
@@ -29,7 +29,7 @@ class SearchResult:
         if self.highlights is None:
             self.highlights = []
     
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             'document_name': self.document_name,
             'score': self.score,
@@ -44,7 +44,7 @@ class SearchQuery:
     """Represents a search query with filters"""
     id: str
     query_text: str
-    filters: Dict[str, Any]
+    filters: dict[str, Any]
     search_type: str  # 'full_text', 'semantic', 'hybrid'
     timestamp: datetime
     user_id: str
@@ -52,7 +52,7 @@ class SearchQuery:
     is_saved: bool = False
     name: str = None
     
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             'id': self.id,
             'query_text': self.query_text,
@@ -72,7 +72,7 @@ class SearchFilter:
     operator: str  # 'eq', 'ne', 'gt', 'lt', 'gte', 'lte', 'contains', 'in'
     value: Any
     
-    def matches(self, document: Dict) -> bool:
+    def matches(self, document: dict) -> bool:
         """Check if document matches this filter"""
         doc_value = document.get(self.field)
         
@@ -109,8 +109,8 @@ class SearchEngine:
         self.tag_index = defaultdict(set)
         
     def index_document(self, doc_name: str, content: str, 
-                       metadata: Dict = None, embeddings: np.ndarray = None,
-                       tags: List[str] = None):
+                       metadata: dict = None, embeddings: np.ndarray = None,
+                       tags: list[str] = None):
         """Index a document for search"""
         # Store full text
         self.document_index[doc_name] = content
@@ -132,7 +132,7 @@ class SearchEngine:
             for tag in tags:
                 self.tag_index[tag].add(doc_name)
     
-    def _tokenize(self, text: str) -> List[str]:
+    def _tokenize(self, text: str) -> list[str]:
         """Tokenize text into words for indexing"""
         # Simple tokenization - can be improved
         text = text.lower()
@@ -142,8 +142,8 @@ class SearchEngine:
                      'for', 'of', 'with', 'without', 'by', 'from', 'up', 'down'}
         return [w for w in words if w not in stopwords and len(w) > 2]
     
-    def search_full_text(self, query: str, filters: List[SearchFilter] = None,
-                        max_results: int = 50) -> List[SearchResult]:
+    def search_full_text(self, query: str, filters: list[SearchFilter] = None,
+                        max_results: int = 50) -> list[SearchResult]:
         """Perform full-text search"""
         query_words = self._tokenize(query)
         if not query_words:
@@ -183,9 +183,9 @@ class SearchEngine:
         return results
     
     def search_semantic(self, query_embedding: np.ndarray, 
-                       filters: List[SearchFilter] = None,
+                       filters: list[SearchFilter] = None,
                        threshold: float = 0.5,
-                       max_results: int = 50) -> List[SearchResult]:
+                       max_results: int = 50) -> list[SearchResult]:
         """Perform semantic search using embeddings"""
         if not self.semantic_embeddings or query_embedding is None:
             return []
@@ -217,9 +217,9 @@ class SearchEngine:
         return results[:max_results]
     
     def search_hybrid(self, query: str, query_embedding: np.ndarray = None,
-                     filters: List[SearchFilter] = None,
+                     filters: list[SearchFilter] = None,
                      semantic_weight: float = 0.5,
-                     max_results: int = 50) -> List[SearchResult]:
+                     max_results: int = 50) -> list[SearchResult]:
         """Perform hybrid search combining full-text and semantic"""
         # Get full-text results
         text_results = self.search_full_text(query, filters, max_results)
@@ -274,7 +274,7 @@ class SearchEngine:
         hybrid_results.sort(key=lambda x: x.score, reverse=True)
         return hybrid_results[:max_results]
     
-    def _apply_filters(self, doc_name: str, filters: List[SearchFilter]) -> bool:
+    def _apply_filters(self, doc_name: str, filters: list[SearchFilter]) -> bool:
         """Apply filters to a document"""
         metadata = self.metadata_index.get(doc_name, {})
         for filter_obj in filters:
@@ -282,7 +282,7 @@ class SearchEngine:
                 return False
         return True
     
-    def _generate_snippet(self, content: str, query_words: List[str], 
+    def _generate_snippet(self, content: str, query_words: list[str], 
                          context_chars: int = 100) -> str:
         """Generate a snippet with context around matches"""
         if not content or not query_words:
@@ -312,7 +312,7 @@ class SearchEngine:
         
         return snippet
     
-    def get_search_history(self) -> List[SearchQuery]:
+    def get_search_history(self) -> list[SearchQuery]:
         """Get search history"""
         return self.search_history
     
@@ -324,7 +324,7 @@ class SearchEngine:
         self.saved_searches[search_id] = query
         return search_id
     
-    def get_saved_searches(self) -> Dict[str, SearchQuery]:
+    def get_saved_searches(self) -> dict[str, SearchQuery]:
         """Get saved searches"""
         return self.saved_searches
     
@@ -335,7 +335,7 @@ class SearchEngine:
             return True
         return False
     
-    def get_search_stats(self) -> Dict:
+    def get_search_stats(self) -> dict:
         """Get search statistics"""
         return {
             'total_searches': len(self.search_history),
@@ -353,7 +353,7 @@ class SearchQueryParser:
         self.operators = ['AND', 'OR', 'NOT']
         self.field_pattern = re.compile(r'(\w+):(".*?"|\S+)')
     
-    def parse(self, query: str) -> Dict:
+    def parse(self, query: str) -> dict:
         """Parse a search query into components"""
         result = {
             'keywords': [],
@@ -432,7 +432,7 @@ class SmartFilterBuilder:
             raise ValueError(f"Invalid operator for {field}: {operator}")
         return SearchFilter(field, operator, value)
     
-    def build_from_dict(self, filter_dict: Dict) -> List[SearchFilter]:
+    def build_from_dict(self, filter_dict: dict) -> list[SearchFilter]:
         """Build filters from dictionary"""
         filters = []
         for field, conditions in filter_dict.items():
@@ -442,7 +442,7 @@ class SmartFilterBuilder:
                         filters.append(SearchFilter(field, op, value))
         return filters
     
-    def get_filter_options(self) -> Dict:
+    def get_filter_options(self) -> dict:
         """Get available filter options"""
         return self.available_fields
 
@@ -583,7 +583,7 @@ def render_search_filters(filter_builder: SmartFilterBuilder):
     
     return filters
 
-def render_search_results(results: List[SearchResult]):
+def render_search_results(results: list[SearchResult]):
     """Render search results"""
     st.subheader(f"📋 Results ({len(results)})")
     

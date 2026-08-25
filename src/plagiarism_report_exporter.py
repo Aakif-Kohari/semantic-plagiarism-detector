@@ -25,9 +25,9 @@ class PlagiarismReportExporter:
     def generate_markdown_report(
         self,
         overall_similarity_pct: float,
-        matched_sources: List[Dict[str, Any]],
+        matched_sources: list[dict[str, Any]],
         code_similarity_pct: float = 0.0,
-        paragraph_alignment_matches: Optional[List[Dict[str, Any]]] = None,
+        paragraph_alignment_matches: Optional[list[dict[str, Any]]] = None,
     ) -> str:
         """Generates comprehensive Markdown report."""
         report = f"""# Plagiarism Analysis Report: {self.document_title}
@@ -64,7 +64,7 @@ class PlagiarismReportExporter:
         return report
 
     def export_html_report(
-        self, overall_similarity_pct: float, matched_sources: List[Dict[str, Any]]
+        self, overall_similarity_pct: float, matched_sources: list[dict[str, Any]]
     ) -> str:
         """Generates standalone HTML report with responsive CSS telemetry tables."""
         html = f"""<!DOCTYPE html>
@@ -92,8 +92,8 @@ class PlagiarismReportExporter:
         return html
 
     def export_json_summary(
-        self, overall_similarity_pct: float, matched_sources: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
+        self, overall_similarity_pct: float, matched_sources: list[dict[str, Any]]
+    ) -> dict[str, Any]:
         """Returns JSON report summary dict."""
         return {
             "documentTitle": self.document_title,

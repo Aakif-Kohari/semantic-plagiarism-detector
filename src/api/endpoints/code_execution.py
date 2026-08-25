@@ -32,7 +32,7 @@ class ExecutionRequest(BaseModel):
     """Schema for code execution requests."""
 
     code: str = Field(..., min_length=1)
-    test_cases: Optional[List[Dict[str, Any]]] = None
+    test_cases: Optional[list[dict[str, Any]]] = None
     timeout: float = Field(5.0, ge=0.1, le=30.0)
     max_memory_mb: int = Field(256, ge=64, le=1024)
 
@@ -47,8 +47,8 @@ class ExecutionResponse(BaseModel):
     return_code: int
     execution_time: float
     memory_limit_exceeded: bool
-    test_results: List[Dict[str, Any]]
-    behavioral_clones: List[str]
+    test_results: list[dict[str, Any]]
+    behavioral_clones: list[str]
 
 
 @router.post("/execute", response_model=ExecutionResponse)

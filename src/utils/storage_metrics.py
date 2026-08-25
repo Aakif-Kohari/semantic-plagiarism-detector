@@ -6,14 +6,14 @@ import logging
 import sqlite3
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 logger = logging.getLogger(__name__)
 
 
-def _deduplicate_paths(paths: List[Path]) -> List[Path]:
+def _deduplicate_paths(paths: list[Path]) -> list[Path]:
     """Remove duplicate paths by comparing their resolved absolute form."""
-    unique_paths: List[Path] = []
+    unique_paths: list[Path] = []
     seen: set[Path] = set()
     for p in paths:
         try:
@@ -26,7 +26,7 @@ def _deduplicate_paths(paths: List[Path]) -> List[Path]:
     return unique_paths
 
 
-def get_sqlite_db_paths() -> List[Path]:
+def get_sqlite_db_paths() -> list[Path]:
     """Retrieve unique paths of SQLite database files in standard locations.
 
     Collects the three configured application databases (corpus, auth and
@@ -41,7 +41,7 @@ def get_sqlite_db_paths() -> List[Path]:
         List[Path]: Existing-or-not database paths, de-duplicated by their
         resolved absolute form. Paths are returned in discovery order.
     """
-    paths: List[Path] = []
+    paths: list[Path] = []
 
     # 1. Corpus DB path
     try:
@@ -79,7 +79,7 @@ def get_sqlite_db_paths() -> List[Path]:
     return _deduplicate_paths(paths)
 
 
-def get_faiss_index_paths() -> List[Path]:
+def get_faiss_index_paths() -> list[Path]:
     """Retrieve unique paths of FAISS index files in standard locations.
 
     Always includes the two default ``corpus.index`` locations (repository
@@ -91,7 +91,7 @@ def get_faiss_index_paths() -> List[Path]:
         List[Path]: Existing-or-not index paths, de-duplicated by their
         resolved absolute form. Paths are returned in discovery order.
     """
-    paths: List[Path] = []
+    paths: list[Path] = []
 
     base_dir = Path(__file__).resolve().parents[2]
     data_dir = base_dir / "data"
@@ -109,9 +109,9 @@ def get_faiss_index_paths() -> List[Path]:
 
 
 def calculate_storage_usage(
-    db_paths: Optional[List[Path]] = None,
-    index_paths: Optional[List[Path]] = None,
-) -> Dict[str, Any]:
+    db_paths: Optional[list[Path]] = None,
+    index_paths: Optional[list[Path]] = None,
+) -> dict[str, Any]:
     """Calculate total SQLite + FAISS disk usage in bytes and formatted megabytes.
 
     Returns:
@@ -172,6 +172,37 @@ def calculate_storage_usage(
         "sqlite_file_count": sqlite_file_count,
         "faiss_file_count": faiss_file_count,
     }
+
+
+def get_directory_size_bytes(directory: Union[str, Path]) -> int:
+    """Calculate total file size in bytes for a directory recursively.
+
+    Accurately sums files in nested subdirectories while ignoring broken symlinks
+    or unreadable files.
+
+    Args:
+        directory: Path or string path of directory to inspect.
+
+    Returns:
+        int: Total size of files in bytes.
+    """
+    dir_path = Path(directory)
+    if not dir_path.exists() or not dir_path.is_dir():
+        return 0
+
+    total_bytes = 0
+    try:
+        for file_path in dir_path.rglob("*"):
+            try:
+                if file_path.is_file():
+                    total_bytes += file_path.stat().st_size
+            except (OSError, ValueError) as e:
+                logger.debug("Could not read size of %s: %s", file_path, e)
+                continue
+    except OSError as e:
+        logger.debug("Error traversing directory %s: %s", dir_path, e)
+
+    return total_bytes
 
 
 def calculate_database_fragmentation(db_path: str) -> dict[str, float | int | str]:

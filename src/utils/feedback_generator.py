@@ -101,7 +101,7 @@ def generate_feedback_paragraph(result: EvaluationResult) -> str:
     return "\n".join(lines)
 
 
-def generate_json_feedback(result: EvaluationResult) -> Dict[str, Any]:
+def generate_json_feedback(result: EvaluationResult) -> dict[str, Any]:
     """Generate a structured JSON feedback object for API responses.
 
     Args:

@@ -545,7 +545,7 @@ def purge_old_translations(
         return 0
 
 
-def get_cache_stats(db_path: Optional[Path] = None) -> Dict[str, Any]:
+def get_cache_stats(db_path: Optional[Path] = None) -> dict[str, Any]:
     """Retrieve statistics about the translation cache.
 
     Returns:

@@ -142,7 +142,7 @@ def seed_documents():
     created_docs = []
     skipped_docs = []
     recovered_docs = []
-    raw_texts: Dict[str, str] = {}
+    raw_texts: dict[str, str] = {}
     
     for filename, student_name, _ in DOCUMENTS:
         filepath = SAMPLE_DIR / filename
