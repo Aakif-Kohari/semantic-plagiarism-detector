@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Union
 
 from dotenv import load_dotenv
 
@@ -412,6 +412,62 @@ def generate_daily_summary_html(stats: dict[str, Any]) -> str:
     return html_content
 
 
+def export_incidents_to_csv(
+    incidents: list[dict[str, Any]] | Iterable[Mapping[str, Any]],
+) -> bytes:
+    """Generate CSV bytes for a list of incidents using UTF-8 with BOM encoding.
+
+    Args:
+        incidents: List or iterable of incident dictionaries.
+
+    Returns:
+        bytes: UTF-8-SIG encoded CSV data suitable for MIMEApplication attachment.
+    """
+    try:
+        from src.db.incidents import incidents_to_csv
+
+        return incidents_to_csv(incidents)
+    except Exception:
+        import csv
+        import io
+
+        buffer = io.StringIO(newline="")
+        fieldnames = [
+            "Incident ID",
+            "Document A",
+            "Document B",
+            "Similarity Score",
+            "Threshold at Time of Flag",
+            "Severity Rank",
+            "Review Status",
+            "Date Flagged",
+        ]
+        writer = csv.DictWriter(buffer, fieldnames=fieldnames)
+        writer.writeheader()
+        for inc in incidents:
+            sim = inc.get("similarity_score", 0.0)
+            sim_str = f"{float(sim):.4f}" if isinstance(sim, (int, float)) else str(sim)
+            thresh = inc.get("threshold_at_time_of_flag", 0.0)
+            thresh_str = (
+                f"{float(thresh):.4f}"
+                if isinstance(thresh, (int, float))
+                else str(thresh)
+            )
+            writer.writerow(
+                {
+                    "Incident ID": inc.get("incident_id", ""),
+                    "Document A": inc.get("document_a", ""),
+                    "Document B": inc.get("document_b", ""),
+                    "Similarity Score": sim_str,
+                    "Threshold at Time of Flag": thresh_str,
+                    "Severity Rank": inc.get("severity_rank", ""),
+                    "Review Status": inc.get("review_status", "Pending"),
+                    "Date Flagged": inc.get("date_flagged", ""),
+                }
+            )
+        return buffer.getvalue().encode("utf-8-sig")
+
+
 def send_email(
     to_emails: list[str],
     subject: str,
@@ -420,7 +476,8 @@ def send_email(
     attachment_filename: str = "daily_plagiarism_summary.csv",
     timeout: float = 10.0,
     reply_to: Optional[str] = None,
-
+    attach_csv: bool = True,
+    csv_data: Optional[bytes | str] = None,
 ) -> bool:
     """
     Send an email using SMTP.
@@ -430,8 +487,11 @@ def send_email(
         subject: Email subject line
         html_body: HTML formatted email body
         status_callback: Optional callback receiving (success: bool, message: str)
+        attachment_filename: Filename for the CSV attachment (default: daily_plagiarism_summary.csv)
         timeout: Socket connection timeout in seconds (default 10.0)
         reply_to: Optional Reply-To email address header
+        attach_csv: Option to attach incidents CSV report (default: True)
+        csv_data: Optional raw CSV bytes or string content for the attachment
 
     Returns:
         True if email sent successfully, False otherwise
@@ -464,8 +524,6 @@ def send_email(
             status_callback(False, msg)
         return False
 
-
-
     max_retries = 3
     for attempt in range(max_retries + 1):
         try:
@@ -479,13 +537,18 @@ def send_email(
 
             html_part = MIMEText(html_body, "html")
             msg_obj.attach(html_part)
-            attachment = MIMEApplication(b"", _subtype="csv")
-            attachment.add_header(
-                "Content-Disposition",
-                "attachment",
-                filename=attachment_filename,
-            )
-            msg_obj.attach(attachment)
+
+            if attach_csv:
+                raw_csv = csv_data if csv_data is not None else b""
+                if isinstance(raw_csv, str):
+                    raw_csv = raw_csv.encode("utf-8-sig")
+                attachment = MIMEApplication(raw_csv, _subtype="csv")
+                attachment.add_header(
+                    "Content-Disposition",
+                    "attachment",
+                    filename=attachment_filename,
+                )
+                msg_obj.attach(attachment)
 
             if smtp_port == 465:
                 logger.debug(
@@ -578,6 +641,8 @@ def send_daily_summary(
     footer_note: Optional[str] = None,
     status_callback: Optional[Callable[[bool, str], None]] = None,
     reply_to: Optional[str] = None,
+    attach_csv: bool = True,
+    csv_filename: str = "daily_plagiarism_summary.csv",
 ) -> bool:
     """
     Main function to aggregate daily incidents and send summary email.
@@ -587,6 +652,8 @@ def send_daily_summary(
         footer_note: Optional custom administrator note to append to the email body
         status_callback: Optional callback receiving (success: bool, message: str)
         reply_to: Optional Reply-To email address header
+        attach_csv: Option to attach incidents CSV report (default: True)
+        csv_filename: Filename for the CSV attachment (default: daily_plagiarism_summary.csv)
 
     Returns:
         True if email sent successfully, False otherwise
@@ -603,6 +670,10 @@ def send_daily_summary(
         incidents_data=incidents, total_scans=100, footer_note=footer_note
     )
 
+    csv_data = None
+    if attach_csv:
+        csv_data = export_incidents_to_csv(incidents)
+
     prefix = f"{subject_prefix} " if subject_prefix else ""
     subject = (
         f"{prefix}Daily Plagiarism Summary - {datetime.now().strftime('%Y-%m-%d')}"
@@ -612,7 +683,10 @@ def send_daily_summary(
         subject,
         html_body,
         status_callback=status_callback,
+        attachment_filename=csv_filename,
         reply_to=reply_to,
+        attach_csv=attach_csv,
+        csv_data=csv_data,
     )
 
     return success
