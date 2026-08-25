@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Optional
 
 from dotenv import load_dotenv
 
@@ -573,11 +573,72 @@ def send_email(
             return False
 
 
+DEFAULT_EMAIL_SUBJECT_TEMPLATE = "Daily Plagiarism Summary - {date} ({count} incidents)"
+
+
+def format_subject_line(
+    template: Optional[str] = None,
+    date: Optional[str] = None,
+    count: int = 0,
+    app_name: Optional[str] = None,
+    subject_prefix: Optional[str] = None,
+) -> str:
+    """
+    Format a dynamic email subject line using template tokens.
+
+    Supports the following tokens:
+        - {date}: Current date (e.g. YYYY-MM-DD)
+        - {count}: Number of flagged incidents
+        - {app_name}: Name of the application (from APP_NAME env var or default)
+
+    Args:
+        template: Optional custom subject template. If not provided, reads from
+            the EMAIL_SUBJECT_TEMPLATE environment variable or defaults to
+            "Daily Plagiarism Summary - {date} ({count} incidents)".
+        date: Date string to substitute for {date} (default: current UTC/local date).
+        count: Integer count of incidents to substitute for {count}.
+        app_name: Application name to substitute for {app_name} (default from APP_NAME).
+        subject_prefix: Optional prefix to prepend to the subject (e.g., "[Plagiarism Alert]").
+
+    Returns:
+        str: Fully formatted email subject line.
+    """
+    if template is None:
+        template = os.getenv("EMAIL_SUBJECT_TEMPLATE", DEFAULT_EMAIL_SUBJECT_TEMPLATE)
+
+    if date is None:
+        date = datetime.now().strftime("%Y-%m-%d")
+
+    if app_name is None:
+        app_name = os.getenv("APP_NAME", "Semantic Plagiarism Detector")
+
+    token_values = {
+        "date": str(date),
+        "count": str(count),
+        "app_name": str(app_name),
+    }
+
+    try:
+        formatted = template.format(**token_values)
+    except KeyError:
+        formatted = template
+        for k, v in token_values.items():
+            formatted = formatted.replace(f"{{{k}}}", v)
+
+    if subject_prefix:
+        clean_prefix = subject_prefix.strip()
+        if clean_prefix and not formatted.startswith(clean_prefix):
+            formatted = f"{clean_prefix} {formatted}"
+
+    return formatted
+
+
 def send_daily_summary(
     subject_prefix: str = "[Plagiarism Alert]",
     footer_note: Optional[str] = None,
     status_callback: Optional[Callable[[bool, str], None]] = None,
     reply_to: Optional[str] = None,
+    subject_template: Optional[str] = None,
 ) -> bool:
     """
     Main function to aggregate daily incidents and send summary email.
@@ -587,6 +648,7 @@ def send_daily_summary(
         footer_note: Optional custom administrator note to append to the email body
         status_callback: Optional callback receiving (success: bool, message: str)
         reply_to: Optional Reply-To email address header
+        subject_template: Optional custom subject template override
 
     Returns:
         True if email sent successfully, False otherwise
@@ -603,10 +665,16 @@ def send_daily_summary(
         incidents_data=incidents, total_scans=100, footer_note=footer_note
     )
 
-    prefix = f"{subject_prefix} " if subject_prefix else ""
-    subject = (
-        f"{prefix}Daily Plagiarism Summary - {datetime.now().strftime('%Y-%m-%d')}"
+    current_date = datetime.now().strftime("%Y-%m-%d")
+    app_name = os.getenv("APP_NAME", "Semantic Plagiarism Detector")
+    subject = format_subject_line(
+        template=subject_template,
+        date=current_date,
+        count=len(incidents),
+        app_name=app_name,
+        subject_prefix=subject_prefix,
     )
+
     success = send_email(
         admin_emails,
         subject,
