@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -172,33 +173,59 @@ def calculate_storage_usage(
     }
 
 
-def get_directory_size_bytes(directory: Union[str, Path]) -> int:
-    """Calculate total file size in bytes for a directory recursively.
-
-    Accurately sums files in nested subdirectories while ignoring broken symlinks
-    or unreadable files.
-
-    Args:
-        directory: Path or string path of directory to inspect.
-
-    Returns:
-        int: Total size of files in bytes.
+def calculate_database_fragmentation(db_path: str) -> dict[str, float | int | str]:
     """
-    dir_path = Path(directory)
-    if not dir_path.exists() or not dir_path.is_dir():
-        return 0
-
-    total_bytes = 0
+    Queries SQLite storage engine page allocations to evaluate structural 
+    fragmentation levels and identify if an analytical VACUUM routine is required.
+    
+    Returns:
+        Dict detailing page counts, freelist counts, and calculated fragmentation ratio.
+    """
+    connection = None
     try:
-        for file_path in dir_path.rglob("*"):
-            try:
-                if file_path.is_file():
-                    total_bytes += file_path.stat().st_size
-            except (OSError, ValueError) as e:
-                logger.debug("Could not read size of %s: %s", file_path, e)
-                continue
-    except OSError as e:
-        logger.debug("Error traversing directory %s: %s", dir_path, e)
-
-    return total_bytes
-
+        # Establish a read-only or direct cursor sequence into the target SQLite file
+        connection = sqlite3.connect(db_path)
+        cursor = connection.cursor()
+        
+        # 1. Retrieve the count of empty, deleted, or unallocated database pages
+        cursor.execute("PRAGMA freelist_count;")
+        freelist_count: int = cursor.fetchone()[0]
+        
+        # 2. Retrieve the cumulative count of total structural database pages
+        cursor.execute("PRAGMA page_count;")
+        page_count: int = cursor.fetchone()[0]
+        
+        # Handle zero-allocation edge cases gracefully to avoid ZeroDivisionError logs
+        if page_count == 0:
+            return {
+                "freelist_count": 0,
+                "page_count": 0,
+                "fragmentation_percentage": 0.0,
+                "status": "EMPTY_DATABASE"
+            }
+            
+        # Calculate fragmentation percentage based on space-recovery eligibility
+        fragmentation_percentage: float = (freelist_count / page_count) * 100.0
+        
+        # Determine actionable optimization benchmarks
+        # Standard administrative threshold sets optimization need at > 20% bloat
+        needs_vacuum: bool = fragmentation_percentage > 20.0
+        
+        return {
+            "freelist_count": freelist_count,
+            "page_count": page_count,
+            "fragmentation_percentage": round(fragmentation_percentage, 2),
+            "status": "VACUUM_RECOMMENDED" if needs_vacuum else "OPTIMAL"
+        }
+        
+    except sqlite3.Error as error:
+        # Capture engine connectivity abnormalities safely
+        return {
+            "error": "SQLITE_QUERY_FAILURE",
+            "details": str(error),
+            "fragmentation_percentage": -1.0
+        }
+        
+    finally:
+        if connection:
+            connection.close()

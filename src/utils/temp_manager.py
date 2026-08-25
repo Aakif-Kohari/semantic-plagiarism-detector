@@ -73,10 +73,32 @@ def cleanup_registered_temp_paths() -> None:
 atexit.register(cleanup_registered_temp_paths)
 
 
-def cleanup_temp_files(retention_hours: float = 1.0) -> None:
+def get_default_temp_file_retention_hours() -> float:
+    """Read TEMP_FILE_RETENTION_HOURS from environment variable, falling back to 1.0 if not set or invalid (Issue #3182)."""
+    env_val = os.getenv("TEMP_FILE_RETENTION_HOURS")
+    if env_val is not None:
+        try:
+            val = float(env_val)
+            if val > 0:
+                return val
+        except (ValueError, TypeError):
+            logger.warning(
+                "Invalid TEMP_FILE_RETENTION_HOURS value '%s'. Falling back to default 1.0 hours.",
+                env_val,
+            )
+    return 1.0
+
+
+def cleanup_temp_files(retention_hours: Optional[float] = None) -> None:
     """
     Cleans up registered temporary files and directories that are older than the specified retention hours.
+
+    Args:
+        retention_hours: Max age in hours. Defaults to TEMP_FILE_RETENTION_HOURS env var (or 1.0 if not set).
     """
+    if retention_hours is None:
+        retention_hours = get_default_temp_file_retention_hours()
+
     now = time.time()
     retention_seconds = retention_hours * 3600.0
 

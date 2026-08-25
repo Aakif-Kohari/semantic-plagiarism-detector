@@ -649,6 +649,104 @@ class BatchTrendDataResponse(BaseModel):
 
 
 # ============================================================================
+# Document Versioning Schemas
+# ============================================================================
+
+
+
+class DocumentVersionSnapshotResponse(BaseModel):
+    """Response schema for a document version snapshot."""
+
+    document_hash: str = Field(..., description="SHA-256 content hash")
+    user_id: str = Field(..., description="User who uploaded")
+    assignment_id: str = Field(..., description="Assignment identifier")
+    filename: str = Field(default="untitled", description="Document filename")
+    content_length: int = Field(default=0, description="Character count")
+    word_count: int = Field(default=0, description="Word count")
+    version_number: int = Field(default=1, description="Version sequence number")
+    parent_hash: Optional[str] = Field(default=None, description="Parent version hash")
+    similarity_to_parent: Optional[float] = Field(default=None, description="Similarity to parent")
+    created_at: str = Field(..., description="ISO 8601 creation timestamp")
+
+
+class DocumentVersionListResponse(BaseModel):
+    """Paginated list of document version snapshots."""
+
+    items: List[DocumentVersionSnapshotResponse] = Field(default_factory=list)
+
+
+# ============================================================================
+# Anomaly Detection Schemas
+# ============================================================================
+
+
+
+class AnomalyScanResponse(BaseModel):
+    """Response schema for an anomaly scan."""
+
+    id: int = Field(..., description="Scan identifier")
+    scan_type: str = Field(default="full", description="Scan type")
+    status: str = Field(default="running", description="Scan status")
+    documents_scanned: int = Field(default=0, description="Documents processed")
+    anomalies_found: int = Field(default=0, description="Anomalies detected")
+    started_at: str = Field(..., description="ISO 8601 start timestamp")
+    completed_at: Optional[str] = Field(default=None, description="Completion timestamp")
+    triggered_by: str = Field(default="system", description="Who triggered the scan")
+    error_message: Optional[str] = Field(default=None, description="Error if failed")
+
+
+class AnomalyScanListResponse(BaseModel):
+    """Paginated list of anomaly scans."""
+
+    items: List[AnomalyScanResponse] = Field(default_factory=list)
+    page: int = Field(..., ge=1)
+    per_page: int = Field(..., ge=1)
+    total: int = Field(..., ge=0)
+    total_pages: int = Field(..., ge=0)
+
+
+# ============================================================================
+# Document Health Scoring Schemas
+# ============================================================================
+
+
+
+class HealthDimensionScore(BaseModel):
+    """Score for a single health dimension."""
+
+    name: str = Field(..., description="Dimension name")
+    score: float = Field(..., description="Score 0-100")
+    weight: float = Field(..., description="Weight in composite score")
+    weighted: float = Field(..., description="Weighted contribution")
+    details: str = Field(default="", description="Human-readable detail")
+
+
+class DocumentHealthScoreResponse(BaseModel):
+    """Response schema for a document health score."""
+
+    id: int = Field(..., description="Score record ID")
+    filename: str = Field(..., description="Document filename")
+    overall_score: float = Field(..., description="Composite health score 0-100")
+    grade: str = Field(..., description="Letter grade (A+, A, B+, B, C, D, F)")
+    dimensions: List[HealthDimensionScore] = Field(default_factory=list, description="Per-dimension scores")
+    checked_at: str = Field(..., description="ISO 8601 timestamp of check")
+    gate_passed: bool = Field(default=True, description="Whether document passed quality gate")
+    gate_reason: str = Field(default="", description="Quality gate decision reason")
+
+
+class DocumentHealthListResponse(BaseModel):
+    """Paginated list of document health scores."""
+
+    scores: List[DocumentHealthScoreResponse] = Field(default_factory=list, description="Health scores")
+    page: int = Field(..., ge=1, description="Current page")
+    per_page: int = Field(..., ge=1, description="Items per page")
+    total_items: int = Field(..., ge=0, description="Total score records")
+    total_pages: int = Field(..., ge=0, description="Total pages")
+    has_next: bool = Field(default=False)
+    has_previous: bool = Field(default=False)
+
+
+# ============================================================================
 # Similarity Heatmap & Clustering Schemas
 # ============================================================================
 
@@ -679,6 +777,190 @@ class HeatmapSnapshotListResponse(BaseModel):
     total_pages: int = Field(..., ge=0)
     has_next: bool = Field(default=False)
     has_previous: bool = Field(default=False)
+
+
+class DocumentVersionLineageItem(BaseModel):
+    """A single version entry in a lineage."""
+
+    document_hash: str = Field(...)
+    version_number: int = Field(...)
+    filename: str = Field(default="untitled")
+    word_count: int = Field(default=0)
+    similarity_to_parent: Optional[float] = Field(default=None)
+    created_at: str = Field(...)
+
+
+class DocumentVersionLineageResponse(BaseModel):
+    """Response for a version lineage."""
+
+    user_id: str = Field(...)
+    assignment_id: str = Field(...)
+    versions: List[DocumentVersionLineageItem] = Field(default_factory=list)
+    total: int = Field(default=0)
+
+
+class DocumentVersionDiffResponse(BaseModel):
+    """Response for a pairwise version diff."""
+
+    parent_hash: str = Field(...)
+    child_hash: str = Field(...)
+    similarity: float = Field(default=0.0)
+    added_words: int = Field(default=0)
+    removed_words: int = Field(default=0)
+    changed_words: int = Field(default=0)
+    jaccard_index: float = Field(default=0.0)
+    computed_at: str = Field(...)
+
+
+class DocumentVersionSummaryResponse(BaseModel):
+    """Aggregate versioning statistics."""
+
+    total_versions: int = Field(default=0)
+    total_lineages: int = Field(default=0)
+    total_diffs: int = Field(default=0)
+    avg_similarity: float = Field(default=0.0)
+    avg_versions_per_document: float = Field(default=0.0)
+    unique_users: int = Field(default=0)
+
+
+class DocumentVersionTrendPoint(BaseModel):
+    """A single point in a similarity trend."""
+
+    from_version: int = Field(...)
+    to_version: int = Field(...)
+    similarity: Optional[float] = Field(default=None)
+    added_words: Optional[int] = Field(default=None)
+    removed_words: Optional[int] = Field(default=None)
+    created_at: str = Field(...)
+
+
+class DocumentVersionTrendResponse(BaseModel):
+    """Similarity trend across versions."""
+
+    user_id: str = Field(...)
+    assignment_id: str = Field(...)
+    trend: List[DocumentVersionTrendPoint] = Field(default_factory=list)
+    total_points: int = Field(default=0)
+
+
+class DocumentVersionMostRevisedItem(BaseModel):
+    """Document with most revisions."""
+
+    assignment_id: str = Field(...)
+    user_id: str = Field(...)
+    total_versions: int = Field(...)
+    avg_similarity: float = Field(default=0.0)
+    last_created: str = Field(...)
+
+
+class DocumentVersionMostRevisedResponse(BaseModel):
+    """Response for most-revised documents."""
+
+    documents: List[DocumentVersionMostRevisedItem] = Field(default_factory=list)
+
+
+class AnomalyAlertResponse(BaseModel):
+    """Response schema for an anomaly alert."""
+
+    id: int = Field(..., description="Alert identifier")
+    scan_id: Optional[int] = Field(default=None, description="Parent scan")
+    anomaly_type: str = Field(..., description="Anomaly type")
+    severity: str = Field(default="info", description="Severity level")
+    title: str = Field(..., description="Alert title")
+    description: str = Field(default="", description="Detailed description")
+    confidence: float = Field(default=0.0, description="Detection confidence 0-1")
+    affected_docs: List[str] = Field(default_factory=list, description="Affected documents")
+    evidence: Dict[str, Any] = Field(default_factory=dict, description="Evidence data")
+    is_acknowledged: bool = Field(default=False, description="Acknowledgement status")
+    is_resolved: bool = Field(default=False, description="Resolution status")
+    notes: str = Field(default="", description="Analyst notes")
+    detected_at: str = Field(..., description="ISO 8601 detection timestamp")
+    acknowledged_at: Optional[str] = Field(default=None)
+    resolved_at: Optional[str] = Field(default=None)
+
+
+class AnomalyAlertListResponse(BaseModel):
+    """Paginated list of anomaly alerts."""
+
+    items: List[AnomalyAlertResponse] = Field(default_factory=list)
+    page: int = Field(..., ge=1)
+    per_page: int = Field(..., ge=1)
+    total: int = Field(..., ge=0)
+    total_pages: int = Field(..., ge=0)
+    has_next: bool = Field(default=False)
+    has_previous: bool = Field(default=False)
+
+
+class AnomalySummaryResponse(BaseModel):
+    """Aggregate anomaly detection statistics."""
+
+    total_alerts: int = Field(default=0)
+    unacknowledged: int = Field(default=0)
+    unresolved: int = Field(default=0)
+    critical_unresolved: int = Field(default=0)
+    avg_confidence: float = Field(default=0.0)
+    total_scans: int = Field(default=0)
+    completed_scans: int = Field(default=0)
+
+
+class AnomalySeverityDistResponse(BaseModel):
+    """Severity distribution."""
+
+    distribution: Dict[str, int] = Field(default_factory=dict)
+
+
+class AnomalyConfigResponse(BaseModel):
+    """Anomaly detection configuration."""
+
+    z_score_threshold: float = Field(default=2.5)
+    cluster_min_size: int = Field(default=3)
+    cluster_similarity: float = Field(default=0.85)
+    outlier_percentile: float = Field(default=95.0)
+    collusion_threshold: float = Field(default=0.80)
+    template_threshold: float = Field(default=0.75)
+    enable_statistical: int = Field(default=1)
+    enable_cluster: int = Field(default=1)
+    enable_pattern: int = Field(default=1)
+    enable_collusion: int = Field(default=1)
+    updated_at: Optional[str] = Field(default=None)
+
+
+class HealthScoreSummaryResponse(BaseModel):
+    """Aggregate health score statistics."""
+
+    total_scored: int = Field(default=0, description="Total documents scored")
+    avg_score: float = Field(default=0.0, description="Average health score")
+    min_score: float = Field(default=0.0, description="Minimum score")
+    max_score: float = Field(default=0.0, description="Maximum score")
+    passed_gate: int = Field(default=0, description="Documents that passed gate")
+    failed_gate: int = Field(default=0, description="Documents that failed gate")
+    pass_rate: float = Field(default=0.0, description="Pass rate percentage")
+    grade_distribution: Dict[str, int] = Field(default_factory=dict, description="Grade counts")
+    last_checked_at: Optional[str] = Field(default=None, description="Last check timestamp")
+
+
+class HealthGateConfigResponse(BaseModel):
+    """Quality gate configuration."""
+
+    min_score: float = Field(default=60.0, description="Minimum passing score")
+    min_grade: str = Field(default="D", description="Minimum passing grade")
+    enabled: bool = Field(default=True, description="Whether gate is active")
+
+
+class HealthGateCheckResponse(BaseModel):
+    """Result of a quality gate check."""
+
+    filename: str = Field(..., description="Document filename")
+    passed: bool = Field(..., description="Whether document passed")
+    reason: str = Field(..., description="Decision reason")
+    overall_score: float = Field(..., description="Document score")
+    grade: str = Field(..., description="Document grade")
+
+
+class HealthDimensionAvgResponse(BaseModel):
+    """Average scores per health dimension."""
+
+    dimensions: Dict[str, float] = Field(default_factory=dict, description="Dimension name → avg score")
 
 
 class ClusterInfo(BaseModel):
@@ -730,6 +1012,7 @@ class HotspotSummaryResponse(BaseModel):
     unresolved: int = Field(default=0)
     critical_unresolved: int = Field(default=0)
     avg_similarity: float = Field(default=0.0)
+
 
 
 # ============================================================================
@@ -871,6 +1154,32 @@ __all__ = [
     'BatchHistorySummaryResponse',
     'BatchTrendDataResponse',
     
+    # Document Versioning
+    'DocumentVersionSnapshotResponse',
+    'DocumentVersionListResponse',
+    'DocumentVersionLineageResponse',
+    'DocumentVersionDiffResponse',
+    'DocumentVersionSummaryResponse',
+    'DocumentVersionTrendResponse',
+    'DocumentVersionMostRevisedResponse',
+
+    # Anomaly Detection
+    'AnomalyScanResponse',
+    'AnomalyScanListResponse',
+    'AnomalyAlertResponse',
+    'AnomalyAlertListResponse',
+    'AnomalySummaryResponse',
+    'AnomalySeverityDistResponse',
+    'AnomalyConfigResponse',
+
+    # Document Health Scoring
+    'HealthDimensionScore',
+    'DocumentHealthScoreResponse',
+    'DocumentHealthListResponse',
+    'HealthScoreSummaryResponse',
+    'HealthGateConfigResponse',
+    'HealthGateCheckResponse',
+    'HealthDimensionAvgResponse',
     # Similarity Heatmap & Clustering
     'HeatmapSnapshotResponse',
     'HeatmapSnapshotListResponse',
@@ -881,6 +1190,7 @@ __all__ = [
     'HotspotSummaryResponse',
     
     # Errors
+
     'ErrorResponse',
     'create_error_response',
     

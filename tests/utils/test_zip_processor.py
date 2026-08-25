@@ -174,7 +174,7 @@ def test_process_zip_empty():
 
 def test_process_zip_corrupted():
     """Verify that a corrupted ZIP raises a ValueError."""
-    with pytest.raises(ValueError, match="Invalid or corrupted ZIP archive."):
+    with pytest.raises(ValueError, match="Invalid or corrupted ZIP archive: missing ZIP header signature."):
         process_zip_file(b"this is not a zip file content")
 
 
@@ -418,3 +418,70 @@ def test_zip_bomb_zero_compressed_size_handled():
             process_zip_file(zip_bytes)
         except ValueError as e:
             assert "Decompression ratio" not in str(e)
+
+
+def test_process_zip_skip_corrupted_on_read_failure():
+    """Verify that process_zip_file with skip_corrupted=True skips corrupted read entries and extracts valid ones."""
+    from unittest.mock import patch
+
+    # 1. Create a zip with one valid file and one corrupted/malformed file.
+    zip_data = create_in_memory_zip({
+        "valid.pdf": b"Valid PDF contents",
+        "corrupted.pdf": b"Corrupted contents"
+    })
+
+    # Mock ZipFile.read to raise BadZipFile for "corrupted.pdf"
+    original_read = zipfile.ZipFile.read
+    def mock_read(self, name_or_info):
+        name = name_or_info.filename if isinstance(name_or_info, zipfile.ZipInfo) else name_or_info
+        if "corrupted" in name:
+            raise zipfile.BadZipFile("CRC check failed")
+        return original_read(self, name_or_info)
+
+    with patch("zipfile.ZipFile.read", mock_read):
+        # With skip_corrupted=False, it should raise ValueError
+        with pytest.raises(ValueError, match="Corrupted or protected entry"):
+            process_zip_file(zip_data, skip_corrupted=False)
+
+        # With skip_corrupted=True, it should successfully extract the valid entry and log warning
+        result = process_zip_file(zip_data, skip_corrupted=True)
+        assert "valid.pdf" in result
+        assert result["valid.pdf"] == b"Valid PDF contents"
+        assert "corrupted.pdf" not in result
+
+
+def test_process_zip_skip_encrypted_entries():
+    """Verify that process_zip_file with skip_corrupted=True skips encrypted entries and extracts valid ones."""
+    from unittest.mock import patch
+
+    info_encrypted = zipfile.ZipInfo("secret.pdf")
+    info_encrypted.flag_bits = 0x1
+
+    info_valid = zipfile.ZipInfo("valid.pdf")
+    info_valid.flag_bits = 0x0
+
+    zip_data = create_in_memory_zip({
+        "secret.pdf": b"secret contents",
+        "valid.pdf": b"valid contents"
+    })
+
+    # Mock infolist to return both entries, and mock read to return contents
+    def mock_read(self, name_or_info):
+        name = name_or_info.filename if isinstance(name_or_info, zipfile.ZipInfo) else name_or_info
+        if "secret" in name:
+            return b"secret contents"
+        return b"valid contents"
+
+    with patch("zipfile.ZipFile.infolist", return_value=[info_encrypted, info_valid]), patch(
+        "zipfile.ZipFile.read", mock_read
+    ):
+        # With skip_corrupted=False, it should raise ValueError
+        with pytest.raises(ValueError, match="Password-protected or encrypted ZIP files are not supported."):
+            process_zip_file(zip_data, skip_corrupted=False)
+
+        # With skip_corrupted=True, it should skip the encrypted file and successfully return the valid one
+        result = process_zip_file(zip_data, skip_corrupted=True)
+        assert "valid.pdf" in result
+        assert result["valid.pdf"] == b"valid contents"
+        assert "secret.pdf" not in result
+

@@ -2211,47 +2211,6 @@ def promote_user(username: str, new_role: UserRole, admin_username: str) -> bool
         return False
 
 
-def demote_user(username: str, admin_username: str) -> bool:
-    """
-    Demote a user to the member role.
-
-    Args:
-        username: The user to demote
-        admin_username: The admin performing the demotion
-
-    Returns:
-        bool: True if demotion was successful
-    """
-    try:
-        username = _validate_username(username)
-        admin_role = UserRole.from_string(get_user_role(admin_username))
-
-        # Only admins can demote users
-        if not admin_role.has_permission(UserRole.ADMIN):
-            raise PermissionError("Only admins can demote users")
-
-        with _connect() as conn:
-            cursor = conn.execute(
-                "UPDATE users SET role = ? WHERE username = ?",
-                (UserRole.MEMBER.value, username),
-            )
-            affected = cursor.rowcount
-            conn.commit()
-
-            if affected > 0:
-                log_security_event(
-                    event_type="user_role_changed",
-                    username=username,
-                    details=f"Role changed to {UserRole.MEMBER.value} by {admin_username}",
-                )
-                return True
-            return False
-
-    except Exception as e:
-        logger.error(f"Failed to demote user {username}: {e}")
-        return False
-
-
 # ============================================================================
 # SSO SECURITY ENHANCEMENTS - Issue #2172
 # ============================================================================
@@ -2696,20 +2655,40 @@ def list_sso_users() -> List[Dict[str, Any]]:
 
 def revoke_sso_access(username: str) -> bool:
     """
-    Revoke SSO access for a user.
+    Unlink a user's SSO provider.
+
+    Clears ``sso_provider`` and ``sso_provider_user_id`` so the account can no
+    longer authenticate through the identity provider. The local account, its
+    role and its password hash are left untouched.
+
+    The provider is read before the update so the audit entry can name it;
+    afterwards the column is NULL and the information is gone.
 
     Args:
         username: The username to revoke access for
 
     Returns:
-        True if successfully revoked
+        True when a linked provider was cleared. False when the user does not
+        exist, had no provider linked, or the update failed.
     """
     try:
         username = _validate_username(username)
         with _connect() as conn:
+            row = conn.execute(
+                "SELECT sso_provider FROM users WHERE username = ?",
+                (username,),
+            ).fetchone()
+
+            if row is None or row[0] is None:
+                # Nothing to revoke: an unknown user, or a local-only account.
+                # Not an error, but not a revocation either, so no audit entry.
+                return False
+
+            provider = row[0]
+
             cursor = conn.execute(
-                """UPDATE users 
-                   SET sso_provider = NULL, 
+                """UPDATE users
+                   SET sso_provider = NULL,
                        sso_provider_user_id = NULL,
                        updated_at = CURRENT_TIMESTAMP
                    WHERE username = ?""",
@@ -2720,19 +2699,19 @@ def revoke_sso_access(username: str) -> bool:
 
             if affected > 0:
                 log_security_event(
-                    event_type="user_role_changed",
+                    event_type="sso_access_revoked",
                     username=username,
-                    details=f"Role changed to {new_role.value} by {admin_username}",  # noqa: F821
+                    details=f"SSO access revoked for provider {provider}",
                 )
                 return True
             return False
 
     except Exception as e:
-        logger.error(f"Failed to promote user {username}: {e}")
+        logger.error(f"Failed to revoke SSO access for {username}: {e}")
         return False
 
 
-def demote_user(username: str, admin_username: str) -> bool:  # noqa: F811
+def demote_user(username: str, admin_username: str) -> bool:
     """
     Demote a user to the default USER role.
 
