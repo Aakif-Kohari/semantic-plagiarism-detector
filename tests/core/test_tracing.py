@@ -1,4 +1,6 @@
 import pytest
+
+opentelemetry = pytest.importorskip("opentelemetry.sdk")
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from src.core.processing import run_full_pipeline
@@ -11,9 +13,10 @@ def memory_exporter():
     init_tracer_provider(exporter=exporter)
     return exporter
 
+
 def test_pipeline_spans_hierarchy(memory_exporter):
     memory_exporter.clear()
-    
+
     # Run mock pipeline
     tracer = get_tracer()
     with tracer.start_as_current_span("root_test"):

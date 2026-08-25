@@ -395,3 +395,24 @@ def test_calculate_kb_per_second():
     # Test zero or negative bytes processed
     assert calculate_kb_per_second(0, 5.0) == 0.0
     assert calculate_kb_per_second(-1024, 5.0) == 0.0
+
+
+@pytest.mark.parametrize(
+    ("seconds", "expected"),
+    [
+        (0.0, "0 minutes"),
+        (45.0, "0 minutes"),
+        (60.0, "1 minute"),
+        (120.0, "2 minutes"),
+        (3600.0, "1 hour"),
+        (3660.0, "1 hour, 1 minute"),
+        (86400.0, "1 day"),
+        (90060.0, "1 day, 1 hour, 1 minute"),
+        (259200 + 4 * 3600 + 12 * 60, "3 days, 4 hours, 12 minutes"),
+        (-10.0, "0 minutes"),
+    ],
+)
+def test_format_uptime_seconds(seconds, expected):
+    from src.utils.processing_time import format_uptime_seconds
+
+    assert format_uptime_seconds(seconds) == expected
