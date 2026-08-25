@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from html import escape
 from numbers import Real
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -431,3 +431,36 @@ def calculate_kb_per_second(total_bytes: int, elapsed_seconds: float) -> float:
     kilobytes = total_bytes / 1024.0
 
     return round(kilobytes / elapsed_seconds, 2)
+
+
+def format_uptime_seconds(seconds: float) -> str:
+    """Convert raw seconds into formatted strings like '3 days, 4 hours, 12 minutes'.
+
+    Args:
+        seconds (float): Raw uptime in seconds.
+
+    Returns:
+        str: Human-readable uptime string.
+    """
+    if seconds < 0:
+        seconds = 0.0
+
+    total_seconds = int(round(seconds))
+
+    days = total_seconds // (24 * 3600)
+    total_seconds %= 24 * 3600
+
+    hours = total_seconds // 3600
+    total_seconds %= 3600
+
+    minutes = total_seconds // 60
+
+    parts = []
+    if days > 0:
+        parts.append(f"{days} day" + ("s" if days != 1 else ""))
+    if hours > 0:
+        parts.append(f"{hours} hour" + ("s" if hours != 1 else ""))
+    if minutes > 0 or not parts:
+        parts.append(f"{minutes} minute" + ("s" if minutes != 1 else ""))
+
+    return ", ".join(parts)

@@ -1,4 +1,4 @@
-﻿"""
+"""
 src/utils/bulk_export.py
 -------------------------
 Bulk export utilities for generating ZIP archives, CSV streams, JSON payloads,
@@ -27,9 +27,9 @@ import logging
 import os
 import re
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
+from typing import Any, Callable, Generator, Optional
 
 import numpy as np
 import pandas as pd
@@ -370,6 +370,11 @@ def export_incidents_xlsx_stream(incidents_list: list[dict]) -> bytes:
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
             df.to_excel(writer, index=False, sheet_name="Plagiarism Incidents")
+            wb = writer.book
+            if hasattr(wb, "properties") and wb.properties is not None:
+                wb.properties.title = "Semantic Plagiarism Similarity Report"
+                wb.properties.creator = "Semantic Plagiarism Detector"
+                wb.properties.created = datetime.now(timezone.utc)
 
         return output.getvalue()
     except ImportError:

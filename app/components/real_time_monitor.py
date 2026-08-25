@@ -17,7 +17,7 @@ import time
 from collections import deque
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Optional
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -185,9 +185,7 @@ class MonitoringEngine:
             cache = get_cache()
             if cache.is_available():
                 keys = list(
-                    cache._client.scan_iter(
-                        match="spd:v1:session:*:last_interaction"
-                    )
+                    cache._client.scan_iter(match="spd:v1:session:*:last_interaction")
                 )
                 active = 0
                 now = time.time()
@@ -540,7 +538,9 @@ class HealthChecker:
         results["overall_status"] = (
             "healthy"
             if all(critical_checks)
-            else "degraded" if any(critical_checks) else "critical"
+            else "degraded"
+            if any(critical_checks)
+            else "critical"
         )
 
         return results
@@ -634,8 +634,10 @@ def render_system_health_dashboard():
     col1.metric("CPU", f"{sys['cpu_percent']:.1f}%")
     col2.metric("Memory", f"{sys['memory_percent']:.1f}%")
     col3.metric("Disk", f"{sys['disk_usage']:.1f}%")
-    uptime = int(sys["uptime_seconds"] / 3600)
-    col4.metric("Uptime", f"{uptime}h")
+    from src.utils.processing_time import format_uptime_seconds
+
+    uptime_str = format_uptime_seconds(sys["uptime_seconds"])
+    col4.metric("Uptime", uptime_str)
 
     # Component status
     st.markdown("#### Component Status")
@@ -894,9 +896,7 @@ def render_monitoring_controls(monitor: MonitoringEngine):
 
     with col1:
         if monitor.running:
-            if st.button(
-                "⏹️ Stop Monitoring", type="primary", use_container_width=True
-            ):
+            if st.button("⏹️ Stop Monitoring", type="primary", use_container_width=True):
                 monitor.stop_monitoring()
                 st.rerun()
         else:

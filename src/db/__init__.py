@@ -54,6 +54,7 @@ from .incidents import (
     get_incidents_repo,
     get_recent_incidents,
     log_incident,
+    bulk_update_incident_status,
 )
 
 __all__ = [
@@ -105,6 +106,7 @@ __all__ = [
     "get_incidents_by_assignment",
     "get_recent_incidents",
     "log_incident",
+    "bulk_update_incident_status",
 ]
 
 
