@@ -35,6 +35,7 @@ import numpy as np
 import pandas as pd
 
 from src.core.similarity import find_most_similar_chunks
+from src.utils.export_sanitizer import sanitize_spreadsheet_value
 from src.utils.filename import sanitize_filename
 from src.utils.pdf_report import generate_plagiarism_report
 
@@ -135,8 +136,8 @@ class ExportFormat(str, Enum):
 def sanitize_csv_cell_value(val: Any) -> str:
     """Sanitize a CSV cell value to prevent CSV formula injection (Issue #1744).
 
-    Prepends a single quote `'` if the string representation of val begins with
-    '=', '+', '-', or '@'.
+    Uses the shared spreadsheet sanitizer so CSV and Excel exports apply the
+    same formula-injection rules.
 
     Args:
         val: Any cell value (string, numeric, None, etc.)
@@ -146,10 +147,8 @@ def sanitize_csv_cell_value(val: Any) -> str:
     """
     if val is None:
         return ""
-    str_val = str(val)
-    if str_val and str_val[0] in ("=", "+", "-", "@"):
-        return f"'{str_val}"
-    return str_val
+    sanitized = sanitize_spreadsheet_value(str(val))
+    return sanitized if isinstance(sanitized, str) else str(sanitized)
 
 
 def normalize_csv_headers(headers: list[str]) -> list[str]:
