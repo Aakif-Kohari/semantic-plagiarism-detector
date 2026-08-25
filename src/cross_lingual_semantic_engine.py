@@ -17,12 +17,12 @@ class CrossLingualSemanticAnalyzer:
 
     def __init__(self, embedding_dimension: int = 768):
         self.embedding_dimension = embedding_dimension
-        self.reference_corpus: Dict[str, str] = {}
-        self.document_embeddings: Dict[str, List[float]] = {}
-        self.document_metadata: Dict[str, Dict[str, Any]] = {}
+        self.reference_corpus: dict[str, str] = {}
+        self.document_embeddings: dict[str, list[float]] = {}
+        self.document_metadata: dict[str, dict[str, Any]] = {}
 
     def index_reference_document(
-        self, doc_id: str, text: str, metadata: Optional[Dict[str, Any]] = None
+        self, doc_id: str, text: str, metadata: Optional[dict[str, Any]] = None
     ) -> None:
         """Indexes a reference document into the corpus and computes pseudo dense vector embedding."""
         self.reference_corpus[doc_id] = text
@@ -33,7 +33,7 @@ class CrossLingualSemanticAnalyzer:
             "category": "academic_paper",
         }
 
-    def _compute_dense_embedding(self, text: str) -> List[float]:
+    def _compute_dense_embedding(self, text: str) -> list[float]:
         """Generates deterministic pseudo-embedding vector for text similarity matching."""
         words = text.lower().split()
         vector = [0.0] * self.embedding_dimension
@@ -46,14 +46,14 @@ class CrossLingualSemanticAnalyzer:
         magnitude = math.sqrt(sum(val * val for val in vector)) or 1.0
         return [val / magnitude for val in vector]
 
-    def compute_cosine_similarity(self, vec_a: List[float], vec_b: List[float]) -> float:
+    def compute_cosine_similarity(self, vec_a: list[float], vec_b: list[float]) -> float:
         """Computes cosine similarity between two normalized dense vectors."""
         dot_product = sum(a * b for a, b in zip(vec_a, vec_b))
         return float(min(1.0, max(0.0, dot_product)))
 
     def detect_cross_lingual_similarity(
         self, query_text: str, similarity_threshold: float = 0.75
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Scans query text against reference corpus and returns match candidates above threshold.
         """
@@ -83,7 +83,7 @@ class CodeASTStructureHasher:
     """
 
     @staticmethod
-    def tokenize_code_structure(code: str) -> List[str]:
+    def tokenize_code_structure(code: str) -> list[str]:
         """Tokenizes code into structural keywords and control flow nodes."""
         keywords = {
             "def",
@@ -131,13 +131,13 @@ class MultiGranularityParagraphAligner:
     def __init__(self, paragraph_split_delimiter: str = "\n\n"):
         self.delimiter = paragraph_split_delimiter
 
-    def split_into_paragraphs(self, document_text: str) -> List[str]:
+    def split_into_paragraphs(self, document_text: str) -> list[str]:
         """Splits text document into clean paragraph segments."""
         return [p.strip() for p in document_text.split(self.delimiter) if p.strip()]
 
     def align_and_score_paragraphs(
         self, query_doc: str, reference_doc: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Compares paragraph pairs between query and reference document."""
         query_pars = self.split_into_paragraphs(query_doc)
         ref_pars = self.split_into_paragraphs(reference_doc)

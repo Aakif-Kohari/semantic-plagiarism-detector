@@ -126,7 +126,7 @@ def compute_transition_anomaly(text: str) -> float:
     return round(min(1.0, anomaly_score), 4)
 
 
-def extract_paraphrase_fingerprint(text: str) -> Dict[str, float]:
+def extract_paraphrase_fingerprint(text: str) -> dict[str, float]:
     """Extract a complete statistical fingerprint for paraphrase tool attribution.
     
     Args:
@@ -149,7 +149,7 @@ def extract_paraphrase_fingerprint(text: str) -> Dict[str, float]:
     }
 
 
-def attribute_paraphrase_tool(fingerprint: Dict[str, float]) -> Dict[str, Any]:
+def attribute_paraphrase_tool(fingerprint: dict[str, float]) -> dict[str, Any]:
     """Attribute the text to a specific paraphrasing tool based on its fingerprint.
     
     Computes the Euclidean distance between the extracted fingerprint and
@@ -221,7 +221,7 @@ class ParaphraseFingerprinter:
         return float(entropy)
 
     @classmethod
-    def extract_fingerprint(cls, text: str) -> Dict[str, float]:
+    def extract_fingerprint(cls, text: str) -> dict[str, float]:
         """Extracts complete statistical signature vector for paraphrasing tool attribution."""
         return {
             "sentence_length_variance": cls.calculate_sentence_length_variance(text),

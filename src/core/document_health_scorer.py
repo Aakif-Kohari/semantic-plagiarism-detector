@@ -66,11 +66,11 @@ class HealthReport:
     filename: str
     overall_score: float
     grade: str  # A+, A, B+, B, C, D, F
-    dimensions: List[DimensionScore]
+    dimensions: list[DimensionScore]
     checked_at: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "filename": self.filename,
             "overall_score": round(self.overall_score, 2),
@@ -94,7 +94,7 @@ class HealthReport:
 # Scoring helpers
 # ---------------------------------------------------------------------------
 
-def _score_metadata_completeness(doc: Dict[str, Any]) -> DimensionScore:
+def _score_metadata_completeness(doc: dict[str, Any]) -> DimensionScore:
     """Evaluate how complete the document metadata is."""
     fields = [
         ("student_name", "Student Name"),
@@ -125,7 +125,7 @@ def _score_metadata_completeness(doc: Dict[str, Any]) -> DimensionScore:
     )
 
 
-def _score_chunk_balance(chunk_word_counts: List[int]) -> DimensionScore:
+def _score_chunk_balance(chunk_word_counts: list[int]) -> DimensionScore:
     """Evaluate whether chunk sizes are balanced (no extreme outliers)."""
     if not chunk_word_counts:
         return DimensionScore(
@@ -188,7 +188,7 @@ def _score_embedding_coverage(total_chunks: int, chunks_with_embeddings: int) ->
 
 
 def _score_content_quality(
-    chunk_texts: List[str],
+    chunk_texts: list[str],
     total_words: int,
 ) -> DimensionScore:
     """Evaluate content quality based on word count and character diversity."""
@@ -310,9 +310,9 @@ def _assign_grade(score: float) -> str:
 # ---------------------------------------------------------------------------
 
 def score_document(
-    doc: Dict[str, Any],
-    chunk_texts: List[str],
-    chunk_word_counts: List[int],
+    doc: dict[str, Any],
+    chunk_texts: list[str],
+    chunk_word_counts: list[int],
     total_chunks: int,
     chunks_with_embeddings: int,
     total_words: int,
@@ -362,10 +362,10 @@ def score_document(
 
 
 def score_corpus_batch(
-    documents: List[Dict[str, Any]],
+    documents: list[dict[str, Any]],
     get_chunks_for_doc: Any = None,
     existing_hashes: Optional[set[str]] = None,
-) -> List[HealthReport]:
+) -> list[HealthReport]:
     """
     Score an entire batch of documents.
 
@@ -380,10 +380,10 @@ def score_corpus_batch(
     if existing_hashes is None:
         existing_hashes = {d.get("file_hash", "") for d in documents}
 
-    reports: List[HealthReport] = []
+    reports: list[HealthReport] = []
     for doc in documents:
         filename = doc.get("filename", "")
-        chunk_texts: List[str] = []
+        chunk_texts: list[str] = []
         total_chunks = 0
         chunks_with_embeddings = 0
         total_words = 0
@@ -420,7 +420,7 @@ def compute_quality_gate(
     *,
     min_score: float = 60.0,
     min_grade: str = "D",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Determine whether a document passes the quality gate.
 
@@ -435,7 +435,7 @@ def compute_quality_gate(
     grade_order = {"F": 0, "D": 1, "C": 2, "B-": 3, "B": 4, "B+": 5, "A-": 6, "A": 7, "A+": 8}
 
     passed = True
-    reasons: List[str] = []
+    reasons: list[str] = []
 
     if report.overall_score < min_score:
         passed = False
@@ -472,7 +472,7 @@ def compute_quality_gate(
 # Batch analytics
 # ---------------------------------------------------------------------------
 
-def aggregate_reports(reports: List[HealthReport]) -> Dict[str, Any]:
+def aggregate_reports(reports: list[HealthReport]) -> dict[str, Any]:
     """Compute aggregate statistics across a batch of health reports."""
     if not reports:
         return {
@@ -489,13 +489,13 @@ def aggregate_reports(reports: List[HealthReport]) -> Dict[str, Any]:
     scores = sorted(r.overall_score for r in reports)
     n = len(scores)
 
-    grade_dist: Dict[str, int] = {}
+    grade_dist: dict[str, int] = {}
     for r in reports:
         grade_dist[r.grade] = grade_dist.get(r.grade, 0) + 1
 
     # Dimension averages
-    dim_totals: Dict[str, float] = {}
-    dim_counts: Dict[str, int] = {}
+    dim_totals: dict[str, float] = {}
+    dim_counts: dict[str, int] = {}
     for r in reports:
         for d in r.dimensions:
             dim_totals[d.name] = dim_totals.get(d.name, 0) + d.score

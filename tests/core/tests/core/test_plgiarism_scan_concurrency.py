@@ -33,7 +33,7 @@ from src.core.embedding_model import EmbeddingModel
 # ============== TEST FIXTURES ==============
 
 @pytest.fixture
-def sample_documents() -> List[str]:
+def sample_documents() -> list[str]:
     """Create sample documents for concurrent testing."""
     return [
         "This is document one about artificial intelligence and machine learning.",

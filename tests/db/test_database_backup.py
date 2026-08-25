@@ -59,6 +59,27 @@ def test_snapshot_does_not_modify_source_database(tmp_path):
     assert source.read_bytes() == before
 
 
+def test_snapshot_applies_busy_timeout_to_source_connection(tmp_path, monkeypatch):
+    source = tmp_path / "corpus.db"
+    create_test_database(source)
+
+    applied_timeouts = []
+    from src.db import database_backup
+
+    orig_apply = database_backup.apply_busy_timeout
+
+    def mock_apply(conn, timeout):
+        applied_timeouts.append(timeout)
+        return orig_apply(conn, timeout)
+
+    monkeypatch.setattr(database_backup, "apply_busy_timeout", mock_apply)
+
+    snapshot = create_sqlite_snapshot(source)
+    assert snapshot.startswith(SQLITE_HEADER)
+    assert len(applied_timeouts) >= 1
+    assert applied_timeouts[0] == database_backup.DEFAULT_SQLITE_TIMEOUT
+
+
 def test_missing_database_raises_file_not_found(tmp_path):
     missing = tmp_path / "missing.db"
 
@@ -156,3 +177,38 @@ def test_get_database_file_size_bytes_rejects_path_traversal(tmp_path):
     outside.write_text("x")
     with pytest.raises(ValueError, match="outside the allowed directory"):
         get_database_file_size_bytes(outside)
+
+
+def test_create_database_backup_sets_restrictive_permissions(tmp_path, monkeypatch):
+    import os
+    from src.db.database_backup import create_database_backup
+
+    source = tmp_path / "source.db"
+    create_test_database(source)
+    backup_dir = tmp_path / "backups"
+
+    chmod_calls = []
+    orig_chmod = os.chmod
+
+    def mock_chmod(path, mode):
+        chmod_calls.append((path, mode))
+        try:
+            orig_chmod(path, mode)
+        except OSError:
+            pass
+
+    monkeypatch.setattr(os, "chmod", mock_chmod)
+
+    # Test compressed backup (.db.gz)
+    gz_backup = create_database_backup(source, backup_dir=backup_dir, compress_backup=True)
+    assert gz_backup.exists()
+    assert len(chmod_calls) >= 1
+    assert chmod_calls[-1][0] == gz_backup
+    assert chmod_calls[-1][1] == 0o600
+
+    # Test uncompressed backup (.db)
+    db_backup = create_database_backup(source, backup_dir=backup_dir, compress_backup=False)
+    assert db_backup.exists()
+    assert len(chmod_calls) >= 2
+    assert chmod_calls[-1][0] == db_backup
+    assert chmod_calls[-1][1] == 0o600

@@ -15,7 +15,7 @@ class NeuralCodeCloneDashboardComponent:
     """
 
     @staticmethod
-    def render_code_clone_summary_card(matches: List[Dict[str, Any]]) -> None:
+    def render_code_clone_summary_card(matches: list[dict[str, Any]]) -> None:
         """Renders aggregate code clone metrics card."""
         st.subheader("💻 Neural Code Clone Telemetry")
         total_clones = len(matches)
@@ -30,7 +30,7 @@ class NeuralCodeCloneDashboardComponent:
             st.metric("Detection Engine Status", "ACTIVE_SCANNING")
 
     @staticmethod
-    def render_clone_matches_list(matches: List[Dict[str, Any]]) -> None:
+    def render_clone_matches_list(matches: list[dict[str, Any]]) -> None:
         """Renders list of detected code clone candidate files with Jaccard scores."""
         st.subheader("🔍 Code Clone Candidate Matches")
         if not matches:

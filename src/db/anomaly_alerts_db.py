@@ -141,7 +141,7 @@ class AnomalyAlertRepository:
         self,
         scan_type: str = "full",
         triggered_by: str = "system",
-        config: Optional[Dict] = None,
+        config: Optional[dict] = None,
     ) -> int:
         """Create a new scan record and return its ID."""
         now = datetime.now(timezone.utc).isoformat()
@@ -187,10 +187,10 @@ class AnomalyAlertRepository:
         page: int = 1,
         per_page: int = 20,
         status: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """List scans with optional status filter."""
-        conditions: List[str] = []
-        params: List[Any] = []
+        conditions: list[str] = []
+        params: list[Any] = []
         if status:
             conditions.append("status = ?")
             params.append(status)
@@ -221,7 +221,7 @@ class AnomalyAlertRepository:
             "has_previous": page > 1,
         }
 
-    def get_scan(self, scan_id: int) -> Optional[Dict[str, Any]]:
+    def get_scan(self, scan_id: int) -> Optional[dict[str, Any]]:
         """Get a scan by ID."""
         with self._conn() as conn:
             row = conn.execute(
@@ -239,8 +239,8 @@ class AnomalyAlertRepository:
         title: str,
         description: str = "",
         confidence: float = 0.0,
-        affected_docs: Optional[List[str]] = None,
-        evidence: Optional[Dict] = None,
+        affected_docs: Optional[list[str]] = None,
+        evidence: Optional[dict] = None,
     ) -> int:
         """Create an anomaly alert."""
         now = datetime.now(timezone.utc).isoformat()
@@ -258,7 +258,7 @@ class AnomalyAlertRepository:
             )
             return cursor.lastrowid
 
-    def get_alert(self, alert_id: int) -> Optional[Dict[str, Any]]:
+    def get_alert(self, alert_id: int) -> Optional[dict[str, Any]]:
         """Get an alert by ID."""
         with self._conn() as conn:
             row = conn.execute(
@@ -280,10 +280,10 @@ class AnomalyAlertRepository:
         acknowledged: Optional[bool] = None,
         resolved: Optional[bool] = None,
         scan_id: Optional[int] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """List alerts with filtering and pagination."""
-        conditions: List[str] = []
-        params: List[Any] = []
+        conditions: list[str] = []
+        params: list[Any] = []
 
         if severity:
             conditions.append("severity = ?")
@@ -387,7 +387,7 @@ class AnomalyAlertRepository:
 
     # -- Analytics ------------------------------------------------------------
 
-    def analytics_summary(self) -> Dict[str, Any]:
+    def analytics_summary(self) -> dict[str, Any]:
         """Return aggregate statistics across all alerts."""
         with self._conn() as conn:
             total = conn.execute(
@@ -426,7 +426,7 @@ class AnomalyAlertRepository:
                 "completed_scans": completed_scans,
             }
 
-    def severity_distribution(self) -> Dict[str, int]:
+    def severity_distribution(self) -> dict[str, int]:
         """Return alert counts per severity level."""
         with self._conn() as conn:
             cursor = conn.execute(
@@ -437,7 +437,7 @@ class AnomalyAlertRepository:
             )
             return {row["severity"]: row["cnt"] for row in cursor.fetchall()}
 
-    def type_distribution(self) -> Dict[str, int]:
+    def type_distribution(self) -> dict[str, int]:
         """Return alert counts per anomaly type."""
         with self._conn() as conn:
             cursor = conn.execute(
@@ -448,7 +448,7 @@ class AnomalyAlertRepository:
             )
             return {row["anomaly_type"]: row["cnt"] for row in cursor.fetchall()}
 
-    def recent_alerts(self, limit: int = 10) -> List[Dict[str, Any]]:
+    def recent_alerts(self, limit: int = 10) -> list[dict[str, Any]]:
         """Return the most recent alerts."""
         with self._conn() as conn:
             cursor = conn.execute(
@@ -466,7 +466,7 @@ class AnomalyAlertRepository:
 
     def high_confidence_alerts(
         self, min_confidence: float = 0.8, limit: int = 10
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Return alerts above a confidence threshold."""
         with self._conn() as conn:
             cursor = conn.execute(
@@ -485,7 +485,7 @@ class AnomalyAlertRepository:
 
     # -- Config management ----------------------------------------------------
 
-    def get_config(self) -> Dict[str, Any]:
+    def get_config(self) -> dict[str, Any]:
         """Get the current anomaly detection configuration."""
         with self._conn() as conn:
             row = conn.execute(
@@ -493,7 +493,7 @@ class AnomalyAlertRepository:
             ).fetchone()
             return dict(row) if row else {}
 
-    def update_config(self, **kwargs) -> Dict[str, Any]:
+    def update_config(self, **kwargs) -> dict[str, Any]:
         """Update anomaly detection configuration."""
         allowed = {
             "z_score_threshold", "cluster_min_size", "cluster_similarity",

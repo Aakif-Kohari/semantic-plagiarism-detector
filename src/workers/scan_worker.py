@@ -46,7 +46,7 @@ from src.workers.task_queue import TaskQueue, get_default_queue
 logger = logging.getLogger(__name__)
 
 
-def execute_scan_job(payload: Dict[str, Any]) -> Dict[str, Any]:
+def execute_scan_job(payload: dict[str, Any]) -> dict[str, Any]:
     """Execute the embedding + similarity pipeline on a job payload.
 
     This function is intentionally pure (no DB, no queue interaction)
@@ -64,7 +64,7 @@ def execute_scan_job(payload: Dict[str, Any]) -> Dict[str, Any]:
         Exception: Any pipeline error propagates to the caller (the
             worker loop catches it and marks the job as failed).
     """
-    files_b64: Dict[str, str] = payload.get("files", {})
+    files_b64: dict[str, str] = payload.get("files", {})
     if not files_b64:
         raise ValueError("Payload must contain a non-empty 'files' dict.")
 
@@ -74,7 +74,7 @@ def execute_scan_job(payload: Dict[str, Any]) -> Dict[str, Any]:
     chunk_overlap: int = payload.get("chunk_overlap", 200)
 
     # Decode base64 → raw bytes.
-    files_bytes: Dict[str, bytes] = {}
+    files_bytes: dict[str, bytes] = {}
     for name, b64_data in files_b64.items():
         try:
             files_bytes[name] = base64.b64decode(b64_data)
@@ -82,7 +82,7 @@ def execute_scan_job(payload: Dict[str, Any]) -> Dict[str, Any]:
             raise ValueError(f"Failed to decode base64 for file '{name}': {exc}") from exc
 
     # Step 1: Extract text from each file.
-    raw_texts: Dict[str, str] = {}
+    raw_texts: dict[str, str] = {}
     for name, data in files_bytes.items():
         try:
             from src.core.document_parser import extract_text
@@ -98,14 +98,14 @@ def execute_scan_job(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     # Step 2: Chunk documents.
     from src.core.text_chunking import chunk_documents
-    chunked: Dict[str, List[str]] = chunk_documents(
+    chunked: dict[str, list[str]] = chunk_documents(
         raw_texts,
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
     )
 
     # Flatten chunks for embedding.
-    all_chunks: List[str] = []
+    all_chunks: list[str] = []
     for doc_name, chunks in chunked.items():
         all_chunks.extend(chunks)
 
@@ -118,13 +118,13 @@ def execute_scan_job(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     # Step 4: Compute pairwise similarity (if ≥2 docs).
     flagged_pairs = 0
-    sim_matrix: List[List[float]] = []
+    sim_matrix: list[list[float]] = []
 
     if len(raw_texts) >= 2:
         try:
             from src.core.similarity import document_similarity_matrix
             doc_names = list(raw_texts.keys())
-            doc_embeddings: List[np.ndarray] = []
+            doc_embeddings: list[np.ndarray] = []
             offset = 0
             for name in doc_names:
                 n_chunks = len(chunked[name])
@@ -196,7 +196,7 @@ class ScanWorker:
                 logger.error("Worker %s unhandled error: %s", self.worker_id, exc)
                 time.sleep(1.0)
 
-    def _process_job(self, job: Dict[str, Any]) -> None:
+    def _process_job(self, job: dict[str, Any]) -> None:
         """Execute a single job and report the result back to the queue."""
         job_id = job["id"]
         payload = job.get("payload", {})

@@ -18,13 +18,13 @@ class FAISSVectorIndexEngine:
     def __init__(self, vector_dimension: int = 512, metric_type: str = "L2"):
         self.vector_dimension = vector_dimension
         self.metric_type = metric_type
-        self.indexed_vectors: List[List[float]] = []
-        self.indexed_doc_ids: List[str] = []
-        self.document_metadata_store: Dict[str, Dict[str, Any]] = {}
+        self.indexed_vectors: list[list[float]] = []
+        self.indexed_doc_ids: list[str] = []
+        self.document_metadata_store: dict[str, dict[str, Any]] = {}
 
     def add_document_vector(
-        self, doc_id: str, text_content: str, metadata: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+        self, doc_id: str, text_content: str, metadata: Optional[dict[str, Any]] = None
+    ) -> dict[str, Any]:
         """Generates dense embedding vector and indexes into FAISS vector space."""
         vector = self._generate_dense_vector(text_content)
         self.indexed_vectors.append(vector)
@@ -46,7 +46,7 @@ class FAISSVectorIndexEngine:
 
     def search_nearest_neighbors(
         self, query_text: str, top_k: int = 5
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Searches top-k nearest neighbor document vectors given query text."""
         query_vec = self._generate_dense_vector(query_text)
         search_results = []
@@ -67,11 +67,11 @@ class FAISSVectorIndexEngine:
         sorted_results = sorted(search_results, key=lambda x: x["semanticSimilarityScore"], reverse=True)
         return sorted_results[:top_k]
 
-    def _compute_l2_distance(self, vec_a: List[float], vec_b: List[float]) -> float:
+    def _compute_l2_distance(self, vec_a: list[float], vec_b: list[float]) -> float:
         """Computes Euclidean L2 distance between two dense vector representations."""
         return math.sqrt(sum((a - b) ** 2 for a, b in zip(vec_a, vec_b)))
 
-    def _generate_dense_vector(self, text: str) -> List[float]:
+    def _generate_dense_vector(self, text: str) -> list[float]:
         """Generates normalized pseudo dense embedding vector from raw document text."""
         words = text.lower().split()
         vector = [0.0] * self.vector_dimension

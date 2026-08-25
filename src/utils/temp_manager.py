@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import List, Optional, Generator
 
 # Global list of registered temporary paths to clean up
-_REGISTERED_TEMP_PATHS: List[str] = []
+_REGISTERED_TEMP_PATHS: list[str] = []
 _lock = threading.Lock()
 
 logger = logging.getLogger(__name__)

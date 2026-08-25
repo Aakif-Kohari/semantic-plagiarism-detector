@@ -23,8 +23,8 @@ class NetworkGraph:
     
     def create_network_graph(
         self,
-        nodes: List[Dict[str, Any]],
-        edges: List[Dict[str, Any]],
+        nodes: list[dict[str, Any]],
+        edges: list[dict[str, Any]],
         title: str = "Network Cluster Graph",
         node_size: int = 10,
         edge_width: int = 1
@@ -148,7 +148,7 @@ class NetworkGraph:
         figure: Optional[go.Figure] = None,
         include_plotlyjs: str = 'cdn',
         full_html: bool = True,
-        config: Optional[Dict[str, Any]] = None,
+        config: Optional[dict[str, Any]] = None,
         filename: Optional[str] = None,
         auto_open: bool = False,
         **kwargs

@@ -21,7 +21,7 @@ JWT_ALGORITHM: str = "HS256"
 _IS_TEST: bool = os.getenv("APP_ENV") == "test"
 
 # Static testing tokens only in test environment
-VALID_STATIC_REFRESH_TOKENS: Set[str] = (
+VALID_STATIC_REFRESH_TOKENS: set[str] = (
     {
         "dev-refresh-token",
         "valid-refresh-token",
@@ -45,7 +45,7 @@ def base64url_decode(data: str) -> bytes:
 
 
 def create_jwt_token(
-    data: Dict[str, Any],
+    data: dict[str, Any],
     expires_in_seconds: int = 3600,
     secret_key: Optional[str] = None,
 ) -> str:
@@ -98,7 +98,7 @@ def create_jwt_token(
 
 def create_access_token(
     sub: str = "user",
-    scopes: Optional[List[str]] = None,
+    scopes: Optional[list[str]] = None,
     expires_in: int = 3600,
 ) -> str:
     """Create a signed access token (default 60 min expiration)."""
@@ -114,7 +114,7 @@ def create_access_token(
 
 def create_refresh_token(
     sub: str = "user",
-    scopes: Optional[List[str]] = None,
+    scopes: Optional[list[str]] = None,
     expires_in: int = 604800,  # 7 days
 ) -> str:
     """Create a signed refresh token (default 7 days expiration)."""
@@ -132,7 +132,7 @@ def _verify_jwt_token(
     token: str,
     expected_type: str,
     secret_key: Optional[str] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Shared implementation for verifying JWT signatures, expiration, and types."""
     if not token or not isinstance(token, str):
         raise ValueError(f"Invalid {expected_type} token: token cannot be empty.")
@@ -192,7 +192,7 @@ def _verify_jwt_token(
 def verify_refresh_token(
     token: str,
     secret_key: Optional[str] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Verify refresh token signature and expiration timestamp.
 
@@ -225,7 +225,7 @@ def verify_refresh_token(
 def verify_access_token(
     token: str,
     secret_key: Optional[str] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Verify access token signature and expiration timestamp.
 

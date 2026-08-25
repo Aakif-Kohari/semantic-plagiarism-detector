@@ -103,7 +103,7 @@ def log_watermark_generation(
 
 def identify_leak_source(
     watermark_id: str, db_path: Optional[Path] = None
-) -> Optional[Dict[str, Any]]:
+) -> Optional[dict[str, Any]]:
     """Look up the user and document associated with a leaked watermark ID."""
     try:
         with get_connection(db_path) as conn:

@@ -83,7 +83,7 @@ def count_words(text: str) -> int:
     return len(_WORD_COUNT_PATTERN.findall(text))
 
 
-def _split_into_sentences(text: str) -> List[str]:
+def _split_into_sentences(text: str) -> list[str]:
     """Return a list of sentences from *text*.
 
     Tries NLTK ``sent_tokenize`` first.  Falls back to a regex-based splitter
@@ -265,7 +265,7 @@ def _find_length_capped_end(
 
 def _character_fallback_chunking(
     text: str, chunk_size: int, chunk_overlap: int, count_bytes: bool = False
-) -> List[ChunkString]:
+) -> list[ChunkString]:
     """Fallback character-based chunking for non-space or single-token texts (CJK, emojis, long words)."""
     text = text.strip()
     if not text:
@@ -346,7 +346,7 @@ def chunk_text(
     sentence_padding: bool = True,
     count_bytes: bool = False,
     separator: str = " ",
-) -> List[ChunkString]:
+) -> list[ChunkString]:
     """Split text into chunks of a target character length with overlapping boundaries.
 
     When *sentence_padding* is enabled (default), chunk start and end boundaries
@@ -415,7 +415,7 @@ def chunk_text(
 
     text = text.strip()
     text_len = len(text)
-    chunks: List[str] = []
+    chunks: list[str] = []
     start = 0
 
     while start < text_len:
@@ -531,7 +531,7 @@ def chunk_by_sentences(
     min_chunk_length: int = 10,
     max_chunk_size: int = 1000,
     min_words: int = 10,
-) -> List[str]:
+) -> list[str]:
     """Split text into chunks based on natural sentence boundaries.
 
     Groups consecutive sentences together until the max_chunk_size limit
@@ -582,8 +582,8 @@ def chunk_by_sentences(
     if not sentences:
         return []
 
-    chunks: List[str] = []
-    current_chunk_sentences: List[str] = []
+    chunks: list[str] = []
+    current_chunk_sentences: list[str] = []
     current_chunk_length = 0
 
     # Target length for combining short sentences into a single chunk
@@ -643,7 +643,7 @@ def chunk_text_dynamic(
     target_size: int = 500,
     min_overlap: int = 50,
     max_chunks: int = 1000,
-) -> List[ChunkString]:
+) -> list[ChunkString]:
     """Dynamically split text into sliding window chunks while preserving sentence boundaries.
 
     Window boundaries are shifted to the nearest sentence end punctuation ('.', '!', '?')
@@ -670,7 +670,7 @@ def chunk_text_dynamic(
         return [ChunkString(text=clean_src)]
 
     margin = int(target_size * 0.20)
-    chunks: List[ChunkString] = []
+    chunks: list[ChunkString] = []
     start = 0
 
     sentence_punct = {".", "!", "?"}
@@ -726,12 +726,12 @@ def chunk_text_dynamic(
 
 
 def chunk_documents(
-    documents: Dict[str, str],
+    documents: dict[str, str],
     chunk_size: int = DEFAULT_CHUNK_SIZE,
     chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
     min_words: int = 10,
     sentence_padding: bool = True,
-) -> Dict[str, List[str]]:
+) -> dict[str, list[str]]:
     """Splits a dictionary of document raw texts into chunks respecting customizable
     chunk size and overlap parameters.
 

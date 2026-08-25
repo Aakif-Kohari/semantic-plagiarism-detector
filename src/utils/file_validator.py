@@ -109,7 +109,7 @@ class FileValidator:
         
     def validate(
         self,
-        file_data: Union[bytes, bytearray],
+        file_data: bytes | bytearray,
         filename: str
     ) -> ValidationResult:
         """Perform comprehensive validation on a file.
@@ -174,7 +174,7 @@ class FileValidator:
         
     def _check_size(
         self,
-        file_data: Union[bytes, bytearray],
+        file_data: bytes | bytearray,
         filename: str
     ) -> ValidationResult:
         """Verify the file size does not exceed the maximum limit.
@@ -284,7 +284,7 @@ class FileValidator:
         
     def _check_epub_mimetype(
         self,
-        file_data: Union[bytes, bytearray],
+        file_data: bytes | bytearray,
         filename: str
     ) -> ValidationResult:
         """Verify that an EPUB file contains a valid EPUB mimetype entry."""
@@ -320,7 +320,7 @@ class FileValidator:
 
     def _check_csv_content(
         self,
-        file_data: Union[bytes, bytearray],
+        file_data: bytes | bytearray,
         filename: str
     ) -> ValidationResult:
         """Verify CSV content is valid UTF-8/ASCII text without binary null bytes."""
@@ -348,7 +348,7 @@ class FileValidator:
 
     def _check_magic_bytes(
         self,
-        file_data: Union[bytes, bytearray],
+        file_data: bytes | bytearray,
         filename: str
     ) -> ValidationResult:
         """Verify the file's magic bytes match its extension.

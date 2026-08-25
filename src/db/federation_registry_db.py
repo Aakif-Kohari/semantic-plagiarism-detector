@@ -92,7 +92,7 @@ def register_trusted_node(
 def store_federated_signature(
     document_id: str,
     institution_id: str,
-    lsh_bands: List[str],
+    lsh_bands: list[str],
     db_path: Optional[Path] = None,
 ) -> bool:
     """Store imported LSH bands from a trusted node."""

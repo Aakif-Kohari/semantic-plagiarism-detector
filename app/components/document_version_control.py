@@ -48,7 +48,7 @@ class DocumentVersion:
     word_count: int
     change_type: str  # create, update, delete, rollback
     parent_version_id: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -57,10 +57,10 @@ class VersionDiff:
     version_id_a: str
     version_id_b: str
     document_id: str
-    added_lines: List[str]
-    removed_lines: List[str]
-    modified_lines: List[Tuple[str, str]]
-    unchanged_lines: List[str]
+    added_lines: list[str]
+    removed_lines: list[str]
+    modified_lines: list[tuple[str, str]]
+    unchanged_lines: list[str]
     summary: str
     change_percentage: float
 
@@ -88,8 +88,8 @@ class VersionManager:
     
     def __init__(self, storage_path: Path):
         self.storage_path = storage_path
-        self.versions: Dict[str, List[DocumentVersion]] = defaultdict(list)
-        self.current_versions: Dict[str, str] = {}  # doc_id -> version_id
+        self.versions: dict[str, list[DocumentVersion]] = defaultdict(list)
+        self.current_versions: dict[str, str] = {}  # doc_id -> version_id
         self._load_versions()
     
     def _load_versions(self):
@@ -199,7 +199,7 @@ class VersionManager:
         
         return version
     
-    def _detect_change_type(self, content: str, existing: List[DocumentVersion]) -> str:
+    def _detect_change_type(self, content: str, existing: list[DocumentVersion]) -> str:
         """Auto-detect change type."""
         if not existing:
             return "create"
@@ -237,11 +237,11 @@ class VersionManager:
             return versions[-1]
         return None
     
-    def get_all_versions(self, document_id: str) -> List[DocumentVersion]:
+    def get_all_versions(self, document_id: str) -> list[DocumentVersion]:
         """Get all versions of a document."""
         return self.versions.get(document_id, [])
     
-    def get_version_history(self, document_id: str, limit: int = 50) -> List[Dict]:
+    def get_version_history(self, document_id: str, limit: int = 50) -> list[dict]:
         """Get version history."""
         versions = self.versions.get(document_id, [])
         
@@ -364,7 +364,7 @@ class VersionManager:
             sentiment_change=0.0
         )
     
-    def get_evolution_timeline(self, document_id: str) -> Dict[str, Any]:
+    def get_evolution_timeline(self, document_id: str) -> dict[str, Any]:
         """Get document evolution timeline."""
         versions = self.versions.get(document_id, [])
         
@@ -417,7 +417,7 @@ class ChangeTracker:
     def __init__(self, version_manager: VersionManager):
         self.version_manager = version_manager
     
-    def detect_active_periods(self, document_id: str, threshold: int = 3) -> List[Dict]:
+    def detect_active_periods(self, document_id: str, threshold: int = 3) -> list[dict]:
         """Detect periods of high activity."""
         versions = self.version_manager.get_all_versions(document_id)
         
@@ -455,7 +455,7 @@ class ChangeTracker:
         
         return active_periods
     
-    def analyze_editing_patterns(self, document_id: str) -> Dict[str, Any]:
+    def analyze_editing_patterns(self, document_id: str) -> dict[str, Any]:
         """Analyze editing patterns."""
         versions = self.version_manager.get_all_versions(document_id)
         

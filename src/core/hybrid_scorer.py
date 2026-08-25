@@ -109,7 +109,7 @@ class HybridScorer:
             )
         return self._tfidf_vectorizer
     
-    def _compute_tfidf_similarity(self, texts: List[str]) -> np.ndarray:
+    def _compute_tfidf_similarity(self, texts: list[str]) -> np.ndarray:
         """Compute TF-IDF similarity matrix."""
         vectorizer = self._get_tfidf_vectorizer()
         tfidf_matrix = vectorizer.fit_transform(texts)
@@ -206,7 +206,7 @@ class HybridScorer:
     
     def compute_hybrid_matrix(
         self,
-        texts: Dict[str, str],
+        texts: dict[str, str],
         semantic_matrix: Optional[pd.DataFrame] = None,
         alpha: Optional[float] = None,
         lexical_method: Optional[str] = None,
@@ -287,7 +287,7 @@ class HybridScorer:
         self,
         hybrid_df: pd.DataFrame,
         threshold: float = 0.59,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Flag plagiarism pairs using hybrid scores.
         
@@ -322,7 +322,7 @@ class HybridScorer:
         semantic_score: float,
         alpha: float = 0.7,
         lexical_method: str = "tfidf",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Compute detailed stats for a document pair.
         
@@ -358,8 +358,8 @@ class HybridScorer:
     
     def get_recommended_alpha(
         self,
-        scores: List[float],
-        labels: List[int],
+        scores: list[float],
+        labels: list[int],
         method: str = "f1"
     ) -> float:
         """
@@ -385,7 +385,7 @@ class HybridScorer:
         
         return best_alpha
     
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get scoring statistics."""
         return {
             **self._stats,
@@ -406,12 +406,12 @@ class HybridScorer:
 def compute_hybrid_plagiarism_flags(
     similarity_df: pd.DataFrame,
     lexical_scores: Optional[pd.DataFrame] = None,
-    texts: Optional[Dict[str, str]] = None,
+    texts: Optional[dict[str, str]] = None,
     alpha: float = 0.7,
     threshold: float = 0.59,
     lexical_method: str = "tfidf",
     normalize: Optional[str] = None,
-) -> Tuple[pd.DataFrame, List[Dict[str, Any]]]:
+) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
     """
     Compute hybrid plagiarism flags.
 

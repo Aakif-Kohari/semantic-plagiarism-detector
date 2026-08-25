@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 def generate_attribution_chart(
-    attribution_result: Dict[str, Any],
+    attribution_result: dict[str, Any],
     title: str = "Paraphrase Tool Attribution"
 ) -> go.Figure:
     """Generate a Plotly bar chart showing tool attribution probabilities.
@@ -68,7 +68,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from typing import Dict
 
-def generate_tool_probability_chart(probabilities: Dict[str, float]) -> go.Figure:
+def generate_tool_probability_chart(probabilities: dict[str, float]) -> go.Figure:
     """
     Generates a Plotly probability chart showing the likelihood of specific paraphrasing tool usage.
     """

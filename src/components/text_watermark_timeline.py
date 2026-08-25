@@ -3,7 +3,7 @@
 from typing import Any, List
 
 
-def render_watermark_timeline(matches: List[Any]) -> str:
+def render_watermark_timeline(matches: list[Any]) -> str:
     """Renders HTML telemetry timeline list for watermark detection tests."""
     if not matches:
         return """

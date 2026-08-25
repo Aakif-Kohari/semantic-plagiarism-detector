@@ -38,7 +38,7 @@ class HybridScorer:
         self,
         embedding_model=None,
         alpha: float = 0.5,
-        vectorizer_params: Optional[Dict[str, Any]] = None,
+        vectorizer_params: Optional[dict[str, Any]] = None,
         cache_matrix: bool = True,
         verbose: bool = True
     ):
@@ -82,7 +82,7 @@ class HybridScorer:
         
         logger.info(f"HybridScorer initialized with alpha={alpha}")
     
-    def fit_tfidf(self, documents: List[str]) -> csr_matrix:
+    def fit_tfidf(self, documents: list[str]) -> csr_matrix:
         """
         Fit TF-IDF vectorizer on all documents and transform them.
         
@@ -110,7 +110,7 @@ class HybridScorer:
         
         return tfidf_matrix
     
-    def compute_lexical_scores(self, documents: List[str]) -> np.ndarray:
+    def compute_lexical_scores(self, documents: list[str]) -> np.ndarray:
         """
         Compute lexical similarity matrix using vectorized TF-IDF.
         
@@ -138,7 +138,7 @@ class HybridScorer:
         
         return lexical_scores
     
-    def compute_embedding_scores(self, documents: List[str]) -> Optional[np.ndarray]:
+    def compute_embedding_scores(self, documents: list[str]) -> Optional[np.ndarray]:
         """
         Compute embedding-based similarity matrix.
         
@@ -193,11 +193,11 @@ class HybridScorer:
     
     def compute_hybrid_matrix(
         self,
-        documents: List[str],
+        documents: list[str],
         alpha: Optional[float] = None,
         return_lexical: bool = False,
         return_embedding: bool = False
-    ) -> Union[np.ndarray, Tuple[np.ndarray, ...]]:
+    ) -> np.ndarray | tuple[np.ndarray, ...]:
         """
         Compute hybrid similarity matrix combining lexical and semantic scores.
         
@@ -272,10 +272,10 @@ class HybridScorer:
     def get_top_k_similar(
         self,
         query_doc: str,
-        documents: List[str],
+        documents: list[str],
         k: int = 10,
         alpha: Optional[float] = None
-    ) -> List[Tuple[int, float]]:
+    ) -> list[tuple[int, float]]:
         """
         Get top-k most similar documents for a query document.
         
@@ -309,12 +309,12 @@ class HybridScorer:
     
     def get_top_k_similar_batch(
         self,
-        query_docs: List[str],
-        documents: List[str],
+        query_docs: list[str],
+        documents: list[str],
         k: int = 10,
         alpha: Optional[float] = None,
         batch_size: int = 100
-    ) -> List[List[Tuple[int, float]]]:
+    ) -> list[list[tuple[int, float]]]:
         """
         Get top-k similar documents for multiple queries in batch.
         
@@ -357,7 +357,7 @@ class HybridScorer:
         self.cached_hybrid_matrix = None
         logger.info("Cache cleared")
     
-    def get_statistics(self, documents: Optional[List[str]] = None) -> Dict[str, Any]:
+    def get_statistics(self, documents: Optional[list[str]] = None) -> dict[str, Any]:
         """
         Get statistics about the scorer.
         

@@ -14,7 +14,7 @@ from src.core.document_versioning import DiffBlock, DiffOp
 
 
 def generate_diff_heatmap(
-    blocks: List[DiffBlock],
+    blocks: list[DiffBlock],
     title: str = "Document Evolution Heatmap"
 ) -> go.Figure:
     """Generate a Plotly heatmap visualizing text changes between versions.
@@ -89,8 +89,8 @@ def generate_diff_heatmap(
 
 
 def generate_retention_chart(
-    lineage: List[Dict[str, Any]],
-    retention_scores: List[float]
+    lineage: list[dict[str, Any]],
+    retention_scores: list[float]
 ) -> go.Figure:
     """Generate a line chart showing text retention across multiple drafts.
     

@@ -209,7 +209,7 @@ class PaginatedResponse(BaseModel, Generic[T]):
         has_next: Whether there is a next page
         has_previous: Whether there is a previous page
     """
-    items: List[T] = Field(..., description="List of items on the current page")
+    items: list[T] = Field(..., description="List of items on the current page")
     page: int = Field(..., ge=1, description="Current page number (1-indexed)")
     per_page: int = Field(..., ge=1, description="Number of items per page")
     total_items: int = Field(..., ge=0, description="Total number of items across all pages")
@@ -234,7 +234,7 @@ class PaginatedResponse(BaseModel, Generic[T]):
     @classmethod
     def from_pagination_data(
         cls,
-        items: List[T],
+        items: list[T],
         page: int,
         per_page: int,
         total_items: int
@@ -316,7 +316,7 @@ class CursorPaginatedResponse(BaseModel, Generic[T]):
     Useful for infinite scrolling and real-time feeds where offset-based
     pagination is not ideal.
     """
-    items: List[T] = Field(..., description="List of items on the current page")
+    items: list[T] = Field(..., description="List of items on the current page")
     next_cursor: Optional[str] = Field(
         default=None, 
         description="Cursor for the next page (null if no more items)"
@@ -378,7 +378,7 @@ class MatchedDocument(BaseModel):
         ..., description="Maximum chunk similarity score"
     )
     severity: str = Field(..., description="Flagged severity level (High, Medium)")
-    flagged_chunks: List[FlaggedChunkMatch] = Field(
+    flagged_chunks: list[FlaggedChunkMatch] = Field(
         default_factory=list, description="List of top matching text chunk pairs"
     )
 
@@ -407,7 +407,7 @@ class SimilarityCheckResponse(BaseModel):
     matched_documents_count: int = Field(
         ..., description="Total count of matched corpus documents"
     )
-    matched_documents: List[MatchedDocument] = Field(
+    matched_documents: list[MatchedDocument] = Field(
         default_factory=list, description="Detailed list of matched corpus documents"
     )
 
@@ -416,6 +416,33 @@ class DocumentUploadResponse(SimilarityCheckResponse):
     """Response schema for document upload and scan operations."""
 
     pass
+
+
+class ScanTextRequest(BaseModel):
+    """Request payload schema for raw text submission plagiarism scanning."""
+
+    text: str = Field(
+        ..., min_length=1, description="Raw text submission content to scan for plagiarism"
+    )
+    filename: str = Field(
+        default="submission.txt", description="Identifier filename for the text submission"
+    )
+    threshold: float = Field(
+        default=0.59,
+        ge=0.0,
+        le=1.0,
+        description="Similarity threshold for flagging plagiarism (default: 0.59)",
+    )
+    top_k: int = Field(
+        default=3,
+        ge=1,
+        le=100,
+        description="Number of top matching paragraph pairs to include per matched document",
+    )
+    reprocess: bool = Field(
+        default=False,
+        description="Bypass duplicate detection and process the submission anyway",
+    )
 
 
 class ClearDataResponse(BaseModel):
@@ -568,7 +595,7 @@ class BatchRunSummary(BaseModel):
 class BatchRunListResponse(BaseModel):
     """Paginated list of batch runs."""
 
-    runs: List[BatchRunSummary] = Field(default_factory=list, description="List of batch runs")
+    runs: list[BatchRunSummary] = Field(default_factory=list, description="List of batch runs")
     page: int = Field(..., ge=1, description="Current page number")
     per_page: int = Field(..., ge=1, description="Items per page")
     total_items: int = Field(..., ge=0, description="Total number of runs")
@@ -586,7 +613,7 @@ class BatchDocumentResult(BaseModel):
     similarity_score: float = Field(default=0.0, description="Similarity score")
     severity: str = Field(default="none", description="Severity level")
     flagged: int = Field(default=0, description="Whether flagged (0 or 1)")
-    matched_docs: List[str] = Field(default_factory=list, description="Matched document names")
+    matched_docs: list[str] = Field(default_factory=list, description="Matched document names")
     processing_ms: Optional[int] = Field(default=None, description="Processing time in ms")
 
 
@@ -594,8 +621,8 @@ class BatchRunDetailResponse(BaseModel):
     """Detailed response for a single batch run including documents."""
 
     run: BatchRunSummary = Field(..., description="Batch run metadata")
-    documents: List[BatchDocumentResult] = Field(default_factory=list, description="Document results")
-    severity_distribution: Dict[str, int] = Field(default_factory=dict, description="Severity counts")
+    documents: list[BatchDocumentResult] = Field(default_factory=list, description="Document results")
+    severity_distribution: dict[str, int] = Field(default_factory=dict, description="Severity counts")
 
 
 class BatchTimelineEventResponse(BaseModel):
@@ -672,7 +699,7 @@ class DocumentVersionSnapshotResponse(BaseModel):
 class DocumentVersionListResponse(BaseModel):
     """Paginated list of document version snapshots."""
 
-    items: List[DocumentVersionSnapshotResponse] = Field(default_factory=list)
+    items: list[DocumentVersionSnapshotResponse] = Field(default_factory=list)
 
 
 # ============================================================================
@@ -698,7 +725,7 @@ class AnomalyScanResponse(BaseModel):
 class AnomalyScanListResponse(BaseModel):
     """Paginated list of anomaly scans."""
 
-    items: List[AnomalyScanResponse] = Field(default_factory=list)
+    items: list[AnomalyScanResponse] = Field(default_factory=list)
     page: int = Field(..., ge=1)
     per_page: int = Field(..., ge=1)
     total: int = Field(..., ge=0)
@@ -728,7 +755,7 @@ class DocumentHealthScoreResponse(BaseModel):
     filename: str = Field(..., description="Document filename")
     overall_score: float = Field(..., description="Composite health score 0-100")
     grade: str = Field(..., description="Letter grade (A+, A, B+, B, C, D, F)")
-    dimensions: List[HealthDimensionScore] = Field(default_factory=list, description="Per-dimension scores")
+    dimensions: list[HealthDimensionScore] = Field(default_factory=list, description="Per-dimension scores")
     checked_at: str = Field(..., description="ISO 8601 timestamp of check")
     gate_passed: bool = Field(default=True, description="Whether document passed quality gate")
     gate_reason: str = Field(default="", description="Quality gate decision reason")
@@ -737,7 +764,7 @@ class DocumentHealthScoreResponse(BaseModel):
 class DocumentHealthListResponse(BaseModel):
     """Paginated list of document health scores."""
 
-    scores: List[DocumentHealthScoreResponse] = Field(default_factory=list, description="Health scores")
+    scores: list[DocumentHealthScoreResponse] = Field(default_factory=list, description="Health scores")
     page: int = Field(..., ge=1, description="Current page")
     per_page: int = Field(..., ge=1, description="Items per page")
     total_items: int = Field(..., ge=0, description="Total score records")
@@ -755,8 +782,8 @@ class HeatmapSnapshotResponse(BaseModel):
     """Response schema for a similarity heatmap snapshot."""
 
     snapshot_id: int = Field(..., description="Snapshot identifier")
-    labels: Optional[List[str]] = Field(default=None, description="Document labels")
-    matrix: Optional[List[List[float]]] = Field(default=None, description="NxN similarity matrix")
+    labels: Optional[list[str]] = Field(default=None, description="Document labels")
+    matrix: Optional[list[list[float]]] = Field(default=None, description="NxN similarity matrix")
     document_count: int = Field(..., description="Number of documents")
     min_similarity: float = Field(..., description="Minimum pairwise similarity")
     max_similarity: float = Field(..., description="Maximum pairwise similarity")
@@ -770,7 +797,7 @@ class HeatmapSnapshotResponse(BaseModel):
 class HeatmapSnapshotListResponse(BaseModel):
     """Paginated list of heatmap snapshots."""
 
-    snapshots: List[HeatmapSnapshotResponse] = Field(default_factory=list)
+    snapshots: list[HeatmapSnapshotResponse] = Field(default_factory=list)
     page: int = Field(..., ge=1)
     per_page: int = Field(..., ge=1)
     total_items: int = Field(..., ge=0)
@@ -795,7 +822,7 @@ class DocumentVersionLineageResponse(BaseModel):
 
     user_id: str = Field(...)
     assignment_id: str = Field(...)
-    versions: List[DocumentVersionLineageItem] = Field(default_factory=list)
+    versions: list[DocumentVersionLineageItem] = Field(default_factory=list)
     total: int = Field(default=0)
 
 
@@ -839,7 +866,7 @@ class DocumentVersionTrendResponse(BaseModel):
 
     user_id: str = Field(...)
     assignment_id: str = Field(...)
-    trend: List[DocumentVersionTrendPoint] = Field(default_factory=list)
+    trend: list[DocumentVersionTrendPoint] = Field(default_factory=list)
     total_points: int = Field(default=0)
 
 
@@ -856,7 +883,7 @@ class DocumentVersionMostRevisedItem(BaseModel):
 class DocumentVersionMostRevisedResponse(BaseModel):
     """Response for most-revised documents."""
 
-    documents: List[DocumentVersionMostRevisedItem] = Field(default_factory=list)
+    documents: list[DocumentVersionMostRevisedItem] = Field(default_factory=list)
 
 
 class AnomalyAlertResponse(BaseModel):
@@ -869,8 +896,8 @@ class AnomalyAlertResponse(BaseModel):
     title: str = Field(..., description="Alert title")
     description: str = Field(default="", description="Detailed description")
     confidence: float = Field(default=0.0, description="Detection confidence 0-1")
-    affected_docs: List[str] = Field(default_factory=list, description="Affected documents")
-    evidence: Dict[str, Any] = Field(default_factory=dict, description="Evidence data")
+    affected_docs: list[str] = Field(default_factory=list, description="Affected documents")
+    evidence: dict[str, Any] = Field(default_factory=dict, description="Evidence data")
     is_acknowledged: bool = Field(default=False, description="Acknowledgement status")
     is_resolved: bool = Field(default=False, description="Resolution status")
     notes: str = Field(default="", description="Analyst notes")
@@ -882,7 +909,7 @@ class AnomalyAlertResponse(BaseModel):
 class AnomalyAlertListResponse(BaseModel):
     """Paginated list of anomaly alerts."""
 
-    items: List[AnomalyAlertResponse] = Field(default_factory=list)
+    items: list[AnomalyAlertResponse] = Field(default_factory=list)
     page: int = Field(..., ge=1)
     per_page: int = Field(..., ge=1)
     total: int = Field(..., ge=0)
@@ -906,7 +933,7 @@ class AnomalySummaryResponse(BaseModel):
 class AnomalySeverityDistResponse(BaseModel):
     """Severity distribution."""
 
-    distribution: Dict[str, int] = Field(default_factory=dict)
+    distribution: dict[str, int] = Field(default_factory=dict)
 
 
 class AnomalyConfigResponse(BaseModel):
@@ -935,7 +962,7 @@ class HealthScoreSummaryResponse(BaseModel):
     passed_gate: int = Field(default=0, description="Documents that passed gate")
     failed_gate: int = Field(default=0, description="Documents that failed gate")
     pass_rate: float = Field(default=0.0, description="Pass rate percentage")
-    grade_distribution: Dict[str, int] = Field(default_factory=dict, description="Grade counts")
+    grade_distribution: dict[str, int] = Field(default_factory=dict, description="Grade counts")
     last_checked_at: Optional[str] = Field(default=None, description="Last check timestamp")
 
 
@@ -960,14 +987,14 @@ class HealthGateCheckResponse(BaseModel):
 class HealthDimensionAvgResponse(BaseModel):
     """Average scores per health dimension."""
 
-    dimensions: Dict[str, float] = Field(default_factory=dict, description="Dimension name → avg score")
+    dimensions: dict[str, float] = Field(default_factory=dict, description="Dimension name → avg score")
 
 
 class ClusterInfo(BaseModel):
     """Single cluster in a clustering result."""
 
     cluster_id: int = Field(..., description="Cluster identifier")
-    documents: List[str] = Field(default_factory=list, description="Filenames in cluster")
+    documents: list[str] = Field(default_factory=list, description="Filenames in cluster")
     centroid_score: float = Field(..., description="Average intra-cluster similarity")
     size: int = Field(..., description="Number of documents")
 
@@ -980,8 +1007,8 @@ class ClusteringResultResponse(BaseModel):
     silhouette_score: float = Field(..., description="Silhouette quality score (-1 to 1)")
     linkage_method: str = Field(..., description="Linkage method used")
     distance_threshold: float = Field(..., description="Distance cutoff")
-    clusters: List[ClusterInfo] = Field(default_factory=list, description="Cluster details")
-    document_assignments: Dict[str, int] = Field(default_factory=dict, description="Doc → cluster mapping")
+    clusters: list[ClusterInfo] = Field(default_factory=list, description="Cluster details")
+    document_assignments: dict[str, int] = Field(default_factory=dict, description="Doc → cluster mapping")
     computed_at: str = Field(..., description="ISO 8601 timestamp")
 
 
@@ -1001,7 +1028,7 @@ class HotspotResponse(BaseModel):
 class HotspotListResponse(BaseModel):
     """Response for hotspot listing."""
 
-    hotspots: List[HotspotResponse] = Field(default_factory=list)
+    hotspots: list[HotspotResponse] = Field(default_factory=list)
     total: int = Field(default=0)
 
 
@@ -1020,7 +1047,7 @@ class HotspotSummaryResponse(BaseModel):
 # ============================================================================
 
 def create_paginated_response(
-    items: List[T],
+    items: list[T],
     page: int,
     per_page: int,
     total_items: int
@@ -1057,7 +1084,7 @@ def create_paginated_response(
 
 def paginated_response_to_dict(
     response: PaginatedResponse[T]
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Convert a PaginatedResponse to a dictionary format.
     
@@ -1138,6 +1165,7 @@ __all__ = [
     'MatchedDocument',
     'SimilarityCheckResponse',
     'DocumentUploadResponse',
+    'ScanTextRequest',
     
     # Admin
     'ClearDataResponse',

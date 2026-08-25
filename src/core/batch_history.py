@@ -33,7 +33,7 @@ class HistoryRecord:
     error_message: Optional[str]
     metadata: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "job_id": self.job_id,
@@ -113,7 +113,7 @@ class BatchHistory:
         """Get database connection."""
         return sqlite3.connect(self.db_path)
 
-    def record_job(self, job_data: Dict[str, Any]) -> bool:
+    def record_job(self, job_data: dict[str, Any]) -> bool:
         """
         Record or update a batch job in history.
 
@@ -164,7 +164,7 @@ class BatchHistory:
             logger.error(f"Failed to record job: {e}")
             return False
 
-    def store_results(self, job_id: str, results: Dict[str, Any]) -> bool:
+    def store_results(self, job_id: str, results: dict[str, Any]) -> bool:
         """Store detailed results for a job."""
         try:
             conn = self._get_conn()
@@ -191,7 +191,7 @@ class BatchHistory:
             return None
         return self._row_to_record(row)
 
-    def get_recent_jobs(self, limit: int = 20) -> List[HistoryRecord]:
+    def get_recent_jobs(self, limit: int = 20) -> list[HistoryRecord]:
         """Get recent jobs sorted by creation date."""
         conn = self._get_conn()
         cursor = conn.cursor()
@@ -213,7 +213,7 @@ class BatchHistory:
         min_documents: Optional[int] = None,
         max_documents: Optional[int] = None,
         limit: int = 50
-    ) -> List[HistoryRecord]:
+    ) -> list[HistoryRecord]:
         """
         Search jobs with filters.
 
@@ -266,7 +266,7 @@ class BatchHistory:
         conn.close()
         return [self._row_to_record(row) for row in rows]
 
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self) -> dict[str, Any]:
         """Get aggregate statistics."""
         conn = self._get_conn()
         cursor = conn.cursor()
@@ -298,7 +298,7 @@ class BatchHistory:
         conn.close()
         return stats
 
-    def get_daily_summary(self, days: int = 7) -> List[Dict[str, Any]]:
+    def get_daily_summary(self, days: int = 7) -> list[dict[str, Any]]:
         """Get daily job summaries for the last N days."""
         conn = self._get_conn()
         cursor = conn.cursor()
@@ -332,7 +332,7 @@ class BatchHistory:
         logger.info(f"Cleaned up {deleted} old records")
         return deleted
 
-    def _row_to_record(self, row: Tuple) -> HistoryRecord:
+    def _row_to_record(self, row: tuple) -> HistoryRecord:
         """Convert database row to HistoryRecord."""
         return HistoryRecord(
             job_id=row[0], name=row[1], status=row[2], priority=row[3],

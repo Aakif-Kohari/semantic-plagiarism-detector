@@ -18,11 +18,11 @@ class NeuralCodeCloneDetector:
 
     def __init__(self, similarity_threshold: float = 0.78):
         self.similarity_threshold = similarity_threshold
-        self.indexed_code_repositories: Dict[str, Dict[str, Any]] = {}
+        self.indexed_code_repositories: dict[str, dict[str, Any]] = {}
 
     def index_repository_file(
         self, file_id: str, file_path: str, code_content: str, language: str = "python"
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Indexes source code file into database and computes structural and semantic AST hashes."""
         ast_tokens = self._extract_ast_structural_tokens(code_content)
         semantic_hash = self._compute_semantic_ast_hash(ast_tokens)
@@ -40,7 +40,7 @@ class NeuralCodeCloneDetector:
         self.indexed_code_repositories[file_id] = file_metadata
         return file_metadata
 
-    def _extract_ast_structural_tokens(self, code: str) -> List[str]:
+    def _extract_ast_structural_tokens(self, code: str) -> list[str]:
         """Extracts structural AST tokens while stripping comments and identifier variable names."""
         keywords = {
             "def", "class", "return", "if", "else", "elif", "for", "while", "import", "from",
@@ -64,14 +64,14 @@ class NeuralCodeCloneDetector:
 
         return tokens
 
-    def _compute_semantic_ast_hash(self, tokens: List[str]) -> str:
+    def _compute_semantic_ast_hash(self, tokens: list[str]) -> str:
         """Computes SHA-256 hash over normalized AST token sequence."""
         token_str = "::".join(tokens)
         return hashlib.sha256(token_str.encode("utf-8")).hexdigest()
 
     def scan_for_code_clones(
         self, query_code: str, language: str = "python"
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Scans query code against indexed repositories to detect code clones."""
         query_tokens = self._extract_ast_structural_tokens(query_code)
         query_set = set(query_tokens)

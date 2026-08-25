@@ -42,15 +42,15 @@ class HeatmapCell:
 class HeatmapMatrix:
     """Full heatmap data structure for rendering."""
 
-    labels: List[str]
-    matrix: List[List[float]]  # NxN similarity values
+    labels: list[str]
+    matrix: list[list[float]]  # NxN similarity values
     min_similarity: float
     max_similarity: float
     mean_similarity: float
     document_count: int
     computed_at: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "labels": self.labels,
             "matrix": self.matrix,
@@ -67,11 +67,11 @@ class Cluster:
     """A cluster of documents from hierarchical clustering."""
 
     cluster_id: int
-    documents: List[str]
+    documents: list[str]
     centroid_score: float  # average intra-cluster similarity
     size: int
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "cluster_id": self.cluster_id,
             "documents": self.documents,
@@ -84,15 +84,15 @@ class Cluster:
 class ClusteringResult:
     """Complete clustering output."""
 
-    clusters: List[Cluster]
+    clusters: list[Cluster]
     num_clusters: int
     silhouette_score: float
     linkage_method: str
     distance_threshold: float
-    document_assignments: Dict[str, int]  # filename → cluster_id
+    document_assignments: dict[str, int]  # filename → cluster_id
     computed_at: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "clusters": [c.to_dict() for c in self.clusters],
             "num_clusters": self.num_clusters,
@@ -131,7 +131,7 @@ def _cosine_similarity_matrix(embeddings: np.ndarray) -> np.ndarray:
 
 
 def compute_heatmap(
-    filenames: List[str],
+    filenames: list[str],
     embeddings: np.ndarray,
 ) -> HeatmapMatrix:
     """
@@ -188,9 +188,9 @@ def _pairwise_distance(sim_matrix: np.ndarray) -> np.ndarray:
 
 def _agglomerative_clustering(
     dist_matrix: np.ndarray,
-    labels: List[str],
+    labels: list[str],
     distance_threshold: float = 0.5,
-) -> Dict[str, int]:
+) -> dict[str, int]:
     """
     Simple agglomerative (single-linkage) clustering.
 
@@ -202,7 +202,7 @@ def _agglomerative_clustering(
     """
     n = len(labels)
     # Each document starts in its own cluster
-    clusters: Dict[int, List[int]] = {i: [i] for i in range(n)}
+    clusters: dict[int, list[int]] = {i: [i] for i in range(n)}
     next_id = n
 
     # Work copy of the distance matrix
@@ -240,7 +240,7 @@ def _agglomerative_clustering(
                 D[k, ci] = new_dist
 
     # Build label → cluster_id mapping
-    assignments: Dict[str, int] = {}
+    assignments: dict[str, int] = {}
     for cid, members in clusters.items():
         for member_idx in members:
             assignments[labels[member_idx]] = cid
@@ -250,8 +250,8 @@ def _agglomerative_clustering(
 
 def _compute_silhouette(
     dist_matrix: np.ndarray,
-    labels: List[str],
-    assignments: Dict[str, int],
+    labels: list[str],
+    assignments: dict[str, int],
 ) -> float:
     """Compute the average silhouette score for the clustering."""
     n = len(labels)
@@ -263,7 +263,7 @@ def _compute_silhouette(
     if len(unique_clusters) <= 1:
         return 0.0
 
-    silhouettes: List[float] = []
+    silhouettes: list[float] = []
 
     for i, label_i in enumerate(labels):
         ci = assignments.get(label_i)
@@ -303,7 +303,7 @@ def _compute_silhouette(
 
 
 def cluster_documents(
-    filenames: List[str],
+    filenames: list[str],
     embeddings: np.ndarray,
     distance_threshold: float = 0.5,
     linkage: str = "single",
@@ -336,11 +336,11 @@ def cluster_documents(
     assignments = _agglomerative_clustering(dist, filenames, distance_threshold)
 
     # Build cluster objects
-    cluster_members: Dict[int, List[str]] = {}
+    cluster_members: dict[int, list[str]] = {}
     for fname, cid in assignments.items():
         cluster_members.setdefault(cid, []).append(fname)
 
-    clusters: List[Cluster] = []
+    clusters: list[Cluster] = []
     for cid, members in sorted(cluster_members.items()):
         # Compute average intra-cluster similarity
         member_indices = [filenames.index(m) for m in members if m in filenames]
@@ -378,17 +378,17 @@ def cluster_documents(
 # ---------------------------------------------------------------------------
 
 def detect_similarity_hotspots(
-    filenames: List[str],
+    filenames: list[str],
     sim_matrix: np.ndarray,
     threshold: float = 0.8,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Identify document pairs with suspiciously high similarity.
 
     Returns:
         List of hotspot dicts with doc_a, doc_b, similarity.
     """
-    hotspots: List[Dict[str, Any]] = []
+    hotspots: list[dict[str, Any]] = []
     n = len(filenames)
     for i in range(n):
         for j in range(i + 1, n):
@@ -410,7 +410,7 @@ def detect_similarity_hotspots(
 def heatmap_to_svg_data(
     heatmap: HeatmapMatrix,
     cell_size: int = 20,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Convert a HeatmapMatrix to SVG-ready data for client rendering.
 

@@ -81,7 +81,7 @@ def get_expected_bearer_token() -> str:
 
 
 @lru_cache(maxsize=1)
-def get_valid_tokens() -> Dict[str, List[str]]:
+def get_valid_tokens() -> dict[str, list[str]]:
     """Parse and return the API bearer tokens mapping from environment.
 
     Returns:
@@ -290,7 +290,7 @@ async def verify_bearer_token(
     return credentials.credentials
 
 
-def extract_token_scopes(token: Optional[str]) -> List[str]:
+def extract_token_scopes(token: Optional[str]) -> list[str]:
     """Extract granted scopes from a bearer token (static mapping or JWT)."""
     if not token:
         return []
@@ -307,7 +307,7 @@ def extract_token_scopes(token: Optional[str]) -> List[str]:
 
 
 def _validate_scopes(
-    required_scopes: Optional[Union[Iterable[str], List[str], Sequence[str]]],
+    required_scopes: Optional[Iterable[str] | list[str] | Sequence[str]],
     token_scopes: Sequence[str],
     mode: str = "all",
 ) -> None:
@@ -452,7 +452,7 @@ class RequireScopes:
 
     def __init__(
         self,
-        scopes: Optional[Union[List[str], Set[str], Tuple[str, ...], Sequence[str], str]] = None,
+        scopes: Optional[list[str] | set[str] | tuple[str, ...] | Sequence[str] | str] = None,
         mode: str = "all",
     ):
         if isinstance(scopes, str):
@@ -483,7 +483,7 @@ class RequireScopes:
 
 
 def require_scopes(
-    scopes: Union[List[str], Set[str], Tuple[str, ...], Sequence[str], str],
+    scopes: list[str] | set[str] | tuple[str, ...] | Sequence[str] | str,
     mode: str = "all",
 ) -> RequireScopes:
     """Factory helper to construct a RequireScopes dependency."""

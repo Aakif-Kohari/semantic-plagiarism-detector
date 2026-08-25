@@ -35,7 +35,7 @@ class DiffBlock(NamedTuple):
     text_v2: str
 
 
-def tokenize_by_words(text: str) -> List[str]:
+def tokenize_by_words(text: str) -> list[str]:
     """Tokenize text into words, preserving whitespace as distinct tokens.
     
     This ensures that changes in spacing are captured in the diff,
@@ -47,7 +47,7 @@ def tokenize_by_words(text: str) -> List[str]:
     return tokens
 
 
-def compute_myers_diff(tokens_v1: List[str], tokens_v2: List[str]) -> List[Tuple[DiffOp, str, str]]:
+def compute_myers_diff(tokens_v1: list[str], tokens_v2: list[str]) -> list[tuple[DiffOp, str, str]]:
     """Compute the shortest edit script between two token lists using Myers' algorithm.
     
     This is a simplified implementation of the Myers diff algorithm that
@@ -100,11 +100,11 @@ def compute_myers_diff(tokens_v1: List[str], tokens_v2: List[str]) -> List[Tuple
 
 
 def _backtrack_myers(
-    trace: List[Dict[int, int]], 
-    tokens_v1: List[str], 
-    tokens_v2: List[str],
+    trace: list[dict[int, int]], 
+    tokens_v1: list[str], 
+    tokens_v2: list[str],
     d: int
-) -> List[Tuple[DiffOp, str, str]]:
+) -> list[tuple[DiffOp, str, str]]:
     """Backtrack through the Myers trace to build the edit script."""
     x = len(tokens_v1)
     y = len(tokens_v2)
@@ -146,7 +146,7 @@ def _backtrack_myers(
 def generate_diff_blocks(
     text_v1: str, 
     text_v2: str
-) -> List[DiffBlock]:
+) -> list[DiffBlock]:
     """Generate high-level diff blocks from two text strings.
     
     Groups consecutive identical operations into DiffBlock objects
@@ -209,7 +209,7 @@ def generate_diff_blocks(
     return blocks
 
 
-def calculate_retention_score(blocks: List[DiffBlock]) -> float:
+def calculate_retention_score(blocks: list[DiffBlock]) -> float:
     """Calculate the percentage of text retained from v1 to v2.
     
     Args:

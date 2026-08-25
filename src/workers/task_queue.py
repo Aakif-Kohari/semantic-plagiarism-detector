@@ -62,10 +62,10 @@ class TaskQueue:
 
     def enqueue(
         self,
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
         *,
         max_retries: Optional[int] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Persist a new job to SQLite and signal the in-memory queue."""
         retries = max_retries if max_retries is not None else self._max_retries
         job = task_db.create_job(payload, max_retries=retries, db_path=self.db_path)
@@ -89,13 +89,13 @@ class TaskQueue:
         job = self.enqueue(payload)
         return job["id"]
 
-    def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
+    def get_job_status(self, job_id: str) -> Optional[dict[str, Any]]:
         """Get the current status and details of a job."""
         return task_db.get_job(job_id, db_path=self.db_path)
 
     # ── Consumer ──────────────────────────────────────────────
 
-    def dequeue(self, timeout: float = 30.0) -> Optional[Dict[str, Any]]:
+    def dequeue(self, timeout: float = 30.0) -> Optional[dict[str, Any]]:
         """Block up to ``timeout`` seconds for the next job.
 
         Returns the job dict (status=PROCESSING) or ``None`` on timeout.
@@ -123,7 +123,7 @@ class TaskQueue:
 
     # ── Result handlers ───────────────────────────────────────
 
-    def complete(self, job_id: str, result: Dict[str, Any]) -> None:
+    def complete(self, job_id: str, result: dict[str, Any]) -> None:
         task_db.mark_completed(job_id, result, db_path=self.db_path)
         logger.info("Job %s completed", job_id)
 

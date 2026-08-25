@@ -58,7 +58,7 @@ class Page(Generic[T]):
     
     def __init__(
         self, 
-        items: List[T], 
+        items: list[T], 
         page_info: PageInfo,
         has_more: bool = False
     ):
@@ -101,7 +101,7 @@ class Paginator(Generic[T]):
     
     def __init__(
         self,
-        items: Union[Sequence[T], Iterator[T], Iterable[T]],
+        items: Sequence[T] | Iterator[T] | Iterable[T],
         page_size: int = 20,
         total_hint: Optional[int] = None,
         error_on_invalid_page: bool = True
@@ -119,7 +119,7 @@ class Paginator(Generic[T]):
         self.page_size = max(1, page_size)
         self.error_on_invalid_page = error_on_invalid_page
         self._total_hint = total_hint
-        self._cached_items: Optional[List[T]] = None
+        self._cached_items: Optional[list[T]] = None
         self._is_sequence = isinstance(items, Sequence)
         self._is_iterator = isinstance(items, (Iterator, Iterable)) and not self._is_sequence
         
@@ -154,7 +154,7 @@ class Paginator(Generic[T]):
         """Check if we have a sequence with length."""
         return self._is_sequence
     
-    def _get_sequence_items(self, start: int, end: int) -> List[T]:
+    def _get_sequence_items(self, start: int, end: int) -> list[T]:
         """Get items from a sequence."""
         if not self._is_sequence:
             raise PaginationError("Not a sequence")
@@ -166,7 +166,7 @@ class Paginator(Generic[T]):
             # Fallback to iteration for custom sequences
             return self._get_iterator_items(start, end)
     
-    def _get_iterator_items(self, start: int, end: int) -> List[T]:
+    def _get_iterator_items(self, start: int, end: int) -> list[T]:
         """
         Get items from an iterator using islice.
         
@@ -214,7 +214,7 @@ class Paginator(Generic[T]):
         
         return items
     
-    def _get_items_with_lazy_islice(self, start: int, end: int) -> List[T]:
+    def _get_items_with_lazy_islice(self, start: int, end: int) -> list[T]:
         """
         Optimized islice for large offsets.
         
@@ -320,7 +320,7 @@ class Paginator(Generic[T]):
         
         return Page(items, page_info, has_more)
     
-    def _get_page_items(self, start: int, end: int, page: int) -> List[T]:
+    def _get_page_items(self, start: int, end: int, page: int) -> list[T]:
         """Get items for a specific page."""
         try:
             if self._has_sequence():
@@ -334,7 +334,7 @@ class Paginator(Generic[T]):
         
         return items
     
-    def _has_more_items(self, items: List[T], start: int, end: int, total_items: Optional[int]) -> bool:
+    def _has_more_items(self, items: list[T], start: int, end: int, total_items: Optional[int]) -> bool:
         """Check if there are more items available."""
         if total_items is not None:
             return end < total_items
@@ -367,7 +367,7 @@ class Paginator(Generic[T]):
                 logger.error(f"Error iterating pages: {e}")
                 break
     
-    def paginate(self, page: int = 1) -> Tuple[List[T], PageInfo]:
+    def paginate(self, page: int = 1) -> tuple[list[T], PageInfo]:
         """
         Legacy interface for paginate_items.
         
@@ -417,7 +417,7 @@ class PaginatedIterator(Generic[T]):
             if len(items) < self.page_size:
                 break
     
-    def get_page(self, page_num: int) -> List[T]:
+    def get_page(self, page_num: int) -> list[T]:
         """
         Get a specific page (requires starting from beginning for iterators).
         """
@@ -441,12 +441,12 @@ class PaginatedIterator(Generic[T]):
 
 
 def paginate_items(
-    items: Union[Sequence[T], Iterator[T], Iterable[T]],
+    items: Sequence[T] | Iterator[T] | Iterable[T],
     page: int = 1,
     page_size: int = 20,
     total_hint: Optional[int] = None,
     error_on_invalid_page: bool = True
-) -> Tuple[List[T], PageInfo]:
+) -> tuple[list[T], PageInfo]:
     """
     Paginate items with support for sequences and iterators.
     
@@ -492,7 +492,7 @@ def paginate_items(
 
 
 def create_paginated_response(
-    items: Union[Sequence[T], Iterator[T], Iterable[T]],
+    items: Sequence[T] | Iterator[T] | Iterable[T],
     page: int = 1,
     page_size: int = 20,
     total_hint: Optional[int] = None
@@ -536,7 +536,7 @@ def create_paginated_response(
 def stream_paginate(
     source: Iterator[T],
     page_size: int = 100
-) -> Iterator[List[T]]:
+) -> Iterator[list[T]]:
     """
     Yield pages of items from a stream.
     
@@ -565,9 +565,9 @@ def stream_paginate(
 
 
 def batch_process(
-    items: Union[Sequence[T], Iterator[T], Iterable[T]],
+    items: Sequence[T] | Iterator[T] | Iterable[T],
     batch_size: int = 100,
-    processor: Optional[Callable[[List[T]], Any]] = None
+    processor: Optional[Callable[[list[T]], Any]] = None
 ) -> Iterator[Any]:
     """
     Process items in batches with a processor function.

@@ -22,7 +22,7 @@ class CrossLingualExporter:
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
 
-    def export_json(self, result: Dict[str, Any], filename: str = "cross_lingual_results.json") -> str:
+    def export_json(self, result: dict[str, Any], filename: str = "cross_lingual_results.json") -> str:
         """Export results to JSON."""
         path = os.path.join(self.output_dir, filename)
         export_data = {
@@ -34,7 +34,7 @@ class CrossLingualExporter:
         logger.info(f"Exported JSON: {path}")
         return path
 
-    def export_matches_csv(self, matches: List[Dict], filename: str = "cross_lingual_matches.csv") -> str:
+    def export_matches_csv(self, matches: list[dict], filename: str = "cross_lingual_matches.csv") -> str:
         """Export matches to CSV."""
         if not matches:
             return ""
@@ -46,7 +46,7 @@ class CrossLingualExporter:
         logger.info(f"Exported CSV: {path}")
         return path
 
-    def export_language_report(self, result: Dict[str, Any], filename: str = "language_report.txt") -> str:
+    def export_language_report(self, result: dict[str, Any], filename: str = "language_report.txt") -> str:
         """Export human-readable language analysis report."""
         path = os.path.join(self.output_dir, filename)
         summary = result.get("summary", {})
@@ -84,7 +84,7 @@ class CrossLingualExporter:
         logger.info(f"Exported report: {path}")
         return path
 
-    def export_all(self, result: Dict[str, Any]) -> Dict[str, str]:
+    def export_all(self, result: dict[str, Any]) -> dict[str, str]:
         """Export all formats."""
         exports = {}
         exports["json"] = self.export_json(result)

@@ -92,7 +92,7 @@ class PaginationPage(Generic[T]):
         helper's vocabulary rather than the dataclass's.
     """
 
-    items: List[T]
+    items: list[T]
     page: int
     total_pages: int
     total_items: int
@@ -222,7 +222,7 @@ class PaginationPage(Generic[T]):
     @classmethod
     def create(
         cls,
-        items: List[T],
+        items: list[T],
         page: int,
         per_page: int,
         total_items: int,
@@ -357,7 +357,7 @@ def _coerce_integer(value: object, default: int) -> int:
         return default
 
 
-def _bounds_for(*, page: int, per_page: int, item_count: int) -> Tuple[int, int]:
+def _bounds_for(*, page: int, per_page: int, item_count: int) -> tuple[int, int]:
     """Return the one-based inclusive ``(start, end)`` positions of a page.
 
     Args:
@@ -521,7 +521,7 @@ class CursorPaginationPage(Generic[T]):
         has_more: ``True`` if at least one more item exists after ``items``.
     """
 
-    items: List[T]
+    items: list[T]
     next_cursor: Optional[str]
     prev_cursor: Optional[str]
     has_more: bool

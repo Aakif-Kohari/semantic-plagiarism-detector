@@ -35,8 +35,8 @@ class DetectionResponse(BaseModel):
     """Schema for tool detection responses."""
     attributed_tool: str
     confidence: float
-    scores: Dict[str, float]
-    fingerprint: Dict[str, float]
+    scores: dict[str, float]
+    fingerprint: dict[str, float]
 
 
 @router.post("/analyze", response_model=DetectionResponse)
@@ -85,7 +85,7 @@ class TextPayload(BaseModel):
     text: str
 
 @router.post("/detect")
-def detect_paraphrase_tool(payload: TextPayload) -> Dict[str, Any]:
+def detect_paraphrase_tool(payload: TextPayload) -> dict[str, Any]:
     """Exposes automated paraphrase tool fingerprinting and attribution via REST."""
     try:
         features = fingerprinter.extract_fingerprint(payload.text)

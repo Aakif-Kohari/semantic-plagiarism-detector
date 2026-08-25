@@ -385,8 +385,8 @@ def test_create_batch_incident_zip_archive():
         # Check for PDF reports
         pdf_names = [n for n in names if n.lower().endswith(".pdf")]
         assert len(pdf_names) == 2
-        assert "report_INC-001_alicepdf_bobpdf.pdf" in pdf_names
-        assert "report_INC-002_charliedocx_davedocx.pdf" in pdf_names
+        assert "report_INC_001_alice_bob.pdf" in pdf_names
+        assert "report_INC_002_charlie_dave.pdf" in pdf_names
 
         # Verify metadata JSON content
         meta_content = zf.read("metadata.json").decode("utf-8")
@@ -400,6 +400,45 @@ def test_create_batch_incident_zip_archive():
         assert "INC-002" in csv_content
         assert "95.00%" in csv_content
         assert "72.00%" in csv_content
+
+
+def test_bulk_zip_rejects_path_traversal_in_entry_names():
+    """Document / incident metadata must not become ../ or absolute ZIP paths."""
+    from src.utils.bulk_export import create_batch_incident_zip_archive
+
+    flags = [
+        {
+            "doc_a": "../../etc/passwd",
+            "doc_b": "/tmp/evil.pdf",
+            "similarity": 0.9,
+            "threshold_at_time_of_flag": 0.5,
+        }
+    ]
+    zip_bytes = generate_bulk_reports_zip(flags, include_pdf=False)
+    with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
+        for name in zf.namelist():
+            assert ".." not in name
+            assert not name.startswith("/")
+            assert not name.startswith("\\")
+
+    incidents = [
+        {
+            "incident_id": "../../evil",
+            "document_a": "../secret.txt",
+            "document_b": "/abs/path.docx",
+            "similarity_score": 0.8,
+        }
+    ]
+    with patch(
+        "src.utils.bulk_export.generate_plagiarism_report",
+        return_value=io.BytesIO(b"%PDF-1.4"),
+    ):
+        zip_bytes = create_batch_incident_zip_archive(incidents)
+    with zipfile.ZipFile(io.BytesIO(zip_bytes), "r") as zf:
+        for name in zf.namelist():
+            assert ".." not in name
+            assert not name.startswith("/")
+            assert not name.startswith("\\")
 
 
 # ---------------------------------------------------------------------------
