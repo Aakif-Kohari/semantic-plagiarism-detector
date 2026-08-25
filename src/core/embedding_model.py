@@ -341,7 +341,7 @@ def verify_model_cache_integrity(cache_dir: Path) -> bool:
         )
         return True
 
-    corrupted: List[tuple[Path, str]] = []
+    corrupted: list[tuple[Path, str]] = []
     for root, _, filenames in os.walk(cache_path):
         for filename in filenames:
             if not filename.endswith(_MODEL_WEIGHT_EXTENSIONS):
@@ -420,7 +420,7 @@ def release_large_batch_memory(batch_size: int) -> None:
 
 
 def embed_chunks(
-    chunks: List[str],
+    chunks: list[str],
     batch_size: int = 32,
     cancel_callback: Optional[Callable[[], bool]] = None,
 ) -> np.ndarray:
@@ -447,7 +447,7 @@ def embed_chunks(
         return np.empty((0, 384), dtype=np.float32)
 
     model = _get_model()
-    all_embeddings: List[np.ndarray] = []
+    all_embeddings: list[np.ndarray] = []
     total_chunks = len(chunks)
 
     logger.debug(
@@ -491,8 +491,8 @@ def embed_chunks(
 
 
 def embed_documents(
-    chunked_docs: Dict[str, List[str]], batch_size: int = 32
-) -> Dict[str, np.ndarray]:
+    chunked_docs: dict[str, list[str]], batch_size: int = 32
+) -> dict[str, np.ndarray]:
     """
     Embed all chunks across multiple documents using optimized mini-batching.
 
@@ -509,10 +509,10 @@ def embed_documents(
         Dict mapping document name → numpy array of embeddings (shape: N×384).
         Documents with no chunks will have an empty array of shape (0, 384).
     """
-    embeddings: Dict[str, np.ndarray] = {}
-    all_chunks: List[str] = []
-    doc_chunk_counts: List[int] = []
-    doc_names: List[str] = []
+    embeddings: dict[str, np.ndarray] = {}
+    all_chunks: list[str] = []
+    doc_chunk_counts: list[int] = []
+    doc_names: list[str] = []
 
     # Initialize all documents with empty arrays to ensure consistent return types
     for doc_name in chunked_docs.keys():

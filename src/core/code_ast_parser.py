@@ -26,7 +26,7 @@ class ASTNormalizer(ast.NodeTransformer):
     """
 
     def __init__(self):
-        self.var_map: Dict[str, str] = {}
+        self.var_map: dict[str, str] = {}
         self.var_counter = 0
 
     def _get_normalized_name(self, name: str) -> str:
@@ -119,7 +119,7 @@ def parse_and_normalize_code(source_code: str) -> Optional[ast.AST]:
         return None
 
 
-def ast_to_node_sequence(tree: ast.AST) -> List[str]:
+def ast_to_node_sequence(tree: ast.AST) -> list[str]:
     """Convert an AST into a sequence of node type names.
 
     This creates a structural fingerprint of the code that can be compared

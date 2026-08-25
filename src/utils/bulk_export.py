@@ -244,7 +244,7 @@ def normalize_csv_headers(headers: list[str]) -> list[str]:
 
 
 def export_incidents_csv_stream(
-    incidents_list: List[Dict],
+    incidents_list: list[dict],
     delimiter: str = ",",
     quoting_style: int = csv.QUOTE_MINIMAL,
 ) -> bytes:
@@ -327,7 +327,7 @@ def export_incidents_csv_stream(
     return csv_text.encode("utf-8-sig")
 
 
-def export_incidents_json_stream(incidents_list: List[Dict]) -> bytes:
+def export_incidents_json_stream(incidents_list: list[dict]) -> bytes:
     """Serialize a list of incident dicts into a JSON-formatted byte stream.
 
     Args:
@@ -341,7 +341,7 @@ def export_incidents_json_stream(incidents_list: List[Dict]) -> bytes:
     return json_str.encode("utf-8")
 
 
-def export_incidents_xlsx_stream(incidents_list: List[Dict]) -> bytes:
+def export_incidents_xlsx_stream(incidents_list: list[dict]) -> bytes:
     """Convert a list of incident dicts into an Excel XLSX byte stream.
 
     Requires pandas and openpyxl. If openpyxl is missing, falls back to CSV.
@@ -378,8 +378,8 @@ def export_incidents_xlsx_stream(incidents_list: List[Dict]) -> bytes:
 
 
 def export_incidents_to_format(
-    incidents_list: List[Dict],
-    format: Union[ExportFormat, str] = ExportFormat.CSV,
+    incidents_list: list[dict],
+    format: ExportFormat | str = ExportFormat.CSV,
 ) -> bytes:
     """Dispatcher function that routes incident data to the appropriate serializer.
 
@@ -441,11 +441,11 @@ def sanitize_export_filename(filename: str, default_ext: str = ".csv") -> str:
 
 
 def export_incidents_csv(
-    incidents_list: List[Dict],
+    incidents_list: list[dict],
     delimiter: str = ",",
     quoting_style: int = csv.QUOTE_MINIMAL,
     filename: Optional[str] = None,
-) -> Union[bytes, Tuple[bytes, str]]:
+) -> bytes | tuple[bytes, str]:
     """Export a list of incident dicts to a CSV-formatted byte stream.
 
     Validates that the delimiter is a single character string, falling back to a
@@ -548,10 +548,10 @@ def stream_incidents_csv_chunks(
 
 
 def generate_bulk_reports_zip(
-    flags: List[Dict],
+    flags: list[dict],
     *,
-    chunked_docs: Optional[Dict[str, List[str]]] = None,
-    embeddings: Optional[Dict[str, "np.ndarray"]] = None,
+    chunked_docs: Optional[dict[str, list[str]]] = None,
+    embeddings: Optional[dict[str, "np.ndarray"]] = None,
     include_pdf: bool = True,
     include_csv: bool = True,
     include_json: bool = True,

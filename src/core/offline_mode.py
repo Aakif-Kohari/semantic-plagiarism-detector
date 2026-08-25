@@ -65,7 +65,7 @@ class OfflineConfig:
         
         return config
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "enabled": self.enabled,
@@ -109,7 +109,7 @@ class LocalFileCache:
         """Get metadata file path."""
         return self.cache_dir / "metadata.json"
     
-    def _load_metadata(self) -> Dict[str, Any]:
+    def _load_metadata(self) -> dict[str, Any]:
         """Load cache metadata."""
         meta_path = self._get_metadata_path()
         if meta_path.exists():
@@ -120,7 +120,7 @@ class LocalFileCache:
                 return {}
         return {}
     
-    def _save_metadata(self, metadata: Dict[str, Any]) -> None:
+    def _save_metadata(self, metadata: dict[str, Any]) -> None:
         """Save cache metadata."""
         try:
             with open(self._get_metadata_path(), 'w') as f:
@@ -216,7 +216,7 @@ class LocalFileCache:
                 file.unlink()
                 logger.info(f"Evicted cache file: {file.name}")
     
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get cache statistics."""
         files = list(self.cache_dir.glob("*.cache"))
         total_size = sum(f.stat().st_size for f in files)
@@ -242,7 +242,7 @@ class OfflineModelManager:
     def __init__(self, config: OfflineConfig):
         self.config = config
         self.model_cache_dir = Path(config.model_cache_dir)
-        self._models: Dict[str, Any] = {}
+        self._models: dict[str, Any] = {}
         self._lock = threading.RLock()
         self._ensure_model_dir()
         
@@ -349,7 +349,7 @@ class OfflineModeManager:
         """Get model manager instance."""
         return self.model_manager
     
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Get offline mode status."""
         if not self.config.enabled:
             return {

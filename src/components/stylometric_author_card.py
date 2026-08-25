@@ -13,7 +13,7 @@ class StylometricAuthorDashboardComponent:
     """
 
     @staticmethod
-    def render_writeprint_summary_card(writeprint: Dict[str, Any]) -> None:
+    def render_writeprint_summary_card(writeprint: dict[str, Any]) -> None:
         """Renders summary metrics card for extracted writeprint features."""
         st.subheader("✍️ Stylometric Write-Print Fingerprint")
         col1, col2, col3, col4 = st.columns(4)
@@ -27,7 +27,7 @@ class StylometricAuthorDashboardComponent:
             st.metric("Complexity Index", writeprint.get("stylometricComplexityIndex", 0.0))
 
     @staticmethod
-    def render_authorship_attribution_results(matches: List[Dict[str, Any]]) -> None:
+    def render_authorship_attribution_results(matches: list[dict[str, Any]]) -> None:
         """Renders list of candidate matched authors with confidence percentages."""
         st.subheader("🎯 Authorship Attribution Match Candidates")
         if not matches:

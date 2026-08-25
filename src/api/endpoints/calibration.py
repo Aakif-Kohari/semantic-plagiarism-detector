@@ -43,7 +43,7 @@ class OverrideRequest(BaseModel):
 
 class KappaRequest(BaseModel):
     """Schema for computing Fleiss' or Cohen's Kappa."""
-    ratings_matrix: List[List[int]] = Field(..., description="Matrix of category counts per item.")
+    ratings_matrix: list[list[int]] = Field(..., description="Matrix of category counts per item.")
 
 
 @router.post("/override", status_code=status.HTTP_201_CREATED)
@@ -100,7 +100,7 @@ db = ReviewerCalibrationDB()
 engine = ReliabilityEngine()
 
 @router.get("/reviewer/{reviewer_id}")
-def get_reviewer_calibration(reviewer_id: str) -> Dict[str, Any]:
+def get_reviewer_calibration(reviewer_id: str) -> dict[str, Any]:
     """Fetches calibration scores and historical bias weighting for a specific reviewer."""
     history = db.fetch_reviewer_history(reviewer_id)
     if not history:
@@ -114,7 +114,7 @@ def get_reviewer_calibration(reviewer_id: str) -> Dict[str, Any]:
     }
 
 @router.get("/committee/irr")
-def get_committee_irr(ratings_matrix: List[List[int]]) -> Dict[str, float]:
+def get_committee_irr(ratings_matrix: list[list[int]]) -> dict[str, float]:
     """Computes and returns committee Inter-Rater Reliability (Fleiss' Kappa)."""
     kappa = engine.compute_fleiss_kappa(ratings_matrix)
     return {

@@ -29,7 +29,7 @@ class AIDetectionResult:
     burstiness_score: float
     pattern_score: float
     sentence_variability: float
-    features: Dict[str, Any] = field(default_factory=dict)
+    features: dict[str, Any] = field(default_factory=dict)
     is_suspicious: bool = False
 
 
@@ -108,14 +108,14 @@ class AIDetectorEnhanced:
             is_suspicious=ai_probability >= self._threshold,
         )
     
-    def detect_batch(self, texts: Dict[str, str]) -> Dict[str, AIDetectionResult]:
+    def detect_batch(self, texts: dict[str, str]) -> dict[str, AIDetectionResult]:
         """Detect AI generation for multiple documents."""
         results = {}
         for doc_name, text in texts.items():
             results[doc_name] = self.detect_document(text, doc_name)
         return results
     
-    def _split_sentences(self, text: str) -> List[str]:
+    def _split_sentences(self, text: str) -> list[str]:
         """Split text into sentences."""
         # Simple sentence splitting
         sentences = re.split(r'[.!?]+', text)
@@ -276,7 +276,7 @@ class AIDetectorEnhanced:
             return 0
         return len(set(words)) / len(words)
     
-    def get_detection_summary(self, results: Dict[str, AIDetectionResult]) -> Dict[str, Any]:
+    def get_detection_summary(self, results: dict[str, AIDetectionResult]) -> dict[str, Any]:
         """Get summary statistics for detection results."""
         if not results:
             return {"total_documents": 0}
@@ -298,9 +298,9 @@ class AIDetectorEnhanced:
 # ============================================================================
 
 def detect_ai_probability_enhanced(
-    chunked_docs: Dict[str, List[str]],
+    chunked_docs: dict[str, list[str]],
     threshold: float = 0.65,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Enhanced AI detection for document chunks.
     
@@ -326,7 +326,7 @@ def detect_ai_probability_enhanced(
 def classify_ai_generated(
     text: str,
     threshold: float = 0.65,
-) -> Tuple[bool, float, Dict[str, Any]]:
+) -> tuple[bool, float, dict[str, Any]]:
     """
     Classify if text is AI-generated.
     

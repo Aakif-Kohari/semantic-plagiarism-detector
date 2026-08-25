@@ -15,8 +15,8 @@ logger = logging.getLogger(__name__)
 
 
 def generate_reviewer_agreement_heatmap(
-    reviewer_matrix: List[List[float]],
-    reviewer_names: List[str],
+    reviewer_matrix: list[list[float]],
+    reviewer_names: list[str],
     title: str = "Reviewer Agreement Matrix"
 ) -> go.Figure:
     """Generate a Plotly heatmap showing pairwise Cohen's Kappa between reviewers.
@@ -54,7 +54,7 @@ def generate_reviewer_agreement_heatmap(
 
 
 def generate_calibration_weight_chart(
-    reviewer_weights: Dict[str, float],
+    reviewer_weights: dict[str, float],
     title: str = "Reviewer Calibration Weights"
 ) -> go.Figure:
     """Generate a bar chart showing the calibration weight of each reviewer.
@@ -95,7 +95,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from typing import List
 
-def generate_reviewer_agreement_heatmap(agreement_matrix: List[List[float]], reviewer_labels: List[str]) -> go.Figure:
+def generate_reviewer_agreement_heatmap(agreement_matrix: list[list[float]], reviewer_labels: list[str]) -> go.Figure:
     """
     Generates a Plotly heatmap displaying pairwise or committee reviewer agreement scores.
     """

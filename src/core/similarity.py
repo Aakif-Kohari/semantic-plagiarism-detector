@@ -53,7 +53,7 @@ def cosine_distance_to_similarity(distance: float) -> float:
 # ── Validation helpers ─────────────────────────────────────────────────────────
 
 
-def _validated_batch_size(batch_size: Optional[Union[int, float, str]]) -> Optional[int]:
+def _validated_batch_size(batch_size: Optional[int | float | str]) -> Optional[int]:
     """Return a safe integer batch size or None for unbatched execution."""
     from src.errors import SIM_BATCH_SIZE_INVALID
 
@@ -74,9 +74,9 @@ def _validated_batch_size(batch_size: Optional[Union[int, float, str]]) -> Optio
 
 
 def _apply_min_percentile_filter(
-    matrix: Union[pd.DataFrame, np.ndarray],
+    matrix: pd.DataFrame | np.ndarray,
     min_percentile: Optional[float],
-) -> Union[pd.DataFrame, np.ndarray]:
+) -> pd.DataFrame | np.ndarray:
     """Zero out similarity scores below the given percentile threshold.
 
     The percentile is computed over the off-diagonal scores only, so a
@@ -166,15 +166,15 @@ DEFAULT_DOCUMENT_SIMILARITY_BATCH_SIZE: int = DEFAULT_BATCH_SIZE
 
 
 def document_similarity_matrix(
-    doc_embeddings: Union[Dict[str, np.ndarray], np.ndarray, List[np.ndarray]],
+    doc_embeddings: dict[str, np.ndarray] | np.ndarray | list[np.ndarray],
     batch_size: Optional[int] = None,
     min_threshold: float = 0.0,
     min_percentile: Optional[float] = None,
     top_k: Optional[int] = None,
-    candidate_pairs: Optional[Set[Tuple[str, str]]] = None,
+    candidate_pairs: Optional[set[tuple[str, str]]] = None,
     pooling: str = "mean",
     use_hnsw: bool = False,
-) -> Union[pd.DataFrame, np.ndarray]:
+) -> pd.DataFrame | np.ndarray:
     """
     Build an N×N cosine similarity matrix between all document pairs.
 
@@ -377,15 +377,15 @@ def document_similarity_matrix(
 
 
 def compute_similarity_matrix(
-    embeddings: Union[Dict[str, np.ndarray], np.ndarray, List[np.ndarray]],
+    embeddings: dict[str, np.ndarray] | np.ndarray | list[np.ndarray],
     batch_size: Optional[int] = None,
     min_threshold: float = 0.0,
     min_percentile: Optional[float] = None,
     top_k: Optional[int] = None,
-    candidate_pairs: Optional[Set[Tuple[str, str]]] = None,
+    candidate_pairs: Optional[set[tuple[str, str]]] = None,
     pooling: str = "mean",
     use_hnsw: bool = False,
-) -> Union[pd.DataFrame, np.ndarray]:
+) -> pd.DataFrame | np.ndarray:
     """
     Direct alias/wrapper for document_similarity_matrix to maintain backwards compatibility
     with app/streamlit_app.py and external modules.
@@ -407,9 +407,9 @@ def compute_similarity_matrix(
 
 
 def normalize_scores(
-    scores: Union[pd.DataFrame, np.ndarray, float],
+    scores: pd.DataFrame | np.ndarray | float,
     method: Optional[str] = None,
-) -> Union[pd.DataFrame, np.ndarray, float]:
+) -> pd.DataFrame | np.ndarray | float:
     """
     Normalize score matrix, array, or scalar float value using Z-Score or Min-Max normalization.
 
@@ -624,7 +624,7 @@ def chunk_max_similarity(
 
 
 def chunk_similarity_matrix(
-    doc_embeddings: Dict[str, np.ndarray],
+    doc_embeddings: dict[str, np.ndarray],
     batch_size: Optional[int] = None,
 ) -> pd.DataFrame:
     """
@@ -655,11 +655,11 @@ def chunk_similarity_matrix(
 
 
 def find_candidate_pairs(
-    doc_names: List[str],
-    doc_vectors: List[np.ndarray],
+    doc_names: list[str],
+    doc_vectors: list[np.ndarray],
     *,
     top_k: int = 10,
-) -> Set[Tuple[str, str]]:
+) -> set[tuple[str, str]]:
     """
     Use a temporary FAISS flat index to find the top-K nearest-neighbour
     document pairs for each document.
@@ -687,14 +687,14 @@ def find_candidate_pairs(
     index = faiss.IndexFlatIP(dim)
     index.add(matrix)
 
-    candidates: Set[Tuple[str, str]] = set()
+    candidates: set[tuple[str, str]] = set()
     for i in range(n):
         query = matrix[i].reshape(1, -1)
         _, indices = index.search(query, top_k + 1)
         for j in indices[0]:
             if j == i or j >= n:
                 continue
-            pair: Tuple[str, str] = tuple(sorted([doc_names[i], doc_names[j]]))
+            pair: tuple[str, str] = tuple(sorted([doc_names[i], doc_names[j]]))
             candidates.add(pair)
 
     return candidates
@@ -709,8 +709,8 @@ def flag_plagiarism(
     chunked_docs: dict = None,
     embeddings: dict = None,
     *,
-    candidate_pairs: Optional[Set[Tuple[str, str]]] = None,
-) -> List[Dict]:
+    candidate_pairs: Optional[set[tuple[str, str]]] = None,
+) -> list[dict]:
     """Identify document pairs whose similarity reaches the threshold.
 
     Flagging uses the configurable plagiarism threshold. Severity uses the
@@ -770,13 +770,13 @@ def flag_plagiarism(
 
 
 def find_most_similar_chunks(
-    chunks_a: List[str],
-    chunks_b: List[str],
+    chunks_a: list[str],
+    chunks_b: list[str],
     emb_a: np.ndarray,
     emb_b: np.ndarray,
     top_k: int = 3,
     threshold: float = PLAGIARISM_THRESHOLD,
-) -> List[Tuple[str, str, float]]:
+) -> list[tuple[str, str, float]]:
     """
     Find the top-K most similar chunk pairs between two documents.
     """
@@ -807,14 +807,14 @@ def find_most_similar_chunks(
 
 
 def find_cross_lingual_matches(
-    chunks_a: List[str],
-    chunks_b: List[str],
+    chunks_a: list[str],
+    chunks_b: list[str],
     emb_a: np.ndarray,
     emb_b: np.ndarray,
     cross_lingual_mode: bool = False,
     top_k: int = 3,
     threshold: float = 0.59,
-) -> List[tuple]:
+) -> list[tuple]:
     """Find similar chunks with optional cross-lingual back-translation.
 
     If cross_lingual_mode is True, chunks from the non-English document
@@ -875,7 +875,7 @@ def find_cross_lingual_matches(
 def calculate_paragraph_similarity_breakdown(
     emb_a: np.ndarray,
     emb_b: np.ndarray,
-) -> List[Tuple[int, int, float]]:
+) -> list[tuple[int, int, float]]:
     """
     Compute a per-paragraph similarity breakdown between two documents.
 
@@ -904,7 +904,7 @@ def calculate_paragraph_similarity_breakdown(
     # shape: (n_paragraphs_a, n_paragraphs_b)
     sim_matrix = cosine_similarity(matrix_a, matrix_b)
 
-    breakdown: List[Tuple[int, int, float]] = []
+    breakdown: list[tuple[int, int, float]] = []
     for idx_a in range(sim_matrix.shape[0]):
         idx_b = int(np.argmax(sim_matrix[idx_a]))
         score = float(np.clip(sim_matrix[idx_a, idx_b], 0.0, 1.0))
@@ -918,7 +918,7 @@ def find_exact_matches(
     text_a: str,
     text_b: str,
     case_sensitive: bool = False,
-) -> List[str]:
+) -> list[str]:
     """
     Find exact matching sentences/segments from text_a that exist in text_b.
 
@@ -957,8 +957,8 @@ def find_exact_matches(
 
 # ── Cross-Encoder Rescoring Stage (#1355) ──────────────────────────────────────
 
-_CROSS_ENCODER_MODELS: Dict[str, Any] = {}
-_CROSS_ENCODER_FAILED_MODELS: Set[str] = set()
+_CROSS_ENCODER_MODELS: dict[str, Any] = {}
+_CROSS_ENCODER_FAILED_MODELS: set[str] = set()
 
 
 def clear_cross_encoder_cache() -> None:
@@ -1221,7 +1221,7 @@ from src.core.hybrid_scorer import HybridConfig, HybridScorer
 
 def compute_hybrid_similarity_df(
     semantic_df: pd.DataFrame,
-    texts: Dict[str, str],
+    texts: dict[str, str],
     alpha: float = 0.7,
     lexical_method: str = "tfidf",
     normalize: Optional[str] = None,
@@ -1250,7 +1250,7 @@ def compute_hybrid_similarity_df(
 def flag_plagiarism_hybrid(
     hybrid_df: pd.DataFrame,
     threshold: float = PLAGIARISM_THRESHOLD,
-) -> List[Dict]:
+) -> list[dict]:
     """
     Flag plagiarism using hybrid similarity scores.
     

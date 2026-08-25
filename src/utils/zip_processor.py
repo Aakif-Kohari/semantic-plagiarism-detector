@@ -45,7 +45,7 @@ def is_safe_zip_path(target_dir: Path, extracted_path: Path) -> bool:
     return True
 
 
-def process_zip_file(zip_bytes: bytes, skip_corrupted: bool = False) -> Dict[str, bytes]:
+def process_zip_file(zip_bytes: bytes, skip_corrupted: bool = False) -> dict[str, bytes]:
     """
     Yields (filename, file_bytes) tuples one entry at a time from a ZIP archive.
 
@@ -67,7 +67,7 @@ def process_zip_file(zip_bytes: bytes, skip_corrupted: bool = False) -> Dict[str
     if magic not in (b"PK\x03\x04", b"PK\x05\x06"):
         raise ValueError("Invalid or corrupted ZIP archive: missing ZIP header signature.")
 
-    extracted_files: Dict[str, bytes] = {}
+    extracted_files: dict[str, bytes] = {}
 
     try:
         zip_stream = io.BytesIO(zip_bytes)
@@ -179,7 +179,7 @@ def process_zip_file(zip_bytes: bytes, skip_corrupted: bool = False) -> Dict[str
         raise ValueError("Invalid or corrupted ZIP archive.") from e
 
 
-def process_zip_file(zip_bytes: bytes) -> Dict[str, bytes]:
+def process_zip_file(zip_bytes: bytes) -> dict[str, bytes]:
     """
     Extracts supported documents (.pdf, .docx, .txt, .rtf, .csv, .odt, .md) from a ZIP archive entirely in memory.
 

@@ -9,7 +9,7 @@ import psutil
 logger = logging.getLogger(__name__)
 
 
-def get_memory_usage() -> Dict[str, Any]:
+def get_memory_usage() -> dict[str, Any]:
     """Get current memory usage of the process."""
     try:
         process = psutil.Process(os.getpid())
@@ -31,7 +31,7 @@ def get_memory_usage() -> Dict[str, Any]:
         }
 
 
-def log_memory_usage(tag: str = "") -> Dict[str, Any]:
+def log_memory_usage(tag: str = "") -> dict[str, Any]:
     """Log current memory usage with a tag."""
     usage = get_memory_usage()
     logger.info("[Memory] %s - RSS: %.1fMB, VMS: %.1fMB, Process: %.1f%%", tag, usage['rss_mb'], usage['vms_mb'], usage['percent'])

@@ -210,9 +210,9 @@ def normalize_perplexity(raw_score: float, scale_factor: float = 100.0) -> float
 
 
 def detect_ai_probability_batch(
-    texts: List[str],
+    texts: list[str],
     batch_size: int = 8,
-) -> List[float]:
+) -> list[float]:
     """
     Detect AI probability for multiple texts in batches.
 
@@ -315,7 +315,7 @@ def detect_ai_probability(text: str) -> float:
     return results[0] if results else 0.0
 
 
-def detect_document_ai_probability(chunks: List[str]) -> Dict[str, Any]:
+def detect_document_ai_probability(chunks: list[str]) -> dict[str, Any]:
     """
     Calculate AI-generated text statistics for a single document's chunks.
 
@@ -343,8 +343,8 @@ def detect_document_ai_probability(chunks: List[str]) -> Dict[str, Any]:
 
 
 def detect_documents_ai_probability(
-    chunked_docs: Dict[str, List[str]],
-) -> Dict[str, Dict[str, Any]]:
+    chunked_docs: dict[str, list[str]],
+) -> dict[str, dict[str, Any]]:
     """
     Calculate AI-generated probabilities across multiple documents.
 
@@ -362,7 +362,7 @@ def detect_documents_ai_probability(
     return results
 
 
-def _split_sentences_simple(text: str) -> List[str]:
+def _split_sentences_simple(text: str) -> list[str]:
     """Split text into sentences using common punctuation delimiters and filter empty strings."""
     if not text or not isinstance(text, str):
         return []
@@ -557,7 +557,7 @@ def extract_stylometric_features(text: str) -> dict[str, float]:
     return features
 
 
-def detect_ai_generated_text(text: str) -> Dict[str, Any]:
+def detect_ai_generated_text(text: str) -> dict[str, Any]:
     """
     Detect the likelihood that a given text was AI-generated using a
     multi-metric classifier (issue #1356).

@@ -398,7 +398,7 @@ class RedisCache:
         except Exception:
             return False
 
-    def scan_keys(self, match: str) -> List[str]:
+    def scan_keys(self, match: str) -> list[str]:
         if not self.is_available():
             return []
         try:
@@ -779,7 +779,7 @@ def _cleanup_redis() -> None:
 atexit.register(_cleanup_redis)
 
 
-def store_large_data(key: Union[str, Path], data: Any, ttl: int = 1800) -> None:
+def store_large_data(key: str | Path, data: Any, ttl: int = 1800) -> None:
     """Store large data in Redis with compression and normalized POSIX key paths."""
     key_str = normalize_cache_key_path(key)
     try:
@@ -798,7 +798,7 @@ def store_large_data(key: Union[str, Path], data: Any, ttl: int = 1800) -> None:
         logger.error(f"Failed to store large data for key {key_str}: {e}")
 
 
-def get_large_data(key: Union[str, Path]) -> Optional[Any]:
+def get_large_data(key: str | Path) -> Optional[Any]:
     """Retrieve large data from Redis with decompression and normalized POSIX key paths."""
     key_str = normalize_cache_key_path(key)
     try:
@@ -822,7 +822,7 @@ def get_large_data(key: Union[str, Path]) -> Optional[Any]:
         return None
 
 
-def clear_large_data(key: Union[str, Path]) -> None:
+def clear_large_data(key: str | Path) -> None:
     """Clear large data from cache using normalized POSIX key paths (Issue #3028)."""
     key_str = normalize_cache_key_path(key)
     try:
@@ -836,7 +836,7 @@ def clear_large_data(key: Union[str, Path]) -> None:
         logger.error(f"Failed to clear large data for key {key_str}: {e}")
 
 
-def clear_all_large_data(session_id: Union[str, Path]) -> None:
+def clear_all_large_data(session_id: str | Path) -> None:
     """Clear all large data for a session using pipelined deletion and normalized POSIX path (Issue #3028)."""
     sid_str = normalize_cache_key_path(session_id)
     try:

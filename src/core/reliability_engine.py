@@ -18,7 +18,7 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
-def compute_cohens_kappa(rater1: List[int], rater2: List[int]) -> float:
+def compute_cohens_kappa(rater1: list[int], rater2: list[int]) -> float:
     """Compute Cohen's Kappa for two raters.
     
     Measures the agreement between two raters evaluating a set of items,
@@ -64,7 +64,7 @@ def compute_cohens_kappa(rater1: List[int], rater2: List[int]) -> float:
     return round(kappa, 4)
 
 
-def compute_fleiss_kappa(ratings_matrix: List[List[int]]) -> float:
+def compute_fleiss_kappa(ratings_matrix: list[list[int]]) -> float:
     """Compute Fleiss' Kappa for multiple raters (N > 2).
     
     Measures the reliability of agreement between a fixed number of raters
@@ -116,9 +116,9 @@ def compute_fleiss_kappa(ratings_matrix: List[List[int]]) -> float:
 
 
 def compute_reviewer_bias(
-    reviewer_scores: List[float], 
-    baseline_scores: List[float]
-) -> Dict[str, float]:
+    reviewer_scores: list[float], 
+    baseline_scores: list[float]
+) -> dict[str, float]:
     """Compute the bias and variance of a reviewer against an automated baseline.
     
     Args:
@@ -145,7 +145,7 @@ def compute_reviewer_bias(
     }
 
 
-def calculate_calibration_weight(bias_metrics: Dict[str, float]) -> float:
+def calculate_calibration_weight(bias_metrics: dict[str, float]) -> float:
     """Calculate a calibration weight (0.0 to 1.0) based on reviewer bias.
     
     A reviewer with low variance and low mean absolute error gets a weight
@@ -176,7 +176,7 @@ class ReliabilityEngine:
     """
 
     @staticmethod
-    def compute_cohens_kappa(rater1: List[int], rater2: List[int]) -> float:
+    def compute_cohens_kappa(rater1: list[int], rater2: list[int]) -> float:
         """Computes Cohen's Kappa for agreement between two reviewers."""
         if len(rater1) != len(rater2) or not rater1:
             return 0.0
@@ -203,7 +203,7 @@ class ReliabilityEngine:
         return float(kappa)
 
     @staticmethod
-    def compute_fleiss_kappa(ratings_matrix: List[List[int]]) -> float:
+    def compute_fleiss_kappa(ratings_matrix: list[list[int]]) -> float:
         """
         Computes Fleiss' Kappa for multi-rater agreement across review committees.
         Ratings matrix shape: N subjects x K categories, where each cell is the number of raters who assigned that category.
@@ -237,7 +237,7 @@ class ReliabilityEngine:
         return float(kappa)
 
     @staticmethod
-    def compute_reviewer_bias_weights(historical_overrides: List[Dict[str, Any]]) -> Dict[str, float]:
+    def compute_reviewer_bias_weights(historical_overrides: list[dict[str, Any]]) -> dict[str, float]:
         """
         Computes calibration bias weights for reviewers based on historical deviation from committee consensus.
         """

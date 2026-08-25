@@ -118,7 +118,7 @@ def create_annotation(record: AnnotationRecord, db_path: Optional[Path] = None) 
 
 def get_annotations_for_document(
     document_id: str, db_path: Optional[Path] = None
-) -> List[AnnotationRecord]:
+) -> list[AnnotationRecord]:
     """Retrieve all annotations for a specific document."""
     try:
         with get_connection(db_path) as conn:

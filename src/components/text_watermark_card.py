@@ -3,7 +3,7 @@
 from typing import Any, Dict
 
 
-def render_watermark_card(match: Dict[str, Any]) -> str:
+def render_watermark_card(match: dict[str, Any]) -> str:
     """Renders HTML glassmorphic markup for displaying watermark test metrics."""
     confidence = match.get("watermark_confidence_percentage", 0.0)
     z_score = match.get("z_score", 0.0)

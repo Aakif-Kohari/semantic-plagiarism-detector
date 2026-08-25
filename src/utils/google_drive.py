@@ -50,7 +50,7 @@ def validate_service_account_key(key_dict: dict) -> bool:
     return True
 
 
-def get_supported_file_extensions() -> List[str]:
+def get_supported_file_extensions() -> list[str]:
     """
     Return the list of supported file extensions for the plagiarism detection pipeline.
 
@@ -136,7 +136,7 @@ def get_drive_service(
         raise ValueError("No API Key or Service Account credentials provided.")
 
 
-def list_files_in_folder(service, folder_id: str) -> List[Dict[str, str]]:
+def list_files_in_folder(service, folder_id: str) -> list[dict[str, str]]:
     """
     Lists all supported assignment files (.pdf, .docx, .txt) within a specified Google Drive folder.
     """
@@ -197,7 +197,7 @@ def bulk_download_drive_folder(
     api_key: Optional[str] = None,
     service_account_info: Optional[dict] = None,
     progress_callback: Optional[Callable[[int, int], None]] = None,
-) -> Tuple[Dict[str, bytes], List[str]]:
+) -> tuple[dict[str, bytes], list[str]]:
     """
     Main helper: Extracts folder ID, lists supported files, downloads them into memory,
     and returns a dictionary mapping filename -> raw bytes.

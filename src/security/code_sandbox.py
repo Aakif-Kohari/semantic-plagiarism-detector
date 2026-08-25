@@ -26,10 +26,10 @@ DEFAULT_MAX_MEMORY_MB = 256
 
 def execute_code_sandbox(
     code: str,
-    test_cases: Optional[List[Dict[str, Any]]] = None,
+    test_cases: Optional[list[dict[str, Any]]] = None,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
     max_memory_mb: int = DEFAULT_MAX_MEMORY_MB,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Execute Python code in a restricted subprocess and capture traces.
 
     Args:
@@ -146,7 +146,7 @@ def execute_code_sandbox(
 
 
 def _generate_test_runner(
-    code_file_path: str, test_cases: Optional[List[Dict[str, Any]]]
+    code_file_path: str, test_cases: Optional[list[dict[str, Any]]]
 ) -> str:
     """Generate a Python script that imports the submitted code and runs test cases."""
     # Normalize path for Windows/Unix

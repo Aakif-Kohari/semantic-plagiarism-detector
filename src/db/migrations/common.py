@@ -419,7 +419,7 @@ def perform_wal_checkpoint(conn: sqlite3.Connection, mode: str = "PASSIVE") -> d
         raise
 
 
-def verify_schema_integrity(db_path: Path, expected_tables: List[str]) -> bool:
+def verify_schema_integrity(db_path: Path, expected_tables: list[str]) -> bool:
     """Verify that the active database schema matches the expected table definitions.
 
     This function inspects the `sqlite_master` table of the specified SQLite database

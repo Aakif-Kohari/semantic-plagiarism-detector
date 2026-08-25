@@ -18,7 +18,7 @@ from src.core.code_ast_parser import parse_and_normalize_code, ast_to_node_seque
 logger = logging.getLogger(__name__)
 
 
-def compute_sequence_similarity(seq_a: List[str], seq_b: List[str]) -> float:
+def compute_sequence_similarity(seq_a: list[str], seq_b: list[str]) -> float:
     """Compute the Jaccard similarity between two node sequences.
 
     This is a fast approximation of structural similarity based on the
@@ -47,7 +47,7 @@ def compute_sequence_similarity(seq_a: List[str], seq_b: List[str]) -> float:
     return intersection / union
 
 
-def compute_levenshtein_similarity(seq_a: List[str], seq_b: List[str]) -> float:
+def compute_levenshtein_similarity(seq_a: list[str], seq_b: list[str]) -> float:
     """Compute the normalized Levenshtein similarity between two node sequences.
 
     This provides a more accurate measure of structural similarity by
@@ -93,7 +93,7 @@ def compute_levenshtein_similarity(seq_a: List[str], seq_b: List[str]) -> float:
     return 1.0 - (distance / max_len)
 
 
-def compare_code_snippets(code_a: str, code_b: str) -> Dict[str, float]:
+def compare_code_snippets(code_a: str, code_b: str) -> dict[str, float]:
     """Compare two Python code snippets for structural plagiarism.
 
     Args:

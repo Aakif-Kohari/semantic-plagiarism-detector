@@ -33,7 +33,7 @@ class DocumentVersion:
         self.change_summary = None
         self.metadata = {}
         
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Convert version to dictionary for serialization"""
         return {
             'version_id': self.version_id,
@@ -49,7 +49,7 @@ class DocumentVersion:
         }
     
     @classmethod
-    def from_dict(cls, data: Dict) -> 'DocumentVersion':
+    def from_dict(cls, data: dict) -> 'DocumentVersion':
         """Create version from dictionary"""
         version = cls(data['content'], data['doc_name'], data['version_id'])
         version.content_hash = data['content_hash']
@@ -82,7 +82,7 @@ class VersionManager:
         
     def add_version(self, doc_name: str, content: str, 
                    parent_version: Optional[int] = None,
-                   metadata: Optional[Dict] = None) -> int:
+                   metadata: Optional[dict] = None) -> int:
         """Add a new version of a document"""
         version_id = len(self.versions[doc_name]) + 1
         
@@ -132,7 +132,7 @@ class VersionManager:
             return self.get_version(doc_name, version_id)
         return None
     
-    def get_version_history(self, doc_name: str) -> List[DocumentVersion]:
+    def get_version_history(self, doc_name: str) -> list[DocumentVersion]:
         """Get all versions of a document"""
         return self.versions.get(doc_name, [])
     
@@ -140,7 +140,7 @@ class VersionManager:
         """Get number of versions for a document"""
         return len(self.versions.get(doc_name, []))
     
-    def get_all_documents(self) -> List[str]:
+    def get_all_documents(self) -> list[str]:
         """Get all document names with versions"""
         return list(self.versions.keys())
     
@@ -190,7 +190,7 @@ class VersionManager:
             return version.content
         return None
     
-    def export_history(self, doc_name: str) -> Dict:
+    def export_history(self, doc_name: str) -> dict:
         """Export version history as dictionary"""
         versions = self.get_version_history(doc_name)
         return {
@@ -200,7 +200,7 @@ class VersionManager:
             'versions': [v.to_dict() for v in versions]
         }
     
-    def import_history(self, data: Dict) -> bool:
+    def import_history(self, data: dict) -> bool:
         """Import version history from dictionary"""
         try:
             doc_name = data['doc_name']
@@ -221,7 +221,7 @@ class ChangeTracker:
         self.change_history = defaultdict(list)
         self.patterns = []
         
-    def detect_changes(self, old_content: str, new_content: str) -> Dict:
+    def detect_changes(self, old_content: str, new_content: str) -> dict:
         """Detect and classify changes between two document versions"""
         old_lines = old_content.splitlines()
         new_lines = new_content.splitlines()
@@ -276,7 +276,7 @@ class ChangeTracker:
             # Fallback to simple diff length
             return len(difflib.ndiff(old_content, new_content))
     
-    def detect_suspicious_patterns(self, changes: Dict) -> List[str]:
+    def detect_suspicious_patterns(self, changes: dict) -> list[str]:
         """Detect suspicious editing patterns"""
         warnings = []
         
@@ -303,7 +303,7 @@ class ChangeTracker:
         
         return warnings
     
-    def get_change_frequency(self, versions: List[DocumentVersion]) -> Dict:
+    def get_change_frequency(self, versions: list[DocumentVersion]) -> dict:
         """Analyze change frequency across versions"""
         if len(versions) < 2:
             return {'status': 'insufficient_data'}
@@ -445,7 +445,7 @@ class PlagiarismEvolutionAnalyzer:
         self.similarity_history = defaultdict(list)
         self.evolution_metrics = {}
         
-    def analyze_plagiarism_evolution(self, doc_name: str) -> Dict:
+    def analyze_plagiarism_evolution(self, doc_name: str) -> dict:
         """Analyze how plagiarism scores evolve across versions"""
         versions = self.version_manager.get_version_history(doc_name)
         if len(versions) < 2:
@@ -625,7 +625,7 @@ class PlagiarismEvolutionAnalyzer:
         
         return fig
     
-    def get_similarity_trend_analysis(self, doc_name: str) -> Dict:
+    def get_similarity_trend_analysis(self, doc_name: str) -> dict:
         """Get trend analysis with forecasting"""
         analysis = self.analyze_plagiarism_evolution(doc_name)
         if analysis.get('status') == 'insufficient_data':
@@ -696,7 +696,7 @@ class SmartChangePatternDetector:
             'unusual_timing': 0.2
         }
         
-    def detect_changes(self, old_content: str, new_content: str) -> Dict:
+    def detect_changes(self, old_content: str, new_content: str) -> dict:
         """Detect changes with intelligent pattern recognition"""
         tracker = ChangeTracker()
         changes = tracker.detect_changes(old_content, new_content)
@@ -775,7 +775,7 @@ class SmartChangePatternDetector:
         else:
             return 'low'
     
-    def _get_recommendations(self, patterns: List[str]) -> List[str]:
+    def _get_recommendations(self, patterns: list[str]) -> list[str]:
         """Get recommendations based on detected patterns"""
         recommendations = []
         
@@ -841,7 +841,7 @@ class VersionStorageManager:
         except Exception:
             return None
     
-    def list_documents(self) -> List[str]:
+    def list_documents(self) -> list[str]:
         """List all documents with stored versions"""
         import os
         files = os.listdir(self.storage_path)
@@ -1206,9 +1206,9 @@ def render_version_control_dashboard():
 def integrate_version_control_with_analysis(
     version_manager: VersionManager,
     similarity_matrix: np.ndarray,
-    document_names: List[str],
-    raw_texts: Dict[str, str]
-) -> Dict:
+    document_names: list[str],
+    raw_texts: dict[str, str]
+) -> dict:
     """Integrate version control with plagiarism analysis"""
     results = {}
     
@@ -1231,8 +1231,8 @@ def integrate_version_control_with_analysis(
 
 def migrate_existing_documents_to_version_control(
     version_manager: VersionManager,
-    existing_documents: List[Dict]
-) -> Dict:
+    existing_documents: list[dict]
+) -> dict:
     """Migrate existing documents to version control system"""
     migrated = 0
     for doc in existing_documents:

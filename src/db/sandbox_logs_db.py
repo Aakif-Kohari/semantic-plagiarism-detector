@@ -66,7 +66,7 @@ def initialize_sandbox_db(db_path: Optional[Path] = None) -> None:
 def log_execution_trace(
     submission_hash: str,
     behavioral_hash: str,
-    trace_data: Dict[str, Any],
+    trace_data: dict[str, Any],
     db_path: Optional[Path] = None,
 ) -> bool:
     """Persist an execution trace and its behavioral hash."""
@@ -95,7 +95,7 @@ def find_behavioral_clones(
     behavioral_hash: str,
     exclude_submission_hash: Optional[str] = None,
     db_path: Optional[Path] = None,
-) -> List[str]:
+) -> list[str]:
     """Find all submission hashes that share the same behavioral fingerprint."""
     try:
         with get_connection(db_path) as conn:

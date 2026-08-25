@@ -51,10 +51,10 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_USER_AGENT: str = "SemanticPlagiarismDetector/1.0"
 DEFAULT_REQUEST_TIMEOUT: float = 5.0
-REDIRECT_STATUS_CODES: Tuple[int, ...] = (301, 302, 303, 307, 308)
-HEAD_REJECTION_STATUS_CODES: Tuple[int, ...] = (405, 501)
+REDIRECT_STATUS_CODES: tuple[int, ...] = (301, 302, 303, 307, 308)
+HEAD_REJECTION_STATUS_CODES: tuple[int, ...] = (405, 501)
 
-RESTRICTED_IPV4_CIDR_BLOCKS: Tuple[str, ...] = (
+RESTRICTED_IPV4_CIDR_BLOCKS: tuple[str, ...] = (
     "127.0.0.0/8",
     "10.0.0.0/8",
     "172.16.0.0/12",
@@ -85,7 +85,7 @@ def is_ip_in_cidr_block(ip_str: str, cidr_block: str) -> bool:
     return ip_address in network
 
 
-def get_allowed_webhook_domains() -> List[str]:
+def get_allowed_webhook_domains() -> list[str]:
     """Return the deployment's configured webhook domain allowlist.
 
     Thin wrapper over :func:`src.core.app_config.get_allowed_webhook_domains`.
@@ -125,7 +125,7 @@ class SSRFProtector:
     _cache_lock: threading.Lock = threading.Lock()
     DNS_CACHE_TTL_SECONDS: int = 300
     DNS_CACHE_MAX_SIZE: int = 1000
-    RESTRICTED_IPV4_CIDR_BLOCKS: Tuple[str, ...] = RESTRICTED_IPV4_CIDR_BLOCKS
+    RESTRICTED_IPV4_CIDR_BLOCKS: tuple[str, ...] = RESTRICTED_IPV4_CIDR_BLOCKS
     MAX_REDIRECT_DEPTH: int = 5
     DEFAULT_USER_AGENT: str = DEFAULT_USER_AGENT
 
@@ -212,7 +212,7 @@ class SSRFProtector:
     def _validate_url_target(
         cls,
         url: str,
-        allowed_domains: Optional[List[str]] = None,
+        allowed_domains: Optional[list[str]] = None,
     ) -> str:
         """Run every network-free safety check for a single URL.
 
@@ -361,7 +361,7 @@ class SSRFProtector:
         user_agent: str,
         timeout: float,
     ) -> requests.Response:
-        headers: Dict[str, str] = {"User-Agent": user_agent}
+        headers: dict[str, str] = {"User-Agent": user_agent}
 
         logger.debug(
             "Making validation request to %s with User-Agent: %s", url, user_agent
@@ -399,7 +399,7 @@ class SSRFProtector:
     def validate_webhook_url(
         cls,
         url: str,
-        allowed_domains: Optional[List[str]] = None,
+        allowed_domains: Optional[list[str]] = None,
         user_agent: str = DEFAULT_USER_AGENT,
         timeout: float = DEFAULT_REQUEST_TIMEOUT,
     ) -> bool:
@@ -416,7 +416,7 @@ class SSRFProtector:
     def _check_redirect_depth(
         cls,
         current_url: str,
-        allowed_domains: Optional[List[str]] = None,
+        allowed_domains: Optional[list[str]] = None,
         user_agent: str = DEFAULT_USER_AGENT,
         timeout: float = DEFAULT_REQUEST_TIMEOUT,
     ) -> Optional[str]:
@@ -433,11 +433,11 @@ class SSRFProtector:
     def validate_url_safety(
         cls,
         url: str,
-        allowed_domains: Optional[List[str]] = None,
+        allowed_domains: Optional[list[str]] = None,
         max_redirects: Optional[int] = None,
         user_agent: str = DEFAULT_USER_AGENT,
         timeout: float = DEFAULT_REQUEST_TIMEOUT,
-    ) -> Tuple[str, str]:
+    ) -> tuple[str, str]:
         if max_redirects is None:
             max_redirects = cls.MAX_REDIRECT_DEPTH
 

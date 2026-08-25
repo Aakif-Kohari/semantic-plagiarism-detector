@@ -35,7 +35,7 @@ class RubricCriterion:
     weight: float  # Weight from 0.0 to 1.0
     max_points: float
     # Thresholds for scoring (e.g., if similarity < 0.2, full points)
-    thresholds: Dict[str, float] = field(default_factory=dict)
+    thresholds: dict[str, float] = field(default_factory=dict)
 
     def evaluate(self, value: float) -> float:
         """Evaluate a specific metric value against this criterion.
@@ -89,7 +89,7 @@ class Rubric:
     """Represents a complete grading rubric."""
 
     name: str
-    criteria: List[RubricCriterion]
+    criteria: list[RubricCriterion]
 
     def get_total_max_points(self) -> float:
         """Compute the total maximum points for the rubric."""
@@ -111,13 +111,13 @@ class EvaluationResult:
     total_score: float
     max_points: float
     percentage: float
-    criterion_results: List[Dict[str, Any]]
+    criterion_results: list[dict[str, Any]]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
-def evaluate_submission(rubric: Rubric, metrics: Dict[str, float]) -> EvaluationResult:
+def evaluate_submission(rubric: Rubric, metrics: dict[str, float]) -> EvaluationResult:
     """Evaluate a document's analysis metrics against a rubric.
 
     Args:

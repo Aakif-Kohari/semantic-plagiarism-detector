@@ -8,7 +8,7 @@ from typing_extensions import TypeAlias
 
 logger = logging.getLogger(__name__)
 
-PDFInput: TypeAlias = Union[str, Path, bytes, BinaryIO, io.BytesIO]
+PDFInput: TypeAlias = str | Path | bytes | BinaryIO | io.BytesIO
 
 DEFAULT_OCR_DPI = 250
 DEFAULT_OCR_LANGUAGE = "eng"

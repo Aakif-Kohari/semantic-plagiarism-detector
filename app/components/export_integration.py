@@ -64,14 +64,14 @@ class ExportJob:
     id: str
     name: str
     format: ExportFormat
-    data: Dict[str, Any]
+    data: dict[str, Any]
     status: ExportStatus
     created_at: float
     completed_at: Optional[float] = None
     file_path: Optional[str] = None
     file_size: Optional[int] = None
     error: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -81,23 +81,23 @@ class ExportTemplate:
     name: str
     description: str
     format: ExportFormat
-    fields: List[str]
-    filters: Dict[str, Any]
-    styling: Dict[str, Any]
+    fields: list[str]
+    filters: dict[str, Any]
+    styling: dict[str, Any]
     created_at: float
     created_by: str
     is_default: bool = False
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class CloudConfig:
     """Cloud storage configuration."""
     provider: CloudProvider
-    credentials: Dict[str, str]
+    credentials: dict[str, str]
     folder_path: str
     enabled: bool = True
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 # ==============================================================================
@@ -111,10 +111,10 @@ class ExportManager:
     
     def __init__(self, storage_path: Path):
         self.storage_path = storage_path
-        self.export_history: List[ExportJob] = []
-        self.templates: List[ExportTemplate] = []
-        self.cloud_configs: Dict[CloudProvider, CloudConfig] = {}
-        self.export_queue: List[ExportJob] = []
+        self.export_history: list[ExportJob] = []
+        self.templates: list[ExportTemplate] = []
+        self.cloud_configs: dict[CloudProvider, CloudConfig] = {}
+        self.export_queue: list[ExportJob] = []
         self.is_running = False
         self.worker_thread: Optional[threading.Thread] = None
         self._load_data()
@@ -217,7 +217,7 @@ class ExportManager:
             job.error = str(e)
             self._save_data()
     
-    def _convert_data(self, data: Dict[str, Any], format: ExportFormat) -> Any:
+    def _convert_data(self, data: dict[str, Any], format: ExportFormat) -> Any:
         """Convert data to export format."""
         # Extract relevant data
         df = data.get("dataframe")
@@ -237,7 +237,7 @@ class ExportManager:
             "format": format
         }
     
-    def _apply_filters(self, df: pd.DataFrame, filters: Dict) -> pd.DataFrame:
+    def _apply_filters(self, df: pd.DataFrame, filters: dict) -> pd.DataFrame:
         """Apply filters to dataframe."""
         filtered_df = df.copy()
         
@@ -260,7 +260,7 @@ class ExportManager:
         
         return filtered_df
     
-    def _generate_file(self, data: Dict, format: ExportFormat) -> bytes:
+    def _generate_file(self, data: dict, format: ExportFormat) -> bytes:
         """Generate file in specified format."""
         df = data["dataframe"]
         metadata = data.get("metadata", {})
@@ -290,7 +290,7 @@ class ExportManager:
         df.to_csv(output, index=False)
         return output.getvalue().encode('utf-8')
     
-    def _generate_excel(self, df: pd.DataFrame, metadata: Dict) -> bytes:
+    def _generate_excel(self, df: pd.DataFrame, metadata: dict) -> bytes:
         """Generate Excel file with metadata."""
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -303,7 +303,7 @@ class ExportManager:
                 metadata_df.to_excel(writer, sheet_name='Metadata', index=False)
         return output.getvalue()
     
-    def _generate_json(self, df: pd.DataFrame, metadata: Dict) -> bytes:
+    def _generate_json(self, df: pd.DataFrame, metadata: dict) -> bytes:
         """Generate JSON file."""
         data = {
             "metadata": metadata,
@@ -314,7 +314,7 @@ class ExportManager:
         }
         return json.dumps(data, indent=2).encode('utf-8')
     
-    def _generate_xml(self, df: pd.DataFrame, metadata: Dict) -> bytes:
+    def _generate_xml(self, df: pd.DataFrame, metadata: dict) -> bytes:
         """Generate XML file."""
         root = ET.Element("plagiarism_report")
         
@@ -334,7 +334,7 @@ class ExportManager:
         
         return ET.tostring(root, encoding='utf-8')
     
-    def _generate_html(self, df: pd.DataFrame, metadata: Dict) -> bytes:
+    def _generate_html(self, df: pd.DataFrame, metadata: dict) -> bytes:
         """Generate HTML file."""
         html = f"""
         <!DOCTYPE html>
@@ -376,7 +376,7 @@ class ExportManager:
         """
         return html.encode('utf-8')
     
-    def _generate_markdown(self, df: pd.DataFrame, metadata: Dict) -> bytes:
+    def _generate_markdown(self, df: pd.DataFrame, metadata: dict) -> bytes:
         """Generate Markdown file."""
         md = "# Plagiarism Report\n\n"
         md += f"Exported: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
@@ -394,7 +394,7 @@ class ExportManager:
         
         return md.encode('utf-8')
     
-    def _generate_txt(self, df: pd.DataFrame, metadata: Dict) -> bytes:
+    def _generate_txt(self, df: pd.DataFrame, metadata: dict) -> bytes:
         """Generate plain text file."""
         txt = "PLAGIARISM REPORT\n"
         txt += "=" * 50 + "\n\n"
@@ -417,7 +417,7 @@ class ExportManager:
         
         return txt.encode('utf-8')
     
-    def _generate_pdf(self, df: pd.DataFrame, metadata: Dict) -> bytes:
+    def _generate_pdf(self, df: pd.DataFrame, metadata: dict) -> bytes:
         """Generate PDF file."""
         # Try to use reportlab if available
         try:
@@ -520,11 +520,11 @@ class ExportManager:
     
     def export_data(
         self,
-        data: Dict[str, Any],
+        data: dict[str, Any],
         name: str,
         format: ExportFormat = ExportFormat.CSV,
-        filters: Dict[str, Any] = None,
-        metadata: Dict[str, Any] = None,
+        filters: dict[str, Any] = None,
+        metadata: dict[str, Any] = None,
         template_id: str = None,
         upload_to_cloud: bool = False,
         cloud_provider: str = None
@@ -582,9 +582,9 @@ class ExportManager:
         name: str,
         description: str,
         format: ExportFormat,
-        fields: List[str],
-        filters: Dict[str, Any],
-        styling: Dict[str, Any],
+        fields: list[str],
+        filters: dict[str, Any],
+        styling: dict[str, Any],
         created_by: str
     ) -> ExportTemplate:
         """Create export template."""
@@ -603,7 +603,7 @@ class ExportManager:
         self._save_data()
         return template
     
-    def get_export_history(self, limit: int = 50) -> List[Dict]:
+    def get_export_history(self, limit: int = 50) -> list[dict]:
         """Get export history."""
         history = []
         for job in self.export_history[-limit:]:

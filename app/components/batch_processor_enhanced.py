@@ -65,14 +65,14 @@ class BatchJob:
     created_at: float
     started_at: Optional[float] = None
     completed_at: Optional[float] = None
-    data: Dict[str, Any] = field(default_factory=dict)
+    data: dict[str, Any] = field(default_factory=dict)
     result: Any = None
     error: Optional[str] = None
     retry_count: int = 0
     max_retries: int = 3
     progress: float = 0.0
-    logs: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    logs: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -85,9 +85,9 @@ class BatchResult:
     failed_count: int
     total_time: float
     average_time: float
-    errors: List[str] = field(default_factory=list)
-    results: List[Any] = field(default_factory=list)
-    metrics: Dict[str, Any] = field(default_factory=dict)
+    errors: list[str] = field(default_factory=list)
+    results: list[Any] = field(default_factory=list)
+    metrics: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -117,11 +117,11 @@ class EnhancedBatchProcessor:
         
         # Queues
         self.job_queue: queue.PriorityQueue = queue.PriorityQueue(maxsize=queue_size)
-        self.completed_jobs: List[BatchJob] = []
-        self.active_jobs: Dict[str, BatchJob] = {}
+        self.completed_jobs: list[BatchJob] = []
+        self.active_jobs: dict[str, BatchJob] = {}
         
         # Worker management
-        self.workers: List[Dict] = []
+        self.workers: list[dict] = []
         self.worker_pool: Optional[concurrent.futures.ThreadPoolExecutor] = None
         self.is_running = False
         self.is_paused = False
@@ -163,7 +163,7 @@ class EnhancedBatchProcessor:
             for i in range(self.max_workers)
         ]
     
-    def add_job(self, job_data: Dict[str, Any], priority: JobPriority = JobPriority.NORMAL) -> str:
+    def add_job(self, job_data: dict[str, Any], priority: JobPriority = JobPriority.NORMAL) -> str:
         """
         Add a job to the queue.
         
@@ -196,7 +196,7 @@ class EnhancedBatchProcessor:
         
         return job_id
     
-    def add_batch(self, jobs: List[Dict[str, Any]], priority: JobPriority = JobPriority.NORMAL) -> List[str]:
+    def add_batch(self, jobs: list[dict[str, Any]], priority: JobPriority = JobPriority.NORMAL) -> list[str]:
         """
         Add multiple jobs to the queue.
         
@@ -389,7 +389,7 @@ class EnhancedBatchProcessor:
         else:
             return {"status": "success", "data": job_data}
     
-    def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
+    def get_job_status(self, job_id: str) -> Optional[dict[str, Any]]:
         """Get job status."""
         # Check active jobs
         job = self.active_jobs.get(job_id)
@@ -403,7 +403,7 @@ class EnhancedBatchProcessor:
         
         return None
     
-    def get_all_jobs(self) -> List[Dict[str, Any]]:
+    def get_all_jobs(self) -> list[dict[str, Any]]:
         """Get all jobs."""
         jobs = []
         
@@ -417,7 +417,7 @@ class EnhancedBatchProcessor:
         
         return jobs
     
-    def _job_to_dict(self, job: BatchJob) -> Dict[str, Any]:
+    def _job_to_dict(self, job: BatchJob) -> dict[str, Any]:
         """Convert job to dictionary."""
         return {
             "id": job.id,
@@ -433,7 +433,7 @@ class EnhancedBatchProcessor:
             "logs": job.logs[-10:],  # Last 10 logs
         }
     
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get processing statistics."""
         total = self.stats["total_jobs"]
         completed = self.stats["completed_jobs"]
@@ -460,7 +460,7 @@ class EnhancedBatchProcessor:
             "is_paused": self.is_paused
         }
     
-    def get_batch_analytics(self) -> Dict[str, Any]:
+    def get_batch_analytics(self) -> dict[str, Any]:
         """Get batch processing analytics."""
         if not self.completed_jobs:
             return {
@@ -502,7 +502,7 @@ class EnhancedBatchProcessor:
         
         return len(recent) / 5  # Jobs per minute
     
-    def export_results(self) -> Dict[str, Any]:
+    def export_results(self) -> dict[str, Any]:
         """Export processing results."""
         return {
             "stats": self.get_stats(),
@@ -521,7 +521,7 @@ class BatchScheduler:
     
     def __init__(self, processor: EnhancedBatchProcessor):
         self.processor = processor
-        self.schedules: List[Dict] = []
+        self.schedules: list[dict] = []
         self.is_running = False
         self.scheduler_thread: Optional[threading.Thread] = None
         self._load_schedules()
@@ -546,7 +546,7 @@ class BatchScheduler:
         except Exception as e:
             print(f"Error saving schedules: {e}")
     
-    def add_schedule(self, name: str, cron: str, config: Dict[str, Any]):
+    def add_schedule(self, name: str, cron: str, config: dict[str, Any]):
         """
         Add a scheduled batch job.
         
@@ -637,7 +637,7 @@ class BatchScheduler:
                 print(f"Scheduler error: {e}")
                 time.sleep(60)
     
-    def _execute_schedule(self, schedule: Dict):
+    def _execute_schedule(self, schedule: dict):
         """Execute a scheduled job."""
         config = schedule.get("config", {})
         

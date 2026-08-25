@@ -202,7 +202,7 @@ def _row_to_dict(row: sqlite3.Row) -> JobRecord:
 
 
 def create_job(
-    payload: Union[str, Dict[str, Any]],
+    payload: Union[str, dict[str, Any]],
     *,
     max_retries: int = 3,
     max_attempts: Optional[int] = None,
@@ -231,7 +231,7 @@ def create_job(
 
 
 def get_job(
-    job_id: Union[str, Dict[str, Any]],
+    job_id: Union[str, dict[str, Any]],
     *,
     db_path: Optional[Union[Path, str]] = None,
 ) -> Optional[JobRecord]:
@@ -251,7 +251,7 @@ def list_jobs(
     status: Optional[str] = None,
     limit: int = 100,
     db_path: Optional[Union[Path, str]] = None,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """List jobs, optionally filtered by status, newest first."""
     with get_conn(db_path) as conn:
         if status:
@@ -271,7 +271,7 @@ def claim_next_job(
     worker_id: str = "worker",
     *,
     db_path: Optional[Union[Path, str]] = None,
-) -> Optional[Dict[str, Any]]:
+) -> Optional[dict[str, Any]]:
     """Atomically claim the oldest PENDING job for a worker."""
     now = _utcnow_iso()
     with get_conn(db_path) as conn:
@@ -323,7 +323,7 @@ def claim_next_job(
 
 def mark_completed(
     job_id: str,
-    result: Dict[str, Any],
+    result: dict[str, Any],
     *,
     db_path: Optional[Union[Path, str]] = None,
 ) -> bool:
@@ -412,7 +412,7 @@ def get_dead_letter_jobs(
     *,
     limit: int = 50,
     db_path: Optional[Union[Path, str]] = None,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     return list_jobs(status="DEAD_LETTER", limit=limit, db_path=db_path)
 
 
@@ -443,14 +443,14 @@ def initialize_task_db(db_path: Optional[Union[Path, str]] = None) -> None:
 def claim_job(
     db_path: Optional[Union[Path, str]] = None,
     worker_id: str = "worker",
-) -> Optional[Dict[str, Any]]:
+) -> Optional[dict[str, Any]]:
     """Compatibility wrapper around claim_next_job."""
     return claim_next_job(worker_id=worker_id, db_path=db_path)
 
 
 def complete_job(
     job_id: str,
-    result: Dict[str, Any],
+    result: dict[str, Any],
     db_path: Optional[Union[Path, str]] = None,
 ) -> bool:
     """Compatibility wrapper around mark_completed."""
@@ -468,7 +468,7 @@ def fail_job(
 
 # ── Helpers ────────────────────────────────────────────────────
 
-def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
+def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     d = dict(row)
     # Parse JSON fields.
     for key in ("payload", "result"):
