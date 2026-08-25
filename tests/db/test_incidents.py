@@ -314,6 +314,41 @@ def test_incidents_to_csv_empty_input():
     assert "Incident ID" in text
 
 
+def test_incidents_to_csv_escapes_special_characters():
+    """Verify filenames with commas, quotes, and newlines are RFC 4180 compliant."""
+    rows = [
+        {
+            "incident_id": "INC-001",
+            "document_a": "thesis, final (v2).pdf",
+            "document_b": 'report "draft".docx',
+            "similarity_score": 0.88,
+            "severity_rank": "High",
+            "review_status": "Pending",
+            "date_flagged": "2026-01-01T00:00:00Z",
+        },
+        {
+            "incident_id": "INC-002",
+            "document_a": "line\nbreak.pdf",
+            "document_b": "normal.pdf",
+            "similarity_score": 0.75,
+            "severity_rank": "Medium",
+            "review_status": "Reviewed",
+            "date_flagged": "2026-01-02T00:00:00Z",
+        },
+    ]
+
+    csv_bytes = incidents_to_csv(rows)
+    text = csv_bytes.decode("utf-8-sig")
+
+    reader = csv.DictReader(io.StringIO(text))
+    records = list(reader)
+
+    assert len(records) == 2
+    assert records[0]["Document A"] == "thesis, final (v2).pdf"
+    assert records[0]["Document B"] == 'report "draft".docx'
+    assert records[1]["Document A"] == "line\nbreak.pdf"
+
+
 def test_export_current_flags_csv_exports_incidents(test_db):
     flags = [
         {
