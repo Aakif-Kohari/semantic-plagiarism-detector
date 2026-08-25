@@ -594,7 +594,7 @@ def verify_user(
     try:
         with _connect() as conn:
             row = conn.execute(
-                "SELECT password, status, is_active, must_change_password FROM users WHERE username = ?",
+                "SELECT password, status, must_change_password FROM users WHERE username = ?",
                 (username,),
             ).fetchone()
 
@@ -603,8 +603,8 @@ def verify_user(
                 return {"authenticated": False, "must_change_password": False}
             return False
 
-        stored_hash, status, is_active, must_change_password = row
-        if status == "suspended" or not is_active:
+        stored_hash, status, must_change_password = row
+        if status == "suspended":
             if return_details:
                 return {"authenticated": False, "must_change_password": False}
             return False
@@ -828,7 +828,7 @@ def get_all_users(role: str | None = None) -> list:
         List of user dicts, optionally filtered by role.
     """
     try:
-        query = "SELECT id, username, role, is_active, version FROM users"
+        query = "SELECT id, username, role, status, version FROM users"
         params: tuple = ()
         if role is not None:
             query += " WHERE role = ?"
@@ -841,7 +841,8 @@ def get_all_users(role: str | None = None) -> list:
                     "id": r[0],
                     "username": r[1],
                     "role": r[2],
-                    "is_active": bool(r[3]),
+                    "status": r[3],
+                    "is_active": (r[3] == "active"),
                     "version": r[4],
                 }
                 for r in rows
@@ -1331,17 +1332,17 @@ def get_user_active_status(username: str) -> bool:
         username = _validate_username(username)
         with _connect() as conn:
             row = conn.execute(
-                "SELECT is_active FROM users WHERE username = ?",
+                "SELECT status FROM users WHERE username = ?",
                 (username,),
             ).fetchone()
-            return bool(row[0]) if row else False
+            return (row[0] == "active") if row else False
     except sqlite3.Error as e:
         raise sqlite3.Error(f"Failed to retrieve user active status: {e}") from e
 
 
 @with_sqlite_retry
 def set_user_status(username: str, status: str) -> None:
-    """Set a user's account status and synchronize the legacy is_active flag."""
+    """Set a user's account status."""
     try:
         username = _validate_username(username)
 
@@ -1352,11 +1353,10 @@ def set_user_status(username: str, status: str) -> None:
             conn.execute(
                 """
                 UPDATE users
-                SET status = ?,
-                    is_active = ?
+                SET status = ?
                 WHERE username = ?
                 """,
-                (status, 1 if status == "active" else 0, username),
+                (status, username),
             )
             conn.commit()
     except sqlite3.Error as e:
@@ -1374,12 +1374,10 @@ def set_user_active_status(username: str, is_active: bool) -> None:
             conn.execute(
                 """
                 UPDATE users
-                SET is_active = ?,
-                    status = ?
+                SET status = ?
                 WHERE username = ?
                 """,
                 (
-                    1 if is_active else 0,
                     "active" if is_active else "suspended",
                     username,
                 ),
@@ -1410,7 +1408,6 @@ def update_user_profile(
     """
     username = _validate_username(username)
     role = _validate_role(role)
-    is_active_val = 1 if is_active else 0
 
     if username == "admin" and not is_active:
         raise ValueError("The admin account cannot be suspended.")
@@ -1434,17 +1431,14 @@ def update_user_profile(
 
             cursor = conn.execute(
                 """
-               UPDATE users
-SET role = ?,
-    is_active = ?,
-    status = ?,
-    version = version + 1
-
+                UPDATE users
+                SET role = ?,
+                    status = ?,
+                    version = version + 1
                 WHERE username = ? AND version = ?
                 """,
                 (
                     role,
-                    is_active_val,
                     "active" if is_active else "suspended",
                     username,
                     expected_version,
@@ -1460,15 +1454,15 @@ SET role = ?,
 
 
 def is_user_active(username: str) -> bool:
-    """Return True if username exists and is_active is 1, or if username does not exist yet."""
+    """Return True if username exists and status is 'active', or if username does not exist yet."""
     try:
         username = _validate_username(username)
         with _connect() as conn:
             row = conn.execute(
-                "SELECT is_active FROM users WHERE username = ?",
+                "SELECT status FROM users WHERE username = ?",
                 (username,),
             ).fetchone()
-            return bool(row[0]) if row else True
+            return (row[0] == "active") if row else True
     except sqlite3.Error:
         return True
 
@@ -1482,19 +1476,9 @@ def get_user_count() -> int:
 
 
 def get_active_users_count() -> int:
-    """Return the total number of active users in the database.
-
-    Issue #1778 acceptance criteria specifies the query shape
-    ``SELECT COUNT(1) FROM users WHERE status = 'active'``. The actual
-    ``users`` table uses an ``is_active INTEGER NOT NULL DEFAULT 1``
-    column (added by migration ``migrate_auth_database``) rather than a
-    text ``status`` column, so the predicate is ``is_active = 1`` — this
-    is the schema-correct translation of "status = 'active'".
-    ``COUNT(1)`` is used in the SELECT clause to match the issue's
-    literal query shape.
-    """
+    """Return the total number of active users in the database."""
     with _connect() as conn:
-        cursor = conn.execute("SELECT COUNT(1) FROM users WHERE is_active = 1")
+        cursor = conn.execute("SELECT COUNT(1) FROM users WHERE status = 'active'")
         row = cursor.fetchone()
         return int(row[0]) if row else 0
 
@@ -2595,7 +2579,7 @@ def get_sso_user_info(username: str) -> Optional[dict[str, Any]]:
         with _connect() as conn:
             row = conn.execute(
                 """SELECT id, username, role, sso_provider, sso_provider_user_id, 
-                          created_at, updated_at, is_active
+                          created_at, updated_at, status
                    FROM users WHERE username = ? AND sso_provider IS NOT NULL""",
                 (username,),
             ).fetchone()
@@ -2611,7 +2595,8 @@ def get_sso_user_info(username: str) -> Optional[dict[str, Any]]:
                 "sso_provider_user_id": row[4],
                 "created_at": row[5],
                 "updated_at": row[6],
-                "is_active": bool(row[7]),
+                "status": row[7],
+                "is_active": (row[7] == "active"),
                 "is_sso_user": True,
             }
     except Exception as e:
@@ -2630,7 +2615,7 @@ def list_sso_users() -> list[dict[str, Any]]:
         with _connect() as conn:
             rows = conn.execute(
                 """SELECT id, username, role, sso_provider, sso_provider_user_id, 
-                          created_at, updated_at, is_active
+                          created_at, updated_at, status
                    FROM users WHERE sso_provider IS NOT NULL
                    ORDER BY created_at DESC"""
             ).fetchall()
@@ -2644,7 +2629,8 @@ def list_sso_users() -> list[dict[str, Any]]:
                     "sso_provider_user_id": row[4],
                     "created_at": row[5],
                     "updated_at": row[6],
-                    "is_active": bool(row[7]),
+                    "status": row[7],
+                    "is_active": (row[7] == "active"),
                 }
                 for row in rows
             ]

@@ -521,6 +521,28 @@ def send_email(
                 status_callback(True, success_msg)
             return True
 
+        except smtplib.SMTPAuthenticationError as e:
+            # Issue #3448: Authentication failures are permanent, so retrying
+            # cannot succeed. Log an actionable explanation instead of a
+            # generic stack trace.
+            smtp_detail = (
+                e.smtp_error.decode("utf-8", "replace")
+                if isinstance(e.smtp_error, bytes)
+                else str(e.smtp_error)
+            )
+            error_msg = (
+                f"SMTP authentication failed for user '{smtp_username}' "
+                f"(server replied {e.smtp_code}: {smtp_detail}). Verify that "
+                "the SMTP_USER/SMTP_USERNAME and SMTP_PASSWORD environment "
+                "variables are correct. If two-factor authentication (2FA) is "
+                "enabled on the mail account (e.g., Gmail, Outlook), generate "
+                "an App Password and configure it as SMTP_PASSWORD."
+            )
+            logger.error(error_msg)
+            if status_callback:
+                status_callback(False, error_msg)
+            return False
+
         except (
             ConnectionError,
             TimeoutError,

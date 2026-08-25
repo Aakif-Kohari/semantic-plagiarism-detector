@@ -53,7 +53,7 @@ from pathlib import Path
 from typing import Dict, Optional, Union
 
 from src.core.app_config import get_backup_dir
-from src.db.connection import apply_busy_timeout
+from src.db.connection import DEFAULT_SQLITE_TIMEOUT, apply_busy_timeout
 
 # ── Logger Configuration ───────────────────────────────────────────────────────
 logger = logging.getLogger(__name__)
@@ -128,6 +128,7 @@ def create_sqlite_snapshot(database_path: str | Path) -> bytes:
                 check_same_thread=False,
             )
         ) as source_connection:
+            apply_busy_timeout(source_connection, DEFAULT_SQLITE_TIMEOUT)
             with closing(sqlite3.connect(snapshot_path)) as destination:
                 source_connection.backup(destination)
 
@@ -185,6 +186,11 @@ def create_database_backup(
     else:
         backup_path = destination_dir / f"{source_name}.{timestamp}.db"
         backup_path.write_bytes(snapshot_bytes)
+
+    try:
+        os.chmod(backup_path, 0o600)
+    except OSError:
+        pass
 
     return backup_path
 

@@ -162,6 +162,16 @@ enabled); see the Description column for the condition.
 | `PDF_FOOTER_TEXT` | *(empty, falls back to built-in default footer)* | No | Custom footer text printed on generated PDF reports. |
 | `TMPDIR` / `TMP` / `TEMP` | *(OS default temp directory)* | No | Standard OS temp-directory variables, respected for locating scratch space when writing intermediate files. |
 
+## AWS S3 Report Export
+
+| Variable Name | Default Value | Required | Description |
+|---|---|---|---|
+| `AWS_ACCESS_KEY_ID` | *(unset — default credential chain used)* | No* | Access key used to sign S3 upload requests. Must be set together with the secret key; omit both to rely on boto3's standard credential chain (IAM roles, SSO, etc.). |
+| `AWS_SECRET_ACCESS_KEY` | *(unset — default credential chain used)* | No* | Secret key paired with `AWS_ACCESS_KEY_ID`. |
+| `AWS_S3_BUCKET` | *(unset — bucket must be passed explicitly)* | No | Default destination bucket for report exports (`src/utils/s3_export.py`) when no bucket is passed to `upload_to_s3()`. |
+
+*S3 export additionally requires the optional `boto3` package (`pip install boto3`); uploads default to region `us-east-1`.
+
 ---
 
 ## Notes

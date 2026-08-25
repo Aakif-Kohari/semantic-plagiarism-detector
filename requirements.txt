@@ -82,6 +82,9 @@ isort>=5.13.0                   # Import sorting library
 google-api-python-client>=2.198.0
 google-auth>=2.56.2
 
+# ── Azure Integration ────────────────────────────────────────────────────────
+azure-storage-blob>=12.20.0      # Upload plagiarism reports to Azure Blob Storage (#3465)
+
 # ── ZIP Encryption ────────────────────────────────────────────────────────────
 pyzipper>=0.4.0                 # AES-256 encrypted ZIP archives for backups
 
