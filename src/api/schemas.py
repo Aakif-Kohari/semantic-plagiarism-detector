@@ -418,6 +418,33 @@ class DocumentUploadResponse(SimilarityCheckResponse):
     pass
 
 
+class ScanTextRequest(BaseModel):
+    """Request payload schema for raw text submission plagiarism scanning."""
+
+    text: str = Field(
+        ..., min_length=1, description="Raw text submission content to scan for plagiarism"
+    )
+    filename: str = Field(
+        default="submission.txt", description="Identifier filename for the text submission"
+    )
+    threshold: float = Field(
+        default=0.59,
+        ge=0.0,
+        le=1.0,
+        description="Similarity threshold for flagging plagiarism (default: 0.59)",
+    )
+    top_k: int = Field(
+        default=3,
+        ge=1,
+        le=100,
+        description="Number of top matching paragraph pairs to include per matched document",
+    )
+    reprocess: bool = Field(
+        default=False,
+        description="Bypass duplicate detection and process the submission anyway",
+    )
+
+
 class ClearDataResponse(BaseModel):
     """Response schema for bulk clearing administrative operation."""
 
@@ -1138,6 +1165,7 @@ __all__ = [
     'MatchedDocument',
     'SimilarityCheckResponse',
     'DocumentUploadResponse',
+    'ScanTextRequest',
     
     # Admin
     'ClearDataResponse',
