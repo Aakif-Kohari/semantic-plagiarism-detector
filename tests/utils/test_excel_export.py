@@ -96,3 +96,42 @@ def test_export_incidents_xlsx_stream_persists_metadata():
     assert wb.properties.creator == "Semantic Plagiarism Detector"
     assert wb.properties.created is not None
 
+
+def test_build_similarity_workbook_nan_handling():
+    """Verify build_similarity_workbook handles NaN/None values gracefully (#3437)."""
+    data = {
+        "DocA.txt": [1.0, float("nan"), 0.3],
+        "DocB.txt": [0.8, 1.0, None],
+        "DocC.txt": [0.2, 0.7, 1.0],
+    }
+    df = pd.DataFrame(data, index=["DocA.txt", "DocB.txt", "DocC.txt"])
+
+    wb = build_similarity_workbook(df)
+    ws = wb.active
+
+    # Cell with NaN should contain "-"
+    assert ws.cell(row=3, column=2).value == "-"
+    # Cell with None should contain "-"
+    assert ws.cell(row=4, column=4).value == "-"
+    # Normal values should still be floats
+    assert ws.cell(row=2, column=2).value == 1.0
+    assert ws.cell(row=2, column=3).value == 0.8
+
+
+def test_export_similarity_matrix_to_excel_with_nan():
+    """Verify export_similarity_matrix_to_excel produces valid XLSX with NaN values (#3437)."""
+    data = {
+        "DocA.txt": [1.0, float("nan")],
+        "DocB.txt": [0.5, 1.0],
+    }
+    df = pd.DataFrame(data, index=["DocA.txt", "DocB.txt"])
+
+    xlsx_bytes = export_similarity_matrix_to_excel(df)
+    assert isinstance(xlsx_bytes, bytes)
+    assert len(xlsx_bytes) > 0
+
+    # Load back and verify NaN cell is "-"
+    wb = openpyxl.load_workbook(io.BytesIO(xlsx_bytes))
+    ws = wb.active
+    assert ws.cell(row=2, column=3).value == "-"
+
