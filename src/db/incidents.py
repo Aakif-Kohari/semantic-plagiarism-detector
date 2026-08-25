@@ -73,7 +73,7 @@ def configure_db_path(db_path: str | Path) -> None:
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _validate_iso_timestamp(val: Any) -> str | None:
