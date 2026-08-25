@@ -14,6 +14,7 @@ from src.utils.daily_summary_email import (
     build_email_html_body,
     build_incident_row_html,
     build_severity_section_html,
+    export_incidents_to_csv,
     generate_daily_summary_html,
     get_admin_emails,
     get_incidents_last_24h,
@@ -1093,4 +1094,184 @@ class TestEmailStructureAndAccessibility:
         assert ">0<" in html or ">0\n" in html
         assert "0.0%" in html
         assert "No high-similarity pairs detected today" in html
+
+
+# ---------------------------------------------------------------------------
+# Tests for Incident CSV Attachment Option (#3445)
+# ---------------------------------------------------------------------------
+
+
+class TestIncidentCsvAttachment:
+    """Test suite for incident CSV report attachment functionality (#3445)."""
+
+    def test_export_incidents_to_csv_content(self, mock_incidents):
+        """Verify export_incidents_to_csv generates valid CSV byte stream with data."""
+        csv_bytes = export_incidents_to_csv(mock_incidents)
+        assert isinstance(csv_bytes, bytes)
+        assert len(csv_bytes) > 0
+
+        # Decode and inspect CSV text
+        csv_text = csv_bytes.decode("utf-8-sig")
+        lines = csv_text.strip().splitlines()
+
+        assert len(lines) == 4  # Header + 3 incident rows
+        header = lines[0]
+        assert "Incident ID" in header
+        assert "Document A" in header
+        assert "Document B" in header
+        assert "Similarity Score" in header
+        assert "Severity Rank" in header
+
+        assert "INC-123" in lines[1]
+        assert "student1.pdf" in lines[1]
+        assert "0.9500" in lines[1]
+
+    def test_export_incidents_to_csv_empty(self):
+        """Verify export_incidents_to_csv on empty list generates header-only CSV."""
+        csv_bytes = export_incidents_to_csv([])
+        assert isinstance(csv_bytes, bytes)
+
+        csv_text = csv_bytes.decode("utf-8-sig")
+        lines = csv_text.strip().splitlines()
+        assert len(lines) == 1  # Only header line
+        assert "Incident ID" in lines[0]
+
+    def test_export_incidents_to_csv_utf8_sig_bom(self, mock_incidents):
+        """Verify export_incidents_to_csv starts with UTF-8 BOM for Excel compatibility."""
+        csv_bytes = export_incidents_to_csv(mock_incidents)
+        assert csv_bytes.startswith(b"\xef\xbb\xbf")
+
+    @patch("smtplib.SMTP")
+    @patch.dict(
+        "os.environ",
+        {
+            "SMTP_SERVER": "smtp.example.com",
+            "SMTP_PORT": "587",
+            "SMTP_USERNAME": "test@example.com",
+            "SMTP_PASSWORD": "password",
+            "FROM_EMAIL": "test@example.com",
+        },
+    )
+    def test_send_email_with_attach_csv_true(self, mock_smtp, mock_incidents):
+        """Verify send_email includes CSV MIMEApplication attachment when attach_csv=True."""
+        mock_server = MagicMock()
+        mock_smtp.return_value.__enter__.return_value = mock_server
+
+        csv_bytes = export_incidents_to_csv(mock_incidents)
+        result = send_email(
+            ["recipient@example.com"],
+            "Daily Summary",
+            "<p>Summary Body</p>",
+            attach_csv=True,
+            csv_data=csv_bytes,
+            attachment_filename="custom_summary.csv",
+        )
+
+        assert result is True
+        sent_msg = mock_server.send_message.call_args[0][0]
+
+        attachments = [
+            part
+            for part in sent_msg.walk()
+            if part.get_content_disposition() == "attachment"
+        ]
+        assert len(attachments) == 1
+        assert attachments[0].get_filename() == "custom_summary.csv"
+        assert attachments[0].get_payload(decode=True) == csv_bytes
+
+    @patch("smtplib.SMTP")
+    @patch.dict(
+        "os.environ",
+        {
+            "SMTP_SERVER": "smtp.example.com",
+            "SMTP_PORT": "587",
+            "SMTP_USERNAME": "test@example.com",
+            "SMTP_PASSWORD": "password",
+            "FROM_EMAIL": "test@example.com",
+        },
+    )
+    def test_send_email_with_attach_csv_false(self, mock_smtp):
+        """Verify send_email omits attachment when attach_csv=False."""
+        mock_server = MagicMock()
+        mock_smtp.return_value.__enter__.return_value = mock_server
+
+        result = send_email(
+            ["recipient@example.com"],
+            "Daily Summary",
+            "<p>Summary Body</p>",
+            attach_csv=False,
+        )
+
+        assert result is True
+        sent_msg = mock_server.send_message.call_args[0][0]
+
+        attachments = [
+            part
+            for part in sent_msg.walk()
+            if part.get_content_disposition() == "attachment"
+        ]
+        assert len(attachments) == 0
+
+    @patch("src.utils.daily_summary_email.send_email")
+    @patch("src.utils.daily_summary_email.get_admin_emails")
+    @patch("src.utils.daily_summary_email.get_incidents_last_24h")
+    def test_send_daily_summary_with_attach_csv_default(
+        self, mock_get_incidents, mock_get_emails, mock_send_email, mock_incidents
+    ):
+        """Verify send_daily_summary forwards attach_csv=True by default with generated CSV."""
+        mock_get_incidents.return_value = mock_incidents
+        mock_get_emails.return_value = ["admin@example.com"]
+        mock_send_email.return_value = True
+
+        result = send_daily_summary()
+
+        assert result is True
+        mock_send_email.assert_called_once()
+        _, kwargs = mock_send_email.call_args
+        assert kwargs.get("attach_csv") is True
+        csv_data = kwargs.get("csv_data")
+        assert isinstance(csv_data, bytes)
+        assert b"INC-123" in csv_data
+
+    @patch("src.utils.daily_summary_email.send_email")
+    @patch("src.utils.daily_summary_email.get_admin_emails")
+    @patch("src.utils.daily_summary_email.get_incidents_last_24h")
+    def test_send_daily_summary_with_attach_csv_false(
+        self, mock_get_incidents, mock_get_emails, mock_send_email, mock_incidents
+    ):
+        """Verify send_daily_summary respects attach_csv=False."""
+        mock_get_incidents.return_value = mock_incidents
+        mock_get_emails.return_value = ["admin@example.com"]
+        mock_send_email.return_value = True
+
+        result = send_daily_summary(attach_csv=False)
+
+        assert result is True
+        mock_send_email.assert_called_once()
+        _, kwargs = mock_send_email.call_args
+        assert kwargs.get("attach_csv") is False
+        assert kwargs.get("csv_data") is None
+
+    def test_export_incidents_to_csv_large_volume_over_20(self):
+        """Verify exporting > 20 incidents includes all rows for offline spreadsheet analysis."""
+        many_incidents = [
+            {
+                "incident_id": f"INC-{i:03d}",
+                "document_a": f"doc_a_{i}.pdf",
+                "document_b": f"doc_b_{i}.pdf",
+                "similarity_score": 0.80,
+                "severity_rank": "High",
+                "review_status": "Pending",
+                "date_flagged": "2026-08-25",
+            }
+            for i in range(50)
+        ]
+        csv_bytes = export_incidents_to_csv(many_incidents)
+        csv_text = csv_bytes.decode("utf-8-sig")
+        lines = csv_text.strip().splitlines()
+
+        assert len(lines) == 51  # Header + 50 rows
+        for i in range(50):
+            assert f"INC-{i:03d}" in csv_text
+
 
