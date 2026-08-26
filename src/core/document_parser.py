@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import io
 import ipaddress
 import logging
@@ -51,19 +52,14 @@ except ImportError:
 import string
 import unicodedata
 
+from src.core.parsers.docx_parser import ParsedDocxText
 from src.core.translator import translate_text
 from src.errors import EmptyDocumentError
 
 # OCR dependencies are imported lazily so TXT/DOCX and normal text PDFs still
 # work even when Tesseract is not installed on the machine.
-PDFInput = Union[str, bytes, io.BytesIO, BinaryIO]
+PDFInput = str | bytes | io.BytesIO | BinaryIO
 
-
-class ParsedDocxText(str):
-    def __new__(cls, value, word_headings=None):
-        obj = super().__new__(cls, value)
-        obj.word_headings = word_headings or []
-        return obj
 
 
 MIN_NATIVE_WORDS_PER_PAGE = 8
@@ -216,6 +212,7 @@ ENGLISH_STOPWORDS = frozenset(
 )
 
 
+@functools.lru_cache(maxsize=1)
 def load_custom_stopwords(file_path: Optional[str] = None) -> frozenset:
     """Load custom domain-specific stopwords from a text file (one word per line).
 
@@ -521,18 +518,20 @@ _BIBLIOGRAPHY_HEADERS = re.compile(
 
 
 def strip_bibliography(text: str) -> str:
-    """Remove everything from the first bibliography header onward.
+    """Remove everything from the first standalone bibliography header onward.
 
     The header must appear on its own line (standalone) to avoid stripping
     body text that merely mentions the word "References".
     """
-    match = _BIBLIOGRAPHY_HEADERS.search(text)
+    structured_headings = getattr(text, "headings", None)
+    plain_text = text.text if isinstance(text, ParsedDocxText) else text
+    match = _BIBLIOGRAPHY_HEADERS.search(plain_text)
     if match:
-        sliced_text = text[: match.start()].rstrip()
-        if hasattr(text, "word_headings"):
+        sliced_text = plain_text[: match.start()].rstrip()
+        if structured_headings is not None:
             words_in_sliced = len(sliced_text.split())
             return ParsedDocxText(
-                sliced_text, word_headings=text.word_headings[:words_in_sliced]
+                text=sliced_text, headings=structured_headings[:words_in_sliced]
             )
         return sliced_text
     return text
@@ -649,9 +648,9 @@ def _is_page_number(line: str) -> bool:
     ) or bool(re.fullmatch(r"\d{1,3}", cleaned))
 
 
-def _clean_page_text(page_text: str) -> List[str]:
+def _clean_page_text(page_text: str) -> list[str]:
     """Clean one page of extracted text."""
-    lines: List[str] = []
+    lines: list[str] = []
     for raw_line in page_text.splitlines():
         cleaned = clean_text(raw_line)
         if not cleaned or _is_page_number(cleaned):
@@ -661,8 +660,8 @@ def _clean_page_text(page_text: str) -> List[str]:
 
 
 def _remove_repeated_boundary_lines(
-    page_lines: List[List[str]],
-) -> List[List[str]]:
+    page_lines: list[list[str]],
+) -> list[list[str]]:
     """Remove repeated first/last lines, typically headers and footers."""
     if not page_lines:
         return []
@@ -670,7 +669,7 @@ def _remove_repeated_boundary_lines(
     cleaned_pages = [list(lines) for lines in page_lines]
 
     for position in ("start", "end"):
-        candidates: List[str] = []
+        candidates: list[str] = []
         for lines in cleaned_pages:
             if not lines:
                 continue
@@ -694,7 +693,7 @@ def _remove_repeated_boundary_lines(
     return cleaned_pages
 
 
-def _normalize_whitespace(page_lines: List[List[str]]) -> str:
+def _normalize_whitespace(page_lines: list[list[str]]) -> str:
     """Join cleaned lines and collapse excessive whitespace."""
     cleaned_lines = [line for lines in page_lines for line in lines]
     text = "\n".join(cleaned_lines).strip()
@@ -915,7 +914,7 @@ def _ocr_pdf_page(
     from src.utils.temp_manager import managed_ocr_temp_dir
 
     try:
-        with managed_ocr_temp_dir(prefix=f"ocr_pdf_p{page_index}_") as tmp_dir:
+        with managed_ocr_temp_dir(prefix=f"ocr_pdf_p{page_index}_"):
             with fitz.open(stream=pdf_bytes, filetype="pdf") as document:
                 page = document.load_page(page_index)
                 scale = dpi / 72
@@ -971,13 +970,13 @@ def _should_use_parallel() -> bool:
     return True
 
 
-def _format_table_as_text(table: List[List[Optional[str]]]) -> str:
+def _format_table_as_text(table: list[list[Optional[str]]]) -> str:
     """Format a pdfplumber-extracted table into clean, readable text.
 
     Each row's cells are joined with ' | ' so the structure stays
     readable instead of being merged into one chaotic string.
     """
-    lines: List[str] = []
+    lines: list[str] = []
     for row in table:
         cells = [str(cell).strip() if cell is not None else "" for cell in row]
         if any(cells):
@@ -990,7 +989,7 @@ def _parse_pdf_page(
     page_index: int,
     ocr_dpi: int,
     ocr_language: str,
-) -> List[str]:
+) -> list[str]:
     """Helper running in a subprocess to extract text from a single PDF page."""
     import io
 
@@ -1086,13 +1085,13 @@ def _resolve_process_pool_workers(
 
 
 def extract_texts_parallel(
-    files_dict: Dict[str, bytes],
+    files_dict: dict[str, bytes],
     *,
     ocr_language: str = DEFAULT_OCR_LANGUAGE,
     ocr_dpi: int = DEFAULT_OCR_DPI,
     session_id: Optional[str] = None,
     max_workers: int | None = None,
-) -> tuple[Dict[str, str], Dict[str, Exception]]:
+) -> tuple[dict[str, str], dict[str, Exception]]:
     """
     Extract text from multiple files using a bounded process pool.
 
@@ -1114,8 +1113,8 @@ def extract_texts_parallel(
         dpi=ocr_dpi,
     )
 
-    results: Dict[str, str] = {}
-    errors: Dict[str, Exception] = {}
+    results: dict[str, str] = {}
+    errors: dict[str, Exception] = {}
 
     if not files_dict:
         return results, errors
@@ -1226,7 +1225,7 @@ def count_pdf_images(pdf_bytes: bytes) -> int:
         return 0
 
 
-def extract_pdf_metadata(file: PDFInput) -> Dict[str, str]:
+def extract_pdf_metadata(file: PDFInput) -> dict[str, str]:
     """Extract PDF metadata (Author, Creation Date, Title) using PyMuPDF.
 
     Returns:
@@ -1395,7 +1394,7 @@ def extract_text_from_docx(file: PDFInput) -> str:
                         word_headings.extend([current_heading] * len(p_words))
 
         full_text = "\n\n".join(paragraphs_text)
-        return ParsedDocxText(full_text.strip(), word_headings=word_headings)
+        return ParsedDocxText(text=full_text.strip(), headings=word_headings)
     except (ValueError, KeyError, OSError) as exc:
         print(f"[document_parser] Error reading DOCX: {exc}")
     except Exception as exc:
@@ -1655,7 +1654,7 @@ def _strip_inline_markdown(line: str) -> str:
 def strip_markdown_syntax(raw_text: str) -> str:
     """Convert raw Markdown source into plain readable text."""
     lines = raw_text.splitlines()
-    output: List[str] = []
+    output: list[str] = []
     in_code_block = False
 
     for line in lines:
@@ -1746,8 +1745,8 @@ def extract_text_from_zip(
         )
 
     zip_stream.seek(0)
-    extracted_texts: List[str] = []
-    corrupted_files: List[str] = []
+    extracted_texts: list[str] = []
+    corrupted_files: list[str] = []
 
     try:
         with zipfile.ZipFile(zip_stream, "r") as archive:
@@ -1794,7 +1793,7 @@ def extract_text_from_odt(file: PDFInput) -> str:
     """
     try:
         raw_data = _read_pdf_bytes(file)
-        text_parts: List[str] = []
+        text_parts: list[str] = []
 
         with zipfile.ZipFile(io.BytesIO(raw_data), "r") as archive:
             with archive.open("content.xml") as xml_file:
@@ -1841,7 +1840,7 @@ def extract_text_from_image(
 
     file_bytes = _read_pdf_bytes(file)
     try:
-        with managed_ocr_temp_dir(prefix="ocr_image_") as tmp_dir:
+        with managed_ocr_temp_dir(prefix="ocr_image_"):
             image = Image.open(io.BytesIO(file_bytes))
             try:
                 return pytesseract.image_to_string(
@@ -2004,7 +2003,36 @@ def extract_text(
     Raises:
         EmptyDocumentError: If the final extracted and cleaned text is empty.
     """
-    # ... [existing extraction logic for PDF, DOCX, TXT, etc.] ...
+    ocr_language, ocr_dpi = normalize_ocr_settings(
+        language=ocr_language,
+        dpi=ocr_dpi,
+    )
+
+    file_bytes = _read_pdf_bytes(file)
+    file = file_bytes
+
+    extension = filename.rsplit(".", 1)[-1].lower()
+
+    if extension == "pdf":
+        raw = extract_text_from_pdf(file, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
+    elif extension == "docx":
+        raw = extract_text_from_docx(file)
+    elif extension == "doc":
+        raw = extract_text_from_doc(file)
+    elif extension in ("md", "markdown", "mdown"):
+        raw = extract_text_from_md(file)
+    elif extension in ("zip", "7z", "tar", "gz"):
+        raw = extract_text_from_zip(file, ocr_language=ocr_language, ocr_dpi=ocr_dpi)
+    elif extension == "rtf":
+        raw = extract_text_from_rtf(file)
+    elif extension == "epub":
+        raw = extract_text_from_epub(file)
+    elif extension in ("png", "jpg", "jpeg"):
+        raw = extract_text_from_image(file, ocr_language=ocr_language)
+    elif extension == "odt":
+        raw = extract_text_from_odt(file)
+    else:
+        raw = extract_text_from_txt(file)
 
     raw = strip_bibliography(raw)
     raw = normalize_unicode_spaces(raw)
@@ -2060,7 +2088,7 @@ def get_supported_file_extensions() -> list[str]:
 
 def extract_texts_from_pdfs(
     files: list, session_id: Optional[str] = None
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """Legacy compatibility wrapper."""
     return extract_texts(files, session_id=session_id)
 
@@ -2138,7 +2166,7 @@ def extract_texts(
     files: list,
     session_id: Optional[str] = None,
     max_workers: int | None = None,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """Extract text from multiple uploaded files."""
     check_batch_rate_limit(len(files) if files else 0, session_id=session_id)
 

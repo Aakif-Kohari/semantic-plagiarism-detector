@@ -98,13 +98,13 @@ class ReportData:
     avg_similarity: float
     max_similarity: float
     min_similarity: float
-    flagged_pairs_list: List[Dict]
+    flagged_pairs_list: list[dict]
     similarity_matrix: pd.DataFrame
-    document_names: List[str]
+    document_names: list[str]
     threshold_used: float
     execution_time: float
-    system_info: Dict[str, Any]
-    alerts: List[Dict]
+    system_info: dict[str, Any]
+    alerts: list[dict]
 
 
 # ==============================================================================
@@ -642,7 +642,7 @@ class ReportScheduler:
         with open(schedule_file, "w") as f:
             json.dump(self.schedules, f, indent=2)
 
-    def add_schedule(self, name: str, frequency: str, config: Dict):
+    def add_schedule(self, name: str, frequency: str, config: dict):
         """Add a new report schedule."""
         schedule = {
             "id": len(self.schedules) + 1,
@@ -671,7 +671,7 @@ class ReportScheduler:
             next_run = now + timedelta(days=1)
         return next_run.isoformat()
 
-    def get_due_schedules(self) -> List[Dict]:
+    def get_due_schedules(self) -> list[dict]:
         """Get schedules that are due to run."""
         now = datetime.now()
         due = []

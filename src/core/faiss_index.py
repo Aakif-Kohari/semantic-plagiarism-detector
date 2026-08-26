@@ -22,6 +22,8 @@ inner product == cosine similarity.
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
+from src.core.text_chunking import ChunkString
+
 # FAISS has no official type stubs; suppress Pylance false positives
 import faiss  # type: ignore
 import numpy as np
@@ -59,12 +61,12 @@ FaissChunkRecord = ChunkRecord
 
 
 def build_index(
-    embeddings: Dict[str, np.ndarray],
-    chunked_docs: Dict[str, List[str]],
+    embeddings: dict[str, np.ndarray],
+    chunked_docs: dict[str, list[str]],
     index_type: str = "auto",
     nlist: Optional[int] = None,
     nprobe: int = 10,
-) -> Tuple[faiss.Index, List[ChunkRecord]]:
+) -> tuple[faiss.Index, list[ChunkRecord]]:
     """
     Build a FAISS index over all chunk embeddings.
 
@@ -83,16 +85,19 @@ def build_index(
         position to its source ChunkRecord.
     """
     dim = 384
-    all_vectors: List[np.ndarray] = []
-    registry: List[ChunkRecord] = []
+    all_vectors: list[np.ndarray] = []
+    registry: list[ChunkRecord] = []
 
     for doc_name, emb in embeddings.items():
         chunks = chunked_docs.get(doc_name, [])
         if emb.ndim != 2 or emb.shape[0] == 0:
             continue
-        for i, (vec, text) in enumerate(zip(emb, chunks)):
+        for i, (vec, chunk) in enumerate(zip(emb, chunks)):
             all_vectors.append(vec.astype("float32"))
-            registry.append(ChunkRecord(doc_name, i, text))
+            if isinstance(chunk, ChunkString):
+                registry.append(ChunkRecord(doc_name, i, chunk.text, metadata=chunk.metadata))
+            else:
+                registry.append(ChunkRecord(doc_name, i, chunk))
 
     if not all_vectors:
         return faiss.IndexFlatIP(dim), registry
@@ -137,11 +142,11 @@ def build_index(
 def search_similar_chunks(
     query_embedding: np.ndarray,
     index: faiss.Index,
-    registry: List[ChunkRecord],
+    registry: list[ChunkRecord],
     top_k: int = 10,
     exclude_doc: Optional[str] = None,
     threshold: float = 0.0,
-) -> List[Tuple[ChunkRecord, float]]:
+) -> list[tuple[ChunkRecord, float]]:
     """
     Search the FAISS index for the most similar chunks to a query vector.
 
@@ -189,7 +194,7 @@ def search_batch_vectors(
     query_matrix: np.ndarray,
     index: faiss.Index,
     top_k: int = 5,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Search the FAISS index for a batch of query vectors.
 
@@ -223,13 +228,13 @@ def search_batch_vectors(
 
 
 def find_plagiarised_chunks(
-    embeddings: Dict[str, np.ndarray],
-    chunked_docs: Dict[str, List[str]],
+    embeddings: dict[str, np.ndarray],
+    chunked_docs: dict[str, list[str]],
     index: faiss.Index,
-    registry: List[ChunkRecord],
+    registry: list[ChunkRecord],
     threshold: float = 0.75,
     top_k: int = 5,
-) -> List[Dict]:
+) -> list[dict]:
     """
     Search every chunk against the FAISS index to find cross-document matches.
 
@@ -270,7 +275,7 @@ def find_plagiarised_chunks(
                     {
                         "source_doc": doc_name,
                         "source_chunk_text": (
-                            chunks[chunk_idx] if chunk_idx < len(chunks) else ""
+                            chunks[chunk_idx].text if chunk_idx < len(chunks) else ""
                         ),
                         "match_doc": record.doc_name,
                         "match_chunk_text": record.chunk_text,
@@ -284,10 +289,10 @@ def find_plagiarised_chunks(
 
 def add_to_index(
     index: faiss.Index,
-    registry: List[ChunkRecord],
-    embeddings: Dict[str, np.ndarray],
-    chunked_docs: Dict[str, List[str]],
-) -> Tuple[faiss.Index, List[ChunkRecord]]:
+    registry: list[ChunkRecord],
+    embeddings: dict[str, np.ndarray],
+    chunked_docs: dict[str, list[str]],
+) -> tuple[faiss.Index, list[ChunkRecord]]:
     """
     Incrementally add new chunk vectors to an existing FAISS index without a full rebuild.
 
@@ -305,16 +310,19 @@ def add_to_index(
         (updated_index, updated_registry) — the index may be wrapped in ``IndexIDMap``
         if it was bare on entry.
     """
-    new_vectors: List[np.ndarray] = []
-    new_registry: List[ChunkRecord] = []
+    new_vectors: list[np.ndarray] = []
+    new_registry: list[ChunkRecord] = []
 
     for doc_name, emb in embeddings.items():
         chunks = chunked_docs.get(doc_name, [])
         if emb.ndim != 2 or emb.shape[0] == 0:
             continue
-        for i, (vec, text) in enumerate(zip(emb, chunks)):
+        for i, (vec, chunk) in enumerate(zip(emb, chunks)):
             new_vectors.append(vec.astype("float32"))
-            new_registry.append(ChunkRecord(doc_name, i, text))
+            if isinstance(chunk, ChunkString):
+                new_registry.append(ChunkRecord(doc_name, i, chunk.text, metadata=chunk.metadata))
+            else:
+                new_registry.append(ChunkRecord(doc_name, i, chunk))
 
     if not new_vectors:
         return index, registry
@@ -341,9 +349,9 @@ def add_to_index(
 
 def remove_vectors_by_doc(
     index: faiss.Index,
-    registry: List[ChunkRecord],
+    registry: list[ChunkRecord],
     doc_name: str,
-) -> Tuple[faiss.Index, List[ChunkRecord]]:
+) -> tuple[faiss.Index, list[ChunkRecord]]:
     """
     Remove all vectors belonging to a given document from the index.
 
@@ -388,8 +396,8 @@ def remove_vectors_by_doc(
 
 def compact_index(
     index: faiss.Index,
-    registry: List[ChunkRecord],
-) -> Tuple[faiss.Index, List[ChunkRecord]]:
+    registry: list[ChunkRecord],
+) -> tuple[faiss.Index, list[ChunkRecord]]:
     """
     Rebuild the index with sequential IDs matching the current registry order.
 
@@ -502,7 +510,7 @@ def validate_index(
         return False
 
 
-def load_or_rebuild_index(filepath: str) -> Tuple[faiss.Index, List[ChunkRecord], bool]:
+def load_or_rebuild_index(filepath: str) -> tuple[faiss.Index, list[ChunkRecord], bool]:
     """
     Load a FAISS index from disk if valid, otherwise rebuild it from corpus.db.
     Returns (index, registry, recovered_flag).

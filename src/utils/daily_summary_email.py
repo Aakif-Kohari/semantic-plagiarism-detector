@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Union
 
 from dotenv import load_dotenv
 
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 
-def get_incidents_last_24h(db_path: str = DEFAULT_DB_PATH) -> List[Dict[str, Any]]:
+def get_incidents_last_24h(db_path: str = DEFAULT_DB_PATH) -> list[dict[str, Any]]:
     """
     Retrieve all incidents flagged in the last 24 hours.
 
@@ -64,7 +64,7 @@ def is_valid_email(email: Optional[str]) -> bool:
     return bool(re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email.strip()))
 
 
-def get_admin_emails() -> List[str]:
+def get_admin_emails() -> list[str]:
     """
     Retrieve email addresses for all admin users with valid email formats.
     Falls back to ADMIN_EMAIL environment variable if no DB admin users have valid emails.
@@ -91,7 +91,7 @@ def get_admin_emails() -> List[str]:
     return []
 
 
-def build_incident_row_html(inc: Dict[str, Any]) -> str:
+def build_incident_row_html(inc: dict[str, Any]) -> str:
     """
     Build a single HTML table row for an incident.
 
@@ -123,7 +123,7 @@ def build_incident_row_html(inc: Dict[str, Any]) -> str:
     """
 
 
-def build_severity_section_html(severity: str, incidents: List[Dict[str, Any]]) -> str:
+def build_severity_section_html(severity: str, incidents: list[dict[str, Any]]) -> str:
     """
     Build an HTML section for a specific severity level.
 
@@ -172,7 +172,7 @@ def build_severity_section_html(severity: str, incidents: List[Dict[str, Any]]) 
 
 
 def build_email_html_body(
-    incidents_data: List[Dict[str, Any]],
+    incidents_data: list[dict[str, Any]],
     total_scans: int,
     footer_note: Optional[str] = None,
 ) -> str:
@@ -272,7 +272,7 @@ def build_email_html_body(
     return html
 
 
-def generate_daily_summary_html(stats: Dict[str, Any]) -> str:
+def generate_daily_summary_html(stats: dict[str, Any]) -> str:
     """Generate the HTML content for the daily plagiarism summary email.
 
     Creates a responsive, email-client-safe HTML email with modern system
@@ -412,15 +412,72 @@ def generate_daily_summary_html(stats: Dict[str, Any]) -> str:
     return html_content
 
 
+def export_incidents_to_csv(
+    incidents: list[dict[str, Any]] | Iterable[Mapping[str, Any]],
+) -> bytes:
+    """Generate CSV bytes for a list of incidents using UTF-8 with BOM encoding.
+
+    Args:
+        incidents: List or iterable of incident dictionaries.
+
+    Returns:
+        bytes: UTF-8-SIG encoded CSV data suitable for MIMEApplication attachment.
+    """
+    try:
+        from src.db.incidents import incidents_to_csv
+
+        return incidents_to_csv(incidents)
+    except Exception:
+        import csv
+        import io
+
+        buffer = io.StringIO(newline="")
+        fieldnames = [
+            "Incident ID",
+            "Document A",
+            "Document B",
+            "Similarity Score",
+            "Threshold at Time of Flag",
+            "Severity Rank",
+            "Review Status",
+            "Date Flagged",
+        ]
+        writer = csv.DictWriter(buffer, fieldnames=fieldnames)
+        writer.writeheader()
+        for inc in incidents:
+            sim = inc.get("similarity_score", 0.0)
+            sim_str = f"{float(sim):.4f}" if isinstance(sim, (int, float)) else str(sim)
+            thresh = inc.get("threshold_at_time_of_flag", 0.0)
+            thresh_str = (
+                f"{float(thresh):.4f}"
+                if isinstance(thresh, (int, float))
+                else str(thresh)
+            )
+            writer.writerow(
+                {
+                    "Incident ID": inc.get("incident_id", ""),
+                    "Document A": inc.get("document_a", ""),
+                    "Document B": inc.get("document_b", ""),
+                    "Similarity Score": sim_str,
+                    "Threshold at Time of Flag": thresh_str,
+                    "Severity Rank": inc.get("severity_rank", ""),
+                    "Review Status": inc.get("review_status", "Pending"),
+                    "Date Flagged": inc.get("date_flagged", ""),
+                }
+            )
+        return buffer.getvalue().encode("utf-8-sig")
+
+
 def send_email(
-    to_emails: List[str],
+    to_emails: list[str],
     subject: str,
     html_body: str,
     status_callback: Optional[Callable[[bool, str], None]] = None,
     attachment_filename: str = "daily_plagiarism_summary.csv",
     timeout: float = 10.0,
     reply_to: Optional[str] = None,
-
+    attach_csv: bool = True,
+    csv_data: Optional[bytes | str] = None,
 ) -> bool:
     """
     Send an email using SMTP.
@@ -430,8 +487,11 @@ def send_email(
         subject: Email subject line
         html_body: HTML formatted email body
         status_callback: Optional callback receiving (success: bool, message: str)
+        attachment_filename: Filename for the CSV attachment (default: daily_plagiarism_summary.csv)
         timeout: Socket connection timeout in seconds (default 10.0)
         reply_to: Optional Reply-To email address header
+        attach_csv: Option to attach incidents CSV report (default: True)
+        csv_data: Optional raw CSV bytes or string content for the attachment
 
     Returns:
         True if email sent successfully, False otherwise
@@ -464,8 +524,6 @@ def send_email(
             status_callback(False, msg)
         return False
 
-
-
     max_retries = 3
     for attempt in range(max_retries + 1):
         try:
@@ -474,18 +532,30 @@ def send_email(
             msg_obj["From"] = from_email
             msg_obj["To"] = ", ".join(to_emails)
 
+            # Issue #3447: Mark this as an automated message so Outlook/Gmail
+            # spam filters and out-of-office auto-responders treat it
+            # correctly, instead of flagging it as suspicious or bouncing
+            # auto-replies back into this automated pipeline.
+            msg_obj["Auto-Submitted"] = "auto-generated"
+            msg_obj["X-Auto-Response-Suppress"] = "All"
+
             if reply_to:
                 msg_obj["Reply-To"] = reply_to
 
             html_part = MIMEText(html_body, "html")
             msg_obj.attach(html_part)
-            attachment = MIMEApplication(b"", _subtype="csv")
-            attachment.add_header(
-                "Content-Disposition",
-                "attachment",
-                filename=attachment_filename,
-            )
-            msg_obj.attach(attachment)
+
+            if attach_csv:
+                raw_csv = csv_data if csv_data is not None else b""
+                if isinstance(raw_csv, str):
+                    raw_csv = raw_csv.encode("utf-8-sig")
+                attachment = MIMEApplication(raw_csv, _subtype="csv")
+                attachment.add_header(
+                    "Content-Disposition",
+                    "attachment",
+                    filename=attachment_filename,
+                )
+                msg_obj.attach(attachment)
 
             if smtp_port == 465:
                 logger.debug(
@@ -521,6 +591,28 @@ def send_email(
                 status_callback(True, success_msg)
             return True
 
+        except smtplib.SMTPAuthenticationError as e:
+            # Issue #3448: Authentication failures are permanent, so retrying
+            # cannot succeed. Log an actionable explanation instead of a
+            # generic stack trace.
+            smtp_detail = (
+                e.smtp_error.decode("utf-8", "replace")
+                if isinstance(e.smtp_error, bytes)
+                else str(e.smtp_error)
+            )
+            error_msg = (
+                f"SMTP authentication failed for user '{smtp_username}' "
+                f"(server replied {e.smtp_code}: {smtp_detail}). Verify that "
+                "the SMTP_USER/SMTP_USERNAME and SMTP_PASSWORD environment "
+                "variables are correct. If two-factor authentication (2FA) is "
+                "enabled on the mail account (e.g., Gmail, Outlook), generate "
+                "an App Password and configure it as SMTP_PASSWORD."
+            )
+            logger.error(error_msg)
+            if status_callback:
+                status_callback(False, error_msg)
+            return False
+
         except (
             ConnectionError,
             TimeoutError,
@@ -551,11 +643,74 @@ def send_email(
             return False
 
 
+DEFAULT_EMAIL_SUBJECT_TEMPLATE = "Daily Plagiarism Summary - {date} ({count} incidents)"
+
+
+def format_subject_line(
+    template: Optional[str] = None,
+    date: Optional[str] = None,
+    count: int = 0,
+    app_name: Optional[str] = None,
+    subject_prefix: Optional[str] = None,
+) -> str:
+    """
+    Format a dynamic email subject line using template tokens.
+
+    Supports the following tokens:
+        - {date}: Current date (e.g. YYYY-MM-DD)
+        - {count}: Number of flagged incidents
+        - {app_name}: Name of the application (from APP_NAME env var or default)
+
+    Args:
+        template: Optional custom subject template. If not provided, reads from
+            the EMAIL_SUBJECT_TEMPLATE environment variable or defaults to
+            "Daily Plagiarism Summary - {date} ({count} incidents)".
+        date: Date string to substitute for {date} (default: current UTC/local date).
+        count: Integer count of incidents to substitute for {count}.
+        app_name: Application name to substitute for {app_name} (default from APP_NAME).
+        subject_prefix: Optional prefix to prepend to the subject (e.g., "[Plagiarism Alert]").
+
+    Returns:
+        str: Fully formatted email subject line.
+    """
+    if template is None:
+        template = os.getenv("EMAIL_SUBJECT_TEMPLATE", DEFAULT_EMAIL_SUBJECT_TEMPLATE)
+
+    if date is None:
+        date = datetime.now().strftime("%Y-%m-%d")
+
+    if app_name is None:
+        app_name = os.getenv("APP_NAME", "Semantic Plagiarism Detector")
+
+    token_values = {
+        "date": str(date),
+        "count": str(count),
+        "app_name": str(app_name),
+    }
+
+    try:
+        formatted = template.format(**token_values)
+    except KeyError:
+        formatted = template
+        for k, v in token_values.items():
+            formatted = formatted.replace(f"{{{k}}}", v)
+
+    if subject_prefix:
+        clean_prefix = subject_prefix.strip()
+        if clean_prefix and not formatted.startswith(clean_prefix):
+            formatted = f"{clean_prefix} {formatted}"
+
+    return formatted
+
+
 def send_daily_summary(
     subject_prefix: str = "[Plagiarism Alert]",
     footer_note: Optional[str] = None,
     status_callback: Optional[Callable[[bool, str], None]] = None,
     reply_to: Optional[str] = None,
+    subject_template: Optional[str] = None,
+    attach_csv: bool = True,
+    csv_filename: str = "daily_plagiarism_summary.csv",
 ) -> bool:
     """
     Main function to aggregate daily incidents and send summary email.
@@ -565,6 +720,9 @@ def send_daily_summary(
         footer_note: Optional custom administrator note to append to the email body
         status_callback: Optional callback receiving (success: bool, message: str)
         reply_to: Optional Reply-To email address header
+        subject_template: Optional custom subject template override
+        attach_csv: Option to attach incidents CSV report (default: True)
+        csv_filename: Filename for the CSV attachment (default: daily_plagiarism_summary.csv)
 
     Returns:
         True if email sent successfully, False otherwise
@@ -581,16 +739,29 @@ def send_daily_summary(
         incidents_data=incidents, total_scans=100, footer_note=footer_note
     )
 
-    prefix = f"{subject_prefix} " if subject_prefix else ""
-    subject = (
-        f"{prefix}Daily Plagiarism Summary - {datetime.now().strftime('%Y-%m-%d')}"
+    csv_data = None
+    if attach_csv:
+        csv_data = export_incidents_to_csv(incidents)
+
+    current_date = datetime.now().strftime("%Y-%m-%d")
+    app_name = os.getenv("APP_NAME", "Semantic Plagiarism Detector")
+    subject = format_subject_line(
+        template=subject_template,
+        date=current_date,
+        count=len(incidents),
+        app_name=app_name,
+        subject_prefix=subject_prefix,
     )
+
     success = send_email(
         admin_emails,
         subject,
         html_body,
         status_callback=status_callback,
+        attachment_filename=csv_filename,
         reply_to=reply_to,
+        attach_csv=attach_csv,
+        csv_data=csv_data,
     )
 
     return success

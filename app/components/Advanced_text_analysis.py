@@ -63,9 +63,9 @@ class ReadabilityMetrics:
     avg_syllables_per_word: float
     complex_words_count: int
     polysyllable_words_count: int
-    metadata: Dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
     
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return asdict(self)
 
 @dataclass
@@ -74,17 +74,17 @@ class StyleMetrics:
     vocabulary_richness: float  # Type-token ratio
     lexical_diversity: float    # Moving average TTR
     sentence_variety: float     # Variation in sentence length
-    word_length_distribution: Dict[int, int]
-    punctuation_frequency: Dict[str, int]
+    word_length_distribution: dict[int, int]
+    punctuation_frequency: dict[str, int]
     pronoun_frequency: float
     conjunction_frequency: float
     nominalization_frequency: float
     passive_voice_frequency: float
     avg_word_complexity: float
     style_consistency_score: float
-    metadata: Dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
     
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return asdict(self)
 
 @dataclass
@@ -97,15 +97,15 @@ class LinguisticFeatures:
     unique_words: int
     readability: ReadabilityMetrics
     style: StyleMetrics
-    pos_distribution: Dict[str, int]
-    named_entities: List[Dict[str, str]]
-    vocabulary_profile: Dict[str, Any]
-    language_detection: Dict[str, float]
+    pos_distribution: dict[str, int]
+    named_entities: list[dict[str, str]]
+    vocabulary_profile: dict[str, Any]
+    language_detection: dict[str, float]
     document_complexity_score: float
     timestamp: datetime = field(default_factory=datetime.now)
-    metadata: Dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
     
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             **asdict(self),
             'timestamp': self.timestamp.isoformat()
@@ -119,7 +119,7 @@ class TextAnalysisEngine:
     def __init__(self):
         self.stopwords = set(stopwords.words('english'))
         self.syllable_cache = {}
-        self.analysis_history: List[Dict] = []
+        self.analysis_history: list[dict] = []
         self._init_patterns()
     
     def _init_patterns(self):
@@ -322,7 +322,7 @@ class TextAnalysisEngine:
             polysyllable_words_count=len(polysyllable_words)
         )
     
-    def _calculate_style_metrics(self, text: str, words: List[str], sentences: List[str]) -> StyleMetrics:
+    def _calculate_style_metrics(self, text: str, words: list[str], sentences: list[str]) -> StyleMetrics:
         """Calculate writing style metrics"""
         if not words or not sentences:
             return self._empty_style_metrics()
@@ -402,7 +402,7 @@ class TextAnalysisEngine:
             style_consistency_score=0
         )
     
-    def _calculate_lexical_diversity(self, words: List[str]) -> float:
+    def _calculate_lexical_diversity(self, words: list[str]) -> float:
         """Calculate moving average type-token ratio"""
         if len(words) < 50:
             return 0
@@ -418,7 +418,7 @@ class TextAnalysisEngine:
         
         return sum(tt_ratios) / len(tt_ratios) if tt_ratios else 0
     
-    def _calculate_style_consistency(self, words: List[str], sentences: List[str]) -> float:
+    def _calculate_style_consistency(self, words: list[str], sentences: list[str]) -> float:
         """Calculate writing style consistency score"""
         if len(sentences) < 3:
             return 0
@@ -437,7 +437,7 @@ class TextAnalysisEngine:
         
         return max(0, min(consistency, 1))
     
-    def _get_pos_distribution(self, words: List[str]) -> Dict[str, int]:
+    def _get_pos_distribution(self, words: list[str]) -> dict[str, int]:
         """Get part-of-speech tag distribution"""
         try:
             tagged = pos_tag(words)
@@ -446,7 +446,7 @@ class TextAnalysisEngine:
         except:
             return {}
     
-    def _extract_named_entities(self, text: str) -> List[Dict[str, str]]:
+    def _extract_named_entities(self, text: str) -> list[dict[str, str]]:
         """Extract named entities from text"""
         try:
             tokens = word_tokenize(text)
@@ -473,7 +473,7 @@ class TextAnalysisEngine:
         except:
             return []
     
-    def _get_vocabulary_profile(self, words: List[str]) -> Dict[str, Any]:
+    def _get_vocabulary_profile(self, words: list[str]) -> dict[str, Any]:
         """Generate vocabulary profile"""
         if not words:
             return {}
@@ -501,7 +501,7 @@ class TextAnalysisEngine:
         
         return freq_distribution
     
-    def _detect_language(self, text: str) -> Dict[str, float]:
+    def _detect_language(self, text: str) -> dict[str, float]:
         """Simple language detection"""
         languages = {
             'en': ['the', 'and', 'for', 'with', 'that', 'this', 'from', 'have', 'are'],
@@ -523,7 +523,7 @@ class TextAnalysisEngine:
     
     def _calculate_complexity_score(self, readability: ReadabilityMetrics, 
                                    style: StyleMetrics, 
-                                   pos_distribution: Dict[str, int]) -> float:
+                                   pos_distribution: dict[str, int]) -> float:
         """Calculate overall document complexity score"""
         score = 0
         total_weight = 0
@@ -594,7 +594,7 @@ class TextAnalysisEngine:
         else:
             return 0.9
     
-    def batch_analyze(self, documents: Dict[str, str]) -> Dict[str, LinguisticFeatures]:
+    def batch_analyze(self, documents: dict[str, str]) -> dict[str, LinguisticFeatures]:
         """Analyze multiple documents"""
         results = {}
         for doc_name, content in documents.items():
@@ -603,7 +603,7 @@ class TextAnalysisEngine:
         return results
     
     def compare_linguistic_features(self, features_a: LinguisticFeatures, 
-                                   features_b: LinguisticFeatures) -> Dict:
+                                   features_b: LinguisticFeatures) -> dict:
         """Compare linguistic features between two documents"""
         comparison = {
             'similarity_scores': {},

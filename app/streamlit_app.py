@@ -255,9 +255,9 @@ class DocumentCategory:
     description: str
     parent_id: Optional[str] = None
     color: str = '#808080'
-    tags: List[str] = None
+    tags: list[str] = None
     created_at: datetime = None
-    metadata: Dict = None
+    metadata: dict = None
     
     def __post_init__(self):
         if self.tags is None:
@@ -267,7 +267,7 @@ class DocumentCategory:
         if self.created_at is None:
             self.created_at = datetime.now()
     
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             **asdict(self),
             'created_at': self.created_at.isoformat()
@@ -283,7 +283,7 @@ class TagAssignment:
     assigned_by: str
     is_auto: bool = False
     
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             **asdict(self),
             'assigned_at': self.assigned_at.isoformat()
@@ -312,7 +312,7 @@ class IntelligentTagGenerator:
         
         self.tag_cache = {}
     
-    def generate_tags(self, content: str, max_tags: int = 10) -> List[Tuple[str, float]]:
+    def generate_tags(self, content: str, max_tags: int = 10) -> list[tuple[str, float]]:
         """Generate tags from document content"""
         if not content:
             return []
@@ -336,7 +336,7 @@ class IntelligentTagGenerator:
         
         return tags
     
-    def _extract_keywords(self, content: str) -> Dict[str, float]:
+    def _extract_keywords(self, content: str) -> dict[str, float]:
         """Extract keywords from content with TF-IDF scoring"""
         # Simple keyword extraction
         words = re.findall(r'\b[a-zA-Z]{3,}\b', content.lower())
@@ -359,7 +359,7 @@ class IntelligentTagGenerator:
         
         return scores
     
-    def _score_tags(self, keywords: Dict[str, float], content: str) -> List[Tuple[str, float]]:
+    def _score_tags(self, keywords: dict[str, float], content: str) -> list[tuple[str, float]]:
         """Score potential tags"""
         tags = []
         
@@ -381,7 +381,7 @@ class IntelligentTagGenerator:
         
         return list(unique_tags.items())
     
-    def _detect_topics(self, content: str) -> List[Tuple[str, float]]:
+    def _detect_topics(self, content: str) -> list[tuple[str, float]]:
         """Detect topics in content using keyword matching"""
         content_lower = content.lower()
         topic_scores = []
@@ -400,7 +400,7 @@ class IntelligentTagGenerator:
         
         return topic_scores
     
-    def generate_categories(self, content: str) -> Tuple[str, float]:
+    def generate_categories(self, content: str) -> tuple[str, float]:
         """Generate category prediction for document"""
         if not content:
             return 'Uncategorized', 0.0
@@ -426,9 +426,9 @@ class TagManager:
     """Manages document tags and categories"""
     
     def __init__(self):
-        self.tags: Dict[str, DocumentTag] = {}
-        self.categories: Dict[str, DocumentCategory] = {}
-        self.assignments: List[TagAssignment] = []
+        self.tags: dict[str, DocumentTag] = {}
+        self.categories: dict[str, DocumentCategory] = {}
+        self.assignments: list[TagAssignment] = []
         self.tag_counter = Counter()
         self.tag_usage = defaultdict(int)
         
@@ -488,7 +488,7 @@ class TagManager:
                 return tag
         return None
     
-    def get_all_tags(self) -> List[DocumentTag]:
+    def get_all_tags(self) -> list[DocumentTag]:
         """Get all tags"""
         return list(self.tags.values())
     
@@ -527,12 +527,12 @@ class TagManager:
             self.tag_counter[tag_name] -= 1
         return True
     
-    def get_document_tags(self, document_name: str) -> List[DocumentTag]:
+    def get_document_tags(self, document_name: str) -> list[DocumentTag]:
         """Get all tags for a document"""
         doc_assignments = [a for a in self.assignments if a.document_name == document_name]
         return [self.tags[a.tag_id] for a in doc_assignments if a.tag_id in self.tags]
     
-    def get_documents_by_tag(self, tag_name: str) -> List[str]:
+    def get_documents_by_tag(self, tag_name: str) -> list[str]:
         """Get all documents with a specific tag"""
         tag = self.get_tag_by_name(tag_name)
         if not tag:
@@ -557,11 +557,11 @@ class TagManager:
         """Get a category by ID"""
         return self.categories.get(category_id)
     
-    def get_all_categories(self) -> List[DocumentCategory]:
+    def get_all_categories(self) -> list[DocumentCategory]:
         """Get all categories"""
         return list(self.categories.values())
     
-    def get_tag_stats(self) -> Dict:
+    def get_tag_stats(self) -> dict:
         """Get tag statistics"""
         return {
             'total_tags': len(self.tags),
@@ -593,7 +593,7 @@ class AutoCategorizer:
         self.tag_generator = tag_generator
         self.categorization_history = []
     def categorize_document(self, document_name: str, content: str,
-                            user_id: str = 'system') -> Dict:
+                            user_id: str = 'system') -> dict:
         """Automatically categorize a document"""
         if not content:
             return {'status': 'failed', 'reason': 'No content'}
@@ -627,15 +627,15 @@ class AutoCategorizer:
             if cat.name.lower() == category_name.lower():
                 return cat.id
         return None
-    def batch_categorize(self, documents: Dict[str, str],
-                         user_id: str = 'system') -> List[Dict]:
+    def batch_categorize(self, documents: dict[str, str],
+                         user_id: str = 'system') -> list[dict]:
         """Categorize multiple documents"""
         results = []
         for doc_name, content in documents.items():
             result = self.categorize_document(doc_name, content, user_id)
             results.append(result)
         return results
-    def get_categorization_stats(self) -> Dict:
+    def get_categorization_stats(self) -> dict:
         """Get categorization statistics"""
         if not self.categorization_history:
             return {'total': 0}
@@ -653,8 +653,8 @@ class TagSuggestionEngine:
         self.tag_manager = tag_manager
         self.tag_generator = tag_generator
         self.suggestion_history = []
-    def suggest_tags(self, content: str, existing_tags: List[str] = None,
-                     max_suggestions: int = 5) -> List[Tuple[str, float]]:
+    def suggest_tags(self, content: str, existing_tags: list[str] = None,
+                     max_suggestions: int = 5) -> list[tuple[str, float]]:
         """Suggest tags for a document"""
         suggestions = []
         # Generate tags from content
@@ -678,7 +678,7 @@ class TagSuggestionEngine:
             'suggestions': suggestions
         })
         return suggestions[:max_suggestions]
-    def get_suggestion_stats(self) -> Dict:
+    def get_suggestion_stats(self) -> dict:
         """Get suggestion statistics"""
         return {
             'total_suggestions': len(self.suggestion_history),
@@ -2796,48 +2796,6 @@ def update_global_activity():
                     except Exception as exc:
                         drive_progress_bar.empty()
                         st.error(f"⚠️ Google Drive import failed: {exc}")
-    # ... [existing imports] ...
-
-# Issue #2926: Import file validator to prevent RAM spikes and malicious uploads
-from src.utils.file_validator import validate_upload
-
-# ... [existing code] ...
-
-        progress_bar = st.progress(0, text="Preparing files…")
-        raw_texts = {}
-        failed_documents = []
-        
-        for i, (name, uploaded_file) in enumerate(uploaded_files.items()):
-            try:
-                # Read the file bytes
-                file_bytes = uploaded_file.getvalue()
-                
-                # Issue #2926: Validate file size, extension, and magic bytes
-                # This provides immediate feedback and prevents passing massive
-                # or malicious files to the expensive extraction pipeline.
-                validation_result = validate_upload(file_bytes, name)
-                
-                if not validation_result.is_valid:
-                    logger.warning(
-                        "File validation failed for %s: %s", 
-                        name, validation_result.error_message
-                    )
-                    failed_documents.append({
-                        "filename": name,
-                        "error": validation_result.error_message,
-                        "type": validation_result.error_code
-                    })
-                    st.error(f"❌ **{name}**: {validation_result.error_message}")
-                    continue  # Skip to the next file
-                
-                # Proceed with text extraction only if validation passed
-                extracted = extract_text(
-                    _io.BytesIO(file_bytes), name, ocr_language=ocr_language, ocr_dpi=ocr_dpi
-                )
-                raw_texts[name] = extracted
-                
-            except EmptyDocumentError as ede:
-                # ... [existing empty document handling] ...
     if uploaded_files:
         for uploaded_file in uploaded_files:
             original_name = uploaded_file.name
@@ -2902,7 +2860,7 @@ from src.utils.file_validator import validate_upload
         for doc_name, chunks in chunked_docs.items():
             translated_chunked_docs[doc_name] = []
             for chunk in chunks:
-                prepared = prepare_text_for_embedding(chunk)
+                prepared = prepare_text_for_embedding(chunk.text if hasattr(chunk, "text") else chunk)
                 translated_chunked_docs[doc_name].append(prepared["embedding_text"])
         embeddings = embed_documents(translated_chunked_docs)
         sim_df = document_similarity_matrix(embeddings)
@@ -3190,15 +3148,45 @@ from src.utils.file_validator import validate_upload
             f"Filtering incidents from **{start_date.strftime('%Y-%m-%d')}** to "
             f"**{end_date.strftime('%Y-%m-%d')}**"
         )
-        if not flags:
-            st.info("No plagiarism incidents detected above configured threshold.")
+
+        # Filter by Tags (Issue #3167)
+        available_tags = []
+        try:
+            from src.db.corpus_db import get_all_tags, get_document_tags
+            available_tags = get_all_tags()
+        except Exception as e:
+            logger.error(f"Failed to load available tags: {e}")
+
+        selected_tags = st.multiselect(
+            "Filter by Tags",
+            options=available_tags,
+            key="incident_tag_filter",
+            help="Filter incident datasets by document tags (e.g., midterm, final_exam)",
+        )
+
+        filtered_flags = flags
+        if selected_tags and flags:
+            filtered_flags = []
+            for flag in flags:
+                doc_a = flag.get("doc_a", "")
+                doc_b = flag.get("doc_b", "")
+                tags_a = set(get_document_tags(doc_a).split(",")) if doc_a else set()
+                tags_b = set(get_document_tags(doc_b).split(",")) if doc_b else set()
+                all_doc_tags = {t.strip() for t in (tags_a | tags_b) if t.strip()}
+                if any(tag in all_doc_tags for tag in selected_tags):
+                    filtered_flags.append(flag)
+
+        st.caption(f"Total matching incidents: **{len(filtered_flags)}**")
+
+        if not filtered_flags:
+            st.info("No plagiarism incidents detected matching the selected filters.")
         elif render_warning_controls is not None:
             if "warning_page" not in st.session_state:
                 st.session_state.warning_page = reset_warning_page()
             def _set_warning_page(page: int) -> None:
                 st.session_state.warning_page = page
             render_warning_controls(
-                flags,
+                filtered_flags,
                 threshold=threshold,
                 ai_probabilities=ai_probabilities,
                 set_warning_page=_set_warning_page,
@@ -3455,8 +3443,8 @@ from src.utils.file_validator import validate_upload
                             current_theme = get_theme_name()
                             # Compute alignment using DP on sentence embeddings
                             alignment_map = align_semantic_sequences(
-                                chunks_a=chunks_a,
-                                chunks_b=chunks_b,
+                                chunks_a=[chunk.text for chunk in chunks_a],
+                                chunks_b=[chunk.text for chunk in chunks_b],
                                 embeddings_a=emb_a,
                                 embeddings_b=emb_b,
                             )
@@ -3528,6 +3516,22 @@ from src.utils.file_validator import validate_upload
     with tab_analytics:
         update_page_title("Analytics")
         st.subheader("📊 Analytics Dashboard")
+
+        # Filter by Tags (Issue #3167)
+        available_tags = []
+        try:
+            from src.db.corpus_db import get_all_tags
+            available_tags = get_all_tags()
+        except Exception as e:
+            logger.error(f"Failed to load available tags: {e}")
+
+        selected_tags = st.multiselect(
+            "Filter by Tags",
+            options=available_tags,
+            default=[],
+            help="Filter incident datasets by document tag",
+        )
+
         # Get data for enhanced analytics
         history_data = []
         try:
@@ -3542,6 +3546,16 @@ from src.utils.file_validator import validate_upload
             )
         except Exception as e:
             logger.error(f"Failed to load history data: {e}")
+
+        if selected_tags and history_data:
+            history_data = [
+                h for h in history_data
+                if any(tag in (h.get("tags") or []) or tag in (h.get("document_tags") or "") for tag in selected_tags)
+            ]
+
+        matching_incident_count = sum(h.get("flagged_count", 0) for h in history_data)
+        st.caption(f"Total matching incidents: **{matching_incident_count}**")
+
         # Render enhanced analytics
         render_enhanced_analytics_tab(
             sim_matrix=active_sim_df if active_sim_df is not None else pd.DataFrame(),

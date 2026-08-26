@@ -17,6 +17,7 @@ from src.core.parsers.common import (
     PDFInput,
 )
 from src.core.parsers.pdf_parser import _read_pdf_bytes
+from src.exceptions import UnsupportedFormatError
 
 logger = logging.getLogger(__name__)
 
@@ -96,17 +97,22 @@ def extract_text_from_rtf(file: PDFInput) -> str:
     RTF inputs are capped at 10 MB to prevent oversized documents from being
     handed to striprtf and causing avoidable memory spikes.
     """
+    if not _rtf_content_within_limit(file):
+        logger.warning(
+            "[document_parser] Rejected RTF input larger than %d bytes",
+            RTF_MAX_FILE_SIZE_BYTES,
+        )
+        return ""
+
+    try:
+        from striprtf.striprtf import rtf_to_text
+    except ImportError as exc:
+        raise UnsupportedFormatError(
+            "striprtf is required to process RTF files. Please install striprtf to parse RTF documents."
+        ) from exc
+
     text = ""
     try:
-        if not _rtf_content_within_limit(file):
-            logger.warning(
-                "[document_parser] Rejected RTF input larger than %d bytes",
-                RTF_MAX_FILE_SIZE_BYTES,
-            )
-            return ""
-
-        from striprtf.striprtf import rtf_to_text
-
         if isinstance(file, str):
             with open(file, "r", encoding="utf-8", errors="ignore") as handle:
                 content = handle.read()
@@ -122,6 +128,8 @@ def extract_text_from_rtf(file: PDFInput) -> str:
                 else data
             )
         text = rtf_to_text(content)
+    except UnsupportedFormatError:
+        raise
     except Exception as exc:
         logger.error(f"[document_parser] Error reading RTF: {exc}")
     return text.strip()

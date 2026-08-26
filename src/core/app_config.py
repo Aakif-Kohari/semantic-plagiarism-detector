@@ -381,8 +381,21 @@ def get_rescan_interval_minutes() -> int:
         return 0
 
 
+def get_rescan_grace_period_minutes() -> int:
+    """Return how far back (in minutes) a scheduled rescan looks for
+    "recently added" documents to re-check against the rest of the corpus.
+
+    Defaults to 60 minutes. Configurable via
+    ``RESCAN_GRACE_PERIOD_MINUTES``.
+    """
+    try:
+        minutes = int(os.getenv("RESCAN_GRACE_PERIOD_MINUTES", "60"))
+        return max(1, minutes)
+    except ValueError:
+        return 60
+
+
 def __getattr__(name: str):
     if name == "VALID_ROLES":
         return get_valid_roles()
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
-

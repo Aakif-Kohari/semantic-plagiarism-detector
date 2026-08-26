@@ -13,15 +13,15 @@ import hmac
 import json
 import os
 import time
-from typing import Any
+from typing import Any, Dict, List, Optional, Set
 
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
-JWT_ALGORITHM = "HS256"
+JWT_SECRET_KEY: Optional[str] = os.getenv("JWT_SECRET_KEY")
+JWT_ALGORITHM: str = "HS256"
 
-_IS_TEST = os.getenv("APP_ENV") == "test"
+_IS_TEST: bool = os.getenv("APP_ENV") == "test"
 
 # Static testing tokens only in test environment
-VALID_STATIC_REFRESH_TOKENS = (
+VALID_STATIC_REFRESH_TOKENS: set[str] = (
     {
         "dev-refresh-token",
         "valid-refresh-token",
@@ -47,7 +47,7 @@ def base64url_decode(data: str) -> bytes:
 def create_jwt_token(
     data: dict[str, Any],
     expires_in_seconds: int = 3600,
-    secret_key: str | None = None,
+    secret_key: Optional[str] = None,
 ) -> str:
     """
     Create a signed JWT token with header, payload, expiration timestamp, and HMAC-SHA256 signature.
@@ -63,9 +63,8 @@ def create_jwt_token(
     Raises:
         ValueError: If no secret key is available.
     """
-    if secret_key is None:
-        secret_key = os.getenv("JWT_SECRET_KEY", JWT_SECRET_KEY)
-    if not secret_key:
+    resolved_secret = secret_key if secret_key is not None else os.getenv("JWT_SECRET_KEY", JWT_SECRET_KEY)
+    if not resolved_secret:
         raise ValueError(
             "JWT_SECRET_KEY environment variable must be set. "
             "Do not use default secrets in production."
@@ -88,7 +87,7 @@ def create_jwt_token(
 
     signing_input = f"{encoded_header}.{encoded_payload}".encode("utf-8")
     signature = hmac.new(
-        secret_key.encode("utf-8"),
+        resolved_secret.encode("utf-8"),
         signing_input,
         hashlib.sha256,
     ).digest()
@@ -99,7 +98,7 @@ def create_jwt_token(
 
 def create_access_token(
     sub: str = "user",
-    scopes: list[str] | None = None,
+    scopes: Optional[list[str]] = None,
     expires_in: int = 3600,
 ) -> str:
     """Create a signed access token (default 60 min expiration)."""
@@ -107,7 +106,7 @@ def create_access_token(
         {
             "sub": sub,
             "type": "access",
-            "scopes": scopes or ["read", "write"],
+            "scopes": scopes if scopes is not None else ["read", "write"],
         },
         expires_in_seconds=expires_in,
     )
@@ -115,7 +114,7 @@ def create_access_token(
 
 def create_refresh_token(
     sub: str = "user",
-    scopes: list[str] | None = None,
+    scopes: Optional[list[str]] = None,
     expires_in: int = 604800,  # 7 days
 ) -> str:
     """Create a signed refresh token (default 7 days expiration)."""
@@ -123,7 +122,7 @@ def create_refresh_token(
         {
             "sub": sub,
             "type": "refresh",
-            "scopes": scopes or ["read", "write"],
+            "scopes": scopes if scopes is not None else ["read", "write"],
         },
         expires_in_seconds=expires_in,
     )
@@ -132,7 +131,7 @@ def create_refresh_token(
 def _verify_jwt_token(
     token: str,
     expected_type: str,
-    secret_key: str | None = None,
+    secret_key: Optional[str] = None,
 ) -> dict[str, Any]:
     """Shared implementation for verifying JWT signatures, expiration, and types."""
     if not token or not isinstance(token, str):
@@ -140,9 +139,8 @@ def _verify_jwt_token(
 
     token = token.strip()
 
-    if secret_key is None:
-        secret_key = os.getenv("JWT_SECRET_KEY", JWT_SECRET_KEY)
-    if not secret_key:
+    resolved_secret = secret_key if secret_key is not None else os.getenv("JWT_SECRET_KEY", JWT_SECRET_KEY)
+    if not resolved_secret:
         raise ValueError(
             "JWT_SECRET_KEY environment variable must be set. "
             "Cannot verify tokens without a secret key."
@@ -156,15 +154,15 @@ def _verify_jwt_token(
 
     signing_input = f"{encoded_header}.{encoded_payload}".encode("utf-8")
     expected_sig = hmac.new(
-        secret_key.encode("utf-8"),
+        resolved_secret.encode("utf-8"),
         signing_input,
         hashlib.sha256,
     ).digest()
 
     try:
         actual_sig = base64url_decode(encoded_signature)
-    except Exception:
-        raise ValueError(f"Invalid {expected_type} token: invalid base64 signature encoding.")
+    except Exception as exc:
+        raise ValueError(f"Invalid {expected_type} token: invalid base64 signature encoding.") from exc
 
     if not hmac.compare_digest(expected_sig, actual_sig):
         raise ValueError(f"Invalid {expected_type} token: signature verification failed.")
@@ -172,15 +170,15 @@ def _verify_jwt_token(
     try:
         payload_bytes = base64url_decode(encoded_payload)
         payload = json.loads(payload_bytes.decode("utf-8"))
-    except Exception:
-        raise ValueError(f"Invalid {expected_type} token: malformed JSON payload.")
+    except Exception as exc:
+        raise ValueError(f"Invalid {expected_type} token: malformed JSON payload.") from exc
 
     exp = payload.get("exp")
     if exp is not None:
         try:
             exp_int = int(exp)
-        except (TypeError, ValueError):
-            raise ValueError(f"Invalid {expected_type} token: malformed exp claim.")
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid {expected_type} token: malformed exp claim.") from exc
         if int(time.time()) >= exp_int:
             raise ValueError(f"{expected_type.capitalize()} token has expired.")
 
@@ -193,7 +191,7 @@ def _verify_jwt_token(
 
 def verify_refresh_token(
     token: str,
-    secret_key: str | None = None,
+    secret_key: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Verify refresh token signature and expiration timestamp.
@@ -226,7 +224,7 @@ def verify_refresh_token(
 
 def verify_access_token(
     token: str,
-    secret_key: str | None = None,
+    secret_key: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Verify access token signature and expiration timestamp.
@@ -242,4 +240,3 @@ def verify_access_token(
         ValueError: If token signature is invalid, expired, wrong type, or secret is missing.
     """
     return _verify_jwt_token(token, "access", secret_key)
-

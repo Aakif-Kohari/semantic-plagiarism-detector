@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-import logging
-import shutil
 import sqlite3
-from pathlib import Path
 
 from .common import column_exists, run_migrations, table_exists
 
-logger = logging.getLogger(__name__)
-CORPUS_SCHEMA_VERSION = 15
+CORPUS_SCHEMA_VERSION = 18
 
 
 def migration_001_create_base_schema(
@@ -310,9 +306,15 @@ def migration_015_pattern_recognition(
             status TEXT NOT NULL DEFAULT 'active'
         )
     """)
-    connection.execute("CREATE INDEX IF NOT EXISTS idx_patterns_type ON plagiarism_patterns(pattern_type)")
-    connection.execute("CREATE INDEX IF NOT EXISTS idx_patterns_status ON plagiarism_patterns(status)")
-    connection.execute("CREATE INDEX IF NOT EXISTS idx_patterns_severity ON plagiarism_patterns(severity)")
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_patterns_type ON plagiarism_patterns(pattern_type)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_patterns_status ON plagiarism_patterns(status)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_patterns_severity ON plagiarism_patterns(severity)"
+    )
 
     connection.execute("""
         CREATE TABLE IF NOT EXISTS pattern_evolution (
@@ -326,8 +328,12 @@ def migration_015_pattern_recognition(
             FOREIGN KEY (pattern_id) REFERENCES plagiarism_patterns(pattern_id) ON DELETE CASCADE
         )
     """)
-    connection.execute("CREATE INDEX IF NOT EXISTS idx_evolution_pattern ON pattern_evolution(pattern_id)")
-    connection.execute("CREATE INDEX IF NOT EXISTS idx_evolution_date ON pattern_evolution(snapshot_date)")
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_evolution_pattern ON pattern_evolution(pattern_id)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_evolution_date ON pattern_evolution(snapshot_date)"
+    )
 
     if not table_exists(connection, "document_risk_scores"):
         connection.execute("""
@@ -340,7 +346,9 @@ def migration_015_pattern_recognition(
                 scored_at TEXT NOT NULL
             )
         """)
-        connection.execute("CREATE INDEX IF NOT EXISTS idx_risk_level ON document_risk_scores(risk_level)")
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_risk_level ON document_risk_scores(risk_level)"
+        )
 
     connection.execute("""
         CREATE TABLE IF NOT EXISTS proactive_recommendations (
@@ -356,8 +364,55 @@ def migration_015_pattern_recognition(
             FOREIGN KEY (pattern_id) REFERENCES plagiarism_patterns(pattern_id) ON DELETE SET NULL
         )
     """)
-    connection.execute("CREATE INDEX IF NOT EXISTS idx_recommendations_status ON proactive_recommendations(status)")
-    connection.execute("CREATE INDEX IF NOT EXISTS idx_recommendations_priority ON proactive_recommendations(priority)")
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_recommendations_status ON proactive_recommendations(status)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_recommendations_priority ON proactive_recommendations(priority)"
+    )
+
+
+def migration_016_add_scheduler_runs(
+    connection: sqlite3.Connection,
+) -> None:
+    """Create the scheduler_runs table.
+
+    Tracks the last-completed run of background scheduled jobs (e.g. the
+    scheduled plagiarism rescan job) so a process restart does not lose track
+    of when a job last ran. Keyed by job_name.
+    """
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS scheduler_runs (
+            job_name           TEXT PRIMARY KEY,
+            last_run_at        TEXT NOT NULL,
+            documents_scanned  INTEGER NOT NULL DEFAULT 0,
+            new_incidents      INTEGER NOT NULL DEFAULT 0
+        )
+        """)
+
+
+def migration_017_add_incident_date_flagged_index(
+    connection: sqlite3.Connection,
+) -> None:
+    """Index plagiarism_incidents(date_flagged) for faster get_recent_incidents queries."""
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_incidents_date_flagged "
+        "ON plagiarism_incidents(date_flagged)"
+    )
+
+
+def migration_018_add_false_positives_audit_columns(
+    connection: sqlite3.Connection,
+) -> None:
+    """Add dismissed_by and dismissal_reason audit columns to false_positives table."""
+    if not column_exists(connection, "false_positives", "dismissed_by"):
+        connection.execute(
+            "ALTER TABLE false_positives ADD COLUMN dismissed_by TEXT DEFAULT 'admin'"
+        )
+    if not column_exists(connection, "false_positives", "dismissal_reason"):
+        connection.execute(
+            "ALTER TABLE false_positives ADD COLUMN dismissal_reason TEXT"
+        )
 
 
 CORPUS_MIGRATIONS = {
@@ -376,6 +431,9 @@ CORPUS_MIGRATIONS = {
     13: migration_013_add_incident_archive_table,
     14: migration_013_add_incident_severity_idx,
     15: migration_015_pattern_recognition,
+    16: migration_016_add_scheduler_runs,
+    17: migration_017_add_incident_date_flagged_index,
+    18: migration_018_add_false_positives_audit_columns,
 }
 
 
@@ -384,7 +442,9 @@ def _drop_column_if_exists(
 ) -> None:
     if column_exists(connection, table_name, column_name):
         try:
-            connection.execute(f'ALTER TABLE "{table_name}" DROP COLUMN "{column_name}"')
+            connection.execute(
+                f'ALTER TABLE "{table_name}" DROP COLUMN "{column_name}"'
+            )
         except sqlite3.OperationalError:
             pass
 
@@ -415,7 +475,9 @@ def down_005_add_false_positives(connection: sqlite3.Connection) -> None:
 
 
 def down_006_add_incident_threshold_snapshot(connection: sqlite3.Connection) -> None:
-    _drop_column_if_exists(connection, "plagiarism_incidents", "threshold_at_time_of_flag")
+    _drop_column_if_exists(
+        connection, "plagiarism_incidents", "threshold_at_time_of_flag"
+    )
 
 
 def down_007_add_document_language(connection: sqlite3.Connection) -> None:
@@ -471,6 +533,22 @@ def down_015_pattern_recognition(connection: sqlite3.Connection) -> None:
     connection.execute("DROP TABLE IF EXISTS plagiarism_patterns")
 
 
+def down_016_add_scheduler_runs(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP TABLE IF EXISTS scheduler_runs")
+
+
+def down_017_add_incident_date_flagged_index(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP INDEX IF EXISTS idx_incidents_date_flagged")
+
+
+def down_018_add_false_positives_audit_columns(
+    connection: sqlite3.Connection,
+) -> None:
+    """Remove dismissed_by and dismissal_reason audit columns from false_positives table."""
+    _drop_column_if_exists(connection, "false_positives", "dismissed_by")
+    _drop_column_if_exists(connection, "false_positives", "dismissal_reason")
+
+
 CORPUS_DOWN_MIGRATIONS = {
     1: down_001_create_base_schema,
     2: down_002_add_document_metadata,
@@ -487,52 +565,19 @@ CORPUS_DOWN_MIGRATIONS = {
     13: down_013_add_incident_archive_table,
     14: down_014_add_incident_severity_idx,
     15: down_015_pattern_recognition,
+    16: down_016_add_scheduler_runs,
+    17: down_017_add_incident_date_flagged_index,
+    18: down_018_add_false_positives_audit_columns,
 }
-
-
-def _corpus_db_file_path(connection: sqlite3.Connection) -> Path | None:
-    """Return the on-disk path of the connection's "main" database.
-
-    Returns ``None`` for in-memory or temporary databases (no file to
-    back up).
-    """
-    for _, name, filename in connection.execute("PRAGMA database_list"):
-        if name == "main" and filename:
-            return Path(filename)
-    return None
 
 
 def migrate_corpus_database(
     connection: sqlite3.Connection,
 ) -> int:
-    """Upgrade corpus.db to the latest supported schema version.
-
-    SQLite does not fully support transactional DDL, so a mid-migration
-    failure can leave the database half-migrated. To protect against
-    this (issue #2929), the on-disk database file is copied to
-    ``corpus_pre_migrate.db.bak`` before any migration scripts run. If a
-    migration raises, the original file is restored from that backup.
-    """
+    """Upgrade corpus.db to the latest supported schema version."""
     connection.execute("PRAGMA foreign_keys = ON")
-
-    db_path = _corpus_db_file_path(connection)
-    backup_path = db_path.with_name("corpus_pre_migrate.db.bak") if db_path else None
-
-    if backup_path is not None:
-        shutil.copy2(db_path, backup_path)
-
-    try:
-        return run_migrations(
-            connection,
-            migrations=CORPUS_MIGRATIONS,
-            target_version=CORPUS_SCHEMA_VERSION,
-        )
-    except Exception:
-        if backup_path is not None and backup_path.exists():
-            logger.error(
-                "Migration failed; restoring corpus.db from backup %s.",
-                backup_path,
-            )
-            connection.close()
-            shutil.copy2(backup_path, db_path)
-        raise
+    return run_migrations(
+        connection,
+        migrations=CORPUS_MIGRATIONS,
+        target_version=CORPUS_SCHEMA_VERSION,
+    )

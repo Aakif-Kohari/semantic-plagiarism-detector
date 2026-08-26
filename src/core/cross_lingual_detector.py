@@ -78,19 +78,19 @@ class LanguageMatch:
     translation_used: bool = True
     confidence: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
 @dataclass
 class CrossLingualResult:
     """Result of cross-lingual plagiarism detection."""
-    documents: List[Dict[str, Any]] = field(default_factory=list)
-    matches: List[LanguageMatch] = field(default_factory=list)
-    language_distribution: Dict[str, int] = field(default_factory=dict)
+    documents: list[dict[str, Any]] = field(default_factory=list)
+    matches: list[LanguageMatch] = field(default_factory=list)
+    language_distribution: dict[str, int] = field(default_factory=dict)
     total_comparisons: int = 0
     processing_time: float = 0.0
-    summary: Dict[str, Any] = field(default_factory=dict)
+    summary: dict[str, Any] = field(default_factory=dict)
     source_text: str = ""
     target_text: str = ""
     source_lang: str = "en"
@@ -101,7 +101,7 @@ class CrossLingualResult:
     is_plagiarism: bool = False
     confidence: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "documents": self.documents,
             "matches": [m.to_dict() if isinstance(m, LanguageMatch) else m for m in self.matches],
@@ -117,7 +117,7 @@ class CrossLingualResult:
 @dataclass
 class CrossLingualConfig:
     """Configuration for cross-lingual detection."""
-    enabled_languages: List[str] = field(default_factory=lambda: ["en", "es", "fr", "de"])
+    enabled_languages: list[str] = field(default_factory=lambda: ["en", "es", "fr", "de"])
     similarity_threshold: float = 0.65
     use_translation_bridge: bool = True
     translation_service: str = "internal"
@@ -135,8 +135,8 @@ class TranslationCache:
     """Cache for translations."""
     def __init__(self, max_size: int = 1000):
         self.max_size = max_size
-        self._cache: Dict[str, str] = {}
-        self._timestamps: Dict[str, float] = {}
+        self._cache: dict[str, str] = {}
+        self._timestamps: dict[str, float] = {}
         self._hits = 0
         self._misses = 0
 
@@ -161,7 +161,7 @@ class TranslationCache:
 class CrossLingualDetector:
     """Detects plagiarism across documents in different languages."""
 
-    def __init__(self, config: Optional[Union[CrossLingualConfig, str]] = None, use_cache: bool = True):
+    def __init__(self, config: Optional[CrossLingualConfig | str] = None, use_cache: bool = True):
         if isinstance(config, str):
             self.config = CrossLingualConfig()
             self.target_lang = config
@@ -173,7 +173,7 @@ class CrossLingualDetector:
             self.target_lang = "en"
 
         self._model = None
-        self._cache: Dict[str, np.ndarray] = {}
+        self._cache: dict[str, np.ndarray] = {}
         self.cache = TranslationCache() if use_cache else None
         logger.info("CrossLingualDetector initialized")
 
@@ -222,8 +222,8 @@ class CrossLingualDetector:
 
     def compare_across_languages(
         self,
-        source_embeddings: List[np.ndarray],
-        target_embeddings: List[np.ndarray]
+        source_embeddings: list[np.ndarray],
+        target_embeddings: list[np.ndarray]
     ) -> np.ndarray:
         if not source_embeddings or not target_embeddings:
             return np.array([])
@@ -235,7 +235,7 @@ class CrossLingualDetector:
 
     def detect_cross_lingual_plagiarism(
         self,
-        documents: Dict[str, Tuple[str, List[str]]],
+        documents: dict[str, tuple[str, list[str]]],
         threshold: Optional[float] = None
     ) -> CrossLingualResult:
         start_time = datetime.now()
@@ -243,7 +243,7 @@ class CrossLingualDetector:
 
         doc_chunks = {name: chunks for name, (_, chunks) in documents.items()}
         embeddings = {
-            doc_name: [self.embed_text(chunk) for chunk in chunks[:self.config.max_chunks_per_doc]]
+            doc_name: [self.embed_text(chunk.text if hasattr(chunk, "text") else chunk) for chunk in chunks[:self.config.max_chunks_per_doc]]
             for doc_name, chunks in doc_chunks.items()
         }
 

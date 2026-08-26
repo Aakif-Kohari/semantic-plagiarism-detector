@@ -48,6 +48,7 @@ __all__ = [
     "SSRF_WEBHOOK_URL_EMPTY",
     "SSRF_INSECURE_SCHEME",
     "SSRF_MISSING_HOSTNAME",
+    "SSRF_INVALID_HOSTNAME",
     "SSRF_INVALID_IP_FORMAT",
     "SSRF_BLOCKED_PRIVATE_SUBNET",
     "SSRF_BLOCKED_LOOPBACK",
@@ -92,7 +93,12 @@ __all__ = [
     "CLI_INVALID_COMMAND",
     "EXPORT_WRITE_FAILED",
     "EXPORT_GENERATION_IO_FAILED",
-]# Authentication Errors
+    "EVENT_MALFORMED_PAYLOAD",
+    "EVENT_MISSING_FIELD",
+    "EVENT_UNKNOWN_TYPE",
+    "EventSchemaError",
+]
+# Authentication Errors
 AUTH_USERNAME_EMPTY = "Username cannot be empty."
 AUTH_PASSWORD_TOO_SHORT = "Password must be at least 6 characters long."
 AUTH_INVALID_ROLE = "Role must be one of: {roles}"
@@ -165,6 +171,9 @@ INCIDENT_UPDATE_STATUS_FAILED = "Failed to update review status: {error}"
 SSRF_WEBHOOK_URL_EMPTY = "Webhook URL cannot be empty."
 SSRF_INSECURE_SCHEME = "Insecure scheme '{scheme}'. Webhooks must use 'https'."
 SSRF_MISSING_HOSTNAME = "Invalid URL: missing hostname."
+SSRF_INVALID_HOSTNAME = (
+    "Invalid URL: hostname cannot be encoded as an internationalised domain name."
+)
 SSRF_INVALID_IP_FORMAT = "Resolved invalid IP address format: {error}"
 SSRF_BLOCKED_PRIVATE_SUBNET = "Blocked private IPv4 subnet IP: {ip} ({subnet})"
 SSRF_BLOCKED_LOOPBACK = "Blocked loopback IP: {ip}"
@@ -177,6 +186,9 @@ SSRF_DNS_NO_ADDRESSES = "No addresses found for hostname '{hostname}'"
 SSRF_DNS_RESOLUTION_FAILED = "DNS resolution failed for hostname '{hostname}': {error}"
 SSRF_DOMAIN_NOT_ALLOWED = (
     "Webhook domain '{hostname}' is not in ALLOWED_WEBHOOK_DOMAINS."
+)
+SSRF_PORT_NOT_ALLOWED = (
+    "Unauthorized port {port} in webhook URL. Allowed ports: {allowed_ports}."
 )
 SSRF_MAX_REDIRECTS_EXCEEDED = "Maximum HTTP redirect depth exceeded"
 SSRF_CIRCULAR_REDIRECT_LOOP = "Circular HTTP redirect loop detected"
@@ -229,7 +241,8 @@ CLI_THRESHOLD_INVALID = "Error: Threshold must be a float between 0.0 and 1.0.\n
 CLI_INVALID_COMMAND = "Error: Invalid command '{command}'.\n"
 
 
-EXPORT_WRITE_FAILED = (    "Unable to write the {format_name} export to '{destination}'. "
+EXPORT_WRITE_FAILED = (
+    "Unable to write the {format_name} export to '{destination}'. "
     "Check the destination permissions and available disk space, then try again."
 )
 
@@ -262,3 +275,15 @@ class EmptyDocumentError(ValueError):
 
     def __str__(self) -> str:
         return self.message
+
+
+# Event / Webhook Errors
+EVENT_MALFORMED_PAYLOAD = "Malformed event payload: {error}"
+EVENT_MISSING_FIELD = "Missing required event field: {field}"
+EVENT_UNKNOWN_TYPE = "Unknown webhook event type: {event_type}"
+
+
+class EventSchemaError(ValueError):
+    """Raised when a webhook event payload violates the schema definition."""
+
+    pass

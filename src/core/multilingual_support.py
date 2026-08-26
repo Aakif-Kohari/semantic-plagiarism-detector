@@ -80,7 +80,7 @@ class MultilingualPreprocessor:
     def __init__(self):
         self.script_detector = ScriptDetector()
         self.normalizer = get_script_normalizer()
-        self._stopword_cache: Dict[str, Set[str]] = {}
+        self._stopword_cache: dict[str, set[str]] = {}
     
     def preprocess(self, text: str, remove_stopwords: bool = True) -> str:
         """
@@ -106,7 +106,7 @@ class MultilingualPreprocessor:
         
         return normalized
     
-    def get_stopwords(self, script: str) -> Set[str]:
+    def get_stopwords(self, script: str) -> set[str]:
         """Get stopwords for a specific script/language."""
         if script in self._stopword_cache:
             return self._stopword_cache[script]
@@ -118,7 +118,7 @@ class MultilingualPreprocessor:
         self._stopword_cache[script] = stopwords
         return stopwords
     
-    def add_stopwords(self, script: str, words: List[str]) -> None:
+    def add_stopwords(self, script: str, words: list[str]) -> None:
         """Add custom stopwords for a script."""
         if script not in LANGUAGE_STOPWORDS:
             LANGUAGE_STOPWORDS[script] = set()
@@ -130,14 +130,14 @@ class MultilingualPreprocessor:
         """Detect the primary language/script of text."""
         return self.script_detector.detect(text)
     
-    def normalize_batch(self, texts: Dict[str, str]) -> Dict[str, str]:
+    def normalize_batch(self, texts: dict[str, str]) -> dict[str, str]:
         """Normalize a batch of texts."""
         results = {}
         for key, text in texts.items():
             results[key] = self.preprocess(text)
         return results
     
-    def get_language_stats(self, texts: Dict[str, str]) -> Dict[str, int]:
+    def get_language_stats(self, texts: dict[str, str]) -> dict[str, int]:
         """Get language statistics for a collection of texts."""
         stats = defaultdict(int)
         for text in texts.values():
@@ -145,7 +145,7 @@ class MultilingualPreprocessor:
             stats[script] += 1
         return dict(stats)
     
-    def is_multilingual_corpus(self, texts: Dict[str, str]) -> bool:
+    def is_multilingual_corpus(self, texts: dict[str, str]) -> bool:
         """Check if a corpus contains multiple languages."""
         scripts = set()
         for text in texts.values():
@@ -154,7 +154,7 @@ class MultilingualPreprocessor:
                 scripts.add(script)
         return len(scripts) > 1
     
-    def get_script_percentage(self, texts: Dict[str, str]) -> Dict[str, float]:
+    def get_script_percentage(self, texts: dict[str, str]) -> dict[str, float]:
         """Get percentage of each script in a corpus."""
         stats = self.get_language_stats(texts)
         total = sum(stats.values())
@@ -171,7 +171,7 @@ def compare_multilingual_texts(
     text_a: str,
     text_b: str,
     preprocessor: Optional[MultilingualPreprocessor] = None,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     Compare two texts with multilingual support.
     

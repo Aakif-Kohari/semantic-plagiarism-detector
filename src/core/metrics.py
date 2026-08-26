@@ -10,10 +10,12 @@ from __future__ import annotations
 import functools
 import logging
 import os
+import threading
 import time
 from typing import Any, Callable
 
-from prometheus_client import Counter, Gauge, Histogram, generate_latest
+from prometheus_client import Counter, Gauge, Histogram
+from prometheus_client import generate_latest as _prometheus_generate_latest
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,18 @@ uploads_total = Counter(
     "uploads_total",
     "Total number of file upload batches processed",
     labelnames=["status"],
+)
+
+cache_hits_total = Counter(
+    "spd_cache_hits_total",
+    "Total cache hits",
+    labelnames=["cache_type"],
+)
+
+cache_misses_total = Counter(
+    "spd_cache_misses_total",
+    "Total cache misses",
+    labelnames=["cache_type"],
 )
 
 # ── Gauges ─────────────────────────────────────────────────────────────────────
@@ -60,6 +74,11 @@ active_users_gauge = Gauge(
     "Current number of active users",
 )
 
+active_threads_gauge = Gauge(
+    "spd_active_threads",
+    "Active Python threads",
+)
+
 # ── Histograms ─────────────────────────────────────────────────────────────────
 
 pipeline_duration_seconds = Histogram(
@@ -67,6 +86,12 @@ pipeline_duration_seconds = Histogram(
     "Duration of each pipeline stage in seconds",
     labelnames=["stage"],
     buckets=(0.01, 0.05, 0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0),
+)
+
+spd_scan_duration_seconds = Histogram(
+    "spd_scan_duration_seconds",
+    "Scan stage duration in seconds",
+    ["stage"],
 )
 
 query_response_time_seconds = Histogram(
@@ -107,6 +132,12 @@ def timed(stage: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
 
 
 # ── JSON-formatted output (for non-Prometheus setups) ──────────────────────────
+
+
+def generate_latest(*args: Any, **kwargs: Any) -> bytes:
+    """Prometheus text exposition; refresh thread count before each scrape."""
+    active_threads_gauge.set(threading.active_count())
+    return _prometheus_generate_latest(*args, **kwargs)
 
 
 def generate_metrics_json() -> dict[str, Any]:

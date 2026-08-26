@@ -44,7 +44,7 @@ class ThresholdConfig:
     homogeneous_bonus: float = 0.05  # Bonus for homogeneous datasets
     heterogeneous_penalty: float = 0.05  # Penalty for heterogeneous
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "plagiarism": self.plagiarism,
@@ -73,14 +73,14 @@ class OptimizationResult:
     document_type: str
     method: str
     confidence: float
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 # ============================================================================
 # DOCUMENT TYPE DETECTION
 # ============================================================================
 
-def detect_document_type(scores: List[float], texts: List[str]) -> str:
+def detect_document_type(scores: list[float], texts: list[str]) -> str:
     """
     Detect document type based on similarity distribution and content.
     
@@ -116,7 +116,7 @@ def detect_document_type(scores: List[float], texts: List[str]) -> str:
         return "mixed"
 
 
-def detect_document_homogeneity(scores: List[float]) -> float:
+def detect_document_homogeneity(scores: list[float]) -> float:
     """
     Calculate document homogeneity score.
     
@@ -137,7 +137,7 @@ def detect_document_homogeneity(scores: List[float]) -> float:
     return homogeneity
 
 
-def detect_document_complexity(texts: List[str]) -> float:
+def detect_document_complexity(texts: list[str]) -> float:
     """
     Estimate document complexity based on text length and vocabulary.
     
@@ -181,12 +181,12 @@ def detect_document_complexity(texts: List[str]) -> float:
 # ============================================================================
 
 def optimize_threshold_f1(
-    scores: List[float],
-    labels: List[int],
+    scores: list[float],
+    labels: list[int],
     min_threshold: float = 0.10,
     max_threshold: float = 0.99,
     step: float = 0.01
-) -> Tuple[float, float, float, float]:
+) -> tuple[float, float, float, float]:
     """
     Optimize threshold using F1 score.
     
@@ -232,12 +232,12 @@ def optimize_threshold_f1(
 
 
 def optimize_threshold_roc(
-    scores: List[float],
-    labels: List[int],
+    scores: list[float],
+    labels: list[int],
     min_threshold: float = 0.10,
     max_threshold: float = 0.99,
     step: float = 0.01
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """
     Optimize threshold using ROC curve (Youden's J statistic).
     
@@ -287,8 +287,8 @@ def optimize_threshold_roc(
 
 
 def optimize_threshold_adaptive(
-    scores: List[float],
-    labels: List[int],
+    scores: list[float],
+    labels: list[int],
     document_type: str = "mixed",
     precision_weight: float = 0.5,
     recall_weight: float = 0.5
@@ -367,14 +367,14 @@ class ThresholdOptimizer:
     
     def __init__(self, config: Optional[ThresholdConfig] = None):
         self.config = config or ThresholdConfig()
-        self._results: Dict[str, OptimizationResult] = {}
-        self._history: List[Dict[str, Any]] = []
+        self._results: dict[str, OptimizationResult] = {}
+        self._history: list[dict[str, Any]] = []
     
     def optimize_from_data(
         self,
-        scores: List[float],
-        labels: List[int],
-        texts: Optional[List[str]] = None,
+        scores: list[float],
+        labels: list[int],
+        texts: Optional[list[str]] = None,
         method: str = "adaptive"
     ) -> OptimizationResult:
         """
@@ -484,11 +484,11 @@ class ThresholdOptimizer:
             return self._results[document_type].optimal_threshold
         return self.config.plagiarism
     
-    def get_results(self) -> Dict[str, OptimizationResult]:
+    def get_results(self) -> dict[str, OptimizationResult]:
         """Get all optimization results."""
         return self._results
     
-    def get_history(self) -> List[Dict[str, Any]]:
+    def get_history(self) -> list[dict[str, Any]]:
         """Get optimization history."""
         return self._history
     

@@ -33,11 +33,11 @@ class PlagiarismPattern:
     frequency: int
     first_detected: datetime
     last_detected: datetime
-    documents: List[str]
-    features: Dict[str, Any]
-    evolution: List[Dict] = field(default_factory=list)
+    documents: list[str]
+    features: dict[str, Any]
+    evolution: list[dict] = field(default_factory=list)
     
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             **asdict(self),
             'first_detected': self.first_detected.isoformat(),
@@ -51,13 +51,13 @@ class RiskPrediction:
     document_name: str
     predicted_risk_score: float
     risk_level: str  # 'low', 'medium', 'high', 'critical'
-    contributing_factors: List[str]
+    contributing_factors: list[str]
     confidence: float
     prediction_date: datetime
-    recommendations: List[str]
-    metadata: Dict = field(default_factory=dict)
+    recommendations: list[str]
+    metadata: dict = field(default_factory=dict)
     
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             **asdict(self),
             'prediction_date': self.prediction_date.isoformat()
@@ -72,8 +72,8 @@ class PatternTrend:
     frequency_change: float  # percentage change
     new_documents: int
     risk_trend: str  # 'increasing', 'decreasing', 'stable'
-    forecast: Dict[str, Any]
-    metadata: Dict = field(default_factory=dict)
+    forecast: dict[str, Any]
+    metadata: dict = field(default_factory=dict)
 
 # ── Pattern Recognition Engine ────────────────────────────────────────────
 
@@ -81,10 +81,10 @@ class PatternRecognitionEngine:
     """Main pattern recognition and prediction engine"""
     
     def __init__(self):
-        self.patterns: Dict[str, PlagiarismPattern] = {}
-        self.predictions: Dict[str, RiskPrediction] = {}
-        self.historical_data: List[Dict] = []
-        self.trends: Dict[str, PatternTrend] = {}
+        self.patterns: dict[str, PlagiarismPattern] = {}
+        self.predictions: dict[str, RiskPrediction] = {}
+        self.historical_data: list[dict] = []
+        self.trends: dict[str, PatternTrend] = {}
         self.pattern_counts = defaultdict(int)
         self._init_pattern_types()
     
@@ -123,8 +123,8 @@ class PatternRecognitionEngine:
             }
         }
     
-    def detect_patterns(self, documents: Dict[str, str], 
-                        similarity_matrix: np.ndarray) -> List[PlagiarismPattern]:
+    def detect_patterns(self, documents: dict[str, str], 
+                        similarity_matrix: np.ndarray) -> list[PlagiarismPattern]:
         """Detect patterns in document collection"""
         detected_patterns = []
         
@@ -158,8 +158,8 @@ class PatternRecognitionEngine:
         
         return detected_patterns
     
-    def _extract_features(self, documents: Dict[str, str], 
-                         similarity_matrix: np.ndarray) -> Dict:
+    def _extract_features(self, documents: dict[str, str], 
+                         similarity_matrix: np.ndarray) -> dict:
         """Extract features for pattern detection"""
         features = {
             'word_counts': {},
@@ -202,8 +202,8 @@ class PatternRecognitionEngine:
         
         return features
     
-    def _detect_copy_paste(self, documents: Dict[str, str], 
-                          similarity_matrix: np.ndarray) -> List[PlagiarismPattern]:
+    def _detect_copy_paste(self, documents: dict[str, str], 
+                          similarity_matrix: np.ndarray) -> list[PlagiarismPattern]:
         """Detect copy-paste patterns"""
         patterns = []
         doc_names = list(documents.keys())
@@ -235,7 +235,7 @@ class PatternRecognitionEngine:
         
         return patterns
     
-    def _detect_structural(self, documents: Dict[str, str]) -> List[PlagiarismPattern]:
+    def _detect_structural(self, documents: dict[str, str]) -> list[PlagiarismPattern]:
         """Detect structural patterns"""
         patterns = []
         
@@ -296,7 +296,7 @@ class PatternRecognitionEngine:
         
         return patterns
     
-    def _detect_citation(self, documents: Dict[str, str]) -> List[PlagiarismPattern]:
+    def _detect_citation(self, documents: dict[str, str]) -> list[PlagiarismPattern]:
         """Detect citation patterns"""
         patterns = []
         
@@ -350,8 +350,8 @@ class PatternRecognitionEngine:
         
         return patterns
     
-    def _detect_hybrid(self, documents: Dict[str, str], 
-                      similarity_matrix: np.ndarray) -> List[PlagiarismPattern]:
+    def _detect_hybrid(self, documents: dict[str, str], 
+                      similarity_matrix: np.ndarray) -> list[PlagiarismPattern]:
         """Detect hybrid patterns combining multiple techniques"""
         patterns = []
         
@@ -425,7 +425,7 @@ class PredictionEngine:
         self.scaler = StandardScaler()
         self.historical_data = []
         
-    def train_model(self, training_data: List[Dict]) -> bool:
+    def train_model(self, training_data: list[dict]) -> bool:
         """Train prediction model on historical data"""
         if len(training_data) < 10:
             return False
@@ -466,7 +466,7 @@ class PredictionEngine:
             return False
     
     def predict_risk(self, document_name: str, document_content: str,
-                    similarity_scores: List[float]) -> RiskPrediction:
+                    similarity_scores: list[float]) -> RiskPrediction:
         """Predict risk for a single document"""
         # Extract features
         words = document_content.split()
@@ -515,7 +515,7 @@ class PredictionEngine:
         self.pattern_engine.predictions[prediction_id] = risk_prediction
         return risk_prediction
     
-    def _heuristic_risk_score(self, features: List[float]) -> float:
+    def _heuristic_risk_score(self, features: list[float]) -> float:
         """Calculate risk score using heuristic rules"""
         similarity_score, doc_length, word_count, unique_ratio, complexity, pattern_count, avg_sim, max_sim = features
         
@@ -549,7 +549,7 @@ class PredictionEngine:
         else:
             return 'low'
     
-    def _get_contributing_factors(self, features: List[float]) -> List[str]:
+    def _get_contributing_factors(self, features: list[float]) -> list[str]:
         """Identify contributing risk factors"""
         factors = []
         similarity_score, doc_length, word_count, unique_ratio, complexity, pattern_count, avg_sim, max_sim = features
@@ -567,8 +567,8 @@ class PredictionEngine:
         
         return factors
     
-    def _generate_recommendations(self, features: List[float], 
-                                  risk_level: str) -> List[str]:
+    def _generate_recommendations(self, features: list[float], 
+                                  risk_level: str) -> list[str]:
         """Generate recommendations based on risk level"""
         recommendations = []
         
@@ -598,10 +598,10 @@ class PatternEvolutionTracker:
     
     def __init__(self, pattern_engine: PatternRecognitionEngine):
         self.pattern_engine = pattern_engine
-        self.evolution_data: Dict[str, List[Dict]] = defaultdict(list)
-        self.trends: Dict[str, PatternTrend] = {}
+        self.evolution_data: dict[str, list[dict]] = defaultdict(list)
+        self.trends: dict[str, PatternTrend] = {}
         
-    def track_evolution(self, pattern_id: str, new_data: Dict):
+    def track_evolution(self, pattern_id: str, new_data: dict):
         """Track evolution of a pattern"""
         self.evolution_data[pattern_id].append({
             'timestamp': datetime.now(),
@@ -648,7 +648,7 @@ class PatternEvolutionTracker:
             
             self.trends[pattern_id] = trend
     
-    def _generate_forecast(self, history: List[Dict]) -> Dict:
+    def _generate_forecast(self, history: list[dict]) -> dict:
         """Generate simple forecast"""
         if len(history) < 3:
             return {'predictions': 'insufficient_data'}
@@ -667,7 +667,7 @@ class PatternEvolutionTracker:
         
         return {'predictions': 'no_data'}
     
-    def get_evolution_insights(self) -> Dict:
+    def get_evolution_insights(self) -> dict:
         """Get evolution insights"""
         insights = {
             'total_patterns': len(self.evolution_data),

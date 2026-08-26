@@ -28,12 +28,17 @@ import bcrypt
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError, VerifyMismatchError
 
+try:
+    import zxcvbn
+except ImportError:
+    zxcvbn = None
+
 from src.core.app_config import AUTH_DB_PATH
 from src.db.base import BaseRepository
 from src.db.common import with_sqlite_retry
 from src.db.connection import get_connection
 from src.db.migrations import migrate_auth_database, table_exists
-from src.db.security_audit import count_recent_failed_logins, log_security_event
+from src.db.security_audit import count_recent_failed_logins
 from src.exceptions import StaleDataException
 
 logger = logging.getLogger(__name__)
@@ -497,7 +502,20 @@ def _validate_password_complexity(password: str) -> str:
         raise ValueError(
             "Password must contain at least one special character (e.g. @$!%*?&)."
         )
+    if zxcvbn is not None:
+        result = zxcvbn.zxcvbn(password)
+        if result.get("score", 0) < 3:
+            feedback = result.get("feedback", {})
+            warning = feedback.get("warning")
+            if warning:
+                raise ValueError(f"Password is too weak or common: {warning}")
+            raise ValueError(
+                "Password is too weak or commonly used. Please choose a stronger password."
+            )
     return password
+
+
+validate_password_complexity = _validate_password_complexity
 
 
 def _validate_role(role: str) -> str:
@@ -576,7 +594,7 @@ def verify_user(
     try:
         with _connect() as conn:
             row = conn.execute(
-                "SELECT password, status, is_active, must_change_password FROM users WHERE username = ?",
+                "SELECT password, status, must_change_password FROM users WHERE username = ?",
                 (username,),
             ).fetchone()
 
@@ -585,8 +603,8 @@ def verify_user(
                 return {"authenticated": False, "must_change_password": False}
             return False
 
-        stored_hash, status, is_active, must_change_password = row
-        if status == "suspended" or not is_active:
+        stored_hash, status, must_change_password = row
+        if status == "suspended":
             if return_details:
                 return {"authenticated": False, "must_change_password": False}
             return False
@@ -810,7 +828,7 @@ def get_all_users(role: str | None = None) -> list:
         List of user dicts, optionally filtered by role.
     """
     try:
-        query = "SELECT id, username, role, is_active, version FROM users"
+        query = "SELECT id, username, role, status, version FROM users"
         params: tuple = ()
         if role is not None:
             query += " WHERE role = ?"
@@ -823,7 +841,8 @@ def get_all_users(role: str | None = None) -> list:
                     "id": r[0],
                     "username": r[1],
                     "role": r[2],
-                    "is_active": bool(r[3]),
+                    "status": r[3],
+                    "is_active": (r[3] == "active"),
                     "version": r[4],
                 }
                 for r in rows
@@ -1313,17 +1332,17 @@ def get_user_active_status(username: str) -> bool:
         username = _validate_username(username)
         with _connect() as conn:
             row = conn.execute(
-                "SELECT is_active FROM users WHERE username = ?",
+                "SELECT status FROM users WHERE username = ?",
                 (username,),
             ).fetchone()
-            return bool(row[0]) if row else False
+            return (row[0] == "active") if row else False
     except sqlite3.Error as e:
         raise sqlite3.Error(f"Failed to retrieve user active status: {e}") from e
 
 
 @with_sqlite_retry
 def set_user_status(username: str, status: str) -> None:
-    """Set a user's account status and synchronize the legacy is_active flag."""
+    """Set a user's account status."""
     try:
         username = _validate_username(username)
 
@@ -1334,11 +1353,10 @@ def set_user_status(username: str, status: str) -> None:
             conn.execute(
                 """
                 UPDATE users
-                SET status = ?,
-                    is_active = ?
+                SET status = ?
                 WHERE username = ?
                 """,
-                (status, 1 if status == "active" else 0, username),
+                (status, username),
             )
             conn.commit()
     except sqlite3.Error as e:
@@ -1356,12 +1374,10 @@ def set_user_active_status(username: str, is_active: bool) -> None:
             conn.execute(
                 """
                 UPDATE users
-                SET is_active = ?,
-                    status = ?
+                SET status = ?
                 WHERE username = ?
                 """,
                 (
-                    1 if is_active else 0,
                     "active" if is_active else "suspended",
                     username,
                 ),
@@ -1392,7 +1408,6 @@ def update_user_profile(
     """
     username = _validate_username(username)
     role = _validate_role(role)
-    is_active_val = 1 if is_active else 0
 
     if username == "admin" and not is_active:
         raise ValueError("The admin account cannot be suspended.")
@@ -1416,17 +1431,14 @@ def update_user_profile(
 
             cursor = conn.execute(
                 """
-               UPDATE users
-SET role = ?,
-    is_active = ?,
-    status = ?,
-    version = version + 1
-
+                UPDATE users
+                SET role = ?,
+                    status = ?,
+                    version = version + 1
                 WHERE username = ? AND version = ?
                 """,
                 (
                     role,
-                    is_active_val,
                     "active" if is_active else "suspended",
                     username,
                     expected_version,
@@ -1442,15 +1454,15 @@ SET role = ?,
 
 
 def is_user_active(username: str) -> bool:
-    """Return True if username exists and is_active is 1, or if username does not exist yet."""
+    """Return True if username exists and status is 'active', or if username does not exist yet."""
     try:
         username = _validate_username(username)
         with _connect() as conn:
             row = conn.execute(
-                "SELECT is_active FROM users WHERE username = ?",
+                "SELECT status FROM users WHERE username = ?",
                 (username,),
             ).fetchone()
-            return bool(row[0]) if row else True
+            return (row[0] == "active") if row else True
     except sqlite3.Error:
         return True
 
@@ -1464,19 +1476,9 @@ def get_user_count() -> int:
 
 
 def get_active_users_count() -> int:
-    """Return the total number of active users in the database.
-
-    Issue #1778 acceptance criteria specifies the query shape
-    ``SELECT COUNT(1) FROM users WHERE status = 'active'``. The actual
-    ``users`` table uses an ``is_active INTEGER NOT NULL DEFAULT 1``
-    column (added by migration ``migrate_auth_database``) rather than a
-    text ``status`` column, so the predicate is ``is_active = 1`` — this
-    is the schema-correct translation of "status = 'active'".
-    ``COUNT(1)`` is used in the SELECT clause to match the issue's
-    literal query shape.
-    """
+    """Return the total number of active users in the database."""
     with _connect() as conn:
-        cursor = conn.execute("SELECT COUNT(1) FROM users WHERE is_active = 1")
+        cursor = conn.execute("SELECT COUNT(1) FROM users WHERE status = 'active'")
         row = cursor.fetchone()
         return int(row[0]) if row else 0
 
@@ -1521,6 +1523,57 @@ def _get_token_signature(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+# ── Revoked Tokens In-Memory Cache (Issue #3018) ──────────────────────────────
+_REVOKED_TOKEN_CACHE_TTL: int = 60
+_REVOKED_TOKEN_CACHE_MAXSIZE: int = 10000
+
+try:
+    import cachetools
+
+    _revoked_token_cache: cachetools.TTLCache = cachetools.TTLCache(
+        maxsize=_REVOKED_TOKEN_CACHE_MAXSIZE, ttl=_REVOKED_TOKEN_CACHE_TTL
+    )
+except ImportError:
+    class _FallbackTTLCache(dict):
+        def __init__(self, maxsize: int = 10000, ttl: int = 60):
+            super().__init__()
+            self._ttl = ttl
+            self._times: dict[str, float] = {}
+
+        def __getitem__(self, key: str) -> bool:
+            if key in self._times and time.time() - self._times[key] > self._ttl:
+                del self[key]
+                del self._times[key]
+                raise KeyError(key)
+            return super().__getitem__(key)
+
+        def __contains__(self, key: object) -> bool:
+            k_str = str(key)
+            if k_str in self._times and time.time() - self._times[k_str] > self._ttl:
+                del self[k_str]
+                del self._times[k_str]
+                return False
+            return super().__contains__(key)
+
+        def __setitem__(self, key: str, value: bool) -> None:
+            self._times[key] = time.time()
+            super().__setitem__(key, value)
+
+        def clear(self) -> None:
+            self._times.clear()
+            super().clear()
+
+    _revoked_token_cache = _FallbackTTLCache(
+        maxsize=_REVOKED_TOKEN_CACHE_MAXSIZE, ttl=_REVOKED_TOKEN_CACHE_TTL
+    )
+
+
+def clear_revocation_cache() -> None:
+    """Clear the in-memory cache of revoked token check results (Issue #3018)."""
+    global _revoked_token_cache
+    _revoked_token_cache.clear()
+
+
 _last_revoked_cleanup = 0.0
 
 
@@ -1531,9 +1584,9 @@ def _cleanup_revoked_tokens() -> int:
         The number of rows deleted.
     """
     import base64
+    import hashlib
     import json
     import time
-    import hashlib
 
     deleted_count = 0
     try:
@@ -1582,6 +1635,7 @@ def _cleanup_revoked_tokens() -> int:
                 deleted_count = cur.rowcount
                 conn.commit()
                 if deleted_count > 0:
+                    clear_revocation_cache()
                     logger.info(f"Cleaned up {deleted_count} expired entries from revoked_tokens table.")
     except Exception as e:
         logger.error(f"Failed to cleanup revoked tokens: {e}")
@@ -1629,19 +1683,31 @@ def revoke_token(token: str, details: str | None = None) -> None:
                     (token, revoked_at, details),
                 )
             conn.commit()
+            # Update in-memory TTLCache immediately on revocation
+            _revoked_token_cache[token] = True
+            _revoked_token_cache[signature] = True
             log_security_event(
                 event_type="token_revocation",
                 username="system",
                 details=details or f"Token signature {signature[:12]}... revoked",
             )
-        _cleanup_revoked_tokens()
+        global _last_revoked_cleanup
+        now = time.time()
+        if now - _last_revoked_cleanup > 3600:
+            _last_revoked_cleanup = now
+            _cleanup_revoked_tokens()
     except sqlite3.Error as e:
         logger.error(f"Failed to revoke token: {e}")
         raise sqlite3.Error(f"Failed to revoke token: {e}") from e
 
 
+
 def is_token_revoked(token: str) -> bool:
-    """Return True if the token or its SHA-256 signature exists in revoked_tokens."""
+    """Return True if the token or its SHA-256 signature exists in revoked_tokens.
+
+    Caches query results in-memory using cachetools.TTLCache (60s TTL) to drastically
+    reduce database disk reads and latency on authenticated requests (Issue #3018).
+    """
     if not token or not isinstance(token, str):
         return False
 
@@ -1649,13 +1715,19 @@ def is_token_revoked(token: str) -> bool:
     if not token:
         return False
 
+    # 1. Check in-memory TTLCache first
+    if token in _revoked_token_cache:
+        return _revoked_token_cache[token]
+
+    signature = _get_token_signature(token)
+    if signature in _revoked_token_cache:
+        return _revoked_token_cache[signature]
+
     global _last_revoked_cleanup
     now = time.time()
     if now - _last_revoked_cleanup > 3600:
         _last_revoked_cleanup = now
         _cleanup_revoked_tokens()
-
-    signature = _get_token_signature(token)
 
     try:
         with _connect() as conn:
@@ -1663,16 +1735,22 @@ def is_token_revoked(token: str) -> bool:
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='revoked_tokens'"
             )
             if not cursor.fetchone():
+                _revoked_token_cache[token] = False
+                _revoked_token_cache[signature] = False
                 return False
 
             row = conn.execute(
                 "SELECT 1 FROM revoked_tokens WHERE token_signature = ? OR token_signature = ? LIMIT 1",
                 (signature, token),
             ).fetchone()
-            return bool(row)
+            revoked = bool(row)
+            _revoked_token_cache[token] = revoked
+            _revoked_token_cache[signature] = revoked
+            return revoked
     except sqlite3.Error as e:
         logger.error(f"Failed to check token revocation status: {e}")
         return False
+
 
 
 def get_upload_count(username: str | None = None) -> int:
@@ -1791,7 +1869,7 @@ class Permission(Enum):
 # ROLE-PERMISSION MAPPING
 # ============================================================================
 
-_ROLE_PERMISSIONS: Dict[UserRole, Set[Permission]] = {
+_ROLE_PERMISSIONS: dict[UserRole, set[Permission]] = {
     UserRole.USER: {
         Permission.VIEW_DASHBOARD,
         Permission.VIEW_PROFILE,
@@ -1867,7 +1945,7 @@ _ROLE_PERMISSIONS: Dict[UserRole, Set[Permission]] = {
 # ============================================================================
 
 
-def get_role_permissions(role: UserRole) -> Set[Permission]:
+def get_role_permissions(role: UserRole) -> set[Permission]:
     """Get all permissions for a role."""
     return _ROLE_PERMISSIONS.get(role, set())
 
@@ -1976,7 +2054,7 @@ def require_role(required_role: UserRole):
 # ============================================================================
 
 
-def get_user_role_enhanced(username: str) -> Dict[str, Any]:
+def get_user_role_enhanced(username: str) -> dict[str, Any]:
     """
     Get enhanced user role information.
 
@@ -2000,17 +2078,17 @@ def get_user_role_enhanced(username: str) -> Dict[str, Any]:
     }
 
 
-def get_roles_hierarchy() -> Dict[str, int]:
+def get_roles_hierarchy() -> dict[str, int]:
     """Get the hierarchy levels for all roles."""
     return {role.value: role.level() for role in UserRole}
 
 
-def get_available_permissions() -> List[str]:
+def get_available_permissions() -> list[str]:
     """Get list of all available permissions."""
     return [p.value for p in Permission]
 
 
-def get_roles_summary() -> Dict[str, Dict[str, Any]]:
+def get_roles_summary() -> dict[str, dict[str, Any]]:
     """Get summary of all roles and their permissions."""
     summary = {}
     for role in UserRole:
@@ -2023,7 +2101,7 @@ def get_roles_summary() -> Dict[str, Dict[str, Any]]:
     return summary
 
 
-def get_users_by_role(role: UserRole) -> List[str]:
+def get_users_by_role(role: UserRole) -> list[str]:
     """
     Get all users with a specific role.
 
@@ -2047,7 +2125,7 @@ def get_users_by_role(role: UserRole) -> List[str]:
         return []
 
 
-def get_users_by_permission(permission: Permission) -> List[str]:
+def get_users_by_permission(permission: Permission) -> list[str]:
     """
     Get all users who have a specific permission.
 
@@ -2117,47 +2195,6 @@ def promote_user(username: str, new_role: UserRole, admin_username: str) -> bool
         return False
 
 
-def demote_user(username: str, admin_username: str) -> bool:
-    """
-    Demote a user to the member role.
-
-    Args:
-        username: The user to demote
-        admin_username: The admin performing the demotion
-
-    Returns:
-        bool: True if demotion was successful
-    """
-    try:
-        username = _validate_username(username)
-        admin_role = UserRole.from_string(get_user_role(admin_username))
-
-        # Only admins can demote users
-        if not admin_role.has_permission(UserRole.ADMIN):
-            raise PermissionError("Only admins can demote users")
-
-        with _connect() as conn:
-            cursor = conn.execute(
-                "UPDATE users SET role = ? WHERE username = ?",
-                (UserRole.MEMBER.value, username),
-            )
-            affected = cursor.rowcount
-            conn.commit()
-
-            if affected > 0:
-                log_security_event(
-                    event_type="user_role_changed",
-                    username=username,
-                    details=f"Role changed to {UserRole.MEMBER.value} by {admin_username}",
-                )
-                return True
-            return False
-
-    except Exception as e:
-        logger.error(f"Failed to demote user {username}: {e}")
-        return False
-
-
 # ============================================================================
 # SSO SECURITY ENHANCEMENTS - Issue #2172
 # ============================================================================
@@ -2188,8 +2225,12 @@ def generate_secure_password(length: int = 32) -> str:
     password = "".join(secrets.choice(alphabet) for _ in range(length))
 
     # Ensure password meets complexity requirements
-    while not _validate_password_complexity(password):
-        password = "".join(secrets.choice(alphabet) for _ in range(length))
+    while True:
+        try:
+            _validate_password_complexity(password)
+            break
+        except ValueError:
+            password = "".join(secrets.choice(alphabet) for _ in range(length))
 
     return password
 
@@ -2321,7 +2362,7 @@ def generate_sso_state() -> str:
 
 def get_or_create_sso_user_enhanced(
     email: str, provider: str, provider_user_id: str, default_role: str = "teacher"
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Enhanced SSO user creation with security features.
 
@@ -2523,7 +2564,7 @@ def verify_sso_recovery_token(username: str, token: str) -> bool:
         return False
 
 
-def get_sso_user_info(username: str) -> Optional[Dict[str, Any]]:
+def get_sso_user_info(username: str) -> Optional[dict[str, Any]]:
     """
     Get SSO user information.
 
@@ -2538,7 +2579,7 @@ def get_sso_user_info(username: str) -> Optional[Dict[str, Any]]:
         with _connect() as conn:
             row = conn.execute(
                 """SELECT id, username, role, sso_provider, sso_provider_user_id, 
-                          created_at, updated_at, is_active
+                          created_at, updated_at, status
                    FROM users WHERE username = ? AND sso_provider IS NOT NULL""",
                 (username,),
             ).fetchone()
@@ -2554,7 +2595,8 @@ def get_sso_user_info(username: str) -> Optional[Dict[str, Any]]:
                 "sso_provider_user_id": row[4],
                 "created_at": row[5],
                 "updated_at": row[6],
-                "is_active": bool(row[7]),
+                "status": row[7],
+                "is_active": (row[7] == "active"),
                 "is_sso_user": True,
             }
     except Exception as e:
@@ -2562,7 +2604,7 @@ def get_sso_user_info(username: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def list_sso_users() -> List[Dict[str, Any]]:
+def list_sso_users() -> list[dict[str, Any]]:
     """
     List all SSO users in the system.
 
@@ -2573,7 +2615,7 @@ def list_sso_users() -> List[Dict[str, Any]]:
         with _connect() as conn:
             rows = conn.execute(
                 """SELECT id, username, role, sso_provider, sso_provider_user_id, 
-                          created_at, updated_at, is_active
+                          created_at, updated_at, status
                    FROM users WHERE sso_provider IS NOT NULL
                    ORDER BY created_at DESC"""
             ).fetchall()
@@ -2587,7 +2629,8 @@ def list_sso_users() -> List[Dict[str, Any]]:
                     "sso_provider_user_id": row[4],
                     "created_at": row[5],
                     "updated_at": row[6],
-                    "is_active": bool(row[7]),
+                    "status": row[7],
+                    "is_active": (row[7] == "active"),
                 }
                 for row in rows
             ]
@@ -2598,20 +2641,40 @@ def list_sso_users() -> List[Dict[str, Any]]:
 
 def revoke_sso_access(username: str) -> bool:
     """
-    Revoke SSO access for a user.
+    Unlink a user's SSO provider.
+
+    Clears ``sso_provider`` and ``sso_provider_user_id`` so the account can no
+    longer authenticate through the identity provider. The local account, its
+    role and its password hash are left untouched.
+
+    The provider is read before the update so the audit entry can name it;
+    afterwards the column is NULL and the information is gone.
 
     Args:
         username: The username to revoke access for
 
     Returns:
-        True if successfully revoked
+        True when a linked provider was cleared. False when the user does not
+        exist, had no provider linked, or the update failed.
     """
     try:
         username = _validate_username(username)
         with _connect() as conn:
+            row = conn.execute(
+                "SELECT sso_provider FROM users WHERE username = ?",
+                (username,),
+            ).fetchone()
+
+            if row is None or row[0] is None:
+                # Nothing to revoke: an unknown user, or a local-only account.
+                # Not an error, but not a revocation either, so no audit entry.
+                return False
+
+            provider = row[0]
+
             cursor = conn.execute(
-                """UPDATE users 
-                   SET sso_provider = NULL, 
+                """UPDATE users
+                   SET sso_provider = NULL,
                        sso_provider_user_id = NULL,
                        updated_at = CURRENT_TIMESTAMP
                    WHERE username = ?""",
@@ -2622,19 +2685,19 @@ def revoke_sso_access(username: str) -> bool:
 
             if affected > 0:
                 log_security_event(
-                    event_type="user_role_changed",
+                    event_type="sso_access_revoked",
                     username=username,
-                    details=f"Role changed to {new_role.value} by {admin_username}",  # noqa: F821
+                    details=f"SSO access revoked for provider {provider}",
                 )
                 return True
             return False
 
     except Exception as e:
-        logger.error(f"Failed to promote user {username}: {e}")
+        logger.error(f"Failed to revoke SSO access for {username}: {e}")
         return False
 
 
-def demote_user(username: str, admin_username: str) -> bool:  # noqa: F811
+def demote_user(username: str, admin_username: str) -> bool:
     """
     Demote a user to the default USER role.
 
@@ -2738,7 +2801,7 @@ def get_sso_users_count() -> int:
         return 0
 
 
-def migrate_existing_sso_users() -> Dict[str, Any]:
+def migrate_existing_sso_users() -> dict[str, Any]:
     """
     Migrate existing SSO users to secure passwords.
 
@@ -2829,4 +2892,6 @@ __all__ = [
     "get_sso_users_count",
     "migrate_existing_sso_users",
     "verify_sso_recovery_token",
+    "validate_password_complexity",
+    "_validate_password_complexity",
 ]

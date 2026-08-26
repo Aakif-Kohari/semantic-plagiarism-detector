@@ -75,11 +75,11 @@ class ApiEndpoint:
     description: str
     status: ApiStatus
     handler: str
-    parameters: List[Dict[str, Any]]
-    responses: Dict[str, Dict[str, Any]]
+    parameters: list[dict[str, Any]]
+    responses: dict[str, dict[str, Any]]
     rate_limit: int  # requests per minute
     requires_auth: bool = True
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -92,9 +92,9 @@ class ApiKey:
     created_at: float
     expires_at: Optional[float] = None
     is_active: bool = True
-    permissions: List[str] = field(default_factory=list)
+    permissions: list[str] = field(default_factory=list)
     rate_limit: int = 60
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -103,14 +103,14 @@ class Webhook:
     id: str
     name: str
     url: str
-    events: List[str]
-    headers: Dict[str, str]
+    events: list[str]
+    headers: dict[str, str]
     status: WebhookStatus
     created_at: float
     last_triggered: Optional[float] = None
     retry_count: int = 0
     max_retries: int = 3
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -119,11 +119,11 @@ class ServiceConnection:
     id: str
     name: str
     type: ServiceType
-    config: Dict[str, Any]
+    config: dict[str, Any]
     status: bool
     created_at: float
     last_used: Optional[float] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -138,7 +138,7 @@ class ApiLog:
     timestamp: float
     ip_address: str
     user_agent: str
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 # ==============================================================================
@@ -152,13 +152,13 @@ class ApiGateway:
     
     def __init__(self, storage_path: Path):
         self.storage_path = storage_path
-        self.endpoints: Dict[str, ApiEndpoint] = {}
-        self.api_keys: Dict[str, ApiKey] = {}
-        self.webhooks: Dict[str, Webhook] = {}
-        self.services: Dict[str, ServiceConnection] = {}
-        self.api_logs: List[ApiLog] = []
-        self.handlers: Dict[str, Callable] = {}
-        self.rate_limits: Dict[str, List[float]] = defaultdict(list)
+        self.endpoints: dict[str, ApiEndpoint] = {}
+        self.api_keys: dict[str, ApiKey] = {}
+        self.webhooks: dict[str, Webhook] = {}
+        self.services: dict[str, ServiceConnection] = {}
+        self.api_logs: list[ApiLog] = []
+        self.handlers: dict[str, Callable] = {}
+        self.rate_limits: dict[str, list[float]] = defaultdict(list)
         self._load_data()
         self._register_default_handlers()
     
@@ -224,7 +224,7 @@ class ApiGateway:
     # API HANDLERS
     # ==========================================================================
     
-    def _handle_plagiarism_check(self, params: Dict) -> Dict:
+    def _handle_plagiarism_check(self, params: dict) -> dict:
         """Handle plagiarism check API request."""
         documents = params.get("documents", [])
         threshold = params.get("threshold", 0.75)
@@ -248,7 +248,7 @@ class ApiGateway:
         
         return results
     
-    def _handle_document_upload(self, params: Dict) -> Dict:
+    def _handle_document_upload(self, params: dict) -> dict:
         """Handle document upload API request."""
         documents = params.get("documents", [])
         
@@ -259,7 +259,7 @@ class ApiGateway:
             "timestamp": datetime.now().isoformat()
         }
     
-    def _handle_get_report(self, params: Dict) -> Dict:
+    def _handle_get_report(self, params: dict) -> dict:
         """Handle get report API request."""
         report_id = params.get("report_id")
         
@@ -287,7 +287,7 @@ class ApiGateway:
             "timestamp": datetime.now().isoformat()
         }
     
-    def _handle_get_status(self, params: Dict) -> Dict:
+    def _handle_get_status(self, params: dict) -> dict:
         """Handle status check API request."""
         return {
             "status": "success",
@@ -302,7 +302,7 @@ class ApiGateway:
             "timestamp": datetime.now().isoformat()
         }
     
-    def _handle_webhook_trigger(self, params: Dict) -> Dict:
+    def _handle_webhook_trigger(self, params: dict) -> dict:
         """Handle webhook trigger."""
         webhook_id = params.get("webhook_id")
         data = params.get("data", {})
@@ -318,7 +318,7 @@ class ApiGateway:
             "timestamp": datetime.now().isoformat()
         }
     
-    def _handle_health_check(self, params: Dict) -> Dict:
+    def _handle_health_check(self, params: dict) -> dict:
         """Handle health check."""
         return {
             "status": "healthy",
@@ -340,8 +340,8 @@ class ApiGateway:
         method: ApiMethod,
         description: str,
         handler: str,
-        parameters: List[Dict[str, Any]],
-        responses: Dict[str, Dict[str, Any]],
+        parameters: list[dict[str, Any]],
+        responses: dict[str, dict[str, Any]],
         rate_limit: int = 60,
         requires_auth: bool = True,
         status: ApiStatus = ApiStatus.ACTIVE
@@ -368,7 +368,7 @@ class ApiGateway:
         self,
         name: str,
         user: str,
-        permissions: List[str] = None,
+        permissions: list[str] = None,
         rate_limit: int = 60,
         expires_in_days: int = 365
     ) -> ApiKey:
@@ -401,8 +401,8 @@ class ApiGateway:
         self,
         name: str,
         url: str,
-        events: List[str],
-        headers: Dict[str, str] = None,
+        events: list[str],
+        headers: dict[str, str] = None,
         max_retries: int = 3
     ) -> Webhook:
         """Register a new webhook."""
@@ -421,7 +421,7 @@ class ApiGateway:
         self._save_data()
         return webhook
     
-    def trigger_webhook(self, webhook_id: str, event: str, data: Dict) -> bool:
+    def trigger_webhook(self, webhook_id: str, event: str, data: dict) -> bool:
         """Trigger a webhook."""
         webhook = self.webhooks.get(webhook_id)
         if not webhook:
@@ -469,7 +469,7 @@ class ApiGateway:
         self,
         name: str,
         type: ServiceType,
-        config: Dict[str, Any]
+        config: dict[str, Any]
     ) -> ServiceConnection:
         """Connect to an external service."""
         service = ServiceConnection(
@@ -488,11 +488,11 @@ class ApiGateway:
     def call_api(
         self,
         endpoint_id: str,
-        params: Dict[str, Any],
+        params: dict[str, Any],
         api_key: Optional[str] = None,
         ip_address: str = None,
         user_agent: str = None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Call an API endpoint.
         
@@ -576,7 +576,7 @@ class ApiGateway:
         
         return result
     
-    def get_api_logs(self, limit: int = 100) -> List[Dict]:
+    def get_api_logs(self, limit: int = 100) -> list[dict]:
         """Get API logs."""
         logs = []
         for log in self.api_logs[-limit:]:
@@ -591,7 +591,7 @@ class ApiGateway:
             })
         return logs
     
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get API statistics."""
         total_endpoints = len(self.endpoints)
         total_keys = len([k for k in self.api_keys.values() if k.is_active])

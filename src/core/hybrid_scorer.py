@@ -6,6 +6,7 @@ for more robust plagiarism detection.
 """
 
 import logging
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -53,6 +54,26 @@ class HybridConfig:
     normalize: Optional[str] = None  # Normalization method: None, 'minmax', or 'zscore'
 
 
+class LRUCache(OrderedDict):
+    """Bounded LRU Cache backed by collections.OrderedDict."""
+
+    def __init__(self, maxsize: int = 50000, *args, **kwargs):
+        self.maxsize = maxsize
+        super().__init__(*args, **kwargs)
+
+    def __getitem__(self, key):
+        value = super().__getitem__(key)
+        self.move_to_end(key)
+        return value
+
+    def __setitem__(self, key, value):
+        if key in self:
+            self.move_to_end(key)
+        super().__setitem__(key, value)
+        if len(self) > self.maxsize:
+            self.popitem(last=False)
+
+
 class HybridScorer:
     """
     Hybrid scorer combining lexical and semantic similarity.
@@ -67,7 +88,7 @@ class HybridScorer:
     def __init__(self, config: Optional[HybridConfig] = None):
         self.config = config or HybridConfig()
         self._tfidf_vectorizer: Optional[TfidfVectorizer] = None
-        self._lexical_cache: Dict[str, float] = {}
+        self._lexical_cache: LRUCache = LRUCache(maxsize=50000)
         self._stats = {
             "total_pairs": 0,
             "flagged_pairs": 0,
@@ -88,7 +109,7 @@ class HybridScorer:
             )
         return self._tfidf_vectorizer
     
-    def _compute_tfidf_similarity(self, texts: List[str]) -> np.ndarray:
+    def _compute_tfidf_similarity(self, texts: list[str]) -> np.ndarray:
         """Compute TF-IDF similarity matrix."""
         vectorizer = self._get_tfidf_vectorizer()
         tfidf_matrix = vectorizer.fit_transform(texts)
@@ -185,7 +206,7 @@ class HybridScorer:
     
     def compute_hybrid_matrix(
         self,
-        texts: Dict[str, str],
+        texts: dict[str, str],
         semantic_matrix: Optional[pd.DataFrame] = None,
         alpha: Optional[float] = None,
         lexical_method: Optional[str] = None,
@@ -228,17 +249,21 @@ class HybridScorer:
                 )
         
         # Compute lexical matrix
-        lexical_matrix = np.zeros((n, n))
-        for i, doc_a in enumerate(doc_names):
-            for j, doc_b in enumerate(doc_names):
-                if i == j:
-                    lexical_matrix[i, j] = 1.0
-                elif j > i:
-                    score = self._compute_lexical_score(
-                        texts[doc_a], texts[doc_b], lexical_method
-                    )
-                    lexical_matrix[i, j] = score
-                    lexical_matrix[j, i] = score
+        if lexical_method == "tfidf" and n > 0:
+            doc_texts = [texts[name] for name in doc_names]
+            lexical_matrix = self._compute_tfidf_similarity(doc_texts)
+        else:
+            lexical_matrix = np.zeros((n, n))
+            for i, doc_a in enumerate(doc_names):
+                for j, doc_b in enumerate(doc_names):
+                    if i == j:
+                        lexical_matrix[i, j] = 1.0
+                    elif j > i:
+                        score = self._compute_lexical_score(
+                            texts[doc_a], texts[doc_b], lexical_method
+                        )
+                        lexical_matrix[i, j] = score
+                        lexical_matrix[j, i] = score
 
         lexical_df = pd.DataFrame(lexical_matrix, index=doc_names, columns=doc_names)
 
@@ -262,7 +287,7 @@ class HybridScorer:
         self,
         hybrid_df: pd.DataFrame,
         threshold: float = 0.59,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Flag plagiarism pairs using hybrid scores.
         
@@ -297,7 +322,7 @@ class HybridScorer:
         semantic_score: float,
         alpha: float = 0.7,
         lexical_method: str = "tfidf",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Compute detailed stats for a document pair.
         
@@ -333,8 +358,8 @@ class HybridScorer:
     
     def get_recommended_alpha(
         self,
-        scores: List[float],
-        labels: List[int],
+        scores: list[float],
+        labels: list[int],
         method: str = "f1"
     ) -> float:
         """
@@ -360,7 +385,7 @@ class HybridScorer:
         
         return best_alpha
     
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get scoring statistics."""
         return {
             **self._stats,
@@ -381,12 +406,12 @@ class HybridScorer:
 def compute_hybrid_plagiarism_flags(
     similarity_df: pd.DataFrame,
     lexical_scores: Optional[pd.DataFrame] = None,
-    texts: Optional[Dict[str, str]] = None,
+    texts: Optional[dict[str, str]] = None,
     alpha: float = 0.7,
     threshold: float = 0.59,
     lexical_method: str = "tfidf",
     normalize: Optional[str] = None,
-) -> Tuple[pd.DataFrame, List[Dict[str, Any]]]:
+) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
     """
     Compute hybrid plagiarism flags.
 

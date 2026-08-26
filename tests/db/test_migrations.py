@@ -90,7 +90,8 @@ def test_fresh_auth_database_reaches_latest_version(tmp_path):
         assert column_exists(connection, "users", "tour_completed")
         assert column_exists(connection, "users", "otp_secret")
         assert column_exists(connection, "users", "two_factor_enabled")
-        assert column_exists(connection, "users", "is_active")
+        assert not column_exists(connection, "users", "is_active")
+        assert column_exists(connection, "users", "status")
         assert index_exists(connection, "idx_users_role")
         assert index_exists(connection, "idx_audit_log_username")
         assert index_exists(connection, "idx_audit_log_event_type")
@@ -462,8 +463,19 @@ def test_migration_005_still_creates_false_positives_table(tmp_path):
         migrate_corpus_database(connection)
 
         assert table_exists(connection, "false_positives")
-        for col in ("document_a", "document_b", "date_dismissed"):
+        for col in ("document_a", "document_b", "date_dismissed", "dismissed_by", "dismissal_reason"):
             assert column_exists(connection, "false_positives", col)
+
+
+def test_migration_018_adds_false_positives_audit_columns(tmp_path):
+    """Verify migration_018_add_false_positives_audit_columns adds dismissed_by and dismissal_reason columns."""
+    with connect(tmp_path / "false-positives-audit-corpus.db") as connection:
+        migrate_corpus_database(connection)
+
+        assert table_exists(connection, "false_positives")
+        for col in ("document_a", "document_b", "date_dismissed", "dismissed_by", "dismissal_reason"):
+            assert column_exists(connection, "false_positives", col)
+
 
 
 def test_check_table_exists():

@@ -59,6 +59,27 @@ def test_snapshot_does_not_modify_source_database(tmp_path):
     assert source.read_bytes() == before
 
 
+def test_snapshot_applies_busy_timeout_to_source_connection(tmp_path, monkeypatch):
+    source = tmp_path / "corpus.db"
+    create_test_database(source)
+
+    applied_timeouts = []
+    from src.db import database_backup
+
+    orig_apply = database_backup.apply_busy_timeout
+
+    def mock_apply(conn, timeout):
+        applied_timeouts.append(timeout)
+        return orig_apply(conn, timeout)
+
+    monkeypatch.setattr(database_backup, "apply_busy_timeout", mock_apply)
+
+    snapshot = create_sqlite_snapshot(source)
+    assert snapshot.startswith(SQLITE_HEADER)
+    assert len(applied_timeouts) >= 1
+    assert applied_timeouts[0] == database_backup.DEFAULT_SQLITE_TIMEOUT
+
+
 def test_missing_database_raises_file_not_found(tmp_path):
     missing = tmp_path / "missing.db"
 
@@ -156,3 +177,126 @@ def test_get_database_file_size_bytes_rejects_path_traversal(tmp_path):
     outside.write_text("x")
     with pytest.raises(ValueError, match="outside the allowed directory"):
         get_database_file_size_bytes(outside)
+
+
+def test_create_database_backup_sets_restrictive_permissions(tmp_path, monkeypatch):
+    import os
+    from src.db.database_backup import create_database_backup
+
+    source = tmp_path / "source.db"
+    create_test_database(source)
+    backup_dir = tmp_path / "backups"
+
+    chmod_calls = []
+    orig_chmod = os.chmod
+
+    def mock_chmod(path, mode):
+        chmod_calls.append((path, mode))
+        try:
+            orig_chmod(path, mode)
+        except OSError:
+            pass
+
+    monkeypatch.setattr(os, "chmod", mock_chmod)
+
+    # Test compressed backup (.db.gz)
+    gz_backup = create_database_backup(source, backup_dir=backup_dir, compress_backup=True)
+    assert gz_backup.exists()
+    assert len(chmod_calls) >= 1
+    assert chmod_calls[-1][0] == gz_backup
+    assert chmod_calls[-1][1] == 0o600
+
+    # Test uncompressed backup (.db)
+    db_backup = create_database_backup(source, backup_dir=backup_dir, compress_backup=False)
+    assert db_backup.exists()
+    assert len(chmod_calls) >= 2
+    assert chmod_calls[-1][0] == db_backup
+    assert chmod_calls[-1][1] == 0o600
+
+
+def test_get_database_table_stats_ignores_sqlite_internal_tables(tmp_path):
+    """Verify that get_database_table_stats returns user-defined tables but ignores internal SQLite metadata tables."""
+    from src.db.database_backup import get_database_table_stats
+
+    db_path = tmp_path / "stats_test.db"
+
+    # 1. Create a database with user-defined tables and trigger sqlite_sequence (by using AUTOINCREMENT)
+    with closing(sqlite3.connect(db_path)) as conn:
+        conn.execute(
+            """
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE documents (
+                id INTEGER PRIMARY KEY,
+                title TEXT
+            )
+            """
+        )
+        # Inserting a row into users will populate the sqlite_sequence internal table
+        conn.execute("INSERT INTO users (username) VALUES ('alice')")
+        conn.execute("INSERT INTO documents (title) VALUES ('doc1')")
+        conn.execute("INSERT INTO documents (title) VALUES ('doc2')")
+        conn.commit()
+
+        # Verify that sqlite_sequence exists in sqlite_master
+        cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = [row[0] for row in cursor.fetchall()]
+        assert "sqlite_sequence" in tables
+
+    # 2. Invoke get_database_table_stats
+    stats = get_database_table_stats(db_path)
+
+    # It must contain '_table_count' mapping to exactly 2 (users, documents)
+    assert stats["_table_count"] == 2
+
+    # It must contain 'users' with count 1 and 'documents' with count 2
+    assert stats["users"] == 1
+    assert stats["documents"] == 2
+
+    # It must NOT contain any key starting with 'sqlite_'
+    for key in stats:
+        assert not key.startswith("sqlite_")
+
+
+def test_create_database_backup_respects_gzip_compression_level_env(tmp_path, monkeypatch):
+    """Verify that create_database_backup reads BACKUP_GZIP_COMPRESSION_LEVEL from the env and passes it to GzipFile."""
+    import gzip
+    from unittest.mock import patch
+    from src.db.database_backup import create_database_backup
+
+    source = tmp_path / "source.db"
+    create_test_database(source)
+    backup_dir = tmp_path / "backups"
+
+    # Mock GzipFile to record the compression level
+    passed_compresslevel = []
+    original_gzip_file = gzip.GzipFile
+
+    class MockGzipFile(original_gzip_file):
+        def __init__(self, *args, **kwargs):
+            if "compresslevel" in kwargs:
+                passed_compresslevel.append(kwargs["compresslevel"])
+            super().__init__(*args, **kwargs)
+
+    # 1. Test default value of 6
+    with patch("gzip.GzipFile", MockGzipFile):
+        monkeypatch.delenv("BACKUP_GZIP_COMPRESSION_LEVEL", raising=False)
+        create_database_backup(source, backup_dir=backup_dir, compress_backup=True)
+        assert len(passed_compresslevel) == 1
+        assert passed_compresslevel[0] == 6
+
+    # 2. Test configured value (e.g. 3)
+    passed_compresslevel.clear()
+    with patch("gzip.GzipFile", MockGzipFile):
+        monkeypatch.setenv("BACKUP_GZIP_COMPRESSION_LEVEL", "3")
+        create_database_backup(source, backup_dir=backup_dir, compress_backup=True)
+        assert len(passed_compresslevel) == 1
+        assert passed_compresslevel[0] == 3
+
+
