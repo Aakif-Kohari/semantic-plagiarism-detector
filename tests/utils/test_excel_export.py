@@ -12,6 +12,7 @@ from src.utils.excel_export import (
     export_similarity_matrix_to_excel,
     export_similarity_matrix_to_temp_file,
     generate_csv_matrix_stream,
+    generate_tsv_matrix_stream,
 )
 
 
@@ -44,6 +45,38 @@ def test_generate_csv_matrix_stream():
     full_csv = "".join(chunks)
     reconstructed_df = pd.read_csv(io.StringIO(full_csv), index_col=0)
     pd.testing.assert_frame_equal(df, reconstructed_df, check_names=False)
+
+
+def test_generate_tsv_matrix_stream():
+    # Setup test DataFrame
+    data = {
+        "DocA.txt": [1.0, 0.85, 0.12],
+        "DocB.txt": [0.85, 1.0, 0.45],
+        "DocC.txt": [0.12, 0.45, 1.0],
+    }
+    df = pd.DataFrame(data, index=["DocA.txt", "DocB.txt", "DocC.txt"])
+
+    # Test 1: Return type is a Generator
+    stream = generate_tsv_matrix_stream(df)
+    assert inspect.isgenerator(stream)
+
+    # Test 2: Verify chunk output
+    chunks = list(stream)
+    assert len(chunks) == len(df) + 1  # 1 header row + 3 data rows
+
+    # Verify header line with tabs
+    assert chunks[0].strip() == "Document\tDocA.txt\tDocB.txt\tDocC.txt"
+
+    # Verify data lines with tabs
+    assert chunks[1].strip() == "DocA.txt\t1.0\t0.85\t0.12"
+    assert chunks[2].strip() == "DocB.txt\t0.85\t1.0\t0.45"
+    assert chunks[3].strip() == "DocC.txt\t0.12\t0.45\t1.0"
+
+    # Test 3: Verify complete TSV reconstruction matches Expected TSV output
+    full_tsv = "".join(chunks)
+    reconstructed_df = pd.read_csv(io.StringIO(full_tsv), sep="\t", index_col=0)
+    pd.testing.assert_frame_equal(df, reconstructed_df, check_names=False)
+
 
 
 def test_build_similarity_workbook_metadata_properties():
