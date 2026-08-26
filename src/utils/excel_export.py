@@ -322,3 +322,38 @@ def generate_csv_matrix_stream(matrix_df: pd.DataFrame) -> Generator[str, None, 
         yield buffer.getvalue()
         buffer.seek(0)
         buffer.truncate(0)
+
+
+def generate_tsv_matrix_stream(matrix_df: pd.DataFrame) -> Generator[str, None, None]:
+    """
+    Yields TSV formatted lines line-by-line from a similarity matrix DataFrame.
+
+    Memory-efficient generator for exporting large result sets (>10,000 document pairs)
+    using tab-delimited formatting for R and Pandas workflows.
+
+    Args:
+        matrix_df (pd.DataFrame): Similarity matrix DataFrame with document labels as index and columns.
+
+    Yields:
+        str: TSV formatted string row (including newline character).
+    """
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, delimiter="\t")
+
+    # Yield header row
+    header = ["Document"] + [sanitize_spreadsheet_value(c) for c in matrix_df.columns]
+    writer.writerow(header)
+    yield buffer.getvalue()
+    buffer.seek(0)
+    buffer.truncate(0)
+
+    # Yield data rows line by line
+    for index, row in matrix_df.iterrows():
+        writer.writerow(
+            [sanitize_spreadsheet_value(index)]
+            + [sanitize_spreadsheet_value(v) for v in row.tolist()]
+        )
+        yield buffer.getvalue()
+        buffer.seek(0)
+        buffer.truncate(0)
+
