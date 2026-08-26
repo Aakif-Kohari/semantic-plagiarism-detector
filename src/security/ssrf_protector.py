@@ -112,6 +112,28 @@ def get_allowed_webhook_domains() -> list[str]:
     return _configured_domains()
 
 
+def get_user_agent(user_agent: Optional[str] = None) -> str:
+    """Return a validated User-Agent for outbound SSRF validation requests.
+
+    An explicit ``user_agent`` takes precedence. When it is omitted, the
+    ``SSRF_USER_AGENT`` environment variable is used, falling back to
+    ``DEFAULT_USER_AGENT``. CR/LF characters are rejected to prevent HTTP
+    header injection.
+    """
+    configured_user_agent = (
+        user_agent
+        if user_agent is not None
+        else os.getenv("SSRF_USER_AGENT", DEFAULT_USER_AGENT)
+    )
+
+    if "\r" in configured_user_agent or "\n" in configured_user_agent:
+        raise SSRFSecurityException(
+            "User-Agent must not contain carriage return or line feed characters"
+        )
+
+    return configured_user_agent
+
+
 class SSRFSecurityException(Exception):
     """Raised when a Webhook URL fails SSRF security checks."""
 
@@ -400,13 +422,14 @@ class SSRFProtector:
         cls,
         url: str,
         allowed_domains: Optional[list[str]] = None,
-        user_agent: str = DEFAULT_USER_AGENT,
+        user_agent: Optional[str] = None,
         timeout: float = DEFAULT_REQUEST_TIMEOUT,
     ) -> bool:
+        resolved_user_agent = get_user_agent(user_agent)
         cls._validate_url_target(url, allowed_domains=allowed_domains)
 
         try:
-            cls._make_validation_request(url, user_agent, timeout)
+            cls._make_validation_request(url, resolved_user_agent, timeout)
         except Exception as e:
             logger.debug(f"Outgoing HTTP validation request failed for {url}: {e}")
 
@@ -417,11 +440,12 @@ class SSRFProtector:
         cls,
         current_url: str,
         allowed_domains: Optional[list[str]] = None,
-        user_agent: str = DEFAULT_USER_AGENT,
+        user_agent: Optional[str] = None,
         timeout: float = DEFAULT_REQUEST_TIMEOUT,
     ) -> Optional[str]:
+        resolved_user_agent = get_user_agent(user_agent)
         cls._validate_url_target(current_url, allowed_domains=allowed_domains)
-        response = cls._make_validation_request(current_url, user_agent, timeout)
+        response = cls._make_validation_request(current_url, resolved_user_agent, timeout)
 
         if response.status_code in REDIRECT_STATUS_CODES:
             location = response.headers.get("Location")
@@ -435,9 +459,10 @@ class SSRFProtector:
         url: str,
         allowed_domains: Optional[list[str]] = None,
         max_redirects: Optional[int] = None,
-        user_agent: str = DEFAULT_USER_AGENT,
+        user_agent: Optional[str] = None,
         timeout: float = DEFAULT_REQUEST_TIMEOUT,
     ) -> tuple[str, str]:
+        resolved_user_agent = get_user_agent(user_agent)
         if max_redirects is None:
             max_redirects = cls.MAX_REDIRECT_DEPTH
 
@@ -450,7 +475,7 @@ class SSRFProtector:
             next_url = cls._check_redirect_depth(
                 current_url,
                 allowed_domains=allowed_domains,
-                user_agent=user_agent,
+                user_agent=resolved_user_agent,
                 timeout=timeout,
             )
             if next_url is None:
