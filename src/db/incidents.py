@@ -31,7 +31,7 @@ from src.db.schemas import MatchResult
 # to work (tests/conftest.py, tests/infrastructure/test_fixtures.py,
 # app/components/incident_export.py, src/utils/daily_summary_email.py).
 DEFAULT_DB_PATH = CORPUS_DB_PATH
-VALID_REVIEW_STATUSES = {"Pending", "Resolved"}
+VALID_REVIEW_STATUSES = {"Pending", "Resolved", "Dismissed"}
 CSV_COLUMNS = [
     "Incident ID",
     "Document A",
@@ -789,7 +789,7 @@ def update_review_status(
 
     if status not in VALID_REVIEW_STATUSES:
         raise ValueError(
-            f"review_status must be one of {sorted(VALID_REVIEW_STATUSES)}"
+            f"Invalid review status: {review_status}. Must be one of {VALID_REVIEW_STATUSES}"
         )
 
     init_incident_db(db_path)
@@ -821,7 +821,7 @@ def bulk_update_incident_status(
 
     if status not in VALID_REVIEW_STATUSES:
         raise ValueError(
-            f"new_status must be one of {sorted(VALID_REVIEW_STATUSES)}"
+            f"Invalid review status: {new_status}. Must be one of {VALID_REVIEW_STATUSES}"
         )
 
     if not incident_ids:
@@ -989,7 +989,11 @@ def get_most_plagiarized_documents(
 
 @with_sqlite_retry
 def add_false_positive(
-    doc_a: str, doc_b: str, db_path: str | Path | None = None
+    doc_a: str,
+    doc_b: str,
+    db_path: str | Path | None = None,
+    dismissed_by: str = "admin",
+    dismissal_reason: str | None = None,
 ) -> None:
     if db_path is None:
         db_path = DEFAULT_DB_PATH
@@ -999,8 +1003,30 @@ def add_false_positive(
 
     with closing(sqlite3.connect(str(db_path))) as conn:
         conn.execute(
-            "INSERT OR IGNORE INTO false_positives (document_a, document_b) VALUES (?, ?)",
-            (norm_a, norm_b),
+            "INSERT OR IGNORE INTO false_positives (document_a, document_b, dismissed_by, dismissal_reason) VALUES (?, ?, ?, ?)",
+            (norm_a, norm_b, dismissed_by, dismissal_reason),
+        )
+        conn.commit()
+
+
+@with_sqlite_retry
+def dismiss_incident(
+    doc_a: str,
+    doc_b: str,
+    dismissed_by: str = "admin",
+    dismissal_reason: str | None = None,
+    db_path: str | Path | None = None,
+) -> None:
+    """Inserts a dismissed pair into the false_positives table with audit metadata."""
+    if db_path is None:
+        db_path = DEFAULT_DB_PATH
+    init_incident_db(db_path)
+    norm_a, norm_b = _normalise_pair(doc_a, doc_b)
+
+    with closing(sqlite3.connect(str(db_path))) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO false_positives (document_a, document_b, dismissed_by, dismissal_reason) VALUES (?, ?, ?, ?)",
+            (norm_a, norm_b, dismissed_by, dismissal_reason),
         )
         conn.commit()
 

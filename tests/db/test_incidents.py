@@ -262,12 +262,63 @@ def test_update_review_status_success(test_db):
 
 
 def test_update_review_status_invalid_status(test_db):
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Invalid review status: Done. Must be one of"):
         update_review_status(
             "INC-123456",
             "Done",
             test_db,
         )
+
+
+def test_update_review_status_dismissed(test_db):
+    flags = [
+        {
+            "doc_a": "doc1.pdf",
+            "doc_b": "doc2.pdf",
+            "similarity": 0.9,
+        }
+    ]
+    incidents = sync_flagged_incidents(flags, test_db)
+    incident_id = incidents[0]["incident_id"]
+
+    result = update_review_status(
+        incident_id,
+        "Dismissed",
+        test_db,
+    )
+    assert result is True
+
+    updated = get_all_incidents(test_db)
+    assert updated[0]["review_status"] == "Dismissed"
+
+
+def test_bulk_update_incident_status_validation(test_db):
+    from src.db.incidents import bulk_update_incident_status
+    flags = [
+        {
+            "doc_a": "doc1.pdf",
+            "doc_b": "doc2.pdf",
+            "similarity": 0.9,
+        }
+    ]
+    incidents = sync_flagged_incidents(flags, test_db)
+    incident_id = incidents[0]["incident_id"]
+
+    # 1. Invalid status check
+    with pytest.raises(ValueError, match="Invalid review status: InvalidState. Must be one of"):
+        bulk_update_incident_status([incident_id], "InvalidState", test_db)
+
+    # 2. Valid status update to Resolved
+    count = bulk_update_incident_status([incident_id], "Resolved", test_db)
+    assert count == 1
+    updated = get_all_incidents(test_db)
+    assert updated[0]["review_status"] == "Resolved"
+
+    # 3. Valid status update to Dismissed
+    count = bulk_update_incident_status([incident_id], "Dismissed", test_db)
+    assert count == 1
+    updated = get_all_incidents(test_db)
+    assert updated[0]["review_status"] == "Dismissed"
 
 
 def test_update_review_status_unknown_incident(test_db):
