@@ -5,6 +5,7 @@ Scheduled task to aggregate daily plagiarism incidents and send a summary email 
 Features modular, inline-CSS styled HTML template generation for maximum email client compatibility.
 """
 
+import html
 import logging
 import os
 import re
@@ -101,24 +102,30 @@ def build_incident_row_html(inc: dict[str, Any]) -> str:
     Returns:
         str: HTML <tr> element with inline styles.
     """
-    doc_a = inc.get("document_a", "Unknown")
-    doc_b = inc.get("document_b", "Unknown")
+    doc_a = str(inc.get("document_a", "Unknown"))
+    doc_b = str(inc.get("document_b", "Unknown"))
     similarity = inc.get("similarity_score", 0.0)
-    date_flagged = inc.get("date_flagged", "Unknown")
+    date_flagged = str(inc.get("date_flagged", "Unknown"))
     incident_id = inc.get("incident_id")
     app_base_url = os.getenv("APP_BASE_URL", "http://localhost:8501").rstrip("/")
 
+    # Issue #3442: Wrap filenames and user-controllable text in html.escape to prevent HTML injection / XSS in email clients
+    escaped_doc_a = html.escape(doc_a)
+    escaped_doc_b = html.escape(doc_b)
+    escaped_date_flagged = html.escape(date_flagged)
+
     if incident_id:
-        doc_a_display = f'<a href="{app_base_url}/incident/{incident_id}" style="color: #007bff; text-decoration: none;">{doc_a}</a>'
+        escaped_incident_id = html.escape(str(incident_id))
+        doc_a_display = f'<a href="{app_base_url}/incident/{escaped_incident_id}" style="color: #007bff; text-decoration: none;">{escaped_doc_a}</a>'
     else:
-        doc_a_display = doc_a
+        doc_a_display = escaped_doc_a
 
     return f"""
     <tr>
         <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #333333;">{doc_a_display}</td>
-        <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #333333;">{doc_b}</td>
+        <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #333333;">{escaped_doc_b}</td>
         <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #333333; font-weight: bold;">{similarity:.2%}</td>
-        <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #666666;">{date_flagged}</td>
+        <td style="padding: 12px; border-bottom: 1px solid #eeeeee; color: #666666;">{escaped_date_flagged}</td>
     </tr>
     """
 
@@ -299,8 +306,8 @@ def generate_daily_summary_html(stats: dict[str, Any]) -> str:
     # Build top pairs HTML rows
     top_pairs_html = ""
     for pair in top_pairs[:5]:  # Limit to top 5
-        doc_a = pair.get("doc_a", "Unknown")
-        doc_b = pair.get("doc_b", "Unknown")
+        doc_a = html.escape(str(pair.get("doc_a", "Unknown")))
+        doc_b = html.escape(str(pair.get("doc_b", "Unknown")))
         similarity = pair.get("similarity", 0.0)
 
         top_pairs_html += f"""
