@@ -212,3 +212,54 @@ def test_create_database_backup_sets_restrictive_permissions(tmp_path, monkeypat
     assert len(chmod_calls) >= 2
     assert chmod_calls[-1][0] == db_backup
     assert chmod_calls[-1][1] == 0o600
+
+
+def test_get_database_table_stats_ignores_sqlite_internal_tables(tmp_path):
+    """Verify that get_database_table_stats returns user-defined tables but ignores internal SQLite metadata tables."""
+    from src.db.database_backup import get_database_table_stats
+
+    db_path = tmp_path / "stats_test.db"
+
+    # 1. Create a database with user-defined tables and trigger sqlite_sequence (by using AUTOINCREMENT)
+    with closing(sqlite3.connect(db_path)) as conn:
+        conn.execute(
+            """
+            CREATE TABLE users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE documents (
+                id INTEGER PRIMARY KEY,
+                title TEXT
+            )
+            """
+        )
+        # Inserting a row into users will populate the sqlite_sequence internal table
+        conn.execute("INSERT INTO users (username) VALUES ('alice')")
+        conn.execute("INSERT INTO documents (title) VALUES ('doc1')")
+        conn.execute("INSERT INTO documents (title) VALUES ('doc2')")
+        conn.commit()
+
+        # Verify that sqlite_sequence exists in sqlite_master
+        cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = [row[0] for row in cursor.fetchall()]
+        assert "sqlite_sequence" in tables
+
+    # 2. Invoke get_database_table_stats
+    stats = get_database_table_stats(db_path)
+
+    # It must contain '_table_count' mapping to exactly 2 (users, documents)
+    assert stats["_table_count"] == 2
+
+    # It must contain 'users' with count 1 and 'documents' with count 2
+    assert stats["users"] == 1
+    assert stats["documents"] == 2
+
+    # It must NOT contain any key starting with 'sqlite_'
+    for key in stats:
+        assert not key.startswith("sqlite_")
+
