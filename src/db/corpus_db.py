@@ -1108,6 +1108,19 @@ def check_database_integrity() -> list[str]:
         return [f"Error: {e}"]
 
 
+def vacuum_corpus_database() -> None:
+    """Reclaim unused SQLite pages after bulk corpus deletions."""
+    close_connections(all_threads=True)
+
+    path = get_corpus_db_path()
+    conn = sqlite3.connect(os.path.abspath(path))
+    conn.isolation_level = None
+    try:
+        conn.execute("VACUUM")
+    finally:
+        conn.close()
+
+
 @with_sqlite_retry
 def optimize_database() -> dict[str, any]:
     """Executes SQLite VACUUM to reclaim database storage space."""
