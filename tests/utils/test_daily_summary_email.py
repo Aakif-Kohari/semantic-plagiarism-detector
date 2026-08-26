@@ -1412,3 +1412,381 @@ class TestIncidentCsvAttachment:
             assert f"INC-{i:03d}" in csv_text
 
 
+# ---------------------------------------------------------------------------
+# Unit tests for explicit SSL/TLS toggles for SMTP (#3443)
+# ---------------------------------------------------------------------------
+
+
+class TestSmtpSslTlsToggles:
+    """Test suite verifying explicit SMTP_USE_SSL and SMTP_USE_TLS toggle configurations (#3443)."""
+
+    @patch("smtplib.SMTP_SSL")
+    @patch.dict(
+        "os.environ",
+        {
+            "SMTP_SERVER": "smtp.relay.edu",
+            "SMTP_PORT": "465",
+            "SMTP_USERNAME": "admin@relay.edu",
+            "SMTP_PASSWORD": "secretpassword",
+            "SMTP_USE_SSL": "true",
+        },
+    )
+    def test_smtp_use_ssl_true_uses_smtplib_smtp_ssl(self, mock_smtp_ssl):
+        """Verify SMTP_USE_SSL=true uses smtplib.SMTP_SSL."""
+        mock_server = MagicMock()
+        mock_smtp_ssl.return_value.__enter__.return_value = mock_server
+
+        result = send_email(["admin@example.com"], "Test SSL", "<p>Body</p>")
+        assert result is True
+        mock_smtp_ssl.assert_called_once_with("smtp.relay.edu", 465, timeout=10.0)
+        mock_server.login.assert_called_once_with("admin@relay.edu", "secretpassword")
+        mock_server.send_message.assert_called_once()
+
+    @patch("smtplib.SMTP_SSL")
+    @patch.dict(
+        "os.environ",
+        {
+            "SMTP_SERVER": "smtp.relay.edu",
+            "SMTP_PORT": "587",
+            "SMTP_USERNAME": "admin@relay.edu",
+            "SMTP_PASSWORD": "secretpassword",
+            "SMTP_USE_SSL": "1",
+        },
+    )
+    def test_smtp_use_ssl_1_overrides_port_587(self, mock_smtp_ssl):
+        """Verify SMTP_USE_SSL=1 forces smtplib.SMTP_SSL even on non-465 port 587."""
+        mock_server = MagicMock()
+        mock_smtp_ssl.return_value.__enter__.return_value = mock_server
+
+        result = send_email(["admin@example.com"], "Test SSL", "<p>Body</p>")
+        assert result is True
+        mock_smtp_ssl.assert_called_once_with("smtp.relay.edu", 587, timeout=10.0)
+
+    @patch("smtplib.SMTP")
+    @patch.dict(
+        "os.environ",
+        {
+            "SMTP_SERVER": "smtp.relay.edu",
+            "SMTP_PORT": "587",
+            "SMTP_USERNAME": "admin@relay.edu",
+            "SMTP_PASSWORD": "secretpassword",
+            "SMTP_USE_TLS": "true",
+        },
+    )
+    def test_smtp_use_tls_true_calls_starttls(self, mock_smtp):
+        """Verify SMTP_USE_TLS=true uses smtplib.SMTP and calls starttls()."""
+        mock_server = MagicMock()
+        mock_smtp.return_value.__enter__.return_value = mock_server
+
+        result = send_email(["admin@example.com"], "Test TLS", "<p>Body</p>")
+        assert result is True
+        mock_smtp.assert_called_once_with("smtp.relay.edu", 587, timeout=10.0)
+        mock_server.starttls.assert_called_once()
+        mock_server.login.assert_called_once_with("admin@relay.edu", "secretpassword")
+
+    @patch("smtplib.SMTP")
+    @patch.dict(
+        "os.environ",
+        {
+            "SMTP_SERVER": "smtp.relay.edu",
+            "SMTP_PORT": "25",
+            "SMTP_USERNAME": "admin@relay.edu",
+            "SMTP_PASSWORD": "secretpassword",
+            "SMTP_USE_TLS": "false",
+            "SMTP_USE_SSL": "false",
+        },
+    )
+    def test_smtp_use_tls_false_plain_smtp(self, mock_smtp):
+        """Verify SMTP_USE_TLS=false uses smtplib.SMTP without calling starttls()."""
+        mock_server = MagicMock()
+        mock_smtp.return_value.__enter__.return_value = mock_server
+
+        result = send_email(["admin@example.com"], "Test Plain SMTP", "<p>Body</p>")
+        assert result is True
+        mock_smtp.assert_called_once_with("smtp.relay.edu", 25, timeout=10.0)
+        mock_server.starttls.assert_not_called()
+        mock_server.login.assert_called_once_with("admin@relay.edu", "secretpassword")
+
+    @pytest.mark.parametrize(
+        "ssl_val,expected_ssl",
+        [
+            ("true", True),
+            ("True", True),
+            ("TRUE", True),
+            ("1", True),
+            ("yes", True),
+            ("YES", True),
+            ("on", True),
+            ("false", False),
+            ("0", False),
+            ("no", False),
+            ("off", False),
+        ],
+    )
+    def test_smtp_use_ssl_truthy_falsy_values(self, ssl_val, expected_ssl):
+        """Verify truthy and falsy variations of SMTP_USE_SSL are parsed accurately."""
+        with patch("smtplib.SMTP_SSL") as mock_ssl, patch("smtplib.SMTP") as mock_smtp, patch.dict(
+            "os.environ",
+            {
+                "SMTP_SERVER": "smtp.example.com",
+                "SMTP_PORT": "2525",
+                "SMTP_USERNAME": "user@example.com",
+                "SMTP_PASSWORD": "password",
+                "SMTP_USE_SSL": ssl_val,
+            },
+        ):
+            mock_server = MagicMock()
+            mock_ssl.return_value.__enter__.return_value = mock_server
+            mock_smtp.return_value.__enter__.return_value = mock_server
+
+            send_email(["recipient@example.com"], "Test", "<p>Body</p>")
+
+            if expected_ssl:
+                assert mock_ssl.call_count == 1
+                assert mock_smtp.call_count == 0
+            else:
+                assert mock_ssl.call_count == 0
+                assert mock_smtp.call_count == 1
+
+    @pytest.mark.parametrize(
+        "tls_val,expected_starttls",
+        [
+            ("true", True),
+            ("1", True),
+            ("yes", True),
+            ("on", True),
+            ("false", False),
+            ("0", False),
+            ("no", False),
+            ("off", False),
+        ],
+    )
+    def test_smtp_use_tls_truthy_falsy_values(self, tls_val, expected_starttls):
+        """Verify truthy and falsy variations of SMTP_USE_TLS control starttls invocation."""
+        with patch("smtplib.SMTP") as mock_smtp, patch.dict(
+            "os.environ",
+            {
+                "SMTP_SERVER": "smtp.example.com",
+                "SMTP_PORT": "587",
+                "SMTP_USERNAME": "user@example.com",
+                "SMTP_PASSWORD": "password",
+                "SMTP_USE_SSL": "false",
+                "SMTP_USE_TLS": tls_val,
+            },
+        ):
+            mock_server = MagicMock()
+            mock_smtp.return_value.__enter__.return_value = mock_server
+
+            send_email(["recipient@example.com"], "Test", "<p>Body</p>")
+
+            assert mock_smtp.call_count == 1
+            if expected_starttls:
+                mock_server.starttls.assert_called_once()
+            else:
+                mock_server.starttls.assert_not_called()
+
+    @patch("smtplib.SMTP_SSL")
+    def test_send_daily_summary_respects_ssl_toggle(self, mock_smtp_ssl):
+        """Verify send_daily_summary workflow respects SMTP_USE_SSL=true in environment."""
+        with patch("src.utils.daily_summary_email.get_admin_emails") as mock_admins, \
+             patch("src.utils.daily_summary_email.get_incidents_last_24h") as mock_incidents, \
+             patch.dict(
+                 "os.environ",
+                 {
+                     "SMTP_SERVER": "smtp.example.com",
+                     "SMTP_PORT": "465",
+                     "SMTP_USERNAME": "user@example.com",
+                     "SMTP_PASSWORD": "password",
+                     "SMTP_USE_SSL": "true",
+                 },
+             ):
+            mock_admins.return_value = ["admin@example.com"]
+            mock_incidents.return_value = []
+            mock_server = MagicMock()
+            mock_smtp_ssl.return_value.__enter__.return_value = mock_server
+
+            result = send_daily_summary()
+            assert result is True
+            mock_smtp_ssl.assert_called_once_with("smtp.example.com", 465, timeout=10.0)
+
+    @patch("smtplib.SMTP")
+    def test_send_daily_summary_respects_tls_toggle(self, mock_smtp):
+        """Verify send_daily_summary workflow respects SMTP_USE_TLS=true and SMTP_USE_SSL=false."""
+        with patch("src.utils.daily_summary_email.get_admin_emails") as mock_admins, \
+             patch("src.utils.daily_summary_email.get_incidents_last_24h") as mock_incidents, \
+             patch.dict(
+                 "os.environ",
+                 {
+                     "SMTP_SERVER": "smtp.example.com",
+                     "SMTP_PORT": "587",
+                     "SMTP_USERNAME": "user@example.com",
+                     "SMTP_PASSWORD": "password",
+                     "SMTP_USE_SSL": "false",
+                     "SMTP_USE_TLS": "true",
+                 },
+             ):
+            mock_admins.return_value = ["admin@example.com"]
+            mock_incidents.return_value = []
+            mock_server = MagicMock()
+            mock_smtp.return_value.__enter__.return_value = mock_server
+
+            result = send_daily_summary()
+            assert result is True
+            mock_smtp.assert_called_once_with("smtp.example.com", 587, timeout=10.0)
+            mock_server.starttls.assert_called_once()
+
+    @patch("smtplib.SMTP_SSL")
+    @patch("smtplib.SMTP")
+    def test_smtp_ssl_priority_when_both_set(self, mock_smtp, mock_smtp_ssl):
+        """Verify behavior when SMTP_USE_SSL is explicitly enabled over SMTP_USE_TLS."""
+        with patch.dict(
+            "os.environ",
+            {
+                "SMTP_SERVER": "smtp.relay.edu",
+                "SMTP_PORT": "465",
+                "SMTP_USERNAME": "user@relay.edu",
+                "SMTP_PASSWORD": "password",
+                "SMTP_USE_SSL": "true",
+                "SMTP_USE_TLS": "true",
+            },
+        ):
+            mock_ssl_server = MagicMock()
+            mock_smtp_ssl.return_value.__enter__.return_value = mock_ssl_server
+
+            res = send_email(["admin@example.com"], "Subject", "<p>Body</p>")
+            assert res is True
+            mock_smtp_ssl.assert_called_once_with("smtp.relay.edu", 465, timeout=10.0)
+            mock_smtp.assert_not_called()
+
+    @patch("smtplib.SMTP_SSL")
+    def test_smtp_ssl_retry_on_connection_error(self, mock_smtp_ssl):
+        """Verify SSL connection retries up to max_retries with backoff."""
+        mock_server = MagicMock()
+        mock_conn_fail = MagicMock()
+        mock_conn_fail.__enter__.side_effect = ConnectionError("SSL handshake timed out")
+        mock_conn_success = MagicMock()
+        mock_conn_success.__enter__.return_value = mock_server
+
+        mock_smtp_ssl.side_effect = [mock_conn_fail, mock_conn_success]
+
+        with patch("time.sleep") as mock_sleep, patch.dict(
+            "os.environ",
+            {
+                "SMTP_SERVER": "smtp.relay.edu",
+                "SMTP_PORT": "465",
+                "SMTP_USERNAME": "user@relay.edu",
+                "SMTP_PASSWORD": "password",
+                "SMTP_USE_SSL": "true",
+            },
+        ):
+            res = send_email(["admin@example.com"], "Subject", "<p>Body</p>")
+            assert res is True
+            assert mock_smtp_ssl.call_count == 2
+            mock_sleep.assert_called_once_with(1)
+
+    @patch("smtplib.SMTP")
+    def test_smtp_tls_retry_on_connection_error(self, mock_smtp):
+        """Verify TLS connection retries up to max_retries with backoff."""
+        mock_server = MagicMock()
+        mock_conn_fail = MagicMock()
+        mock_conn_fail.__enter__.side_effect = ConnectionError("STARTTLS connection dropped")
+        mock_conn_success = MagicMock()
+        mock_conn_success.__enter__.return_value = mock_server
+
+        mock_smtp.side_effect = [mock_conn_fail, mock_conn_success]
+
+        with patch("time.sleep") as mock_sleep, patch.dict(
+            "os.environ",
+            {
+                "SMTP_SERVER": "smtp.relay.edu",
+                "SMTP_PORT": "587",
+                "SMTP_USERNAME": "user@relay.edu",
+                "SMTP_PASSWORD": "password",
+                "SMTP_USE_TLS": "true",
+                "SMTP_USE_SSL": "false",
+            },
+        ):
+            res = send_email(["admin@example.com"], "Subject", "<p>Body</p>")
+            assert res is True
+            assert mock_smtp.call_count == 2
+            mock_sleep.assert_called_once_with(1)
+
+    @patch("smtplib.SMTP_SSL")
+    def test_smtp_ssl_custom_timeout_and_callback(self, mock_smtp_ssl):
+        """Verify timeout and status callback work in SSL mode."""
+        mock_server = MagicMock()
+        mock_smtp_ssl.return_value.__enter__.return_value = mock_server
+        callback = MagicMock()
+
+        with patch.dict(
+            "os.environ",
+            {
+                "SMTP_SERVER": "smtp.custom.edu",
+                "SMTP_PORT": "993",
+                "SMTP_USERNAME": "user@custom.edu",
+                "SMTP_PASSWORD": "password",
+                "SMTP_USE_SSL": "true",
+            },
+        ):
+            res = send_email(
+                ["admin@example.com"],
+                "Subject",
+                "<p>Body</p>",
+                timeout=25.0,
+                status_callback=callback,
+            )
+            assert res is True
+            mock_smtp_ssl.assert_called_once_with("smtp.custom.edu", 993, timeout=25.0)
+            callback.assert_called_once()
+            success, msg = callback.call_args[0]
+            assert success is True
+            assert "sent successfully" in msg
+
+    @patch("smtplib.SMTP")
+    def test_smtp_toggles_unrecognized_string_falls_back_to_port_default(self, mock_smtp):
+        """Verify unrecognized toggle string (e.g. 'maybe') is treated as falsy and relies on port heuristics."""
+        mock_server = MagicMock()
+        mock_smtp.return_value.__enter__.return_value = mock_server
+
+        with patch.dict(
+            "os.environ",
+            {
+                "SMTP_SERVER": "smtp.example.com",
+                "SMTP_PORT": "587",
+                "SMTP_USERNAME": "user@example.com",
+                "SMTP_PASSWORD": "password",
+                "SMTP_USE_SSL": "invalid_string",
+                "SMTP_USE_TLS": "true",
+            },
+        ):
+            res = send_email(["recipient@example.com"], "Test", "<p>Body</p>")
+            assert res is True
+            mock_smtp.assert_called_once_with("smtp.example.com", 587, timeout=10.0)
+            mock_server.starttls.assert_called_once()
+
+    @patch("smtplib.SMTP")
+    def test_smtp_tls_logging_debug_message(self, mock_smtp):
+        """Verify debug log output explicitly reports STARTTLS configuration status."""
+        mock_server = MagicMock()
+        mock_smtp.return_value.__enter__.return_value = mock_server
+
+        with patch("src.utils.daily_summary_email.logger.debug") as mock_debug, patch.dict(
+            "os.environ",
+            {
+                "SMTP_SERVER": "smtp.example.com",
+                "SMTP_PORT": "587",
+                "SMTP_USERNAME": "user@example.com",
+                "SMTP_PASSWORD": "password",
+                "SMTP_USE_TLS": "true",
+            },
+        ):
+            send_email(["recipient@example.com"], "Test", "<p>Body</p>")
+            assert any(
+                "Using SMTP (STARTTLS=%s)" in call_args[0][0] and call_args[0][1] is True
+                for call_args in mock_debug.call_args_list
+            )
+
+
+
+
+

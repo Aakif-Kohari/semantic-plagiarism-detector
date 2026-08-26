@@ -517,6 +517,20 @@ def send_email(
     smtp_password = os.getenv("SMTP_PASSWORD")
     from_email = os.getenv("FROM_EMAIL", smtp_username)
 
+    # Issue #3443: Support explicit SSL/TLS configuration toggles
+    smtp_use_ssl_env = os.getenv("SMTP_USE_SSL")
+    smtp_use_tls_env = os.getenv("SMTP_USE_TLS")
+
+    if smtp_use_ssl_env is not None:
+        use_ssl = smtp_use_ssl_env.lower().strip() in ("true", "1", "yes", "on")
+    else:
+        use_ssl = smtp_port == 465
+
+    if smtp_use_tls_env is not None:
+        use_tls = smtp_use_tls_env.lower().strip() in ("true", "1", "yes", "on")
+    else:
+        use_tls = not use_ssl
+
     if not all([smtp_server, smtp_username, smtp_password]):
         msg = "SMTP configuration incomplete. Please set SMTP_SERVER, SMTP_USERNAME, and SMTP_PASSWORD."
         logger.error(msg)
@@ -557,7 +571,7 @@ def send_email(
                 )
                 msg_obj.attach(attachment)
 
-            if smtp_port == 465:
+            if use_ssl:
                 logger.debug(
                     "Using SMTP_SSL (implicit SSL) on port %d with timeout %.1fs (attempt %d/%d)",
                     smtp_port,
@@ -572,14 +586,16 @@ def send_email(
                     server.send_message(msg_obj)
             else:
                 logger.debug(
-                    "Using SMTP with STARTTLS on port %d with timeout %.1fs (attempt %d/%d)",
+                    "Using SMTP (STARTTLS=%s) on port %d with timeout %.1fs (attempt %d/%d)",
+                    use_tls,
                     smtp_port,
                     timeout,
                     attempt + 1,
                     max_retries + 1,
                 )
                 with smtplib.SMTP(smtp_server, smtp_port, timeout=timeout) as server:
-                    server.starttls()
+                    if use_tls:
+                        server.starttls()
                     server.login(smtp_username, smtp_password)
                     server.send_message(msg_obj)
 
