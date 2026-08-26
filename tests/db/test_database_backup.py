@@ -8,6 +8,7 @@ import pytest
 from src.db.database_backup import (
     _ALLOWED_DB_DIR,
     SQLITE_HEADER,
+    BackupRestoreSecurityError,
     create_sqlite_snapshot,
     get_database_file_size_bytes,
 )
@@ -212,3 +213,39 @@ def test_create_database_backup_sets_restrictive_permissions(tmp_path, monkeypat
     assert len(chmod_calls) >= 2
     assert chmod_calls[-1][0] == db_backup
     assert chmod_calls[-1][1] == 0o600
+
+
+def test_backup_restore_security_error_bypasses_value_error_handlers():
+    """
+    Scenario: Verify that BackupRestoreSecurityError inherits from Exception
+              and is NOT caught by except ValueError blocks.
+    Acceptance Criteria:
+    - Assert that catching ValueError fails to intercept BackupRestoreSecurityError.
+    - Confirm the security exception bubbles up to base Exception blocks.
+    """
+
+    # 1. Negative Test: Verify a ValueError block cannot intercept the error
+    try:
+        with pytest.raises(BackupRestoreSecurityError):
+            try:
+                # Force trigger the targeted security exception
+                raise BackupRestoreSecurityError("Unauthorized administrative data restoration attempt blocked.")
+            except ValueError:
+                # If execution drops into this block, the exception was incorrectly caught
+                pytest.fail("Security Vulnerability: BackupRestoreSecurityError was caught by a ValueError handler!")
+    except BackupRestoreSecurityError:
+        # Expected baseline behavior: The exception bubbled out completely unscathed
+        pass
+
+
+def test_exception_inheritance_integrity():
+    """
+    Scenario: Explicitly audit class inheritance properties to protect
+              against unintended future refactoring regressions.
+    """
+    # Assert structural type hierarchy constraints directly
+    assert issubclass(BackupRestoreSecurityError, Exception), "Must inherit from the base Exception class."
+    assert not issubclass(BackupRestoreSecurityError, ValueError), (
+        "Security Vulnerability: BackupRestoreSecurityError must NOT inherit from ValueError, "
+        "as this allows broad input validation catch blocks to accidentally swallow security alerts."
+    )
