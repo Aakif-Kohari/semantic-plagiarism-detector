@@ -282,6 +282,7 @@ def sync_flagged_incidents(
     *,
     now: str | None = None,
     threshold: float | None = None,
+    allow_self_plagiarism_flags: bool = True,
 ) -> list[MatchResult]:
     from src.db.schemas import MatchResult
 
@@ -301,6 +302,31 @@ def sync_flagged_incidents(
 
                 if not doc_a or not doc_b or doc_a == doc_b:
                     continue
+
+                if not allow_self_plagiarism_flags:
+                    student_a = None
+                    student_b = None
+                    meta_cursor = conn.execute(
+                        "SELECT filename, student_name FROM documents WHERE filename IN (?, ?)",
+                        (doc_a, doc_b),
+                    )
+                    for row in meta_cursor.fetchall():
+                        fname, sname = row[0], row[1]
+                        if sname:
+                            sname = sname.strip()
+                        if fname == doc_a:
+                            student_a = sname
+                        elif fname == doc_b:
+                            student_b = sname
+
+                    if student_a and student_b and student_a == student_b:
+                        logger.info(
+                            "Skipping self-plagiarism incident between %s and %s for student: %s",
+                            doc_a,
+                            doc_b,
+                            student_a,
+                        )
+                        continue
 
                 first, second = _normalise_pair(doc_a, doc_b)
 
@@ -1318,7 +1344,8 @@ def log_incident(
     *,
     now: str | None = None,
     threshold: float | None = None,
-) -> MatchResult:
+    allow_self_plagiarism_flags: bool = True,
+) -> Optional[MatchResult]:
     """Log a single plagiarism incident and clear get_recent_incidents cache.
 
     Args:
@@ -1326,12 +1353,20 @@ def log_incident(
         db_path: Path to the SQLite corpus database.
 
     Returns:
-        The created MatchResult.
+        The created MatchResult, or None if skipped due to self-plagiarism.
     """
     if db_path is None:
         db_path = DEFAULT_DB_PATH
-    results = sync_flagged_incidents([flag], db_path, now=now, threshold=threshold)
+    results = sync_flagged_incidents(
+        [flag],
+        db_path,
+        now=now,
+        threshold=threshold,
+        allow_self_plagiarism_flags=allow_self_plagiarism_flags,
+    )
     if not results:
+        if not allow_self_plagiarism_flags:
+            return None
         raise ValueError("Failed to log incident: Invalid input.")
     get_recent_incidents.cache_clear()
     doc_a = str(flag.get("doc_a", "")).strip()

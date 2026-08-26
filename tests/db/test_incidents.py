@@ -1311,3 +1311,99 @@ def test_dismiss_incident_audit_metadata(test_db):
         assert row[0] == "admin_jane"
         assert row[1] == "Incorrect match"
 
+
+def test_self_plagiarism_exclusion(test_db):
+    """Verify that sync_flagged_incidents skips self-plagiarism when allow_self_plagiarism_flags=False."""
+    import sqlite3
+    from src.db.incidents import sync_flagged_incidents, get_all_incidents
+
+    # 1. Insert documents with matching student_name into database
+    with sqlite3.connect(test_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            ("student_draft1.pdf", "hash1", "2026-08-01", "CS101", "Alice Smith", "Assignment 1")
+        )
+        conn.execute(
+            """
+            INSERT INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            ("student_draft2.pdf", "hash2", "2026-08-02", "CS101", "Alice Smith", "Assignment 1")
+        )
+        conn.commit()
+
+    # 2. Call sync_flagged_incidents with allow_self_plagiarism_flags=False
+    flag = {
+        "doc_a": "student_draft1.pdf",
+        "doc_b": "student_draft2.pdf",
+        "similarity": 0.95,
+        "severity": "High"
+    }
+
+    results = sync_flagged_incidents(
+        [flag],
+        db_path=test_db,
+        allow_self_plagiarism_flags=False
+    )
+
+    # 3. Assert it did not return any match results and is not in the db
+    assert len(results) == 0
+    all_incidents = get_all_incidents(db_path=test_db)
+    assert len(all_incidents) == 0
+
+    # 4. Call sync_flagged_incidents with allow_self_plagiarism_flags=True
+    results_allow = sync_flagged_incidents(
+        [flag],
+        db_path=test_db,
+        allow_self_plagiarism_flags=True
+    )
+    # It should successfully log and return the MatchResult
+    assert len(results_allow) == 1
+    assert results_allow[0].document_a == "student_draft1.pdf"
+
+
+def test_self_plagiarism_no_exclusion_when_names_differ(test_db):
+    """Verify that sync_flagged_incidents does not skip when student names differ or are empty."""
+    import sqlite3
+    from src.db.incidents import sync_flagged_incidents
+
+    # 1. Insert documents with different student names
+    with sqlite3.connect(test_db) as conn:
+        conn.execute(
+            """
+            INSERT INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            ("alice_draft.pdf", "hash3", "2026-08-01", "CS101", "Alice Smith", "Assignment 1")
+        )
+        conn.execute(
+            """
+            INSERT INTO documents (filename, file_hash, upload_date, class_section, student_name, assignment_title)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            ("bob_draft.pdf", "hash4", "2026-08-02", "CS101", "Bob Jones", "Assignment 1")
+        )
+        conn.commit()
+
+    # 2. Call sync_flagged_incidents with allow_self_plagiarism_flags=False
+    flag = {
+        "doc_a": "alice_draft.pdf",
+        "doc_b": "bob_draft.pdf",
+        "similarity": 0.85,
+        "severity": "Medium"
+    }
+
+    results = sync_flagged_incidents(
+        [flag],
+        db_path=test_db,
+        allow_self_plagiarism_flags=False
+    )
+
+    # 3. Assert it was NOT skipped (since student names differ)
+    assert len(results) == 1
+    assert results[0].document_a == "alice_draft.pdf"
+
+
