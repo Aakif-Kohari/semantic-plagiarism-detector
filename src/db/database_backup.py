@@ -147,7 +147,10 @@ def iter_sqlite_snapshot_chunks(
                 yield chunk
 
 
-def create_sqlite_snapshot(database_path: str | Path) -> bytes:
+def create_sqlite_snapshot(
+    database_path: str | Path,
+    check_integrity: bool = False,
+) -> bytes:
     """
     Return a transactionally consistent SQLite snapshot.
 
@@ -157,6 +160,8 @@ def create_sqlite_snapshot(database_path: str | Path) -> bytes:
 
     Args:
         database_path: Path to the source SQLite database.
+        check_integrity: If True, checks the integrity of the source database
+                         using PRAGMA quick_check before creating a snapshot.
 
     Returns:
         bytes: The raw bytes of the SQLite snapshot.
@@ -164,8 +169,38 @@ def create_sqlite_snapshot(database_path: str | Path) -> bytes:
     Raises:
         FileNotFoundError: If the source database does not exist.
         IsADirectoryError: If the source path is a directory.
-        sqlite3.DatabaseError: If the generated backup is invalid.
+        sqlite3.DatabaseError: If the integrity check fails or the generated backup is invalid.
     """
+    if check_integrity:
+        source_path = Path(database_path).expanduser().resolve()
+        if not source_path.exists():
+            raise FileNotFoundError(f"SQLite database does not exist: {source_path}")
+        if not source_path.is_file():
+            raise IsADirectoryError(f"SQLite database path is not a file: {source_path}")
+
+        source_uri = f"{source_path.as_uri()}?mode=ro"
+        with closing(
+            sqlite3.connect(
+                source_uri,
+                uri=True,
+                check_same_thread=False,
+            )
+        ) as source_connection:
+            apply_busy_timeout(source_connection, DEFAULT_SQLITE_TIMEOUT)
+            cursor = source_connection.cursor()
+            try:
+                cursor.execute("PRAGMA quick_check;")
+                result = cursor.fetchone()
+                if not result or result[0] != "ok":
+                    details = result[0] if result else "Unknown error"
+                    raise sqlite3.DatabaseError(f"Database integrity check failed: {details}")
+            except sqlite3.DatabaseError as exc:
+                if "Database integrity check failed" not in str(exc):
+                    raise sqlite3.DatabaseError(f"Database integrity check failed: {exc}") from exc
+                raise
+            finally:
+                cursor.close()
+
     return b"".join(iter_sqlite_snapshot_chunks(database_path))
 
 

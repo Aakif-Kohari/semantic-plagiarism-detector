@@ -339,4 +339,44 @@ def test_verify_backup_file_nonexistent():
     assert verify_backup_file("nonexistent_backup_file_path.db.gz") is False
 
 
+def test_create_sqlite_snapshot_check_integrity_healthy(tmp_path):
+    source = tmp_path / "healthy.db"
+    create_test_database(source)
+    snapshot = create_sqlite_snapshot(source, check_integrity=True)
+    assert snapshot.startswith(SQLITE_HEADER)
+
+
+def test_create_sqlite_snapshot_check_integrity_corrupted(tmp_path):
+    source = tmp_path / "corrupt.db"
+    create_test_database(source)
+
+    # Overwrite the database with junk bytes starting after the header
+    with open(source, "r+b") as f:
+        f.seek(100)
+        f.write(b"CORRUPTEDDATA" * 100)
+
+    with pytest.raises(sqlite3.DatabaseError, match="Database integrity check failed"):
+        create_sqlite_snapshot(source, check_integrity=True)
+
+
+def test_create_sqlite_snapshot_check_integrity_disabled_by_default(tmp_path):
+    source = tmp_path / "corrupt_default.db"
+    create_test_database(source)
+
+    # Overwrite database pages to corrupt it
+    with open(source, "r+b") as f:
+        f.seek(100)
+        f.write(b"CORRUPTEDDATA" * 100)
+
+    # By default (check_integrity=False), it should not raise DatabaseError from quick_check
+    # (though backup itself might raise sqlite3.DatabaseError if it's completely unreadable,
+    # let's assert it runs or at least does not fail on integrity quick_check)
+    try:
+        create_sqlite_snapshot(source, check_integrity=False)
+    except sqlite3.DatabaseError as exc:
+        # If it raises DatabaseError, it must not be "Database integrity check failed"
+        assert "Database integrity check failed" not in str(exc)
+
+
+
 
