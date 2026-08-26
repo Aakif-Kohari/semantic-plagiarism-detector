@@ -820,7 +820,7 @@ def bulk_update_incident_status(
 
 def incidents_to_csv(incidents: Iterable[Mapping[str, Any]]) -> bytes:
     buffer = io.StringIO(newline="")
-    writer = csv.DictWriter(buffer, fieldnames=CSV_COLUMNS)
+    writer = csv.DictWriter(buffer, fieldnames=CSV_COLUMNS, quoting=csv.QUOTE_MINIMAL)
     writer.writeheader()
     for incident in incidents:
         writer.writerow(
