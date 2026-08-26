@@ -213,7 +213,8 @@ def create_database_backup(
 
     if compress_backup:
         backup_path = destination_dir / f"{source_name}.{timestamp}.db.gz"
-        with gzip.GzipFile(backup_path, "wb") as gz_file:
+        compression_level = int(os.getenv("BACKUP_GZIP_COMPRESSION_LEVEL", "6"))
+        with gzip.GzipFile(backup_path, "wb", compresslevel=compression_level) as gz_file:
             for chunk in iter_sqlite_snapshot_chunks(database_path):
                 gz_file.write(chunk)
     else:
