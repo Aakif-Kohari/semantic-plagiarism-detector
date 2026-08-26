@@ -45,6 +45,11 @@ def test_build_incident_id_same_pair_different_order():
     assert id1 == id2
 
 
+def test_build_incident_id_commutativity():
+    """Verify build_incident_id is commutative and yields identical hash IDs regardless of document order (Issue #3429)."""
+    assert build_incident_id("doc_alpha.pdf", "doc_beta.pdf") == build_incident_id("doc_beta.pdf", "doc_alpha.pdf")
+
+
 def test_build_incident_id_no_collision_between_distinct_pairs():
     """Regression test: build_incident_id() previously joined the two
     normalised filenames with a bare "0" digit before hashing
