@@ -212,3 +212,40 @@ def test_create_database_backup_sets_restrictive_permissions(tmp_path, monkeypat
     assert len(chmod_calls) >= 2
     assert chmod_calls[-1][0] == db_backup
     assert chmod_calls[-1][1] == 0o600
+
+
+def test_create_database_backup_respects_gzip_compression_level_env(tmp_path, monkeypatch):
+    """Verify that create_database_backup reads BACKUP_GZIP_COMPRESSION_LEVEL from the env and passes it to GzipFile."""
+    import gzip
+    from unittest.mock import patch
+    from src.db.database_backup import create_database_backup
+
+    source = tmp_path / "source.db"
+    create_test_database(source)
+    backup_dir = tmp_path / "backups"
+
+    # Mock GzipFile to record the compression level
+    passed_compresslevel = []
+    original_gzip_file = gzip.GzipFile
+
+    class MockGzipFile(original_gzip_file):
+        def __init__(self, *args, **kwargs):
+            if "compresslevel" in kwargs:
+                passed_compresslevel.append(kwargs["compresslevel"])
+            super().__init__(*args, **kwargs)
+
+    # 1. Test default value of 6
+    with patch("gzip.GzipFile", MockGzipFile):
+        monkeypatch.delenv("BACKUP_GZIP_COMPRESSION_LEVEL", raising=False)
+        create_database_backup(source, backup_dir=backup_dir, compress_backup=True)
+        assert len(passed_compresslevel) == 1
+        assert passed_compresslevel[0] == 6
+
+    # 2. Test configured value (e.g. 3)
+    passed_compresslevel.clear()
+    with patch("gzip.GzipFile", MockGzipFile):
+        monkeypatch.setenv("BACKUP_GZIP_COMPRESSION_LEVEL", "3")
+        create_database_backup(source, backup_dir=backup_dir, compress_backup=True)
+        assert len(passed_compresslevel) == 1
+        assert passed_compresslevel[0] == 3
+
