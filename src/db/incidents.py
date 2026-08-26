@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import logging
 import math
 import os
 import sqlite3
@@ -24,6 +25,8 @@ from src.db.base import BaseRepository
 from src.db.migrations import migrate_corpus_database, table_exists
 from src.db.migrations.common import column_exists
 from src.db.schemas import MatchResult
+
+logger = logging.getLogger(__name__)
 
 # Seed the incidents default DB path from the centralized app_config.
 # ``DEFAULT_DB_PATH`` is intentionally kept as a module-level constant so
