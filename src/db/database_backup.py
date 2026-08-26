@@ -36,6 +36,7 @@ Recent Additions (Issue #1885):
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import gzip
 import io
 import logging
@@ -242,7 +243,7 @@ def create_database_backup(
         raise FileNotFoundError(f"Source database file does not exist: {database_path}")
 
     source_name = Path(database_path).name
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%SZ")
     destination_dir = Path(backup_dir).expanduser()
     destination_dir.mkdir(parents=True, exist_ok=True)
 

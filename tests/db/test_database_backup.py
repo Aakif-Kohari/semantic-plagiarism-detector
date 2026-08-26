@@ -378,5 +378,24 @@ def test_create_sqlite_snapshot_check_integrity_disabled_by_default(tmp_path):
         assert "Database integrity check failed" not in str(exc)
 
 
+def test_create_database_backup_uses_utc_timestamp(tmp_path):
+    from src.db.database_backup import create_database_backup
+
+    source = tmp_path / "source.db"
+    create_test_database(source)
+    backup_dir = tmp_path / "backups"
+
+    # Test compressed backup (.db.gz) UTC Zulu timestamp pattern
+    gz_backup = create_database_backup(source, backup_dir=backup_dir, compress_backup=True)
+    assert gz_backup.exists()
+    assert re.search(r"\.\d{8}_\d{6}Z\.db\.gz$", gz_backup.name) is not None
+
+    # Test uncompressed backup (.db) UTC Zulu timestamp pattern
+    db_backup = create_database_backup(source, backup_dir=backup_dir, compress_backup=False)
+    assert db_backup.exists()
+    assert re.search(r"\.\d{8}_\d{6}Z\.db$", db_backup.name) is not None
+
+
+
 
 
